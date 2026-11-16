@@ -1089,7 +1089,7 @@ static void check_turns(const char *fixtures) {
     }
     if (corpus != 61) fail("turns", "manifest", "the corpus must hold exactly 61 cases including the four operation ones");
     if (replayed != 57) fail("turns", "manifest", "exactly 57 static cases must replay");
-    if (turn_objects != 62) fail("turns", "manifest", "the 54 non-empty cases must hold 62 complete turn objects");
+    if (turn_objects != 73) fail("turns", "manifest", "the 54 non-empty cases must hold 73 complete turn objects");
     printf("c-abi: turns %zu/57 static cases, %zu complete turn objects, overlay applied client-side\n", replayed, turn_objects);
 
     if (plain_input) {

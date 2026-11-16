@@ -261,7 +261,7 @@ struct ChatLines {
     static func transcriptItems(_ block: ChatBlock) -> [Item] {
         switch block {
         case .row(let row): return transcriptItems(row)
-        case .turn(let turn): return (turn.ordered + turn.tail + turn.trailing).flatMap(transcriptItems)
+        case .turn(let turn): return (turn.ordered + turn.trailing).flatMap(transcriptItems)
         }
     }
 
@@ -284,18 +284,22 @@ struct ChatLines {
             case .row(let r):
                 if !SubagentDelivery.isWake(r) { out.append(.row(r)) }
             case .turn(var t):
-                // Work a background task woke the agent for opens with that notice, where a message would be.
-                var wokeAt: Date?
+                // Work a background task woke the agent for opens with that notice, where a message would be (a
+                // subagent's report that woke it is drawn under its call, so that one opens with the work).
+                var woke: Item?
                 if let first = t.ordered.first, case .notice(let n) = first, n.wake == true {
                     if !SubagentDelivery.isWake(first) { out.append(.row(first)) }
                     t.ordered.removeFirst()
-                    wokeAt = n.ts
+                    woke = n
                 }
-                let segments = Self.segments(t.ordered)
+                let wokeAt = woke?.ts
+                var segments = Self.segments(t.ordered)
+                // Woken and at work with nothing of it here yet: its work line.
+                if segments.isEmpty, woke != nil, t.id == liveID { segments = [(nil, [])] }
                 for (k, seg) in segments.enumerated() {
-                    // Once the answer is in, its wake continues in the same summary while new words stream.
-                    let afterWake = k > 0 && t.id == liveID && t.hasPendingWake
-                    let live = t.id == liveID && k == segments.count - 1 && (t.tail.isEmpty || afterWake)
+                    let live = t.id == liveID && k == segments.count - 1
+                    // The work a wake opened is known by the wake: its line keeps its id from before its first step.
+                    let opening = k == 0 && seg.user == nil ? woke?.id : nil
                     // Photos sent with the message (Claude inlines a pasted image path as an image block) sit above
                     // its text, as they did while it was being sent — not in the agent's work.
                     let photos = Self.photos(seg.rows)
@@ -320,7 +324,7 @@ struct ChatLines {
                         // Only compactions (/compact): dividers across the chat, no work line to open.
                         out += work.filter { if case .notice(let i) = $0 { i.compact != nil } else { false } }.map { .row($0) }
                     } else if !items.isEmpty || live {
-                        let id = "w-" + (seg.user?.id ?? seg.rows.first?.id ?? t.id)
+                        let id = "w-" + (seg.user?.id ?? opening ?? seg.rows.first?.id ?? t.id)
                         // The answer and an interrupt end the exchange too; an idle compaction after it does not.
                         let ending = seg.rows.indices.filter { !after.contains($0) }.map { seg.rows[$0] }
                             + (k == segments.count - 1 ? t.trailing : [])
@@ -330,7 +334,7 @@ struct ChatLines {
                     }
                     // Between the work and the answer: what the work looked at. Its id stays as pictures come in and
                     // the answer changes, so the strip grows sideways in place.
-                    out += Self.viewed("vi-" + (seg.user?.id ?? seg.rows.first?.id ?? t.id), items)
+                    out += Self.viewed("vi-" + (seg.user?.id ?? opening ?? seg.rows.first?.id ?? t.id), items)
                     if let last { out.append(.row(seg.rows[last])) }
                     out += after.sorted().map { .row(seg.rows[$0]) }
                 }

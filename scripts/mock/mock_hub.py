@@ -8102,6 +8102,38 @@ ITEMS[ASK1] = (
 # MOCK_ASSISTANT_WORKING=1 (#6230): the unanswered user message the working main conversation is on.
 if os.environ.get("MOCK_ASSISTANT_WORKING") == "1":
     ITEMS[ASK1] = ITEMS[ASK1] + [it("user", "text", 0.2, text="把今天的待办按优先级排一下，告诉我先做哪个。")]
+# MOCK_WAKE_AFTER_ANSWER=1 (#9140): the main conversation asked for three background checks (A), then asked something
+# else (B) and got its answer in full; each check's notification then woke the assistant with no message of the user's,
+# and it wrote about A again. Four final texts lie between two of the user's messages: each is the answer of its own
+# exchange, so the answer to B stays on screen and the woken turns follow under their notices.
+if os.environ.get("MOCK_WAKE_AFTER_ANSWER") == "1":
+    def _woke(ts_min, title, task_id):
+        return it("system", "notice", ts_min, text="Background command completed · " + title, wake=True,
+                  task={"kind": "shell", "status": "completed", "title": title, "task_id": task_id})
+
+    def _check(line, task_id, ts_min):
+        return tool("Bash", {"command": "timetable --line %s --day saturday" % line.lower(), "description": line + " line timetable",
+                             "run_in_background": True},
+                    "Command running in background with ID: %s. Output is being written to: /tmp/claude/%s.output" % (task_id, task_id), ts_min)
+
+    ITEMS[ASK1] = (
+        [it("user", "text", 30, text="Which trains to the coast run this Saturday? Check all three lines.")]
+        + _check("Coast", "bkc", 29.9) + _check("Valley", "bkv", 29.9) + _check("Harbour", "bkh", 29.9)
+        + [it("assistant", "text", 29.6, text="All three timetable checks are running in the background. I will tell you as each one comes in.")]
+        + [it("user", "text", 28.5, text="Meanwhile: what should I pack for two days there?")]
+        + [it("assistant", "text", 28.2, text="A rain jacket and a warm layer, two shirts, walking shoes and sunscreen. All of it fits in a day pack.")]
+        + [_woke(25, "Coast line timetable", "bkc")]
+        + tool("Read", {"file_path": "/tmp/claude/bkc.output"}, "08:10 Saturday: runs", 24.9)
+        + [it("assistant", "text", 24.8, text="The Coast line is in: the 08:10 runs on Saturday.")]
+        + [_woke(20, "Valley line timetable", "bkv")]
+        + [it("assistant", "text", 19.9, text="The Valley line too: the 10:40 runs, with one change.")]
+        + [_woke(10, "Harbour line timetable", "bkh")]
+        + tool("Read", {"file_path": "/tmp/claude/bkh.output"}, "13:05 Saturday: runs", 9.9)
+        + [it("assistant", "text", 9.8, text="All three are in: the 08:10, the 10:40 and the 13:05 run. Only the 08:10 is direct.")]
+    )
+    for _s in ASSISTANT:
+        if _s["session_id"] == ASK1:
+            _s.update(title="A weekend on the coast", last_text="All three are in: the 08:10, the 10:40 and the 13:05 run.")
 # MOCK_QUOTE=1: a message sent with "Quote" earlier (#2427): the main conversation's history has one that starts with a
 # `> ` block of the answer above, and a reply to it, so the bubble's quote card shows for a message from the transcript.
 if os.environ.get("MOCK_QUOTE") == "1":
@@ -21943,7 +21975,7 @@ def truth():
 # POST /mock/sync/card {"session": "<id>"}: a permission card in that session (an assistant conversation too), sent as
 # the hub sends one; answering it tells every app it ended, as the hub does (interaction_resolved).
 # GET /mock/sync/truth?session=<id>: what the chat should show: each turn's user message and its answer (the agent's
-# last words in it), the session's pending cards and its state.
+# last words in it; a wake starts a turn too), the session's pending cards and its state.
 SYNC_CARDS = {"n": 0}
 # MOCK_SYNC_REVS=1: a transcript that grows (a reply, an echoed send) moves its session's updated_at and rev and the list
 # says so, as the hub's does: what tells a page that missed the items push to catch up (#3139). Off, the list stays.
@@ -21993,6 +22025,8 @@ def sync_truth(sid):
         if x.get("role") == "user" and x.get("kind") == "text" and not x.get("injected") and not x.get("from"):
             messages.append({"from": "user", "text": x.get("text") or "", "state": "shown"})
             answer = None
+        elif x.get("wake"):
+            answer = None  # a notice that woke the idle agent starts a turn: the turn before it keeps its answer (#9140)
         elif x.get("role") == "assistant" and x.get("kind") == "text":
             if answer is None:
                 messages.append({"from": "agent", "text": x.get("text") or ""})

@@ -52,7 +52,7 @@ the same comparison. `PersonaCoreProjectionTests` runs this on macOS through the
   outside this six-function slice.
 - Answer: 15 question and 8 recommendation cases, conditional expected fields, invalid page/option and U+200B.
 - Stream chunks: all 21 complete `{done, tail}` objects.
-- Turns: all 57 static cases with the checked-in current-iOS overlay applied by the caller; 54 cases hold 62 complete
+- Turns: all 57 static cases with the checked-in current-iOS overlay applied by the caller; 54 cases hold 73 complete
   turn objects, while three compare empty arrays only.
 - Task index: all five complete expected objects plus the background receipt boundary.
 

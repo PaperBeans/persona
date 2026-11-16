@@ -209,8 +209,8 @@ test('ArkTS host replays all 57 static cases and the complete iOS-overlay turns 
       turnCount += actual.length;
     }
     assert.deepEqual(empty.sort(), emptyOnlyCases, 'exactly three empty-array cases');
-    assert.equal(turnCount, 62, '54 nonempty cases hold 62 complete turn objects');
-    console.log('  turns ArkTS host replay: 57 cases; 54 with 62 complete turn objects; 3 empty arrays');
+    assert.equal(turnCount, 73, '54 nonempty cases hold 73 complete turn objects');
+    console.log('  turns ArkTS host replay: 57 cases; 54 with 73 complete turn objects; 3 empty arrays');
   });
 });
 

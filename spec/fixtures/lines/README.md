@@ -8,7 +8,7 @@
 | --- | --- |
 | `structure.json` | 基本问答、行标识、菜单归属、回顾、中断、压缩通知 |
 | `queued.json` | 中途吸收、多消息轮按消息分段、普通图片和被吸收的图片 |
-| `wakes.json` | 多次唤醒取答、后续抽屉、回顾后重新归轮、图片归属 |
+| `wakes.json` | A wake opens a turn of its own (#9140): the answer before it stays, several wakes, a wake after a recap, a live woken turn, pictures after a wake |
 | `work.json` | 思考叙述、工具配对、失败、缺结果、工具图片、时间边界 |
 | `folds.json` | fold 计数、重复页、扩大范围、展开还原、范围外的结果 |
 | `tasks.json` | 后台任务关联、主题、结果文案和后台徽标 |
@@ -57,12 +57,12 @@ What the rendered tier does not cover: `ChatView`'s post-processing of the lines
 | 工具缺结果时 `ToolCall.isRunning` 为真，但不会据此把完成轮的工作行改成进行中。 | `ToolCall.isRunning`、`ChatLines.flatLines(live:)` | `missing_tool_result_is_running` |
 | 工具失败只取结果的 `is_error`，不根据输出文字推断。 | `ToolCall.isError` | `failed_tool_counts_known_failure` |
 | 带 `tool_use_id` 的图片归工具卡，普通及被吸收的用户图片在消息上方显示。 | `buildRows`、`ChatLines.photos`、`flatLines`、`viewed`；`docs/lessons/transcript.md` 图片两条路 | `tool_images_belong_to_call`、`regular_user_images`、`absorbed_user_images` |
-| After background-task wakes the answer is the latest run's last reply, whatever its length (#638; it used to be the longest). These cases were updated from `ChatStoreTests.backgroundWakeEndsOnTheNewestWords` and `wakeAfterARecapStaysInItsExchange`, read against the Swift code rather than run. | `Turn.pickAnswerAcrossWakes` | `multiple_wakes_pick_latest_answer`、`only_last_reply_in_each_wake_is_candidate`、`short_reply_after_wake_is_the_answer`、`wake_after_recap_reopens_turn`、`photos_after_wake_stay_with_message` |
-| 选中回复之前的工作留在主列表，之后的助手内容只放抽屉，抽屉从第一次唤醒开始。 Corpus contract (Android); not current iOS since #2996. | `pickAnswerAcrossWakes`、`Turn.hasPendingWake` | `short_reply_after_wake_is_the_answer`、`long_answer_after_wake`、`live_tail_runs_behind_chip` |
-| 唤醒后的用户文本和图片仍留在主轮，`tail` 和 `afterWake` 排除这些用户输入。 `afterWake` is the corpus contract (Android); current iOS has no such list since #2996. | `pickAnswerAcrossWakes`、`ChatRow.isUserInput`；`ChatStoreTests.picturesSentAfterAWakeStayWithTheirMessage` | `photos_after_wake_stay_with_message` |
-| 回顾独立于轮，回顾后的唤醒能重新打开原轮且不移动回顾。 | `ChatBlock.build`；`ChatStoreTests.wakeAfterARecapStaysInItsExchange` | `recap_separates_turns`、`wake_after_recap_reopens_turn` |
-| 没有唤醒标记的后台通知只算工作过程，没有回复的唤醒轮也保留抽屉入口。 Corpus contract (Android); not current iOS since #2996. | `ChatBlock.build`、`pickAnswerAcrossWakes` | `notification_without_wake`、`wake_without_any_reply` |
-| 窗口以唤醒通知开头时先显示该通知，后续运行可以由唤醒入口承接。 Corpus contract (Android); not current iOS since #2996. | `ChatLines.flatLines`、`Turn.hasPendingWake` | `orphan_wake_opens_with_notice`、`live_tail_runs_behind_chip`、`live_answer_after_wake` |
+| A notice that woke the idle agent (`wake`) opens a turn of its own (#9140): the turn before it keeps its last reply as its answer, whatever the lengths (until then the woken run stayed in that turn and its latest reply took the answer's place, #638). Each run's last reply is its turn's answer; a reply before it is narration in that turn's work line. | `ChatBlock.build`; `ChatStoreTests.aBackgroundWakeOpensItsOwnExchange`, `theAnswerToANewerQuestionSurvivesLaterWakes` | `multiple_wakes_pick_latest_answer`、`only_last_reply_in_each_wake_is_candidate`、`short_reply_after_wake_is_the_answer`、`long_answer_after_wake` |
+| A woken turn draws its notice where a message would be, then one work line for what it did and its last reply. The Android port also lists what the wake led to (`after_wake_ids`) and what came after the turn's last reply (`tail_ids`); neither is a line of its own, and current iOS has no such lists. | `ChatBlock.build`, `ChatLines.flatLines` | `short_reply_after_wake_is_the_answer`、`long_answer_after_wake`、`live_tail_runs_behind_chip` |
+| A message typed while the woken agent works, and its pictures, join the woken turn and stay with that message. | `ChatBlock.build`、`ChatRow.isUserInput`；`ChatStoreTests.picturesSentAfterAWakeStayWithTheirMessage` | `photos_after_wake_stay_with_message` |
+| 回顾独立于轮。A wake after a recap does not reach back over it: the woken turn follows the recap, and the turn before the recap keeps its answer. | `ChatBlock.build`；`ChatStoreTests.aWakeAfterARecapOpensItsExchangeAfterTheRecap` | `recap_separates_turns`、`wake_after_recap_reopens_turn` |
+| 没有唤醒标记的后台通知只算工作过程。A woken turn with no reply keeps its work line under its notice. | `ChatBlock.build` | `notification_without_wake`、`wake_without_any_reply` |
+| A turn a wake opened (also at the start of the window) draws the notice first; its work line is known by the wake's id from before its first step (`w-<wake id>`), and it is the live one while the woken agent works. | `ChatLines.flatLines` | `orphan_wake_opens_with_notice`、`live_tail_runs_behind_chip`、`live_answer_after_wake` |
 | 无任务字段且含“中断”的通知进入轮尾，压缩通知和任务标题里的“中断”仍属工作过程。 | `ChatBlock.build`；`TaskNoteTests.aNoticeAboutAnInterruptIsNotTheInterrupt` | `interrupt_is_trailing_notice`、`compaction_stays_inside_work`、`task_title_containing_interrupt_is_not_interrupt` |
 | fold 按其代表的工具和思考计数，结束时间取 `fold.until`，收起步数按工具数加思考数。 | `ToolStep`、`ChatLines.unfold`；`FoldedWorkTests.aFoldCountsWhatItStandsFor` | `fold_counts_tools_and_thoughts` |
 | fold 替换范围内的工作，重复 fold 幂等，扩大范围替换旧 fold，展开还原原步骤。 | `ChatStore.dropFolded`、`ChatStore.unfold`；`FoldedWorkTests.aFoldReplacesTheStepsItCoversAndOpeningItPutsThemBack` | `fold_replaces_extends_and_unfolds` |
@@ -76,7 +76,7 @@ What the rendered tier does not cover: `ChatView`'s post-processing of the lines
 | 窗口可从助手过程开始，未知类型不生成消息。 | `buildRows`、`ChatBlock.build` | `orphan_assistant`、`unknown_item_is_ignored` |
 | 请求面板按给定顺序排在正文外、输入框上方，不给它伪造 transcript 行。 | `ChatView.mainFooter`、`pendingCards`、`PendingCards`、`chatScroll`；`ux.md` 3.2、3.4 | `single_interaction_in_footer`、`multiple_interactions_in_footer` |
 | Current iOS only: the blocks of one transcript entry are one message whatever their kind or `queued`; a picture goes after the entry's next text block and is drawn above it. | `ChatStore.picturesAfterTheirText`, `ChatBlock.build` (`sameMessage` by `Item.entry`), `rebuild`; `ChatLinesTests.aPictureAfterItsTextStaysWithItsMessage` | `same_entry_text_image_text_is_one_message`, `queued_entry_text_and_images_join_the_running_turn`, `supervision_round_keeps_same_entry_text_and_images` |
-| Current iOS only: a subagent's tool result with `wake` is a wake of its exchange, also after a recap. It is its call's result, never a notice line or a work step, even when it opens the window. | `buildRows`, `ChatBlock.build`, `SubagentDelivery.isWake`, `ChatLines.flatLines`; `SubagentDeliveryTests.wakesRemainTurnEvidenceWithoutCreatingAParentMessageCard` | `agent_result_wake_stays_in_its_exchange`, `agent_result_wake_pending_keeps_previous_answer`, `agent_result_wake_after_recap_reopens_turn`, `orphan_agent_result_wake_draws_no_notice` |
+| Current iOS only: a subagent's tool result with `wake` opens an exchange of its own like any wake, also after a recap. It is its call's result, never a notice line or a work step, even when it opens the window. | `buildRows`, `ChatBlock.build`, `SubagentDelivery.isWake`, `ChatLines.flatLines`; `SubagentDeliveryTests.wakesRemainTurnEvidenceWithoutCreatingAParentMessageCard` | `agent_result_wake_opens_its_own_exchange`, `agent_result_wake_pending_keeps_previous_answer`, `agent_result_wake_after_recap_follows_the_recap`, `orphan_agent_result_wake_draws_no_notice` |
 | Current iOS only: a frozen view cuts the raw items at `(seq, part)`, inside a tool run too. Results after the cut are not paired, an earlier exchange's call included. | `ChatView.currentLines`, `prefixCount`, `buildRows`; `ChatStoreTests.frozenChatCountsItemsUpToTheSnapshot` | `frozen_cut_between_parallel_calls_leaves_later_results_out`, `frozen_cut_keeps_an_earlier_exchanges_late_result_out` |
 | Current iOS only: a compaction's continuation and idle note join its boundary: one work step mid-turn, one divider after the answer or the command; a continuation whose boundary is on an older page is a divider by itself. | `ChatStore.compactions`, `ChatLines.flatLines`; `ChatLinesTests` compaction tests | `compaction_continuation_joins_its_boundary_mid_turn`, `idle_compaction_after_answer_is_one_divider`, `compaction_continuation_alone_is_a_divider`, `manual_compaction_is_a_divider_after_the_command` |
 | Current iOS only: supervision input (the hub's mark or its exact template) opens a round that lasts across recaps until the next input, and the user's queued input after it opens another turn. The same words from an app, from another conversation or under the user's sentinel are the user's. | `ChatBlock.build` (`supervisionRound`), `Injected.of`, `MessageSource.protectsUser`; `ChatSupervisionTests` | `queued_supervision_and_next_genuine_input_are_separate_turns`, `protected_supervision_text_stays_the_users_queued_input`, `supervision_round_keeps_same_entry_text_and_images`, `image_only_queued_input_after_supervision_opens_new_turn`, `recap_does_not_end_a_supervision_round` |
@@ -94,7 +94,7 @@ What the rendered tier does not cover: `ChatView`'s post-processing of the lines
 | 可选字段 | 含义与默认值 |
 | --- | --- |
 | `live_turn_id` | 当前进行中的 Turn ID，缺省为 `null`，对应 iOS 已从会话状态选出的轮，不根据工具结果自行推断 |
-| `open_work` | 展开的行 ID 集合，缺省为空，既可以有 `w-…`，也可以有抽屉的 `dw-…`（the drawer is the corpus contract; current iOS has none since #2996） |
+| `open_work` | 展开的行 ID 集合，缺省为空，既可以有 `w-…`，也可以有抽屉的 `dw-…`（no client draws a wake drawer any more: iOS since #2996, Android's port emits no `wakes` line） |
 | `now` | 固定比较时钟，缺省为 `2026-01-01T00:01:00Z`，只用于工作行时长投影 |
 | `menu_queries` | 要传给每行 `holds` 的原消息 ID，允许 `null`，结果按查询顺序排列 |
 | `frozen` | `{seq, part, live_turn_id}`，按该位置截取 item 前缀并用冻结时的进行中轮重建 |
@@ -117,7 +117,7 @@ What the rendered tier does not cover: `ChatView`'s post-processing of the lines
 | `work` | 过程步骤、计数、时间、展开状态和进行中状态，见下文 |
 | `work_step` | `group_id`、`first` 和 `step`，ID 为组 ID 加 `/` 再加步骤 ID |
 | `work_end` | `group_id` 和收起步数 `count`，ID 为组 ID 加 `-end` |
-| `wakes` | `notice_ids`、`live` 及真正的 `drawer_lines`，ID 为 `wk-` 加 Turn ID。Corpus contract (Android): current iOS draws no `wakes` line since #2996. |
+| `wakes` | `notice_ids`、`live` 及真正的 `drawer_lines`，ID 为 `wk-` 加 Turn ID。No case has such a line: iOS draws none since #2996, and the Android port emits none. |
 | `task_note` | 原通知内容及 `task_note` 投影，包含标签、主题、结果、失败标记和回配的调用 ID |
 
 `work` 的 `steps` 即折叠内容，展开时每个步骤另有一条 `work_step`，两者不重复计数。步骤类型包括 `tool`、`thinking`、`notice`、`task_note`、`narration`、`fold`。工具步骤保存实际结果 ID、结果文本、`running`、`failed`、图片数和可选的 `background_badge`；任务步骤沿用 `TaskNoteText` 的标签与结果；fold 保存代表计数和加载范围。
@@ -126,14 +126,14 @@ What the rendered tier does not cover: `ChatView`'s post-processing of the lines
 
 - `tools`、`thoughts` 是步骤所代表的工具数和思考数，包含 fold 的计数。
 - `known_failed_tools`、`unresolved_tools` 是当前可见工具卡中，错误标记为真和缺少结果的数量；`contains_fold` 为真时它们仅是下界，fold 没有提供失败数或缺结果数。
-- `summary_full`、`summary_short` 是当前 iOS `WorkSummary` 的完整与简略文案；有 `wake: true` 的通知会让文案里的工具数加一，因此文案中的数字可能和实际 `tools` 不同。
+- `summary_full`、`summary_short` 是当前 iOS `WorkSummary` 的完整与简略文案；有 `wake: true` 的通知会让文案里的工具数加一，因此文案中的数字可能和实际 `tools` 不同（since #9140 a wake opens its own turn and is drawn before the work line, so no case has one inside a work line）。
 - `live` 完全来自进行中轮和段位置，`open` 来自展开集合；`running` 只描述单张工具卡缺结果。
 
 `start`、`end` 是折叠算法选出的时间戳，`elapsed_seconds` 和 `duration_text` 使用固定时钟按现有 `WorkLine.duration` 计算；这些是编造时间戳的规格值，不是性能测量。缺起点时分别为 `null` 和空字符串。完成段缺结束时间时，现有 View 使用当前时钟；对照器以 `now` 固定这条路径。
 
 `separator_before` 只描述展开卡片内部的结构：首步骤没有分隔线，后续步骤及收起行有分隔线；不规定颜色、线宽、位置等像素。原始 iOS 代码分别来自 `WorkStepView` 和 `lineView` 的 `.workEnd` 分支。
 
-`turns` 包含用户、过程、回复、轮尾、唤醒、抽屉和到达顺序的 ID 列表，以及 Turn 本身的计数和起止时间；`process_ids` 中的工具组使用 `tools-<首步骤 ID>`。Turn 统计发生在 View 的空思考过滤之前，不能直接拿 `thought_count` 当工作行的 `thoughts`。有任务通知时还输出 `task_index`，包含 `started`、通知到调用的 `calls`、描述、开始时间和按调用归组的状态序列。Current iOS has no drawer list (`after_wake_ids`) since #2996: its turns carry `has_pending_wake` instead (`spec/fixtures/lines/ios/differences.json`).
+`turns` 包含用户、过程、回复、轮尾、唤醒、抽屉和到达顺序的 ID 列表，以及 Turn 本身的计数和起止时间；`process_ids` 中的工具组使用 `tools-<首步骤 ID>`。Turn 统计发生在 View 的空思考过滤之前，不能直接拿 `thought_count` 当工作行的 `thoughts`。有任务通知时还输出 `task_index`，包含 `started`、通知到调用的 `calls`、描述、开始时间和按调用归组的状态序列。`wake_ids` is the wake that opened the turn (empty when a message did). Current iOS has no `after_wake_ids` since #2996; its turns carry `has_pending_wake`, false on every turn since #9140 (`spec/fixtures/lines/ios/differences.json`).
 
 `layout.json` 额外输出 `footer`：请求 ID 顺序、`placement: "above_composer"`、`part_of_transcript: false`；不把请求交互和新的 `StatusLine` 塞进 transcript 行。
 
@@ -148,15 +148,15 @@ What the rendered tier does not cover: `ChatView`'s post-processing of the lines
 
 ## Where current iOS differs
 
-The corpus is the shared contract: Android's `LinesFixtureTest` replays every case against its own Kotlin port, which keeps `afterWake` and the wake drawer, and compares complete objects. Current iOS differs from it in three ways. Since #1015, and by transcript entry since #2112, a user picture in an entry of its own is a message of its own that opens the next turn (`regular_user_images`, `tool_images_belong_to_call`). Since #2112 user pictures are a turn's input, not its process (`absorbed_user_images`, `photos_after_wake_stay_with_message`). Since #2996 a wake's continuation stays in the exchange's work line: there is no wake chip or drawer, a turn has no `after_wake_ids` but `has_pending_wake`, and a wake with no reply after it leaves the tail empty (`live_tail_runs_behind_chip`).
+The corpus is the shared contract: Android's `LinesFixtureTest` replays every case against its own Kotlin port, which keeps `afterWake`, and compares complete objects. Current iOS differs from it in three ways. Since #1015, and by transcript entry since #2112, a user picture in an entry of its own is a message of its own that opens the next turn (`regular_user_images`, `tool_images_belong_to_call`). Since #2112 user pictures are a turn's input, not its process (`absorbed_user_images`, `photos_after_wake_stay_with_message`). Since #2996 there is no wake chip or drawer, so a turn has no `after_wake_ids` but `has_pending_wake`. Since #9140 a wake opens a turn of its own on both clients, so the wake cases agree again: no turn has a wake pending inside it, and none has a tail.
 
-`spec/fixtures/lines/ios/differences.json` pins exactly these differences, each with why and the Apple code and test that assert it. `turn_wake_state` drops `after_wake_ids` from every turn and sets `has_pending_wake`, true only for the turns it lists; an entry of `cases` replaces whole keys of a case's `expected` (`replace`) or single fields of one of its turns (`turn_fields`). The file sits in a subdirectory, so Android's readers, which list only this directory's own `*.json` files, do not take it for a fixture, and the replay leaves it out of the iOS-only cases it reads there. The replay fails on an entry that changes nothing, on one the case passes without, and on one that names a case or turn the corpus does not have, so the file can only shrink. Moving the corpus to current iOS is a follow-up once Android's port follows; until then the corpus values stay as they are.
+`spec/fixtures/lines/ios/differences.json` pins exactly these differences, each with why and the Apple code and test that assert it. `turn_wake_state` drops `after_wake_ids` from every turn and sets `has_pending_wake`, true only for the turns it lists (none since #9140); an entry of `cases` replaces whole keys of a case's `expected` (`replace`) or single fields of one of its turns (`turn_fields`). The file sits in a subdirectory, so Android's readers, which list only this directory's own `*.json` files, do not take it for a fixture, and the replay leaves it out of the iOS-only cases it reads there. The replay fails on an entry that changes nothing, on one the case passes without, and on one that names a case or turn the corpus does not have, so the file can only shrink. Moving the corpus to current iOS is a follow-up once Android's port follows; until then the corpus values stay as they are.
 
 ## Cases only current iOS asserts
 
 The other `ios/*.json` files hold cases derived from current iOS that the shared corpus does not have: same-entry text→picture→text, subagent results that wake the agent (also after a recap), frozen cuts inside a tool run, compaction continuations, and genuine against protected supervision input. They have the corpus's structure with current iOS's turn shape (`has_pending_wake`, no `after_wake_ids` and no `wakes` lines), so `differences.json` does not apply to them. Each one's inputs follow the Apple tests its `source` names; its expected object is what the replay printed on current `apple/`, written down only after it showed what those tests assert. The replay also asserts those claims for each case (who opens which turn, where a wake or a continuation went), so a case written again from a later run cannot drift from them unnoticed. Every one sets `check_prefixes`.
 
-They sit in the subdirectory so that Android does not replay them: `LinesFixtureTest` and `FixtureReader` list only this directory's own `*.json` files, and Harmony's `domain.test.mjs` reads named corpus cases. The Kotlin port keeps the corpus contract (`afterWake`, the drawer), which these cases do not have. They move into the corpus, as they are, when the corpus moves to current iOS.
+They sit in the subdirectory so that Android does not replay them: `LinesFixtureTest` and `FixtureReader` list only this directory's own `*.json` files, and Harmony's `domain.test.mjs` reads named corpus cases. The Kotlin port keeps the corpus contract (`afterWake`), which these cases do not have. They move into the corpus, as they are, when the corpus moves to current iOS.
 
 ## 对照和复跑
 
@@ -166,7 +166,7 @@ The lines are built as an Agent's chat in a style without BeautifulUI draws them
 
 The replay's output differs from the projection the fixtures were written against in three ways, each forced by the refactor:
 
-- `Turn.afterWake` is gone: #2996 folded a wake's continuation into the exchange's ordinary work line and removed the wake chip and its drawer. Each turn reports the state that replaced it, `has_pending_wake` (`Turn.hasPendingWake`), where the corpus has `after_wake_ids`; `wakes` lines and their `drawer_lines` no longer occur.
+- `Turn.afterWake` is gone: #2996 removed the wake chip and its drawer. Each turn reports `has_pending_wake` where the corpus has `after_wake_ids`; since #9140 a wake opens a turn of its own, so `Turn.hasPendingWake` and `Turn.tail` are gone too and the adapter writes `false` and an empty list to keep the shape. `wakes` lines and their `drawer_lines` no longer occur.
 - The line kinds `ChatLines.build` gained since are projected as `LinesFixtureTest` on Android projects them: `viewed` (`image_ids`), `recaps` (`item_ids`) and `api_error` (`item_id`, `count`, `status`, `reason`); subagents launched one after another share an `agents` line (`group_id`, `call_ids`, `first`, `separator_before`, `alone`). A kind the replay's options cannot produce traps.
 - The Swift runner prints what it built for each case, and the Python block compares that with `expected` and lists every difference instead of stopping at the first mismatching case.
 
@@ -434,15 +434,18 @@ for name, split in {'same_entry_text_image_text_is_one_message': [['1#0'], ['3#0
                     'image_only_queued_input_after_supervision_opens_new_turn': [['1#0'], ['4#0', '4#1']],
                     'recap_does_not_end_a_supervision_round': [['1#0'], [], ['5#0']]}.items():
     assert [t['user_ids'] for t in all_cases[name]['expected']['turns']] == split, name
-for name, gone, turn in [('agent_result_wake_stays_in_its_exchange', '5#0', {'wake_ids': ['5#0'], 'answer_id': '6#0'}),
-                         ('agent_result_wake_pending_keeps_previous_answer', '5#0', {'has_pending_wake': True, 'answer_id': '4#0'}),
-                         ('agent_result_wake_after_recap_reopens_turn', '6#0', {'wake_ids': ['6#0'], 'answer_id': '7#0'}),
-                         ('orphan_agent_result_wake_draws_no_notice', '10#0', {'user_ids': []}),
-                         ('compaction_continuation_joins_its_boundary_mid_turn', '5#0', {'answer_id': '8#0'}),
-                         ('idle_compaction_after_answer_is_one_divider', '6#0', {'answer_id': '4#0'}),
-                         ('manual_compaction_is_a_divider_after_the_command', '3#0', {'user_ids': ['1#0']})]:
+for name, gone, index, turn in [('agent_result_wake_opens_its_own_exchange', '5#0', 0, {'wake_ids': [], 'answer_id': '4#0'}),
+                                ('agent_result_wake_opens_its_own_exchange', '5#0', 1, {'user_ids': [], 'wake_ids': ['5#0'], 'answer_id': '6#0'}),
+                                ('agent_result_wake_pending_keeps_previous_answer', '5#0', 0, {'answer_id': '4#0'}),
+                                ('agent_result_wake_pending_keeps_previous_answer', '5#0', 1, {'wake_ids': ['5#0'], 'answer_id': None}),
+                                ('agent_result_wake_after_recap_follows_the_recap', '6#0', 0, {'answer_id': '4#0'}),
+                                ('agent_result_wake_after_recap_follows_the_recap', '6#0', 1, {'wake_ids': ['6#0'], 'answer_id': '7#0'}),
+                                ('orphan_agent_result_wake_draws_no_notice', '10#0', 0, {'user_ids': [], 'wake_ids': ['10#0']}),
+                                ('compaction_continuation_joins_its_boundary_mid_turn', '5#0', 0, {'answer_id': '8#0'}),
+                                ('idle_compaction_after_answer_is_one_divider', '6#0', 0, {'answer_id': '4#0'}),
+                                ('manual_compaction_is_a_divider_after_the_command', '3#0', 0, {'user_ids': ['1#0']})]:
     expected = all_cases[name]['expected']
-    assert all(expected['turns'][0][key] == value for key, value in turn.items()), name
+    assert all(expected['turns'][index][key] == value for key, value in turn.items()), name
     assert all(gone not in [line['id'], line.get('step', {}).get('id')] + [s['id'] for s in line.get('steps', [])] for line in expected['lines']), name
 subprocess.run([str(tmp / 'check'), '--properties', *zh], env=env, check=True, timeout=60)
 assert not failed, '%d cases do not match: %s' % (len(failed), ', '.join(failed))
@@ -561,7 +564,8 @@ struct Projection {
     func turn(_ t: Turn) -> [String: Any] {
         ["id": t.id, "user_ids": t.users.map(\.id), "process_ids": t.process.map(\.id),
          "answer_id": nullable(t.answer?.id), "trailing_ids": t.trailing.map(\.id),
-         "wake_ids": t.wakes.map(\.id), "has_pending_wake": t.hasPendingWake, "tail_ids": t.tail.map(\.id),
+         // A turn has no pending wake and no tail since #9140 (a wake opens its own turn); the keys keep the corpus's shape.
+         "wake_ids": t.wakes.map(\.id), "has_pending_wake": false, "tail_ids": [String](),
          "ordered_ids": t.ordered.map(\.id), "tool_count": t.toolCount, "thought_count": t.thoughtCount,
          "interim_count": t.interimCount, "start": stamp(t.startedAt), "end": stamp(t.endedAt)]
     }

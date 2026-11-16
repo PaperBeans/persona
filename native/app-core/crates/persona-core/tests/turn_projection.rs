@@ -340,19 +340,23 @@ mod apple_source_regressions {
     }
 
     #[test]
-    fn pending_wake_only_moves_its_work_not_a_later_non_wake_answer() {
-        let input = json!([
+    fn a_wake_opens_its_own_turn_and_the_turn_before_it_keeps_its_answer() {
+        let turns = project(json!([
             {"id":"u1#0","seq":1,"role":"user","kind":"text"},
             {"id":"a2#0","seq":2,"role":"assistant","kind":"text"},
             {"id":"w3#0","seq":3,"role":"system","kind":"notice","wake":true},
             {"id":"a4#0","seq":4,"role":"assistant","kind":"text"},
-        ]);
-        let turns = project(input);
-        assert_eq!(turns[0]["ordered_ids"], json!(["u1#0", "a2#0", "w3#0", "a4#0"]));
-        assert_eq!(turns[0]["answer_id"], "a4#0");
-        assert_eq!(turns[0]["tail_ids"], json!([]));
-        assert_eq!(turns[0]["has_pending_wake"], false);
+        ]));
+        assert_eq!(turns.as_array().unwrap().len(), 2, "{turns}");
+        assert_eq!(turns[0]["ordered_ids"], json!(["u1#0", "a2#0"]));
+        assert_eq!(turns[0]["answer_id"], "a2#0");
+        assert_eq!(turns[0]["wake_ids"], json!([]));
+        assert_eq!(turns[1]["user_ids"], json!([]));
+        assert_eq!(turns[1]["ordered_ids"], json!(["w3#0", "a4#0"]));
+        assert_eq!(turns[1]["wake_ids"], json!(["w3#0"]));
+        assert_eq!(turns[1]["answer_id"], "a4#0");
 
+        // Woken and at work with no words yet: the answer before the wake is untouched, the new work is the woken turn's.
         let turns = project(json!([
             {"id":"u1#0","seq":1,"role":"user","kind":"text"},
             {"id":"a2#0","seq":2,"role":"assistant","kind":"text","ts":"2026-01-01T00:00:02Z"},
@@ -360,24 +364,73 @@ mod apple_source_regressions {
             {"id":"t4#0","seq":4,"role":"assistant","kind":"tool_use","ts":"2026-01-01T00:00:04Z"},
         ]));
         assert_eq!(turns[0]["answer_id"], "a2#0");
-        assert_eq!(turns[0]["tail_ids"], json!([]));
-        assert_eq!(turns[0]["end"], "2026-01-01T00:00:04Z");
-        assert_eq!(turns[0]["has_pending_wake"], true);
+        assert_eq!(turns[0]["end"], "2026-01-01T00:00:02Z");
+        assert_eq!(turns[1]["process_ids"], json!(["w3#0", "tools-t4#0"]));
+        assert_eq!(turns[1]["answer_id"], Value::Null);
+        assert_eq!(turns[1]["start"], "2026-01-01T00:00:03Z");
+        assert_eq!(turns[1]["end"], "2026-01-01T00:00:04Z");
+    }
 
+    /// #9140: a background check for one question reports back after a newer question was answered. Four final texts
+    /// lie between the two messages; each is the answer of its own turn.
+    #[test]
+    fn the_answer_to_a_newer_question_survives_later_wakes() {
         let turns = project(json!([
             {"id":"u1#0","seq":1,"role":"user","kind":"text"},
-            {"id":"a2#0","seq":2,"role":"assistant","kind":"text"},
-            {"id":"w3#0","seq":3,"role":"system","kind":"notice","wake":true},
-            {"id":"t4#0","seq":4,"role":"assistant","kind":"tool_use"},
+            {"id":"t2#0","seq":2,"role":"assistant","kind":"tool_use","tool_use_id":"a"},
+            {"id":"a3#0","seq":3,"role":"assistant","kind":"text"},
+            {"id":"u4#0","seq":4,"role":"user","kind":"text"},
             {"id":"a5#0","seq":5,"role":"assistant","kind":"text"},
+            {"id":"w6#0","seq":6,"role":"system","kind":"notice","wake":true},
+            {"id":"t7#0","seq":7,"role":"assistant","kind":"tool_use","tool_use_id":"b"},
+            {"id":"a8#0","seq":8,"role":"assistant","kind":"text"},
+            {"id":"w9#0","seq":9,"role":"system","kind":"notice","wake":true},
+            {"id":"a10#0","seq":10,"role":"assistant","kind":"text"},
+            {"id":"w11#0","seq":11,"role":"system","kind":"notice","wake":true},
+            {"id":"a12#0","seq":12,"role":"assistant","kind":"text"},
+            {"id":"u13#0","seq":13,"role":"user","kind":"text"},
         ]));
-        assert_eq!(turns[0]["answer_id"], "a5#0");
-        assert_eq!(turns[0]["tail_ids"], json!([]));
-        assert_eq!(turns[0]["has_pending_wake"], false);
+        let field = |key: &str| {
+            turns
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|turn| turn[key].clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            field("id"),
+            [
+                json!("u1#0"),
+                json!("u4#0"),
+                json!("w6#0"),
+                json!("w9#0"),
+                json!("w11#0"),
+                json!("u13#0")
+            ]
+        );
+        assert_eq!(
+            field("answer_id"),
+            [
+                json!("a3#0"),
+                json!("a5#0"),
+                json!("a8#0"),
+                json!("a10#0"),
+                json!("a12#0"),
+                Value::Null
+            ]
+        );
+        assert_eq!(
+            turns[1]["process_ids"],
+            json!([]),
+            "the answer to the newer question is no step of any turn's work"
+        );
+        assert_eq!(turns[2]["process_ids"], json!(["w6#0", "tools-t7#0"]));
+        assert_eq!(turns[2]["interim_count"], 0);
     }
 
     #[test]
-    fn tool_result_wake_reopens_the_turn_without_becoming_a_user_message() {
+    fn tool_result_wake_opens_a_turn_without_becoming_a_user_message() {
         let items = json!([
             {"id":"q1#0","seq":1,"role":"user","kind":"text"},
             {"id":"a2#0","seq":2,"role":"assistant","kind":"text"},
@@ -387,38 +440,32 @@ mod apple_source_regressions {
             {"id":"a5#0","seq":5,"role":"assistant","kind":"text"},
         ]);
         let turns = project(json!(items));
-        assert_eq!(turns.as_array().unwrap().len(), 1, "wake: {turns}");
+        assert_eq!(turns.as_array().unwrap().len(), 2, "wake: {turns}");
         assert_eq!(turns[0]["user_ids"], json!(["q1#0"]));
-        assert_eq!(turns[0]["wake_ids"], json!(["r4#0"]), "{turns}");
-        assert_eq!(turns[0]["process_ids"], json!(["a2#0", "r4#0"]));
-        assert_eq!(turns[0]["answer_id"], "a5#0", "wake: {turns}");
-        assert_eq!(turns[0]["has_pending_wake"], false);
+        assert_eq!(turns[0]["answer_id"], "a2#0", "wake: {turns}");
+        assert_eq!(turns[1]["user_ids"], json!([]));
+        assert_eq!(turns[1]["wake_ids"], json!(["r4#0"]), "{turns}");
+        assert_eq!(turns[1]["process_ids"], json!(["r4#0"]));
+        assert_eq!(turns[1]["answer_id"], "a5#0", "wake: {turns}");
 
+        // Absorbed mid-turn (no wake): the result is its call's, and the words after the recap open a turn as before.
         let mut not_a_wake = items;
         not_a_wake[3]["wake"] = Value::Bool(false);
         let turns = project(not_a_wake);
         assert_eq!(turns.as_array().unwrap().len(), 2, "not-a-wake: {turns}");
-        assert_eq!(turns[0]["wake_ids"], json!([]), "not-a-wake: {turns}");
+        assert_eq!(turns[1]["wake_ids"], json!([]), "not-a-wake: {turns}");
+        assert_eq!(turns[1]["process_ids"], json!([]), "not-a-wake: {turns}");
         assert_eq!(turns[0]["answer_id"], "a2#0", "not-a-wake: {turns}");
         assert_eq!(turns[1]["answer_id"], "a5#0", "not-a-wake: {turns}");
-        let pending = project(json!([
-            {"id":"q1#0","seq":1,"role":"user","kind":"text"},
-            {"id":"a2#0","seq":2,"role":"assistant","kind":"text"},
-            {"id":"w3#0","seq":3,"role":"system","kind":"notice","wake":true},
-            {"id":"t4#0","seq":4,"role":"assistant","kind":"tool_use","tool_use_id":"call4"},
-        ]));
-        assert_eq!(pending[0]["answer_id"], "a2#0");
-        assert_eq!(pending[0]["tail_ids"], json!([]));
-        assert_eq!(pending[0]["has_pending_wake"], true);
     }
 
     #[test]
-    fn only_agent_tool_result_wakes_reopen_a_recap_closed_turn() {
-        for (task, wake, expected_turns) in [
-            (json!({"kind":"agent"}), true, 1),
-            (json!({"kind":"agent"}), false, 2),
-            (json!({"kind":"shell"}), true, 2),
-            (Value::Null, true, 2),
+    fn only_agent_tool_result_wakes_are_wakes_and_a_wake_follows_the_recaps_before_it() {
+        for (task, wake, woken) in [
+            (json!({"kind":"agent"}), true, true),
+            (json!({"kind":"agent"}), false, false),
+            (json!({"kind":"shell"}), true, false),
+            (Value::Null, true, false),
         ] {
             let turns = project(json!([
                 {"id":"q1#0","seq":1,"role":"user","kind":"text"},
@@ -427,14 +474,11 @@ mod apple_source_regressions {
                 {"id":"r4#0","seq":4,"role":"user","kind":"tool_result","task":task,"wake":wake},
                 {"id":"a5#0","seq":5,"role":"assistant","kind":"text"},
             ]));
-            assert_eq!(turns.as_array().unwrap().len(), expected_turns, "{task}/{wake}");
+            assert_eq!(turns.as_array().unwrap().len(), 2, "{task}/{wake}");
+            assert_eq!(turns[0]["wake_ids"], json!([]), "{task}/{wake}");
             assert_eq!(
-                turns[0]["wake_ids"],
-                if expected_turns == 1 {
-                    json!(["r4#0"])
-                } else {
-                    json!([])
-                },
+                turns[1]["wake_ids"],
+                if woken { json!(["r4#0"]) } else { json!([]) },
                 "{task}/{wake}"
             );
         }
@@ -448,9 +492,10 @@ mod apple_source_regressions {
             {"id":"t6#0","seq":6,"role":"assistant","kind":"tool_use"},
             {"id":"a7#0","seq":7,"role":"assistant","kind":"text"},
         ]));
-        assert_eq!(turns.as_array().unwrap().len(), 1, "{turns}");
-        assert_eq!(turns[0]["wake_ids"], json!(["w5#0"]));
-        assert_eq!(turns[0]["answer_id"], "a7#0");
+        assert_eq!(turns.as_array().unwrap().len(), 2, "{turns}");
+        assert_eq!(turns[0]["answer_id"], "a2#0");
+        assert_eq!(turns[1]["wake_ids"], json!(["w5#0"]));
+        assert_eq!(turns[1]["answer_id"], "a7#0");
     }
 
     #[test]
@@ -496,14 +541,25 @@ mod apple_source_regressions {
                 {"id":"n4#0","seq":4,"role":"system","kind":"notice","text":"已从压缩的上下文继续"}, // i18n-ignore
                 {"id":"n5#0","seq":5,"role":"system","kind":"notice","text":"Compacted while idle, fictional example"},
             ]));
-            assert_eq!(turns.as_array().unwrap().len(), 1, "{task}/{wake}/{suffix}");
             let expected = if suffix.is_empty() && task.is_null() && !wake {
                 json!(["u1#0", "a2#0", "n3#0"])
             } else {
                 // With no eligible open boundary, the continuation itself becomes one and absorbs the idle note.
                 json!(["u1#0", "a2#0", "n3#0", "n4#0"])
             };
-            assert_eq!(turns[0]["ordered_ids"], expected, "{task}/{wake}/{suffix}");
+            // A notice that woke the agent is no compaction boundary: it opens a turn of its own like any wake.
+            let all: Vec<Value> = turns
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|turn| turn["ordered_ids"].as_array().unwrap().clone())
+                .collect();
+            assert_eq!(
+                turns.as_array().unwrap().len(),
+                if wake { 2 } else { 1 },
+                "{task}/{wake}/{suffix}"
+            );
+            assert_eq!(Value::Array(all), expected, "{task}/{wake}/{suffix}");
         }
 
         let turns = project(json!([

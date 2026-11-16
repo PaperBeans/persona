@@ -47,7 +47,7 @@ export function lineItemIds(line: ChatLine): string[] {
   }
 }
 
-/** The line a hit is on: the one that draws it (a wake's runs are part of their exchange's line, #3783), else the line
+/** The line a hit is on: the one that draws it (the work a wake started is its own exchange's line, #9140), else the line
  *  of the nearest item before it that a line draws (another block of your message, a notice folded into a compaction). */
 export function lineOfItem(lines: ChatLine[], items: Item[], itemId: string): string | undefined {
   const owner = new Map<string, string>();

@@ -201,6 +201,20 @@ struct TurnUsageTests {
         #expect(exchanges.map { $0.usage?.first } == [true, nil, false])
     }
 
+    /// #9140: a wake after an answer starts an exchange of its own, so what it and the work it woke used counts
+    /// there, and the answer before it keeps its own count.
+    @Test func aWakeAfterAnAnswerCountsInItsOwnExchange() {
+        var wake = Item(id: "w5#0", seq: 5, ts: nil, role: "system", kind: .notice, text: "Background command finished")
+        wake.wake = true
+        wake.task = TaskNote(kind: "shell", status: "completed", title: "", taskID: "b1")
+        wake.usage = [opus(input: 5)]
+        let exchanges = chatUsage([user(1, "check the trains"), answer(2, "running", usage: [opus(output: 3)]),
+                                   user(3, "what to pack?"), answer(4, "a rain jacket", usage: [opus(output: 4)]),
+                                   wake, answer(6, "three trains run", usage: [opus(output: 6)])])
+        #expect(exchanges.map { models($0)?.first } == [tokens(output: 3), tokens(output: 4), tokens(input: 5, output: 6)])
+        #expect(exchanges.map(\.answerID) == [answer(2, "").id, answer(4, "").id, answer(6, "").id])
+    }
+
     @Test func theUsageKeyIsStableAndParsesBack() {
         let one = segmentUsage([user(1, "a"), answer(2, "b", usage: [opus(input: 1)])])[0]
         let two = segmentUsage([user(1, "a"), answer(2, "b", usage: [opus(input: 1)])])[0]

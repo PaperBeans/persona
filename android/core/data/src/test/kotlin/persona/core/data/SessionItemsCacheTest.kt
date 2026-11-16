@@ -63,6 +63,19 @@ class SessionItemsCacheTest {
         assertEquals(items, SessionItemsCache(database, scope).load(session).items)
     }
 
+    /** #9140: a wake opens a turn of its own, with no message. The cached tail still starts at a message of the
+     *  user's, the second to last, so woken turns neither shrink it to themselves nor keep the whole chat. */
+    @Test fun theCachedTailStartsAtTheUsersSecondToLastMessageWhateverWokeTheAgentSince() = runBlocking {
+        val cache = SessionItemsCache(database, scope)
+        val session = SessionKey("computer", "woken")
+        fun user(seq: Int) = Item("u$seq", seq, role = "user", kind = "text", text = "Question $seq")
+        fun reply(seq: Int) = Item("a$seq", seq, role = "assistant", kind = "text", text = "Answer $seq")
+        fun wake(seq: Int) = Item("w$seq", seq, role = "system", kind = "notice", text = "Background check finished", wake = true)
+        val items = listOf(user(1), reply(2), user(3), reply(4), user(5), reply(6), wake(7), reply(8), wake(9), reply(10))
+        cache.save(session, items)
+        assertEquals(items.drop(2), SessionItemsCache(database, scope).load(session).items)
+    }
+
     @Test fun ledgerAsksForTheFullScanOnlyWhenUnknownOrOverBudget() {
         val a = SessionKey("m", "a"); val b = SessionKey("m", "b"); val c = SessionKey("m", "c")
         // (session, bytes after its save) -> (full scan, total); budget 30, seeded with a = 10, b = 10.

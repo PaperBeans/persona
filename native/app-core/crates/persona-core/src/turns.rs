@@ -1,8 +1,8 @@
 //! Transcript rows grouped into exchanges, following iOS's `ChatStore.buildRows` and `ChatBlock.build`.
 //!
 //! This is the turn-projection slice of `lines`, not the rendered `ChatLine` projection. It owns tool/result pairing,
-//! user-picture placement, ordinary/queued turn boundaries, recap reopening and wake-aware answer selection. Times
-//! are caller-supplied item timestamps; no clock or IO is read.
+//! user-picture placement and the turn boundaries: ordinary and queued messages, and the wake of an idle agent, which
+//! starts a turn of its own (#9140). Times are caller-supplied item timestamps; no clock or IO is read.
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -466,44 +466,14 @@ struct Turn {
     process: Vec<Row>,
     answer: Option<Row>,
     trailing: Vec<Row>,
+    /// The wake that opened this turn (a background task's notice, or a subagent's report); empty when a message did.
     wakes: Vec<Row>,
-    has_pending_wake: bool,
-    tail: Vec<Row>,
     steps: Vec<Row>,
     ordered: Vec<Row>,
-    reopened_at: Option<usize>,
 }
 
 impl Turn {
     fn close(mut self) -> Self {
-        if !self.wakes.is_empty() {
-            let all = self.ordered.clone();
-            let mut pick = None;
-            self.has_pending_wake = false;
-            for (index, row) in all.iter().enumerate() {
-                if row.kind == Kind::Notice && row.wake {
-                    pick = None;
-                    self.has_pending_wake = true;
-                }
-                if row.assistant() {
-                    pick = Some(index);
-                    self.has_pending_wake = false;
-                }
-            }
-            if let Some(pick) = pick {
-                self.tail = all[pick + 1..]
-                    .iter()
-                    .filter(|row| !row.user_input())
-                    .cloned()
-                    .collect();
-                self.ordered = all[..=pick]
-                    .iter()
-                    .chain(all[pick + 1..].iter().filter(|row| row.user_input()))
-                    .cloned()
-                    .collect();
-                self.process = self.ordered.iter().filter(|row| !row.user_input()).cloned().collect();
-            }
-        }
         self.steps = self.process.clone();
         if let Some(index) = self.process.iter().rposition(Row::assistant) {
             self.answer = Some(self.process.remove(index));
@@ -528,8 +498,10 @@ impl Turn {
             "answer_id": self.answer.as_ref().map(|row| &row.id),
             "trailing_ids": ids(&self.trailing),
             "wake_ids": ids(&self.wakes),
-            "has_pending_wake": self.has_pending_wake,
-            "tail_ids": ids(&self.tail),
+            // A turn has no pending wake and no tail since #9140 (a wake opens its own turn); the keys keep the
+            // corpus's shape.
+            "has_pending_wake": false,
+            "tail_ids": [],
             "ordered_ids": ids(&self.ordered),
             "tool_count": self.process.iter().map(|row| row.tools).sum::<i64>(),
             "thought_count": self.process.iter().map(|row| row.thoughts).sum::<i64>()
@@ -558,30 +530,12 @@ pub fn project(input: &Input) -> Value {
     });
     let rows = rows(items);
     let mut current: Option<Turn> = None;
-    let mut last_raw: Option<Turn> = None;
-    let mut last_index = 0_usize;
-    let mut reopened_at = None;
     let mut message_entry = None;
     let mut supervision_round = false;
     let mut blocks: Vec<Value> = Vec::new();
-    let close = |current: &mut Option<Turn>,
-                 last_raw: &mut Option<Turn>,
-                 last_index: &mut usize,
-                 reopened_at: &mut Option<usize>,
-                 blocks: &mut Vec<Value>| {
-        let reopened = current
-            .as_ref()
-            .and_then(|turn| turn.reopened_at)
-            .or_else(|| reopened_at.take());
-        let Some(turn) = current.take() else { return };
-        *last_raw = Some(turn.clone());
-        let turn = turn.close();
-        if let Some(index) = reopened {
-            blocks[index] = turn.json();
-            *last_index = index;
-        } else {
-            *last_index = blocks.len();
-            blocks.push(turn.json());
+    let close = |current: &mut Option<Turn>, blocks: &mut Vec<Value>| {
+        if let Some(turn) = current.take() {
+            blocks.push(turn.close().json());
         }
     };
     for row in rows {
@@ -598,13 +552,7 @@ pub fn project(input: &Input) -> Value {
                 turn.users.push(row.clone());
                 turn.ordered.push(row.clone());
             } else {
-                close(
-                    &mut current,
-                    &mut last_raw,
-                    &mut last_index,
-                    &mut reopened_at,
-                    &mut blocks,
-                );
+                close(&mut current, &mut blocks);
                 current = Some(Turn {
                     id: row.id.clone(),
                     users: vec![row.clone()],
@@ -620,41 +568,27 @@ pub fn project(input: &Input) -> Value {
         }
         match row.kind {
             Kind::Recap => {
-                close(
-                    &mut current,
-                    &mut last_raw,
-                    &mut last_index,
-                    &mut reopened_at,
-                    &mut blocks,
-                );
+                close(&mut current, &mut blocks);
                 blocks.push(serde_json::json!({"row_id": row.id}));
             }
             Kind::Notice => {
-                if row.wake
-                    && current.is_none()
-                    && let Some(raw) = &last_raw
-                {
-                    current = Some(raw.clone());
-                    if blocks
-                        .get(last_index)
-                        .and_then(Value::as_object)
-                        .and_then(|turn| turn.get("id"))
-                        == Some(&Value::String(raw.id.clone()))
-                    {
-                        current.as_mut().unwrap().reopened_at = Some(last_index);
-                    }
-                }
                 if row.refusal {
                     let turn = current.get_or_insert_with(|| Turn {
                         id: row.id.clone(),
                         ..Turn::default()
                     });
                     turn.trailing.push(row);
-                } else if row.wake && current.is_some() {
-                    let turn = current.as_mut().unwrap();
-                    turn.wakes.push(row.clone());
-                    turn.process.push(row.clone());
-                    turn.ordered.push(row);
+                } else if row.wake {
+                    // The turn before the wake was over and keeps its last words as its answer: the work the wake
+                    // started is a turn of its own that opens with it, after a recap too (#9140).
+                    close(&mut current, &mut blocks);
+                    current = Some(Turn {
+                        id: row.id.clone(),
+                        process: vec![row.clone()],
+                        wakes: vec![row.clone()],
+                        ordered: vec![row],
+                        ..Turn::default()
+                    });
                 } else if current.is_none() {
                     current = Some(Turn {
                         id: row.id.clone(),
@@ -681,17 +615,11 @@ pub fn project(input: &Input) -> Value {
             }
         }
     }
-    close(
-        &mut current,
-        &mut last_raw,
-        &mut last_index,
-        &mut reopened_at,
-        &mut blocks,
-    );
+    close(&mut current, &mut blocks);
     Value::Array(blocks.into_iter().filter(|block| block.get("id").is_some()).collect())
 }
 
-/// Wake selection mutation: choosing the first assistant row must disagree with the fixture corpus.
+/// Answer selection mutation: choosing the first assistant row must disagree with the fixture corpus.
 #[doc(hidden)]
 pub fn answer_mutation(input: &Input) -> Option<String> {
     let turns = project(input);

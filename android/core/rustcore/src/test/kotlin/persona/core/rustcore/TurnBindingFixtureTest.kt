@@ -153,8 +153,8 @@ class TurnBindingFixtureTest {
                 expected.size
             }
         }
-        assertEquals("three empty-array cases do not count as layout coverage", 62, turnCount)
-        println("JNI turn host replay: ${replayed.size} cases; 54 with 62 complete turn objects; 3 empty arrays")
+        assertEquals("three empty-array cases do not count as layout coverage", 73, turnCount)
+        println("JNI turn host replay: ${replayed.size} cases; 54 with 73 complete turn objects; 3 empty arrays")
     }
 
     @Test fun boundaryRejectsMalformedInputAndTheComparisonRejectsAWrongExpectation() {

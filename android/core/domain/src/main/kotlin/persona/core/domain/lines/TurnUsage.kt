@@ -106,7 +106,9 @@ private fun split(items: List<Item>): List<Seg> {
             }
             continue
         }
-        val seg = cur ?: Seg().also { cur = it; out += it }
+        // What woke the idle agent starts an exchange, as in the chat's lines (buildBlocks, #9140): its tokens and the
+        // work it woke count there, not under the answer of the turn before it.
+        val seg = (if (isWake(it)) null else cur) ?: Seg().also { cur = it; out += it }
         seg.items += it
         val own = itemUsage(it, reports = false)
         if (own.isNotEmpty()) seg.entries.addAll(own)
@@ -203,7 +205,8 @@ private fun itemUsage(it: Item, reports: Boolean): List<TokenUsage> =
 private fun isUserMessage(it: Item) =
     it.role == "user" && (it.kind == "text" || (it.kind == "image" && it.toolUseId == null))
 
-private fun isWake(it: Item) = it.kind == "notice" && it.wake == true
+/** A background task's notice, or a subagent's report as its call's result, that woke the idle agent: what opens a turn in [buildBlocks]. */
+private fun isWake(it: Item) = it.wake == true && (it.kind == "notice" || (it.kind == "tool_result" && it.task?.kind == "agent"))
 
 /** The transcript's "Interrupted" notice. Its tokens belong to the exchange it stopped; the notice stays its own line. */
 private fun isInterrupt(it: Item) =

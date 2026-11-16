@@ -177,6 +177,17 @@ class TurnUsageTest {
         assertEquals(listOf(true, null, false), exchanges.map { it.usage?.first })
     }
 
+    /** #9140: a wake after an answer starts an exchange of its own; what it and the work it woke used counts there. */
+    @Test fun aWakeAfterAnAnswerCountsInItsOwnExchange() {
+        val wake = Item("w5#0", 5, role = "system", kind = "notice", wake = true, text = "Background command finished",
+            task = WireTask(kind = "shell", status = "completed", taskId = "b1"), usage = listOf(opus(input = 5)))
+        val exchanges = chatUsage(listOf(user(1, "check the trains"), answer(2, "running", listOf(opus(output = 3))),
+            user(3, "what to pack?"), answer(4, "a rain jacket", listOf(opus(output = 4))),
+            wake, answer(6, "three trains run", listOf(opus(output = 6)))))
+        assertEquals(listOf(tokens(output = 3), tokens(output = 4), tokens(input = 5, output = 6)), exchanges.map { models(it)?.single() })
+        assertEquals(listOf(answer(2, "").id, answer(4, "").id, answer(6, "").id), exchanges.map { it.answerId })
+    }
+
     @Test fun theUsageKeyIsStableAndParsesBack() {
         val one = segmentUsage(listOf(user(1, "a"), answer(2, "b", listOf(opus(input = 1)))))[0]
         val two = segmentUsage(listOf(user(1, "a"), answer(2, "b", listOf(opus(input = 1)))))[0]

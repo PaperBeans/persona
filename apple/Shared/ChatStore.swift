@@ -129,12 +129,9 @@ nonisolated struct Turn: Identifiable, Hashable, Sendable {
     var process: [ChatRow] = []
     var answer: ChatRow?
     var trailing: [ChatRow] = [] // notices that belong to the turn (e.g. "interrupted")
-    /// Background tasks that woke the agent during this exchange (their notices).
+    /// The background task that woke the idle agent for this exchange (its notice, or a subagent's report): the row it
+    /// opens with. Empty when a message opened it.
     var wakes: [Item] = []
-    /// The latest wake has not produced an answer yet: its continuation is live, even after its rows move into `ordered`.
-    var hasPendingWake = false
-    /// What came after the answer (a follow-up once a background task reported back).
-    var tail: [ChatRow] = []
     /// Everything the agent did in arrival order, answer included.
     var steps: [ChatRow] = []
     /// Messages and steps in arrival order (how the running turn is shown: input sent mid-turn stays where it was sent).
@@ -160,23 +157,6 @@ nonisolated struct Turn: Identifiable, Hashable, Sendable {
         }
     }
     var interimCount: Int { process.filter { if case .assistant = $0 { true } else { false } }.count }
-
-    /// A wake continues the same exchange; its tools and narration join the ordinary execution summary. Until new
-    /// words arrive, `hasPendingWake` keeps them in the summary rather than promoting the earlier narration to a
-    /// separate answer (#2796).
-    mutating func pickAnswerAcrossWakes() {
-        let all = ordered
-        var pick: Int?
-        hasPendingWake = false
-        for (i, row) in all.enumerated() {
-            if case .notice(let n) = row, n.wake == true { pick = nil; hasPendingWake = true }
-            if case .assistant = row { pick = i; hasPendingWake = false }
-        }
-        guard let pick else { return }
-        tail = all[(pick + 1)...].filter { !$0.isUserInput }
-        ordered = Array(all[...pick]) + all[(pick + 1)...].filter(\.isUserInput)
-        process = ordered.filter { !$0.isUserInput }
-    }
 }
 
 nonisolated enum SubagentDelivery {
@@ -301,30 +281,16 @@ nonisolated enum ChatBlock: Identifiable, Hashable, Sendable {
     static func build(_ rows: [ChatRow]) -> [ChatBlock] {
         var blocks: [ChatBlock] = []
         var current: Turn?
-        // The last exchange as it was before closing, and where it sits: a background task that reports back after
-        // a recap card (Claude Code writes one when a finished session sits idle) still belongs to that exchange.
-        var lastRaw: Turn?
-        var lastIndex = 0
-        var reopenedAt: Int?
 
         func close() {
             guard var t = current else { return }
-            lastRaw = t
-            if !t.wakes.isEmpty { t.pickAnswerAcrossWakes() }
             // The answer is the last thing the assistant said; everything before it is process.
             // (Steps after the final words, rare trailing tool calls, stay in the process.)
             t.steps = t.process
             if let i = t.process.lastIndex(where: { if case .assistant = $0 { true } else { false } }) {
                 t.answer = t.process.remove(at: i)
             }
-            if let i = reopenedAt {
-                blocks.insert(.turn(t), at: i) // back in its place, the recap card still after it
-                lastIndex = i
-            } else {
-                lastIndex = blocks.count
-                blocks.append(.turn(t))
-            }
-            reopenedAt = nil
+            blocks.append(.turn(t))
             current = nil
         }
 
@@ -353,21 +319,18 @@ nonisolated enum ChatBlock: Identifiable, Hashable, Sendable {
             case .notice(let item):
                 // Inside a turn: "interrupted" closes it visibly; compaction / API errors are part of the process
                 // (auto-compaction happens mid-turn and must not split it).
-                if item.wake == true, current == nil, let raw = lastRaw, blocks.indices.contains(lastIndex),
-                   case .turn(let closed) = blocks[lastIndex], closed.id == raw.id {
-                    blocks.remove(at: lastIndex) // reopen the exchange the recap closed
-                    reopenedAt = lastIndex
-                    current = raw
-                }
                 if item.modelRefusal != nil {
                     // An upstream refusal (#4489): a line of its own after the exchange, never folded into the work row.
                     if current == nil { current = Turn(id: row.id) }
                     current!.trailing.append(row)
-                } else if item.wake == true, current != nil {
-                    // A background task woke the idle agent: still the same exchange (the answer is picked at close).
-                    current!.wakes.append(item)
-                    current!.process.append(row)
-                    current!.ordered.append(row)
+                } else if item.wake == true {
+                    // A background task woke the idle agent: the turn before it was over, and the last words of that
+                    // turn stay its answer. The work it woke is an exchange of its own that opens with the notice,
+                    // where a message would be (#9140: kept in the exchange before it, each woken turn's last words
+                    // took the answer's place and the real answer folded into the work). After a recap it follows
+                    // the recap.
+                    close()
+                    current = Turn(id: row.id, process: [row], wakes: [item], ordered: [row])
                 } else if current == nil {
                     // e.g. a background command finishing after a recap: part of the (next) work, never its own line.
                     current = Turn(id: row.id)

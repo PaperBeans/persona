@@ -61,12 +61,11 @@
   (#1112). Fixed startup sleeps can turn a tap on an unloaded card into a silent no-op; accepting a reply with no held
   request then falsely labels the later card snapshot as a resurrection. Require an actual request before delivering
   its reply and test a delayed initial snapshot. Streaming projection must pass the active turn and whether live text
-  is drawn, as the real page does. A pending wake joins the ordinary execution summary while the previous answer stays
-  in place; only when that turn's next words start streaming does the earlier narration fold into the inspectable work.
-  An idle or other-turn presentation still shows the last answer. Cover the ordered/no-tail shape, manual inspection,
+  is drawn, as the real page does. A wake opens an exchange of its own (#9140): the answer before it stays in place
+  while the woken work runs, streams and ends, and the woken work has its own summary.
+  An idle or other-turn presentation still shows the last answer. Cover the ordered shape, manual inspection,
   serialized reload and other turn IDs separately. When a merge retains the maintained renderer, reconcile tests
-  imported from a competing wake model instead of letting their old tail expectations reintroduce it, and do not treat
-  `hasPendingWake` as proof that new words are streaming (#3169).
+  imported from a competing wake model instead of letting their old expectations reintroduce it (#3169).
 
 - UI screenshot evidence must be unobscured, not merely present in the accessibility tree (#2705). A localized
   notification prompt left the chat's elements discoverable while covering the screenshot. Handle the current

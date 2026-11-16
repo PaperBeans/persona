@@ -184,38 +184,51 @@ struct ChatLinesTests {
         #expect(kinds(ChatLines(openWork: []).build(done, live: nil)) == ["user", "work", "answer"], "reloaded history defaults to folded")
     }
 
-    @Test func aWakeJoinsItsExchangesSummaryBeforeNewWordsArrive() {
+    /// #9140: the work a background task woke the agent for is an exchange of its own. It opens with the notice and
+    /// has its own work line; the answer of the turn before it stays in place while that work runs, streams and ends.
+    @Test func aWakeOpensItsOwnWorkLineAndLeavesTheAnswerBeforeIt() {
         var wake = item(4, .notice, role: "system", text: "Forecast check")
         wake.wake = true
-        let items = [item(1, .text, role: "user", text: "Will it rain?"),
-                     item(2, .toolUse, tool: "Bash", id: "a"),
-                     item(3, .text, text: "The forecast check is running."),
-                     wake, item(5, .toolUse, tool: "Bash", id: "b")]
+        let before = [item(1, .text, role: "user", text: "Will it rain?"),
+                      item(2, .toolUse, tool: "Bash", id: "a"),
+                      item(3, .text, text: "The forecast check is running.")]
+        // Woken, nothing of the new work here yet: a live work line under the notice, under the id it keeps.
+        let woken = blocks(before + [wake])
+        guard case .turn(let first) = woken.last else { Issue.record("expected a turn"); return }
+        #expect(first.id == wake.id && first.users.isEmpty)
+        let started = ChatLines(openWork: []).build(woken, live: first.id)
+        #expect(kinds(started) == ["user", "work", "answer", "row", "work"])
+        #expect(started[2].holds("3#0"))
+        guard case .work(let wokenID, let none, let liveNow, _, _) = started[4].content else { Issue.record("expected the woken work line"); return }
+        #expect(none.isEmpty && liveNow)
+
+        let items = before + [wake, item(5, .toolUse, tool: "Bash", id: "b")]
         let b = blocks(items)
         guard case .turn(let t) = b.last else { Issue.record("expected a turn"); return }
-        #expect(t.hasPendingWake, "the wake marks unfinished continuation even before another text segment")
         let running = ChatLines(openWork: []).build(b, live: t.id)
-        #expect(kinds(running) == ["user", "work", "answer"], "before new words stream, the previous answer stays in place")
-        #expect(running.last?.holds("3#0") == true)
+        #expect(kinds(running) == ["user", "work", "answer", "row", "work"], "the previous answer stays in place")
+        #expect(running[2].holds("3#0"))
         let streaming = ChatLines(openWork: []).build(b, live: t.id, streaming: true)
-        #expect(kinds(streaming) == ["user", "work"], "new live words replace the wake's pre-existing text slot")
-        guard case .work(let id, let work, _, _, _) = running[1].content else {
-            Issue.record("expected the wake's ordinary work summary")
+        #expect(kinds(streaming) == ["user", "work", "answer", "row", "work"], "live words belong to the woken exchange, not to the answer before it")
+        #expect(streaming[2].holds("3#0"))
+        guard case .work(_, let earlier, let earlierLive, _, _) = running[1].content,
+              case .work(let id, let work, let live, _, _) = running[4].content else {
+            Issue.record("expected two work lines")
             return
         }
-        #expect(work.contains { $0.id == wake.id })
-        #expect(work.contains { $0.id == "5#0" })
+        #expect(id == wokenID, "the woken work line keeps its id from before its first step")
+        #expect(!earlierLive && live)
+        #expect(earlier.map(\.id) == ["2#0"] && work.map(\.id) == ["5#0"])
+        // Nothing opens by itself; opened, the woken work shows its own steps only.
         let open = ChatLines(openWork: [id]).build(b, live: t.id, streaming: true)
-        #expect(kinds(open) == ["user", "work", "step", "step", "step", "step", "end"])
-        #expect(open.contains { if case .workStep(_, .step(.thought(let i)), _) = $0.content { i.id == wake.id } else { false } })
-        #expect(open.contains { if case .workStep(_, .text(let i), _) = $0.content { i.id == "3#0" } else { false } })
+        #expect(kinds(open) == ["user", "work", "answer", "row", "work", "step", "end"])
 
         let complete = blocks(items + [item(6, .text, text: "No rain; keep the plan.")])
         let done = ChatLines(openWork: []).build(complete, live: nil)
-        #expect(kinds(done) == ["user", "work", "answer"])
-        #expect(done.last?.holds("6#0") == true)
-        let inspected = ChatLines(openWork: [id]).build(complete, live: nil)
-        #expect(inspected.contains { if case .workStep(_, .text(let i), _) = $0.content { i.id == "3#0" } else { false } })
+        #expect(kinds(done) == ["user", "work", "answer", "row", "work", "answer"])
+        #expect(done[2].holds("3#0") && done.last?.holds("6#0") == true)
+        guard case .work(let doneID, _, _, _, _) = done[4].content else { Issue.record("expected the woken work line"); return }
+        #expect(doneID == id)
     }
 
     @Test func liveNarrationReplacesThePreviousSegmentAndOnlyTheFinalAnswerRemains() {

@@ -523,9 +523,10 @@ Phase 3 lands in several PRs.
     have cargo evidence, and state also has ArkTS host replay, but no production migration or separate C/SwiftPM replay.
 
 - **Turn grouping and wake-aware answer selection (#8218).**
-  - `persona_core::turns` projects the static corpus's rows into turns, following current iOS `ChatBlock.build` and
-    `Turn.pickAnswerAcrossWakes`. It handles raw-item frozen cuts, entry-based user pictures, tool pairing,
-    compaction, supervision provenance, recap reopening and pending wakes; it does not project rendered `ChatLine`s.
+  - `persona_core::turns` projects the static corpus's rows into turns, following current iOS `ChatBlock.build`.
+    It handles raw-item frozen cuts, entry-based user pictures, tool pairing, compaction, supervision provenance and
+    the wake of an idle agent, which opens a turn of its own since #9140 (until then: recap reopening and pending
+    wakes inside the turn before it); it does not project rendered `ChatLine`s.
   - All 57 static turn cases compare complete `turns` arrays after applying the checked-in current-iOS overlay
     (`spec/fixtures/lines/ios/differences.json`, #8429). The independent maintainer's macOS replay passed the 59
     executable content cases and its properties; this Rust PR does not run Swift or claim that replay itself.

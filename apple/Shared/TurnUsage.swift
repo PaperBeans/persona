@@ -405,7 +405,9 @@ private func split(_ items: [Item]) -> [Seg] {
             }
             continue
         }
-        if current == nil {
+        // What woke the idle agent starts an exchange, as in the chat's lines (`ChatBlock.build`, #9140): its tokens and
+        // the work it woke count there, not under the answer of the turn before it.
+        if current == nil || isWake(it) {
             out.append(Seg())
             current = out.count - 1
         }
@@ -524,7 +526,11 @@ private func isUserMessage(_ it: Item) -> Bool {
     it.role == "user" && (it.kind == .text || (it.kind == .image && it.toolUseID == nil))
 }
 
-private func isWake(_ it: Item) -> Bool { it.kind == .notice && it.wake == true }
+/// A background task's notice, or a subagent's report as its call's result, that woke the idle agent: what opens a
+/// turn in `ChatStore.buildRows` / `ChatBlock.build`.
+private func isWake(_ it: Item) -> Bool {
+    it.wake == true && (it.kind == .notice || (it.kind == .toolResult && it.task?.kind == "agent"))
+}
 
 /// The transcript's "Interrupted" notice. Its tokens belong to the exchange it stopped.
 private func isInterrupt(_ it: Item) -> Bool {

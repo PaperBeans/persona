@@ -17,13 +17,19 @@ The generic screenshot mock folds tool calls without production's `fold.supervis
 review hidden in such a fold falsely makes the entire synthetic round quiet. Emit the same retained evidence as
 production when testing this case; do not disable folding or force-open the UI to make the screenshot pass.
 
-## Wake continuations use the ordinary execution summary (#2796)
+## An exchange ends where its turn ends: a wake starts the next one (#9140; replaces #2796's rule)
 
-A wake before new assistant text must not cut the segment holding the previous answer: doing so shows the pre-wake
-narration again outside the folded summary. Keep the previous answer in place until new words arrive and put wake
-notices, new tools and narration in the same inspectable summary. Remove the separate wake-chip/drawer path rather
-than leaving it appended after the answer. Cover the interval between wake and new text in both the line model and
-the shared sync fixture, not only the final completed turn.
+The chat grouped everything between two of the user's messages into one exchange and showed its last words as the
+answer. A turn is not that: a background command's notification (`wake`) starts a turn with no message. With the
+woken work kept in the exchange before it, each woken turn's last words took the answer's place, so a complete
+answer to a newer question was folded into "work" as soon as an older background command reported back (four final
+texts between two messages, one shown). The wire already says where the turn ended (`Item.wake`: delivered while the
+agent was idle); every client now closes the exchange there and opens one for the woken work, which draws the notice
+where a message would be and has an ordinary summary of its own, never a wake chip or drawer.
+When grouping is ported or changed, check all of them together: the web's `buildBlocks`, iOS `ChatBlock.build`,
+Android `buildBlocks`, the Rust core's `turns::project`, the per-reply usage split (`chatUsage` on iOS and Android),
+and the two shared fixtures that pin it (`spec/fixtures/lines/wakes.json`, `spec/fixtures/sync/wake.json`). Cover the
+interval between the wake and its first step (the live work row must exist and keep its id) as well as the finished turn.
 
 
 Persona's `conversation_send` relay is model input with role `user`, not the user's own words. Its existing `from`
@@ -69,7 +75,7 @@ Use synthetic conversations for screenshots, not the user's real main conversati
   (duplicates are dropped), the previous "! cmd" input, and Codex recording the same item twice. If a parser change introduces "cross-line state," the window's starting point must also be able to reconstruct it
   (`seeded` / `seeNotifications`), or windowed and full reads will disagree. `TestFixtureWindowedEqualsFull` and the corpus's `TestCorpusWindowed` catch this.
 - User images take two paths: ordinary messages contain user image blocks; messages sent while Claude is working are "absorbed mid-turn" as `attachment/queued_command`, with images in the prompt's block array
-  (before 2026-10-29, the parser took only text blocks, so bubbles showed no images). In App turns awakened by background tasks (`pickAnswerAcrossWakes`), keep the user's images together with their message in the original position, not in the work trace.
+  (before 2026-10-29, the parser took only text blocks, so bubbles showed no images). In App turns awakened by background tasks, keep the user's images together with their message in the original position, not in the work trace.
 - A long chat's slow first screen is not caused by the hub / node (cold read: 0.12 s), but by the page being too large: one long Codex session's last two turns contained 1412 entries and 1.08 MB, with just 6 reply entries; the rest were tools and thinking already collapsed in the UI.
 - Codex commentary is assistant text, not `Reasoning` (#5853). Keep an internal-only `Narration` marker so folding can handle completed narration without exposing a new wire kind or counting it as thinking. Only the latest page leaves the newest commentary visible until a final answer follows; a historical page may end before a final answer stored on the next page. Changing only the item kind let 110 commentary rows escape the fold and broke the long-session 40-item / 32 KB budget; cover real running pages, completed folds, expansion merging and golden output together.
 - The App requests `fold_work`. Pages read backward from the end replace each work segment with one `kind: fold` entry (counts and ranges only). Expanding a work row fetches it with `from_seq` / `through_seq`

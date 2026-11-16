@@ -3,25 +3,16 @@
   "domain": "lines",
   "description": "Where current iOS (apple/) differs from the lines corpus. The corpus stays the shared contract that Android's LinesFixtureTest checks; the iOS replay in ../README.md applies these entries to it before comparing, and fails on an entry that no longer changes anything or names a case or turn the corpus does not have.",
   "turn_wake_state": {
-    "why": "#2996 removed Turn.afterWake with the wake chip and its drawer: a wake's continuation stays in the exchange's work line, and Turn.hasPendingWake says that the latest wake has no reply yet.",
+    "why": "#2996 removed Turn.afterWake with the wake chip and its drawer, so a turn has no after_wake_ids. Since #9140 a wake opens a turn of its own on every client, so no turn has a wake pending inside it or a tail after its answer: has_pending_wake is false on every turn, and the list below is empty.",
     "source": [
-      "apple/Shared/ChatStore.swift: Turn.hasPendingWake / Turn.pickAnswerAcrossWakes",
-      "apple/PersonaTests/ChatStoreTests.swift: backgroundWakeEndsOnTheNewestWords",
-      "apple/PersonaTests/WakeReplyOrderTests.swift: wakeReplacesThePreviousAnswerOnlyWhenItsOwnContinuationStreams",
-      "apple/PersonaTests/ChatLinesTests.swift: aWakeJoinsItsExchangesSummaryBeforeNewWordsArrive"
+      "apple/Shared/ChatStore.swift: Turn.wakes / ChatBlock.build",
+      "apple/PersonaTests/ChatStoreTests.swift: aBackgroundWakeOpensItsOwnExchange",
+      "apple/PersonaTests/WakeReplyOrderTests.swift: theAnswerBeforeAWakeStaysWhileTheWokenWorkRunsStreamsAndEnds",
+      "apple/PersonaTests/ChatLinesTests.swift: aWakeOpensItsOwnWorkLineAndLeavesTheAnswerBeforeIt"
     ],
     "drop": "after_wake_ids",
     "set": "has_pending_wake",
-    "pending": [
-      {
-        "case": "wake_without_any_reply",
-        "turn": "1#0"
-      },
-      {
-        "case": "live_tail_runs_behind_chip",
-        "turn": "1#0"
-      }
-    ]
+    "pending": []
   },
   "cases": [
     {
@@ -103,7 +94,7 @@
       "name": "absorbed_user_images",
       "why": "Since #2112 user pictures are user input: the queued pictures join the turn's users, never its process; the lines are unchanged.",
       "source": [
-        "apple/Shared/ChatStore.swift: ChatBlock.build (users.append for every userInput) / Turn.pickAnswerAcrossWakes (process = ordered.filter { !$0.isUserInput })",
+        "apple/Shared/ChatStore.swift: ChatBlock.build (users.append for every userInput; process holds no user input)",
         "apple/PersonaTests/SupervisionTests.swift: imageOnlyQueuedInputAfterSupervisionOpensANewTurn / sameEntryTextAndImagesStayInTheSupervisionRound"
       ],
       "turn_fields": {
@@ -121,36 +112,20 @@
       }
     },
     {
-      "name": "live_tail_runs_behind_chip",
-      "why": "Since #2996 a wake with no reply after it leaves the tail empty (the turn is pending instead); its tool stays in the exchange's work line.",
-      "source": [
-        "apple/Shared/ChatStore.swift: Turn.pickAnswerAcrossWakes",
-        "apple/PersonaTests/WakeReplyOrderTests.swift: wakeReplacesThePreviousAnswerOnlyWhenItsOwnContinuationStreams",
-        "apple/PersonaTests/ChatLinesTests.swift: aWakeJoinsItsExchangesSummaryBeforeNewWordsArrive"
-      ],
-      "turn_fields": {
-        "1#0": {
-          "tail_ids": []
-        }
-      }
-    },
-    {
       "name": "photos_after_wake_stay_with_message",
-      "why": "Since #2112 the picture sent with the message is user input: it joins the turn's users, not its process; it still stays with its message and out of the tail.",
+      "why": "Since #2112 the picture sent with the message is user input: it joins the woken turn's users, not its process; it still stays with its message.",
       "source": [
-        "apple/Shared/ChatStore.swift: ChatBlock.build (users.append for every userInput) / Turn.pickAnswerAcrossWakes (process = ordered.filter { !$0.isUserInput })",
+        "apple/Shared/ChatStore.swift: ChatBlock.build (users.append for every userInput; process holds no user input)",
         "apple/PersonaTests/SupervisionTests.swift: imageOnlyQueuedInputAfterSupervisionOpensANewTurn / sameEntryTextAndImagesStayInTheSupervisionRound",
         "apple/PersonaTests/ChatStoreTests.swift: picturesSentAfterAWakeStayWithTheirMessage"
       ],
       "turn_fields": {
-        "1#0": {
+        "3#0": {
           "process_ids": [
-            "2#0",
             "3#0",
             "4#0"
           ],
           "user_ids": [
-            "1#0",
             "message#0",
             "message#1"
           ]

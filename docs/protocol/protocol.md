@@ -1248,7 +1248,8 @@ not invented.
   handback, has no `text` or `task.detail`; its status still participates in the call's lifecycle.
 - `wake` marks a task notification or associated peer report delivered as a user line while the parent was idle,
   including hidden `isMeta` peer lines. Queued-command attachments absorbed mid-turn do not carry it. It starts a
-  new parent turn without becoming a user-authored message. Cold windows reconstruct earlier launch associations
+  new parent turn without becoming a user-authored message: clients begin a new exchange at it, so the last words
+  of the turn before it stay that turn's answer and are never folded into the woken turn's work (#9140). Cold windows reconstruct earlier launch associations
   and delivery status before parsing their tail; incremental reads append results, never rewrite the old receipt.
 
 Apple integration (#3377): decode `task` on `tool_result` as well as on legacy notices, accept `running`, retain all

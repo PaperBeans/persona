@@ -84,7 +84,7 @@ unchanged fixtures through every pure C projection: sort's `empty_list`, `person
 `persona_core_display_answer` for all 15 question + 9 recommendation cases (complete conditional expected objects,
 invalid page/option and the U+200B boundaries), `persona_core_project_stream_chunks` for all 21 complete
 `{done, tail}` objects, `persona_core_project_turns` for all 57 static cases with the checked-in current-iOS overlay
-applied by the client (62 complete turn objects across the 54 non-empty cases), and
+applied by the client (73 complete turn objects across the 54 non-empty cases), and
 `persona_core_project_task_index` for all five complete expected objects plus the background receipt, and
 `persona_core_project_viewed_images` (#9017) for the complete post-overlay ordinary viewed line and a source-derived
 folded line, plus `persona_core_transport_frame` for the shared-scalar Envelope gate and Other routing (20 named
@@ -295,7 +295,7 @@ The `ohos`-feature NAPI projection exports are `coreProjectSort`, `coreProjectAn
 `coreProjectStreamChunks`, `coreProjectTaskIndex` and `coreProjectTurns`; their generated declarations are checked
 for drift. `coreDisplayAnswer` takes a bare option label, while the other five take JSON documents.
 `harmony/tests/core-host/turns.test.mjs` (#9235) adds `coreProjectTurns` and its host JSON projection. It compares
-all 57 unchanged static cases after applying the checked-in current-iOS overlay: 54 nonempty cases hold 62 complete
+all 57 unchanged static cases after applying the checked-in current-iOS overlay: 54 nonempty cases hold 73 complete
 turn objects, and three explicitly named cases compare empty arrays rather than establishing layout coverage. The
 same generated ArkTS codec and existing registry dispatch/flush/drain commands replay four operation cases at all 10
 checkpoints, with exact item IDs and 13 complete turn objects; an existing burst is also replayed through the

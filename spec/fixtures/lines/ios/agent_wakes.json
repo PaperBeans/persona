@@ -4,10 +4,10 @@
   "description": "Current iOS (apple/) only: a subagent's tool result that wakes the agent (task.kind agent, wake true). Not part of the shared corpus that Android's LinesFixtureTest replays; the iOS replay in ../README.md checks these cases exactly.",
   "cases": [
     {
-      "name": "agent_result_wake_stays_in_its_exchange",
-      "description": "A subagent's tool result that wakes the agent (task.kind agent, wake) stays in the same exchange: the call gets it as its result, it is neither a notice line nor a work step, and the words after it are the answer.",
+      "name": "agent_result_wake_opens_its_own_exchange",
+      "description": "A subagent's tool result that wakes the agent (task.kind agent, wake) opens an exchange of its own (#9140): the words before it stay their exchange's answer, the call gets the result, it is neither a notice line nor a work step, and the words after it are the woken exchange's answer.",
       "source": [
-        "apple/Shared/ChatStore.swift: buildRows (an agent tool_result with wake is a notice row) / ChatBlock.build / Turn.pickAnswerAcrossWakes / SubagentDelivery.isWake / TaskIndex.build",
+        "apple/Shared/ChatStore.swift: buildRows (an agent tool_result with wake is a notice row) / ChatBlock.build / SubagentDelivery.isWake / TaskIndex.build",
         "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / segments / photos / workItems / unfold",
         "apple/PersonaTests/SubagentDeliveryTests.swift: wakesRemainTurnEvidenceWithoutCreatingAParentMessageCard"
       ],
@@ -118,17 +118,10 @@
                 "result_text": "审查完成：没有发现问题。",
                 "running": false,
                 "type": "tool"
-              },
-              {
-                "id": "t-4#0",
-                "item_id": "4#0",
-                "text": "审查已在后台开始。",
-                "type": "narration"
               }
             ],
             "summary_full": [
-              "工具 1",
-              "回复 1"
+              "工具 1"
             ],
             "summary_short": [
               "工具 1"
@@ -162,26 +155,18 @@
             "type": "work_step"
           },
           {
-            "first": false,
-            "group_id": "w-1#0",
-            "id": "w-1#0/t-4#0",
-            "is_input": false,
-            "separator_before": true,
-            "step": {
-              "id": "t-4#0",
-              "item_id": "4#0",
-              "text": "审查已在后台开始。",
-              "type": "narration"
-            },
-            "type": "work_step"
-          },
-          {
-            "count": 2,
+            "count": 1,
             "group_id": "w-1#0",
             "id": "w-1#0-end",
             "is_input": false,
             "separator_before": true,
             "type": "work_end"
+          },
+          {
+            "id": "4#0",
+            "is_input": false,
+            "text": "审查已在后台开始。",
+            "type": "reply"
           },
           {
             "id": "6#0",
@@ -211,22 +196,18 @@
         },
         "turns": [
           {
-            "answer_id": "6#0",
+            "answer_id": "4#0",
             "end": null,
             "has_pending_wake": false,
             "id": "1#0",
-            "interim_count": 1,
+            "interim_count": 0,
             "ordered_ids": [
               "1#0",
               "tools-2#0",
-              "4#0",
-              "5#0",
-              "6#0"
+              "4#0"
             ],
             "process_ids": [
-              "tools-2#0",
-              "4#0",
-              "5#0"
+              "tools-2#0"
             ],
             "start": null,
             "tail_ids": [],
@@ -236,6 +217,27 @@
             "user_ids": [
               "1#0"
             ],
+            "wake_ids": []
+          },
+          {
+            "answer_id": "6#0",
+            "end": null,
+            "has_pending_wake": false,
+            "id": "5#0",
+            "interim_count": 0,
+            "ordered_ids": [
+              "5#0",
+              "6#0"
+            ],
+            "process_ids": [
+              "5#0"
+            ],
+            "start": null,
+            "tail_ids": [],
+            "thought_count": 0,
+            "tool_count": 0,
+            "trailing_ids": [],
+            "user_ids": [],
             "wake_ids": [
               "5#0"
             ]
@@ -246,12 +248,12 @@
     },
     {
       "name": "agent_result_wake_pending_keeps_previous_answer",
-      "description": "After a subagent's result wakes the agent and before new words arrive, the turn has a pending wake: the wake and the tools after it stay in the live work line, and the words before them are still the answer.",
+      "description": "After a subagent's result wakes the agent and before new words arrive: the tools after the wake are the woken exchange's live work line, and the words before the wake are still their exchange's answer.",
       "source": [
-        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build / Turn.pickAnswerAcrossWakes / Turn.hasPendingWake",
+        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build",
         "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / segments / photos / workItems / unfold",
-        "apple/PersonaTests/ChatLinesTests.swift: aWakeJoinsItsExchangesSummaryBeforeNewWordsArrive",
-        "apple/PersonaTests/WakeReplyOrderTests.swift: wakeReplacesThePreviousAnswerOnlyWhenItsOwnContinuationStreams"
+        "apple/PersonaTests/ChatLinesTests.swift: aWakeOpensItsOwnWorkLineAndLeavesTheAnswerBeforeIt",
+        "apple/PersonaTests/WakeReplyOrderTests.swift: theAnswerBeforeAWakeStaysWhileTheWokenWorkRunsStreamsAndEnds"
       ],
       "input": {
         "items": [
@@ -322,7 +324,7 @@
             "tool_name": "Read"
           }
         ],
-        "live_turn_id": "1#0",
+        "live_turn_id": "5#0",
         "check_prefixes": true
       },
       "expected": {
@@ -341,7 +343,7 @@
             "id": "w-1#0",
             "is_input": false,
             "known_failed_tools": 0,
-            "live": true,
+            "live": false,
             "open": false,
             "start": null,
             "steps": [
@@ -359,7 +361,37 @@
                 "result_text": "审查完成：没有发现问题。",
                 "running": false,
                 "type": "tool"
-              },
+              }
+            ],
+            "summary_full": [
+              "工具 1"
+            ],
+            "summary_short": [
+              "工具 1"
+            ],
+            "thoughts": 0,
+            "tools": 1,
+            "type": "work",
+            "unresolved_tools": 0
+          },
+          {
+            "id": "4#0",
+            "is_input": false,
+            "text": "审查已在后台开始。",
+            "type": "reply"
+          },
+          {
+            "contains_fold": false,
+            "duration_text": "",
+            "elapsed_seconds": null,
+            "end": null,
+            "id": "w-5#0",
+            "is_input": false,
+            "known_failed_tools": 0,
+            "live": true,
+            "open": false,
+            "start": null,
+            "steps": [
               {
                 "call_id": "call_b",
                 "failed": false,
@@ -373,21 +405,15 @@
               }
             ],
             "summary_full": [
-              "工具 2"
+              "工具 1"
             ],
             "summary_short": [
-              "工具 2"
+              "工具 1"
             ],
             "thoughts": 0,
-            "tools": 2,
+            "tools": 1,
             "type": "work",
             "unresolved_tools": 1
-          },
-          {
-            "id": "4#0",
-            "is_input": false,
-            "text": "审查已在后台开始。",
-            "type": "reply"
           }
         ],
         "task_index": {
@@ -413,29 +439,47 @@
           {
             "answer_id": "4#0",
             "end": null,
-            "has_pending_wake": true,
+            "has_pending_wake": false,
             "id": "1#0",
             "interim_count": 0,
             "ordered_ids": [
               "1#0",
               "tools-2#0",
-              "4#0",
+              "4#0"
+            ],
+            "process_ids": [
+              "tools-2#0"
+            ],
+            "start": null,
+            "tail_ids": [],
+            "thought_count": 0,
+            "tool_count": 1,
+            "trailing_ids": [],
+            "user_ids": [
+              "1#0"
+            ],
+            "wake_ids": []
+          },
+          {
+            "answer_id": null,
+            "end": null,
+            "has_pending_wake": false,
+            "id": "5#0",
+            "interim_count": 0,
+            "ordered_ids": [
               "5#0",
               "tools-6#0"
             ],
             "process_ids": [
-              "tools-2#0",
               "5#0",
               "tools-6#0"
             ],
             "start": null,
             "tail_ids": [],
             "thought_count": 0,
-            "tool_count": 2,
+            "tool_count": 1,
             "trailing_ids": [],
-            "user_ids": [
-              "1#0"
-            ],
+            "user_ids": [],
             "wake_ids": [
               "5#0"
             ]
@@ -445,12 +489,12 @@
       "derived": true
     },
     {
-      "name": "agent_result_wake_after_recap_reopens_turn",
-      "description": "A subagent's waking result that arrives after a recap reopens the exchange the recap closed: the words after it are that exchange's answer, and the recap stays after it.",
+      "name": "agent_result_wake_after_recap_follows_the_recap",
+      "description": "A subagent's waking result that arrives after a recap does not reach back over it: the exchange the recap closed keeps its answer, the recap stays where it was, and the woken exchange with the words after the result follows the recap.",
       "source": [
-        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build (a wake after a recap reopens the exchange the recap closed) / Turn.pickAnswerAcrossWakes",
+        "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build (a wake closes the exchange before it and opens its own)",
         "apple/Persona/Views/Chat/ChatLines.swift: build / flatLines / segments / photos / workItems / unfold",
-        "apple/PersonaTests/ChatStoreTests.swift: wakeAfterARecapStaysInItsExchange",
+        "apple/PersonaTests/ChatStoreTests.swift: aWakeAfterARecapOpensItsExchangeAfterTheRecap",
         "apple/PersonaTests/SubagentDeliveryTests.swift: wakesRemainTurnEvidenceWithoutCreatingAParentMessageCard"
       ],
       "input": {
@@ -564,17 +608,10 @@
                 "result_text": "审查完成：没有发现问题。",
                 "running": false,
                 "type": "tool"
-              },
-              {
-                "id": "t-4#0",
-                "item_id": "4#0",
-                "text": "审查已在后台开始。",
-                "type": "narration"
               }
             ],
             "summary_full": [
-              "工具 1",
-              "回复 1"
+              "工具 1"
             ],
             "summary_short": [
               "工具 1"
@@ -585,9 +622,9 @@
             "unresolved_tools": 0
           },
           {
-            "id": "7#0",
+            "id": "4#0",
             "is_input": false,
-            "text": "审查通过，可以合并。",
+            "text": "审查已在后台开始。",
             "type": "reply"
           },
           {
@@ -595,6 +632,12 @@
             "is_input": false,
             "text": "回顾：示例审查在后台进行",
             "type": "recap"
+          },
+          {
+            "id": "7#0",
+            "is_input": false,
+            "text": "审查通过，可以合并。",
+            "type": "reply"
           }
         ],
         "task_index": {
@@ -618,22 +661,18 @@
         },
         "turns": [
           {
-            "answer_id": "7#0",
+            "answer_id": "4#0",
             "end": null,
             "has_pending_wake": false,
             "id": "1#0",
-            "interim_count": 1,
+            "interim_count": 0,
             "ordered_ids": [
               "1#0",
               "tools-2#0",
-              "4#0",
-              "6#0",
-              "7#0"
+              "4#0"
             ],
             "process_ids": [
-              "tools-2#0",
-              "4#0",
-              "6#0"
+              "tools-2#0"
             ],
             "start": null,
             "tail_ids": [],
@@ -643,6 +682,27 @@
             "user_ids": [
               "1#0"
             ],
+            "wake_ids": []
+          },
+          {
+            "answer_id": "7#0",
+            "end": null,
+            "has_pending_wake": false,
+            "id": "6#0",
+            "interim_count": 0,
+            "ordered_ids": [
+              "6#0",
+              "7#0"
+            ],
+            "process_ids": [
+              "6#0"
+            ],
+            "start": null,
+            "tail_ids": [],
+            "thought_count": 0,
+            "tool_count": 0,
+            "trailing_ids": [],
+            "user_ids": [],
             "wake_ids": [
               "6#0"
             ]
@@ -653,7 +713,7 @@
     },
     {
       "name": "orphan_agent_result_wake_draws_no_notice",
-      "description": "A window that opens with a subagent's waking result (its call is on an older page): it opens a turn without a message, but unlike a wake notice it is not drawn as a line, nor as a work step.",
+      "description": "A window that opens with a subagent's waking result (its call is on an older page): it opens a turn without a message, but unlike a wake notice it is not drawn as a line, nor as a work step; the work it woke is known by the wake's id.",
       "source": [
         "apple/Shared/ChatStore.swift: buildRows / ChatBlock.build / SubagentDelivery.isWake",
         "apple/Persona/Views/Chat/ChatLines.swift: flatLines (a turn opening with a wake draws that notice unless SubagentDelivery.isWake) / workItems",
@@ -711,7 +771,7 @@
             "duration_text": "",
             "elapsed_seconds": null,
             "end": null,
-            "id": "w-tools-11#0",
+            "id": "w-10#0",
             "is_input": false,
             "known_failed_tools": 0,
             "live": false,
@@ -783,7 +843,9 @@
             "tool_count": 1,
             "trailing_ids": [],
             "user_ids": [],
-            "wake_ids": []
+            "wake_ids": [
+              "10#0"
+            ]
           }
         ]
       },

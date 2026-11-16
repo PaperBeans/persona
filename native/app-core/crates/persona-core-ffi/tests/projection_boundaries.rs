@@ -180,7 +180,7 @@ fn c_abi_turns_replays_the_static_corpus_with_the_overlay() {
         }
     }
     assert_eq!(replayed.len(), 57, "the exact static turn manifest");
-    assert_eq!(turn_objects, 62, "the 54 non-empty cases hold 62 complete turn objects");
+    assert_eq!(turn_objects, 73, "the 54 non-empty cases hold 73 complete turn objects");
     assert!(call(persona_core_project_turns, b"{\"invalid\":true}").is_none());
     assert!(call(persona_core_project_turns, b"not JSON").is_none());
     eprintln!(

@@ -337,13 +337,15 @@ Chat page:
     Mac `NSClipView` clamps beyond-latest offsets on layout, so glide manually sets each frame and restores any displacement in the same layout (`ChatPin+Mac.swift`).
     Tapping thinking/tools/BeautifulUI tool-pill groups within open work keeps both title and tapped row still (no borrowing remaining title rise or replacing persistent hold with normal 1.5 s).
     Reduce Motion disables rise/glide and content fades (`Theme.Motion.reduced`, #1123).
-  - Background tasks wake idle Claude (`wake` notice): still the same turn, not split. The latest Agent text after a
-    wake is the answer, so the chat always ends on the newest words (`Turn.pickAnswerAcrossWakes`, #3783). Before new
-    words arrive, the previous answer stays in place while the new work joins its execution summary instead of opening
-    a second segment (#2796). Everything before the answer, including wake notices and intermediate narration, stays
-    inspectable by opening that ordinary work row. Tasks completing during work (not waking) remain a work step.
-    Pitfall: Claude Code's idle-session away recap closes the turn; a later wake must reopen and merge into it,
-    keeping recap in place, or post-wake replies show directly (`ChatBlock.build` `lastRaw` / `reopenedAt`).
+  - Background tasks wake idle Claude (`wake`: a background command's notice, or a subagent's report as its call's
+    result): the wake opens a turn of its own (`ChatBlock.build`, `Turn.wakes`, #9140). The turn before it had ended,
+    so its last words stay its answer; the woken turn draws the notice where a message would be (a subagent's report
+    is drawn under its call instead), then its own work row and its own last words, so the chat still ends on the
+    newest words (#3783). Its work row is known by the wake (`w-<wake id>`) from before its first step, and is the
+    live one while the woken agent works. Tasks completing during work (not waking) remain a work step, and a wake
+    after an away recap follows the recap. Until #9140 the woken work stayed in the turn before it and its newest
+    words took the answer's place, which folded a complete answer to a newer question into the work row once an older
+    background command reported back. The per-reply token count follows the same exchanges (`chatUsage`).
   - Away recaps resemble background tasks: small "↺ Away recap · 21 min ago ›" strip opens `RecapCard` / `RecapDrawer` with full text. Consecutive recaps with nothing between merge into "↺ Away recap · 3 times · 3 min ago ›", newest first in drawer (`ChatLines.foldRecaps`, requested 2026-10-31); mock `MOCK_RECAPS=1`.
     On returning, if latest recap is the chat's last item and never closed, it expands at the end as a full card (`RecapStrip`, `ChatLines.openRecap`):
     same plane as Agent replies, newest inverted-list row, scrolling away with content and fully visible when following bottom, not above input

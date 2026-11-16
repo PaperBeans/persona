@@ -47,8 +47,8 @@ extension ProjectionBindingReplay {
                 turnObjects += values.count
             }
         }
-        guard turnObjects == 62 else {
-            throw ProjectionFixtureError.invalidFixture("expected 62 complete turn objects, got \(turnObjects)")
+        guard turnObjects == 73 else {
+            throw ProjectionFixtureError.invalidFixture("expected 73 complete turn objects, got \(turnObjects)")
         }
         try ProjectionFixture.rejectMalformed(PersonaCoreProjections.turns, label: "turns")
         let plain = try ProjectionFixture.require(staticCases.first { $0.name == "plain_exchange" }, "plain_exchange")

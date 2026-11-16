@@ -25,7 +25,7 @@ final class PersonaCoreProjectionTests: XCTestCase {
     func testEveryStaticTurnFixtureThroughTheRealCBindingAndIOSOverlay() throws {
         let result = try ProjectionBindingReplay.turns()
         XCTAssertEqual(result.cases, 57)
-        XCTAssertEqual(result.turnObjects, 62)
+        XCTAssertEqual(result.turnObjects, 73)
         print("PersonaCore Swift/C turns: \(result.cases) static cases, \(result.turnObjects) complete turn objects")
     }
 
