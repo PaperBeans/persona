@@ -1620,13 +1620,14 @@ above), so without this each profile would keep its own.
   until it restarts. A note only a copy has is copied in with its modification time and its `MEMORY.md` line. The
   same file name with the same bytes is left. The same file name with different content keeps the one modified
   later. Notes with different names about the same matter are both kept: reconciling them is not this merge's job.
-- **Nothing is deleted.** The other copies are never written. Each run first saves the memory as it was (`before/`),
-  the notes it read (`copies/<n>/`) and a manifest of what it did, in `<data dir>/memory-merge/<encoded directory>/<UTC time>/`.
+- **Nothing is deleted.** The other copies are never written. Each run first saves the memory as it was (`before/`)
+  and the notes it read (`copies/<n>/`), then every version a copy's note took the place of (`replaced/<n>/`) and a
+  manifest of what it did, in `<data dir>/memory-merge/<encoded directory>/<UTC time>/`.
   A note whose bytes a run has already read is skipped, so a note deleted on the Memory page does not come back and a
   second run does nothing. To undo a merge by hand, copy `before/` back over the memory directory.
 - **Concurrent writers**: the model writes memory with its own file tools, outside the node's lock. The merge creates a
   new note only if the name is still free, replaces a note only if it has not changed since it was compared, and
-  re-reads `MEMORY.md` just before replacing it.
+  (time, size and bytes, read again just before the rename), and re-reads `MEMORY.md` just before replacing it.
 - **Telling the user** (`assistant/memory_merge.go`): every ten minutes the manager asks the node for its runs
   (`assistant.memory`, op `merges`). For a run it has not told about (`persona_settings` key `assistant.memory_merge`) it
   writes `memory-merge.md` into the memory directory in the user's language and sends one P1 push. The report lists

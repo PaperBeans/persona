@@ -26,8 +26,9 @@ import (
 //
 // Rules: a note only another copy has is copied in with its index line; the same name with the same bytes is left;
 // the same name with different content keeps the one modified later. Nothing is deleted: the other copies are never
-// written, and each run that changes the memory first saves it, and the notes it read, below
-// <data dir>/memory-merge/<project>/<run>/ with a manifest of what it did. A note whose bytes a run has already
+// written, and each run first saves the memory as it was (before/) and the notes it read (copies/<n>/) below
+// <data dir>/memory-merge/<project>/<run>/, then each version a copy's note replaced (replaced/<n>/) and a manifest
+// of what it did. A note whose bytes a run has already
 // seen is skipped, so a note the user deleted after the merge does not come back.
 //
 // A run interrupted before its manifest is written is done again by the next check, with a new backup; that run
@@ -293,6 +294,7 @@ func (n *Node) mergeMemoryCopies(cwd, dir string) (_ *memoryMergeRun, err error)
 	type pending struct {
 		dir   string
 		notes []memoryNote
+		index string // the copy's own MEMORY.md
 	}
 	var todo []pending
 	for _, c := range copies {
@@ -302,9 +304,14 @@ func (n *Node) mergeMemoryCopies(cwd, dir string) (_ *memoryMergeRun, err error)
 				fresh = append(fresh, f)
 			}
 		}
-		if len(fresh) > 0 {
-			todo = append(todo, pending{c, fresh})
+		if len(fresh) == 0 {
+			continue
 		}
+		index, err := os.ReadFile(filepath.Join(c, memoryIndexName))
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		todo = append(todo, pending{c, fresh, string(index)})
 	}
 	if len(todo) == 0 {
 		return nil, nil
@@ -337,9 +344,8 @@ func (n *Node) mergeMemoryCopies(cwd, dir string) (_ *memoryMergeRun, err error)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	var lines []string
-	for _, p := range todo {
-		index, _ := os.ReadFile(filepath.Join(p.dir, memoryIndexName))
+	var lines []memoryIndexEntry
+	for i, p := range todo {
 		out := memoryMergeCopy{Dir: p.dir}
 		for _, f := range p.notes {
 			rec := memoryMergeFile{Name: f.name, SHA256: f.sum, Modified: f.mod.UTC()}
@@ -349,13 +355,22 @@ func (n *Node) mergeMemoryCopies(cwd, dir string) (_ *memoryMergeRun, err error)
 				return nil, err
 			}
 			applied = applied || rec.Action == memoryMergeAdded || rec.Kept == memoryKeptCopy
-			if replaced != nil { // the version the copy's replaced, as it was at that moment
-				if err := writeMemoryFile(filepath.Join(runDir, "before", f.name), replaced, *rec.MemoryModified); err != nil {
+			if replaced != nil {
+				// The version this copy's note took the place of, as it was at that moment. Kept apart from before/,
+				// which stays the memory as the run found it: a later copy may replace the same name again.
+				if err := writeMemoryFile(filepath.Join(runDir, "replaced", strconv.Itoa(i), f.name), replaced, *rec.MemoryModified); err != nil {
 					return nil, err
 				}
 			}
-			if rec.Action == memoryMergeAdded || rec.Kept == memoryKeptCopy {
-				lines = append(lines, memoryIndexLine(string(index), f))
+			switch {
+			case rec.Action == memoryMergeAdded || rec.Kept == memoryKeptCopy:
+				lines = append(lines, memoryIndexEntry{f.name, memoryIndexLine(p.index, f)})
+			case rec.Action == memoryMergeSame:
+				// Both hold the note: the copy's index line comes along if the memory's index has none (also what
+				// finishes a run that was interrupted after it copied the note in).
+				if line, ok := memoryIndexLineOf(p.index, f.name); ok {
+					lines = append(lines, memoryIndexEntry{f.name, line})
+				}
 			}
 			out.Files = append(out.Files, rec)
 		}
@@ -436,7 +451,7 @@ func mergeMemoryNote(dir string, f memoryNote) (action, kept string, memoryMod *
 		if !f.mod.After(info.ModTime()) {
 			return memoryMergeConflict, memoryKeptMemory, &mod, nil, nil
 		}
-		swapped, err := replaceMemoryNote(dst, f, info)
+		swapped, err := replaceMemoryNote(dst, f, info, cur)
 		if err != nil {
 			return "", "", nil, nil, err
 		}
@@ -504,14 +519,19 @@ func createMemoryNote(dst string, f memoryNote) (bool, error) {
 	return true, os.Chtimes(dst, f.mod, f.mod)
 }
 
-// replaceMemoryNote puts f in the place of dst if dst is still the file was describes.
-func replaceMemoryNote(dst string, f memoryNote, was fs.FileInfo) (bool, error) {
+// replaceMemoryNote puts f in the place of dst if dst is still the file that was compared: the same time and size as
+// was, and the same bytes as cur, read again as the last thing before the rename.
+func replaceMemoryNote(dst string, f memoryNote, was fs.FileInfo, cur []byte) (bool, error) {
 	tmp, err := memoryTemp(filepath.Dir(dst), f.data, f.mod)
 	if err != nil {
 		return false, err
 	}
 	now, err := os.Lstat(dst)
-	if err != nil || !now.ModTime().Equal(was.ModTime()) || now.Size() != was.Size() {
+	if err != nil || !now.Mode().IsRegular() || !now.ModTime().Equal(was.ModTime()) || now.Size() != was.Size() {
+		os.Remove(tmp)
+		return false, nil
+	}
+	if again, err := os.ReadFile(dst); err != nil || !bytes.Equal(again, cur) {
 		os.Remove(tmp)
 		return false, nil
 	}
@@ -570,13 +590,24 @@ func copyMemoryTree(src, dst string) error {
 	return err
 }
 
+// memoryIndexEntry is a MEMORY.md line and the note it points to.
+type memoryIndexEntry struct{ name, line string }
+
+// memoryIndexLineOf is index's line for the note name.
+func memoryIndexLineOf(index, name string) (string, bool) {
+	for _, l := range strings.Split(index, "\n") {
+		if strings.Contains(l, "("+name+")") {
+			return strings.TrimRight(l, "\r"), true
+		}
+	}
+	return "", false
+}
+
 // memoryIndexLine is the MEMORY.md line for note f: the one its own copy's index has, else one made from the note's
 // frontmatter (its name and description).
 func memoryIndexLine(index string, f memoryNote) string {
-	for _, l := range strings.Split(index, "\n") {
-		if strings.Contains(l, "("+f.name+")") {
-			return strings.TrimRight(l, "\r")
-		}
+	if line, ok := memoryIndexLineOf(index, f.name); ok {
+		return line
 	}
 	title, hook := memoryFrontmatter(string(f.data))
 	if title == "" {
@@ -612,7 +643,7 @@ func memoryFrontmatter(text string) (name, description string) {
 
 // addMemoryIndexLines appends to dir's MEMORY.md the lines whose note it does not point to yet. The model edits the
 // index too: it is read again just before it is replaced, and the append is redone on what is there then.
-func addMemoryIndexLines(dir string, lines []string) error {
+func addMemoryIndexLines(dir string, lines []memoryIndexEntry) error {
 	if len(lines) == 0 {
 		return nil
 	}
@@ -626,14 +657,13 @@ func addMemoryIndexLines(dir string, lines []string) error {
 		next := string(cur)
 		added := false
 		for _, l := range lines {
-			open, end := strings.LastIndex(l, "("), strings.LastIndex(l, ")")
-			if open >= 0 && end > open && strings.Contains(next, l[open:end+1]) {
+			if strings.Contains(next, "("+l.name+")") {
 				continue
 			}
 			if next != "" && !strings.HasSuffix(next, "\n") {
 				next += "\n"
 			}
-			next += l + "\n"
+			next += l.line + "\n"
 			added = true
 		}
 		if !added {
@@ -679,7 +709,7 @@ func (n *Node) memoryMerges(cwd, after string) []memoryMergeRunOut {
 					}
 					other := filepath.Join(root, run.ID, "copies", strconv.Itoa(i), f.Name)
 					if f.Kept == memoryKeptCopy {
-						other = filepath.Join(root, run.ID, "before", f.Name)
+						other = filepath.Join(root, run.ID, "replaced", strconv.Itoa(i), f.Name)
 					}
 					if b, err := os.ReadFile(other); err == nil {
 						if len(b) > memoryMergeTextLimit {

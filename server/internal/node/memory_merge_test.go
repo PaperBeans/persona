@@ -268,7 +268,7 @@ func TestMemoryCopiesAreMergedOnce(t *testing.T) {
 	writeNote(t, n.private, "indexed.md", "indexed in the copy\n", mid)
 	writeNote(t, n.private, "unindexed.md", "---\nname: tunnel\ndescription: where the tunnel ends\n---\nbody\n", mid)
 	writeNote(t, n.private, "notes.txt", "not a note\n", mid)
-	writeNote(t, n.private, memoryIndexName, "- [Indexed](indexed.md) — from the copy\n- [Copy newer](copy-newer.md) — copy's line\n", mid)
+	writeNote(t, n.private, memoryIndexName, "- [Indexed](indexed.md) — from the copy (with a note in brackets)\n- [Copy newer](copy-newer.md) — copy's line\n- [Same](same.md) — in both, indexed only in the copy\n", mid)
 	copyBefore := dirState(t, n.private)
 	mainBefore := dirState(t, n.shared)
 
@@ -290,7 +290,7 @@ func TestMemoryCopiesAreMergedOnce(t *testing.T) {
 		t.Errorf("the note's modification time was not kept: %v %v", info, err)
 	}
 	wantIndex := "- [Main only](main-only.md) — a\n- [Copy newer](copy-newer.md) — b\n- [Main newer](main-newer.md) — c\n" +
-		"- [Indexed](indexed.md) — from the copy\n- [tunnel](unindexed.md) — where the tunnel ends\n"
+		"- [Indexed](indexed.md) — from the copy (with a note in brackets)\n- [Same](same.md) — in both, indexed only in the copy\n- [tunnel](unindexed.md) — where the tunnel ends\n"
 	if got := readNote(t, n.shared, memoryIndexName); got != wantIndex {
 		t.Errorf("index:\n%s\nwant:\n%s", got, wantIndex)
 	}
@@ -315,6 +315,9 @@ func TestMemoryCopiesAreMergedOnce(t *testing.T) {
 	}
 	if got := readNote(t, filepath.Join(runs[0], "copies", "0"), "main-newer.md"); got != "copy says no\n" {
 		t.Errorf("the version that lost is not in the backup: %q", got)
+	}
+	if got := readNote(t, filepath.Join(runs[0], "replaced", "0"), "copy-newer.md"); got != "main says no\n" {
+		t.Errorf("the version that was replaced is not in the backup: %q", got)
 	}
 	var manifest memoryMergeRun
 	if err := json.Unmarshal([]byte(readNote(t, runs[0], "manifest.json")), &manifest); err != nil {
@@ -398,6 +401,35 @@ func TestMemoryCopiesAreMergedOnce(t *testing.T) {
 	}
 }
 
+// Two copies with a newer version of the same note: the newest stays, and the backup keeps the memory's original and
+// every version that was replaced, each shown with the conflict it lost.
+func TestMemoryMergeKeepsEveryReplacedVersion(t *testing.T) {
+	n := newOneMemoryNode(t)
+	old := time.Now().Add(-72 * time.Hour).Truncate(time.Second)
+	other := filepath.Join(n.dir, "profiles", "other", "projects", memoryKey(n.cwd), "memory")
+	writeNote(t, n.shared, "x.md", "the memory's original\n", old)
+	writeNote(t, n.private, "x.md", "the first copy's\n", old.Add(24*time.Hour))
+	writeNote(t, other, "x.md", "the second copy's\n", old.Add(48*time.Hour))
+
+	n.memoryForUse(n.cwd)
+	runs := mergeRunDirs(t, n)
+	if got := readNote(t, n.shared, "x.md"); got != "the second copy's\n" || len(runs) != 1 {
+		t.Fatalf("x.md = %q, runs %v", got, runs)
+	}
+	if got := readNote(t, filepath.Join(runs[0], "before"), "x.md"); got != "the memory's original\n" {
+		t.Errorf("the backup of the memory as it was holds %q", got)
+	}
+	res, err := n.assistantMemory(memoryOp{Op: "merges", Cwd: n.cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := res.(map[string]any)["runs"].([]memoryMergeRunOut)
+	if len(out) != 1 || len(out[0].Conflicts) != 2 || out[0].Conflicts[0].Other != "the memory's original\n" || out[0].Conflicts[1].Other != "the first copy's\n" ||
+		out[0].Conflicts[0].Kept != memoryKeptCopy || out[0].Conflicts[1].Kept != memoryKeptCopy {
+		t.Fatalf("merges %+v", out)
+	}
+}
+
 // Profiles that share one projects directory through a link hold one memory, not a copy of it.
 func TestMemoryCopyThroughALinkIsNotMerged(t *testing.T) {
 	n := newOneMemoryNode(t)
@@ -468,8 +500,18 @@ func TestMemoryMergeYieldsToConcurrentWrites(t *testing.T) {
 	}
 	writeNote(t, dir, "b.md", "rewritten by the model since\n", time.Time{})
 	note.name = "b.md"
-	if swapped, err := replaceMemoryNote(filepath.Join(dir, "b.md"), note, was); err != nil || swapped {
+	if swapped, err := replaceMemoryNote(filepath.Join(dir, "b.md"), note, was, []byte("old\n")); err != nil || swapped {
 		t.Fatalf("replaced a note that had changed: %v %v", swapped, err)
+	}
+	// The same size and time as before, other bytes (a write within the file system's clock tick): still not replaced.
+	writeNote(t, dir, "s.md", "aaaa\n", mod.Add(-time.Hour))
+	was, err = os.Lstat(filepath.Join(dir, "s.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeNote(t, dir, "s.md", "bbbb\n", mod.Add(-time.Hour))
+	if swapped, err := replaceMemoryNote(filepath.Join(dir, "s.md"), memoryNote{name: "s.md", data: []byte("from the copy\n"), mod: mod}, was, []byte("aaaa\n")); err != nil || swapped {
+		t.Fatalf("replaced a note rewritten with the same size and time: %v %v", swapped, err)
 	}
 	if got := readNote(t, dir, "b.md"); got != "rewritten by the model since\n" {
 		t.Fatalf("b.md = %q", got)
@@ -480,13 +522,13 @@ func TestMemoryMergeYieldsToConcurrentWrites(t *testing.T) {
 	}
 
 	writeNote(t, dir, memoryIndexName, "- [A](a.md) — a", time.Time{})
-	if err := addMemoryIndexLines(dir, []string{"- [A again](a.md) — duplicate", "- [C](c.md) — c"}); err != nil {
+	if err := addMemoryIndexLines(dir, []memoryIndexEntry{{"a.md", "- [A again](a.md) — duplicate"}, {"c.md", "- [C](c.md) — c (see b)"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := addMemoryIndexLines(dir, []string{"- [C](c.md) — c"}); err != nil {
+	if err := addMemoryIndexLines(dir, []memoryIndexEntry{{"c.md", "- [C](c.md) — c (see b)"}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readNote(t, dir, memoryIndexName); got != "- [A](a.md) — a\n- [C](c.md) — c\n" {
+	if got := readNote(t, dir, memoryIndexName); got != "- [A](a.md) — a\n- [C](c.md) — c (see b)\n" {
 		t.Fatalf("index %q", got)
 	}
 	if left, _ := filepath.Glob(filepath.Join(dir, ".merge-*")); len(left) != 0 {
