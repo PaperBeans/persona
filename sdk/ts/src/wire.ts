@@ -4061,6 +4061,15 @@ export interface ConnectorArchiveChat {
   /** The owner marked it done. */
   done?: boolean;
   updated_at?: string;
+  /**
+   * Where the conversation stands at the source, as the source records it (a pull request or issue: open, merged or
+   * closed); omitted when the source has no such state. A fact, not the owner's done flag: the selection does not
+   * read it; the knowledge base keeps it on the chat, finishes projects whose chats have all ended and leaves ended
+   * chats out of the assistant's snapshot.
+   */
+  state?: string;
+  /** When the conversation got to state; omitted when unknown. */
+  state_at?: string;
 }
 
 /**

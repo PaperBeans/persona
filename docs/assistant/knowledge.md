@@ -213,6 +213,7 @@ assistant is not connected, the knowledge base closes once no lane runs; a lane 
    - **GitHub**: only PRs / issues involving me (`involves:@me`, last 30 days initially), not entire repositories.
    - One PR / issue per chat, `github-<owner>-<repo>-<number>` (`kind` is `pr` / `issue`), in this order: description (starts with `【标题】`, "[Title]"); comments; reviews (`（review）批准了`, "(review) approved"); inline comments ("(file:line)…").
    - Bots are marked `(bot)`. Each entry is at most 4000 characters. Skip the round when the request quota is low.
+   - Every chat carries the thread's state (`open`, `merged`, `closed`), and a merge, close or reopen adds one line (`（状态）已合并`, "(state) merged"), though no one commented ("Chat state and finished projects").
 2. **Compress**: once a chat has 50 new messages or has been quiet for 10 minutes, send the old `summary.md` + new messages (up to 24,000 bytes, keeping the latest and cut at a message or line start, or inside a long line at a whole character when the next start would drop more than half of them) to a small model,
    producing a new summary (fixed sections: what this is / progress / to-dos and unresolved issues / about me), one line, tags, mentioned projects and people; write `summary.md` and `meta.json`.
    At most 8 chats per round, most relevant first. Direct-chat / email tags propagate to the other person; a person's `summary.md` is assembled from metadata and direct-chat context without a model call.
@@ -712,6 +713,25 @@ The model may mistake product names in notification emails (each App Store app, 
 and prompts (`server/internal/prompts/kb/`, `docs/assistant/prompts.md`) explicitly exclude notifications, marketing and billing. At startup the manager marks projects sourced only from these chats and never manually tagged as `ignored`:
 no more updates, snapshots or prompts; the app groups them under **Not projects**. Changing their status in tags restores them.
 
+## Chat state and finished projects
+
+A pull request merged or closed adds no message, so the archive alone never learned it: chats and projects stayed at "waiting for review" long after the work was done, and the
+live snapshot kept repeating them (#9427). State is the source's fact, so it comes from the source, never from a model reading comments.
+
+- **The chat's state.** A connector may report a chat's `state` (`open`, `merged`, `closed`) and `state_at` with any batch (`kbwire.SourceChat`, the extension schema's
+  `ConnectorArchiveChat`). `Ingest` keeps them in the chat's `meta.json` (`state`, `state_at`), also from a batch without new lines, and only for a chat it already has.
+  A change marks the chat's projects dirty, so they are rewritten. It is not the owner's `done` flag, and the selection does not read it.
+- **GitHub** (`connector/github/archive_state.go`) sends every thread it reads with its state. A change since the state it last sent (the cursor keeps the ended ones per thread,
+  forgotten with the thread after 90 days) adds one system line, merged at the merge time, closed at the close time, reopened at the thread's update. The line's ID is the state and
+  its time (`state-merged-<unix>`), so a replay or a cursor that starts over adds it once. The line is what compression reads, so the chat's summary follows. A cursor from before
+  states were sent reads each thread it knows once (`recheck`, one request each, paused while the quota is low), so pull requests merged before then are recorded too.
+- **Project rewrites** list each linked chat's state as a fact next to its summary (`prompts/kb/project_input.md`). A rewrite no longer moves a `done` project back to active
+  or paused; news still revives it (`evolveProject`), as before.
+- **Finished projects.** After the rewrites, each knowledge-base round finishes, without a model (`kb.FinishProjects`), a project that is `active` or `paused`, not `long`,
+  whose `status` is not locked, that has no unfinished to-do filed under it, that links at least one chat with every linked chat `merged` or `closed`, and to which nothing happened for
+  3 days (a linked chat's last message or state change, a timeline entry). Its status becomes `done`, as if set by a rewrite; the user can set it back, which locks it.
+- **The snapshot** (`kb.Engine.Prompt`) leaves out ended chats, and projects whose linked chats have all ended, besides `done` and `ignored` projects.
+
 ## Deleting a project
 
 A project can be deleted from the knowledge list on the web (#4412) and on the iPhone and iPad (#7077: a project row's swipe or context menu); both ask first and then offer Undo. The delete is soft (`kb/project_trash.go`):
@@ -765,7 +785,7 @@ chat's progress, each Agent's last words, to-do conclusions) and chat summaries,
 
 - **Persona (main chat and other chats)**: CLAUDE.md describes the layout and requires "keep context flowing"; MCP tools `kb_search` (full text) / `kb_list` (sorted list) /
   `kb_get` (profile + last 7 days' messages) / `kb_update` (create projects, edit profiles, tag, link, add timeline entries; manual tags lock and are not overwritten by compression);
-  live snapshots include the 6 most important projects and 8 chats. These four tools belong to the assistant (parameter defaults, limits and model-facing copy in `assistant/tools_apps.go`),
+  live snapshots include the 6 most important projects and 8 chats that have not ended ("Chat state and finished projects"). These four tools belong to the assistant (parameter defaults, limits and model-facing copy in `assistant/tools_apps.go`),
   and since 2026-11-04 so does the knowledge base, so they call the engine directly (formerly bus calls to hub `kb.search` / `kb.list` / `kb.get` / `kb.update`).
 - **Main chat**: hub settings `assistant.main` stores its session id (set by `POST /api/v1/assistant/conversations` with `main: true`,
   cleared by `PUT /api/v1/assistant {"main":"-"}`). When requesting a snapshot per message, node passes the session id to `assistant.context`; main-chat snapshots start with "This is the main chat".

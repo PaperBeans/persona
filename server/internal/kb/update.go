@@ -45,6 +45,10 @@ func (e *Engine) Ingest(ctx context.Context, src Source, sc SourceChat, msgs []S
 	selecting := sel != nil && facts.Selected()
 	unchanged := func() (int, error) {
 		if exists {
+			// No new lines, but the source may report a new state (a pull request merged): record it all the same.
+			if err := e.recordChatState(c.ID, sc); err != nil {
+				return 0, err
+			}
 			e.index(KindChat, c.ID, c.Name, c.Tagging, c.OneLine, c.LastAt)
 		}
 		return 0, nil
@@ -174,6 +178,7 @@ func (e *Engine) Ingest(ctx context.Context, src Source, sc SourceChat, msgs []S
 	}
 	c.Messages += len(lines)
 	c.Pending += len(lines)
+	stateChanged := noteChatState(c, sc, time.Now())
 	usual := ""
 	if selecting {
 		usual = sel.UsualRule(ret, facts)
@@ -181,6 +186,9 @@ func (e *Engine) Ingest(ctx context.Context, src Source, sc SourceChat, msgs []S
 	}
 	if err := e.Store.commitIngest(c, lines, r, selecting, usual); err != nil {
 		return 0, err
+	}
+	if stateChanged {
+		e.chatStateChanged(c)
 	}
 	// After the commit: a window saved before it would say messages are stored that a failed commit never wrote.
 	if err := saveWindow(); err != nil {

@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/nwverse/persona/server/internal/kbwire"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
@@ -88,7 +89,15 @@ type Chat struct {
 	// Compressions that failed in a row, and when the next try is due (compress.go compressFailed).
 	CompressFailures int       `json:"compress_failures,omitempty"`
 	CompressRetryAt  time.Time `json:"compress_retry_at,omitzero"`
+
+	// State is where the conversation stands at its source (kbwire.ChatOpen, ChatMerged, ChatClosed; "" none
+	// reported) and StateAt since when, as Ingest last recorded them (#9427): the source's fact, never the model's.
+	State   string    `json:"state,omitempty"`
+	StateAt time.Time `json:"state_at,omitzero"`
 }
+
+// Ended reports whether the conversation has ended at its source (a pull request merged or closed, an issue closed).
+func (c *Chat) Ended() bool { return kbwire.ChatEnded(c.State) }
 
 // Person is someone the owner talks to: lark-<userId> or mail-<address>.
 type Person struct {

@@ -544,14 +544,30 @@ func recordingEntry(r *Recording) Entry {
 // Prompt is a short Markdown digest of the most important projects and chats, for the assistant's live snapshot.
 func (e *Engine) Prompt(projects, chats int) string {
 	var d prompts.KBDigest
+	// What has ended stays out (#9427): a done project, one whose chats have all ended at their source though it is not
+	// finished yet, and a chat that ended there (a pull request merged or closed).
 	for _, p := range e.List(KindProject, "") {
-		if len(d.Projects) >= projects || strings.HasSuffix(p.Extra, "done") || strings.HasSuffix(p.Extra, "ignored") {
+		if len(d.Projects) >= projects {
+			break
+		}
+		if strings.HasSuffix(p.Extra, "done") || strings.HasSuffix(p.Extra, "ignored") {
 			continue
+		}
+		if pr, ok := e.Store.Project(p.ID); ok {
+			if ended, _ := e.projectEnded(pr); ended {
+				continue
+			}
 		}
 		d.Projects = append(d.Projects, digestEntry(p))
 	}
 	for _, c := range e.List(KindChat, "") {
-		if len(d.Chats) >= chats || c.Importance == "P3" {
+		if len(d.Chats) >= chats {
+			break
+		}
+		if c.Importance == "P3" {
+			continue
+		}
+		if ch, ok := e.Store.Chat(c.ID); ok && ch.Ended() {
 			continue
 		}
 		d.Chats = append(d.Chats, digestEntry(c))
