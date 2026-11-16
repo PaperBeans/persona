@@ -1666,7 +1666,85 @@ struct ChatView: View {
 
     /// A landing is over: near the newest end it follows (a line in the last screenful lands there: what arrived after
     /// it was held back with no ↓, TestFlight 50/51), further up it reads (#597), by the geometry.
-    private func landed() { setFollow { $0.landed() } }
+    private func landed() {
+        setFollow { $0.landed() }
+        mendMisplacedStartSoon()
+    }
+
+    /// The end sentinel (`bottomID`), the lazy stack's first row, was laid out `y` from the stack's top: 0 when the stack
+    /// placed its rows from its start.
+    private func startPlaced(at y: CGFloat) {
+        guard abs(scratch.startY - y) > 0.5 else { return }
+        scratch.startY = y
+        mendMisplacedStartSoon()
+    }
+
+    /// The newest line was laid out `y` from the stack's top: past the sentinel by the rows' spacing at least.
+    private func newestPlaced(_ id: String, at y: CGFloat) {
+        if let last = scratch.newestLineY, last.id == id, abs(last.y - y) <= 0.5 { return }
+        scratch.newestLineY = (id, y)
+        mendMisplacedStartSoon()
+    }
+
+    /// The stack placed its newest end by estimate (#7382): the sentinel off the stack's top, the newest line over it, or,
+    /// with nothing drawn between them, the newest line further than the rows' spacing past it.
+    private var startMisplaced: Bool {
+        if abs(scratch.startY) > Self.startSlack { return true }
+        guard let newest = scratch.newestLineY, newest.id == scratch.lines.last?.id else { return false } // the lines last built
+        let after = newest.y - scratch.startY - Theme.Space.l
+        return after < -Self.startSlack || (after > Self.startSlack && newestAlone)
+    }
+
+    /// Nothing is drawn between the end sentinel and the newest line (`chatRows`): no streamed words, typing line,
+    /// unsent message, error or call captions. Read loosely: anything that might be there counts.
+    private var newestAlone: Bool {
+        shownPending.isEmpty && sendPhase == nil && store.error == nil && (frozen?.text ?? store.liveText).isEmpty
+            && !(viewing == nil && VoiceCalls.shared.isBound(to: key))
+    }
+
+    /// How far off the newest end may be placed before the list is built again (rounding, a pixel).
+    static let startSlack: CGFloat = 1
+
+    /// `mendMisplacedStart` a moment later, if the stack still has it so then: rows coming in or going out at the newest
+    /// end are placed over a few frames.
+    private func mendMisplacedStartSoon() {
+        guard startMisplaced else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            mendMisplacedStart()
+        }
+    }
+
+    /// The lazy stack placed its newest rows away from where its content starts (#7382, #1942). After a landing far from
+    /// the newest end (a saved place, a search hit, a quote), SwiftUI places what is between there and the newest end by
+    /// estimated heights, and a finger that then scrolls back to the newest end gets those rows where the estimates put
+    /// them, never corrected: rows taller than estimated (a long Markdown answer) put the newest line over the sentinel,
+    /// before the scroll view's end, so the answer's last lines stayed under the capsules and the composer and a drag
+    /// there sprang back (590 pt of it, measured); shorter ones left thousands of points of blank room before it, and
+    /// rows out of order. ↓ was gone (the offset said the list was at its end), and only building the list again places
+    /// the rows from its start. Done once the newest line is on screen (the list was taken to the newest end, so it goes
+    /// there) and nothing moves the list: not under a finger, in a glide, a jump, a landing or a held row; otherwise the
+    /// next time the list comes to rest. Logged (category `chat-landing`) with numbers only.
+    private func mendMisplacedStart() {
+        guard startMisplaced, !scratch.userDragging, entry == nil, landing == nil, !pin.holding,
+              let newest = currentLines().last, scratch.drawnLines.contains(newest.id) else { return }
+        #if os(iOS) || os(visionOS)
+        if let list = pin.list, list.isTracking || list.isDecelerating || jumpRun.running { return }
+        #endif
+        // A list that keeps reporting a misplaced start is left alone after one try a second: never a loop of builds.
+        guard Date.now.timeIntervalSince(scratch.startMendedAt) > 1 else { return }
+        scratch.startMendedAt = .now
+        let start = Int(scratch.startY), placed = Int(scratch.newestLineY?.y ?? 0)
+        scratch.startY = 0
+        scratch.newestLineY = nil
+        #if DEBUG
+        scratch.startMends += 1
+        #endif
+        Self.landingLog.notice("misplaced newest end: sentinel at \(start, privacy: .public), newest line at \(placed, privacy: .public) pt; built again")
+        listBuild += 1
+        setFollow { $0.follow() }
+        position.scrollTo(edge: .top)
+    }
 
     /// Opened again at the place it was left, a chat on a phone showed only its header, ↓ and the composer, no line
     /// drawn anywhere, until it was closed (#1386; never on a simulator). A landing that leaves no line in the viewport
@@ -2552,7 +2630,9 @@ struct ChatView: View {
                                            near: follow.near, mode: "\(follow.mode)", arrow: arrowShows, gap: Int(scratch.newestGap.rounded()),
                                            dragging: scratch.userDragging, held: pin.holding, blank: scratch.blankLandings,
                                            glideTaps: scratch.glideTaps, jumpMs: scratch.jumpMs, slips: scratch.jumpSlips,
-                                           listGap: listGap, lastShown: lastShown, storedRow: position.viewID(type: String.self) != nil))
+                                           listGap: listGap, lastShown: lastShown, storedRow: position.viewID(type: String.self) != nil,
+                                           newestY: scratch.newestLineY.flatMap { $0.id == order.last ? Int($0.y.rounded()) : nil },
+                                           startMends: scratch.startMends))
         }
     }
 
@@ -2881,6 +2961,7 @@ struct ChatView: View {
     /// The list's rows, newest first: apart from `chatScroll`, which as one expression Swift 6.2 could not type-check in time.
     private func chatRows(store: ChatStore, lines: [ChatLine], pending: [PendingMessage]) -> some View {
         let rows = store.rows
+        let newestID = lines.last?.id
         return LazyVStack(alignment: .leading, spacing: Theme.Space.l) {
             // Newest first (the list is drawn upside down): the end sentinel, live text, unsent messages, lines (a failed
             // message among them, before the first line written after it).
@@ -2888,6 +2969,7 @@ struct ChatView: View {
             Color.clear
                 .frame(height: Theme.Size.line)
                 .padding(.bottom, -Theme.Size.line)
+                .onGeometryChange(for: CGFloat.self, of: { $0.frame(in: .named(ChatPin.space)).minY }) { y in startPlaced(at: y) }
                 .id(Self.bottomID)
             // A voice call's captions, the thread's last rows while it is bound here (docs/assistant/voice.md 6.2): they read the
             // call themselves; the page only asks whether one is bound.
@@ -2950,6 +3032,10 @@ struct ChatView: View {
                     .background { if let flash = quoteFlash, flash.line == line.id { QuoteFlash(hold: flash.hold).id(flash.id) } }
                     .flippedBack()
                     .debugLineY(line.id, scratch)
+                    // In the list's content, which scrolling does not change: reported only when the stack places it.
+                    .onGeometryChange(for: CGFloat.self, of: { $0.frame(in: .named(ChatPin.space)).minY }) { y in
+                        if line.id == newestID { newestPlaced(line.id, at: y) }
+                    }
                     .landingFrame(line.id == landing, scratch)
                     .id(line.id)
                     .zIndex(menu.selected != nil && line.holds(menu.selected) ? 1 : 0)
@@ -3110,6 +3196,7 @@ struct ChatView: View {
                 // Where the user's scrolling stopped decides (nothing if it was the app's). A tap (down and up, the list
                 // never scrolled) is no scrolling: deciding there ended the hold on a row just opened (#3005).
                 setFollow { if old == .tracking { $0.tapped() } else { $0.released() } }
+                mendMisplacedStartSoon()
             }
             // On this upside-down list (`flippedBack`) `.scrollDismissesKeyboard(.interactively)` never put the keyboard
             // away while scrolling (#1823). A real drag does it; a touch that may still be a tap (.tracking) does not, so
@@ -8014,6 +8101,15 @@ final class ChatScratch {
     var drawnLines: [String] = []
     /// When a work line was last folded (the list may follow again if that leaves it at the newest end).
     var foldedAt = Date.distantPast
+    /// Where the lazy stack last placed its first row, the end sentinel, from the stack's top (0 when laid out right;
+    /// `ChatView.mendMisplacedStart`), and when the list was last built again for it.
+    var startY: CGFloat = 0
+    /// Where it placed the newest line, from the stack's top (`Theme.Space.l` past the sentinel, or more).
+    var newestLineY: (id: String, y: CGFloat)?
+    var startMendedAt = Date.distantPast
+    #if DEBUG
+    var startMends = 0 // lists built again for a misplaced newest end (#7382), for the scroll probe
+    #endif
     #if DEBUG
     /// Landings that left nothing drawn (`ChatView.mendBlankLanding`, `probe.chat-rows`).
     var blankLandings = 0
@@ -8175,6 +8271,11 @@ nonisolated struct ChatRowsShown: Encodable, Equatable {
     /// SwiftUI's stored scroll position names a row: once a row was opened (`ChatPin.letGo`), the user's own scrolling
     /// stores the row it leaves on screen, and SwiftUI scrolls back to it when the content changes (#4788).
     var storedRow: Bool
+    /// Where the newest line starts in the list's content (16, the rows' spacing past the end sentinel, when the lazy stack
+    /// placed it from its start; #7382).
+    var newestY: Int?
+    /// Lists built again because the stack had placed its newest end elsewhere (`ChatView.mendMisplacedStart`).
+    var startMends: Int
 }
 #endif
 
