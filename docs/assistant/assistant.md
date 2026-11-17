@@ -1609,7 +1609,7 @@ above), so without this each profile would keep its own.
 - **The directory** (`node/memory.go` `memoryDir`): for the assistant's own directory it is always
   `<the node's default Claude config directory>/projects/<encoded assistant directory>/memory`, whichever directories
   exist. The Memory page, Codex and the other runtimes (`memory_dir`) and dreaming resolve it there.
-- **Claude Code** (CLI and Agent SDK): every assistant start's settings carry `autoMemoryDirectory` with that directory
+- **Claude Code**: every assistant start's settings carry `autoMemoryDirectory` with that directory
   (`assistantCompactionSettings`). Claude Code takes the key from `--settings` before the profile's own settings, and
   knows it from 2.1.74; an older one ignores it and keeps writing to its profile's copy, which the merge below still
   brings in. Writes to `.md` files in the directory need no permission, as in the default location (read from Claude

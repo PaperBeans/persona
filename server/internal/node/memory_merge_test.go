@@ -115,7 +115,7 @@ func mergeRunDirs(t *testing.T, n oneMemoryNode) []string {
 }
 
 // Every way the assistant reaches its memory names one directory, whichever Claude profile a conversation runs in
-// and whichever directories exist: the Claude start's settings (CLI and Agent SDK share the file), Codex and the
+// and whichever directories exist: the Claude start's settings, Codex and the
 // other runtimes, the Memory page and dreaming.
 func TestAssistantMemoryIsOneDirectoryInEveryProfile(t *testing.T) {
 	n := newOneMemoryNode(t)
@@ -131,19 +131,6 @@ func TestAssistantMemoryIsOneDirectoryInEveryProfile(t *testing.T) {
 			t.Errorf("a conversation in profile %q is told %q, want %s", profile, got, n.shared)
 		}
 	}
-	// The Agent SDK start reads the same settings file.
-	path, err := n.assistantCompactionSettings("sdk-id", n.cwd, "", assistantCompaction{profile: n.privateProfile})
-	if err != nil {
-		t.Fatal(err)
-	}
-	opts, err := (sdkStart{settings: path, mcp: map[string]any{}}).options("claude")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := opts["settings"].(map[string]any)["autoMemoryDirectory"].(string); got != n.shared {
-		t.Errorf("the Agent SDK start is told %q, want %s", got, n.shared)
-	}
-
 	real, err := filepath.EvalSymlinks(n.shared)
 	if err != nil {
 		t.Fatal(err)
