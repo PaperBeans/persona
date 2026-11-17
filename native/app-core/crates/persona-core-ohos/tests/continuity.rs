@@ -195,5 +195,5 @@ fn continuity_fixtures_through_napi_runtime_registry() {
             registry::close(handle).unwrap();
         }
     }
-    assert_eq!((cases, steps), (38, 94), "every continuity case and step replays");
+    assert_eq!((cases, steps), (39, 95), "every continuity case and step replays");
 }

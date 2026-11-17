@@ -105,6 +105,50 @@ struct PhoneScreenTests {
         #expect(link.phase == .failed(PhoneScreenLink.message(APIError(status: 403, message: "no", fields: ["code": "permission"]))))
     }
 
+    /// The keyboard up (#9500): the picture keeps the view's width at its own size, its bottom under the keyboard, moved
+    /// up only as far as needed to keep where the user tapped above it; with the keyboard down it fills the view.
+    @Test func thePictureFillsTheWidthAndTheKeyboardCoversIt() {
+        let picture = CGSize(width: 1080, height: 2042) // 540 × 1021 pt at 2×
+        let full = CGRect(x: 0, y: 0, width: 402, height: 760)
+        #expect(abs(VNCZoom.phoneFit(picture, in: full, pointer: nil, margin: 40).width - 402) < 0.5)
+        let short = CGRect(x: 0, y: 0, width: 402, height: 420) // the keyboard and its row took the rest
+        let top = VNCZoom.phoneFit(picture, in: short, pointer: CGPoint(x: 0.5, y: 0.2), margin: 40)
+        #expect(top.minX == 0 && top.minY == 0 && top.width == 402 && abs(top.height - 402.0 * 2042 / 1080) < 0.01)
+        // Tapped low on the picture: it moves up just enough to keep that point 40 pt above the view's bottom.
+        let low = VNCZoom.phoneFit(picture, in: short, pointer: CGPoint(x: 0.5, y: 0.6), margin: 40)
+        #expect(abs((low.minY + 0.6 * low.height) - (420 - 40)) < 0.01 && low.width == 402)
+        // At the very bottom it never moves past the picture's end.
+        let bottom = VNCZoom.phoneFit(picture, in: short, pointer: CGPoint(x: 0.5, y: 1), margin: 40)
+        #expect(abs(bottom.maxY - 420) < 0.01)
+        // A tall keyboard leaves a view wider than tall: still the whole width, the picture under it.
+        let shorter = CGRect(x: 0, y: 0, width: 402, height: 300)
+        #expect(VNCZoom.phoneFit(picture, in: shorter, pointer: nil, margin: 40).width == 402)
+    }
+
+    /// A display that widened for one window and narrowed for the next (#9500): each place answer's arrangement replaces
+    /// the one from start, so the picture is found again; a helper that sends the display alone has it swapped in.
+    @Test func theArrangementFollowsEachPlacement() async throws {
+        let wide = MachineDisplay(id: 23, x: 1920, y: 0, width: 800, height: 1512, scale: 2)
+        let w = PhoneScreenWindow(pid: 10, window: 3, app: "Wide", bundle: nil, title: "w", minimized: nil, placed: nil)
+        var sendsDisplays = true
+        let link = PhoneScreenLink(ref: MachineRef(group: "g", id: "mac")) { req in
+            switch req.op {
+            case "start": return PhoneScreenReply(display: self.phone(1920, 0, 540, 1021), displays: [self.main, self.phone(1920, 0, 540, 1021)])
+            case "place": return PhoneScreenReply(display: wide, displays: sendsDisplays ? [self.main, wide] : nil, placed: w)
+            default: return PhoneScreenReply()
+            }
+        }
+        link.start(pair: "P", size: CGSize(width: 402, height: 760))
+        try await until { link.phase == .on }
+        #expect(await link.place(w))
+        #expect(link.displays.contains(wide))
+        // Now the picture (3520 × 3024, measured) holds the widened display.
+        let laid = VNCDisplays.layout(server: [], machine: link.displays, framebuffer: CGSize(width: 3520, height: 3024))
+        #expect(laid.first { $0.id == "display-23" }?.frame == CGRect(x: 1920, y: 0, width: 1600, height: 3024))
+        sendsDisplays = false
+        #expect(PhoneScreenLink.replacing(wide, in: [main, phone(1920, 0, 540, 1021)]) == [main, wide])
+    }
+
     private func until(_ ok: @escaping () -> Bool) async throws {
         for _ in 0..<200 where !ok() { try await Task.sleep(for: .milliseconds(10)) }
         #expect(ok())

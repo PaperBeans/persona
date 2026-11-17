@@ -2462,6 +2462,67 @@ function bridgeHas(node, id) {
   return node.last('runtime.workspaces').workspaces.some((x) => x.workspace_id === id)
 }
 
+
+test('Paseo 0.16 native jobs are read without a watch and retain their parent activity', async (t) => {
+  const inventory = new Map()
+  const { fake, a, rows } = await setup(t, { version: '0.16.0', features: { agentBackgroundWork: true },
+    handlers: { 'agent.background_work.list.request': (m) => ({ payload: { agentId: m.agentId, items: inventory.get(m.agentId) ?? [], error: null } }) } })
+  const job = { id: 'native-shell', kind: 'shell', description: 'Build the project', command: 'make build', startedAt: '2026-11-16T00:00:00Z' }
+  inventory.set(a.codex.id, [job])
+  fake.update(a.codex.id, { status: 'idle', requiresAttention: true, backgroundWork: { count: 1 },
+    workspaceId: a.claude.workspaceId, labels: { 'paseo.parent-agent-id': a.claude.id } })
+  await until('native work and its parent listed', () => rows().find((r) => r.session_id === `paseo-${a.codex.id}`)?.background?.[0]?.id === job.id &&
+    rows().find((r) => r.session_id === SID)?.background?.some((b) => b.id === `paseo-${a.codex.id}`))
+  const listed = rows().find((r) => r.session_id === `paseo-${a.codex.id}`)
+  assert.deepEqual(listed.background, [{ id: job.id, kind: 'shell', description: job.description, command: job.command, started_at: new Date(job.startedAt).toISOString() }])
+  assert.equal(fake.requestsOf('agent.timeline.set_subscription.request').length, 0)
+  const subscribed = fake.requestsOf('session.events.set_subscription.request')[0]
+  assert.ok(subscribed.events.includes('agent.background_work.update'))
+  fake.emit('events', { type: 'agent.background_work.update', payload: { agentId: a.codex.id, items: [] } }, (s) => s.events.includes('agent.background_work.update'))
+  await until('finished background child no longer keeps parent busy', () => !rows().find((r) => r.session_id === `paseo-${a.codex.id}`)?.background && !rows().find((r) => r.session_id === SID)?.background)
+})
+
+test('a positive native summary stays working through read failure and a sweep repairs it', async (t) => {
+  let fail = true
+  const { fake, a, rows } = await setup(t, { version: '0.16.0', features: { agentBackgroundWork: true }, sweepMs: 25,
+    handlers: { 'agent.background_work.list.request': (m) => ({ payload: { agentId: m.agentId,
+      items: fail ? [] : [{ id: 'restored-job', kind: 'monitor', description: 'Wait for deployment', startedAt: '2026-11-16T00:00:00Z' }], error: fail ? 'Inventory unavailable' : null } }) } })
+  fake.update(a.codex.id, { status: 'idle', requiresAttention: true, backgroundWork: { count: 1 } })
+  await until('failed detail read recorded', () => fake.requestsOf('agent.background_work.list.request').length > 0)
+  assert.equal(rows().find((r) => r.session_id === `paseo-${a.codex.id}`).status, 'working')
+  fail = false
+  await until('sweep repairs native inventory', () => rows().find((r) => r.session_id === `paseo-${a.codex.id}`)?.background?.[0]?.id === 'restored-job')
+  fake.update(a.codex.id, { status: 'closed', backgroundWork: undefined })
+  await until('unloaded inventory clears', () => !rows().find((r) => r.session_id === `paseo-${a.codex.id}`)?.background)
+  assert.deepEqual(fake.loads, [])
+})
+
+test('a reconnect refetches native job identities even when the summary count stays the same', async (t) => {
+  let job = 'before-reconnect'
+  const { fake, a, rows } = await setup(t, { version: '0.16.0', features: { agentBackgroundWork: true },
+    handlers: { 'agent.background_work.list.request': (m) => ({ payload: { agentId: m.agentId,
+      items: [{ id: job, kind: 'shell', description: null, startedAt: '2026-11-16T00:00:00Z' }], error: null } }) } })
+  fake.update(a.codex.id, { status: 'idle', backgroundWork: { count: 1 } })
+  await until('initial native inventory', () => rows().find((r) => r.session_id === `paseo-${a.codex.id}`)?.background?.[0]?.id === job)
+  job = 'after-reconnect'
+  fake.drop()
+  await until('reconnect replaces same-count inventory', () => rows().find((r) => r.session_id === `paseo-${a.codex.id}`)?.background?.[0]?.id === job)
+})
+
+test('initial Paseo 0.16 discovery reads existing native jobs after subscribing to updates', async (t) => {
+  const existing = Array.from({ length: 4 }, (_, n) => agentSnapshot({ provider: 'my-codex', cwd: '/tmp', status: 'idle',
+    backgroundWork: { count: n === 0 ? 1 : 0 } }))
+  const { fake, rows } = await setup(t, { version: '0.16.0', features: { agentBackgroundWork: true },
+    agents: existing.map((agent) => ({ agent, project: PROJECT })),
+    handlers: { 'agent.background_work.list.request': (m) => ({ payload: { agentId: m.agentId,
+      items: [{ id: 'already-running', kind: 'shell', description: null, startedAt: '2026-11-16T00:00:00Z' }], error: null } }) } })
+  await until('existing work appears on initial discovery', () => rows().find((r) => r.session_id === `paseo-${existing[0].id}`)?.background?.[0]?.id === 'already-running')
+  assert.equal(fake.requestsOf('agent.background_work.list.request').length, 1)
+  const subscription = fake.requests.findIndex((r) => r.type === 'session.events.set_subscription.request')
+  const list = fake.requests.findIndex((r) => r.type === 'agent.background_work.list.request')
+  assert.ok(subscription >= 0 && subscription < list)
+})
+
 test("Paseo pin changes reach the catalog without an agent update, survive reconnect, and never write preferences", async (t) => {
   const pinnedAt = '2026-11-16T12:00:00.000Z'
   const pinned = workspaceDescriptor({ id: 'wks_native_pin', workspaceDirectory: '/tmp', pinnedAt })

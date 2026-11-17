@@ -16,6 +16,16 @@ import (
 
 // ---- recording ----
 
+var usageLimitModel = lazyre.New(`(?i)\b(opus|sonnet|haiku) limit\b`)
+
+// A default model's success cannot clear another model family's subscription limit.
+func usageLimitProbeMatches(text, model string) bool {
+	limit := usageLimitModel.FindStringSubmatch(text)
+	return limit == nil || slices.Contains(strings.FieldsFunc(strings.ToLower(model), func(r rune) bool {
+		return r < 'a' || r > 'z'
+	}), strings.ToLower(limit[1]))
+}
+
 // healthResult is one check's or start's outcome.
 type healthResult struct {
 	ok           bool
@@ -27,6 +37,8 @@ type healthResult struct {
 	// resetsAt: a usage limit's reset as the outcome's source knew it (an agent's own record of the limit); nil: read
 	// off err's words when they name a time zone.
 	resetsAt *time.Time
+	// observedAt is the record checked before a probe; a newer record makes that probe's result obsolete.
+	observedAt *time.Time
 }
 
 // Where a result comes from (LauncherHealth.Source).
@@ -50,11 +62,24 @@ func (s *Service) recordHealth(ctx context.Context, machine, launcher string, r 
 	s.healthLoadLocked(ctx)
 	key := healthKey(machine, launcher)
 	rec := b.recs[key]
+	if r.observedAt != nil && (rec == nil && !r.observedAt.IsZero() || rec != nil && !rec.CheckedAt.Equal(*r.observedAt)) {
+		var out LauncherHealth
+		if rec != nil {
+			out = *rec
+		}
+		b.mu.Unlock()
+		return out
+	}
 	if rec == nil {
 		rec = &LauncherHealth{Machine: machine, Launcher: launcher}
 		b.recs[key] = rec
 	}
 	before := rec.State
+	if r.ok && rec.Kind == errKindUsageLimit && rec.unusable() && !usageLimitProbeMatches(rec.Error, r.model) {
+		out := *rec
+		b.mu.Unlock()
+		return out
+	}
 	if r.source != healthSourceStart && rec.Kind == errKindNotInTerminal && rec.unusable() {
 		// The check runs in the login shell, where the launcher works; the terminal is what cannot run it. Only a
 		// start says otherwise (#1642): a session already running says nothing of a new terminal tab.
@@ -202,11 +227,11 @@ func (s *Service) recordStartSuccess(ctx context.Context, machine, launcher stri
 // as a passing check would (#1838); recordHealth keeps a not_in_terminal record, which only a start clears. Without a
 // failing record nothing is kept (a launcher the checks do not cover gets no entry), and a failed Test is not recorded:
 // the checks and the starts judge failures, and testing a launcher still being set up must not move starts off it.
-func (s *Service) recordTestPassed(ctx context.Context, machine, launcher string, res proto.LauncherCheck) {
+func (s *Service) recordTestPassed(ctx context.Context, machine, launcher string, res proto.LauncherCheck, observedAt time.Time) {
 	if r, ok := s.launcherHealth(ctx, machine, launcher); !ok || r.State == healthOK {
 		return
 	}
-	s.recordHealth(ctx, machine, launcher, healthResult{ok: true, agent: res.Agent, model: res.Model, millis: res.Millis, source: healthSourceCheck})
+	s.recordHealth(ctx, machine, launcher, healthResult{ok: true, agent: res.Agent, model: res.Model, millis: res.Millis, source: healthSourceCheck, observedAt: &observedAt})
 }
 
 // launcherSetupChanged: a save of a managed launcher changed what decides whether its requests get through (its key,

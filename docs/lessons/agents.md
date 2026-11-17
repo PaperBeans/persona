@@ -577,6 +577,10 @@ passed in the login shell and reset the launcher to `ok`, so the assistant kept 
 - Don't read a shell's lines by their English words alone (#6122): bash translates them through gettext (about 40 catalogs) and glibc translates `strerror`, and Homebrew's bash on a Mac follows the system language even without `LANG` (`bash: nosuch: 未找到命令`), so the start waited out its timeout on any non-English machine. Read the line's shape instead (a shell's name first, then colon or full-width colon parts, one of them the start's own command), and only for the command the start itself typed, so rc noise in any language still never ends a start.
 - Don't compare a node's timestamps with the manager's clock: a node whose clock ran behind made a first failed start look counted already. Keep what was counted instead (with the health records, across restarts).
 
+## A subscription reset time is not proof that quota is still exhausted (#9386)
+
+Quota can recover before the reported reset. Skipping every on-demand probe until `resets_at` made a stale usage-limit record refuse starts even while the launcher worked. Reuse the machine × launcher single-flight probe and throttle; only a passing model request clears the record. A successful terminal start alone does not prove quota recovered. A default Sonnet probe cannot clear an Opus limit: request and verify the limited family. Capture the health record before sending the probe and compare it atomically when recording the answer; newer exhaustion must survive an older success. Save a failed probe's new reset evidence instead of releasing a weekly limit at an older short-window reset. Keep periodic probes waiting for the reset so an idle, genuinely exhausted subscription spends no extra requests.
+
 ## Don't default to bare claude when resuming externally created sessions (2026-11-05, #411)
 
 - On many computers, `claude` itself isn't logged in; launchers (functions in `~/.zshrc`, or Persona-added launchers) supply the gateway and key.

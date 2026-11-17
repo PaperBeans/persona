@@ -20,12 +20,19 @@ import (
 func (s *Service) probeLauncherHealth(ctx context.Context, machine, launcher string) (healthResult, bool) {
 	ctx, cancel := context.WithTimeout(ctx, healthCheckTimeout)
 	defer cancel()
+	observed, _ := s.launcherHealth(ctx, machine, launcher)
+	params := map[string]any{"name": launcher}
+	if observed.Kind == errKindUsageLimit && observed.unusable() {
+		if model := usageLimitModel.FindStringSubmatch(observed.Error); model != nil {
+			params["model"] = strings.ToLower(model[1])
+		}
+	}
 	var res proto.LauncherCheck
-	if err := s.call(ctx, machine, assistantwire.DeviceLaunchersCheck, map[string]any{"name": launcher}, &res); err != nil {
+	if err := s.call(ctx, machine, assistantwire.DeviceLaunchersCheck, params, &res); err != nil {
 		s.logf("launcher health: check %s on %s: %v", launcher, machine, err)
 		return healthResult{}, false
 	}
-	return healthResult{ok: res.OK, agent: res.Agent, model: res.Model, millis: res.Millis, err: res.Error, source: healthSourceCheck}, true
+	return healthResult{ok: res.OK, agent: res.Agent, model: res.Model, millis: res.Millis, err: res.Error, source: healthSourceCheck, observedAt: &observed.CheckedAt}, true
 }
 
 // healthLaunchers are the launchers to check on machine: those it can start (its ~/.zshrc's, the managed ones) and
@@ -273,7 +280,8 @@ func (s *Service) claimHealthRecheck(ctx context.Context, machine, launcher stri
 }
 
 // runHealthRecheck publishes the health result before releasing waiters. A start's follow-up records failures too;
-// an on-demand detour probe only clears an old failure, preserving the periodic repair cadence.
+// an on-demand detour also records usage-limit failures so a later reset is not discarded. Other failures keep the
+// periodic repair cadence.
 func (s *Service) runHealthRecheck(ctx context.Context, machine, launcher string, rc *healthRecheck, recordFailure bool) {
 	defer func() {
 		s.health.mu.Lock()
@@ -282,24 +290,27 @@ func (s *Service) runHealthRecheck(ctx context.Context, machine, launcher string
 		s.health.mu.Unlock()
 	}()
 	rc.res, rc.got = s.probeLauncherHealth(ctx, machine, launcher)
-	if rc.got && (rc.res.ok || recordFailure) {
+	if rc.got && (rc.res.ok || recordFailure || classifyLauncherError(rc.res.err) == errKindUsageLimit) {
 		s.recordHealth(ctx, machine, launcher, rc.res)
 	}
 }
 
 // launcherUnusableNow is launcherUnusable after one on-the-spot probe of a failing record, for a start about to
 // move or be refused because of it: the record can lag behind a fix, so a pass clears it and the start stays on the
-// asked machine (#2018). Two records cannot be settled by a probe: a subscription usage limit (the request would be
-// refused too) and a launcher the terminal's shell cannot run (the probe's login shell runs it fine); only a real
-// start clears those.
+// asked machine (#2018). Known usage-limit resets can be superseded by restored quota (#9386); fresh limit evidence
+// waits through the same throttle before probing. Unknown resets keep their periodic cadence. A terminal-shell
+// failure cannot be settled by the probe's login shell; only a real start clears it.
 func (s *Service) launcherUnusableNow(ctx context.Context, machine, launcher string) (LauncherHealth, bool) {
 	r, bad := s.launcherUnusable(ctx, machine, launcher)
-	if !bad || r.Kind == errKindUsageLimit || r.Kind == errKindNotInTerminal {
+	if !bad || r.Kind == errKindNotInTerminal {
 		return r, bad
 	}
-	if res, got, checked := s.recheckLauncherNow(ctx, machine, launcher); checked && got && res.ok {
-		return LauncherHealth{}, false
+	if r.Kind == errKindUsageLimit {
+		if _, known := r.limitReset(); !known || time.Since(r.CheckedAt) < healthRecheckThrottle {
+			return r, bad
+		}
 	}
+	s.recheckLauncherNow(ctx, machine, launcher)
 	// The shared follow-up may have finished between the first read and the throttled claim. Decide from its
 	// published result, not the stale failure that led us here.
 	return s.launcherUnusable(ctx, machine, launcher)

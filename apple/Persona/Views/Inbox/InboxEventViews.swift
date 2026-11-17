@@ -710,7 +710,7 @@ struct InboxChainSection: View {
             .accessibilityIdentifier("inbox.chain")
             .task(id: CutChain(key: item.key, count: item.chainCount)) { await readWhole() }
             .sheet(item: $todo) { r in
-                NavigationStack { TodoDetailView(todoID: r.id).macSheetDone { todo = nil } }.overTabSwitch()
+                NavigationStack { TodoDetailView(todoID: r.id).macSheetDone { todo = nil } }
                 #if os(macOS)
                 .macSheet()
                 #endif

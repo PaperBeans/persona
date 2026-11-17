@@ -246,6 +246,14 @@ func (h *orcaHost) Run(ctx context.Context, pane host.PaneRef, command string) e
 	return host.Mark(fmt.Errorf("orca: the newly created shell was replaced or is no longer writable"), host.ErrNotDelivered)
 }
 
+// launchable: Run would still take a command in pane, a terminal this host made whose one launch is unused.
+func (h *orcaHost) launchable(pane host.PaneRef) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, ok := h.launches[pane.ID]
+	return ok
+}
+
 func (h *orcaHost) NameAgent(ctx context.Context, pane host.PaneRef, name string) error {
 	t, err := h.terminal(ctx, pane.ID, true)
 	if err != nil {

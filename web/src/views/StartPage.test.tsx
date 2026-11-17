@@ -73,6 +73,8 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+// Each test imports the sidebar (or the settings group) afresh (resetModules): cold, under a full parallel run, the first
+// took more than vitest's 5 s, so the describes allow 30 s, as SidebarCollapse.test.tsx does.
 /** A fresh load with `stored` as this browser's copy: opened as the app opens, then `ui` drawn and the hub's hello. */
 async function open(stored: string | undefined, ui: "sidebar" | "settings", features = ["extensions", "extension_ui_slots"]) {
   if (stored !== undefined) localStorage.setItem("persona.startPage", stored);
@@ -105,7 +107,7 @@ async function open(stored: string | undefined, ui: "sidebar" | "settings", feat
   return { act, page, router, store, hello, flush };
 }
 
-describe("opening on a page that is not there", () => {
+describe("opening on a page that is not there", { timeout: 30_000 }, () => {
   it("gives way to the main chat once the hub lists the extension pages without it", async () => {
     places = [otherPlace];
     const { hello } = await open(TODAY, "sidebar");
@@ -144,7 +146,7 @@ describe("opening on a page that is not there", () => {
   });
 });
 
-describe("Settings › General › Start page", () => {
+describe("Settings › General › Start page", { timeout: 30_000 }, () => {
   const select = () => host.querySelector<HTMLSelectElement>("select")!;
   const options = () => [...select().options].map((o) => ({ value: o.value, text: o.textContent, disabled: o.disabled }));
 

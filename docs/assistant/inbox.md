@@ -922,16 +922,23 @@ The same rules on the web (`web/src/lib/inbox-groups.ts`) and iOS / iPad (`Perso
   filter mark, "Nothing open matches these filters", "Clear the filters to see the whole Inbox." and **Clear filters**; a search alone, the search mark, "No matches",
   "Try a different search." and **Clear search**. Either button clears the chips and the search: the chips are kept on this device, so a list left filtered opens
   filtered, and the Inbox outside them may still hold plenty (web #7478, `docs/web/web.md` "Pages"; iOS #7551, `InboxPage.emptyKind`).
-- DEBUG (iOS): `-showInboxPicked <n>`, `-showInboxPickedDone YES`, `-showInboxDone YES` (Done and its newest group open), `-showInboxPickGroups YES`, `-showInboxDue YES` / `-showInboxMerge YES` / `-showInboxTodo YES` (the first two rows picked and the due sheet open / merged / added to to-dos for today, #6480; `MOCK_INBOX_TODO=1|time` puts a to-do suggestion on the mock's design-review mail),
+- DEBUG (iOS): `-showInboxSection action|working|fyi|done|all` (the section bar on that choice; without it `-showInboxDone` and `-showInboxJump` choose Done and `-showInboxPickGroups` All, and `-showInboxPickedDone` shows Done after marking), `-showInboxPicked <n>`, `-showInboxPickedDone YES`, `-showInboxDone YES` (Done and its newest group open), `-showInboxPickGroups YES`, `-showInboxDue YES` / `-showInboxMerge YES` / `-showInboxTodo YES` (the first two rows picked and the due sheet open / merged / added to to-dos for today, #6480; `MOCK_INBOX_TODO=1|time` puts a to-do suggestion on the mock's design-review mail),
   `-showInboxJump <group>` (Done jumped to that group, `week` or `month`, its first page loaded). Mock hub: `MOCK_INBOX_HISTORY=busy` (36 done a day for two months), `MOCK_INBOX_DAYS=none`.
-- Tests: web `lib/inbox-groups.test.ts`, `views/inbox/Inbox.groups.test.tsx`, `views/inbox/Inbox.select.test.tsx`; Apple `InboxGroupsTests`, `InboxBulkTests`, `InboxFilteredEmptyTests`.
+- Tests: web `lib/inbox-groups.test.ts`, `views/inbox/Inbox.groups.test.tsx`, `views/inbox/Inbox.select.test.tsx`; Apple `InboxGroupsTests`, `InboxBulkTests`, `InboxFilteredEmptyTests`, and for the section bar `InboxBarFixtureTests` (the three shared files), `InboxBarTests` and `InboxSectionBarUITests`.
 
 ## App
 
 - `InboxStore` (`Persona/App/InboxStore.swift`): list cached locally (`inbox-items`), shown before refresh on cold start; fetch on Inbox events, reconnect, page entry.
   Mark done locally before request; restore on failure. A mark the hub may not have yet is laid over every list that comes in (`InboxMarks`, #2201): while its request is out, over every list; once the hub took it, over the lists that started before then. So a reload taken before the hub had it (the push after another item's Done) can't bring a swiped-away item back; the web does the same (`withPending`). Tab badge = unhandled Needs you count.
 - Page (`Persona/Views/Inbox/InboxView.swift`): top filters (All / Lark / each mail account | Mentions / Private / Groups / Mail); search titles, senders,
-  body, summary. Sections: Needs you (expanded), Working (always expanded, non-tappable heading, Inbox phase 1; present only with hub `status`, absent on older hubs using `tier`; excluded from badges and Watch Needs you, while urgent `status: action` still counts), FYI (expanded, Mark All Seen to the heading's right), Collapsed (collapsed, Clear All), then Done (collapsed); groups and selection in "Grouping and selection".
+  body, summary. The section bar is the list's first row, above the filters (`CapsuleFilterBar` with the grouping menu at its end, hidden under In Progress and Done; `Persona/Views/Inbox/InboxBar.swift`, "Section bar" above): a choice shows its section alone under a heading that doesn't fold, and All stacks the sections as follows.
+  Every entry opens on Needs you, also the Inbox chosen again while its page stays up (the place in front picked again, a widget, a quick action,
+  visionOS's Inbox tab: `AppModel.inboxEntries`). iOS and iPadOS never show the list beside an item, so they follow the phone's rule: an item
+  opened from outside (a Needs-you line over the composer) is pushed over the Inbox, the list landed on its choice (`InboxBarLanding`), so
+  closing it shows the list there, as an item a place kept and brings back does; an item opened from another item's chain or relations is
+  pushed over that item and leaves the choice alone, so Back returns to it. A strip that doesn't fit scrolls with `.edgeFade()`, and the
+  choice landed on or tapped scrolls clear of the fade (`revealsSelection`).
+  Sections: Needs you (expanded), Working (always expanded, non-tappable heading, Inbox phase 1; present only with hub `status`, absent on older hubs using `tier`; excluded from badges and Watch Needs you, while urgent `status: action` still counts), FYI (expanded, Mark All Seen to the heading's right), Collapsed (collapsed, Clear All), then Done (collapsed); groups and selection in "Grouping and selection".
   Tap headings to expand / collapse. Row: 40-point avatar (18pt source badge at bottom right: Lark blue, mail neutral gray), title (headline) + type `Chip` (mentions red), time;
   with summary, second line ✦ summary, third small "sender: content" (secondary gray, not tertiary); before triage, just "sender: content." Count badge (normally gray fill, primary-color fill for mentions).
   Separator starts at text column (16 + 40 + 12). Lark avatar palette avoids red / orange that imply Needs you. Full left swipe = done. More contains Clean up all (see "Clean up all" above).
@@ -966,7 +973,7 @@ The same rules on the web (`web/src/lib/inbox-groups.ts`) and iOS / iPad (`Perso
     FYI conclusions remain under FYI with their card; OK archives them.
   - Watch unchanged: uses `agent.draft` as before.
   - Unit tests `InboxEventsTests` (decode every event state in `PersonaTests/Fixtures/inbox-events.json`, sections, row text, chain targets, suggestion buttons with FakeHub).
-- DEBUG: `-tab mail` (Inbox), `-openInboxFirst YES` (first unhandled item), `-openInboxItem <id>` (specific item), `-showInboxAction draft|handoff` (then that sheet),
+- DEBUG: `-tab mail` (Inbox), `-showInboxSection action|working|fyi|done|all` (the section bar's choice, #9053), `-openInboxFirst YES` (first unhandled item), `-openInboxItem <id>` (specific item; on the iPhone both put the item on the Assistant stack in the list's place, so `InboxSectionBarUITests` walks the landing through a Needs-you line on an iPhone and a kept place on an iPad), `-showInboxAction draft|handoff` (then that sheet),
   `-showInboxSuggestionEdit YES` (suggestion editor on iPhone event page).
 - **Plugin-rendered details** (#1681; `docs/extensions/extensions.md`, "Inbox items"): for items from a plugin connector (`source` = connector) contributing `inbox_item`,
   the plugin's item View is the slot's source body. Hub passes `{id, title, summary, tier, reason, done, meta, extra}`; meta unchanged, unparsed.

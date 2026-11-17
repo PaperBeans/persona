@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DesktopBridge, DesktopNotification, DesktopPresence } from "../../spec/desktop-bridge";
+import type { DesktopBridge, DesktopIslandState, DesktopNotification, DesktopPresence } from "../../spec/desktop-bridge";
 
 // Fixed, self-contained CommonJS capabilities; no arbitrary IPC, tokens, socket messages or Node access.
 // The annotation makes every version-1 capability, including its signature, a compile-time requirement.
@@ -28,6 +28,9 @@ const api = Object.freeze({
   setLaunchAtLogin(enabled: boolean) { return ipcRenderer.invoke("desktop:login-set", enabled); },
   getLaunchAtLogin() { return ipcRenderer.invoke("desktop:login-get"); },
   openLocalSettings() { ipcRenderer.send("desktop:open-local-settings"); },
+  getIsland() { return ipcRenderer.invoke("desktop:island-get"); },
+  setIslandEnabled(enabled: boolean) { return ipcRenderer.invoke("desktop:island-set", enabled); },
+  setIslandState(state: DesktopIslandState) { ipcRenderer.send("desktop:island-state", state); },
 } satisfies DesktopBridge);
 
 contextBridge.exposeInMainWorld("personaDesktop", api);

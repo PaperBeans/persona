@@ -49,10 +49,16 @@ struct VNCPage: View {
     @State private var smoothScrollingHelp = false
     /// The app went to the background with the page up (not just Control Center or an alert over it).
     @State private var wentBackground = false
-    /// Phone Screen (#9314): this page's portrait display on the Mac, the window sheet, and the picture's size in points
-    /// (the display's shape; not read while the keyboard is up, which only shortens the picture for a while).
+    /// Phone Screen (#9314): this page's portrait display on the Mac and the window sheet.
     @State private var phone: PhoneScreenLink?
     @State private var phoneWindows = false
+    /// The display's shape (#9500): the picture's size in points with the keyboard down, read until the display is up and
+    /// then kept. Only the phone turning reads it again; the keyboard, the shortcut row and the lines under the bars,
+    /// which change the picture's height for a while, never do, so the Mac never rebuilds the display for them.
+    @State private var phoneShape: PhoneShape?
+    /// The system keyboard is on screen (it can come up without the Keyboard button, from the key catcher), and the
+    /// picture's last size, read again for the shape once the keyboard is down (the phone may have turned meanwhile).
+    @State private var keyboardUp = false
     @State private var pictureSize = CGSize.zero
     /// When the app came back from the background with the connection not (yet) known to be down: a drop reported
     /// within `returnWindow` is the suspension's, so it reconnects once by itself (#4243).
@@ -125,7 +131,10 @@ struct VNCPage: View {
                     #endif
                 }
                 #if os(iOS) || os(visionOS)
-                .onGeometryChange(for: CGSize.self) { $0.size } action: { size in if !typing { pictureSize = size } }
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                    pictureSize = size
+                    readPhoneShape(size)
+                }
                 #endif
                 #if os(iOS) || os(visionOS)
                 // Over the keyboard while it is up (the bars ride above it).
@@ -136,6 +145,7 @@ struct VNCPage: View {
         }
         .background(Color.black.ignoresSafeArea())
         .environment(\.colorScheme, .dark)
+        .devScreen("screen")
         .onAppear {
             session = VNC.hold(ref)
             mode = VNCMode.of(ref)
@@ -171,6 +181,11 @@ struct VNCPage: View {
         #if os(iOS)
         .task(id: hubProbing) { await probeHub() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in appActive = false }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+            keyboardUp = false
+            readPhoneShape(pictureSize)
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in appActive = true }
         #endif
         .onDisappear {
@@ -805,12 +820,14 @@ struct VNCPage: View {
             // left a blank there until then. It is back at once, where the small window has just grown into it.
             let handedOver = model.vncPiP == ref
             VNCScreen(session: s, mode: activeMode, interactive: true, region: shownDisplay?.frame, regionID: shownDisplay?.id,
+                      fillsWidth: activeMode == .phone && !railed,
                       onView: { v in DispatchQueue.main.async { screenView = v; zoomed = false } }, onZoom: { zoomed = $0 },
                       onPicture: { VNCPiP.shared.pagePicture($0) })
                 .opacity(handedOver ? 0 : 1)
                 .animation(handedOver ? Theme.Motion.conceal : nil, value: handedOver)
             #else
             VNCScreen(session: s, mode: activeMode, interactive: true, region: shownDisplay?.frame, regionID: shownDisplay?.id,
+                      fillsWidth: activeMode == .phone && !railed,
                       onView: { v in DispatchQueue.main.async { screenView = v; zoomed = false } }, onZoom: { zoomed = $0 })
             #endif
             #else
@@ -874,11 +891,23 @@ struct VNCPage: View {
     /// does is Mouse Mode until it does again).
     private var activeMode: VNCMode { mode == .phone && !phoneOffered ? .mouse : mode }
 
-    /// What Phone Screen needs now: the live connection's pair and the picture's size; nil: off.
+    /// What Phone Screen needs now: the live connection's pair and the display's shape; nil: off.
     private var phoneWant: PhoneWant? {
-        guard activeMode == .phone, let s = session, s.phase == .live, let pair = s.pair,
-              pictureSize.width > 0, pictureSize.height > 0 else { return nil }
-        return PhoneWant(pair: pair, size: pictureSize)
+        guard activeMode == .phone, let s = session, s.phase == .live, let pair = s.pair, let shape = phoneShape else { return nil }
+        return PhoneWant(pair: pair, size: shape.size)
+    }
+
+    struct PhoneShape: Equatable {
+        var size: CGSize
+        var railed: Bool
+    }
+
+    /// The picture's size as the display's shape (#9500), when it may change: never with the keyboard up; freely until
+    /// the display is up; after that only when the phone turned.
+    private func readPhoneShape(_ size: CGSize) {
+        guard !typing, !keyboardUp, size.width > 0, size.height > 0 else { return }
+        let started = phone.map { $0.phase != .off } ?? false
+        if phoneShape == nil || !started || phoneShape?.railed != railed { phoneShape = PhoneShape(size: size, railed: railed) }
     }
 
     struct PhoneWant: Equatable {

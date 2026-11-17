@@ -4006,6 +4006,29 @@
       },
       "extractionState" : "manual"
     },
+    "%@ – Now" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ – Now"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ – 現在"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ – 现在"
+          }
+        }
+      }
+    },
     "%@ → %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -15505,6 +15528,29 @@
         }
       }
     },
+    "About %@ · zip · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About %1$@ · zip · %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "約 %1$@ · zip · %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "约 %1$@ · zip · %2$@"
+          }
+        }
+      }
+    },
     "AI Draft Reply" : {
       "localizations" : {
         "en" : {
@@ -24164,6 +24210,29 @@
         }
       }
     },
+    "App logs, screens, request errors" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App logs, screens, request errors"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アプリのログ、画面、リクエストエラー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 日志、页面切换、接口错误"
+          }
+        }
+      }
+    },
     "App Secret" : {
       "shouldTranslate" : true,
       "localizations" : {
@@ -26383,24 +26452,24 @@
         }
       }
     },
-    "Assistant and Agents each have a page. On iPhone you switch at the top, on iPhone Duo at the bottom right, and on iPad with the Persona and Agents tabs." : {
+    "Assistant and Agents each have a page. On iPhone you switch at the top, on iPhone Duo with a tab bar down the side or along the bottom, and on iPad with the Persona and Agents tabs." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Assistant and Agents each have a page. On iPhone you switch at the top, on iPhone Duo at the bottom right, and on iPad with the Persona and Agents tabs."
+            "value" : "Assistant and Agents each have a page. On iPhone you switch at the top, on iPhone Duo with a tab bar down the side or along the bottom, and on iPad with the Persona and Agents tabs."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "アシスタントと Agents がそれぞれ 1 ページずつあります。iPhone では上部、iPhone Duo では右下で切り替え、iPad では Persona と Agents のタブです。"
+            "value" : "アシスタントと Agents がそれぞれ 1 ページずつあります。iPhone では上部、iPhone Duo では横または下のタブバーで切り替え、iPad では Persona と Agents のタブです。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "助手和 Agents 各占一页。iPhone 上在顶部切换，iPhone Duo 上在右下角切换，iPad 上是 Persona 和 Agents 两个标签。"
+            "value" : "助手和 Agents 各占一页。iPhone 上在顶部切换，iPhone Duo 上用侧边或底部的标签栏切换，iPad 上是 Persona 和 Agents 两个标签。"
           }
         }
       },
@@ -31229,6 +31298,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Couldn’t export: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t export: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "書き出せませんでした：%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法导出：%@"
+          }
+        }
+      }
     },
     "CPU, memory and network update every 10 seconds. Charts show the last hour." : {
       "localizations" : {
@@ -52328,6 +52420,29 @@
         }
       }
     },
+    "Crashes, hangs, uncaught exceptions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crashes, hangs, uncaught exceptions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "クラッシュ、ハング、捕捉されなかった例外"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "崩溃、卡顿、未捕获的异常"
+          }
+        }
+      }
+    },
     "Create" : {
       "localizations" : {
         "en" : {
@@ -53475,6 +53590,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这里截短了，完整的话在原对话里。"
+          }
+        }
+      }
+    },
+    "Developing Persona" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Developing Persona"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona を開発中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在开发 Persona"
+          }
+        }
+      }
+    },
+    "Device and App Version" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device and App Version"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "デバイスとアプリのバージョン"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备和 App 版本"
           }
         }
       }
@@ -62725,6 +62886,29 @@
       },
       "extractionState" : "manual"
     },
+    "Energy and Performance" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Energy and Performance"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "電力とパフォーマンス"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "耗电和性能"
+          }
+        }
+      }
+    },
     "Engine" : {
       "localizations" : {
         "en" : {
@@ -63688,6 +63872,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Errors and Crashes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Errors and Crashes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エラーとクラッシュ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "错误和崩溃"
+          }
+        }
+      }
     },
     "Esc" : {
       "shouldTranslate" : true,
@@ -65134,6 +65341,75 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Export Diagnostics" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export Diagnostics"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "診断データを書き出す"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出诊断数据"
+          }
+        }
+      }
+    },
+    "Export Diagnostics…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export Diagnostics…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "診断データを書き出す…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出诊断数据…"
+          }
+        }
+      }
+    },
+    "Export First…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export First…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先に書き出す…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先导出…"
+          }
+        }
+      }
     },
     "Extension Action" : {
       "localizations" : {
@@ -76105,6 +76381,29 @@
       },
       "extractionState" : "manual"
     },
+    "In Progress" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In Progress"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "進行中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "进行中"
+          }
+        }
+      }
+    },
     "In Progress [Action Bar]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -76788,6 +77087,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "包括添加 %1$@"
+          }
+        }
+      }
+    },
+    "Includes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Includes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "含まれるもの"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "包含"
           }
         }
       }
@@ -85982,6 +86304,52 @@
       },
       "extractionState" : "manual"
     },
+    "Load Image" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Load Image"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画像を読み込む"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加载图片"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Load Images" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Load Images"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画像を読み込む"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加载图片"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Load More" : {
       "localizations" : {
         "en" : {
@@ -91659,6 +92027,29 @@
       },
       "extractionState" : "manual"
     },
+    "MetricKit daily reports, heat, battery, requests and connections each minute" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MetricKit daily reports, heat, battery, requests and connections each minute"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MetricKit の日次レポート、発熱、バッテリー、1 分ごとのリクエストと接続"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MetricKit 每日报告、发热、电量、每分钟的请求和连接"
+          }
+        }
+      }
+    },
     "Microphone" : {
       "localizations" : {
         "en" : {
@@ -92576,6 +92967,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "模型服务限流"
+          }
+        }
+      }
+    },
+    "Model, system, app version (always included)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Model, system, app version (always included)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "機種、システム、アプリのバージョン（常に含む）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "机型、系统、App 版本（始终包含）"
           }
         }
       }
@@ -95719,6 +96133,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Never included: message text, knowledge base content, keys, tokens, passwords, cookies, pairing links." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Never included: message text, knowledge base content, keys, tokens, passwords, cookies, pairing links."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "含まれないもの：メッセージ本文、ナレッジベースの内容、キー、トークン、パスワード、Cookie、ペアリングリンク。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不会包含：消息内容、知识库内容、密钥、令牌、密码、cookie、配对链接。"
+          }
+        }
+      }
     },
     "Never Mind" : {
       "localizations" : {
@@ -106609,6 +107046,29 @@
         }
       }
     },
+    "Nothing Done Yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing Done Yet"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了したものはまだありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有已处理的"
+          }
+        }
+      }
+    },
     "Nothing Here" : {
       "localizations" : {
         "en" : {
@@ -106631,6 +107091,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Nothing in Progress" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing in Progress"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "進行中のものはありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有进行中的"
+          }
+        }
+      }
     },
     "Nothing Muted" : {
       "localizations" : {
@@ -107067,6 +107550,29 @@
       },
       "extractionState" : "manual"
     },
+    "Nothing Needs You" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing Needs You"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "対応が必要なものはありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有需要你处理的"
+          }
+        }
+      }
+    },
     "Nothing needs you [Home Widgets]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -107292,6 +107798,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有需要记的：没有提到要点、决定或待办。"
+          }
+        }
+      }
+    },
+    "Nothing to Read" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing to Read"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読むものはありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有要看的"
           }
         }
       }
@@ -125156,6 +125685,29 @@
       },
       "extractionState" : "manual"
     },
+    "Recorded [Developing Persona]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recorded"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記録済み"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已记录"
+          }
+        }
+      }
+    },
     "Remove [Meeting Room]" : {
       "localizations" : {
         "en" : {
@@ -136311,6 +136863,52 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Share File…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share File…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルを共有…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享文件…"
+          }
+        }
+      }
+    },
+    "Since %@ · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Since %1$@ · %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ から · %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 起 · %2$@"
+          }
+        }
+      }
     },
     "SMS" : {
       "localizations" : {
@@ -159125,6 +159723,29 @@
       },
       "extractionState" : "manual"
     },
+    "The rest are in the other sections above." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The rest are in the other sections above."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "残りは上のほかの区分にあります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其余的在上面的其他分区里。"
+          }
+        }
+      }
+    },
     "The SSH server didn't accept this device's public key. Add the line from Copy authorized_keys Line to ~/.ssh/authorized_keys for %@ on the server (Warpgate: add it to this user's public keys), then try again." : {
       "localizations" : {
         "en" : {
@@ -178478,6 +179099,52 @@
       },
       "extractionState" : "manual"
     },
+    "Turn Off and Delete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn Off and Delete"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オフにして削除"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭并删除"
+          }
+        }
+      }
+    },
+    "Turn off and delete the %@ recorded?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn off and delete the %@ recorded?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記録済みの %@ を削除してオフにしますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭并删除已记录的 %@ 数据？"
+          }
+        }
+      }
+    },
     "Turn Off Dependent Extensions and Uninstall?" : {
       "localizations" : {
         "en" : {
@@ -190135,6 +190802,29 @@
       },
       "extractionState" : "manual"
     },
+    "What you mark done shows up here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What you mark done shows up here."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "対応済みにしたものがここに表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标为已处理的会出现在这里。"
+          }
+        }
+      }
+    },
     "What you say goes to this chat" : {
       "localizations" : {
         "en" : {
@@ -190318,6 +191008,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "When this is on, this device records logs, errors and energy use so you can export them for an Agent to look into. The data stays on this device; turning this off deletes it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When this is on, this device records logs, errors and energy use so you can export them for an Agent to look into. The data stays on this device; turning this off deletes it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オンにすると、このデバイスがログ、エラー、電力使用量を記録し、Agent に調べてもらうために書き出せます。データはこのデバイスにだけ保存され、オフにすると削除されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开后这台设备会记录日志、错误和耗电数据，方便导出给 Agent 分析。数据只存在本机；关掉会删除。"
+          }
+        }
+      }
     },
     "When You're Needed" : {
       "localizations" : {

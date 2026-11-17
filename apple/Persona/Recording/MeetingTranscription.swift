@@ -794,15 +794,16 @@ final class MeetingTranscription {
     }
 
     /// Whether `entry` may still need gap uploads (pure, for the tests): a room meeting recorded here that asked for hub
-    /// mode and has hub-mode time (`RecordingAttendance.hubTime`; never one an older manager rolled back), ended, its last
-    /// revision (the `complete: true` one) stored, within the hub's retention (the phone keeps its audio at least that
-    /// long, and never longer), not known to be done or transcribed on the phone.
+    /// mode and has hub-mode time (`RecordingAttendance.hubTime`; never one an older manager rolled back), ended, its latest
+    /// revision stored, within the hub's retention (the phone keeps its audio at least that long, and never longer), not
+    /// known to be done or transcribed on the phone. The phone's own text isn't waited for (#9491): the gaps are audio the
+    /// hub transcribes itself, and a phone that can't transcribe the meeting held them back for good.
     nonisolated static func needsGaps(_ entry: RecordingEntry, meeting: Meeting?, expired: Bool, synced: Bool, done: Bool) -> Bool {
         guard !entry.active, entry.roomMeeting, let attendance = entry.attendance, attendance.transcription == .hub,
               !attendance.hubRolledBack, !attendance.hubTime.isEmpty, !expired, !done else { return false }
         if let mode = meeting?.mode, mode != .hub { return false }
         if meeting?.hub?.settled == true { return false }
-        return entry.transcribedAll && synced
+        return synced
     }
 
     /// The stretches of `entry`'s audio a gap upload may send (pure, for the tests): its hub-mode time, an open stretch

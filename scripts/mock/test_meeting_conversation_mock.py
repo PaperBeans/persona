@@ -190,6 +190,18 @@ class MeetingConversationMockTests(Conversation, unittest.TestCase):
         self.assertEqual((row["origin"], row["origin_ref"]), ("meeting", rid))
         self.assertRegex(row["title"], r"^\d{4} \| .+ \| Design review$")
 
+    def test_the_note_taker_follows_the_meeting_and_takes_no_asks(self):
+        """A room meeting Persona isn't invited to (#8851): the upload's notes is taken, the room starts with a header
+        that says so, its lines still go, and an ask is refused as the hub refuses it (409 not_attending)."""
+        rid = str(uuid.uuid4())
+        room = self.ready_room(rid, role="notes")
+        header = self.items(room["session_id"])[0]["text"]
+        self.assertIn("Role: notes:", header)
+        self.call("POST", f"/api/v1/recordings/{rid}/live", {"from": 0, "segments": LINES})
+        self.wait(lambda: len([x for x in self.items(room["session_id"]) if x["kind"] == "text"]) > 1, "a batch")
+        status, out = self.call("POST", f"/api/v1/recordings/{rid}/ask", {"id": str(uuid.uuid4()), "question": "Who owns it?"})
+        self.assertEqual((status, out["code"]), (409, "not_attending"))
+
     def test_asks_go_to_the_room(self):
         rid = str(uuid.uuid4())
         room = self.ready_room(rid)

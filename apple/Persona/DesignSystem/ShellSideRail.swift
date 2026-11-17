@@ -42,11 +42,14 @@ private struct SystemVerticalBarEdge: ViewModifier {
 }
 #endif
 
-/// The shell's top bar where the system puts its bars down the side (iPhone Duo, `shellRailEdge`): the page's buttons in
-/// the column beside the status bar, low in it where the thumb of the hand holding the phone reaches, and the switch at
-/// its foot, in the order the system's own bars keep there (Apple's iPhone Duo guidance: navigation first, then the
-/// prominent action, the tab bar below). The column is the side's safe area, so the content stays clear of it; the top
-/// of the column is the status bar's and the camera's.
+/// The shell's top bar where the system puts its bars down the side (iPhone Duo, `shellRailEdge`): the column beside the
+/// status bar, with the switch as the Duo's tab bar (#4231) in the column's lower middle, as a tab bar down the side of the
+/// outer display stands, not a small block at the foot (the owner's reference), and the page's buttons (the face, the
+/// page's action) under it at the foot, where the thumb of the hand holding the phone reaches them (#1057). Where there
+/// are no buttons (the open Duo's tabs) the tab bar's foot is a share of the column above its foot
+/// (`Theme.Shell.sideTabBarFoot`). All of it is centred on the status bar (the column less the strip at the screen's edge,
+/// `Theme.Shell.sideColumnEdge`). The column is the side's safe area, so the content stays clear of it; its top is the
+/// status bar's and the camera's.
 struct ShellSideRail<Buttons: View, Switcher: View>: View {
     let edge: HorizontalEdge
     @ViewBuilder var buttons: Buttons
@@ -59,12 +62,14 @@ struct ShellSideRail<Buttons: View, Switcher: View>: View {
             GeometryReader { whole in
                 let column = max(0, whole.size.width - inside.size.width)
                 VStack(spacing: Theme.Space.m) {
+                    switcher.padding(.bottom, Theme.Space.s)
                     buttons
-                    switcher.padding(.top, Theme.Space.s)
                 }
-                .frame(width: max(column, TabSwitchLayout.width))
+                .frame(width: TabSwitchLayout.sideColumn(inset: column))
+                // Off the strip at the screen's edge, as the status bar is.
+                .padding(edge == .trailing ? .trailing : .leading, max(0, column - TabSwitchLayout.sideColumn(inset: column)))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: edge == .trailing ? .bottomTrailing : .bottomLeading)
-                .padding(.bottom, Theme.Space.l)
+                .padding(.bottom, Buttons.self == EmptyView.self ? TabSwitchLayout.sideFoot(height: whole.size.height) : Theme.Space.l)
             }
             .ignoresSafeArea(.container, edges: edge == .trailing ? .trailing : .leading)
         }

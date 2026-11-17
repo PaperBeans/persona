@@ -216,7 +216,8 @@ on watch it receives `transcript: true` and only pushes streaming text (the SDK 
 and node switches over automatically once the file appears. A daemon can't do this (it would read other sessions on the machine).
 
 Three things stay the runtime's word on such a row. Its own `background` list is kept beside the background tasks the transcript shows (#4494): work the runtime started for the
-session outside Claude Code. Its `model` decides the context window when it names a 1M variant (`…[1m]`, #4496): Claude Code writes the id without the suffix into the
+session outside Claude Code. If both sources name the same task ID, it counts once and the transcript keeps its richer local details
+(including its output file, #9320). Its `model` decides the context window when it names a 1M variant (`…[1m]`, #4496): Claude Code writes the id without the suffix into the
 transcript, and a gateway writes an id of its own, so the transcript alone reads as 200K, or as no window. A window the transcript records itself keeps the transcript's word,
 and so does a session answering as another model: after a refusal's fallback, or when the reply came from a Claude model that is not the one the runtime names. And its `title`
 (#8133): where the transcript records no title (a custom or an AI one), node takes a terminal session's title for its first prompt (`title_source: "prompt"`, which Persona's

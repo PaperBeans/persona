@@ -361,7 +361,7 @@ func (n *Node) liveRuntimeModels(ctx context.Context, h *runtimeConn, name strin
 // runtimeLauncherCheck opts into the authenticated availability probe of runtime h, the one offering launcher name to
 // the start in question (runtimeOfIn). A refused probe never falls back to the login shell, whose credentials may be
 // different. Older runtimes keep the existing shell check.
-func (n *Node) runtimeLauncherCheck(ctx context.Context, h *runtimeConn, name, cwd, prompt string) (proto.LauncherCheck, bool) {
+func (n *Node) runtimeLauncherCheck(ctx context.Context, h *runtimeConn, name, cwd, prompt, model string) (proto.LauncherCheck, bool) {
 	if h == nil {
 		return proto.LauncherCheck{}, false
 	}
@@ -375,7 +375,11 @@ func (n *Node) runtimeLauncherCheck(ctx context.Context, h *runtimeConn, name, c
 	defer cancel()
 	start := time.Now()
 	var result proto.LauncherCheck
-	if err := h.peer.Call(ctx, "launchers.check", map[string]any{"launcher": name, "cwd": cwd, "prompt": prompt}, &result); err != nil {
+	params := map[string]any{"launcher": name, "cwd": cwd, "prompt": prompt}
+	if model != "" {
+		params["model"] = model
+	}
+	if err := h.peer.Call(ctx, "launchers.check", params, &result); err != nil {
 		result = proto.LauncherCheck{Error: err.Error()}
 	}
 	launcher, _ := h.launcherNamed(name)

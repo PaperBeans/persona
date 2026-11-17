@@ -506,3 +506,74 @@ func TestOrcaRunRefusesAnotherTerminalUnderItsKey(t *testing.T) {
 		t.Errorf("typed %+v", w)
 	}
 }
+
+// An Orca terminal takes one launch (orcaHost.Run). A retry named at the kept tab of a start whose claude stalled
+// (agent_start_stalled: its line was typed there) closes that tab and starts in a new one instead of failing with
+// "shell launch is only allowed once" (#9534). A kept tab where nothing was typed (shell_waiting) is still started in.
+func TestOrcaRetryAfterAStalledStartOpensANewTab(t *testing.T) {
+	withPaneShell(t, "/bin/bash")
+	n, _, o, _, home := orcaNode(t)
+	watchShell(n)
+	n.shellSettle, n.shellQuiet = 10*time.Second, 100*time.Millisecond
+	repoDir := mkdir(t, filepath.Join(home, "proj"))
+	o.SetWorktrees(orcarttest.Worktree("wt-proj", repoDir, "refs/heads/main"))
+	o.Handle("terminal.read", func(p map[string]any) any {
+		return map[string]any{"terminal": map[string]any{"handle": p["terminal"], "tail": []string{"bash-5.2$ "}, "source": "screen"}}
+	})
+	h := n.hosts.Get(host.Orca).(*orcaHost)
+	ctx := context.Background()
+	stalled, err := h.CreateSpace(ctx, repoDir, "stalled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Run(ctx, stalled.Pane, "claude"); err != nil { // the stalled start's line
+		t.Fatal(err)
+	}
+	waiting, err := h.CreateSpace(ctx, repoDir, "waiting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stalledHandle := o.Writes()[0].Handle
+	until := time.Now().Add(time.Minute)
+	n.mu.Lock()
+	n.keptStarts = map[string]keptStart{
+		stalled.Pane.String(): {launch: h, created: stalled, until: until},
+		waiting.Pane.String(): {launch: h, created: waiting, until: until},
+	}
+	n.mu.Unlock()
+
+	if c, _ := n.reusingKeptTab(ctx, waiting.Pane.String()).Value(reusedTabKey{}).(*host.Created); c != waiting {
+		t.Errorf("a kept tab with its launch unused was not started in: %v", c)
+	}
+
+	// As the hub's task_retry starts it: synchronously, with in_pane. No claude comes up here; what matters is where
+	// the start's line went.
+	withStartWaits(n, time.Second, time.Second)
+	_, err = request(t, n, "session.start", map[string]any{"session_id": startID, "cwd": repoDir, "in_pane": stalled.Pane.String()})
+	if err != nil && strings.Contains(err.Error(), "only allowed once") {
+		t.Fatalf("the retry failed in the stalled tab: %v", err)
+	}
+	typed := false
+	for _, w := range o.Writes() {
+		typed = typed || !w.Close && w.Handle != stalledHandle && strings.Contains(w.Text, " && true "+shellQuote(startID))
+	}
+	if !typed {
+		t.Errorf("the start line was not typed into a new tab: %+v", o.Writes())
+	}
+	if got := o.Count("terminal.create"); got != 3 {
+		t.Errorf("terminals created: %d, want the two kept and one new", got)
+	}
+	closed := false
+	for _, w := range o.Writes() {
+		closed = closed || w.Close && w.Handle == stalledHandle
+	}
+	if !closed {
+		t.Errorf("the stalled tab was not closed: %v", o.Trace("terminal.close"))
+	}
+	n.mu.Lock()
+	_, kept := n.keptStarts[stalled.Pane.String()]
+	n.mu.Unlock()
+	if kept {
+		t.Error("the stalled tab is still kept")
+	}
+}

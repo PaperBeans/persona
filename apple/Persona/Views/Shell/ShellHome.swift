@@ -95,9 +95,7 @@ struct ShellHome: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room.composerAtRest($0, typeSize: typeSize) }
                     .onPreferenceChange(MentionMenuOpen.self) { open in withAnimation(Theme.Motion.standard) { mentionOpen = open } }
             }
-            // Beside the open Duo's floating tabs' switch, room at the trailing end (#4231); the fade and the page's color go
-            // across. One step of the chain for both, not two: it is the page's deepest stack on a phone (#6735).
-            .tabSwitchRoom(padding: Theme.Space.m)
+            .padding(.horizontal, Theme.Space.m)
             .padding(.bottom, Theme.Space.s)
             .frame(maxWidth: ChatView.readableWidth)
             .frame(maxWidth: .infinity)

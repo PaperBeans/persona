@@ -96,7 +96,6 @@ struct InboxHandOffBar: View {
         .padding(.vertical, Theme.Space.s)
         .frame(maxWidth: Theme.Size.readable)
         .frame(maxWidth: .infinity)
-        .tabSwitchRoom() // beside the open Duo's floating tabs' switch (#4231)
         // What scrolls under it stays under it: the page's text never runs through the chips.
         .background(.bar, ignoresSafeAreaEdges: .bottom)
         .animation(Theme.Motion.standard, value: toastKey)

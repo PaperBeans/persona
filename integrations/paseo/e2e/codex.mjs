@@ -1,6 +1,7 @@
 // Real Paseo + real Codex + real personad, with a local scripted Responses model.
 // PERSONAD=/path/personad PASEO_BIN=/path/paseo CODEX_BIN=/path/codex node integrations/paseo/e2e/codex.mjs
 // Build personad after go generate ./internal/runtimepkg. No user homes or credentials are used.
+// PASEO_BACKGROUND_E2E=1 also checks a real background shell on Paseo 0.16+ and a compatible Codex app-server.
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -13,6 +14,7 @@ import { PaseoClient } from '../lib/paseo.js'
 import { startCodexModel } from './codex-model.mjs'
 
 const { PERSONAD: personad, PASEO_BIN: paseoBin, CODEX_BIN: codexBin } = process.env
+const testBackground = process.env.PASEO_BACKGROUND_E2E === '1'
 if (![personad, paseoBin, codexBin].every((p) => p?.startsWith('/') && existsSync(p))) {
   throw new Error('Set PERSONAD, PASEO_BIN and CODEX_BIN to absolute executable paths')
 }
@@ -77,8 +79,11 @@ try {
   paseoHome = join(root, 'paseo')
   for (const p of [home, state, work, codexHome, claudeHome, paseoHome]) mkdirSync(p, { recursive: true })
   childrenFile = join(root, 'codex-pids')
-  model = await startCodexModel()
   const quote = (s) => `'${s.replaceAll("'", "'\\''")}'`
+  const gate = join(work, 'background-finished')
+  const backgroundProgram = `const fs = require('node:fs'); const gate = ${JSON.stringify(gate)}; const watcher = fs.watch(${JSON.stringify(work)}, () => { if (fs.existsSync(gate)) { watcher.close(); console.log('background finished'); } }); console.log('background ready'); if (fs.existsSync(gate)) watcher.close();`
+  const backgroundCommand = `${quote(process.execPath)} -e ${quote(backgroundProgram)}`
+  model = await startCodexModel(testBackground ? { backgroundCommand } : {})
   const wrapper = join(root, 'codex')
   writeFileSync(wrapper, `#!/bin/sh\nif [ "$1" = app-server ]; then printf '%s\\n' "$$" >> ${quote(childrenFile)}; fi\nexec ${quote(codexBin)} "$@"\n`)
   chmodSync(wrapper, 0o700)
@@ -192,6 +197,23 @@ try {
   await until('Paseo-originated archived runtime leaves list', () => !node.sessions().some((s) => s.session_id === `paseo-${nativeId}`), 15_000)
   check('Paseo-originated archive behavior is unchanged', !node.sessions().some((s) => s.session_id === `paseo-${nativeId}`))
   check('all four scripted turns reached the local model', model.requests.length === 4, `${model.requests.length} requests`)
+  if (testBackground) {
+    await node.call('session.modes', { session_id: sid, permission_mode: 'bypassPermissions' })
+    await node.call('session.send', { session_id: sid, text: 'E2E_CODEX_BACKGROUND', client_msg_id: 'codex-e2e-background' }, 60_000)
+    await until('real background command outlives its foreground reply', async () => {
+      const current = await agent()
+      return current.status === 'idle' && current.backgroundWork?.count > 0
+    }, 30_000)
+    const inventory = await paseo.request('agent.background_work.list.request', { agentId })
+    const native = inventory.items.find((task) => task.command?.includes('background ready'))
+    check('Paseo reports the real background command after the turn ends', native?.kind === 'shell')
+    await until('Persona lists the native task without an open chat', () => row()?.background?.some((task) => task.id === native?.id), 15_000)
+    check('Persona keeps the native task identity and command', row().background.some((task) => task.id === native.id && task.command?.includes('background ready')))
+    writeFileSync(gate, 'finish\n')
+    await until('Paseo observes the background command exit', async () => (await agent()).backgroundWork?.count === 0, 15_000)
+    await until('Persona clears the completed native task', () => !row()?.background?.some((task) => task.id === native.id), 15_000)
+    check('the completed native task leaves Persona without an open chat', !row()?.background?.length)
+  }
 } catch (error) {
   check('real Codex archive lifecycle completed', false, error.stack)
   console.error('Paseo log:', daemonLog.join('').slice(-16000))

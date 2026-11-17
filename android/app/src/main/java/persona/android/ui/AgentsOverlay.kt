@@ -80,6 +80,8 @@ private class AgentsOverlayScene(
                     onShowList = { shown.value = true },
                 )
             ) {
+                // iOS SplitNavigation.swift:125-146, 178-208: a sidebar value replaces the detail stack immediately;
+                // only the overlaid list slides away with Theme.Motion.layout. Keep this scene's key fixed.
                 if (detail != null) detail.Content() else emptyDetail()
             }
         }

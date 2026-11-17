@@ -68,6 +68,15 @@ The exact HTTP(S) instance (including nondefault port) and private CIDR must bot
 CIDRs cannot opt in private networks. Configure only infrastructure the operator trusts; this is not a connector
 or sign-in system. Public-only installations need no configuration.
 
+The remote image route (`docs/protocol/protocol.md` "Remote images (#9473)") asks a DNS-over-HTTPS service for a picture
+host's real addresses when this machine's resolver answers only a fake-IP proxy's (#9550). `remote_images.doh` in this
+manager's `manager.json` names that service's JSON API; without it `https://dns.alidns.com/resolve` is asked, and `""`
+asks none (those pictures are then refused). The service learns the host names of the pictures looked up this way:
+
+```json
+{"remote_images":{"doh":"https://dns.alidns.com/resolve"}}
+```
+
 Read-only MCP `repositories_list(query?, cursor?, limit?)` and `repository_get(id)` return only this manager's saved
 metadata. Search covers name, aliases, namespace path and purpose (200-character query, at most 50 records/page).
 Cursors are bounded and tied to query/document revision; edits invalidate old cursors. Neither tool accepts a

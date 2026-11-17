@@ -155,7 +155,7 @@ fun JSidebarColumn(
     content: @Composable () -> Unit,
 ) {
     val progress by animateFloatAsState(if (shown) 1f else 0f,
-        drawerSpec(), label = "sidebar-column")
+        sidebarColumnSpec(PersonaTheme.style, PersonaTheme.reduceMotion), label = "sidebar-column")
     val palette = PersonaTheme.palette
     val visible = sidebar != null && progress > 0f
     val modal = sidebar != null && overlay && shown

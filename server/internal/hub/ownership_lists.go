@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"slices"
@@ -165,14 +167,48 @@ func (h *Hub) mergeList(w http.ResponseWriter, r *http.Request, key string, ask 
 	var answers []listAnswer
 	for _, id := range ids {
 		bw := newBufferedWriter()
-		ask(bw, withBody(r, body), id)
+		asked := withBody(r, body)
+		if key == "todos" {
+			asked.Header.Del("If-None-Match") // the merged list's validator is the hub's: a manager's 304 would leave its todos out
+		}
+		ask(bw, asked, id)
 		ans := listAnswer{id: id, status: cmp.Or(bw.status, http.StatusOK), header: bw.header, body: bw.body.Bytes(), localize: bw.localize}
 		if key == "todos" && ans.ok() {
 			h.noteTodoOwners(&ans)
 		}
 		answers = append(answers, ans)
 	}
+	if key == "todos" {
+		writeTaggedList(w, r, key, answers)
+		return
+	}
 	writeMerged(w, key, answers)
+}
+
+// writeTaggedList is writeMerged with a validator, for the to-dos (#9590): the merged list is the same bytes while
+// nothing it lists changed, and most "todos" events change nothing it lists (a mark, a done to-do's note), yet each
+// had every app read the whole list again (about 200 KB on a busy hub). A 200 carries ETag W/"t1-<the first 128 bits
+// of the SHA-256 of its bytes>"; a request whose If-None-Match names it gets 304 with the 200's headers and no body.
+func writeTaggedList(w http.ResponseWriter, r *http.Request, key string, answers []listAnswer) {
+	out := newBufferedWriter()
+	writeMerged(out, key, answers)
+	status := cmp.Or(out.status, http.StatusOK)
+	hd := w.Header()
+	for k, v := range out.header {
+		hd[k] = slices.Clone(v)
+	}
+	if status == http.StatusOK {
+		sum := sha256.Sum256(out.body.Bytes())
+		tag := `W/"t1-` + hex.EncodeToString(sum[:16]) + `"`
+		hd.Set("ETag", tag)
+		if inm := r.Header.Values("If-None-Match"); len(inm) > 0 && tagMatches(inm, tag) {
+			hd.Del("Content-Length")
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(out.body.Bytes())
 }
 
 // noteTodoOwners notes a's manager as the owner of each todo in a, a 2xx answer to a todos list. It reads the ids from

@@ -2,8 +2,10 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,7 +39,8 @@ func TestUsageBackfillScan(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	buckets, err := n.backfillScan(context.Background(), since, before)
+	lim := &readLimiter{rate: 1 << 30, start: time.Now()}
+	buckets, err := n.backfillScan(context.Background(), since, before, lim)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +57,7 @@ func TestUsageBackfillScan(t *testing.T) {
 	// The connection ended: the scan stops.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := n.backfillScan(ctx, since, before); err == nil {
+	if _, err := n.backfillScan(ctx, since, before, lim); err == nil {
 		t.Fatal("a scan after its connection ended")
 	}
 }
@@ -91,5 +94,73 @@ func TestBackfillReadLimiter(t *testing.T) {
 	cancel()
 	if err := l.wait(ctx, 10<<20); err == nil {
 		t.Fatal("waited past the connection's end")
+	}
+}
+
+// A week's requests: whole hours each saying the last hour it holds; the last says the week is read through the hour
+// before its end (hours without usage too) and, for the last week, that the backfill is done; a week without usage is
+// one request with no buckets.
+func TestBackfillRequests(t *testing.T) {
+	end := time.Unix(100*3600, 0)
+	hour := func(h int64) proto.UsageBucket { return proto.UsageBucket{Minute: h * 3600, Model: "m"} }
+	list := []proto.UsageBucket{hour(10), hour(10), hour(20), hour(30)}
+	got := backfillRequestsSized(list, end, true, 2)
+	if len(got) != 2 || got[0]["through"] != int64(10*3600) || got[0]["done"] != false || got[1]["through"] != int64(99*3600) || got[1]["done"] != true {
+		t.Fatalf("requests = %v", got)
+	}
+	if got := backfillRequests(nil, end, false); len(got) != 1 || got[0]["through"] != int64(99*3600) || got[0]["done"] != false {
+		t.Fatalf("an empty week = %v", got)
+	}
+}
+
+// Week by week: each week counts its own replies, a fork's copy within its week once; a file's read stops once
+// backfillPast lines in a row are past the week, so the weeks together read about one pass.
+func TestUsageBackfillWeeks(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	n, home := testNode(t)
+	now := time.Now().UTC().Truncate(time.Hour)
+	w1 := now.Add(-21 * 24 * time.Hour)
+	w2 := w1.Add(backfillSlice)
+	project := filepath.Join(home, ".claude", "projects", "-work-app")
+	var long strings.Builder
+	long.WriteString(claudeReply(w1.Add(time.Hour), "a1", "claude-opus-5-5", 0, 0, 100, 1))
+	for i := range 200 { // the second week: a long tail the first week's read stops in
+		long.WriteString(claudeReply(w2.Add(time.Duration(i)*time.Minute), fmt.Sprintf("b%d", i), "claude-opus-5-5", 0, 0, 10, 1))
+	}
+	files := map[string]string{
+		filepath.Join(project, "s1.jsonl"): long.String(),
+		filepath.Join(project, "s2.jsonl"): claudeReply(w1.Add(time.Hour), "a1", "claude-opus-5-5", 0, 0, 100, 1) + // a fork's copy
+			claudeReply(w2.Add(2*time.Hour), "b0", "claude-opus-5-5", 0, 0, 10, 1), // and of a second-week reply
+	}
+	for p, body := range files {
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lim := &readLimiter{rate: 1 << 30, start: time.Now()}
+	first, err := n.backfillScan(context.Background(), w1, w2, lim)
+	if err != nil || len(first) != 1 || first[0].Requests != 1 || first[0].CacheRead != 100 || first[0].Minute != w1.Add(time.Hour).Unix() {
+		t.Fatalf("the first week = %+v, %v", first, err)
+	}
+	second, err := n.backfillScan(context.Background(), w2, w2.Add(backfillSlice), lim)
+	var replies int
+	for _, b := range second {
+		replies += b.Requests
+	}
+	if err != nil || replies != 200 {
+		t.Fatalf("the second week has %d replies (%v), want 200", replies, err)
+	}
+
+	// The first week's read of the long file stopped soon after the week's end.
+	p := filepath.Join(project, "s1.jsonl")
+	st, _ := os.Stat(p)
+	m := newUsageMeter()
+	m.step, m.until, m.seen = 3600, w2, map[uint64]struct{}{}
+	read, err := m.scanSlice(context.Background(), p, st, w1, w2, lim)
+	if err != nil || read >= st.Size()/2 || read == 0 {
+		t.Fatalf("read %d of %d bytes for the first week (%v)", read, st.Size(), err)
 	}
 }

@@ -252,7 +252,10 @@ func decisionOpen(a *acceptAsk, t Todo) bool {
 
 // acceptAskStale says an ask belongs to an earlier round: the todo was reopened (PATCH done:false, change feedback
 // on its card, or a failed start's retry) after the ask, so the old card is dead and the next deploy asks fresh.
+// A legacy owner-priority park also superseded its old decision: moving that park to needs_user cannot revive the
+// old card. A fresh needs_user review replaces that marker. Non-decision verification asks are unaffected.
 // A ReopenedAt the auto-judge's second close leaves is harmless (the new ask is younger); zero AskedAt is a claim.
 func acceptAskStale(a *acceptAsk, t Todo) bool {
-	return !a.AskedAt.IsZero() && t.ReopenedAt != nil && a.AskedAt.Before(*t.ReopenedAt)
+	return !a.AskedAt.IsZero() && (t.ReopenedAt != nil && a.AskedAt.Before(*t.ReopenedAt) ||
+		decideAsk(a) && t.Supervision.legacyOwnerPriorityReview() != nil)
 }

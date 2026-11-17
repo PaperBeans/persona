@@ -47,6 +47,7 @@ export type Panel =
   /** A task of a conversation, opened from it while Agents open in the side panel (lib/agent-open.ts, #5424): its
    *  Agent's chat (docs/assistant/unified-entry.md "Task details"). */
   | { kind: "task"; todo: string }
+  | { kind: "conversation-tasks"; mid: string; sid: string; manager: string }
   /** An Agent opened from a conversation while Agents open in the side panel (#5424), one no task stands for (#1113)
    *  included: its chat. */
   | { kind: "agent"; mid: string; sid: string }

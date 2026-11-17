@@ -1,11 +1,11 @@
 package persona.feature.chat
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import persona.core.designsystem.text
 import persona.core.designsystem.stableAlpha
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.draw.rotate
@@ -75,6 +75,8 @@ import persona.core.designsystem.Status
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.WorkflowIcon
 import persona.core.designsystem.rememberCopy
+import persona.core.designsystem.rememberOpenEdge
+import persona.core.designsystem.unfolding
 import persona.core.domain.sort.WorkflowSummary
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
@@ -239,14 +241,16 @@ private fun FeedLine(item: FeedItem, host: AssistantTaskHost) {
 @Composable
 internal fun AnsweredLine(item: FeedItem, title: String, onOpenTask: (() -> Unit)?) {
     var open by rememberSaveable(item.id) { mutableStateOf(false) }
+    val edge = rememberOpenEdge(item.id)
+    val revealing = edge.revealing(open)
     val items = remember(item) { item.answeredItems() }
     val expandable = items.isNotEmpty()
     val shape = if (open) PersonaTheme.shapes.cardShape else CircleShape
     val toggleLabel = stringResource(if (open) R.string.chat_tasks_collapse else R.string.chat_tasks_expand)
     val toggleState = stringResource(if (open) R.string.chat_tasks_expanded else R.string.chat_tasks_collapsed)
     val openTaskLabel = stringResource(R.string.chat_tasks_open_task)
-    Column(Modifier.then(if (open) Modifier.fillMaxWidth() else Modifier).clip(shape).background(PersonaTheme.palette.surfaceStrong)
-        .animateContentSize()) {
+    // Opened answers fade in place (iOS AnsweredLine, TaskViews.swift:587, ChatPin.swift:707-726). The same on iPhone and iPad.
+    Column(Modifier.then(if (open) Modifier.fillMaxWidth() else Modifier).clip(shape).background(PersonaTheme.palette.surfaceStrong)) {
         Row(Modifier.then(if (expandable) Modifier.clickable(onClickLabel = toggleLabel) { open = !open } else Modifier)
             .semantics { if (expandable) stateDescription = toggleState }
             .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
@@ -261,7 +265,7 @@ internal fun AnsweredLine(item: FeedItem, title: String, onOpenTask: (() -> Unit
                 modifier = Modifier.rotate(if (open) 90f else 0f))
         }
         if (open) SelectionContainer {
-            Column(Modifier.fillMaxWidth().padding(start = Tokens.Space.m, end = Tokens.Space.m, bottom = Tokens.Space.m)
+            Column(Modifier.unfolding(revealing).fillMaxWidth().padding(start = Tokens.Space.m, end = Tokens.Space.m, bottom = Tokens.Space.m)
                 .testTag("answered-detail"), verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
                 items.forEach { qa ->
                     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
@@ -289,13 +293,17 @@ private fun sentTitle(item: FeedItem, title: String): String =
 @Composable
 internal fun SentLine(item: FeedItem, title: String, onOpenTask: (() -> Unit)?) {
     var open by rememberSaveable(item.id) { mutableStateOf(false) }
+    val edge = rememberOpenEdge(item.id)
+    val revealing = edge.revealing(open)
     val text = item.field("text").orEmpty()
     val first = remember(text) { SentToAgents.firstLine(text) }
     val shape = if (open) PersonaTheme.shapes.cardShape else CircleShape
     val toggleLabel = stringResource(if (open) R.string.chat_tasks_collapse else R.string.chat_tasks_expand)
     val toggleState = stringResource(if (open) R.string.chat_tasks_expanded else R.string.chat_tasks_collapsed)
+    // Brief and Board keep AgentSentLine, which fades its text (SentViews.swift:30, ChatPin.swift:707-726).
+    // iPhone assistant chats use the new layout and draw RoutedExchange instead, which has no .unfolding (AgentExchange.swift:29, ChatLayout.swift:39-40).
     Column(Modifier.then(if (open) Modifier.fillMaxWidth() else Modifier).clip(shape).background(PersonaTheme.palette.surfaceStrong)
-        .animateContentSize().testTag("sent-line")) {
+        .testTag("sent-line")) {
         Row(Modifier.clickable(onClickLabel = toggleLabel) { open = !open }.semantics { stateDescription = toggleState }
             .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
@@ -309,7 +317,7 @@ internal fun SentLine(item: FeedItem, title: String, onOpenTask: (() -> Unit)?) 
             JIcon(PhIcons.CaretRight, decorative = true, size = Tokens.Space.m, tint = PersonaTheme.palette.ink3,
                 modifier = Modifier.rotate(if (open) 90f else 0f))
         }
-        if (open) SentText(text, Modifier.padding(start = Tokens.Space.m, end = Tokens.Space.m, bottom = Tokens.Space.m))
+        if (open) SentText(text, Modifier.unfolding(revealing).padding(start = Tokens.Space.m, end = Tokens.Space.m, bottom = Tokens.Space.m))
     }
 }
 
@@ -343,7 +351,6 @@ private fun TaskSentList(todoId: String, host: AssistantTaskHost) {
 internal fun TaskSentRows(sent: List<FeedItem>) {
     var open by rememberSaveable(sent.first().id) { mutableStateOf(false) }
     var shown by rememberSaveable(sent.first().id) { mutableStateOf<String?>(null) }
-    val locale = currentLocale
     val toggleState = stringResource(if (open) R.string.chat_tasks_expanded else R.string.chat_tasks_collapsed)
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
         Row(Modifier.clip(PersonaTheme.shapes.controlShape).clickable { open = !open }.semantics { stateDescription = toggleState }
@@ -355,25 +362,32 @@ internal fun TaskSentRows(sent: List<FeedItem>) {
             JIcon(PhIcons.CaretRight, decorative = true, size = Tokens.Space.m, tint = PersonaTheme.palette.ink3,
                 modifier = Modifier.rotate(if (open) 90f else 0f))
         }
-        if (open) sent.forEach { item ->
-            val text = item.field("text").orEmpty()
-            val isOpen = shown == item.id
-            Column(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.controlShape).background(PersonaTheme.palette.surfaceStrong)
-                .animateContentSize().testTag("task-sent-entry")) {
-                Row(Modifier.fillMaxWidth().clickable { shown = if (isOpen) null else item.id }
-                    .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                    AssistantLines.time(item.at)?.let { Text(LocalizedFormats.format(it, LocalizedFormats.TIME, locale),
-                        style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3, maxLines = 1) }
-                    if (item.interrupting) JIcon(PhIcons.Stop, decorative = true, size = Tokens.Space.m, tint = PersonaTheme.palette.ink2)
-                    Text(SentToAgents.firstLine(text), Modifier.weight(1f), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    JIcon(PhIcons.CaretRight, decorative = true, size = Tokens.Space.m, tint = PersonaTheme.palette.ink3,
-                        modifier = Modifier.rotate(if (isOpen) 90f else 0f))
-                }
-                if (isOpen) SentText(text, Modifier.padding(start = Tokens.Space.m, end = Tokens.Space.m, bottom = Tokens.Space.m))
-            }
+        if (open) sent.forEach { item -> TaskSentEntry(item, shown == item.id) { shown = if (shown == item.id) null else item.id } }
+    }
+}
+
+/**
+ * One instruction Persona sent: its time and first line, and the whole text when opened.
+ * iOS removed `TaskSentList` (#5569), so this row is not `.unfolding`. It keeps the size change it had.
+ */
+@Composable
+private fun TaskSentEntry(item: FeedItem, open: Boolean, onToggle: () -> Unit) {
+    val text = item.field("text").orEmpty()
+    val locale = currentLocale
+    Column(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.controlShape).background(PersonaTheme.palette.surfaceStrong)
+        .animateContentSize().testTag("task-sent-entry")) {
+        Row(Modifier.fillMaxWidth().clickable(onClick = onToggle)
+            .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+            AssistantLines.time(item.at)?.let { Text(LocalizedFormats.format(it, LocalizedFormats.TIME, locale),
+                style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3, maxLines = 1) }
+            if (item.interrupting) JIcon(PhIcons.Stop, decorative = true, size = Tokens.Space.m, tint = PersonaTheme.palette.ink2)
+            Text(SentToAgents.firstLine(text), Modifier.weight(1f), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            JIcon(PhIcons.CaretRight, decorative = true, size = Tokens.Space.m, tint = PersonaTheme.palette.ink3,
+                modifier = Modifier.rotate(if (open) 90f else 0f))
         }
+        if (open) SentText(text, Modifier.padding(start = Tokens.Space.m, end = Tokens.Space.m, bottom = Tokens.Space.m))
     }
 }
 

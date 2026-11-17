@@ -1404,6 +1404,58 @@ final class VNCTests: XCTestCase {
         XCTAssertEqual(calls.last?["op"] as? String, "stop", "\(calls)")
     }
 
+    /// Phone Screen and the keyboard (#9500): the keyboard up and down 12 times sends no second `start` (the Mac never
+    /// rebuilds the display for it), and with the keyboard up the picture keeps the view's whole width instead of shrinking.
+    @MainActor func testPhoneScreenKeyboard() throws {
+        guard ProcessInfo.processInfo.environment["PERSONA_PHONE_SCREEN"] == "1" else {
+            throw XCTSkip("needs MOCK_PHONE_SCREEN=1 (TEST_RUNNER_PERSONA_PHONE_SCREEN=1)")
+        }
+        let (app, _) = try signedInMachinePage()
+        let screen = app.descendants(matching: .any)["vnc-screen"].firstMatch
+        XCTAssertTrue(screen.waitForExistence(timeout: 10))
+        let sheet = app.descendants(matching: .any)["phone-screen-windows"].firstMatch
+        if sheet.waitForExistence(timeout: 3) { app.buttons["完成"].firstMatch.tap() }
+        app.buttons["vnc-more"].tap()
+        app.buttons["鼠标模式"].firstMatch.tap()
+        rest()
+        try mock(hub!, "/mock/screen-password?clear=1")
+        app.buttons["vnc-more"].tap()
+        app.buttons["手机屏"].firstMatch.tap()
+        XCTAssertTrue(sheet.waitForExistence(timeout: 15), "the window list:\n\(app.debugDescription)")
+        let rows = app.buttons.matching(identifier: "phone-screen-window")
+        rows.matching(NSPredicate(format: "label == %@", "build — npm run dev")).firstMatch.tap()
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        rest()
+        let keyboard = app.buttons["vnc-keyboard"]
+        func drawnWidth() -> Double {
+            let v = screen.value as? String ?? ""
+            guard let part = v.split(separator: ";").first(where: { $0.hasPrefix("drawn=") }) else { return 0 }
+            return Double(part.dropFirst("drawn=".count).split(separator: "x").first ?? "") ?? 0
+        }
+        let fullWidth = screen.frame.width
+        for i in 0..<12 {
+            keyboard.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "the keyboard came up (\(i))")
+            sleep(1)
+            if i == 0 {
+                shot(app, "phone-screen-4-keyboard")
+                hold("phone-screen-4-keyboard")
+            }
+            // The picture keeps the whole width with the keyboard up.
+            XCTAssertEqual(drawnWidth(), Double(fullWidth), accuracy: 1, "keyboard up \(i): \(String(describing: screen.value))")
+            keyboard.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard went down (\(i))")
+            sleep(1)
+        }
+        let calls = try mockState()["phone_screen"] as? [[String: Any]] ?? []
+        let starts = calls.filter { $0["op"] as? String == "start" }
+        XCTAssertEqual(starts.count, 1, "one start for the whole session, keyboard or not: \(calls)")
+        XCTAssertEqual(drawnWidth(), Double(fullWidth), accuracy: 1)
+        shot(app, "phone-screen-5-after-keyboard")
+        app.buttons["vnc-more"].tap()
+        app.buttons["鼠标模式"].firstMatch.tap()
+    }
+
     @MainActor private func live(_ app: XCUIApplication) -> Bool {
         let phase = app.descendants(matching: .any)["screen-phase"].firstMatch
         let deadline = Date.now.addingTimeInterval(30)

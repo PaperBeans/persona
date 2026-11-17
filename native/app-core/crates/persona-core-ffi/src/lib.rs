@@ -414,6 +414,22 @@ pub unsafe extern "C" fn persona_core_project_stream_repair(input: *const u8, le
     .unwrap_or_else(|_| PersonaCoreBytes::empty())
 }
 
+/// Removes the drawn info string of a still-open picture fence (`persona_core::stream_repair::PlainFenceInput`).
+/// Returns the complete `{text}` JSON. Pure function, same buffer ownership as `persona_core_project_stream_repair`.
+///
+/// # Safety
+/// `input` is valid for `length` bytes of UTF-8 JSON.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn persona_core_project_plain_open_fence(input: *const u8, length: usize) -> PersonaCoreBytes {
+    catch_unwind(AssertUnwindSafe(|| {
+        let Some(input) = json_input::<persona_core_domain::stream_repair::PlainFenceInput>(input, length) else {
+            return PersonaCoreBytes::empty();
+        };
+        json_output(&persona_core_domain::stream_repair::plain_open_fence(&input))
+    }))
+    .unwrap_or_else(|_| PersonaCoreBytes::empty())
+}
+
 /// Projects static transcript rows into turns (`persona_core::turns::Input`). Returns a JSON array of complete turn
 /// objects; the caller applies the checked-in current-iOS overlay to the fixture's expected turns before comparing.
 /// Pure function, same buffer ownership as `persona_core_project_sort`.

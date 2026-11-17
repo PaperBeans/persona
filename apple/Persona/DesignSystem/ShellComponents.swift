@@ -19,9 +19,10 @@ import SwiftUI
 struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
     @Binding var tab: AppTab
     @Environment(AppModel.self) private var model
-    /// Across the top bar, or down the side rail on iPhone Duo (`ShellSideRail`): a segment there is the page's symbol over
-    /// its name, as a tab bar's item on the side.
+    /// Across the top bar, or down the side column on iPhone Duo (`ShellSideRail`): there it is the Duo's tab bar.
     var axis: Axis = .horizontal
+    /// iPhone Duo's tab bar along the foot of the inner display upright (#4231, `TabSwitchOverlay`), across.
+    var bottomBar = false
     @ViewBuilder var chatMenu: () -> ChatMenu
     @ViewBuilder var workMenu: () -> WorkMenu
     @Namespace private var pill
@@ -31,35 +32,40 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
     /// it moves, so theirs sits on the page in front and does not read the strip at all (`PagerPill`).
     @Environment(\.shellPillFollowsStrip) private var follows
     @Environment(\.buiTheme) private var theme
-    /// The system's side column the upright switch stands in (nil: floating over the page, at its trailing corner): its
-    /// counts hang toward the page.
-    @Environment(\.shellRailEdge) private var railEdge
 
     var body: some View {
         #if DEBUG || PERF_SIGNPOST
         let _ = PerfTrace.body("ShellSwitch")
         #endif
-        if AppStyle.current.usesBeautifulUI {
+        if tabBar {
+            // iPhone Duo's tab bar (#4231): one glass capsule with a hairline edge and a faint shadow, as a tab bar down the
+            // side of the outer display looks (the owner's reference), in every style.
+            row
+                .padding(axis == .vertical ? .vertical : .horizontal, Theme.Space.s)
+                .padding(axis == .vertical ? .horizontal : .vertical, Theme.Space.xs)
+                .surface(interactive: true, in: .capsule)
+                .overlay(Capsule().strokeBorder(Theme.cardStroke, lineWidth: Theme.Size.hairline))
+                .compositingGroup()
+                .shadow(color: StyleSpec.current.softShadow, radius: Theme.Space.s, y: Theme.Space.xxs)
+                .modifier(SwitchMotion(chosen: chosen, upright: true))
+        } else if AppStyle.current.usesBeautifulUI {
             // BeautifulUI's pill segmented control: a field-colored track, the chosen segment a raised capsule.
             row
                 .padding(Theme.Space.xs)
                 .background(theme.colors.field, in: .capsule)
                 .overlay(Capsule().strokeBorder(theme.colors.line, lineWidth: Theme.Size.hairline))
-                .modifier(SwitchMotion(chosen: chosen, upright: axis == .vertical))
+                .modifier(SwitchMotion(chosen: chosen, upright: false))
         } else {
             row
                 .padding(Theme.Space.xs)
                 .surface(interactive: true, in: .capsule)
-                .modifier(SwitchMotion(chosen: chosen, upright: axis == .vertical))
+                .modifier(SwitchMotion(chosen: chosen, upright: false))
         }
     }
 
-    /// Where a segment's count hangs: off its corner toward the page on the upright switch (iPhone Duo, #4231), past
-    /// which is the screen's edge and under which rests the thumb; off the trailing one across the top.
-    private var badgeCorner: Alignment {
-        guard axis == .vertical else { return .topTrailing }
-        return railEdge == .leading ? .topTrailing : .topLeading
-    }
+    /// The switch is iPhone Duo's tab bar (#4231): down the side column, or along the foot upright. Its items are the
+    /// page's symbol over its name; across the top it is the iPhone's switch of names.
+    private var tabBar: Bool { axis == .vertical || bottomBar }
 
     /// The page the switch shows as chosen: the shell's, or `tab` outside it.
     private var chosen: AppTab {
@@ -84,30 +90,29 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
 
     private var row: some View {
         stack {
-            ZStack(alignment: badgeCorner) {
+            ZStack(alignment: .topTrailing) {
                 if opensMenu(.assistant) {
                     Menu { chatMenu() } label: { segment(String(localized: "shell.assistant", defaultValue: "Assistant", comment: "The chat side of the top switch (72 pt wide)"), .assistant, selected: true) }
                         .menuStyle(.button)
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("shell-assistant")
-                        .modifier(MenuSegmentAccess(hint: "Chat menu", upright: axis == .vertical, title: String(localized: "shell.assistant", defaultValue: "Assistant", comment: "The chat side of the top switch (72 pt wide)"), symbol: Self.symbol(.assistant)))
+                        .modifier(MenuSegmentAccess(hint: "Chat menu", upright: tabBar, title: String(localized: "shell.assistant", defaultValue: "Assistant", comment: "The chat side of the top switch (72 pt wide)"), symbol: Self.symbol(.assistant)))
                 } else {
                     button(String(localized: "shell.assistant", defaultValue: "Assistant", comment: "The chat side of the top switch (72 pt wide)"), .assistant, id: "shell-assistant")
                 }
-                // Upright, the switch stands for the tabs (iPhone Duo): Persona's count as the system's tab showed it.
-                if axis == .vertical { WaitingBadge(axis: axis, tab: .assistant) }
             }
-            ZStack(alignment: badgeCorner) {
+            ZStack(alignment: .topTrailing) {
                 if opensMenu(.chats) {
                     Menu { workMenu() } label: { segment("Agents", .chats, selected: true) }
                         .menuStyle(.button)
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("shell-agents")
-                        .modifier(MenuSegmentAccess(hint: "List options", upright: axis == .vertical, title: "Agents", symbol: Self.symbol(.chats)))
+                        .modifier(MenuSegmentAccess(hint: "List options", upright: tabBar, title: "Agents", symbol: Self.symbol(.chats)))
                 } else {
                     button("Agents", .chats, id: "shell-agents")
                 }
-                WaitingBadge(axis: axis)
+                // The tab bar's counts are on its items' symbols (`TabBarBadge`).
+                if !tabBar { WaitingBadge() }
             }
             #if os(iOS) || os(visionOS)
             if LarkHomePreference.shared.shows {
@@ -115,8 +120,9 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
             }
             #endif
         }
-        .background(alignment: axis == .vertical ? .top : .leading) {
-            if let shell { PagerPill(shell: shell, follows: follows, axis: axis) }
+        .background(alignment: .leading) {
+            // The tab bar marks its chosen item itself (`tabBarSegment`).
+            if let shell, !tabBar { PagerPill(shell: shell, follows: follows) }
         }
     }
 
@@ -143,12 +149,12 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
-        .modifier(ButtonSegmentAccess(selected: chosen == value, upright: axis == .vertical, title: title, symbol: Self.symbol(value)))
+        .modifier(ButtonSegmentAccess(selected: chosen == value, upright: tabBar, title: title, symbol: Self.symbol(value)))
     }
 
     @ViewBuilder private func segment(_ title: String, _ value: AppTab, selected: Bool) -> some View {
-        if axis == .vertical {
-            railSegment(title, symbol: Self.symbol(value), selected: selected)
+        if tabBar {
+            tabBarSegment(title, value, selected: selected)
         } else if AppStyle.current.usesBeautifulUI {
             beautifulSegment(title, selected: selected)
         } else {
@@ -164,26 +170,27 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
         return value == .chats ? Theme.Icon.agents : Theme.Icon.ai
     }
 
-    /// A segment of the upright switch (iPhone Duo's side rail and tabs, #4231): the page's symbol alone in a tap target,
-    /// as a tab bar's item down the side; its name is what VoiceOver reads and what a long press shows large
-    /// (`ButtonSegmentAccess`, `MenuSegmentAccess`). Under the chosen one the pill: the strip's (`PagerPill`) in the shell, its own round one
-    /// over the tabs, where there is no strip.
-    private func railSegment(_ title: String, symbol: String, selected: Bool) -> some View {
-        ThemedIcon(symbol).font(Theme.Font.heading)
-            .foregroundStyle(selected ? Color.primary : Color.secondary)
-            .tapTargetFrame()
-            .background {
-                if selected, shell == nil {
-                    if AppStyle.current.usesBeautifulUI {
-                        Color.clear.buiSurface(Capsule(), fill: theme.colors.surface, elevation: .button)
-                            .matchedGeometryEffect(id: "pill", in: pill)
-                    } else {
-                        Capsule().fill(Theme.Shell.segment).matchedGeometryEffect(id: "pill", in: pill)
-                    }
-                }
-            }
-            .contentShape(.capsule)
-            .accessibilityLabel(title)
+    /// An item of iPhone Duo's tab bar (#4231, after a tab bar down the side of the outer display, the owner's reference):
+    /// the page's symbol over its name, the chosen one's symbol white on a round fill of the Theme Color and its name in
+    /// it, the others a line symbol over a plain name; the page's count red at the symbol's top trailing corner
+    /// (`TabBarBadge`). Its name is what VoiceOver reads; a long press shows it large (`ButtonSegmentAccess`).
+    private func tabBarSegment(_ title: String, _ value: AppTab, selected: Bool) -> some View {
+        VStack(spacing: Theme.Space.xxs) {
+            ThemedIcon(Self.symbol(value))
+                .font(Theme.Font.heading)
+                .foregroundStyle(selected ? Color.white : Color.primary)
+                .frame(width: Theme.Size.well, height: Theme.Size.well)
+                .background { if selected { Circle().fill(Theme.accent) } }
+                .overlay(alignment: .topTrailing) { TabBarBadge(tab: value) }
+            Text(title)
+                .font(selected ? Theme.Font.labelStrong : Theme.Font.label)
+                .foregroundStyle(selected ? Theme.accent : Color.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(width: Theme.Shell.tabBarItemWidth, height: Theme.Shell.tabBarItemHeight)
+        .contentShape(.rect)
+        .accessibilityLabel(title)
     }
 
     private func beautifulSegment(_ title: String, selected: Bool) -> some View {
@@ -228,17 +235,14 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
 private struct PagerPill: View {
     let shell: ShellState
     var follows: Bool
-    /// Along the switch: across it, or down it on the side rail.
-    var axis: Axis = .horizontal
     @Environment(\.buiTheme) private var theme
 
     var body: some View {
         GeometryReader { g in
             let n = CGFloat(shell.pager.pageCount)
             let at = follows ? min(n - 1, max(0, shell.pager.position)) : CGFloat(shell.page)
-            let down = axis == .vertical
-            let size = down ? CGSize(width: g.size.width, height: g.size.height / n) : CGSize(width: g.size.width / n, height: g.size.height)
-            let offset = down ? CGSize(width: 0, height: at * size.height) : CGSize(width: at * size.width, height: 0)
+            let size = CGSize(width: g.size.width / n, height: g.size.height)
+            let offset = CGSize(width: at * size.width, height: 0)
             if AppStyle.current.usesBeautifulUI {
                 // BeautifulUI's segmented control: the chosen segment is a raised capsule.
                 Color.clear.buiSurface(Capsule(), fill: theme.colors.surface, elevation: .button)
@@ -254,17 +258,10 @@ private struct PagerPill: View {
 }
 
 /// How many agents wait on the user, over the switch's Agents. Its own view: the count changes with nearly every push
-/// (an agent asks, another is answered), and only this badge is drawn again. Over the upright switch's Assistant
-/// (iPhone Duo, #4231) the same for Persona's own conversations (`tab: .assistant`, `TabBadges.assistant`), as the
-/// system's Persona tab counted them.
+/// (an agent asks, another is answered), and only this badge is drawn again.
 private struct WaitingBadge: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.shellRailEdge) private var railEdge
-    var axis: Axis = .horizontal
-    var tab: AppTab = .chats
     private var offset: CGSize {
-        // Upright (iPhone Duo), off the segment's corner toward the page (`ShellSwitch.badgeCorner`), clear of its symbol.
-        if axis == .vertical { return UprightBadge.offset(railEdge: railEdge) }
         #if os(iOS) || os(visionOS)
         if LarkHomePreference.shared.shows { return CGSize(width: -Theme.Space.s, height: -Theme.Space.l) }
         #endif
@@ -272,27 +269,50 @@ private struct WaitingBadge: View {
     }
 
     var body: some View {
-        let waiting = tab == .assistant ? model.badges.assistant : model.agentsWaiting
+        let waiting = model.agentsWaiting
         if AppStyle.current.usesBeautifulUI, let text = CountBadge.text(waiting) {
             BUIPill(text, tone: .custom(ink: StatusPalette.needsYou.text, fill: StatusPalette.needsYou.tint))
                 .offset(offset)
                 .allowsHitTesting(false)
                 .accessibilityLabel(StateName.count(.needsYou, waiting))
-                .modifier(UprightCountID(axis: axis, tab: tab))
         } else if waiting > 0 {
             CountBadge(count: waiting, look: .needs, label: StateName.count(.needsYou, waiting))
                 .offset(offset)
                 .allowsHitTesting(false)
-                .modifier(UprightCountID(axis: axis, tab: tab))
+        }
+    }
+}
+
+/// A page's count on iPhone Duo's tab bar (#4231): white on red at its symbol's top trailing corner, hanging half off it,
+/// as the system's tab bar badges its items (the iPad's too). The tabs' numbers: what waits on the user among the Agents
+/// (`agentsWaiting`) and in Persona's own conversations (`TabBadges.assistant`); Messages has none, as its tab had none.
+/// Its own view, as `WaitingBadge`: only it is drawn again when the count changes. `shell-agents-count`,
+/// `shell-assistant-count` for the UI tests.
+private struct TabBarBadge: View {
+    @Environment(AppModel.self) private var model
+    let tab: AppTab
+
+    var body: some View {
+        let waiting = switch tab {
+        case .chats: model.agentsWaiting
+        case .assistant: model.badges.assistant
+        default: 0
+        }
+        if waiting > 0 {
+            CountBadge(count: waiting, look: .solid(Theme.tabBarBadge), label: StateName.count(.needsYou, waiting))
+                .alignmentGuide(.top) { $0[VerticalAlignment.center] }
+                .alignmentGuide(.trailing) { $0[HorizontalAlignment.center] }
+                .allowsHitTesting(false)
+                .accessibilityIdentifier(tab == .assistant ? "shell-assistant-count" : "shell-agents-count")
         }
     }
 }
 
 /// The switch's motion, in the one step of its chain where the pill's glide always was (the switch across the top as it
-/// was, #6735's stack). Upright (iPhone Duo's side rail and tabs, #4231) also: a bar of fixed items at the default text
-/// size (`Theme.Shell.switchTypeSize`), one container VoiceOver reads as a tab bar, the pill moving at once with Reduce
-/// Motion on, and away while the keyboard is up, as the tab bar it stands for goes under the keyboard: faded and out of
-/// reach, never taken out of the tree (a segment's menu may be open as the keyboard goes, docs/lessons/ios.md).
+/// was, #6735's stack). As iPhone Duo's tab bar (`upright`, #4231) also: a bar of fixed items at the default text size
+/// (`Theme.Shell.switchTypeSize`), one container VoiceOver reads as a tab bar, the chosen item changing at once with
+/// Reduce Motion on, and away while the keyboard is up, as the tab bar it stands for goes under the keyboard: faded and
+/// out of reach, never taken out of the tree (an item's menu may be open as the keyboard goes, docs/lessons/ios.md).
 private struct SwitchMotion: ViewModifier {
     let chosen: AppTab
     let upright: Bool
@@ -352,29 +372,6 @@ private struct ButtonSegmentAccess: ViewModifier {
         } else {
             content.accessibilityAddTraits(selected ? .isSelected : [])
         }
-    }
-}
-
-/// The upright switch's counts by name (`shell-agents-count`, `shell-assistant-count`), for the UI tests; the switch across
-/// the top is as it was.
-private struct UprightCountID: ViewModifier {
-    let axis: Axis
-    let tab: AppTab
-
-    func body(content: Content) -> some View {
-        if axis == .vertical {
-            content.accessibilityIdentifier(tab == .assistant ? "shell-assistant-count" : "shell-agents-count")
-        } else {
-            content
-        }
-    }
-}
-
-/// Where a count hangs off an upright segment's corner toward the page (`ShellSwitch.badgeCorner`): out past the
-/// capsule's edge, above the segment's symbol.
-nonisolated enum UprightBadge {
-    static func offset(railEdge: HorizontalEdge?) -> CGSize {
-        CGSize(width: railEdge == .leading ? Theme.Space.s : -Theme.Space.s, height: -Theme.Space.xs)
     }
 }
 

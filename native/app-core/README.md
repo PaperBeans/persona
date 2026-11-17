@@ -33,11 +33,11 @@ emulator results never fill the physical-device column.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `continuity` | 38 cases / 94 steps, including #8227 duplicate-key snapshot restoration | Full runtime corpus | Generic runtime C ABI is linked and exported; fixture replay is through SwiftPM | Full corpus through the real C XCFramework on macOS (#7160, #8972); native Store replay also exists | Full generated-codec / registry replay | Not measured; OHOS feature compiles, no loaded NAPI module | Native / native + DEBUG shadow (#7448) / native; iOS production shadow is unmerged #8970 | Android x86_64 packaged emulator replay passed; contributor-reported arm64 / 4 KiB benchmark exists, not independently rerun; physical 16 KiB acceptance blocked |
 | `transport` / `wire_envelope` | 17 wire cases plus the 64 source-derived Envelope cases and nested-scalar regressions (#8955, #8995, #9082, #9187) | Full wire runtime plus diagnostic Envelope replay | Partial: `persona_core_transport_frame` covers the shared-scalar gate and Other routing, not the complete wire corpus | No raw-transport Swift binding/replay implemented; generic action codecs are not a full wire replay | Full wire decoder plus selected production Envelope refusals | Generic runtime NAPI unexecuted; separate wire/Envelope NAPI projection not implemented | Native everywhere; no production client sends `WirePayload` | No domain-specific physical run; acceptance blocked |
-| `sort` / `state` / `recents` | 30 sort, 13 state and 21 recents cases | Sort 30; state/recents not implemented | Sort smoke only; state/recents not implemented | Sort 30 on macOS (#8952); state/recents not implemented | Sort 30 + state 13; recents not implemented | Sort is compiled for OHOS but its actual NAPI invocation is not measured; state/recents have no NAPI export | Native / native + DEBUG sort shadow (#8954) / **core Agents-list sort in production** (#8957, #8966, #9066); no state/recents migration | No domain-specific physical run; acceptance blocked |
+| `sort` / `state` / `recents` | 30 sort, 13 state and 21 recents cases | Sort 30; state/recents not implemented | Sort smoke only; state/recents not implemented | Sort 30 on macOS (#8952); state/recents not implemented | Sort 30 + state 13; recents 11 conversation + 10 setup (#9584) | Sort/recents exports committed, actual NAPI not measured; state has no NAPI export | Native / native + DEBUG sort shadow (#8954) / **core Agents-list sort in production** (#8957, #8966, #9066); no state/recents migration | No domain-specific physical run; acceptance blocked |
 | `turns` / `task_index` | 57 static turn cases and five task-index cases + receipt; four operation cases have host-JNI coverage | Turns 57 + 10 operation checkpoints; task index 5 + receipt | Turns 57; task index 5 + receipt | Turns 57; task index 5 + receipt on macOS (#8952) | Turns 57 + 10 operation checkpoints (#9235); task index 5 + receipt | Turns and task-index NAPI unexecuted; host turns is not #8808's Linux loader | Native everywhere | No domain-specific physical run; acceptance blocked |
 | `answer` | 15 question + 9 recommendation cases (#9233), including newline / NBSP / TAB trimming, and the draft each click leaves (#9238) | Full 15 + 9 | Full 15 + 9 | Full 15 + 9 on macOS (#8952 plus #9233) | Full 15 + 9 through host projection | Not measured | Native everywhere | No domain-specific physical run; acceptance blocked |
-| `stream_chunks` / `stream_repair` | Split 21; repair covers fence, table, final-marker, inline, math-end and plain-open-fence source-derived assertions | Split 21; repair 21 fence + 6 end, 22 table + 15 end, 14 final-marker, 51 explicit inline + 13 boundary, 6 explicit math end + 57 boundary expectations and 342 mixed-reply prefixes; plain fence 5 explicit + 31 boundary | Split 21; repair 80 complete objects (#9241); plain fence not implemented | Split 21 on macOS; repair not implemented | Split 21; repair 80 complete objects (#9241); plain fence not implemented | Split NAPI unexecuted; repair NAPI export committed, real NAPI not executed; no plain-fence export | Native everywhere | No domain-specific physical run; acceptance blocked |
-| `viewed_images` | Source-derived ordinary/folded leaf and turn ownership | Ordinary/folded leaf plus identity, ordering and error controls | Ordinary + folded complete objects (#9017) | 28 complete objects + 8 no-line boundaries on macOS (#9237 / #9246) | Not implemented | Not implemented; no NAPI export | Native everywhere | No domain-specific physical run; acceptance blocked |
+| `stream_chunks` / `stream_repair` | Split 21; repair covers fence, table, final-marker, inline, math-end and plain-open-fence source-derived assertions | Split 21; repair 21 fence + 6 end, 22 table + 15 end, 14 final-marker, 51 explicit inline + 13 boundary, 6 explicit math end + 57 boundary expectations and 342 mixed-reply prefixes; plain fence 5 explicit + 31 boundary | Split 21; repair 80 complete objects (#9241); plain fence 5 explicit + 31 boundary (#9563) | Split 21 on macOS; repair not implemented | Split 21; repair 80 complete objects (#9241); plain fence 5 explicit + 31 boundary (#9563) | Split NAPI unexecuted; repair and plain-fence NAPI exports committed, real NAPI not executed | Native everywhere | No domain-specific physical run; acceptance blocked |
+| `viewed_images` | Source-derived ordinary/folded leaf and turn ownership | Ordinary/folded leaf plus identity, ordering and error controls | Ordinary + folded complete objects (#9017) | 28 complete objects + 8 no-line boundaries on macOS (#9237 / #9246) | Ordinary post-overlay + folded complete objects (#9577); no-image/malformed/wrong-expectation controls | NAPI export committed, real NAPI not executed | Native everywhere | No domain-specific physical run; acceptance blocked |
 
 `scripts/ci/core.sh` exercises the cargo, C ABI and ArkTS-host columns, including generated-codec and OHOS declaration
 checks. `:core:rustcore:test` is the real host-JNI suite; `:core:data` / `:feature:agents` host tests cover their
@@ -51,8 +51,9 @@ table scanner, final unfinished block-marker hold-back, scalar inline repair and
 and real host-JNI evidence. Their C ABI and ArkTS-host replays (#9241) cover the named fence/table/marker inputs,
 including inherited inline expectations; they do not replay the complete inline or math corpora. The separate
 `projectPlainOpenFence` Kotlin/JNI projection (#9515) replays five explicit Apple assertions and 31 source-derived
-controls, taking the caller's exact drawn-info-string list as input. It has no C ABI, ArkTS, SwiftPM, real-NAPI or
-production-adapter coverage. Rendering, timing/coalescing and production adapters remain out of scope; no SwiftPM or real-NAPI repair replay exists. #8227 was a duplicate-key snapshot correctness bug and is
+controls, taking the caller's exact drawn-info-string list as input. The independent Linux C ABI client and real ArkTS
+host helper replay that same corpus (#9563) through separate `{text}` projection entry points. There is no SwiftPM,
+real-NAPI or production-adapter coverage. Rendering, timing/coalescing and production adapters remain out of scope. #8227 was a duplicate-key snapshot correctness bug and is
 closed. It does not close
 the separate Android performance follow-up: #9048's lock-free dispatch and owned-JNI-byte hand-off have overlapping
 host A/B distributions, and the original emulator / device go/no-go evidence remains unresolved as recorded in the plan.
@@ -90,7 +91,9 @@ unchanged fixtures through every pure C projection: sort's `empty_list` and the 
 invalid page/option and the U+200B boundaries), `persona_core_project_stream_chunks` for all 21 complete
 `{done, tail}` objects, `persona_core_project_stream_repair` (#9241) for 22 fence + 19 marker/boundary + 39
 table/boundary complete `{repaired, end}` objects stated independently from the Apple tests/source and existing JNI
-replay,
+replay. The separate `persona_core_project_plain_open_fence` (#9563) replays #9515's five explicit Apple assertions
+and 31 source-derived controls through complete `{text}` objects and wrong-expectation controls, including Unicode
+whitespace, exact drawn predicates and malformed input.
 `persona_core_project_turns` for all 57 static cases with the checked-in current-iOS overlay
 applied by the client (73 complete turn objects across the 54 non-empty cases), and
 `persona_core_project_task_index` for all five complete expected objects plus the background receipt, and
@@ -199,6 +202,36 @@ Neither accept nor close waits for Rust; close preserves queued inputs. After ev
 and after draining on close, each shadow logs only `compared=<count> mismatches=<count>` to `PersonaCoreShadow`.
 `compared` excludes queued inputs, failed native work and rejections; `mismatches` counts individual rule reports.
 Release source sets contain neither the shadow nor its preferences.
+
+## iOS production DEBUG continuity shadow (#8970)
+
+The iOS `ChatStore` remains the authoritative production implementation behind its continuity adapter. DEBUG mirrors
+its immutable inputs into the real C core on a private serial queue, applies each drained patch and compares decoded
+items and continuity state. The mirror covers the native cached snapshot, prefetch and reload-retention semantics,
+older pages and independently opened folds. Core effects never reach transport. A patch is a delta, not a snapshot;
+scheduling-only inputs must not clear its state by draining without applying it.
+
+Diagnostics contain only the domain, rule and input shape (kind, counts and presence flags). They never contain item
+JSON, message text, identifiers, history or sequence values. DEBUG uses the mirror by default, with
+`-showContinuityShadow NO` to turn it off and `YES` to opt in for performance A/B; Release has neither the mirror nor
+the switch. Optimized simulator evidence is labelled as such and is not a physical-device acceptance.
+
+## iOS Agents-list adapter and sort shadow (#9058)
+
+`AgentSortProjectionAdapter` returns the existing Swift `AgentListProjection`; there is no Rust production-selection
+path. `-showAgentSortShadow` is opt-in in DEBUG only. The observer waits for the published structural revision, takes
+the cache's immutable input and already-computed projection, then submits at most one running and one pending comparison
+to a utility queue. Presentation folds, including `TabPanes` tabs, are not part of the production cache key and never
+rebuild or reorder its result. JSON conversion, C ABI invocation and typed output comparison happen off the main actor,
+not in a view body. Reports contain only the domain, a rule, enum values and counts/flags, including a periodic compared
+count; never titles, identifiers, paths, query text or exception messages.
+
+The shared `agents_list` fixture contract remains unchanged. `presentation_rows` is a separate opt-in for the compact By
+Project tab rows (#9292), and the adapter passes the production-prepared parent rows, nested-row counting flags and
+folded-child counts (#9136). A single frozen `now` drives both sides of `since:`; timestamps retain fractional seconds.
+Unsupported grouping, hub/source filters and extended search scopes are explicitly reported, not silently treated as
+parity. The unregistered-machine and matching-parent core discrepancy remains tracked as #9221. This is a DEBUG shadow,
+not approval to replace Swift with the core.
 
 ## Android Agents-list adapter and sort shadow (#8954)
 
@@ -326,10 +359,21 @@ notices/statuses. Exact manifests, malformed inputs and deliberately wrong expec
 `harmony/tests/core-host/stream-repair.test.mjs` (#9241) replays the same 80 complete `{repaired, end}` objects
 through the `stream_repair` host projection command, including the digit, leading-blank-line and delimiter boundaries.
 Both surfaces reject malformed inputs and deliberately wrong `end`, wrong `repaired` and extra-field expectations.
+The separate `plain_open_fence` host projection (#9563) replays #9515's five explicit Apple assertions and 31
+source-derived controls through complete `{text}` objects and wrong-expectation checks, including malformed input and
+non-drawn preservation.
 The `ohos`-feature NAPI projection exports are `coreProjectSort`, `coreProjectAnswer`, `coreDisplayAnswer`,
-`coreProjectStreamChunks`, `coreProjectStreamRepair` (#9241), `coreProjectTaskIndex` and `coreProjectTurns`; their
-generated declarations are checked for drift. `coreDisplayAnswer` takes a bare option label, while the other six take
+`coreProjectStreamChunks`, `coreProjectStreamRepair` (#9241), `coreProjectPlainOpenFence` (#9563),
+`coreProjectViewedImages` (#9577), `coreProjectRecents` (#9584), `coreProjectTaskIndex` and `coreProjectTurns`; their
+generated declarations are checked for drift. `coreDisplayAnswer` takes a bare option label, while the other nine take
 JSON documents.
+`harmony/tests/core-host/recents.test.mjs` (#9584) replays all 11 conversation and 10 setup fixture cases through the
+real `recents` host dispatcher, comparing complete expected objects and exact manifests. The fixture supplies the shown
+operation's existing-key list in place of a persistence closure; no storage, clock or production adapter is introduced.
+`harmony/tests/core-host/viewed-images.test.mjs` (#9577) compares the ordinary complete post-overlay object and the
+source-derived folded object through the real `viewed_images` host projection, including identity, order, malformed,
+no-image and deliberately wrong expectations. It does not reconstruct `FoldImage.ref`, load images or project full
+`ChatLine`s.
 `harmony/tests/core-host/turns.test.mjs` (#9235) adds `coreProjectTurns` and its host JSON projection. It compares
 all 57 unchanged static cases after applying the checked-in current-iOS overlay: 54 nonempty cases hold 73 complete
 turn objects, and three explicitly named cases compare empty arrays rather than establishing layout coverage. The
@@ -447,7 +491,9 @@ and an older page into history, and refusal, other-frame and dispatch-cost tests
 binding (`TransportBindingFixtureTest` in `:core:rustcore`) and through ArkTS and the transport decoder on the host
 (`harmony/tests/core-host/transport.test.mjs`); both are host evidence, not device runs.
 
-The patch also carries `verified` (the chat's items are known complete, the rule Android used to derive per
+  - A no-op batch without a span merges rather than clearing existing items; pending patches commit their complete
+    state and ops together on drain (#8970, with a new 39th case / 95th step in the shared corpus).
+  - The patch also carries `verified` (the chat's items are known complete, the rule Android used to derive per
 client), and `acked` (a host's acknowledgement watermark, so an applied no-op is visible). `Action::HubChanged`
 settles as if a gap were found, iOS's `settle(.fill)`. Folds are keyed by id and independent: different folds open
 and complete in either order, with `fold_id` on the range request, event and payload; a caller that sends no id keeps

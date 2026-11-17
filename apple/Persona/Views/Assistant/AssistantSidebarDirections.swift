@@ -52,7 +52,6 @@ struct AssistantSidebarDirection<Head: View>: View {
                 NavigationStack {
                     TodoDetailView(todoID: r.id).macSheetDone { shownTodo = nil }
                 }
-                .overTabSwitch()
                 #if os(macOS)
                 .macSheet()
                 #endif

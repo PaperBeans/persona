@@ -21,6 +21,13 @@ import (
 // window's start), stores only hours that have no usage yet, and records how far it got, so a scan cut off continues
 // and one run again counts nothing twice.
 //
+// It goes a week at a time (backfillSlice), oldest first, and sends each week before reading the next: the manager
+// records the last hour stored, so a scan the connection cuts (the hub restarts several times an hour, and a
+// computer with many gigabytes of transcripts takes longer than that, #9562) goes on from the next week on the next
+// connection, and the node keeps nothing. A fork's copy of a reply keeps its timestamp, so it falls in the same week
+// and is still counted once. Within a file, reading stops once its lines are past the week, so the weeks together
+// read about one pass of the transcripts.
+//
 // The scan is gentle: it waits a few minutes after the connection, reads at backfillRate at most, and ends with the
 // connection.
 
@@ -30,6 +37,13 @@ const (
 	backfillRead  = 256 << 10       // the most one read takes before it waits its turn
 	backfillChunk = 2000            // buckets a request, whole hours
 	backfillCall  = 30 * time.Second
+	// backfillSlice is what one pass reads and stores: a cut connection loses one week's reading at most.
+	backfillSlice = 7 * 24 * time.Hour
+	// backfillPast: this many lines in a row past a week's end end a file's read (a line that names a later time
+	// inside it, a tool's input, does not).
+	backfillPast = 50
+	// backfillSmall: a file under this is read from its start; a larger one from about the week's start (startOffset).
+	backfillSmall = 256 << 10
 )
 
 // backfillStatus is the manager's answer to usage.backfill.status.
@@ -63,45 +77,68 @@ func (n *Node) backfillUsage(ctx context.Context, stateLoaded <-chan struct{}) {
 	}
 	since, before := time.Unix(st.Since, 0), time.Unix(st.Before, 0)
 	started := time.Now()
-	buckets, err := n.backfillScan(ctx, since, before)
-	if err != nil {
-		return
-	}
-	hours := 0
-	chunks := backfillChunks(buckets, backfillChunk)
-	for i, chunk := range chunks {
-		var through int64
-		if len(chunk) > 0 {
-			through = chunk[len(chunk)-1].Minute
+	lim := &readLimiter{rate: backfillRate, start: started}
+	read, hours := 0, 0
+	for start := since; start.Before(before); {
+		end := start.Add(backfillSlice)
+		if end.After(before) {
+			end = before
 		}
-		last := i == len(chunks)-1
-		var res struct {
-			Stored int `json:"stored"`
-		}
-		cctx, cancel := context.WithTimeout(ctx, backfillCall)
-		err := n.peer.Call(cctx, "usage.backfill", map[string]any{"buckets": chunk, "through": through, "done": last}, &res)
-		cancel()
-		if err != nil { // the next connection asks again, from the hour after the last stored
-			n.logger.Printf("usage backfill: %v", err)
+		buckets, err := n.backfillScan(ctx, start, end, lim)
+		if err != nil {
 			return
 		}
-		hours += res.Stored
+		for _, req := range backfillRequests(buckets, end, end.Equal(before)) {
+			var res struct {
+				Stored int `json:"stored"`
+			}
+			cctx, cancel := context.WithTimeout(ctx, backfillCall)
+			err := n.peer.Call(cctx, "usage.backfill", req, &res)
+			cancel()
+			if err != nil { // the next connection asks again, from the hour after the last stored
+				n.logger.Printf("usage backfill: %v (%d hours stored)", err, hours)
+				return
+			}
+			hours += res.Stored
+		}
+		read += len(buckets)
+		start = end
 	}
-	n.logger.Printf("usage backfill: %d buckets read in %s, %d hours stored", len(buckets), time.Since(started).Round(time.Second), hours)
+	n.logger.Printf("usage backfill: %d buckets read in %s, %d hours stored", read, time.Since(started).Round(time.Second), hours)
 }
 
-// backfillScan sums the replies of every transcript from since to before by the hour, model and launcher, in time
+// backfillRequests are a week's usage.backfill requests: its buckets (in time order) in whole hours, each saying the
+// last hour it holds, the last the hour before end (the week is read through it, hours without usage too) and, with
+// done, that the backfill is.
+func backfillRequests(buckets []proto.UsageBucket, end time.Time, done bool) []map[string]any {
+	return backfillRequestsSized(buckets, end, done, backfillChunk)
+}
+
+func backfillRequestsSized(buckets []proto.UsageBucket, end time.Time, done bool, size int) []map[string]any {
+	chunks := backfillChunks(buckets, size)
+	out := make([]map[string]any, len(chunks))
+	for i, chunk := range chunks {
+		last := i == len(chunks)-1
+		through := end.Add(-time.Hour).Unix()
+		if !last {
+			through = chunk[len(chunk)-1].Minute
+		}
+		out[i] = map[string]any{"buckets": chunk, "through": through, "done": done && last}
+	}
+	return out
+}
+
+// backfillScan sums the replies of every transcript from start to end by the hour, model and launcher, in time
 // order. Only ctx ending stops it (its error).
-func (n *Node) backfillScan(ctx context.Context, since, before time.Time) ([]proto.UsageBucket, error) {
+func (n *Node) backfillScan(ctx context.Context, start, end time.Time, lim *readLimiter) ([]proto.UsageBucket, error) {
 	m := newUsageMeter()
-	m.step, m.until, m.seen = 3600, before, map[uint64]struct{}{}
+	m.step, m.until, m.seen = 3600, end, map[uint64]struct{}{}
 	m.launcherOf = func(session string) string {
 		st, _ := n.state.get(session)
 		return st.Launcher
 	}
-	lim := &readLimiter{rate: backfillRate, start: time.Now()}
-	for _, f := range n.usageFiles(since) {
-		if err := m.scanAll(ctx, f.path, f.st, since, lim); err != nil {
+	for _, f := range n.usageFiles(start) { // the files changed since the week began
+		if _, err := m.scanSlice(ctx, f.path, f.st, start, end, lim); err != nil {
 			return nil, err
 		}
 	}
@@ -132,25 +169,35 @@ func backfillChunks(buckets []proto.UsageBucket, size int) [][]proto.UsageBucket
 	return append(out, buckets[start:])
 }
 
-// scanAll reads path whole from about since (startOffset), through lim, as scan reads what a file gained.
-func (m *usageMeter) scanAll(ctx context.Context, path string, st os.FileInfo, since time.Time, lim *readLimiter) error {
+// scanSlice reads path from about start (startOffset, from its start when small) through lim until its lines are
+// past end (backfillPast of them in a row), as scan reads what a file gained; read is how far it got.
+func (m *usageMeter) scanSlice(ctx context.Context, path string, st os.FileInfo, start, end time.Time, lim *readLimiter) (read int64, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return ctx.Err()
+		return 0, ctx.Err()
 	}
 	defer f.Close()
 	uf := &usageFile{session: usageSession(path)}
-	off := startOffset(path, st.Size(), since)
+	off := startOffsetFrom(path, st.Size(), start, backfillSmall)
 	codex := strings.HasPrefix(filepath.Base(path), "rollout-")
 	r := &limitedReader{ctx: ctx, r: io.NewSectionReader(f, off, st.Size()-off), lim: lim}
-	eachLine(r, func(line []byte) {
-		if codex {
-			m.codexLine(uf, line, since)
-		} else {
-			m.claudeLine(uf, line, since)
+	past := 0
+	read = off + eachLineAt(r, func(line []byte, _, _ int64) bool {
+		if ts := firstTime(line); !ts.IsZero() {
+			if ts.Before(end) {
+				past = 0
+			} else if past++; past >= backfillPast {
+				return false
+			}
 		}
+		if codex {
+			m.codexLine(uf, line, start)
+		} else {
+			m.claudeLine(uf, line, start)
+		}
+		return true
 	})
-	return ctx.Err()
+	return read, ctx.Err()
 }
 
 // readLimiter keeps the reads of a backfill to rate bytes a second on average.

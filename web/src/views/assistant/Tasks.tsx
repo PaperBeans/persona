@@ -987,7 +987,7 @@ function OpenEntry({ title, onOpen }: { title: string; onOpen: () => void }) {
 }
 
 /** The whole card of a Needs you row, or the one line it is. `nested`: inside its opened row, which carries the row's key. */
-function NeedsYouBody({ item, nested = false }: { item: NeedsYouItem; nested?: boolean }) {
+export function NeedsYouBody({ item, nested = false }: { item: NeedsYouItem; nested?: boolean }) {
   const rowKey = nested ? undefined : item.key;
   if (item.kind === "plan") return <PlanCard plan={item.plan} />;
   if (item.kind === "message") return <MessageCard item={item.item} />;

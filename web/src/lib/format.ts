@@ -43,6 +43,14 @@ export function interactionCanAnswer(ix: Pick<Interaction, "session_id">, sessio
   return ix.session_id === "" || sessionCan(session, "approve");
 }
 
+/** Why this page can't answer a card (#7497), as iOS (#6868) and Android (`approvalBlockedReason`) say it: null when it
+ *  can; "attach" when linking the session live would let it (a Codex thread Persona hasn't joined yet); else "computer",
+ *  an unknown session included. */
+export function answerBlock(ix: Pick<Interaction, "session_id">, session: Session | undefined): "attach" | "computer" | null {
+  if (interactionCanAnswer(ix, session)) return null;
+  return sessionCan(session, "attach") ? "attach" : "computer";
+}
+
 // The node writes some reasons with their own "View only: " in Chinese, which the subtitle adds already (#7803;
 // Android's READ_ONLY_PREFIX).
 const NODE_READ_ONLY_PREFIX = "仅查看："; // i18n-ignore: the node's prefix it strips

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -80,5 +82,28 @@ func TestRemoteImageAnswers(t *testing.T) {
 	writeRemoteImageError(w, &remoteimage.Error{Code: remoteimage.CodeRateLimited, Status: http.StatusTooManyRequests, RetryAfter: 1500 * time.Millisecond})
 	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != "2" {
 		t.Fatalf("limit answered %d, Retry-After %q", w.Code, w.Header().Get("Retry-After"))
+	}
+}
+
+// manager.json's remote_images.doh (#9550): the default when it names none, off when empty, else what it names.
+func TestRemoteImageDoHFromManagerConfig(t *testing.T) {
+	s := newTestService(t, newFakeHub())
+	if got := s.remoteImageDoH(); got != remoteimage.DefaultDoH {
+		t.Fatalf("no manager.json: %q, want the default", got)
+	}
+	file := filepath.Join(t.TempDir(), "manager.json")
+	s.repositoryConfig = file
+	for body, want := range map[string]string{
+		`{}`:                           remoteimage.DefaultDoH,
+		`{"remote_images":{}}`:         remoteimage.DefaultDoH,
+		`{"remote_images":{"doh":""}}`: "",
+		`{"remote_images":{"doh":" https://doh.example.org/resolve "}}`: "https://doh.example.org/resolve",
+	} {
+		if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := s.remoteImageDoH(); got != want {
+			t.Errorf("%s: %q, want %q", body, got, want)
+		}
 	}
 }

@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/managerconf"
 	"github.com/nwverse/persona/server/internal/remoteimage"
 )
 
@@ -79,4 +81,24 @@ func queryURL(raw string) string {
 		}
 	}
 	return ""
+}
+
+// remoteImageDoH is manager.json's remote_images.doh: the DNS-over-HTTPS JSON API the route asks for a host's real
+// addresses when this machine's resolver answers only a fake-IP proxy's (#9550, remoteimage/doh.go).
+// remoteimage.DefaultDoH when it names none; "" asks none, and such pictures are refused. Read when one is needed.
+func (s *Service) remoteImageDoH() string {
+	var cfg struct {
+		RemoteImages struct {
+			DoH *string `json:"doh"`
+		} `json:"remote_images"`
+	}
+	if s.repositoryConfig != "" {
+		if raw, err := managerconf.ReadFile(s.repositoryConfig); err == nil && raw != nil {
+			_ = json.Unmarshal(raw, &cfg)
+		}
+	}
+	if cfg.RemoteImages.DoH == nil {
+		return remoteimage.DefaultDoH
+	}
+	return strings.TrimSpace(*cfg.RemoteImages.DoH)
 }

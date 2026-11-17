@@ -102,7 +102,10 @@ type Options struct {
 	CacheDir string
 	// CacheMax is the disk cache's cap in bytes (0: 512 MiB).
 	CacheMax int64
-	Logf     func(format string, args ...any)
+	// DoH is the DNS-over-HTTPS JSON API asked for a host's real addresses when the resolver answers only a fake-IP
+	// proxy's (doh.go), read when one is needed; nil or "" asks none, and such answers are refused.
+	DoH  func() string
+	Logf func(format string, args ...any)
 
 	// Seams for tests.
 	resolve func(ctx context.Context, host string) ([]net.IPAddr, error)
@@ -122,8 +125,10 @@ type Fetcher struct {
 	decodes   chan struct{}
 	cache     *diskCache
 	limits    *limiter
+	dohClient *http.Client
 
 	mu      sync.Mutex
+	doh     map[string]dohEntry
 	calls   map[string]*call
 	failed  map[string]failure
 	sources map[string]*call
@@ -172,6 +177,9 @@ func New(o Options) *Fetcher {
 		calls:   map[string]*call{},
 		failed:  map[string]failure{},
 		sources: map[string]*call{},
+		doh:     map[string]dohEntry{},
+		// The DoH service is the operator's: reached as the machine reaches the internet (its proxy too).
+		dohClient: &http.Client{Timeout: dohTimeout},
 	}
 	f.transport = f.newTransport()
 	if o.CacheDir != "" {

@@ -94,6 +94,9 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
     private var heldDrag = false
     /// The display shown alone (`VNCDisplay.id`), for its own scale when the Mac's displays differ (#9314).
     var regionID: String?
+    /// Phone Screen upright (#9500): the picture fills the view's width and the keyboard covers its bottom rather than
+    /// shrinking it (`VNCZoom.phoneFit`).
+    var fillsWidth = false { didSet { if fillsWidth != oldValue { shown = nil; setNeedsLayout() } } }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -156,7 +159,17 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
         return region
     }
 
-    private var fitted: CGRect { VNCZoom.fit(visible.size, in: bounds) }
+    private var fitted: CGRect {
+        guard fillsWidth else { return VNCZoom.fit(visible.size, in: bounds) }
+        var pointer: CGPoint?
+        if let s = session, visible.contains(s.pointer), visible.height > 0 {
+            pointer = CGPoint(x: (s.pointer.x - visible.minX) / visible.width, y: (s.pointer.y - visible.minY) / visible.height)
+        }
+        return VNCZoom.phoneFit(visible.size, in: bounds, pointer: pointer, margin: Theme.Space.xxl)
+    }
+
+    /// Phone Screen's picture is taller than the view (the keyboard is up): two fingers move it to show the rest.
+    private var overhangs: Bool { fillsWidth && fitted.height > bounds.height + 1 }
     private var rect: CGRect { shown ?? fitted }
     private var viewport: VNCViewport { VNCViewport(visible: visible, rect: rect) }
 
@@ -171,6 +184,8 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
     override func layoutSubviews() {
         super.layoutSubviews()
         if bounds.size != laidOut {
+            // Phone Screen: only moved to see under the keyboard (not zoomed), it goes back as the view changes size.
+            if fillsWidth, let r = shown, abs(r.width - bounds.width) < 1 { shown = nil }
             if let r = shown, laidOut.width > 0 {
                 shown = VNCZoom.turned(r, picture: visible.size, from: CGRect(origin: .zero, size: laidOut), to: bounds)
             }
@@ -221,9 +236,10 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
             #if DEBUG
             // UI tests measure (the frame rate, the latency) and look (the pointer's size in points, #3075; the zoom and
             // where the pointer is drawn, #6196).
-            accessibilityValue = String(format: "fps=%.0f;latency=%.0f;mode=%@;pointer=%.0fx%.0f;zoom=%.2f;at=%.0f,%.0f;picture=%@", // i18n-ignore
+            accessibilityValue = String(format: "fps=%.0f;latency=%.0f;mode=%@;pointer=%.0fx%.0f;zoom=%.2f;at=%.0f,%.0f;picture=%@;drawn=%.0fx%.0f", // i18n-ignore
                                         s.fps, s.latency ?? -1, mode.rawValue, pointerLayer.frame.width, pointerLayer.frame.height,
-                                        port.rect.width / max(fitted.width, 1), at.x, at.y, video.isHidden ? "vnc" : "video") // i18n-ignore
+                                        port.rect.width / max(fitted.width, 1), at.x, at.y, video.isHidden ? "vnc" : "video",
+                                        port.rect.width, port.rect.height) // i18n-ignore
             #endif
         }
         CATransaction.commit()
@@ -368,7 +384,7 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
             : lifted || g.numberOfTouches < 2 ? two.meaning : two.moved(center: g.location(in: self), spread: spread(g))
         guard meaning != .undecided else { return }
         let t = g.translation(in: self)
-        if shown != nil, mode.underFinger { // zoomed in: two fingers move the picture
+        if shown != nil && mode.underFinger || overhangs { // zoomed in (or taller than the view): two fingers move the picture
             var r = rect
             r.origin.x += t.x
             r.origin.y += t.y
@@ -539,6 +555,8 @@ struct VNCScreen: UIViewRepresentable {
     var region: CGRect? = nil
     /// That display's id (`VNCDisplay.id`), for its scale when the Mac's displays differ (#9314).
     var regionID: String? = nil
+    /// Phone Screen upright: the picture fills the width and the keyboard covers it (#9500).
+    var fillsWidth = false
     /// The view, for the page's Center Pointer and Zoom In.
     var onView: (VNCScreenUIView) -> Void = { _ in }
     /// Zoomed in or back to fitted.
@@ -567,6 +585,7 @@ struct VNCScreen: UIViewRepresentable {
         v.interactive = interactive
         v.region = region
         v.regionID = regionID
+        v.fillsWidth = fillsWidth
         _ = (session.pointer, session.size, session.cursor?.width, session.phase, session.fps) // redrawn as they change
         #if os(iOS) && canImport(PersonaScreenKit)
         _ = (session.video.showing, session.video.rect)

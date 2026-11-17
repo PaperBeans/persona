@@ -23,6 +23,31 @@ type langWriter struct {
 
 func (w langWriter) Lang() i18n.Lang { return w.lang }
 
+// A session or file the node says is not there is 404 not_found, never the 502 internal of a failed call: a request
+// for a session id its machine has no transcript for (#9551) is the client's, and nothing is retried. The summary is
+// in the request's language, the node's words the detail; with no language they stay the error.
+func TestCallNotFoundIs404(t *testing.T) {
+	const words = "transcript for session 11111111-2222-3333-4444-555555555555 not found"
+	rec := httptest.NewRecorder()
+	body := call(t, rec, rec, &rpc.Error{Code: proto.CodeNotFound, Message: words})
+	if rec.Code != http.StatusNotFound || body["code"] != "not_found" || body["retryable"] != false || body["error"] != words {
+		t.Errorf("no language: %d %v", rec.Code, body)
+	}
+	for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
+		rec := httptest.NewRecorder()
+		body := call(t, langWriter{rec, lang}, rec, fmt.Errorf("session.items: %w", &rpc.Error{Code: proto.CodeNotFound, Message: words}))
+		if rec.Code != http.StatusNotFound || body["code"] != "not_found" || body["retryable"] != false ||
+			body["error"] != i18n.T(lang, "http-status.not_found") || body["detail"] != words {
+			t.Errorf("%s: %d %v", lang, rec.Code, body)
+		}
+	}
+	// An uncoded failure is still the hub's 502.
+	rec = httptest.NewRecorder()
+	if body := call(t, rec, rec, errors.New("boom")); rec.Code != http.StatusBadGateway || body["code"] != "internal" {
+		t.Errorf("plain error: %d %v", rec.Code, body)
+	}
+}
+
 // A start the node refused on its request, with nothing to name: a launcher that cannot be read-only, a directory whose
 // name cannot be typed into a terminal. The hub words both, for a session's start_error and an HTTP answer.
 func TestPlainStartRefusalLocalization(t *testing.T) {

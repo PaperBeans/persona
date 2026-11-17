@@ -393,7 +393,7 @@ func TestRuntimeLauncherAvailabilityCheck(t *testing.T) {
 		if method != "launchers.check" {
 			return nil, errors.New("unexpected shell fallback")
 		}
-		var p struct{ Launcher, Cwd, Prompt string }
+		var p struct{ Launcher, Cwd, Prompt, Model string }
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
@@ -401,13 +401,13 @@ func TestRuntimeLauncherAvailabilityCheck(t *testing.T) {
 		if _, err := os.Stat(p.Cwd); err != nil {
 			return nil, err
 		}
-		if p.Launcher != "paseo-claude" || p.Prompt == "" {
+		if p.Launcher != "paseo-claude" || p.Prompt == "" || p.Model != "opus" {
 			return nil, errors.New("missing check parameters")
 		}
 		return proto.LauncherCheck{OK: true, Model: "native-model", Answer: "OK"}, nil
 	}
 	host.mu.Unlock()
-	result := n.launcherCheck(context.Background(), "paseo-claude")
+	result := n.launcherCheck(context.Background(), "paseo-claude", "opus")
 	if !result.OK || result.Model != "native-model" || result.Agent != "claude" || result.Answer != "OK" {
 		t.Fatalf("native check: %+v", result)
 	}
@@ -431,7 +431,7 @@ func TestRuntimeLauncherAvailabilityCheck(t *testing.T) {
 func TestRuntimeAvailabilityCheckRequiresOptIn(t *testing.T) {
 	n, _ := runtimeNode(t)
 	host := dialRuntime(t, n, paseoEngineHello())
-	if _, handled := n.runtimeLauncherCheck(context.Background(), n.runtimes.launcherRuntime("paseo-claude"), "paseo-claude", t.TempDir(), "probe"); handled {
+	if _, handled := n.runtimeLauncherCheck(context.Background(), n.runtimes.launcherRuntime("paseo-claude"), "paseo-claude", t.TempDir(), "probe", ""); handled {
 		t.Fatal("older runtime intercepted the shell check")
 	}
 	if len(host.got("launchers.check")) != 0 {

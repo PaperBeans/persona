@@ -299,7 +299,7 @@ final class AgentSync {
         guard shouldApply() else { throw CancellationError() }
         let r = try await api.items(key, afterSeq: store.covered)
         guard shouldApply() else { throw CancellationError() }
-        let gap = store.apply(r.items, span: r.span, moreAfter: r.moreAfter == true)
+        let gap = model.applyPrefetch(store, items: r.items, span: r.span, moreAfter: r.moreAfter == true)
         switch gap {
         case .none: break
         case .fill: await model.fill(key, shouldApply: shouldApply)

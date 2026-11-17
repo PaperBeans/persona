@@ -713,6 +713,12 @@ Settings › Meetings, the meeting page, the Live Activity, the recording's page
   never ignores it whole. The `200`'s `transcription` and `transcription_problem` reach the store
   (`RecordingSync.onTranscription`) before the attendance it carried counts as stored. Device transcription and
   15-second segments keep running in hub mode: they are the fallback, they fill the gaps, they are the `segments`.
+  A segment inside the meeting's hub-mode time that the phone can't transcribe (no model for the language, a format it
+  can't read; the simulator, always) keeps no text of its own, and the next one is tried (#9491,
+  `RecordingTranscription.hubTranscribes`): the hub's final pass transcribes its own copy, so the upload still says
+  `complete: true` and the minutes come, rather than the hub waiting 12 hours for them. A device-mode meeting, and a
+  segment outside hub-mode time (a Note, after a rollback or after hub transcription stopped), still needs the phone's
+  text, and its failure is the recording's.
 - **The mode in effect** (`MeetingTranscriptionRule.decide`) is the `200`'s word, and `hub` only when the phone asked for
   it, so a meeting's audio never leaves the phone unasked. A `200` without `transcription` is an older manager: `device`
   for the rest of the recording (`olderManager`), a running uplink stopped, whatever a later `200` says. The rollback is
@@ -780,7 +786,7 @@ Settings › Meetings, the meeting page, the Live Activity, the recording's page
   comes to the front). What the phone can't see stays a limit: a local proxy's app, or the in-app tunnel's core, may
   choose a path of its own (Wi-Fi Assist included) behind a phone that is on Wi-Fi.
 - **The gaps after the meeting** (`MeetingTranscription.kickGaps`): for every ended room meeting that asked for `hub`,
-  within the hub's retention, once its last revision (the `complete: true` upload) is stored, the phone reads
+  within the hub's retention, once its latest revision is stored (without waiting for the phone's own text, #9491), the phone reads
   `transcription` (`GET …/live?parts=transcription`) and, while the hub is `live` or `finishing` with gaps, uploads them
   (`PUT …/audio?at=`, `MeetingGapUpload.plan`: at most 300 seconds a request, only what lies inside the phone's audio,
   `at` a plain decimal exact to the sample, `MeetingAudioClock.query`), decoded from the phone's own segments off the

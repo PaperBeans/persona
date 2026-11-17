@@ -344,6 +344,7 @@ struct ChatView: View {
             // floats a bar over the chat (Persona's conversation, `MessageLiftHost`, #3188).
             .liftBlur(menu)
             .overlay { if liftHost == nil { MessageLiftLayer(menu: menu) } }
+            .devScreen(style == .assistant ? "assistant-chat" : "chat")
             .onAppear { liftHost?.menu = menu }
             .onDisappear { if liftHost?.menu === menu { liftHost?.menu = nil } }
             .codexTakeoverDialogs(coordinator: takeoverCoordinator) { adopted in
@@ -2264,8 +2265,7 @@ struct ChatView: View {
                         guard let mark = navigationJump else { return }
                         await jumpToInput(mark)
                     }
-                    // Left of the open Duo's floating tabs' switch, which stands up past the footer there (#4231).
-                    .overlay(alignment: .bottomTrailing) { arrowLayer.padding(.bottom, under).tabSwitchRoom() }
+                    .overlay(alignment: .bottomTrailing) { arrowLayer.padding(.bottom, under) }
                     #if DEBUG
                     .overlay(alignment: .topLeading) { if Self.scrollProbe { scrollState } }
                     .screenProbe("chat", page: style == .assistant ? "assistant" : "agents",
@@ -2289,8 +2289,6 @@ struct ChatView: View {
             // the region alone did not do it. Not the classic composer's island, which takes what it is offered until it
             // has measured itself.
             ChatRegion(name: "ChatFooter.body") { VStack(spacing: 0) { pickOrFooter } }
-                // Room beside the open Duo's floating tabs' switch while it shows (#4231): the composer and what is over it.
-                .tabSwitchRoom()
                 .layoutPriority(usesShellComposer ? 1 : 0)
                 // What the footer takes of the page: the pending cards grow into the rest while the keyboard is up.
                 // Exact, like the cards' own height inside it (`PendingCards.shown`): the cards take one from the other for
@@ -7073,7 +7071,7 @@ struct SessionInfoSheet: View {
                                 row(Theme.Icon.todo, String(localized: "To-dos"), todo.title)
                             }
                             .sheet(isPresented: $showTodo) {
-                                NavigationStack { TodoDetailView(todoID: todo.id).macSheetDone { showTodo = false } }.overTabSwitch()
+                                NavigationStack { TodoDetailView(todoID: todo.id).macSheetDone { showTodo = false } }
                                     #if os(macOS)
                                     .macSheet()
                                     #elseif os(iOS)

@@ -9,8 +9,8 @@ use std::slice;
 
 use persona_core::{
     PersonaCoreBytes, persona_core_bytes_free, persona_core_display_answer, persona_core_project_answer,
-    persona_core_project_stream_chunks, persona_core_project_stream_repair, persona_core_project_task_index,
-    persona_core_project_turns, persona_core_project_viewed_images,
+    persona_core_project_plain_open_fence, persona_core_project_stream_chunks, persona_core_project_stream_repair,
+    persona_core_project_task_index, persona_core_project_turns, persona_core_project_viewed_images,
 };
 use serde_json::Value;
 
@@ -129,6 +129,36 @@ fn c_abi_stream_repair_calls_the_projection_and_rejects_bad_utf8_and_expectation
     assert!(call(persona_core_project_stream_repair, b"not JSON").is_none());
     assert!(call(persona_core_project_stream_repair, &[0xff]).is_none());
     eprintln!("C ABI stream_repair: Rust caller, complete object, invalid UTF-8 and negatives");
+}
+
+#[test]
+fn c_abi_plain_open_fence_uses_the_independent_apple_expectation_and_rejects_bad_inputs() {
+    let input = serde_json::json!({
+        "text": "看图：\n```mermaid\ngraph TD",
+        "drawn": ["mermaid", "math"],
+    });
+    let expected = serde_json::json!({"text": "看图：\n```\ngraph TD"});
+    let actual = project(persona_core_project_plain_open_fence, &input);
+    assert_eq!(actual, expected);
+    let mut wrong = expected.clone();
+    wrong["text"] = serde_json::json!("看图：\n```mermaid\ngraph TD");
+    assert_ne!(actual, wrong);
+    let mut extra = expected.clone();
+    extra
+        .as_object_mut()
+        .unwrap()
+        .insert("extra".to_owned(), Value::Bool(true));
+    assert_ne!(actual, extra);
+    for malformed in [
+        &br#"{"text":"```mermaid"}"#[..],
+        &br#"{"drawn":[]}"#[..],
+        &br#"{"text":1,"drawn":[]}"#[..],
+        b"not JSON",
+        &[0xff],
+    ] {
+        assert!(call(persona_core_project_plain_open_fence, malformed).is_none());
+    }
+    eprintln!("C ABI plain_open_fence: independent Apple expectation, invalid UTF-8 and negatives");
 }
 
 fn lines_documents() -> Vec<Value> {

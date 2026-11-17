@@ -43,7 +43,11 @@ var (
 	interimShown     = 10 * time.Second // GET …/live shows a caption at most this old
 	finalEvery       = time.Minute      // the final passes are looked at this often (and when kicked)
 	finalGapWait     = 30 * time.Minute // the final pass waits at most this long after the complete upload for gaps
-	finalRetries     = []time.Duration{time.Minute, 5 * time.Minute}
+	// When the final pass is tried again: finalRetries after a try that failed (it may have billed), and
+	// finalUnreachableRetries after one that never reached the upstream (upstream_unavailable, nothing billed), which
+	// costs nothing while the hub's route to the service can be down for longer than finalRetries span (#9535).
+	finalRetries            = []time.Duration{time.Minute, 5 * time.Minute}
+	finalUnreachableRetries = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour}
 	// The most audio sent ahead of a job's last ack: live (more is skipped, the job moved on with seek) and replay.
 	liveAhead, replayAhead = 30 * time.Second, time.Minute
 )

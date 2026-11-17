@@ -39,11 +39,6 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.window.core.layout.WindowSizeClass
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
-import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -912,20 +907,15 @@ internal fun PersonaShell(session: ShellSession, openNavigation: MutableState<((
                             CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides back, LocalDetailKey provides detail,
                                 LocalAgentsTabSplit provides agentsTabSplit,
                                 persona.feature.settings.LocalExtensionPageVisible provides shown) {
+                                val pageTransitions = rememberPageTransitions()
                                 val display: @Composable () -> Unit = {
                                     NavDisplay(backStack = stacks.getValue(tab),
                                         modifier = Modifier.fillMaxSize().then(if (shown || tab == AppTab.Persona) Modifier else Modifier.unplaced()),
                                         onBack = navigator::back, entryDecorators = decorators.getValue(tab) + chrome,
                                         sceneStrategies = listOf(agentsOverlay, listDetail.strategy),
-                                        // A pushed page slides in over the page it came from, which stays drawn underneath; going
-                                        // back, it slides away over the page below. Pages stay opaque the whole way (fading them
-                                        // showed both pages' text on top of each other) and nothing in between shows the background.
-                                        transitionSpec = { ContentTransform(slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { width -> width },
-                                            slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { width -> -width / 4 }) },
-                                        popTransitionSpec = { ContentTransform(slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { width -> -width / 4 },
-                                            slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { width -> width }, targetContentZIndex = -1f) },
-                                        predictivePopTransitionSpec = { _ -> ContentTransform(slideInHorizontally(tween(260)) { width -> -width / 4 },
-                                            slideOutHorizontally(tween(260)) { width -> width }, targetContentZIndex = -1f) },
+                                        transitionSpec = { pageTransitions.push },
+                                        popTransitionSpec = { pageTransitions.pop },
+                                        predictivePopTransitionSpec = { pageTransitions.predictivePop },
                                         entryProvider = { key -> panes(key, policy.singleRightStack) })
                                 }
                                 if (tab == AppTab.Persona) {

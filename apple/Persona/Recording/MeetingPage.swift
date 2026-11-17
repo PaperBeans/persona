@@ -416,7 +416,6 @@ struct MeetingPage: View {
                     RecordingJumpButton(unread: shown.ids.filter { !seen.contains($0) }.count) { following = true }
                         .padding(.trailing, Theme.Space.page)
                         .padding(.bottom, Theme.Space.s)
-                        .tabSwitchRoom() // left of the open Duo's floating tabs' switch (#4231)
                         .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: Theme.Recording.arrivalOffset)))
                 }
             }
@@ -585,7 +584,6 @@ struct MeetingPage: View {
                     .padding(.horizontal, Theme.Space.page)
                     .padding(.vertical, Theme.Space.s)
                     .frame(maxWidth: .infinity)
-                    .tabSwitchRoom() // beside the open Duo's floating tabs' switch (#4231)
                     .background { Theme.groupedPage.ignoresSafeArea(edges: .bottom) }
                     .transition(.opacity)
             } else {

@@ -328,6 +328,7 @@ func (s *Service) launcherRoutes() {
 			apierr.Call(w, err)
 			return
 		}
+		observed, _ := s.launcherHealth(ctx, machine, r.PathValue("name"))
 		var res proto.LauncherCheck
 		params := map[string]any{"name": r.PathValue("name")}
 		if r.URL.Query().Get("purpose") == "assistant" {
@@ -338,7 +339,7 @@ func (s *Service) launcherRoutes() {
 			return
 		}
 		if res.OK {
-			s.recordTestPassed(ctx, machine, r.PathValue("name"), res)
+			s.recordTestPassed(ctx, machine, r.PathValue("name"), res, observed.CheckedAt)
 		}
 		apierr.WriteJSON(w, map[string]any{"machine": machine, "check": res})
 	})

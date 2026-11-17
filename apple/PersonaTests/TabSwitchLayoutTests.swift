@@ -4,64 +4,64 @@ import SwiftUI
 import Testing
 @testable import Persona
 
-/// The tabs' switch on iPhone Duo in the Separate layout (#4231, `TabSwitchLayout`): one upright capsule of the pages'
-/// symbols at the bottom-trailing corner, at the foot of the system's side column where the bars run down the side and
-/// floating over the page where they run across the top; what sits at the page's foot leaves it room while it shows,
-/// and none while the keyboard is up. Settings › Appearance › Sidebar (Merged / Separate) chooses it, kept on this device.
+/// iPhone Duo's tab bar in the Separate layout (#4231, `TabSwitchLayout`): the same items on both displays (the page's
+/// symbol over its name), down the system's side column, centred on the status bar and in its lower middle, or along the
+/// foot of the inner display upright, where the pages keep its room as for the system's tab bar. Settings › Appearance ›
+/// Sidebar (Merged / Separate) chooses it, kept on this device.
 @MainActor
 struct TabSwitchLayoutTests {
-    /// Where the switch stands in each posture of the open Duo, and nowhere on the iPad, which keeps the system's tab bar.
+    /// Where the tab bar stands in each posture of the open Duo, and nowhere on the iPad, which keeps the system's tab bar.
     @Test func itStandsWhereTheSystemsBarsAre() {
-        #expect(TabSwitchLayout.placement(phone: true, barEdge: nil) == .floating) // open, upright: bars across the top
+        #expect(TabSwitchLayout.placement(phone: true, barEdge: nil) == .bottom) // open, upright: bars across the top
         #expect(TabSwitchLayout.placement(phone: true, barEdge: .trailing) == .rail(.trailing)) // open, on its side
         #expect(TabSwitchLayout.placement(phone: true, barEdge: .leading) == .rail(.leading))
         #expect(TabSwitchLayout.placement(phone: false, barEdge: nil) == nil) // the iPad
         #expect(TabSwitchLayout.placement(phone: false, barEdge: .trailing) == nil)
     }
 
-    /// The design's capsule (#4206, the 11-12 prototype without names): 44 pt segments, 52 pt wide, 140 pt tall with
-    /// Messages and 96 pt without, at every text size (a bar of fixed items, DESIGN_SYSTEM.md 6.2).
-    @Test func theCapsulesSize() {
-        #expect(TabSwitchLayout.width == Theme.Size.tapTarget + Theme.Space.xs * 2)
-        #expect(TabSwitchLayout.width == 52)
-        #expect(TabSwitchLayout.height(items: 3) == 140)
-        #expect(TabSwitchLayout.height(items: 2) == 96)
+    /// An item is a tap target and more (its symbol over its name), at every text size (a bar of fixed items,
+    /// DESIGN_SYSTEM.md 6.2); the side bar fits the side column the status bar is centred on.
+    @Test func theItemsAndTheBarsSizes() {
+        #expect(Theme.Shell.tabBarItemWidth >= Theme.Size.tapTarget)
+        #expect(Theme.Shell.tabBarItemHeight >= Theme.Size.tapTarget)
+        #expect(Theme.Shell.switchTypeSize == .large) // the default text size, as the system's tab bar keeps
+        #expect(TabSwitchLayout.sideWidth == 64)
+        #expect(TabSwitchLayout.sideHeight(items: 3) == 184)
+        #expect(TabSwitchLayout.sideHeight(items: 2) == 128)
+        #expect(TabSwitchLayout.bottomHeight == 64)
+        #expect(TabSwitchLayout.bottomWidth(items: 3) == 184)
         #expect(TabSwitchLayout.items(messages: true) == 3)
         #expect(TabSwitchLayout.items(messages: false) == 2)
-        #expect(Theme.Size.tapTarget >= 44) // each segment is a whole tap target
-        #expect(Theme.Shell.switchTypeSize == .large) // the default text size, as the system's tab bar keeps
-        // Floating: the footer's own margins, so its foot is level with the composer's.
-        #expect(TabSwitchLayout.trailingInset == Theme.Space.m)
-        #expect(TabSwitchLayout.bottomInset == Theme.Space.s)
+        // The Duo's 84 pt inset (both displays) less the screen edge's strip: 70 pt, the bar within it.
+        #expect(TabSwitchLayout.sideColumn(inset: 84) == 70)
+        #expect(TabSwitchLayout.sideColumn(inset: 84) >= TabSwitchLayout.sideWidth)
+        #expect(TabSwitchLayout.sideColumn(inset: 0) == TabSwitchLayout.sideWidth) // never narrower than the bar
     }
 
-    /// The composer and the rows at the page's foot leave the floating switch its width and a gap while it shows; with
-    /// the keyboard up the switch is away and they take the whole width back; elsewhere they leave nothing.
-    @Test func theRoomBesideTheFloatingSwitch() {
-        #expect(TabSwitchLayout.trailingRoom(floats: true, keyboardUp: false) == 60)
-        #expect(TabSwitchLayout.trailingRoom(floats: true, keyboardUp: true) == 0)
-        #expect(TabSwitchLayout.trailingRoom(floats: false, keyboardUp: false) == 0)
-        #expect(TabSwitchLayout.trailingRoom(floats: false, keyboardUp: true) == 0)
-        // Outside the rows' own 12 pt margin, the room keeps them a gap clear of the capsule 12 pt from the edge.
-        let rowsEnd = TabSwitchLayout.trailingInset + TabSwitchLayout.trailingRoom(floats: true, keyboardUp: false)
-        let capsuleStart = TabSwitchLayout.trailingInset + TabSwitchLayout.width
-        #expect(rowsEnd - capsuleStart == Theme.Space.s)
+    /// Down the side it is centred on the status bar: measured on both displays, the clock 49 pt from the screen's edge.
+    @Test func theSideBarIsCentredOnTheStatusBar() {
+        let inset: CGFloat = 84
+        let column = TabSwitchLayout.sideColumn(inset: inset)
+        let centreFromEdge = (inset - column) + column / 2
+        #expect(centreFromEdge == 49)
     }
 
-    /// A list's end scrolls clear of the floating switch: its height, its inset from the foot and a gap.
-    @Test func theRoomAtAListsEnd() {
-        #expect(TabSwitchLayout.listRoom(floats: true, items: 3) == 156)
-        #expect(TabSwitchLayout.listRoom(floats: true, items: 2) == 112)
-        #expect(TabSwitchLayout.listRoom(floats: false, items: 3) == 0)
+    /// In the lower middle of the column, not a small block at its foot: a quarter of the column under it.
+    @Test func theSideBarStandsInTheLowerMiddle() {
+        let height: CGFloat = 644 // the outer display's 678 pt less its 34 pt foot
+        let foot = TabSwitchLayout.sideFoot(height: height)
+        #expect(foot == height * Theme.Shell.sideTabBarFoot)
+        let top = height - foot - TabSwitchLayout.sideHeight(items: 3)
+        #expect(top > height * 0.4 && height - foot < height * 0.8) // its middle in the column's lower half
+        #expect(TabSwitchLayout.sideFoot(height: 0) == Theme.Space.l) // never on the foot itself
     }
 
-    /// The counts hang off the segment's corner toward the page: leftward with the switch at the right (the side column
-    /// on the right, or floating), rightward in a side column on the left.
-    @Test func theCountsHangTowardThePage() {
-        #expect(UprightBadge.offset(railEdge: nil).width < 0)
-        #expect(UprightBadge.offset(railEdge: .trailing).width < 0)
-        #expect(UprightBadge.offset(railEdge: .leading).width > 0)
-        #expect(UprightBadge.offset(railEdge: nil).height < 0) // above the segment's symbol
+    /// Along the foot upright the pages keep the bar's room, as the system's tab bar makes them keep; with the keyboard up
+    /// the bar is away and the room goes; on its side there is none.
+    @Test func theRoomUnderTheBottomBar() {
+        #expect(TabSwitchLayout.bottomRoom(bottomBar: true, keyboardUp: false) == TabSwitchLayout.bottomHeight + TabSwitchLayout.bottomGap)
+        #expect(TabSwitchLayout.bottomRoom(bottomBar: true, keyboardUp: true) == 0)
+        #expect(TabSwitchLayout.bottomRoom(bottomBar: false, keyboardUp: false) == 0)
     }
 
     /// The choice is Settings › Appearance › Sidebar's, this device's own: picking Separate is written at once and read
@@ -88,29 +88,9 @@ struct TabSwitchLayoutTests {
 
     private static let apple = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
 
-    /// What sits at a page's foot under the open Duo's floating switch leaves it room (`tabSwitchRoom`), and the main lists
-    /// keep room at their end (`tabSwitchListRoom`): one taken off covers the composer's send button, the to-do page's
-    /// Done or a list's last row.
-    @Test(arguments: [
-        ("Persona/Views/Chat/ChatView.swift", ".tabSwitchRoom()"), // the chats' footer and Jump to Latest
-        ("Persona/Views/Shell/ShellHome.swift", ".tabSwitchRoom(padding:"), // a new conversation's composer and Needs You
-        ("Persona/DesignSystem/FloatingPill.swift", ".tabSwitchRoom()"), // the to-do page's buttons
-        ("Persona/Views/Inbox/Lark/LarkChatView.swift", ".tabSwitchRoom()"),
-        ("Persona/Views/Inbox/InboxHandOffBar.swift", ".tabSwitchRoom()"),
-        ("Persona/Views/Inbox/ConnectorThread/ThreadComposer.swift", ".tabSwitchRoom()"),
-        ("Persona/Recording/MeetingPage.swift", ".tabSwitchRoom()"), // a meeting's bars and Jump to Latest
-        ("Persona/Views/Machines/BrowserLoginsListView.swift", ".tabSwitchBottomBarRoom(shown: selecting)"),
-        ("Persona/Views/Inbox/InboxView.swift", ".tabSwitchListRoom()"),
-        ("Persona/Views/Todos/TodosView.swift", ".tabSwitchListRoom()"),
-        ("Persona/Views/Inbox/Lark/LarkConversationsView.swift", ".tabSwitchListRoom()"),
-    ])
-    func thePagesFootLeavesTheSwitchRoom(file: String, modifier: String) throws {
-        let source = try String(contentsOf: Self.apple.appending(path: file), encoding: .utf8)
-        #expect(source.contains(modifier), "\(file) no longer leaves the open Duo's floating tabs' switch room")
-    }
-
-    /// The tabs hide the system's tab bar on a phone (the open Duo) and the switch stands in its place; every tab's page
-    /// hides it, or the bar comes back on that tab under the switch.
+    /// The tabs hide the system's tab bar on a phone (the open Duo) and the Duo's stands in its place; every tab's page
+    /// hides it and keeps the bottom bar's room (`PhoneTabBarHidden`), or the system's bar comes back on that tab, or its
+    /// composer goes under the bar.
     @Test func everyTabHidesTheSystemsBarOnAPhone() throws {
         let source = try String(contentsOf: Self.apple.appending(path: "Persona/Views/RootView.swift"), encoding: .utf8)
         #expect(source.contains(".modifier(TabSwitchOverlay())"))
@@ -118,7 +98,7 @@ struct TabSwitchLayoutTests {
             let start = try #require(source.range(of: tab), "\(tab) not in RootView.swift")
             let rest = source[start.upperBound...]
             let body = rest[..<(rest.range(of: "\n}\n")?.upperBound ?? rest.endIndex)]
-            #expect(body.contains("PhoneTabBarHidden()"), "\(tab) shows the system's tab bar under the switch")
+            #expect(body.contains("PhoneTabBarHidden()"), "\(tab) shows the system's tab bar under the Duo's")
         }
     }
 }

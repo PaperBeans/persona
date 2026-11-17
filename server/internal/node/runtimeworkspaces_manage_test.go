@@ -313,6 +313,50 @@ func TestRuntimeWorktreeDeleteWhileAtWork(t *testing.T) {
 	}
 }
 
+// A foreground turn can finish while a native command or delegated agent still writes in its workspace.
+func TestRuntimeWorktreeDeleteWithBackgroundWork(t *testing.T) {
+	for _, kind := range []string{"shell", "agent"} {
+		t.Run(kind, func(t *testing.T) {
+			r := runtimeRepoNode(t)
+			r.manageAnswers(t, nil)
+			tree := filepath.Join(r.trees, "background")
+			if _, err := request(t, r.n, "worktree.create", map[string]any{"workspace_id": "wks_main", "kind": "paseo", "branch": "background", "path": tree}); err != nil {
+				t.Fatal(err)
+			}
+			tell := func(tasks []map[string]any) {
+				t.Helper()
+				r.tellSessions(t, map[string]any{"session_id": "paseo-bg", "status": "idle", "workspace_id": "wks_new1", "background": tasks})
+				waitFor(t, "background inventory", func() bool { return len(listed(t, r.n)["paseo-bg"].Background) == len(tasks) })
+			}
+			del := func(params map[string]any) (map[string]any, error) {
+				params["workspace_id"], params["kind"], params["locale"] = "wks_new1", "paseo", "en"
+				return request(t, r.n, "worktree.delete", params)
+			}
+			tell(nil)
+			preview, err := del(map[string]any{"preview": true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tell([]map[string]any{{"id": "background-task", "kind": kind}})
+			for _, params := range []map[string]any{{"preview": true}, {"preview_token": preview["preview_token"]}} {
+				if _, err := del(params); err == nil || !strings.Contains(err.Error(), "An Agent is still working in this worktree") {
+					t.Fatalf("background work was not protected: %v", err)
+				}
+			}
+			if len(r.rt.got("workspace.archive")) != 0 {
+				t.Fatal("background work reached workspace archive")
+			}
+			if _, err := os.Stat(tree); err != nil {
+				t.Fatalf("protected worktree disappeared: %v", err)
+			}
+			tell(nil)
+			if res, err := del(map[string]any{"preview_token": preview["preview_token"]}); err != nil || res["removed"] != true {
+				t.Fatalf("deletion did not recover after background work finished: %v %v", res, err)
+			}
+		})
+	}
+}
+
 // The preview says why a worktree Paseo lists is not one to delete: its folder gone, git no longer knowing it (its
 // record in the repository pruned), a folder inside a worktree; a main checkout is said apart from those.
 func TestRuntimeWorktreeDeleteSaysWhyNot(t *testing.T) {

@@ -344,7 +344,6 @@ struct GitPane: View {
             .padding(.trailing, Theme.Space.m)
             .surface(in: .rect(cornerRadius: Theme.Radius.panel, style: .continuous))
             .padding(.horizontal, Theme.Space.page).padding(.bottom, Theme.Space.s)
-            .tabSwitchRoom() // beside the open Duo's floating tabs' switch (#4231)
             // The list runs on under the bar: back it with the page and fade the list out above it, or the rows and
             // commits scrolled under it read through its words.
             .background(alignment: .top) {

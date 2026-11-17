@@ -408,37 +408,6 @@ enum ViewerLoader {
     }
 }
 
-/// A web picture in Markdown (`![](https://…)` in an answer, a message, a note): drawn through `LarkMedia`'s cache, a tap
-/// opens it in the viewer. Pages with their own pictures set their own provider (a file's relative images, Feishu
-/// documents); anything not on the web is left to MarkdownUI's default.
-struct WebMarkdownImages: ImageProvider {
-    func makeImage(url: URL?) -> some View { WebMarkdownImage(url: url) }
-}
-
-private struct WebMarkdownImage: View {
-    var url: URL?
-    @State private var open = false
-    @Namespace private var zoom
-
-    var body: some View {
-        if let url, let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" {
-            Button { open = true } label: {
-                LarkRemoteImage(url: url.absoluteString, maxPixel: 1600, contentMode: .fit)
-                    .scaledFrame(maxWidth: .infinity, minHeight: Theme.Size.box60, alignment: .leading)
-                    .clipShape(.rect(cornerRadius: Theme.Radius.control, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .matchedTransitionSource(id: "markdown-image", in: zoom)
-            .accessibilityLabel("Image, tap to enlarge")
-            .fullScreenCover(isPresented: $open) {
-                ImageViewer(urls: [url.absoluteString], index: 0).navigationTransition(.zoom(sourceID: "markdown-image", in: zoom))
-            }
-        } else {
-            DefaultImageProvider.default.makeImage(url: url)
-        }
-    }
-}
-
 /// The thumbnails under a picture when there are several, as Photos has them: the current one wider, a tap moves to
 /// it. Centered when they fit, otherwise a strip that scrolls sideways and follows the swipes.
 private struct ViewerThumbStrip: View {

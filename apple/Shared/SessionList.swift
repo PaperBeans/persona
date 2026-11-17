@@ -98,6 +98,12 @@ extension APIClient {
     /// page by full identity (duplicate titles are not identities). nil: no machine lists that session (an id that
     /// was never written out, or one that has since gone), which is not a failure of the request.
     func sessionListDetail(_ key: SessionKey, title: String) async throws -> Session? {
+        try await sessionListDetailAnswer(key, title: title).row
+    }
+
+    /// `sessionListDetail`, with the revision the hub's exact answer stands at (`sessions_lookup` only; nil from the paged
+    /// fallback, whose pages are no baseline for one row): what a later hint's `since` is compared with (#9479).
+    func sessionListDetailAnswer(_ key: SessionKey, title: String) async throws -> (row: Session?, revision: String?) {
         func decode(_ data: Data) async throws -> SessionListPage<Session> {
             try await Task.detached(priority: .userInitiated) { try JSON.decoder.decode(SessionListPage<Session>.self, from: data) }.value
         }
@@ -107,7 +113,8 @@ extension APIClient {
         if sessionLookup {
             // The exact form takes no `since` or `cursor`, and answers with at most the one row (a `limit` is not needed).
             let query = ["summary": "0", "machine_id": key.machineID, "session_id": key.sessionID]
-            return match(try await decode(try await request("GET", "/api/v1/sessions", query: query)))
+            let page = try await decode(try await request("GET", "/api/v1/sessions", query: query))
+            return (match(page), page.revision)
         }
         let prefix = String(title.unicodeScalars.prefix(256))
         // A title is mutable. If it changed before the hint's HTTP request, retry by stable machine/id rather than
@@ -117,13 +124,13 @@ extension APIClient {
             query["summary"] = "0"
             for _ in 0..<160 {
                 let page = try await decode(try await request("GET", "/api/v1/sessions", query: query))
-                if let row = match(page) { return row }
+                if let row = match(page) { return (row, nil) }
                 guard page.hasMore == true, let cursor = page.nextCursor else { break }
                 query["cursor"] = cursor
                 try Task.checkCancellation()
             }
         }
-        return nil
+        return (nil, nil)
     }
 
     /// One page of the sessions folded under `parent` on `machine`. Own states, not folded state. Never `roots`
@@ -161,6 +168,35 @@ extension APIClient {
         let data = try await request("GET", personal ? "/api/v1/agents/sessions" : "/api/v1/sessions", query: parameters)
         return try await Task.detached(priority: .utility) { try JSON.decoder.decode(SessionListCounts.self, from: data) }.value
     }
+}
+
+/// What a `sessions_list` hint says changed, when the hub can say (`sessions_list_changes`, docs/protocol/protocol.md
+/// "Which rows changed"): the revision it starts from and the `[machine_id, session_id]` of every row changed after it.
+/// Nil (see `init`) when the hint has no starting point, or anything in it is not that shape: the hint is then read as
+/// one that could be about any row.
+nonisolated struct SessionListChanges: Equatable, Sendable {
+    static let feature = "sessions_list_changes"
+    var since: String
+    private var ids: Set<[String]>
+
+    init(since: String, changed: [(machineID: String, sessionID: String)]) {
+        self.since = since
+        ids = Set(changed.map { [$0.machineID, $0.sessionID] })
+    }
+
+    init?(since: JSONValue?, changed: JSONValue?) {
+        // Strings only (`JSONValue.string` would also read a number as one).
+        guard case .string(let since)? = since, !since.isEmpty, let list = changed?.array else { return nil }
+        var pairs: [(machineID: String, sessionID: String)] = []
+        for id in list {
+            guard let pair = id.array, pair.count == 2, case .string(let machine) = pair[0], case .string(let session) = pair[1] else { return nil }
+            pairs.append((machine, session))
+        }
+        self.init(since: since, changed: pairs)
+    }
+
+    /// Whether the change may concern this session's row.
+    func names(_ key: SessionKey) -> Bool { ids.contains([key.machineID, key.sessionID]) }
 }
 
 /// A runtime removal is a JSON tuple, not a slash-delimited path. Both components may contain slashes.

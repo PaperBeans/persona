@@ -440,12 +440,15 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 		if g, ok := s.orphanSignal(t); ok && !allStopped { // a fresh complete group outranks the minute pass's orphan snapshot
 			s.signal(g)
 		}
-		s.parkDecidedRetry(ctx, t)             // a stored decision ends its parking when the ledger write missed it then (parked.go)
+		ownerEvidencePending := s.parkDecidedRetry(ctx, t) // a stored owner answer outranks legacy reconciliation
+		t = s.reconcileLegacyOwnerPriority(ctx, t, ownerEvidencePending)
 		if g, ok := parkDecidedSignal(t); ok { // a decision ended its parking, and no message carried that yet (parked.go)
 			s.signal(g)
 		}
-		if g, ok := s.undecidableSignal(ctx, t, now); ok { // waits for the owner with nothing to answer (decision.go)
-			s.signal(g)
+		if !ownerEvidencePending { // a stored or unreadable answer must not be replaced with another question
+			if g, ok := s.undecidableSignal(ctx, t, now); ok {
+				s.signal(g)
+			}
 		}
 		s.briefClock(ctx, t, now)   // past its brief's clock with no end (task_brief_scope.go)
 		s.watchTurn(ctx, t, agents) // a turn that ended with no working heard, or was left half handled (task_turns.go)

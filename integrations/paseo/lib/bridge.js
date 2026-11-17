@@ -17,6 +17,7 @@ import {
   sameKindProvider, sessionIdOf, slotNameOf, spaceIdOf, strayRecord, timelineItems, transcriptOf, workspacePinTime, workspaceRow,
 } from './map.js'
 import { createLineage } from './lineage.js'
+import { createBackgroundWork } from './background-work.js'
 import { personaMcpServers } from './mcp.js'
 import { PaseoClient } from './paseo.js'
 
@@ -104,6 +105,10 @@ export function createPaseoBridge(deps = {}, options = {}) {
 
   const agents = new Map() // agent id → { agent, project }
   const bySession = new Map() // session id → agent id
+  const background = createBackgroundWork({
+    request: (id) => paseo.request('agent.background_work.list.request', { agentId: id }, { timeoutMs: 30_000 }),
+    changed: () => rt.sessionsChanged(), log,
+  })
   let configProviders = {} // provider id → { extends, label } (nothing else of the daemon's config is kept)
   let entries = [] // the providers snapshot
   let roots = {}
@@ -276,6 +281,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
     archived.delete(agent.id) // back from the archive: listed again
     const oldSession = prev ? sessionIdOf(prev.agent, roots) : undefined
     agents.set(agent.id, { agent, project: project ?? prev?.project })
+    background.observe(agent)
     // Moved to another id, or one of two on a Claude session (its turn ended: the other may be the one again).
     if ((oldSession && oldSession !== sessionIdOf(agent, roots)) || sharesSession(agent)) reindex()
     else {
@@ -451,6 +457,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
    * else the one it was listed with).
    */
   function remove(agentId, record, project) {
+    background.forget(agentId)
     const a = agents.get(agentId)
     if (record) noteArchived(record, project ?? a?.project)
     if (!a) return
@@ -613,6 +620,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
         if (changed) rt.sessionsChanged()
         missing.push(...named.filter((id) => !there.has(id)))
       }
+      background.refresh()
       for (const id of missing) {
         if (!paseo.connected) return
         if (agents.has(id) || archived.has(id)) await whatBecameOf(id)
@@ -691,6 +699,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
   paseo.on('connected', (info) => void onPaseo(info))
   paseo.on('disconnected', (why) => {
     log(`paseo: disconnected (${why})`)
+    background.disconnect()
     // The live text ends with the connection: Paseo tells a new connection none of what was written meanwhile, nor the
     // end of a turn that ended meanwhile. What comes after the reconnect is a live text of its own.
     for (const [sessionId, w] of watches) {
@@ -711,12 +720,14 @@ export function createPaseoBridge(deps = {}, options = {}) {
   async function onPaseo(info) {
     clearTimeout(awayTimer)
     const connection = ++connections
+    const nativeBackground = info?.features?.agentBackgroundWork === true
+    background.connect(nativeBackground)
     const version = String(info?.version ?? '')
     log(`paseo: connected to Paseo ${version || '(version unknown)'}`)
     try {
       const cfg = await paseo.request('get_daemon_config_request', {})
       configProviders = keepProviders(cfg?.config?.providers)
-      await paseo.subscribe('session.events.set_subscription.request', { events: EVENTS }, onSessionEvent)
+      await paseo.subscribe('session.events.set_subscription.request', { events: nativeBackground ? [...EVENTS, 'agent.background_work.update'] : EVENTS }, onSessionEvent)
       const snap = await paseo.request('get_providers_snapshot_request', {})
       entries = Array.isArray(snap?.entries) ? snap.entries : []
       providersChanged()
@@ -985,6 +996,13 @@ export function createPaseoBridge(deps = {}, options = {}) {
     const p = inner.payload ?? {}
     if (inner.type === 'agent_permission_request' || inner.type === 'agent_permission_resolved') told('agents', p.agentId, true)
     switch (inner.type) {
+      case 'agent.background_work.update':
+        // This inventory is newer than any directory page currently being read.
+        if (agents.has(p.agentId) && agents.get(p.agentId).agent.status !== 'closed') {
+          told('agents', p.agentId)
+          background.update(p)
+        }
+        break
       case 'agent_permission_request': {
         const a = agents.get(p.agentId)?.agent
         if (a && p.request?.id && !(a.pendingPermissions ?? []).some((r) => r?.id === p.request.id)) {
@@ -1288,7 +1306,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
     const busy = (id) => {
       if (!unfinished.has(id)) {
         const a = agents.get(id)?.agent
-        unfinished.set(id, isRunning(a) || (a?.pendingPermissions?.length ?? 0) > 0 || (created.get(id) ?? []).some(busy))
+        unfinished.set(id, isRunning(a) || background.busy(id) || (a?.pendingPermissions?.length ?? 0) > 0 || (created.get(id) ?? []).some(busy))
       }
       return unfinished.get(id)
     }
@@ -1321,7 +1339,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
     const spaceId = s.idOf(a?.project)
     const by = fam.creator.get(agentId)
     return { project: a?.project, roots, labels, lastText: lastTexts.get(agentId), spaceId, spaceName: s.names.get(spaceId),
-      parent: by && sessionOf(by), quiet: Boolean(a) && !workspaceOwn(a.agent), fleet: fam.fleet.get(agentId), canon,
+      parent: by && sessionOf(by), quiet: Boolean(a) && !workspaceOwn(a.agent), fleet: fam.fleet.get(agentId), nativeBackground: background.items(agentId), backgroundPending: background.pending(agentId), canon,
       thinking: a && thinkingOptions(a.agent) }
   }
 
@@ -1342,7 +1360,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
     // list. Then the delegated agents of those listed, however many creators lie between. One that works, waits or is
     // open on the phone keeps the agent its line of creators starts at, and every creator between is listed with it:
     // no row names a parent that is not there.
-    const busy = (r) => r.status === 'working' || r.status === 'blocked'
+    const busy = (r) => r.status === 'working' || r.status === 'blocked' || (r.background?.length ?? 0) > 0
     const pinnedWorkspaces = new Set([...workspaces.values()].filter((w) => workspacePinTime(w)).map((w) => w.id))
     const pinned = (r) => pinnedWorkspaces.has(r.workspace_id)
     const retained = (r) => busy(r) || pinned(r)
@@ -2628,6 +2646,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
     },
     stop() {
       started = false
+      background.disconnect()
       clearTimeout(awayTimer)
       clearInterval(sweepTimer)
       for (const t of closedTimers) clearTimeout(t)

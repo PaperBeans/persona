@@ -503,6 +503,62 @@ import PersonaWire
         #expect(model.chat(key).error == nil)
     }
 
+    @Test func aHintSaysWhichRowsChangedOnlyWhenWellFormed() throws {
+        func changes(_ json: String) -> SessionListChanges? {
+            guard case .sessionsList(_, let changes)? = ServerEvent.decode(Data(json.utf8)) else { Issue.record("hint lost: \(json)"); return nil }
+            return changes
+        }
+        let named = changes(#"{"changed":[["demo","s1"],["mac/2","s/2"]],"revision":"r2","since":"r1","type":"sessions_list"}"#)
+        #expect(named?.since == "r1")
+        #expect(named?.names(SessionKey(group: "g", machineID: "demo", sessionID: "s1")) == true)
+        #expect(named?.names(SessionKey(group: "g", machineID: "mac/2", sessionID: "s/2")) == true)
+        #expect(named?.names(SessionKey(group: "g", machineID: "demo", sessionID: "s2")) == false)
+        #expect(changes(#"{"changed":[],"revision":"r2","since":"r1","type":"sessions_list"}"#)?.since == "r1", "nothing named")
+        #expect(changes(#"{"changed":[["demo"]],"revision":"r2","since":"r1","type":"sessions_list"}"#) == nil, "not a pair")
+        #expect(changes(#"{"changed":[["demo","s1"]],"revision":"r2","type":"sessions_list"}"#) == nil, "no since")
+        #expect(changes(#"{"changed":[["demo","s1"]],"revision":"r2","since":7,"type":"sessions_list"}"#) == nil, "since of another shape")
+        #expect(changes(#"{"changed":[["demo",1]],"revision":"r2","since":"r1","type":"sessions_list"}"#) == nil, "an id of another shape")
+    }
+
+    /// An open chat reads its own row again only for a hint that may be about it (#9479, the web's rule since #6685): one
+    /// that starts where its last exact answer stands and does not name it moves that answer to its revision instead.
+    @Test func aHintAboutOtherSessionsLeavesAnOpenChatsRowUnread() async throws {
+        let hub = FakeHub()
+        let id = UUID().uuidString.lowercased()
+        var revision = "r1"
+        hub.on("GET", "/api/v1/sessions") { _ in
+            Data(#"{"sessions":[{"machine_id":"demo","session_id":"\#(id)","title":"t"}],"total":1,"revision":"\#(revision)"}"#.utf8)
+        }
+        let key = SessionKey(group: "detail-fixture", machineID: "demo", sessionID: id)
+        let model = await chatModel(hub, key: key, subscriber: UUID())
+        await eventually { model.latest(key) != nil }
+        let reads = { hub.sent("GET", "/api/v1/sessions").count }
+        #expect(reads() == 1)
+        func hint(_ to: String, since: String?, naming: [String] = []) {
+            let changes = since.map { SessionListChanges(since: $0, changed: naming.map { ("demo", $0) }) }
+            model.handle(.sessionsList(revision: to, changes: changes), group: key.group)
+        }
+
+        hint("r2", since: "r1", naming: ["someone-else"])
+        hint("r3", since: "r2")
+        await eventually { reads() > 1 } // a read these started would show within this wait
+        #expect(reads() == 1, "two hints about other sessions, chained from the answer: nothing to read")
+
+        revision = "r4"
+        hint("r4", since: "r3", naming: [id])
+        await eventually { reads() == 2 }
+        #expect(reads() == 2, "a hint that names it reads")
+        await eventually { model.passesOver(key, revision: "r5", changes: SessionListChanges(since: "r4", changed: [])) }
+
+        hint("r6", since: "r1", naming: ["someone-else"])
+        await eventually { reads() == 3 }
+        #expect(reads() == 3, "a hint from another starting point reads")
+
+        hint("r7", since: nil)
+        await eventually { reads() == 4 }
+        #expect(reads() == 4, "a hint that cannot say reads")
+    }
+
     @Test func aFailedDetailReadStillShowsItsError() async throws {
         let hub = FakeHub()
         hub.on("GET", "/api/v1/sessions") { _ in throw APIError(status: 500, message: "hub broke") }
@@ -564,9 +620,11 @@ import PersonaWire
         let query = LiveConnection.queryItems(EventCursor(), sessionList: true)
         #expect(query.first?.value?.contains("sessions_list") == true)
         #expect(LiveConnection.queryItems(EventCursor()).first?.value?.contains("sessions_list") == false)
+        #expect(query.first?.value?.contains("sessions_list_changes") == true, "asks which rows each hint is about (#9479)")
         let ev = ServerEvent.decode(Data(#"{"type":"sessions_list","revision":"opaque"}"#.utf8))
-        guard case .sessionsList(let revision)? = ev?.stamped("other") else { Issue.record("hint lost"); return }
+        guard case .sessionsList(let revision, let changes)? = ev?.stamped("other") else { Issue.record("hint lost"); return }
         #expect(revision == "opaque")
+        #expect(changes == nil, "no starting point: could be about any row")
         #expect(SessionListIdentity.runtime(#"["machine/with/slashes","session/with/slashes"]"#, group: "other") ==
                 SessionKey(group: "other", machineID: "machine/with/slashes", sessionID: "session/with/slashes"))
     }

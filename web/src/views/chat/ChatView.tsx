@@ -15,7 +15,7 @@ import { backgroundPanelOf, hasBackgroundWork, isWorkflowsCommand, latestWorkflo
 import { machineWithHub } from "../../lib/mesh";
 import { useLayout } from "../../lib/layout";
 import { hasModes, isMuted, listedModesOf, toggleMute } from "../../lib/session-actions";
-import { attachLive, flipPin } from "../../lib/agent-actions";
+import { flipPin } from "../../lib/agent-actions";
 import { isPinned } from "../../lib/pins";
 import { acknowledgeLaunch } from "../../lib/new-agent";
 import { useRuntimeSession } from "../../lib/runtime-session";
@@ -1890,6 +1890,13 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
 
   // the header's Team button (#5180): on a lead with workers, at every width (a phone has no other way to the panel); its dot
   // says a worker needs you while the panel is shut
+  const showConversationTasks = Boolean((assistant || inPage) && !embedded && !chrome && session?.space !== "health");
+  const conversationTasksOpen = panel?.kind === "conversation-tasks" && panel.mid === mid && panel.sid === sid;
+  const chatHeaderActions = useMemo(() => showConversationTasks ? <>
+    <IconButton icon="todo" label={t("sidepanel.conversation_tasks")} active={conversationTasksOpen}
+      onClick={() => togglePanel({ kind: "conversation-tasks", mid, sid, manager: skillManager })} />
+    {headerActions}
+  </> : headerActions, [showConversationTasks, conversationTasksOpen, mid, sid, skillManager, headerActions]);
   const teamCount = leads ? workerCount(session) : 0;
   const teamNeeds = workers.some((w) => stateOf(w) === "needs_you");
   const toggleTeam = useCallback(() => {
@@ -1945,7 +1952,7 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
         onTerminal={openTerminal}
         viewDot={view === "term" && (interactions.length > 0 || state === "needs_you")}
         termDot={terminalWaits(session, interactions, outbox)}
-        actions={headerActions}
+        actions={chatHeaderActions}
         team={team}
         sides={sideControl}
         panel={chrome}
@@ -2476,7 +2483,8 @@ export const Header = memo(function Header({
   const [linkTodoOpen, setLinkTodoOpen] = useState(false);
   const [sharingOpen, setSharingOpen] = useState(false);
   const allowed = session ? sessionMenuActions(session) : [];
-  const attach = () => session && attachLive(session);
+  // Live link loads with the click (lib/attach-live.ts), off the first screen
+  const attach = () => session && import("../../lib/attach-live").then((m) => m.attachLive(session));
   // Resume in terminal (#5521): a stopped Agent comes back in a terminal on its computer. The same action as its stopped
   // line's Resume: the terminal shown as that line's Terminal shows it, then the Resume both share.
   const machine = useStore((s) => s.machines.find((m) => m.id === session?.machine_id));

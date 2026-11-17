@@ -20,8 +20,8 @@ import (
 // (someone sent it something) ends the parking, and it is supervised as before. So does a decision of the owner's
 // recorded on a task parked for them or for someone else (parkDecided, #8044): its supervisor gets the decision.
 // Parking again and again is the old habit under a new name, so the parks in a row with no agent turn between them
-// are counted, and one past maxReparks re-parks is refused. Legacy owner_priority parks keep their digest behavior;
-// new owner decisions must be answerable needs_user requests.
+// are counted, and one past maxReparks re-parks is refused. The watch reconciles legacy owner_priority parks into
+// needs_user and hands missing questions back to their supervisor; it never reconstructs a question or consent.
 
 const (
 	reviewParked = "parked"
@@ -282,11 +282,11 @@ func (s *Service) endParkOnDecision(ctx context.Context, row db.TodoDecisionRow)
 		return nil
 	}
 	t, ok := s.todoNow(row.TodoID)
-	if !ok || t.DoneAt != nil || t.Supervision.parking() == nil {
+	if !ok || t.DoneAt != nil || t.Supervision.decisionPark() == nil {
 		return nil
 	}
 	v, changed, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
-		r := v.parking()
+		r := v.decisionPark()
 		if r == nil || !parkWaitsForDecision(r.WaitingOn) ||
 			!row.CreatedAt.IsZero() && row.CreatedAt.Before(r.At.Truncate(time.Microsecond)) {
 			return false // not parked for an answer, or parked again after this decision (parkDecidedRetry)
@@ -304,6 +304,7 @@ func (s *Service) endParkOnDecision(ctx context.Context, row db.TodoDecisionRow)
 	b := &s.supervise
 	b.mu.Lock()
 	delete(b.pending, t.ID+"|"+sigParkedDue)
+	delete(b.pending, t.ID+"|"+sigUndecidable)
 	b.mu.Unlock()
 	s.logf("task %s: decision %s was recorded while it was parked: the parking ends, its supervisor is told", t.ID, row.ID)
 	t.Supervision = &v
@@ -316,29 +317,31 @@ func (s *Service) endParkOnDecision(ctx context.Context, row db.TodoDecisionRow)
 // parkDecidedRetry: open task t is parked for an answer, and a decision of the owner's was stored after it was parked
 // (the latest such one in effect): the parking ends on it, as parkDecided would have when it was stored. The watch
 // asks this on every look, so a ledger write that failed then (or a manager that stopped between the decision and the
-// ledger) is made good from what is stored, never lost.
-func (s *Service) parkDecidedRetry(ctx context.Context, t Todo) {
-	r := t.Supervision.parking()
+// ledger) is made good from what is stored, never lost. True means owner evidence was found or its lookup failed:
+// legacy reconciliation must not run ahead of an answer that is stored, pending or unknown.
+func (s *Service) parkDecidedRetry(ctx context.Context, t Todo) bool {
+	r := t.Supervision.decisionPark()
 	if t.DoneAt != nil || r == nil || !parkWaitsForDecision(r.WaitingOn) {
-		return
+		return false
 	}
 	st := s.todoDB()
 	if st == nil {
-		return
+		return false
 	}
 	list, err := st.ListTodoDecisions(ctx, t.ID, false)
 	if err != nil {
 		s.logf("task %s: the decisions of a parked task: %v", t.ID, err)
-		return
+		return true
 	}
 	for i := len(list) - 1; i >= 0; i-- {
 		if d := list[i]; decisionEndsPark(d.Source) && !d.CreatedAt.Before(r.At.Truncate(time.Microsecond)) {
 			if err := s.endParkOnDecision(ctx, d); err != nil {
 				s.logf("task %s: decision %s on a parked task: %v (tried again on the next look)", t.ID, d.ID, err)
 			}
-			return
+			return true
 		}
 	}
+	return false
 }
 
 // parkDecidedSignal: a recorded decision ended a parking of open task t (parkDecided) and no supervision message

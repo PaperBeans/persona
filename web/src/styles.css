@@ -401,13 +401,23 @@ button:disabled { cursor: default; }
 .prose-j blockquote > div > :first-child { margin-top: 0; }
 .prose-j blockquote > div > :last-child { margin-bottom: 0; }
 .prose-j hr { border: 0; border-top: 1px solid var(--line); margin: 1.2em 0; }
-.prose-j code { font-family: var(--font-mono); font-size: .86em; background: var(--field); border-radius: 5px; padding: .12em .36em; box-shadow: var(--shadow-hairline); }
+/* Inline code's face (#9477): the system's monospaced one, then the body's CJK faces before the generic one, which would
+   draw Chinese in a serif (NSimSun on Windows; Linux falls back to Noto CJK on its own). The monospaced faces come first:
+   a CJK face has proportional Latin letters. Its ink is a step quieter than --ink, a long way from --ink-2 (iOS
+   Theme.Reply.codeInk; theme-contrast.test.ts keeps it readable). */
+.prose-j code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "PingFang SC", "Microsoft YaHei", monospace; font-size: .94em; color: color-mix(in srgb, var(--ink) 55%, var(--ink-2)); }
 .prose-j pre { margin: .7em 0; background: var(--inset); border-radius: 10px; box-shadow: var(--shadow-hairline); padding: 10px 12px; overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
-.prose-j pre code { background: none; box-shadow: none; padding: 0; font-size: inherit; }
+.prose-j pre code { font-family: var(--font-mono); font-size: inherit; }
 /* A code block with its title bar (#2984, CodeBar): the box is the wrap's, the pre sits in it. */
 .prose-j .code-block { margin: .7em 0; background: var(--inset); border-radius: 10px; box-shadow: var(--shadow-hairline); overflow: hidden; }
 .prose-j .code-block > pre { margin: 0; background: none; border-radius: 0; box-shadow: none; }
-/* Inline code a click copies (#2984): the body's color on its gray; in a link (a path that opens) the link's. */
+/* Inline code (#2984, #9477): no background, border or padding; 0.94 em, where the monospaced letters sit as large as the
+   words beside them. In a link (a path that opens, a written link) it is the link's color. A little room where it meets a
+   CJK letter, none beside a space or CJK punctuation (ReplyBlocks.tsx rehypeLinkedCode marks the sides). A click copies it:
+   a pale wash shows that while the pointer is on it. */
+.prose-j :is(a, pre) code { color: inherit; }
+.prose-j code[data-gap*=s] { margin-left: .12em; }
+.prose-j code[data-gap*=e] { margin-right: .12em; }
 .prose-j code[data-copy-code] { cursor: pointer; }
 .prose-j code[data-copy-code]:hover { background: var(--hover-2); }
 .prose-j table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: separate; border-spacing: 0; margin: .8em 0; font-size: 13px; border-radius: 10px; box-shadow: var(--shadow-hairline); }

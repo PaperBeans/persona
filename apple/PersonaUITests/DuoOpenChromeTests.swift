@@ -1,8 +1,8 @@
 import XCTest
 
 /// iPhone Duo open, the inner screen, in the Separate layout's new look (#4206; it replaced #2623's switch on the page):
-/// - the shell's upright switch in the system's tab bar's place (#4231, `DuoTabSwitchTests`): at the foot of the side
-///   column on its side, floating at the bottom-trailing corner upright; no switch drawn on the page's top;
+/// - the Duo's tab bar in the system's tab bar's place (#4231, `DuoTabSwitchTests`): down the side column on its side,
+///   along the foot upright; no switch drawn on the page's top;
 /// - each tab its part of the one sidebar's column: its fold at the head, New Chat, Search and Settings at the foot;
 /// - Search and Settings over the window, and the iPhone's new conversation with Needs You (#3680);
 /// - an Agent asked for from outside on the Agents tab.
@@ -47,7 +47,7 @@ final class DuoOpenChromeTests: XCTestCase {
         return app.buttons.matching(NSPredicate(format: "label == %@", label)).matching(narrow).firstMatch
     }
 
-    /// The upright switch's segment for a tab (#4231): `shell-assistant`, `shell-agents`.
+    /// The Duo's tab bar's item for a tab (#4231): `shell-assistant`, `shell-agents`.
     @MainActor private func tab(_ id: String) -> XCUIElement { element(id) }
 
     @MainActor private func shot(_ name: String) {
@@ -56,7 +56,7 @@ final class DuoOpenChromeTests: XCTestCase {
         }
     }
 
-    /// The upright switch in the system's tab bar's place (#4231), none drawn on the page's top (#4206, the new look of
+    /// The Duo's tab bar in the system's tab bar's place (#4231), none drawn on the page's top (#4206, the new look of
     /// the Separate layout): the column's head has its fold, its foot Search; the page has its face, and its sidebar
     /// button only while the column is away.
     @MainActor func testTheTabSwitchAndTheColumnsFold() {

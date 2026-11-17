@@ -106,6 +106,14 @@ func (f *Fetcher) dialPublic(ctx context.Context, network, address string) (net.
 	if len(ips) == 0 || len(ips) > 64 {
 		return nil, fail(CodeFetchFailed, http.StatusBadGateway, "%s has no usable address", host)
 	}
+	// Behind a fake-IP proxy every answer is the proxy's: the real ones come from DoH, or the picture is refused (doh.go).
+	if fakeOnly(ips) {
+		real, err := f.realAddrs(ctx, host)
+		if err != nil {
+			return nil, fail(CodeNotAllowed, http.StatusForbidden, "%s resolves only to a proxy's fake addresses, and DNS-over-HTTPS gave none: %v", host, err)
+		}
+		ips = real
+	}
 	// One answer that is not public refuses the name: a mixed answer is how a rebinding host looks.
 	for _, a := range ips {
 		ip, ok := netip.AddrFromSlice(a.IP)

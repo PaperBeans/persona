@@ -594,24 +594,32 @@ func (s *Service) undecidableSignal(ctx context.Context, t Todo, now time.Time) 
 		return superviseSignal{}, false
 	}
 	r := v.Reviews[len(v.Reviews)-1]
-	if !r.RestateAt.IsZero() || now.Sub(r.At) < decisionSettle {
+	legacy := v.legacyOwnerPriorityReview() != nil
+	if !r.RestateAt.IsZero() || !legacy && now.Sub(r.At) < decisionSettle {
 		return superviseSignal{}, false
 	}
 	a, ok := s.askCopy(t.ID)
-	if ok && decideAsk(&a) && !acceptAskStale(&a, t) {
+	if !legacy && ok && decideAsk(&a) && !acceptAskStale(&a, t) {
 		if a.AcceptedAt.IsZero() && a.Recommend != "" || !a.AcceptedAt.IsZero() && now.Sub(a.AcceptedAt) < decisionSettle {
 			return superviseSignal{}, false // answerable, or its answer is on its way to the agent
 		}
 	}
-	if _, _, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
+	_, changed, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
 		n := len(v.Reviews)
-		if n == 0 || !v.Reviews[n-1].At.Equal(r.At) || !v.Reviews[n-1].RestateAt.IsZero() {
+		if v.State != reviewNeedsUser || n == 0 || !v.Reviews[n-1].At.Equal(r.At) || !v.Reviews[n-1].RestateAt.IsZero() {
+			return false
+		}
+		if current, ok := s.todoNow(t.ID); !ok || current.DoneAt != nil {
 			return false
 		}
 		v.Reviews[n-1].RestateAt = now.UTC()
 		return true
-	}); err != nil {
+	})
+	if err != nil {
 		s.logf("task %s: undecidable: %v", t.ID, err)
+		return superviseSignal{}, false
+	}
+	if !changed {
 		return superviseSignal{}, false
 	}
 	s.logf("task %s: waits for the owner with nothing they can answer: back to its supervisor to restate it", t.ID)

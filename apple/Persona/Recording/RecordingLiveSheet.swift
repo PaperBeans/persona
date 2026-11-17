@@ -50,9 +50,8 @@ private struct RecordingLiveSheetPresenter: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            // The meeting room is the whole screen (#8731 v2): a meeting app's, not a sheet over the page. Over the tabs, as
-            // the sheet was: nothing in it leaves the tabs' switch room.
-            .fullScreenCover(isPresented: $presented) { RecordingLiveSheet().overTabSwitch() }
+            // The meeting room is the whole screen (#8731 v2): a meeting app's, not a sheet over the page.
+            .fullScreenCover(isPresented: $presented) { RecordingLiveSheet() }
             // A hidden shell page never gets onDisappear: the tab-aware pair keeps one host presenting at a time.
             .onTabVisibility(appear: {
                 visible = true

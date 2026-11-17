@@ -193,7 +193,6 @@ struct MailDetailView: View {
                     .disabled(message == nil)
             }
         }
-        .tabSwitchBottomBarRoom() // Reply clear of the open Duo's floating tabs' switch (#4231)
         .sheet(item: $reply) { d in ComposeView(draft: d, accounts: accounts) }
         .sheet(isPresented: $askClaude) {
             NewChatPrefilled(prompt: String(localized: "Use mail_read to read the email (account_id: \(summary.accountID), mailbox: \(summary.mailbox), uid: \(summary.uid), subject: \(summary.subject ?? "")), summarize the key points, and draft a suggested reply."))

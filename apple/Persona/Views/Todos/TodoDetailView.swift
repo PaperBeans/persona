@@ -335,7 +335,6 @@ struct TodoDetailView: View {
                 }
             }
         }
-        .tabSwitchListRoom() // the notes' end clear of the open Duo's floating tabs' switch, which stands above the buttons (#4231)
         .themedPage()
         // The buttons float over the notes, which scroll on behind them and blur under them, with no band of page
         // color (on one they sat on a white strip, #9008).

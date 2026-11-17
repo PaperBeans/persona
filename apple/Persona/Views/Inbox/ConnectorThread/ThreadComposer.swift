@@ -49,7 +49,6 @@ struct ThreadComposer: View {
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.bottom, Theme.Space.s)
-        .tabSwitchRoom() // beside the open Duo's floating tabs' switch (#4231)
         .animation(Theme.Motion.standard, value: quote.map { $0.heading + "\n" + $0.summary })
         .animation(Theme.Motion.standard, value: sending)
     }

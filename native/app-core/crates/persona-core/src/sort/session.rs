@@ -87,6 +87,31 @@ pub struct Session {
     pub awaits_reply: bool,
     #[serde(default)]
     pub background_waiting: bool,
+    /// Already folded by the client's SideFold/ChildSessions input preparation, not a child to fold again.
+    #[serde(default)]
+    pub nested_subtask: bool,
+    #[serde(default)]
+    pub children: Option<Children>,
+    #[serde(default)]
+    pub pane_id: Option<String>,
+    #[serde(default)]
+    pub pane_index: Option<i64>,
+    #[serde(default)]
+    pub space_kind: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Children {
+    #[serde(default)]
+    pub working: usize,
+    #[serde(default)]
+    pub needs_you: usize,
+    #[serde(default)]
+    pub sides: usize,
+    #[serde(default)]
+    pub sides_working: usize,
+    #[serde(default)]
+    pub sides_needs_you: usize,
 }
 
 impl Session {

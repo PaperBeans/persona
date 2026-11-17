@@ -133,7 +133,7 @@ export async function startFakePaseo(t, o = {}) {
         c.fail(f.refuse, 'refused')
         return
       }
-      send(c, { type: 'status', payload: { status: 'server_info', protocolVersion: 1, serverId: 'srv_test', hostname: 'test', version: f.version, features: {} } })
+      send(c, { type: 'status', payload: { status: 'server_info', protocolVersion: 1, serverId: 'srv_test', hostname: 'test', version: f.version, features: o.features ?? {} } })
       return
     }
     if (m.type === 'ping') {

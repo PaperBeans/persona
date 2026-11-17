@@ -98,7 +98,7 @@ struct ReadinessSheets: ViewModifier {
             .sheet(item: Binding(get: { route.flatMap { r -> ReadinessRoute? in
                 switch r { case .link, .addComputer, .confirmComputer: nil; default: r } } }, set: { route = $0 }),
                    onDismiss: { model.readinessChanged() }) { r in
-                sheet(r).overTabSwitch()
+                sheet(r)
             }
             .sheet(item: Binding(get: { route.flatMap { if case .link(let u) = $0 { LinkTarget(url: u) } else { nil } } },
                                  set: { if $0 == nil { route = nil } })) { LinkSheet(target: $0) }

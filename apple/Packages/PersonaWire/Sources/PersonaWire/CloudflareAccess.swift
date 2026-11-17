@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// A Cloudflare Access service token for one paired hub (docs/operations/network.md "Behind Cloudflare Access"): the hub
 /// is published through Cloudflare Tunnel with Access in front, which lets the apps through only with these two values as
@@ -117,5 +118,18 @@ open nonisolated class HubRedirects: NSObject, URLSessionTaskDelegate, @unchecke
     open func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
         completionHandler(CloudflareAccess.follow(request, from: task.originalRequest))
+    }
+
+    /// Each finished request to the hub with its timings and sizes, for the app's on-device diagnostics (Settings ›
+    /// About › Developing Persona, #9460). Nil, and nothing is kept, unless the app set it.
+    public static var finished: (@Sendable (URLSessionTask, URLSessionTaskMetrics) -> Void)? {
+        get { observer.withLock { $0 } }
+        set { observer.withLock { $0 = newValue } }
+    }
+
+    private static let observer = OSAllocatedUnfairLock<(@Sendable (URLSessionTask, URLSessionTaskMetrics) -> Void)?>(initialState: nil)
+
+    open func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        Self.finished?(task, metrics)
     }
 }

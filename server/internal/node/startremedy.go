@@ -81,7 +81,9 @@ type reusedTabKey struct{}
 
 // reusingKeptTab is ctx for a start in pane, the kept tab of an earlier failed start, when it still is one: the start
 // takes it over (it is no longer kept; this start keeps or closes it as its own, startTabFailed). Else ctx as it is,
-// and the start opens a new tab.
+// and the start opens a new tab. An Orca terminal takes one launch (orcaHost.Run): a kept tab whose start already typed
+// its line there (agent_start_stalled) is closed instead, and the start opens a new tab rather than fail (#9534); one
+// where nothing was typed (shell_waiting, answered with start.keys) is still started in.
 func (n *Node) reusingKeptTab(ctx context.Context, pane string) context.Context {
 	if pane == "" {
 		return ctx
@@ -94,5 +96,9 @@ func (n *Node) reusingKeptTab(ctx context.Context, pane string) context.Context 
 	}
 	delete(n.keptStarts, pane)
 	n.mu.Unlock()
+	if o, isOrca := k.launch.(*orcaHost); isOrca && !o.launchable(k.created.Pane) {
+		n.closeNewTab(ctx, k.launch, k.created, k.ws)
+		return ctx
+	}
 	return context.WithValue(ctx, reusedTabKey{}, k.created)
 }

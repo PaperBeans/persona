@@ -75,5 +75,20 @@ The shadow does not select Rust for production. Real `AppModel` tests with manua
 cover independent concurrent folds, coalescing two opens of one fold, overlapping reloads retaining newer pushes, and
 per-owner subscriptions; fold/reload rules must remain covered before any later adapter integration.
 
+### Production DEBUG shadow (#8970)
+
+The iOS app's `ChatContinuityAdapting` boundary keeps native `ChatStore` authoritative. In DEBUG builds the
+`ProductionContinuityShadow` mirrors the same immutable inputs into one lazily created real C core on a private serial
+queue, applies every drained patch and compares complete decoded items and continuity state. A `ChatPatch` is a delta:
+its continuity fields are those at the previous drain, so scheduling-only inputs cannot be treated as a full snapshot.
+The adapter mirrors native reload retention and fold ownership explicitly; core effects are inspected only and never
+reach native transport. Tests drain on that private queue, never the main thread.
+
+Diagnostics contain `domain`, `rule` and an input shape made of kind, counts and set/unset flags, never message text,
+item/fold/chat IDs, history, sequence values or payload JSON. Mismatches use the existing error-report queue and OSLog.
+DEBUG enables the mirror by default; `-showContinuityShadow NO` turns it off and `YES` selects it explicitly for an
+optimized A/B run. The implementation and its switch are excluded from Release, which retains the original native
+calls. No Android, UI or production-default implementation changes are involved.
+
 The package and fixture replay are not proof of physical-device performance, download-size, launch or memory budgets.
 Those remain unmeasured until a named device/simulator, optimized build and workload are reported.

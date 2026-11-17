@@ -14,7 +14,7 @@ struct MeetingSettingsView: View {
     /// Hub transcription's settings, made once the page shows (its model reads this phone's Wi-Fi rule: P3).
     @State private var transcription: MeetingTranscriptionSettings?
     /// This phone's experiment (#8731 B2): echo cancellation turned on with the speaker mid-meeting.
-    @AppStorage(MeetingRecorder.echoWithSpeakerKey) private var echoWithSpeaker = false
+    @StoredValue(MeetingRecorder.echoWithSpeakerKey) private var echoWithSpeaker = false
 
     var body: some View {
         SettingsForm {

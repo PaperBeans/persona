@@ -34,12 +34,12 @@ func shortHubTimes(t *testing.T) {
 	for i, p := range saved {
 		old[i] = *p
 	}
-	oldRetries := finalRetries
+	oldRetries, oldUnreachable := finalRetries, finalUnreachableRetries
 	t.Cleanup(func() {
 		for i, p := range saved {
 			*p = old[i]
 		}
-		finalRetries = oldRetries
+		finalRetries, finalUnreachableRetries = oldRetries, oldUnreachable
 	})
 	audioStartWait, audioAckEvery, audioPingEvery, audioEndWait = time.Second, 30*time.Millisecond, time.Minute, 3*time.Second
 	fallbackAfter, jobRetry, jobReadyWait, jobIdle, jobDoneWait = 300*time.Millisecond, 200*time.Millisecond, 2*time.Second, time.Minute, 5*time.Second
@@ -47,6 +47,7 @@ func shortHubTimes(t *testing.T) {
 	echoHoldMost, hubSegmentsEvery, hubTick, interimShown = time.Minute, 50*time.Millisecond, 10*time.Millisecond, 10*time.Second
 	finalEvery, finalGapWait = time.Hour, time.Hour
 	finalRetries = []time.Duration{0, 0}
+	finalUnreachableRetries = []time.Duration{0, 0, 0, 0, 0}
 	askLiveWait, askLivePoll = 3*time.Second, 5*time.Millisecond
 }
 
@@ -74,7 +75,8 @@ type jobScript struct {
 	interim  bool
 	held     bool // live: lines only on flush and end (a window still open)
 	noAck    bool
-	failAt   float64 // a fatal upstream_failed once the audio passes this second (0: never)
+	failAt   float64 // a fatal error once the audio passes this second (0: never), after the usage frame when usage
+	failCode string  // failAt's code (default upstream_failed)
 	dropAt   float64 // the socket dropped once the audio passes this second (0: never)
 	usage    float64 // the usage frame's seconds at done
 	windows  []fakeWindow
@@ -289,7 +291,10 @@ func (f *fakeTranscriber) serve(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if script.failAt > 0 && at >= script.failAt {
-				send(extwire.TranscriptionFrame{Type: extwire.TFError, Code: extwire.TEUpstreamFailed, Fatal: true})
+				if script.usage > 0 {
+					send(extwire.TranscriptionFrame{Type: extwire.TFUsage, Seconds: script.usage, Sessions: 1})
+				}
+				send(extwire.TranscriptionFrame{Type: extwire.TFError, Code: cmp.Or(script.failCode, extwire.TEUpstreamFailed), Fatal: true})
 				return
 			}
 			if !script.noAck && pos-ackedTo >= kb.AudioRate/2 {

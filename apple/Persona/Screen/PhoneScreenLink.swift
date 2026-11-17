@@ -106,6 +106,8 @@ final class PhoneScreenLink {
         defer { placing = nil }
         do {
             let r = try await call(PhoneScreenRequest(pair: pair, op: "place", pid: w.pid, window: w.window))
+            // The display may have changed width for this window (#9500): the arrangement that explains the picture now.
+            if let ds = r.displays, !ds.isEmpty { displays = ds } else if let d = r.display { displays = Self.replacing(d, in: displays) }
             if let d = r.display { display = d }
             placed = r.placed ?? w
             windowError = nil
@@ -114,6 +116,11 @@ final class PhoneScreenLink {
             if !Self.cancelled(error) { windowError = Self.message(error) }
             return false
         }
+    }
+
+    /// `d` in place of the display with its id (a helper before #9500 sent the display alone).
+    static func replacing(_ d: MachineDisplay, in displays: [MachineDisplay]) -> [MachineDisplay] {
+        displays.map { $0.id == d.id ? d : $0 }
     }
 
     private static func cancelled(_ error: Error) -> Bool {

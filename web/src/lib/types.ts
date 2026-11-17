@@ -624,6 +624,12 @@ export interface FoldChange {
   exact: boolean;
 }
 
+/** A web page a folded run used (docs/protocol/protocol.md "Folded work", #9132): one it opened or a search result. */
+export interface FoldSource {
+  url: string;
+  title?: string;
+}
+
 /** What model requests used (proto.TokenUsage): tokens by kind, `in` without the cache; `cache_write_1h` is the part of
  *  `cache_write` written for an hour; `fast`: Claude Code's fast speed. Entries with the same `id` (and model) are one
  *  report, counted once. */
@@ -655,7 +661,7 @@ export interface Item {
   queued?: boolean;
   wake?: boolean;
   task?: TaskNote;
-  fold?: { items: number; tools: number; thoughts: number; until?: string; through_seq: number; through_id?: string; images?: FoldImage[]; tasks?: FoldTaskSnapshot[]; latest_thinking?: Item; supervision_user?: boolean; changes?: FoldChange[] | null; usage?: TokenUsage[] };
+  fold?: { items: number; tools: number; thoughts: number; until?: string; through_seq: number; through_id?: string; images?: FoldImage[]; tasks?: FoldTaskSnapshot[]; latest_thinking?: Item; supervision_user?: boolean; changes?: FoldChange[] | null; usage?: TokenUsage[]; sources?: FoldSource[] };
   image?: { mime: string; data?: string; lazy?: boolean; size?: number; width?: number; height?: number };
   /** Sent by another Claude session (cross-session messaging), not typed by you: its name. */
   from?: string;

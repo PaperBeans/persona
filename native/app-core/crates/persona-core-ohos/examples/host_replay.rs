@@ -442,6 +442,25 @@ fn projection_json(bytes: &[u8]) -> Result<String, String> {
                 .map_err(|error| format!("stream_repair: input does not decode: {error}"))?;
             serde_json::to_string(&persona_core::stream_repair::project(&input)).map_err(|e| e.to_string())
         }
+        "plain_open_fence" => {
+            let input: persona_core::stream_repair::PlainFenceInput = serde_json::from_value(input.clone())
+                .map_err(|error| format!("plain_open_fence: input does not decode: {error}"))?;
+            serde_json::to_string(&persona_core::stream_repair::plain_open_fence(&input)).map_err(|e| e.to_string())
+        }
+        "viewed_images" => {
+            let input: persona_core::viewed_images::Input = serde_json::from_value(input.clone())
+                .map_err(|error| format!("viewed_images: input does not decode: {error}"))?;
+            let projection =
+                persona_core::viewed_images::project(&input).ok_or("viewed_images: input has no viewed line")?;
+            serde_json::to_string(&projection).map_err(|e| e.to_string())
+        }
+        "recents" => {
+            let input: persona_core::recents::Input = serde_json::from_value(input.clone())
+                .map_err(|error| format!("recents: input does not decode: {error}"))?;
+            let projection =
+                persona_core::recents::input_fixture(&input).map_err(|error| format!("recents: {error}"))?;
+            serde_json::to_string(&projection).map_err(|e| e.to_string())
+        }
         "task_index" => {
             let input: persona_core::task_index::Input = serde_json::from_value(input.clone())
                 .map_err(|error| format!("task_index: input does not decode: {error}"))?;

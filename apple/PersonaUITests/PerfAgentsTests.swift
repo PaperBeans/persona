@@ -52,11 +52,11 @@ final class PerfAgentsTests: PerfTestCase {
 
     // MARK: The Agents list
 
-    /// ~130 agents as cards, grouped by repository (the default).
+    /// ~130 agents as cards, grouped by repository (the default), with an app-driven frame window.
     @MainActor func testAgentsListScroll() throws {
         openList(["-dev.grouping", "repo"])
         see(app.buttons["agents.filter.all"], "the quick filters", timeout: 30)
-        measureScroll(list)
+        measureVerifiedGlide()
     }
 
     /// Grouped by machine, then by state: other section structures over the same agents.

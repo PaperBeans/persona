@@ -156,7 +156,9 @@ final class InboxTitleTargetUITests: XCTestCase {
         app = XCUIApplication()
         let env = ProcessInfo.processInfo.environment
         app.launchArguments = ["-pairURL", pair, "-ui.scheme", env["PERSONA_UI_SCHEME"] ?? "light", "-tab", "mail",
-                               "-inbox.kind", "", "-inbox.source", "", "-inbox.grouping", "time"] + extra
+                               "-inbox.kind", "", "-inbox.source", "", "-inbox.grouping", "time",
+                               // every section stacked, Done folding under them (the section bar's All, #9053)
+                               "-showInboxSection", "all"] + extra
             + (env["PERSONA_TEXT_SIZE"].map { ["-UIPreferredContentSizeCategoryName", $0] } ?? [])
         // the first launch after pairing may open on the Assistant instead: once more, paired
         for attempt in 0..<2 {

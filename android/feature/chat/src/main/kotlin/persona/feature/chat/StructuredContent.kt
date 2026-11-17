@@ -206,10 +206,14 @@ internal fun MergedUserBubble(items: List<Item>, updates: Map<String, ChatTextUp
 @Composable
 internal fun ThoughtContent(text: String, id: String, collapsed: Boolean, last: Boolean = true) {
     var open by rememberSaveable(id) { mutableStateOf(!collapsed) }
+    // A thought in a work step fades its text (ThinkingRow chip, MessageViews.swift:778, ChatView.swift:7388).
+    // The BeautifulUI trace (MessageViews.swift:791) does not pass unfold, and this row is not that trace.
+    val edge = rememberOpenEdge(id)
+    val revealing = edge.revealing(open)
     Column {
         val thought = stringResource(R.string.chat_work_thought)
         TimelineStep(PhIcons.Lightbulb, thought, verb = thought, last = last, onClick = { open = !open })
-        if (open) {
+        if (open) Column(Modifier.unfolding(revealing)) {
             Column(Modifier.workDetail(Tokens.Space.m)) {
                 ChatMarkdown(text, id, PersonaTheme.type.callout, PersonaTheme.palette.ink2)
             }

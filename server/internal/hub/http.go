@@ -1122,9 +1122,21 @@ func (h *Hub) broadcastTo(typ string, b []byte, elicitation bool) {
 		if elicitation && !c.has("elicitation") {
 			continue
 		}
+		if typ == legacyLarkEvent && c.has(featureLarkViaMessaging) {
+			continue
+		}
 		c.queue(localizedOnce(forms, c.lang(), b, localize))
 	}
 }
+
+// legacyLarkEvent is the Lark extension's old change notice ({"type":"lark","feed_ids":…}); while the old /api/v1/lark
+// is still read it comes beside the same change's "messaging" event (docs/extensions/extension-messaging.md).
+const legacyLarkEvent = "lark"
+
+// featureLarkViaMessaging: in client_hello, the app follows the "messaging" events for its Feishu screens and drops
+// the legacy "lark" one, so it is not sent to it (#9591). An app says it only while it uses a messaging source, and
+// says it again in a new client_hello when that changes; replayed events on resume, before its hello, still include it.
+const featureLarkViaMessaging = "lark_via_messaging"
 
 func (h *Hub) toSubscribers(machineID, sessionID string, v any) {
 	h.toSubscribersWith(machineID, sessionID, "", v)

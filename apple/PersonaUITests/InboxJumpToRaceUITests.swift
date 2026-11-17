@@ -115,6 +115,8 @@ final class InboxJumpToRaceUITests: XCTestCase {
         app = XCUIApplication()
         app.launchArguments = ["-pairURL", pair, "-ui.scheme", "light", "-tab", "mail", "-inbox.kind", "", "-inbox.source", "",
                                "-inbox.grouping", "time", "-inboxJumpWait", "60"]
+            // Done at the end of every section stacked, its title folding (the section bar's All, #9053)
+            + ["-showInboxSection", "all"]
         for attempt in 0..<2 { // the first launch after pairing may open on the Assistant: once more, paired
             if attempt > 0 { app.terminate() }
             app.launchPinned()

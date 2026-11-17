@@ -378,6 +378,11 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
 // pages as its own folding section (lib/sidebar-pages.ts arrangeSections, views/Sidebar.tsx PageGroup), and the
 // arrangement goes to and from the hub with the start page (lib/start-page.ts). The editor is in the Settings chunk.
 // Main's room is kept on top.
+// #9132: a finished reply's Sources row is a chunk of its own (views/chat/TurnSources.tsx with lib/turn-sources.ts and
+// its words); the first screen keeps only SegmentView's check for a web call and the lazy entry, the smallest of four
+// layouts tried (mounting it under every exchange, or riding the reply bar's chunk, cost more). 85 B in ja, measured in
+// one environment against main 21cd52cc2 (ja 482,104 B to 482,189 B; en 478,990 B to 479,075 B, zh-Hans 479,859 B to
+// 479,944 B). Main had 422 B of room; the budget stays.
 export const FIRST_SCREEN_BUDGET = 482_526;
 // The hash in a built file's name: the 8 characters of Rollup's [hash] (url-safe base64) between "-" and the
 // extension, as vite.config.ts names every chunk and asset ("assets/[name]-[hash].js", "[name]-[hash][extname]").

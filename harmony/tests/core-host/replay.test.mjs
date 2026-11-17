@@ -201,8 +201,8 @@ test('every continuity case replays through the ArkTS codec and the real runtime
     }
   }
   await core.end();
-  assert.equal(cases, 38, 'every continuity case replays');
-  assert.equal(steps, 94, 'every continuity step replays');
+  assert.equal(cases, 39, 'every continuity case replays');
+  assert.equal(steps, 95, 'every continuity step replays');
 });
 
 test('a repeated item is one Update, and a closed handle stays closed', {timeout: 60_000}, async () => {

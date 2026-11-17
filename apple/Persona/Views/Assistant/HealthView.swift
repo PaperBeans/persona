@@ -107,7 +107,7 @@ struct HealthView: View {
         VStack(spacing: 0) {
             sections(HealthModel.merge(page.fetched, live: model.healthConversations))
                 .themedPage()
-            if !reports.items.isEmpty { UploadsBar(uploads: reports).padding(.horizontal, Theme.Space.page).tabSwitchRoom() }
+            if !reports.items.isEmpty { UploadsBar(uploads: reports).padding(.horizontal, Theme.Space.page) }
             Group {
                 if ChatComposerKind.padCard {
                     // iPhone and iPad, every style: Persona's new conversation's composer (#3825), with the attach panel and
@@ -123,7 +123,6 @@ struct HealthView: View {
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
             .padding(.bottom, Theme.Space.s)
-            .tabSwitchRoom() // beside the open Duo's floating tabs' switch (#4231)
             .frame(maxWidth: ChatView.readableWidth)
             .frame(maxWidth: .infinity)
             .background(Theme.groupedPage.ignoresSafeArea(edges: .bottom))

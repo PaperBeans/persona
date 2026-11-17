@@ -5,8 +5,9 @@ import SwiftUI
 /// - `sidebar`, Merged: everything in one sidebar, as the web app has it: the main conversation, the pages, Persona's
 ///   chats and the Agents list. What is picked in it is the page beside it (docs/apple/ios.md「Sidebar layout」).
 /// - `separate`: Assistant and Agents as two pages, the Assistant | Agents switch at the top on an iPhone, the
-///   Persona | Agents tabs on an iPad, as before the choice existed; on iPhone Duo, on both displays, the switch stands
-///   upright at the bottom-trailing corner, its pages' symbols alone (#4231, `TabSwitchLayout`).
+///   Persona | Agents tabs on an iPad, as before the choice existed; on iPhone Duo, on both displays, a tab bar of the
+///   pages' symbols over their names, down the system's side column, or along the foot of the inner display upright
+///   (#4231, `TabSwitchLayout`).
 /// - Nothing picked (`effective`): Merged where the sidebar sits beside the page (regular width: the iPad, the open
 ///   iPhone Duo), Separate at compact width (an iPhone, the folded Duo), as #4206 designed it; picked, either one at
 ///   every width (the iPhone's drawer is Merged at compact width, #6332).
@@ -40,7 +41,7 @@ enum NavigationLayout: String, CaseIterable, Identifiable {
     var summary: String {
         switch self {
         case .separate:
-            String(localized: "Assistant and Agents each have a page. On iPhone you switch at the top, on iPhone Duo at the bottom right, and on iPad with the Persona and Agents tabs.")
+            String(localized: "Assistant and Agents each have a page. On iPhone you switch at the top, on iPhone Duo with a tab bar down the side or along the bottom, and on iPad with the Persona and Agents tabs.")
         case .sidebar:
             String(localized: "The main chat, pages, Persona chats and Agents are all in one sidebar, as in the web app. On iPhone it slides in from the left; on iPad it stays on the left.")
         }

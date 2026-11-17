@@ -331,8 +331,8 @@ struct RootView: View {
         #if os(iOS)
         .environment(\.splitSideBars, barEdge != nil) // the columns' top margin under side bars (#4853)
         .readsVerticalBarEdge($barEdge)
-        // On a phone (the open iPhone Duo) the shell's upright switch in the system's tab bar's place, at the bottom-trailing
-        // corner (#4231); the iPad keeps its bar. Before the routes: Settings' cover leaves the pages' room for it behind.
+        // On a phone (the open iPhone Duo) the Duo's tab bar in the system's tab bar's place, down the side column or along
+        // the foot (#4231); the iPad keeps its bar.
         .modifier(TabSwitchOverlay())
         .modifier(PadRoutes(router: pad))
         .onAppear { agentsPart.linedUpWith = personaPart } // one head line on both tabs (#8596)
@@ -532,7 +532,7 @@ private struct TabPage<Page: View>: View, Equatable {
                 ChatsView()
                     .environment(\.unifiedSidebar, part)
                     .modifier(TabActivityScope(tab: .assistant))
-                    .modifier(PhoneTabBarHidden()) // the open Duo's switch stands in for it (#4231)
+                    .modifier(PhoneTabBarHidden()) // the open Duo's tab bar stands in for it (#4231)
                 #else
                 AssistantView()
                     .modifier(TabActivityScope(tab: .assistant))
@@ -564,7 +564,7 @@ private struct TabPage<Page: View>: View, Equatable {
                 #if os(iOS)
                     // The Separate layout in the new look (#4206): the one sidebar's column with the Agents' part.
                     .environment(\.unifiedSidebar, part)
-                    .modifier(PhoneTabBarHidden()) // the open Duo's switch stands in for it (#4231)
+                    .modifier(PhoneTabBarHidden()) // the open Duo's tab bar stands in for it (#4231)
                 #endif
                     .modifier(TabActivityScope(tab: .chats))
                 #if PERF_SIGNPOST

@@ -167,7 +167,6 @@ struct TodosView: View {
         .themedPage()
         // The first row close to the bar, as the Agents list keeps it: not the grouped list's first-section margin.
         .contentMargins(.top, Theme.Space.xs, for: .scrollContent)
-        .tabSwitchListRoom()  // its end clear of the open Duo's floating tabs' switch (#4231)
         .refreshable {
             await store.refresh()
         }

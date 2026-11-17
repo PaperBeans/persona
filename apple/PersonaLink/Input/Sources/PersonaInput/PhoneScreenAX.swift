@@ -129,6 +129,20 @@ enum AX {
         }
     }
 
+    /// ⌘+ (`steps` > 0) or ⌘− (< 0) to the app alone (`postToPid`, nothing global), a key every 80 ms. The app gives them
+    /// to its front window, so the window is raised first.
+    static func zoom(pid: pid_t, steps: Int) {
+        let key: CGKeyCode = steps > 0 ? 0x18 : 0x1B // kVK_ANSI_Equal, kVK_ANSI_Minus
+        for _ in 0..<abs(steps) {
+            for down in [true, false] {
+                guard let event = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: down) else { continue }
+                event.flags = .maskCommand
+                event.postToPid(pid)
+            }
+            Thread.sleep(forTimeInterval: 0.08)
+        }
+    }
+
     static func wait(seconds: TimeInterval, until done: () -> Bool) {
         let deadline = ProcessInfo.processInfo.systemUptime + seconds
         while !done(), ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.25) }

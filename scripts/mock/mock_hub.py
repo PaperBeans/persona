@@ -4675,6 +4675,9 @@ def managers_route(h, method, p):
 # modes, every recording's live log and its asks; POST /mock/recording_minutes forgets them too.
 MEETING_ATTENDANCE = os.environ.get("MOCK_NO_MEETING_ATTENDANCE") != "1"
 MEETING_ROLES = ("off", "listener", "participant")
+# A room meeting's roles (#8851): the three, and the note-taker, which follows the meeting and answers nothing. The hub
+# takes notes on a room's upload, on the hub-transcription timeline and on the audio socket; never as the default.
+ROOM_ROLES = MEETING_ROLES + ("notes",)
 MEETING_MODE = {"feed": os.environ.get("MOCK_MEETING_FEED", "ok"), "answer": os.environ.get("MOCK_MEETING_ANSWER", "ok"),
                 "answer_seconds": float(os.environ.get("MOCK_MEETING_ANSWER_SECONDS", "3")), "kb_read_only": False}
 MEETING_LIVE = {}  # recording id → its role, session, live log, fed count and asks (meeting_live)
@@ -4911,7 +4914,7 @@ def meeting_ask(h, st, body, rec):
             now = meeting_ask_now(st, stored)
             return h.send_json({"ask": now}, 202 if now["state"] == "pending" else 200) or True
     if MEETING_MODE["kb_read_only"]: return h.send_json({"error": "知识库是只读的", "code": "kb_read_only"}, 403) or True
-    if st["role"] == "off": return h.send_json({"error": "这条录音没有参会", "code": "not_attending"}, 409) or True
+    if st["role"] in ("off", "notes"): return h.send_json({"error": "这条录音没有参会", "code": "not_attending"}, 409) or True
     room = room_of(st["id"])
     if room is not None and room.get("state") in ("ended", "deleted"):
         return h.send_json({"error": "The meeting has ended: ask in its follow-up.", "code": "meeting_ended"}, 409) or True
@@ -5111,13 +5114,13 @@ def meeting_event_flush(rid):
 
 
 def room_role(body):
-    """The role an upload's room asks for and what was wrong with it (kb.roomRole): not a string, or not one of the three,
-    unknown_role; a role on a recording that is not a meeting not_meeting."""
+    """The role an upload's room asks for and what was wrong with it (kb.roomRole): not a string, or not one of the room's
+    roles (notes too, #8851), unknown_role; a role on a recording that is not a meeting not_meeting."""
     att = body["room"].get("attendance")
     if att is not None and not isinstance(att, str): return "", "unknown_role"
     role = (att or "").strip().lower()
     if role in ("", "off"): return "", None
-    if role not in ("listener", "participant"): return "", "unknown_role"
+    if role not in ("notes", "listener", "participant"): return "", "unknown_role"
     if recording_kind(body) != "meeting": return "", "not_meeting"
     return role, None
 
@@ -5197,7 +5200,9 @@ def conv_start(rid, part, origin, items):
 
 def room_header(rec, role):
     started = rec.get("started_at", "")
-    say = "participant: answers may be said aloud" if role == "participant" else "listener: answers are shown on screen only"
+    say = ("participant: answers may be said aloud" if role == "participant"
+           else "notes: you keep the topics and highlights only, and nobody asks you anything until the role changes" if role == "notes"
+           else "listener: answers are shown on screen only")
     return meeting_source_text(rec, f'The meeting is starting. Write nothing now.\n\n<persona-context kind="context" title="{meeting_name(rec)}" url="">\n'
                                     f"Title: {meeting_name(rec)}\nStarted: {started}\nLanguage: {rec.get('language') or 'en'}\nRole: {say}\n</persona-context>")
 
@@ -5404,7 +5409,7 @@ def room_end(rid):
     if state == "ready" and r.get("attendance"):
         rec = RECORDINGS.get(rid) or {}
         conv_append(r["machine_id"], r["session_id"], [conv_item("user", meeting_source_text(rec,
-            f'"{meeting_name(rec)}", the meeting you attend as a {r["attendance"]}, has ended. Write nothing in reply.'),
+            f'"{meeting_name(rec)}", the meeting you attend as {"the note-taker" if r["attendance"] == "notes" else "a " + r["attendance"]}, has ended. Write nothing in reply.'),
             source={"kind": "meeting", "title": meeting_name(rec)})])
     if state in ("ready", "starting", "unavailable"):
         r.update(state="ended", problem="")
@@ -6534,7 +6539,7 @@ def transcription_timeline(t, raw):
     if not isinstance(raw, dict): return
     roles, spans = raw.get("roles", []), raw.get("speaking", [])
     if not isinstance(roles, list) or not isinstance(spans, list) or len(roles) > 100 or len(spans) > 1000: return
-    if any(not isinstance(r, dict) or not transcription_number(r.get("at")) or r.get("attendance") not in MEETING_ROLES for r in roles): return
+    if any(not isinstance(r, dict) or not transcription_number(r.get("at")) or r.get("attendance") not in ROOM_ROLES for r in roles): return
     if any(not isinstance(sp, dict) or not transcription_number(sp.get("start")) or not transcription_number(sp.get("end"))
            or sp["start"] > sp["end"] or not isinstance(sp.get("text", ""), (str, type(None))) for sp in spans): return
     spans = [{"start": sp["start"], "end": sp["end"], **({"text": spoken_cut(sp["text"])} if sp.get("text") else {})} for sp in spans]
@@ -7120,7 +7125,7 @@ def transcription_socket(h, rid):
                     state["at"] = at
                     state["sentence"] = max(at, t["held"][-1][1] if t["held"] else 0)
                 elif kind == "role":
-                    if msg.get("attendance") not in MEETING_ROLES: fail("bad_frame"); break
+                    if msg.get("attendance") not in ROOM_ROLES: fail("bad_frame"); break
                     transcription_timeline(t, {"roles": [{"at": at, "attendance": msg["attendance"]}]})
                 elif kind == "speaking":
                     if type(msg.get("on")) is not bool or not isinstance(msg.get("text", ""), (str, type(None))): fail("bad_frame"); break
@@ -16824,6 +16829,29 @@ if WORK_TIMELINE:
     mock_work_timeline()
 
 
+# MOCK_WEB_SOURCES=1 (#9132): the main chat ends with a finished exchange that looked things up on the web, so its reply
+# has a Sources row: a Claude Code WebSearch whose result names five pages on its "Links:" line, and a WebFetch of one
+# of them. Made-up sites (example domains).
+def mock_web_sources():
+    links = [{"title": "Kyoto 10-day forecast", "url": "https://weather.example.com/kyoto/10-day"},
+             {"title": "Kyoto in late November: what to pack", "url": "https://www.travel.example.org/kyoto-november"},
+             {"title": "Autumn leaves report: Kyoto", "url": "https://leaves.example.net/kyoto"},
+             {"title": "Japan weather warnings", "url": "https://alerts.example.com/japan"},
+             {"title": "Kyoto city events this week", "url": "https://events.example.org/kyoto"}]
+    q = "Kyoto weather next week"
+    rows = [it("user", "text", 0.6, text="What's the weather in Kyoto next week? We're going on Tuesday.")]
+    rows += tool("WebSearch", {"query": q}, 'Web search results for query: "%s"\n\nLinks: %s\n\nMostly sunny, 9–17 °C.' % (q, json.dumps(links)), 0.5)
+    rows += tool("WebFetch", {"url": links[0]["url"], "prompt": "Tuesday to Friday"}, "Tue sunny 17/9, Wed sunny 16/8, Thu cloudy 15/9, Fri light rain 14/10.", 0.4)
+    rows.append(it("assistant", "text", 0.3, text="Mostly sunny from Tuesday, 15–17 °C by day and 8–10 °C at night; light rain is likely on "
+                                                   "Friday, so pack a light jacket and a small umbrella. The autumn leaves should be near their best."))
+    ITEMS[ASK1] = ITEMS[ASK1] + rows
+    ASSISTANT[0].update(state="idle", status="idle", updated_at=ago(), last_text=rows[-1]["text"])
+
+
+if os.environ.get("MOCK_WEB_SOURCES") == "1":
+    mock_web_sources()
+
+
 # MOCK_EDIT_DIFF=1 (#2915): one finished turn whose edits read as real diffs: an Edit that changes a word in two lines
 # of a block (context between and around them), a MultiEdit of two pieces, a Write (all additions) and an Edit of a
 # 56-line switch that changes its first and last lines (the unchanged middle folds; past 40 lines, Show All). The first
@@ -18058,6 +18086,44 @@ def fold_usage(run):
     return list(sums.values()) + out
 
 
+def fold_sources(run):
+    """transcript.foldSources (#9132, spec/fixtures/fold-sources): the pages the run's successful WebFetch calls opened,
+    then the results its WebSearch calls returned (Claude's "Links: [...]" lines, Codex's "title  url" lines), each URL
+    once, at most 10. The fake leaves out the cut-result rules: its results are never cut."""
+    ok = {x.get("tool_use_id"): x for x in run if x["kind"] == "tool_result" and not x.get("is_error")}
+    calls = lambda name: [x for x in run if x["kind"] == "tool_use" and x.get("tool_name") == name and x.get("tool_use_id") in ok]
+    web = lambda u: bool(re.match(r"(?i)^https?://\S+$", u or ""))
+    found = [{"url": (x.get("tool_input") or {}).get("url", "")} for x in calls("WebFetch")]
+    for x in calls("WebSearch"):
+        lines = (ok[x["tool_use_id"]].get("text") or "").split("\n")
+        linked = [l[len("Links: "):] for l in lines if l.startswith("Links: ")]
+        if linked:
+            for l in linked:
+                try:
+                    found += [{"url": e.get("url", ""), "title": e.get("title", "")} for e in json.loads(l)]
+                except ValueError:
+                    pass
+            continue
+        for l in (l.strip() for l in lines):
+            if web(l):
+                found.append({"url": l})
+            elif "  " in l:
+                title, _, url = l.rpartition("  ")
+                found.append({"url": url.strip(), "title": title})
+    out, at = [], {}
+    for e in found:
+        url, title = e["url"].strip(), (e.get("title") or "").strip()
+        if not web(url):
+            continue
+        if url in at:
+            if title:
+                out[at[url]].setdefault("title", title)
+            continue
+        at[url] = len(out)
+        out.append({"url": url, **({"title": title} if title else {})})
+    return out[:10]
+
+
 def fold_work(items):
     """transcript.FoldWork: each run of tool calls (with their results) and thoughts becomes one fold item."""
     uses = {x.get("tool_use_id") for x in items if x["kind"] == "tool_use"}
@@ -18095,13 +18161,14 @@ def fold_work(items):
                     preview["full_size"] = max(latest.get("full_size", 0), len(preview["text"].encode()))
                     preview["text"] = preview["text"][:511] + "…"
                 narration["latest_thinking"] = preview
-            usage = fold_usage(run)
+            usage, sources = fold_usage(run), fold_sources(run)
             out.append({"id": "fold:" + run[0]["id"], "seq": run[0]["seq"], "ts": run[0]["ts"], "role": "assistant", "kind": "fold",
                         "fold": {"items": len(run), "tools": sum(x["kind"] == "tool_use" for x in run),
                                  "thoughts": sum(x["kind"] == "thinking" and bool((x.get("text") or "").strip()) for x in run),
                                  "until": run[-1]["ts"], "through_seq": run[-1]["seq"], "through_id": run[-1]["id"],
                                  **({"tasks": tasks} if tasks else {}), **({"images": images} if images else {}), **narration,
-                                 "changes": fold_changes(run), **({"usage": usage} if usage else {})}})
+                                 "changes": fold_changes(run), **({"usage": usage} if usage else {}),
+                                 **({"sources": sources} if sources else {})}})
         i = j
     return out
 
@@ -21063,6 +21130,73 @@ if os.environ.get("MOCK_RENDER"):
     MOCK_TREE[MOCK_REPO + "/docs/算法.md"] = "# 降雨预报的算法\n\n" + RENDER_MD + (
         "\n\n## 时序\n\n```mermaid\nsequenceDiagram\n  participant W as 小组件\n  participant A as App\n  participant S as 服务器\n"
         "  W->>A: 时间线请求\n  A->>S: GET /v1/forecast\n  S-->>A: 6 小时预报\n  A-->>W: Timeline\n```\n")
+# Pictures in replies (#9474, #9473): the hub's remote image route draws made-up pictures, their shape named by the
+# address (tall-, wide-, pano-, square-, small-; fail- answers fetch_failed), a gradient picked by the number in it,
+# scaled to fit `size` and never enlarged. MOCK_REMOTE_IMAGES=0 is a hub from before it (no feature, 404).
+# MOCK_REPLY_IMAGES=1 adds a turn to the release-notes conversation whose reply names such pictures: a pair under a
+# line of text and a portrait alone right under one (the shape replies take), a landscape one and a run of eight in
+# paragraphs of their own, one inside a line, one that fails.
+REMOTE_IMAGES = os.environ.get("MOCK_REMOTE_IMAGES") != "0"
+_features_without_remote_images = features
+
+
+def features():
+    return _features_without_remote_images() + (["remote_images"] if REMOTE_IMAGES else [])
+
+
+_REMOTE_SHAPES = {"tall": (1080, 1440), "wide": (1600, 1200), "pano": (3000, 1000), "square": (1200, 1200), "small": (96, 96)}
+_REMOTE_COLORS = [((244, 237, 229), (228, 211, 192)), ((168, 199, 230), (125, 139, 152)), ((231, 227, 220), (200, 196, 188)),
+                  ((246, 242, 236), (201, 160, 122)), ((185, 214, 238), (122, 162, 108)), ((239, 233, 222), (127, 154, 134)),
+                  ((255, 216, 164), (200, 116, 107)), ((238, 240, 242), (45, 49, 56)), ((207, 229, 245), (230, 225, 216))]
+
+
+def mock_picture(h, name, size=0):
+    """A made-up picture named like the fixture's (shape-number.ext), at its own size or scaled to fit `size`."""
+    if name.startswith("fail-"):
+        return h.send_json({"error": "Couldn't fetch that picture. Try again later.", "code": "fetch_failed"}, 502)
+    w, hgt = _REMOTE_SHAPES.get(name.split("-", 1)[0], (1200, 900))
+    if size and max(w, hgt) > size:
+        w, hgt = (size, max(1, hgt * size // w)) if w >= hgt else (max(1, w * size // hgt), size)
+    digits = "".join(c for c in name if c.isdigit())
+    top, bottom = _REMOTE_COLORS[int(digits or 0) % len(_REMOTE_COLORS)]
+    data = _fs_png(w, hgt, top, bottom)
+    h.send_response(200)
+    h.send_header("Content-Type", "image/png")
+    h.send_header("Cache-Control", "private, max-age=86400")
+    h.send_header("Content-Length", str(len(data)))
+    h.end_headers()
+    h.wfile.write(data)
+
+
+def mock_remote_image(h, raw_query):
+    """GET /api/v1/remote-image: `url` read as written (a plus stays a plus, as the hub reads it), `size` snapped."""
+    addr = next((unquote(v) for k, _, v in (part.partition("=") for part in raw_query.split("&")) if k == "url"), "")
+    name = addr.rsplit("/", 1)[-1]
+    if not addr.startswith(("http://", "https://")):
+        return h.send_json({"error": "That picture's address can't be loaded.", "code": "bad_url"}, 400)
+    try:
+        size = int(parse_qs(raw_query).get("size", ["1024"])[0])
+    except ValueError:
+        size = 1024
+    size = next((s for s in (256, 512, 768, 1024, 1536, 2048) if size <= s), 2048) if size > 0 else 1024
+    return mock_picture(h, name, size)
+
+
+# The pictures' addresses are the mock's own /mock/pic/<name>: another origin than the app's hub, so a build from
+# before #9473 loads them straight (as large as they are), and one with it through /api/v1/remote-image.
+REPLY_PIC = "http://127.0.0.1:%d/mock/pic/" % PORT
+REPLY_IMAGES_MD = ("找到了能看到楼和屋里的照片。\n\n"
+                   "**楼和小区**（中介发的两张）\n![楼](" + REPLY_PIC + "tall-1.jpg)\n![街道](" + REPLY_PIC + "pano-4.jpg)\n"
+                   "- 楼下就是公交站，走到地铁大约 8 分钟。\n\n"
+                   "**厨房**（同一篇帖子里的照片）\n![厨房](" + REPLY_PIC + "tall-0.jpg)\n- 厨房是独立的，带洗衣机位。\n\n"
+                   "**客厅**\n\n![客厅](" + REPLY_PIC + "wide-3.jpg)\n\n"
+                   "**屋里**（帖子里一共 8 张）\n\n" + " ".join("![](" + REPLY_PIC + "%s-%d.jpg)" % (k, n) for n, k in enumerate(
+                       ["wide", "square", "tall", "wide", "square", "tall", "wide", "square"], 5)) + "\n\n"
+                   "项目的图标 ![图标](" + REPLY_PIC + "small-6.png) 跟着行高走。\n\n"
+                   "这张没取到：\n![坏图](" + REPLY_PIC + "fail-1.jpg)\n\n最后一段文字在图片下面。")
+if os.environ.get("MOCK_REPLY_IMAGES"):
+    ITEMS[RELEASE] = ITEMS.get(RELEASE, []) + [it("user", "text", 1, text="帮我找几张这套房子的照片"),
+                                               it("assistant", "text", 0, text=REPLY_IMAGES_MD)]
 MOCK_TREE["Desktop/"] = None  # listed, but macOS keeps it from personad (mock_denied)
 MOCK_COMMITS[2]["refs"] = "tag: v0.1.0"
 TIME_OFFSET = os.environ.get("MOCK_TIME_OFFSET", "")
@@ -26005,6 +26139,10 @@ class H(BaseHTTPRequestHandler):
         if p.startswith("/api/v1/assistant") and (other := assistant_for_manager(self)) is not None:
             if p == "/api/v1/assistant" or other[1] != 200: return self.send_json(*other)
             if p in ("/api/v1/assistant/tasks", "/api/v1/assistant/runs"): return self.send_json({"tasks": [], "runs": []})
+        if p.startswith("/mock/pic/"): return mock_picture(self, p.rsplit("/", 1)[-1])
+        if p == "/api/v1/remote-image":
+            if not REMOTE_IMAGES: return self.send_json({"error": "not found"}, 404)
+            return mock_remote_image(self, urlparse(self.path).query)
         if p == "/api/v1/assistant/search":
             if not ASSISTANT_SEARCH: return self.send_json({"error": "not found"}, 404)
             return self.send_json(assistant_search(q.get("q", [""])[0], q.get("limit", ["30"])[0]))

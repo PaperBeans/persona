@@ -85,7 +85,7 @@ struct KnowledgeView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .tabSwitchListRoom()  // its end clear of the open Duo's floating tabs' switch (#4231)
+        .devScreen("knowledge")
         .alert("Couldn't Finish", isPresented: Binding(get: { recordingFailure != nil }, set: { if !$0 { recordingFailure = nil } })) {
             Button("OK [Recordings Section de32e2]") { recordingFailure = nil }.lineLimit(1)
         } message: { Text(recordingFailure ?? "") }

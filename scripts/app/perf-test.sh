@@ -14,6 +14,7 @@
 #   PERF_DD          DerivedData of the optimized build (default /tmp/persona-perf-dd)
 #   PERF_SKIP_BUILD  1: reuse the last build in PERF_DD
 #   PERF_SIM_LOCK    the lock every simulator use runs under (default /tmp/playbox-sim.lock, shared with other agents)
+#   PERSONA_CONTINUITY_SHADOW=1  opt in to the DEBUG production shadow A/B (`-showContinuityShadow YES`)
 #   PERF_SAMPLE      a test name (e.g. testAgentChatScrollBig): also `sample` the app's main thread during that test
 #
 # Builds always go through ~/.local/bin/xcode-slot (at most two builds on the machine). Building does not hold
@@ -165,6 +166,7 @@ for s in "${SUITES[@]}"; do
     env TEST_RUNNER_PERSONA_PERF_HUB="http://127.0.0.1:$port" \
       TEST_RUNNER_PERSONA_PERF_ITERATIONS="$ITER" \
       TEST_RUNNER_PERSONA_PERF_SIM="$UDID" \
+      TEST_RUNNER_PERSONA_CONTINUITY_SHADOW="${PERSONA_CONTINUITY_SHADOW:-0}" \
       TEST_RUNNER_PERSONA_PERF_BUNDLE="$PERSONA_BUNDLE_ID" \
       TEST_RUNNER_PERSONA_PERF_SIM_HOME="$HOME" \
     "${SLOT[@]}" timeout 5400 xcodebuild test-without-building -project apple/Persona.xcodeproj -scheme Persona \

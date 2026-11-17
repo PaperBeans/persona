@@ -12,7 +12,8 @@ import tarfile
 import unittest
 from unittest.mock import patch
 
-from scripts.test import test_web_development_update as fixtures
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # the suites run from scripts/test, where `scripts` is no package
+import test_web_development_update as fixtures  # noqa: E402
 
 webdev = fixtures.webdev
 
@@ -157,7 +158,7 @@ class RecoveryValidation(unittest.TestCase):
         link = destination / "root-0/data/latest"
         self.assertTrue(link.is_symlink())
         self.assertEqual(link.read_text(), "saved history")
-        self.assertTrue(link.resolve().is_relative_to(destination))
+        self.assertTrue(link.resolve().is_relative_to(destination.resolve()))  # macOS temp dirs sit behind /var -> /private/var
         self.assertTrue((destination / "root-0/latest").is_symlink())
         self.assertEqual((destination / "root-0/latest/history.txt").read_text(), "saved history")
         self.assertEqual((Path(self.request["runtime"]) / "data/history.txt").read_text(), "synthetic history")
