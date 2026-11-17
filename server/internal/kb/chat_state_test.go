@@ -217,3 +217,53 @@ func TestPromptLeavesOutEndedChatsAndProjects(t *testing.T) {
 		t.Fatalf("projects %v chats %v in\n%s", projects, chats, d)
 	}
 }
+
+// A project whose summary the user locked keeps that summary and its lock through a merge (#9427, from the issue's
+// note): the event dirties the project, the rewrite may update the one line and the status, and FinishProjects may
+// finish it, but the locked text is never replaced.
+func TestMergeLeavesALockedSummary(t *testing.T) {
+	m := &captureModel{reply: `{"summary":"PR 已合并，事情做完了","one_line":"PR 已合并","status":"active"}`}
+	e := testEngine(t, m)
+	at := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	c := prChat(t, e, "lock-1", "locked", at)
+	const mine = "# locked\n\n我自己写的结论：等评审\n"
+	if err := e.Store.putSummary(KindProject, "locked", mine, true); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := e.Store.Project("locked")
+	p.LockedFields, p.Dirty = []string{"summary"}, false
+	if err := e.Store.putEntity(KindProject, p.Slug, p, &p.Tagging, true); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := e.Ingest(context.Background(), named("github"), SourceChat{ID: c.SourceID, Kind: "pr", State: "merged", StateAt: at}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ = e.Store.Project("locked"); !p.Dirty {
+		t.Fatal("the merge did not mark the project for a rewrite")
+	}
+	if n := e.RefreshProjects(context.Background(), 1); n != 1 {
+		t.Fatalf("rewrote %d", n)
+	}
+	check := func(when string) *Project {
+		t.Helper()
+		p, _ := e.Store.Project("locked")
+		if got := e.Store.Summary(KindProject, "locked"); got != mine {
+			t.Fatalf("%s: the locked summary changed to %q", when, got)
+		}
+		if !slices.Equal(p.LockedFields, []string{"summary"}) {
+			t.Fatalf("%s: locks %v", when, p.LockedFields)
+		}
+		return p
+	}
+	if p := check("after the rewrite"); p.OneLine != "PR 已合并" {
+		t.Fatalf("one line %q", p.OneLine)
+	}
+
+	if got := e.FinishProjects(time.Now().Add(4*24*time.Hour), nil); !slices.Equal(got, []string{"locked"}) {
+		t.Fatalf("finished %v", got)
+	}
+	if p := check("after finishing"); p.Status != "done" {
+		t.Fatalf("status %q", p.Status)
+	}
+}
