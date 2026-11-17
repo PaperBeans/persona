@@ -227,7 +227,7 @@ func (n *Node) takeOriginalGrant(cfg proto.AssistantLark, session, id string, c 
 		if g.session != "" && key.session != "" && g.session != key.session {
 			continue
 		}
-		if g.body != nil && (!parsed || !reflect.DeepEqual(g.body, body)) {
+		if g.bodyBound && (!parsed || !reflect.DeepEqual(g.body, body)) {
 			continue
 		}
 		p.grants = slices.Delete(p.grants, i, i+1)
@@ -248,7 +248,7 @@ func (n *Node) grantEdited(cfg proto.AssistantLark, session string, c larkCall, 
 	if err := dec.Decode(&body); err != nil {
 		return err
 	}
-	g := gateGrant{command: cfg.Gates[c.Gate].Command, method: strings.ToUpper(c.Method), path: c.Path, query: gateQueryKey(c.Query), body: body, bodyUseNumber: true,
+	g := gateGrant{command: cfg.Gates[c.Gate].Command, method: strings.ToUpper(c.Method), path: c.Path, query: gateQueryKey(c.Query), body: body, bodyBound: true, bodyUseNumber: true,
 		until: time.Now().Add(gateGrantFor), session: session, through: through}
 	p := n.gates()
 	p.mu.Lock()
