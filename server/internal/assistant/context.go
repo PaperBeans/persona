@@ -370,9 +370,10 @@ func (s *Service) snapshotAgents(ctx context.Context, devices []Device, web stri
 	for _, m := range devices {
 		list, off, _ := s.sessionsMuted(ctx, m.ID)
 		for _, c := range list {
-			if c.Assistant {
+			if c.Assistant || c.FoldedUnder() != "" {
 				continue
 			}
+			c.State = c.FoldedState()
 			a := prompts.SnapshotAgent{Label: agentLabel(c), Machine: m.ID, Session: short(c.SessionID),
 				Link: sessionLink(web, m.ID, c.SessionID, false), Ultracode: ultracodeState(c.Ultracode), Plan: snapshotPlan(c)}
 			for _, w := range runningWorkflows(c, now) {

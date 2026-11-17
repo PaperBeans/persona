@@ -20,6 +20,30 @@ struct OpenPersonaAssistantIntent: AppIntent {
     }
 }
 
+/// Opens a new assistant conversation and asks its composer to start dictating once it is visible.
+struct OpenPersonaDictationIntent: AppIntent {
+    nonisolated static let title: LocalizedStringResource = "Dictate to Persona"
+    nonisolated static let description = IntentDescription("Opens a new conversation and starts dictation.")
+    nonisolated static var supportedModes: IntentModes { .foreground(.immediate) }
+
+    nonisolated init() {}
+
+    /// The same entry for the intent and its DEBUG stand-in; tests can supply a model other than the app's singleton.
+    #if !WIDGET_EXTENSION
+    @MainActor static func open(_ model: AppModel) {
+        model.shellSettings = false
+        model.openNewAssistantForDictation()
+    }
+    #endif
+
+    nonisolated func perform() async throws -> some IntentResult {
+        #if !WIDGET_EXTENSION
+        await MainActor.run { Self.open(AppModel.shared) }
+        #endif
+        return .result()
+    }
+}
+
 /// Opens Persona on the Agents tab (personal agents are one tap from there).
 struct OpenPersonaAgentsIntent: AppIntent {
     nonisolated static let title: LocalizedStringResource = "Open Persona Agents"

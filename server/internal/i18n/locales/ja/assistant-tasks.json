@@ -57,6 +57,7 @@
   "admission_procs": "claude プロセスが既に {count} 個実行中で、上限 {limit} に達しています。",
   "admission_load": "負荷 {load} がコア数 {cores} × {multiplier} を超えています。",
   "admission_direction_full": "この方向のエージェントは既に {running} 個実行中で、上限 {limit} に達しています。",
+  "admission_launcher_group_full": "ランチャーグループ {group} のタスクは既に {running} 件実行中で、上限 {limit} に達しています。",
   "admission_refused": "コンピューター {machine} ではこのエージェントを開始できません：{reason}{recommend}",
   "admission_recommend": " 推奨コンピューター：{machine}。",
   "admission_reroute": "{from} から {to} に変更しました：{reason}",

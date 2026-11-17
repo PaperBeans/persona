@@ -126,6 +126,11 @@ final class MeetingConversation {
         self.sync = sync
     }
 
+    #if DEBUG
+    /// A replayed meeting's state (`MeetingReplay`, #9417), as the hub's reads would have left it.
+    func replace(_ id: UUID, _ m: Meeting) { if meetings[id] != m { meetings[id] = m } }
+    #endif
+
     /// From `MeetingRecorder.start`: hears the room of every upload `200` (`RecordingSync.onRoom`).
     func start() {
         guard !started else { return }
@@ -536,6 +541,10 @@ final class MeetingConversation {
     // MARK: Reading
 
     private func read(_ id: UUID, _ wanted: Wanted) async {
+        #if DEBUG
+        // A replayed meeting (`MeetingReplay`, #9417) is on no hub: its tape is what the room holds.
+        if MeetingReplay.holds(id) { return }
+        #endif
         guard let api = deps.api() else { return }
         var query: [String: String] = [:]
         if case .parts(let parts) = wanted {

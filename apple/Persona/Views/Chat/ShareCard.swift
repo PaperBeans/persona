@@ -154,6 +154,61 @@ extension MarkdownUI.Theme {
                 .markdownTableBackgroundStyle(.alternatingRows(Color.clear, Color.primary.opacity(0.03)))
                 .markdownMargin(top: 4, bottom: 12)
         }
+
+    /// Several messages exported as a picture (#9468, `ChatExportRenderer`): the card's theme, with ```math and
+    /// ```mermaid drawn from the pictures the export had drawn first (an offscreen picture never waits for them).
+    @MainActor static let export = MarkdownUI.Theme.card
+        .codeBlock { config in
+            if let kind = RenderedFence.kind(config.language) {
+                ExportRenderedFence(kind: kind, source: config.content)
+                    .markdownMargin(top: 4, bottom: 12)
+            } else if AssistantCardBlock.handles(config.language) {
+                ShareCardPartView(part: ShareCardParts.picture(language: config.language, config.content))
+                    .markdownMargin(top: 4, bottom: 12)
+            } else {
+                config.label
+                    .relativeLineSpacing(.em(0.2))
+                    .markdownTextStyle { FontFamilyVariant(.monospaced); FontSize(.em(0.8)) }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.codeBackground, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
+                    .markdownMargin(top: 4, bottom: 12)
+            }
+        }
+}
+
+/// A formula or a diagram in an exported picture (#9468): the picture `ChatExportRenderer` drew first, as large as it
+/// was drawn or the column, whichever is smaller; its source as code when it could not be drawn.
+struct ExportRenderedFence: View {
+    let kind: MarkdownRenderer.Kind
+    let source: String
+    @Environment(\.colorScheme) private var scheme
+
+    /// The picture's text size, the card theme's, which formulas are drawn at; diagrams a step smaller, as the chat's.
+    static let textPoints: CGFloat = 15
+    static func points(_ kind: MarkdownRenderer.Kind) -> CGFloat { kind == .mermaid ? 13 : textPoints }
+    /// Formulas are drawn black and tinted; diagrams in their own light or dark theme.
+    static func dark(_ kind: MarkdownRenderer.Kind, _ scheme: ColorScheme) -> Bool { kind == .mermaid && scheme == .dark }
+
+    var body: some View {
+        if let image = MarkdownRenderer.shared.cached(kind, source, dark: Self.dark(kind, scheme), points: Self.points(kind)) {
+            if kind == .mermaid {
+                Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: image.size.width)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Image(uiImage: image).renderingMode(.template).resizable().scaledToFit().frame(maxWidth: image.size.width)
+                    .foregroundStyle(Color.primary)
+                    .frame(maxWidth: .infinity)
+            }
+        } else {
+            Text(verbatim: source)
+                .font(.system(size: 12, design: .monospaced))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.codeBackground, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
+        }
+    }
 }
 
 /// One piece of the picture (`ShareCardParts`): words in the picture's Markdown theme, a card as the chat draws it, a

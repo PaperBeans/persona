@@ -152,10 +152,16 @@ import PersonaWire
     }
 
     @Test func rowMenuIsNotEqualWhenItsPaneItemsChange() {
-        let actions = AgentRowMenu.Actions()
-        let key = session("a").key
-        let a = AgentRowMenu(key: key, pinned: false, muted: false, looping: false, live: true, actions: actions)
-        let b = AgentRowMenu(key: key, pinned: false, muted: false, looping: false, live: true, paneActions: true, actions: actions)
+        let actions = AgentMenuHandlers()
+        let s = session("a", pane: nil)
+        let before = AgentActionFacts(session: s)
+        let a = AgentActionMenu(facts: before, handlers: actions)
+        var paned = s
+        paned.paneID = "w1:p1"
+        let after = AgentActionFacts(session: paned)
+        let b = AgentActionMenu(facts: after, handlers: actions)
+        #expect(before != after)
+        #expect(a.facts.items.map(\.id) != b.facts.items.map(\.id))
         #expect(a != b)
     }
 }

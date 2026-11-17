@@ -82,9 +82,7 @@ struct LarkChatPinsView: View {
             .navigationTitle("Pinned Messages")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done [Extension System Presentation c0b3fb]") { dismiss() }.lineLimit(1).accessibilityIdentifier("lark.pins.close")
-                }
+                SheetClose(id: "lark.pins.close") { dismiss() }
             }
             .confirmationDialog("Unpin This Message?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
                 if let pin = removing {

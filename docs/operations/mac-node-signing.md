@@ -118,6 +118,25 @@ cdhash. Builds made elsewhere (the Docker image, Linux release workers) keep `a.
 
 ## Official releases: options for the maintainers
 
+The `darwin-cli-sign` job in `release.yml` signs `personad`, `persona-node`,
+`persona-link`, `persona-hub` and `persona-manager` for both darwin architectures
+under fixed `com.nwverse.<program>` identifiers. It uses the existing Developer ID
+certificate in the protected `persona-desktop-release` environment, never an
+ad-hoc signature. The job runs only when that environment supplies a Developer ID
+Application identity and the notarization credentials already used by the desktop
+packages. `sign_darwin_cli.py` verifies each signature and rejects a remaining
+ad-hoc `cdhash`; the manifest is rebuilt from the signed downloads before upload,
+so a stable feed never carries a mismatched binary digest. This is a CI publication
+choice, not a local signing requirement for other builders.
+
+The first certificate-signed build after the historical ad-hoc ones is a new
+program to macOS, so grant the privacy permissions once more. Subsequent updates
+signed by the same certificate and identifier keep their designated requirement.
+`nodeupdate` preserves an already valid official signature rather than replacing
+it with a local certificate or ad-hoc signature. Local `node-signing.json` remains
+available for development or custom builds. Signature presence does not bypass the
+existing source, build, executable SHA-256 or node-update self-checks.
+
 This setting is per computer and needs the owner's own certificate. For the builds everyone downloads, the choice is the
 maintainers':
 

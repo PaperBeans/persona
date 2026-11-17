@@ -21,7 +21,9 @@ const FileViewerPanel = lazy(() => import("./session/FileViewer").then((m) => ({
 const GitPanel = lazy(() => import("./session/GitPanel").then((m) => ({ default: m.GitPanel })));
 const PreviewPanel = lazy(() => import("./session/PreviewPanel").then((m) => ({ default: m.PreviewPanel })));
 const ReviewPanel = lazy(() => import("./session/ReviewPanel").then((m) => ({ default: m.ReviewPanel })));
+const ChangesPanel = lazy(() => import("./session/ChangesPanel").then((m) => ({ default: m.ChangesPanel })));
 const LinkPanel = lazy(() => import("./link/LinkPanel").then((m) => ({ default: m.LinkPanel })));
+const ConversationTasksPanel = lazy(() => import("./chat/ConversationTasksPanel").then((m) => ({ default: m.ConversationTasksPanel })));
 const TaskPanel = lazy(() => import("./assistant/TaskPanel").then((m) => ({ default: m.TaskPanel })));
 const AgentPanel = lazy(() => import("./assistant/TaskPanel").then((m) => ({ default: m.AgentPanel })));
 // a lead's Team (#5180): only on a lead's page, outside the first screen
@@ -140,7 +142,8 @@ export function SidePanel() {
 }
 
 function panelLabel(p: Panel) {
-  return p.kind === "files" ? t("sidepanel.files") : p.kind === "git" ? "Git" : p.kind === "review" ? t("sidepanel.review") : p.kind === "file" ? t("sidepanel.files") : p.kind === "preview" ? t("sidepanel.preview") : p.kind === "team" ? t("sidepanel.team") : p.kind === "sides" ? t("sidepanel.sides") : p.kind === "background" ? t("sidepanel.background") : p.kind === "task" ? t("sidepanel.task") : p.kind === "agent" ? t("sidepanel.agent") : t("sidepanel.link");
+  if (p.kind === "conversation-tasks") return t("sidepanel.conversation_tasks");
+  return p.kind === "files" ? t("sidepanel.files") : p.kind === "git" ? "Git" : p.kind === "review" ? t("sidepanel.review") : p.kind === "changes" ? t("sidepanel.changes") : p.kind === "file" ? t("sidepanel.files") : p.kind === "preview" ? t("sidepanel.preview") : p.kind === "team" ? t("sidepanel.team") : p.kind === "sides" ? t("sidepanel.sides") : p.kind === "background" ? t("sidepanel.background") : p.kind === "task" ? t("sidepanel.task") : p.kind === "agent" ? t("sidepanel.agent") : t("sidepanel.link");
 }
 
 function body(p: Panel) {
@@ -151,10 +154,14 @@ function body(p: Panel) {
       return <GitPanel key={directoryPanelKey(p)} mid={p.mid} sid={p.sid} cwd={p.cwd} at={p.at} onClose={closePanel} />;
     case "review":
       return <ReviewPanel key={directoryPanelKey(p)} mid={p.mid} sid={p.sid} cwd={p.cwd} scope={p.scope} at={p.at} opened={p} onClose={closePanel} />;
+    case "changes":
+      return <ChangesPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} opened={p} onClose={closePanel} />;
     case "file":
       return <FileViewerPanel key={`${p.mid}:${p.path}:${p.line ?? ""}-${p.to ?? ""}`} mid={p.mid} sid={p.sid} path={p.path} cwd={p.cwd} line={p.line} to={p.to} onClose={closePanel} />;
     case "link":
       return <LinkPanel key={`${p.manager ?? ""} ${p.url}`} url={p.url} title={p.title} manager={p.manager} onClose={closePanel} />;
+    case "conversation-tasks":
+      return <ConversationTasksPanel key={JSON.stringify([p.manager, p.mid, p.sid])} sid={p.sid} manager={p.manager} onClose={closePanel} />;
     case "task":
       return <TaskPanel key={p.todo} todoId={p.todo} onClose={closePanel} />;
     case "agent":

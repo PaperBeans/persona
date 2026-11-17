@@ -345,11 +345,18 @@ func TestResolutionFixturesIOS(t *testing.T) {
 		t.Fatalf("ScreenStepsLogic.enabled changed: revisit the review replay\n%s", stepsEnabled)
 	}
 	source += "enum ScreenStepsLogic { static let enabled = true }\n"
-	source += "enum QuestionSteps {\n" + swiftBlock(t, read("apple/Persona/Views/Interactions/QuestionSteps.swift"), "static func enabled(") + "\n}\n"
+	steps := read("apple/Persona/Views/Interactions/QuestionSteps.swift")
+	source += "enum QuestionSteps {\n"
+	// A single-select pick on a card of several questions steps a pause later (#6549), through these as written.
+	for _, marker := range []string{"static func enabled(", "static var pause: Duration {", "@MainActor static func step(replacing", "static func next(after from:"} {
+		source += swiftBlock(t, steps, marker) + "\n"
+	}
+	source += "}\n"
 	source += swiftQuestionSupport + "\n"
-	source += "#if TRANSPORT\n" + swiftResolveSupport + "\n@MainActor final class ResolveProbe {\n" + swiftResolveFields + swiftBlock(t, read("apple/Persona/App/AppModel.swift"), "func resolve(_ ix:") + "\n}\n#endif\n"
+	source += "#if TRANSPORT\n" + transportSource(t, read, text) + "#endif\n"
 	question := swiftBlock(t, views, "struct QuestionForm:")
-	source += "@MainActor final class QuestionProbe {\n" + swiftQuestionFields
+	// A struct with SwiftUI's State semantics, as QuestionForm is: its closures read the form's state without self.
+	source += "@MainActor struct QuestionProbe {\n" + swiftQuestionFields
 	for _, marker := range []string{"private var questions:", "private var stepped:", "private var isSending:", "private var needsFooter:", "private func pick(", "private var isLast:", "private func advance(", "private func answer(", "private var allAnswered:", "private var canAdvance:", "private func submit(", "private func send("} {
 		source += swiftBlock(t, question, marker) + "\n"
 	}
@@ -421,10 +428,54 @@ func TestResolutionFixturesIOS(t *testing.T) {
 		}
 	}
 	t.Run("answers", func(t *testing.T) { run(t) })
-	t.Run("transport", func(t *testing.T) {
-		t.Skip(transportReplayGap)
-		run(t, "-D", "TRANSPORT")
-	})
+	t.Run("transport", func(t *testing.T) { run(t, "-D", "TRANSPORT") })
+}
+
+// transportSource is what AppModel.resolve needs, copied from its sources: the answer bookkeeping, the retry through a
+// hub restart, the API error and its gap rules, the hub's reply, the receipts, and the app model's own helpers around
+// resolve, including what it does when the hub says a card ended. Only the app host is a stand-in (swiftResolveSupport).
+func transportSource(t *testing.T, read func(string) string, interactionText string) string {
+	t.Helper()
+	var b strings.Builder
+	add := func(source string, markers ...string) {
+		for _, marker := range markers {
+			b.WriteString(swiftBlock(t, source, marker) + "\n")
+		}
+	}
+	add(read("apple/Persona/App/AnsweringInteractions.swift"), "nonisolated struct AnsweringInteractions {", "nonisolated struct AnswerAttempts {")
+	add(read("apple/Shared/Reconnect.swift"), "nonisolated enum OpRetry {", "nonisolated extension Error {", "nonisolated enum OpReceipt {")
+	client := read("apple/Shared/APIClient.swift")
+	add(client, "nonisolated struct APIError: LocalizedError")
+	b.WriteString("extension Error {\n")
+	add(client, "nonisolated var isCancellation: Bool {", "nonisolated var isTimeout: Bool {", "nonisolated var isOffline: Bool {", "nonisolated private static var offlineCodes: Set<Int> {", "nonisolated var isQuiet: Bool {")
+	b.WriteString("}\n")
+	add(read("apple/Shared/Answered.swift"), "nonisolated struct ResolveResult:", "nonisolated struct AnswerLine:", "nonisolated enum Answered {")
+	delegated := read("apple/Shared/Delegated.swift")
+	add(delegated, "nonisolated struct AssistantAnswer:", "nonisolated struct DelegatedAnswer:")
+	kept := regexp.MustCompile(`static let kept = \d+`).FindString(delegated)
+	if kept == "" {
+		t.Fatal("Delegated.kept missing")
+	}
+	b.WriteString("enum Delegated { " + kept + " }\n")
+	b.WriteString("extension Interaction {\n")
+	add(interactionText, "var isSessionless: Bool {", "func canAnswer(session: Session?) -> Bool {")
+	b.WriteString("}\n")
+	b.WriteString(swiftResolveSupport + "\n@MainActor final class ResolveProbe {\n" + swiftResolveFields)
+	app := read("apple/Persona/App/AppModel.swift")
+	add(app, "func canAnswer(_ ix: Interaction) -> Bool {", "func resolve(_ ix:", "private func putBack(_ ix: Interaction) {", "private func keepDelegated(_ ix: Interaction, _ answer: AssistantAnswer) {")
+	// The app's handling of the hub's interaction_resolved event, a case of its event switch, as written there.
+	const resolvedCase = "case .interactionResolved(let id, let assistant):"
+	start := strings.Index(app, resolvedCase)
+	if start < 0 {
+		t.Fatal("AppModel interaction_resolved handling missing")
+	}
+	body := app[start+len(resolvedCase):]
+	end := strings.Index(body, "\n        case .")
+	if end < 0 {
+		t.Fatal("AppModel interaction_resolved handling unterminated")
+	}
+	b.WriteString("func interactionResolved(_ id: String, assistant: AssistantAnswer?, group: String) {" + body[:end] + "\n}\n}\n")
+	return b.String()
 }
 
 // reviewConfirmedCases are the questions.json cases whose expected Resolution is what the review's Submit sends: on a
@@ -433,11 +484,15 @@ func TestResolutionFixturesIOS(t *testing.T) {
 // closed.
 var reviewConfirmedCases = []string{"multiple_questions_send_original_keys", "all_answered_can_submit_from_earlier_page"}
 
-// transportReplayGap keeps the `resolve` replay out until it is brought in line with the current AppModel.resolve.
-const transportReplayGap = "the transport replay has drifted from AppModel.resolve (#8915)"
-
 const swiftQuestionSupport = `
-enum Haptics { static func tap() {}; static func success() {}; static func attention() {} }
+// SwiftUI's State: storage outside the view, so a copy of the view and its closures see the same values.
+@propertyWrapper struct State<Value> {
+ final class Box { var value: Value; init(_ value: Value) { self.value = value } }
+ let box: Box
+ init(wrappedValue: Value) { box = Box(wrappedValue) }
+ var wrappedValue: Value { get { box.value } nonmutating set { box.value = newValue } }
+}
+enum Haptics { static func tap() {}; static func success() {}; static func attention() {}; static func error() {} }
 struct Animation { static var snappy: Self { .init() }; static func snappy(duration: Double) -> Self { .init() } }
 enum Theme { enum Motion { static var standard: Animation { .init() } } }
 func withAnimation(_ animation: Animation, _ body: () -> Void) { body() }
@@ -451,13 +506,14 @@ enum AnswerProgress: Equatable { case sending; case failed(String) }
 `
 const swiftQuestionFields = `
 var interaction: Interaction
-var picks: [String: Set<String>] = [:]
-var other: [String: String] = [:]
-var page = 0
-var sending = false
-var writing = false
-var reviewing = false
-var otherFocused = false
+@State var picks: [String: Set<String>] = [:]
+@State var other: [String: String] = [:]
+@State var page = 0
+@State var sending = false
+@State var writing = false
+@State var reviewing = false
+@State var pendingStep: Task<Void, Never>?
+@State var otherFocused = false
 let model = Spy()
 init(_ ix: Interaction) { interaction = ix }
 `
@@ -493,7 +549,7 @@ func run(_ op: [String: Any], confirm: Bool) async -> [String: Any] {
   reviewSubmit()
  }
  for _ in 0..<100 where model.result == nil && sending { try! await Task.sleep(for: .milliseconds(10)) }
- var out: [String: Any] = ["allowed": allowed, "resolution": wire(model.result), "next_page": page, "picks": picks.mapValues { $0.sorted() }, "reviewing": reviewing]
+ var out: [String: Any] = ["allowed": allowed, "resolution": wire(model.result), "next_page": page, "picks": picks.mapValues { $0.sorted() }, "other": other, "reviewing": reviewing]
  if let q = questions.first, let option = q.options.first {
   let d = QuestionOption.display(option.label)
   out["display"] = ["text": d.0, "recommended": d.1]
@@ -510,6 +566,68 @@ func check(_ expected: [String: Any], _ actual: [String: Any], _ name: String) {
   if lhs != rhs { fatalError("\(name).\(key): expected \(String(decoding: lhs,as: UTF8.self)), got \(String(decoding: rhs,as: UTF8.self))") }
  }
 }
+
+// What one click leaves in the draft the next click starts from (#9238). Advance, Submit and a click made while an answer
+// is on its way change neither map. An accepted single choice replaces its question's picks and empties its Other entry:
+// the key stays (other[q.question] = "" in QuestionForm.pick). An accepted multiple choice only toggles its pick.
+// persona-core's answer tests assert the same rules for the same cases.
+func checkDraft(_ op: [String: Any], _ ix: Interaction, _ actual: [String: Any], _ name: String) {
+ var picks = (op["picks"] as? [String: [String]] ?? [:]).mapValues { Set($0) }
+ var other = op["other"] as? [String: String] ?? [:]
+ if op["action"] as? String == "pick_option", actual["allowed"] as? Bool == true {
+  let q = ix.questions![op["page"] as? Int ?? 0]
+  let label = q.options[op["option_index"] as! Int].label
+  if q.multiSelect {
+   var set = picks[q.question, default: []]
+   if set.contains(label) { set.remove(label) } else { set.insert(label) }
+   picks[q.question] = set
+  } else {
+   picks[q.question] = [label]
+   other[q.question] = ""
+  }
+ }
+ let gotPicks = (actual["picks"] as! [String: [String]]).mapValues { Set($0) }
+ precondition(gotPicks == picks, "\(name): the picks a click leaves are \(gotPicks), not \(picks)")
+ let gotOther = actual["other"] as! [String: String]
+ precondition(gotOther == other, "\(name): the Other entries a click leaves are \(gotOther), not \(other)")
+}
+
+// The issue's own case (#9238), clicked through iOS's own code: two single choices, a custom answer typed for the first,
+// then its option picked. Every click starts from what the one before left, as a person's taps do.
+@MainActor func draftChain() async throws {
+ func single(_ question: String, _ labels: [String]) -> [String: Any] {
+  ["question": question, "multi_select": false, "options": labels.map { ["label": $0] }]
+ }
+ let card: [String: Any] = ["id": "example_request", "machine_id": "example_machine", "session_id": "example_session", "kind": "question", "questions": [single("One", ["A", "B"]), single("Two", ["C", "D"])]]
+ let form = QuestionProbe(try JSONDecoder().decode(Interaction.self, from: JSONSerialization.data(withJSONObject: card)))
+ form.other = ["One": "custom"]
+ func click(_ action: String, _ option: Int? = nil, confirm: Bool = false) async -> [String: Any] {
+  var op: [String: Any] = ["action": action, "page": form.page, "picks": form.picks.mapValues { $0.sorted() }, "other": form.other, "sending": false, "reviewing": form.reviewing]
+  if let option { op["option_index"] = option }
+  let out = await form.run(op, confirm: confirm)
+  await form.pendingStep?.value // the page turn a pick on a card of several questions schedules, a pause later (#6549)
+  return out
+ }
+ func expect(_ step: String, _ out: [String: Any], allowed: Bool, page: Int, picks: [String: Set<String>], other: [String: String], answers: [String: String]? = nil) {
+  precondition(out["allowed"] as? Bool == allowed, "draft chain, \(step): allowed")
+  precondition(form.page == page, "draft chain, \(step): page \(form.page)")
+  precondition(form.picks == picks, "draft chain, \(step): picks \(form.picks)")
+  precondition(form.other == other, "draft chain, \(step): other \(form.other)")
+  let sent = (out["resolution"] as? [String: Any])?["answers"] as? [String: String]
+  precondition(sent == answers, "draft chain, \(step): answers \(String(describing: sent))")
+ }
+ var out = await click("pick_option", 1)
+ expect("pick One=B", out, allowed: true, page: 1, picks: ["One": ["B"]], other: ["One": ""])
+ out = await click("advance")
+ expect("Advance with Two open", out, allowed: false, page: 1, picks: ["One": ["B"]], other: ["One": ""])
+ out = await click("submit")
+ expect("Submit with Two open", out, allowed: false, page: 1, picks: ["One": ["B"]], other: ["One": ""])
+ out = await click("pick_option", 1)
+ expect("pick Two=D", out, allowed: true, page: 1, picks: ["One": ["B"], "Two": ["D"]], other: ["One": "", "Two": ""])
+ out = await click("submit", confirm: true) // the review opens, then its Submit sends
+ expect("Submit", out, allowed: true, page: 1, picks: ["One": ["B"], "Two": ["D"]], other: ["One": "", "Two": ""], answers: ["One": "B", "Two": "D"])
+}
+
 @main struct Main {
  @MainActor static func main() async throws {
   var files: [URL] = []
@@ -530,12 +648,13 @@ func check(_ expected: [String: Any], _ actual: [String: Any], _ name: String) {
     if action == "resolve" {
      #if TRANSPORT
      let p = ResolveProbe()
-     p.api = (op["api_available"] as! Bool) ? ProbeAPI(op["outcome"] as! String) : nil
+     p.client = (op["api_available"] as! Bool) ? ProbeAPI(op["outcome"] as! String) : nil
+     p.client?.hubEnds = { [unowned p] in p.interactionResolved(ix.id, assistant: nil, group: ix.group) }
      p.connection.networkUp = op["network_up"] as! Bool
-     p.interactions[ix.id] = ix
+     p.interactions[ix.uid] = ix
      let r = try JSONDecoder().decode(Resolution.self, from: JSONSerialization.data(withJSONObject: op["resolution"]!))
      await p.resolve(ix,r)
-     actual = ["allowed": p.api != nil && p.connection.networkUp, "resolution": wire(p.api?.sent), "card_present": p.interactions[ix.id] != nil]
+     actual = ["allowed": p.client != nil && p.connection.networkUp, "resolution": wire(p.client?.sent), "card_present": p.interactions[ix.uid] != nil]
      #else
      transport += 1; continue
      #endif
@@ -546,6 +665,7 @@ func check(_ expected: [String: Any], _ actual: [String: Any], _ name: String) {
     } else if ix.kind == .question && action != "dismiss" {
      let confirm = confirmedThroughReview.contains(name)
      actual = await QuestionProbe(ix).run(op, confirm: confirm)
+     checkDraft(op, ix, actual, name)
      // A click that opens the review sends nothing; a case that does not assert the review must not open it.
      if expected["reviewing"] == nil && actual["reviewing"] as! Bool != confirm { fatalError("\(name): the review is \(actual["reviewing"]!) here; say so in the fixture") }
      if confirm { confirmed.insert(name) }
@@ -573,6 +693,8 @@ func check(_ expected: [String: Any], _ actual: [String: Any], _ name: String) {
   }
   precondition(confirmed == confirmedThroughReview, "review-confirmed cases missing: \(confirmedThroughReview.subtracting(confirmed).sorted())")
   print("Verified \(count) iOS answer fixtures against source declarations and button constructors (\(confirmed.count) through the review; \(transport) transport cases left to the transport replay)")
+  try await draftChain()
+  print("Verified the draft each question click leaves, for every case above and for the two-question chain (#9238)")
   let policies = try JSONSerialization.jsonObject(with: Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[1]))) as! [String:Any]
   var modes = 0
   for c in policies["cases"] as! [[String:Any]] {
@@ -595,28 +717,46 @@ func check(_ expected: [String: Any], _ actual: [String: Any], _ name: String) {
 `
 
 const swiftResolveSupport = `
-struct APIError: Error { var status: Int; var code: String }
+// The app host around resolve: a session its source lets the app answer, toasts, and an API that never connects.
+struct Session { var canApprove = true }
+// Answered's lines for an MCP form read its fields through Elicitation; no transport case is a form.
+enum Elicitation {
+ enum Action: String { case accept, decline, cancel }
+ struct Field { var key: String; var title: String }
+ static func fields(_ schema: JSONValue?, order: [String]? = nil) -> [Field] { [] }
+ static func shown(_ f: Field, _ value: JSONValue) -> String { "" }
+}
 struct ProbeConnection { var networkUp = true }
-struct Toast { enum Style { case error }; init(_ text: String, style: Style) {} }
+struct Toast { enum Style { case info, success, error }; let message: String; let style: Style; init(_ message: String, style: Style = .info) { self.message = message; self.style = style } }
 @MainActor final class ProbeAPI {
  var outcome: String; var sent: Resolution?
+ // The hub ends a card whose dialog changed before its 409 comes back (fleet_ix_screen.go, fleet_ix_codex.go):
+ // interaction_resolved reaches the app first (AnsweringInteractions).
+ var hubEnds: () -> Void = {}
  init(_ outcome: String) { self.outcome = outcome }
- func resolve(_ id: String, _ r: Resolution) async throws {
+ func resolve(_ id: String, _ r: Resolution, opID: UUID, handoffCard: Bool) async throws -> ResolveResult {
   sent = r
   switch outcome {
-  case "gone": throw APIError(status:410,code:"")
-  case "prompt_changed": throw APIError(status:409,code:"prompt_changed")
-  case "error": throw APIError(status:500,code:"")
-  default: break
+  case "gone": throw APIError(status: 410, message: "gone", fields: ["status": "expired"])
+  case "prompt_changed": hubEnds(); throw APIError(status: 409, message: "prompt changed", fields: ["code": "prompt_changed"])
+  case "error": throw APIError(status: 500, message: "failed")
+  default: return ResolveResult(ok: true)
   }
  }
 }
 `
 const swiftResolveFields = `
-var api: ProbeAPI?
+var client: ProbeAPI?
 var connection = ProbeConnection()
-var interactions: [String:Interaction] = [:]
+var interactions: [String: Interaction] = [:]
+var endedInteractionIDs: Set<String> = []
+var answering = AnsweringInteractions()
+var answerAttempts = AnswerAttempts()
+var delegatedAnswers: [DelegatedAnswer] = []
 var toast: Toast?
+func api(_ group: String) -> ProbeAPI? { client }
+func session(_ key: SessionKey) -> Session? { Session() }
+func summariesChanged() {}
 func notDone() {}
 func show(_ error: Error) {}
 `

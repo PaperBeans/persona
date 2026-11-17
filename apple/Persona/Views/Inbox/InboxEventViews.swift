@@ -594,7 +594,7 @@ struct InboxSuggestionEditor: View {
             .navigationTitle(InboxEventText.kindTitle(suggestion))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                SheetClose { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         let changed = text
@@ -710,7 +710,7 @@ struct InboxChainSection: View {
             .accessibilityIdentifier("inbox.chain")
             .task(id: CutChain(key: item.key, count: item.chainCount)) { await readWhole() }
             .sheet(item: $todo) { r in
-                NavigationStack { TodoDetailView(todoID: r.id).macSheetDone { todo = nil } }.overTabSwitch()
+                NavigationStack { TodoDetailView(todoID: r.id).sheetDone { todo = nil } }
                 #if os(macOS)
                 .macSheet()
                 #endif

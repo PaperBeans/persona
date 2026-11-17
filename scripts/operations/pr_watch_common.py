@@ -9,14 +9,42 @@ import os
 import re
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 PR_FIELDS = (
     "number,title,body,state,isDraft,headRefOid,headRefName,baseRefName,"
-    "baseRefOid,isCrossRepository,mergeable,mergeStateStatus,reviewDecision,url"
-).replace("baseRefOid,", "")
+    "baseRefOid,isCrossRepository,mergeable,mergeStateStatus,reviewDecision,url,"
+    "createdAt,updatedAt"
+)
+STALE_LABEL = "stale"
+STALE_SECONDS = 7 * 86400
+
+
+def github_time(value):
+    """Parse only GitHub's explicit UTC timestamps; missing dates fail closed."""
+    if not isinstance(value, str):
+        raise WatchError("GitHub timestamp is missing")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z", value):
+        raise WatchError("GitHub timestamp is not explicit UTC")
+    try:
+        return datetime.fromisoformat(value[:-1] + "+00:00").timestamp()
+    except ValueError as error:
+        raise WatchError("GitHub timestamp is invalid") from error
+
+
+def progress_timestamp(snapshot, comments, reviews, commits):
+    """Actual PR activity, not a poll or a retry counter, resets stale cleanup."""
+    latest = github_time(snapshot.get("createdAt"))
+    if not isinstance(comments, list) or not isinstance(reviews, list) or not isinstance(commits, list):
+        raise WatchError("stale-PR activity must contain comments, reviews and commits")
+    for item, field in [(item, "createdAt") for item in comments + reviews] + [(item, "committedDate") for item in commits]:
+        if not isinstance(item, dict):
+            raise WatchError("stale-PR activity contains an invalid record")
+        latest = max(latest, github_time(item.get(field)))
+    return latest
 
 
 class WatchError(Exception):
@@ -105,21 +133,116 @@ def checked(argv, cwd=None, timeout=120, environ=None, input_text=None):
     result = run(argv, cwd=cwd, timeout=timeout, environ=environ, input_text=input_text)
     if result.returncode:
         detail = (result.stderr.strip() or result.stdout.strip())[-2000:]
+        if argv[:2] == ["git", "fetch"] and "exhaustive rename detection was skipped" in detail:
+            # This fallback supports only the exact single-refspec shape used
+            # by the watcher, never arbitrary options or multiple refspecs.
+            if len(argv) != 5 or argv[3].startswith("-"):
+                raise WatchError("unsupported fetch recovery command shape")
+            if argv[4].lstrip("+").startswith("-"):
+                raise WatchError("unsupported fetch recovery refspec")
+            remote_name = argv[3]
+            original_refspecs = argv[4:]
+            if len(original_refspecs) != 1:
+                raise WatchError("fetch recovery requires exactly one refspec")
+            refspecs = [refspec.rsplit(":", 1)[0].lstrip("+") for refspec in original_refspecs]
+            remote_refspecs = [refspec if refspec.startswith("refs/") else "refs/" + refspec for refspec in refspecs]
+            if remote_name.startswith("-") or any(refspec.startswith("-") for refspec in refspecs):
+                raise WatchError("cannot recover an unsafe fetch refspec")
+            refreshed = run(["git", "ls-remote", remote_name, *remote_refspecs], cwd=cwd,
+                            timeout=60, environ=environ)
+            if refreshed.returncode:
+                raise WatchError("cannot resolve the exact remote ref after a refused fetch: " + bounded(refreshed.stderr, 800))
+            entries = [line.split(None, 1) for line in refreshed.stdout.splitlines() if line.strip()]
+            if not (len(entries) == 1 and len(entries[0]) == 2
+                    and entries[0][1] in remote_refspecs and SHA.fullmatch(entries[0][0])):
+                raise WatchError("refused fetch could not resolve one exact remote ref")
+            # The commit was received but the ref transaction was refused.
+            # Re-fetch the validated SHA and finish the exact requested ref.
+            checked(["git", "-c", "diff.renames=false", "fetch", "-q", "--no-write-fetch-head",
+                     remote_name, entries[0][0]], cwd=cwd, timeout=timeout, environ=environ)
+            checked(["git", "cat-file", "-e", entries[0][0] + "^{commit}"], cwd=cwd,
+                    timeout=60, environ=environ)
+            original_refspec = next(value for value in original_refspecs
+                                    if (value.rsplit(":", 1)[0].lstrip("+") == entries[0][1]
+                                        or "refs/" + value.rsplit(":", 1)[0].lstrip("+") == entries[0][1]))
+            if ":" in original_refspec:
+                destination = original_refspec.split(":", 1)[1]
+                if not destination.startswith("refs/"):
+                    raise WatchError("fetch recovery needs a fully qualified destination ref")
+                checked(["git", "update-ref", destination, entries[0][0]], cwd=cwd,
+                        timeout=60, environ=environ)
+            else:
+                if not cwd:
+                    raise WatchError("FETCH_HEAD recovery requires the actual checkout path")
+                git_dir_text = checked(["git", "rev-parse", "--git-dir"], cwd=cwd).strip()
+                git_dir = (Path(cwd).resolve() / git_dir_text).resolve() if not Path(git_dir_text).is_absolute() else Path(git_dir_text).resolve()
+                common_text = checked(["git", "rev-parse", "--git-path", "FETCH_HEAD"], cwd=cwd).strip()
+                destination = (Path(cwd).resolve() / common_text).resolve() if not Path(common_text).is_absolute() else Path(common_text).resolve()
+                if (destination.name != "FETCH_HEAD" or destination.parent != git_dir
+                        or git_dir.is_symlink() or destination.is_symlink() or not git_dir.is_dir()):
+                    raise WatchError("fetch recovery requires a path inside the checkout's Git directory")
+                temporary = destination.parent / ("FETCH_HEAD.pr-watch-" + entries[0][0] + ".tmp")
+                temporary.write_text(entries[0][0] + "\t\tbranch '" + entries[0][1] + "' of " + remote_name + "\n",
+                                     encoding="utf-8")
+                os.chmod(temporary, 0o600)
+                temporary.replace(destination)
+                if checked(["git", "rev-parse", "FETCH_HEAD"], cwd=cwd).strip() != entries[0][0]:
+                    raise WatchError("fetch recovery could not establish the exact FETCH_HEAD")
+            return entries[0][0] + "\n"
         raise WatchError("%s failed (%s): %s" % (Path(argv[0]).name, result.returncode, detail))
     return result.stdout
 
 
 def gh_json(argv, timeout=90, environ=None, input_text=None):
     text = checked(["gh"] + argv, timeout=timeout, environ=environ, input_text=input_text)
+    if not text.strip():
+        raise WatchError("gh returned an empty response")
     try:
         return json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise WatchError("gh returned invalid JSON: %s" % exc)
+    except json.JSONDecodeError:
+        # --paginate applies --jq per page. Depending on the endpoint and gh
+        # version, that is several adjacent JSON values, not one array.
+        decoder = json.JSONDecoder()
+        values = []
+        index = 0
+        try:
+            while index < len(text):
+                while index < len(text) and text[index].isspace():
+                    index += 1
+                if index == len(text):
+                    break
+                value, index = decoder.raw_decode(text, index)
+                values.append(value)
+        except json.JSONDecodeError as exc:
+            raise WatchError("gh returned invalid JSON: %s" % exc)
+        if len(values) == 1:
+            return values[0]
+        if all(not isinstance(value, list) for value in values):
+            return values
+        flattened = []
+        for value in values:
+            if not isinstance(value, list):
+                raise WatchError("gh returned mixed paginated JSON values")
+            flattened.extend(value)
+        return flattened
 
 
 def pr_snapshot(repo, number, timeout=90, environ=None):
-    data = gh_json(["pr", "view", str(number), "--repo", repository(repo), "--json", PR_FIELDS],
-                   timeout=timeout, environ=environ)
+    argv = ["gh", "pr", "view", str(number), "--repo", repository(repo), "--json", PR_FIELDS]
+    result = run(argv, timeout=timeout, environ=environ)
+    if result.returncode:
+        if "Unknown JSON field: \"baseRefOid\"" not in result.stderr:
+            raise WatchError("gh failed (%s): %s" % (result.returncode, bounded(result.stderr or result.stdout, 1000)))
+        # Older gh releases reject an unknown optional field before returning
+        # the PR. Re-read the supported fields, then use the commits fallback.
+        legacy = PR_FIELDS.replace("baseRefOid,", "")
+        data = gh_json(["pr", "view", str(number), "--repo", repository(repo), "--json", legacy],
+                       timeout=timeout, environ=environ)
+    else:
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise WatchError("gh returned invalid PR snapshot JSON: %s" % error) from error
     if not isinstance(data, dict) or data.get("number") != number:
         raise WatchError("unexpected PR snapshot")
     for field in ("headRefOid", "baseRefOid"):
@@ -132,12 +255,18 @@ def pr_snapshot(repo, number, timeout=90, environ=None):
             raise WatchError("PR snapshot has no valid %s" % field)
         if field == "baseRefOid" and data[field] == "0" * 40:
             raise WatchError("PR snapshot has no repository base commit")
-    for field in ("title", "body", "state", "headRefName", "baseRefName", "url", "mergeable"):
+    for field in ("title", "body", "state", "headRefName", "baseRefName", "url", "mergeable", "createdAt", "updatedAt"):
         if not isinstance(data.get(field), str):
             raise WatchError("PR snapshot has no valid %s" % field)
+    github_time(data["createdAt"])
+    github_time(data["updatedAt"])
     if not isinstance(data.get("isDraft"), bool) or not isinstance(data.get("isCrossRepository"), bool):
         raise WatchError("PR snapshot has invalid flags")
     return data
+
+
+class RepairAttemptError(WatchError):
+    """A completed repair attempt that produced no usable patch."""
 
 
 class VerificationError(WatchError):

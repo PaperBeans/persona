@@ -124,9 +124,10 @@ After acceptance, workspaces are **silently retained**: no cleanup, recycling, o
 
 ### Needs you and In progress: each thing once (#3387)
 
-Above the Assistant's composer there are two entries. **Needs you** lists everything the user has to act on; **In
-progress** everything running that does not need them. Each thing is one row in exactly one entry, Needs you first, and
-each count is its rows:
+Above the Assistant's composer, **Needs you** lists the user's turn and **In progress** the work that does not need
+them. On the web, **Parked** is their peer for external waits, including ready review/merge waits (#9325), not a fold
+inside active work. Each thing is one row in exactly one entry, Needs you first; task badges use the shared open-count
+rule below. Native clients keep their existing two-entry presentation until they adopt this grouping:
 
 - **Needs you**: a task whose current agent asks something (one row, its cards under the task's name), a task waiting
   for a decision that is the owner's (an open `ask`; `needs_user` on an open task; on Android and Apple also a
@@ -146,8 +147,8 @@ each count is its rows:
     long the review has waited and whether or not the hub sends `pending_since`. The entry is there only while one
     waits (or its tray is open), is drawn neutral (a grey `ink-3` dot and `ink-2` label, never the attention or
     working colour) since nothing in it is the user's, and counts its rows like the others. Its rows say "Supervisor
-    reviewing" (zh 督办验收中, ja 監督の確認待ち) and open the task. It comes before Waiting for merge: a task under
-    review whose PR is open and waits for a maintainer is here, not there (`supervisor_review_with_open_pr`). A
+    reviewing" (zh 督办验收中, ja 監督の確認待ち) and open the task. A task under
+    review whose PR is open and waits for a maintainer is here, not in Parked (`supervisor_review_with_open_pr`). A
     review whose agent is at work again is In progress with it. Until #8678 the web put a review overdue by an hour
     (or with no `pending_since`) in Needs you, as Android and Apple still do: users opened such a row, found only the
     Agent's finished conversation and nothing to answer, and could not tell what was wanted of them. The entry keeps a
@@ -159,18 +160,20 @@ each count is its rows:
     each client re-reads the clock once a minute, and a task under review with an open PR is In progress, not Waiting
     for merge, until the review is overdue. `spec/fixtures/entries` pins this split and, in `web_review`, the rows the
     web lists under Persona reviewing instead.
-- **Waiting for merge** (web only, #7614): a task whose fresh, open, non-draft PR waits for a maintainer with nothing
-  of it active and nothing the owner's (the To-dos page's `pr_open` rule, `docs/assistant/todo-status-sop.md`) is a
-  third group shown only when it has rows, outside In progress and its count. Needs you and a supervisor's review
-  (Persona reviewing) come first. Android and iOS do not read `pr_status` and keep such a task in In progress.
-- **In progress**: every other task the To-dos page counts open (#3331), and in the main chat each working Agent opened by
-  hand. A task its supervisor parked (#3804, "Supervision" below) is here on the web, saying "Parked until <time> ·
-  <reason>", however long it has been still (never folded under shelved); it is never in Needs you for being parked.
-  Android and iOS do not know the state yet and file it by its other facts; `spec/fixtures/entries` has no parked case. A task's agents are never rows of their own: the task's row carries their state and progress meter, and opens the
-  task's details, which switch between its agents' chats. Shelved tasks fold under one uncounted line. A row can stay
-  visible while the To-dos page no longer counts it open (a parked task past 48 h, a seen review): the chip badge reads
-  the row's `data-counts-open` flag, so the counted to-dos across the entries (Needs you, In progress, and on the web
-  Persona reviewing and Waiting for merge) equal the To-dos header's "Not done".
+- **Parked** (web only, #9325): explicit supervisor holds and ready review/merge waits share one peer group. A fresh,
+  matching open non-draft PR with nothing active or awaiting the owner keeps the existing `pr_open` rule, now displayed
+  inside Parked. Generic person-reply holds do not become merge waits. The To-dos status list and All board use the
+  same classification. Multiple PRs keep their own links/blockers but the task has one row and count. Overdue holds stay
+  here until the hub actually wakes/reviews them, never auto-shelved or silently filed as finished. The entry appears
+  while it has rows or its tray is open; a hold's neutral clock replaces the Agent's finished-turn check. This slice
+  keeps the existing until/reason line; contact evidence, waiting age/order and reminders are separate work in #9289.
+  Android and iOS still use their earlier presentation and do not adopt this web group in this PR.
+- **In progress**: every other task the To-dos page counts open (#3331), and in the main chat each working Agent opened
+  by hand. A task's agents are never rows of their own. Shelved tasks fold under one uncounted line. A row may remain
+  visible without being counted open (a seen supervisor review); its `data-counts-open` flag keeps counted task rows
+  across Needs you, In progress, Parked and Persona reviewing equal to the To-dos header's "Not done", for the same
+  scope. Live questions, owner decisions and active work outrank both types of wait; the supervisor's review keeps its
+  own entry. Existing acceptance/deployed precedence and PR freshness are unchanged.
 - Finished tasks (done, cancelled, accepted) are in neither; the board (**All**) has them. An answered card moves its task
   back to In progress. An entry with nothing counted (no number on it), Needs you or In progress, is grey and still opens:
   to the rows it lists uncounted, or to its line ("All caught up", "Nothing in progress"); the web drew such an In
@@ -609,8 +612,11 @@ on its page (the criteria stay in the page's one list, the ledger's; a finished 
 
 **Lineage.** A task that takes over from another gives `continues` (that task's to-do id) and `continues_why` in
 `task_plan`: a retry on another computer, a rework round, a new Agent after the first failed, a part split off. It
-works for the same brief (`brief.id`), with the criteria and expected time as they stand; its prompt is its own. The
-earlier to-do is linked as superseded with the reason. Without `continues`, when `task_plan`'s "Possible duplicates"
+runs on the original to-do and keeps its brief (`brief.id`). The replacement prompt supplies the goal, authorization
+boundaries, and new information. The manager adds the effective criteria once. For an owner-authorized change, call
+`task_scope` first and pass its `scope_revision` with `continues`. A stale revision is refused at planning, and the
+manager rechecks the planned revision at Start and before dispatch. Replan a refused continuation from the current
+brief. The original request, scope log, and to-do survive a failed start. Without `continues`, when `task_plan`'s "Possible duplicates"
 fires, the answer tells the assistant to plan again with `continues` or say why the work is different. A to-do's
 `lineage` is the chain, oldest first: to-do id, title, Agent, machine, session, `started`, `ended`, `why` it stopped,
 `continues`, `superseded_by`. The to-do that joined the brief last carries the work: the clock, the result and the briefing go by
@@ -624,7 +630,8 @@ and `agent_send` with a `task` on one's own task go through the same code. A cha
 a step from the hub's risky words (deploy, merge, release, send, comment, delete, pay, production: `riskyWords`; the
 Agent's own pushes aside) that the work did not name before is refused, with a pointer to ask the owner. It is taken
 when the owner's own message started the turn that makes it, and that message is kept on the entry (`approval`). At
-most 40 scope changes per brief.
+most 40 scope changes per brief. The response distinguishes the original brief, effective criteria and dropped
+criteria, and reports the new revision.
 
 **The clock.** A brief runs to `max(expect_minutes × 3, 24 h)` from when the work was handed out (of the brief, not of
 the latest take-over), or from its latest scope change. Past that with no end (not done, not waiting for review, not

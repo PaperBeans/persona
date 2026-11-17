@@ -177,8 +177,8 @@ func TestProviderEnvMaxOutputTokens(t *testing.T) {
 			}
 		}
 	}
-	// `personad launch` sets it for the session's model (sessionOutput), so the settings file of either runtime leaves
-	// it to the process env; one the provider's env sets is pinned like the rest of that env.
+	// `personad launch` sets it for the session's model (sessionOutput), so the settings file leaves it to the process
+	// env; one the provider's env sets is pinned like the rest of that env.
 	if _, pinned := managedSettingsEnv(base)[maxOutputEnv]; pinned || !slices.Contains(managedEnv(base), maxOutputEnv+"=128000") {
 		t.Errorf("settings / launch env: %v / %q", managedSettingsEnv(base), managedEnv(base))
 	}
@@ -188,12 +188,8 @@ func TestProviderEnvMaxOutputTokens(t *testing.T) {
 	if own := with(func(l *proto.ManagedLauncher) { l.Env = "CLAUDE_CODE_MAX_OUTPUT_TOKENS=50000" }); managedSettingsEnv(own)[maxOutputEnv] != "50000" {
 		t.Errorf("provider env not pinned: %v", managedSettingsEnv(own))
 	}
-	sdk := providerEnv(base, "mid", "", true)
-	if sdk[maxOutputEnv] != "64000" {
-		t.Errorf("SDK bridge env: %v", sdk)
-	}
-	if _, pinned := unpinnedOutput(pinnedEnv(sdk))[maxOutputEnv]; pinned {
-		t.Error("SDK bridge pins Persona's value")
+	if main := providerEnv(base, "mid", "", true); main[maxOutputEnv] != "64000" {
+		t.Errorf("an assistant conversation's env: %v", main)
 	}
 	// Reporting a limit adds this one variable and its mark and changes nothing else.
 	plain := with(func(l *proto.ManagedLauncher) {

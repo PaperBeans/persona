@@ -391,6 +391,37 @@ func (n *Node) liveClaudeOf(pid int) (claudeProc, bool) {
 	return claudeProc{}, false
 }
 
+// ownerInputExact: params carry the owner mark exactly as the devices manager writes it, "owner_input": true, and no
+// other key that encoding/json would also read as it (OWNER_INPUT, Owner_Input…: its field match ignores case). The
+// devices manager strips every such key a caller sent (devices/owner_input.go); this keeps a node from honouring a
+// variant that reached it some other way (#9607).
+func ownerInputExact(params json.RawMessage) bool {
+	decoder := json.NewDecoder(bytes.NewReader(params))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return false
+	}
+	owner := false
+	for decoder.More() {
+		token, err := decoder.Token()
+		key, ok := token.(string)
+		var value json.RawMessage
+		if err != nil || !ok || decoder.Decode(&value) != nil {
+			return false
+		}
+		if strings.EqualFold(key, "owner_input") {
+			if owner || key != "owner_input" || string(value) != "true" {
+				return false
+			}
+			owner = true
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return false
+	}
+	_, err := decoder.Token()
+	return owner && err == io.EOF
+}
+
 // ownerDelivery is where sendOutside says how the owner's message went in, for session.send's answer.
 type ownerDelivery struct{ as, reason string }
 

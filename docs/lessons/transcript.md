@@ -2,6 +2,10 @@
 
 Pitfalls, unusual behavior, and the trade-offs made at the time (originally in "Lessons" in `CLAUDE.md`; see the index in `docs/lessons/README.md`). Add new lessons to the relevant section, or start a section if none fits.
 
+## Inline HTML is not one Markdown node (#9420)
+
+An inline script or style can have its tags in separate raw HTML nodes and its body in ordinary text, emphasis or code-span nodes. Track the hidden element across nodes when building searchable prose, but keep literal code examples and ordinary preview formatting. Render separate source fields independently so an unclosed tag in one cannot hide text from another; test the real search index, not only the text helper.
+
 ## Visible supervision replies do not exempt tool execution from folding (#2705)
 
 A promoted supervision round must expose its input and final reply, not pull visibility tools out of the work

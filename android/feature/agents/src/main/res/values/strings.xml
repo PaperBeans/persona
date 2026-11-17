@@ -19,6 +19,19 @@
         <item quantity="one">1 thing needs your decision</item>
         <item quantity="other">%1$d things need your decision</item>
     </plurals>
+    <!-- The note over the list while it is read further down: what came meanwhile; a tap goes back to the latest -->
+    <plurals name="agents_feed_needs_you">
+        <item quantity="one">%1$d needs you</item>
+        <item quantity="other">%1$d need you</item>
+    </plurals>
+    <plurals name="agents_feed_offline">
+        <item quantity="one">%1$d not running</item>
+        <item quantity="other">%1$d not running</item>
+    </plurals>
+    <plurals name="agents_feed_new">
+        <item quantity="one">%1$d new</item>
+        <item quantity="other">%1$d new</item>
+    </plurals>
     <plurals name="agents_summary_working">
         <item quantity="one">1 agent working</item>
         <item quantity="other">%1$d agents working</item>

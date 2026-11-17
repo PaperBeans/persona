@@ -25,18 +25,8 @@ struct FileEditSheet: View {
             .navigationSubtitle(edit.dirty ? String(localized: "Edited") : model.machine(edit.ref.machineRef)?.name ?? edit.ref.machineID)
             .navigationBarTitleDisplayMode(.inline)
             .pageToolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { edit.dirty ? discarding = true : dismiss() }
-                        .lineLimit(1)
-                        .accessibilityIdentifier("editor.cancel")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { Task { await save(force: false) } } label: {
-                        if edit.saving { ProgressView() } else { Text("Save").lineLimit(1) }
-                    }
-                    .disabled(!edit.dirty || edit.saving)
-                    .accessibilityIdentifier("editor.save")
-                }
+                SheetClose(id: "editor.cancel") { edit.dirty ? discarding = true : dismiss() }
+                SheetConfirm(id: "editor.save", disabled: !edit.dirty, busy: edit.saving) { Task { await save(force: false) } }
             }
         }
         .interactiveDismissDisabled(edit.dirty)

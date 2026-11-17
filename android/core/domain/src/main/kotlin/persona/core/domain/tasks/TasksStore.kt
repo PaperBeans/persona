@@ -39,6 +39,7 @@ import persona.core.contracts.draftPlaceholder
 import persona.core.contracts.api.AssistantManagerChoice
 import persona.core.contracts.api.ConnectionState
 import persona.core.contracts.api.HubConnection
+import persona.core.contracts.api.PhoneQuickResults
 import persona.core.contracts.api.RequestManager
 import persona.core.contracts.api.hubCodedFailure
 import persona.core.contracts.api.TasksApi
@@ -97,7 +98,13 @@ class TasksStore(
     private val scope: CoroutineScope,
     private val cache: TodoCache? = null,
     private val clock: Clock = Clock.systemDefaultZone(),
+    /** The phone's own delete for Undo on a calendar quick result; null: the cards offer no Undo. */
+    private val quickResults: PhoneQuickResults? = null,
 ) : TodoDecisionsSource {
+    /** Created calendar event id → its Undo state, for as long as this store lives (iOS `TasksStore.undone`). */
+    private val _quickResultUndos = MutableStateFlow<Map<Long, QuickResultUndo>>(emptyMap())
+    val quickResultUndos: StateFlow<Map<Long, QuickResultUndo>> = _quickResultUndos.asStateFlow()
+    private val quickResultLock = Any()
     private val _todos = MutableStateFlow<List<Todo>>(emptyList())
     val todos: StateFlow<List<Todo>> = _todos.asStateFlow()
     /** The connected hub's declared capabilities; seen controls are absent without `todo_seen`. */
@@ -114,6 +121,42 @@ class TasksStore(
     private val agentLookup = TaskAgentLookup(api, scope)
     val agentSessions = agentLookup.sessions
     val agentLookupFailures = agentLookup.failures
+
+    /**
+     * Undo is offered for what this phone can take back: its own calendar events. A reminder is not one (Android has no
+     * reminders store, so `phone_reminders_create` runs on an iPhone), and neither is a card whose result named no event.
+     */
+    fun canUndoQuickResult(result: QuickResult): Boolean = quickResults != null && !result.reminder && result.itemId != null
+
+    fun quickResultUndo(result: QuickResult): QuickResultUndo =
+        result.itemId?.let { _quickResultUndos.value[it] } ?: QuickResultUndo.Added
+
+    /**
+     * Undo on a quick result (iOS `TasksStore.undo(_:)`): the event comes off the phone, with no second permission prompt
+     * because the user is undoing the assistant's own write. The card turns Undone as soon as the local delete returned;
+     * on failure it stays Added and this is false, so the chat can say so.
+     */
+    suspend fun undoQuickResult(result: QuickResult): Boolean {
+        if (!canUndoQuickResult(result)) return false
+        val id = result.itemId ?: return false
+        val remove = quickResults ?: return false
+        // One delete per card: a second tap while it runs, or after it, changes nothing.
+        synchronized(quickResultLock) {
+            if ((_quickResultUndos.value[id] ?: QuickResultUndo.Added) != QuickResultUndo.Added) return false
+            _quickResultUndos.update { it + (id to QuickResultUndo.Undoing) }
+        }
+        try {
+            remove.removeCalendarEvent(id)
+        } catch (cancelled: CancellationException) {
+            _quickResultUndos.update { it - id }
+            throw cancelled
+        } catch (_: Exception) {
+            _quickResultUndos.update { it - id }
+            return false
+        }
+        _quickResultUndos.update { it + (id to QuickResultUndo.Undone) }
+        return true
+    }
 
     /** Called by the visible conversation; exact lookups never change the Agents list window. */
     fun watchAgents(keys: Set<persona.core.contracts.SessionKey>) = agentLookup.watch(keys)

@@ -110,6 +110,8 @@ private actor AdapterReloadResponses {
 /// released so concurrent folds, overlapping reloads and subscription ownership do not depend on network timing.
 @MainActor
 struct PersonaCoreAdapterContractTests {
+    init() { ProductionContinuityShadow.shared.installForTests() }
+
     private func item(_ seq: Int, kind: ItemKind = .toolUse) -> Item {
         Item(id: "\(seq)#0", seq: seq, ts: nil, role: "assistant", kind: kind, text: "Synthetic adapter fixture",
              toolUseID: nil, toolName: nil, toolInput: nil, isError: nil, image: nil)
@@ -144,7 +146,7 @@ struct PersonaCoreAdapterContractTests {
 
     @Test func independentFoldsCompleteInEitherOrderWithoutLosingWork() async throws {
         let (model, key, store, responses) = try foldModel()
-        store.merge([fold(2, through: 3), fold(5, through: 6)], backlog: true)
+        _ = store.apply(.batch(.latest, items: [fold(2, through: 3), fold(5, through: 6)], span: ItemSpan(), backlog: true))
         async let first: Void = model.unfold(key, fold(2, through: 3))
         async let second: Void = model.unfold(key, fold(5, through: 6))
         try await responses.waitForRequests(2)
@@ -155,18 +157,24 @@ struct PersonaCoreAdapterContractTests {
         try await first
         #expect(store.items.map(\.seq) == [2, 3, 5, 6])
         #expect(store.items.allSatisfy { $0.kind != .fold })
+        let result = try await ProductionContinuityShadow.shared.compare(store)
+        #expect(result.compared >= 2)
+        #expect(result.mismatches == 0)
     }
 
     @Test func repeatedOpenOfOneFoldSharesItsFetch() async throws {
         let (model, key, store, responses) = try foldModel()
         let fold = fold(2, through: 3)
-        store.merge([fold], backlog: true)
+        _ = store.apply(.batch(.latest, items: [fold], span: ItemSpan(), backlog: true))
         async let first: Void = model.unfold(key, fold)
         async let second: Void = model.unfold(key, fold)
         try await responses.waitForRequests(1)
         try await responses.releaseFold(2)
         _ = try await (first, second)
         #expect(store.items.map(\.seq) == [2, 3])
+        let result = try await ProductionContinuityShadow.shared.compare(store)
+        #expect(result.compared >= 2)
+        #expect(result.mismatches == 0)
     }
 
     @Test func overlappingReloadsPreserveNewerPushesAndFinishInResponseOrder() async throws {
@@ -195,6 +203,9 @@ struct PersonaCoreAdapterContractTests {
         await second
         #expect(store.items.map(\.seq) == [3, 4])
         #expect(store.covered == 3)
+        let shadow = try await ProductionContinuityShadow.shared.compare(store)
+        #expect(shadow.compared >= 3)
+        #expect(shadow.mismatches == 0)
     }
 
     @Test func subscriptionOwnersDoNotCancelEachOther() throws {
@@ -220,6 +231,7 @@ struct PersonaCoreAdapterContractTests {
         #expect(sent.withLock { $0.filter { $0 == "subscribe" }.count } == 1)
         #expect(sent.withLock { !$0.contains("unsubscribe") })
         #expect(model.isSubscribed(key, by: second))
+        ProductionContinuityShadow.shared.close(model.chat(key))
         model.unsubscribe(key, by: second)
         #expect(sent.withLock { $0.filter { $0 == "unsubscribe" }.count } == 1)
     }

@@ -1,7 +1,7 @@
 import { backgroundWork, taskBackgroundWork, type BackgroundWork } from "./background-work";
 import { cardDismissed, cardFiled, cardSent, startFailure, type FeedItem, type TaskPlan } from "./feed";
 import { cardBucket, taskCardSlots, type TaskCardMetadata } from "./task-cards";
-import { reviewState } from "./supervision";
+import { decisionDismissed, reviewState } from "./supervision";
 import { supersededFailedStarts, triage } from "./todo-triage";
 import { awaitsReview, dockAgents, makeSessionLookup, openAsk, todoRank, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 import { byTime } from "./times";
@@ -9,10 +9,9 @@ import { homeKey } from "./folded-rows";
 import type { Interaction, Session } from "./types";
 
 /**
- * The Assistant's two entries above the composer (#3387, docs/assistant/unified-entry.md "Needs you and In progress"):
- * Needs you lists everything waiting on the user, In progress everything running that does not. Each thing is one row in
- * exactly one of them, Needs you first; finished things are in neither (the board has them), and each entry's count is
- * its rows. A task its supervisor parked is In progress, saying until when and why; it is never in Needs you for that. A
+ * The Assistant's entries above the composer (docs/assistant/unified-entry.md "Needs you and In progress"):
+ * Needs you lists the user's turn, In progress the active work, and Parked the external waits, including ready PRs.
+ * Each thing has one home and one count; finished things are on the board, not counted in these entries. A
  * task waiting for its supervisor's review is in neither: the web lists it under Persona reviewing (`review`, #8678),
  * however long it has waited. A task is one row whatever its agents: they are not listed on their own. In the main
  * conversation an Agent that belongs to no task (opened by hand) is a row of its own.
@@ -41,8 +40,8 @@ export interface AssistantEntries {
   /** Open tasks with no progress for 48 hours and nothing running (the To-dos page's shelved, #3331): folded under
    *  In progress, not counted. */
   shelved: RunningItem[];
-  /** Fresh open PRs with no active agent, separate from In progress; still open tasks. */
-  pr: RunningItem[];
+  /** Explicit holds and fresh ready PR waits, outside In progress; still open tasks. */
+  parked: RunningItem[];
   /** Tasks waiting for their supervisor's review (`pending_review`) with nothing of them running or asking, however long
    *  the review has waited (web only, #8678): Persona's to do, not the owner's, so outside Needs you; still open tasks,
    *  counted like the other entries. An asking agent, an open `ask` or `needs_user` makes such a task Needs you instead. */
@@ -141,7 +140,7 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
   const deciding: { item: NeedsYouItem; rank: number; at: string }[] = [];
   const open: { item: RunningItem; rank: number; at: string }[] = [];
   const shelved: { item: RunningItem; at: string }[] = [];
-  const pr: { item: RunningItem; at: string }[] = [];
+  const parked: { item: RunningItem; at: string }[] = [];
   const review: { item: RunningItem; rank: number; at: string }[] = [];
   const finished: { item: RunningItem; at: number }[] = [];
   const folded = new Set<string>();
@@ -183,7 +182,7 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     if (asks.length) asking.push({ kind: "task", key, todo, status, asks, countsOpen });
     else if (waits || decision) {
       // Only the review decision is hidden; a live Agent question above still has its home.
-      if (!(status !== "needs_you" && decision && (todo.decision_review?.dismissal_id && todo.decision_review.review_at === decisionRound(todo) || input.deferred?.[decisionLaterKey(todo)]))) {
+      if (!(status !== "needs_you" && decision && (decisionDismissed(todo) || input.deferred?.[decisionLaterKey(todo)]))) {
         deciding.push({ item: { kind: "task", key, todo, status, asks, countsOpen }, rank: todoRank(todo, status), at: card.at });
       }
     }
@@ -191,10 +190,9 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     // its own group whatever the To-dos page files it under, even with a fresh open PR; once reviewed (accepted, or parked
     // on the PR) the PR rule below files it
     else if (underReview(todo, status)) review.push({ item: { kind: "task", key, card, todo, status, countsOpen }, rank: todoRank(todo, status), at: card.at });
-    // a review whose agent works again is In progress with it, not Waiting for merge
-    else if (reviewState(todo) !== "pending_review" && triage(todo, lookup, now, input.restored?.get(todo.id) ?? 0, superseded.has(todo.id)).section === "pr") pr.push({ item: { kind: "task", key, card, todo, status, countsOpen }, at: card.at });
-    // a parked task waits on purpose (#3804): with the tasks in progress however long it has been still, never folded away
-    else if (bucket === "open" || reviewState(todo) === "parked" || reviewState(todo) === "pending_review") open.push({ item: { kind: "task", key, card, todo, status, activity: taskBackgroundWork(todo, lookup), countsOpen }, rank: todoRank(todo, status), at: card.at });
+    // Use the To-dos page's wait classification. Live work and owner decisions outrank a hold or an open PR.
+    else if (reviewState(todo) !== "pending_review" && triage(todo, lookup, now, input.restored?.get(todo.id) ?? 0, superseded.has(todo.id)).section === "parked") parked.push({ item: { kind: "task", key, card, todo, status, countsOpen }, at: card.at });
+    else if (bucket === "open" || reviewState(todo) === "pending_review") open.push({ item: { kind: "task", key, card, todo, status, activity: taskBackgroundWork(todo, lookup), countsOpen }, rank: todoRank(todo, status), at: card.at });
     else if (bucket === "shelved") shelved.push({ item: { kind: "task", key, card, todo, status, countsOpen: false }, at: card.at });
     else {
       // finished work a conversation handed out (a failed start a related to-do finished is history, not news)
@@ -232,7 +230,7 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     ],
     running: [...open.sort(newest).map((row) => row.item), ...agentsRunning],
     shelved: shelved.sort(newest).map((row) => row.item),
-    pr: pr.sort(newest).map((row) => row.item),
+    parked: parked.sort(newest).map((row) => row.item),
     review: review.sort(newest).map((row) => row.item),
     justFinished: finished.sort((a, b) => b.at - a.at).map((row) => row.item),
   };

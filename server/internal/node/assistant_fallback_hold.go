@@ -34,8 +34,7 @@ type assistantFallback struct {
 
 // sameModelChoice: two requests for the same model, whatever the message around them.
 func sameModelChoice(a, b modelExecution) bool {
-	return a.Model == b.Model && a.Effort == b.Effort && a.UseEffort == b.UseEffort && a.Fingerprint == b.Fingerprint &&
-		a.Runtime == b.Runtime
+	return a.Model == b.Model && a.Effort == b.Effort && a.UseEffort == b.UseEffort && a.Fingerprint == b.Fingerprint
 }
 
 // holdFallback starts conversation id's hold on to, after a recovery's switch away from from answered there. n.mu is

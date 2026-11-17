@@ -12,6 +12,8 @@ data class AgentSession(
     val session: Session,
     val stateSince: String? = null,
     val hasRunningSubagent: Boolean = false,
+    /** The open chat that was Unread when opened (iOS `AgentListOrder.held`), until its chat is left. */
+    val heldInList: Boolean = false,
     /** The hub supplies the authoritative hierarchy; parent-id inference belongs only to older hubs. */
     val hierarchyKnown: Boolean = false,
 ) {
@@ -38,8 +40,8 @@ data class AgentSession(
         // a summary row's count also covers a run it sends no progress for (an older runtime's background entry, #5888)
         (session.runningWorkflows.isNotEmpty() || (session.waiting != null && (session.runningWorkflowsCount ?: 0) > 0))
     fun awaitsReply(mutes: AgentPreferences): Boolean = asksYou && !mutes.mutes(this)
-    /** Kept out of the idle folds and quiet spaces: not quiet, waiting to be woken, or Awaiting Reply ([awaitsReply]). */
-    fun stays(mutes: AgentPreferences): Boolean = !isQuiet || isWaiting || awaitsReply(mutes)
+    /** Held rows stay out of idle folds; quiet-space membership separately includes [AgentSpace.quiet]. */
+    fun stays(mutes: AgentPreferences): Boolean = !isQuiet || heldInList || isWaiting || awaitsReply(mutes)
     val updatedAt: Instant? get() = parseTime(session.updatedAt)
     val sortDate: Instant? get() = if (state == AgentState.Working) parseTime(stateSince) ?: updatedAt else updatedAt
     val spacePreferenceKey: String? get() = session.spaceName?.let { "${session.machineId}/$it" }

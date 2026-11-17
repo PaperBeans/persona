@@ -5,6 +5,7 @@
 import { matches } from "./launcher-models";
 import { cleanModelId, validModelId } from "./model-id";
 import { isCurrentModel } from "./model-switch";
+import { familyBlocks, type PanelBlock } from "./model-families";
 
 /** The catalog's reference price in USD per one million tokens; absent means unknown, not free. */
 export interface PanelPrice {
@@ -280,6 +281,8 @@ export interface PanelRow {
   customized: boolean;
   /** A preset row's preset (its name is the row's name). */
   preset?: PanelPreset;
+  /** The newest version of a family that has older ones listed (lib/model-families.ts): the row says "Latest". */
+  latest?: boolean;
 }
 
 export interface PanelSection {
@@ -291,11 +294,16 @@ export interface PanelSection {
   loading?: boolean;
   /** The All view shows only the group's first rows (ALL_GROUP_MAX): how many it has in all, for its "Show all N". */
   total?: number;
+  /** The rows by model family (lib/model-families.ts), when a family has two rows or more: drawn in place of `rows`,
+   *  which then holds the same rows (the ones shown) in the same order. */
+  blocks?: PanelBlock[];
 }
 
 /** A provider group's rows in the All view, not searching, when several providers are listed: the rest are a click away
  *  in the provider's own view, so one long list does not bury the providers below it. */
 export const ALL_GROUP_MAX = 8;
+
+const NONE_OPEN: ReadonlySet<string> = new Set();
 
 export interface SectionsInput {
   providers: PanelProvider[];
@@ -307,6 +315,8 @@ export interface SectionsInput {
   overrides: PanelOverrides;
   /** Ready-made setups listed after the favorites (New Agent's presets). */
   presets?: PanelPreset[];
+  /** Families the user unfolded (PanelBlock keys); the others keep their older versions folded. */
+  openFamilies?: ReadonlySet<string>;
 }
 
 /** A saved copy's model among the providers: undefined when its provider is gone, or its list is read and lacks it
@@ -329,9 +339,19 @@ function resolveCopy(providers: PanelProvider[], copy: PanelConfig): { provider:
  * that runs now) with its `total`. A provider's view: its favorites and presets, then its models. Favorites: the
  * favorites only. Recent: the last setups applied. A search searches every provider, and a typed model ID none of whose
  * models answers is offered as "Use “…”" in the group of each provider that takes a pick here and takes typed IDs.
+ * A provider group (and Recommended, after the model that runs) keeps each model family together, newest first, with
+ * the older versions folded unless unfolded (`openFamilies`), searched for or in use (lib/model-families.ts); the
+ * ALL_GROUP_MAX cut counts the rows shown.
  */
-export function panelSections({ providers, state, view: chosen, query, favorites, recent, overrides, presets }: SectionsInput): PanelSection[] {
+export function panelSections({ providers, state, view: chosen, query, favorites, recent, overrides, presets, openFamilies }: SectionsInput): PanelSection[] {
   const q = query.trim();
+  const open = openFamilies ?? NONE_OPEN;
+  // an older version the user is using never folds away: the one that runs or waits, a favorite's, a recent setup's,
+  // one customized
+  const used = (c: PanelConfig | null | undefined, row: PanelRow) => Boolean(c) && c?.provider === row.provider.id && isCurrentModel(row.model, c.model);
+  const listed = (id: string) => providers.find((p) => p.id === id)?.models;
+  const keep = (row: PanelRow) =>
+    row.current || row.customized || used(state.pending, row) || favorites.some((f) => used(f, row)) || recent.slice(0, RECENT_MAX).some((c) => used(c, row));
   const view: PanelView = q ? { kind: "all" } : chosen;
   const inView = (p: PanelProvider) => view.kind !== "provider" || p.id === view.provider;
   const out: PanelSection[] = [];
@@ -385,7 +405,10 @@ export function panelSections({ providers, state, view: chosen, query, favorites
     if (now) promoted.push(now);
     for (const p of shown) if (state.recommended.includes(p.id)) for (const r of groups.get(p.id) ?? []) if (r !== now) promoted.push(r);
     if (promoted.length) {
-      out.push({ key: "recommended", kind: "recommended", rows: promoted });
+      // the model that runs stays first; the rest keep their families together
+      const blocks = familyBlocks(now ? promoted.slice(1) : promoted, { fold: !q, keep, open, scope: "recommended", listed });
+      if (blocks && now) blocks.unshift({ key: "recommended\nnow", rows: [now], older: 0 });
+      out.push({ key: "recommended", kind: "recommended", rows: blocks ? blocks.flatMap((b) => b.rows) : promoted, ...(blocks ? { blocks } : {}) });
       const moved = new Set(promoted);
       for (const [id, rows] of groups) groups.set(id, rows.filter((r) => !moved.has(r)));
     }
@@ -411,9 +434,15 @@ export function panelSections({ providers, state, view: chosen, query, favorites
     }
     // a list on its way under rows already shown (the running model's while its list is read): the spinner too
     if (!rows.length) continue;
+    // families together, older versions folded (not under a search)
+    const key = `provider:${p.id}`;
+    const blocks = familyBlocks(rows, { fold: !q, keep, open, scope: key, listed });
+    const shownRows = blocks ? blocks.flatMap((b) => b.rows) : rows;
     // the model that runs now stays, wherever it is in the list
-    const cut = capped && rows.length > ALL_GROUP_MAX ? rows.filter((r, i) => i < ALL_GROUP_MAX || r.current) : rows;
-    out.push({ key: `provider:${p.id}`, kind: "provider", provider: p, rows: cut, ...(p.loading ? { loading: true } : {}), ...(cut.length < rows.length ? { total: rows.length } : {}) });
+    const cut = capped && shownRows.length > ALL_GROUP_MAX ? shownRows.filter((r, i) => i < ALL_GROUP_MAX || r.current) : shownRows;
+    const left = cut.length < shownRows.length ? new Set(cut) : undefined;
+    const cutBlocks = blocks && left ? blocks.map((b) => ({ ...b, rows: b.rows.filter((r) => left.has(r)) })).filter((b) => b.rows.length) : blocks;
+    out.push({ key, kind: "provider", provider: p, rows: cut, ...(cutBlocks ? { blocks: cutBlocks } : {}), ...(p.loading ? { loading: true } : {}), ...(left ? { total: rows.length } : {}) });
   }
   return out;
 }

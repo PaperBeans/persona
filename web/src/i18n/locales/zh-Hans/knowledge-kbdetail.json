@@ -132,7 +132,6 @@
   "room_ended": "会议已结束。",
   "room_ended_copy": "会议已结束。它的对话在助手所在的电脑上还有一份，等那台电脑连得上就会删除。",
   "room_deleted": "会议中的对话已经随转写一起删除了。",
-  "thread_joined": "Persona 加入了会议",
   "thread_lines_other": "会上的 {count} 句话",
   "thread_ended": "会议结束",
   "thread_heard": "刚才说的话（{clock}）",

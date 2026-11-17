@@ -12,13 +12,14 @@ import (
 )
 
 // A work agent (pi, the Cursor CLI, the Antigravity CLI) starts in a herdr pane with the model the start names, and
-// herdr is told which agent it is. The first message is not an argument of the command.
+// herdr is told which agent it is. The first message is not an argument of the command. pi also gets --approve: nobody is
+// at the pane to answer its project Trust prompt (#9462).
 func TestWorkAgentStartTypesTheModel(t *testing.T) {
 	for _, tc := range []struct{ kind, program, model, want string }{
-		{piAgent, "pi", "ag-chat/cursor/grok-4.7", "HERDR_AGENT=pi pi --model ag-chat/cursor/grok-4.7"},
+		{piAgent, "pi", "ag-chat/cursor/grok-4.7", "HERDR_AGENT=pi pi --model ag-chat/cursor/grok-4.7 --approve"},
 		{cursorAgent, "cursor-agent", "cursor/grok-4.7", "HERDR_AGENT=cursor cursor-agent --model cursor/grok-4.7"},
 		{agyAgent, "agy", "", "HERDR_AGENT=agy agy"},
-		{piAgent, "pi", "", "HERDR_AGENT=pi pi"},
+		{piAgent, "pi", "", "HERDR_AGENT=pi pi --approve"},
 	} {
 		t.Run(tc.kind+" "+tc.model, func(t *testing.T) {
 			n, f, home := herdrNode(t)
@@ -44,6 +45,25 @@ func TestWorkAgentStartTypesTheModel(t *testing.T) {
 				t.Errorf("typed %v, want %s", got, want)
 			}
 		})
+	}
+}
+
+// pi trusts the directory the start chose for that run only, on the first start and when herdr resumes it, whatever
+// launcher runs it; cursor-agent and agy get no pi flag (#9462).
+func TestWorkAgentCommandApprovesPiProjectFiles(t *testing.T) {
+	for _, tc := range []struct{ launcher, program, model, want string }{
+		{"pi", "pi", "", "pi --approve"},
+		{"pi", "pi", "ag-chat/cursor/grok-4.7", "pi --model ag-chat/cursor/grok-4.7 --approve"},
+		{"my-pi", "pi", "", "my-pi --approve"},
+		{"cursor", "cursor-agent", "cursor/grok-4.7", "cursor-agent --model cursor/grok-4.7"},
+		{"agy", "agy", "", "agy"},
+	} {
+		if got := workAgentCommand(tc.launcher, tc.program, tc.model); got != tc.want {
+			t.Errorf("workAgentCommand(%q, %q, %q) = %q, want %q", tc.launcher, tc.program, tc.model, got, tc.want)
+		}
+	}
+	if got, want := workAgentResume(piAgent, workAgentCommand("pi", "pi", ""), "/s/a.jsonl"), `pi --approve --session /s/a.jsonl`; got != want {
+		t.Errorf("resume = %q, want %q", got, want)
 	}
 }
 

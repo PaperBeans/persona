@@ -227,6 +227,15 @@ func paneShells(ctx context.Context, created *host.Created) []string {
 	return []string{herdrPaneShell()}
 }
 
+// startPaneShells resolves the shell for one start. An adopted pane reuses the foreground answer already gathered by
+// runAgentInPane; a new pane goes through the platform resolver (Windows adds one foreground request, then config).
+func (n *Node) startPaneShells(ctx context.Context, launch host.Launcher, created *host.Created) []string {
+	if _, ok := ctx.Value(adoptedPaneKey{}).(adopted); ok {
+		return paneShells(ctx, created)
+	}
+	return n.freshPaneShells(ctx, launch, created)
+}
+
 // runAgentInPane starts an agent of a launcher in a plain shell pane, the way "New Agent" does in a new tab: same
 // launcher command, same wait for the session, same binding. The pane has to be at its shell prompt: nothing but a
 // shell in front, no agent bound to it. A start that fails leaves the pane as it is (it is not closed: it was not made

@@ -68,6 +68,24 @@ class InboxLineSectionTest {
         assertEquals(InboxEventRoute("parent"), opened.last())
     }
 
+    /**
+     * #9053: an item of the thread opens from outside the Inbox list, so a list drawn beside it (two panes) moves to it;
+     * on a phone, with no list drawn, the list stays as the user left it and Back returns there.
+     */
+    @Test fun anItemOfTheThreadMovesAListBesideIt() {
+        val current = record("current", "Current")
+        val parent = record("parent", "Parent").let { it.copy(item = it.item.copy(doneAt = "2026-11-13T01:00:00Z")) }
+        val repository = FakeRepository(InboxLineage(InboxParentRef("inbox", "current"), current,
+            listOf(InboxLineAncestor(InboxParentRef("inbox", "parent"), parent))))
+        val landing = InboxLanding()
+        show(repository, current, landing)
+        rule.onNodeWithText("Parent", substring = true).performClick()
+        assertEquals(null, landing.pending)
+        landing.drawn = 1
+        rule.onNodeWithText("Parent", substring = true).performClick()
+        assertEquals(persona.core.domain.inbox.InboxBar.Landing("done", false), landing.pending)
+    }
+
     @Test fun unlinkTargetsThePairSLowerItemRefreshesAndShowsTheExactSuccessWords() {
         val current = record("current", "Current")
         val parent = record("parent", "Parent")
@@ -149,15 +167,15 @@ class InboxLineSectionTest {
         assertEquals(ChatRoute("m1", "s1", source = RouteSource.InboxItem("current")), opened.last())
     }
 
-    private fun show(repository: FakeRepository, current: InboxRecord) {
-        rule.setContent { Content(repository, current) }
+    private fun show(repository: FakeRepository, current: InboxRecord, landing: InboxLanding? = null) {
+        rule.setContent { Content(repository, current, landing) }
         rule.waitForIdle()
     }
 
     @Composable
-    private fun Content(repository: FakeRepository, current: InboxRecord) {
+    private fun Content(repository: FakeRepository, current: InboxRecord, landing: InboxLanding? = null) {
         PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
-            CompositionLocalProvider(LocalAppFeedback provides feedback) {
+            CompositionLocalProvider(LocalAppFeedback provides feedback, LocalInboxLanding provides landing) {
                 InboxLineSection(repository, current, navigator)
             }
         }

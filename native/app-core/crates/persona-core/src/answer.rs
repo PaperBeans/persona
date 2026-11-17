@@ -58,6 +58,15 @@ pub struct Operation {
     pub option_index: Option<usize>,
 }
 
+/// What one click leaves behind: the draft the next click starts from (`page`, `picks`, `other`) and, when this click
+/// sends the answers, the resolution.
+///
+/// The draft follows the current iOS `QuestionForm` entry for entry (#9238). An accepted single choice replaces its
+/// question's picks and leaves that question's Other entry as an empty string; the key stays, as in iOS's
+/// `other[q.question] = ""`. An accepted multiple choice only toggles its label. Advance and Submit hand back the picks
+/// and Other entries they were given. A client that reads a missing entry and an empty one alike, as iOS does wherever
+/// it reads one, can store the draft as it is. One that tests the key itself, as Android's form does to draw its Other
+/// field, must drop an emptied entry first.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Transition {
     pub allowed: bool,
@@ -139,6 +148,9 @@ fn answer(
 
 /// Applies one of the three operations in the existing answer fixture driver. Invalid pages/options are rejected
 /// rather than indexed, since those inputs are outside the current Apple replay's contract.
+///
+/// Only a pick edits the draft ([`Transition`]). Advance and Submit never apply the single-choice rule: a question
+/// holding both a pick and typed text still answers with the typed text and keeps both, as iOS does.
 pub fn project(input: &Input) -> Option<Transition> {
     if input.interaction.kind != "question" {
         return None;

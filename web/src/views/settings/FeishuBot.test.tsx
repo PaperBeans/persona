@@ -523,6 +523,7 @@ describe("Feishu bot dialog", () => {
     await open(saved());
     const select = () => document.body.querySelector<HTMLSelectElement>(`select[aria-label="${t("settings-feishubot.nudge_title")}"]`)!;
     expect(select().value).toBe("60");
+    expect(document.body.querySelector(`select[aria-label="${t("settings-feishubot.source_report_delay_title")}"]`)).toBeNull();
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select(), "0");
       select().dispatchEvent(new Event("change", { bubbles: true }));
@@ -530,6 +531,36 @@ describe("Feishu bot dialog", () => {
     expect(calls.update[0].body).toEqual({ nudge_after: 0 });
     await act(async () => calls.update[0].resolve(saved({ nudge_after: 0 })));
     expect(select().value).toBe("0");
+  });
+
+  it("turns on the complete final answer and can turn it off again", async () => {
+    await open(saved({ source_report_full_reply: false }));
+    const toggle = () => switches().find((b) => b.getAttribute("aria-label") === t("settings-feishubot.source_report_full_title"))!;
+    expect(toggle().getAttribute("aria-checked")).toBe("false");
+    for (const on of [true, false]) {
+      await act(async () => toggle().click());
+      const pending = calls.update.at(-1)!;
+      expect(pending.body).toEqual({ source_report_full_reply: on });
+      await act(async () => pending.resolve(saved({ source_report_full_reply: on })));
+      expect(toggle().getAttribute("aria-checked")).toBe(String(on));
+    }
+  });
+
+  it("sets the original-group reply to immediate and restores the ten-minute preview", async () => {
+    await open(saved({ source_report_delay_minutes: 10 }));
+    const select = document.body.querySelector<HTMLSelectElement>(`select[aria-label="${t("settings-feishubot.source_report_delay_title")}"]`)!;
+    expect(select.value).toBe("10");
+    for (const minutes of [0, 10]) {
+      await act(async () => {
+        select.value = String(minutes);
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      const pending = calls.update.at(-1)!;
+      expect(pending.body).toEqual({ source_report_delay_minutes: minutes });
+      expect(select.disabled).toBe(true);
+      await act(async () => pending.resolve(saved({ source_report_delay_minutes: minutes })));
+      expect(select.value).toBe(String(minutes));
+    }
   });
 
   it("with no app, starts with scanning to create one, the credentials folded under Advanced (#5818)", async () => {

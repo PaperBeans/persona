@@ -67,11 +67,10 @@ struct AutoConversationsView: View {
             .macSheetDone { dismiss() }
             #else
             .toolbar {
+                // ✕ at the leading corner, the page's own menu at the trailing one (#9653).
+                SheetClose { dismiss() }
                 if let on = model.assistantConfig?.recentTaskChats {
-                    ToolbarItem(placement: .topBarLeading) { recentMenu(on) }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done [Extension System Presentation c0b3fb]") { dismiss() }.lineLimit(1)
+                    ToolbarItem(placement: .primaryAction) { recentMenu(on) }
                 }
             }
             #endif

@@ -440,6 +440,10 @@ data class InboxPreferences(
     val source: String = "",
     val kind: String = "",
     val query: String = "",
+    /**
+     * The old bays' choice ("action", "", "done"). No longer read: the section bar opens on Needs you each time and keeps
+     * its choice only while the Inbox is open (#9053). Kept so the stored JSON reads the same in older versions.
+     */
     val section: String = "",
     val expanded: List<String> = listOf("action", "fyi"),
     /** Needs you, FYI and Collapsed grouped by source or by time (#2576, persona.core.domain.inbox.InboxGroups). */

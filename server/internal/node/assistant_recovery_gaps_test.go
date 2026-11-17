@@ -14,7 +14,7 @@ import (
 // claudeLikeCLI behaves as Claude Code 2.1.311 does on the seams recovery uses: no background_tasks_changed at start,
 // a control response with the request's own id, and the current task set (empty) only behind a repeated initialize.
 // The launcher's model list is a separate process asked with request_id persona-models.
-const claudeLikeCLI = `printf '%s\n' "$*" >> "$SDK_FAKE_DIR/cli-argv"
+const claudeLikeCLI = `printf '%s\n' "$*" >> "$CLI_FAKE_DIR/cli-argv"
 echo '{"type":"system","subtype":"init"}'
 model=primary-model
 case "$*" in *'--model fallback-model'*) model=fallback-model ;; esac
@@ -33,10 +33,10 @@ while IFS= read -r line; do
         fi
       fi ;;
     *'"type":"user"'*)
-      printf '%s\n' "$line" >> "$SDK_FAKE_DIR/user.jsonl"
-      count=$(cat "$SDK_FAKE_DIR/attempts" 2>/dev/null || echo 0)
+      printf '%s\n' "$line" >> "$CLI_FAKE_DIR/user.jsonl"
+      count=$(cat "$CLI_FAKE_DIR/attempts" 2>/dev/null || echo 0)
       count=$((count+1))
-      echo "$count" > "$SDK_FAKE_DIR/attempts"
+      echo "$count" > "$CLI_FAKE_DIR/attempts"
       printf '{"type":"stream_event","event":{"type":"message_start","message":{"model":"%s","usage":{"input_tokens":5}}},"parent_tool_use_id":null}\n' "$model"
       if [ "$count" -le 2 ]; then
         echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 503 no eligible upstream account is currently available"}'
@@ -51,7 +51,7 @@ done
 // A Claude conversation that never ran a background task still moves to the next model: Claude Code reports its task
 // set only when it changes, so the node asks for it before the restart (#3495).
 func TestAssistantFallbackAsksClaudeForItsTasks(t *testing.T) {
-	f := sdkTest(t)
+	f := cliTest(t)
 	if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\n"+claudeLikeCLI), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestAssistantFallbackAsksClaudeForItsTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sdkWait(t, "the second refusal to resume on the next launcher model", func() bool {
+	cliWait(t, "the second refusal to resume on the next launcher model", func() bool {
 		return strings.Count(f.file("user.jsonl"), `"type":"user"`) == 3
 	})
 	f.idle(t, id)
@@ -363,46 +363,6 @@ func TestAssistantUnavailableFallbackMovesOn(t *testing.T) {
 	own.procs[id] = q
 	if own.recoverAssistantResult(q, true, missing, proto.TurnErrorUser, assistantRecordKind) {
 		t.Fatal("a model the user asked for that does not exist was replayed")
-	}
-}
-
-// An Agent SDK conversation reports its background tasks through the bridge, so a model switch can restart it; an
-// older bridge that refuses the request leaves the set unknown (#5234).
-func TestAssistantSDKReportsItsTasksForASwitch(t *testing.T) {
-	for _, c := range []struct {
-		name  string
-		tasks string // tasks.json; "" for a bridge without the request
-		safe  bool
-	}{
-		{"none running", `[]`, true},
-		{"one running", `[{"task_id":"b1","description":"sleep 600"}]`, false},
-		{"not known yet", `null`, false},
-		{"an older bridge", "", false},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			f := sdkTest(t)
-			if c.tasks != "" {
-				if err := os.WriteFile(filepath.Join(f.dir, "tasks.json"), []byte(c.tasks), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			id, err := f.n.assistantSend(context.Background(), "", t.TempDir(), "claude", "hello", nil, "", "", sdkExec(proto.AssistantRuntimeAgentSDK))
-			if err != nil {
-				t.Fatal(err)
-			}
-			f.idle(t, id)
-			p := f.proc(id)
-			p.syncClaudeTasks(context.Background())
-			p.mu.Lock()
-			safe := p.tasksObserved && len(p.tasks) == 0
-			p.mu.Unlock()
-			if safe != c.safe {
-				t.Fatalf("restart allowed %v, want %v (stdin %s)", safe, c.safe, f.file("stdin.jsonl"))
-			}
-			if !strings.Contains(f.file("stdin.jsonl"), `"subtype":"persona_background_tasks"`) {
-				t.Fatal("the bridge was not asked for its tasks")
-			}
-		})
 	}
 }
 

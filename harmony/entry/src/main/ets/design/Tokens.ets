@@ -42,6 +42,7 @@ export class Tokens {
   static readonly readerPartial: string = '60%';
   static readonly readerFull: Dimension = '100%';
   static readonly touch: number = 48;
+  static readonly headerPeerIcons: number = Tokens.touch * 2 + Tokens.gap;
   static readonly qr: number = 240;
   static readonly attachmentPreview: number = 80;
   static readonly attachmentItem: number = 112;

@@ -35,9 +35,6 @@ func checkModelProfile(p *ModelProfile, stored []storedLauncher) error {
 		if !slices.Contains(modelCategoryIDs, id) {
 			return i18n.Err("assistant-model_profiles.err_purpose", i18n.Args{"purpose": id, "purposes": strings.Join(modelCategoryIDs, ", ")})
 		}
-		if b.Runtime != "" {
-			return i18n.Err("assistant-model_profiles.err_runtime")
-		}
 		if b.ConfigDir != "" {
 			return i18n.Err("assistant-model_profiles.err_config_dir")
 		}

@@ -44,13 +44,10 @@ struct InboxDueSheet: View {
             .navigationTitle(request.items.count == 1 ? String(localized: "Add to To-Dos") : String(localized: "Add \(request.items.count) Rows to To-Dos"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
-                        InboxStore.shared.addTodos(request.items, due: .at(at), done: request.done)
-                        dismiss()
-                    }
-                    .accessibilityIdentifier("inbox.todo.add")
+                SheetClose { dismiss() }
+                SheetConfirm(id: "inbox.todo.add", name: String(localized: "Add")) {
+                    InboxStore.shared.addTodos(request.items, due: .at(at), done: request.done)
+                    dismiss()
                 }
             }
         }

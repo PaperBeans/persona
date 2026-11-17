@@ -18,11 +18,11 @@ The table below is for Orca; where the herdr engine differs is in the table in t
 | Send messages (multi-line as one), keys, interrupt | ✅ | Bracketed paste works under ConPTY |
 | Answer dialogs (AskUserQuestion, permissions) | ✅ | Answered by reading the screen, same as Orca on macOS |
 | Close a session | ✅ | |
-| Create a session from the phone, resume a Claude session that isn't running | ✅ | Since #5548 Orca opens a terminal in the session's worktree and runs `claude --resume` there, as herdr does; other agents' sessions are refused with why (`orca_resume`) |
+| Create a session from the phone, resume a Claude session that isn't running | ✅ | Since #5548 Orca opens a terminal in the session's worktree and runs `claude --resume` there, as herdr does; other agents' sessions are refused with why (`orca_resume`). Orca's terminals run Windows PowerShell by default, which reads neither the `cd -- <dir> &&` nor the POSIX start the node types, so the node opens that terminal in Git Bash (`terminal.create`'s `shell`) when Orca advertises `terminal.create-shell-selection.v1` (Orca 1.4.256 does; #9810). An older Orca opens its default shell: set its Windows terminal shell to Git Bash |
 | Claude in the desktop app or in a terminal Persona does not drive | ✅ | Listed as running with its own state, transcript streamed; messages go through the session's peer inbox (a named pipe). Questions and permission prompts there stay on the computer. See "Claude outside Persona's terminals" below |
 | Persona plugin for Claude Code (desktop app sessions, other terminals) | ✅ | The resident node installs and updates it at the user scope of `%USERPROFILE%\.claude` with Claude Code's own CLI (the one on `PATH`, or the desktop app's copy under `%LOCALAPPDATA%\Claude-3p\claude-code`); `persona-link plugin status\|install\|uninstall\|on\|off` ([link.md](link.md) "Claude Code plugin") |
 | Machine monitoring (CPU, memory, swap, network, disk, system info) | ✅ | Win32 calls, no processes spawned; the metrics follow the Windows column of [machines.md](../server/machines.md) ("Collection definitions") (#1943) |
-| Port forwarding | ❌ | Depends on `ps` / `lsof` / `/proc`; silently unavailable on Windows (#1179) |
+| Port forwarding | ✅ | Win32 calls, no processes spawned: the process tree from a Toolhelp snapshot, listeners from `GetExtendedTcpTable` (#2114, [ports.md](ports.md)). A server whose tree Git Bash broke (`cd x && npm run dev` from Claude Code's Bash tool) is found by the pane its environment names (#9815) |
 | Codex discovery (processes, homes, `--listen` endpoints, which rollouts a process holds open) | ✅ | Win32 calls, no processes spawned: Toolhelp32 and the PEB for `codex.exe`, each one's handle table for its open rollouts ("Codex" below). Compatible Codex forks are still not discovered |
 | Codex desktop App chats: list, state, send text and images | ✅ | Through the App's bus, the named pipe `\\.\pipe\codex-ipc` ("Codex" below) |
 | Codex CLI running in a plain terminal | ✅ view, state | Seen as running from the rollout it holds open (working / done as on macOS), so never resumed into a second writer; view only, as on macOS. On a `--listen` app-server it joins like anywhere else |
@@ -184,14 +184,20 @@ herdr has a native Windows build since 0.9.5 (ConPTY panes, [official notes](htt
 - **socket**: herdr's API on Windows is a named pipe, named `\\.\pipe\` plus the socket path (`\\.\pipe\C:\Users\<you>\AppData\Roaming\herdr\herdr.sock`);
   the config directory is `%APPDATA%\herdr` (or `herdr` under `$XDG_CONFIG_HOME` if that's set). `socket_windows.go` in `internal/herdr` dials by this rule, matching herdr's own
   `config_dir` / interprocess `GenericNamespaced`; `$HERDR_SOCKET_PATH` still takes precedence. The path itself isn't a file, so `SocketUp` checks whether the pipe exists.
-- **Shell in the pane**: herdr opens PowerShell by default on Windows, but the start commands the node types are POSIX shell syntax (`'…'` quoting, `A=1 cmd`). Set the pane shell to Git Bash in herdr's
-  `%APPDATA%\herdr\config.toml`:
+- **Shell in the pane**: herdr opens PowerShell by default on Windows, and the start commands the node types are POSIX shell syntax (`'…'` quoting, `A=1 cmd`). There are two ways to run Agents:
+  - **Git Bash as the pane shell**, the setup this page has always described. Set it in herdr's `%APPDATA%\herdr\config.toml`; the node then types its command directly:
 
-  ```toml
-  [terminal]
-  default_shell = "C:/Program Files/Git/bin/bash.exe"
-  ```
+    ```toml
+    [terminal]
+    default_shell = "C:/Program Files/Git/bin/bash.exe"
+    ```
 
+  - **herdr's default PowerShell** (Windows PowerShell 5.1 or PowerShell 7), through a handoff to Git Bash (#8107); it needs the full Git for Windows. The node writes the Agent's POSIX command, with its `PERSONA_HOME` / `unset` prefix, to the same self-deleting 0600 start file as on macOS / Linux, and types one short PowerShell line that uses `&` to run Git Bash with `-ic` and source that file (`-ic` is how the node already reads launchers, so aliases, functions and `PATH` from `~/.bashrc` work). Only the Git Bash path and the file's path cross PowerShell, single-quoted with every single-quote character PowerShell knows doubled. When Git Bash cannot be found through `CLAUDE_CODE_GIT_BASH_PATH`, `git` or the standard install directories, the start fails with that reason before anything is typed; it never falls back to WSL's `bash`.
+    **The handoff has not been confirmed on a real Windows machine yet**: its quoting and the choice of line are covered by tests on other systems and the Windows build compiles, nothing more. If a start fails in a PowerShell pane, set Git Bash as above and report what the pane showed in #8107.
+
+  Which of the two a start uses depends on the shell that will read the typed line. A host that says its new pane runs PowerShell or pwsh gets the handoff; a host that names any other shell is taken at its word. A new pane of classic herdr, which does not say, is asked once for its foreground program; when that is no known shell, `[terminal] default_shell` decides (found the way herdr finds its config: `HERDR_CONFIG_PATH`, `XDG_CONFIG_HOME`, `%APPDATA%\herdr`), and without either it is PowerShell. Git Bash or another POSIX shell gets the command typed directly, with no start file. `cmd.exe` is refused before anything is written or typed, with a message asking for PowerShell or Git Bash.
+  Launcher sync's `"shell": "bash"` and `"rc_file": "~/.bashrc"` describe the Git Bash that reads launcher definitions, not the shell in herdr's pane.
+  **Not covered by the handoff**: a pane of Orca, Tern or herdr-core that names no shell (Orca opens Git Bash itself when it can, #9810); Run Agent Here in a pane that already runs PowerShell; and classic herdr's own restore after it restarts, whose `resume_argv` is still a POSIX `eval` command that PowerShell cannot run. After a herdr restart, use the app's ordinary Resume, which opens a new pane.
 - **herdr has to stay resident in the user's desktop session**: a `herdr server` started from an ssh session exits with that session. Run `herdr.exe server` from a scheduled task that starts at logon (current user,
   `Interactive`, no time limit); it's the same kind as the `persona-link install` task.
 - **`syscall.Exec`**: `personad launch` (managed launchers) and `codex-start` / `tab-start` replace themselves with claude / codex. Windows has no exec, so `osproc.Exec` starts a child in the same

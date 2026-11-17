@@ -33,12 +33,13 @@ final class MeetingLiveViewUITests: XCTestCase {
         try post(hub, "/mock/meeting_highlights", ["on": true])
     }
 
-    /// The room sets topics after a batch of the meeting's lines: the page shows them as chips under its header, the
-    /// current one among them, as the hub has them; the Live Activity says "Now: <topic>" on the Lock Screen after the
-    /// role, within its height even for the longest topic beside an answer.
+    /// The room sets topics after a batch of the meeting's lines: the room's Highlights page (#8731 B1) shows them as
+    /// chips, the current one among them, as the hub has them; the Live Activity says "Topic n / m: <topic>" on the
+    /// Lock Screen after the role (#8731 V4), within its height even for the longest topic beside an answer.
     @MainActor func testTopicsShowOnThePageAndTheLockScreen() throws {
         let hub = try mockHub()
         let app = try meetingPage(hub)
+        try roomPage(app, "highlights")
         let topics = element(app, "meeting-topics")
         XCTAssertTrue(topics.waitForExistence(timeout: 40),
                       "no topics on the page; the hub has \(String(describing: try? self.topics(hub, self.live))):\n\(app.debugDescription)")
@@ -66,6 +67,8 @@ final class MeetingLiveViewUITests: XCTestCase {
         let begins = String(Self.longTopic.prefix(12))
         XCTAssertTrue(waitFor(20) { now.exists && now.label.contains(begins) }, "the page never showed the room's new topic:\n\(app.debugDescription)")
         try shot(app, "topics-long")
+        // The answer shows in the thread, on the room's Live page.
+        try roomPage(app, "live")
         let answers = app.descendants(matching: .any).matching(identifier: "meeting-thread-answer")
         let before = answers.count
         try ask(app, "上次评审定的导出上限是多少？")
@@ -138,8 +141,36 @@ final class MeetingLiveViewUITests: XCTestCase {
         app.launchArguments = ["-pairURL", pair(hub), "-tab", "assistant", "-openShellPage", "recordings", "-openChatsFresh", "YES",
                                "-showMeetingSample", "room-taking-part"]
         app.launchPinned()
+        clearLaunchAlerts()
+        if !element(app, "meeting-thread-header").waitForExistence(timeout: 20) {
+            // The Recordings page can lose its push to the main conversation's late pick on a busy Mac: once more, the
+            // chats already fresh from this launch.
+            app.terminate()
+            if let i = app.launchArguments.firstIndex(of: "-openChatsFresh") { app.launchArguments.removeSubrange(i...i + 1) }
+            app.launchPinned()
+        }
         XCTAssertTrue(element(app, "meeting-thread-header").waitForExistence(timeout: 20), "no meeting page:\n\(app.debugDescription)")
         return app
+    }
+
+    /// A new install's launch alerts (#9348): notifications are allowed, and the icon-change alert's only button closes it.
+    /// Left up, either one eats the Home press, and no Live Activity reaches the Lock Screen. Up to two, whichever first.
+    @MainActor private func clearLaunchAlerts() {
+        let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        for _ in 0..<2 {
+            guard alert.waitForExistence(timeout: 3) else { return }
+            let allow = alert.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
+            if allow.exists { allow.tap() } else { alert.buttons.firstMatch.tap() }
+            sleep(1)
+        }
+    }
+
+    /// One of the meeting room's pages, by its tab (#8731 B1: live, highlights, map).
+    @MainActor private func roomPage(_ app: XCUIApplication, _ page: String) throws {
+        let tab = app.buttons["meeting-room-tab-\(page)"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 10), "no \(page) tab:\n\(app.debugDescription)")
+        tab.tap()
+        XCTAssertTrue(waitFor(5) { tab.isSelected }, "\(page) not picked")
     }
 
     @MainActor private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {

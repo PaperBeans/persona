@@ -52,8 +52,9 @@ interface AgentsDependencies {
     fun hubUpdates(): persona.core.contracts.api.HubUpdates? = null
     fun machines(): MachineManagement?
     fun listAdapter(): persona.core.data.AgentListAdapter = persona.core.data.AgentListAdapters.create()
-    /** Current Agent chat from the shell; a retained ViewModel reads it again for every projection. */
+    /** The current Agent chat and the id the shell captured as Unread on entry, before its read receipt could arrive. */
     fun visibleChat(): kotlinx.coroutines.flow.StateFlow<persona.core.contracts.SessionKey?> = kotlinx.coroutines.flow.MutableStateFlow(null)
+    fun heldChat(): kotlinx.coroutines.flow.StateFlow<persona.core.contracts.SessionKey?> = kotlinx.coroutines.flow.MutableStateFlow(null)
 }
 
 /** Supply one immutable pairing scope; close callbacks synchronize navigation and notifications. */
@@ -110,7 +111,7 @@ fun EntryProviderScope<NavKey>.agentsEntries(
                 AgentsViewModel(dependencies.sessions(), dependencies.interactions(), dependencies.connection(), dependencies.sender(), dependencies.preferences(), operations, wiring.mainSender,
                     wiring.scope.ifEmpty { operations?.operations?.scope.orEmpty() }, renamer, tasksStore, hubUpdates = dependencies.hubUpdates(), machineManagement = dependencies.machines(),
                     hubGroups = dependencies.groups(), listContext = kotlinx.coroutines.Dispatchers.Default, archiveService = wiring.archives,
-                    listAdapter = dependencies.listAdapter(), visibleChat = dependencies.visibleChat())
+                    listAdapter = dependencies.listAdapter(), visibleChat = dependencies.visibleChat(), heldChat = dependencies.heldChat())
                     .also { it.machine(initialMachine); it.show(assistant) }
             }
             val source = LocalAgentsDraftSource.current

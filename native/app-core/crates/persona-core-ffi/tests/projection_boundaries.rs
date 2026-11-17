@@ -1,5 +1,6 @@
-//! Replays the answer, stream-chunk, stream-repair, turn, task-index and viewed-image corpora through the exported C
-//! ABI, including each returned buffer. The independently compiled C11 client (`tests/c_abi_smoke.c`) exercises the
+//! Replays the answer, stream-chunk, stream-repair, turn, task-index, viewed-image and recents corpora through the
+//! exported C ABI, including each returned buffer. The independently compiled C11 client (`tests/c_abi_smoke.c`)
+//! exercises the
 //! same boundary from outside Rust; these tests pin the contract for a Rust caller, not for Swift or a device.
 
 use std::collections::BTreeSet;
@@ -9,8 +10,9 @@ use std::slice;
 
 use persona_core::{
     PersonaCoreBytes, persona_core_bytes_free, persona_core_display_answer, persona_core_project_answer,
-    persona_core_project_stream_chunks, persona_core_project_stream_repair, persona_core_project_task_index,
-    persona_core_project_turns, persona_core_project_viewed_images,
+    persona_core_project_plain_open_fence, persona_core_project_recents, persona_core_project_stream_chunks,
+    persona_core_project_stream_repair, persona_core_project_task_index, persona_core_project_turns,
+    persona_core_project_viewed_images,
 };
 use serde_json::Value;
 
@@ -129,6 +131,36 @@ fn c_abi_stream_repair_calls_the_projection_and_rejects_bad_utf8_and_expectation
     assert!(call(persona_core_project_stream_repair, b"not JSON").is_none());
     assert!(call(persona_core_project_stream_repair, &[0xff]).is_none());
     eprintln!("C ABI stream_repair: Rust caller, complete object, invalid UTF-8 and negatives");
+}
+
+#[test]
+fn c_abi_plain_open_fence_uses_the_independent_apple_expectation_and_rejects_bad_inputs() {
+    let input = serde_json::json!({
+        "text": "看图：\n```mermaid\ngraph TD",
+        "drawn": ["mermaid", "math"],
+    });
+    let expected = serde_json::json!({"text": "看图：\n```\ngraph TD"});
+    let actual = project(persona_core_project_plain_open_fence, &input);
+    assert_eq!(actual, expected);
+    let mut wrong = expected.clone();
+    wrong["text"] = serde_json::json!("看图：\n```mermaid\ngraph TD");
+    assert_ne!(actual, wrong);
+    let mut extra = expected.clone();
+    extra
+        .as_object_mut()
+        .unwrap()
+        .insert("extra".to_owned(), Value::Bool(true));
+    assert_ne!(actual, extra);
+    for malformed in [
+        &br#"{"text":"```mermaid"}"#[..],
+        &br#"{"drawn":[]}"#[..],
+        &br#"{"text":1,"drawn":[]}"#[..],
+        b"not JSON",
+        &[0xff],
+    ] {
+        assert!(call(persona_core_project_plain_open_fence, malformed).is_none());
+    }
+    eprintln!("C ABI plain_open_fence: independent Apple expectation, invalid UTF-8 and negatives");
 }
 
 fn lines_documents() -> Vec<Value> {
@@ -254,6 +286,94 @@ fn c_abi_task_index_replays_all_cases_and_rejects_bad_input() {
         "C ABI task_index replay: {} complete expected objects plus the receipt",
         replayed.len()
     );
+}
+
+#[test]
+fn c_abi_recents_replays_all_cases_and_rejects_bad_inputs() {
+    let names = [
+        (
+            "recent_conversations",
+            vec![
+                "open_into_empty",
+                "open_goes_first",
+                "open_again_moves_to_front",
+                "open_the_first_again",
+                "keeps_ten",
+                "ignores_empty",
+                "shown_skips_the_current",
+                "shown_skips_the_missing",
+                "shown_up_to_the_limit",
+                "shown_without_a_current",
+                "shown_nothing_else",
+            ],
+        ),
+        (
+            "recent_setups",
+            vec![
+                "record_into_empty",
+                "record_moves_the_same_setup_first",
+                "record_keeps_twenty",
+                "record_differs_by_model",
+                "cards_skip_unknown_machines",
+                "cards_at_most_three",
+                "cards_offline_shown",
+                "model_of_the_latest_same_launcher",
+                "model_other_launcher_is_default",
+                "model_unknown_machine",
+            ],
+        ),
+    ];
+    let mut replayed = BTreeSet::new();
+    for (domain, expected_names) in names {
+        let document: Value =
+            serde_json::from_slice(&fs::read(fixtures().join("recents").join(format!("{domain}.json"))).unwrap())
+                .unwrap();
+        assert_eq!(document["schema_version"], 1);
+        let cases = document["cases"].as_array().unwrap();
+        let actual_names: Vec<_> = cases.iter().map(|case| case["name"].as_str().unwrap()).collect();
+        assert_eq!(actual_names, expected_names, "{domain}: exact case manifest");
+        for case in cases {
+            let name = case["name"].as_str().unwrap().to_owned();
+            assert!(replayed.insert(name.clone()), "duplicate recents case: {name}");
+            let input = serde_json::json!({
+                "domain": domain,
+                "operation": case["operation"],
+                "input": case["input"],
+            });
+            let actual = project(persona_core_project_recents, &input);
+            assert_eq!(actual, case["expected"], "C ABI recents: {domain}/{name}");
+        }
+    }
+    assert_eq!(replayed.len(), 21, "11 conversation + 10 setup cases");
+    let first = serde_json::json!({
+        "domain": "recent_conversations", "operation": "open",
+        "input": {"before": [], "opened": "s:m1/a"},
+    });
+    let actual = project(persona_core_project_recents, &first);
+    assert_eq!(actual, serde_json::json!({"after": ["s:m1/a"]}));
+    assert_ne!(actual, serde_json::json!({"after": ["s:m1/wrong"]}));
+    for input in [
+        serde_json::json!({}),
+        serde_json::json!({"domain": "recent_conversations", "operation": "open"}),
+        serde_json::json!({"domain": "recent_conversations", "operation": "unknown", "input": {}}),
+        serde_json::json!({"domain": "unknown", "operation": "open", "input": {}}),
+        serde_json::json!({"domain": 1, "operation": "open", "input": {}}),
+        serde_json::json!({"domain": "recent_conversations", "operation": 1, "input": {}}),
+        serde_json::json!({"domain": "recent_conversations", "operation": "open", "input": []}),
+        serde_json::json!({"domain": "recent_conversations", "operation": "open", "input": {}}),
+        serde_json::json!({
+            "domain": "recent_conversations", "operation": "open", "input": {"before": 1, "opened": "s:m1/a"},
+        }),
+    ] {
+        let input = serde_json::to_vec(&input).unwrap();
+        assert!(
+            call(persona_core_project_recents, &input).is_none(),
+            "must reject: {input:?}"
+        );
+    }
+    assert!(call(persona_core_project_recents, b"not JSON").is_none());
+    assert!(call(persona_core_project_recents, &[0xff]).is_none());
+    eprintln!("C ABI recents replay: 11 conversation + 10 setup complete objects; negatives rejected");
 }
 
 #[test]

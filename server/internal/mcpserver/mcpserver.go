@@ -463,8 +463,9 @@ func listToolsOnce(ctx context.Context, previous toolSnapshot) (toolSnapshot, er
 			schema, description = withClipboardFile(schema, description)
 		}
 		tool := map[string]any{"name": t.Name, "description": description, "inputSchema": schema}
-		if isAssistant() {
-			// Claude Code keeps these loaded up front while other MCP servers stay behind ToolSearch (#5838).
+		if isAssistant() && !t.DeferLoading {
+			// Claude Code keeps these loaded up front (#5838); the tools the manager deferred and other MCP servers'
+			// stay behind ToolSearch (#7317).
 			tool["_meta"] = map[string]any{"anthropic/alwaysLoad": true}
 		}
 		tools = append(tools, tool)

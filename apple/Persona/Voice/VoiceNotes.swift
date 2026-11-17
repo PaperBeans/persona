@@ -47,12 +47,18 @@ nonisolated struct VoiceUnavailableNote: Equatable, Sendable {
                                         message: String(localized: "It’s view-only and can’t take messages."), settings: nil)
         case .meetingRoom:
             return VoiceUnavailableNote(title: String(localized: "Voice isn’t available in this chat"),
-                                        message: String(localized: "To talk to Persona in this meeting, hold Talk on the meeting’s page while it records."),
+                                        message: String(localized: "To talk to Persona in this meeting, tap Talk on the meeting’s page while it records."),
                                         settings: nil)
         case .unknown:
             return VoiceUnavailableNote(title: String(localized: "Not sure yet whether the hub supports voice"),
                                         message: String(localized: "Try again once connected to the hub."), settings: nil)
         }
+    }
+
+    /// Persona's urgent call rings or is on (#9290): no voice chat, Continue or call to Persona until it is over.
+    static var urgentCall: VoiceUnavailableNote {
+        VoiceUnavailableNote(title: String(localized: "Finish the urgent call first"),
+                             message: String(localized: "Persona's urgent call is on. Call again once it's over."), settings: nil)
     }
 }
 
@@ -86,6 +92,8 @@ nonisolated struct VoiceEndNote: Equatable, Sendable {
             return note(String(localized: "A call or another app took the audio"))
         case .microphoneTaken:
             return note(String(localized: "A recording or dictation took the microphone"))
+        case .urgentCall:
+            return note(String(localized: "Ended for Persona's urgent call"))
         case .microphoneBusy:
             return note(String(localized: "Finish the recording or dictation first"), .retry)
         case .permissionDenied:

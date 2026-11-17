@@ -209,7 +209,7 @@ function HealthHome({ onToggleSidebar }: { onToggleSidebar: () => void }) {
             ))}
           </div>
 
-          <HealthReports version={seed} />
+          <HealthReports mid={mid} unavailable={error} version={seed} />
 
           <section className="mt-7">
             <SectionTitle>{t("health.recent")}</SectionTitle>

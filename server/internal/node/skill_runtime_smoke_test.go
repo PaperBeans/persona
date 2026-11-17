@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/prompts"
-	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // Opt-in bridge for the real CLI smoke: discover and resolve through production code,
@@ -29,7 +28,7 @@ func TestClaudeSkillRuntimeSmokeContract(t *testing.T) {
 	n := &Node{home: home, dir: t.TempDir(), machineID: "skill-smoke", runtimes: &runtimeRegistry{}}
 	ctx := withSkillOwner(context.Background(), "skill-smoke")
 	request := skillCatalogRequest{Owner: "skill-smoke", Machine: n.machineID, Cwd: cwd,
-		Launcher: "claude", Runtime: proto.AssistantRuntimeAgentSDK, ConfigDir: profile}
+		Launcher: "claude", ConfigDir: profile}
 	catalog, err := n.skillCatalog(ctx, request)
 	if err != nil {
 		t.Fatal("effective Claude catalog unavailable; details redacted")
@@ -46,7 +45,7 @@ func TestClaudeSkillRuntimeSmokeContract(t *testing.T) {
 	}
 	text := `<persona-context kind="skill" ref="` + reference + `">project</persona-context>`
 	selected, err := n.selectedSkills(ctx, "", cwd, "claude", text,
-		modelExecution{Runtime: request.Runtime, ConfigDir: profile})
+		modelExecution{ConfigDir: profile})
 	if err != nil || len(selected) != 1 || selected[0].Path != file {
 		t.Fatal("exact selected reference did not resolve")
 	}

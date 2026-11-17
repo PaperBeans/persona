@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Session } from "../../lib/types";
-import { arrange, conversationTitle, filterConversations, groupByDay, mergeConversations, splitTitle, type Conversation } from "./conversations";
+import { arrange, conversationTitle, filterConversations, groupByDay, inUseTags, mergeConversations, normalizeTags, splitTitle, withTag, TAG_MAX_LENGTH, TAGS_MAX, type Conversation } from "./conversations";
 
 const now = new Date(2026, 10, 2, 10, 0);
 const at = (d: number, h = 9) => new Date(2026, 10, d, h).toISOString();
@@ -34,6 +34,32 @@ describe("titles", () => {
   it("calls the main conversation Persona, whatever its first message was (#1313)", () => {
     expect(conversationTitle({ title: "我的邮箱里最近有哪些需要我处理或回复的邮件？挑重要的说。" }, true)).toBe("Persona");
     expect(conversationTitle({ title: "" }, true)).toBe("Persona");
+  });
+});
+
+describe("conversation tags", () => {
+  it("trims, drops empties and de-duplicates to the first occurrence", () => {
+    expect(normalizeTags(["  planning ", "", "planning", "trip"])).toEqual(["planning", "trip"]);
+    expect(normalizeTags([])).toEqual([]);
+    expect(normalizeTags(["  ", ""])).toEqual([]);
+  });
+
+  it("keeps the hub's length and count limits as constants the dialog enforces", () => {
+    expect(TAG_MAX_LENGTH).toBe(32);
+    expect(TAGS_MAX).toBe(10);
+  });
+
+  it("lists every tag in use once, sorted", () => {
+    const list = [conv("a", { tags: ["trip", "planning"] }), conv("b", { tags: ["trip"] }), conv("c")];
+    expect(inUseTags(list)).toEqual(["planning", "trip"]);
+    expect(inUseTags([conv("c")])).toEqual([]);
+  });
+
+  it("filters by one exact tag; an empty filter is the whole list", () => {
+    const list = [conv("a", { tags: ["trip"] }), conv("b", { tags: ["planning"] }), conv("c", { tags: ["trip", "planning"] })];
+    expect(withTag(list, "trip").map((s) => s.session_id)).toEqual(["a", "c"]);
+    expect(withTag(list, "missing")).toEqual([]);
+    expect(withTag(list, "")).toBe(list);
   });
 });
 

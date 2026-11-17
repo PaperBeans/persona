@@ -51,7 +51,11 @@ func TestEventsFromRetiredPeerCannotOverwriteReplacement(t *testing.T) {
 	n.rows = []proto.Session{{SessionID: "s1", Status: proto.StatusDone}}
 	n.mu.Unlock()
 	m.reconnect()
-	eventually(t, 5*time.Second, "the replacement's initial list", func() bool { return n.seen("sessions.list") > 1 })
+	// The replacement's list applied, not only asked for: until then the row reads unknown, and that is no overwrite.
+	eventually(t, 5*time.Second, "the replacement's initial list", func() bool {
+		got := m.sessionList()
+		return n.seen("sessions.list") > 1 && len(got) == 1 && got[0].Status == proto.StatusDone
+	})
 	m.mu.Lock()
 	newPeer := m.peer
 	m.mu.Unlock()

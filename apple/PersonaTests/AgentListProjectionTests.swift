@@ -331,7 +331,7 @@ import PersonaWire
 
     @Test func revisionsFasterThanOneDerivationCoalesceAndStillConverge() async throws {
         let gate = Gate()
-        let cache = AgentListProjectionCache(compute: { await gate.build($0) })
+        let cache = AgentListProjectionCache(compute: { input, _ in await gate.build(input) })
         let state = State()
         let seed = input([try session("seed")]), first = input([try session("first")])
         let skipped = input([try session("skipped")]), latest = input([try session("latest")])
@@ -356,7 +356,7 @@ import PersonaWire
 
     @Test func completionUsesTheLiveHoldAndNotifiesTheReaderBeforeLanding() async throws {
         let gate = Gate()
-        let cache = AgentListProjectionCache(compute: { await gate.build($0) })
+        let cache = AgentListProjectionCache(compute: { input, _ in await gate.build(input) })
         let state = State()
         let seed = input([try session("seed")]), next = input([try session("next")])
         _ = resolve(cache, seed, revision: 1, state: state)
@@ -376,7 +376,7 @@ import PersonaWire
 
     @Test func aLiveFenceRejectsCompletionEvenWithoutAnotherBodyEvaluation() async throws {
         let gate = Gate()
-        let cache = AgentListProjectionCache(compute: { await gate.build($0) })
+        let cache = AgentListProjectionCache(compute: { input, _ in await gate.build(input) })
         let state = State()
         let seed = input([try session("seed")]), next = input([try session("next")])
         _ = resolve(cache, seed, revision: 1, state: state)
@@ -394,7 +394,7 @@ import PersonaWire
 
     @Test func urgentChangesBypassAHoldAndCancelOrdinaryPreparation() async throws {
         let gate = Gate()
-        let cache = AgentListProjectionCache(compute: { await gate.build($0) })
+        let cache = AgentListProjectionCache(compute: { input, _ in await gate.build(input) })
         let state = State()
         let seed = input([try session("seed")]), ordinary = input([try session("ordinary")])
         let urgent = input([try session("urgent", state: "needs_you")])
@@ -419,7 +419,7 @@ import PersonaWire
         replaced.owner = ObjectIdentifier(replacement)
         for partitions in [[token], [url], [replaced], []] {
             let gate = Gate()
-            let cache = AgentListProjectionCache(compute: { await gate.build($0) })
+            let cache = AgentListProjectionCache(compute: { input, _ in await gate.build(input) })
             let state = State()
             let seed = input([try session("seed", group: "hub-a")]), old = input([try session("old", group: "hub-a")])
             let next = input(partitions.isEmpty ? [] : [try session("new", group: "hub-a")])
@@ -437,7 +437,7 @@ import PersonaWire
 
     @Test func anUrgentFeedRevisionRejectsCompletionBeforeTheNextBodyEvaluation() async throws {
         let gate = Gate()
-        let cache = AgentListProjectionCache(compute: { await gate.build($0) })
+        let cache = AgentListProjectionCache(compute: { input, _ in await gate.build(input) })
         let state = State()
         let seed = input([try session("seed")]), ordinary = input([try session("ordinary")])
         let urgent = input([try session("urgent", state: "needs_you")])
@@ -483,7 +483,7 @@ import PersonaWire
 
     @Test func aFailedWorkerRecoversFromImmutableInputBehindTheSameFences() async throws {
         struct Failure: Error {}
-        let cache = AgentListProjectionCache(compute: { _ in throw Failure() })
+        let cache = AgentListProjectionCache(compute: { _, _ in throw Failure() })
         let state = State()
         let seed = input([try session("seed")]), next = input([try session("next")])
         _ = resolve(cache, seed, revision: 1, state: state)

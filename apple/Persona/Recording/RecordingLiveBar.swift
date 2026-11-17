@@ -46,6 +46,12 @@ struct RecordingLiveBar: View {
         } message: {
             Text("The audio is saved on this device and its text goes to Knowledge. A stopped recording can't be continued.")
         }
+        // A meeting's End on the Lock Screen or in the Dynamic Island (#8731 V4) asks here, never ends it at once.
+        .onChange(of: RecordingLivePresenter.shared.endAsking, initial: true) { _, asked in
+            guard asked == entry.id.uuidString.lowercased() else { return }
+            RecordingLivePresenter.shared.endAsked()
+            confirmingStop = true
+        }
         .animation(reduceMotion ? nil : Theme.Motion.state, value: typing)
         .animation(reduceMotion ? nil : Theme.Motion.state, value: writing)
         // Persona stopped attending (the role turned off, the hub can't follow): no question to finish.

@@ -85,7 +85,7 @@ describe("todo rows on a sessions push", () => {
   it("renders a fresh waiting PR in its own section with link and blocker details", async () => {
     const url = "https://example.com/repo/pull/91";
     await act(async () => putTodo({ ...getState().todos[0], id: "ta", title: "Waiting PR", agents: [], pr_url: url, delivery: { state: "pr" }, pr_status: { url, state: "open", draft: false, review: "required", checks: "failure", conflicts: false, checked_at: new Date(Date.now() - 30_000).toISOString() } }));
-    const section = host.querySelector<HTMLElement>('[data-testid="todo-section"][data-section="pr"]');
+    const section = host.querySelector<HTMLElement>('[data-testid="todo-section"][data-section="parked"]');
     expect(section?.textContent).toContain("Waiting PR");
     const link = section?.querySelector<HTMLAnchorElement>('[data-testid="todo-pr-line"] a');
     expect(link?.href).toBe(url);

@@ -43,7 +43,34 @@ func handledHub(t *testing.T) (*inboxHub, *extensionLark, *InboxItem) {
 
 func suggestTool(t *testing.T, h *inboxHub, args string) (string, error) {
 	t.Helper()
+	turn := inboxTestProcessingTurn(h, "s1")
+	if turn != "" {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(args), &fields); err != nil {
+			t.Fatal(err)
+		}
+		fields["processing_turn"], _ = json.Marshal(turn)
+		raw, err := json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		args = string(raw)
+	}
 	return h.runTool(context.Background(), "server", "s1", "inbox_suggest", json.RawMessage(args))
+}
+
+func inboxTestProcessingTurn(h *inboxHub, session string) string {
+	h.inbox.mu.Lock()
+	defer h.inbox.mu.Unlock()
+	if it := h.inbox.itemOfAgent(session); it != nil {
+		return it.Agent.ProcessingTurn
+	}
+	return ""
+}
+
+func inboxTestNotificationText(prompt string) string {
+	text, _, _ := strings.Cut(prompt, "\n\n[Persona Inbox processing turn:")
+	return text
 }
 
 func suggestionCall(t *testing.T, h *inboxHub, id string, body string, role ...string) (int, map[string]any) {
@@ -70,6 +97,66 @@ func toldConv(t *testing.T, h *inboxHub, want string) string {
 			t.Fatalf("the conversation was not told %q:\n%s", want, all)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestInboxSuggestionRejectsSupersededProcessingTurn(t *testing.T) {
+	h, _, it := handledHub(t)
+	deliver := func() string {
+		t.Helper()
+		h.inbox.mu.Lock()
+		h.inbox.tell(it, inboxNote{Name: prompts.NoteNewMessages, Text: "A new message"}, true, time.Now())
+		h.inbox.mu.Unlock()
+		h.deliverNotes(t.Context(), it)
+		h.inbox.mu.Lock()
+		turn := it.Agent.ProcessingTurn
+		h.inbox.mu.Unlock()
+		if turn == "" || !strings.Contains(strings.Join(h.f.sentToAgents(), "\n"), fmt.Sprintf("processing_turn: %q", turn)) {
+			t.Fatal("processing prompt did not carry its write precondition")
+		}
+		return turn
+	}
+
+	first, latest := deliver(), deliver()
+	if first == latest {
+		t.Fatal("second delivery reused the first processing turn")
+	}
+	h.inbox.mu.Lock()
+	listed := it.listed()
+	h.inbox.mu.Unlock()
+	if listed.Agent.ProcessingTurn != "" {
+		t.Fatal("listed Inbox item exposed the internal processing turn")
+	}
+
+	for _, args := range []string{
+		fmt.Sprintf(`{"processing_turn":%q,"recap":"Current recap","follow":{"who":"Current contact","next":"Check response","check_in":"1h"}}`, latest),
+		fmt.Sprintf(`{"processing_turn":%q,"kind":"reply","text":"Current reply"}`, latest),
+	} {
+		if _, err := h.runTool(t.Context(), "server", "s1", "inbox_suggest", json.RawMessage(args)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.inbox.mu.Lock()
+	before := string(itemState(it))
+	h.inbox.mu.Unlock()
+	for _, args := range []string{
+		fmt.Sprintf(`{"processing_turn":%q,"kind":"reply","text":"Old reply","recap":"Old recap"}`, first),
+		fmt.Sprintf(`{"processing_turn":%q,"recap":"Old recap","follow":{"who":"Old contact","next":"Check again","check_in":"2h"}}`, first),
+		`{"recap":"Unidentified recap"}`,
+	} {
+		if _, err := h.runTool(t.Context(), "server", "s1", "inbox_suggest", json.RawMessage(args)); !errors.Is(err, errStaleInboxTurn) {
+			t.Fatalf("expected stale turn refusal for %s, got %v", args, err)
+		}
+	}
+	_, err := h.runTool(t.Context(), "server", "s1", "inbox_draft", json.RawMessage(fmt.Sprintf(`{"processing_turn":%q,"text":"Old legacy draft"}`, first)))
+	if !errors.Is(err, errStaleInboxTurn) {
+		t.Fatalf("expected legacy draft tool to refuse a stale turn, got %v", err)
+	}
+	h.inbox.mu.Lock()
+	after := string(itemState(it))
+	h.inbox.mu.Unlock()
+	if after != before {
+		t.Fatal("a refused call changed the current Inbox item")
 	}
 }
 

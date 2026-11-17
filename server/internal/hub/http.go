@@ -650,6 +650,7 @@ func (h *Hub) interruptSession(w http.ResponseWriter, r *http.Request, m *Machin
 	}
 	sid := r.PathValue("sid")
 	p["session_id"] = sid
+	r = h.captureHumanSubmission(r, "")
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	var out json.RawMessage
@@ -1122,9 +1123,21 @@ func (h *Hub) broadcastTo(typ string, b []byte, elicitation bool) {
 		if elicitation && !c.has("elicitation") {
 			continue
 		}
+		if typ == legacyLarkEvent && c.has(featureLarkViaMessaging) {
+			continue
+		}
 		c.queue(localizedOnce(forms, c.lang(), b, localize))
 	}
 }
+
+// legacyLarkEvent is the Lark extension's old change notice ({"type":"lark","feed_ids":…}); while the old /api/v1/lark
+// is still read it comes beside the same change's "messaging" event (docs/extensions/extension-messaging.md).
+const legacyLarkEvent = "lark"
+
+// featureLarkViaMessaging: in client_hello, the app follows the "messaging" events for its Feishu screens and drops
+// the legacy "lark" one, so it is not sent to it (#9591). An app says it only while it uses a messaging source, and
+// says it again in a new client_hello when that changes; replayed events on resume, before its hello, still include it.
+const featureLarkViaMessaging = "lark_via_messaging"
 
 func (h *Hub) toSubscribers(machineID, sessionID string, v any) {
 	h.toSubscribersWith(machineID, sessionID, "", v)
@@ -1365,7 +1378,10 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 			if c.delta {
 				h.snapshotSessions(c, m)
 			} else {
-				c.sendJSON(map[string]any{"type": "sessions", "machine_id": m.cfg.ID, "sessions": h.shown(m.cfg.ID, h.decorated(m))})
+				// The kept list, not decorated's copy of every row the manager listed: the archived rows told apart are
+				// never shown (#6836), and stamped copies only when a row lacks the manager.
+				shown := h.shown(m.cfg.ID, stamped(m.keptSessions(), h.machineOwner(m.cfg.ID)))
+				c.sendJSON(map[string]any{"type": "sessions", "machine_id": m.cfg.ID, "sessions": shown})
 			}
 		}
 	}

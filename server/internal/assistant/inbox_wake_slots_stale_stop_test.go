@@ -77,7 +77,7 @@ func TestInboxWakeSlotsRound1FixStaleDeferredStopDoesNotWakeConfirmedAgent(t *te
 	if got := len(wakeSlotsAgentTestStopEntries(&stored)); got != 1 {
 		t.Fatalf("Agent A has %d durable stop entries, want exactly one", got)
 	}
-	if _, _, err := h.suggest(ctx, "s1", suggestIn{Recap: "Synthetic recap while Agent B runs"}); err != nil {
+	if _, _, err := h.suggest(ctx, "s1", suggestIn{Recap: "Synthetic recap while Agent B runs", ProcessingTurn: inboxTestProcessingTurn(h, "s1")}); err != nil {
 		t.Fatal(err)
 	}
 	if state, _, _ := handlingNow(h, it); state != HandlingAgent {

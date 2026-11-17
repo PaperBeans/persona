@@ -210,13 +210,16 @@ type MeetingTranscription struct {
 	Fallback bool      `json:"fallback,omitempty"` // the live log is filled from the phone
 	Timeline *Timeline `json:"timeline,omitempty"`
 	// End is the recording's end in recording seconds: the socket's end.at (the manager's), else the duration of the
-	// complete upload.
+	// complete upload or the end of the audio held, whichever is later.
 	End        float64   `json:"end,omitempty"`
 	CompleteAt time.Time `json:"complete_at,omitzero"` // the first complete:true upload (the gap and minutes waits)
 	FinalFrom  time.Time `json:"final_from,omitzero"`  // the final pass started: transcription_final from here
 	// FinalAt is when the state became final or failed (set then when the manager did not).
 	FinalAt    time.Time `json:"final_at,omitzero"`
 	FinalTries int       `json:"final_tries,omitempty"`
+	// FinalUnreachable counts the final pass's tries that never reached the upstream (upstream_unavailable, nothing
+	// billed): they are tried again on their own, longer schedule (the manager's finalUnreachableRetries).
+	FinalUnreachable int `json:"final_unreachable,omitempty"`
 	// Gaps are the spans of the recording the hub holds no audio for (GapsIn), kept up to date by the audio writes
 	// until the final pass starts and frozen from then on: the final pass's, which stay once the audio is gone.
 	Gaps         [][2]float64 `json:"gaps,omitempty"`
@@ -384,7 +387,8 @@ func (u *RecordingUpload) SetTranscription(mode string, t *Timeline) {
 // putTranscriptionFields applies what upload u (cleaned) says of the transcription to m, recording id's meeting.json
 // under meetMu: the mode of the first meeting upload that names one (hub only while TranscriptionReady says so, else
 // device with TranscriptionUnavailable), and on every hub-mode upload the timeline's union, CompleteAt and End (from
-// the complete upload's duration while the socket said no end). A note or day upload's are ignored.
+// the complete upload's duration, or the end of the audio held when that is later, while the socket said no end). A
+// note or day upload's are ignored.
 func (e *Engine) putTranscriptionFields(id string, m *Meeting, u *RecordingUpload, now time.Time) {
 	asked := transcriptionMode(u.transcription)
 	if u.Kind != RecordingMeeting {
@@ -412,7 +416,8 @@ func (e *Engine) putTranscriptionFields(id string, m *Meeting, u *RecordingUploa
 			t.CompleteAt = now.UTC()
 		}
 		if t.End == 0 && finite(u.Duration) && u.Duration > 0 {
-			t.End = u.Duration
+			// The longer of the upload's and the audio held (#9587): a phone killed mid-segment uploads less.
+			t.End = max(u.Duration, e.audioHeldEnd(id))
 		}
 	}
 	t.settle(now)

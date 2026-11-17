@@ -148,7 +148,7 @@ class InboxShowcaseShotsTest {
                 PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
                     key(run) {
                         Box(Modifier.testTag("showcase-list").width(400.dp).height(1800.dp).background(PersonaTheme.palette.background)) {
-                            InboxScreen(inbox, navigator)
+                            OnAll { InboxScreen(inbox, navigator) }
                         }
                     }
                 }

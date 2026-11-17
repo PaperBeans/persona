@@ -1,18 +1,29 @@
 #if os(iOS)
 import SwiftUI
 
-// Select Messages (#3838, docs/apple/ios.md "Forwarding a message"): Forward To's Select Messages… puts the chat into
-// selecting, the pressed message already picked. Each message gets a round mark on its leading edge and a tap anywhere on
-// it picks or unpicks it; the composer gives way to a bar with Cancel and Forward (N). Cancel leaves the chat as it was.
-// The marks read the picked set themselves, so a tap redraws its mark and the bar, never the chat.
+// Select Messages (#3838, #9468, docs/apple/ios.md "Forwarding a message"): the long-press bar's Select Messages row, or
+// Forward To's Select Messages…, puts the chat into selecting, the pressed message already picked. Each message gets a
+// round mark on its leading edge and a tap anywhere on it picks or unpicks it; the composer gives way to a bar with
+// Cancel, the count, Include Questions when it means something, and Forward · Copy · Export Image. Cancel leaves the chat
+// as it was. The marks read the picked set themselves, so a tap redraws its mark and the bar, never the chat.
 
-/// The chat's selecting state: `on` while selecting (the chat reads only this), `ids` the picked messages' item ids.
+/// The chat's selecting state: `on` while selecting (the chat reads only this), `ids` the picked messages' item ids,
+/// `include` whether picked replies bring their questions (#9468: on by default, remembered).
 @Observable final class MessagePick {
     var on = false
     var ids: Set<String> = []
+    /// Read as selecting starts, not as the chat is made (docs/apple/performance.md P3); written when it is changed.
+    var include = true
+    /// Each reply's questions (`PickQuestions.map`), read from the chat as selecting starts and at each pick.
+    var questions: [String: [String]] = [:]
+    @ObservationIgnored var readQuestions: () -> [String: [String]] = { [:] }
+
+    static let includeKey = "pickIncludeQuestions"
 
     /// Starts selecting with `id` picked.
     func start(_ id: String) {
+        include = UserDefaults.standard.object(forKey: Self.includeKey) as? Bool ?? true
+        questions = readQuestions()
         ids = [id]
         on = true
     }
@@ -22,11 +33,32 @@ import SwiftUI
         ids = []
     }
 
-    /// Picks or unpicks `id`; false when it would pick more than one forward takes.
+    /// The questions that go with the picked replies, not picked themselves; none with Include Questions off.
+    var brought: Set<String> { include ? PickQuestions.brought(ids, questions: questions) : [] }
+
+    /// Include Questions means something now: a picked reply's question is not picked.
+    var offersQuestions: Bool { PickQuestions.offered(ids, questions: questions) }
+
+    /// The messages that go: the picked ones and the questions they bring.
+    var going: Set<String> { ids.union(brought) }
+
+    /// Picks or unpicks `id`; false when more would go than one forward takes.
     func toggle(_ id: String) -> Bool {
+        questions = readQuestions()
         if ids.remove(id) != nil { return true }
-        guard ids.count < ForwardMessage.most else { return false }
-        ids.insert(id)
+        var next = ids
+        next.insert(id)
+        let count = include ? next.union(PickQuestions.brought(next, questions: questions)).count : next.count
+        guard count <= ForwardMessage.most else { return false }
+        ids = next
+        return true
+    }
+
+    /// Include Questions on or off; false when turning it on would take more than one forward takes.
+    func setInclude(_ on: Bool) -> Bool {
+        if on, ids.union(PickQuestions.brought(ids, questions: questions)).count > ForwardMessage.most { return false }
+        include = on
+        UserDefaults.standard.set(on, forKey: Self.includeKey)
         return true
     }
 }
@@ -59,16 +91,18 @@ extension MessageBarInfo {
     }
 }
 
-/// A message's mark while selecting: filled and in the accent when picked, an empty ring when not (the Inbox's Select).
+/// A message's mark while selecting: filled and in the accent when picked, an empty ring when not (the Inbox's Select);
+/// a question a picked reply brings along (#9468) is filled in a lighter accent.
 struct PickMark: View {
     let pick: MessagePick
     let id: String
 
     var body: some View {
         let on = pick.ids.contains(id)
-        ThemedIcon(on ? Theme.Icon.successFilled : Theme.Icon.unchecked)
+        let brought = !on && pick.brought.contains(id)
+        ThemedIcon(on || brought ? Theme.Icon.successFilled : Theme.Icon.unchecked)
             .font(Theme.Font.heading)
-            .foregroundStyle(on ? Theme.accent : Color.secondary)
+            .foregroundStyle(on ? AnyShapeStyle(Theme.accent) : brought ? AnyShapeStyle(Theme.accent.tertiary) : AnyShapeStyle(Color.secondary))
             .scaledFrame(height: Theme.Size.avatar)
             .accessibilityHidden(true)
     }
@@ -111,40 +145,93 @@ private struct PickRow<Content: View>: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
+        .accessibilityValue(!pick.ids.contains(id) && pick.brought.contains(id) ? String(localized: "Goes with its answer") : "")
         .accessibilityAddTraits(pick.ids.contains(id) ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier("chat.pick." + id)
         .accessibilityHidden(!mark)
     }
 }
 
-/// In the composer's place while selecting: Cancel, how many are picked, and Forward (N), off with none picked.
+/// In the composer's place while selecting (#9468): Cancel, how many are picked and Include Questions when it means
+/// something; under them Forward · Copy · Export Image, drawn as the long-press bar's actions, off with none picked.
 struct PickBar: View {
     let pick: MessagePick
     var cancel: () -> Void
     var forward: () -> Void
+    var copy: () -> Void
+    var export: () -> Void
+    /// Include Questions would take more messages than one forward takes.
+    var refused: () -> Void
 
     var body: some View {
         let n = pick.ids.count
-        HStack(spacing: Theme.Space.m) {
-            Button("Cancel", action: cancel)
-                .themedButton()
-                .lineLimit(1)
-                .accessibilityIdentifier("chat.pickCancel")
-            Spacer(minLength: Theme.Space.s)
-            Text("\(n) Selected [Selected Messages]").font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
-                .accessibilityIdentifier("chat.pickCount")
-            Spacer(minLength: Theme.Space.s)
-            Button(action: forward) {
-                Text(n == 0 ? String(localized: "Forward [Message Menu]") : String(localized: "Forward \(n) [Selected Messages]"))
-                    .lineLimit(1).minimumScaleFactor(0.8)
+        VStack(spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.m) {
+                Button("Cancel", action: cancel)
+                    .themedButton()
+                    .lineLimit(1)
+                    .accessibilityIdentifier("chat.pickCancel")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("\(n) Selected [Selected Messages]").font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .accessibilityIdentifier("chat.pickCount")
+                Group {
+                    if pick.offersQuestions { questions }
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .themedButton(prominent: true)
+            HStack(spacing: Theme.Space.flush) {
+                action(String(localized: "Forward [Message Menu]"), Theme.Icon.forwardMessage, "chat.pickForward", forward)
+                action(String(localized: "Copy [Message Menu 63d90d]"), Theme.Icon.copy, "chat.pickCopy", copy)
+                action(String(localized: "Export Image"), Theme.Icon.photo, "chat.pickExport", export)
+            }
             .disabled(n == 0)
-            .accessibilityIdentifier("chat.pickForward")
+            .dynamicTypeSize(...MessageActionBar.barTypeSize)
+            .surface(in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         }
         .padding(.horizontal, Theme.Space.page)
         .padding(.vertical, Theme.Space.s)
         .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    /// Include Questions: a chip that turns it on and off, ticked while on.
+    private var questions: some View {
+        Button {
+            if pick.setInclude(!pick.include) { Haptics.tap() } else { refused() }
+        } label: {
+            Chip(text: String(localized: "Include Questions"), symbol: pick.include ? Theme.Icon.successFilled : Theme.Icon.unchecked,
+                 look: pick.include ? .tint(Theme.accent) : .outline)
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(pick.include ? String(localized: "On") : String(localized: "Off"))
+        .accessibilityAddTraits(pick.include ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier("chat.pickQuestions")
+    }
+
+    /// One action as the long-press bar draws it: its icon over its word, in the accent.
+    private func action(_ title: String, _ symbol: String, _ id: String, _ perform: @escaping () -> Void) -> some View {
+        Button(action: perform) { PickBarAction(title: title, symbol: symbol) }
+            .buttonStyle(.plain)
+            .accessibilityLabel(title)
+            .accessibilityShowsLargeContentViewer { ThemedIcon(symbol); Text(title) }
+            .accessibilityIdentifier(id)
+    }
+}
+
+/// A selecting bar action's face: the accent, or the quiet ink while it is off.
+private struct PickBarAction: View {
+    @Environment(\.isEnabled) private var enabled
+    let title: String
+    let symbol: String
+
+    var body: some View {
+        VStack(spacing: Theme.Space.xs) {
+            ThemedIcon(symbol).font(Theme.Font.heading).scaledFrame(height: Theme.Size.iconS)
+            Text(title).font(Theme.Font.label).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: MessageActionBar.height)
+        .foregroundStyle(enabled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+        .contentShape(.rect)
     }
 }
 #endif

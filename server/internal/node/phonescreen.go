@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,6 +70,26 @@ func phoneScreenStatus(ctx context.Context) *proto.PhoneScreen {
 	return &proto.PhoneScreen{Version: min(v, phoneScreenVersion), Permission: permission}
 }
 
+// phoneRestoreFile is where the helper keeps where windows were and the text size it gave them (PhoneScreenRestore):
+// there only while something is to be put back.
+func phoneRestoreFile() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".persona", "phone-screen.json")
+}
+
+// phoneRestoreRun runs the helper's `--phone-screen-restore` through LaunchServices (its Accessibility is its own) and
+// waits for it to finish.
+func phoneRestoreRun(ctx context.Context, helper string) error {
+	out, err := exec.CommandContext(ctx, "/usr/bin/open", "-W", "-g", "-n", helper, "--args", "--phone-screen-restore").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("open: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// phoneRestoreAfter is how long after a session ends the node looks for records it left (a helper that died, #9500).
+const phoneRestoreAfter = 5 * time.Second
+
 // phoneStart starts the helper's session and returns it once it said the token and whether it may move windows.
 // A variable for tests.
 var phoneStart = func(ctx context.Context, helper string) (net.Conn, bool, error) {
@@ -90,6 +113,12 @@ type phoneScreens struct {
 	signed func(pair string) bool              // the pair's RFB stream is open and signed in (screenLogins.signedIn)
 	attach func(pair string, c io.Closer) bool // ends c with that stream (screenLogins.attach)
 
+	// What a helper that died left (#9500): its file, how to run --phone-screen-restore, how long after a session ends to
+	// look. Zero: phoneRestoreFile, phoneRestoreRun, phoneRestoreAfter (tests set their own).
+	restoreFile  func() string
+	restoreRun   func(ctx context.Context, helper string) error
+	restoreAfter time.Duration
+
 	starting sync.Mutex // one start at a time; never held by a request
 	mu       sync.Mutex
 	cur      *phoneSession
@@ -104,7 +133,8 @@ type phoneSession struct {
 	once  sync.Once
 }
 
-// Close ends the session: the helper puts everything back as its socket closes. Safe to call more than once.
+// Close ends the session: the helper puts everything back as its socket closes. Safe to call more than once. A helper
+// that died first left its records: a moment later the node has them put back (restoreLeftovers).
 func (s *phoneSession) Close() error {
 	s.once.Do(func() {
 		_ = s.conn.Close()
@@ -113,8 +143,61 @@ func (s *phoneSession) Close() error {
 			s.owner.cur = nil
 		}
 		s.owner.mu.Unlock()
+		after := s.owner.restoreAfter
+		if after == 0 {
+			after = phoneRestoreAfter
+		}
+		time.AfterFunc(after, func() { s.owner.restoreLeftovers(context.Background()) })
 	})
 	return nil
+}
+
+// restoreLeftovers puts back what a helper that died left (#9500): windows on a display that is gone and, for terminals
+// and editors, the text size it raised, so the user's terminal never stays big. Only while no session runs, and a
+// session starting waits for it (both hold starting): a window is never put back, and its text made smaller, twice. It
+// runs when the node starts and after every session ends; with no records it does nothing.
+func (p *phoneScreens) restoreLeftovers(ctx context.Context) {
+	file, run := p.restoreFile, p.restoreRun
+	if file == nil {
+		file = phoneRestoreFile
+	}
+	if run == nil {
+		run = phoneRestoreRun
+	}
+	if _, err := os.Stat(file()); err != nil {
+		return
+	}
+	p.starting.Lock()
+	defer p.starting.Unlock()
+	p.mu.Lock()
+	busy := p.cur != nil
+	p.mu.Unlock()
+	if busy {
+		return // that session puts them back as it starts
+	}
+	helper, _ := inputHelpers.current(ctx, p.logf)
+	if helper == "" {
+		return
+	}
+	if v, permission := parsePhoneScreenPreflight(inputPermissions.raw(ctx, helper)); v < 1 || permission != "granted" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	err := run(ctx, helper)
+	_, left := os.Stat(file())
+	switch {
+	case left != nil && err != nil:
+		// `open -W` can't wait on a helper that has already finished (its records were for windows that are gone): the
+		// records are gone, so it did its work. Not a failure.
+		p.logf("phone screen: put back what a session left (nothing to wait for)")
+	case err != nil:
+		p.logf("phone screen: putting back what a session left: %v", err)
+	case left == nil:
+		p.logf("phone screen: some of what a session left is kept for later (an app that didn't answer)")
+	default:
+		p.logf("phone screen: put back what a session left")
+	}
 }
 
 // errPhoneHelper is a helper that stopped answering or answered nonsense: the session is over.

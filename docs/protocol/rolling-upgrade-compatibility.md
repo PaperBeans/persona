@@ -47,7 +47,7 @@
 | pi reload 命令／配置 | `/jarvis-reload`, `jarvis.json`, `JARVIS_PI_HOST` | `/persona-reload`, `persona.json`, `PERSONA_PI_HOST` | 命令 alias、明确配置优先级、显式空变量优先 | 旧配置继续有效，不扩大权限 |
 | mDNS service | `_jarvis-hub._tcp` | `_persona-hub._tcp` | 两套广播，同一 hub 身份 | 两套 browse，按 hub id 去重 |
 | 证书备用 DNS | `*.jarvis.invalid` | `*.persona.invalid` | 不替换已有证书和 pin | 接受旧证书身份 |
-| runtime 包名 | `jarvis-{dsh,pi,paseo,agent-sdk}-runtime` | `persona-…` | 同一包内容接受旧 ID | 查询旧 node 时用旧 ID |
+| runtime 包名 | `jarvis-{dsh,pi,paseo}-runtime` | `persona-…` | 同一包内容接受旧 ID | 查询旧 node 时用旧 ID |
 
 基线的 `/api/v1/…` 入口、普通 WebSocket `type` 与 node／manager RPC 方法不因产品名切换而整体改名；新增业务能力仍按各自协商规则处理。协议版本没有因本兼容层提高。注册 Bundle ID、系统 controls／Intent 等原生身份由 #6152／#6192 记录，本清单不以服务端测试代替其系统升级证据。
 
@@ -55,7 +55,7 @@
 
 The hub sends its feature list in `devices.connected`, matching the capabilities advertised in `hello.features`.
 The devices manager forwards it as `node.configure.hub_features`; the node snapshots that list when starting an
-assistant process to choose its MCP namespace. A new Claude, Codex app-server, Agent SDK or guest assistant registers the built-in MCP
+assistant process to choose its MCP namespace. A new Claude, Codex app-server or guest assistant registers the built-in MCP
 handler only as `persona` when the hub announces
 `persona_contracts_v1`. Its automatic tool permissions use the same namespace selection, so each built-in tool is
 offered once and only one built-in MCP process is needed. An old hub, an absent feature list or a connection that has
@@ -89,7 +89,7 @@ and normalized to `persona_settings`, so an old direct call still runs without p
 The shared `mcp.json` generated at node startup and checked or repaired by doctor also retains both namespaces.
 It is created before the hub handshake, and ordinary Agent launches and resumes reuse it without a per-session
 namespace decision. Doctor cannot safely narrow that file from the connected hub's capabilities alone. This
-optimization therefore applies to the per-process Claude, Codex app-server, Agent SDK and guest assistant configurations.
+optimization therefore applies to the per-process Claude, Codex app-server and guest assistant configurations.
 
 Registration and historical recognition are separate: transcript readers, task completion and supervision folding
 continue accepting `mcp__persona__*` and `mcp__jarvis__*` forever. Extension namespaces and their permission rules are
@@ -122,6 +122,23 @@ unrecognized enum to `unknown`. The four terminal messages are a presentation ma
 `unknown | approval | answer | computer` is the entire wire state. Nothing is persisted, and removing the pending call
 before its final socket write prevents late updates after the answer. The peer-combination table and terminal messages
 are in [protocol.md](protocol.md) ("MCP tools (`personad mcp`)").
+
+### Assistant conversations on the CLI only (#9799)
+
+Every assistant conversation on Claude Code (the main chat, side chats, scheduled tasks, guests and meeting rooms) runs
+on its CLI (`claude -p` with stream-json). A hub or node before #9799 could also run the main chat on the Agent SDK,
+chosen by a `runtime` in the main chat's model binding. Each pair keeps working:
+
+| Where | What it gets |
+| --- | --- |
+| A stored binding | A `model_config` or model-profile binding an older hub saved with `runtime` (`"agentsdk"` or `"cli"`) reads as the CLI, without an error. The key is ignored on read and is gone after the next save. |
+| An older client saving model config | `runtime` in a `PUT` / `PATCH` body, with any value (`null` included) and on any purpose, is accepted and ignored: the save succeeds and stores no runtime. |
+| A client reading model config | The `assistant` purpose has no `runtimes`, no purpose lists `runtime` in `fields`, and a launcher picker's `default` has no `runtime`. Clients show the runtime picker only when `runtimes` is present, so it is hidden; their picker stays for an older hub. |
+| New hub, older node | The manager never sends `runtime` on `assistant.send` / `assistant.warm` and drops one a caller left in the params. The older node gets no runtime and a fingerprint without one, and runs the CLI. A guest conversation it already runs on the Agent SDK stays there until the node is updated: a guest's messages carry no fingerprint, so that node keeps the runtime its state recorded. |
+| Older hub, new node | The node ignores the `runtime: "agentsdk"` an older hub sends and starts the CLI. |
+| A conversation that ran on the Agent SDK | The node continues it on the CLI with `--resume <id>` in the profile (config directory) its state recorded: the same conversation id, no history lost. One the SDK started on the plain `claude` launcher keeps running the claude executable, as the SDK did, not the launcher's alias or shell function; the first entrypoint on its transcript (`sdk-ts`) tells it apart, as the hub never kept a runtime. |
+| Session rows | `runtime` and `runtime_fallback` are no longer produced, and the hub drops them from an older node's report. Clients read their absence as the CLI. |
+| The runtime package | The Agent SDK runtime package (`persona-agent-sdk-runtime`, under its older `jarvis-` name too) is no longer carried. An older node that looks for it finds none and runs the CLI, its existing fallback. Copies already unpacked under a node's `runtime-packages/` are unused and not cleaned up. |
 
 ## 配置、目录、服务与升级渠道
 

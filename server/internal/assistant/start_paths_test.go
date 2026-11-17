@@ -62,7 +62,7 @@ var startOptOuts = map[string]string{
 }
 
 // supervisionCalls make or keep a ledger.
-var supervisionCalls = []string{"superviseTodo", "updateSupervision", "adoptAgent", "adoptAgentAs", "quietAgentTask", "ensureSupervisor"}
+var supervisionCalls = []string{"superviseTodo", "supervisePlanTask", "updateSupervision", "adoptAgent", "adoptAgentAs", "quietAgentTask", "ensureSupervisor"}
 
 func TestEveryStartPathIsSupervisedOrOptedOut(t *testing.T) {
 	funcs := parsePackageFuncs(t)

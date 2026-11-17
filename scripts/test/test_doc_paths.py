@@ -46,6 +46,7 @@ SKIP_FILES = {
 GENERATED = {
     "apple/Config.xcconfig",
     "apple/PersonaOptIn.entitlements",  # written by persona_config.py xcconfig when an opt-in entitlement is on
+    "apple/PersonaSiriCalls.entitlements",  # written by xcodegen with app.siri_calls on (apple/siri-calls.yml), git-ignored
     "apple/Persona.xcodeproj",
     "android/app/build/outputs/apk/debug/app-debug.apk",
     "android/local.properties",  # each machine's own SDK location (sdk.dir), git-ignored
@@ -102,8 +103,8 @@ TABLE_DELIMITER = re.compile(r"^\s*\|?(?:\s*:?-+:?\s*\|)+(?:\s*:?-+:?)?\s*$")
 
 def current_docs():
     """Discover every maintained module guide, but not point-in-time archives."""
-    return sorted(p for p in (ROOT / "docs").rglob("*.md")
-                  if "archive" not in p.relative_to(ROOT / "docs").parts)
+    return sorted((p for p in (ROOT / "docs").rglob("*.md")
+                   if "archive" not in p.relative_to(ROOT / "docs").parts), key=Path.as_posix)
 
 
 def doc_files():
@@ -168,7 +169,7 @@ def missing_links(doc):
     for number, path in link_targets(doc.read_text(errors="ignore")):
         resolved = ROOT / path.lstrip("/") if path.startswith("/") else doc.parent / path
         if not resolved.exists():
-            found.append(f"{doc.relative_to(ROOT)}:{number}: {path}")
+            found.append(f"{doc.relative_to(ROOT).as_posix()}:{number}: {path}")
     return found
 
 
@@ -278,7 +279,7 @@ class DocPathTests(unittest.TestCase):
             for number, line in enumerate(doc.read_text(errors="ignore").splitlines(), 1):
                 if "github.com/" in line:  # a path inside another project, quoted with its source
                     continue
-                missing += [f"{doc.relative_to(ROOT)}:{number}: {path}" for path in quoted_paths(line) if not exists(path)]
+                missing += [f"{doc.relative_to(ROOT).as_posix()}:{number}: {path}" for path in quoted_paths(line) if not exists(path)]
         self.assertEqual([], missing, "docs quote paths that are not in the repository; update them to where the file is now")
 
     def test_markdown_link_targets_exist(self):
@@ -319,7 +320,7 @@ class DocPathTests(unittest.TestCase):
                                   "spec/fixtures/wire/README.md:15: long-after-missing.md"], missing_links(doc))
 
     def test_tables_are_not_split_by_blank_lines(self):
-        split = [f"{doc.relative_to(ROOT)}:{number}" for doc in doc_files()
+        split = [f"{doc.relative_to(ROOT).as_posix()}:{number}" for doc in doc_files()
                  for number in split_tables(doc.read_text(errors="ignore"))]
         self.assertEqual([], split, "a blank line ends a table, so these rows render as plain text; remove the blank "
                                     "line, or give the rows a header and delimiter row of their own")

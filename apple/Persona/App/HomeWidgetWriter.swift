@@ -11,12 +11,17 @@ import WidgetKit
 /// - Only on change: the bytes are compared without the time; the same content is not written again, except once a
 ///   `heartbeat` so the widgets do not call it stale while the app runs. Then only the kinds whose part changed reload
 ///   (`WidgetCenter` budgets reloads; the heartbeat runs only in the foreground, where reloads are not budgeted).
+/// - Live numbers wait: a change of only what moves while agents work (each working row's activity line, the machines'
+///   load, today's tokens) is written at most once a `livePause`, the latest then; anything else is written at once. A
+///   working fleet changed those every few seconds, a snapshot rewrite and a widget reload each time (#9592).
+/// - Only placed widgets reload (`HomeWidgetData.installed`, every kind while it is not known yet).
 /// - Off the main thread: the file is written on a background task.
 @MainActor
 final class HomeWidgetWriter {
     static let shared = HomeWidgetWriter()
     static let pause: Duration = .seconds(5)
     nonisolated static let heartbeat: TimeInterval = 20 * 60
+    nonisolated static let livePause: TimeInterval = 60
 
     /// What to write: the app's state (`AppModel.homeSnapshot()`); DEBUG `-showHomeWidgetSample` writes the sample.
     var source: () -> HomeSnapshot? = { nil }
@@ -42,8 +47,8 @@ final class HomeWidgetWriter {
     private var writing: Task<Void, Never>?
     private let output: Output
 
-    init(store: HomeSnapshotStore = .shared) {
-        output = Output(store: store)
+    init(store: HomeSnapshotStore = .shared, livePause: TimeInterval = HomeWidgetWriter.livePause) {
+        output = Output(store: store, livePause: livePause)
     }
 
     /// Whether the hub knows this device has the widgets (nil: not told since launch).
@@ -75,10 +80,12 @@ final class HomeWidgetWriter {
     }
 
     /// Asks for a write within `pause`.
-    func schedule() {
+    func schedule() { schedule(after: Self.pause) }
+
+    private func schedule(after delay: Duration) {
         guard pending == nil else { return }
         pending = Task { [weak self] in
-            try? await Task.sleep(for: Self.pause)
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
             self?.pending = nil
             self?.write()
@@ -108,11 +115,19 @@ final class HomeWidgetWriter {
         // Encoding, comparing and writing happen off the main actor: a snapshot of a busy hub took 28 ms of JSON
         // encoding on the main thread each time, every few seconds while Agents worked (#8412).
         let output = output, previous = writing
-        writing = Task.detached(priority: .utility) {
+        writing = Task.detached(priority: .utility) { [weak self] in
             await previous?.value
-            guard let kinds = await output.write(snapshot, now: now) else { return }
-            await MainActor.run {
-                for kind in kinds { WidgetCenter.shared.reloadTimelines(ofKind: kind.widgetKind) }
+            switch await output.write(snapshot, now: now) {
+            case .unchanged:
+                return
+            case .later(let wait):
+                // Only live numbers moved: the latest of them go once the pause is over, unless something else comes first.
+                await MainActor.run { [weak self] in self?.schedule(after: .seconds(wait)) }
+            case .wrote(let kinds):
+                await MainActor.run {
+                    let placed = HomeWidgetData.shared.installed
+                    for kind in kinds where placed?.contains(kind) ?? true { WidgetCenter.shared.reloadTimelines(ofKind: kind.widgetKind) }
+                }
             }
         }
     }
@@ -120,31 +135,64 @@ final class HomeWidgetWriter {
     /// The snapshot's file, and what was last written to it.
     private actor Output {
         private let store: HomeSnapshotStore
-        private var written: (body: Data, parts: [HomeKind: Data], at: Date)?
+        private let livePause: TimeInterval
+        private var written: (body: Data, settled: Data?, parts: [HomeKind: Data], at: Date)?
 
-        init(store: HomeSnapshotStore) { self.store = store }
+        init(store: HomeSnapshotStore, livePause: TimeInterval) {
+            self.store = store
+            self.livePause = livePause
+        }
 
-        /// Writes `snapshot` unless the same content was written within `heartbeat`; returns the kinds whose widgets
-        /// should reload (nil: nothing written).
-        func write(_ snapshot: HomeSnapshot, now: Date) -> [HomeKind]? {
+        enum Outcome: Sendable {
+            /// Nothing to write.
+            case unchanged
+            /// Only live numbers changed and the last write is younger than `livePause`: ask again after this many seconds.
+            case later(TimeInterval)
+            /// Written: the kinds whose widgets should reload.
+            case wrote([HomeKind])
+        }
+
+        /// Writes `snapshot` unless the same content was written within `heartbeat`, or only its live numbers changed
+        /// within `livePause` (`HomeWidgetWriter.settled`).
+        func write(_ snapshot: HomeSnapshot, now: Date) -> Outcome {
             var snapshot = snapshot
             snapshot.at = 0
-            guard let body = HomeWidgetWriter.encode(snapshot) else { return nil }
-            if let written, written.body == body, now.timeIntervalSince(written.at) < HomeWidgetWriter.heartbeat { return nil }
+            guard let body = HomeWidgetWriter.encode(snapshot) else { return .unchanged }
+            if let written, written.body == body, now.timeIntervalSince(written.at) < HomeWidgetWriter.heartbeat { return .unchanged }
+            let settled = HomeWidgetWriter.encode(HomeWidgetWriter.settled(snapshot))
+            if let written, written.body != body, settled != nil, written.settled == settled {
+                let age = now.timeIntervalSince(written.at)
+                if age < livePause { return .later(livePause - age) }
+            }
             let parts = HomeWidgetWriter.parts(snapshot)
             let changed = HomeKind.allCases.filter { written?.parts[$0] != parts[$0] }
             let kinds = written?.body == body ? HomeKind.allCases : changed
             snapshot.at = now.timeIntervalSince1970
-            guard let data = HomeWidgetWriter.encode(snapshot) else { return nil }
-            written = (body, parts, now)
+            guard let data = HomeWidgetWriter.encode(snapshot) else { return .unchanged }
+            written = (body, settled, parts, now)
             do {
                 try store.write(data)
             } catch {
                 HomeSnapshotStore.log.error("widget snapshot not written: \(error.localizedDescription, privacy: .public)")
-                return nil
+                return .unchanged
             }
-            return kinds
+            return .wrote(kinds)
         }
+    }
+
+    /// `s` without its live numbers: each working row's activity line, the machines' load and today's tokens (what
+    /// moves every few seconds while agents work). Two snapshots equal here differ only in those (#9592).
+    nonisolated static func settled(_ s: HomeSnapshot) -> HomeSnapshot {
+        var s = s
+        for i in s.agents.rows.indices { s.agents.rows[i].detail = nil }
+        for i in s.machines.indices { s.machines[i].load = nil }
+        if s.usage != nil {
+            s.usage?.tokensToday = 0
+            s.usage?.tpm = 0
+            s.usage?.hourly = []
+            s.usage?.costToday = nil
+        }
+        return s
     }
 
     nonisolated static func encode(_ s: HomeSnapshot) -> Data? {

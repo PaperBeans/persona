@@ -4,7 +4,7 @@
 // go to it. Nothing here merges or deletes: keeping one result is the Git and worktree tools' job.
 import { useEffect, useState } from "react";
 import { errorText } from "../lib/api";
-import { awaitsReply } from "../lib/agent-groups";
+import { awaitsReply, justFinished } from "../lib/agent-groups";
 import { runStatus, useCompareGroup, type CompareGroup, type CompareRun, type RunStatus } from "../lib/compare-runs";
 import { retryRun, useRunner } from "../lib/compare-runner";
 import { ago, backgroundWaiting, sessionTitle, shortPath, stateOf } from "../lib/format";
@@ -67,15 +67,16 @@ function Runs({ group, reading }: { group: CompareGroup; reading: number }) {
       <div data-compare-runs className="grid gap-3 sm:grid-cols-2">
         {group.runs.map((run) => (
           <RunCard key={run.n} group={group} run={run} status={runStatus(run, group, ctx)} reviews={reviews} reading={reading}
-            awaiting={(s) => awaitsReply(s, mutes)} />
+            awaiting={(s) => awaitsReply(s, mutes)} finished={(s) => justFinished(s, mutes)} />
         ))}
       </div>
     </>
   );
 }
 
-function RunCard({ group, run, status, reviews, reading, awaiting }: {
+function RunCard({ group, run, status, reviews, reading, awaiting, finished }: {
   group: CompareGroup; run: CompareRun; status: RunStatus; reviews: boolean; reading: number; awaiting: (s: Session) => boolean;
+  finished: (s: Session) => boolean;
 }) {
   const session = status.kind === "started" ? status.session : undefined;
   return (
@@ -84,7 +85,7 @@ function RunCard({ group, run, status, reviews, reading, awaiting }: {
       <div className="flex items-center gap-2">
         <span className="shrink-0 text-label font-semibold tracking-wide text-ink-3 uppercase">{t("compare-runs.run", { n: run.n })}</span>
         <span className="min-w-0 flex-1" />
-        <StatusLine status={status} awaiting={awaiting} />
+        <StatusLine status={status} awaiting={awaiting} finished={finished} />
       </div>
       <p className="truncate text-card-title font-semibold text-ink" title={session ? sessionTitle(session) : undefined}>
         {session ? sessionTitle(session) : t("compare-runs.not_started_title")}
@@ -101,16 +102,17 @@ function RunCard({ group, run, status, reviews, reading, awaiting }: {
 }
 
 /** The run's state in the sidebar's mark and words once it is a session; before that, how far its start got. */
-function StatusLine({ status, awaiting }: { status: RunStatus; awaiting: (s: Session) => boolean }) {
+function StatusLine({ status, awaiting, finished }: { status: RunStatus; awaiting: (s: Session) => boolean; finished: (s: Session) => boolean }) {
   if (status.kind === "started") {
     const s = status.session;
     const state = stateOf(s);
     const reply = awaiting(s);
+    const done = !reply && finished(s);
     const bg = backgroundWaiting(s);
     return (
       <span className="flex shrink-0 items-center gap-1.5 text-label text-ink-2">
-        <StatusMark state={state} awaiting={reply} waiting={bg} label={false} />
-        {reply ? stateName("awaits_reply") : bg ? stateName("bg_waiting") : STATE_LABEL[state]}
+        <StatusMark state={state} awaiting={reply} finished={done} waiting={bg} label={false} />
+        {reply ? stateName("awaits_reply") : done ? stateName("just_finished") : bg ? stateName("bg_waiting") : STATE_LABEL[state]}
       </span>
     );
   }

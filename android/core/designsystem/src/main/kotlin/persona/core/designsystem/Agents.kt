@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1084,26 +1085,80 @@ private const val BoardBayPeek = 0.4f
 /**
  * A quick filter: its words, count and state ([status]'s dot, or [icon] in its color: Waiting in the background's clock).
  * [waiting]: it lists the agents that only wait in the background, so the Glass home draws it in that state's lighter tone.
+ * [countTone]: the count as a badge in that state's colours (Needs you's for what waits for the user, [Status.Idle]'s for a
+ * neutral total; none at 0, 99+ past 99) and part of the spoken name, as the Inbox's section bar draws its counts (#9053).
  */
 data class Bay(
     val label: String, val count: Int? = null, val status: Status? = null, val icon: persona.core.designsystem.icons.PhIcon? = null,
-    val waiting: Boolean = false,
+    val waiting: Boolean = false, val countTone: Status? = null,
 )
 
 /**
  * The quick filters of a list. Glass shows glass chips; brief underlined tabs; the board a counter board with
  * one big number per bay — tapping a cell filters to it. A Needs You dot is still, as on iOS's `QuickFilterBar`.
+ * [revealSelected]: when the choice changes, also from outside the bar (a search, a link: the Inbox's section bar,
+ * #9053), a bar that scrolls sideways scrolls it whole into sight ([revealWhenSelected]).
+ * [pinFirst]: the first bay stays at the bar's start and only the rest scroll beside it, so its count is in sight
+ * whichever bay is chosen (the Inbox's Needs you, #9053); a bar that fits looks the same either way.
+ * [fadeCut]: an edge of the part that scrolls fades where it cuts bays off, as the Agents capsule's (#9121): the trailing
+ * edge while more lie past it, the leading one once it has moved from its start, so a strip that runs past the screen
+ * reads as one that scrolls (the Inbox's section bar, #9053). A bar that fits draws as it would without it.
  */
 @Composable
-fun QuickFilterBar(bays: List<Bay>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+fun QuickFilterBar(bays: List<Bay>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, revealSelected: Boolean = false,
+                   pinFirst: Boolean = false, fadeCut: Boolean = false) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
+    val scroll = rememberScrollState()
+    val reveal = scroll.takeIf { revealSelected }
+    // How many bays sit outside the part that scrolls: the first, when pinned.
+    val pinned = if (pinFirst && bays.size > 1) 1 else 0
+    // How far a cut edge fades: the Agents capsule's width, growing with the text; a chosen bay is kept clear of it.
+    val fadeWidth = if (fadeCut) AgentFilterTokens.fade * androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceAtLeast(1f) else Tokens.Space.flush
+    // Read in drawing only: the fade's frames redraw the strip and never recompose it. A strip not yet measured counts
+    // as one that fits, and one with nothing to fade draws without the fade's layer, exactly as without the option.
+    val fade: Modifier = if (!fadeCut) Modifier else {
+        val spec: androidx.compose.animation.core.AnimationSpec<Float> =
+            if (PersonaTheme.reduceMotion) androidx.compose.animation.core.snap() else androidx.compose.animation.core.tween(Tokens.Motion.State.duration)
+        val measured = scroll.viewportSize > 0
+        val leading = androidx.compose.animation.core.animateFloatAsState(if (measured && scroll.canScrollBackward) 1f else 0f, spec, label = "quick-filter-fade-leading")
+        val trailing = androidx.compose.animation.core.animateFloatAsState(if (measured && scroll.canScrollForward) 1f else 0f, spec, label = "quick-filter-fade-trailing")
+        val fading by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { leading.value > 0f || trailing.value > 0f } }
+        if (fading) Modifier.agentFilterEdgeFade(palette.surfaceOpaque, fadeWidth, { leading.value }, { trailing.value }) else Modifier
+    }
     when (PersonaTheme.style) {
-        AppStyle.Glass -> Row(modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp.dense)) {
-            bays.forEachIndexed { index, bay -> JChip(bay.label, selected = index == selected, onClick = { onSelect(index) }, status = bay.status, count = bay.count, breathes = false) }
+        AppStyle.Glass -> {
+            val gap = 8.dp.dense
+            @Composable fun chip(index: Int) {
+                val bay = bays[index]
+                JChip(bay.label, Modifier.revealWhenSelected(reveal?.takeIf { index >= pinned }, index == selected, fadeWidth), selected = index == selected,
+                    onClick = { onSelect(index) }, status = bay.status, count = bay.count, breathes = false, countTone = bay.countTone)
+            }
+            if (pinned == 0) Row(modifier.fillMaxWidth().then(fade).horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                bays.indices.forEach { chip(it) }
+            } else Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                chip(0)
+                Row(Modifier.weight(1f).then(fade).horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    (pinned until bays.size).forEach { chip(it) }
+                }
+            }
         }
-        // Tabs that do not fit scroll sideways rather than being cut off at the edge.
-        AppStyle.Brief -> JSegmented(bays.map { JSegment(it.label, it.count) }, selected, onSelect, modifier.horizontalScroll(rememberScrollState()))
+        // Tabs that do not fit scroll sideways rather than being cut off at the edge. Fading the cut edge, the tabs keep
+        // part of the next one in sight under the fade (TabPeek): an edge that fell between two tabs showed none of it.
+        AppStyle.Brief -> {
+            val segments = bays.map { JSegment(it.label, it.count, countTone = it.countTone) }
+            @Composable fun strip(shown: List<JSegment>, chosen: Int, pick: (Int) -> Unit, place: Modifier) =
+                if (!fadeCut) JSegmentedStrip(shown, chosen, pick, place.horizontalScroll(scroll), revealIn = reveal)
+                else BoxWithConstraints(place) {
+                    JSegmentedStrip(shown, chosen, pick, Modifier.then(fade).horizontalScroll(scroll), revealIn = reveal, revealMargin = fadeWidth,
+                        peek = TabPeek(constraints.maxWidth, fadeWidth / 2))
+                }
+            if (pinned == 0) strip(segments, selected, onSelect, modifier)
+            else Row(modifier) {
+                JSegmented(segments.take(pinned), if (selected < pinned) selected else -1, onSelect)
+                strip(segments.drop(pinned), selected - pinned, { onSelect(it + pinned) }, Modifier.weight(1f).padding(start = JSegmentedBriefGap))
+            }
+        }
         AppStyle.Board -> BoxWithConstraints(modifier.fillMaxWidth()) {
             val shape = RoundedCornerShape(10.dp.corner)
             // Each bay is a share of the width while its label fits; more bays than that (the Agents list's six) keep
@@ -1113,23 +1168,47 @@ fun QuickFilterBar(bays: List<Bay>, selected: Int, onSelect: (Int) -> Unit, modi
             val whole = (maxWidth / BoardBayMinWidth).toInt().coerceAtLeast(1)
             val bayWidth = maxWidth / (whole + BoardBayPeek)
             val frame = Modifier.fillMaxWidth().clip(shape).background(palette.surface).border(1.dp, palette.line, shape)
-            val row = if (fits) frame.height(IntrinsicSize.Min) else frame.horizontalScroll(rememberScrollState()).height(IntrinsicSize.Min)
-            Row(row) {
-                bays.forEachIndexed { index, bay ->
-                    if (index > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(palette.line))
-                    val on = index == selected
-                    val color = bay.status?.let { palette.status(it).dot } ?: palette.ink
-                    val cell = if (fits) Modifier.weight(1f) else Modifier.widthIn(min = bayWidth)
-                    Box(cell.clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = on }) {
-                        Column(Modifier.padding(start = 12.dp.dense, top = 10.dp.dense, bottom = 12.dp.dense, end = 6.dp.dense)) {
-                            Text("${bay.count ?: "—"}", style = type.number, color = if ((bay.count ?: 0) == 0) palette.ink3 else palette.ink, maxLines = 1)
-                            Spacer(Modifier.height(2.dp.dense))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (bay.status != null) { Box(Modifier.size(8.dp).clip(RoundedCornerShape(2.dp)).background(color)); Spacer(Modifier.width(5.dp.dense)) }
-                                Text(bay.label, style = type.caption.copy(fontSize = androidx.compose.ui.unit.TextUnit(12f, androidx.compose.ui.unit.TextUnitType.Sp)), color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
+            @Composable fun rule() = Box(Modifier.width(1.dp).fillMaxHeight().background(palette.line))
+            @Composable fun cell(index: Int, place: Modifier) {
+                val bay = bays[index]
+                val on = index == selected
+                val color = bay.status?.let { palette.status(it).dot } ?: palette.ink
+                // A toned count (the Inbox's section bar, #9053) shows no number at 0 and 99+ past 99, Needs you's in its
+                // state's ink, and is spoken with the label.
+                val toned = bay.countTone?.let { tone -> bay.count?.takeIf { it > 0 }?.let { it to tone } }
+                val spoken = bay.countTone?.let { spokenCount(bay.label, bay.count) }
+                Box(place.clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = on; spoken?.let { contentDescription = it } }) {
+                    Column(Modifier.padding(start = 12.dp.dense, top = 10.dp.dense, bottom = 12.dp.dense, end = 6.dp.dense)) {
+                        if (bay.countTone == null && bay.count != null) Text("${bay.count}", style = type.number, color = if (bay.count == 0) palette.ink3 else palette.ink, maxLines = 1)
+                        else if (toned != null) Text(countBadgeText(toned.first), style = type.number, maxLines = 1,
+                            color = if (toned.second == Status.Idle) palette.ink else palette.status(toned.second).text)
+                        // No number to show (the Inbox's Done and All, a toned 0): the line keeps its height so the labels
+                        // stay in one row, and is neither seen nor heard.
+                        else Text("—", Modifier.clearAndSetSemantics { }, style = type.number, color = palette.ink.copy(alpha = 0f), maxLines = 1)
+                        Spacer(Modifier.height(2.dp.dense))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (bay.status != null) { Box(Modifier.size(8.dp).clip(RoundedCornerShape(2.dp)).background(color)); Spacer(Modifier.width(5.dp.dense)) }
+                            Text(bay.label, style = type.caption.copy(fontSize = androidx.compose.ui.unit.TextUnit(12f, androidx.compose.ui.unit.TextUnitType.Sp)), color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        if (on) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(color))
+                    }
+                    // Over the cell's measured size: a cell of a board that scrolls has no bounded width of its own, and a
+                    // fillMaxWidth bar in it drew nothing.
+                    if (on) Box(Modifier.matchParentSize(), contentAlignment = Alignment.BottomStart) {
+                        Box(Modifier.fillMaxWidth().height(3.dp).background(color))
+                    }
+                }
+            }
+            if (fits) Row(frame.height(IntrinsicSize.Min)) {
+                bays.indices.forEach { index -> if (index > 0) rule(); cell(index, Modifier.weight(1f)) }
+            } else if (pinned == 0) Row(frame.then(fade).horizontalScroll(scroll).height(IntrinsicSize.Min)) {
+                bays.indices.forEach { index -> if (index > 0) rule(); cell(index, Modifier.widthIn(min = bayWidth).revealWhenSelected(reveal, index == selected, fadeWidth)) }
+            } else Row(frame.height(IntrinsicSize.Min)) {
+                cell(0, Modifier.widthIn(min = bayWidth))
+                rule()
+                Row(Modifier.weight(1f).then(fade).horizontalScroll(scroll).height(IntrinsicSize.Min)) {
+                    (pinned until bays.size).forEach { index ->
+                        if (index > pinned) rule()
+                        cell(index, Modifier.widthIn(min = bayWidth).revealWhenSelected(reveal, index == selected, fadeWidth))
                     }
                 }
             }

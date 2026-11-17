@@ -35,6 +35,7 @@ func (t *Todo) setPlan(row db.TodoRow) {
 	t.Kind = row.Kind
 	t.SeenAt = row.SeenAt
 	t.InboxItem = row.InboxItem
+	t.PartOf, t.After = row.PartOf, slices.Clone(row.After)
 }
 
 // keepPlan writes t's plan, project and seen mark into row: a row made in memory for a change that is not to them keeps
@@ -49,6 +50,7 @@ func (t *Todo) keepPlan(row *db.TodoRow) {
 	row.Kind = t.Kind
 	row.SeenAt = t.SeenAt
 	row.InboxItem = t.InboxItem
+	row.PartOf, row.After = t.PartOf, slices.Clone(t.After)
 }
 
 // todoRowOf is todo t as a row (what memory has of it; the store-less PATCH changes it).
@@ -206,6 +208,19 @@ func (s *Service) createDirectionTodo(ctx context.Context, leader, title, notes 
 	return t, nil
 }
 
+// createPieceTodo makes a piece of a request that conversation will hand out itself (todo_pieces.go): a to-do with
+// plan's links, opened by that conversation, with no agent, so that its task_plan's todo_id can run an Agent on it when
+// its turn comes (reusableTodo) instead of opening a second to-do. Unlike a leader's piece (createDirectionTodo) it is
+// not supervised until an Agent works on it: the plan that starts it sets that up.
+func (s *Service) createPieceTodo(ctx context.Context, conversation, title, notes string, plan db.TodoEdit, bindings ...*repository.CreateBindings) (Todo, error) {
+	now := time.Now().UTC()
+	row := db.TodoRow{ID: "todo_" + randomHex(8), Title: title, Notes: notes, CreatedAt: now, UpdatedAt: now,
+		Origin: conversation, Quiet: s.quietTask(ctx, conversation)}
+	plan.Title, plan.Notes, plan.Done = nil, nil, nil
+	plan.Apply(&row, now)
+	return s.insertTodo(ctx, row, bindings...)
+}
+
 // editTodo makes edit e to todo id as the user's PATCH does: stored, put into memory, the apps and the hub told; a
 // todo it closes has its outcome recorded and a question's to-do answered as dropped. db.ErrTodoNotFound when it is not
 // there.
@@ -217,7 +232,24 @@ func (s *Service) editTodo(ctx context.Context, id string, e db.TodoEdit) (Todo,
 	if cur.isConcern() && cur.DoneAt == nil && e.Done != nil && *e.Done {
 		return Todo{}, db.ErrConcernUnreported // only its report closes it (concerns.go); the store checks it again
 	}
+	links := e.PartOf != nil || e.After != nil
+	if f := s.pieceWriteHook; links && f != nil {
+		f(id)
+	}
+	if f := s.editWriteHook; f != nil {
+		f(id)
+	}
 	s.todos.writing.Lock()
+	if links {
+		// Checked again with the graph held still: a write since the caller's check may have changed the request
+		// (todo_pieces.go). A *pieceError when it no longer holds.
+		l, err := s.recheckPieces(id, e)
+		if err != nil {
+			s.todos.writing.Unlock()
+			return Todo{}, err
+		}
+		e.PartOf, e.After = l.PartOf, l.After
+	}
 	now := time.Now().UTC()
 	var row *db.TodoRow
 	if st := s.todoDB(); st != nil {
@@ -227,7 +259,14 @@ func (s *Service) editTodo(ctx context.Context, id string, e db.TodoEdit) (Todo,
 			return Todo{}, err
 		}
 	} else {
-		r := todoRowOf(cur)
+		// as the writes before this one left it, not as it was before the lock; deleted since: not there (never made
+		// again from the copy read before the lock)
+		base, ok := s.todoNow(id)
+		if !ok {
+			s.todos.writing.Unlock()
+			return Todo{}, db.ErrTodoNotFound
+		}
+		r := todoRowOf(base)
 		e.Apply(&r, now)
 		row = &r
 	}

@@ -610,7 +610,7 @@ test('the companion gives sessions that ran in herdr a resume command, and never
   await n.ready
   await until('listed', () => n.last('runtime.sessions')?.sessions.length === 2)
   const rows = Object.fromEntries(n.last('runtime.sessions').sessions.map((s) => [s.session_id, s]))
-  assert.deepEqual(rows['s-herdr'].resume_argv, ['pi', '--session', herdrFile])
+  assert.deepEqual(rows['s-herdr'].resume_argv, ['pi', '--approve', '--session', herdrFile], 'resumed in a pane nobody watches: no Trust prompt (#9462)')
   assert.equal(rows['s-web'].resume_argv, undefined, 'last ran in pi-web: woken there')
   // A node that did not resume it (an older one) reaches the companion: refused, not opened in pi-web.
   await assert.rejects(n.peer.call('session.send', { session_id: 's-herdr', text: 'x', client_msg_id: 'h1' }), /herdr/)

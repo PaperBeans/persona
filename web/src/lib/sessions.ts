@@ -7,7 +7,7 @@ import { foldedState } from "./child-sessions";
 import { foldRows } from "./folded-rows";
 import { getState, onHubEvent, subscribe, useStore } from "./store";
 import { SESSIONS_LIST_FEATURE } from "./session-list";
-import { runtimeSessions } from "./runtime-list";
+import { runtimeAgents, runtimeSessions, supportsPagedAgents } from "./runtime-list";
 import type { Session } from "./types";
 
 /** The agents the lists show and count: without the child sessions folded under one of them, each parent in its folded
@@ -216,11 +216,18 @@ export function othersWaiting(badge: number, open: Session | undefined, quietCou
   return Math.max(0, badge - (open && !open.assistant && (quietCounted || !open.quiet) && foldedState(open) === "needs_you" ? 1 : 0));
 }
 
+const scopedAgentCounts = () => runtimeAgents.getSnapshot().counts;
+
 export function useCounts() {
   const all = useAgentSessions();
   const interactions = useStore((s) => s.interactions.length);
-  const counts = useStore((s) => s.sessionCounts);
-  const bounded = useStore((s) => s.features.includes(SESSIONS_LIST_FEATURE));
+  const { bounded, pagedAgents, aggregate } = useStore((s) => ({
+    bounded: s.features.includes(SESSIONS_LIST_FEATURE),
+    pagedAgents: supportsPagedAgents(s.features),
+    aggregate: s.sessionCounts,
+  }));
+  const scoped = useSyncExternalStore(runtimeAgents.subscribe, scopedAgentCounts, scopedAgentCounts);
+  const counts = pagedAgents ? scoped : aggregate;
   return useMemo(() => {
     if (!bounded || !counts) return { ...stateCounts(all), interactions, quietCounted: false };
     const needs = counts.state.needs_you ?? 0;

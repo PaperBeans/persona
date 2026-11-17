@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -692,5 +693,86 @@ fun JCodeBlock(
         // the title bar is not code: a selection of the message leaves its language and Copy out
         DisableSelection { header() }
         text(Modifier.fillMaxWidth())
+    }
+}
+
+/**
+ * What a page that loads is in (iOS `Loadable`, with the two cases a phone also needs): [Loading] before anything has
+ * arrived, [Loaded] with the value (kept while it reloads or when the reload failed, so a cache is never shown as a fresh
+ * or empty answer), and [Failed] when there is nothing to show. Drawn by [jLoadableContent].
+ */
+sealed interface JLoadable<out T> {
+    /** First load, or a retry after [Failed]: a spinner. */
+    data object Loading : JLoadable<Nothing>
+
+    /**
+     * [value] is on screen. [refreshing] is a reload under way (the page's pull indicator, the content stays). [failure] is why
+     * the last reload failed over it: said above the content with Retry, and over an empty [value] it replaces the empty
+     * state (a failed read is not "nothing here").
+     */
+    data class Loaded<out T>(val value: T, val refreshing: Boolean = false, val failure: String? = null) : JLoadable<T>
+
+    /** Nothing to show and why; [title] heads the reason when the page has a name for what failed. */
+    data class Failed(val message: String, val title: String? = null) : JLoadable<Nothing>
+}
+
+/** A reload is under way over content: feed it to [JListPage]'s `refreshing`. */
+val JLoadable<*>.isRefreshing: Boolean get() = this is JLoadable.Loaded<*> && refreshing
+
+/** Which of the four things a [JLoadable] draws (the choice [jLoadableContent] makes, apart from drawing). */
+internal enum class LoadableSlot { Loading, Failure, Empty, Content }
+
+internal fun <T> loadableSlot(state: JLoadable<T>, isEmpty: (T) -> Boolean, hasEmpty: Boolean): LoadableSlot = when (state) {
+    JLoadable.Loading -> LoadableSlot.Loading
+    is JLoadable.Failed -> LoadableSlot.Failure
+    is JLoadable.Loaded -> when {
+        !hasEmpty || !isEmpty(state.value) -> LoadableSlot.Content
+        state.failure != null -> LoadableSlot.Failure
+        else -> LoadableSlot.Empty
+    }
+}
+
+/** The list item keys [jLoadableContent] uses, for scrolling and tests. */
+object LoadableKeys {
+    const val Loading = "loadable-loading"
+    const val Failure = "loadable-failure"
+    const val Reload = "loadable-reload-failure"
+}
+
+/**
+ * A [JLoadable] drawn the one way inside a [JListPage]: a centered spinner ([loadingText] under it), the [content], or the
+ * failure with Retry ([onRetry] null: no Retry). Over loaded content a failed reload is a line above it, not a page error.
+ * [empty] is the page's own empty state, drawn when [isEmpty] says the loaded value has nothing; without it [content]
+ * gets the value as it is.
+ */
+fun <T> LazyListScope.jLoadableContent(
+    state: JLoadable<T>,
+    onRetry: (() -> Unit)? = null,
+    loadingText: String? = null,
+    isEmpty: (T) -> Boolean = { false },
+    empty: (LazyListScope.() -> Unit)? = null,
+    content: LazyListScope.(T) -> Unit,
+) {
+    when (loadableSlot(state, isEmpty, hasEmpty = empty != null)) {
+        LoadableSlot.Loading -> item(LoadableKeys.Loading) { JLoading(text = loadingText) }
+        LoadableSlot.Failure -> {
+            val title = (state as? JLoadable.Failed)?.title
+            val message = (state as? JLoadable.Failed)?.message ?: (state as JLoadable.Loaded<T>).failure.orEmpty()
+            item(LoadableKeys.Failure) {
+                JNotice(message, Modifier.padding(top = Tokens.Space.m), title = title, status = Status.NeedsYou,
+                    actionLabel = onRetry?.let { stringResource(R.string.designsystem_retry) }, onAction = onRetry)
+            }
+        }
+        LoadableSlot.Empty -> requireNotNull(empty)()
+        LoadableSlot.Content -> {
+            val loaded = state as JLoadable.Loaded<T>
+            loaded.failure?.let { why ->
+                item(LoadableKeys.Reload) {
+                    JNotice(why, Modifier.padding(top = Tokens.Space.m), status = Status.NeedsYou,
+                        actionLabel = onRetry?.let { stringResource(R.string.designsystem_retry) }, onAction = onRetry, inlineAction = true)
+                }
+            }
+            content(loaded.value)
+        }
     }
 }

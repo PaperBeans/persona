@@ -299,7 +299,10 @@ struct LarkPlayerView: View {
             } else {
                 ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            Button { dismiss() } label: { Image(systemName: Theme.Icon.close).font(Theme.Font.heading).scaledFrame(width: Theme.Size.avatar, height: Theme.Size.avatar) }
+            Button { dismiss() } label: {
+                ThemedIcon(Theme.Icon.close).font(Theme.Font.heading).sheetBarLabel()
+                    .scaledFrame(width: Theme.Size.avatar, height: Theme.Size.avatar)
+            }
                 .themedButton()
                 .clipShape(.circle)
                 .padding(Theme.Space.l)

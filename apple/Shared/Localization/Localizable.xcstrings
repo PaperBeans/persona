@@ -637,6 +637,30 @@
       },
       "shouldTranslate" : false
     },
+    "%@ %@ · %@ tokens" : {
+      "comment" : "The hour grid's picked hour: its day, hour and tokens, as in Mon, Nov 16 2 PM · 520M tokens",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@ · %3$@ tokens"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@ · %3$@トークン"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@ · %3$@ token"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "%@ %@\\n\\nOn the server, run ssh-keygen -lf on its host public key and trust it only if the fingerprints match. If the fingerprint changes later, the connection is refused." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3406,6 +3430,30 @@
       },
       "shouldTranslate" : false
     },
+    "%@ · %@ tokens" : {
+      "comment" : "The token calendar's picked day: its date and its tokens, as in Nov 16 · 5.85B tokens",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@ tokens"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@トークン"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@ token"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "%@ · %@ ·" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4005,6 +4053,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "%@ – Now" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ – Now"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ – 現在"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ – 现在"
+          }
+        }
+      }
     },
     "%@ → %@" : {
       "localizations" : {
@@ -5123,6 +5194,30 @@
       },
       "extractionState" : "manual"
     },
+    "%@: %@ tokens" : {
+      "comment" : "The token calendar's day read aloud: its date and tokens",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: %2$@ tokens"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：%2$@トークン"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：%2$@ token"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "%@: %@ → %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5272,6 +5367,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "%@: [Copied Messages]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@:"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@："
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@："
+          }
+        }
+      }
     },
     "%@: open %@, high %@, low %@, close %@" : {
       "localizations" : {
@@ -8889,6 +9006,28 @@
       },
       "extractionState" : "manual"
     },
+    "%lld min [Meeting After]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld min"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 分"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 分钟"
+          }
+        }
+      }
+    },
     "%lld min [Task Views 135d12]" : {
       "localizations" : {
         "en" : {
@@ -9445,6 +9584,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "%lld more topics [Meeting Map]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld more topics"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ほか %lld 件の議題"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还有 %lld 个议题"
+          }
+        }
+      }
     },
     "%lld more waiting on you, not in %@" : {
       "extractionState" : "manual",
@@ -12703,6 +12864,29 @@
       },
       "extractionState" : "manual"
     },
+    "(Persona) [Brand Lockup]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(Persona)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(Persona)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(Persona)"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "(The original is longer and was cut here.)" : {
       "localizations" : {
         "en" : {
@@ -15208,6 +15392,29 @@
       },
       "extractionState" : "manual"
     },
+    "A recording or dictation is using the microphone." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A recording or dictation is using the microphone."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "録音または音声入力がマイクを使用しています。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "录音或听写正在使用麦克风。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "A recording or dictation took the microphone" : {
       "localizations" : {
         "en" : {
@@ -15873,28 +16080,6 @@
         }
       }
     },
-    "Answers Out Loud" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Answers out loud"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "声で回答"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "出声回答"
-          }
-        }
-      }
-    },
     "API Key" : {
       "shouldTranslate" : true,
       "localizations" : {
@@ -16074,6 +16259,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "约 %1$@ 小时"
+          }
+        }
+      }
+    },
+    "About %@ · zip · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About %1$@ · zip · %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "約 %1$@ · zip · %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "约 %1$@ · zip · %2$@"
           }
         }
       }
@@ -21493,6 +21701,29 @@
       },
       "extractionState" : "manual"
     },
+    "Allow Persona Input on this Mac to use Phone Screen (Privacy & Security › Accessibility)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow Persona Input on this Mac to use Phone Screen (Privacy & Security › Accessibility)."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スマホ画面を使うには、この Mac で Persona Input を許可してください（プライバシーとセキュリティ › アクセシビリティ）。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要用手机屏，请在这台 Mac 上允许 Persona Input（隐私与安全性 › 辅助功能）。"
+          }
+        }
+      }
+    },
     "Allow Persona to access %@ in Settings" : {
       "localizations" : {
         "en" : {
@@ -21580,6 +21811,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请在系统设置中允许 Persona 使用麦克风"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Allow Persona to use the microphone in Settings, then call again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow Persona to use the microphone in Settings, then call again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定で Persona にマイクの使用を許可してから、もう一度かけてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在“设置”里允许 Persona 使用麦克风，然后再打。"
           }
         }
       },
@@ -23319,6 +23573,29 @@
         }
       }
     },
+    "Another call is on, so this is a voice chat in the app instead" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Another call is on, so this is a voice chat in the app instead"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ほかの通話中のため、アプリ内の音声チャットに切り替えました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已有别的通话，改为 App 内语音对话"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Another conversation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23338,6 +23615,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "別の会話"
+          }
+        }
+      }
+    },
+    "Another device is using this Mac's phone screen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Another device is using this Mac's phone screen."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "別のデバイスがこの Mac のスマホ画面を使っています。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "另一台设备正在用这台 Mac 的手机屏。"
           }
         }
       }
@@ -23843,6 +24143,28 @@
         }
       }
     },
+    "Answers Out Loud" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Answers out loud"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "声で回答"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出声回答"
+          }
+        }
+      }
+    },
     "Answers are formatted (Markdown)" : {
       "localizations" : {
         "en" : {
@@ -24209,6 +24531,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "App logs, screens, request errors" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App logs, screens, request errors"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アプリのログ、画面、リクエストエラー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 日志、页面切换、接口错误"
+          }
+        }
+      }
     },
     "App pairing QR code" : {
       "localizations" : {
@@ -26337,24 +26682,24 @@
         }
       }
     },
-    "Assistant and Agents each have a page. On iPhone you switch at the top, on iPhone Duo at the bottom right, and on iPad with the Persona and Agents tabs." : {
+    "Assistant and Agents each have a page. On iPhone you switch at the top, on iPhone Duo with a tab bar down the side or along the bottom, and on iPad with the Persona and Agents tabs." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Assistant and Agents each have a page. On iPhone you switch at the top, on iPhone Duo at the bottom right, and on iPad with the Persona and Agents tabs."
+            "value" : "Assistant and Agents each have a page. On iPhone you switch at the top, on iPhone Duo with a tab bar down the side or along the bottom, and on iPad with the Persona and Agents tabs."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "アシスタントと Agents がそれぞれ 1 ページずつあります。iPhone では上部、iPhone Duo では右下で切り替え、iPad では Persona と Agents のタブです。"
+            "value" : "アシスタントと Agents がそれぞれ 1 ページずつあります。iPhone では上部、iPhone Duo では横または下のタブバーで切り替え、iPad では Persona と Agents のタブです。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "助手和 Agents 各占一页。iPhone 上在顶部切换，iPhone Duo 上在右下角切换，iPad 上是 Persona 和 Agents 两个标签。"
+            "value" : "助手和 Agents 各占一页。iPhone 上在顶部切换，iPhone Duo 上用侧边或底部的标签栏切换，iPad 上是 Persona 和 Agents 两个标签。"
           }
         }
       },
@@ -26727,6 +27072,29 @@
       },
       "extractionState" : "manual"
     },
+    "Audio [Call Control]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audio"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オーディオ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音频"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Audio session" : {
       "localizations" : {
         "en" : {
@@ -26831,48 +27199,48 @@
         }
       }
     },
-    "Audio stays on this iPhone, except while you hold Talk: what is said then goes to the voice service." : {
+    "Audio stays on this iPhone, except while Talk is on: what is said then goes to the voice service." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Audio stays on this iPhone, except while you hold Talk: what is said then goes to the voice service."
+            "value" : "Audio stays on this iPhone, except while Talk is on: what is said then goes to the voice service."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "音频保留在这台 iPhone 上，只有按住“说话”时例外：那时说的内容会发送到语音服务。"
+            "value" : "音频保留在这台 iPhone 上，只有“说话”打开时例外：那时说的内容会发送到语音服务。"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "音声はこの iPhone に残ります。ただし「話す」を押している間は例外で、そのときに話された内容は音声サービスに送られます。"
+            "value" : "音声はこの iPhone に残ります。ただし「話す」がオンの間は例外で、そのときに話された内容は音声サービスに送られます。"
           }
         }
       }
     },
-    "Audio stays on this iPhone, except while you hold Talk: what is said then goes to the voice service. Its text syncs to Knowledge and is kept for %lld days." : {
+    "Audio stays on this iPhone, except while Talk is on: what is said then goes to the voice service. Its text syncs to Knowledge and is kept for %lld days." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Audio stays on this iPhone, except while you hold Talk: what is said then goes to the voice service. Its text syncs to Knowledge and is kept for %1$lld days."
+            "value" : "Audio stays on this iPhone, except while Talk is on: what is said then goes to the voice service. Its text syncs to Knowledge and is kept for %1$lld days."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "音频保留在这台 iPhone 上，只有按住“说话”时例外：那时说的内容会发送到语音服务。文字会同步到知识库，并保留 %1$lld 天。"
+            "value" : "音频保留在这台 iPhone 上，只有“说话”打开时例外：那时说的内容会发送到语音服务。文字会同步到知识库，并保留 %1$lld 天。"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "音声はこの iPhone に残ります。ただし「話す」を押している間は例外で、そのときに話された内容は音声サービスに送られます。テキストはナレッジに同期されて %1$lld 日間保存されます。"
+            "value" : "音声はこの iPhone に残ります。ただし「話す」がオンの間は例外で、そのときに話された内容は音声サービスに送られます。テキストはナレッジに同期されて %1$lld 日間保存されます。"
           }
         }
       }
@@ -29005,6 +29373,50 @@
         }
       }
     },
+    "Beta Updates" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beta Updates"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beta アップデート"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beta 更新"
+          }
+        }
+      }
+    },
+    "Beta updates install prereleases from the beta channel. Turn this off to return to stable releases. An update already in progress must finish before changing channels." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beta updates install prereleases from the beta channel. Turn this off to return to stable releases. An update already in progress must finish before changing channels."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beta アップデートではベータチャンネルのプレリリースをインストールします。オフにすると安定版に戻ります。実行中の更新が終わるまでチャンネルは切り替えられません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beta 更新会安装预发布版本。关闭后恢复正式版更新；进行中的更新结束后才能切换通道。"
+          }
+        }
+      }
+    },
     "Binary" : {
       "localizations" : {
         "en" : {
@@ -30635,6 +31047,29 @@
       },
       "extractionState" : "manual"
     },
+    "By Computer · Last 7 Days" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "By Computer · Last 7 Days"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コンピューター別 · 過去7日間"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按电脑 · 最近 7 天"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "By Importance and Relevance" : {
       "localizations" : {
         "en" : {
@@ -30676,6 +31111,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "分类"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "By Kind · Last 7 Days" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "By Kind · Last 7 Days"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "種類別 · 過去7日間"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按类别 · 最近 7 天"
           }
         }
       },
@@ -31599,6 +32057,52 @@
       },
       "extractionState" : "manual"
     },
+    "Call Persona" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Call Persona"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personaに電話"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "呼叫 Persona"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Call Persona on your main chat, like a phone call: it keeps going when you switch apps or lock this device, and you hang up from the call or your headphones." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Call Persona on your main chat, like a phone call: it keeps going when you switch apps or lock this device, and you hang up from the call or your headphones."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メインのチャットで、電話のようにPersonaに電話します。ほかのアプリに切り替えても、このデバイスをロックしても通話は続き、通話画面やヘッドフォンから切れます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "像打电话一样，在主对话里打给 Persona：切到别的 App 或锁上这台设备，通话都不会断；在通话里或用耳机挂断。"
+          }
+        }
+      }
+    },
     "Call Persona · %@" : {
       "localizations" : {
         "en" : {
@@ -31644,6 +32148,52 @@
         }
       }
     },
+    "Call ended · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Call ended · %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話終了 · %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通话已结束 · %1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Calling Persona" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Calling Persona"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personaに電話しています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在呼叫 Persona"
+          }
+        }
+      }
+    },
     "Calling this iPhone. Lock it to see how a call looks." : {
       "localizations" : {
         "en" : {
@@ -31665,6 +32215,29 @@
           }
         }
       }
+    },
+    "Calling… [Call Screen]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Calling…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "発信中…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在呼叫…"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Calls a Day" : {
       "localizations" : {
@@ -34119,6 +34692,29 @@
           }
         }
       }
+    },
+    "Car [Call Audio Route]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Car"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "車"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "车载"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Card [Sent as You]" : {
       "localizations" : {
@@ -39997,6 +40593,28 @@
       },
       "extractionState" : "manual"
     },
+    "Cloud Transcription [Meeting After]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloud transcription"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "クラウド文字起こし"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "云端转写"
+          }
+        }
+      }
+    },
     "Cloud doc" : {
       "localizations" : {
         "en" : {
@@ -45282,6 +45900,28 @@
         }
       }
     },
+    "Conversation [Meeting After]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conversation"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会話"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对话"
+          }
+        }
+      }
+    },
     "Conversation [Message Source]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45419,6 +46059,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Copied [Selected Messages]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copied"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コピーしました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已拷贝"
+          }
+        }
+      }
     },
     "Copied [V N C Pi P Diagnostics 8f6f8d]" : {
       "localizations" : {
@@ -49142,6 +49804,28 @@
       },
       "extractionState" : "manual"
     },
+    "Couldn't make the image" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't make the image"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画像を作成できませんでした"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能生成图片"
+          }
+        }
+      }
+    },
     "Couldn't mark it as handled: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -52079,6 +52763,29 @@
       },
       "extractionState" : "manual"
     },
+    "Couldn’t export: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t export: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "書き出せませんでした：%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法导出：%@"
+          }
+        }
+      }
+    },
     "Couldn’t hand it to %@" : {
       "localizations" : {
         "en" : {
@@ -52278,6 +52985,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "@所有人也算提及"
+          }
+        }
+      }
+    },
+    "Crashes, hangs, uncaught exceptions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crashes, hangs, uncaught exceptions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "クラッシュ、ハング、捕捉されなかった例外"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "崩溃、卡顿、未捕获的异常"
           }
         }
       }
@@ -54091,6 +54821,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "決定事項"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "决定"
+          }
+        }
+      }
+    },
+    "Decisions [Meeting After]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Decisions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "決定"
           }
         },
         "zh-Hans" : {
@@ -56786,6 +57538,29 @@
         }
       }
     },
+    "Developing Persona" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Developing Persona"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona を開発中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在开发 Persona"
+          }
+        }
+      }
+    },
     "Development" : {
       "localizations" : {
         "en" : {
@@ -56854,6 +57629,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Device and App Version" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device and App Version"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "デバイスとアプリのバージョン"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备和 App 版本"
+          }
+        }
+      }
     },
     "Device code sign-in is missing the %@ scope: switch to another sign-in method, then sign in with a device code again." : {
       "localizations" : {
@@ -57034,6 +57832,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "听写"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Dictate to Persona" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dictate to Persona"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personaに音声入力"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "向 Persona 口述"
           }
         }
       },
@@ -61007,6 +61828,30 @@
       },
       "extractionState" : "manual"
     },
+    "Each Day" : {
+      "comment" : "Token usage page: the calendar's heading",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Each Day"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日ごと"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Each agent's row says what it is waiting for" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -61026,6 +61871,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "列表里每个 Agent 的行写明它在等什么"
+          }
+        }
+      }
+    },
+    "Each answer brings the question before it" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Each answer brings the question before it"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "各回答の前の質問も一緒に含めます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把每条回答前面的提问一起带上"
           }
         }
       }
@@ -61213,6 +62080,29 @@
       },
       "extractionState" : "manual"
     },
+    "Each square is an hour in your time zone, shaded by where it ranks among the week's hours." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Each square is an hour in your time zone, shaded by where it ranks among the week's hours."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1マスはあなたのタイムゾーンでの1時間です。色の濃さは、この7日間の中での順位で決まります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每格是你所在时区的一小时，颜色深浅按它在这 7 天所有小时里的排位。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Earlier" : {
       "localizations" : {
         "en" : {
@@ -61327,6 +62217,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Echo Cancellation with the Speaker" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Echo Cancellation with the Speaker"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スピーカー使用時のエコー除去"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开喇叭时消除回声"
+          }
+        }
+      }
     },
     "Edit" : {
       "localizations" : {
@@ -62407,6 +63319,29 @@
         }
       }
     },
+    "End Conversation" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End Conversation"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会話を終了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束对话"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "End [Meeting Room]" : {
       "localizations" : {
         "en" : {
@@ -62450,29 +63385,6 @@
           }
         }
       }
-    },
-    "End Conversation" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "End Conversation"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "会話を終了"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "结束对话"
-          }
-        }
-      },
-      "extractionState" : "manual"
     },
     "End of output" : {
       "localizations" : {
@@ -62560,6 +63472,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已结束"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Ended for Persona's urgent call" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ended for Persona's urgent call"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona の緊急コールのため終了しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "因 Persona 的加急来电而结束"
           }
         }
       },
@@ -62656,6 +63591,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Energy and Performance" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Energy and Performance"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "電力とパフォーマンス"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "耗电和性能"
+          }
+        }
+      }
     },
     "Engine" : {
       "localizations" : {
@@ -63620,6 +64578,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Errors and Crashes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Errors and Crashes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エラーとクラッシュ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "错误和崩溃"
+          }
+        }
+      }
     },
     "Esc" : {
       "shouldTranslate" : true,
@@ -64907,6 +65888,28 @@
       },
       "extractionState" : "manual"
     },
+    "Experimental [Meeting Settings]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Experimental"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "実験的機能"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实验"
+          }
+        }
+      }
+    },
     "Expired" : {
       "localizations" : {
         "en" : {
@@ -65044,6 +66047,97 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Export Diagnostics" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export Diagnostics"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "診断データを書き出す"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出诊断数据"
+          }
+        }
+      }
+    },
+    "Export Diagnostics…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export Diagnostics…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "診断データを書き出す…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出诊断数据…"
+          }
+        }
+      }
+    },
+    "Export First…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export First…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先に書き出す…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先导出…"
+          }
+        }
+      }
+    },
+    "Export Image" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export Image"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画像を書き出す"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出图片"
+          }
+        }
+      }
     },
     "Extension Action" : {
       "localizations" : {
@@ -67406,6 +68500,29 @@
       },
       "extractionState" : "manual"
     },
+    "Finish the urgent call first" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finish the urgent call first"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先に緊急コールを終えてください"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先结束加急来电"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Finished phase [Workflow Phase]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -69151,6 +70268,30 @@
       },
       "extractionState" : "manual"
     },
+    "From %@ to %@" : {
+      "comment" : "A heat grid's legend: what its faintest and fullest squares mean",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "From %1$@ to %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@から%2$@まで"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从 %1$@ 到 %2$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "From %@ · to %@ on %@" : {
       "localizations" : {
         "en" : {
@@ -69633,6 +70774,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Full Screen [Meeting Map]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Full Screen"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全画面"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全屏"
+          }
+        }
+      }
     },
     "Full Transcript" : {
       "extractionState" : "manual",
@@ -70827,6 +71990,28 @@
         }
       }
     },
+    "Goes with its answer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Goes with its answer"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回答と一緒に含めます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "随回答一起"
+          }
+        }
+      }
+    },
     "Good afternoon [Assistant View 552594]" : {
       "localizations" : {
         "en" : {
@@ -71511,28 +72696,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "当前是分离的 HEAD：先切到一个分支"
-          }
-        }
-      }
-    },
-    "Highlights [Meeting Room]" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Highlights"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要点"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要点"
           }
         }
       }
@@ -72294,6 +73457,52 @@
         }
       }
     },
+    "Hangs up the call" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hangs up the call"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話を切ります"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "挂断通话"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Hangs up the call; what was handed over still gets done" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hangs up the call; what was handed over still gets done"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話を切ります。渡した作業はそのまま続きます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "挂断通话，已经交出去的事照常做完"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Has Access To" : {
       "localizations" : {
         "en" : {
@@ -72542,6 +73751,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请求头，一行一个 Name: value"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Headphones [Call Audio Route]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Headphones"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ヘッドフォン"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "耳机"
           }
         }
       },
@@ -72864,6 +74096,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Here are the Persona diagnostics from my device (since %@). Please find out what is using the battery and what is failing." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Here are the Persona diagnostics from my device (since %@). Please find out what is using the battery and what is failing."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "これは私のデバイスの Persona 診断データです（%@ から）。電池を消費している原因とエラーの原因を調べてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这是我设备上的 Persona 诊断数据（%@ 起），请分析耗电和报错的原因。"
+          }
+        }
+      }
     },
     "Hidden" : {
       "localizations" : {
@@ -73462,6 +74717,28 @@
         }
       }
     },
+    "Highlights [Meeting Room]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Highlights"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要点"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要点"
+          }
+        }
+      }
+    },
     "Highlights [Meeting]" : {
       "comment" : "The meeting page's top card: the room's highlights of the meeting so far (#3862 phase 2b)",
       "extractionState" : "manual",
@@ -73555,52 +74832,6 @@
         }
       },
       "extractionState" : "manual"
-    },
-    "Hold Talk while you speak, then let go." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hold Talk while you speak, then let go."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "说话时按住“说话”，说完再松开。"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "話している間は「話す」を押し続け、話し終えたら指を離してください。"
-          }
-        }
-      }
-    },
-    "Hold while you speak. Persona answers when you let go." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hold while you speak. Persona answers when you let go."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "说话时按住，松开后 Persona 回答。"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "話している間は押し続けてください。指を離すと Persona が答えます。"
-          }
-        }
-      }
     },
     "Holds an agent's stop once to ask what's done, merged, deployed and missing" : {
       "extractionState" : "manual",
@@ -76015,6 +77246,29 @@
       },
       "extractionState" : "manual"
     },
+    "In Progress" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In Progress"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "進行中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "进行中"
+          }
+        }
+      }
+    },
     "In Progress [Action Bar]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -76679,6 +77933,28 @@
       },
       "extractionState" : "manual"
     },
+    "Include Questions" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Include Questions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "質問を含める"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "包含提问"
+          }
+        }
+      }
+    },
     "Include adding %@" : {
       "comment" : "BeautifulUI looks this up in the app's catalog (#5574)",
       "localizations" : {
@@ -76698,6 +77974,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "包括添加 %1$@"
+          }
+        }
+      }
+    },
+    "Includes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Includes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "含まれるもの"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "包含"
           }
         }
       }
@@ -77090,6 +78389,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "输入"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Input, output, cache write and cache read added up: the same count as Today on the Machines page." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Input, output, cache write and cache read added up: the same count as Today on the Machines page."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "入力・出力・キャッシュ書き込み・キャッシュ読み取りの合計で、「マシン」ページの「今日」と同じ数です。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入、输出、缓存写、缓存读四项相加，和「机器」页的「今天」是同一个数。"
           }
         }
       },
@@ -78625,28 +79947,6 @@
         }
       }
     },
-    "Invite [Meeting Room]" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Invite"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "招待"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "邀请"
-          }
-        }
-      }
-    },
     "Invite Persona" : {
       "localizations" : {
         "en" : {
@@ -78710,6 +80010,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "質問するには Persona を招待するか、「自分だけ」を使ってください。"
+          }
+        }
+      }
+    },
+    "Invite [Meeting Room]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invite"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "招待"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "邀请"
           }
         }
       }
@@ -82868,6 +84190,29 @@
       },
       "extractionState" : "manual"
     },
+    "Last 7 Days by the Hour" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last 7 Days by the Hour"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "過去7日間 · 1時間ごと"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近 7 天 · 每小时"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Last Check" : {
       "localizations" : {
         "en" : {
@@ -83983,6 +85328,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "左侧"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Less [Heat Legend]" : {
+      "comment" : "A heat grid's faintest squares",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Less"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "少"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "少"
           }
         }
       },
@@ -85502,28 +86871,6 @@
         }
       }
     },
-    "Live [Meeting Room]" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Live"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ライブ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "实时"
-          }
-        }
-      }
-    },
     "Live Activities" : {
       "localizations" : {
         "en" : {
@@ -85635,6 +86982,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "实时屏幕用 x264 编码"
+          }
+        }
+      }
+    },
+    "Live [Meeting Room]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ライブ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时"
           }
         }
       }
@@ -85887,6 +87256,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "负载看哪台"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Load Image" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Load Image"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画像を読み込む"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加载图片"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Load Images" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Load Images"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画像を読み込む"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加载图片"
           }
         }
       },
@@ -86270,6 +87685,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Loading photos…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading photos…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真を読み込み中…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在载入照片…"
+          }
+        }
+      }
     },
     "Loading replies…" : {
       "localizations" : {
@@ -87647,28 +89084,6 @@
         }
       }
     },
-    "Map [Meeting Room]" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Map"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "マップ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导图"
-          }
-        }
-      }
-    },
     "MCP Form Needs You" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -88742,6 +90157,28 @@
         }
       }
     },
+    "Map [Meeting Room]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Map"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マップ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导图"
+          }
+        }
+      }
+    },
     "Map: %@ [Place Map]" : {
       "localizations" : {
         "en" : {
@@ -89700,6 +91137,28 @@
       },
       "extractionState" : "manual"
     },
+    "Meeting Map [Meeting After]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meeting Map"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議マップ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会议导图"
+          }
+        }
+      }
+    },
     "Meeting Minutes" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -89787,6 +91246,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "会议录音"
+          }
+        }
+      }
+    },
+    "Meeting Recording [Meeting Float]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meeting recording"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議を録音中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会议录制中"
           }
         }
       }
@@ -91569,6 +93050,29 @@
       },
       "extractionState" : "manual"
     },
+    "MetricKit daily reports, heat, battery, requests and connections each minute" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MetricKit daily reports, heat, battery, requests and connections each minute"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MetricKit の日次レポート、発熱、バッテリー、1 分ごとのリクエストと接続"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MetricKit 每日报告、发热、电量、每分钟的请求和连接"
+          }
+        }
+      }
+    },
     "Microphone" : {
       "localizations" : {
         "en" : {
@@ -91732,8 +93236,76 @@
       },
       "extractionState" : "manual"
     },
+    "Minimize [Call Screen]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Minimize"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最小化"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Minimized" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Minimized"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "しまってあります"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已最小化"
+          }
+        }
+      }
+    },
     "Minutes" : {
       "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Minutes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "議事録"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "纪要"
+          }
+        }
+      }
+    },
+    "Minutes [Meeting After]" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -92352,24 +93924,24 @@
       },
       "extractionState" : "manual"
     },
-    "Model not connected: Claude Code isn't signed in" : {
+    "Model not connected: Claude Code CLI isn't signed in" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Model not connected: Claude Code isn't signed in"
+            "value" : "Model not connected: Claude Code CLI isn't signed in"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "モデル未接続：Claude Code にログインしていません"
+            "value" : "モデル未接続：Claude Code CLI にログインしていません"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "模型没接好：Claude Code 没登录"
+            "value" : "模型没接好：Claude Code 命令行没登录"
           }
         }
       },
@@ -92463,6 +94035,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "模型服务限流"
+          }
+        }
+      }
+    },
+    "Model, system, app version (always included)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Model, system, app version (always included)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "機種、システム、アプリのバージョン（常に含む）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "机型、系统、App 版本（始终包含）"
           }
         }
       }
@@ -92911,6 +94506,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更多设置"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "More [Heat Legend]" : {
+      "comment" : "A heat grid's fullest squares",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多"
           }
         }
       },
@@ -93621,6 +95240,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "リストに移動：%1$@"
+          }
+        }
+      }
+    },
+    "Move to the Side [Meeting Float]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move to the Side"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端に寄せる"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收到边上"
           }
         }
       }
@@ -95791,6 +97432,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Never included: message text, knowledge base content, keys, tokens, passwords, cookies, pairing links." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Never included: message text, knowledge base content, keys, tokens, passwords, cookies, pairing links."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "含まれないもの：メッセージ本文、ナレッジベースの内容、キー、トークン、パスワード、Cookie、ペアリングリンク。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不会包含：消息内容、知识库内容、密钥、令牌、密码、cookie、配对链接。"
+          }
+        }
+      }
     },
     "Never taken by default" : {
       "extractionState" : "manual",
@@ -98938,6 +100602,29 @@
         }
       }
     },
+    "No Windows" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Windows"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ウインドウがありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有窗口"
+          }
+        }
+      }
+    },
     "No Wrap · Scroll Sideways" : {
       "localizations" : {
         "en" : {
@@ -100933,6 +102620,28 @@
       },
       "extractionState" : "manual"
     },
+    "No minutes for this recording." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No minutes for this recording."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この録音には議事録がありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这条录音没有纪要。"
+          }
+        }
+      }
+    },
     "No minutes, and Persona stays out." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -101527,6 +103236,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未分阶段"
+          }
+        }
+      }
+    },
+    "No photos in this meeting." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No photos in this meeting."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この会議には写真がありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这场会没有照片。"
           }
         }
       }
@@ -105040,6 +106771,29 @@
       },
       "extractionState" : "manual"
     },
+    "Not paired with a hub yet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not paired with a hub yet"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まだハブとペアリングしていません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有配对 hub"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Not paired with a hub yet. Open Persona on the phone first" : {
       "localizations" : {
         "en" : {
@@ -106473,6 +108227,29 @@
         }
       }
     },
+    "Nothing Done Yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing Done Yet"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了したものはまだありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有已处理的"
+          }
+        }
+      }
+    },
     "Nothing Here" : {
       "localizations" : {
         "en" : {
@@ -106518,6 +108295,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Nothing Needs You" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing Needs You"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "対応が必要なものはありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有需要你处理的"
+          }
+        }
+      }
     },
     "Nothing Open Matches These Filters" : {
       "localizations" : {
@@ -106697,6 +108497,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没什么事"
+          }
+        }
+      }
+    },
+    "Nothing in Progress" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing in Progress"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "進行中のものはありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有进行中的"
           }
         }
       }
@@ -107064,6 +108887,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有收起的改动"
+          }
+        }
+      }
+    },
+    "Nothing to Read" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing to Read"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読むものはありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有要看的"
           }
         }
       }
@@ -108995,24 +110841,24 @@
       },
       "extractionState" : "manual"
     },
-    "On %@, open Terminal, type this word, press Return, and sign in once in the browser as it asks:" : {
+    "On Hold [Call Screen]" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "On %1$@, open Terminal, type this word, press Return, and sign in once in the browser as it asks:"
+            "value" : "On Hold"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ でターミナルを開き、次の語を入力して Return キーを押し、案内に従ってブラウザで一度ログインしてください："
+            "value" : "保留中"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %1$@ 上打开终端，输入下面这个词，回车，按提示在浏览器里登录一次："
+            "value" : "通话保持中"
           }
         }
       },
@@ -109685,6 +111531,29 @@
       },
       "extractionState" : "manual"
     },
+    "On the phone screen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On the phone screen"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スマホ画面に表示中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在手机屏上"
+          }
+        }
+      }
+    },
     "On the same Wi-Fi or Tailscale as your computer, the screen comes straight from it, faster and steadier. Turned off, it always goes through your hub." : {
       "localizations" : {
         "en" : {
@@ -109861,29 +111730,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "iPhone 上的 Persona 配对好之后，点下面从 iPhone 同步。"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
-    "Once google.client_id is in the assistant's manager.json and the hub restarts, “Sign In with Google” appears here (a one-time setup). Until then, add the account with an app password: turn on 2-Step Verification for the Google account, then create a 16-character password under Google Account › Security › App passwords and enter it here (not your Google password)." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Once google.client_id is in the assistant's manager.json and the hub restarts, “Sign In with Google” appears here (a one-time setup). Until then, add the account with an app password: turn on 2-Step Verification for the Google account, then create a 16-character password under Google Account › Security › App passwords and enter it here (not your Google password)."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アシスタントの manager.json に google.client_id を追加してハブを再起動すると、ここに「Googleでサインイン」が表示されます（初回のみの設定）。それまではアプリパスワードで追加できます。Google アカウントで 2 段階認証プロセスを有効にし、Google アカウント › セキュリティ › アプリパスワードで 16 文字のパスワードを作成してここに入力してください（Google のログインパスワードではありません）。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在助手的 manager.json 里写上 google.client_id 并重启 hub 后，这里会出现「使用 Google 账号登录」（一次性配置）。在那之前可以用应用专用密码添加：Google 账号先开两步验证，再到 Google 账号 › 安全性 › 应用专用密码 生成一个 16 位密码填在这里（不是 Google 登录密码）。"
           }
         }
       },
@@ -111816,6 +113662,29 @@
       },
       "extractionState" : "manual"
     },
+    "Open Apple Account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Apple Account"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple アカウントを開く"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Apple 账户"
+          }
+        }
+      }
+    },
     "Open Chat" : {
       "localizations" : {
         "en" : {
@@ -111929,6 +113798,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Open Google App passwords" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Google App passwords"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Google のアプリ パスワードを開く"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Google 应用专用密码页面"
+          }
+        }
+      }
     },
     "Open Knowledge Selection" : {
       "extractionState" : "manual",
@@ -112407,6 +114299,29 @@
           }
         }
       }
+    },
+    "Open Persona's chat once, then call again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Persona's chat once, then call again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一度 Persona のチャットを開いてから、もう一度かけてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先打开一次 Persona 的对话，然后再打。"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Open Personal Agent" : {
       "localizations" : {
@@ -112934,6 +114849,28 @@
         }
       }
     },
+    "Open [Meeting After]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未決"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待定"
+          }
+        }
+      }
+    },
     "Open [Workflow Agent]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -113093,6 +115030,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Open an app on %@, then pull down to refresh." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open an app on %1$@, then pull down to refresh."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ でアプリを開いてから、下に引いて更新してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %1$@ 上打开一个应用，再下拉刷新。"
+          }
+        }
+      }
     },
     "Open as Draft" : {
       "extractionState" : "manual",
@@ -114060,6 +116020,29 @@
       },
       "extractionState" : "manual"
     },
+    "Opens a new conversation and starts dictation." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opens a new conversation and starts dictation."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新しいチャットを開き、音声入力を開始します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开新对话并开始听写。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Opens a new tab in this herdr workspace on %@." : {
       "localizations" : {
         "en" : {
@@ -114175,6 +116158,28 @@
       },
       "extractionState" : "manual"
     },
+    "Opens the meeting room. [Meeting Float]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opens the meeting room."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議室を開きます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开会议室。"
+          }
+        }
+      }
+    },
     "Opens the original message" : {
       "localizations" : {
         "en" : {
@@ -114285,6 +116290,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开这次运行的对话"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Opens token usage by day, hour and computer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opens token usage by day, hour and computer"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日別・時間別・コンピューター別のトークン使用量を開きます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开按天、按小时、按电脑的 token 用量"
           }
         }
       },
@@ -115392,28 +117420,6 @@
       },
       "extractionState" : "manual"
     },
-    "Photo [Meeting Room]" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Photo"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "写真"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "拍照"
-          }
-        }
-      }
-    },
     "PR to Merge" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -115609,6 +117615,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Page %lld of %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page %1$lld of %2$lld"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$lld枚中%1$lld枚目"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %1$lld 张，共 %2$lld 张"
+          }
+        }
+      }
     },
     "Page drawn by the assistant · Sandboxed" : {
       "localizations" : {
@@ -115883,6 +117911,29 @@
           }
         }
       }
+    },
+    "Pair this device with a hub to call Persona." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pair this device with a hub to call Persona."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona に電話するには、このデバイスをハブとペアリングしてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台设备配对 hub 后才能打给 Persona。"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Paired" : {
       "localizations" : {
@@ -116745,6 +118796,28 @@
         }
       }
     },
+    "Paused [Meeting Float]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paused"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一時停止中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停"
+          }
+        }
+      }
+    },
     "Paused by a call" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -117455,6 +119528,29 @@
       },
       "extractionState" : "manual"
     },
+    "Persona Banner in Screenshots" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona Banner in Screenshots"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スクリーンショットに Persona のバナーを表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "截屏时显示 Persona 标识"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Persona Chats" : {
       "localizations" : {
         "en" : {
@@ -117523,6 +119619,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Persona Is Answering [Meeting Float]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona is answering"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona が回答中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 在念回答"
+          }
+        }
+      }
     },
     "Persona Link runs outside the desktop session on this computer." : {
       "extractionState" : "manual",
@@ -118301,25 +120419,24 @@
         }
       }
     },
-    "Persona didn’t hear anything. Hold Talk while you speak." : {
-      "extractionState" : "manual",
+    "Persona didn’t hear anything. Tap Talk and speak, or hold it while you speak." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Persona didn’t hear anything. Hold Talk while you speak."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Persona 没听到内容。说话时请按住“说话”。"
+            "value" : "Persona didn’t hear anything. Tap Talk and speak, or hold it while you speak."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Persona には何も聞こえませんでした。話している間は「話す」を押し続けてください。"
+            "value" : "Persona には何も聞こえませんでした。「話す」をタップして話すか、押したまま話してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 没听到内容。请轻点“说话”再说，或按住“说话”说。"
           }
         }
       }
@@ -118980,6 +121097,29 @@
       },
       "extractionState" : "manual"
     },
+    "Persona left the meeting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona left the meeting"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 离开了会议"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona が会議から退出しました"
+          }
+        }
+      }
+    },
     "Persona listening" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -119321,6 +121461,29 @@
           }
         }
       }
+    },
+    "Persona runs the Claude Code CLI on %@, and the Claude desktop app's sign-in doesn't count for it. Open Terminal there, run this command and sign in once in the browser:" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona runs the Claude Code CLI on %1$@, and the Claude desktop app's sign-in doesn't count for it. Open Terminal there, run this command and sign in once in the browser:"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona は %1$@ の Claude Code CLI を使い、Claude デスクトップアプリのログインはこれに含まれません。そのコンピュータでターミナルを開き、次のコマンドを実行して、ブラウザで一度ログインしてください："
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 用的是 %1$@ 上的 Claude Code 命令行，Claude 桌面版登录了也不算。在那台电脑上打开终端，运行下面这条命令，按提示在浏览器里登录一次："
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Persona starts these tasks directly without showing you a plan first. Swipe left to remove one, and it'll ask first again." : {
       "localizations" : {
@@ -119690,6 +121853,29 @@
       },
       "extractionState" : "manual"
     },
+    "Persona's main chat isn't set up yet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona's main chat isn't set up yet"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona のメインチャットがまだ設定されていません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 的主对话还没设好"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Persona's meeting conversation isn't available. Ask again for an answer from the meeting so far." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -119754,6 +121940,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agent 里能用 Persona 的工具"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Persona's urgent call is on. Call again once it's over." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona's urgent call is on. Call again once it's over."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona の緊急コール中です。終わってからもう一度かけてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 的加急来电正在进行，结束后再打。"
           }
         }
       },
@@ -120091,6 +122300,29 @@
       },
       "extractionState" : "manual"
     },
+    "Phone Screen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phone Screen"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スマホ画面"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手机屏"
+          }
+        }
+      }
+    },
     "Phone and FaceTime" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -120176,6 +122408,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "图片"
+          }
+        }
+      }
+    },
+    "Photo [Meeting Room]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拍照"
           }
         }
       }
@@ -120317,6 +122571,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Photos [Meeting After]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片"
+          }
+        }
+      }
     },
     "Photos or videos, up to 4" : {
       "localizations" : {
@@ -124675,6 +126951,28 @@
         }
       }
     },
+    "Quiet [Meeting Float]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quiet"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "静か"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安静中"
+          }
+        }
+      }
+    },
     "Quit Persona" : {
       "localizations" : {
         "en" : {
@@ -124950,28 +127248,6 @@
         }
       },
       "extractionState" : "manual"
-    },
-    "Remove [Meeting Room]" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "外す"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移出"
-          }
-        }
-      }
     },
     "RTF document" : {
       "localizations" : {
@@ -127409,6 +129685,29 @@
         }
       }
     },
+    "Recorded [Developing Persona]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recorded"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記録済み"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已记录"
+          }
+        }
+      }
+    },
     "Recorded [Todo Decisions]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -127522,6 +129821,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Recording Details" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recording Details"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "録音の詳細"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "录音详情"
+          }
+        }
+      }
     },
     "Recording Language" : {
       "localizations" : {
@@ -129866,6 +132187,28 @@
         }
       }
     },
+    "Remove [Meeting Room]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "外す"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移出"
+          }
+        }
+      }
+    },
     "Remove [Start Grant]" : {
       "localizations" : {
         "en" : {
@@ -130181,6 +132524,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已移除（%1$lld）"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Removed Computer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removed Computer"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除したコンピューター"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已移除的电脑"
           }
         }
       },
@@ -132647,6 +135013,29 @@
       },
       "extractionState" : "manual"
     },
+    "Resume [Call Control]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resume"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再開"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "恢复通话"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Resume [Persona Alarm]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -133091,6 +135480,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在重试… · %1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Return Key Sends" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Return Key Sends"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Returnキーで送信"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按回车发送"
+          }
+        }
+      }
+    },
+    "Returns to the call" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Returns to the call"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話に戻ります"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回到通话"
           }
         }
       },
@@ -136176,28 +138611,6 @@
         }
       }
     },
-    "Speaker [Meeting Room]" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Speaker"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "スピーカー"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "喇叭"
-          }
-        }
-      }
-    },
     "SSH Server" : {
       "localizations" : {
         "en" : {
@@ -137944,6 +140357,29 @@
       },
       "extractionState" : "manual"
     },
+    "Screenshots and screen recordings of chats show your assistant's picture and name at the top" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Screenshots and screen recordings of chats show your assistant's picture and name at the top"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャットのスクリーンショットや画面収録の上部に、アシスタントの画像と名前を表示します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聊天页截屏、录屏时，顶部显示助手的头像和名字"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Script" : {
       "comment" : "A needs-you card on no agent session (personad ask run outside herdr)",
       "localizations" : {
@@ -139322,6 +141758,28 @@
       },
       "extractionState" : "manual"
     },
+    "Select Messages [Message Menu]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select Messages"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "複数選択"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多选"
+          }
+        }
+      }
+    },
     "Select Messages…" : {
       "localizations" : {
         "en" : {
@@ -140310,6 +142768,29 @@
         }
       }
     },
+    "Send To" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send To"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "送信先"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发给"
+          }
+        }
+      }
+    },
     "Send To [Share Sheet]" : {
       "localizations" : {
         "en" : {
@@ -140747,6 +143228,29 @@
       },
       "extractionState" : "manual"
     },
+    "Send to Agent…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send to Agent…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent に送る…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发给 Agent…"
+          }
+        }
+      }
+    },
     "Send to Chat" : {
       "localizations" : {
         "en" : {
@@ -140838,6 +143342,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Send with Return; Shift-Return starts a new line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send with Return; Shift-Return starts a new line"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Returnで送信、Shift + Returnで改行"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回车直接发送，Shift + 回车换行"
+          }
+        }
+      }
     },
     "Sendable Only" : {
       "localizations" : {
@@ -143132,6 +145659,29 @@
       },
       "extractionState" : "manual"
     },
+    "Setting up the phone screen on %@…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Setting up the phone screen on %1$@…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ でスマホ画面を準備しています…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在 %1$@ 上准备手机屏…"
+          }
+        }
+      }
+    },
     "Settings" : {
       "localizations" : {
         "en" : {
@@ -143288,6 +145838,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "与手机互传剪贴板"
+          }
+        }
+      }
+    },
+    "Share File…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share File…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルを共有…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享文件…"
           }
         }
       }
@@ -144190,6 +146763,29 @@
           }
         }
       }
+    },
+    "Show Call [Voice Bar]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Call"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話を表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示通话"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Show Details on Lock Screen" : {
       "localizations" : {
@@ -145588,6 +148184,28 @@
         }
       }
     },
+    "Shows the meeting window again. [Meeting Float]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows the meeting window again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議ウインドウをもう一度表示します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新显示会议小窗。"
+          }
+        }
+      }
+    },
     "Shows the plan [Plan Sheet]" : {
       "localizations" : {
         "en" : {
@@ -146158,29 +148776,6 @@
       },
       "extractionState" : "manual"
     },
-    "Sign in once on that computer, or use an API key instead." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sign in once on that computer, or use an API key instead."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "そのコンピュータで一度ログインするか、代わりに API キーを使ってください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在那台电脑上登录一次，或者改用 API Key。"
-          }
-        }
-      },
-      "extractionState" : "manual"
-    },
     "Sign in to Claude Code" : {
       "localizations" : {
         "en" : {
@@ -146727,6 +149322,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@ 起"
+          }
+        }
+      }
+    },
+    "Since %@ · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Since %1$@ · %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ から · %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 起 · %2$@"
           }
         }
       }
@@ -147465,6 +150083,28 @@
         }
       }
     },
+    "Someone Is Speaking [Meeting Float]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Someone is speaking"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "誰かが話しています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有人在说话"
+          }
+        }
+      }
+    },
     "Someone [Lark Topic Card 8ea02f]" : {
       "localizations" : {
         "en" : {
@@ -148063,6 +150703,51 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Speaker [Call Control]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speaker"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スピーカー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "扬声器"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Speaker [Meeting Room]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speaker"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スピーカー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "喇叭"
+          }
+        }
+      }
     },
     "Speaking" : {
       "localizations" : {
@@ -150404,25 +153089,25 @@
         }
       }
     },
-    "Starts recording a meeting in Persona, named after the calendar event happening now. Audio stays on this device, except while you hold Talk: what is said then goes to the voice service. If you set meetings to be transcribed on the hub, the meeting's audio, Talk included, goes through your hub to its speech service, and the hub deletes it once the minutes are written. The transcript goes to Knowledge." : {
+    "Starts recording a meeting in Persona, named after the calendar event happening now. Audio stays on this device, except while Talk is on: what is said then goes to the voice service. If you set meetings to be transcribed on the hub, the meeting's audio, Talk included, goes through your hub to its speech service, and the hub deletes it once the minutes are written. The transcript goes to Knowledge." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Starts recording a meeting in Persona, named after the calendar event happening now. Audio stays on this device, except while you hold Talk: what is said then goes to the voice service. If you set meetings to be transcribed on the hub, the meeting's audio, Talk included, goes through your hub to its speech service, and the hub deletes it once the minutes are written. The transcript goes to Knowledge."
+            "value" : "Starts recording a meeting in Persona, named after the calendar event happening now. Audio stays on this device, except while Talk is on: what is said then goes to the voice service. If you set meetings to be transcribed on the hub, the meeting's audio, Talk included, goes through your hub to its speech service, and the hub deletes it once the minutes are written. The transcript goes to Knowledge."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 Persona 中开始会议录音，以日历里正在进行的会议命名。音频保留在这台设备上，只有按住“说话”时例外：那时说的内容会发送到语音服务。如果你设置了在 hub 上转写会议，会议的音频（包括“说话”）会经你的 hub 发送到它的语音服务，会议纪要写好后 hub 就删除这段音频。转写文字进入知识库。"
+            "value" : "在 Persona 中开始会议录音，以日历里正在进行的会议命名。音频保留在这台设备上，只有“说话”打开时例外：那时说的内容会发送到语音服务。如果你设置了在 hub 上转写会议，会议的音频（包括“说话”）会经你的 hub 发送到它的语音服务，会议纪要写好后 hub 就删除这段音频。转写文字进入知识库。"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Personaで会議の録音を始め、カレンダーで進行中の予定の名前を付けます。音声はこのデバイスに残ります。ただし「話す」を押している間は例外で、そのときに話された内容は音声サービスに送られます。会議をハブで文字起こしする設定にした場合は、会議の音声（「話す」を含む）がハブ経由でその音声サービスに送られ、議事録ができるとハブが削除します。文字起こしはナレッジに入ります。"
+            "value" : "Personaで会議の録音を始め、カレンダーで進行中の予定の名前を付けます。音声はこのデバイスに残ります。ただし「話す」がオンの間は例外で、そのときに話された内容は音声サービスに送られます。会議をハブで文字起こしする設定にした場合は、会議の音声（「話す」を含む）がハブ経由でその音声サービスに送られ、議事録ができるとハブが削除します。文字起こしはナレッジに入ります。"
           }
         }
       }
@@ -153811,6 +156496,28 @@
         }
       }
     },
+    "Summary [Meeting After]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Summary"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まとめ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "总结"
+          }
+        }
+      }
+    },
     "Sun [Assistant Proactive Views 85217f]" : {
       "comment" : "Weekday, short: Sunday",
       "localizations" : {
@@ -155502,6 +158209,29 @@
         }
       }
     },
+    "Takes the call off hold" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Takes the call off hold"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留を解除して通話を続けます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消保持，继续通话"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Taking a photo, one moment" : {
       "localizations" : {
         "en" : {
@@ -155681,6 +158411,73 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "会議で Persona と話す"
+          }
+        }
+      }
+    },
+    "Talk turned off after 20 seconds without speech." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Talk turned off after 20 seconds without speech."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "20 秒間話し声がなかったため、「話す」をオフにしました。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "20 秒没听到说话，“说话”已关闭。"
+          }
+        }
+      }
+    },
+    "Talk turned off after a minute." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Talk turned off after a minute."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 分経ったため、「話す」をオフにしました。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已满一分钟，“说话”已关闭。"
+          }
+        }
+      }
+    },
+    "Talk with Persona hands-free: on CarPlay, a continuous voice chat on the car's screen; elsewhere, a call to Persona on this device. You talk, it answers, and you can cut in anytime." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Talk with Persona hands-free: on CarPlay, a continuous voice chat on the car's screen; elsewhere, a call to Persona on this device. You talk, it answers, and you can cut in anytime."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ハンズフリーでPersonaと話します。CarPlayでは車の画面で続けて音声チャット、それ以外ではこのデバイスでPersonaに電話します。話すと答え、いつでも割り込めます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "免提和 Persona 聊：在 CarPlay 上，是车机屏幕上的连续语音对话；不在车里时，是在这台设备上打给 Persona 的一通电话。你说，它答，你随时可以插话。"
           }
         }
       }
@@ -156258,6 +159055,28 @@
         }
       }
     },
+    "Tap to dictate, or touch and hold to dictate while you hold. Slide left to cancel." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to dictate, or touch and hold to dictate while you hold. Slide left to cancel."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "タップで音声入力を開始します。押したままでも入力でき、指を離すと終了、左にスライドするとキャンセルします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点开始听写；也可以按住听写，松手结束，左滑取消。"
+          }
+        }
+      }
+    },
     "Tap to fill in the input field, double-tap to send" : {
       "localizations" : {
         "en" : {
@@ -156369,6 +159188,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "タップで停止"
+          }
+        }
+      }
+    },
+    "Tap to stop." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to stop."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "タップで終了します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点结束。"
+          }
+        }
+      }
+    },
+    "Tap to talk and tap again when you’re done, or hold while you speak." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to talk and tap again when you’re done, or hold while you speak."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "タップして話し、話し終えたらもう一度タップしてください。押したまま話して指を離すこともできます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点开始说，说完再点一下；也可以按住说，松手发出。"
           }
         }
       }
@@ -158233,6 +161096,29 @@
         }
       }
     },
+    "That app isn't responding. Pick another window." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That app isn't responding. Pick another window."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "そのアプリが応答していません。別のウインドウを選んでください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那个应用没有响应，请换一个窗口。"
+          }
+        }
+      }
+    },
     "That commit isn't in this repository" : {
       "localizations" : {
         "en" : {
@@ -158343,6 +161229,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这个设置无效，没有保存。"
+          }
+        }
+      }
+    },
+    "That window is gone. Pick another." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That window is gone. Pick another."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "そのウインドウはもうありません。別のものを選んでください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那个窗口已经不在了，请换一个。"
           }
         }
       }
@@ -158530,6 +161439,29 @@
       },
       "extractionState" : "manual"
     },
+    "The Claude desktop app's sign-in doesn't count for it. Run claude auth login in a terminal on that computer, or use an API key instead." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Claude desktop app's sign-in doesn't count for it. Run claude auth login in a terminal on that computer, or use an API key instead."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude デスクトップアプリのログインはこれに含まれません。そのコンピュータのターミナルで claude auth login を実行するか、代わりに API キーを使ってください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude 桌面版登录了也不算。在那台电脑的终端里运行 claude auth login，或者改用 API Key。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "The Default Branch" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -158668,6 +161600,29 @@
       },
       "extractionState" : "manual"
     },
+    "The Mac couldn't set up the phone screen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Mac couldn't set up the phone screen."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac でスマホ画面を準備できませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 没能准备好手机屏。"
+          }
+        }
+      }
+    },
     "The Mac is locked. Showing VNC until it’s unlocked." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -158687,28 +161642,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Mac 锁屏了，解锁前先用 VNC。"
-          }
-        }
-      }
-    },
-    "The map grows as the meeting moves through its topics." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The map grows as the meeting moves through its topics."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "会議が議題を進むにつれて、ここにマップができていきます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "会议进入各个议题后，导图会在这里长出来。"
           }
         }
       }
@@ -159842,6 +162775,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "分支名里有不能用的字符"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "The call goes on; the bar at the top returns to it" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The call goes on; the bar at the top returns to it"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話は続きます。上部のバーから戻れます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通话照常继续，点顶部的条可以回来"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "The call is on hold; nothing you say is sent" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The call is on hold; nothing you say is sent"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話は保留中です。話しても送信されません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通话保持中，你说的话不会发出去"
           }
         }
       },
@@ -163614,6 +166593,28 @@
       },
       "extractionState" : "manual"
     },
+    "The map grows as the meeting moves through its topics." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The map grows as the meeting moves through its topics."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議が議題を進むにつれて、ここにマップができていきます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会议进入各个议题后，导图会在这里长出来。"
+          }
+        }
+      }
+    },
     "The meeting ended" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -164681,6 +167682,52 @@
       },
       "extractionState" : "manual"
     },
+    "The password is an app password, not your Google password: turn on 2-Step Verification for the Google account, then open App passwords, create one and paste the 16-character password above." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The password is an app password, not your Google password: turn on 2-Step Verification for the Google account, then open App passwords, create one and paste the 16-character password above."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パスワードには Google アカウントのパスワードではなくアプリ パスワードを入力します。Google アカウントで 2 段階認証を有効にし、「アプリ パスワード」ページで作成した 16 文字のパスワードを上に貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密码要填应用专用密码，不是 Google 账号密码：先给 Google 账号开启两步验证，再打开「应用专用密码」页面生成一个，把 16 位密码粘贴到上面。"
+          }
+        }
+      }
+    },
+    "The password is an app-specific password, not your Apple Account password: sign in to your Apple Account, open Sign-In and Security › App-Specific Passwords, create one and paste it above." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The password is an app-specific password, not your Apple Account password: sign in to your Apple Account, open Sign-In and Security › App-Specific Passwords, create one and paste it above."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パスワードには Apple アカウントのパスワードではなく App 用パスワードを入力します。Apple アカウントにサインインし、サインインとセキュリティ › App 用パスワード で作成したものを上に貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密码要填 App 专用密码，不是 Apple 账户密码：登录 Apple 账户，打开 登录与安全 › App 专用密码，生成一个并粘贴到上面。"
+          }
+        }
+      }
+    },
     "The photo couldn't be read. Try another one." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -165581,6 +168628,29 @@
         }
       }
     },
+    "The rest are in the other sections above." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The rest are in the other sections above."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "残りは上のほかの区分にあります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其余的在上面的其他分区里。"
+          }
+        }
+      }
+    },
     "The saved password no longer works (the Mac's password may have changed). Enter it again; it replaces the saved one once connected." : {
       "localizations" : {
         "en" : {
@@ -165645,6 +168715,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "画面正在省流量，要清晰一些吗？"
+          }
+        }
+      }
+    },
+    "The screen is still connecting. Try again in a moment." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The screen is still connecting. Try again in a moment."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画面はまだ接続中です。少ししてからもう一度お試しください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕还在连接，请稍后再试。"
           }
         }
       }
@@ -168108,6 +171201,29 @@
       },
       "extractionState" : "manual"
     },
+    "This Mac can't show a phone screen yet. Update Persona Link on it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Mac can't show a phone screen yet. Update Persona Link on it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Mac はまだスマホ画面を表示できません。Persona Link をアップデートしてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 还不能显示手机屏，请在它上面更新 Persona Link。"
+          }
+        }
+      }
+    },
     "This Mac connects to the hub with its own pairing credentials and can't be signed out here." : {
       "localizations" : {
         "en" : {
@@ -170118,6 +173234,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这台设备不能在这个对话里用语音"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "This device didn't place the call, so this is a voice chat in the app instead" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This device didn't place the call, so this is a voice chat in the app instead"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスから発信できなかったため、アプリ内の音声チャットに切り替えました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台设备没有拨出这通电话，改为 App 内语音对话"
           }
         }
       },
@@ -174600,6 +177739,28 @@
         }
       }
     },
+    "Title and Date" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Title and Date"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "タイトルと日付"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标题和日期"
+          }
+        }
+      }
+    },
     "Title, e.g. “Morning briefing”" : {
       "localizations" : {
         "en" : {
@@ -174967,25 +178128,25 @@
       },
       "extractionState" : "manual"
     },
-    "To talk to Persona in this meeting, hold Talk on the meeting’s page while it records." : {
+    "To talk to Persona in this meeting, tap Talk on the meeting’s page while it records." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "To talk to Persona in this meeting, hold Talk on the meeting’s page while it records."
+            "value" : "To talk to Persona in this meeting, tap Talk on the meeting’s page while it records."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "想在这场会议里和 Persona 说话，请在录音时到会议页面按住“说话”。"
+            "value" : "想在这场会议里和 Persona 说话，请在录音时到会议页面轻点“说话”。"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "この会議で Persona と話すには、録音中に会議のページで「話す」を押し続けてください。"
+            "value" : "この会議で Persona と話すには、録音中に会議のページで「話す」をタップしてください。"
           }
         }
       }
@@ -175146,6 +178307,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ToDo"
+          }
+        }
+      }
+    },
+    "To-Dos [Meeting After]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To-dos"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ToDo"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待办"
           }
         }
       }
@@ -175398,6 +178581,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "今天 %1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Today %@ tokens · Last 30 days %@" : {
+      "comment" : "The token calendar's line: today's tokens and the last 30 days', as in Today 3.2B tokens · Last 30 days 56.7B",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Today %1$@ tokens · Last 30 days %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日 %1$@トークン · 過去30日間 %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天 %1$@ token · 近 30 天 %2$@"
           }
         }
       },
@@ -175907,6 +179114,30 @@
         }
       }
     },
+    "Tokens a day" : {
+      "comment" : "The token calendar: one square a day",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tokens a day"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1日ごとのトークン使用量"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天的 token 用量"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Tokens per Minute" : {
       "localizations" : {
         "en" : {
@@ -176355,6 +179586,28 @@
       },
       "extractionState" : "manual"
     },
+    "Topic %lld / %lld: %@ [Meeting Topic]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Topic %lld / %lld: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "議題 %lld/%lld：%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "议题 %lld/%lld：%@"
+          }
+        }
+      }
+    },
     "Topic Details" : {
       "localizations" : {
         "en" : {
@@ -176397,6 +179650,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "トピック"
+          }
+        }
+      }
+    },
+    "Topic: %@ [Meeting Topic]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Topic: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "議題：%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "议题：%@"
           }
         }
       }
@@ -176632,28 +179907,6 @@
         }
       }
     },
-    "Touch and hold to dictate. Slide left to cancel, or up to keep dictating." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Touch and hold to dictate. Slide left to cancel, or up to keep dictating."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "長押しで音声入力。左にスライドでキャンセル、上にスライドで入力を続けます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按住听写。左滑取消，上滑可松手继续听写。"
-          }
-        }
-      }
-    },
     "Trackpad Mode" : {
       "localizations" : {
         "en" : {
@@ -176883,6 +180136,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Transcript [Meeting After]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transcript"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字起こし"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字稿"
+          }
+        }
+      }
     },
     "Transcript around %@" : {
       "extractionState" : "manual",
@@ -178135,29 +181410,6 @@
       },
       "extractionState" : "manual"
     },
-    "Turn Off Persona" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Turn Off Persona"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Persona をオフ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "关闭 Persona"
-          }
-        }
-      }
-    },
     "Turn Off Persona in the Meeting" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -178177,6 +181429,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在会议中关闭 Persona"
+          }
+        }
+      }
+    },
+    "Turn Off and Delete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn Off and Delete"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オフにして削除"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭并删除"
           }
         }
       }
@@ -178613,6 +181888,29 @@
         }
       }
     },
+    "Turn off and delete the %@ recorded?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn off and delete the %@ recorded?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記録済みの %@ を削除してオフにしますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭并删除已记录的 %@ 数据？"
+          }
+        }
+      }
+    },
     "Turn off ego's usage statistics: in ego lite on that Mac, open Settings › Sync and services and turn off “Automatically sends usage statistics and crash reports to Citro Labs”" : {
       "localizations" : {
         "en" : {
@@ -178905,6 +182203,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已在设置中关闭"
+          }
+        }
+      }
+    },
+    "Turning on the speaker during a meeting stops the microphone for a moment." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turning on the speaker during a meeting stops the microphone for a moment."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議中にスピーカーをオンにすると、マイクが一瞬止まります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会中打开喇叭时，麦克风会短暂中断一下。"
           }
         }
       }
@@ -187705,6 +191025,29 @@
       },
       "extractionState" : "manual"
     },
+    "Waiting for the phone screen's picture…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for the phone screen's picture…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スマホ画面の映像を待っています…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在等待手机屏的画面…"
+          }
+        }
+      }
+    },
     "Waiting for this iPhone to allow it" : {
       "localizations" : {
         "en" : {
@@ -189701,6 +193044,29 @@
       },
       "extractionState" : "manual"
     },
+    "What you mark done shows up here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What you mark done shows up here."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "対応済みにしたものがここに表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标为已处理的会出现在这里。"
+          }
+        }
+      }
+    },
     "What you say goes to this chat" : {
       "localizations" : {
         "en" : {
@@ -190618,6 +193984,29 @@
       },
       "extractionState" : "manual"
     },
+    "When this is on, this device records logs, errors and energy use so you can export them for an Agent to look into. The data stays on this device; turning this off deletes it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When this is on, this device records logs, errors and energy use so you can export them for an Agent to look into. The data stays on this device; turning this off deletes it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オンにすると、このデバイスがログ、エラー、電力使用量を記録し、Agent に調べてもらうために書き出せます。データはこのデバイスにだけ保存され、オフにすると削除されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开后这台设备会记录日志、错误和耗电数据，方便导出给 Agent 分析。数据只存在本机；关掉会删除。"
+          }
+        }
+      }
+    },
     "When this task runs, it won't ask before running any command, changing any file or using any tool, and no one can stop it midway. Use it only for prompts you trust and whose mistakes you can live with." : {
       "localizations" : {
         "en" : {
@@ -190867,6 +194256,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "来自哪里，比如“信息”或“邮件”"
+          }
+        }
+      }
+    },
+    "Where the Mac offers it, “…” › Phone Screen shows one of its windows on a display shaped like this iPhone, so text is readable without zooming. Pick the window from Windows at the bottom. Tap to click, drag with one finger to scroll, touch and hold then drag to select, and touch and hold to right-click. Switching back to another mode, or closing the screen, puts the Mac's windows back where they were." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Where the Mac offers it, “…” › Phone Screen shows one of its windows on a display shaped like this iPhone, so text is readable without zooming. Pick the window from Windows at the bottom. Tap to click, drag with one finger to scroll, touch and hold then drag to select, and touch and hold to right-click. Switching back to another mode, or closing the screen, puts the Mac's windows back where they were."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac が対応していれば、「…」› スマホ画面で、Mac のウインドウを1つこの iPhone と同じ形の画面に表示します。拡大しなくても文字が読めます。下の「ウインドウ」から表示するウインドウを選びます。タップでクリック、1本指のドラッグでスクロール、長押ししてからドラッグで文字を選択、長押しして離すと右クリックです。ほかのモードに戻すか画面を閉じると、Mac のウインドウは元の位置に戻ります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac 支持时，“…” › 手机屏会把它的一个窗口放到一块和这台 iPhone 一样形状的屏幕上，不用放大也看得清字。用底部的“窗口”挑选窗口。轻点即点击，单指拖动即滚动，按住后拖动可选择文字，按住松开即右键。换回其他模式或关闭屏幕时，Mac 上的窗口会回到原来的位置。"
           }
         }
       }
@@ -191779,6 +195191,52 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Windows" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Windows"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ウインドウ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "窗口"
+          }
+        }
+      }
+    },
+    "Windows on %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Windows on %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ のウインドウ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 的窗口"
+          }
+        }
+      }
     },
     "With Docker" : {
       "localizations" : {
@@ -194297,6 +197755,28 @@
         }
       }
     },
+    "You're Speaking [Meeting Float]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You're speaking"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたが話しています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你在说话"
+          }
+        }
+      }
+    },
     "You're online but can't reach the hub (the hub machine may be off, asleep, or offline). Persona keeps retrying automatically." : {
       "localizations" : {
         "en" : {
@@ -196151,6 +199631,29 @@
         }
       }
     },
+    "call" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "call"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打电话"
+          }
+        }
+      }
+    },
     "central directory" : {
       "comment" : "A document's part or an xlsx error, shown in Compare and the table viewer (PersonaKit, #5575)",
       "localizations" : {
@@ -197796,6 +201299,29 @@
       },
       "extractionState" : "manual"
     },
+    "iPhone [Call Audio Route]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "iPhone couldn’t keep up" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -198912,6 +202438,29 @@
       },
       "extractionState" : "manual"
     },
+    "phone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "phone"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "電話"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电话"
+          }
+        }
+      }
+    },
     "picker.machine" : {
       "extractionState" : "extracted_with_value",
       "localizations" : {
@@ -199495,19 +203044,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "appearance display color theme style text size layout dark light glow"
+            "value" : "appearance display color theme style text size layout dark light glow return enter keyboard send"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "外观 显示 颜色 主题 风格 字号 布局 深色 浅色 发光"
+            "value" : "外观 显示 颜色 主题 风格 字号 布局 深色 浅色 发光 回车 键盘 发送"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "外観 表示 色 テーマ スタイル 文字サイズ レイアウト ダーク ライト"
+            "value" : "外観 表示 色 テーマ スタイル 文字サイズ レイアウト ダーク ライト Return キーボード 送信"
           }
         }
       }
@@ -202117,6 +205666,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "“%@” [Recording Line]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”"
+          }
+        }
+      }
     },
     "“%@” already exists" : {
       "localizations" : {

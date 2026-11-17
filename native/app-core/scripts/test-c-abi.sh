@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Compile an independent C client against the exact release library and check its dynamic C exports (#8560, #8912).
 # The client replays the unchanged spec fixtures through every pure C projection: sort's empty_list, answer and
-# display_answer (15 + 9 cases), stream_chunks (21), stream_repair (80 complete objects, #9241), turns (57 static
+# display_answer (15 + 9 cases), stream_chunks (21), stream_repair (80 complete objects, #9241),
+# plain_open_fence (5 explicit + 31 source-derived expectations, #9563), turns (57 static
 # cases with the checked-in current-iOS overlay applied by the client), task_index (5 complete expected objects plus
-# the background receipt), and viewed_images
-# (ordinary post-overlay and source-derived folded complete objects, #9017). Malformed inputs
+# the background receipt), viewed_images
+# (ordinary post-overlay and source-derived folded complete objects, #9017), and all 21 recents fixture objects (#9654).
+# Malformed inputs
 # must return empty buffers and a deliberately wrong expectation must be detected, per domain.
 # This is Linux host ABI evidence only, not Swift importer, Apple ABI, NAPI, device or performance evidence.
 set -euo pipefail

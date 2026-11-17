@@ -217,6 +217,10 @@ struct LinkSheet: View {
 
     private var header: some View {
         HStack(spacing: Theme.Space.m) {
+            // The way out first, as on every presented page (#9653); the page's own actions after the title.
+            Button { dismiss() } label: { ThemedIcon(Theme.Icon.close).sheetBarLabel() }
+                .accessibilityLabel("Close")
+                .accessibilityIdentifier("link-close")
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                 Text(title.isEmpty ? (isFeishuDoc ? String(localized: "Lark Doc") : feishuRoute != nil ? String(localized: "Moments") : (target.forwarded != nil ? nil : target.url.host) ?? String(localized: "Web Pages")) : title)
                     .font(Theme.Font.secondaryStrong).lineLimit(1)
@@ -256,9 +260,6 @@ struct LinkSheet: View {
                 Button { UIPasteboard.general.url = target.url; Haptics.success() } label: { Label("Copy Link", systemImage: Theme.Icon.link) }
                 if target.forwarded == nil { browserItems } // the phone's loopback means nothing to another app
             } label: { ThemedIcon(Theme.Icon.moreMenu) }
-            Button { dismiss() } label: { ThemedIcon(Theme.Icon.clear).symbolRenderingMode(.hierarchical) }
-                .accessibilityLabel("Close")
-                .accessibilityIdentifier("link-close")
         }
         .font(Theme.Font.title)
         .padding(.horizontal, Theme.Space.l)
@@ -670,7 +671,7 @@ struct PickTextSheet: View {
             }
             .navigationTitle("Select Text [Link Sheet 409a5a]")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done [Extension System Presentation c0b3fb]") { dismiss() } } }
+            .toolbar { SheetClose { dismiss() } }
         }
         .presentationDetents([.medium, .large])
     }

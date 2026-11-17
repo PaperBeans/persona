@@ -66,7 +66,7 @@ type ExtensionMarketConfig struct {
 // GoogleConfig is the iOS OAuth client behind Gmail's "Sign in with Google" (docs/extensions/mail.md).
 type GoogleConfig struct {
 	ClientID string `json:"client_id"`
-	// Proxy is an http:// proxy for Gmail IMAP / SMTP and Google's OAuth / Gmail API.
+	// Proxy is an http:// (CONNECT) or socks5:// proxy for Gmail IMAP / SMTP and Google's OAuth / Gmail API.
 	Proxy string `json:"proxy,omitempty"`
 }
 

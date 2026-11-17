@@ -269,6 +269,7 @@ struct CompatibleAssistantStatusIntent: AppIntent {
 #if os(iOS)
 extension OpenPersonaAssistantIntent { nonisolated static let persistentIdentifier = "OpenJarvisAssistantIntent" }
 extension OpenPersonaAgentsIntent { nonisolated static let persistentIdentifier = "OpenJarvisAgentsIntent" }
+extension OpenPersonaDictationIntent { nonisolated static let persistentIdentifier = "OpenPersonaDictationIntent" }
 
 #if !WIDGET_EXTENSION
 struct CompatibleOpenAssistantIntent: AppIntent {

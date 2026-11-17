@@ -132,6 +132,13 @@ describe("default palette contrast", () => {
       // Unadjusted, the built-in theme colors fall short on the dark AI tint: the rule above is what keeps them.
       if (scheme === "dark") expect(contrast(accentTokens(PRESET_COLORS.blue.accent).dark["--accent-ink"], ai)).toBeLessThan(4.5);
     });
+    it(`${scheme}: inline code's ink (--ink and --ink-2 mixed, #9477) reads on every background, between the two`, () => {
+      expect(css).toContain("color: color-mix(in srgb, var(--ink) 55%, var(--ink-2))");
+      const ink = mix(t.ink, t["ink-2"], 0.45);
+      for (const bg of BACKGROUNDS) expect(contrast(ink, t[bg]), `on --${bg}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(ink, t.surface)).toBeLessThan(contrast(t.ink, t.surface));
+      expect(contrast(ink, t.surface)).toBeGreaterThan(contrast(t["ink-2"], t.surface));
+    });
     it(`${scheme}: --ink-3 stays a step quieter than --ink-2`, () => {
       expect(contrast(t["ink-3"], t.surface)).toBeLessThan(contrast(t["ink-2"], t.surface));
     });

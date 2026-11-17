@@ -482,7 +482,7 @@ fn continuity_steps_from_bytes_match_hand_built_batches() {
     // Every payload event of the corpus went through transport; a new event kind must be placed on purpose.
     let want: std::collections::BTreeMap<String, usize> = [
         ("http_after", 13),
-        ("http_latest", 10),
+        ("http_latest", 11),
         ("http_older", 1),
         ("http_range", 5),
         ("http_reload", 5),
@@ -493,6 +493,6 @@ fn continuity_steps_from_bytes_match_hand_built_batches() {
     .map(|(kind, count)| (kind.to_owned(), count))
     .collect();
     assert_eq!(through_transport, want, "payload events decoded from bytes");
-    assert_eq!((cases, steps), (38, 94), "the continuity corpus");
-    eprintln!("continuity through transport: {cases} cases, {steps} steps, 78 decoded from bytes");
+    assert_eq!((cases, steps), (39, 95), "the continuity corpus");
+    eprintln!("continuity through transport: {cases} cases, {steps} steps, 79 decoded from bytes");
 }

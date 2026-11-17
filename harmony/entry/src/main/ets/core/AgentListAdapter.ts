@@ -1,6 +1,6 @@
 import native from 'libpersona_core_ohos.so';
 import type { AgentListInput, CoreAgentListProjection, CoreSortInput } from './AgentListProjection';
-import { Wire } from '../models/Wire';
+
 
 export interface AgentListAdapter {
   project(input: AgentListInput): CoreAgentListProjection;
@@ -9,8 +9,8 @@ export interface AgentListAdapter {
 /** The production adapter has one sorter: the shared Rust core. */
 export class CoreAgentListAdapter implements AgentListAdapter {
   project(input: AgentListInput): CoreAgentListProjection {
-    const projected = Wire.record(JSON.parse(native.coreProjectSort(JSON.stringify(coreAgentSortInput(input)))) as Object) as Object as CoreAgentListProjection;
-    if (!Array.isArray(projected.groups) || !Array.isArray(projected.unread_shown) || !projected.counts) throw new Error('invalid_core_projection');
+    const projected = JSON.parse(native.coreProjectSort(JSON.stringify(coreAgentSortInput(input)))) as CoreAgentListProjection;
+    if (!projected || !Array.isArray(projected.groups) || !Array.isArray(projected.unread_shown) || !projected.counts) throw new Error('invalid_core_projection');
     return projected;
   }
 }
@@ -27,13 +27,13 @@ export function coreAgentSortInput(input: AgentListInput): CoreSortInput {
   const hubPreferences: Record<string, Object> = {};
   const managerPreferences: Record<string, Object> = {};
   input.rows.forEach((row) => {
-    const current = input.preferencesFor(row), group = Wire.text(row.raw, 'app_hub_group');
+    const current = input.preferencesFor(row), group = rowText(row.raw, 'app_hub_group');
     const preferences: Record<string, Object> = {
       pins: {spaces: current.pinsSpaces.slice(), sessions: current.pinsSessions.slice()},
       mutes: {spaces: current.mutesSpaces.slice(), sessions: current.mutesSessions.slice(), allowed: current.mutesAllowed.slice()}
     };
-    if (Wire.text(row.raw, 'manager')) {
-      managerPreferences[group + '|' + Wire.text(row.raw, 'manager')] = preferences;
+    if (rowText(row.raw, 'manager')) {
+      managerPreferences[group + '|' + rowText(row.raw, 'manager')] = preferences;
     } else if (group) hubPreferences[group] = preferences;
     else {
       // The legacy maps belong to the default Hub only; never concatenate owners.
@@ -71,4 +71,9 @@ export function coreMachineFilter(input: AgentListInput): string | undefined {
 
 export function nativeCoreProjection(input: AgentListInput): CoreAgentListProjection {
   return JSON.parse(native.coreProjectSort(JSON.stringify(coreAgentSortInput(input)))) as CoreAgentListProjection;
+}
+
+function rowText(value: Record<string, Object>, key: string): string {
+  const item = value[key];
+  return typeof item === 'string' ? item : '';
 }

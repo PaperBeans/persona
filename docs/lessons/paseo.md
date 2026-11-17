@@ -109,3 +109,36 @@ The assistant-purpose query does not select a manager: the `/machines` routes ar
 assistant switcher. Capture the manager when reading its catalog, send its header explicitly, and include it in cache
 and in-flight request keys. Keep generic Agent reads on their existing default-manager route. Changing the selected
 manager must refresh the pill even when the machine and launcher names stay the same.
+
+## Native background work is independent of the foreground turn (#9320)
+
+Paseo 0.16 adds `backgroundWork.count` to agent snapshots and a separate full inventory through
+`agent.background_work.list.request` and `agent.background_work.update`. An idle foreground agent can still own live
+shell commands or monitors. Follow the advertised `agentBackgroundWork` capability, subscribe before reading, and treat
+an unavailable inventory differently from an empty one. A positive summary must not look finished while the details
+are pending or a read fails. In-flight replies belong to their connection and inventory revision; a later completion
+or archive must not be undone by an older response. Reconnects must fetch task identities even when the count is unchanged.
+
+Reuse the native task ID when merging with Claude's local transcript; otherwise one process counts twice. Keep the
+transcript's output path and command when both sources report the same task. Include native work when deciding whether
+a delegated agent has finished, pinning active rows, and protecting worktree deletion. Those checks cannot rely only on
+foreground `status`. The real Codex regression uses a file-watching process and a fixture-controlled exit, proving that
+the task remains listed after the answer and disappears after exit without opening the chat or using a real model.
+
+## Creation needs project identity, not only a path (#9726)
+
+Git resolves a symlink spelling to its physical checkout. Paseo 0.16's project registry matches root paths by spelling,
+so handing it only that checkout can allocate a second project. An explicit workspace supplies the project; folder-only
+creation requires a fresh project list and a unique physical-path match. An unavailable list is not an empty list, and
+list order does not identify the intended owner when duplicates already exist. Use checkout roots rather than remotes
+so independent clones remain independent. Read symlinks afresh for writes, outside the display cache.
+
+The direct Agent route reaches `findOrCreateProjectForDirectory` too. Its request has no project ID field: create a
+keyed directory workspace with the resolved project first, then pass its workspace ID to Agent creation. Keep the new
+step inside the existing pending-start flow so a slow creation remains visible. A later Agent failure leaves that
+workspace available; never remove a project or move existing sessions as part of alias repair.
+
+The real Codex E2E registers the alias project without a workspace, then calls the real node with the alias. This
+forces Git's physical-root handoff; an existing source workspace can hide the original defect in Paseo's own fallback.
+It also explicitly creates duplicate fixture projects to prove ambiguity is refused and selected workspace ownership
+still wins. All of these resources belong to the isolated daemon.

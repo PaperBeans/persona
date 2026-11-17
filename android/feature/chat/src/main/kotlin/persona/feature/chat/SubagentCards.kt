@@ -1,7 +1,6 @@
 package persona.feature.chat
 
 import android.content.res.Resources
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -49,6 +48,8 @@ import persona.core.designsystem.JIcon
 import persona.core.designsystem.JSpinner
 import persona.core.designsystem.JTextButton
 import persona.core.designsystem.PersonaTheme
+import persona.core.designsystem.rememberOpenEdge
+import persona.core.designsystem.unfolding
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.domain.lines.SubagentStatus
@@ -134,10 +135,13 @@ internal fun SubagentCard(call: ToolCall, live: Boolean, assistant: Boolean, mod
         stringResource(R.string.chat_subagent_running_for, workDuration(res, java.time.Duration.between(started, now).seconds.coerceAtLeast(1)))
         else null
     val shape = PersonaTheme.shapes.cardShape
+    // Details fade over the space they take (SubagentCard.swift:220, ChatPin.swift:707-726). The .move transition is on
+    // that view, and the open runs with animations disabled (ChatPin.swift:686-688), so this does not slide.
+    val edge = rememberOpenEdge(call.id)
+    val revealing = edge.revealing(open)
     // The page under the card hides the work rail behind it; its avatar sits where the rail runs.
     Column(modifier.fillMaxWidth().padding(vertical = Tokens.Space.xs).clip(shape).background(palette.background)
         .background(palette.surface).border(Tokens.Size.lineMedium, palette.line, shape)
-        .animateContentSize(PersonaTheme.motion.size())
         .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s)
         .semantics { testTag = "chat.subagent-card" }) {
         val state = stringResource(if (open) R.string.chat_tasks_expanded else R.string.chat_tasks_collapsed)
@@ -169,7 +173,7 @@ internal fun SubagentCard(call: ToolCall, live: Boolean, assistant: Boolean, mod
             JIcon(PersonaIcons.disclosure, null, Modifier.padding(top = Tokens.Space.xs).rotate(if (open) 90f else 0f),
                 size = Tokens.Space.m, tint = palette.ink3)
         }
-        if (open) Details(call, agent, status)
+        if (open) Details(call, agent, status, Modifier.unfolding(revealing))
     }
 }
 
@@ -214,10 +218,10 @@ private fun MetaLine(meta: SubagentCardText.Meta, runningFor: String?) {
 
 /** The opened card: what it was asked, its latest result, its last tool and its output, on a rail of their own. */
 @Composable
-private fun Details(call: ToolCall, agent: Subagent?, status: SubagentStatus) {
+private fun Details(call: ToolCall, agent: Subagent?, status: SubagentStatus, modifier: Modifier = Modifier) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
-    Row(Modifier.fillMaxWidth().padding(top = Tokens.Space.s).height(IntrinsicSize.Min).semantics { testTag = "chat.subagent-details" }) {
+    Row(modifier.fillMaxWidth().padding(top = Tokens.Space.s).height(IntrinsicSize.Min).semantics { testTag = "chat.subagent-details" }) {
         Box(Modifier.width(Tokens.Space.xxs).fillMaxHeight().background(palette.line))
         Column(Modifier.weight(1f).padding(start = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
             Subagents.prompt(call).takeIf(String::isNotEmpty)?.let { Text(it, style = type.caption, color = palette.ink2) }

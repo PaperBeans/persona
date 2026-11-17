@@ -12,7 +12,9 @@ import UIKit
 /// overflowed are sized by the views' types, not their data, so an empty page measures them; rows and sheets a page
 /// only builds with data are not covered. The pages share one process: the first builds the Swift runtime's metadata for
 /// types the others use too, so a page measured later can read up to ~100 KB less than its cold first render on a
-/// phone. The budget (512 KB, half the device's stack) leaves room for that.
+/// phone. The budget (512 KB, half the device's stack) leaves room for that. Which page that is does not depend on what
+/// earlier runs left on the simulator: the host app and the models start as on a new install (`AppModel.savedPlace`,
+/// #9333), as on a fresh simulator.
 ///
 /// A page over the budget: cut its long modifier chains (`stackSegment()`, `AnyView` at stage boundaries) and measure
 /// again (`docs/lessons/ios.md`, "A Debug build on an iPhone has a 1 MB main-thread stack"). The pages still over it have
@@ -58,10 +60,11 @@ import UIKit
     @Test(arguments: Page.allCases) func thePageFitsAPhonesMainThreadStack(_ page: Page) throws {
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let model = AppModel(stateFolder: FileManager.default.temporaryDirectory.appending(path: "stack-\(page)-" + UUID().uuidString))
-        // The Agents page with its list: a chat the simulator's last run left open (`dev.openChat`) would be opened
-        // over it, and the list is not built under a chat on its way (#8467).
-        model.openChat = nil
-        model.openPersonalAgent = nil
+        // As on a new install (above): the Agents page with its list, not a chat opened over it (#8467); the assistant's
+        // home, not a conversation; the shell on its first page (`ShellView` starts on the host model's tab).
+        #expect(model.openChat == nil && model.assistantCurrent == nil && model.selectedTabNow == .assistant
+                    && AppModel.shared.selectedTabNow == .assistant,
+                "a saved tab, chat or conversation reached the pages (#9333)")
         let root = page.ownsNavigation ? AnyView(page.view) : AnyView(NavigationStack { page.view })
         let (bytes, window) = StackPeak.render(root.environment(model), in: scene)
         defer { window.isHidden = true }

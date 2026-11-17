@@ -39,6 +39,8 @@ export interface PlanTask {
   ultracode?: boolean;
   readonly?: boolean;
   why?: string;
+  /** The reasoning effort the assistant chose for its Agent (task_plan's `effort`); absent: the launcher's default. */
+  effort?: string;
   todo_id?: string;
   error?: string;
   /** The failed start's coded refusal and its details (as a session's start_error_code / start_error_args). */

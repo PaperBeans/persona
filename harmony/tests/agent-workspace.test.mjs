@@ -499,11 +499,16 @@ test('archived sessions get a registry entry for machine grouping', async () => 
   assert.equal(w.groups[0].machineName, 'retired');
 });
 
-test('group fold and quick filter controls are native buttons with touch bounds', () => {
+test('group folds use named native icons and idle expansion retains its count', () => {
   const source = readFileSync(new URL('../entry/src/main/ets/components/AgentListPage.ets', import.meta.url), 'utf8');
-  assert.match(source, /Button\(tr\(binding\.value\.folded \? 'agent_expand' : 'agent_collapse'\)\)/);
-  assert.match(source, /constraintSize\(\{minHeight: Tokens\.touch\}\)/);
-  assert.ok(!source.includes("Text(tr(binding.value.folded ? 'agent_expand' : 'agent_collapse'))"));
+  const header=source.slice(source.indexOf('  @Builder groupHeader('),source.indexOf('  private groupCounts('));
+  assert.match(header,/Button\(\{ type: ButtonType.Circle \}\)/);
+  assert.match(header,/binding\.value\.folded \? Symbols\.down : Symbols\.up/);
+  assert.match(header,/attributeModifier\(ButtonStyles\.icon\)/);
+  assert.ok(header.includes("tr(binding.value.folded ? 'agent_expand' : 'agent_collapse')"));
+  assert.ok(header.includes('this.workspace.toggleFold(binding.value.id)'));
+  assert.ok(source.includes("String(binding.value.totalRowCount - binding.value.rows.length) + ' ' + tr('agent_group_more_idle')"));
+  assert.ok(source.includes('this.workspace.toggleIdleRows(binding.value.id)'));
 });
 
 test('merged rows with identical runtime ids isolate pin, mute and mutation ownership',async()=>{

@@ -26,6 +26,13 @@ public nonisolated enum TokenFormat {
 
     public static func count(_ n: Int) -> String { count(Int64(n)) }
 
+    /// The language's own short numbers, at most three digits: 3.2B and 72.9M in English, counted in ten-thousands and
+    /// hundred-millions in Chinese and Japanese (the token calendar, docs/server/machines.md "Token usage history").
+    /// `count` stays K / M / B everywhere else.
+    public static func short(_ n: Int64, locale: Locale = .autoupdatingCurrent) -> String {
+        n.formatted(.number.notation(.compactName).precision(.significantDigits(1...3)).locale(locale))
+    }
+
     /// "31K/min": a rate of tokens per minute.
     public static func perMinute(_ n: Int64) -> String { String(localized: "\(count(n))/min", comment: "Tokens per minute, as in 31K/min") }
 

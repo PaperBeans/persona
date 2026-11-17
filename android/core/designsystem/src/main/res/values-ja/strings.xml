@@ -196,6 +196,7 @@
     <string name="designsystem_channel_source">%1$sから</string>
     <string name="designsystem_series_separator">／</string>
     <string name="designsystem_plan_spoken">プラン、%2$dステップ中%1$dステップ目、%3$s</string>
+    <string name="designsystem_count_spoken">%1$s、%2$d</string>
     <string name="designsystem_plan_all_done">すべて完了</string>
     <string name="designsystem_plan_step">ステップ%1$d/%2$d</string>
     <string name="designsystem_plan_item_done">完了</string>

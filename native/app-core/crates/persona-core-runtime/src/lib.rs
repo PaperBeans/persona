@@ -81,6 +81,9 @@ struct Patches {
     chats: HashMap<String, ChatPatch>,
     /// Chats whose latest changes have not been drained. One chat's drain cannot consume another's wake-up.
     woken: HashSet<String>,
+    /// The last patch committed to each client, with no pending operations. An unchanged drain returns this state
+    /// rather than mixing a newly emptied pending patch with the next input's state.
+    drained: HashMap<String, ChatPatch>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -175,7 +178,11 @@ impl Runtime {
         {
             diagnostics::measure_patch_held(&self.shared, || {
                 let started = Instant::now();
-                let patch = patches.chats.get(chat).cloned().unwrap_or_default();
+                let patch = if patches.woken.contains(chat) {
+                    patches.chats.get(chat).cloned().unwrap_or_default()
+                } else {
+                    patches.drained.get(chat).cloned().unwrap_or_default()
+                };
                 if let Some(diagnostics) = self.shared.diagnostics.get() {
                     diagnostics::add(&diagnostics.counters.patch_clone, started);
                 }
@@ -184,21 +191,29 @@ impl Runtime {
                 if let Some(diagnostics) = self.shared.diagnostics.get() {
                     diagnostics::add(&diagnostics.counters.patch_encode, started);
                 }
-                if let Some(patch) = patches.chats.get_mut(chat) {
-                    patch.ops.clear();
+                if patches.woken.remove(chat) {
+                    patches.chats.remove(chat);
+                    let mut committed = patch;
+                    committed.ops.clear();
+                    patches.drained.insert(chat.to_owned(), committed);
                 }
-                patches.woken.remove(chat);
                 encoded
             })
         }
         #[cfg(not(any(target_os = "android", feature = "test-support")))]
         {
-            let patch = patches.chats.get(chat).cloned().unwrap_or_default();
+            let patch = if patches.woken.contains(chat) {
+                patches.chats.get(chat).cloned().unwrap_or_default()
+            } else {
+                patches.drained.get(chat).cloned().unwrap_or_default()
+            };
             let encoded = wire::encode(&patch);
-            if let Some(patch) = patches.chats.get_mut(chat) {
-                patch.ops.clear();
+            if patches.woken.remove(chat) {
+                patches.chats.remove(chat);
+                let mut committed = patch;
+                committed.ops.clear();
+                patches.drained.insert(chat.to_owned(), committed);
             }
-            patches.woken.remove(chat);
             encoded
         }
     }
@@ -472,6 +487,7 @@ impl Worker {
                 let mut patches = lock(&self.shared.patches);
                 patches.chats.remove(&chat);
                 patches.woken.remove(&chat);
+                patches.drained.remove(&chat);
             }
             Action::Chat { chat, event } => {
                 let Some(state) = self.chats.get_mut(&chat) else {
@@ -559,30 +575,39 @@ impl Worker {
         }
         let wake = {
             let mut patches = lock(&self.shared.patches);
-            let patch = patches.chats.entry(chat.to_owned()).or_default();
-            let state_changed = patch.covered != reducer.covered()
-                || patch.history.as_deref() != reducer.history()
-                || patch.has_more != reducer.has_more()
-                || patch.loaded_once != reducer.loaded_once()
-                || patch.verified != state.session.verified()
-                || patch.acked != state.acked;
-            if !items_changed && !state_changed && patch.version != 0 {
-                None
-            } else {
-                patch.ops.extend(ops);
-                patch.covered = reducer.covered();
-                patch.history = reducer.history().map(str::to_owned);
-                patch.has_more = reducer.has_more();
-                patch.loaded_once = reducer.loaded_once();
-                patch.verified = state.session.verified();
-                patch.acked = state.acked;
-                patches.version += 1;
-                let version = patches.version;
-                patches.chats.get_mut(chat).expect("patch inserted above").version = version;
-                // Every real change wakes this chat, even if a previous frame's patch is still pending. The client
-                // coalesces at its frame boundary; another chat's drain cannot consume this chat's notification.
-                Some(version)
+            // After a drain there is no pending patch. Compare with the state committed to the client, not a
+            // default ChatPatch, or every no-op publish looks like a state change and wakes the client again.
+            let previous = patches.chats.get(chat).or_else(|| patches.drained.get(chat));
+            let previous_version = previous.map_or(0, |patch| patch.version);
+            let state_changed = previous.is_some_and(|patch| {
+                patch.covered != reducer.covered()
+                    || patch.history.as_deref() != reducer.history()
+                    || patch.has_more != reducer.has_more()
+                    || patch.loaded_once != reducer.loaded_once()
+                    || patch.verified != state.session.verified()
+                    || patch.acked != state.acked
+            });
+            if !items_changed && !state_changed && previous_version != 0 {
+                return;
             }
+            let patch = patches.chats.entry(chat.to_owned()).or_default();
+            patch.ops.extend(ops);
+            patch.covered = reducer.covered();
+            patch.history = reducer.history().map(str::to_owned);
+            patch.has_more = reducer.has_more();
+            patch.loaded_once = reducer.loaded_once();
+            patch.verified = state.session.verified();
+            patch.acked = state.acked;
+            if patch.version == 0 {
+                patch.version = previous_version;
+            }
+            patches.version += 1;
+            patches.woken.insert(chat.to_owned());
+            let version = patches.version;
+            patches.chats.get_mut(chat).expect("patch inserted above").version = version;
+            // Every real change wakes this chat, even if a previous frame's patch is still pending. The client
+            // coalesces at its frame boundary; another chat's drain cannot consume this chat's notification.
+            Some(version)
         };
         if let Some(version) = wake {
             #[cfg(any(target_os = "android", feature = "test-support"))]
@@ -610,6 +635,7 @@ impl Worker {
         patch.verified = state.session.verified();
         patch.acked = state.acked;
         patches.version += 1;
+        patches.woken.insert(chat.to_owned());
         let version = patches.version;
         patches.chats.get_mut(chat).expect("patch inserted above").version = version;
         drop(patches);

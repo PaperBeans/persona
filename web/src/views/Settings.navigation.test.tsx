@@ -27,6 +27,7 @@ vi.mock("./settings/KnowledgeSelection", () => ({ KnowledgeSelection: () => <div
 vi.mock("./settings/TranslationSettings", () => ({ TranslationSettings: () => <div data-page="translation" /> }));
 vi.mock("./settings/AssistantSettings", () => ({ AssistantSettings: () => <div data-page="persona" /> }));
 vi.mock("./settings/SidebarPages", () => ({ SidebarPagesGroup: () => <div data-page="sidebar-pages" /> }));
+vi.mock("./settings/StartPage", () => ({ StartPageGroup: () => <div data-page="start-page" /> }));
 vi.mock("../lib/pwa", async (original) => ({ ...(await original<typeof import("../lib/pwa")>()), useInstall: () => "installed" }));
 vi.mock("../lib/api", async (original) => ({ ...(await original<typeof import("../lib/api")>()), api: () => Promise.resolve({ accounts: [] }) }));
 vi.mock("./settings/AgentSettings", () => ({ AgentSettings: ({ agent }: { agent: string }) => <div data-page="agent" data-agent={agent} /> }));
@@ -125,7 +126,6 @@ describe("Settings category navigation", () => {
       ["text-size", t("ui-look.text_size_hint")],
       ["reply-motion", t("settings.reply_motion_hint")],
       ["agent-details", t("context.details_hint")],
-      ["context-as-used", t("context.as_used_hint")],
       ["install-app", t("settings.install_installed")],
     ];
     for (const [anchor, text] of hints) {

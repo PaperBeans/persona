@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { ClientModel } from '../models/ClientModel';
 import { ExtensionUIModel, ExtensionUINavigationEffect } from '../models/ExtensionUI';
 import { ExtensionViewRecord } from '../core/ExtensionViewTree';
@@ -63,9 +66,9 @@ export struct ExtensionPage {
     Column() {
       if (this.extensionUI.error) Row({ space: Tokens.gap }) {
         Text(tr(this.extensionUI.error)).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).layoutWeight(1)
-        if (this.extensionUI.uncertainEventId) Button(tr('extension_ui_retry_action')).height(Tokens.touch).enabled(!this.extensionUI.busy)
+        if (this.extensionUI.uncertainEventId) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('extension_ui_retry_action')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('extension_ui_retry_action', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('extension_ui_retry_action')).bindTips(tr('extension_ui_retry_action')).enabled(!this.extensionUI.busy)
           .onClick(() => this.extensionUI.retryUncertainEvent(this.extensionUI.uncertainEventId))
-        else if (this.extensionUI.phase === 'recovering' || this.extensionUI.phase === 'failed') Button(tr('retry')).height(Tokens.touch)
+        else if (this.extensionUI.phase === 'recovering' || this.extensionUI.phase === 'failed') Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry'))
           .onClick(() => this.extensionUI.retryRead())
       }.width('100%').padding({ left: Tokens.page, right: Tokens.page, top: Tokens.gap, bottom: Tokens.gap })
       if (this.extensionUI.notice) Text(this.extensionUI.notice).fontSize(Tokens.meta).fontColor($r('sys.color.font_emphasize'))

@@ -387,6 +387,10 @@ def verify_remote_assets(repository, tag, assets, listed, gh="gh", missing=False
             raise ConfigError("uploaded asset digest verification failed: " + item["name"])
 
 
+def is_beta_tag(tag):
+    return bool(re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*", tag))
+
+
 def upload(repository, tag, assets, gh="gh"):
     # The workflow owns Release creation; never create a tag from this machine.
     release = json.loads(subprocess.check_output(
@@ -394,6 +398,11 @@ def upload(repository, tag, assets, gh="gh"):
         text=True, timeout=60))
     if release.get("tagName") != tag or release.get("isDraft") is not False:
         raise ConfigError("published GitHub Release for the exact tag is required")
+    if is_beta_tag(tag):
+        details = json.loads(subprocess.check_output(
+            [gh, "release", "view", tag, "--repo", repository, "--json", "isPrerelease"], text=True, timeout=60))
+        if details.get("isPrerelease") is not True:
+            raise ConfigError("beta tags require a prerelease, never the stable Release")
     if not assets:
         print("Store publication verified; this platform has no Release assets", flush=True)
         return
@@ -461,6 +470,15 @@ def publish_once(config, tag, commit):
         check_windows_archives(assets, tag[1:])
     except ValueError as error:
         raise ConfigError(str(error)) from error
+    if is_beta_tag(tag):
+        # Stable manifests omit channel for compatibility. A beta feed must
+        # never identify itself as the stable latest.json.
+        manifests = [Path(item["path"]) for item in assets if item["name"] == "latest.json"]
+        if len(manifests) != 1:
+            raise ConfigError("beta publication requires one latest.json")
+        manifest = json.loads(manifests[0].read_text())
+        if manifest.get("channel") != "beta" or manifest.get("version") != tag[1:]:
+            raise ConfigError("beta latest.json must carry this beta version/channel")
     check_release_manifest(assets)
     check_android_index(assets, tag[1:])
     upload(config["repository"], tag, assets)

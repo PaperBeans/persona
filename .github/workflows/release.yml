@@ -110,7 +110,75 @@ jobs:
             args+=(--prerelease)
           fi
           gh release create "$RELEASE_TAG" "${args[@]}"
-  # Desktop packages (docs/desktop/desktop.md, "Updates"). They are attached to the Release created above only when
+  darwin-cli-sign:
+    name: Sign Darwin command-line programs
+    needs: [authorize, desktop-gate, publish]
+    if: needs.desktop-gate.outputs.mac == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 90
+    environment: persona-desktop-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build release command-line programs
+        env:
+          VERSION: ${{ needs.desktop-gate.outputs.version }}
+          NO_DEPLOY: '1'
+          RELEASE_CHANNEL: ${{ contains(github.ref_name, '-') && 'beta' || 'release' }}
+        run: scripts/release/publish.sh
+      - name: Install the existing signing certificate
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          PERSONA_SIGNING_KEYCHAIN: ${{ runner.temp }}/persona-cli-release.keychain
+        run: |
+          set -euo pipefail
+          umask 077
+          packet="$(mktemp "${RUNNER_TEMP}/persona-signing-XXXXXX.p12")"
+          trap 'rm -f "$packet"' EXIT
+          printf '%s' "$MAC_CSC_LINK" | base64 --decode > "$packet"
+          security create-keychain -p "$MAC_CSC_KEY_PASSWORD" "$PERSONA_SIGNING_KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$PERSONA_SIGNING_KEYCHAIN"
+          security unlock-keychain -p "$MAC_CSC_KEY_PASSWORD" "$PERSONA_SIGNING_KEYCHAIN"
+          security import "$packet" -k "$PERSONA_SIGNING_KEYCHAIN" -P "$MAC_CSC_KEY_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MAC_CSC_KEY_PASSWORD" "$PERSONA_SIGNING_KEYCHAIN"
+          identity="$(security find-identity -v -p codesigning "$PERSONA_SIGNING_KEYCHAIN" | awk -F'"' '/Developer ID Application/{print $2; exit}')"
+          test -n "$identity" || { echo 'No Developer ID Application signing identity is available.' >&2; exit 1; }
+          printf '%s\n' "$identity" > "${RUNNER_TEMP}/persona-cli-signing-identity"
+      - name: Sign and verify fixed-identifier binaries
+        run: |
+          identity="$(cat "${RUNNER_TEMP}/persona-cli-signing-identity")"
+          test -n "$identity" || { echo 'No Developer ID Application signing identity is available.' >&2; exit 1; }
+          python3 scripts/release/sign_darwin_cli.py build-publish/bin --identity "$identity"
+      - name: Rebuild the manifest from the signed downloads
+        env:
+          VERSION: ${{ needs.desktop-gate.outputs.version }}
+          COMMIT: ${{ github.sha }}
+          RELEASE_CHANNEL: ${{ contains(github.ref_name, '-') && 'beta' || 'release' }}
+        run: |
+          set -euo pipefail
+          host="build-publish/bin/personad-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          build="$(date -u +%Y%m%d%H%M)"
+          (cd build-publish/bin && shasum -a 256 *.gz > SHA256SUMS && printf '%s\n' "$VERSION" > VERSION)
+          "$host" release manifest --dir build-publish/bin --version "$VERSION" --build "$build" --commit "$COMMIT" --channel "$RELEASE_CHANNEL" --out build-publish/bin/latest.json
+          "$host" release verify --dir build-publish/bin --manifest build-publish/bin/latest.json
+      - name: Upload signed Darwin downloads
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          for f in build-publish/bin/*-darwin-amd64.gz build-publish/bin/*-darwin-arm64.gz; do
+            test -f "$f" || continue
+            gh release upload "$RELEASE_TAG" "$f" --clobber
+            gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq '.assets[] | select(.name == "'"${f##*/}"'") | .digest'
+          done
+          gh release upload "$RELEASE_TAG" build-publish/bin/latest.json build-publish/bin/SHA256SUMS build-publish/bin/VERSION --clobber
+
   # they are signed: without the signing secrets the release still succeeds and this job says what was skipped and why.
   desktop-gate:
     name: Desktop packages gate

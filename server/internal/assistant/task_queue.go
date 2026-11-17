@@ -12,7 +12,8 @@ import (
 // The admission queue. A start the admission gate refuses because the machine is briefly full (a stale 30-second
 // sample, a load spike, the direction cap) is not a failed start: the task stays open, its card reads as waiting with
 // the gate's reason, and this loop retries it on a timer until it starts or the bounds below are reached. Only the
-// hub retries these; no supervisor turn is involved.
+// hub retries these; no supervisor turn is involved. A full launcher group (admissionGroupFullKey) has no bounds: the
+// task waits for the shared pool as long as it takes, and the bounds apply again from the moment another line holds it.
 
 const (
 	// admissionQueueSweep is how often the loop looks for due retries.
@@ -67,6 +68,11 @@ func (s *Service) queueAdmissionRefusal(planID string, i int, t PlanTask, err er
 			q.QueuedAt = pt.Queue.QueuedAt
 			q.Attempt = pt.Queue.Attempt + 1
 			q.Retry = pt.Queue.Retry
+			// The wait for a full launcher group is not on the clock: when another line takes over, its bounds start now
+			// rather than from a QueuedAt hours back, which would fail the task on its first refusal.
+			if pt.Queue.Key == admissionGroupFullKey && key != admissionGroupFullKey {
+				q.QueuedAt, q.Attempt = now, 1
+			}
 		}
 		pt.Queue = q
 		pt.Error = ""
@@ -125,7 +131,7 @@ func (s *Service) sweepAdmissionQueue(ctx context.Context) {
 				}
 				continue
 			}
-			if q.Attempt >= admissionQueueMaxAttempts || now.Sub(q.QueuedAt) >= admissionQueueMaxWait {
+			if queueBounded(q) && (q.Attempt >= admissionQueueMaxAttempts || now.Sub(q.QueuedAt) >= admissionQueueMaxWait) {
 				s.failQueuedStart(cctx, p, i, pt, q)
 				continue
 			}
@@ -133,6 +139,9 @@ func (s *Service) sweepAdmissionQueue(ctx context.Context) {
 		}
 	}
 }
+
+// queueBounded says the queue's attempt and time bounds apply to q: every gate line but a full launcher group.
+func queueBounded(q *TaskQueue) bool { return q.Key != admissionGroupFullKey }
 
 // retryQueuedStart starts the task again through the ordinary async start path, which re-runs the gate and either
 // links the agent or parks the task again. The queue record is kept (not cleared) with NextAt pushed past the max wait

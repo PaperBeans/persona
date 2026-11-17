@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+import io
+from contextlib import redirect_stdout
 
 spec = importlib.util.spec_from_file_location("assistant_token_report", Path(__file__).with_name("assistant_token_report.py"))
 report = importlib.util.module_from_spec(spec)
@@ -132,6 +135,120 @@ class ReportTests(unittest.TestCase):
     def test_output_has_no_message_text(self):
         s = self.run_lines([user(SNAPSHOT + "a private request"), reply("m1", output=1)])
         self.assertNotIn("private", json.dumps(s))
+        self.assertNotIn("private", json.dumps(self.run_lines([user(source("private secret")), reply("m1", output=1)])))
+
+    def test_codex_rounds_and_duplicate_usage(self):
+        def event(payload, ts="2026-11-13T01:00:01Z"):
+            return {"type": "event_msg", "timestamp": ts, "payload": payload}
+
+        def text_event(text, ident):
+            return event({"type": "item_completed", "item": {"type": "UserMessage", "id": ident,
+                          "content": [{"type": "text", "text": text}]}})
+
+        def usage(total, inp, cached, out):
+            return event({"type": "token_count", "info": {"total_token_usage": {"total_tokens": total},
+                          "last_token_usage": {"input_tokens": inp, "cached_input_tokens": cached, "output_tokens": out}}})
+
+        text = source("supervision") + SUPERVISION
+        raw = {"type": "response_item", "timestamp": "2026-11-13T01:00:00Z", "payload": {
+            "type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}}
+        s = self.run_lines([
+            {"type": "session_meta", "payload": {"id": "test", "cwd": "/test"}},
+            raw, event({"type": "user_message", "message": text}), text_event(text, "u1"), text_event(text, "u1"),
+            usage(120, 100, 80, 20), usage(120, 100, 80, 20),
+            text_event("a private request", "u2"), usage(180, 50, 20, 10),
+        ])
+        sup, owner = s["by_kind"]["supervision"], s["by_kind"]["owner"]
+        self.assertEqual((sup["rounds"], sup["model_calls"], sup["input_tokens"], sup["cache_read_input_tokens"]), (1, 1, 20, 80))
+        self.assertEqual((owner["rounds"], owner["model_calls"], owner["output_tokens"]), (1, 1, 10))
+        self.assertIsNone(s["total"]["cache_creation_input_tokens"])
+        self.assertIsNone(sup["cache_creation_input_tokens"])
+        self.assertNotIn("private", json.dumps(s))
+
+    def test_codex_since_and_unknown_fields(self):
+        def ev(ts, payload):
+            return {"type": "event_msg", "timestamp": ts, "payload": payload}
+        def tokens(total, last):
+            return {"type": "token_count", "info": {"total_token_usage": {"total_tokens": total}, "last_token_usage": last}}
+        s = self.run_lines([
+            {"type": "session_meta", "payload": {}},
+            ev("2026-11-12T23:59:00Z", {"type": "user_message", "message": source("followup") + "private"}),
+            ev("2026-11-12T23:59:01Z", tokens(100, {"input_tokens": 100})),
+            ev("2026-11-13T00:00:00Z", tokens(100, {"input_tokens": 100})),
+            ev("2026-11-13T00:00:01Z", tokens(200, {"input_tokens": 80, "output_tokens": 20})),
+        ], since="2026-11-13")
+        row = s["by_kind"]["followup"]
+        self.assertEqual((row["rounds"], row["model_calls"], row["output_tokens"]), (0, 1, 20))
+        self.assertIsNone(row["input_tokens"])
+        self.assertIsNone(row["cache_read_input_tokens"])
+        with redirect_stdout(io.StringIO()) as out:
+            report.print_text(s)
+        self.assertNotIn("private", out.getvalue())
+        self.assertIn("?", out.getvalue())
+
+    def test_codex_environment_context_is_not_a_new_round(self):
+        def ev(payload):
+            return {"type": "event_msg", "payload": payload}
+        def usage(total):
+            return ev({"type": "token_count", "info": {"total_token_usage": {"total_tokens": total},
+                       "last_token_usage": {"input_tokens": 10, "cached_input_tokens": 2, "output_tokens": 1}}})
+        def runtime(text):
+            return {"type": "response_item", "payload": {"type": "message", "role": "user",
+                    "content": [{"type": "input_text", "text": text}]}}
+        s = self.run_lines([
+            {"type": "session_meta", "payload": {}},
+            ev({"type": "user_message", "message": source("supervision") + "request"}), usage(11),
+            runtime("<environment_context>private context</environment_context>"), usage(22),
+            runtime("<codex_internal_context>private context</codex_internal_context>"), usage(33),
+        ])
+        self.assertEqual((s["by_kind"]["supervision"]["rounds"], s["by_kind"]["supervision"]["model_calls"]), (1, 3))
+        self.assertNotIn("owner", s["by_kind"])
+        self.assertNotIn("private context", json.dumps(s))
+
+    def test_codex_image_wrappers_do_not_duplicate_user_round(self):
+        raw = {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [
+            {"type": "input_text", "text": "hello"}, {"type": "input_text", "text": "image metadata"},
+            {"type": "input_image", "image_url": "data:image/png;base64,example"}, {"type": "input_text", "text": "</image>"}]}}
+        item = {"type": "event_msg", "payload": {"type": "item_completed", "item": {"type": "UserMessage", "id": "u",
+                "content": [{"type": "text", "text": "hello"}, {"type": "local_image", "path": "/private"}]}}}
+        s = self.run_lines([{"type": "session_meta", "payload": {}}, raw, item])
+        self.assertEqual(s["by_kind"]["owner"]["rounds"], 1)
+        self.assertEqual(s["by_kind"]["owner"]["typed_bytes"], 5)
+        self.assertNotIn("private", json.dumps(s))
+
+    def test_mixed_transcripts_report_unknown_total_without_erasing_known_row(self):
+        with tempfile.TemporaryDirectory() as d:
+            claude = Path(d) / "c.jsonl"
+            codex = Path(d) / "rollout.jsonl"
+            claude.write_text("\n".join(json.dumps(x) for x in [user(source("followup") + "x"), reply("m", cache_write=7)]))
+            codex.write_text("\n".join(json.dumps(x) for x in [
+                {"type": "session_meta", "payload": {}},
+                {"type": "event_msg", "payload": {"type": "user_message", "message": "owner"}},
+                {"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"total_tokens": 10},
+                 "last_token_usage": {"input_tokens": 8, "cached_input_tokens": 4, "output_tokens": 2}}}},
+            ]))
+            r = report.Report()
+            r.add_file(str(claude))
+            r.add_file(str(codex))
+            s = r.summary()
+            self.assertEqual(s["by_kind"]["followup"]["cache_creation_input_tokens"], 7)
+            self.assertIsNone(s["total"]["cache_creation_input_tokens"])
+            self.assertIsNone(s["by_kind"]["followup"]["cache_creation_input_tokens_share"])
+
+    def test_default_rollouts_only_include_assistant_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            codex = home / "codex"
+            sessions = codex / "sessions" / "2026" / "11" / "16"
+            sessions.mkdir(parents=True)
+            def write(name, cwd):
+                p = sessions / name
+                p.write_text(json.dumps({"type": "session_meta", "payload": {"cwd": str(cwd)}}) + "\n")
+                return str(p)
+            expected = write("rollout-assistant.jsonl", home / ".persona" / "assistant")
+            write("rollout-other.jsonl", home / "other")
+            with patch.dict("os.environ", {"HOME": d, "CODEX_HOME": str(codex)}):
+                self.assertEqual(list(report.default_codex_files()), [expected])
 
 
 if __name__ == "__main__":

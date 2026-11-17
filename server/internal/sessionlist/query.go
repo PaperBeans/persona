@@ -145,6 +145,7 @@ func (f filters) matches(r *record) bool {
 		(f.PaneSource == "" || f.PaneSource == v.PaneSource) &&
 		(f.ExcludePaneSource == "" || f.ExcludePaneSource != v.PaneSource) &&
 		(f.Waiting == "" || (f.Waiting == "1") == waitingOf(v, f.Roots)) &&
+		(f.JustFinished == "" || (f.JustFinished == "1") == justFinishedOf(v, f.Roots)) &&
 		(f.Manager == "" || f.Manager == r.owner) &&
 		(f.Provider == "" || f.Provider == v.Provider) &&
 		(f.Todo == "" || f.Todo == todo || f.Todo == TodoNone && todo == "") &&
@@ -209,6 +210,12 @@ func waitingOf(v Item, roots bool) bool {
 	return v.BackgroundWaiting && (!roots || v.Fold == nil || v.Fold.BackgroundWaiting)
 }
 
+// justFinishedOf is whether v is Just finished, as it is filtered and counted: only while it shows idle (by its folded
+// state for Options.Roots: a parent whose children work is not).
+func justFinishedOf(v Item, roots bool) bool {
+	return v.JustFinished && stateOf(v, roots) == "idle"
+}
+
 func addCount(c *Counts, v Item, roots bool, delta int) {
 	c.Total += delta
 	state := stateOf(v, roots)
@@ -226,6 +233,9 @@ func addCount(c *Counts, v Item, roots bool, delta int) {
 	}
 	if waitingOf(v, roots) {
 		c.BackgroundWaiting += delta
+	}
+	if justFinishedOf(v, roots) {
+		c.JustFinished += delta
 	}
 	for _, pair := range []struct {
 		m   map[string]int

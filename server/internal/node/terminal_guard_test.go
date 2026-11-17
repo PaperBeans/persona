@@ -20,10 +20,12 @@ var paneClosers = map[string]string{
 	"closePane":       "panes.close: the user closes a pane or tab",
 	"retire":          "session.retire with close_terminal: the user's Archive and close",
 	"close":           "n.close itself",
+	"closeAfterExit":  "session.close after its Agent exits: the user's Close of its marked Herdr shell (#9648)",
 	"closeCodexStart": "a Codex start abandoned before Codex ran",
 	"closeNewTab":     "a start whose command never ran",
 	"failedTerminal":  "a Herdr App terminal whose launch failed",
 	"closeFinished":   "panes.close_finished: the user's Close finished terminals (stopped.go)",
+	"closeStalledTab": "the user's retry of a stalled Orca start: its kept tab, with no agent in it, whose one launch is used (#9534)",
 }
 
 func TestOnlyUserActionsClosePanes(t *testing.T) {
@@ -46,6 +48,14 @@ func TestOnlyUserActionsClosePanes(t *testing.T) {
 			if !ok || fn.Body == nil {
 				continue
 			}
+			nodeMethod, keptClaimMethod := false, false
+			if fn.Recv != nil {
+				if ptr, ok := fn.Recv.List[0].Type.(*ast.StarExpr); ok {
+					typ, _ := ptr.X.(*ast.Ident)
+					nodeMethod = typ != nil && typ.Name == "Node"
+					keptClaimMethod = typ != nil && typ.Name == "keptClaim"
+				}
+			}
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				c, ok := n.(*ast.CallExpr)
 				if !ok {
@@ -56,7 +66,9 @@ func TestOnlyUserActionsClosePanes(t *testing.T) {
 					return true
 				}
 				recv, _ := sel.X.(*ast.Ident)
-				closes := sel.Sel.Name == "close" && recv != nil && recv.Name == "n" ||
+				closes := (sel.Sel.Name == "close" || sel.Sel.Name == "closeAfterExit") && recv != nil && recv.Name == "n" ||
+					sel.Sel.Name == "PaneClose" && nodeMethod ||
+					sel.Sel.Name == "guardedClose" && (nodeMethod || keptClaimMethod) ||
 					sel.Sel.Name == "Close" && len(c.Args) == 4 // host.Organizer.Close(ctx, pane, workspace, tab)
 				if closes && !slices.Contains(found, fn.Name.Name) {
 					found = append(found, fn.Name.Name)

@@ -350,9 +350,7 @@ struct AssistantModelSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "Close")) { dismiss() }.lineLimit(1)
-                }
+                SheetClose { dismiss() }
             }
             .refreshable { await panel.load(refresh: true) }
             .task { await panel.load() }

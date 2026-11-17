@@ -39,7 +39,8 @@ import java.io.File
 
 /**
  * A source or kind filter that leaves nothing open says so, with the filter mark and Clear filters, instead of the
- * check and "All caught up" (#7550). The bay with nothing, and an inbox that has never had an item, stay as they were.
+ * check and "All caught up" (#7550). A chosen section with nothing says so in its own words (#9053), and an inbox that has
+ * never had an item stays as it was.
  * Shots: Glass, Brief and Board, light and dark, in `build/inbox-filtered-empty-shots/`.
  */
 @RunWith(AndroidJUnit4::class)
@@ -104,10 +105,11 @@ class InboxFilteredEmptyShotsTest {
         gone("Nothing open matches these filters", "All caught up")
     }
 
-    @Test fun aBayWithNothingStillSaysAllCaughtUp() {
-        show(listOf(fyi), InboxPreferences(section = "action"))
-        see("All caught up", "Nothing under this filter.")
-        gone("Nothing open matches these filters", "Clear filters")
+    @Test fun aChosenSectionWithNothingSaysSoInItsOwnWords() {
+        // Needs you, as the Inbox opens, with FYI still holding an item: not "All caught up" (#9053).
+        show(listOf(fyi))
+        see("Nothing needs you", "The rest are in the other sections above.")
+        gone("All caught up", "Nothing open matches these filters", "Clear filters")
     }
 
     @Test fun anInboxWithNoItemsStillSaysItIsEmpty() {

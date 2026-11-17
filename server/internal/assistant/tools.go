@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -35,16 +34,18 @@ var toolNames = []string{"ask_user", "notify_user", "supervision_finish", "sched
 	"model_profiles_list", "model_profile_get", "model_profile_switch", "model_profile_rollback",
 	"repositories_list", "repository_get", "repository_add", "view_show", "view_update", "view_get",
 	"conversations_list", "conversation_read", "conversation_rename", "conversation_archive", "conversation_unarchive",
+	"conversation_tags_set",
 	"conversation_new", "conversation_send", "task_plan", "task_plan_withdraw", "task_review", "task_scope", "task_decided", "task_start_screen", "task_start_keys", "task_retry",
 	"todo_repositories_get", "todo_repositories_set", "todo_repository_links_set", "todo_repository_links_add", "todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete", "concern_report",
 	"direction_name", "leader_progress"}
 
 // Tools are the assistant's tools (assistant.tools).
 func (s *Service) Tools(ctx context.Context) []proto.Tool {
-	if s.urgentOn(ctx) { // only while the owner has urgent calls on (urgent_call.go)
-		return toolsNamed(append(slices.Clip(toolNames), "urgent_call"))
+	tools := toolsNamed(toolNames)
+	if s.urgentOn(ctx) {
+		tools = append(tools, toolsNamed([]string{"urgent_call"})...)
 	}
-	return toolsNamed(toolNames)
+	return append(tools, s.knowledgeFolderTools(ctx)...)
 }
 
 // toolsNamed are the MCP tools of these names, as prompts/mcp has them.
@@ -174,6 +175,12 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		return s.toolLeaderProgress(ctx, self, args)
 	case "concern_report":
 		return s.toolConcernReport(ctx, machine, self, args) // concerns.go
+	case knowledgeSearchTool, knowledgeReadTool:
+		_, guest, err := s.guestOf(ctx, machine, self)
+		if err != nil || guest || s.isWorkMachine(machine) || isOutwardReader(ctx) {
+			return "", errors.New("remote knowledge folders are only available in private sessions")
+		}
+		return s.toolKnowledgeFolder(ctx, name, args)
 	case "kb_search", "kb_list", "kb_get", "kb_update":
 		return s.toolKB(ctx, name, args)
 	case "kb_history_plan", "kb_history_status", "kb_history_stop", "kb_history_resume":
@@ -255,6 +262,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		return s.toolConversationRename(ctx, self, args)
 	case "conversation_archive", "conversation_unarchive":
 		return s.toolConversationArchive(ctx, self, args, name == "conversation_archive")
+	case "conversation_tags_set":
+		return s.toolConversationTagsSet(ctx, self, args)
 	case "conversation_new":
 		return s.toolConversationNew(ctx, self, args)
 	case "conversation_send":
@@ -565,7 +574,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			a.Effort = ""
 		}
 		// The admission gate refuses a too-busy computer before the user is asked to approve anything.
-		if err := s.checkAgentStart(ctx, am.ID); err != nil {
+		gated, _ := run["launcher"].(string)
+		if err := s.checkAgentStart(ctx, am.ID, s.startLauncher(ctx, gated)); err != nil {
 			return "", fmt.Errorf("%w; no agent was started", err)
 		}
 		branch := strings.TrimSpace(a.Worktree.Branch)
@@ -695,7 +705,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		}
 		// Last look on the machine it will really start on (a health detour may have changed am): re-check and hold
 		// its admission slot across the session.start call.
-		release, err := s.admitAgentStart(sctx, am.ID)
+		final, _ := params["launcher"].(string)
+		release, err := s.admitAgentStart(sctx, am.ID, s.startLauncher(ctx, final))
 		if err != nil {
 			return "", fmt.Errorf("%w; no agent was started", err)
 		}
@@ -1199,7 +1210,11 @@ func (s *Service) describeAgents(ctx context.Context, state, machine, query stri
 		} else if ix.Kind == proto.IxScreen {
 			what = "终端对话框等你处理"
 		}
-		k := [2]string{ix.MachineID, ix.SessionID}
+		session := ix.SessionID
+		if ix.FoldedUnder != "" {
+			session = ix.FoldedUnder
+		}
+		k := [2]string{ix.MachineID, session}
 		what += " (interaction_id=" + ix.ID + ")"
 		pending[k] = append(pending[k], clip(what, 400))
 	}
@@ -1222,9 +1237,10 @@ func (s *Service) describeAgents(ctx context.Context, state, machine, query stri
 		}
 		list, muted, _ := s.sessionsMuted(ctx, m.ID)
 		for _, c := range list {
-			if c.Assistant {
+			if c.Assistant || c.FoldedUnder() != "" {
 				continue
 			}
+			c.State = c.FoldedState()
 			// Archived ones are out of the apps' lists: only "archived" lists them, and "all" with them marked.
 			switch state {
 			case "all":

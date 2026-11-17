@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   below,
   columns,
@@ -126,6 +130,47 @@ describe("diff", () => {
     const parts = splitDiff(two);
     expect(Object.keys(parts)).toEqual(["Sources/App/main.swift", "my docs/a b.md"]);
     expect(parseDiff(parts["my docs/a b.md"]).filter((l) => l.kind === "add")).toEqual([{ kind: "add", text: "y", new: 2 }]);
+  });
+
+  it.each([
+    ["say\"hello.ts", String.raw`"b/say\"hello.ts"`],
+    ["a\tb.ts", String.raw`"b/a\tb.ts"`],
+    ["a\\b.ts", String.raw`"b/a\\b.ts"`],
+    ["a\nb.ts", String.raw`"b/a\nb.ts"`],
+    ["a\x07\b\v\f\r\x1b\x7fb.ts", String.raw`"b/a\a\b\v\f\r\033\177b.ts"`],
+    ["café.ts", String.raw`"b/caf\303\251.ts"`],
+    ["你好\t.ts", String.raw`"b/你好\t.ts"`],
+    ['\uFEFFsay"hello.ts', String.raw`"b/\357\273\277say\"hello.ts"`],
+    ["literal\\141.ts", String.raw`"b/literal\\141.ts"`],
+  ])("keeps the exact chunk for Git-quoted path %j", (path, target) => {
+    const chunk = `diff --git a/before.ts ${target}\n--- a/before.ts\n+++ ${target}\n@@ -1 +1 @@\n-before\n+after\n`;
+    const following = "diff --git a/next.ts b/next.ts\nnew file mode 100644\n--- /dev/null\n+++ b/next.ts\n@@ -0,0 +1 @@\n+next\n";
+    const parts = splitDiff(chunk + following);
+    expect(Object.keys(parts)).toEqual([path, "next.ts"]);
+    expect(parts[path]).toBe(chunk.slice(0, -1));
+    expect(parts["next.ts"]).toBe(following);
+    expect(parseDiff(parts[path]).filter((line) => line.kind === "add")).toEqual([{ kind: "add", text: "after", new: 1 }]);
+  });
+
+  it("maps an actual Git-produced quoted new-file header", () => {
+    const dir = mkdtempSync(join(tmpdir(), "persona-quoted-diff-"));
+    try {
+      const path = 'say"hello.ts';
+      writeFileSync(join(dir, path), "new content\n");
+      const result = spawnSync("git", ["-c", "core.quotepath=off", "diff", "--no-index", "--", "/dev/null", path], { cwd: dir, encoding: "utf8", timeout: 10_000 });
+      expect(result.status).toBe(1); // git diff reports a difference
+      expect(result.stderr).toBe("");
+      expect(splitDiff(result.stdout)[path]).toBe(result.stdout);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['renamed"file.ts', 'diff --git a/old.ts "b/renamed\\"file.ts"\nsimilarity index 100%\nrename from old.ts\nrename to "renamed\\"file.ts"\n'],
+    ["gone\tfile.ts", 'diff --git "a/gone\\tfile.ts" "b/gone\\tfile.ts"\ndeleted file mode 100644\n--- "a/gone\\tfile.ts"\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone\n'],
+  ])("preserves a rename or deletion chunk for %j", (path, diff) => {
+    expect(splitDiff(diff)).toEqual({ [path]: diff });
   });
 });
 

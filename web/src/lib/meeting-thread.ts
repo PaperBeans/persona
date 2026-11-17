@@ -23,8 +23,6 @@ export interface MeetingLine {
 }
 
 export type ThreadEntry =
-  /** The room's first message (the meeting header): Persona joined. */
-  | { kind: "joined"; id: string; ts?: string }
   /** A batch of live lines. */
   | { kind: "lines"; id: string; ts?: string; lines: MeetingLine[] }
   /** The end batch: the meeting ended (after the batch's last lines, when it had any). */
@@ -115,7 +113,9 @@ export function roomThread(items: Item[], recordingId: string, asks: RecordingAs
       const { text, contexts } = parseUserText(it.text ?? "");
       const block = contexts.find((c) => c.kind === "context");
       if ((it.client_msg_id ?? "").toLowerCase() === header || (sourced && block && isHeader(block.text))) {
-        out.push({ kind: "joined", id: it.id, ts: it.ts });
+        // The header shows nothing (#9411): a meeting begun with Persona as the note-taker had nobody join, and Persona
+        // invited in or taken out later is the phone's to know, so the web says neither.
+        continue;
       } else if (sourced && (ask || /^What was just said\b/.test(block?.title ?? ""))) {
         const at = byId.get(ask ?? "")?.at;
         const clock = /\(([\d:]+)\)\s*$/.exec(block?.title ?? "")?.[1] ?? (typeof at === "number" ? meetingClock(at) : "");

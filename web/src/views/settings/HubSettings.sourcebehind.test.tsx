@@ -54,4 +54,11 @@ describe("Settings › Hub update source", () => {
     expect(text).toContain(t("settings-hubsettings.up_to_date"));
     expect(text).not.toContain("update.url");
   });
+
+  it("keeps the stopped-source warning beside a failed-check error", async () => {
+    const text = await render(status({ source_behind: true, error: "Fixture check failed" }));
+    expect(text).toContain("update.url");
+    expect(text).toContain("Fixture check failed");
+    expect(text).not.toContain(t("settings-hubsettings.up_to_date"));
+  });
 });

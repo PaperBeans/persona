@@ -340,6 +340,8 @@ export function promptKey(text) {
  */
 export function rowStatus(agent, o = {}) {
   if ((agent?.pendingPermissions?.length ?? 0) > 0) return 'blocked'
+  // A positive inventory summary is work even before its details arrive (or while that read fails).
+  if (o.backgroundPending) return 'working'
   switch (agent?.status) {
     case 'running':
     case 'initializing':
@@ -463,7 +465,7 @@ export function agentRow(agent, o = {}) {
     session_id: id,
     title: (typeof agent.title === 'string' && agent.title.trim()) || basename(cwd),
     cwd,
-    status: o.archived ? 'offline' : rowStatus(agent, { quiet: o.quiet, fleet: (o.fleet?.length ?? 0) > 0 }),
+    status: o.archived ? 'offline' : rowStatus(agent, { quiet: o.quiet, fleet: (o.fleet?.length ?? 0) > 0, backgroundPending: o.backgroundPending }),
     updated_at: new Date(Date.parse(agent.updatedAt) || Date.now()).toISOString(),
     rev: Date.parse(agent.updatedAt) || 0,
     space_id: space ?? (agent.workspaceId || cwd),
@@ -531,9 +533,21 @@ export function agentRow(agent, o = {}) {
     row.parent_session_id = o.parent
   }
   // The agents it created that have not finished are its background work: its own turn ended, and theirs wake it.
-  const fleet = (o.fleet ?? []).map(backgroundOf).filter(Boolean)
-  if (fleet.length) row.background = fleet
+  const fleet = o.archived ? [] : (o.fleet ?? []).map(backgroundOf).filter(Boolean)
+  const native = o.archived ? [] : (o.nativeBackground ?? []).map(nativeBackgroundOf).filter(Boolean)
+  const tasks = [...new Map([...native, ...fleet].map((task) => [task.id, task])).values()]
+  if (tasks.length) row.background = tasks
   return row
+}
+
+/** Native provider jobs retain their IDs so the node can merge Claude's richer transcript copy. */
+export function nativeBackgroundOf(item) {
+  if (typeof item?.id !== 'string' || !item.id.trim() || !Number.isFinite(Date.parse(item.startedAt))) return undefined
+  return {
+    id: item.id, kind: item.kind === 'agent' ? 'agent' : 'shell', started_at: ts(item.startedAt),
+    ...(typeof item.description === 'string' && item.description.trim() ? { description: snippet(item.description) } : {}),
+    ...(typeof item.command === 'string' && item.command ? { command: item.command } : {}),
+  }
 }
 
 /** A delegated agent that has not finished, as a background task of the agent that created it (proto.BackgroundTask). */

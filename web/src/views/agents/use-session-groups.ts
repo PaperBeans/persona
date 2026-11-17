@@ -78,6 +78,8 @@ export interface SessionGroupsQuery {
   event: "sessions_list" | "agents";
   /** By to-do: the to-dos' order and titles (the hub counts them by id). */
   todos?: TodoNames;
+  /** The hub lists the Just finished rows apart (`sessions_just_finished`): By state draws them a section (#9751). */
+  justFinished?: boolean;
 }
 
 export interface SessionGroups {
@@ -89,7 +91,7 @@ export interface SessionGroups {
   retry: () => void;
 }
 
-export function useSessionGroups({ dimension, catalog, countsPath, scope, facets, facetQuery, facetsError = "", retryFacets, waiting, event, todos }: SessionGroupsQuery): SessionGroups {
+export function useSessionGroups({ dimension, catalog, countsPath, scope, facets, facetQuery, facetsError = "", retryFacets, waiting, event, todos, justFinished = false }: SessionGroupsQuery): SessionGroups {
   const fromCatalog = catalog && (dimension === "project" || dimension === "group");
   const query = useMemo(() => filterQuery(scope), [scope]);
   // the groups' own counts are the parent's facets when no state narrows them: one read serves both
@@ -113,11 +115,11 @@ export function useSessionGroups({ dimension, catalog, countsPath, scope, facets
       return { groups, total: c ? c.total : null, error: catalogRead.error ?? "", retry: catalogRead.retry };
     }
     const counts = shared ? facets : countsRead.value ?? null;
-    const groups = counts ? countGroups(counts, dimension, { machine: scope.machine_id, needs: badge ? countsNeeds.value : null, todos }) : null;
+    const groups = counts ? countGroups(counts, dimension, { machine: scope.machine_id, needs: badge ? countsNeeds.value : null, todos, justFinished }) : null;
     // from the facets: their failure while there are none (a later failed refresh keeps the last ones, as a read does)
     if (shared) return { groups, total: counts ? counts.total : null, error: counts ? "" : facetsError, retry: retryFacets ?? (() => {}) };
     return { groups, total: counts ? counts.total : null, error: countsRead.error ?? "", retry: countsRead.retry };
     // the retry functions are new on each render and do the same thing
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dimension, fromCatalog, shared, badge, facets, facetsError, scope, catalogRead.value, catalogRead.error, countsRead.value, countsRead.error, countsNeeds.value, todos]);
+  }, [dimension, fromCatalog, shared, badge, facets, facetsError, scope, catalogRead.value, catalogRead.error, countsRead.value, countsRead.error, countsNeeds.value, todos, justFinished]);
 }

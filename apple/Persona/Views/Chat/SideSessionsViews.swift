@@ -73,7 +73,7 @@ struct SideSessionsSheet: View {
             .navigationTitle(String(localized: "Side Sessions"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done [Extension System Presentation c0b3fb]") { dismiss() } }
+                SheetClose { dismiss() }
             }
         }
         .presentationDetents([.medium, .large])

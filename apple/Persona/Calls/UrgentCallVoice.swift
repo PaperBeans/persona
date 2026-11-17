@@ -11,78 +11,166 @@ import Speech
 /// which LiveCommunicationKit activated (`.playAndRecord`, `.voiceChat`): it never sets a category of its own.
 /// What the call's turns speak and hear with: `UrgentCallVoice` on a call, a written-out one in the tests.
 @MainActor protocol UrgentCallSpeech: AnyObject {
-    /// Says `text` and returns once it was said.
+    /// Says `text` and returns once it was said, or as soon as `stop` cut it (while its speech was fetched or played).
     func say(_ text: String) async
     /// What the owner said once they stopped for a moment; nil when nothing was heard.
     func listen() async -> String?
+    /// Stops whatever it is saying or hearing: a `say` or `listen` in progress returns.
     func stop()
+    /// Stops hearing only (the call muted): a `listen` in progress returns, what is being said goes on.
+    func stopListening()
     /// Whether it can hear at all (the microphone and speech recognition allowed); false: the call works by taps.
     var canHear: Bool { get }
 }
 
 @MainActor final class UrgentCallVoice: UrgentCallSpeech {
+    /// The hub's speech voice saying `text` in `lang`, streamed; nil when no extension offers one (the phone's voice
+    /// says it then).
+    typealias Speech = @MainActor (_ text: String, _ lang: String) async throws -> VoiceSpeech?
+
     private static let log = Logger(subsystem: "persona", category: "urgent-call")
-    private let device = MeetingDeviceVoice()
-    private var player: MeetingVoicePlayer?
+    private let device: any MeetingDeviceSpeech
+    private let makePlayer: @MainActor () -> any MeetingVoicePlayback
+    /// The tests' speech; nil: the hub's (`MeetingVoiceRoutes`).
+    private let fetch: Speech?
+    private var player: (any MeetingVoicePlayback)?
     private var route: MeetingVoiceRoute?
     private var routeRead = false
     private var hearing: Hearing?
+    /// The line being said: its speech fetched, then played (`stop` cancels it).
+    private var speaking: Task<Void, Never>?
+    /// The hub's speech being fed to the player.
+    private var feeding: Task<Void, Never>?
+    /// Returns the `say` in progress: its line was said, or cut.
+    private var sayOver: (@MainActor () -> Void)?
+    /// Ends the wait for the player or the phone's voice to finish the line: neither calls back once stopped.
+    private var playOver: (@MainActor () -> Void)?
+    /// Moves on at every line, so an older one's end does not end the next.
+    private var line = 0
 
     /// The language Persona speaks and hears in: the app's.
     let language: String
 
-    init(language: String = LanguageStore.shared.launched) {
+    init(language: String = LanguageStore.shared.launched, device: any MeetingDeviceSpeech = MeetingDeviceVoice(),
+         player: @escaping @MainActor () -> any MeetingVoicePlayback = { MeetingVoicePlayer() }, speech: Speech? = nil) {
         self.language = language
+        self.device = device
+        makePlayer = player
+        fetch = speech
     }
 
-    /// Says `text` and returns once it was said (or cut by `stop`).
+    /// Says `text` and returns once it was said, or at once when `stop` cuts it: while the hub's speech is still being
+    /// fetched, played, or the phone's voice says it.
     func say(_ text: String) async {
+        // One line at a time: one still on (its turn was replaced by a tap) is cut.
+        if sayOver != nil { cutSpeech() }
+        line += 1
+        let line = line
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            var resumed = false
+            let over: @MainActor () -> Void = {
+                guard !resumed else { return }
+                resumed = true
+                done.resume()
+            }
+            sayOver = over
+            // Main-actor isolation said, not inherited through the continuation's body (Swift 6.2 resolves that
+            // call to another overload than 6.4).
+            speaking = Task { @MainActor [weak self] in
+                await self?.speakOut(text)
+                over()
+            }
+        }
+        if self.line == line {
+            sayOver = nil
+            speaking = nil
+        }
+    }
+
+    /// The line in the hub's speech voice when an extension offers one, else (or when it could not) the phone's.
+    private func speakOut(_ text: String) async {
+        let lang = Self.speechLanguage(language)
+        do {
+            if let speech = try await hubSpeech(text, lang: lang) {
+                guard !Task.isCancelled else { return }
+                if await play(speech) { return }
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            Self.log.notice("urgent call: the speech voice did not speak: \(error.localizedDescription, privacy: .public)")
+        }
+        guard !Task.isCancelled else { return }
+        let voice = MeetingSpeaker.voice(lang: nil, text: text, fallback: lang)
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            var resumed = false
+            let over: @MainActor () -> Void = {
+                guard !resumed else { return }
+                resumed = true
+                done.resume()
+            }
+            playOver = over
+            device.speak(text, voice: voice) { over() }
+        }
+    }
+
+    private func hubSpeech(_ text: String, lang: String) async throws -> VoiceSpeech? {
+        if let fetch { return try await fetch(text, lang) }
         if !routeRead {
             routeRead = true
             route = await MeetingVoiceRoutes.shared.route()
         }
-        if let route, let speech = route.speech, let api = route.api, await sayAloud(text, api: api, extensionID: route.extensionID, speech: speech) {
-            return
-        }
-        let voice = MeetingSpeaker.voice(lang: nil, text: text, fallback: Self.speechLanguage(language))
-        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            device.speak(text, voice: voice) { done.resume() }
+        guard let route, let speech = route.speech, let api = route.api else { return nil }
+        return try await api.speechSpeak(route.extensionID, contribution: speech, text: text, lang: lang)
+    }
+
+    /// Plays the hub's speech; false when it could not, so the phone's voice says the line instead. Cut by `stop`: true.
+    private func play(_ speech: VoiceSpeech) async -> Bool {
+        let player = makePlayer()
+        self.player = player
+        return await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
+            var resumed = false
+            let over: @MainActor (Bool) -> Void = { ok in
+                guard !resumed else { return }
+                resumed = true
+                done.resume(returning: ok)
+            }
+            playOver = { over(true) }
+            do {
+                try player.start(rate: speech.rate, started: {}, ended: { over(true) })
+            } catch {
+                over(false)
+                return
+            }
+            feeding = Task { @MainActor in
+                do {
+                    for try await chunk in speech.audio {
+                        guard !Task.isCancelled else { return }
+                        player.play(chunk)
+                    }
+                    if !Task.isCancelled { player.finish() }
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    player.stop()
+                    over(false)
+                }
+            }
         }
     }
 
-    /// The speech extension's voice; false when it could not speak, so the phone's voice says it instead.
-    private func sayAloud(_ text: String, api: APIClient, extensionID: String, speech: String) async -> Bool {
-        do {
-            let audio = try await api.speechSpeak(extensionID, contribution: speech, text: text, lang: Self.speechLanguage(language))
-            let player = MeetingVoicePlayer()
-            self.player = player
-            return try await withCheckedThrowingContinuation { (done: CheckedContinuation<Bool, Error>) in
-                var resumed = false
-                let finish: @MainActor (Bool) -> Void = { ok in
-                    guard !resumed else { return }
-                    resumed = true
-                    done.resume(returning: ok)
-                }
-                do {
-                    try player.start(rate: audio.rate, started: {}, ended: { finish(true) })
-                } catch {
-                    finish(false)
-                    return
-                }
-                Task { @MainActor in
-                    do {
-                        for try await chunk in audio.audio { player.play(chunk) }
-                        player.finish()
-                    } catch {
-                        player.stop()
-                        finish(false)
-                    }
-                }
-            }
-        } catch {
-            Self.log.notice("urgent call: the speech voice did not speak: \(error.localizedDescription, privacy: .public)")
-            return false
-        }
+    /// The line being said stops: its fetch, its feed and its playing, and its `say` returns.
+    private func cutSpeech() {
+        speaking?.cancel()
+        speaking = nil
+        feeding?.cancel()
+        feeding = nil
+        device.stop()
+        player?.stop()
+        player = nil
+        let playing = playOver, saying = sayOver
+        playOver = nil
+        sayOver = nil
+        playing?()
+        saying?()
     }
 
     func listen() async -> String? { await hear(quiet: 1.6, longest: 20) }
@@ -116,11 +204,14 @@ import Speech
         return text.isEmpty ? nil : text
     }
 
-    /// Stops whatever it is saying or hearing (the call ended).
+    /// Stops whatever it is saying or hearing (the call ended, or went on hold).
     func stop() {
-        device.stop()
-        player?.stop()
-        player = nil
+        cutSpeech()
+        hearing?.stop()
+    }
+
+    /// Stops hearing (the call muted): what Persona says goes on.
+    func stopListening() {
         hearing?.stop()
     }
 
@@ -180,6 +271,8 @@ import Speech
     }
 
     func stop() {
+        // Over: the turn returns what it heard so far at its next look.
+        over = true
         if engine.isRunning {
             engine.stop()
             engine.inputNode.removeTap(onBus: 0)

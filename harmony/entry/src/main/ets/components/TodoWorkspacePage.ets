@@ -1,3 +1,7 @@
+import { IconActions } from '../design/IconActions';
+import { Symbols } from '../design/Symbols';
+import { Colors } from '../design/Colors';
+import { ButtonStyles, SelectStyles } from '../design/Controls';
 import { ComposeListItemV2, ContentItemV2 } from '@kit.ArkUI';
 import { ClientModel } from '../models/ClientModel';
 import { TodoWorkspace, TodoWorkspaceAgent, TodoWorkspaceGroup, TodoWorkspaceItem, TodoWorkspaceSection,
@@ -220,10 +224,12 @@ export struct TodoWorkspacePage {
   private targetCurrent(todo: TodoWorkspaceItem, generation: number, scope: string): boolean {
     return this.model.owns(generation, scope) && this.workspace.isSelected(todo);
   }
-  private todoSubtitle(group: TodoWorkspaceGroup): string {
+  private todoSubtitle(group: TodoWorkspaceGroup, includeState: boolean = false): string {
     const relatedCount = group.related().length;
     const state = tr('todo_state_' + group.state);
-    return relatedCount > 0 ? state + ' · ' + String(relatedCount + 1) + ' · ' + tr('todo_related') : state;
+    const visibleState = includeState || this.workspace.groupBy !== 'status' ? state : '';
+    const related = relatedCount > 0 ? tr('todo_related') + ' ' + String(relatedCount) : '';
+    return [visibleState, related].filter((value: string) => !!value).join(' · ');
   }
   private sectionTitle(section: TodoWorkspaceSection): string {
     if (this.workspace.groupBy === 'status' || section.title === 'todo_unsorted' || section.title === 'todo_no_thread')
@@ -360,6 +366,7 @@ export struct TodoWorkspacePage {
       ComposeListItemV2({ contentItemV2: new ContentItemV2({ primaryText: binding.value.lead.title,
         secondaryText: this.todoSubtitle(binding.value) }) })
     }.onClick(() => this.onOpenResource(this.workspace.todoResource(binding.value.lead)))
+      .accessibilityGroup(true).accessibilityText(binding.value.lead.title + ' · ' + this.todoSubtitle(binding.value, true))
       .id('todo.' + binding.value.lead.manager + '.' + binding.value.lead.id)
   }
 
@@ -369,21 +376,36 @@ export struct TodoWorkspacePage {
       .padding({ left: Tokens.page, right: Tokens.page, top: Tokens.inset, bottom: Tokens.fine })
   }
 
+  @Builder listFilters() {
+    Menu() {
+      MenuItemGroup({ header: tr('todo_filter_status') }) {
+        ForEach(this.statusOptions(), (option: SelectOption, index: number) => {
+          MenuItem({ content: option.value }).selected(this.statusIndex() === index).selectIcon(true)
+            .onClick(() => this.workspace.setStatusFilter(['all', 'needs_you', 'checking', 'working', 'followup', 'not_started', 'done'][index]))
+        }, (option: SelectOption) => JSON.stringify(option.value))
+      }
+      MenuItemGroup({ header: tr('todo_group_by') }) {
+        ForEach(this.groupOptions(), (option: SelectOption, index: number) => {
+          MenuItem({ content: option.value }).selected(this.groupIndex() === index).selectIcon(true)
+            .onClick(() => this.workspace.setGroupBy(['status', 'project', 'thread'][index]))
+        }, (option: SelectOption) => JSON.stringify(option.value))
+      }
+    }.width(Tokens.popupWidth)
+  }
+
   @Builder listContent() {
     Column() {
       Row({ space: Tokens.gap }) {
         Search({ value: this.workspace.search, placeholder: tr('todo_search') })
           .onChange((value: string) => this.workspace.setSearch(value)).layoutWeight(1).id('todos.search')
-        Button(tr('add')).onClick(() => this.workspace.startCreate()).height(Tokens.touch).id('todos.add')
+        Badge({ count: (this.workspace.statusFilter !== 'all' ? 1 : 0) + (this.workspace.groupBy !== 'status' ? 1 : 0),
+          style: { color: Colors.onAction, badgeColor: Colors.action, borderWidth: 0, borderColor: Color.Transparent, badgeSize: Tokens.body, fontSize: Tokens.caption } }) {
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(Symbols.filter).fontSize(Tokens.symbolFont).fontColor([Colors.link]) }
+          .attributeModifier(ButtonStyles.chrome).accessibilityText(tr('todo_filter_status') + ' · ' + this.statusOptions()[this.statusIndex()].value + ' · ' + this.groupOptions()[Math.max(0, this.groupIndex())].value)
+          .bindMenu(this.listFilters).id('todos.filters')
+        }
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(Symbols.plus).fontSize(Tokens.symbolFont).fontColor([Colors.link]) }.attributeModifier(ButtonStyles.chrome).accessibilityText(tr('add')).onClick(() => this.workspace.startCreate()).id('todos.add')
       }.padding({ left: Tokens.inset, right: Tokens.inset, top: Tokens.inset, bottom: Tokens.gap })
-      Row({ space: Tokens.gap }) {
-        Select(this.statusOptions()).selected(this.statusIndex()).value(this.statusOptions()[this.statusIndex()].value)
-          .onSelect((index: number) => this.workspace.setStatusFilter(['all', 'needs_you', 'checking', 'working', 'followup', 'not_started', 'done'][index]))
-          .layoutWeight(1).accessibilityText(tr('todo_filter_status')).id('todos.filter')
-        Select(this.groupOptions()).selected(Math.max(0, this.groupIndex())).value(this.groupOptions()[Math.max(0, this.groupIndex())].value)
-          .onSelect((index: number) => this.workspace.setGroupBy(['status', 'project', 'thread'][index]))
-          .layoutWeight(1).accessibilityText(tr('todo_group_by')).id('todos.group')
-      }.padding({ left: Tokens.inset, right: Tokens.inset, bottom: Tokens.inset })
       if (this.workspace.error) Text(tr(this.workspace.error)).fontSize(Tokens.meta)
         .fontColor($r('app.color.persona_danger')).padding(Tokens.inset).width('100%')
       List() {
@@ -392,7 +414,7 @@ export struct TodoWorkspacePage {
           ListItemGroup({ header: () => this.sectionHeader(section) }) {
             ForEach(section.rows, (binding: BoundRow<TodoWorkspaceGroup>) => this.todoRow(binding),
               (binding: BoundRow<TodoWorkspaceGroup>) => binding.key)
-          }.id(section.key)
+          }.divider({ strokeWidth: Tokens.hairline, startMargin: Tokens.page, endMargin: Tokens.page, color: Colors.divider }).id(section.key)
         }, (section: BoundTodoSection) => section.key)
         if (!this.sectionBindings.length && !this.workspace.loading) ListItem() {
           Text(tr(this.workspace.search ? 'no_results' : 'empty')).fontSize(Tokens.meta).padding(Tokens.page).width('100%')
@@ -473,7 +495,7 @@ export struct TodoWorkspacePage {
               (binding: BoundRow<TodoWorkspaceSpace>) => binding.key) }.height(Math.min(300, Tokens.touch * this.spaceBindings.length))
           }
 
-          Text(tr('todo_agents')).fontSize(Tokens.meta).width('100%')
+          if (this.activeAgentBindings.length || this.previousAgentBindings.length || !this.workspace.selected.isDone() && this.workspace.candidateSessions().length) Text(tr('todo_agents')).fontSize(Tokens.meta).width('100%')
           ForEach(this.activeAgentBindings, (binding: BoundRow<TodoWorkspaceAgent>) => this.agentRow(binding),
             (binding: BoundRow<TodoWorkspaceAgent>) => binding.key)
           if (this.previousAgentBindings.length) {
@@ -487,35 +509,34 @@ export struct TodoWorkspacePage {
 
           if (!this.workspace.selected.isDone()) {
             if (this.workspace.candidateSessions().length) {
-              Select(this.sessionOptions()).selected(Math.max(0, this.workspace.candidateSessions().findIndex((row: ResourceRow) => this.sessionKey(row) === this.workspace.selectedAgentKey)))
+              Select(this.sessionOptions()).attributeModifier(SelectStyles.inline).selected(Math.max(0, this.workspace.candidateSessions().findIndex((row: ResourceRow) => this.sessionKey(row) === this.workspace.selectedAgentKey)))
                 .value(this.selectedSession()?.title || tr('todo_choose_agent'))
                 .onSelect((index: number) => this.selectSession(index))
                 .accessibilityText(tr('todo_choose_agent')).width('100%')
-              Button(tr('todo_link_agent')).enabled(!!this.selectedSession() && !this.workspace.saving && !this.workspace.targetGone)
-                .onClick(() => this.confirmLinkAgent(this.workspace.selected)).height(Tokens.touch).width('100%')
+              Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('todo_link_agent')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('todo_link_agent', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('todo_link_agent')).bindTips(tr('todo_link_agent')).enabled(!!this.selectedSession() && !this.workspace.saving && !this.workspace.targetGone)
+                .onClick(() => this.confirmLinkAgent(this.workspace.selected))
             }
-            Button(tr('more'), { buttonStyle: ButtonStyleMode.TEXTUAL }).bindMenu(this.advancedMenu)
-              .enabled(!this.workspace.saving && !this.workspace.targetGone).height(Tokens.touch)
+            Button({ type: ButtonType.Circle }) { Image($r('sys.media.ohos_ic_public_more')).width(Tokens.symbol).height(Tokens.symbol).fillColor(Colors.link) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('more')).bindTips(tr('more')).bindMenu(this.advancedMenu)
+              .enabled(!this.workspace.saving && !this.workspace.targetGone)
             if (this.workspace.spaceChoices().length) {
-              Select(this.spaceOptions()).selected(Math.max(0, this.workspace.spaceChoices().findIndex((item: TodoWorkspaceSpaceChoice) => this.choiceKey(item) === this.workspace.selectedSpaceKey)))
+              Select(this.spaceOptions()).attributeModifier(SelectStyles.inline).selected(Math.max(0, this.workspace.spaceChoices().findIndex((item: TodoWorkspaceSpaceChoice) => this.choiceKey(item) === this.workspace.selectedSpaceKey)))
                 .value(this.selectedSpace()?.label || tr('todo_choose_project'))
                 .onSelect((index: number) => this.selectSpace(index))
                 .accessibilityText(tr('todo_choose_project')).width('100%')
-              Button(tr('todo_link_project')).enabled(!!this.selectedSpace() && !this.workspace.saving && !this.workspace.targetGone)
-                .onClick(() => this.confirmLinkSpace(this.workspace.selected)).height(Tokens.touch).width('100%')
+              Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('todo_link_project')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('todo_link_project', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('todo_link_project')).bindTips(tr('todo_link_project')).enabled(!!this.selectedSpace() && !this.workspace.saving && !this.workspace.targetGone)
+                .onClick(() => this.confirmLinkSpace(this.workspace.selected))
             }
           }
           if (this.workspace.error) Text(tr(this.workspace.error)).fontSize(Tokens.meta)
             .fontColor($r('app.color.persona_danger')).width('100%')
         }.alignItems(HorizontalAlign.Start).padding(Tokens.page).width('100%')
         else Text(tr(this.detailEmptyKey())).fontSize(Tokens.meta).padding(Tokens.page).width('100%')
-      }.layoutWeight(1).width('100%')
+      }.align(Alignment.TopStart).layoutWeight(1).width('100%')
       if (this.workspace.selected.id) Row({ space: Tokens.gap }) {
-        Button(this.completionLabel()).enabled(!this.workspace.saving && !this.workspace.targetGone)
-          .layoutWeight(1).height(Tokens.touch).onClick(() => this.changeCompletion())
-        Button(tr('edit')).enabled(!this.workspace.saving && !this.workspace.targetGone).layoutWeight(1).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.workspace.selected.isDone() && !this.workspace.selected.startError ? 'reopen' : 'todo_complete')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.onAction); else SymbolGlyph(IconActions.symbol(this.workspace.selected.isDone() && !this.workspace.selected.startError ? 'reopen' : 'todo_complete')).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.workspace.selected.isDone() && !this.workspace.selected.startError ? 'reopen' : 'todo_complete', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(this.completionLabel()).bindTips(this.completionLabel()).enabled(!this.workspace.saving && !this.workspace.targetGone).onClick(() => this.changeCompletion())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(Symbols.edit).fontSize(Tokens.symbolFont).fontColor([Colors.link]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('edit')).enabled(!this.workspace.saving && !this.workspace.targetGone)
           .onClick(() => this.workspace.beginEdit(this.workspace.selected))
-      }.padding(Tokens.inset).width('100%')
+      }.justifyContent(FlexAlign.End).padding(Tokens.inset).width('100%')
     }.width('100%').height('100%')
   }
 
@@ -527,11 +548,10 @@ export struct TodoWorkspacePage {
         .height(Tokens.inputExpanded).id('todos.notes')
       if (this.workspace.error) Text(tr(this.workspace.error)).fontColor($r('app.color.persona_danger')).width('100%')
       Row({ space: Tokens.gap }) {
-        Button(tr('cancel')).layoutWeight(1).height(Tokens.touch).onClick(() => this.workspace.closeEditor())
-        Button(tr('save')).layoutWeight(1).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('save')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('save', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('save')).bindTips(tr('save'))
           .enabled(!this.workspace.saving && !this.workspace.targetGone && !!this.workspace.titleDraft.trim())
           .onClick(() => this.workspace.save().catch(() => undefined)).id('todos.save')
-      }.width('100%')
+      }.width('100%').justifyContent(FlexAlign.End)
     }.padding(Tokens.page).width('100%')
   }
 

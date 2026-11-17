@@ -1337,6 +1337,255 @@ final class VNCTests: XCTestCase {
         return false
     }
 
+    /// Phone Screen (#9314) against a mock Mac that has it (MOCK_PHONE_SCREEN=1, TEST_RUNNER_PERSONA_PHONE_SCREEN=1): ⋯ ›
+    /// Mode › Phone Screen starts it at the picture's size, the window list opens, a tap puts a window there, the page
+    /// shows only that display, one finger scrolls it, and Mouse Mode again stops it.
+    @MainActor func testPhoneScreen() throws {
+        guard ProcessInfo.processInfo.environment["PERSONA_PHONE_SCREEN"] == "1" else {
+            throw XCTSkip("needs MOCK_PHONE_SCREEN=1 (TEST_RUNNER_PERSONA_PHONE_SCREEN=1)")
+        }
+        let (app, _) = try signedInMachinePage()
+        let screen = app.descendants(matching: .any)["vnc-screen"].firstMatch
+        XCTAssertTrue(screen.waitForExistence(timeout: 10))
+        let sheet = app.descendants(matching: .any)["phone-screen-windows"].firstMatch
+        // The mode is kept per Mac: an earlier run may have left Phone Screen on. Mouse Mode first.
+        if sheet.waitForExistence(timeout: 3) { app.buttons["sheet-close"].firstMatch.tap() }
+        app.buttons["vnc-more"].tap()
+        app.buttons["鼠标模式"].firstMatch.tap()
+        rest()
+        shot(app, "phone-screen-0-mouse")
+        app.buttons["vnc-more"].tap()
+        let item = app.buttons["手机屏"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "Phone Screen in ⋯:\n\(app.debugDescription)")
+        shot(app, "phone-screen-1-menu")
+        item.tap()
+
+        // The window list comes up by itself the first time, with the Mac's windows by app.
+        XCTAssertTrue(sheet.waitForExistence(timeout: 15), "the window list:\n\(app.debugDescription)")
+        let rows = app.buttons.matching(identifier: "phone-screen-window")
+        let dev = rows.matching(NSPredicate(format: "label == %@", "build — npm run dev")).firstMatch
+        XCTAssertTrue(dev.waitForExistence(timeout: 10), "the windows:\n\(app.debugDescription)")
+        XCTAssertTrue(rows.matching(NSPredicate(format: "label CONTAINS %@", "已最小化")).firstMatch.exists, "a minimized window says so")
+        rest()
+        shot(app, "phone-screen-2-windows")
+        hold("phone-screen-2-windows")
+        dev.tap()
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "the list closes once the window is there")
+        rest()
+        var calls = try mockState()["phone_screen"] as? [[String: Any]] ?? []
+        let start = calls.first { $0["op"] as? String == "start" }
+        XCTAssertNotNil(start, "started: \(calls)")
+        let w = start?["width"] as? Double ?? 0, h = start?["height"] as? Double ?? 0
+        XCTAssertTrue(w > 300 && h > w, "the picture's size, portrait: \(w)×\(h)")
+        XCTAssertTrue(calls.contains { $0["op"] as? String == "place" && $0["pid"] as? Int == 501 && $0["window"] as? Int == 12 }, "placed: \(calls)")
+        // Only the portrait display shows: the picture is taller than wide.
+        XCTAssertTrue(screen.frame.height > screen.frame.width, "\(screen.frame)")
+        shot(app, "phone-screen-3-window")
+        hold("phone-screen-3-window")
+
+        // One finger scrolls (wheel notches here: this mock's Mac has no Persona Input for pixels), never a drag.
+        let before = (try mockState()["clicks"] as? [[String: Any]] ?? []).count
+        screen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            .press(forDuration: 0.05, thenDragTo: screen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)))
+        rest(2)
+        let after = (try mockState()["clicks"] as? [[String: Any]] ?? []).dropFirst(before)
+        XCTAssertTrue(after.contains { $0["scroll"] != nil }, "a one-finger drag scrolls: \(Array(after))")
+        XCTAssertFalse(after.contains { $0["down"] as? Bool == true }, "a one-finger drag pressed the button: \(Array(after))")
+
+        // The Windows button opens the list again; Mouse Mode stops it.
+        app.buttons["phone-screen-windows-button"].tap()
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+        app.buttons["sheet-close"].firstMatch.tap()
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        app.buttons["vnc-more"].tap()
+        app.buttons["鼠标模式"].firstMatch.tap()
+        rest()
+        calls = try mockState()["phone_screen"] as? [[String: Any]] ?? []
+        XCTAssertEqual(calls.last?["op"] as? String, "stop", "\(calls)")
+    }
+
+    /// Phone Screen and the keyboard (#9500): the keyboard up and down 12 times sends no second `start` (the Mac never
+    /// rebuilds the display for it), and with the keyboard up the picture keeps the view's whole width instead of shrinking.
+    @MainActor func testPhoneScreenKeyboard() throws {
+        guard ProcessInfo.processInfo.environment["PERSONA_PHONE_SCREEN"] == "1" else {
+            throw XCTSkip("needs MOCK_PHONE_SCREEN=1 (TEST_RUNNER_PERSONA_PHONE_SCREEN=1)")
+        }
+        let (app, _) = try signedInMachinePage()
+        let screen = app.descendants(matching: .any)["vnc-screen"].firstMatch
+        XCTAssertTrue(screen.waitForExistence(timeout: 10))
+        let sheet = app.descendants(matching: .any)["phone-screen-windows"].firstMatch
+        if sheet.waitForExistence(timeout: 3) { app.buttons["sheet-close"].firstMatch.tap() }
+        app.buttons["vnc-more"].tap()
+        app.buttons["鼠标模式"].firstMatch.tap()
+        rest()
+        try mock(hub!, "/mock/screen-password?clear=1")
+        app.buttons["vnc-more"].tap()
+        app.buttons["手机屏"].firstMatch.tap()
+        XCTAssertTrue(sheet.waitForExistence(timeout: 15), "the window list:\n\(app.debugDescription)")
+        let rows = app.buttons.matching(identifier: "phone-screen-window")
+        rows.matching(NSPredicate(format: "label == %@", "build — npm run dev")).firstMatch.tap()
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        rest()
+        let keyboard = app.buttons["vnc-keyboard"]
+        func drawnWidth() -> Double {
+            let v = screen.value as? String ?? ""
+            guard let part = v.split(separator: ";").first(where: { $0.hasPrefix("drawn=") }) else { return 0 }
+            return Double(part.dropFirst("drawn=".count).split(separator: "x").first ?? "") ?? 0
+        }
+        let fullWidth = screen.frame.width
+        for i in 0..<12 {
+            keyboard.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "the keyboard came up (\(i))")
+            sleep(1)
+            if i == 0 {
+                shot(app, "phone-screen-4-keyboard")
+                hold("phone-screen-4-keyboard")
+            }
+            // The picture keeps the whole width with the keyboard up.
+            XCTAssertEqual(drawnWidth(), Double(fullWidth), accuracy: 1, "keyboard up \(i): \(String(describing: screen.value))")
+            keyboard.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard went down (\(i))")
+            sleep(1)
+        }
+        let calls = try mockState()["phone_screen"] as? [[String: Any]] ?? []
+        let starts = calls.filter { $0["op"] as? String == "start" }
+        XCTAssertEqual(starts.count, 1, "one start for the whole session, keyboard or not: \(calls)")
+        XCTAssertEqual(drawnWidth(), Double(fullWidth), accuracy: 1)
+        shot(app, "phone-screen-5-after-keyboard")
+        app.buttons["vnc-more"].tap()
+        app.buttons["鼠标模式"].firstMatch.tap()
+    }
+
+    /// Phone Screen's small window is portrait (#9659): the small window's source (DEBUG -showPiPSource; the iPhone
+    /// simulators have no picture in picture) shows only the portrait display, at its pixels on the Mac's picture (the
+    /// mock's 270 × 510), and lies over that display on the page; Mouse Mode again, all of the picture and wide again.
+    @MainActor func testPhoneScreenSmallWindowSourceIsPortrait() throws {
+        guard ProcessInfo.processInfo.environment["PERSONA_PHONE_SCREEN"] == "1" else {
+            throw XCTSkip("needs MOCK_PHONE_SCREEN=1 (TEST_RUNNER_PERSONA_PHONE_SCREEN=1)")
+        }
+        let (app, _) = try signedInMachinePage(["-showPiPSource", "YES"])
+        let screen = app.descendants(matching: .any)["vnc-screen"].firstMatch
+        let source = app.descendants(matching: .any)["vnc-pip-source"].firstMatch
+        XCTAssertTrue(source.waitForExistence(timeout: 10), "the source:\n\(app.debugDescription)")
+        let sheet = app.descendants(matching: .any)["phone-screen-windows"].firstMatch
+        if sheet.waitForExistence(timeout: 3) { app.buttons["sheet-close"].firstMatch.tap() }
+        app.buttons["vnc-more"].tap()
+        app.buttons["鼠标模式"].firstMatch.tap()
+        rest()
+        func cut() -> String { readoutField(source, "cut") ?? "?" }
+        XCTAssertTrue(waitFor { cut() == "0x0" && source.frame.width > source.frame.height }, "Mouse Mode: all of it, wide: \(cut()) \(source.frame)")
+
+        app.buttons["vnc-more"].tap()
+        app.buttons["手机屏"].firstMatch.tap()
+        XCTAssertTrue(sheet.waitForExistence(timeout: 15), "the window list:\n\(app.debugDescription)")
+        app.buttons.matching(identifier: "phone-screen-window").matching(NSPredicate(format: "label == %@", "build — npm run dev")).firstMatch.tap()
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(waitFor { cut() == "270x510" }, "the portrait display alone, at its pixels: \(cut())")
+        XCTAssertTrue(waitFor { source.frame.height > source.frame.width * 1.5 }, "portrait: \(source.frame)")
+        // Over the display as the page draws it (the picture fills the view's width upright).
+        let drawn = readoutField(screen, "drawn")?.split(separator: "x").compactMap { Double($0) } ?? []
+        XCTAssertEqual(drawn.count, 2, "\(String(describing: screen.value))")
+        if drawn.count == 2 {
+            XCTAssertEqual(Double(source.frame.width), drawn[0], accuracy: 1.5, "over the display: \(source.frame) vs \(drawn)")
+            XCTAssertEqual(Double(source.frame.height), drawn[1], accuracy: 1.5, "over the display: \(source.frame) vs \(drawn)")
+        }
+        shot(app, "phone-screen-pip-source")
+
+        app.buttons["vnc-more"].tap()
+        app.buttons["鼠标模式"].firstMatch.tap()
+        XCTAssertTrue(waitFor { cut() == "0x0" && source.frame.width > source.frame.height }, "Mouse Mode again: all of it, wide: \(cut()) \(source.frame)")
+    }
+
+    /// Phone Screen in the system's small window (#9659), on a stock iPad simulator (it has picture in picture; the iPhone
+    /// ones don't) with MOCK_PHONE_SCREEN=1 and TEST_RUNNER_PERSONA_PIP_ROUNDS=1: Picture in Picture from Phone Screen
+    /// comes up portrait and the Mac keeps the display (no `stop`); Restore brings the page back on it without a new
+    /// `start`; from Mouse Mode the small window is wide again.
+    @MainActor func testPhoneScreenPictureInPictureIsPortrait() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["PERSONA_PIP_ROUNDS"] == "1", env["PERSONA_PHONE_SCREEN"] == "1" else {
+            throw XCTSkip("needs picture in picture (a stock iPad simulator), TEST_RUNNER_PERSONA_PIP_ROUNDS=1 and MOCK_PHONE_SCREEN=1")
+        }
+        let (app, _) = try signedInMachinePage()
+        let on = app.descendants(matching: .any)["vnc-pip-on"].firstMatch, button = app.buttons["vnc-pip"].firstMatch
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let pip = springboard.windows.matching(NSPredicate(format: "identifier BEGINSWITH 'PIP' OR label == 'Picture in Picture' OR label == '画中画'")).firstMatch
+        let sheet = app.descendants(matching: .any)["phone-screen-windows"].firstMatch
+        if sheet.waitForExistence(timeout: 3) { app.buttons["sheet-close"].firstMatch.tap() }
+        app.buttons["vnc-more"].tap()
+        app.buttons["鼠标模式"].firstMatch.tap()
+        rest()
+        try mock(hub!, "/mock/screen-password?clear=1")
+        app.buttons["vnc-more"].tap()
+        app.buttons["手机屏"].firstMatch.tap()
+        XCTAssertTrue(sheet.waitForExistence(timeout: 15), "the window list:\n\(app.debugDescription)")
+        app.buttons.matching(identifier: "phone-screen-window").matching(NSPredicate(format: "label == %@", "build — npm run dev")).firstMatch.tap()
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        rest(2)
+
+        button.tap()
+        XCTAssertTrue(on.waitForExistence(timeout: 20), "the small window:\n\(app.debugDescription)")
+        XCTAssertTrue(pip.waitForExistence(timeout: 10), "the system's small window:\n\(springboard.debugDescription)")
+        sleep(3)
+        XCTAssertGreaterThan(pip.frame.height, pip.frame.width * 1.3, "Phone Screen's small window is portrait: \(pip.frame)")
+        screenShot("phone-screen-pip")
+        hold("phone-screen-pip")
+        var calls = try mockState()["phone_screen"] as? [[String: Any]] ?? []
+        XCTAssertFalse(calls.contains { $0["op"] as? String == "stop" }, "the Mac keeps the display for the small window: \(calls)")
+
+        pip.tap() // its controls
+        restoreButton(springboard, in: pip.frame, round: 1).tap()
+        XCTAssertTrue(on.waitForNonExistence(timeout: 15), "back on the page")
+        XCTAssertTrue(live(app), "the page, live")
+        rest(2)
+        XCTAssertTrue(app.buttons["phone-screen-windows-button"].waitForExistence(timeout: 10), "still Phone Screen")
+        XCTAssertFalse(sheet.exists, "the window still on the display: no list to pick from again")
+        calls = try mockState()["phone_screen"] as? [[String: Any]] ?? []
+        XCTAssertEqual(calls.filter { $0["op"] as? String == "start" }.count, 1, "the page took the display back, not a new one: \(calls)")
+        XCTAssertFalse(calls.contains { $0["op"] as? String == "stop" }, "\(calls)")
+
+        app.buttons["vnc-more"].tap()
+        app.buttons["鼠标模式"].firstMatch.tap()
+        rest(2)
+        button.tap()
+        XCTAssertTrue(on.waitForExistence(timeout: 20), "the small window from Mouse Mode")
+        XCTAssertTrue(pip.waitForExistence(timeout: 10))
+        sleep(3)
+        XCTAssertGreaterThan(pip.frame.width, pip.frame.height, "Mouse Mode's small window is wide: \(pip.frame)")
+        screenShot("mouse-pip")
+        pip.tap()
+        restoreButton(springboard, in: pip.frame, round: 2).tap()
+        XCTAssertTrue(on.waitForNonExistence(timeout: 15), "back on the page")
+    }
+
+    /// One field of a view's DEBUG readout (`k=v;…`, VNCScreenUIView.place).
+    @MainActor private func readoutField(_ e: XCUIElement, _ k: String) -> String? {
+        (e.value as? String ?? "").split(separator: ";").first { $0.hasPrefix(k + "=") }.map { String($0.dropFirst(k.count + 1)) }
+    }
+
+    /// Whether `ok` holds within `seconds`, looked at every quarter second.
+    @MainActor private func waitFor(_ seconds: Double = 10, _ ok: () -> Bool) -> Bool {
+        let deadline = Date.now.addingTimeInterval(seconds)
+        while Date.now < deadline {
+            if ok() { return true }
+            usleep(250_000)
+        }
+        return ok()
+    }
+
+    /// The whole screen, the system's small window over the app included.
+    @MainActor private func screenShot(_ name: String) {
+        let look = ProcessInfo.processInfo.environment["PERSONA_LOOK"].map { "-" + $0 } ?? ""
+        let full = "\(name)-\(UITestStyle.name)\(look)"
+        let png = XCUIScreen.main.screenshot()
+        let attachment = XCTAttachment(screenshot: png)
+        attachment.name = full
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        if let dir = ProcessInfo.processInfo.environment["PERSONA_SHOTS"] {
+            try? png.pngRepresentation.write(to: URL(fileURLWithPath: dir + "/\(full).png"))
+        }
+    }
+
     @MainActor private func live(_ app: XCUIApplication) -> Bool {
         let phase = app.descendants(matching: .any)["screen-phase"].firstMatch
         let deadline = Date.now.addingTimeInterval(30)

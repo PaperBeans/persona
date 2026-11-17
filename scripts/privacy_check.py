@@ -21,6 +21,11 @@ only extensions may name). A hit says what kind of value matched and where it co
 `machines.id`, private-words.txt, CLAUDE.local.md, the home directory), never the value. Install as a hook:
 scripts/hooks/pre-commit (docs/operations/testing.md).
 
+Values match as substrings, ignoring case, with two narrower rules: a short value (under six letters and digits) only as
+a word of its own, and an app identifier (a reverse-DNS value held only under a `bundle_id`, `application_id` or
+`app_group` key) only as a whole identifier, so what is derived from it with dots (group.<id>, <id>.widgets) matches
+and a longer identifier that merely starts the same way (<id>d, <id>-node) does not (#9461).
+
 Not private: loopback addresses (127.0.0.0/8, ::1, also with a port or as a URL's host) even when the config or
 CLAUDE.local.md holds one, hosts under the example domains (RFC 2606, RFC 6761: example and example.com/.net/.org,
 and the .test, .invalid and .localhost TLDs) held there as placeholders, the documentation and IETF protocol ranges
@@ -220,6 +225,18 @@ WAIVABLE = re.compile(r"[A-Za-z]+")
 # bundle ids), or one that is itself a private value, shows as `*`: the report never carries a value.
 KEY_NAME = re.compile(r"[a-z][a-z0-9_]*")
 
+# App identifiers (#9461): a config value held only under one of these keys (app.bundle_id,
+# app.watch_widget_bundle_id, android.application_id, app.app_group, …) and shaped like a reverse-DNS id. Everything
+# the apps derive from one adds dot-separated parts (group.<id>, <id>.watchkitapp.widgets, <TEAM ID>.<id>), so it is
+# matched as a whole identifier: not continued by a letter, digit, `_` or `-`. A substring match also flagged another
+# identifier that only starts the same way, a public default committed on purpose, failing every whole-repo scan.
+APP_ID_KEY = re.compile(r"(?:[a-z0-9_]*_)?(?:bundle_id|application_id|app_group)")
+REVERSE_DNS = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
+
+
+class AppIdentifier(str):
+    """A private value problems() matches as a whole identifier (APP_ID_KEY); otherwise the plain value."""
+
 
 def word_list():
     """The listed words, each with the file that lists it, and the config values `!word` lines take back (lowercase)."""
@@ -320,6 +337,11 @@ def term_sources():
         found.setdefault(v, set()).update(files)
     found = {v: where for v, where in found.items()
              if len(v) >= 4 and v.lower() not in IGNORE and not loopback(v) and not reserved(v)}
+    # held only under app-identifier keys and not also listed plainly: matched as a whole identifier (#9461)
+    app_ids = {v for v, paths in config.items()
+               if v in found and v.lower() not in plain and REVERSE_DNS.fullmatch(v)
+               and all(path and APP_ID_KEY.fullmatch(path[-1]) for path in paths)}
+    found = {(AppIdentifier(v) if v in app_ids else v): where for v, where in found.items()}
     user = os.path.basename(HOME)
     if len(user) >= 3:
         for v in ("/Users/" + user, "/home/" + user):
@@ -454,9 +476,13 @@ def problems(text, words, emails=True):
     found = []
     low = text.lower()
     for w in words:
+        if isinstance(w, AppIdentifier):
+            # a whole identifier, with what is derived from it by dot-separated parts (#9461)
+            if re.search(r"(?<![a-z0-9_-])" + re.escape(w.lower()) + r"(?![a-z0-9_-])", low):
+                found.append(w)
         # Short values (a name of 4–5 letters) only as a word of their own: inside identifiers ("inboxItem") they
         # matched by accident and flagged whole files.
-        if len(w) < 6 and w.isalnum():
+        elif len(w) < 6 and w.isalnum():
             if re.search(r"(?<![a-z0-9])" + re.escape(w.lower()) + r"(?![a-z0-9])", low):
                 found.append(w)
         elif w.lower() in low and not only_in_camel_joins(text, w):

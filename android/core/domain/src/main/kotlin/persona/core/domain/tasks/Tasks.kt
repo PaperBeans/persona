@@ -115,8 +115,16 @@ sealed interface TaskNow {
     }
 }
 
-/** A reminder or an event the assistant added on the phone, read from its tool call. */
-data class QuickResult(val reminder: Boolean, val callId: String, val title: String, val time: String?, val place: String?) {
+/**
+ * A reminder or an event the assistant added on the phone, read from its tool call (iOS `QuickResult`): a result whose
+ * `id` is missing or empty draws no card at all, as on iOS.
+ *
+ * [itemId] is the id of the item the phone made, which Undo deletes. The phone's calendar ids are numbers, so a result
+ * whose id is not one (an iPhone's event or reminder) still draws its card, without an Undo button.
+ */
+data class QuickResult(
+    val reminder: Boolean, val callId: String, val itemId: Long?, val title: String, val time: String?, val place: String?,
+) {
     companion object {
         fun of(call: ToolCall): QuickResult? {
             val short = call.name.substringAfterLast("__")
@@ -129,11 +137,19 @@ data class QuickResult(val reminder: Boolean, val callId: String, val title: Str
             if (result.isError == true) return null
             val o = runCatching { JsonCodec.parseToJsonElement(result.text.orEmpty()) as? JsonObject }.getOrNull() ?: return null
             fun s(k: String) = (o[k] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
-            if (s("id").isNullOrEmpty()) return null
-            return QuickResult(reminder, call.use.id, s("title").orEmpty(), s(if (reminder) "due" else "start"), s(if (reminder) "list" else "calendar"))
+            // No card without an id (iOS QuickResult.init), so an old or broken result says nothing it cannot back.
+            val id = s("id")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            return QuickResult(reminder, call.use.id, id.toLongOrNull()?.takeIf { it > 0 },
+                s("title").orEmpty(), s(if (reminder) "due" else "start"), s(if (reminder) "list" else "calendar"))
         }
     }
 }
+
+/**
+ * Undo on a quick result (iOS `TasksStore.undone`): [Added] when the phone still has the item, [Undoing] while the
+ * delete runs, [Undone] once it is off the phone. A failure goes back to [Added].
+ */
+enum class QuickResultUndo { Added, Undoing, Undone }
 
 /** What the assistant's conversation adds to the transcript's lines, drawn by the chat's host. */
 sealed interface AssistantExtra {

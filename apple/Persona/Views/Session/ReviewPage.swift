@@ -44,10 +44,7 @@ struct ReviewPage: View {
             .navigationTitle(Text("Review Changes"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: { Text("Close").lineLimit(1) }
-                        .accessibilityIdentifier("review.close")
-                }
+                SheetClose(id: "review.close") { dismiss() }
                 ToolbarItem(placement: .principal) { title }
             }
             .safeAreaInset(edge: .bottom) { bottomBar }
@@ -139,7 +136,7 @@ struct ReviewPage: View {
             .navigationTitle(Text("Pick a Commit"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button { pickingCommit = false } label: { Text("Cancel").lineLimit(1) } }
+                SheetClose { pickingCommit = false }
             }
             .overlay { commitsState }
         }
@@ -439,7 +436,7 @@ struct ReviewPage: View {
             .navigationTitle(Text("Finish Review"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button { finishing = false } label: { Text("Cancel").lineLimit(1) } }
+                SheetClose { finishing = false }
             }
         }
         .presentationDetents([.medium, .large])

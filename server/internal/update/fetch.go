@@ -22,6 +22,9 @@ import (
 // "Security"): the sha256s guard against a broken download over HTTPS, not against the site itself being replaced.
 type Published struct {
 	Manifest *Manifest
+	// Development pins a Git candidate; Source is its locally compiled feed.
+	Development *DevelopmentCandidate
+	Source      string
 }
 
 // Check reads latest.json from base (the publisher's dl/).

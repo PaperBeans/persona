@@ -1039,6 +1039,20 @@ data class ExtensionUIItem(
      * widget only: how often the widget is drawn again on its own (30 when not said).
      */
     @SerialName("refresh_minutes") val refreshMinutes: Int? = null,
+    /**
+     * nav_page only: the sidebar group the page goes in unless the user put it elsewhere (#9071). Title translated in
+     * l10n's groups.
+     */
+    val group: ExtensionUIGroup? = null,
+)
+
+/**
+ * A sidebar group a nav_page names (docs "UI slots"): pages of any extension naming the same id share it.
+ */
+@Serializable
+data class ExtensionUIGroup(
+    val id: String = "",
+    val title: String = "",
 )
 
 @Serializable
@@ -1516,6 +1530,10 @@ data class ExtensionUIPlace(
     val opens: String? = null,
     val badge: ExtensionBadge? = null,
     val connector: String? = null,
+    /**
+     * A nav_page's sidebar group, its title in the request's language (#9071).
+     */
+    val group: ExtensionUIGroup? = null,
 )
 
 @Serializable
@@ -1949,6 +1967,15 @@ object ExtensionTextStyle {
 }
 
 /**
+ * A progress drawing hint: bar (the default) or ring.
+ */
+object ExtensionProgressStyle {
+    const val BAR = "bar"
+    const val RING = "ring"
+    val ALL = listOf("bar", "ring")
+}
+
+/**
  * date, time, datetime, multichoice and multiline are UI version 6. Values stay strings: date YYYY-MM-DD, time HH:MM
  * (24 hours), datetime YYYY-MM-DDTHH:MM local to context.tz, multichoice a JSON array of the chosen values, multiline
  * the text with \n.
@@ -2337,7 +2364,7 @@ data class ExtensionMetricComponent(
 ) : ExtensionComponent
 
 /**
- * A bar filled to ratio (0 to 1).
+ * Progress toward a goal, filled to ratio (0 to 1).
  */
 @Serializable
 data class ExtensionProgressComponent(
@@ -2345,6 +2372,12 @@ data class ExtensionProgressComponent(
     val key: String? = null,
     val label: String = "",
     val ratio: Double = 0.0,
+    /**
+     * A drawing hint; omitted means bar. Apple Home Screen widgets (small, medium and large) draw ring as a ring;
+     * other surfaces draw a bar. Apps that do not recognize this field keep drawing a bar. Native stream does not
+     * accept this field.
+     */
+    val style: String? = null,
     val detail: String? = null,
     val tone: String? = null,
 ) : ExtensionComponent
@@ -2894,6 +2927,29 @@ data class ExtensionTile(
     val control: ExtensionRowControl? = null,
     val actions: List<ExtensionRowAction>? = null,
     val action: ExtensionAction? = null,
+    /**
+     * Draws the tile as a ring (UI version 9): never with an image or a spark.
+     */
+    val gauge: ExtensionGauge? = null,
+)
+
+/**
+ * A tile's ring (UI version 9), for a quota or a usage: filled to ratio, with the tile's value and the unit in its
+ * centre (the percentage when the tile has no value), the title below. Without color, the tile's color, else the
+ * app's accent. An older app gets the tile without it: the unit after the value, the percentage in the subtitle, the
+ * color as the tile's.
+ */
+@Serializable
+data class ExtensionGauge(
+    /**
+     * How full the ring is, 0 to 1.
+     */
+    val ratio: Double = 0.0,
+    /**
+     * A short word under the value (USD, GB, h), as a control's unit.
+     */
+    val unit: String? = null,
+    val color: String? = null,
 )
 
 /**

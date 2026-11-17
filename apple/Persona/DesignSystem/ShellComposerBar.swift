@@ -43,6 +43,9 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
     /// What tells dictation the language spoken besides the draft (`DictationLanguage`): the owner's recent messages in
     /// this chat, read only when the mic starts.
     var dictationHints: () -> [String] = { [] }
+    /// The visible new-assistant starter takes this control request before entering the mic's own start path below.
+    var dictationRequest: DictationRequest? = nil
+    var takeDictation: ((DictationRequest) -> Bool)? = nil
     var send: () -> Void
     @ViewBuilder var attach: () -> Attach
     @ViewBuilder var modes: () -> Modes
@@ -53,6 +56,11 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
     @State private var hold = ComposerHold()
     /// The mic tapped: the capsule is the dictation bar (`DictationBar`).
     @State private var dictationBar = DictationBarModel()
+    /// The mic ends its row: the bar's ■ goes last, where the finger is (#9619). It follows the composer while the bar is
+    /// off, so a tap moves nothing; from a tap until the bar has gone it stays as it was.
+    @State private var barStopLast = false
+    /// When the bar last closed: the order waits until it has gone (`followMicPlace`).
+    @State private var barClosedAt = Date.distantPast
     /// The composer's row under the bar has left the accessibility tree (`Theme.DictationBar.treeAfter` after it opened).
     @State private var rowOutOfTree = false
     /// Where 「+」 is in the window, for the panel it opens. Read when tapped, never drawn, so it is kept outside the
@@ -229,10 +237,12 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                 .allowsHitTesting(!barOn)
                 .accessibilityElement(children: rowOutOfTree ? .ignore : .contain)
                 .accessibilityHidden(rowOutOfTree)
-            DictationBar(model: dictationBar, meter: dictation.meter,
+            DictationBar(model: dictationBar, meter: dictation.meter, stopLast: barStopLast,
                          cancel: { dictationBar.cancel(dictation, reduceMotion: reduceMotion) },
                          stop: { dictationBar.end(.stop, dictation, text: $text, reduceMotion: reduceMotion, send: { false }) },
                          send: { dictationBar.end(.send, dictation, text: $text, reduceMotion: reduceMotion, send: sendDictated) })
+                .onChange(of: barOn) { _, on in if !on { barClosedAt = .now } }
+                .task(id: DictationBarOrder(micEndsRow: micEndsRow, barOn: barOn)) { await followMicPlace() }
         }
         let erased = AnyView(layered)
         #else
@@ -291,10 +301,13 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
         }
         #endif
         .onDisappear {
-            dictation.stop() // a start still asking for permission too (#3407)
             #if os(iOS)
-            dictationBar.reset()
+            #if DEBUG
+            if dictationBar.on { ShellTrace.shared.note("dictation composer disappeared") }
             #endif
+            dictationBar.reset(dictation, text: $text)
+            #endif
+            dictation.stop() // a start still asking for permission too (#3407)
         }
         #if os(iOS)
         .task { dictationBar.warm() }
@@ -305,6 +318,17 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
             }
             try? await Task.sleep(for: Theme.DictationBar.treeAfter)
             if !Task.isCancelled, barOn { rowOutOfTree = true }
+        }
+        .tabActiveTask(id: dictationRequest) {
+            #if DEBUG
+            ShellTrace.shared.note("dictation starter task request=\(dictationRequest != nil)")
+            #endif
+            guard let request = dictationRequest, takeDictation?(request) == true else { return }
+            guard !dictation.isListening else { return }
+            startDictationBar(focusOnFailure: true)
+            #if DEBUG
+            ShellTrace.shared.note("dictation bar start requested")
+            #endif
         }
         .onChange(of: dictation.isListening) { _, on in
             if !on { dictationBar.listeningEnded(dictation, text: $text, reduceMotion: reduceMotion) }
@@ -341,6 +365,10 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
             }
             #endif
             .focused(focused)
+            #if os(iOS)
+            // Return Key Sends (#8178): what send does, never from under the full-page editor (it keeps Return a new line).
+            .returnSends(text: $text, canSend: canSend, gate: gate?.action, paused: enlarged || barOn) { endDictation(then: sendTyped) }
+            #endif
             #if os(macOS)
             .textFieldStyle(.plain) // the card is the field's box; the Mac's own bezel drew a second one inside
             .macComposerKeys(focused: focused.wrappedValue, canSend: canSend, // ⏎ sends, ⇧⏎ a new line
@@ -370,6 +398,12 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
     /// The mic tapped: the bar, with the keyboard down (what it was composing goes into the draft first). A hold
     /// locked on keeps dictating into the draft; a tap then ends it, as before.
     private func startDictationBar() {
+        startDictationBar(focusOnFailure: false)
+    }
+
+    /// The control enters here too, after its one-shot request was taken. Only that automatic start restores focus
+    /// when the existing permission / availability path fails; an ordinary mic tap behaves exactly as it did.
+    private func startDictationBar(focusOnFailure: Bool) {
         if dictation.isListening {
             dictation.stop()
             return
@@ -378,7 +412,8 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
             TypedText.commitFocused(into: $text)
             focused.wrappedValue = false
         }
-        dictationBar.start(dictation, hints: [text] + dictationHints(), reduceMotion: reduceMotion)
+        dictationBar.start(dictation, hints: [text] + dictationHints(), reduceMotion: reduceMotion,
+                           onFailure: focusOnFailure ? { focused.wrappedValue = true } : nil)
     }
 
     /// ↑ on the bar, once the words are in the draft: sent as the card's send would, unless there is nothing to send
@@ -578,11 +613,36 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
     @ViewBuilder private var mic: some View {
         #if os(iOS)
         ComposerHoldMic(dictation: dictation, text: $text, hold: hold, id: "shell-composer-mic", hints: dictationHints,
-                        tap: startDictationBar, quiet: barOn)
+                        tap: micTapped, quiet: barOn)
         #else
         ComposerMicButton(dictation: dictation, text: $text, id: "shell-composer-mic", hints: dictationHints)
         #endif
     }
+
+    #if os(iOS)
+    /// Nothing follows the mic in its row: no voice or stop on the line, no send or send gate in the card.
+    private var micEndsRow: Bool { voice == nil && stop == nil && !(expanded && (gate != nil || canSend)) }
+
+    /// The mic tapped: the bar puts ■ where the finger is, so a second tap there stops and sends nothing (#9619). The
+    /// order is normally right already (`followMicPlace`); only a tap just after the bar closed changes it here.
+    private func micTapped() {
+        if barStopLast != micEndsRow { barStopLast = micEndsRow }
+        startDictationBar()
+    }
+
+    /// The bar's ■ follows the mic's place while the bar is off, so the tap's frame reorders nothing (a reorder there
+    /// left a button without a frame for a moment and rebuilt the bar's accessibility). Just after the bar closed it
+    /// waits until the bar has gone (`Theme.DictationBar.reorderAfter`), so ■ and ↑ never swap as they fade.
+    private func followMicPlace() async {
+        guard !barOn, barStopLast != micEndsRow else { return }
+        let left = Theme.DictationBar.reorderAfter - Date.now.timeIntervalSince(barClosedAt)
+        if left > 0 {
+            try? await Task.sleep(for: .seconds(left))
+            guard !Task.isCancelled, !barOn else { return }
+        }
+        barStopLast = micEndsRow
+    }
+    #endif
 
     private func stopButton(_ stop: @escaping () -> Void) -> some View {
         ComposerRoundButton.stop(id: "shell-composer-stop") { endDictation(then: stop) }
@@ -723,19 +783,7 @@ private struct ComposerPageEditor: View {
 
     private var controls: some View {
         HStack(spacing: Theme.Space.xs) {
-            Spacer(minLength: Theme.Space.s)
-            if focused {
-                Button(action: dismissPageKeyboard) {
-                    ThemedIcon(Theme.Icon.dismissKeyboard)
-                        .font(Theme.Font.secondary)
-                        .foregroundStyle(ink)
-                        .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Hide Keyboard")
-                .accessibilityIdentifier("composer-page-dismiss-keyboard")
-            }
+            // The way back to the box first, at the leading corner, as every presented page's way out (#9653).
             Button {
                 commitTyped()
                 collapse()
@@ -749,6 +797,19 @@ private struct ComposerPageEditor: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Collapse the message box")
             .accessibilityIdentifier("composer-page-collapse")
+            Spacer(minLength: Theme.Space.s)
+            if focused {
+                Button(action: dismissPageKeyboard) {
+                    ThemedIcon(Theme.Icon.dismissKeyboard)
+                        .font(Theme.Font.secondary)
+                        .foregroundStyle(ink)
+                        .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Hide Keyboard")
+                .accessibilityIdentifier("composer-page-dismiss-keyboard")
+            }
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, Theme.Space.l)
@@ -926,5 +987,13 @@ struct ComposerLines: Encodable, Equatable {
 /// A view's frame in the window, for an action to read when it runs. Not observed: writing it draws nothing again.
 @MainActor final class WindowFrame {
     var rect: CGRect = .zero
+}
+#endif
+
+#if os(iOS)
+/// What the dictation bar's order follows (`ShellComposerBar.followMicPlace`).
+private struct DictationBarOrder: Hashable {
+    var micEndsRow: Bool
+    var barOn: Bool
 }
 #endif

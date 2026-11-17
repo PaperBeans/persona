@@ -21,6 +21,20 @@ internal class AppNavigator(
     /** Returns true when the Persona home shows this conversation itself; the flag says whether to switch to it. */
     private val openAssistant: (ChatRoute, Boolean) -> Boolean = { _, _ -> false },
     inboxReturns: List<ChatRoute>? = null,
+    /**
+     * Regular width: a route to a sidebar place (or a child of one) switches that root instead of pushing
+     * onto whatever root is in front. Returns true when it did, so the caller must not also push.
+     * iOS selects the place, then sets the path (`AssistantView` open-from-outside, AssistantView.swift:601–605).
+     */
+    private val openPlace: (NavKey) -> Boolean = { false },
+    /**
+     * Regular width, the stack is only a place root: Back switches to the conversation instead of leaving
+     * the app. iOS `leavePlace` selects the conversation (`AssistantView.swift:682–686`) after
+     * `assistantReveal` (`AppModel.swift:1381`, `:1393`). Returns true when it switched.
+     */
+    private val leavePlaceRoot: () -> Boolean = { false },
+    /** The Inbox was navigated to (a link to it in a chat or from the hub) on this tab: its list opens as on entry (#9053). */
+    private val onInboxEntered: (AppTab) -> Unit = {},
 ) : Navigator {
     /**
      * Pages [navigate] pushed onto another tab's stack, and the tab each was opened from: back from such a page returns
@@ -84,6 +98,7 @@ internal class AppNavigator(
         val visibleOrigin = shown[from]?.takeIf { it == key }?.let(openedFrom::get)
         val opened = open(key, replacingDetailIn)
         val to = selectedTab()
+        if (key == InboxRoute) onInboxEntered(to)
         val page = stacks.getValue(to).lastOrNull() ?: return
         if (to == from && page == key && visibleOrigin != null) openedFrom[page] = visibleOrigin
         // Not recorded: the tab's root, and a page that already topped the target tab's stack but is not the one asked
@@ -203,6 +218,9 @@ internal class AppNavigator(
         // The sourced-Persona path does not use Router.restore, but an already-visible kindless reopen needs the same
         // exact-key retention. A page buried below a newer detail keeps the existing push/pop chain behavior.
         val retained = if (chat?.kind == null) stack.lastOrNull()?.takeIf { sameKindlessTarget(it, route) } else null
+        // A place route at regular width replaces the root. Pushing it here would insert Inbox under To-dos
+        // once restoreSecondaryParents runs (Router.kt:203–227). A drill on the place already in front returns false.
+        if (target == AppTab.Persona && openPlace(route)) return retained ?: route
         if (retained == null && stack.last() != route) stack.add(route)
         restoreSecondaryParents(stack)
         return retained ?: route
@@ -239,14 +257,18 @@ internal class AppNavigator(
                 }
                 if (owner != tab) {
                     stack.removeAll { it == chat }
+                    val source = inboxSource(chat)
+                    // At regular width the item is a root switch, then the chat sits on that host.
+                    // Pushing onto the conversation would make [Assistant, Inbox, InboxItem] (a drill, composed twice).
+                    val placed = owner == AppTab.Persona && source != null && openPlace(InboxItemRoute(source.itemId))
                     val destination = stacks.getValue(owner)
                     if (chat !in destination) {
-                        if (owner == selectedTab() && visible != chat) destination.add(1, chat)
-                        else destination.add(chat)
+                        if (placed || owner != selectedTab() || visible == chat) destination.add(chat)
+                        else destination.add(1, chat)
                     }
                     // The restored Agent used to live under Agents. Remember that cross-tab return even after late
                     // metadata moves its unchanged key to Persona; Back must rebuild the source detail, not the list.
-                    if (tab == AppTab.Agents && owner == AppTab.Persona && inboxSource(chat) != null) {
+                    if (tab == AppTab.Agents && owner == AppTab.Persona && source != null) {
                         openedFrom[chat] = tab
                     }
                     if (visible == chat) onSelectTab(owner)
@@ -258,7 +280,11 @@ internal class AppNavigator(
     override fun back() {
         val from = selectedTab()
         val stack = stacks.getValue(from)
-        if (stack.size <= 1) return
+        if (stack.size <= 1) {
+            // A pushed page pops. A place that is the whole stack switches to the conversation (item 4, item 5).
+            if (from == AppTab.Persona) leavePlaceRoot()
+            return
+        }
         val page = stack.removeAt(stack.lastIndex)
         val origin = openedFrom.remove(page)
         val source = inboxSource(page)
@@ -268,8 +294,13 @@ internal class AppNavigator(
             // item's actual detail unless its detail, native source page or processing conversation is already on top.
             val visibleItem = persona.lastOrNull()?.let(::displayedInboxItemId)
             if (visibleItem != source.itemId) {
-                persona.add(InboxItemRoute(source.itemId))
-                restoreSecondaryParents(persona)
+                val item = InboxItemRoute(source.itemId)
+                // Regular width: the inbox host shows the item. Compact still pushes, and the parent insert
+                // stays in Router.restoreSecondaryParents (Router.kt:203–227).
+                if (!openPlace(item)) {
+                    persona.add(item)
+                    restoreSecondaryParents(persona)
+                }
             }
             // A real inbox source takes precedence over a stale openedFrom=Agents origin.
             onSelectTab(AppTab.Persona)
@@ -370,7 +401,7 @@ private fun NavKey.session(): SessionKey? = when (this) {
 }
 
 /** The item this page displays or processes, without treating an unrelated non-root page as its return target. */
-private fun NavKey.inboxItemId(): String? = when (this) {
+internal fun NavKey.inboxItemId(): String? = when (this) {
     is InboxItemRoute -> itemId
     is InboxItemUiRoute -> itemId
     is InboxEventRoute -> itemId

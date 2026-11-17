@@ -303,6 +303,7 @@ func (d *Devices) Handler(next http.Handler) http.Handler {
 	d.transferRoutes(mux)
 	d.metricsRoutes(mux)
 	d.usageRoutes(mux)
+	d.usageHistoryRoutes(mux)
 	d.usageWindowRoutes(mux)
 	d.adminUsageRoutes(mux)
 	d.shareRoutes(mux)

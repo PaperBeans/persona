@@ -93,14 +93,9 @@ struct FilePermissionsSheet: View {
             .navigationSubtitle(name)
             .navigationBarTitleDisplayMode(.inline)
             .pageToolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.lineLimit(1)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { asking = true }
-                        .lineLimit(1)
-                        .disabled(old == nil || old == bits || saving)
-                        .accessibilityIdentifier("files.perm.save")
+                SheetClose { dismiss() }
+                SheetConfirm(id: "files.perm.save", name: String(localized: "Save"), disabled: old == nil || old == bits || saving) {
+                    asking = true
                 }
             }
             .alert(String(localized: "Change the permissions of “\(name)”?"), isPresented: $asking) {

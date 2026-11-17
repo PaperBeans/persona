@@ -23,6 +23,8 @@ final class LarkNavigationTests: XCTestCase {
         app.launchArguments = ["-pairURL", pair, "-tab", inbox == nil ? "assistant" : "mail", "-demo.on", "NO",
                                "-integrations.lark.enabled", "YES",
                                "-inbox.kind", inbox.map { $0.contains("f3") ? "group" : "dm" } ?? "", "-inbox.source", ""]
+            // the group chat is FYI: every section stacked (the section bar's All, #9053)
+            + (inbox == nil ? [] : ["-showInboxSection", "all"])
         // Navigate through the actual inbox. Its debug deep link replaces the shell's path and skips that page.
         app.launchPinned()
         return app

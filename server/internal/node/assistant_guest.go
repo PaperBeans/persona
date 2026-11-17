@@ -16,13 +16,11 @@ import (
 )
 
 // Guest conversations (the hub's assistant/guest.go, docs/assistant/assistant.md ("Guest conversations")): an assistant conversation that
-// answers someone else for the user. It runs on Claude Code on the CLI or the Agent SDK (no other agent or runtime),
-// never in the warm spare, and every CLI process has no built-in tools (--tools "") and none of the owner's Claude Code
-// setup (guestSettingArgs, guestSettingsFile: no user settings, CLAUDE.md or AGENTS.md files, rules or auto memory).
-// The SDK uses tools: [], settingSources: [], the same guest settings and an in-process server for its declared MCP
-// tools. Both load only Persona's MCP server (strict MCP config, no user's or extensions' servers), and only their own
-// tools. The hub lists and runs only those for it and gives it no live snapshot; the tools it has are kept in its
-// sessionState.Guest.
+// answers someone else for the user. It runs on Claude Code (no other agent or runtime), never in the warm spare, and its
+// process has no built-in tools (--tools "") and none of the owner's Claude Code setup (guestSettingArgs,
+// guestSettingsFile: no user settings, CLAUDE.md or AGENTS.md files, rules or auto memory). It loads only Persona's MCP
+// server (strict MCP config, no user's or extensions' servers), and only its own tools. The hub lists and runs only those
+// for it and gives it no live snapshot; the tools it has are kept in its sessionState.Guest.
 
 // maxGuestTools is the hub's bound (assistant/guest.go).
 const maxGuestTools = 8
@@ -106,7 +104,7 @@ func (n *Node) knowsConversation(id string) bool {
 	return p != nil || n.transcriptPath(id) != ""
 }
 
-// errGuestAgent refuses a guest conversation anything but Claude Code on the CLI or the Agent SDK.
+// errGuestAgent refuses a guest conversation anything but Claude Code on the CLI.
 var errGuestAgent = errors.New("a guest conversation runs on Claude Code only (its built-in tools can be taken away there)")
 
 // assistantGuestPrepare makes a guest conversation's directory and writes only its instructions there. A meeting's room
@@ -412,13 +410,13 @@ func (n *Node) guestOf(id string) []string {
 }
 
 // guestMCPAndTools are a guest conversation's process flags: Persona's MCP server alone, told it is a guest's, and
-// only its tools allowed. The Agent SDK maps these to its stdio proxy with no built-in tools (assistant_start.go).
-func (n *Node) guestMCPAndTools(id string, tools []string, legacyMCP bool) (mcpJSON string, toolFlags []string) {
+// only its tools allowed.
+func (n *Node) guestMCPAndTools(id string, tools []string, legacyMCP bool) []string {
 	env := assistantMCPEnv(id, n.dir)
 	env["PERSONA_GUEST"] = "1"
 	mcp, _ := json.Marshal(map[string]any{"mcpServers": compat.MCPRegistrationServers(map[string]any{"persona": map[string]any{"command": n.bin, "args": []string{"mcp"}, "env": env}}, legacyMCP)})
 	allowed := compat.MCPAllowedToolNames(tools, legacyMCP)
-	return string(mcp), []string{"--mcp-config", string(mcp), "--strict-mcp-config", "--tools", "", "--allowedTools", strings.Join(allowed, ",")}
+	return []string{"--mcp-config", string(mcp), "--strict-mcp-config", "--tools", "", "--allowedTools", strings.Join(allowed, ",")}
 }
 
 // assistantDirOf is where a directory the hub names relative to HOME for the assistant (".persona/assistant",

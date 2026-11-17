@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { ComposeListItemV2, ContentItemV2 } from '@kit.ArkUI';
 import { ClientModel } from '../models/ClientModel';
 import { InteractionHistoryEntry, InteractionHistoryModel } from '../models/InteractionHistory';
@@ -102,7 +105,7 @@ export struct InteractionHistoryPage {
       if (this.history.error) {
         Row({ space: Tokens.gap }) {
           Text(tr(this.history.error)).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger')).layoutWeight(1)
-          Button(tr('retry')).onClick(() => this.history.refresh()).height(Tokens.touch)
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).onClick(() => this.history.refresh())
         }.padding(Tokens.inset).width('100%')
       }
       List() {

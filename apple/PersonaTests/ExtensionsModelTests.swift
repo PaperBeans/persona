@@ -3,6 +3,68 @@ import Testing
 @testable import Persona
 import PersonaWire
 
+struct ExtensionIntegerStepperTests {
+    @Test func stepDecodesAndRoundTripsWithoutChangingLegacyFields() throws {
+        let field = try JSON.decoder.decode(ExtensionField.self, from: Data(#"{"name":"goal","type":"integer","step":250}"#.utf8))
+        #expect(field.step == 250)
+        #expect(try JSON.decoder.decode(ExtensionField.self, from: JSON.encoder.encode(field)).step == 250)
+        let legacy = try JSON.decoder.decode(ExtensionField.self, from: Data(#"{"name":"goal","type":"integer"}"#.utf8))
+        #expect(legacy.step == nil)
+        #expect(ExtensionIntegerStepper.next(legacy, current: 2100, up: true) == 2101)
+        #expect(ExtensionIntegerStepper.next(legacy, current: 2100, up: false) == 2099)
+    }
+
+    @Test func stepsFromTheCurrentValueWithoutSnappingToAGrid() {
+        let field = ExtensionField(name: "goal", type: "integer", step: 250)
+        #expect(ExtensionIntegerStepper.next(field, current: 2100, up: true) == 2350)
+        #expect(ExtensionIntegerStepper.next(field, current: 2100, up: false) == 1850)
+        #expect(ExtensionIntegerStepper.next(field, current: 2_000_000_000, up: true) == 2_000_000_250)
+    }
+
+    @Test func clampsBothDirectionsAndDisablesOnlyTheBoundedDirection() {
+        let field = ExtensionField(name: "goal", type: "integer", minimum: 1000, maximum: 3000, step: 250)
+        #expect(ExtensionIntegerStepper.next(field, current: 2900, up: true) == 3000)
+        #expect(ExtensionIntegerStepper.next(field, current: 1100, up: false) == 1000)
+        #expect(!ExtensionIntegerStepper.canStep(field, current: 3000, up: true))
+        #expect(ExtensionIntegerStepper.canStep(field, current: 3000, up: false))
+        #expect(!ExtensionIntegerStepper.canStep(field, current: 1000, up: false))
+        #expect(ExtensionIntegerStepper.canStep(field, current: 1000, up: true))
+        #expect(ExtensionIntegerStepper.next(field, current: 4000, up: false) == 3000)
+        #expect(ExtensionIntegerStepper.next(field, current: 0, up: true) == 1000)
+    }
+
+    @Test func fallsBackToDefaultThenRoundedMinimumThenZero() {
+        var field = ExtensionField(name: "goal", type: "integer", default: .number(2100), minimum: 1000.2, maximum: 3000.8, step: 250)
+        #expect(ExtensionIntegerStepper.next(field, current: nil, up: true) == 2350)
+        #expect(ExtensionIntegerStepper.next(field, current: 2900, up: true) == 3000)
+        #expect(ExtensionIntegerStepper.next(field, current: 1100, up: false) == 1001)
+        field.default = nil
+        #expect(ExtensionIntegerStepper.next(field, current: nil, up: true) == 1251)
+        #expect(ExtensionIntegerStepper.next(field, current: nil, up: false) == 1001)
+        field.minimum = nil
+        #expect(ExtensionIntegerStepper.next(field, current: nil, up: true) == 250)
+        #expect(ExtensionIntegerStepper.next(field, current: nil, up: false) == -250)
+        #expect(ExtensionIntegerStepper.canStep(field, current: nil, up: true))
+    }
+
+    @MainActor @Test func typedOffGridValuesRemainValidAndAreSavedUnchanged() async throws {
+        let hub = FakeHub()
+        let detail = #"{"id":"goal","name":"Goal","kind":"tools","status":"running","form":{"fields":[{"name":"amount","type":"integer","minimum":0,"maximum":3000,"step":250}]},"config":{"amount":2000}}"#
+        hub.on("GET", "/api/v1/plugins/goal/-/", json: detail)
+        hub.on("PUT", "/api/v1/plugins/goal/-/config") { request in
+            let body = try JSON.decoder.decode(JSONValue.self, from: #require(request.body))
+            #expect(body == .object(["config": .object(["amount": .number(2100)])]))
+            return Data(detail.replacingOccurrences(of: "2000", with: "2100").utf8)
+        }
+        let page = ExtensionModel(id: "goal", deps: .init(api: { hub.client }))
+        await page.load()
+        page.set(.number(2100), at: ["amount"])
+        #expect(page.canSave)
+        #expect(await page.save())
+        #expect(page.value(["amount"]) == .number(2100))
+    }
+}
+
 /// Settings › Extensions' logic (ExtensionsModel, ExtensionModel): what the hub sends decodes, the form's draft is edited by path and
 /// saved as a whole without the emptied fields, a field the hub refuses comes back beside that field.
 @MainActor

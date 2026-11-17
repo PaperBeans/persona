@@ -409,7 +409,7 @@ func TestAdmissionConcurrentClaimsAreAtomic(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			// No direction: isolate the machine-level atomic decision.
-			rel, err := s.admitAgentStart(ctx, "busy")
+			rel, err := s.admitAgentStart(ctx, "busy", "work")
 			results <- err
 			if err == nil {
 				releases <- rel

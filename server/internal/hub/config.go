@@ -23,6 +23,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/managerconf"
+	"github.com/nwverse/persona/server/internal/update"
 
 	"github.com/mdp/qrterminal/v3"
 
@@ -103,8 +104,9 @@ type NodePackagesConfig struct {
 // http://[user:pass@]host:port proxy for the update's checks and downloads only (internal/netproxy); "" the
 // environment's, as before.
 type UpdateConfig struct {
-	URL   string `json:"url,omitempty"`
-	Proxy string `json:"proxy,omitempty"`
+	URL         string                    `json:"url,omitempty"`
+	Proxy       string                    `json:"proxy,omitempty"`
+	Development *update.DevelopmentConfig `json:"development,omitempty"`
 }
 
 // TailcatConfig: DERPMapURL is a DERP map of your own relays (a derper) instead of Tailscale's public ones; the nodes

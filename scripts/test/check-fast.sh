@@ -58,8 +58,10 @@
 #                              also test_doc_sections.py: it reads the code comments there too (its SOURCE_DIRS)
 #   server/internal/{proto,hub,extension}/**, schema/extension/manifest.schema.json
 #                              also test_doc_wire.py: the code side of those wire lists
-#   apple/**                   scripts/test/test_apple_l10n.py (String Catalogs, Chinese Swift literals); the iOS/macOS
-#                              builds and tests are skipped with a note (they need a Mac)
+#   apple/**                   scripts/test/test_apple_l10n.py (String Catalogs, Chinese Swift literals) and
+#                              test_apple_no_callkit.py (no CallKit import or link setting, #9290; also for
+#                              scripts/persona_config.py, whose xcconfig it reads); the iOS/macOS builds and tests
+#                              are skipped with a note (they need a Mac)
 #   deploy/docker/**, docs/operations/docker.md, Dockerfile
 #                              scripts/test/test_docker_entrypoint.py (it also reads the root Dockerfile)
 #                              These Linux suites run in CI's Scripts tests job; they run from scripts/test as there.
@@ -774,6 +776,8 @@ else
         script_test_add scripts/test/test_doc_sections.py ;;
     esac
     case "$f" in apple/*) script_test_add scripts/test/test_apple_l10n.py ;; esac
+    # Every Apple source and build file, and the xcconfig persona_config.py writes, against CallKit (#9290).
+    case "$f" in apple/*|scripts/persona_config.py) script_test_add scripts/test/test_apple_no_callkit.py ;; esac
     # test_gen_tokens.py checks the token sources against the iOS values and the committed Android Tokens.kt (#4209).
     case "$f" in
       spec/tokens/*|apple/Shared/Design/*|android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt)

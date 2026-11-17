@@ -501,9 +501,7 @@ private struct ModelConfigurationSheet: ViewModifier {
                 }
                 .navigationDestination(for: ModelPurposeRoute.self) { ModelPurposeEditorView(purposeID: $0.id, owner: owner) }
                 .pageToolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Close") { showing = false }.lineLimit(1)
-                    }
+                    SheetClose { showing = false }
                 }
             }
             #endif

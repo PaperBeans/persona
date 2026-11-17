@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"crypto/rand"
 	"strings"
 	"sync"
 	"time"
@@ -364,6 +365,15 @@ func (s *Service) deliverPending(ctx context.Context) {
 	}
 }
 
+// inboxProcessingPrompt adds the write precondition to each new processing prompt.
+func inboxProcessingPrompt(turn, text string) string {
+	if turn == "" {
+		return text
+	}
+	return text + "\n\n[Persona Inbox processing turn: include processing_turn: \"" + turn +
+		"\" in inbox_suggest or inbox_draft calls for this prompt. If superseded, end this turn.]"
+}
+
 // deliverNotes sends what waits for the event's conversation into it. A conversation found gone is dropped: a note
 // that asks for work then queues a new one (carrying the recap and the chain); a send that failed otherwise is tried
 // again on the next pass.
@@ -413,6 +423,11 @@ func (s *Service) deliverNotes(ctx context.Context, it *InboxItem) {
 		b.mu.Unlock()
 		return
 	}
+	turn := ""
+	if it.open() {
+		turn = rand.Text()
+		a.ProcessingTurn = turn
+	}
 	b.mu.Unlock()
 	if s.isWorkMachine(machine) {
 		b.mu.Lock()
@@ -427,7 +442,7 @@ func (s *Service) deliverNotes(ctx context.Context, it *InboxItem) {
 	for i, n := range notes {
 		texts[i] = renderNote(n, owner)
 	}
-	err := s.sendToSession(ctx, machine, sid, strings.Join(texts, "\n\n---\n\n"))
+	err := s.sendToSession(ctx, machine, sid, inboxProcessingPrompt(turn, strings.Join(texts, "\n\n---\n\n")))
 	gone := false
 	if err != nil {
 		// Gone only when its machine answers without it (an offline machine is tried again later).

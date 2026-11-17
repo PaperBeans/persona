@@ -301,7 +301,7 @@ export function HelpDialog({ topic, machine, step, onClose, onAction }: { topic:
       return (
         <Dialog open onClose={onClose} title={t("assistant-readiness.help_login_title")} footer={footer(useKey)}>
           <P>{t("assistant-readiness.help_login_body", { machine: where })}</P>
-          <Command text="claude" />
+          <Command text="claude auth login" />
           <p className="mt-2 text-[12px] leading-relaxed text-ink-3">{t("assistant-readiness.help_login_after")}</p>
         </Dialog>
       );

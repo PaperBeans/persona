@@ -187,6 +187,8 @@ nonisolated struct ExtensionField: Codable, Hashable, Sendable, Identifiable {
     var maxLength: Int?
     var minimum: Double?
     var maximum: Double?
+    /// How far an integer stepper moves; typing and validation are independent of this hint.
+    var step: Int?
     /// An array's items (strings, maybe from a list of choices).
     var items: ExtensionItems?
     var minItems: Int?
@@ -207,9 +209,27 @@ nonisolated struct ExtensionField: Codable, Hashable, Sendable, Identifiable {
     var picksLauncher: Bool { type == "string" && format == "launcher" && (self.enum ?? []).isEmpty }
 
     enum CodingKeys: String, CodingKey {
-        case name, type, title, description, `default`, required, `enum`, format, pattern, minimum, maximum, items, fields, confirm, os
+        case name, type, title, description, `default`, required, `enum`, format, pattern, minimum, maximum, step, items, fields, confirm, os
         case minLength = "min_length", maxLength = "max_length", minItems = "min_items", maxItems = "max_items"
         case uniqueItems = "unique_items"
+    }
+}
+
+/// Integer configuration steppers share the Android app's fallback and bounds rules.
+nonisolated enum ExtensionIntegerStepper {
+    static func next(_ field: ExtensionField, current: Double?, up: Bool) -> Double {
+        let from = current?.rounded(.towardZero) ?? field.default?.double?.rounded(.towardZero)
+            ?? field.minimum?.rounded(.up) ?? 0
+        let step = Double(field.step ?? 1)
+        var next = from + (up ? step : -step)
+        if let minimum = field.minimum { next = max(next, minimum.rounded(.up)) }
+        if let maximum = field.maximum { next = min(next, maximum.rounded(.down)) }
+        return next
+    }
+
+    static func canStep(_ field: ExtensionField, current: Double?, up: Bool) -> Bool {
+        guard let current else { return true }
+        return up ? field.maximum.map { current < $0 } ?? true : field.minimum.map { current > $0 } ?? true
     }
 }
 

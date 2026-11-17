@@ -53,6 +53,19 @@ func startLine(path, anchor string, shells ...string) string {
 	return line
 }
 
+// startLineChoice is the line typed for cmd: cmd itself when the pane cannot use a start file, the POSIX source line
+// for a shell that can, or PowerShell's line that has Git Bash source it on Windows. useStartFile comes from
+// typesStartFile; bash is needed only for the PowerShell choice.
+func startLineChoice(cmd, path, anchor, bash string, useStartFile bool, shells ...string) string {
+	if !useStartFile {
+		return cmd
+	}
+	if powerShellPane(shells...) {
+		return powerShellStartLine(bash, path, anchor)
+	}
+	return startLine(path, anchor, shells...)
+}
+
 // writeStartScript writes the start file for cmd in dir (0600; dir made 0700 when missing) and returns its path.
 func writeStartScript(dir, cmd string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -135,8 +148,26 @@ func (n *Node) typeStart(ctx context.Context, launch host.Launcher, created *hos
 // typeStartMode is typeStart with closeOnError controlling only its own failure cleanup. Work agents keep the terminal
 // on every error because launch.Run cannot prove an accepted command did not run; other starts retain closeNewTab.
 func (n *Node) typeStartMode(ctx context.Context, launch host.Launcher, created *host.Created, ws, anchor, cmd string, closeOnError bool, shells ...string) (*typedStart, error) {
+	if err := windowsPaneShellError(shells...); err != nil {
+		if closeOnError {
+			n.closeNewTab(ctx, launch, created, ws)
+		}
+		return nil, err
+	}
+	useStartFile := n.typesStartFile(launch, shells...)
 	t := &typedStart{launch: launch, created: created, line: cmd}
-	if n.typesStartFile(launch, shells...) {
+	bash := ""
+	if useStartFile && powerShellPane(shells...) {
+		var err error
+		bash, err = powerShellStartShell()
+		if err != nil {
+			if closeOnError {
+				n.closeNewTab(ctx, launch, created, ws)
+			}
+			return nil, err
+		}
+	}
+	if useStartFile {
 		path, err := writeStartScript(n.dir, cmd)
 		if err != nil {
 			if closeOnError {
@@ -144,8 +175,9 @@ func (n *Node) typeStartMode(ctx context.Context, launch host.Launcher, created 
 			}
 			return nil, err
 		}
-		t.path, t.line = path, startLine(path, anchor, shells...)
+		t.path = path
 	}
+	t.line = startLineChoice(cmd, t.path, anchor, bash, useStartFile, shells...)
 	if err := launch.Run(ctx, created.Pane, t.line); err != nil {
 		t.done()
 		if closeOnError {
@@ -157,9 +189,10 @@ func (n *Node) typeStartMode(ctx context.Context, launch host.Launcher, created 
 	return t, nil
 }
 
-// typesStartFile: runAgentCommand types `. <file>` into launch's pane whose shells are shells, not the command itself.
+// typesStartFile: runAgentCommand types `. <file>` into a POSIX pane, or a PowerShell line that has Git Bash read
+// the file on Windows, rather than typing the command itself.
 func (n *Node) typesStartFile(launch host.Launcher, shells ...string) bool {
-	return startsFromFile(launch) && n.dir != "" && takesAssign(shells...)
+	return n.dir != "" && (powerShellPane(shells...) || startsFromFile(launch) && takesAssign(shells...))
 }
 
 // startsFromFile: the launcher's panes get a start file (herdr, herdr-core, Orca) rather than the command typed out.

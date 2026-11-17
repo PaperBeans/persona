@@ -179,6 +179,7 @@ struct AgentsListMenu: View {
     }
 }
 
+#if !os(iOS)
 /// A row's long-press menu in Agents. Equal while the facts it shows are: the row's session changes with every push
 /// while its agent works (a new last line), and the menu held open on it was rebuilt each time.
 struct AgentRowMenu: View, Equatable {
@@ -357,6 +358,11 @@ extension AgentRowMenu {
                   actions: actions)
     }
 }
+
+#else
+/// iOS aliases the shared definition used by the detail More menu too.
+typealias AgentRowMenu = AgentActionMenu
+#endif
 
 /// The ⋯ on a space's header in Agents: `SpaceMenuItems`, equal while what it offers is (the space, its unread agents,
 /// whether it can be renamed); the group's other fields change with every push.

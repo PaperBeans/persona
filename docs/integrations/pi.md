@@ -42,7 +42,7 @@ both built on `integrations/runtime-sdk/`. pi follows the route of whichever hos
 At session start, the extension records where it runs using `pi.appendEntry("persona-host", {host})` (`herdr`, `terminal`, `pi-web`; only when it changes, excluded from model context;
 not recorded for sessions launched by other programs, such as `pi --mode rpc` or `pi -p`). After a session stops, the companion lists it from disk and uses the last record to decide:
 
-- Previously run in herdr or a terminal: the row carries `resume_argv: ["pi", "--session", <file>]`. When the phone sends a message, node opens a new tab in the herdr space for that directory,
+- Previously run in herdr or a terminal: the row carries `resume_argv: ["pi", "--approve", "--session", <file>]` (`--approve`: "Project trust" below). When the phone sends a message, node opens a new tab in the herdr space for that directory,
   runs it through `personad tab-start <0600 file>` (commands and paths do not pass through a shell or appear on screen), waits for the new pi extension to list the session, then sends the message.
   If herdr is unavailable, it rejects the request (`engine_missing`); it does **not** open it in pi-web instead. If node is too old to recognize `resume_argv`, the companion also rejects the request rather than waking pi-web.
 - Previously run in pi-web, or no record (sessions from before the extension was installed): pi-web wakes it, as before.
@@ -121,6 +121,12 @@ The first switch (from a version without this mechanism, or an installation from
 These are all terminal commands on that computer (or ask an Agent to do it); there is no UI to click through.
 
 The companion's `--port` / `--host` must match pi-web (default `127.0.0.1:30141`). If pi-web sets `PI_WEB_PASSWORD`, the companion needs the same environment variable.
+
+### Project trust
+
+pi asks before it loads project-local files (`.pi/`, `.agents/`, `AGENTS.md` and the like) from a directory it has no saved decision for. A pi Persona starts or resumes in a herdr pane has nobody at that prompt: a `task_plan` / `agent_start` start, herdr's resume of one, and a stopped session woken by a phone message would wait there, the extension would never list the session, and the first message would not be sent (#9462).
+So those runs pass `--approve` ("trust project-local files for this run"): the directory the task or the person chose is trusted for that process only. Nothing is written to `~/.pi/agent/trust.json`, so a pi the user starts in a terminal still asks, and a saved decision there stays the user's. pi versions without project trust also lack the flag and refuse it; update pi (`pi update self`).
+Persona's own health check runs `pi -p … --no-session` in an empty temporary directory, which has nothing to trust.
 
 ## Mapping
 

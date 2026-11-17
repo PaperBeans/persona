@@ -12,11 +12,12 @@ whether there's a pending interaction, and whether the user has looked at it in 
 | Waiting in the background (a kind of `working`) | The turn is over and all the agent still runs only waits: background commands that sleep, loop on a check (`until … sleep`), `gh … --watch`, `tail -f` (#6045, `Session.background_waiting`) | — | The node looks at the processes under the session's `claude`: every background command is a shell Claude Code starts there (it sources its shell snapshot). One `ps` at most every 20 s, and only while an agent with background commands has ended its turn; CPU is what they used between two looks (Linux `ps` counts whole seconds). Waiting: only waiters, shells and filters in their pipes, near-zero CPU, a loop's short probes (younger than 10 s) left out. Working: a compiler, build tool, test runner or download runs, or CPU is used, or a process nothing here knows runs while their output grew in the last 2 minutes. No look to compare with yet, or no shell found: Working, as before. Subagents and workflows are work. `state` stays `working` (older apps show Working); new clients leave it out of the Working count | Amber, faded, still |
 | `unread` Unread | A turn finished and the result hasn't been seen | `done` (never focused in herdr) | And not viewed in the App since it finished | Green |
 | `idle` Seen | Finished and seen, waiting for input | `idle` (seen in herdr) | Or herdr still says `done` but it was viewed in the App | Gray |
+| Just finished (a kind of `idle`) | The triage found the turn done before anybody looked, less than three hours ago ("Just finished" below, #9751, `work.just_finished`) | — | Session Triage on, and the turn Unread before the triage took it out | Green, a plain dot |
 | `offline` Not running | Not in the host, only a transcript. An Agent of a terminal engine is read-only (#4754): a message is refused (`agent_stopped`), and Resume on its terminal page brings it back (`--resume`) | — | — | Light gray |
 | `interrupted` Interrupted by restart | Was running before a restart, and the restart took herdr's panes with it (#1917) | — | The record has a pane, the start time is earlier than this node's start, and there's no live agent now | Light gray, with "Continue" |
 | `unknown` Unknown | The host recognized the agent but can't tell its state | `unknown` | — | Gray |
 
-List order (each client's rank: web `lib/format.ts`, iOS / Mac `AgentListOrder.rank`, Android `agentRank`): Needs you → Unread → Awaiting reply → Working → Seen → Unknown → Not running.
+List order (each client's rank: web `lib/format.ts`, iOS / Mac `AgentListOrder.rank`, Android `agentRank`): Needs you → Unread → Awaiting reply → Working → Just finished → Seen → Unknown → Not running.
 
 Sort priority of a folded row or tab (which agent it speaks for and which pane it opens on; web `lib/herdr-tree.ts`, Android `tabUrgency`): Needs you → Working → Unread → Seen → Unknown → Not running, with Awaiting reply right after Unread on Android.
 iOS / Mac tab rows (`TabPanes.swift`) go by `AgentState.priority` instead: Needs you → Unread → Working → Seen → Unknown → Not running.
@@ -64,6 +65,38 @@ forgotten. So a stopped session carries `awaits_reply` (`state` is unchanged; ol
 - The finished push of a turn that asks says the question, not the reply's first lines.
 - **The assistant knows**: its live snapshot has a section for agents asking the user that the user saw and has not answered,
   and `agents_list`'s `active` lists them with an "asking you, unanswered" line.
+
+### Just finished (#9751)
+
+With Session Triage on, a turn the triage finds done stops being Unread ("Work state" below): the green dot stays for
+what needs a look. But it went straight to Seen, and the Agents list sorted and folded it with sessions seen long ago
+(Idle Spaces, "N more idle", the folded Seen section), so the work that had just finished was hard to find. A stopped
+session therefore carries `work.just_finished` (`state` is unchanged; older apps still show Seen):
+
+- **Set** by the manager while it makes the lists (`decorateWork`, `server/internal/assistant/fleet_work.go`): the triage
+  found the turn done (`work.phase` `done`), the session was Unread before that took it out (nobody had seen it: not
+  opened or marked seen in an app, not focused in herdr, not viewed in Paseo's own App), no `/loop` wakes it again (that
+  is Waiting), and the turn ended less than `agents.triage.just_finished_hours` ago (manager.json, 3 by default;
+  `work.turn_at`, else `updated_at`). Only on the lists; the triage's record never holds it. With Session Triage off no
+  turn has a work state, so a finished one is Unread as before.
+- **Gone** when the session is seen (opening its chat, Mark as Seen, Mark all as seen, a look in the host), when a new
+  turn starts, and when the window ends. Nothing else tells a list again when only time passes, so the manager keeps
+  when each machine's first Just finished row runs out and tells that list again once it has (`republishFinished`,
+  looked at every 30 seconds).
+- **Lists**: a Just finished, not muted agent gets its own rank, after Working and Waiting in the background, before
+  Waiting, Muted and Seen: work still going comes first, finished work before the parked waits and the seen ones. It
+  and its space stay out of Idle Spaces and the "N more idle" folds. A muted one is plain Seen, as a muted Awaiting
+  reply is. Its row draws the unread tint as a plain dot (not the glowing Unread one), names its state "Just finished"
+  (`lib-state-labels.just_finished`, the To-dos' "Just finished" section's word), and keeps the triage's "✓
+  conclusion" as its second line. Opening it, or Mark all as seen, takes it out on that device at once and waits in the
+  seen outbox for the hub ("Seen" below).
+- **Why three hours**, not the To-dos' 24 (`docs/assistant/todo-status-sop.md`): the Agents list sees far more turns than
+  the To-dos page; on a busy hub a day kept dozens of rows, the pile the section was made to end. Three hours covers a
+  meeting or a stretch of focused work; the setting changes it.
+- **Not counted**: no push, badge, Needs you count, Live Activity or widget count changes, and the assistant's snapshot
+  still lists these turns under "Done (within 24 hours)".
+- **Clients** (#9751): the web first. The shared Rust sort core with HarmonyOS, Android and iOS / Mac follow in their
+  own issues; until then they show these rows as Seen, as before.
 
 ### Codex (#4865)
 
@@ -169,7 +202,7 @@ The `sessions/<pid>.json` Claude Code writes also has `status` (busy / idle) and
 
 **Work state** (2026-11-04, #1686, [agent-work.md](../assistant/agent-work.md)): everything above is the host's view; "Unread" only says the turn stopped. After a turn stops, the hub triages it
 and adds a work state `work` to the session: working / blocked on a named precondition (waiting for your decision, another Agent, an external event, a transient error) / done, with a line saying "what it's waiting for" or the conclusion.
-State computation takes it into account: **done**, or **blocked on something the hub waits on for it** (the hub retries automatically, wakes it at the set time), is no longer `unread` but `idle`;
+State computation takes it into account: **done**, or **blocked on something the hub waits on for it** (the hub retries automatically, wakes it at the set time), is no longer `unread` but `idle` (a done one nobody had seen is Just finished for three hours, "Just finished" above);
 for a decision you need to make, the hub opens a question card, so it's `needs_you`. Anything not triaged (just stopped, model failure, can't tell) stays `unread`.
 There is only one set of colors: `apple/Shared/StatusPalette.swift`, shared by the App, the watch and Live Activities (`docs/apple/ios.md` ("Design language")).
 The Agents list also has "Waiting": the state is Seen, but a `/loop` hasn't fired yet (`Session.isWaiting`), so a new message will come. Sessions whose background commands / sub-Agents are still running are counted as Working directly by the hub (#2228, `backgroundState`) and no longer go into Waiting; the assistant chat's background tasks and Monitor are always running and don't count.
@@ -196,7 +229,7 @@ They count as background work just like background commands: the Agent is Workin
 - **Summary rows** (#5888, #5950): a `summary=1` row (for example iOS Agents › Recent) has no `workflows`. Clients take its `workflow_progress` as the running run (name, phase with `phase_count`, counts, time) and `running_workflows > 0` alone as background work, so the row's workflow line and "Working (Background)" read the same in every grouping (iOS `Session.runningWorkflows` / `isBackgroundWorking`, web `runningWorkflows`, Android `Session.runningWorkflows` / `AgentSession.isBackgroundWorking`). They key on the summary marker (`waiting` present), not on `workflows` being absent: a client keeps an older complete row's `workflows` under a summary (iOS `preservingDetails`, Android `keepingDetails`, the web store's merge), and the summary's own counts win over that kept array, as in "Summary rows" in `docs/protocol/protocol.md` (#3588). A chat whose row a summary last updated reads its running run the same way; its header cards (`workflows`) wait for the complete row. A summary names only the newest run, so its line has no "and N more".
 - **Fallback**: with no notification and no status file, 30 minutes without any write counts as `stalled` (its claude is gone) and no longer as running; a Monitor past `expires_at` doesn't count; finished ones stop being listed after a day.
 - The assistant's live snapshot and `agents_list` spell out running workflows ("this turn stopped to wait for results, it isn't done"), so it won't nudge or close these Agents.
-List order (the same for all three groupings): Needs you → Unread → Awaiting reply → Working → Waiting → Muted → Seen; within a state, by last update time (`docs/apple/ios.md`).
+List order (the same for all three groupings): Needs you → Unread → Awaiting reply → Working → Waiting in the background → Just finished → Waiting → Muted → Seen; within a state, by last update time (`docs/apple/ios.md`).
 
 ### "Seen"
 

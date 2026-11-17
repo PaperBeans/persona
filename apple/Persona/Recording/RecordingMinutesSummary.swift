@@ -66,9 +66,28 @@ extension View {
     /// One of the Summary's cards: the one row of a section of its own, padded as a card. The page's list draws it, with
     /// its other sections' background and corners in every style: a `.surface` drawn in a row had its shadow cut off
     /// square by the row's edges.
-    func minutesCard() -> some View {
-        frame(maxWidth: .infinity, alignment: .leading)
-            .listRowInsets(EdgeInsets(top: Theme.Space.l, leading: Theme.Space.l, bottom: Theme.Space.l, trailing: Theme.Space.l))
+    /// After the meeting (#8731 V3) the cards sit in a scroll view, not a list (`minutesBoxed`): each on a surface of its own.
+    func minutesCard() -> some View { modifier(MinutesCardStyle()) }
+}
+
+extension EnvironmentValues {
+    /// The minutes' cards are drawn in a scroll view rather than the recording page's list (#8731 V3, after the meeting):
+    /// each card boxed on its own surface, since no list draws a section around it.
+    @Entry var minutesBoxed = false
+}
+
+private struct MinutesCardStyle: ViewModifier {
+    @Environment(\.minutesBoxed) private var boxed
+
+    func body(content: Content) -> some View {
+        if boxed {
+            content.frame(maxWidth: .infinity, alignment: .leading)
+                .padding(Theme.Space.l)
+                .surface(in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
+        } else {
+            content.frame(maxWidth: .infinity, alignment: .leading)
+                .listRowInsets(EdgeInsets(top: Theme.Space.l, leading: Theme.Space.l, bottom: Theme.Space.l, trailing: Theme.Space.l))
+        }
     }
 }
 

@@ -250,9 +250,9 @@ func (s *Service) roomCreate(ctx context.Context, machine, sid string, r kb.Reco
 		"guest":          map[string]any{"tools": meetingRoomToolNames(), "kind": guestKindMeeting},
 		"message_source": &proto.MessageSource{Kind: proto.SourceMeeting, Title: feedMeetingName(r, s.location(ctx))},
 		"client_msg_id":  "meeting-" + r.ID}
-	// The In-meeting conversation's launcher and model (the main chat's while it follows it), on the CLI even when the
-	// main chat runs on the Agent SDK: a room never does. A room keeps them until it is deleted.
-	if err := s.applyModelCLI(ctx, purposeMeetingRoom, params); err != nil {
+	// The In-meeting conversation's launcher and model (the main chat's while it follows it). A room keeps them until
+	// it is deleted.
+	if err := s.applyModel(ctx, purposeMeetingRoom, params); err != nil {
 		return "", "", err
 	}
 	delete(params, "permission_mode")

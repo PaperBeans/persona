@@ -205,7 +205,7 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
               title={t("home.tasks")}
               count={tasks.total}
               right={tasks.total > tasks.rows.length && <a href={href({ name: "todos" })} onClick={(e) => onLinkClick(e, { name: "todos" })} className="text-[12px] text-ink-3 hover:text-ink-2">{t("home.tasks_all")}</a>}
-              grid
+              grid="tasks"
             >
               {tasks.rows.map((r) => (
                 <TaskCard key={r.todo.id} task={r} />
@@ -305,10 +305,12 @@ function MarkAllSeen({ count, onClick }: { count: number; onClick: () => void })
 // answering) only once each still has room for its question and buttons.
 const GRID = {
   rows: "grid grid-cols-1 items-start gap-1.5 @min-[60rem]:grid-cols-2 @min-[100rem]:grid-cols-3",
+  // task cards differ in height (a stage bar or not): a row stretches them to one height, the agent line at the bottom
+  tasks: "grid grid-cols-1 items-stretch gap-1.5 @min-[60rem]:grid-cols-2 @min-[100rem]:grid-cols-3",
   cards: "grid grid-cols-1 items-start gap-1.5 @min-[84rem]:grid-cols-2 @min-[120rem]:grid-cols-3",
 };
 
-function Group({ title, count, children, right, hint, grid }: { title: string; count: number; children: React.ReactNode; right?: React.ReactNode; hint?: string; grid?: true | "cards" }) {
+function Group({ title, count, children, right, hint, grid }: { title: string; count: number; children: React.ReactNode; right?: React.ReactNode; hint?: string; grid?: true | "cards" | "tasks" }) {
   return (
     <section>
       <div className={cx("flex items-baseline gap-2", hint ? "mb-1" : "mb-2.5")}>
@@ -332,7 +334,7 @@ function TaskCard({ task: { todo, status, agents } }: { task: HomeTask }) {
   const orphan = status !== "needs_you" ? orphanedLine(todo) : undefined;
   const line = [held && t(`todos.delivery_${held.state}`), agents > 0 && t("todos.agent_count", { count: agents })].filter(Boolean).join(" · ");
   return (
-    <div className="flex flex-col gap-2 rounded-card bg-surface px-3 py-2.5 shadow-card" data-task={todo.id}>
+    <div className="flex h-full flex-col gap-2 rounded-card bg-surface px-3 py-2.5 shadow-card" data-task={todo.id}>
       <div className="flex min-w-0 items-center gap-2">
         <a href={href(to)} onClick={(e) => onLinkClick(e, to)} className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink hover:underline">
           {todo.title}
@@ -341,13 +343,18 @@ function TaskCard({ task: { todo, status, agents } }: { task: HomeTask }) {
         <span className={cx("inline-flex h-5 shrink-0 items-center rounded-full bg-field px-1.5 text-[11px] font-medium whitespace-nowrap", TODO_TONE_CLASS[TODO_STATUS_INFO[status].tone])}>{todoStatusLabel(todo, status)}</span>
       </div>
       <TodoStageBar stage={todo.stage} stageKind={todo.stage_kind} prURL={todo.pr_url} />
-      {line && <p className={cx("truncate text-[11.5px]", held ? "text-orange" : "text-ink-3")}>{line}</p>}
-      {/* nobody is working on it (#3618): the hub's finding and why; a card that waits for the user says that instead */}
-      {orphan && (
-        <p data-orphaned-line className="truncate text-[11.5px] text-ink-3">
-          <span className="font-medium text-orange">{orphan.lead}</span>
-          {orphan.reason && <> · {orphan.reason}</>}
-        </p>
+      {/* the lines under the stage bar sit at the card's bottom, so a row of cards of one height lines up */}
+      {(line || orphan) && (
+        <div className="mt-auto flex flex-col gap-2">
+          {line && <p className={cx("truncate text-[11.5px]", held ? "text-orange" : "text-ink-3")}>{line}</p>}
+          {/* nobody is working on it (#3618): the hub's finding and why; a card that waits for the user says that instead */}
+          {orphan && (
+            <p data-orphaned-line className="truncate text-[11.5px] text-ink-3">
+              <span className="font-medium text-orange">{orphan.lead}</span>
+              {orphan.reason && <> · {orphan.reason}</>}
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

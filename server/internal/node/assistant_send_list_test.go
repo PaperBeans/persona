@@ -27,7 +27,7 @@ func TestAssistantSendDoesNotWaitForTheList(t *testing.T) {
 	n.mu.Lock()
 	p := n.procs[id]
 	n.mu.Unlock()
-	sdkWait(t, "its init", func() bool {
+	cliWait(t, "its init", func() bool {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		return p.claudeVersion != ""
@@ -108,7 +108,7 @@ func TestAssistantSendWithAOnceIDGoesOnce(t *testing.T) {
 	n.mu.Lock()
 	p := n.procs[id]
 	n.mu.Unlock()
-	sdkWait(t, "its init", func() bool {
+	cliWait(t, "its init", func() bool {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		return p.claudeVersion != ""

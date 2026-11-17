@@ -100,13 +100,6 @@
   "act_tool_what": "{what}を呼び出し中",
   "act_run": "実行中",
   "act_run_what": "{what}を実行中",
-  "fallback_shell_launcher": "ランチャー{launcher}はこのコンピューター上のシェルコマンドのため、Agent SDKはその設定を使えません",
-  "fallback_read_bridge": "Agent SDKブリッジを読み取れません：{cause}",
-  "fallback_no_bridge": "このpersonadにはAgent SDKブリッジが含まれていません",
-  "fallback_write_bridge": "Agent SDKブリッジを書き出せません：{cause}",
-  "fallback_no_bridge_script": "Agent SDKブリッジのパッケージにbridge.mjsがありません",
-  "fallback_no_node": "Node.js 22以降がありません：{cause}",
-  "fallback_no_claude": "claudeが見つかりません：{cause}",
   "read_only_claude_bg": "Claude Codeのバックグラウンドセッション：ここでは表示のみ。返信はコンピューターで claude agents から開いてください",
   "read_only_claude_no_inbox": "このClaudeにはメッセージ経路がありません（古いバージョンかオフ）：ここでは表示のみ。返信はコンピューターで",
   "read_only_claude_inbox": "このClaudeのメッセージ経路はPersonaで使えません（不明なバージョンかキーがない）：ここでは表示のみ。返信はコンピューターで",
@@ -133,5 +126,6 @@
   "paseo_ui_state_todo": "未着手",
   "paseo_ui_state_blocked": "ブロック中",
   "paseo_ui_state_skipped": "スキップ",
-  "paseo_ui_reply_with": "次のいずれかで返信できます："
+  "paseo_ui_reply_with": "次のいずれかで返信できます：",
+  "omp_stopped": "この omp セッションは停止しています。今はコンピューターでのみ続けられます（omp --resume）。ここからはまだメッセージを送れません。"
 }

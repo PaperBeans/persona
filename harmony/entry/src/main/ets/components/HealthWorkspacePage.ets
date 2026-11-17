@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { Binding, UIUtils } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { dataSharePredicates } from '@kit.ArkData';
@@ -247,7 +250,7 @@ export struct HealthWorkspacePage {
     Column({ space: Tokens.gap }) {
       Row({ space: Tokens.gap }) {
         Text(binding.value.name === 'MEMORY.md' ? tr('health_memory_index') : binding.value.name).fontSize(Tokens.body).fontWeight(FontWeight.Medium).layoutWeight(1)
-        if (binding.value.name !== 'MEMORY.md' && !this.editingMemory) Button(tr('health_memory_edit')).height(Tokens.touch)
+        if (binding.value.name !== 'MEMORY.md' && !this.editingMemory) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('health_memory_edit')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('health_memory_edit', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('health_memory_edit')).bindTips(tr('health_memory_edit'))
           .onClick(() => this.editingMemory = true).id('health.memory.edit')
       }.width('100%')
       if (this.editingMemory && binding.value.name !== 'MEMORY.md') {
@@ -256,20 +259,20 @@ export struct HealthWorkspacePage {
         if (this.workspace.memoryError) Text(tr(this.workspace.memoryError)).fontSize(Tokens.meta)
           .fontColor($r('app.color.persona_danger')).width('100%')
         Row({ space: Tokens.gap }) {
-          Button(tr('cancel')).layoutWeight(1).height(Tokens.touch).onClick(() => {
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('cancel')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('cancel', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('cancel')).bindTips(tr('cancel')).onClick(() => {
             this.editingMemory = false; this.workspace.openMemory(binding.value);
           })
-          Button(tr('save')).layoutWeight(1).height(Tokens.touch).enabled(this.workspace.canSaveMemory())
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('save')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('save', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('save')).bindTips(tr('save')).enabled(this.workspace.canSaveMemory())
             .onClick(() => this.workspace.saveMemory().then((saved: boolean) => { if (saved) this.editingMemory = false; }).catch(() => false))
             .id('health.memory.save')
-          Button(tr('delete')).layoutWeight(1).height(Tokens.touch).enabled(this.workspace.canEditMemory() && !this.workspace.busy)
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('delete')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('delete', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('delete')).bindTips(tr('delete')).enabled(this.workspace.canEditMemory() && !this.workspace.busy)
             .onClick(() => this.confirmDeleteMemory(binding.value)).id('health.memory.delete')
         }.width('100%')
       } else {
         MarkdownText({ text: this.workspace.memoryDraft, onLink: (url: string) => this.safeLink(url) })
         if (this.workspace.memoryError) Text(tr(this.workspace.memoryError)).fontSize(Tokens.meta)
           .fontColor($r('app.color.persona_danger')).width('100%')
-        if (binding.value.name !== 'MEMORY.md') Button(tr('delete')).height(Tokens.touch).enabled(this.workspace.canEditMemory() && !this.workspace.busy)
+        if (binding.value.name !== 'MEMORY.md') Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('delete')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('delete', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('delete')).bindTips(tr('delete')).enabled(this.workspace.canEditMemory() && !this.workspace.busy)
           .onClick(() => this.confirmDeleteMemory(binding.value)).id('health.memory.delete')
       }
     }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
@@ -289,10 +292,10 @@ export struct HealthWorkspacePage {
               Text(binding.value.title || tr('health_new_chat')).fontSize(Tokens.body).fontWeight(FontWeight.Medium).maxLines(1).width('100%')
               if (Wire.text(binding.value.data(), 'last_text', binding.value.detail)) Text(Wire.text(binding.value.data(), 'last_text', binding.value.detail)).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).maxLines(2).width('100%')
             }.alignItems(HorizontalAlign.Start).width('100%')
-          }.layoutWeight(1).height(Tokens.touch).onClick(() => {
+          }.layoutWeight(1).constraintSize({ minHeight: Tokens.touch }).buttonStyle(ButtonStyleMode.TEXTUAL).backgroundColor(Color.Transparent).onClick(() => {
           if (this.workspace.isHealthConversation(binding.value)) this.onChat(binding.value);
           }).id('health.chat.' + binding.value.id)
-      Button(tr('health_archive')).height(Tokens.touch).enabled(!this.workspace.busy && this.workspace.canArchiveConversation(binding.value))
+      Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('health_archive')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('health_archive', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('health_archive')).bindTips(tr('health_archive')).enabled(!this.workspace.busy && this.workspace.canArchiveConversation(binding.value))
             .onClick(() => this.confirmArchive(binding.value)).id('health.chat.archive.' + binding.value.id)
         }.width('100%').alignItems(VerticalAlign.Center)
       }, (binding: BoundRow<ResourceRow>) => binding.key)
@@ -305,10 +308,10 @@ export struct HealthWorkspacePage {
       if (this.workspace.loading && !this.workspace.memories.length) LoadingProgress().width(Tokens.touch).height(Tokens.touch)
       else if (!this.workspace.memoryEntries().length && !this.workspace.indexMemory()) Text(tr('health_no_memory'))
         .fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).width('100%')
-      ForEach(this.memoryRowBindings, (binding: BoundRow<HealthMemoryFile>) => Button(binding.value.name).width('100%').height(Tokens.touch)
+      ForEach(this.memoryRowBindings, (binding: BoundRow<HealthMemoryFile>) => Button({ type: ButtonType.Normal }) { Row({ space: Tokens.inset }) { Text(binding.value.name).fontSize(Tokens.body).fontColor(Colors.ink).layoutWeight(1); SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(Tokens.meta).fontColor([Colors.secondary]) }.width('100%').constraintSize({ minHeight: Tokens.touch }) }.buttonStyle(ButtonStyleMode.TEXTUAL).backgroundColor(Color.Transparent).padding({ left: Tokens.page, right: Tokens.page }).width('100%')
         .onClick(() => { this.editingMemory = false; this.workspace.openMemory(binding.value); }).id('health.memory.' + binding.value.name),
         (binding: BoundRow<HealthMemoryFile>) => binding.key)
-      if (this.workspace.indexMemory()) Button(tr('health_memory_index')).width('100%').height(Tokens.touch)
+      if (this.workspace.indexMemory()) Button({ type: ButtonType.Normal }) { Row({ space: Tokens.inset }) { Text(tr('health_memory_index')).fontSize(Tokens.body).fontColor(Colors.ink).layoutWeight(1); SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(Tokens.meta).fontColor([Colors.secondary]) }.width('100%').constraintSize({ minHeight: Tokens.touch }) }.buttonStyle(ButtonStyleMode.TEXTUAL).backgroundColor(Color.Transparent).width('100%').padding({ left: Tokens.page, right: Tokens.page })
         .onClick(() => { this.editingMemory = false; const index = this.workspace.indexMemory(); if (index) this.workspace.openMemory(index); })
         .id('health.memory.index')
       if (this.workspace.selectedMemory) this.memoryDetail(UIUtils.makeBinding((): HealthMemoryFile => this.workspace.selectedMemory || new HealthMemoryFile()))
@@ -324,14 +327,14 @@ export struct HealthWorkspacePage {
       ForEach(this.reportRowBindings, (binding: BoundRow<HealthReport>) => {
         Column({ space: Tokens.fine }) {
           Text(binding.value.title || binding.value.name).fontSize(Tokens.body).fontWeight(FontWeight.Medium).maxLines(2).width('100%')
-          Text(tr(binding.value.recordPath ? 'health_report_summarized' : 'health_report_not_summarized')).fontSize(Tokens.meta)
+          if (!binding.value.recordPath) Text(tr('health_report_not_summarized')).fontSize(Tokens.meta)
             .fontColor($r('sys.color.font_secondary')).width('100%')
           Row({ space: Tokens.gap }) {
-            if (binding.value.recordPath) Button(tr('health_report_summary')).layoutWeight(1).height(Tokens.touch)
+            if (binding.value.recordPath) Button({ type: ButtonType.Normal }) { Row({ space: Tokens.inset }) { Text(tr('health_report_summary')).fontSize(Tokens.body).fontColor(Colors.ink).layoutWeight(1); SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(Tokens.meta).fontColor([Colors.secondary]) }.width('100%').constraintSize({ minHeight: Tokens.touch }) }.buttonStyle(ButtonStyleMode.TEXTUAL).backgroundColor(Color.Transparent).width('100%').padding({ left: Tokens.page, right: Tokens.page }).layoutWeight(1)
               .onClick(() => this.openReport(binding.value, true)).id('health.report.summary.' + binding.value.name)
-            if (binding.value.path) Button(tr('health_report_original')).layoutWeight(1).height(Tokens.touch)
+            if (binding.value.path) Button({ type: ButtonType.Normal }) { Row({ space: Tokens.inset }) { Text(tr('health_report_original')).fontSize(Tokens.body).fontColor(Colors.ink).layoutWeight(1); SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(Tokens.meta).fontColor([Colors.secondary]) }.width('100%').constraintSize({ minHeight: Tokens.touch }) }.buttonStyle(ButtonStyleMode.TEXTUAL).backgroundColor(Color.Transparent).width('100%').padding({ left: Tokens.page, right: Tokens.page }).layoutWeight(1)
               .onClick(() => this.openReport(binding.value, false)).id('health.report.original.' + binding.value.name)
-            Button(tr('delete')).height(Tokens.touch).enabled(!this.workspace.busy)
+            Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('delete')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('delete', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('delete')).bindTips(tr('delete')).enabled(!this.workspace.busy)
               .onClick(() => this.confirmDeleteReport(binding.value)).id('health.report.delete.' + binding.value.name)
           }.width('100%')
         }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
@@ -349,7 +352,7 @@ export struct HealthWorkspacePage {
         }.alignItems(HorizontalAlign.Start).width('100%')
         Column({ space: Tokens.gap }) {
           Text(tr('health_try_asking')).fontSize(Tokens.body).fontWeight(FontWeight.Medium).width('100%')
-          Button(tr('health_upload_report')).bindMenu(this.reportUploadMenu).width('100%').height(Tokens.touch)
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('health_upload_report')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('health_upload_report', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('health_upload_report')).bindTips(tr('health_upload_report')).bindMenu(this.reportUploadMenu)
             .enabled(!this.pickerBusy && this.workspace.canUploadReports()).id('health.report.upload')
           if (this.pickerBusy || this.workspace.reportUploadState === 'sending') Row({ space: Tokens.gap }) {
             LoadingProgress().width(Tokens.touch).height(Tokens.touch)
@@ -357,7 +360,7 @@ export struct HealthWorkspacePage {
           }.width('100%')
           if (this.pickerError) Text(tr(this.pickerError)).fontSize(Tokens.meta)
             .fontColor($r('app.color.persona_danger')).width('100%')
-          ForEach(HEALTH_SUGGESTIONS, (key: string) => Button(tr(key)).width('100%').height(Tokens.touch)
+          ForEach(HEALTH_SUGGESTIONS, (key: string) => Button({ type: ButtonType.Normal }) { Row({ space: Tokens.inset }) { Text(tr(key)).fontSize(Tokens.body).fontColor(Colors.ink).layoutWeight(1); SymbolGlyph($r('sys.symbol.arrow_up')).fontSize(Tokens.meta).fontColor([Colors.secondary]) }.width('100%').constraintSize({ minHeight: Tokens.touch }) }.buttonStyle(ButtonStyleMode.TEXTUAL).backgroundColor(Color.Transparent).padding({ left: Tokens.page, right: Tokens.page }).width('100%').constraintSize({ minHeight: Tokens.touch })
             .enabled(this.workspace.canStartConversation() && !this.pickerBusy).onClick(() => this.send(tr(key))).id('health.suggestion.' + key), (key: string) => key)
         }.width('100%').alignItems(HorizontalAlign.Start)
         this.conversationSection()
@@ -371,7 +374,7 @@ export struct HealthWorkspacePage {
     Row({ space: Tokens.gap }) {
       TextArea({ text: this.workspace.draft, placeholder: tr('health_ask_placeholder') }).height(Tokens.inputExpanded).layoutWeight(1)
         .onChange((value: string) => this.workspace.setDraft(value)).id('health.composer')
-      Button(tr('send')).height(Tokens.touch).enabled(!!this.workspace.draft.trim() && this.workspace.canStartConversation() && !this.pickerBusy)
+      Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('send')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('send', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('send')).bindTips(tr('send')).enabled(!!this.workspace.draft.trim() && this.workspace.canStartConversation() && !this.pickerBusy)
         .onClick(() => this.send(this.workspace.draft)).id('health.send')
     }.width('100%').padding({ left: Tokens.page, right: Tokens.page, top: Tokens.gap, bottom: Tokens.gap })
       .backgroundColor($r('app.color.persona_canvas'))

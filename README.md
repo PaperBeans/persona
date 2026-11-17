@@ -41,7 +41,7 @@ https://github.com/user-attachments/assets/1c16db32-72e3-4d74-8cbf-1976d27b0b78
 - **A SuperAgent, one entry for everything.** Ask in one chat. Persona pulls in your context, breaks the work down and hands it to Agents. [Assistant](docs/assistant/assistant.md)
 - **Phone and computer, one session.** Claude Code, Codex, opencode, pi, DSH and Antigravity CLI keep running on your computers. Watch them live, answer and approve from your phone, then carry on at your desk. Capabilities vary by runtime and engine. [Runtimes](docs/integrations/runtimes.md) · [Engines](docs/integrations/engines.md)
 - **Extensions for everything.** Tools, Agent runtimes, data sources, channels and voice plug in, with an SDK and a market. [Extensions](docs/extensions/extensions.md) · [Extension market](https://github.com/nwverse/persona-extensions)
-- **Dynamic Island, Siri and Shortcuts.** Every Agent at a glance on the Lock Screen; ask, approve or start work by voice, a shortcut or your watch. [Live Activities](docs/apple/live-activity.md) · [Siri](docs/apple/siri.md)
+- **Dynamic Island, Siri and Shortcuts.** Every Agent at a glance on the Lock Screen; ask, approve or start work by voice, a shortcut or your watch, and call Persona with Siri. [Live Activities](docs/apple/live-activity.md) · [Siri](docs/apple/siri.md)
 - **Knowledge base and Inbox.** Your chats, people and projects become shared memory; Lark, mail and GitHub land in one AI-sorted Inbox. [Knowledge](docs/assistant/knowledge.md) · [Inbox](docs/assistant/inbox.md)
 - **Your phone's data, in reach.** Contacts, calendar, reminders, photos, health and location become tools, and writes are confirmed on your phone. [Phone tools](docs/apple/phone-tools.md)
 - **Connectors and channels.** Bring in Lark, mail, GitHub, iMessage, Telegram and WeChat; talk to Persona from the app, Lark, WeChat or by voice. [Connectors](docs/extensions/connectors.md) · [Channels](docs/extensions/channels.md)
@@ -70,7 +70,7 @@ Then install what you need, for example:
 
 ## How it works
 
-You run a small hub on an always-on machine; your devices talk only to it, and it reaches each of your computers. Agents run in herdr, Orca, Herdr App, Paseo or Cindy, or through a runtime integration. The main chat can also use [Claude Agent SDK](docs/assistant/model-config.md#main-chat-runtime-2455) instead of the Claude Code CLI; this is a main-chat backend, not a separate coding Agent. Engine and runtime capabilities vary; Cindy's read-only database fallback needs the host API for sending and interruption. Your data stays on your own hardware.
+You run a small hub on an always-on machine; your devices talk only to it, and it reaches each of your computers. Agents run in herdr, Orca, Herdr App, Paseo or Cindy, or through a runtime integration. Engine and runtime capabilities vary; Cindy's read-only database fallback needs the host API for sending and interruption. Your data stays on your own hardware.
 [Architecture](docs/server/architecture.md) · [Network and security](docs/operations/network.md)
 
 ## Get started

@@ -8,7 +8,8 @@ final class PerfInboxTests: PerfTestCase {
     private let lark = ["-demo.on", "NO", "-integrations.lark.enabled", "YES"]
 
     @MainActor private func openInbox(_ extra: [String] = []) {
-        launch(["-dev.openChat", "", "-tab", "mail", "-inbox.kind", "", "-inbox.source", ""] + lark + extra)
+        // the whole stacked page, as measured before the section bar (#9053), the group chat (FYI) in it
+        launch(["-dev.openChat", "", "-tab", "mail", "-inbox.kind", "", "-inbox.source", "", "-showInboxSection", "all"] + lark + extra)
         sleep(2)
     }
 

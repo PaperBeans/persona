@@ -648,6 +648,9 @@ func (m *Machine) callOnce(ctx context.Context, method string, params any, out a
 		snapshot.peer, snapshot.revision = p, m.sessionRevision
 		m.mu.Unlock()
 	}
+	if nodeHas(info, nodeproto.OwnerControls) {
+		method = ownerControlMethod(ctx, method)
+	}
 	return p.Call(ctx, method, params, out)
 }
 
@@ -946,6 +949,12 @@ func (m *Machine) onRequest(ctx context.Context, method string, params json.RawM
 			}
 		}
 		return map[string]any{"sessions": out}, nil
+	case "usage.backfill.status": // the token usage backfill (usage_backfill.go)
+		return m.d.usageBackfillStatus(ctx, m.cfg.ID, time.Now())
+	case "usage.backfill":
+		sctx, cancel := m.storeCtx()
+		defer cancel()
+		return m.d.putUsageBackfill(sctx, m.cfg.ID, params, time.Now())
 	}
 	if method == "notify" {
 		if id := spoolID(params); id != "" { // replayed by a resident node (spooldedupe.go)

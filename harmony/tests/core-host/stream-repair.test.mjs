@@ -124,6 +124,47 @@ async function withHost(context, run) {
 }
 const options = {timeout: 10_000};
 
+// #9515's five explicit Apple assertions plus 31 source-derived controls, including its malformed-input case, are
+// replayed through the real Rust plain_open_fence host projection. Complete {text} objects and drawn arrays are
+// copied from the independently reviewed expectations, never inferred from this surface's output.
+const plainFence = [
+  [{text: '看图：\n```mermaid\ngraph TD', drawn: ['mermaid', 'math']}, {text: '看图：\n```\ngraph TD'}, 'Apple explicit'],
+  [{text: '  ~~~ math \nx^2\n', drawn: ['mermaid', 'math']}, {text: '  ~~~\nx^2\n'}, 'Apple explicit'],
+  [{text: '```mermaid\ngraph TD\n```\n', drawn: ['mermaid', 'math']}, {text: '```mermaid\ngraph TD\n```\n'}, 'Apple explicit'],
+  [{text: '```mermaid\na\n```\n```swift\nlet', drawn: ['mermaid', 'math']}, {text: '```mermaid\na\n```\n```swift\nlet'}, 'Apple explicit'],
+  [{text: '```swift\nlet', drawn: ['mermaid', 'math']}, {text: '```swift\nlet'}, 'Apple explicit'],
+  [{text: '', drawn: ['mermaid', 'math']}, {text: ''}, 'empty input'],
+  [{text: 'mermaid', drawn: ['mermaid', 'math']}, {text: 'mermaid'}, 'no fence run'],
+  [{text: '`mermaid`', drawn: ['mermaid', 'math']}, {text: '`mermaid`'}, 'inline code span'],
+  [{text: '``mermaid\nx', drawn: ['mermaid', 'math']}, {text: '``mermaid\nx'}, 'two opener backticks'],
+  [{text: '```code```\nx', drawn: ['mermaid', 'math']}, {text: '```code```\nx'}, 'extra opener backtick'],
+  [{text: '    ```mermaid\nx', drawn: ['mermaid', 'math']}, {text: '    ```\nx'}, 'four-column indentation'],
+  [{text: '\t~~~math \nx', drawn: ['mermaid', 'math']}, {text: '\t~~~\nx'}, 'tab indentation'],
+  [{text: '````math \nx', drawn: ['mermaid', 'math']}, {text: '````\nx'}, 'four-character opener'],
+  [{text: '```mermaid', drawn: ['mermaid', 'math']}, {text: '```'}, 'opener only'],
+  [{text: '```mermaid\n', drawn: ['mermaid', 'math']}, {text: '```\n'}, 'opener and newline'],
+  [{text: '```mermaid\r', drawn: ['mermaid', 'math']}, {text: '```'}, 'trailing CR'],
+  [{text: '```mermaid\r\nx', drawn: ['mermaid', 'math']}, {text: '```\nx'}, 'CRLF'],
+  [{text: '\r```mermaid\nx', drawn: ['mermaid', 'math']}, {text: '\r```\nx'}, 'leading CR'],
+  [{text: '```mermaid \nx', drawn: ['mermaid', 'math']}, {text: '```\nx'}, 'trailing NBSP'],
+  [{text: ' ```mermaid\nx', drawn: ['mermaid', 'math']}, {text: ' ```mermaid\nx'}, 'leading NBSP'],
+  [{text: '```mermaid\nx', drawn: ['mermaid', 'math']}, {text: '```\nx'}, 'vertical tab before info'],
+  [{text: '```mermaid\nx', drawn: ['mermaid', 'math']}, {text: '```\nx'}, 'NEL after info'],
+  [{text: '```mermaid \nx', drawn: ['mermaid', 'math']}, {text: '```\nx'}, 'line separator after info'],
+  [{text: '```mermaid \nx', drawn: ['mermaid', 'math']}, {text: '```\nx'}, 'paragraph separator after info'],
+  [{text: '```mermaid extra\nx', drawn: ['mermaid', 'math']}, {text: '```mermaid extra\nx'}, 'complete predicate'],
+  [{text: '```MERMAID\nx', drawn: ['mermaid', 'math']}, {text: '```MERMAID\nx'}, 'case-sensitive predicate'],
+  [{text: '```mermaid\nx\n~~~\n', drawn: ['mermaid', 'math']}, {text: '```\nx\n~~~\n'}, 'different-character closer'],
+  [{text: '````mermaid\nx\n```\n', drawn: ['mermaid', 'math']}, {text: '````\nx\n```\n'}, 'shorter closer'],
+  [{text: '```mermaid\nx\n```\n~~~math\ny', drawn: ['mermaid', 'math']}, {text: '```mermaid\nx\n```\n~~~\ny'}, 'open math fence'],
+  [{text: '$$\n```mermaid\nx', drawn: ['mermaid', 'math']}, {text: '$$\n```mermaid\nx'}, 'fence-looking line inside math'],
+  [{text: '```mermaid\n$$\nx', drawn: ['mermaid', 'math']}, {text: '```\n$$\nx'}, 'math-looking line inside fence'],
+  [{text: '```mermaid\nx', drawn: ['math']}, {text: '```mermaid\nx'}, 'wrong drawn predicate'],
+  [{text: '```mermaid\nx', drawn: []}, {text: '```mermaid\nx'}, 'empty drawn input'],
+  [{text: '```mermaid extra\nx', drawn: ['mermaid extra']}, {text: '```\nx'}, 'complete drawn info'],
+  [{text: '```图 é \nx', drawn: ['图 é']}, {text: '```\nx'}, 'decomposed Unicode info'],
+];
+
 async function replay(host, cases, label) {
   for (const [{text, ...expected}, source] of cases) {
     assert.deepEqual(Object.keys(expected).sort(), ['end', 'repaired'], `${label}: complete expectation shape`);
@@ -160,6 +201,35 @@ test('ArkTS host replays every table and delimiter expectation as a complete obj
     assert.equal(table.length, 39);
     await replay(host, table, 'table');
     console.log(`  stream_repair table host replay: ${table.length} complete objects`);
+  });
+});
+
+test('ArkTS host replays every independent plain-fence expectation as a complete object', options, async (context) => {
+  await withHost(context, async (host) => {
+    assert.equal(plainFence.length, 35);
+    for (const [input, expected, source] of plainFence) {
+      assert.deepEqual(Object.keys(expected), ['text'], 'complete plain-fence expectation shape');
+      const actual = await host.projection('plain_open_fence', input);
+      assert.deepEqual(actual, expected, `plain_open_fence: ${JSON.stringify(input.text)} (${source})`);
+    }
+    for (const input of [
+      {text: '```mermaid'},
+      {drawn: []},
+      {text: 1, drawn: []},
+      {text: 'x', drawn: 1},
+      {text: 'x', drawn: [1]},
+    ]) {
+      await assert.rejects(() => host.projection('plain_open_fence', input), /plain_open_fence: input does not decode/);
+    }
+    const actual = await host.projection('plain_open_fence', plainFence[0][0]);
+    wrongObject(actual, (wrong) => { wrong.text = plainFence[0][0].text; });
+    wrongObject(actual, (wrong) => { wrong.extra = true; });
+    const nonDrawn = await host.projection('plain_open_fence', {
+      text: '```swift\nx', drawn: ['mermaid', 'math'],
+    });
+    assert.deepEqual(nonDrawn, {text: '```swift\nx'}, 'non-drawn input is preserved');
+    wrongObject(nonDrawn, (wrong) => { wrong.text = '```\nx'; });
+    console.log(`  plain_open_fence host replay: ${plainFence.length} complete objects plus two wrong expectations`);
   });
 });
 

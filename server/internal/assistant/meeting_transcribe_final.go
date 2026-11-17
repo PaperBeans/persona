@@ -21,19 +21,22 @@ import (
 // start the recording takes no more audio (transcription_final). The final transcript is the pass's sentences in its
 // windows, the live sentences in the windows it kept and wherever it did not get to; the echo rule marks Persona's echo
 // among its sentences as among the live ones (kept, with the mark). A pass that fails is tried again after each of
-// finalRetries from its first window not done; then the state is final with the live sentences, or failed when the hub
-// has none. A recording that never completes is complete for the pass feedStale after its last upload. Once the pass
-// stored its text the knowledge base makes the minutes (again, quietly) and deletes the audio when no minutes will
-// come (kb.FinalTranscriptStored).
+// finalRetries from its first window not done, and a try that never reached the upstream (upstream_unavailable with
+// nothing billed) after each of finalUnreachableRetries, counted apart (finalRetryAfter); then the state is final
+// with the live sentences, or failed when the hub has none. A recording that never completes is complete for the pass
+// feedStale after its last upload. Once the pass stored its text the knowledge base makes the minutes (again,
+// quietly) and deletes the audio when no minutes will come (kb.FinalTranscriptStored).
 
 // finalPassState is one recording's final pass in this process: running (cancel ends the try, its recording deleted
-// or trimmed), when it may be tried again, the windows it finished (kept across tries) and where they end.
+// or trimmed), when it may be tried again, the windows it finished (kept across tries) and where they end, and
+// whether the try running billed anything.
 type finalPassState struct {
 	running bool
 	cancel  context.CancelFunc
 	nextAt  time.Time
 	doneTo  float64
 	windows []finalWindow
+	billed  bool
 }
 
 // finalWindow is one window of a replay: its span, whether the hub's text stays (kept), the pass's sentences in it.
@@ -209,6 +212,9 @@ func (s *Service) finalPass(ctx context.Context, e *kb.Engine, id string, st *fi
 	case err != nil:
 		return err
 	}
+	s.hubTr.mu.Lock()
+	st.billed = false
+	s.hubTr.mu.Unlock()
 	s.hubStop(id, codeTranscriptionFinal) // the live pass's last sentences are written first
 	h, err := e.HubTranscript(id)
 	if err != nil {
@@ -238,13 +244,42 @@ func (s *Service) finalPass(ctx context.Context, e *kb.Engine, id string, st *fi
 		return err // the manager stops (resumed after the restart), or the recording went (finalCancel)
 	}
 	s.logf("recording %s: final pass try %d failed: %v", id, t.FinalTries, err)
-	if t.FinalTries <= len(finalRetries) {
+	s.hubTr.mu.Lock()
+	billed := st.billed
+	s.hubTr.mu.Unlock()
+	var je *jobError
+	unreachable := errors.As(err, &je) && je.code == extwire.TEUpstreamUnavailable && !billed
+	if unreachable {
+		u, uerr := e.TranscriptionUpdate(id, func(t *kb.MeetingTranscription, _ kb.Recording) error {
+			t.FinalUnreachable++
+			return nil
+		})
+		if uerr != nil {
+			return uerr
+		}
+		t = u
+	}
+	if wait, ok := finalRetryAfter(t, unreachable); ok {
 		s.hubTr.mu.Lock()
-		st.nextAt = time.Now().Add(finalRetries[t.FinalTries-1])
+		st.nextAt = time.Now().Add(wait)
 		s.hubTr.mu.Unlock()
 		return nil
 	}
 	return s.finalEnd(e, id, st, live, tl)
+}
+
+// finalRetryAfter is how long after a failed try of the final pass the next one starts, false when none is left. A try
+// that never reached the upstream (unreachable: counted in FinalUnreachable) waits by finalUnreachableRetries; any
+// other failed try by finalRetries, counted among the tries that were not unreachable (#9535).
+func finalRetryAfter(t kb.MeetingTranscription, unreachable bool) (time.Duration, bool) {
+	waits, n := finalRetries, t.FinalTries-t.FinalUnreachable
+	if unreachable {
+		waits, n = finalUnreachableRetries, t.FinalUnreachable
+	}
+	if n < 1 || n > len(waits) {
+		return 0, false
+	}
+	return waits[n-1], true
 }
 
 // finalEnd stores recording id's final transcript (the windows done, the live sentences elsewhere), Persona's echo in
@@ -392,6 +427,19 @@ func (s *Service) replay(ctx context.Context, e *kb.Engine, id string, held [][2
 		jc.close()
 		<-exited
 	}()
+	// sendFailed is the try's error once a send to the job failed: the job's own (its fatal error, read before the
+	// socket it closed after it), when the reader has it within a second, else the send's. Which one it is decides the
+	// retry schedule (finalRetryAfter).
+	sendFailed := func(err error) error {
+		t := time.NewTimer(time.Second)
+		defer t.Stop()
+		select {
+		case r := <-result:
+			return cmp.Or(r, err)
+		case <-t.C:
+			return err
+		}
+	}
 	go func() {
 		defer close(exited)
 		var cur []kb.RecordingSegment
@@ -437,6 +485,9 @@ func (s *Service) replay(ctx context.Context, e *kb.Engine, id string, held [][2
 			case extwire.TFUsage:
 				if add := f.Seconds - usage; add > 0 {
 					usage = f.Seconds
+					s.hubTr.mu.Lock()
+					st.billed = true // a failure from here is not "unreachable"
+					s.hubTr.mu.Unlock()
 					s.logf("recording %s: transcription usage %.1f s billed (replay job: %.1f s, %d session(s))", id, add, f.Seconds, f.Sessions)
 					s.addUsage(e, id, add)
 				}
@@ -507,17 +558,17 @@ func (s *Service) replay(ctx context.Context, e *kb.Engine, id string, held [][2
 			}
 			pos = next
 			if err := jc.send(jctx, extwire.TranscriptionFrame{Type: extwire.TFSeek, At: extwire.F(float64(pos) / kb.AudioRate)}); err != nil {
-				return err
+				return sendFailed(err)
 			}
 			continue
 		}
 		if err := jc.sendAudio(jctx, buf[:n]); err != nil {
-			return err
+			return sendFailed(err)
 		}
 		pos += int64(n / 2)
 	}
 	if err := jc.send(jctx, extwire.TranscriptionFrame{Type: extwire.TFEnd}); err != nil {
-		return err
+		return sendFailed(err)
 	}
 	done := time.NewTimer(jobDoneWait)
 	defer done.Stop()

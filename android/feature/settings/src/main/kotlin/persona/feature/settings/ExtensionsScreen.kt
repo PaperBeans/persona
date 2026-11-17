@@ -319,10 +319,18 @@ fun ExtensionPage(
         removing = false
         scope.launch {
             if (model.uninstall(keep, members = members)) {
-                feedback?.notice(ExtensionText.uninstalled(res, current.extension.name.ifBlank { current.extension.id }, members, model.removal))
-                onBack()
+                if (model.state.value.removalNotice == null) {
+                    feedback?.notice(ExtensionText.uninstalled(res, current.extension.name.ifBlank { current.extension.id }, members, model.removal))
+                    onBack()
+                }
             }
         }
+    }
+    state.removalNotice?.let { notice ->
+        ExtensionRemovalWarningsSheet(notice, onDone = {
+            model.dismissRemovalNotice()
+            onBack()
+        })
     }
     state.partial?.let { PackPartialDialog(it, detail?.extension?.name?.ifBlank { null } ?: extensionId, memberNames) { model.dismissPartial() } }
     // A new hub switches the pack's enabled members too: name them and change nothing until agreed (#1830).
@@ -340,8 +348,10 @@ fun ExtensionPage(
             destructive = true, confirm = stringResource(if (ask.keepData == null) R.string.settings_ext_dependents_off else R.string.settings_ext_dependents_remove) to {
                 scope.launch {
                     if (model.confirmCascade() && ask.keepData != null) {
-                        feedback?.notice(ExtensionText.uninstalled(res, name, ask.members, model.removal))
-                        onBack()
+                        if (model.state.value.removalNotice == null) {
+                            feedback?.notice(ExtensionText.uninstalled(res, name, ask.members, model.removal))
+                            onBack()
+                        }
                     }
                 }
             })

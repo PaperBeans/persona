@@ -14,6 +14,16 @@ enum UITestStyle {
     static func pinned(_ arguments: [String]) -> [String] {
         arguments.contains("-ui.style") ? arguments : arguments + ["-ui.style", name]
     }
+
+    /// The screenshot banner (#9508) pinned as well: a system screenshot (XCUIScreen, attachments) of a chat would show
+    /// it instead of the top bar, so it is off unless the test names it, or the run asks for it
+    /// (`TEST_RUNNER_PERSONA_SCREENSHOT_BANNER=1`: the bars' own tests with the bars in the capture layer, as a fresh
+    /// install has them).
+    static func bannerPinned(_ arguments: [String]) -> [String] {
+        if arguments.contains("-ui.screenshotBanner") { return arguments }
+        let on = ProcessInfo.processInfo.environment["PERSONA_SCREENSHOT_BANNER"] == "1"
+        return arguments + ["-ui.screenshotBanner", on ? "YES" : "NO"]
+    }
 }
 
 extension XCUIApplication {
@@ -22,7 +32,7 @@ extension XCUIApplication {
     /// Merged sidebar (#4206), and the tests written for the tabs and the shell would find another app. `navigation:
     /// false` leaves the layout to the app (a test of the setting itself, which a launch argument would pin).
     func launchPinned(navigation: Bool = true) {
-        launchArguments = UITestStyle.pinned(launchArguments)
+        launchArguments = UITestStyle.bannerPinned(UITestStyle.pinned(launchArguments))
         launchPersona(navigation: navigation)
     }
 

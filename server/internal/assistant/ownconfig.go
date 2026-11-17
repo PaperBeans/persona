@@ -27,12 +27,13 @@ type ownConfig struct {
 	} `json:"assistant"`
 	Agents *assistantwire.AgentsConfig `json:"agents"`
 	KB     *struct {
-		ReadOnly       bool           `json:"read_only"`
-		Enabled        *bool          `json:"enabled"`
-		TextDays       int            `json:"text_days"`
-		AttachmentDays int            `json:"attachment_days"`
-		AI             *aiwire.Config `json:"ai"`
-		ExtraDirs      []string       `json:"extra_dirs"`
+		ReadOnly       bool                           `json:"read_only"`
+		Enabled        *bool                          `json:"enabled"`
+		TextDays       int                            `json:"text_days"`
+		AttachmentDays int                            `json:"attachment_days"`
+		AI             *aiwire.Config                 `json:"ai"`
+		ExtraDirs      []string                       `json:"extra_dirs"`
+		RemoteFolders  []assistantwire.KBRemoteFolder `json:"remote_folders"`
 		// AttachmentDaysBySource: attachment_days per source, e.g. years for a chat source whose history is imported.
 		AttachmentDaysBySource map[string]int `json:"attachment_days_by_source"`
 		// History: the history import (docs/assistant/knowledge.md "History import"); missing or not enabled: off.
@@ -99,7 +100,7 @@ func (c ownConfig) over(h Hello) Hello {
 	}
 	if k := c.KB; k != nil {
 		h.KB = &assistantwire.KBSettings{Off: k.Enabled != nil && !*k.Enabled, ReadOnly: k.ReadOnly, TextDays: k.TextDays,
-			AttachmentDays: k.AttachmentDays, ExtraDirs: k.ExtraDirs, AttachmentDaysBySource: positiveDays(k.AttachmentDaysBySource), History: k.History}
+			AttachmentDays: k.AttachmentDays, ExtraDirs: k.ExtraDirs, RemoteFolders: k.RemoteFolders, AttachmentDaysBySource: positiveDays(k.AttachmentDaysBySource), History: k.History}
 		h.Models.KBAI = k.AI
 	}
 	if c.AI != nil {

@@ -238,6 +238,9 @@ final class AppModel {
     @ObservationIgnored var linkHooksForTests: (transport: APIClient.Transport, socket: () -> LocalSocket)?
     /// Unit tests: every group's link counts as up (true) or down (false) without a socket (`isLive`, the outbox's sends).
     @ObservationIgnored var linksUpForTests: Bool?
+    /// Unit tests: the app's voice call (`VoiceCalls.shared` otherwise), whose call to Persona keeps its group's tunnels
+    /// open in the background (`callTunnelGroup`).
+    @ObservationIgnored var voiceCallsForTests: VoiceCalls?
     /// Unit tests: no machines, agents or cards, whatever `init` restored. A simulator paired by an earlier run keeps
     /// its last snapshot, and a test of everything the model holds (the watch summary) would count those too (#1638).
     func forgetRestoredForTests() {
@@ -288,6 +291,9 @@ final class AppModel {
     @ObservationIgnored private(set) var agentsNavigationRevision = 0
     /// An explicit Agents-tab selection returns to its list; targeted opens do not change this request.
     var agentsListReveal = 0
+    /// Bumped each time the Inbox is entered at its root (the sidebar, a widget, a quick action, its tab on visionOS),
+    /// also while its page stays up: the section bar opens on Needs You on every entry (#9053, `InboxPage`).
+    var inboxEntries = 0
 
     /// User navigation, unlike `open` (notifications / links): choosing Agents discards its retained detail.
     func selectHomeTab(_ tab: AppTab) {
@@ -324,11 +330,16 @@ final class AppModel {
     var selectedTab: AppTab = .assistant {
         didSet {
             DeferredDefaults.set(selectedTab.rawValue, forKey: "app.tab")
+            DevMode.shared.tab(selectedTab) // the screen in front, while Developing Persona records (#9460)
             #if DEBUG
             ShellTrace.shared.note("tab \(oldValue)->\(selectedTab)")
             #endif
             // The shell routes it now, not when a view is next drawn (docs/apple/shell.md).
             if selectedTab != oldValue { tabRouter?.route(selectedTab, in: self) }
+            #if os(visionOS)
+            // The Inbox's own tab, which the TabView keeps up: picked, or routed to again while in front (a widget).
+            if selectedTab == .mail { inboxEntries += 1 }
+            #endif
             #if PERF_SIGNPOST
             PerfTrace.event("Tab selection", selectedTab.rawValue)
             #endif
@@ -352,7 +363,16 @@ final class AppModel {
     /// The chat a rebuilt list opens again (ChatsView): what the launch had (`dev.openChat`), then what rememberChat
     /// says. Kept here, not read back from UserDefaults: a launch argument of that name cannot be removed, and the
     /// list came back to a chat just closed (#1868).
-    static var rememberedChat: String? = UserDefaults.standard.string(forKey: "dev.openChat").flatMap { $0.isEmpty ? nil : $0 }
+    static var rememberedChat: String? = savedPlace?.string(forKey: "dev.openChat").flatMap { $0.isEmpty ? nil : $0 }
+    /// Where a launch reads the place the app was left (`app.tab`, `dev.openChat`, `assistant.current`). None in the app
+    /// hosting unit tests: it starts as a new install does, whatever earlier runs left on the simulator, which changed
+    /// the pages `MainPagesStackTests` measures (#9333). UI tests' target app is not such a host.
+    static var savedPlace: UserDefaults? {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil { return nil }
+        #endif
+        return .standard
+    }
     /// Session whose chat is on screen; its completion pings are suppressed.
     var visibleSession: SessionKey? {
         didSet {
@@ -396,6 +416,8 @@ final class AppModel {
     /// page drawn in that flush read the old conversation, watched it again and never heard of the new one, so New Chat
     /// left the conversation on screen (and #1749's switch did not redraw the page). Stored first, a page drawn while
     /// observers are told reads the new value. Otherwise as `@Observable`'s own setter: an equal value tells no one.
+    /// Dictate to Persona left this for the new assistant conversation's visible starter; it is never persisted.
+    var dictationRequest: DictationRequest?
     @ObservationIgnored private var currentStore: SessionKey?
     var assistantCurrent: SessionKey? {
         get {
@@ -405,6 +427,12 @@ final class AppModel {
         set {
             let old = currentStore
             currentStore = newValue
+            if newValue != old, newValue != nil {
+                #if DEBUG
+                if dictationRequest != nil { ShellTrace.shared.note("dictation request cleared by a conversation") }
+                #endif
+                dictationRequest = nil
+            }
             if newValue != old { withMutation(keyPath: \.assistantCurrent) {} }
             UserDefaults.standard.set(newValue?.path ?? "", forKey: "assistant.current")
             #if DEBUG
@@ -415,7 +443,30 @@ final class AppModel {
             #endif
         }
     }
+    /// Only the main assistant's new-conversation starter may take this exact request. Health leaves it for that page;
+    /// an existing conversation cancels it, and taking it before starting dictation makes failure one-shot too.
+    func takeDictationRequest(_ request: DictationRequest, uploadDest: String?) -> Bool {
+        #if DEBUG
+        ShellTrace.shared.note("dictation take match=\(dictationRequest == request) current=\(assistantCurrent != nil) health=\(uploadDest != nil)")
+        #endif
+        guard dictationRequest == request, uploadDest == nil else { return false }
+        guard assistantCurrent == nil else {
+            dictationRequest = nil
+            return false
+        }
+        dictationRequest = nil
+        return true
+    }
+
     var debugShowNewChat = false
+    /// Explicit New Chat navigation, including Dictate: older refreshes and first-message completions must not replace it.
+    @ObservationIgnored private(set) var assistantNewChat = 0
+    func noteNewAssistantChat() { assistantNewChat += 1 }
+    /// An async hub/manager refresh's fallback, only if no newer New Chat happened while it was away.
+    func selectAssistantMain(after generation: Int) {
+        guard generation == assistantNewChat, assistantCurrent == nil else { return }
+        assistantCurrent = assistantMain
+    }
     /// Bumped whenever another page hands the user to a Persona conversation (`askPersona`): the Persona tab goes back
     /// to its conversation even when it is the one already shown (a pushed Knowledge page would otherwise stay on top).
     var assistantReveal = 0
@@ -519,14 +570,14 @@ final class AppModel {
         }
         #endif
         hubGroup = UserDefaults.standard.string(forKey: Self.hubGroupKey) ?? ""
-        if let raw = UserDefaults.standard.string(forKey: "app.tab"), let tab = AppTab(rawValue: raw) {
+        if let raw = Self.savedPlace?.string(forKey: "app.tab"), let tab = AppTab(rawValue: raw) {
             selectedTab = tab
         }
         // Remembered as `SessionKey.path`: no group in it is the default group.
-        if selectedTab == .chats, let v = UserDefaults.standard.string(forKey: "dev.openChat") {
+        if selectedTab == .chats, let v = Self.savedPlace?.string(forKey: "dev.openChat") {
             openChat = SessionKey(path: v)
         }
-        if let v = UserDefaults.standard.string(forKey: "assistant.current") {
+        if let v = Self.savedPlace?.string(forKey: "assistant.current") {
             assistantCurrent = SessionKey(path: v)
         }
         connection.lives = { [weak self] in self?.links.map(\.live) ?? [] }
@@ -899,6 +950,9 @@ final class AppModel {
 
     /// What the demo's conversations left behind: drafts, and cached chats (a new demo starts over).
     private func forgetDemoChats() {
+        #if DEBUG
+        ProductionContinuityShadow.shared.closeAll()
+        #endif
         let demo = DemoHub.shared.sessionKeys
         drafts = drafts.filter { !demo.contains($0.key) }
         heldAttachments = heldAttachments.filter { !demo.contains($0.key) }
@@ -924,6 +978,9 @@ final class AppModel {
         pairingEngineMachine = nil
         checklistPending = false
         if isDemo { leaveDemo() }
+        #if DEBUG
+        ProductionContinuityShadow.shared.closeAll()
+        #endif
         for link in links { link.live.disconnect() }
         closeAllTunnels() // no hub left to route through a tunnel (also drops HubTransport's routes)
         PortForwarder.shared.closeAll() // no hub left for a forwarded port to reach
@@ -1091,6 +1148,13 @@ final class AppModel {
         guard let m = machine(ref) else { return nil }
         if let c = m.computer, c.enabled, c.screenSharing, let i = c.screenInput, i.reads { return i }
         if let b = m.browser, b.enabled, b.screenSharing, let i = b.screenInput, i.reads { return i }
+        return nil
+    }
+    /// Phone Screen as the extension showing this Mac's screen reports it (#9314); nil when no shown extension's node has it.
+    func phoneScreen(_ ref: MachineRef) -> MachinePhoneScreen? {
+        guard let m = machine(ref) else { return nil }
+        if let c = m.computer, c.enabled, c.screenSharing, let p = c.phoneScreen, p.offered { return p }
+        if let b = m.browser, b.enabled, b.screenSharing, let p = b.phoneScreen, p.offered { return p }
         return nil
     }
     nonisolated static func advertisesVideo(_ m: Machine) -> Bool {
@@ -1614,9 +1678,13 @@ final class AppModel {
 
     /// Forgets a chat held in memory (its group went away).
     func dropChat(_ key: SessionKey) {
+        #if DEBUG
+        if let store = chats[key] { ProductionContinuityShadow.shared.close(store) }
+        #endif
         chats[key] = nil
         chatUse[key] = nil
         subscribers[key] = nil
+        detailAt[key] = nil
         shown.removeAll { $0.key == key }
         if visibleSession == key { visibleSession = shown.last?.key }
     }
@@ -1628,6 +1696,9 @@ final class AppModel {
         }
         guard idle.count > Self.keptChats else { return }
         for k in idle.sorted(by: { chatUse[$0, default: 0] < chatUse[$1, default: 0] }).prefix(idle.count - Self.keptChats) {
+            #if DEBUG
+            if let store = chats[k] { ProductionContinuityShadow.shared.close(store) }
+            #endif
             chats[k] = nil
             chatUse[k] = nil
         }
@@ -1643,6 +1714,9 @@ final class AppModel {
     @ObservationIgnored private var filling = Set<SessionKey>()
     /// A detail or children lookup already running. The latest hint that arrived during it runs once it ends.
     @ObservationIgnored private var detailHints: [SessionKey: FetchHint] = [:]
+    /// The revision each held chat's last exact row answer stands at (`sessions_lookup`): a hint that starts there and
+    /// does not name the chat leaves that row as it was (#9479).
+    @ObservationIgnored private var detailAt: [SessionKey: String] = [:]
     @ObservationIgnored private var childHints: [SessionKey: FetchHint] = [:]
     /// Folded children of open chats, kept out of the root list window.
     let childIndex = ChildSessionIndex()
@@ -1702,7 +1776,9 @@ final class AppModel {
             // list does not have (hidden from it, or gone) is not a chat error. A transcript that cannot be read is
             // still reported, by the read of the transcript itself. The composer still needs a reason when the row
             // stays missing (#8748). A retained row the hub no longer has must leave the index so that reason shows.
-            guard let full = try await api.sessionListDetail(key, title: latest(key)?.title ?? "") else {
+            let answer = try await api.sessionListDetailAnswer(key, title: latest(key)?.title ?? "")
+            detailAt[key] = answer.revision
+            guard let full = answer.row else {
                 if retainedSessionKeys.contains(key) { dropRetainedSessionRow(key) }
                 noteMissingSessionDetail(key)
                 return
@@ -1729,9 +1805,21 @@ final class AppModel {
             applySessions([key.machineRef: Self.replacing(full, in: sessionsByMachine[key.machineRef] ?? [])])
             await refreshOpenChildren(key, hint: listHint)
         } catch {
+            detailAt[key] = nil
             if sessionIndex[key] == nil { noteMissingSessionDetail(key) }
             if isSubscribed(key), !error.isQuiet { chat(key).error = error.localizedDescription }
         }
+    }
+
+    /// A hint about other sessions: the held chat's exact row still holds, now at the hint's revision, and is not read
+    /// again (#9479; the web's rule since #6685, docs/protocol/protocol.md "Exact runtime-session detail"). Only when the
+    /// hint starts where the last exact answer stands, does not name the chat, and no read of it is out; any other hint
+    /// reads as before. Folded children keep their own gate.
+    func passesOver(_ key: SessionKey, revision: String, changes: SessionListChanges?) -> Bool {
+        guard let changes, let at = detailAt[key], at == changes.since, !changes.names(key),
+              detailHints[key]?.isRunning != true else { return false }
+        detailAt[key] = revision
+        return true
     }
 
     /// The hub answered with no row for a key we had only kept across a filtered landing: drop it so the composer
@@ -1826,6 +1914,7 @@ final class AppModel {
         guard var owners = subscribers[key], owners.remove(owner) != nil else { return }
         guard owners.isEmpty else { subscribers[key] = owners; return }
         subscribers[key] = nil
+        detailAt[key] = nil
         forgetAgentLive(key)
         if openChat != key, visibleSession != key, !shown.contains(where: { $0.key == key }) {
             clearMissingSessionDetail(key)
@@ -2054,11 +2143,54 @@ final class AppModel {
     /// The chat's store if one is in memory (never creates one: background sync writes to the disk cache instead).
     func existingChat(_ key: SessionKey) -> ChatStore? { chats[key] }
 
+    /// Native continuity through its adapter. DEBUG instrumentation is isolated here; Release executes the same
+    /// ChatStore methods directly and never carries the shadow's types or launch switches.
+    private func applyBatch(_ store: ChatStore, kind: NativeContinuityInput.Kind, items: [Item], span: ItemSpan,
+                            backlog: Bool = false, hasMore: Bool? = nil, moreAfter: Bool = false) -> ChatStore.Gap {
+        #if DEBUG
+        return store.apply(.batch(kind, items: items, span: span, backlog: backlog,
+                                  hasMore: hasMore, moreAfter: moreAfter)) ?? .none
+        #else
+        return store.apply(items, span: span, backlog: backlog, hasMore: hasMore, moreAfter: moreAfter)
+        #endif
+    }
+
+    private func replaceBatch(_ store: ChatStore, items: [Item], hasMore: Bool, span: ItemSpan) {
+        #if DEBUG
+        // Rust's reload retains strictly newer pushes of the same history, matching ChatStore.replace.
+        _ = store.apply(.batch(.reloaded, items: items, span: span, hasMore: hasMore))
+        #else
+        store.replace(with: items, hasMore: hasMore, span: span)
+        #endif
+    }
+
+    private func prependBatch(_ store: ChatStore, items: [Item], hasMore: Bool) {
+        #if DEBUG
+        _ = store.apply(.batch(.older, items: items, span: ItemSpan(), hasMore: hasMore))
+        #else
+        store.prepend(items, hasMore: hasMore)
+        #endif
+    }
+
+    private func unfoldBatch(_ store: ChatStore, fold: Item, items: [Item]) {
+        #if DEBUG
+        _ = store.apply(.range(items, fold: fold, more: false))
+        #else
+        store.unfold(fold, into: items)
+        #endif
+    }
+
+    /// An independent HTTP response can finish a core fill or leave its next-page effect outstanding. The shadow
+    /// checks that actual effect rather than inferring native scheduling across an await or through the fill gate.
+    func applyPrefetch(_ store: ChatStore, items: [Item], span: ItemSpan, moreAfter: Bool) -> ChatStore.Gap {
+        applyBatch(store, kind: .after, items: items, span: span, moreAfter: moreAfter)
+    }
+
     func loadInitial(_ key: SessionKey) async {
         guard let api = api(key.group) else { return }
         do {
             let res = try await api.items(key, beforeSeq: nil)
-            settle(key, chat(key).apply(res.items, span: res.span, backlog: true, hasMore: res.hasMore))
+            settle(key, applyBatch(chat(key), kind: .latest, items: res.items, span: res.span, backlog: true, hasMore: res.hasMore))
         } catch {
             chat(key).error = error.shown
         }
@@ -2084,27 +2216,51 @@ final class AppModel {
     func fill(_ key: SessionKey, shouldApply: (@MainActor () -> Bool)? = nil) async {
         guard shouldApply?() ?? true, let api = api(key.group), !filling.contains(key) else { return }
         filling.insert(key)
-        defer { filling.remove(key) }
         let store = chat(key)
+        var completed = false
+        defer {
+            filling.remove(key)
+            #if DEBUG
+            ProductionContinuityShadow.shared.fillCompleted(completed, in: store)
+            #endif
+        }
         for _ in 0..<8 {
             guard shouldApply?() ?? true else { return }
-            guard let r = try? await api.items(key, afterSeq: store.covered) else { return }
+            let response = try? await api.items(key, afterSeq: store.covered)
             guard shouldApply?() ?? true else { return }
-            switch store.apply(r.items, span: r.span, moreAfter: r.moreAfter == true) {
-            case .none: return
+            guard let r = response else { return }
+            guard shouldApply?() ?? true else { return }
+            switch applyBatch(store, kind: .after, items: r.items, span: r.span, moreAfter: r.moreAfter == true) {
+            case .none: completed = true; return
             case .fill: continue
-            case .reload: await reload(key, shouldApply: shouldApply); return
+            case .reload: await reload(key, shouldApply: shouldApply); completed = true; return
             }
         }
         await reload(key, shouldApply: shouldApply)
+        completed = true
     }
 
     /// Starts the chat over from the latest page (the hole was too big, or the transcript was replaced).
     func reload(_ key: SessionKey, shouldApply: (@MainActor () -> Bool)? = nil) async {
-        guard shouldApply?() ?? true, let api = api(key.group), let page = try? await api.items(key, beforeSeq: nil) else { return }
-        guard shouldApply?() ?? true else { return }
-        chat(key).replace(with: page.items, hasMore: page.hasMore, span: page.span)
-        ChatTrace.shared.note(key, "reload n=\(page.items.count) to=\(page.span.to.map(String.init) ?? "?") kept=\(chat(key).items.count - page.items.count)")
+        guard shouldApply?() ?? true, let api = api(key.group) else { return }
+        #if DEBUG
+        var completed = false
+        let store = chat(key)
+        defer {
+            if !completed { ProductionContinuityShadow.shared.failed(.fillFailed, in: store) }
+        }
+        #endif
+        do {
+            let page = try await api.items(key, beforeSeq: nil)
+            guard shouldApply?() ?? true else { return }
+            replaceBatch(chat(key), items: page.items, hasMore: page.hasMore, span: page.span)
+            #if DEBUG
+            completed = true
+            #endif
+            ChatTrace.shared.note(key, "reload n=\(page.items.count) to=\(page.span.to.map(String.init) ?? "?") kept=\(chat(key).items.count - page.items.count)")
+        } catch {
+            // The defer reports one failed completion for both transport errors and fence cancellation.
+        }
     }
 
     /// Fetches the work a fold stands for into the chat, once at a time per fold (several rows of one open work line
@@ -2117,9 +2273,21 @@ final class AppModel {
             return
         }
         let task = Task { try await api.foldedWork(key, fold) }
+        // The transport helper returns the concatenated pages. One range event applies the same complete work to
+        // both implementations, so a final empty page cannot erase the previous page in the mirror.
+        #if DEBUG
+        _ = chat(key).apply(.event(.openFold, fold: fold))
+        #endif
         unfolding[id] = task
         defer { unfolding[id] = nil }
-        chat(key).unfold(fold, into: try await task.value)
+        do {
+            unfoldBatch(chat(key), fold: fold, items: try await task.value)
+        } catch {
+            #if DEBUG
+            ProductionContinuityShadow.shared.failed(.rangeFailed, in: chat(key), fold: fold)
+            #endif
+            throw error
+        }
     }
     @ObservationIgnored private var unfolding: [String: Task<[Item], Error>] = [:]
 
@@ -2130,12 +2298,18 @@ final class AppModel {
         let store = chat(key)
         guard let api = api(key.group), store.hasMore, !store.isLoadingOlder, let first = store.items.first else { return false }
         store.isLoadingOlder = true
+        #if DEBUG
+        ProductionContinuityShadow.shared.loadOlder(store)
+        #endif
         defer { store.isLoadingOlder = false }
         do {
             let res = try await api.items(key, beforeSeq: first.seq, turns: turns)
-            store.prepend(res.items, hasMore: res.hasMore)
+            prependBatch(store, items: res.items, hasMore: res.hasMore)
             return true
         } catch {
+            #if DEBUG
+            ProductionContinuityShadow.shared.failed(.olderFailed, in: store)
+            #endif
             if !error.isOffline { show(error) } // scrolling up while offline: the title says why nothing comes
             return false
         }
@@ -2181,6 +2355,9 @@ final class AppModel {
         // resumed (an empty catch-up only lets the outbox go).
         connection.startCatchUp(group, plan.refetch ? [Self.interactionsPart(group)] + mine.map(Self.catchUpPart) : [])
         for key in mine {
+            #if DEBUG
+            _ = chat(key).apply(.event(.reconnected))
+            #endif
             deltas.drop(key)
             // A delta that cleared it may have been lost with the old socket. A resumed hub sends the current one
             // right after the catch-up, so the answer goes on being written instead of blanking for a moment.
@@ -2563,10 +2740,16 @@ final class AppModel {
                     socket(group)?.send(subscribeMessage(key))
                 }
             }
-        case .sessionsList(let revision):
+        case .sessionsList(let revision, let changes):
             sessionLists.invalidate(group, revision: revision)
             if isHub { followNeedsYou() }
-            for key in subscribers.keys where key.group == group { Task { await refreshSessionDetail(key, listHint: revision) } }
+            for key in subscribers.keys where key.group == group {
+                if passesOver(key, revision: revision, changes: changes) {
+                    Task { await refreshOpenChildren(key, hint: revision) }
+                } else {
+                    Task { await refreshSessionDetail(key, listHint: revision) }
+                }
+            }
         case .sessions(let machineID, let list):
             // A busy hub sends each machine's list on its own, one after another: they are applied together a moment
             // later, so the pages that read the sessions update once for the lot (one SwiftUI pass, not one a machine).
@@ -2668,7 +2851,8 @@ final class AppModel {
         case .items(let key, let items, let backlog, let hasMore, let span, let moreAfter):
             if backlog { connection.caughtUp(Self.catchUpPart(key)) }
             let store = chat(key)
-            let gap = store.apply(items, span: span, backlog: backlog, hasMore: hasMore, moreAfter: moreAfter)
+            let gap = applyBatch(store, kind: backlog && span.from == nil ? .latest : .pushed, items: items, span: span,
+                                 backlog: backlog, hasMore: hasMore, moreAfter: moreAfter)
             ChatTrace.shared.note(key, ChatTrace.batch(items, span: span, backlog: backlog, gap: gap, resets: store.resets, covered: store.covered))
             settle(key, gap)
             // The streamed message landed in the transcript: stop drawing its live copy (and the newer one kept back).
@@ -4051,10 +4235,11 @@ final class AppModel {
         followScope()
         // The avatar is the new hub's from now, before its list is read below: a card tapped meanwhile goes to it.
         personas.switchHub(api)
+        let newChat = assistantNewChat
         Task {
             await refreshAssistant()
             await personas.refresh(api)
-            if assistantCurrent == nil { assistantCurrent = assistantMain }
+            selectAssistantMain(after: newChat)
         }
         applyPersonaPalette()
     }
@@ -4083,10 +4268,11 @@ final class AppModel {
             if let a = assistantCurrent, let s = session(a), s.assistant, !s.isHealth, !assistantShows(s.manager) { assistantCurrent = assistantMain }
             assistantSwitches += 1
         }
+        let newChat = assistantNewChat
         Task {
             await refreshAssistant()
             readinessChanged()
-            if assistantCurrent == nil { assistantCurrent = assistantMain }
+            selectAssistantMain(after: newChat)
         }
     }
 
@@ -4649,6 +4835,7 @@ nonisolated struct TabBadges: Equatable, Sendable {
 /// Who shows the app's tabs, told of each new one as it is set (`AppModel.tabRouter`): the iPhone's shell.
 @MainActor protocol TabRouter: AnyObject {
     func route(_ tab: AppTab, in model: AppModel)
+    func show(_ page: ShellPage)
 }
 
 /// The Persona conversations of one group, newest first: open and archived (`AppModel.assistantConversations`), and

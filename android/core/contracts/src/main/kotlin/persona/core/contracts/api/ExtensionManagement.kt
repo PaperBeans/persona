@@ -158,6 +158,8 @@ data class ExtensionField(
     val fields: List<ExtensionField>? = null,
     /** x-confirm: what to ask before a switch of it is turned on (a boolean, or a machine of a machine list). */
     val confirm: String? = null,
+    /** x-step: an integer stepper's increment, not a constraint on typed or saved values. */
+    val step: Long? = null,
 ) {
     val label: String get() = title?.takeIf { it.isNotBlank() } ?: name
     /** The default it falls back to, when there is one (JSON null is none). */

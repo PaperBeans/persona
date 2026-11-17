@@ -59,6 +59,18 @@ struct HubUpdateTests {
         #expect(sent == [["auto": false], ["auto_notice_seen": true]])
     }
 
+    @Test func betaSelectionUsesTheAuthoritativeSource() async throws {
+        let hub = FakeHub()
+        hub.on("PUT", "/api/v1/hub/update/settings", json: #"{"version":"0.6.2","build":1,"channel":"release","source":"beta","can_update":true,"state":"idle","busy":[],"auto":false,"auto_notice":false,"confirmed":true}"#)
+        let m = model(hub)
+        await m.setBeta(true)
+        #expect(m.status?.betaUpdates == true)
+        let sent = hub.sent("PUT", "/api/v1/hub/update/settings").compactMap { $0.body.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] } }
+        #expect(sent == [["source": "beta"]])
+        let older = try JSON.decoder.decode(HubUpdateStatus.self, from: Data(Self.available.utf8))
+        #expect(older.source == nil && !older.betaUpdates)
+    }
+
     /// A hub from before updates in the app answers 404: the page says so instead of failing.
     @Test func anOlderHub() async {
         let hub = FakeHub()

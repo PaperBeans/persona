@@ -194,6 +194,12 @@ nonisolated final class VoiceUplink: @unchecked Sendable {
         }
     }
 
+    /// Drops what is held for the socket, keeping it closed or open as it is: a system call put on hold, so nothing said
+    /// before the hold goes up when `ready` opens the uplink while it is on (#9290).
+    func discardHeld() {
+        lock.withLock { held = [] }
+    }
+
     /// Stops sending and holds again (the socket went away; a reconnect opens it again).
     func hold() {
         lock.withLock {

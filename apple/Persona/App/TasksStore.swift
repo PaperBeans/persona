@@ -30,8 +30,9 @@ final class TasksStore {
     var openAfterBoard: String?
     var openAgentAfterBoard: SessionKey?
     /// Feed card IDs put off with Later, sent here, or refused as handled elsewhere (409 inbox_item_done).
-    /// A new draft with the same Inbox reference has its own decision state.
-    private(set) var laterMessages: Set<String> = []
+    /// A new draft with the same Inbox reference has its own decision state. Private so a view can only ask by the card
+    /// itself (`isLater`), never by its Inbox reference (#6002).
+    private var laterMessages: Set<String> = []
     private(set) var sentMessages: Set<String> = []
     private(set) var filedMessages: Set<String> = []
     /// Decision rounds put off with Later, for this session only (`decisionKey`), and the ones Don't handle took out of
@@ -417,6 +418,9 @@ final class TasksStore {
     }
 
     func later(_ cardID: String) { laterMessages.insert(cardID) }
+    /// Put off with Later, by the card's own id: Needs You and the chat's feed both ask this, so a card whose Inbox item
+    /// (`ref`) differs from its id leaves both (#6002).
+    func isLater(_ card: FeedItem) -> Bool { laterMessages.contains(card.id) }
     /// A card put off with Later, opened again (a hand-off card's one line, #5932).
     func unlater(_ cardID: String) { laterMessages.remove(cardID) }
 

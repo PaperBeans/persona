@@ -1,3 +1,4 @@
+import { IconActions } from '../design/IconActions';
 import { ThemeScope } from '../design/ThemeScope';
 import { util } from '@kit.ArkTS';
 import { AdminWorkspacePage } from '../components/AdminWorkspacePage';
@@ -26,7 +27,6 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ComposeListItemV2, ContentItemV2, KeyboardAvoidMode, TextModifier, SymbolGlyphModifier, CapsuleSegmentButtonV2, SegmentButtonV2Items, ColorMetrics, LengthMetrics, uiMaterial } from '@kit.ArkUI';
 import { ConfigurationConstant } from '@kit.AbilityKit';
 import { ClientModel, client } from '../models/ClientModel';
-import { ResourceRow, HubProfile, Wire } from '../models/Wire';
 import { ResourceRow, HubProfile, Wire } from '../models/Wire';
 import { BoundRow, reconcileBoundRows } from '../models/RowBinding';
 import { Pairing, PairingTarget } from '../platform/Pairing';
@@ -110,7 +110,6 @@ struct Index {
   private titleMaterial: uiMaterial.Material = uiMaterial.isImmersiveMaterialSupported() ? new uiMaterial.ImmersiveMaterial({ style: uiMaterial.ImmersiveStyle.THIN }) : uiMaterial.Material.empty;
   @Local agentWorkspace: AgentWorkspace = new AgentWorkspace();
   @Local environment: NativeEnvironment = nativeEnvironment;
-  @Local environment: NativeEnvironment = nativeEnvironment;
   @Local spacesShown: boolean = false;
   @Local spacesInset: number = 0;
   private spacesLayoutReady: boolean = false;
@@ -143,39 +142,20 @@ struct Index {
     return name === 'conversation' && this.detailModel === this.model && this.peer() === 0 && this.wide() && !this.rail() &&
       this.model.target() === this.model.target(row) && visible >= 0.99;
   }
-  @Local shellPeerWidth: number = 0;
-  @Local mainPeerWidth: number = 0;
-  private peerUsesSelect(main: boolean): boolean {
-    const width = main ? this.mainPeerWidth : this.shellPeerWidth;
-    return this.environment.fontScale >= 1.5 || width > 0 && width < (this.wide() ? Tokens.headerWideSegment : Tokens.headerSegment);
-  }
-  private measurePeerSlot(main: boolean, measured: number): void {
-    const width = measured;
-    if (!Number.isFinite(width) || width <= 0 || Math.abs(width - (main ? this.mainPeerWidth : this.shellPeerWidth)) <= 1) return;
-    if (main) this.mainPeerWidth = width; else this.shellPeerWidth = width;
-  }
-  private peerLabelStyle(): TextModifier {
-    const maximum = String(Tokens.body * Math.min(this.environment.fontScale, Tokens.chromeFontMaxScale)) + 'vp';
-    return new TextModifier().fontSize(maximum).minFontSize(String(Tokens.body) + 'vp').maxFontSize(maximum)
-      .maxLines(1).heightAdaptivePolicy(TextHeightAdaptivePolicy.MIN_FONT_SIZE_FIRST).fontColor(Colors.ink);
-  }
-  @Builder peerTitle(main: boolean = false) {
+  @Builder peerTitle(_main: boolean = false) {
     Row({ space: Tokens.gap }) {
-      Row() {
-      if (this.peerUsesSelect(main)) {
-        Select([{ value: tr('persona') }, { value: tr('agents') }]).selected(this.peer()).value(tr(this.peer() === 1 ? 'agents' : 'persona'))
-          .textModifier(this.peerLabelStyle()).width('100%').onSelect((index: number) => this.selectPeer(index)).id('shell.peer')
-      } else {
-        CapsuleSegmentButtonV2({ items: new SegmentButtonV2Items([{ text: tr('persona') }, { text: tr('agents') }]),
-          selectedIndex: this.peer(), $selectedIndex: (index: number) => this.selectPeer(index),
-          itemSelectedBackgroundColor: ColorMetrics.resourceColor(Colors.action), itemSelectedFontColor: ColorMetrics.resourceColor(Colors.onAction),
-          itemFontColor: ColorMetrics.resourceColor(Colors.secondary), buttonBackgroundColor: ColorMetrics.resourceColor(Colors.control),
-          itemFontSize: LengthMetrics.fp(Tokens.body), itemSelectedFontSize: LengthMetrics.fp(Tokens.body),
-          itemMinHeight: LengthMetrics.vp(Tokens.chrome - Tokens.fine), buttonMinHeight: LengthMetrics.vp(Tokens.chrome) })
-          .width('100%').constraintSize({ maxWidth: this.wide() ? Tokens.headerWideSegment : Tokens.headerSegment }).responseRegion({ x: 0, y: -Tokens.fine, width: '100%', height: Tokens.touch }).id('shell.peer')
-      }
-      }.layoutWeight(1).height(this.headerHeight())
-        .onAreaChange((_old: Area, area: Area) => this.measurePeerSlot(main, Number(area.width)))
+      CapsuleSegmentButtonV2({ items: new SegmentButtonV2Items([
+        { symbol: Symbols.persona, accessibilityText: tr('persona') },
+        { symbol: Symbols.agents, accessibilityText: tr('agents') }]),
+        selectedIndex: this.peer(), $selectedIndex: (index: number) => this.selectPeer(index),
+        itemSelectedBackgroundColor: ColorMetrics.resourceColor(Colors.action),
+        itemSymbolFontColor: ColorMetrics.resourceColor(Colors.secondary),
+        itemSelectedSymbolFontColor: ColorMetrics.resourceColor(Colors.onAction),
+        itemSymbolFontSize: LengthMetrics.vp(Tokens.symbol),
+        buttonBackgroundColor: ColorMetrics.resourceColor(Colors.control),
+        itemMinHeight: LengthMetrics.vp(Tokens.touch), buttonMinHeight: LengthMetrics.vp(Tokens.touch) })
+        .width(Tokens.headerPeerIcons).id('shell.peer')
+      Blank().layoutWeight(1)
       this.shellMenu()
     }.width('100%').height(this.headerHeight()).padding({ left: Tokens.page }).alignItems(VerticalAlign.Center)
   }
@@ -247,6 +227,7 @@ struct Index {
   }
   private updateBreakpoint(): void {
     const old = this.breakpoint; this.breakpoint = this.getUIContext().getWindowWidthBreakpoint();
+    hilog.info(0x0000, 'PersonaLayout', 'widthBreakpoint=%{public}s', String(this.breakpoint));
     if (old !== this.breakpoint && this.wide() && this.model.section === 1 && this.stack.size() === 0 && this.model.sessions.length)
       this.openRow(this.model.sessions.find((row: ResourceRow) => row.key() === this.model.selected.key()) || this.model.sessions[0]);
   }
@@ -533,6 +514,14 @@ struct Index {
     if (kind === 'collapse') return Symbols.collapse;
     return Symbols.spaces;
   }
+  private spaceColor(kind: string): ResourceColor {
+    if (kind === 'inbox' || kind === 'persona') return Colors.link;
+    if (kind === 'todo') return Colors.positive;
+    if (kind === 'knowledge') return Colors.ai;
+    if (kind === 'health') return Colors.teal;
+    if (kind === 'devices') return Colors.working;
+    return Colors.secondary;
+  }
   private spaceTitle(kind: string): string {
     if (kind === 'hub') return this.model.profile.name || tr('hub');
     if (kind === 'persona') return tr('main_chat');
@@ -544,10 +533,10 @@ struct Index {
   @Builder spaceRow(kind: string) {
     ListItem() {
       Row({ space: Tokens.inset }) {
-        SymbolGlyph(this.spaceSymbol(kind)).fontSize(Tokens.symbolFont).fontColor([Colors.secondary]).width(Tokens.symbol)
+        SymbolGlyph(this.spaceSymbol(kind)).fontSize(Tokens.symbolFont).fontColor([this.spaceColor(kind)]).width(Tokens.symbol)
         Text(this.spaceTitle(kind)).fontSize(Tokens.body).fontColor(Colors.ink).layoutWeight(1)
       }.padding({ left: Tokens.page, right: Tokens.page, top: Tokens.inset, bottom: Tokens.inset }).constraintSize({ minHeight: Tokens.touch }).width('100%')
-    }.onClick(() => this.openSpace(kind)).id('spaces.' + kind)
+    }.selectable(true).selected(this.activeModule() === kind).onClick(() => this.openSpace(kind)).id('spaces.' + kind)
   }
   @Builder spacesContent() {
     Column() {
@@ -656,7 +645,7 @@ struct Index {
   }
   @Builder connectionState() {
     Row({ space: Tokens.gap }) { Text(tr(this.model.error)).fontSize(Tokens.meta).layoutWeight(1)
-      Button(tr('retry')).onClick(() => this.retryRoot())
+      Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).onClick(() => this.retryRoot())
     }.padding(Tokens.inset)
   }
   @Builder personaList() {
@@ -673,7 +662,7 @@ struct Index {
           .onVisibleAreaChange([0, 1], (visible: boolean, ratio: number) => { this.rowVisibility.set(this.model.scope() + this.model.target(binding.value), visible ? ratio : 0); if (this.model.target() === this.model.target(binding.value)) this.visibilityEpoch++; })
           .onDisAppear(() => { this.rowVisibility.delete(this.model.scope() + this.model.target(binding.value)); this.visibilityEpoch++; }).onClick(() => this.openRow(binding.value))
       }, (binding: BoundRow<ResourceRow>) => binding.key)
-      }.backgroundColor(Colors.canvas).borderRadius(Tokens.card)
+      }.backgroundColor(Colors.canvas)
       ListItemGroup() {
       this.spaceRow('inbox')
       this.spaceRow('todo')
@@ -682,11 +671,27 @@ struct Index {
       if (this.applications.visible) this.spaceRow('applications')
       this.spaceRow('devices')
       this.spaceRow('settings')
-      }.backgroundColor(Colors.canvas).borderRadius(Tokens.card)
-    }.width('100%').height('100%').backgroundColor(Colors.grouped).padding({ bottom: Tokens.listTail })
+      }.backgroundColor(Colors.canvas)
+    }.width('100%').height('100%').backgroundColor(Colors.canvas).padding({ bottom: Tokens.listTail })
+  }
+  private activeModule(): string {
+    if (!this.activeChild) return '';
+    const names = this.stack.getAllPathName();
+    for (let index = names.length - 1; index >= 0; index--) {
+      const name = names[index];
+      const value: Object | undefined = this.stack.getParamByIndex(index) as Object | undefined;
+      const param = typeof value === 'string' ? value : '';
+      if (name === 'resources') return param;
+      if (['todo', 'knowledge', 'inbox'].includes(name)) return name;
+      if (name === 'settings_root') return 'settings';
+      if (name === 'settings') return this.settingsKind(param) === 'machines' ? 'devices' : 'settings';
+      if (name === 'applications' || name === 'extension' && !!Wire.text(this.routeRow(param).data(), 'navigation_extension')) return 'applications';
+      if (['conversation', 'session', 'assistant', 'tools', 'history'].includes(name)) return 'chat';
+    }
+    return '';
   }
   private chatSelectionShown(kind: string): boolean {
-    return !!this.activeChild && this.stack.getAllPathName().includes(kind);
+    return this.activeModule() === 'chat' && this.stack.getAllPathName().includes(kind);
   }
   private readingAgentDetail(): boolean {
     return this.model.section === 1 && this.detailModel.selected.kind === 'session' &&
@@ -719,7 +724,7 @@ struct Index {
         .onClick(() => { this.model.selectProfile(profile); this.showSheet = false; }) }, (profile: HubProfile) => profile.id)
       ForEach(this.model.managers, (manager: ResourceRow) => { ListItem() { Text(manager.title).padding(Tokens.page) }
         .onClick(() => { this.model.selectManager(manager.id); this.showSheet = false; }) }, (manager: ResourceRow) => manager.id)
-      ListItem() { Button(tr('connect')).attributeModifier(ButtonStyles.primary).onClick(() => { this.showSheet = false; this.openSheet('connect'); }) }
+      ListItem() { Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('connect')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('connect', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('connect')).bindTips(tr('connect')).onClick(() => { this.showSheet = false; this.openSheet('connect'); }) }
     }.width('100%')
   }
   private async scanPairing(): Promise<void> {
@@ -734,13 +739,22 @@ struct Index {
   }
   @Builder pairingForm() {
     Column({ space: Tokens.page }) {
-      if (canIUse('SystemCapability.Multimedia.Scan.ScanBarcode')) Button(tr('scan_qr')).attributeModifier(ButtonStyles.secondary).enabled(!this.scanning && !this.model.busy).onClick(() => this.scanPairing()).id('pair.scan')
-      TextInput({ text: this.address, placeholder: tr('hub_address') }).onChange((value: string) => this.address = value).id('pair.address')
+      Row({ space: Tokens.gap }) {
+        TextInput({ text: this.address, placeholder: tr('hub_address') }).onChange((value: string) => this.address = value).id('pair.address').layoutWeight(1)
+        if (canIUse('SystemCapability.Multimedia.Scan.ScanBarcode')) Button({ type: ButtonType.Circle }) {
+          SymbolGlyph($r('sys.symbol.qrcode')).fontSize(Tokens.symbolFont).fontColor([Colors.link])
+        }.attributeModifier(ButtonStyles.chrome).accessibilityText(tr('scan_qr')).enabled(!this.scanning && !this.model.busy).onClick(() => this.scanPairing()).id('pair.scan')
+      }.width('100%')
       TextInput({ text: this.pairCode, placeholder: tr('pair_code') }).type(InputType.Password).onChange((value: string) => this.pairCode = value).id('pair.code')
       if (this.model.error) Text(tr(this.model.error)).fontColor($r('app.color.persona_danger'))
-      Button(tr('verify')).attributeModifier(ButtonStyles.primary).enabled(!!this.address.trim() && (!!this.pairCode.trim() || isPairingAddress(this.address.trim())) && !this.model.busy).onClick(() => this.connect()).id('pair.verify')
+      Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('verify')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('verify', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('verify')).bindTips(tr('verify')).enabled(!!this.address.trim() && (!!this.pairCode.trim() || isPairingAddress(this.address.trim())) && !this.model.busy).onClick(() => this.connect()).id('pair.verify').alignSelf(ItemAlign.End)
     }.padding(Tokens.page).width('100%')
   }
+  private createAgentKey(): string {
+    if (this.creatingAgent) return 'sending';
+    return this.agentModel.operationBlocked('/api/v1/sessions') ? 'result_unknown' : 'create';
+  }
+
   @Builder newAgentForm() {
     Column({ space: Tokens.page }) {
       TextArea({ text: this.newTask, placeholder: tr('task') }).onChange((value: string) => { this.newTask = value; this.saveAgentDraft(); }).height(Tokens.inputExpanded).id('agent.task')
@@ -749,8 +763,8 @@ struct Index {
       TextInput({ text: this.directory, placeholder: tr('directory') }).onChange((value: string) => { this.directory = value; this.saveAgentDraft(); }).id('agent.directory')
       TextInput({ text: this.launcher, placeholder: tr('launcher') }).onChange((value: string) => { this.launcher = value; this.saveAgentDraft(); }).id('agent.launcher')
       if (this.agentModel.error) Text(tr(this.agentModel.error)).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
-      Button(tr(this.creatingAgent || this.agentModel.operationBlocked('/api/v1/sessions') ? 'pending' : 'create')).attributeModifier(ButtonStyles.primary).enabled(!this.creatingAgent && !this.agentModel.operationBlocked('/api/v1/sessions') && this.newTask.trim().length > 0 && this.agentMachines().length > 0)
-        .onClick(() => this.confirmCreateAgent()).id('agent.create')
+      Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.createAgentKey())) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.onAction); else SymbolGlyph(IconActions.symbol(this.createAgentKey())).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.createAgentKey(), true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr(this.createAgentKey())).bindTips(tr(this.createAgentKey())).enabled(!this.creatingAgent && !this.agentModel.operationBlocked('/api/v1/sessions') && this.newTask.trim().length > 0 && this.agentMachines().length > 0)
+        .onClick(() => this.confirmCreateAgent()).id('agent.create').alignSelf(ItemAlign.End)
     }.padding(Tokens.page)
   }
   private agentDraftKey(): string { return 'new-agent:' + (this.agentTodo?.id || 'standalone'); }
@@ -840,7 +854,7 @@ struct Index {
     Column({ space: Tokens.gap }) {
       if (this.model.error) {
         Text(tr(this.model.error)).fontSize(Tokens.meta)
-        Button(tr('retry')).onClick(() => this.restoreTarget(name, param))
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).onClick(() => this.restoreTarget(name, param))
       } else LoadingProgress().width(Tokens.touch).height(Tokens.touch)
     }.width('100%').height('100%').justifyContent(FlexAlign.Center)
   }
@@ -875,7 +889,7 @@ struct Index {
         Column() {
           if (!this.applicationAllowed(param)) Row({ space: Tokens.gap }) {
             Text(tr('application_unavailable')).fontSize(Tokens.meta).layoutWeight(1)
-            Button(tr('retry')).height(Tokens.touch).enabled(!this.applications.loading).onClick(() => this.applications.refresh())
+            Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).enabled(!this.applications.loading).onClick(() => this.applications.refresh())
           }.width('100%').padding(Tokens.page)
           Column() {
         if (this.targetReady(name, param)) ExtensionPage({ model: this.detailModel, extensionId: this.routeRow(param).id, uiId: Wire.text(this.routeRow(param).data(), 'ui'), state: Wire.text(this.routeRow(param).data(), 'state'), context: Wire.object(this.routeRow(param).data(), 'context'), active: this.activeChild === this.childKey(name, param), authorized: this.applicationAllowed(param), refreshRevision: this.extensionRefreshRevision + (Wire.text(this.routeRow(param).data(), 'navigation_extension') ? this.applications.revision : 0), onTitle: (title: string) => { if (this.activeChild === this.childKey(name, param)) this.extensionTitle = title; }, onNavigate: (effect: ExtensionUINavigationEffect) => this.extensionNavigate(name, param, effect), onLink: (address: string) => { if (this.activeChild === this.childKey(name, param)) this.openReader(address); }, onBack: () => { if (this.activeChild === this.childKey(name, param)) { this.stack.pop(); this.savePath(); } } })
@@ -942,15 +956,15 @@ struct Index {
         Column({ space: Tokens.section }) {
           Text(tr('welcome')).fontSize(Tokens.title).fontWeight(FontWeight.Bold)
           if (this.model.error) Text(tr(this.model.error)).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
-          Button(tr('connect')).attributeModifier(ButtonStyles.primary).onClick(() => this.openSheet('connect')).id('welcome.connect')
-          Button(tr('experience')).attributeModifier(ButtonStyles.secondary).onClick(() => this.model.useDemo()).id('welcome.demo')
-          if (this.model.pendingCleanupCount > 0) Button(tr('retry_cleanup')).attributeModifier(ButtonStyles.quiet).onClick(() => this.model.retryCleanup())
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('connect')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('connect', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('connect')).bindTips(tr('connect')).onClick(() => this.openSheet('connect')).id('welcome.connect')
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('experience')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('experience', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('experience')).bindTips(tr('experience')).onClick(() => this.model.useDemo()).id('welcome.demo')
+          if (this.model.pendingCleanupCount > 0) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry_cleanup')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry_cleanup', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry_cleanup')).bindTips(tr('retry_cleanup')).onClick(() => this.model.retryCleanup())
         }.justifyContent(FlexAlign.Center).width('100%').height('100%')
           .bindSheet($$this.showSheet, this.sheetContent(), { title: { title: this.sheetTitle() }, height: SheetSize.LARGE, showClose: true })
       } else {
         Navigation(this.stack) { this.primaryContent() }.title({ builder: this.peerTitle, height: this.headerHeight() }, { systemMaterial: this.titleMaterial }).titleMode(NavigationTitleMode.Mini)
           .hideBackButton(true).hideTitleBar(this.rail()).menus([])
-          .backgroundColor(this.peer() === 0 ? Colors.grouped : Colors.canvas)
+          .backgroundColor(Colors.canvas)
           .toolbarConfiguration(this.rail() ? [{ value: tr('expand'), icon: $r('sys.media.ohos_ic_public_arrow_right'), action: () => this.collapsed = false }] : [])
           .mode(this.wide() ? NavigationMode.Split : NavigationMode.Stack)
           .navBarWidth(this.rail() ? Tokens.collapsed : Tokens.master).navBarWidthRange(this.rail() ? [Tokens.collapsed, Tokens.collapsed] : [Tokens.masterMin, Tokens.masterMax])

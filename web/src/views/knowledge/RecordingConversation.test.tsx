@@ -143,8 +143,9 @@ describe("a recorded meeting's conversation", () => {
     expect(s.querySelector("h2")!.textContent).toBe("Conversation");
     expect(s.querySelector("[role=status]")!.textContent).toBe("Persona is in the meeting as a participant · answers can be said aloud");
     expect(s.querySelector('a[title="Open the meeting’s conversation"]')!.getAttribute("href")).toBe(`/persona/${room}`);
-    expect(kinds()).toEqual(["joined", "lines", "question", "answer"]);
-    expect(s.textContent).toContain("Persona joined the meeting");
+    // No "Persona joined the meeting" (#9411): the web can't know whether Persona was ever in it.
+    expect(kinds()).toEqual(["lines", "question", "answer"]);
+    expect(s.textContent).not.toContain("joined the meeting");
     expect(s.textContent).toContain("2 lines from the meeting");
     expect(s.textContent).toContain("You kept the 4 MB cap.");
     expect(s.querySelector('[title="Typed on the phone"]')).not.toBeNull();
@@ -312,7 +313,7 @@ describe("a recorded meeting's conversation", () => {
     await reply(pending(itemsPath(follow))[0], { items: followItems() });
     const s = section()!;
     expect(s.querySelector("[role=separator]")!.textContent).toContain("After the meeting");
-    expect(kinds()).toEqual(["joined", "lines", "question", "answer", "material", "question", "answer"]);
+    expect(kinds()).toEqual(["lines", "question", "answer", "material", "question", "answer"]);
     const seed = s.querySelector<HTMLButtonElement>('li[data-thread="material"] button')!;
     expect(seed.textContent).toBe("The meeting’s material");
     expect(seed.getAttribute("aria-expanded")).toBe("false");

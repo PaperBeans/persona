@@ -44,7 +44,7 @@ func launcherRuns(t *testing.T, runs string) int {
 // A message to a running assistant conversation does not run its shell launcher again: the profile check reuses the
 // probe of the message before it (#8947). Through the RPC boundary, as the hub sends.
 func TestAssistantMessageDoesNotProbeTheLauncherEachTime(t *testing.T) {
-	f := sdkTest(t)
+	f := cliTest(t)
 	n := f.n
 	n.home = os.Getenv("HOME")
 	profile := t.TempDir()
@@ -81,7 +81,7 @@ func TestAssistantMessageDoesNotProbeTheLauncherEachTime(t *testing.T) {
 // after the cached probe ages out, and a launcher that sets the conversation's own directory again is let through.
 // Each edit is settled before the message, as one made seconds earlier: the file's stamp must tell, not its age.
 func TestAssistantMessageSeesAnEditedLauncherAtOnce(t *testing.T) {
-	f := sdkTest(t)
+	f := cliTest(t)
 	n := f.n
 	n.home = os.Getenv("HOME")
 	profile := t.TempDir()
@@ -115,7 +115,7 @@ func TestAssistantMessageSeesAnEditedLauncherAtOnce(t *testing.T) {
 // What the stamp cannot see (a file the startup files source) is seen once the probe is profileProbeFresh old, and a
 // failed probe is tried again after profileProbeRetry.
 func TestAssistantLauncherProfileProbeAgesOut(t *testing.T) {
-	f := sdkTest(t)
+	f := cliTest(t)
 	n := f.n
 	n.home = os.Getenv("HOME")
 	sourced := filepath.Join(n.home, "work.zsh")
@@ -133,30 +133,30 @@ func TestAssistantLauncherProfileProbeAgesOut(t *testing.T) {
 		profileProbes.got[n.home+"\x00work"] = c
 	}
 	ctx := context.Background()
-	if got := n.assistantLauncherProfile(ctx, "work", ""); got != "" {
+	if got := n.assistantLauncherProfile(ctx, "work"); got != "" {
 		t.Fatalf("a launcher that is not defined yet has profile %q", got)
 	}
 	define(first)
-	if got := n.assistantLauncherProfile(ctx, "work", ""); got != "" {
+	if got := n.assistantLauncherProfile(ctx, "work"); got != "" {
 		t.Fatalf("a failed probe was tried again before profileProbeRetry: %q", got)
 	}
 	age(profileProbeRetry)
-	if got := n.assistantLauncherProfile(ctx, "work", ""); got != first {
+	if got := n.assistantLauncherProfile(ctx, "work"); got != first {
 		t.Fatalf("a failed probe was not tried again after profileProbeRetry: %q, want %q", got, first)
 	}
 	define(second)
-	if got := n.assistantLauncherProfile(ctx, "work", ""); got != first {
+	if got := n.assistantLauncherProfile(ctx, "work"); got != first {
 		t.Fatalf("a probe younger than profileProbeFresh was taken again for an unwatched file: %q", got)
 	}
 	age(profileProbeFresh)
-	if got := n.assistantLauncherProfile(ctx, "work", ""); got != second {
+	if got := n.assistantLauncherProfile(ctx, "work"); got != second {
 		t.Fatalf("a probe older than profileProbeFresh was reused: %q, want %q", got, second)
 	}
 }
 
 // sendFirst starts an assistant conversation on launcher work through the RPC boundary, as the hub does, and waits for
 // the end of its turn.
-func sendFirst(t *testing.T, f *sdkFixture, params map[string]any) string {
+func sendFirst(t *testing.T, f *cliFixture, params map[string]any) string {
 	t.Helper()
 	answer, err := nodeCall(t, f.n, "assistant.send", params)
 	if err != nil {
@@ -203,7 +203,7 @@ func ageProbes(home string, d time.Duration) {
 // the agent, profile and compaction checks together, plus one for the model it passes on (#9097). Each took its own
 // login shell before, one after another.
 func TestAssistantStartRunsTheLauncherOnlyToStartIt(t *testing.T) {
-	f := sdkTest(t)
+	f := cliTest(t)
 	n := f.n
 	n.home = os.Getenv("HOME")
 	for _, k := range claudeModelVars { // a model the developer's own shell exports is not the launcher's
@@ -242,7 +242,7 @@ func TestAssistantStartRunsTheLauncherOnlyToStartIt(t *testing.T) {
 // profileProbeFresh does not wait for a login shell; an edit is still seen on the very next message; a probe nobody
 // used in profileProbeKeep is left to age out (#9097).
 func TestKeptProbeIsRenewedBeforeItAgesOut(t *testing.T) {
-	f := sdkTest(t)
+	f := cliTest(t)
 	n := f.n
 	n.home = os.Getenv("HOME")
 	profile := t.TempDir()

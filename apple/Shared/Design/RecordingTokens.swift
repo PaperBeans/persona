@@ -21,6 +21,17 @@ nonisolated extension Theme.Size {
     /// The widest a topic's chip on the meeting page gets (#3862 phase 2) at the default text size: a title of up to 80
     /// characters is cut there, so the row shows the topics around the current one rather than one long title.
     static let meetingTopicChip: CGFloat = 240
+    /// The floating meeting window (#8731 V5) at the default text size: its card's width, the docked bar's width and
+    /// height, the window's room from the screen's side, and how much of the bottom it leaves the page (a composer and a
+    /// tab bar sit there).
+    static let meetingFloatWidth: CGFloat = 196
+    static let meetingFloatDockWidth: CGFloat = 22
+    static let meetingFloatDockHeight: CGFloat = 64
+    static let meetingFloatEdge: CGFloat = 12
+    static let meetingFloatBottomRoom: CGFloat = 132
+    /// Its speaker's face, and the waveform's height beside the name.
+    static let meetingFloatFace: CGFloat = 40
+    static let meetingFloatWave: CGFloat = 14
 }
 
 nonisolated extension Theme {
@@ -112,5 +123,14 @@ nonisolated extension Theme {
         /// that says "Persona hears you" is its color and the words over the field; the size only confirms the touch.
         /// None under Reduce Motion.
         static let talkHeldScale: CGFloat = 1.06
+        /// The floating meeting window's voice gate (#8731 V5, `MeetingFloatSpeaker`): someone speaks once the
+        /// microphone's level reaches `floatVoiceOn`, and still while it stays above `floatVoiceOff` or for
+        /// `floatVoiceHold` seconds after, so a breath between words doesn't say "quiet". It looks every `floatTick`.
+        static let floatVoiceOn: Double = 0.18
+        static let floatVoiceOff: Double = 0.10
+        static let floatVoiceHold: Double = 1.2
+        static let floatTick: Double = 0.25
+        /// Dragged this share of its width past the screen's side, the window docks as a bar there.
+        static let floatDockPull: Double = 0.3
     }
 }

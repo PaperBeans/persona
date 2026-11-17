@@ -36,7 +36,10 @@ struct CarPlayMicPermission: MicPermission {
         if let reason = CarPlayMicGate.blockReason() { return reason }
         do {
             let (key, extensionID) = try await resolve()
-            await VoiceCalls.shared.start(key, extensionID: extensionID, surface: .carPlay, deps: deps(group: key.group))
+            // Not under Persona's urgent call (#9290): its audio is the system's.
+            if let refused = await VoiceCalls.shared.start(key, extensionID: extensionID, surface: .carPlay, deps: deps(group: key.group)) {
+                return refused.title
+            }
             if let call = VoiceCalls.shared.current, call.surface == .carPlay, case .ended(let end) = call.phase {
                 return CarPlayVoiceScreen.endedHeadline(for: end)
             }
@@ -51,7 +54,7 @@ struct CarPlayMicPermission: MicPermission {
     /// Continue on an ended car call, or a fresh start when there is none.
     static func resume() async -> String? {
         if let call = VoiceCalls.shared.current, call.surface == .carPlay, call.phase.isEnded {
-            await VoiceCalls.shared.resume(call.key)
+            if let refused = await VoiceCalls.shared.resume(call.key) { return refused.title }
             if let call = VoiceCalls.shared.current, call.surface == .carPlay, case .ended(let end) = call.phase {
                 return CarPlayVoiceScreen.endedHeadline(for: end)
             }

@@ -46,7 +46,7 @@ class AgentReadingPositionTest {
         var rows by mutableStateOf(initialRows)
         rule.setContent {
             val state = rememberLazyListState()
-            KeepAgentReadingPosition(state, rows, paginationFooter = false, scope = emptyList())
+            KeepAgentReadingPosition(state, rows, paginationFooter = false, scope = emptyList(), restoring = false)
             LazyColumn(Modifier.height(310.dp), state = state, verticalArrangement = Arrangement.spacedBy(24.dp)) {
                 items(rows, key = { it.key }) { row ->
                     Box(Modifier.fillMaxWidth().height(heights[row] ?: 52.dp).testTag(row.key))
@@ -80,7 +80,7 @@ class AgentReadingPositionTest {
         var renderedRows by mutableStateOf(initialRows)
         rule.setContent {
             val state = rememberLazyListState()
-            KeepAgentReadingPosition(state, tree, paginationFooter = false, scope = emptyList())
+            KeepAgentReadingPosition(state, tree, paginationFooter = false, scope = emptyList(), restoring = false)
             LazyColumn(Modifier.height(276.dp), state = state) {
                 item("header") { Box(Modifier.height(52.dp)) }
                 items(renderedRows, key = { it.key }) { row ->
@@ -120,7 +120,7 @@ class AgentReadingPositionTest {
         var rows by mutableStateOf(initialRows)
         rule.setContent {
             val state = rememberLazyListState()
-            KeepAgentReadingPosition(state, rows, paginationFooter = false, scope = emptyList())
+            KeepAgentReadingPosition(state, rows, paginationFooter = false, scope = emptyList(), restoring = false)
             LazyColumn(Modifier.height(276.dp), state = state) {
                 items(rows, key = { it.key }) { row ->
                     Box(Modifier.fillMaxWidth().height(heights[row] ?: 52.dp).testTag(row.key))
@@ -160,7 +160,7 @@ class AgentReadingPositionTest {
         var viewportHeight by mutableStateOf(300.dp)
         rule.setContent {
             val state = rememberLazyListState()
-            KeepAgentReadingPosition(state, rows, paginationFooter = false, scope = emptyList())
+            KeepAgentReadingPosition(state, rows, paginationFooter = false, scope = emptyList(), restoring = false)
             LazyColumn(Modifier.height(viewportHeight), state = state) {
                 items(rows, key = { it.key }) { row ->
                     Box(Modifier.fillMaxWidth().height(heights[row] ?: 52.dp).testTag(row.key))

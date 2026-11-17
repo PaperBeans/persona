@@ -659,8 +659,6 @@ function AskState({ ask }: { ask: RecordingAsk }) {
 
 function Entry({ entry: e, conv, room, photos }: { entry: ThreadEntry; conv: MeetingConversation; room: boolean; photos?: MeetingPhotos }) {
   switch (e.kind) {
-    case "joined":
-      return <Muted icon="spark" text={t("knowledge-kbdetail.thread_joined")} time={at(e.ts)} />;
     case "lines":
       return <Lines label={t("knowledge-kbdetail.thread_lines", { count: e.lines.length })} lines={e.lines} time={at(e.ts)} />;
     case "ended":

@@ -37,6 +37,8 @@ final class RecordingKnowledgeUITests: XCTestCase {
 
         let putsBefore = try puts(hub)
         row.tap()
+        // The made-up recording has no meeting (a note to the hub too), so it opens its recording's page (#8731 V3: a
+        // meeting would open after the meeting).
         let delete = app.buttons["recording-delete"]
         XCTAssertTrue(delete.waitForExistence(timeout: 8), app.debugDescription)
         try shot(app, "detail")

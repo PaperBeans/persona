@@ -13,9 +13,10 @@ import type { Session } from "../../lib/types";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // The chunk comes in (or fails) when a test says so; `calls` counts its loads. A fresh one for every test (beforeEach).
-const chunk = { calls: 0, open: () => {}, fail: () => {} };
+const chunk = { calls: 0, loaded: false, open: () => {}, fail: () => {} };
 function mockChunk() {
   chunk.calls = 0;
+  chunk.loaded = false;
   vi.doMock("./CloseoutEvidence", async () => {
     chunk.calls++;
     await new Promise<void>((resolve, reject) => {
@@ -23,15 +24,24 @@ function mockChunk() {
       chunk.fail = () => reject(new TypeError("Failed to fetch dynamically imported module"));
     });
     const { createElement, Fragment } = await import("react");
+    chunk.loaded = true;
     return { CloseoutEvidence: () => createElement(Fragment, null, createElement("dt", null, "Evidence"), createElement("dd", { "data-closeout-evidence": "" })) };
   });
 }
 // the module system asks for the chunk a few turns after the import starts
 const asked = (n: number) => vi.waitFor(() => expect(chunk.calls).toBe(n));
-// a few turns of the event loop, inside act, for the chunk's module to come in and the card to draw (setImmediate: the
-// fake timers below take only setTimeout)
+// one turn of the event loop, inside act (setImmediate: the fake timers below take only setTimeout)
+const turn = () => act(async () => void (await new Promise((r) => setImmediate(r))));
+// turns until the chunk's module came in and the card drew: up to 5 s, as under a full parallel run a cold module took
+// more than the 50 turns this once allowed
 async function turns(until: () => boolean) {
-  for (let i = 0; i < 50 && !until(); i++) await act(async () => void (await new Promise((r) => setImmediate(r))));
+  const end = Date.now() + 5_000;
+  while (!until() && Date.now() < end) await turn();
+}
+// the chunk's module in, then the 50 turns its importers once had to take it up
+async function chunkIn() {
+  await turns(() => chunk.loaded);
+  for (let i = 0; i < 50; i++) await turn();
 }
 
 const read = {
@@ -89,7 +99,7 @@ describe("CloseoutCard and its evidence chunk", () => {
     await card(read, null);
     await asked(1);
     chunk.open();
-    await turns(() => false);
+    await chunkIn();
     expect(shows("chat-chatview.closeout_verified")).toBe(false); // the chunk is in, the exchange is not
     await card(read);
     expect(shows("chat-chatview.closeout_did")).toBe(true);
@@ -140,7 +150,7 @@ describe("CloseoutCard and its evidence chunk", () => {
     applyCompleteSessions([row]);
     await asked(1);
     chunk.open();
-    await turns(() => false); // the chunk comes in, before any card
+    await chunkIn(); // the chunk comes in, before any card
     await card(read); // the card draws at once, with every row
     expect(chunk.calls).toBe(1);
     expect(shows("chat-chatview.closeout_verified")).toBe(true);

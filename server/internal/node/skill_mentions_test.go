@@ -9,11 +9,10 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/assistantskills"
-	"github.com/nwverse/persona/server/internal/proto"
 )
 
 func TestSkillCatalogIsolationProfilesDeletionAndFailure(t *testing.T) {
-	f := sdkTest(t)
+	f := cliTest(t)
 	n := f.n
 	n.home = os.Getenv("HOME")
 	cwd, profile := t.TempDir(), t.TempDir()
@@ -69,25 +68,25 @@ func TestSkillCatalogIsolationProfilesDeletionAndFailure(t *testing.T) {
 	}
 }
 
-func TestSkillCatalogToClaudeSDKDelivery(t *testing.T) {
-	f := sdkTest(t)
+func TestSkillCatalogToClaudeDelivery(t *testing.T) {
+	f := cliTest(t)
 	n := f.n
 	n.home = os.Getenv("HOME")
 	cwd, profile := t.TempDir(), t.TempDir()
 	file := filepath.Join(profile, "skills", "review", "SKILL.md")
 	writeFile(t, file, "---\nname: review\ndescription: Review\nallowed-tools: Bash(*)\n---\n!`must-not-execute`\n")
-	in := skillCatalogRequest{Owner: "helper-a", Cwd: cwd, Launcher: "claude", Runtime: proto.AssistantRuntimeAgentSDK, ConfigDir: profile}
+	in := skillCatalogRequest{Owner: "helper-a", Cwd: cwd, Launcher: "claude", ConfigDir: profile}
 	catalog, err := n.skillCatalog(context.Background(), in)
 	if err != nil || len(catalog.Skills) != 1 {
 		t.Fatalf("catalog: %+v %v", catalog, err)
 	}
 	text := `<persona-context kind="skill" ref="` + catalog.Skills[0].ID + `">review</persona-context>` + "\nUse this"
 	_, err = n.assistantSend(withSkillOwner(context.Background(), in.Owner), "", cwd, "claude", text, nil, "default", "",
-		modelExecution{Runtime: in.Runtime, ConfigDir: profile, Fingerprint: "skill-test"})
+		modelExecution{ConfigDir: profile, Fingerprint: "skill-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sdkWait(t, "explicit instruction delivery", func() bool { return strings.Contains(f.file("stdin.jsonl"), "Instruction file:") })
+	cliWait(t, "explicit instruction delivery", func() bool { return strings.Contains(f.file("stdin.jsonl"), "Instruction file:") })
 	delivered := f.file("stdin.jsonl")
 	if !strings.Contains(delivered, resolved(t, file)) || !strings.Contains(delivered, catalog.Skills[0].ID) || strings.Contains(delivered, "must-not-execute") || strings.Contains(delivered, "allowed-tools: Bash") {
 		t.Fatalf("not exact metadata-safe delivery: %s", delivered)
@@ -118,7 +117,7 @@ func TestClaudeSkillCatalogDoesNotBypassCustomizationOrSkillPermissions(t *testi
 func TestClaudeSkillCatalogRespectsLauncherSettings(t *testing.T) {
 	probedLaunchers(t, map[string]string{"policy-claude": "claude"})
 	withLauncherSettings(t, map[string]string{"policy-claude": `{"permissions":{"deny":["Skill(review)"]}}`})
-	f := sdkTest(t)
+	f := cliTest(t)
 	f.n.home = os.Getenv("HOME")
 	profile, cwd := t.TempDir(), t.TempDir()
 	writeFile(t, filepath.Join(profile, "skills", "review", "SKILL.md"), "---\nname: review\n---\nInstructions\n")

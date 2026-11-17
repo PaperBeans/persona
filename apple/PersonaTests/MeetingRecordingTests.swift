@@ -582,6 +582,18 @@ import PersonaWire
         #expect(!RecordingLink.matches(URL(string: "https://example.com/record")!))
     }
 
+    /// A meeting's End on the Lock Screen (#8731 V4) is a link that names the recording, lowercase, and opens Recordings
+    /// as the page link does; no other link names one.
+    @Test func endLinkNamesTheMeeting() {
+        let id = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+        let end = RecordingLink.end(id)
+        #expect(RecordingLink.matches(end))
+        #expect(RecordingLink.endID(end) == id.lowercased())
+        #expect(RecordingLink.endID(RecordingLink.page) == nil)
+        #expect(RecordingLink.endID(URL(string: "persona://open?end=\(id)")!) == nil)
+        #expect(RecordingLink.endID(URL(string: "persona://record?end=")!) == nil)
+    }
+
     // MARK: Intents
 
     /// The activity's buttons work locked (as a voice memo's) and stay out of Shortcuts.

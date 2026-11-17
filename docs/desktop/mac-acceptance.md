@@ -33,7 +33,7 @@ Suggested evidence layout, one folder per run:
 ```text
 mac-acceptance-<date>/
   00-environment.txt      # macOS version, Mac model, the CI run URL you downloaded from
-  01-install/ … 08-screen-recording/
+  01-install/ … 09-notch-island/
 ```
 
 Record in `00-environment.txt`: macOS version, chip (Apple silicon / Intel), the exact artifact file names, and
@@ -154,7 +154,28 @@ absent and you cannot reach the permission prompt.
 | 8.2 | After granting, confirm the **video** path actually works: in the live view switch **Picture › Video** (or open Connection stats). | Actual **video** plays, not just the VNC picture. A working VNC picture alone does **not** prove Persona Screen — VNC is the fallback when video permission is missing. If only VNC appears, the video proof has **not** passed: check Connection stats and the fallback reason — if it says video is not allowed, the grant did not take effect; on a multi-display Mac, select one display first (video can also stay off over plain HTTP, without a WebCodecs decoder, or on a busy/locked stream). | Screenshot of the live **video** (synthetic content only) or the Connection stats video state. | Screen Recording works |
 | 8.3 | Rebuild/reinstall Link without changing Persona Screen's sources, and start the live screen again. | The grant survives (the helper is reused byte-identically). If you did change its sources or signing, macOS asks once more — that is expected, note it. | Note whether you were asked again. | Permission persistence |
 
-## 9. What stays open after this manual
+## 9. The notch island (#7669)
+
+Off by default and only on a Mac (`desktop.md`, "Island at the MacBook notch"). On a MacBook with a notch the pill sits
+around it; on a Mac without one (or with its lid closed) the same pill without the middle sits at the top center of
+the display. Keep a few synthetic sessions on the test hub that need you or are working.
+
+| Step | Do | Expected | Capture | #7669 item |
+| --- | --- | --- | --- | --- |
+| 9.1 | Settings › Notifications: turn on **Show at the MacBook notch**. | A black pill appears around the notch at once: the most urgent category with its symbol and count on the left (Needs you red, then Working amber, then Unread green), the next one on the right; the same counts as the Dock badge and the Overview. With nothing to count it stays hidden. | Screenshot of the menu bar around the notch (crop the rest of the menu bar). | Opt-in; counts |
+| 9.2 | Move the pointer over the pill, then away. | It opens downward into at most five agents: the ones that need you, then the working ones, newest first, each with its title, state and the line its Agents-list row shows. It closes a moment after the pointer leaves, and never takes focus from the app in front. | Screenshot of the open list. | The list |
+| 9.3 | Click a row. | The Persona window comes forward on that session, as a notification's click brings it. | Screenshot of the window it opened. | Click opens the session |
+| 9.4 | With the island on, look at the Dock, press Cmd-Tab, bring Persona to the front. | Persona keeps its Dock icon and Needs-you badge, is in the app switcher and has its menu bar. | Screenshot of the Dock and the switcher. | The app stays in the Dock |
+| 9.5 | Put another app in full screen (its green button) and stay in its Space; then switch Spaces. | The pill stays at the notch over the full-screen app, and on every Space. | Screenshot over the full-screen app. | Over full-screen apps |
+| 9.6 | Switch System Settings › Appearance between Light and Dark, and Persona's own theme too. | The island stays dark in both, as the notch is; the Settings row follows Persona's theme. | The Settings row in both. | Light and dark |
+| 9.7 | Sign out: the sidebar's assistant menu › **Disconnect this browser…**. | The pill goes with the account: nothing of it stays at the notch over the sign-in page. | Screenshot of the notch after signing out. | Signing out clears it |
+| 9.8 | Turn the switch off. Turn it on again, quit Persona and open it. | Off hides the pill at once. On survives the restart: the pill is back once signed in. | Note both results. | Kept for this computer |
+
+What this proves that CI cannot: the pill is really drawn at the notch, over the menu bar and full-screen apps, and a
+real pointer opens it and clicks through. The acceptance smoke checks only that turning it on keeps the app in the
+Dock, and what the shell keeps across a hub change.
+
+## 10. What stays open after this manual
 
 - **Signed + notarized installation** and everything Gatekeeper does differently for it.
 - **A published auto-update** from a real GitHub Release, including macOS's Squirrel.Mac accepting the new

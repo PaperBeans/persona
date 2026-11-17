@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { common } from '@kit.AbilityKit';
 import { image } from '@kit.ImageKit';
 import type { LoadedMessageImage, MessageImageGalleryEntry, MessageImageGalleryWindow } from '../core/MessageImageGallery';
@@ -212,7 +215,7 @@ export struct TranscriptImage {
         .onClick(() => this.preview()).bindContextMenu(this.imageMenu, ResponseType.LongPress)
         .accessibilityText(tr('image'))
       else if (this.busy) LoadingProgress().width(Tokens.touch).height(Tokens.touch)
-      else Button(tr(this.failed ? 'retry' : 'image')).onClick(() => this.load())
+      else Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.failed ? 'retry' : 'image')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.link); else SymbolGlyph(IconActions.symbol(this.failed ? 'retry' : 'image')).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.failed ? 'retry' : 'image', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr(this.failed ? 'retry' : 'image')).bindTips(tr(this.failed ? 'retry' : 'image')).onClick(() => this.load())
     }.width('100%').onVisibleAreaChange([0, 1], (visible: boolean, ratio: number) => { if (visible && ratio > 0 && !this.failed) this.load(); })
   }
 }

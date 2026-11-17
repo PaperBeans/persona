@@ -45,7 +45,7 @@ func TestAdversarialInboxGroupStateWakeOlderAgentStopRecapKeepsNewerAgent(t *tes
 		t.Fatalf("recorded stop = %+v, want Agent A", stop)
 	}
 
-	if _, _, err := h.suggest(ctx, "s1", suggestIn{Recap: "Synthetic recap while Agent B continues"}); err != nil {
+	if _, _, err := h.suggest(ctx, "s1", suggestIn{ProcessingTurn: inboxTestProcessingTurn(h, "s1"), Recap: "Synthetic recap while Agent B continues"}); err != nil {
 		t.Fatal(err)
 	}
 	state, wake, back := handlingNow(h, it)

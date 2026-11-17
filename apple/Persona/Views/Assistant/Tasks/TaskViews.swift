@@ -479,7 +479,7 @@ struct FeedLine: View {
             // A routine's facts (#2320); a body this build can't read leaves the card out, never the feed around it.
             if let brief = item.brief { BriefCard(brief: brief, group: group, conversation: item.conversation) }
         case .message:
-            if let id = item.ref, !store.laterMessages.contains(id) { MessageCard(item: item, itemID: id) }
+            if let id = item.ref, !store.isLater(item) { MessageCard(item: item, itemID: id) }
         case .inboxSuggestion:
             // A hand-off conversation's write-back (#5932); a body this build can't read leaves the card out.
             if let id = item.ref, let card = item.handoffCard { HandoffCardView(item: item, card: card, itemID: id) }

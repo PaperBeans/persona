@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { image } from '@kit.ImageKit';
 import { ClientModel } from '../models/ClientModel';
 import { ComputerScreen, ComputerScreenFrame } from '../models/ComputerScreen';
@@ -181,9 +184,9 @@ export struct ComputerScreenPage {
       TextInput({ text: this.passwordDraft, placeholder: tr('computer_screen_password') })
         .type(InputType.Password).showPasswordIcon(false).onChange((value: string) => this.passwordDraft = value).height(Tokens.touch)
       Row({ space: Tokens.gap }) {
-        Button(tr('computer_screen_cancel_sign_in')).layoutWeight(1).onClick(() => this.cancelCredentials()).height(Tokens.touch)
-        Button(tr('computer_screen_sign_in')).layoutWeight(1).enabled(!!this.accountDraft.trim() && !!this.passwordDraft)
-          .onClick(() => this.submitCredentials()).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('computer_screen_cancel_sign_in')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('computer_screen_cancel_sign_in', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('computer_screen_cancel_sign_in')).bindTips(tr('computer_screen_cancel_sign_in')).onClick(() => this.cancelCredentials())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('computer_screen_sign_in')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('computer_screen_sign_in', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('computer_screen_sign_in')).bindTips(tr('computer_screen_sign_in')).enabled(!!this.accountDraft.trim() && !!this.passwordDraft)
+          .onClick(() => this.submitCredentials())
       }.width('100%')
     }.padding(Tokens.page).width('100%')
   }
@@ -202,8 +205,8 @@ export struct ComputerScreenPage {
       Row({ space: Tokens.gap }) {
         TextInput({ text: this.textDraft, placeholder: tr('computer_screen_type_text') })
           .layoutWeight(1).onChange((value: string) => this.textDraft = value).height(Tokens.touch)
-        Button(tr('computer_screen_send_text')).enabled(!!this.textDraft && this.textDraft.length <= 256 && !this.textSending)
-          .onClick(() => this.submitText()).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('computer_screen_send_text')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('computer_screen_send_text', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('computer_screen_send_text')).bindTips(tr('computer_screen_send_text')).enabled(!!this.textDraft && this.textDraft.length <= 256 && !this.textSending)
+          .onClick(() => this.submitText())
       }.width('100%')
     }.padding({ left: Tokens.page, right: Tokens.page, top: Tokens.gap, bottom: Tokens.page }).width('100%')
   }
@@ -213,9 +216,9 @@ export struct ComputerScreenPage {
       if (this.screen.phase === 'live') Row({ space: Tokens.gap }) {
         if (!this.screen.controlAllowed()) Text(tr('computer_screen_read_only')).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).layoutWeight(1)
         else Blank().layoutWeight(1)
-        Button(tr('computer_screen_refresh')).onClick(() => this.screen.refresh()).constraintSize({ minHeight: Tokens.touch })
-        if (this.screen.controlAllowed()) Button(tr('computer_screen_release_control')).onClick(() => this.screen.releaseControl()).constraintSize({ minHeight: Tokens.touch })
-        else Button(tr('computer_screen_control')).onClick(() => this.confirmControl()).constraintSize({ minHeight: Tokens.touch })
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('computer_screen_refresh')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('computer_screen_refresh', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('computer_screen_refresh')).bindTips(tr('computer_screen_refresh')).onClick(() => this.screen.refresh())
+        if (this.screen.controlAllowed()) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('computer_screen_release_control')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('computer_screen_release_control', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('computer_screen_release_control')).bindTips(tr('computer_screen_release_control')).onClick(() => this.screen.releaseControl())
+        else Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('computer_screen_control')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('computer_screen_control', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('computer_screen_control')).bindTips(tr('computer_screen_control')).onClick(() => this.confirmControl())
       }.padding({ left: Tokens.page, right: Tokens.page, bottom: Tokens.gap }).width('100%').alignItems(VerticalAlign.Center)
 
       if (this.screen.credentialsRequested) this.credentialForm()
@@ -227,7 +230,7 @@ export struct ComputerScreenPage {
           LoadingProgress().width(Tokens.touch).height(Tokens.touch).align(Alignment.Center)
         else if (!this.screen.credentialsRequested) Column({ space: Tokens.gap }) {
           Text(tr(this.screen.messageKey)).fontSize(Tokens.body).fontColor($r('sys.color.font_secondary')).textAlign(TextAlign.Center)
-          Button(tr('computer_screen_connect')).onClick(() => this.open()).constraintSize({ minHeight: Tokens.touch })
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('computer_screen_connect')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('computer_screen_connect', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('computer_screen_connect')).bindTips(tr('computer_screen_connect')).onClick(() => this.open())
         }.align(Alignment.Center).width('100%').padding(Tokens.page)
       }.layoutWeight(1).width('100%').backgroundColor($r('app.color.persona_canvas'))
         .onAreaChange((_oldArea: Area, area: Area) => { this.frameAreaWidth = Number(area.width); this.frameAreaHeight = Number(area.height); })

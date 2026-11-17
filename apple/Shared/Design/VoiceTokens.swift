@@ -33,6 +33,15 @@ nonisolated extension Theme.Size {
     /// How much of the conversation a call keeps in sight over the pending cards (`PendingCards`) where the page is short
     /// (large text): about a line of the call's captions, its last row. The card the user has to answer gets the rest.
     static let voiceThreadRoom: CGFloat = 44
+    /// The call screen's round controls (#9290: Mute, Speaker or Audio, Resume, End): a circle a thumb finds without
+    /// looking, as the Phone app's, with its one-line label under it. Grows with the text (`scaledFrame`).
+    static let callControl: CGFloat = 72
+    /// The call screen's orb (`VoiceOrb` at this size), where the Phone app shows the caller's picture: the box, halo
+    /// included.
+    static let callOrb: CGFloat = 160
+    /// The most of the call screen's height the orb takes. It also gives way to the name, the line and the caption (the
+    /// controls always keep their room), down to the voice bar's orb; where even that does not fit, it is not drawn.
+    static let callOrbShare: CGFloat = 0.22
 }
 
 nonisolated extension Theme {

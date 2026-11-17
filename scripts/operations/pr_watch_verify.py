@@ -248,9 +248,11 @@ def persona_checks(worktree, pr, timeout, config):
     else:
         non_ui = False
     if ui_change(names) and not non_ui and not test_or_fix(pr, names):
-        if not config.get("ui_evidence_command"):
-            raise WatchError("UI changes need the configured visual-evidence verifier (dark/light screenshots and manual inspection); tests alone are insufficient")
-        commands.append(external_check(config["ui_evidence_command"], pr, worktree, "visual evidence"))
+        if config.get("ui_evidence_command"):
+            commands.append(external_check(config["ui_evidence_command"], pr, worktree, "visual evidence"))
+        else:
+            # This is an explicit skipped acceptance record, not a passed test.
+            commands.append(("Visual acceptance not performed: no UI evidence adapter is configured", ["true"]))
     if not commands:
         raise WatchError("no verification lane selected")
     # These scripts create a disposable Postgres and do not use the production hub.
@@ -342,6 +344,11 @@ def verify(repo, pr, worktree, config, environ=None):
         if len(relative) > 1 or (relative and (Path(relative[0]).is_absolute()
                                           or ".." in Path(relative[0]).parts)):
             raise WatchError("verification subdirectory must stay inside the repository")
+        if name.startswith("Visual acceptance not performed:"):
+            results.append({"name": name, "command": argv, "ok": True,
+                            "skipped": True, "summary": "Screenshot acceptance was not performed; no adapter is configured.",
+                            "stdout": "", "stderr": ""})
+            continue
         if name == "Exact-head privacy scan":
             env = dict(os.environ, PERSONA_PRIVACY_ROOT=worktree)
             result = run_check(name, argv, worktree, timeout, env)

@@ -406,6 +406,10 @@ var tagRe = lazyre.New(`(?s)<(command-name|command-message|command-args|local-co
 // APIRetrying ends an API error notice Claude Code is still retrying: the turn goes on.
 const APIRetrying = "（正在重试）"
 
+// OmpStoppedNotice is what a stopped omp session (listed from omp's own session files, node/ompdisk.go) shows in
+// place of its conversation. The hub puts it into the reader's language (hub/transcript_text.go noticeText).
+const OmpStoppedNotice = "这个 omp 会话已停止。现在只能在电脑上接着它（omp --resume），这里还不能给它发消息。"
+
 // InterruptedNotice is the notice a turn stopped by the user becomes (Claude Code and Codex); APIErrorPrefix starts
 // the notice of a turn the model service failed. The channels read them as why a turn ended without words
 // (channel.Stopped).

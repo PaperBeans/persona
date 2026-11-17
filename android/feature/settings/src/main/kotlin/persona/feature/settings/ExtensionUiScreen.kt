@@ -121,6 +121,9 @@ fun ExtensionUiPage(extensions: ExtensionManagement?, extensionId: String, uiId:
                     notificationIntent: Intent? = null,
                     notificationStore: ExtensionNotificationActionStore = ExtensionNotificationActionStore.shared,
                     notificationLocked: (suspend () -> Boolean)? = null) {
+    // Depth 0 is the sidebar root: the shell's sidebar button replaces Back (iOS sidebarRootPage). Deeper pages keep Back.
+    // onPop and "Set Up with…" still call [onBack]. On a lone root that switches to the conversation (AppNavigator.back).
+    val barBack = if (depth == 0 && LocalIsSidebarRoot.current) null else onBack
     val notification = if (notificationActionToken == null) null else {
         val context = LocalContext.current
         val activity = context as? Activity
@@ -153,7 +156,7 @@ fun ExtensionUiPage(extensions: ExtensionManagement?, extensionId: String, uiId:
         }.value
     }
     if (notificationActionToken != null && notification == null) {
-        JListPage(title = title, onBack = onBack) { item { JLoading() } }
+        JListPage(title = title, onBack = barBack) { item { JLoading() } }
         return
     }
     notification?.error?.let { error ->
@@ -162,7 +165,7 @@ fun ExtensionUiPage(extensions: ExtensionManagement?, extensionId: String, uiId:
             ExtensionNotificationPageError.Locked -> R.string.settings_ext_notification_unlock
             else -> R.string.settings_ext_notification_expired
         }
-        JListPage(title = title, onBack = onBack) { item { JNotice(stringResource(message)) } }
+        JListPage(title = title, onBack = barBack) { item { JNotice(stringResource(message)) } }
         return
     }
     val pageManager = notification?.record?.scope?.manager ?: manager
@@ -188,13 +191,14 @@ fun ExtensionUiPage(extensions: ExtensionManagement?, extensionId: String, uiId:
     }
     if (adapter != null && !nativeUnsupported) {
         require(adapter.session.identity.extension == extensionId && adapter.session.identity.contribution == uiId)
-        NativeExtensionStreamPage(adapter, title, onBack, onPush = { push ->
+        // The bar hides Back at a regular-width root; a stream pop still leaves the page (onBack).
+        NativeExtensionStreamPage(adapter, title, onBack, showBack = barBack != null, onPush = { push ->
             ExtensionViewText.pushed(extensionId, uiId, title, depth, push, binding?.manager ?: pageManager)?.let(onPush)
         }, presentations = owned?.presentations)
         return
     }
     if (extensions == null) {
-        JListPage(title = title, onBack = onBack) { item { JNotice(stringResource(if (nativeUnsupported) R.string.settings_ext_native_unsupported else R.string.settings_ext_demo_none)) } }
+        JListPage(title = title, onBack = barBack) { item { JNotice(stringResource(if (nativeUnsupported) R.string.settings_ext_native_unsupported else R.string.settings_ext_demo_none)) } }
         return
     }
     val api = rememberPinned(extensions, extensionPrefixes(extensionId), pageManager)
@@ -233,7 +237,7 @@ fun ExtensionUiPage(extensions: ExtensionManagement?, extensionId: String, uiId:
     val view = state.view
     // UI version 8: a columns view takes the pane's whole width, as many columns of cards as it has room for
     ExtensionPageWidth(view) { columns, fullWidth ->
-        JListPage(title = view?.title?.takeIf { it.isNotBlank() } ?: title, onBack = onBack, largeTitle = false,
+        JListPage(title = view?.title?.takeIf { it.isNotBlank() } ?: title, onBack = barBack, largeTitle = false,
             refreshing = state.loading && view != null, onRefresh = { scope.launch { model.load() } }, fullWidth = fullWidth) {
             if (nativeNotice) item("native-unsupported") { JNotice(stringResource(R.string.settings_ext_native_unsupported)) }
             viewStatus("page", state, onRetry = { scope.launch { model.load() } })

@@ -27,6 +27,7 @@ private class FakeExtensions(var detail: ExtensionDetail) : ExtensionApiStub() {
     var fail: Exception? = null
     val autoUpgrades = mutableListOf<Boolean>()
     val uninstalls = mutableListOf<Boolean>()
+    var removal = ExtensionRemoval()
     /** Enabled extensions that depend on it: refused (409 has_dependents) without cascade. */
     var dependents: List<ExtensionDependent> = emptyList()
     val cascades = mutableListOf<String>()
@@ -61,7 +62,7 @@ private class FakeExtensions(var detail: ExtensionDetail) : ExtensionApiStub() {
     override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean, members: Boolean): ExtensionRemoval {
         refuseDependents("uninstall", cascade)
         uninstalls += keepData; fail?.let { throw it }
-        return ExtensionRemoval()
+        return removal
     }
     private fun refuseDependents(call: String, cascade: Boolean) {
         cascades += "$call cascade=$cascade"
@@ -460,6 +461,23 @@ class ExtensionsStateTest {
         api.fail = HubFailure(HubError.Server, "还有扩展依赖它", status = 409)
         assertFalse(model.uninstall(keepData = false))
         assertEquals("没有卸载：还有扩展依赖它", model.state.value.error)
+    }
+
+    @Test fun installedPageCleanupWarningsStayUntilTheirOkAndEmptyResultsStayQuiet() = runBlocking {
+        val warnings = listOf("请手动删除配置缓存", "定时任务文件仍需手动处理")
+        val api = FakeExtensions(cua).apply { removal = ExtensionRemoval(warnings = warnings) }
+        val model = ExtensionModel(api, "cua", res)
+        model.load()
+        assertTrue(model.uninstall(keepData = true))
+        assertEquals(warnings, model.state.value.removalNotice?.warnings)
+        assertEquals("已卸载 操控电脑", model.state.value.removalNotice?.title)
+        model.dismissRemovalNotice()
+        assertNull(model.state.value.removalNotice)
+        assertNull(model.removal)
+
+        api.removal = ExtensionRemoval()
+        assertTrue(model.uninstall(keepData = true))
+        assertNull(model.state.value.removalNotice)
     }
 
     @Test fun packSwitchOffWaitsForConfirmation() = runBlocking {

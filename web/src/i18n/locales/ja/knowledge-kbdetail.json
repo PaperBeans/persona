@@ -132,7 +132,6 @@
   "room_ended": "会議は終わりました。",
   "room_ended_copy": "会議は終わりました。その会話はまだアシスタントのコンピュータに残っていて、そのコンピュータにつながったら削除されます。",
   "room_deleted": "会議中の会話は文字起こしとともに削除されました。",
-  "thread_joined": "Persona が会議に参加しました",
   "thread_lines_other": "会議の発言 {count} 文",
   "thread_ended": "会議が終わりました",
   "thread_heard": "直前の発言（{clock}）",

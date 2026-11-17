@@ -10,8 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -99,6 +101,9 @@ func newCatalogGateway(t *testing.T, handler func(w http.ResponseWriter, r *http
 	t.Helper()
 	g := &catalogGateway{}
 	g.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/" && slices.Contains(portProbeAgents, r.Header.Get("User-Agent")) {
+			return // a Persona node on the machine probing this server among an agent's ports (ports.go), not the probe tested
+		}
 		g.mu.Lock()
 		g.seen = append(g.seen, r.Clone(context.Background()))
 		g.mu.Unlock()
@@ -196,7 +201,21 @@ func TestCodexCatalogFoundByShape(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fakeCodex(t, "0.167.0")
-			g := newCatalogGateway(t, c.handler)
+			// The paths are asked at once: each answer waits until every path was asked (or 2 s), so the first path's
+			// catalog cannot end the probe, and cancel the other request, before that request reaches the gateway.
+			var asked atomic.Int32
+			all := make(chan struct{})
+			var allOnce sync.Once
+			g := newCatalogGateway(t, func(w http.ResponseWriter, r *http.Request) {
+				if asked.Add(1) >= int32(len(codexCatalogPaths)) {
+					allOnce.Do(func() { close(all) })
+				}
+				select {
+				case <-all:
+				case <-time.After(2 * time.Second):
+				}
+				c.handler(w, r)
+			})
 			got := catalogOf(quietNode(), codexProvider(g.URL+"/v1"))
 			want := ""
 			if c.want != "" {

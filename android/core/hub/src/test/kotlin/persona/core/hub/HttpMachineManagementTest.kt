@@ -189,6 +189,20 @@ class HttpMachineManagementTest {
         assertNull(none.quota)
     }
 
+    @Test fun noTerminalEngineIsSavedAsTheEmptyHostSet() = withHub { server, machines ->
+        server.enqueue(MockResponse().setBody("""{"id":"m1","engine":"herdr","engine_hosts":[],"engine_default":""}"""))
+        val saved = machines.setEngine("m1", NO_TERMINAL_ENGINE)
+        val put = server.takeRequest()
+        assertEquals("PUT", put.method)
+        assertEquals("/api/v1/machines/m1/engine", put.path)
+        assertEquals("""{"hosts":[]}""", put.body.readUtf8())
+        assertEquals(emptyList<String>(), saved.engineHosts)
+        // Going back is the ordinary single engine again.
+        server.enqueue(MockResponse().setBody("""{"id":"m1","engine":"herdr","engine_hosts":["herdr"]}"""))
+        assertEquals(listOf("herdr"), machines.setEngine("m1", "herdr").engineHosts)
+        assertEquals("""{"engine":"herdr"}""", server.takeRequest().body.readUtf8())
+    }
+
     @Test fun putsTheEngineAndDecodesTheMachine() = withHub { server, machines ->
         server.enqueue(MockResponse().setBody("""{"id":"m1","engine":"orca","engines":[{"id":"orca","name":"Orca","available":true}]}"""))
         val saved = machines.setEngine("m1", "orca")

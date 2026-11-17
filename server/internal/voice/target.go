@@ -46,7 +46,13 @@ type startFrame struct {
 	// Only a full device's ordinary call can: another extension's call and a meeting call keep it. Said at all, the app
 	// has Send Anyway (conversation.sendsAnyway): an app from before #5904 says nothing.
 	SpeechGate *bool `json:"speech_gate"`
+	// Surface "call" (#9290): the app places this call as a system call (the iPhone's call to Persona); absent for an
+	// in-app or CarPlay call. Informational: only the call's log says it (logStart), and only "call", never the raw value.
+	Surface string `json:"surface"`
 }
+
+// surfaceCall is start.surface of a system call (#9290).
+const surfaceCall = "call"
 
 type wireLine struct {
 	Role string `json:"role"`
@@ -65,8 +71,9 @@ type resumeRun struct {
 
 // The features this extension's protocol 2 has (GET /info, ready): only what is there (docs/assistant/voice.md "Version negotiation").
 // speak is POST /speak (speak.go), outside a call. speech_gate (#5904): a run the user-speech gate refused (unprompted)
-// can be sent again (resend), and start takes speech_gate. meeting is the meeting call (meeting.go, #3862 phase 4).
-var features = []string{"target", "runs", "asks", "resume", "suspend", "speak", "speech_gate", "meeting"}
+// can be sent again (resend), and start takes speech_gate. meeting is the meeting call (meeting.go, #3862 phase 4). hold
+// (#9290): the app's hold frame pauses the upstream at once and nothing wakes it until the hold is off (suspend.go).
+var features = []string{"target", "runs", "asks", "resume", "suspend", "speak", "speech_gate", "meeting", "hold"}
 
 const (
 	// snapshotWait is how long the snapshot's parts that may be left out are waited for (docs/assistant/voice.md 4.5): it is

@@ -15,8 +15,7 @@ import (
 // in-meeting conversation (#7980)"). A room runs on Claude Code's CLI only: its removal of built-in tools and of the
 // owner's own setup is defined there (docs/assistant/meeting-minutes.md "The room conversation"). So the purpose takes
 // a launcher whose CLI is Claude Code, or a Messages API connection (Claude Code started with its address and key, as
-// for the main chat); never Codex, agy, omp or a runtime, nor a Responses or Chat Completions connection. It never
-// takes a runtime either (effectiveModel).
+// for the main chat); never Codex, agy, omp or a runtime, nor a Responses or Chat Completions connection.
 
 var errMeetingRoomClaudeOnly = i18n.Err("assistant-models.err_meeting_room_claude_only")
 

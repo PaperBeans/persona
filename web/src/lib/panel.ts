@@ -38,6 +38,8 @@ export type Panel =
   /** Reviewing the session's changes (#151): `scope` to open at, `at` a comment's file and line to go to, or a changed
    *  file to scroll to (`path` from the repository's root, or a full path inside it; no `line`). */
   | { kind: "review"; mid: string; sid: string; cwd: string; scope?: "uncommitted" | "branch" | "commit"; at?: ReviewSpot }
+  /** The transcript's own edits, by exchange or session: `turn` scopes the exchange and `at` selects a file / call. */
+  | { kind: "changes"; mid: string; sid: string; turn?: string; at?: { path: string; call?: string } }
   /** `sid`: the session whose message box takes the comments made in it (else the one last used). */
   | { kind: "file"; mid: string; path: string; cwd?: string; line?: number; to?: number; sid?: string }
   /** `manager`: the chat's it was opened from, which reads it (none: the default's). */
@@ -45,6 +47,7 @@ export type Panel =
   /** A task of a conversation, opened from it while Agents open in the side panel (lib/agent-open.ts, #5424): its
    *  Agent's chat (docs/assistant/unified-entry.md "Task details"). */
   | { kind: "task"; todo: string }
+  | { kind: "conversation-tasks"; mid: string; sid: string; manager: string }
   /** An Agent opened from a conversation while Agents open in the side panel (#5424), one no task stands for (#1113)
    *  included: its chat. */
   | { kind: "agent"; mid: string; sid: string }

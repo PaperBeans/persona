@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { ClientModel } from '../models/ClientModel';
 import { AdminManager, AdminMemory, AdminSnapshot, AdminWorkspace } from '../models/AdminWorkspace';
@@ -329,6 +332,15 @@ export struct AdminWorkspacePage {
 
   private engineLabel(id: string): string { return this.workspace.engineName(id); }
 
+  @Builder hubUpdateMenu() {
+    Menu() {
+      MenuItem({ content: tr('admin_hub_update') }).enabled(this.writeAllowed())
+        .onClick(() => this.confirmHubApply(false))
+      MenuItem({ content: tr('admin_hub_update_now') }).enabled(this.writeAllowed())
+        .onClick(() => this.confirmHubApply(true))
+    }
+  }
+
   @Builder feedback() {
     if (this.workspace.loading && !this.workspace.saving) LoadingProgress().width(Tokens.touch).height(Tokens.touch)
     if (this.workspace.notice) Text(tr(this.workspace.notice)).fontSize(Tokens.meta).fontColor($r('sys.color.font_emphasize')).width('100%')
@@ -392,7 +404,7 @@ export struct AdminWorkspacePage {
         TextInput({ text: this.workspace.formText('minutes_days', '0'), placeholder: tr('admin_minutes_days') }).type(InputType.Number)
           .onChange((value: string) => this.workspace.setForm('minutes_days', value)).id('admin.assistant.minutes_days')
         Row({ space: Tokens.gap }) {
-          Button(tr('admin_save')).layoutWeight(1).height(Tokens.touch).enabled(this.workspace.draftDirty && this.writeAllowed())
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_save')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_save', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('admin_save')).bindTips(tr('admin_save')).enabled(this.workspace.draftDirty && this.writeAllowed())
             .onClick(() => this.saveAssistant()).id('admin.assistant.save')
           if (this.workspace.saving) LoadingProgress().width(Tokens.touch).height(Tokens.touch)
         }.width('100%')
@@ -413,9 +425,9 @@ export struct AdminWorkspacePage {
             TextArea({ text: this.workspace.memoryDraft, placeholder: tr('admin_memory_content') }).height(Tokens.inputExpanded)
               .onChange((value: string) => this.workspace.setMemoryDraft(value)).id('admin.memory.content')
             Row({ space: Tokens.gap }) {
-              Button(tr('admin_save')).layoutWeight(1).height(Tokens.touch).enabled(this.workspace.memoryDirty && this.writeAllowed())
+              Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_save')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_save', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('admin_save')).bindTips(tr('admin_save')).enabled(this.workspace.memoryDirty && this.writeAllowed())
                 .onClick(() => this.workspace.saveMemory(this.workspace.capture('/api/v1/assistant/memory/' + encodeURIComponent(this.workspace.selectedMemory))).catch(() => false)).id('admin.memory.save')
-              if (this.workspace.selectedMemory !== 'MEMORY.md') Button(tr('delete')).layoutWeight(1).height(Tokens.touch)
+              if (this.workspace.selectedMemory !== 'MEMORY.md') Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('delete')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('delete', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('delete')).bindTips(tr('delete'))
                 .enabled(this.writeAllowed()).onClick(() => this.confirmDeleteMemory(this.currentMemory() as AdminMemory)).id('admin.memory.delete')
             }.width('100%')
           }
@@ -431,7 +443,7 @@ export struct AdminWorkspacePage {
           .fontColor($r('app.color.persona_danger')).width('100%')
         TextArea({ text: this.workspace.newMemoryContent, placeholder: tr('admin_memory_content') }).height(Tokens.inputExpanded)
           .onChange((value: string) => this.workspace.setNewMemoryContent(value)).id('admin.memory.new_content')
-        Button(tr('admin_create_memory')).width('100%').height(Tokens.touch).enabled(this.workspace.canCreateMemory() && this.writeAllowed())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_create_memory')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_create_memory', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_create_memory')).bindTips(tr('admin_create_memory')).enabled(this.workspace.canCreateMemory() && this.writeAllowed())
           .onClick(() => this.createMemory()).id('admin.memory.create')
       }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
         .backgroundColor($r('sys.color.comp_background_tertiary')).borderRadius(Tokens.inset)
@@ -453,15 +465,15 @@ export struct AdminWorkspacePage {
             TextInput({ text: this.workspace.managerNameDraft, placeholder: tr('admin_manager_name') })
               .onChange((value: string) => this.workspace.setManagerNameDraft(value)).id('admin.manager.name')
             Row({ space: Tokens.gap }) {
-              Button(tr('admin_rename')).layoutWeight(1).height(Tokens.touch).enabled(this.writeAllowed() && !!this.workspace.managerNameDraft.trim() && this.workspace.managerNameDraft.trim() !== this.currentManager()?.name)
+              Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_rename')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_rename', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_rename')).bindTips(tr('admin_rename')).enabled(this.writeAllowed() && !!this.workspace.managerNameDraft.trim() && this.workspace.managerNameDraft.trim() !== this.currentManager()?.name)
                 .onClick(() => this.confirmRenameManager(this.currentManager() as AdminManager)).id('admin.manager.rename')
-              if (!this.currentManager()?.isDefault) Button(tr('admin_make_default')).layoutWeight(1).height(Tokens.touch).enabled(this.writeAllowed() && !this.currentManager()?.installing)
+              if (!this.currentManager()?.isDefault) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_make_default')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_make_default', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_make_default')).bindTips(tr('admin_make_default')).enabled(this.writeAllowed() && !this.currentManager()?.installing)
                 .onClick(() => this.confirmDefaultManager(this.currentManager() as AdminManager)).id('admin.manager.default')
             }.width('100%')
             Row({ space: Tokens.gap }) {
-              Button(tr('admin_new_install_code')).layoutWeight(1).height(Tokens.touch).enabled(this.writeAllowed() && !this.currentManager()?.builtin)
+              Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_new_install_code')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_new_install_code', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_new_install_code')).bindTips(tr('admin_new_install_code')).enabled(this.writeAllowed() && !this.currentManager()?.builtin)
                 .onClick(() => this.confirmManagerCode(this.currentManager() as AdminManager)).id('admin.manager.code')
-              Button(tr('delete')).layoutWeight(1).height(Tokens.touch)
+              Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('delete')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('delete', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('delete')).bindTips(tr('delete'))
                 .enabled(this.writeAllowed() && this.workspace.managerCanDelete(this.currentManager()))
                 .onClick(() => this.confirmDeleteManager(this.currentManager() as AdminManager)).id('admin.manager.delete')
             }.width('100%')
@@ -474,7 +486,7 @@ export struct AdminWorkspacePage {
             ForEach(this.workspace.managerInstallCommandKinds(), (commandName: string) => {
               Text(tr('admin_command_' + commandName)).fontSize(Tokens.meta).fontWeight(FontWeight.Medium).width('100%')
               Text(this.workspace.managerInstallCommand(commandName)).fontSize(Tokens.meta).width('100%')
-              Button(tr('copy')).height(Tokens.touch).onClick(() => this.copyInstallCommand(commandName)).id('admin.manager.copy.' + commandName)
+              Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('copy')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('copy', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('copy')).bindTips(tr('copy')).onClick(() => this.copyInstallCommand(commandName)).id('admin.manager.copy.' + commandName)
             }, (commandName: string) => commandName)
           }
         } else if (!this.workspace.loading && !this.workspace.error) Text(tr('admin_managers_empty')).fontSize(Tokens.meta).width('100%')
@@ -485,7 +497,7 @@ export struct AdminWorkspacePage {
         this.title('admin_new_manager')
         TextInput({ text: this.newManagerName, placeholder: tr('admin_manager_name') })
           .onChange((value: string) => this.newManagerName = value).id('admin.manager.new_name')
-        Button(tr('admin_create_manager')).width('100%').height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_create_manager')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_create_manager', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_create_manager')).bindTips(tr('admin_create_manager'))
           .enabled(this.writeAllowed() && !!this.newManagerName.trim()).onClick(() => this.confirmCreateManager()).id('admin.manager.create')
       }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
         .backgroundColor($r('sys.color.comp_background_tertiary')).borderRadius(Tokens.inset)
@@ -500,7 +512,7 @@ export struct AdminWorkspacePage {
           if (this.moveDestinationIds().length) Select(this.options(this.moveDestinationOptions())).selected(this.moveDestinationIndex())
             .value(this.selectedOptionValue(this.moveDestinationOptions(), this.moveDestinationIndex()))
             .onSelect((index: number) => this.workspace.selectMoveDestination(this.moveDestinationIds()[index] || '')).id('admin.manager.move_destination')
-          Button(tr('admin_move')).height(Tokens.touch).width('100%').enabled(this.writeAllowed() && !!this.workspace.selectedMoveMachine && !!this.workspace.selectedMoveDestination)
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_move')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_move', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_move')).bindTips(tr('admin_move')).enabled(this.writeAllowed() && !!this.workspace.selectedMoveMachine && !!this.workspace.selectedMoveDestination)
             .onClick(() => this.confirmMoveMachine()).id('admin.manager.move')
         } else Text(tr('admin_no_machine_move')).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).width('100%')
       }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
@@ -532,9 +544,9 @@ export struct AdminWorkspacePage {
           .type(InputType.Password).showPasswordIcon(false).onChange((value: string) => this.workspace.setLauncherSecretDraft(value)).id('admin.launcher.edit.key')
       }.width('100%')
       Row({ space: Tokens.gap }) {
-        Button(tr('cancel')).layoutWeight(1).height(Tokens.touch).enabled(!this.workspace.saving)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('cancel')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('cancel', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('cancel')).bindTips(tr('cancel')).enabled(!this.workspace.saving)
           .onClick(() => this.workspace.cancelLauncherEdit()).id('admin.launcher.edit.cancel')
-        Button(tr('admin_save')).layoutWeight(1).height(Tokens.touch).enabled(this.launcherSaveAllowed())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_save')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_save', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('admin_save')).bindTips(tr('admin_save')).enabled(this.launcherSaveAllowed())
           .onClick(() => this.saveLauncher()).id('admin.launcher.edit.save')
       }.width('100%')
     }.width('100%').alignItems(HorizontalAlign.Start)
@@ -555,11 +567,11 @@ export struct AdminWorkspacePage {
         if (Wire.rows(this.workspace.launcherDetail, 'models').length) Text(tr('admin_launcher_models') + ': ' + Wire.rows(this.workspace.launcherDetail, 'models').map((item: Record<string, Object>) => Wire.text(item, 'id', Wire.text(item, 'name'))).join(', ')).fontSize(Tokens.meta).width('100%')
       }
       Row({ space: Tokens.gap }) {
-        Button(tr('admin_launcher_check')).layoutWeight(1).height(Tokens.touch).enabled(this.writeAllowed())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_launcher_check')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_launcher_check', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_launcher_check')).bindTips(tr('admin_launcher_check')).enabled(this.writeAllowed())
           .onClick(() => this.confirmLauncherCheck()).id('admin.launcher.check')
-        if (Wire.text(this.currentLauncher(), 'source') === 'persona') Button(tr('admin_edit')).layoutWeight(1).height(Tokens.touch).enabled(this.writeAllowed())
+        if (Wire.text(this.currentLauncher(), 'source') === 'persona') Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_edit')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_edit', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_edit')).bindTips(tr('admin_edit')).enabled(this.writeAllowed())
           .onClick(() => this.beginLauncher(false)).id('admin.launcher.edit')
-        Button(tr('delete')).layoutWeight(1).height(Tokens.touch).enabled(this.writeAllowed())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('delete')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('delete', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('delete')).bindTips(tr('delete')).enabled(this.writeAllowed())
           .onClick(() => this.confirmDeleteLauncher(this.currentLauncher())).id('admin.launcher.delete')
       }.width('100%')
       if (Object.keys(this.workspace.healthResult).length) {
@@ -576,7 +588,7 @@ export struct AdminWorkspacePage {
           .value(this.selectedOptionValue(this.launcherLabels(), this.launcherIndex()))
           .onSelect((index: number) => this.selectLauncher(index)).id('admin.launcher.select')
         Row({ space: Tokens.gap }) {
-          Button(tr('admin_new_launcher')).layoutWeight(1).height(Tokens.touch).onClick(() => this.beginLauncher(true)).id('admin.launcher.new')
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_new_launcher')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_new_launcher', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_new_launcher')).bindTips(tr('admin_new_launcher')).onClick(() => this.beginLauncher(true)).id('admin.launcher.new')
         }.width('100%')
         if (this.workspace.launcherEditor) this.launcherEditorContent()
         else this.launcherSummary()
@@ -587,7 +599,7 @@ export struct AdminWorkspacePage {
         this.title('admin_launcher_import')
         Select(this.machineSelectOptions()).selected(this.machineIndex()).value(this.machineSelectValue()).enabled(this.machineChoices().length > 0)
           .onSelect((index: number) => this.chooseMachine(index)).id('admin.launcher.import_machine')
-        Button(tr('admin_load_import')).height(Tokens.touch).enabled(!!this.workspace.selectedMachine && !this.workspace.loading)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_load_import')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_load_import', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_load_import')).bindTips(tr('admin_load_import')).enabled(!!this.workspace.selectedMachine && !this.workspace.loading)
           .onClick(() => this.loadImporter()).id('admin.launcher.import_load')
         ForEach(Wire.rows(this.workspace.importer, 'providers'), (item: Record<string, Object>) => {
           Row({ space: Tokens.gap }) {
@@ -596,7 +608,7 @@ export struct AdminWorkspacePage {
             Text(Wire.text(item, 'name') + (Wire.bool(item, 'has_key') ? ' · ' + tr('admin_launcher_key_present') : '')).layoutWeight(1).fontSize(Tokens.body)
           }.width('100%')
         }, (item: Record<string, Object>) => Wire.text(item, 'name'))
-        if (this.workspace.importerSelection.length) Button(tr('admin_import_selected')).width('100%').height(Tokens.touch)
+        if (this.workspace.importerSelection.length) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_import_selected')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_import_selected', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_import_selected')).bindTips(tr('admin_import_selected'))
           .enabled(this.writeAllowed() && this.workspace.importerMachine === this.workspace.selectedMachine)
           .onClick(() => this.confirmImportLaunchers()).id('admin.launcher.import_commit')
       }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
@@ -605,7 +617,7 @@ export struct AdminWorkspacePage {
       Column({ space: Tokens.gap }) {
         this.title('admin_launcher_presets')
         if (this.workspace.presets.length) ForEach(this.workspace.presets, (preset: Record<string, Object>) => {
-          Button(Wire.text(preset, 'name', Wire.text(preset, 'id'))).width('100%').height(Tokens.touch).enabled(this.writeAllowed())
+          Button({ type: ButtonType.Normal }) { Row({ space: Tokens.inset }) { Text(Wire.text(preset, 'name', Wire.text(preset, 'id'))).fontSize(Tokens.body).fontColor(Colors.ink).layoutWeight(1); SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(Tokens.meta).fontColor([Colors.secondary]) }.width('100%').constraintSize({ minHeight: Tokens.touch }) }.buttonStyle(ButtonStyleMode.TEXTUAL).backgroundColor(Color.Transparent).padding({ left: Tokens.page, right: Tokens.page }).width('100%').height(Tokens.touch).enabled(this.writeAllowed())
             .onClick(() => this.confirmAddPreset(preset)).id('admin.launcher.preset.' + Wire.text(preset, 'id'))
         }, (preset: Record<string, Object>) => Wire.text(preset, 'id'))
         else Text(tr('admin_launcher_presets_empty')).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).width('100%')
@@ -614,7 +626,7 @@ export struct AdminWorkspacePage {
 
       Column({ space: Tokens.gap }) {
         this.title('admin_launcher_health')
-        Button(tr('admin_health_check')).height(Tokens.touch).width('100%').enabled(this.writeAllowed())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_health_check')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_health_check', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_health_check')).bindTips(tr('admin_health_check')).enabled(this.writeAllowed())
           .onClick(() => this.confirmHealthCheck()).id('admin.launcher.health_check')
         ForEach(this.workspace.healthRecords, (record: Record<string, Object>) => {
           Column({ space: Tokens.fine }) {
@@ -660,7 +672,7 @@ export struct AdminWorkspacePage {
           }
           if (Wire.bool(this.workspace.machineData, 'engine_sets_unsupported')) Text(tr('admin_engine_sets_unsupported')).fontSize(Tokens.meta)
             .fontColor($r('app.color.persona_danger')).width('100%')
-          Button(tr('admin_save')).width('100%').height(Tokens.touch).enabled(this.writeAllowed() && this.machineChoices().length > 0)
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_save')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_save', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('admin_save')).bindTips(tr('admin_save')).enabled(this.writeAllowed() && this.machineChoices().length > 0)
             .onClick(() => this.confirmEngineSave()).id('admin.engine.save')
         } else if (!this.workspace.loading) Text(tr('admin_machine_unavailable')).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).width('100%')
       }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
@@ -684,8 +696,7 @@ export struct AdminWorkspacePage {
             .fontColor($r('app.color.persona_danger')).width('100%')
           if (!Wire.bool(this.workspace.machineData, 'can_deploy')) Text(Wire.text(this.workspace.machineData, 'deploy_reason', tr('admin_node_cannot_deploy')))
             .fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).width('100%')
-          Button(tr(Wire.bool(this.workspace.machineData, 'deploying') || this.workspace.writeState === 'running' ? 'admin_node_deploying' : 'admin_redeploy'))
-            .width('100%').height(Tokens.touch).enabled(this.writeAllowed() && Wire.bool(this.workspace.machineData, 'can_deploy') && !Wire.bool(this.workspace.machineData, 'deploying'))
+          Button({ type: ButtonType.Circle }) { if (IconActions.busy(Wire.bool(this.workspace.machineData, 'deploying') || this.workspace.writeState === 'running' ? 'admin_node_deploying' : 'admin_redeploy')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.link); else SymbolGlyph(IconActions.symbol(Wire.bool(this.workspace.machineData, 'deploying') || this.workspace.writeState === 'running' ? 'admin_node_deploying' : 'admin_redeploy')).fontSize(Tokens.symbolFont).fontColor([IconActions.color(Wire.bool(this.workspace.machineData, 'deploying') || this.workspace.writeState === 'running' ? 'admin_node_deploying' : 'admin_redeploy', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr(Wire.bool(this.workspace.machineData, 'deploying') || this.workspace.writeState === 'running' ? 'admin_node_deploying' : 'admin_redeploy')).bindTips(tr(Wire.bool(this.workspace.machineData, 'deploying') || this.workspace.writeState === 'running' ? 'admin_node_deploying' : 'admin_redeploy')).enabled(this.writeAllowed() && Wire.bool(this.workspace.machineData, 'can_deploy') && !Wire.bool(this.workspace.machineData, 'deploying'))
             .onClick(() => this.confirmNodeDeploy()).id('admin.node_update.deploy')
         } else if (!this.workspace.loading) Text(tr('admin_machine_unavailable')).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).width('100%')
       }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
@@ -711,15 +722,14 @@ export struct AdminWorkspacePage {
           if (Wire.text(this.workspace.hubUpdate, 'error')) Text(Wire.text(this.workspace.hubUpdate, 'error')).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger')).width('100%')
           if (this.workspace.hubBusyLabels().length) Text(tr('admin_hub_busy') + ': ' + this.workspace.hubBusyLabels().join(', ')).fontSize(Tokens.meta).width('100%')
           Row({ space: Tokens.gap }) {
-            Button(tr('admin_hub_check')).layoutWeight(1).height(Tokens.touch).enabled(this.writeAllowed() && !this.workspace.hubUpdateWorking())
+            Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_hub_check')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_hub_check', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_hub_check')).bindTips(tr('admin_hub_check')).enabled(this.writeAllowed() && !this.workspace.hubUpdateWorking())
               .onClick(() => this.confirmHubCheck()).id('admin.hub_update.check')
           }.width('100%')
           if (Wire.bool(this.workspace.hubUpdate, 'can_update') && Wire.bool(Wire.object(this.workspace.hubUpdate, 'latest'), 'newer') && !this.workspace.hubUpdateWorking()) {
             Row({ space: Tokens.gap }) {
-              Button(tr('admin_hub_update')).layoutWeight(1).height(Tokens.touch).enabled(this.writeAllowed())
-                .onClick(() => this.confirmHubApply(false)).id('admin.hub_update.apply')
-              Button(tr('admin_hub_update_now')).layoutWeight(1).height(Tokens.touch).enabled(this.writeAllowed())
-                .onClick(() => this.confirmHubApply(true)).id('admin.hub_update.apply_now')
+              Button({ type: ButtonType.Circle }) { Image($r('sys.media.ohos_ic_public_more')).width(Tokens.symbol).height(Tokens.symbol).fillColor(Colors.link) }
+                .attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_hub_update')).enabled(this.writeAllowed())
+                .bindMenu(this.hubUpdateMenu).id('admin.hub_update.options')
             }.width('100%')
           } else if (!Wire.bool(this.workspace.hubUpdate, 'can_update')) Text(Wire.text(this.workspace.hubUpdate, 'why_not', tr('admin_hub_cannot_update')))
             .fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).width('100%')

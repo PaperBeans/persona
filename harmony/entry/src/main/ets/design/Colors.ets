@@ -16,6 +16,9 @@ class NativeColors {
   readonly unread: ResourceColor = $r('app.color.persona_unread');
   readonly positive: ResourceColor = $r('app.color.persona_positive');
   readonly divider: ResourceColor = $r('app.color.persona_divider');
+  readonly danger: ResourceColor = $r('app.color.persona_danger');
+  readonly ai: ResourceColor = $r('app.color.persona_ai');
+  readonly teal: ResourceColor = $r('app.color.persona_teal');
   readonly subtle: ResourceColor = $r('app.color.persona_subtle');
 }
 

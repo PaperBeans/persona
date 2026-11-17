@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/nwverse/persona/server/internal/compat"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -119,6 +120,11 @@ type Todo struct {
 	SeenAt *time.Time `json:"seen_at,omitempty"`
 	// InboxItem is the Inbox row it was made from (#6480); the to-do's page opens that row. Empty for any other to-do.
 	InboxItem string `json:"inbox_item,omitempty"`
+	// PartOf: the to-do whose request this one is a piece of; After: the pieces of that request it waits for
+	// (todo_pieces.go, docs/assistant/todos.md "Requests in pieces"). Both empty for a to-do that is no piece. Clients
+	// that do not know them show the to-do as ever.
+	PartOf string   `json:"part_of,omitempty"`
+	After  []string `json:"after,omitempty"`
 	// Brief: what was asked when the work was handed out, with its log, and Lineage: the to-dos that carried the work
 	// (#3822, task_brief.go). Filled in where the apps read the to-dos (withBrief); absent for a to-do with no brief.
 	Brief   *TaskBrief    `json:"brief,omitempty"`
@@ -159,8 +165,8 @@ type todoStore interface {
 	ListTodoSources(ctx context.Context) (map[string]db.TodoSource, error)
 	SetTodoSource(ctx context.Context, todoID string, src db.TodoSource) error
 	StopTodoSourceReport(ctx context.Context, todoID string, at time.Time) (bool, error)
-	PlanTodoSourceReport(ctx context.Context, todoID, text string, due time.Time) (bool, error)
-	ClaimTodoSourceReport(ctx context.Context, todoID string, now time.Time, maxAttempts int) (int, string, bool, error)
+	PlanTodoSourceReport(ctx context.Context, todoID, text string, due time.Time, fullReply bool, doneAt *time.Time) (bool, error)
+	ClaimTodoSourceReport(ctx context.Context, todoID string, now time.Time, maxAttempts int) (int, string, bool, bool, error)
 	ReleaseTodoSourceReport(ctx context.Context, todoID string) error
 	ClearTodoSourcePlan(ctx context.Context, todoID string) (bool, error)
 }
@@ -182,7 +188,8 @@ type todoBook struct {
 	// memory takes the rows in the order the store committed them: two devices writing the same todo at once
 	// otherwise leave memory with whichever finished last, not the newer row. Every writer that puts a stored row
 	// into memory takes it. Workspace ownership writes and deletion also take it through publication; fanout
-	// rechecks ownership under it after session lookup. Automatic links take it for memory changes and again for background persistence, so a
+	// rechecks ownership under it after session lookup. A write of part_of or after checks the request graph again
+	// under it before storing (todo_pieces.go). Automatic links take it for memory changes and again for background persistence, so a
 	// removed workspace cannot gain a late stored agent. Agent snapshots do not take it. Taken before mu, never
 	// while mu is held; node calls and change notifications run after it is released.
 	writing         sync.Mutex
@@ -201,7 +208,7 @@ type todoBook struct {
 
 	// reporting are the todos whose report back to their source is waiting for the outcome (todo_source.go).
 	reportMu  sync.Mutex
-	reporting map[string]bool
+	reporting map[string]time.Time
 	runMu     sync.Mutex // one report step at a time (sourceReportNow)
 
 	// importing is held across a batch of imported reminders, and imports are their links when there is no store
@@ -519,13 +526,13 @@ func (s *Service) createTodo(ctx context.Context, title, notes, origin, planID s
 
 // createTaskTodo is createTodo for a plan's task, in the knowledge-base project the task names (a slug; "" for none).
 func (s *Service) createTaskTodo(ctx context.Context, title, notes, origin, planID, project string) (Todo, error) {
-	return s.createTaskTodoAs(ctx, "todo_"+randomHex(8), title, notes, origin, planID, project)
+	return s.createTaskTodoAs(ctx, "todo_"+randomHex(8), title, notes, origin, planID, project, "")
 }
 
-func (s *Service) createTaskTodoAs(ctx context.Context, id, title, notes, origin, planID, project string) (Todo, error) {
+func (s *Service) createTaskTodoAs(ctx context.Context, id, title, notes, origin, planID, project, inboxItem string) (Todo, error) {
 	now := time.Now().UTC()
 	return s.insertTodo(ctx, db.TodoRow{ID: id, Title: title, Notes: notes, CreatedAt: now, UpdatedAt: now,
-		Origin: origin, PlanID: planID, Quiet: s.quietTask(ctx, origin), Project: project})
+		Origin: origin, PlanID: planID, Quiet: s.quietTask(ctx, origin), Project: project, InboxItem: inboxItem})
 }
 
 // newTodo is createTodo, quiet or not as given (a launcher repair's has no conversation and is quiet,
@@ -546,6 +553,38 @@ func (s *Service) insertTodo(ctx context.Context, row db.TodoRow, bindings ...*r
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		return Todo{}, err
 	}
+	var out Todo
+	var err error
+	if row.PartOf != "" || len(row.After) > 0 {
+		out, err = s.insertPiece(ctx, row, bindings...)
+	} else {
+		out, err = s.putNewTodo(ctx, row, bindings...)
+	}
+	if err != nil {
+		return Todo{}, err
+	}
+	s.todosChanged(ctx)
+	return out, nil
+}
+
+// insertPiece is putNewTodo for a piece of a request: its links checked again and the row stored with todoBook.writing
+// held, as editTodo writes them (todo_pieces.go).
+func (s *Service) insertPiece(ctx context.Context, row db.TodoRow, bindings ...*repository.CreateBindings) (Todo, error) {
+	if f := s.pieceWriteHook; f != nil {
+		f(row.ID)
+	}
+	s.todos.writing.Lock()
+	defer s.todos.writing.Unlock()
+	e, err := s.recheckPieces("", db.TodoEdit{PartOf: &row.PartOf, After: &row.After})
+	if err != nil {
+		return Todo{}, err
+	}
+	row.PartOf, row.After = *e.PartOf, *e.After
+	return s.putNewTodo(ctx, row, bindings...)
+}
+
+// putNewTodo is insertTodo's store write and memory, without telling anyone.
+func (s *Service) putNewTodo(ctx context.Context, row db.TodoRow, bindings ...*repository.CreateBindings) (Todo, error) {
 	if len(bindings) > 0 && bindings[0] != nil {
 		st, ok := s.store().(todoRepositoryStore)
 		if !ok {
@@ -567,7 +606,6 @@ func (s *Service) insertTodo(ctx context.Context, row db.TodoRow, bindings ...*r
 	s.todos.todos[id] = tObj
 	out := formatTodo(copyTodoLocked(tObj))
 	s.todos.mu.Unlock()
-	s.todosChanged(ctx)
 	return out, nil
 }
 
@@ -590,6 +628,7 @@ func copyTodoLocked(t *Todo) Todo {
 	}
 	out.Spaces = make([]TodoSpace, len(t.Spaces))
 	copy(out.Spaces, t.Spaces)
+	out.After = slices.Clone(t.After)
 	out.Agents = make([]TodoAgent, len(t.Agents))
 	for i, a := range t.Agents {
 		out.Agents[i] = a
@@ -618,6 +657,11 @@ func copyTodoLocked(t *Todo) Todo {
 // that worked for it (latest released first).
 func formatTodo(t Todo) Todo {
 	out := t
+	if out.Source != nil && out.Source.ReportFullReply {
+		source := *out.Source
+		source.ReportText = "" // the delivery payload is not part of the to-do list
+		out.Source = &source
+	}
 	// Existing clients use review for cancellation labels and reasons. Keep that wire value;
 	// the stored marker distinguishes cancellation even for tasks without a supervision ledger.
 	if out.DoneBy == db.DoneByCancelled {
@@ -935,7 +979,8 @@ func (s *Service) todoRoutes() {
 		apierr.WriteJSON(w, map[string]any{"todo": resTodo})
 	})
 
-	// PATCH /api/v1/todos/{id}: update title, notes, done, due_at | due_date, remind_at, priority, project ("" clears it)
+	// PATCH /api/v1/todos/{id}: update title, notes, done, due_at | due_date, remind_at, priority, project ("" clears it),
+	// part_of ("" clears it) and after ([] clears it), checked as todo_pieces.go says
 	s.handle("PATCH /api/v1/todos/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !todoWriter(r) {
 			apierr.Write(w, http.StatusForbidden, errors.New("read-only role cannot modify todos"))
@@ -946,16 +991,19 @@ func (s *Service) todoRoutes() {
 			return
 		}
 		id := r.PathValue("id")
-		if _, ok := s.todoNow(id); !ok {
+		cur, ok := s.todoNow(id)
+		if !ok {
 			apierr.Write(w, http.StatusNotFound, errors.New("todo not found"))
 			return
 		}
 
 		var in struct {
-			Title   *string `json:"title"`
-			Notes   *string `json:"notes"`
-			Done    *bool   `json:"done"`
-			Project *string `json:"project"`
+			Title   *string         `json:"title"`
+			Notes   *string         `json:"notes"`
+			Done    *bool           `json:"done"`
+			Project *string         `json:"project"`
+			PartOf  json.RawMessage `json:"part_of"`
+			After   json.RawMessage `json:"after"`
 			todoPlanIn
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -979,12 +1027,27 @@ func (s *Service) todoRoutes() {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
+		pieces, err := pieceArgs(in.PartOf, in.After)
+		if err == nil && pieces.set() && cur.isConcern() {
+			err = errors.New("a concern is no piece of a request")
+		}
+		var links db.TodoEdit
+		if err == nil {
+			links, err = s.checkPieces(id, pieces)
+		}
+		if err != nil {
+			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		}
+		e.PartOf, e.After = links.PartOf, links.After
 		resTodo, err := s.editTodo(r.Context(), id, e)
 		if err != nil {
 			if errors.Is(err, db.ErrTodoNotFound) {
 				apierr.Write(w, http.StatusNotFound, err)
 			} else if errors.Is(err, db.ErrConcernUnreported) {
 				apierr.Write(w, http.StatusConflict, err) // report its outcome instead: POST …/decisions {source: "reported"}
+			} else if pe := (*pieceError)(nil); errors.As(err, &pe) {
+				apierr.Write(w, http.StatusBadRequest, err) // another write changed the request since it was checked
 			} else {
 				apierr.Write(w, http.StatusInternalServerError, err)
 			}

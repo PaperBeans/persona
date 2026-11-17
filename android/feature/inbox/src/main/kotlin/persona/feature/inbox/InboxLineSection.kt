@@ -36,6 +36,7 @@ import persona.core.navigation.TodoDetailRoute
 internal fun InboxLineSection(repository: InboxRepository, record: InboxRecord, navigator: Navigator, reload: Int = 0, modifier: Modifier = Modifier) {
     val snapshot by repository.snapshot.collectAsStateWithLifecycle()
     val pages = LocalInboxItemPages.current
+    val landing = LocalInboxLanding.current
     val feedback = LocalAppFeedback.current
     val scope = rememberCoroutineScope()
     var tree by remember(record.item.id) { mutableStateOf<InboxLineage?>(null) }
@@ -51,7 +52,8 @@ internal fun InboxLineSection(repository: InboxRepository, record: InboxRecord, 
     if (rows.isEmpty()) return
 
     fun open(row: InboxLineRow): (() -> Unit)? {
-        row.item?.let { return { navigator.navigate(inboxRowPage(it, pages)) } }
+        // An item of the thread opens from outside the list: a list beside it moves to it (#9053).
+        row.item?.let { return { val page = inboxRowPage(it, pages); landing?.landBeside(it, page); navigator.navigate(page) } }
         return when (row.parent.kind) {
             "todo" -> ({ navigator.navigate(TodoDetailRoute(row.parent.id)) })
             "session" -> row.parent.id.split('/', limit = 2).takeIf { it.size == 2 && it.all(String::isNotBlank) }?.let { (machine, session) ->

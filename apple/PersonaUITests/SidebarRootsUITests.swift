@@ -341,7 +341,7 @@ final class SidebarRootsUITests: XCTestCase {
         app.launchArguments = ["-demo.on", "YES", "-newAssistant", "YES", "-tab", "assistant", "-dev.openChat", "",
                                "-app.navigation", "separate", "-probes", "YES"]
         app.launchPinned(navigation: false)
-        // The iPad's tab bar, or the open Duo's upright switch in its place (#4231).
+        // The iPad's tab bar, or the open Duo's own tab bar in its place (#4231).
         let persona = app.buttons.matching(NSPredicate(format: "identifier == 'shell-assistant' OR label == 'Persona'")).firstMatch
         let agents = app.buttons.matching(NSPredicate(format: "identifier == 'shell-agents' OR label == 'Agents'")).firstMatch
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 20))
@@ -480,6 +480,73 @@ final class SidebarRootsUITests: XCTestCase {
         XCTAssertEqual(afterOpen.transitions, root.transitions, "bringing the sidebar out moved the page: \(root) → \(afterOpen)")
     }
 
+    /// Folding the sidebar beside an Agent's chat leaves the chat's top where it was: on the open Duo on its side the
+    /// system's Show Sidebar came in a row of its own above the chat's header and pushed the header and the chat 58 pt
+    /// down. Folded, the title stays put (within 1 pt), one button brings the sidebar back, on the title's line, and an
+    /// open title still takes a tap. In the Sidebar layout and in the Separate layout's Agents tab.
+    @MainActor func testFoldingTheSidebarKeepsTheChatsTop() throws {
+        for separate in [false, true] {
+            app = XCUIApplication()
+            app.launchArguments = ["-demo.on", "YES", "-newAssistant", "YES", "-dev.openChat", "", "-openSplitFresh", "YES", "-probes", "YES",
+                                   "-app.navigation", separate ? "separate" : "sidebar", "-tab", separate ? "dev" : "assistant"]
+            app.launchPinned(navigation: false)
+            XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 20))
+            guard app.windows.firstMatch.frame.width > 600 else { throw XCTSkip("a column beside the page, at regular width") }
+            let layout = separate ? "the Agents tab" : "the Sidebar layout"
+            if separate {
+                let agentsTab = app.buttons.matching(NSPredicate(format: "identifier == 'shell-agents' OR label == 'Agents'")).firstMatch
+                if agentsTab.waitForExistence(timeout: 10), !agentsTab.isSelected { agentsTab.tap() }
+                probeName = "sidebar-page-agents"
+            } else {
+                probeName = "sidebar-page"
+            }
+            _ = settled("conversation", "\(layout) at launch")
+            _ = pickAgent("an Agent in \(layout)")
+            let fold = element("sidebar-fold-column")
+            // Upright on the open Duo the column lies over the page and a pick slid it away: nothing beside the page moves.
+            guard fold.exists && fold.isHittable else { throw XCTSkip("the column lies over the page here") }
+            // The header's title: open (always, under side bars), or the folded bar's (the iPad's header folds on a long chat).
+            let open = app.buttons["chat.title"].firstMatch, compact = app.buttons["chat.compactTitle"].firstMatch
+            XCTAssertTrue(open.waitForExistence(timeout: 10) || compact.exists, "\(layout): no chat title:\n\(app.debugDescription)")
+            Thread.sleep(forTimeInterval: 1.0) // the header's own settling after the pick
+            let title = open.exists && open.isHittable ? open : compact
+            let out = title.frame
+            shot("fold-top-\(separate ? "tabs" : "sidebar")-0-out")
+
+            fold.tap()
+            let main = element(separate ? "sidebar-fold-column" : "sidebar-main")
+            let deadline = Date.now.addingTimeInterval(5)
+            while Date.now < deadline, main.exists && main.isHittable { Thread.sleep(forTimeInterval: 0.2) }
+            Thread.sleep(forTimeInterval: 1.0) // the column's slide
+            let folded = title.frame
+            shot("fold-top-\(separate ? "tabs" : "sidebar")-1-folded")
+            XCTAssertLessThanOrEqual(abs(folded.minY - out.minY), 1, "\(layout): folding moved the chat's title from \(out) to \(folded)")
+            XCTAssertLessThanOrEqual(abs(folded.height - out.height), 1, "\(layout): folding changed the title's height: \(out) → \(folded)")
+
+            // One button brings the sidebar back (the system's, or the chat's own in its header), beside the title.
+            let openers = app.buttons.matching(NSPredicate(format: "identifier IN %@ OR label IN %@",
+                                                           ["ToggleSidebar", "chat-sidebar-button", "sidebar-show-button"],
+                                                           ["Show Sidebar", "显示边栏", "显示侧边栏"]))
+                .allElementsBoundByIndex.filter { $0.exists && $0.isHittable }
+            guard let first = openers.first else {
+                return XCTFail("\(layout): no button brings the sidebar back:\n\(app.debugDescription)")
+            }
+            // A bar button is two elements, the button and its glass: one place.
+            let apart = openers.filter { hypot($0.frame.midX - first.frame.midX, $0.frame.midY - first.frame.midY) > 44 }
+            XCTAssertTrue(apart.isEmpty, "\(layout): \(openers.count) buttons bring the sidebar back, at \(openers.map(\.frame)):\n\(app.debugDescription)")
+            XCTAssertTrue(folded.minY <= first.frame.midY && first.frame.midY <= folded.maxY,
+                          "\(layout): the sidebar's button \(first.frame) is not on the title's line \(folded)")
+
+            // The open title takes a tap where the system's bar now has a row: Session Info comes up over the chat.
+            guard title == open else { app.terminate(); continue }
+            title.tap()
+            let covered = NSPredicate { _, _ in !title.exists || !title.isHittable }
+            XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: covered, object: nil)], timeout: 5), .completed,
+                           "\(layout): a tap on the folded chat's title opened nothing:\n\(app.debugDescription)")
+            app.terminate()
+        }
+    }
+
     /// The Separate layout's Agents tab (#8603): an Agent picked in its list is the page's root, put in place with no push,
     /// as in the Sidebar layout; another one picked replaces it, again with no push; nothing picked, "Choose an Agent". With
     /// the column folded the chat has the sidebar's button and no ‹, which brings the column back.
@@ -490,7 +557,7 @@ final class SidebarRootsUITests: XCTestCase {
         app.launchPinned(navigation: false)
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 20))
         guard app.windows.firstMatch.frame.width > 600 else { throw XCTSkip("the Separate layout's tabs at regular width") }
-        // The iPad's tab bar, or the open Duo's upright switch in its place (#4231).
+        // The iPad's tab bar, or the open Duo's own tab bar in its place (#4231).
         let agentsTab = app.buttons.matching(NSPredicate(format: "identifier == 'shell-agents' OR label == 'Agents'")).firstMatch
         if agentsTab.waitForExistence(timeout: 10), !agentsTab.isSelected { agentsTab.tap() }
         probeName = "sidebar-page-agents"

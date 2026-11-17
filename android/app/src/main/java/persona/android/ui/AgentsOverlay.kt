@@ -70,9 +70,12 @@ private class AgentsOverlayScene(
         val detail = entries.last().takeIf { entries.size > 1 }
         // A row pick, including a new detail on the same list, closes only the overlaid column.
         LaunchedEffect(detail?.contentKey) { shown.value = false }
+        // The Agents list drags like iOS when `listKey != nil` (`SplitNavigation.swift:237`). A pushed detail keeps
+        // the edge (`SplitColumnControl.swift:160-169`); `entries.size <= 2` is the list plus its root detail.
         JSidebarColumn(sidebar = { entries.first().Content() }, width = PaneSplits.DefaultLeft.dp,
             pageStart = PaneSplits.DefaultLeft.dp, shown = shown.value, overlay = true,
-            onDismiss = { shown.value = false }, insetSidebar = false) {
+            onDismiss = { shown.value = false }, insetSidebar = false, drags = true,
+            detailAtRoot = entries.size <= 2, onDragSettle = { shown.value = it }) {
             CompositionLocalProvider(
                 LocalSplitDetail provides SplitDetailContext(
                     isFirstPage = entries.size == 2,
@@ -80,6 +83,8 @@ private class AgentsOverlayScene(
                     onShowList = { shown.value = true },
                 )
             ) {
+                // iOS SplitNavigation.swift:125-146, 178-208: a sidebar value replaces the detail stack immediately;
+                // only the overlaid list slides away with Theme.Motion.layout. Keep this scene's key fixed.
                 if (detail != null) detail.Content() else emptyDetail()
             }
         }

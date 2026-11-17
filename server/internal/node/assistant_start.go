@@ -197,7 +197,8 @@ func (n *Node) spawnAssistant(id, cwd, launcher string, resume, spare bool, opti
 	return n.spawnClaude(id, cwd, launcher, resume, spare, options...)
 }
 
-func (n *Node) claudeAssistantMCPAndTools(id, cwd string, legacyMCP bool) (mcpJSON string, toolFlags []string) {
+// claudeAssistantMCPAndTools are a conversation's --mcp-config and tool permission flags.
+func (n *Node) claudeAssistantMCPAndTools(id, cwd string, legacyMCP bool) []string {
 	if guest := n.guestOf(id); guest != nil { // assistant_guest.go: nothing else of the below
 		return n.guestMCPAndTools(id, guest, legacyMCP)
 	}
@@ -212,7 +213,7 @@ func (n *Node) claudeAssistantMCPAndTools(id, cwd string, legacyMCP bool) (mcpJS
 	}
 	mcp, _ := json.Marshal(map[string]any{"mcpServers": compat.MCPRegistrationServers(servers, legacyMCP)})
 	allow = append(allow, healthReportRules(cwd)...) // healthdeny.go
-	toolFlags = []string{"--mcp-config", string(mcp), "--allowedTools", strings.Join(append([]string{n.assistantTools(legacyMCP)}, allow...), ","), "--tools", assistantBuiltinTools}
+	toolFlags := []string{"--mcp-config", string(mcp), "--allowedTools", strings.Join(append([]string{n.assistantTools(legacyMCP)}, allow...), ","), "--tools", assistantBuiltinTools}
 	// One --disallowedTools with a word per rule (it takes several, up to the next flag): a path may hold a comma.
 	if len(deny) > 0 {
 		deny = []string{strings.Join(deny, ",")}
@@ -221,15 +222,20 @@ func (n *Node) claudeAssistantMCPAndTools(id, cwd string, legacyMCP bool) (mcpJS
 	if len(deny) > 0 {
 		toolFlags = append(toolFlags, append([]string{"--disallowedTools"}, deny...)...)
 	}
-	return string(mcp), toolFlags
+	return toolFlags
 }
 
 // assistantCLICommand is the command that runs the conversation's claude on the CLI: an interactive shell so ~/.zshrc
-// defines the launcher function, "$@" passing our flags through. In the agent sandbox when it is on (agentsandbox.go).
-// A managed launcher's shell is not wrapped: it runs `personad launch`, which fetches the launcher's settings outside
-// the sandbox and wraps only the agent it execs (launchExec).
-func (n *Node) assistantCLICommand(shell, launcher, cwd string, args, env []string) *exec.Cmd {
-	argv := append([]string{shell, "-ic", n.launcherCommandIn(launcher, envValue(env, "CLAUDE_CONFIG_DIR"), scriptPath) + ` "$@"`, "persona"}, args...)
+// defines the launcher function, "$@" passing our flags through; itself: Claude Code's executable past a `claude` alias
+// or function instead (claudeItself). In the agent sandbox when it is on (agentsandbox.go). A managed launcher's shell
+// is not wrapped: it runs `personad launch`, which fetches the launcher's settings outside the sandbox and wraps only
+// the agent it execs (launchExec).
+func (n *Node) assistantCLICommand(shell, launcher, cwd string, itself bool, args, env []string) *exec.Cmd {
+	command := n.launcherCommandIn(launcher, envValue(env, "CLAUDE_CONFIG_DIR"), scriptPath)
+	if itself {
+		command = commandInProfile("command claude", envValue(env, "CLAUDE_CONFIG_DIR"), scriptPath)
+	}
+	argv := append([]string{shell, "-ic", command + ` "$@"`, "persona"}, args...)
 	if _, managed := n.managedLauncher(launcher); !managed {
 		base := env
 		argv, env, _ = wrapAgent("assistant", n.home, n.dir, cwd, settingsArgs(args),
@@ -248,8 +254,9 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	if err := os.MkdirAll(cwd, 0o700); err != nil {
 		return nil, err
 	}
+	guest := n.guestOf(id) != nil // a guest, a meeting's room too (assistant_guest.go)
 	var err error
-	execution.ConfigDir, err = n.assistantProfileSelection(context.Background(), id, launcher, execution.Runtime, execution.ConfigDir, resume)
+	execution.ConfigDir, err = n.assistantProfileSelection(context.Background(), id, launcher, execution.ConfigDir, resume)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +267,7 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	}
 	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
 		"--include-partial-messages"}
-	if execution.SupervisionInstructions != "" && n.guestOf(id) == nil {
+	if execution.SupervisionInstructions != "" && !guest {
 		args = append(args, "--append-system-prompt", execution.SupervisionInstructions)
 	}
 	// Persona's hooks: a plugin, or in --settings for a claude that loads none (hooksplugin.go).
@@ -274,10 +281,10 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	if settingsErr != nil {
 		return nil, settingsErr
 	}
-	if n.guestKindOf(id) == guestMeeting && n.guestOf(id) == nil {
+	if n.guestKindOf(id) == guestMeeting && !guest {
 		return nil, errRoomRecord // a meeting's room never runs with the assistant's tools
 	}
-	if n.guestOf(id) != nil { // a guest, a meeting's room too: none of the owner's Claude Code setup (assistant_guest.go)
+	if guest { // none of the owner's Claude Code setup (assistant_guest.go)
 		if settings, settingsErr = n.guestSettingsFile(id, cwd, configPath, settings, hooks == ""); settingsErr != nil {
 			return nil, settingsErr
 		}
@@ -289,14 +296,13 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	if hooks != "" {
 		args = append(args, "--plugin-dir", hooks)
 	}
-	// Snapshot the connection capability once for both runtime paths and their permission lists. Historical tool_use
+	// Snapshot the connection capability once for the MCP config and its permission lists. Historical tool_use
 	// blocks under the old namespace remain valid on a resume with only Persona offered (verified on Claude Code 2.1.322);
 	// an old hub that still addresses the legacy namespace keeps the alias.
 	legacyMCP := !n.hubSupportsPersonaContracts()
-	_, toolFlags := n.claudeAssistantMCPAndTools(id, cwd, legacyMCP)
-	args = append(args, toolFlags...)
+	args = append(args, n.claudeAssistantMCPAndTools(id, cwd, legacyMCP)...)
 	model := execution.Model
-	if model == "" && resume && execution.Fingerprint != "" && n.guestOf(id) == nil {
+	if model == "" && resume && execution.Fingerprint != "" && !guest {
 		// The model configuration names none: the launcher's default, not the model the session ran on last
 		// (assistant_resume_model.go). A guest keeps what it started on.
 		model = n.resumeModel(launcher, cwd, settings, configPath)
@@ -317,14 +323,12 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	} else {
 		args = append(args, "--session-id", id)
 	}
-	// Persona's own tools are few and used all the time: personad mcp marks them alwaysLoad (#5838). Other MCP
-	// servers keep Claude Code's normal ToolSearch deferral instead of having every tool forced into the context.
-	env := identity.Environment(os.Environ(), append([]string{"PERSONA_ASSISTANT=1"}, compaction.env()...)...)
+	// Tool search is on for every conversation: personad mcp marks the Persona tools used all the time alwaysLoad, the
+	// rest and other MCP servers' tools wait behind ToolSearch (#5838, #7317). ENABLE_TOOL_SEARCH=true lifts Claude
+	// Code's hold-off for a conversation that ran without ToolSearch (one from before #5839), which would otherwise load
+	// every tool until it is compacted. Never false: that turns deferral off for every server (#5838).
+	env := identity.Environment(os.Environ(), append([]string{"PERSONA_ASSISTANT=1", "ENABLE_TOOL_SEARCH=true"}, compaction.env()...)...)
 	env = n.claudeProcessEnv(env, configDir)
-	guest := n.guestOf(id) != nil
-	if guest && execution.Runtime == proto.AssistantRuntimeAgentSDK && n.guestKindOf(id) == guestMeeting {
-		return nil, errGuestAgent // a meeting room keeps its CLI-only settings (assistant_guest.go)
-	}
 	gateEnv, releaseGates := n.assistantLarkEnv(cwd, id) // its addresses at the gate proxy go with the process
 	if guest {
 		releaseGates()
@@ -339,79 +343,19 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 		}
 	}()
 	env = identity.Environment(env, gateEnv...)
-	var bridge sdkBridge
-	var fallback string
-	if execution.Runtime == proto.AssistantRuntimeAgentSDK {
-		if bridge, fallback = n.sdkPrepare(context.Background(), launcher); fallback != "" {
-			n.logger.Printf("assistant %s: running on the CLI, not the Agent SDK: %s", short(id), fallback)
-		}
+	shell, err := interactiveShell()
+	if err != nil {
+		return nil, err
 	}
-	var cmd *exec.Cmd
-	var first []byte // the bridge's persona_start
-	if bridge.script != "" {
-		if guest {
-			// A CLI --tools selection drops MCP tools too. Keep the same Persona
-			// stdio server, but register its declared tools through the SDK.
-			mcpConfig, flags := n.guestMCPAndTools(id, n.guestOf(id), legacyMCP)
-			var mcp struct {
-				MCPServers map[string]any `json:"mcpServers"`
-			}
-			if err := json.Unmarshal([]byte(mcpConfig), &mcp); err != nil {
-				return nil, err
-			}
-			persona, ok := mcp.MCPServers["persona"]
-			if !ok {
-				return nil, errors.New("guest MCP config has no persona server")
-			}
-			for name := range mcp.MCPServers {
-				if name != "persona" && name != compat.MCPServer {
-					return nil, errors.New("guest MCP config contains an unexpected server")
-				}
-			}
-			start := sdkStart{id: id, cwd: cwd, model: model, configDir: execution.ConfigDir, permissionMode: startMode,
-				resume: resume, mcp: map[string]any{"mcpServers": map[string]any{}}, guestMCP: map[string]any{"persona": persona},
-				settings: settings, compaction: &compaction}
-			for i := 0; i < len(flags); i++ {
-				switch flags[i] {
-				case "--allowedTools":
-					i++
-					start.allowedTools = flags[i]
-				case "--disallowedTools":
-					i++
-					start.deny = strings.Split(flags[i], ",")
-				}
-			}
-			start.strictMCP = true
-			var err error
-			if cmd, first, err = n.sdkCommand(bridge, launcher, start, env); err != nil {
-				return nil, err
-			}
-		} else {
-			// The Agent SDK runtime gets only Persona's own MCP server: it has no --disallowedTools, so the Lark extension's
-			// control tools (whose approval_decide must stay off) are not mounted here.
-			mcpConfig := map[string]any{"mcpServers": map[string]any{"persona": map[string]any{
-				"command": n.bin, "args": []string{"mcp"}, "env": map[string]string{"PERSONA_ASSISTANT": "1", "PERSONA_SESSION_ID": id},
-			}}}
-			compat.MCPRegistrationServers(mcpConfig["mcpServers"].(map[string]any), legacyMCP)
-			start := sdkStart{id: id, cwd: cwd, model: model, configDir: execution.ConfigDir, permissionMode: startMode, resume: resume, mcp: mcpConfig,
-				supervisionInstructions: execution.SupervisionInstructions,
-				allowedTools:            strings.Join(append([]string{n.assistantTools(legacyMCP)}, healthReportRules(cwd)...), ","), tools: assistantBuiltinTools, deny: n.healthDenyRules(cwd), settings: settings, plugin: hooks, compaction: &compaction}
-			var err error
-			if cmd, first, err = n.sdkCommand(bridge, launcher, start, env); err != nil {
-				return nil, err
-			}
-		}
-	} else {
-		shell, err := interactiveShell()
-		if err != nil {
-			return nil, err
-		}
-		args, cleanupMCP, err = assistantCLIMCPFlags(args)
-		if err != nil {
-			return nil, fmt.Errorf("prepare assistant MCP config: %w", err)
-		}
-		cmd = n.assistantCLICommand(shell, launcher, cwd, args, env)
+	args, cleanupMCP, err = assistantCLIMCPFlags(args)
+	if err != nil {
+		return nil, fmt.Errorf("prepare assistant MCP config: %w", err)
 	}
+	itself := resume && n.claudeItself(id, launcher)
+	if itself {
+		n.logger.Printf("assistant %s: started on the Agent SDK: resumes with claude itself in its recorded profile, not the claude launcher", short(id))
+	}
+	cmd := n.assistantCLICommand(shell, launcher, cwd, itself, args, env)
 	cmd.SysProcAttr = osproc.GroupAttr() // so stop() can kill the whole group
 	msysCmdLine(cmd)
 	stdin, err := cmd.StdinPipe()
@@ -436,17 +380,7 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	started = true
 	p := &assistantProc{id: id, agent: "claude", launcher: launcher, cwd: cwd, cmd: cmd, stdin: stdin, exited: make(chan struct{}), ready: make(chan struct{}),
 		stderrDone: make(chan struct{}), born: time.Now(), lastActive: time.Now(), mode: startMode, canBypass: startMode == proto.ModeBypass, model: execution, fingerprint: n.executionFingerprint(launcher, execution),
-		instructions: instructions, fallback: fallback, personaMCPOnly: !legacyMCP, compactIdleAt: compaction.idle(), declaredWindow: compaction.declared()}
-	if first != nil {
-		p.runtime = proto.AssistantRuntimeAgentSDK
-		if err := p.write(first); err != nil {
-			_ = osproc.StopGroup(cmd.Process.Pid, true)
-			_ = cmd.Wait()
-			_ = stderr.Close()
-			releaseGates() // started, but the exit watcher below never runs
-			return nil, fmt.Errorf("start the agent sdk bridge: %w", err)
-		}
-	}
+		instructions: instructions, personaMCPOnly: !legacyMCP, compactIdleAt: compaction.idle(), declaredWindow: compaction.declared()}
 	if !spare {
 		n.mu.Lock()
 		n.procs[id] = p
@@ -519,7 +453,7 @@ func watchAssistantStderr(logger *log.Logger, p *assistantProc, stderr io.ReadCl
 	sc := bufio.NewScanner(stderr)
 	for sc.Scan() {
 		l := sc.Text()
-		if strings.Contains(l, "rror") || strings.Contains(l, "agent-sdk bridge: guest tools:") {
+		if strings.Contains(l, "rror") {
 			logger.Printf("assistant %s: %s", id[:8], l)
 		}
 		if clean := strings.TrimSpace(ansiRe.ReplaceAllString(l, "")); clean != "" {

@@ -82,6 +82,9 @@ internal object NativeBridge {
     /** Projects the Agents list from a JSON input string. Pure function, no runtime handle needed. */
     @JvmStatic external fun projectSort(input: String): String
 
+    /** Projects a session_state or hub_state fixture through the pure host adapter. No runtime handle needed. */
+    @JvmStatic external fun projectState(input: String): String
+
     /** Projects static transcript rows into turns from a JSON input string. Pure function, no runtime handle needed. */
     @JvmStatic external fun projectTurns(input: String): String
 
@@ -90,6 +93,9 @@ internal object NativeBridge {
 
     /** Repairs only an open code fence and reports this slice's code/text end state. Pure function. */
     @JvmStatic external fun projectStreamRepair(input: String): String
+
+    /** Removes the drawn info string of a still-open picture fence. Pure function, no runtime handle needed. */
+    @JvmStatic external fun projectPlainOpenFence(input: String): String
 
     /** Applies one question-answer operation from a JSON input string. Pure function, no runtime handle needed. */
     @JvmStatic external fun projectAnswer(input: String): String

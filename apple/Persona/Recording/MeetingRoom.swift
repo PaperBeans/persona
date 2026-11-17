@@ -69,13 +69,25 @@ struct MeetingRoomTabs: View {
     @Binding var page: MeetingRoomPage
 
     var body: some View {
+        MeetingTabRow(pages: MeetingRoomPage.allCases, page: $page, title: \.title) { "meeting-room-tab-\($0.rawValue)" }
+    }
+}
+
+/// A row of a page's parts by name, the picked one on a chip (the meeting room's pages, #8731 B1; after the meeting, V3).
+struct MeetingTabRow<Page: Hashable>: View {
+    var pages: [Page]
+    @Binding var page: Page
+    var title: (Page) -> String
+    var identifier: (Page) -> String
+
+    var body: some View {
         HStack(spacing: Theme.Space.xs) {
-            ForEach(MeetingRoomPage.allCases, id: \.self) { p in
+            ForEach(pages, id: \.self) { p in
                 let on = p == page
                 Button {
                     withAnimation(Theme.Motion.standard) { page = p }
                 } label: {
-                    Text(p.title).font(on ? Theme.Font.secondaryStrong : Theme.Font.secondaryMedium)
+                    Text(title(p)).font(on ? Theme.Font.secondaryStrong : Theme.Font.secondaryMedium)
                         .foregroundStyle(on ? Color.primary : Color.secondary)
                         .lineLimit(1)
                         .padding(.horizontal, Theme.Space.m)
@@ -85,7 +97,7 @@ struct MeetingRoomTabs: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
-                .accessibilityIdentifier("meeting-room-tab-\(p.rawValue)")
+                .accessibilityIdentifier(identifier(p))
             }
         }
         .frame(maxWidth: .infinity)
@@ -105,7 +117,7 @@ nonisolated enum MeetingRoomPage: String, CaseIterable, Hashable, Sendable {
 }
 
 /// The meeting so far as a map: its topics in order, the one on now lit, those still to come dimmed, each topic's note
-/// under it. Empty until the room set any.
+/// under it. Empty until the room set any. The meeting room's Map page, and after the meeting its map full screen (V3).
 struct MeetingTopicMap: View {
     var title: String
     var topics: [MeetingTopic]
@@ -119,23 +131,7 @@ struct MeetingTopicMap: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Text(title).font(Theme.Font.heading)
-                    ForEach(Array(topics.enumerated()), id: \.offset) { _, topic in
-                        VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                            HStack(spacing: Theme.Space.s) {
-                                Text(topic.title).font(Theme.Font.bodyStrong)
-                                    .foregroundStyle(topic.known == .open ? Color.secondary : topic.known == .current ? Theme.positive : Color.primary)
-                                if topic.known == .current {
-                                    Text("On Now [Meeting Topic]").font(Theme.Font.label).foregroundStyle(Theme.positive)
-                                }
-                            }
-                            if let note = topic.note, !note.isEmpty {
-                                Text(note).font(Theme.Font.secondary).foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.leading, Theme.Space.m)
-                        .overlay(alignment: .leading) { Capsule().fill(Theme.accent.opacity(0.5)).frame(width: Theme.Size.rule) }
-                        .accessibilityElement(children: .combine)
-                    }
+                    MeetingTopicMapRows(topics: topics)
                 }
             }
             .padding(Theme.Space.page)
@@ -144,6 +140,34 @@ struct MeetingTopicMap: View {
             .padding(.vertical, Theme.Space.s)
         }
         .accessibilityIdentifier("meeting-room-map")
+    }
+}
+
+/// The map's topics, each on its line with its note under it: the meeting room's Map page and the after-meeting card draw
+/// them alike.
+struct MeetingTopicMapRows: View {
+    var topics: [MeetingTopic]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            ForEach(Array(topics.enumerated()), id: \.offset) { _, topic in
+                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                    HStack(spacing: Theme.Space.s) {
+                        Text(topic.title).font(Theme.Font.bodyStrong)
+                            .foregroundStyle(topic.known == .open ? Color.secondary : topic.known == .current ? Theme.positive : Color.primary)
+                        if topic.known == .current {
+                            Text("On Now [Meeting Topic]").font(Theme.Font.label).foregroundStyle(Theme.positive)
+                        }
+                    }
+                    if let note = topic.note, !note.isEmpty {
+                        Text(note).font(Theme.Font.secondary).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.leading, Theme.Space.m)
+                .overlay(alignment: .leading) { Capsule().fill(Theme.accent.opacity(0.5)).frame(width: Theme.Size.rule) }
+                .accessibilityElement(children: .combine)
+            }
+        }
     }
 }
 

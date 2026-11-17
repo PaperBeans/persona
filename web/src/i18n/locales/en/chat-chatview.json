@@ -66,6 +66,7 @@
   "route_no_images": "Images can't be sent straight to a task yet. Remove the image and try again.",
   "not_live": "Not live",
   "not_live_reload": "Reload",
+  "agent_status_repository": "Open repository",
   "composer_source": "Source",
   "call_not_loaded": "That step is not in the loaded history; scroll up and try again",
   "refresh_failed": "Couldn’t refresh",

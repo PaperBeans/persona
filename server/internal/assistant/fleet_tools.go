@@ -33,6 +33,7 @@ func (s *Service) mcpTools(ctx context.Context, assistant bool) []proto.Tool {
 	}
 	tools := append(s.phoneTools(ctx), agents...)
 	if !assistant {
+		tools = append(tools, s.knowledgeFolderTools(ctx)...)
 		tools = append(tools, s.AgentTools()...)       // report_to_supervisor, todo_decisions, todo_decision_add, todo_bind_thread (agentToolNames)
 		tools = append(tools, s.dispatchTools(ctx)...) // dispatch_start, dispatch_read, when agents.dispatch is on (dispatch.go)
 	}
@@ -147,7 +148,8 @@ func (s *Service) sessionMCPToolsChecked(ctx context.Context, machine, session s
 	if s.isWorkMachine(machine) {
 		return []proto.Tool{}, nil
 	}
-	return guestTools(s.mcpTools(ctx, assistant), allowed), nil
+	tools := guestTools(s.mcpTools(ctx, assistant), allowed)
+	return slices.DeleteFunc(tools, func(t proto.Tool) bool { return isKnowledgeFolderTool(t.Name) }), nil
 }
 
 // guestRefuses refuses a guest conversation's call of a tool it was not given (and any call of one the hub cannot
@@ -160,7 +162,7 @@ func (s *Service) guestRefuses(ctx context.Context, machine, session, name strin
 		return proto.TextResult("tool unavailable for the moment: "+name, true), true
 	case !guest && guestHint:
 		return proto.TextResult("unknown tool "+name, true), true
-	case guest && !slices.Contains(allowed, name):
+	case guest && (isKnowledgeFolderTool(name) || !slices.Contains(allowed, name)):
 		return proto.TextResult("unknown tool "+name, true), true
 	}
 	return proto.ToolResult{}, false
@@ -180,6 +182,9 @@ func (s *Service) mcpCall(ctx context.Context, machine, session, name string, ar
 	}
 	if assistant && !s.assistantCaller(ctx, machine, session) {
 		return proto.TextResult(i18n.T(s.lang(ctx), "assistant-privacy.assistant_denied"), true)
+	}
+	if isKnowledgeFolderTool(name) && !assistant {
+		return s.Tool(ctx, ToolCall{Name: name, Arguments: args, MachineID: machine, SessionID: session})
 	}
 	if s.ext != nil { // the connectors', Cua's, ego's: ctx is the node's call (its caller going away withdraws a card)
 		if res, ok := s.ext.CallTool(ctx, machine, session, name, args, assistant); ok {

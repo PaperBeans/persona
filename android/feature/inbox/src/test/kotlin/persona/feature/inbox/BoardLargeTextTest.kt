@@ -118,7 +118,8 @@ class BoardLargeTextTest {
         useUnmergedTree = true,
     ).fetchSemanticsNode().boundsInRoot
 
-    private fun statisticsTop(): Float = listOf("Needs you", "All", "Done").minOf { bay(it).top }
+    // The section bar (#9053): only action items here, so Needs you and All are its choices.
+    private fun statisticsTop(): Float = listOf("Needs you", "All").minOf { bay(it).top }
 
     private fun firstTextTop(text: String): Float {
         val nodes = rule.onAllNodesWithText(text, useUnmergedTree = true).fetchSemanticsNodes()

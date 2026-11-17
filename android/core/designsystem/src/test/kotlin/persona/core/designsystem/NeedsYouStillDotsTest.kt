@@ -43,6 +43,10 @@ class NeedsYouStillDotsTest {
     private val places: List<Pair<String, @Composable () -> Unit>> = listOf(
         // still, as iOS
         "quick filter chip" to { QuickFilterBar(listOf(Bay("All"), Bay("Needs you", 2, Status.NeedsYou)), 0, onSelect = NoPick) },
+        // the Inbox's section bar, its count a badge (#9053)
+        "quick filter chip with a toned count" to {
+            QuickFilterBar(listOf(Bay("Needs you", 2, Status.NeedsYou, countTone = Status.NeedsYou), Bay("All")), 0, onSelect = NoPick)
+        },
         "home filter chip" to {
             CompositionLocalProvider(LocalHomeChrome provides HomeChrome(emptyList(), "agents", {}, {})) {
                 HomeAgentFilters(listOf(Bay("All"), Bay("Needs you", 2, Status.NeedsYou)), 0, onSelect = NoPick)

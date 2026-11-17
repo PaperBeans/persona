@@ -9,6 +9,7 @@ import persona.core.contracts.api.LauncherQuotaAnswer
 import persona.core.contracts.api.HerdrState
 import persona.core.contracts.api.MachineManagement
 import persona.core.contracts.api.MachineMove
+import persona.core.contracts.api.NO_TERMINAL_ENGINE
 import persona.core.contracts.MachineBrowser
 import persona.core.contracts.api.DoctorReport
 import persona.core.contracts.api.UsageAccount
@@ -60,8 +61,9 @@ class HttpMachineManagement internal constructor(
 
     override suspend fun setEngine(machineId: String, engine: String): Machine {
         require(engine.isNotBlank())
-        val machine = JsonCodec.decodeFromJsonElement<Machine>(
-            call(api("machines", machineId, "engine"), "PUT", buildJsonObject { put("engine", engine) }))
+        // The empty host set says no terminal engine, which a single engine cannot (docs/protocol/protocol.md "Host sets").
+        val body = if (engine == NO_TERMINAL_ENGINE) buildJsonObject { put("hosts", JsonArray(emptyList())) } else buildJsonObject { put("engine", engine) }
+        val machine = JsonCodec.decodeFromJsonElement<Machine>(call(api("machines", machineId, "engine"), "PUT", body))
         // An answer for another machine is not this machine's state.
         if (machine.id != machineId) throw HubFailure(HubError.Protocol, "hub answered for another machine", retryable = false)
         return machine

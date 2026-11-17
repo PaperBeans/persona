@@ -1,10 +1,10 @@
 import XCTest
 
-/// Four small controls are hit as a finger-sized area and drawn as before (#6577, from #5414; `tapTargetOutset`):
-/// full-screen search's clear ×, a waiting comment's ×, a forwarded page's server chooser, and the Terminals section
-/// header's ⋯. Each one's frame is at least `Theme.Size.tapTarget`, and a tap off what it draws, inside that frame,
-/// still does what it does. Against scripts/mock/mock_hub.py (PERSONA_MOCK_HUB); PERSONA_SHOTS=<dir> keeps each screen
-/// in light and dark (`-ui.scheme`).
+/// Five small controls are hit as a finger-sized area and drawn as before (#6577, from #5414; `tapTargetOutset`):
+/// full-screen search's clear ×, a waiting comment's ×, a forwarded page's server chooser, the Terminals section
+/// header's ⋯, and Back on a chat's folded slim bar (#9699). Each one's frame is at least `Theme.Size.tapTarget`, and a
+/// tap off what it draws, inside that frame, still does what it does. Against scripts/mock/mock_hub.py
+/// (PERSONA_MOCK_HUB); PERSONA_SHOTS=<dir> keeps each screen in light and dark (`-ui.scheme`).
 ///   PORT=18795 MOCK_PREVIEW=1 MOCK_TERMINAL_PANES=1 python3 scripts/mock/mock_hub.py &
 ///   TEST_RUNNER_PERSONA_MOCK_HUB=http://127.0.0.1:18795 xcodebuild test … -only-testing:PersonaUITests/SmallTapTargetsTests
 final class SmallTapTargetsTests: XCTestCase {
@@ -117,6 +117,27 @@ final class SmallTapTargetsTests: XCTestCase {
             tap(more, dy: -15, app)
             let item = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '在 ' AND label ENDSWITH '新开终端'")).firstMatch
             see(item, "a tap 15 pt above the ⋯ did not open its menu", app, timeout: 5)
+            app.terminate()
+        }
+    }
+
+    /// Back on a chat's folded slim bar (#9699): drawn as a 7.7 × 13.3 pt arrow, it is hit as the same 44 pt square as the
+    /// ⋯ at the other end. A tap 15 pt right of and below the arrow's centre, in the square and off the glyph, goes back.
+    /// The chat is held folded with `-showCompactChrome` (as `HeaderModeShotTests` does) instead of waiting for the idle fold.
+    @MainActor func testSlimBarBackIsAFingerWide() {
+        for scheme in ["light", "dark"] {
+            let app = launch(["-tab", "dev", "-dev.openChat", "", "-openChatsFresh", "YES", "-openSession", widget,
+                              "-holdChromeOpen", "YES", "-showCompactChrome", "YES"], scheme: scheme)
+            let slim = element(app, "chat.compactTitle")
+            see(slim, "the chat did not open folded", app, timeout: 25)
+            let back = app.buttons.matching(NSPredicate(format: "label == %@", "返回")).firstMatch // i18n-ignore: the tests run in zh-Hans
+            see(back, "no Back on the slim bar", app)
+            sleep(3) // the fold's animation and the backlog settled
+            shot(app, "slim-back-\(scheme)")
+            assertTarget(back, "the slim bar's Back")
+            XCTAssertGreaterThanOrEqual(back.frame.minX, 0, "the slim bar's Back is cut off at the left: \(back.frame)")
+            tap(back, dx: 15, dy: 15, app)
+            XCTAssertTrue(back.waitForNonExistence(timeout: 8), "a tap 15 pt right of and below the Back arrow did not leave the chat: \(back.frame)")
             app.terminate()
         }
     }

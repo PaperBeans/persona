@@ -139,6 +139,20 @@ describe("the sidebar's lists by to-do and by state (#6662)", () => {
     expect(groups.map((g) => [g.key, g.count, g.filters, g.needs])).toEqual([["needs_you", 1, { state: "needs_you" }, 0], ["working", 2, { state: "working" }, 0], ["idle", 3, { state: "idle" }, 0]]);
   });
 
+  it("has Just finished before Seen on a hub that lists those rows apart, Seen's number without them (#9751)", () => {
+    const by = counts({ state: { idle: 5, working: 2 }, just_finished: 2 });
+    expect(countGroups(by, "state", { justFinished: true }).map((g) => [g.key, g.name, g.count, g.filters])).toEqual([
+      ["working", "工作中", 2, { state: "working" }],
+      ["just_finished", "刚做完待看", 2, { state: "idle", just_finished: "1" }],
+      ["idle", "已看", 3, { state: "idle", just_finished: "0" }],
+    ]);
+    // all of the seen ones just finished: no Seen section
+    expect(countGroups(counts({ state: { idle: 2 }, just_finished: 2 }), "state", { justFinished: true }).map((g) => g.key)).toEqual(["just_finished"]);
+    // a hub that does not say it: one Seen section, the key never sent
+    expect(countGroups(by, "state").map((g) => [g.key, g.count, g.filters])).toEqual([["working", 2, { state: "working" }], ["idle", 5, { state: "idle" }]]);
+    expect(holdsPlace(countGroups(by, "state", { justFinished: true })[1], "state", { machine: "m", project: "", group: "", state: "just_finished" })).toBe(true);
+  });
+
   it("finds the open session's section by its to-do and its state", () => {
     const [review, none] = countGroups(counts({ todo: { todo_b: 1, "": 1 } }), "todo", { todos });
     const place = { machine: "mac", project: "/code", group: "w1", todo: "todo_b", state: "working" };

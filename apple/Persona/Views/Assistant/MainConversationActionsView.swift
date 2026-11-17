@@ -305,10 +305,7 @@ struct NewMainSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button { dismiss() } label: { Text("Cancel").lineLimit(1) }
-                        .disabled(busy)
-                }
+                SheetClose(disabled: busy) { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { Task { await go() } } label: {
                         if busy { ProgressView().controlSize(.small) } else { Text("New Main Chat").lineLimit(1) }

@@ -51,7 +51,7 @@ type ModelProfile struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	// Purposes: a category's choice (its record in the model configuration) by category id; an empty binding is
-	// "follow the default". The main chat's runtime is not a profile's.
+	// "follow the default". The profile the main chat's new conversations start in is not a profile's.
 	Purposes map[string]ModelBinding `json:"purposes,omitempty"`
 	// Launchers: model fields of providers added in Persona, by provider name.
 	Launchers map[string]LauncherModels `json:"launchers,omitempty"`
@@ -264,7 +264,7 @@ func (s *Service) captureModels(ctx context.Context) (map[string]ModelBinding, m
 			return nil, nil, nil, err
 		}
 		b := r.Binding
-		b.Runtime, b.ConfigDir = "", ""
+		b.ConfigDir = ""
 		purposes[id] = b
 		effective, err := s.resolveModelRecord(ctx, id, &r)
 		if err != nil {

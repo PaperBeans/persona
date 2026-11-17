@@ -133,7 +133,7 @@ export async function startFakePaseo(t, o = {}) {
         c.fail(f.refuse, 'refused')
         return
       }
-      send(c, { type: 'status', payload: { status: 'server_info', protocolVersion: 1, serverId: 'srv_test', hostname: 'test', version: f.version, features: {} } })
+      send(c, { type: 'status', payload: { status: 'server_info', protocolVersion: 1, serverId: 'srv_test', hostname: 'test', version: f.version, features: o.features ?? {} } })
       return
     }
     if (m.type === 'ping') {
@@ -157,6 +157,8 @@ export async function startFakePaseo(t, o = {}) {
       return sid
     }
     switch (msg.type) {
+      case 'project.list.request':
+        return reply(c, 'project.list.response', { requestId: id, projects: [] })
       case 'get_daemon_config_request':
         return reply(c, 'get_daemon_config_response', { requestId: id, config: { providers: f.providers, mcp: { injectIntoAgents: true } } })
       case 'get_providers_snapshot_request':
@@ -207,6 +209,11 @@ export async function startFakePaseo(t, o = {}) {
         // A worktree: cut from the source's repository (Paseo 0.14 createWorktreeCore), its folder the slug or the branch,
         // no agent with it here. Its answer has no project placement (describeCreatedWorktreeWorkspace).
         const s = msg.source
+        if (s?.kind === 'directory') {
+          const d = workspaceDescriptor({ workspaceDirectory: s.path, projectRootPath: s.path, projectId: s.projectId, workspaceKind: 'directory' })
+          f.upsertWorkspace(d)
+          return reply(c, 'workspace.create.response', { requestId: id, workspace: d, setupTerminalId: null, error: null })
+        }
         if (s?.kind !== 'worktree' || (!s.cwd && !s.projectId)) {
           return reply(c, 'workspace.create.response', { requestId: id, workspace: null, setupTerminalId: null, error: 'cwd or projectId is required', errorCode: 'source_required' })
         }

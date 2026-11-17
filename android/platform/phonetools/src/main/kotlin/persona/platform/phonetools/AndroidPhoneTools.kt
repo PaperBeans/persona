@@ -70,6 +70,15 @@ class AndroidPhoneTools(context: Context, private val foreground: () -> Boolean)
         }
     }
 
+    /**
+     * Undo from the assistant's conversation (iOS `CalendarTool.remove`): the event it just added comes off the phone
+     * directly, without the before → after card `phone_calendar_delete_event` asks for, because the user is taking back
+     * the assistant's own write. Provider work stays on IO; a refusal throws.
+     */
+    suspend fun removeCalendarEvent(id: Long): PhoneToolResult = withContext(Dispatchers.IO) {
+        CalendarTools(context).remove(id)
+    }
+
     /** iOS DeviceTool's keys (app_version, app_build, app_channel too); android_version and sdk stand where iOS has ios_version. */
     private fun device(): PhoneToolResult {
         val battery = context.getSystemService(BatteryManager::class.java)

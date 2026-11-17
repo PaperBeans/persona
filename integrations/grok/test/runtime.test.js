@@ -189,6 +189,19 @@ test('failed or unacknowledged native rename keeps the old title and native reco
   }
 })
 
+test('the assistant launcher is named for people and says only the Agent launcher it was set up for', async (t) => {
+  const plain = await fixture(t)
+  assert.deepEqual(plain.node.hello.launchers, [{ name: 'grok-chat', agent: 'grok', display_name: 'Grok', model: 'fast-model' }])
+  const f = await fixture(t, { displayName: 'Grok assistant', assistantFor: 'grok' })
+  assert.deepEqual(f.node.hello.launchers, [{ name: 'grok-chat', agent: 'grok', display_name: 'Grok assistant', assistant_for: 'grok', model: 'fast-model' }])
+  await f.start()
+  const changed = await until('launchers with models', () => f.node.all('runtime.launchers').at(-1)?.launchers?.[0]?.models)
+  assert.equal(f.node.last('runtime.launchers').launchers[0].assistant_for, 'grok')
+  assert.equal(f.node.last('runtime.launchers').launchers[0].display_name, 'Grok assistant')
+  assert.ok(changed.some((m) => m.id === 'fast-model'))
+  for (const assistantFor of ['bad name!', 'grok-chat']) assert.throws(() => createGrokRuntime({ acp: new FakeAcp(), assistantFor }), /assistant-for/)
+})
+
 test('assistant startup selects exact model/effort and forwards context, images and scoped tools', async (t) => {
   const f = await fixture(t)
   assert.equal(f.node.hello.caps.assistant, true)
@@ -442,10 +455,10 @@ test('manual check times out and closes its native session without publishing a 
   assert.deepEqual(await f.runtime.driver.listSessions(), [])
 })
 
-async function terminalSession(f, { cwd = join(f.home, 'code', 'project'), raw = RAW, updated = new Date().toISOString(), text = 'Hello from the terminal' } = {}) {
+async function terminalSession(f, { cwd = join(f.home, 'code', 'project'), raw = RAW, updated = new Date().toISOString(), text = 'Hello from the terminal', sessionKind } = {}) {
   const dir = join(f.home, '.grok', 'sessions', encodeURIComponent(cwd), raw)
   await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, 'summary.json'), JSON.stringify({ info: { id: raw, cwd }, generated_title: 'Terminal work', current_model_id: 'fast-model', updated_at: updated }))
+  await writeFile(join(dir, 'summary.json'), JSON.stringify({ info: { id: raw, cwd }, generated_title: 'Terminal work', current_model_id: 'fast-model', updated_at: updated, session_kind: sessionKind }))
   await writeFile(join(dir, 'updates.jsonl'), JSON.stringify({ method: 'session/update', params: { update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text } } } }) + '\n')
   return { cwd, dir }
 }
@@ -463,6 +476,113 @@ test('conversations started in a terminal are listed outside the assistant direc
   assert.equal(rows[0].title, 'Terminal work')
   assert.equal(f.runtime.sessions.get(ID).assistant, false)
   assert.equal((await f.node.peer.call('session.items', { session_id: ID })).items[0].text, 'Hello from the terminal')
+})
+
+test('headless and subagent runs are not discovered outside assistant directories', async (t) => {
+  for (const sessionKind of ['headless', 'subagent']) await t.test(sessionKind, async (t) => {
+    const f = await fixture(t)
+    for (const cwd of [join(f.home, 'paseo-insight-recap'), join(f.home, 'code', 'worktree')]) {
+      const { dir } = await terminalSession(f, { cwd, sessionKind })
+      await holdInTerminal(f)
+      assert.deepEqual(await f.runtime.driver.listSessions(), [])
+      assert.equal(f.runtime.sessions.size, 0)
+      assert.ok((await stat(join(dir, 'summary.json'))).isFile())
+      await rm(dir, { recursive: true })
+    }
+    assert.deepEqual(f.acp.calls, [])
+  })
+})
+
+test('deleted native sessions leave the next list and notify the node without ACP close', async (t) => {
+  for (const missing of ['summary', 'session', 'cwd group', 'sessions root']) await t.test(missing, async (t) => {
+    const f = await fixture(t)
+    const { dir } = await terminalSession(f)
+    assert.equal((await f.runtime.driver.listSessions())[0].status, 'done')
+    await until('terminal row published', () => f.node.last('runtime.sessions')?.sessions?.some((s) => s.session_id === ID))
+    const path = missing === 'summary' ? join(dir, 'summary.json') : missing === 'session' ? dir : missing === 'cwd group' ? dirname(dir) : dirname(dirname(dir))
+    await rm(path, { recursive: true })
+    assert.deepEqual(await f.runtime.driver.listSessions(), [])
+    assert.equal(f.runtime.sessions.has(ID), false)
+    await until('removed row published', () => f.node.last('runtime.sessions')?.sessions?.length === 0)
+    assert.deepEqual(f.acp.calls, [])
+  })
+})
+
+test('queued and running conversations survive missing summaries until their turns settle', async (t) => {
+  const f = await fixture(t)
+  const { dir } = await terminalSession(f)
+  await f.runtime.driver.listSessions()
+  const s = f.runtime.sessions.get(ID)
+  let release
+  s.tail = new Promise((resolve) => { release = resolve })
+  try {
+    await f.send('Continue after the native summary disappears')
+    assert.equal(s.running, false)
+    assert.equal(s.queued, 1)
+    await rm(join(dir, 'summary.json'))
+    assert.equal((await f.runtime.driver.listSessions())[0].status, 'working')
+    release()
+    await until('continued prompt starts', () => f.acp.prompts.length === 1)
+    assert.equal(s.running, true)
+    assert.equal(s.queued, 0)
+    assert.equal((await f.runtime.driver.listSessions())[0].status, 'working')
+    f.acp.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Finished normally' } })
+    f.acp.prompts[0].resolve({ stopReason: 'end_turn' })
+    await s.tail
+    assert.deepEqual(await f.runtime.driver.listSessions(), [])
+    assert.equal(f.acp.calls.some((c) => c.method === 'session/close'), false)
+  } finally { release() }
+})
+
+test('a terminal-held conversation stays listed after its native directory disappears', async (t) => {
+  const f = await fixture(t)
+  const { dir } = await terminalSession(f)
+  await holdInTerminal(f)
+  await f.runtime.driver.listSessions()
+  await rm(dir, { recursive: true })
+  assert.equal((await f.runtime.driver.listSessions())[0].session_id, ID)
+  await assert.rejects(f.send('Still held'), /open in a terminal/)
+  await writeFile(join(f.home, '.grok', 'active_sessions.json'), '[]')
+  assert.deepEqual(await f.runtime.driver.listSessions(), [])
+  assert.deepEqual(f.acp.calls, [])
+})
+
+test('assistant conversations are retained regardless of session kind or missing native files', async (t) => {
+  for (const sessionKind of [undefined, 'headless', 'subagent']) await t.test(sessionKind || 'unmarked', async (t) => {
+    const f = await fixture(t)
+    const { dir } = await terminalSession(f, { cwd: f.cwd, sessionKind })
+    assert.equal((await f.runtime.driver.listSessions())[0].session_id, ID)
+    assert.equal(f.runtime.sessions.get(ID).assistant, true)
+    await rm(dir, { recursive: true })
+    assert.equal((await f.runtime.driver.listSessions())[0].session_id, ID)
+    assert.deepEqual(f.acp.calls, [])
+  })
+})
+
+test('assistant ownership from metadata protects a rediscovered conversation outside assistant directories', async (t) => {
+  const f = await fixture(t)
+  const { dir } = await terminalSession(f)
+  await writeFile(join(dir, 'persona-runtime.json'), JSON.stringify({ version: 1, session_id: RAW, assistant: true }))
+  await f.runtime.driver.listSessions()
+  assert.equal(f.runtime.sessions.get(ID).assistant, true)
+  await rm(dir, { recursive: true })
+  assert.equal((await f.runtime.driver.listSessions())[0].session_id, ID)
+})
+
+test('a newly started conversation is retained before its native summary is written', async (t) => {
+  const f = await fixture(t)
+  await f.node.peer.call('session.start', { cwd: join(f.home, 'code', 'worktree') })
+  assert.equal(f.runtime.sessions.get(ID).assistant, false)
+  assert.equal((await f.runtime.driver.listSessions())[0].session_id, ID)
+})
+
+test('an unreadable summary is not treated as a deleted native session', async (t) => {
+  const f = await fixture(t)
+  const { dir } = await terminalSession(f)
+  await f.runtime.driver.listSessions()
+  await writeFile(join(dir, 'summary.json'), '{')
+  assert.equal((await f.runtime.driver.listSessions())[0].session_id, ID)
+  assert.deepEqual(f.acp.calls, [])
 })
 
 test('old terminal conversations are left out unless a terminal still holds them', async (t) => {

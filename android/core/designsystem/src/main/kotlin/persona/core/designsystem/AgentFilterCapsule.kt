@@ -1,7 +1,8 @@
 package persona.core.designsystem
 
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -9,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -20,25 +22,28 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.TextOverflow
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.flow.first
 import persona.core.designsystem.icons.PersonaIcons
 
-val AgentFilterExpanded = SemanticsPropertyKey<Boolean>("AgentFilterExpanded")
+/** How much each edge of the status strip fades, from 0 (not at all) to 1 (in full): the drawn state, as the tests read it. */
+internal data class AgentFilterFades(val leading: Float, val trailing: Float)
+internal val AgentFilterFade = SemanticsPropertyKey<AgentFilterFades>("AgentFilterFade")
 
 /**
  * Final E: only status choices scroll; grouping has one fixed, anchored menu at the trailing edge.
- * Labels reveal with animated width and a crossfade; equal-width CJK ellipses still abbreviate exactly.
- * Counts never take part in truncation.
- * Focus is resolved after scrolling settles, so changing a label's width cannot feed back into focus.
+ * Every label shows whole, whatever the language or text size (#9121): a strip that does not fit scrolls, and an edge with
+ * more hidden past it fades, the trailing one while choices lie beyond it and the leading one once the strip has moved from
+ * its start. Counts stay beside their label and the chosen choice keeps its highlight. A choice is brought to the middle
+ * of the strip when it is made; one wider than what lies between the fades goes to where that begins, so its first word
+ * shows. Reduce Motion moves and fades at once.
  */
 @Composable
 fun JAgentFilterCapsule(
@@ -47,42 +52,26 @@ fun JAgentFilterCapsule(
 ) {
     val palette = PersonaTheme.palette
     val surface = if (PersonaTheme.style == AppStyle.Glass && !palette.dark) Tokens.Semantic.Glass.Light.pageBackground else palette.surfaceOpaque
-    val visualHeight = AgentFilterTokens.height * LocalDensity.current.fontScale.coerceAtLeast(1f)
+    val textScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+    val visualHeight = AgentFilterTokens.height * textScale
+    val fade = AgentFilterTokens.fade * textScale
     val state = rememberLazyListState()
-    var focused by remember { mutableIntStateOf(-1) }
     var menu by remember { mutableStateOf(false) }
     val reduceMotion = PersonaTheme.reduceMotion
-    val duration = if (reduceMotion) Tokens.Motion.reduced else Tokens.Motion.State.duration
-    // Only scroll start/end is observed, never animated item geometry on every frame.
-    LaunchedEffect(state) {
-        snapshotFlow { state.isScrollInProgress }.collectLatest { moving ->
-            if (!moving) {
-                delay(AgentFilterTokens.focusDelayMillis)
-                focused = if (!state.canScrollBackward) -1 else {
-                    val layout = state.layoutInfo
-                    val center = layout.viewportStartOffset +
-                        (layout.viewportEndOffset - layout.viewportStartOffset) * AgentFilterTokens.focusFraction
-                    layout.visibleItemsInfo.minByOrNull { kotlin.math.abs(it.offset + it.size / 2f - center) }?.index ?: -1
-                }
-            }
-        }
-    }
-    var previousSelection by remember { mutableIntStateOf(selected) }
+    val fadeSpec: AnimationSpec<Float> = if (reduceMotion) snap() else tween(Tokens.Motion.State.duration)
+    // Read in drawing and semantics only: the fade's frames redraw the strip and never recompose it.
+    val leading = animateFloatAsState(if (state.canScrollBackward) 1f else 0f, fadeSpec, label = "filter-fade-leading")
+    val trailing = animateFloatAsState(if (state.canScrollForward) 1f else 0f, fadeSpec, label = "filter-fade-trailing")
+    var placed by remember { mutableStateOf(false) }
+    val fadePx = with(LocalDensity.current) { fade.toPx() }
     LaunchedEffect(selected) {
-        if (previousSelection == selected) return@LaunchedEffect
-        previousSelection = selected
-        // Let the selected label expand before centering its final geometry.
-        delay(duration.toLong())
+        if (selected !in bays.indices) return@LaunchedEffect
+        snapshotFlow { state.layoutInfo.visibleItemsInfo.isNotEmpty() }.first { it }
         withFrameNanos { }
-        val item = state.layoutInfo.visibleItemsInfo.firstOrNull { it.index == selected }
-        if (item == null) state.scrollToItem(selected)
-        val visible = state.layoutInfo.visibleItemsInfo.firstOrNull { it.index == selected }
-        if (visible != null) {
-            val layout = state.layoutInfo
-            val delta = visible.offset + visible.size / 2f -
-                (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
-            if (reduceMotion) state.scrollBy(delta) else state.animateScrollBy(delta, tween(duration))
-        }
+        // A strip built anew starts at its first choice, and the page may have kept another: that one is placed at once.
+        val first = !placed
+        placed = true
+        state.place(selected, fadePx, if (first || reduceMotion) null else tween(Tokens.Motion.State.duration))
     }
     Box(modifier.fillMaxWidth().heightIn(min = Tokens.MinTouch.android)) {
         Box(Modifier.align(Alignment.Center).fillMaxWidth().height(visualHeight)
@@ -93,22 +82,15 @@ fun JAgentFilterCapsule(
             LazyRow(
                 state = state,
                 modifier = Modifier.weight(1f).testTag("agents-status-scroll")
-                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                    .drawWithContent {
-                        drawContent()
-                        val start = (AgentFilterTokens.chipPadding.toPx() / size.width).coerceIn(0f, 0.5f)
-                        val end = (1f - AgentFilterTokens.fadeEnd.toPx() / size.width).coerceIn(start, 1f)
-                        drawRect(Brush.horizontalGradient(0f to surface.copy(alpha = 0f), start to surface.copy(alpha = 1f),
-                            end to surface.copy(alpha = 1f), 1f to surface.copy(alpha = 0f)), blendMode = BlendMode.DstIn)
-                    },
+                    .semantics { this[AgentFilterFade] = AgentFilterFades(leading.value, trailing.value) }
+                    .agentFilterEdgeFade(surface, fade, { leading.value }, { trailing.value }),
                 contentPadding = PaddingValues(horizontal = AgentFilterTokens.inset),
                 horizontalArrangement = Arrangement.spacedBy(AgentFilterTokens.gap),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 items(bays.size, key = { bays[it].label }) { index ->
                     val bay = if (index == 0 && PersonaTheme.style == AppStyle.Glass) bays[index].copy(count = null) else bays[index]
-                    CapsuleChoice(bay, selected == index, selected == index || focused == index,
-                        duration, Modifier.testTag("agents-status-$index")) { onSelect(index) }
+                    CapsuleChoice(bay, selected == index, Modifier.testTag("agents-status-$index")) { onSelect(index) }
                 }
             }
             Box(Modifier.width(AgentFilterTokens.stroke).height(AgentFilterTokens.separatorHeight).background(palette.line))
@@ -122,24 +104,35 @@ fun JAgentFilterCapsule(
     }
 }
 
+/**
+ * Fades what the strip shows into [surface] over [fade] at an edge with more hidden past it: [leading] and [trailing] are
+ * how much each edge fades, 0 (not at all) to 1 (to nothing at the very edge). They are read in drawing only.
+ */
+internal fun Modifier.agentFilterEdgeFade(surface: Color, fade: Dp, leading: () -> Float, trailing: () -> Float): Modifier = this
+    .graphicsLayer {
+        compositingStrategy = if (leading() > 0f || trailing() > 0f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+    }
+    .drawWithContent {
+        drawContent()
+        val head = leading()
+        val tail = trailing()
+        if ((head > 0f || tail > 0f) && size.width > 0f) {
+            val edge = (fade.toPx() / size.width).coerceIn(0f, 0.5f)
+            // Only the alpha counts: DstIn keeps the content as opaque as the mask is.
+            drawRect(Brush.horizontalGradient(0f to surface.copy(alpha = 1f - head), edge to surface,
+                (1f - edge) to surface, 1f to surface.copy(alpha = 1f - tail)), blendMode = BlendMode.DstIn)
+        }
+    }
+
+/** One choice: its dot or icon, its whole label and its count. The strip gives it all the width it asks for, so nothing is cut. */
 @Composable
-private fun CapsuleChoice(
-    bay: Bay, selected: Boolean, expanded: Boolean, duration: Int, modifier: Modifier,
-    onClick: () -> Unit,
-) {
+private fun CapsuleChoice(bay: Bay, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type.callout.copy(fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium)
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val compact = remember(bay.label) { collapsedFilterLabel(bay.label) }
-    val fullWidth = remember(bay.label, type, density) { measurer.measure(bay.label, type).size.width }
-    val compactWidth = remember(compact, type, density) { measurer.measure(compact, type).size.width }
-    val width by animateDpAsState(with(density) { (if (expanded) fullWidth else compactWidth).toDp() }, tween(duration), label = "filter-label-width")
     Row(modifier.heightIn(min = Tokens.MinTouch.android).widthIn(min = Tokens.MinTouch.android).clip(CircleShape)
         .clickable(role = Role.Tab, onClick = onClick)
         .semantics(mergeDescendants = true) {
             this.selected = selected
-            this[AgentFilterExpanded] = expanded
             contentDescription = listOfNotNull(bay.label, bay.count?.toString()).joinToString(" ")
         }
         .padding(vertical = Tokens.Space.xs), verticalAlignment = Alignment.CenterVertically) {
@@ -151,9 +144,9 @@ private fun CapsuleChoice(
                 ?: bay.status?.let {
                     Box(Modifier.size(AgentFilterTokens.dot).clip(CircleShape).background(palette.status(it, bay.waiting).dot))
                 }
-            Crossfade(expanded, modifier = Modifier.width(width).clearAndSetSemantics { }, animationSpec = tween(duration), label = "filter-label") { reveal ->
-                Text(if (reveal) bay.label else compact, style = type,
-                    color = if (selected) palette.accent else palette.ink, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+            // The chip speaks as one (its description, above), so the words it draws are no second node for a screen reader.
+            Box(Modifier.clearAndSetSemantics { }) {
+                Text(bay.label, style = type, color = if (selected) palette.accent else palette.ink, maxLines = 1, softWrap = false)
             }
             bay.count?.let { Text("$it", style = type, color = if (selected) palette.accent else palette.ink2,
                 maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { }) }
@@ -161,9 +154,16 @@ private fun CapsuleChoice(
     }
 }
 
-/** Count Unicode code points, not UTF-16 halves, when making the compact two-character label. */
-internal fun collapsedFilterLabel(label: String): String {
-    val count = label.codePointCount(0, label.length)
-    return if (count <= AgentFilterTokens.collapsedCharacters) label else
-        label.substring(0, label.offsetByCodePoints(0, AgentFilterTokens.collapsedCharacters)) + "…"
+/**
+ * Moves the choice at [index] to the middle of the strip. A choice wider than what lies between the two fades ([fade] wide
+ * each) goes to where that begins instead, so the first word of a long label is not dimmed. [spec] animates it; null moves
+ * at once. The strip stops at its ends by itself.
+ */
+private suspend fun LazyListState.place(index: Int, fade: Float, spec: AnimationSpec<Float>?) {
+    if (layoutInfo.visibleItemsInfo.none { it.index == index }) scrollToItem(index)
+    val layout = layoutInfo
+    val item = layout.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+    val delta = if (item.size > layout.viewportSize.width - 2 * fade) item.offset - (fade - layout.beforeContentPadding)
+        else item.offset + item.size / 2f - (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
+    if (spec == null) scrollBy(delta) else animateScrollBy(delta, spec)
 }

@@ -43,8 +43,8 @@ func TestGuestProcessFlags(t *testing.T) {
 		return flags[i+1], true
 	}
 
-	mcpJSON, flags := n.claudeAssistantMCPAndTools("guest-1", t.TempDir(), true)
-	got := servers(mcpJSON)
+	flags := n.claudeAssistantMCPAndTools("guest-1", t.TempDir(), true)
+	got := servers(mcpFlag(t, flags, "--mcp-config"))
 	if len(got) != 2 || got["persona"] == nil || got[compat.MCPServer] == nil {
 		t.Fatalf("servers = %v, want Persona's alone", got)
 	}
@@ -62,7 +62,8 @@ func TestGuestProcessFlags(t *testing.T) {
 		t.Fatalf("flags = %q", flags)
 	}
 
-	mcpJSON, flags = n.claudeAssistantMCPAndTools("ordinary-1", t.TempDir(), true)
+	flags = n.claudeAssistantMCPAndTools("ordinary-1", t.TempDir(), true)
+	mcpJSON := mcpFlag(t, flags, "--mcp-config")
 	builtin, hasBuiltin := flagValue(flags, "--tools")
 	if servers(mcpJSON)["example"] == nil || !hasBuiltin || builtin != assistantBuiltinTools || slices.Contains(flags, "--strict-mcp-config") {
 		t.Fatalf("an ordinary conversation changed: %s %q", mcpJSON, flags)
@@ -120,11 +121,11 @@ func TestGuestConversationStarts(t *testing.T) {
 		}
 	}
 
-	// A later message naming another launcher and the Agent SDK still goes to it as it is.
-	if _, err := n.assistantSend(context.Background(), id, "", "codex", "more", nil, "", "", modelExecution{Runtime: proto.AssistantRuntimeAgentSDK}); err != nil {
+	// A later message naming another launcher still goes to it as it is.
+	if _, err := n.assistantSend(context.Background(), id, "", "codex", "more", nil, "", "", modelExecution{Fingerprint: "fp"}); err != nil {
 		t.Fatalf("a later message: %v", err)
 	}
-	if st, _ := n.state.get(id); st.Launcher != "claude" || st.Runtime != "" || st.Guest == nil {
+	if st, _ := n.state.get(id); st.Launcher != "claude" || st.Guest == nil {
 		t.Fatalf("state after a later message = %+v", st)
 	}
 }
@@ -143,41 +144,6 @@ func TestGuestRefusesOtherRuntimes(t *testing.T) {
 	n.mu.Unlock()
 	if procs != 0 {
 		t.Fatal("a process started")
-	}
-}
-
-// A guest on the Agent SDK registers its declared tools through an in-process
-// MCP server. No built-in tools or user settings are loaded.
-func TestGuestAgentSDKStart(t *testing.T) {
-	f := sdkTest(t)
-	f.n.hubPersonaContracts.Store(true)
-	id, err := f.n.assistantSend(withGuest(context.Background(), []string{"larkbridge_docs"}), "", t.TempDir(), "claude", "search", nil, "", "",
-		sdkExec(proto.AssistantRuntimeAgentSDK))
-	if err != nil {
-		t.Fatal(err)
-	}
-	o := f.start(t)
-	if o["sessionId"] != id || o["strictMcpConfig"] != true || o["tools"] != nil || o["plugins"] != nil {
-		t.Fatalf("start: %v", o)
-	}
-	servers, _ := o["guestMcpServers"].(map[string]any)
-	server, _ := servers["persona"].(map[string]any)
-	env, _ := server["env"].(map[string]any)
-	if server["command"] == nil || env["PERSONA_GUEST"] != "1" || env["PERSONA_SESSION_ID"] != id {
-		t.Fatalf("guest MCP: %v", o["guestMcpServers"])
-	}
-	if _, plain := o["mcpServers"].(map[string]any)["persona"]; plain {
-		t.Fatalf("guest config must go through the SDK proxy: %v", o)
-	}
-	if got, _ := o["allowedTools"].([]any); len(got) != 1 || got[0] != "mcp__persona__larkbridge_docs" {
-		t.Fatalf("allowed tools: %#v", o["allowedTools"])
-	}
-	// Its settings are the guest's own on the SDK too (#5786): the owner's instructions excluded, no auto memory.
-	settings, _ := o["settings"].(map[string]any)
-	excludes, _ := settings["claudeMdExcludes"].([]any)
-	settingsEnv, _ := settings["env"].(map[string]any)
-	if !slices.Contains(excludes, any(filepath.Join(f.n.home, ".claude", "rules", "**"))) || settingsEnv["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] != "1" {
-		t.Fatalf("the guest's settings: %v", o["settings"])
 	}
 }
 

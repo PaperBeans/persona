@@ -103,6 +103,9 @@ func busyBoard(t *testing.T) *Service {
 // it into new bytes (28.4 MB in all); now it allocates the decorated list alone. Each bound is the measured bytes per
 // call + 3%.
 func TestSessionReadersCopyNoList(t *testing.T) {
+	if raceEnabled {
+		t.Skip("race instrumentation allocates")
+	}
 	if !isolated(t) {
 		return
 	}

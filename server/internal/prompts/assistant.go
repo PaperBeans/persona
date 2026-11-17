@@ -780,23 +780,24 @@ type Supervise struct {
 // started, escalated, ask, inbox…).
 type SuperviseEntry struct {
 	ID, Title, Kind string
-	Detail          string             // why: the judge's reason, the step it is stuck on, the model service's error, why it did not start
-	Minutes         int                // how long it has waited (needs_you) or not moved (stalled)
-	Ask             string             // needs_you: what it asks
-	Recommend       string             // escalated: the option the leader recommends
-	LeaderGone      bool               // decide: its task leader agent cannot be reached, so the supervisor takes the task over
-	Background      bool               // escalated: by the background supervisor, not a leader conversation (#4927)
-	DoneWhen        []string           // what done means
-	Round           int                // reworks so far
-	Machine         string             // where its agent runs (a name)
-	Session         string             // its agent's session id (short)
-	AgentID         string             // full id for durable deduplication; not rendered
-	Last            string             // what its agent said last
-	Closeout        *SuperviseCloseout // the closeout its agent ended the turn with (#3612), nil when it wrote none
-	Link            string             // the task's page ("" when the hub has no public_url)
-	Quiet           bool               // the user was not pushed about it
-	Orphan          string             // orphaned: why nobody works on it (error, closed, offline)
-	Review          *SuperviseReviewed // review: what the independent reviewer found (#2173), nil when none ran
+	AgentReply      *DecisionAgentReply // decision_reply: a pending decision's owner message, not an inferred choice
+	Detail          string              // why: the judge's reason, the step it is stuck on, the model service's error, why it did not start
+	Minutes         int                 // how long it has waited (needs_you) or not moved (stalled)
+	Ask             string              // needs_you: what it asks
+	Recommend       string              // escalated: the option the leader recommends
+	LeaderGone      bool                // decide: its task leader agent cannot be reached, so the supervisor takes the task over
+	Background      bool                // escalated: by the background supervisor, not a leader conversation (#4927)
+	DoneWhen        []string            // what done means
+	Round           int                 // reworks so far
+	Machine         string              // where its agent runs (a name)
+	Session         string              // its agent's session id (short)
+	AgentID         string              // full id for durable deduplication; not rendered
+	Last            string              // what its agent said last
+	Closeout        *SuperviseCloseout  // the closeout its agent ended the turn with (#3612), nil when it wrote none
+	Link            string              // the task's page ("" when the hub has no public_url)
+	Quiet           bool                // the user was not pushed about it
+	Orphan          string              // orphaned: why nobody works on it (error, closed, offline)
+	Review          *SuperviseReviewed  // review: what the independent reviewer found (#2173), nil when none ran
 	// report: what its agent reported (progress, question, blocked, done), its words, evidence and step.
 	Report      string
 	Said        string
@@ -823,6 +824,11 @@ type SuperviseEntry struct {
 	Dropped                             []string
 	// inbox: the Inbox item the new messages came in, the newest when several did.
 	Inbox *SuperviseInbox
+}
+
+// DecisionAgentReply asks a supervisor to confirm a pending decision after its owner writes in the task's Agent chat.
+type DecisionAgentReply struct {
+	Language, Machine, Session string
 }
 
 // SuperviseInbox is the Inbox item an inbox entry names (#4293): its id, title (the chat's name or the mail's subject),
@@ -878,6 +884,12 @@ type SuperviseAsk struct {
 }
 
 func RenderSupervise(s Supervise) string { return render("assistant/supervise", s) }
+
+type DraftPR struct {
+	Language, URL, Head string
+}
+
+func RenderDraftPR(p DraftPR) string { return render("assistant/draft_pr", p) }
 
 // SuperviseReviewed is the independent review of a task waiting for review: State clean (nothing blocking), blocking
 // (blocking findings left once the rework rounds ran out) or failed (Error says why), its counts and report.

@@ -27,6 +27,13 @@ export function createGrokRuntime(options = {}) {
   const home = options.home || homedir()
   const grokHome = options.grokHome || process.env.GROK_HOME || join(home, '.grok')
   const launcher = options.launcher || 'grok-chat'
+  // What the apps call it, and the Agent launcher (a Paseo provider running this Grok CLI and account) it runs the
+  // assistant for: only what the person setting it up declares, never guessed from names.
+  const displayName = typeof options.displayName === 'string' && options.displayName.trim() ? options.displayName.trim() : 'Grok'
+  const assistantFor = typeof options.assistantFor === 'string' ? options.assistantFor.trim() : ''
+  if (assistantFor && (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(assistantFor) || assistantFor === launcher)) throw new Error('Unsupported Grok assistant-for launcher')
+  const launcherEntry = (model, models) => ({ name: launcher, agent: 'grok', display_name: displayName, ...(assistantFor ? { assistant_for: assistantFor } : {}),
+    ...(model ? { model } : {}), ...(models ? { models } : {}) })
   const defaultModel = options.model || ''
   const defaultEffort = options.effort || ''
   const defaultMode = options.mode || 'default'
@@ -51,7 +58,7 @@ export function createGrokRuntime(options = {}) {
   })
 
   const rt = createRuntime({ listSessions, items, cursor, item, image, start, send, interrupt, rename: renameSession, close, models, modes, check }, {
-    runtime: 'grok-chat', name: 'Grok', agent: 'grok', launcher, launcherModel: defaultModel,
+    runtime: 'grok-chat', name: 'Grok', agent: 'grok', launcher, launcherModel: defaultModel, launchers: [launcherEntry(defaultModel)],
     assistant: true, answerFirst: 'phone', modelSwitch: true, readonly: true,
     socketPath: options.socketPath, connect: options.connect, log, refreshMs: options.refreshMs || 10_000,
     pushDelayMs: options.pushDelayMs ?? 50, retryMs: options.retryMs,
@@ -78,7 +85,7 @@ export function createGrokRuntime(options = {}) {
       // A rediscovered conversation belongs to the assistant only in its directories (or by its metadata, readMetadata).
     const s = { ...blankItems(), raw, id: PREFIX + raw, cwd, assistant: !restored || isConversationDir(cwd, home, options.env || process.env), title: 'Grok', mode: restored ? 'default' : defaultMode, modeKnown: !restored,
       model: '', effort: '', updated: new Date().toISOString(), history: `grok:${raw}`,
-      loaded: 0, running: false, tail: Promise.resolve(), queued: 0, epoch: 0, seen: new Set(), asks: new Set(), approved: new Set() }
+      restored, loaded: 0, running: false, tail: Promise.resolve(), queued: 0, epoch: 0, seen: new Set(), asks: new Set(), approved: new Set() }
     sessions.set(s.id, s)
     return s
   }
@@ -121,7 +128,7 @@ export function createGrokRuntime(options = {}) {
       if (option.id === 'reasoning_effort') s.effort = option.currentValue
     }
     selectedModel ||= s.model
-    rt.launchersChanged([{ name: launcher, agent: 'grok', model: defaultModel || selectedModel, models: modelOptions(catalog, defaultModel || selectedModel) }])
+    rt.launchersChanged([launcherEntry(defaultModel || selectedModel, modelOptions(catalog, defaultModel || selectedModel))])
   }
 
   const sessionDir = (s) => s.file ? dirname(s.file) : join(grokHome, 'sessions', encodeURIComponent(s.cwd), s.raw)
@@ -171,8 +178,8 @@ export function createGrokRuntime(options = {}) {
     if (scanning) return (rescanning ||= scanning.then(() => { rescanning = null; return scan() }))
     scanning = (async () => {
       await readTerminalHeld()
-      let dirs
-      try { dirs = await readdir(join(grokHome, 'sessions'), { withFileTypes: true }) } catch (error) { if (error.code === 'ENOENT') return; throw error }
+      let dirs = []
+      try { dirs = await readdir(join(grokHome, 'sessions'), { withFileTypes: true }) } catch (error) { if (error.code !== 'ENOENT') throw error }
       for (const dir of dirs) {
         if (!dir.isDirectory()) continue
         let cwd
@@ -180,12 +187,15 @@ export function createGrokRuntime(options = {}) {
         // Every working directory: the assistant's, and the ones where Grok was started in a terminal.
         const conversations = isConversationDir(cwd, home, options.env || process.env)
         const base = join(grokHome, 'sessions', dir.name)
-        const entries = await readdir(base, { withFileTypes: true })
+        let entries
+        try { entries = await readdir(base, { withFileTypes: true }) } catch (error) { if (error.code === 'ENOENT') continue; throw error }
         for (const entry of entries) {
           if (!entry.isDirectory() || !validRaw(entry.name) || probes.has(entry.name)) continue
           try {
             const summary = JSON.parse(await readFile(join(base, entry.name, 'summary.json'), 'utf8'))
             if (summary.info?.cwd !== cwd || summary.info?.id !== entry.name) continue
+            // Background CLI runs and child agents are not interactive terminal conversations.
+            if (!conversations && (summary.session_kind === 'headless' || summary.session_kind === 'subagent')) continue
             // Older terminal conversations are left unread until they are updated again.
             if (!conversations && !sessions.has(PREFIX + entry.name) && !terminalHeld.has(entry.name) &&
               !(Date.now() - Date.parse(summary.updated_at) < TERMINAL_RECENT_MS)) continue
@@ -201,6 +211,19 @@ export function createGrokRuntime(options = {}) {
               await readMetadata(s)
             }
           } catch (error) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) log(`Grok transcript read: ${error.code || error.name}`) }
+        }
+      }
+      // Native cleanup can remove a whole cwd group between scans. Forget only rediscovered, unowned conversations;
+      // a new chat may not have flushed its summary yet, and the assistant keeps its own conversation lifecycle.
+      for (const [id, s] of sessions) {
+        if (!s.restored || s.assistant) continue
+        try { await stat(join(sessionDir(s), 'summary.json')) }
+        catch (error) {
+          if (error.code !== 'ENOENT') { log(`Grok summary stat: ${error.code || error.name}`); continue }
+          // Check after the filesystem await: a turn may have started or queued while the summary was checked.
+          if (s.running || s.queued || s.loading || terminalHeld.has(s.raw)) continue
+          sessions.delete(id)
+          rt.sessionsChanged()
         }
       }
     })().finally(() => { scanning = null })

@@ -170,7 +170,7 @@ struct KBPointSheet: View {
             .navigationTitle("Knowledge Point")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Text("Done").lineLimit(1) } }
+                SheetClose { dismiss() }
             }
         }
         .presentationDetents([.medium, .large])

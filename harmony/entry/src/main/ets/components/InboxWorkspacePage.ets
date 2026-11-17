@@ -1,3 +1,5 @@
+import { IconActions } from '../design/IconActions';
+import { Symbols } from '../design/Symbols';
 import { NativeEnvironment, nativeEnvironment } from '../platform/NativeEnvironment';
 import { common } from '@kit.AbilityKit';
 import { fileIo, picker } from '@kit.CoreFileKit';
@@ -9,7 +11,7 @@ import { ResourceRow, Wire } from '../models/Wire';
 import { BoundRow, reconcileBoundRows } from '../models/RowBinding';
 import { MarkdownText } from './MarkdownText';
 import { Colors } from '../design/Colors';
-import { ButtonStyles } from '../design/Controls';
+import { ButtonStyles, SelectStyles } from '../design/Controls';
 import { Tokens } from '../design/Tokens';
 import { tr } from '../design/Strings';
 
@@ -81,7 +83,7 @@ export struct InboxRemoteImage {
 
   @Builder fullView() {
     Column() {
-      Row() { Text(this.name).layoutWeight(1).maxLines(1); Button(tr('close')).onClick(() => this.full = false) }
+      Row() { Text(this.name).layoutWeight(1).maxLines(1); Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('close')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('close', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('close')).bindTips(tr('close')).onClick(() => this.full = false) }
         .padding(Tokens.page).width('100%')
       if (this.pixels) Image(this.pixels).objectFit(ImageFit.Contain).width('100%').layoutWeight(1)
     }.width('100%').height('100%').backgroundColor($r('app.color.persona_canvas'))
@@ -92,7 +94,7 @@ export struct InboxRemoteImage {
       if (this.pixels) Image(this.pixels).width('100%').aspectRatio(this.ratio).objectFit(ImageFit.Contain)
         .onClick(() => this.full = true).accessibilityText(this.name)
       else if (this.loading) LoadingProgress().width(Tokens.touch).height(Tokens.touch)
-      else Button(tr(this.failed ? 'retry' : 'image')).onClick(() => this.load())
+      else Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.failed ? 'retry' : 'image')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.link); else SymbolGlyph(IconActions.symbol(this.failed ? 'retry' : 'image')).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.failed ? 'retry' : 'image', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr(this.failed ? 'retry' : 'image')).bindTips(tr(this.failed ? 'retry' : 'image')).onClick(() => this.load())
     }.width('100%').padding({ top: Tokens.gap, bottom: Tokens.gap })
       .onVisibleAreaChange([0, 1], (visible: boolean, ratio: number) => { if (visible && ratio > 0 && !this.failed) this.load(); })
       .bindContentCover($$this.full, this.fullView())
@@ -141,7 +143,7 @@ export struct InboxMessageParts {
     } else if (Wire.text(part, 'kind') === 'file' || Wire.text(part, 'kind') === 'video' || Wire.text(part, 'kind') === 'audio') {
       Row({ space: Tokens.gap }) {
         Text(this.line(part)).layoutWeight(1).wordBreak(WordBreak.BREAK_WORD)
-        if (Wire.text(part, 'media')) Button(tr('save')).onClick(() => this.onSaveMedia(Wire.text(part, 'media'), Wire.text(part, 'name', Wire.text(part, 'kind')), Wire.text(part, 'mime')))
+        if (Wire.text(part, 'media')) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('download')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('download', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('save')).bindTips(tr('save')).onClick(() => this.onSaveMedia(Wire.text(part, 'media'), Wire.text(part, 'name', Wire.text(part, 'kind')), Wire.text(part, 'mime')))
       }.width('100%').alignItems(VerticalAlign.Center)
     } else if ((Wire.text(part, 'kind') === 'link' || Wire.text(part, 'kind') === 'text') && Wire.text(part, 'url')) {
       Text(this.line(part)).fontColor($r('sys.color.font_emphasize')).decoration({ type: TextDecorationType.Underline, color: $r('sys.color.font_emphasize') })
@@ -152,7 +154,7 @@ export struct InboxMessageParts {
     } else if (Wire.text(part, 'kind') === 'share' && Wire.text(part, 'url')) {
       Column({ space: Tokens.gap }) {
         if (this.line(part)) Text(this.line(part)).fontSize(Tokens.body).width('100%').copyOption(CopyOptions.LocalDevice)
-        Button(tr('open'), { buttonStyle: ButtonStyleMode.TEXTUAL }).onClick(() => this.onLink(Wire.text(part, 'url')))
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('open')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('open', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('open')).bindTips(tr('open')).onClick(() => this.onLink(Wire.text(part, 'url')))
       }.width('100%').alignItems(HorizontalAlign.Start)
     } else if (Wire.text(part, 'kind') === 'system') {
       Text(this.line(part)).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).width('100%').textAlign(TextAlign.Center)
@@ -278,7 +280,7 @@ export struct InboxWorkspacePage {
   }
   private async refreshList(): Promise<void> { await this.workspace.refresh(); }
   private openMailCompose(): void { this.activeSheet = 'mail'; this.sheetOpen = true; this.workspace.openMailCompose(); }
-  private openHandoff(): void { this.handoffText = this.workspace.handoffDraft || tr('inbox_handoff_preset_summary'); this.activeSheet = 'handoff'; this.sheetOpen = true; }
+  private openHandoff(): void { if (!this.workspace.canWrite()) return; this.handoffText = this.workspace.handoffDraft || tr('inbox_handoff_preset_summary'); this.activeSheet = 'handoff'; this.sheetOpen = true; }
   private chain(): Record<string, Object>[] { return Wire.rows(this.workspace.detail, 'chain'); }
   private handling(): Record<string, Object> { return Wire.object(this.workspace.detail, 'handling'); }
   private suggestion(): Record<string, Object> { return Wire.object(this.workspace.detail, 'suggestion'); }
@@ -297,7 +299,7 @@ export struct InboxWorkspacePage {
 
   private confirmReply(): void {
     const value = this.workspace.replyDraft.trim();
-    if (!value || !this.workspace.canReplyToItem()) return;
+    if (!value || !this.workspace.canReplyToItem() || !this.workspace.canWrite()) return;
     const fingerprint = this.workspace.replyConfirmationSnapshot(value);
     const message = this.workspace.replyAccountLabel() + '\n' + this.workspace.replyRecipient() + '\n\n' + value;
     this.getUIContext().showAlertDialog({ title: tr('confirm_send'), message: message,
@@ -438,17 +440,40 @@ export struct InboxWorkspacePage {
       .onChange((value: string) => this.workspace.search = value).width('100%').layoutWeight(weighted ? 1 : 0)
   }
   @Builder inboxActions() {
-    Button(tr('refresh')).attributeModifier(ButtonStyles.quiet).enabled(!this.workspace.loading)
+    Badge({ count: (this.workspace.sourceFilter !== 'all' ? 1 : 0) + (this.workspace.accountFilter !== 'all' ? 1 : 0),
+      style: { color: Colors.onAction, badgeColor: Colors.action, borderWidth: 0, borderColor: Color.Transparent, badgeSize: Tokens.body, fontSize: Tokens.caption } }) {
+      Button({ type: ButtonType.Circle }) { SymbolGlyph(Symbols.filter).fontSize(Tokens.symbolFont).fontColor([Colors.link]) }
+        .attributeModifier(ButtonStyles.chrome).accessibilityText(tr('agent_filter_button') + ' · ' + this.sourceLabel(this.workspace.sourceFilter) + ' · ' + (this.workspace.accountFilter === 'all' ? tr('all') : this.workspace.accountName(this.workspace.accountFilter)))
+        .bindMenu(this.inboxFilters).id('inbox.filters')
+    }
+    Button({ type: ButtonType.Circle }) { SymbolGlyph(Symbols.refresh).fontSize(Tokens.symbolFont).fontColor([Colors.link]) }.attributeModifier(ButtonStyles.chrome).accessibilityText(tr('refresh')).enabled(!this.workspace.loading)
       .onClick(() => this.refreshList())
-    Button(tr('compose')).attributeModifier(ButtonStyles.quiet).onClick(() => this.openMailCompose())
+    Button({ type: ButtonType.Circle }) { SymbolGlyph(Symbols.edit).fontSize(Tokens.symbolFont).fontColor([Colors.link]) }.attributeModifier(ButtonStyles.chrome).accessibilityText(tr('compose')).onClick(() => this.openMailCompose())
   }
+  @Builder inboxFilters() {
+    Menu() {
+      MenuItemGroup({ header: tr('source') }) {
+        ForEach(this.workspace.sourceOptions, (value: string) => {
+          MenuItem({ content: this.sourceLabel(value) }).selected(this.workspace.sourceFilter === value).selectIcon(true)
+            .onClick(() => this.workspace.sourceFilter = value)
+        }, (value: string) => value)
+      }
+      MenuItemGroup({ header: tr('account') }) {
+        ForEach(this.workspace.accountOptions, (value: string) => {
+          MenuItem({ content: value === 'all' ? tr('all') : this.workspace.accountName(value) }).selected(this.workspace.accountFilter === value).selectIcon(true)
+            .onClick(() => this.workspace.accountFilter = value)
+        }, (value: string) => value)
+      }
+    }.width(Tokens.popupWidth)
+  }
+
   @Builder sourceFilterControl() {
-    Select(this.optionList(this.workspace.sourceOptions.map((value: string) => this.sourceLabel(value))))
+    Select(this.optionList(this.workspace.sourceOptions.map((value: string) => this.sourceLabel(value)))).attributeModifier(SelectStyles.inline)
       .selected(this.sourceIndex()).value(this.sourceLabel(this.workspace.sourceFilter)).onSelect((index: number) => this.workspace.sourceFilter = this.workspace.sourceOptions[index])
       .constraintSize({ minHeight: Tokens.touch }).width('100%')
   }
   @Builder accountFilterControl() {
-    Select(this.optionList(this.workspace.accountOptions.map((value: string) => value === 'all' ? tr('all') : this.workspace.accountName(value))))
+    Select(this.optionList(this.workspace.accountOptions.map((value: string) => value === 'all' ? tr('all') : this.workspace.accountName(value)))).attributeModifier(SelectStyles.inline)
       .selected(this.accountIndex()).value(this.workspace.accountFilter === 'all' ? tr('all') : this.workspace.accountName(this.workspace.accountFilter)).onSelect((index: number) => this.workspace.accountFilter = this.workspace.accountOptions[index])
       .constraintSize({ minHeight: Tokens.touch }).width('100%')
   }
@@ -462,16 +487,8 @@ export struct InboxWorkspacePage {
         this.inboxSearch(true)
         this.inboxActions()
       }.padding({ left: Tokens.page, right: Tokens.page, top: Tokens.gap }).width('100%')
-      if (this.environment.fontScale >= 1.5) Column({ space: Tokens.gap }) {
-        this.sourceFilterControl()
-        this.accountFilterControl()
-      }.width('100%').padding({ left: Tokens.page, right: Tokens.page })
-      else Row({ space: Tokens.gap }) {
-        Column() { this.sourceFilterControl() }.layoutWeight(1)
-        Column() { this.accountFilterControl() }.layoutWeight(1)
-      }.width('100%').padding({ left: Tokens.page, right: Tokens.page })
       if (this.environment.fontScale >= 1.5) Row() {
-        Select([{ value: tr('inbox_open') }, { value: tr('done') }, { value: tr('all') }])
+        Select([{ value: tr('inbox_open') }, { value: tr('done') }, { value: tr('all') }]).attributeModifier(SelectStyles.inline)
         .selected(this.workspace.statusFilter === 'open' ? 0 : this.workspace.statusFilter === 'done' ? 1 : 2)
         .value(tr(this.workspace.statusFilter === 'open' ? 'inbox_open' : this.workspace.statusFilter === 'done' ? 'done' : 'all'))
         .font({ size: Tokens.body }).constraintSize({ minHeight: Tokens.touch }).width('100%')
@@ -492,10 +509,9 @@ export struct InboxWorkspacePage {
               Row({ space: Tokens.gap }) { Text(this.rowSource(binding.value)).fontSize(Tokens.caption).fontColor(Colors.secondary).layoutWeight(1); Text(this.doneLabel(binding.value)).fontSize(Tokens.caption).fontColor(Colors.secondary) }.width('100%')
               Text(binding.value.title || tr('inbox')).fontSize(Tokens.body).fontWeight(FontWeight.Medium).fontColor(Colors.ink).width('100%')
               if (binding.value.detail) Text(binding.value.detail).fontSize(Tokens.body).fontColor(Colors.secondary).maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-              }.width('100%').constraintSize({ minHeight: Tokens.touch }).alignItems(HorizontalAlign.Start).accessibilityGroup(true).onClick(() => this.openRow(binding.value))
-              if (!this.workspace.isHandled(binding.value)) Button(tr('inbox_handoff_title')).attributeModifier(ButtonStyles.primary).enabled(this.model.connected).onClick(() => this.openListHandoff(binding.value))
+              }.width('100%').constraintSize({ minHeight: Tokens.touch }).alignItems(HorizontalAlign.Start)
             }.padding(Tokens.card).width('100%').alignItems(HorizontalAlign.Start).backgroundColor(Colors.canvas).borderRadius(Tokens.card)
-          }.id('inbox.' + binding.value.key())
+          }.onClick(() => this.openRow(binding.value)).accessibilityGroup(true).id('inbox.' + binding.value.key())
         }, (binding: BoundRow<ResourceRow>) => binding.key)
         if (!this.itemRowBindings.length && !this.workspace.loading)
           ListItem() { Text(tr(this.workspace.search ? 'no_results' : 'empty')).padding(Tokens.page).width('100%') }
@@ -507,7 +523,7 @@ export struct InboxWorkspacePage {
     Row({ space: Tokens.gap }) {
       Text(this.workspace.isReference() ? this.workspace.referenceSourceLabel() + (this.workspace.replyAccountLabel() ? ' · ' + this.workspace.replyAccountLabel() : '')
         : this.rowSource(this.workspace.selected)).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).maxLines(1).layoutWeight(1)
-      Button(tr('refresh')).attributeModifier(ButtonStyles.quiet).height(Tokens.touch).enabled(!this.workspace.detailLoading)
+      Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('refresh')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('refresh', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('refresh')).bindTips(tr('refresh')).enabled(!this.workspace.detailLoading)
         .onClick(() => this.workspace.refreshDetail())
     }.width('100%').padding({ left: Tokens.page, right: Tokens.page, top: Tokens.gap })
   }
@@ -586,8 +602,7 @@ export struct InboxWorkspacePage {
         Button(tr('inbox_open_thread') + (Wire.number(this.messageThread(message), 'count') ? ' · ' + String(Wire.number(this.messageThread(message), 'count')) : ''),
           { buttonStyle: ButtonStyleMode.TEXTUAL }).height(Tokens.touch).onClick(() => this.workspace.openThread(message))
       }
-      if (!this.workspace.isThreadReference() && this.workspace.canReplyToMessage(message)) Button(tr('reply'), { buttonStyle: ButtonStyleMode.TEXTUAL })
-        .height(Tokens.touch).onClick(() => this.workspace.setThreadTarget(message.id, false))
+      if (!this.workspace.isThreadReference() && this.workspace.canReplyToMessage(message)) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('reply')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('reply', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('reply')).bindTips(tr('reply')).onClick(() => this.workspace.setThreadTarget(message.id, false))
       if (this.workspace.canReact(message) && this.workspace.quickReactions.length) {
         Row({ space: Tokens.fine }) {
           ForEach(this.workspace.quickReactions, (key: string) => {
@@ -610,11 +625,11 @@ export struct InboxWorkspacePage {
       Column({ space: Tokens.gap }) {
         Row({ space: Tokens.gap }) {
           Text(tr(this.workspace.isTopicList ? 'inbox_topics' : 'inbox_conversation')).fontSize(Tokens.title).fontWeight(FontWeight.Medium).layoutWeight(1)
-          if (this.workspace.threadRoot && !this.workspace.isThreadReference()) Button(tr('back'), { buttonStyle: ButtonStyleMode.TEXTUAL }).onClick(() => this.workspace.closeThread())
-          Button(tr('refresh')).attributeModifier(ButtonStyles.quiet).enabled(!this.workspace.feedLoading).onClick(() => this.workspace.refreshConversation())
+          if (this.workspace.threadRoot && !this.workspace.isThreadReference()) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('back')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('back', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('back')).bindTips(tr('back')).onClick(() => this.workspace.closeThread())
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('refresh')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('refresh', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('refresh')).bindTips(tr('refresh')).enabled(!this.workspace.feedLoading).onClick(() => this.workspace.refreshConversation())
         }.width('100%')
-        if (this.workspace.feedHasOlder) Button(tr(this.workspace.feedLoading ? 'loading' : 'inbox_older')).enabled(!this.workspace.feedLoading)
-          .onClick(() => this.workspace.loadOlder()).width('100%')
+        if (this.workspace.feedHasOlder) Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.workspace.feedLoading ? 'loading' : 'inbox_older')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.link); else SymbolGlyph(IconActions.symbol(this.workspace.feedLoading ? 'loading' : 'inbox_older')).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.workspace.feedLoading ? 'loading' : 'inbox_older', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr(this.workspace.feedLoading ? 'loading' : 'inbox_older')).bindTips(tr(this.workspace.feedLoading ? 'loading' : 'inbox_older')).enabled(!this.workspace.feedLoading)
+          .onClick(() => this.workspace.loadOlder())
         ForEach(this.workspace.feedMessages, (message: InboxMessage) => this.messageCard(message), (message: InboxMessage) => message.id)
         if (this.workspace.feedLoading) LoadingProgress().width(Tokens.touch).height(Tokens.touch)
       }.width('100%').alignItems(HorizontalAlign.Start)
@@ -656,18 +671,16 @@ export struct InboxWorkspacePage {
         ForEach(Wire.rows(message.data(), 'attachments'), (attachment: Record<string, Object>) => {
           Row({ space: Tokens.gap }) {
             Text(Wire.text(attachment, 'filename', tr('attachment')) + ' · ' + inboxBytesText(Wire.number(attachment, 'size'))).layoutWeight(1).maxLines(2)
-            Button(tr(this.mediaBusy ? 'loading' : 'save')).enabled(!this.mediaBusy).onClick(() => this.saveMailAttachment(message, attachment))
+            Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.mediaBusy ? 'loading' : 'save')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.onAction); else SymbolGlyph(IconActions.symbol('download')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('download', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr(this.mediaBusy ? 'loading' : 'save')).bindTips(tr(this.mediaBusy ? 'loading' : 'save')).enabled(!this.mediaBusy).onClick(() => this.saveMailAttachment(message, attachment))
           }.width('100%')
         }, (attachment: Record<string, Object>) => Wire.text(attachment, 'id'))
       }
       Row({ space: Tokens.gap }) {
-        Select(this.optionList(['zh-Hans', 'en', 'ja']))
+        Select(this.optionList(['zh-Hans', 'en', 'ja'])).attributeModifier(SelectStyles.inline)
           .selected(this.workspace.translationTarget === 'zh-Hans' ? 0 : this.workspace.translationTarget === 'en' ? 1 : 2)
           .onSelect((index: number) => this.workspace.translationTarget = ['zh-Hans', 'en', 'ja'][index]).layoutWeight(1)
-        Button(tr(this.workspace.translationBusy ? 'loading' : this.workspace.translationError ? 'retry' : 'translation'),
-          { buttonStyle: ButtonStyleMode.TEXTUAL }).enabled(!this.workspace.translationBusy).onClick(() => this.workspace.translateMail(message))
-        if (this.hasMailTranslation(message)) Button(tr(this.workspace.showOriginal ? 'inbox_show_translation' : 'inbox_show_original'),
-          { buttonStyle: ButtonStyleMode.TEXTUAL }).onClick(() => this.workspace.toggleOriginal())
+        Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.workspace.translationBusy ? 'loading' : this.workspace.translationError ? 'retry' : 'translation')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.link); else SymbolGlyph(IconActions.symbol(this.workspace.translationBusy ? 'loading' : this.workspace.translationError ? 'retry' : 'translation')).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.workspace.translationBusy ? 'loading' : this.workspace.translationError ? 'retry' : 'translation', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr(this.workspace.translationBusy ? 'loading' : this.workspace.translationError ? 'retry' : 'translation')).bindTips(tr(this.workspace.translationBusy ? 'loading' : this.workspace.translationError ? 'retry' : 'translation')).enabled(!this.workspace.translationBusy).onClick(() => this.workspace.translateMail(message))
+        if (this.hasMailTranslation(message)) Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.workspace.showOriginal ? 'inbox_show_translation' : 'inbox_show_original')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.link); else SymbolGlyph(IconActions.symbol(this.workspace.showOriginal ? 'inbox_show_translation' : 'inbox_show_original')).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.workspace.showOriginal ? 'inbox_show_translation' : 'inbox_show_original', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr(this.workspace.showOriginal ? 'inbox_show_translation' : 'inbox_show_original')).bindTips(tr(this.workspace.showOriginal ? 'inbox_show_translation' : 'inbox_show_original')).onClick(() => this.workspace.toggleOriginal())
       }.width('100%')
       if (this.workspace.translationError) Text(tr(this.workspace.translationError)).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger')).width('100%')
       if (this.hasMailTranslation(message) && Wire.bool(this.workspace.mailTranslation, 'clipped')) Text(tr('inbox_translation_clipped')).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary'))
@@ -689,9 +702,27 @@ export struct InboxWorkspacePage {
       Column({ space: Tokens.gap }) {
         if (Wire.text(this.connector(), 'label')) Text(Wire.text(this.connector(), 'label')).fontSize(Tokens.title).width('100%')
         if (Wire.text(this.connector(), 'reply_to')) Text(tr('inbox_reply_to') + ': ' + Wire.text(this.connector(), 'reply_to')).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).width('100%')
-        if (Wire.text(this.connector(), 'url')) Button(tr('open'), { buttonStyle: ButtonStyleMode.TEXTUAL }).onClick(() => this.onLink(Wire.text(this.connector(), 'url')))
+        if (Wire.text(this.connector(), 'url')) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('open')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('open', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('open')).bindTips(tr('open')).onClick(() => this.onLink(Wire.text(this.connector(), 'url')))
       }.width('100%').alignItems(HorizontalAlign.Start)
     }
+  }
+
+  private conversationSendKey(): string {
+    if (this.workspace.writeState === 'unknown') return 'result_unknown';
+    if (this.workspace.attachmentBusy || this.workspace.handoffBusy) return 'send';
+    return ['sending', 'pending'].includes(this.workspace.writeState) ? this.workspace.writeState : 'send';
+  }
+  private attachmentSendKey(): string { return this.workspace.attachmentBusy ? 'sending' : 'inbox_send_attachment'; }
+  private mailSendKey(): string {
+    if (this.workspace.mailComposeState === 'unknown') return 'result_unknown';
+    if (this.workspace.mailComposeState === 'sending') return 'sending';
+    if (this.workspace.mailComposeBusy) return this.workspace.mailComposeReady ? 'sending' : 'loading';
+    return this.workspace.mailComposeState === 'pending' ? 'pending' : 'send';
+  }
+  private handoffSendKey(): string {
+    if (this.workspace.writeState === 'unknown') return 'result_unknown';
+    if (this.workspace.handoffBusy) return 'sending';
+    return this.workspace.writeState === 'pending' ? 'pending' : 'inbox_handoff_send';
   }
 
   @Builder replyBox() {
@@ -703,7 +734,7 @@ export struct InboxWorkspacePage {
         if (this.workspace.threadReplyTo) Row({ space: Tokens.gap }) {
           Text(tr(this.workspace.threadReply ? 'inbox_thread_reply' : 'inbox_message_reply') + ' · ' + this.workspace.threadReplyTo)
             .fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).layoutWeight(1)
-          Button(tr('close'), { buttonStyle: ButtonStyleMode.TEXTUAL }).onClick(() => this.workspace.setThreadTarget('', false))
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('close')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('close', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('close')).bindTips(tr('close')).onClick(() => this.workspace.setThreadTarget('', false))
         }.width('100%')
         TextArea({ text: this.workspace.replyDraft, placeholder: tr('reply') }).height(Tokens.inputExpanded)
           .enabled(this.workspace.draftReady && !this.workspace.draftLoading && !['sending', 'pending', 'unknown'].includes(this.workspace.writeState))
@@ -711,23 +742,24 @@ export struct InboxWorkspacePage {
         if (this.workspace.isGeneric()) {
           if (this.workspace.attachment) Row({ space: Tokens.gap }) {
             Text(this.workspace.attachment.name + ' · ' + inboxBytesText(this.workspace.attachment.size)).layoutWeight(1)
-            Button(tr('remove'), { buttonStyle: ButtonStyleMode.TEXTUAL }).onClick(() => this.workspace.removeAttachment())
+            Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('remove')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('remove', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('remove') + ' ' + this.workspace.attachment.name).bindTips(tr('remove') + ' ' + this.workspace.attachment.name).enabled(this.workspace.canWrite()).onClick(() => this.workspace.removeAttachment())
+            Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.attachmentSendKey())) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.link); else SymbolGlyph(IconActions.symbol(this.attachmentSendKey())).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.attachmentSendKey(), false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr(this.attachmentSendKey())).bindTips(tr(this.attachmentSendKey()))
+              .enabled(this.workspace.canSendGeneric()).onClick(() => this.confirmAttachmentSend())
           }.width('100%')
           Row({ space: Tokens.gap }) {
             if (this.workspace.canSendGeneric() && this.workspace.capability('attachments')) {
-              Button(tr('attachment'), { buttonStyle: ButtonStyleMode.TEXTUAL }).enabled(!this.pickerBusy && !this.workspace.attachmentBusy)
+              Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('attachment')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('attachment', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('attachment')).bindTips(tr('attachment')).enabled(!this.pickerBusy && !this.workspace.attachmentBusy)
                 .onClick(() => this.pickConversationAttachment())
             }
-            if (this.workspace.attachment) Button(tr(this.workspace.attachmentBusy ? 'sending' : 'inbox_send_attachment'))
-              .enabled(!this.workspace.attachmentBusy && this.workspace.canSendGeneric()).onClick(() => this.confirmAttachmentSend())
-            Button(tr(this.workspace.writeState === 'pending' || this.workspace.writeState === 'unknown' ? 'pending' : 'send'))
+
+            Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.conversationSendKey())) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.onAction); else SymbolGlyph(IconActions.symbol(this.conversationSendKey())).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.conversationSendKey(), true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr(this.conversationSendKey())).bindTips(tr(this.conversationSendKey()))
               .enabled(this.workspace.replyDraft.trim().length > 0 && this.workspace.canSendGeneric() && !['sending', 'pending', 'unknown'].includes(this.workspace.writeState))
               .onClick(() => this.confirmConversationSend())
           }.width('100%')
         } else {
-          Button(tr(this.workspace.writeState === 'pending' || this.workspace.writeState === 'unknown' ? 'pending' : 'send'))
-            .enabled(this.workspace.replyDraft.trim().length > 0 && this.workspace.draftReady && !['sending', 'pending', 'unknown'].includes(this.workspace.writeState))
-            .onClick(() => this.confirmReply()).width('100%')
+          Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.conversationSendKey())) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.onAction); else SymbolGlyph(IconActions.symbol(this.conversationSendKey())).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.conversationSendKey(), true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr(this.conversationSendKey())).bindTips(tr(this.conversationSendKey()))
+            .enabled(this.workspace.replyDraft.trim().length > 0 && this.workspace.draftReady && this.workspace.canWrite())
+            .onClick(() => this.confirmReply())
         }
         if (this.workspace.writeState) Text(tr('inbox_write_' + this.workspace.writeState)).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).width('100%')
       }.width('100%').padding(Tokens.inset).alignItems(HorizontalAlign.Start)
@@ -755,9 +787,9 @@ export struct InboxWorkspacePage {
         }.width('100%').padding(Tokens.page).alignItems(HorizontalAlign.Start)
       }.layoutWeight(1).width('100%').align(Alignment.TopStart)
       if (!this.workspace.isReference()) Row({ space: Tokens.gap }) {
-        Button(tr(this.workspace.isHandled() ? 'reopen' : 'process')).attributeModifier(ButtonStyles.secondary).enabled(!this.workspace.writeState || !['saving', 'sending'].includes(this.workspace.writeState))
-          .onClick(() => this.workspace.processInbox().then((changed: boolean) => this.acknowledged(changed))).layoutWeight(1)
-        Button(tr('handoff')).attributeModifier(ButtonStyles.primary).enabled(!this.workspace.handoffBusy).onClick(() => this.openHandoff()).layoutWeight(1)
+        Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.workspace.isHandled() ? 'reopen' : 'process')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.link); else SymbolGlyph(IconActions.symbol(this.workspace.isHandled() ? 'reopen' : 'process')).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.workspace.isHandled() ? 'reopen' : 'process', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr(this.workspace.isHandled() ? 'reopen' : 'process')).bindTips(tr(this.workspace.isHandled() ? 'reopen' : 'process')).enabled(this.workspace.canWrite())
+          .onClick(() => this.workspace.processInbox().then((changed: boolean) => this.acknowledged(changed)))
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('handoff')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('handoff', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('handoff')).bindTips(tr('handoff')).enabled(this.workspace.canWrite()).onClick(() => this.openHandoff())
       }.width('100%').padding({ left: Tokens.page, right: Tokens.page, bottom: Tokens.footer })
       this.replyBox()
     }.width('100%').height('100%')
@@ -770,7 +802,7 @@ export struct InboxWorkspacePage {
 
   @Builder mailComposer() {
     Column({ space: Tokens.gap }) {
-      if (this.workspace.mailAccounts.length > 1) Select(this.optionList(this.workspace.mailAccounts.map((item: Record<string, Object>) => this.workspace.mailAccountName(Wire.text(item, 'id')))))
+      if (this.workspace.mailAccounts.length > 1) Select(this.optionList(this.workspace.mailAccounts.map((item: Record<string, Object>) => this.workspace.mailAccountName(Wire.text(item, 'id'))))).attributeModifier(SelectStyles.inline)
         .selected(this.mailAccountIndex()).onSelect((index: number) => this.workspace.selectMailComposeAccount(Wire.text(this.workspace.mailAccounts[index], 'id')))
       TextInput({ text: this.workspace.mailComposeTo, placeholder: tr('to') }).enabled(this.workspace.mailComposeReady && !this.workspace.mailComposeBlocked)
         .onChange((value: string) => this.workspace.setMailComposeField('to', value))
@@ -784,8 +816,7 @@ export struct InboxWorkspacePage {
         .enabled(this.workspace.mailComposeReady && !this.workspace.mailComposeBlocked).onChange((value: string) => this.workspace.setMailComposeField('text', value))
       if (this.workspace.mailComposeError) Text(tr(this.workspace.mailComposeError)).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
       if (this.workspace.mailComposeBlocked) Text(tr('inbox_write_' + this.workspace.mailComposeState)).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
-      Button(tr(this.workspace.mailComposeBusy ? 'sending' : 'send')).enabled(this.workspace.mailComposeValid() && !this.workspace.mailComposeBusy)
-        .width('100%').height(Tokens.touch).onClick(() => this.confirmCompose())
+      Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.mailSendKey())) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.onAction); else SymbolGlyph(IconActions.symbol(this.mailSendKey())).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.mailSendKey(), true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr(this.mailSendKey())).bindTips(tr(this.mailSendKey())).enabled(this.workspace.mailComposeValid() && !this.workspace.mailComposeBusy).onClick(() => this.confirmCompose()).alignSelf(ItemAlign.End)
     }.width('100%').padding(Tokens.page).alignItems(HorizontalAlign.Start)
   }
 
@@ -795,9 +826,8 @@ export struct InboxWorkspacePage {
         .enabled(!['pending', 'unknown'].includes(this.workspace.writeState))
         .onChange((value: string) => { this.handoffText = value; this.workspace.handoffDraft = value; })
       if (this.workspace.error) Text(tr(this.workspace.error)).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
-      Button(tr(this.workspace.handoffBusy ? 'sending' : ['pending', 'unknown'].includes(this.workspace.writeState) ? 'pending' : 'inbox_handoff_send'))
-        .enabled(!!this.handoffText.trim() && !this.workspace.handoffBusy && !['pending', 'unknown'].includes(this.workspace.writeState))
-        .attributeModifier(ButtonStyles.primary).width('100%').onClick(() => this.confirmHandoff())
+      Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.handoffSendKey())) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.onAction); else SymbolGlyph(IconActions.symbol(this.handoffSendKey())).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.handoffSendKey(), true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr(this.handoffSendKey())).bindTips(tr(this.handoffSendKey()))
+        .enabled(!!this.handoffText.trim() && this.workspace.canWrite()).onClick(() => this.confirmHandoff()).alignSelf(ItemAlign.End)
     }.width('100%').padding(Tokens.page).alignItems(HorizontalAlign.Start)
   }
 

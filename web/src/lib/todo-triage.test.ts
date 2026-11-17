@@ -81,7 +81,7 @@ describe("triage (docs/assistant/todo-status-sop.md, decision table)", () => {
       agents: [agent("unseen")], seen_at: hoursAgo(0),
       supervision: { supervisor: "conv", state: "parked", parked: { reason: "Check again", waiting_on: "date", until: hoursAgo(1), count: 1 } },
     });
-    expect(at(td)).toMatchObject({ section: "other", rule: "parked" });
+    expect(at(td)).toMatchObject({ section: "parked", rule: "parked" });
     expect(todoBucket(td, lookup, NOW)).toBe("open");
   });
 
@@ -157,7 +157,7 @@ describe("triage (docs/assistant/todo-status-sop.md, decision table)", () => {
     expect(at(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(0.5) }))).toMatchObject({ section: "done", rule: "seen" });
     expect(at(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(2) }))).toMatchObject({ section: "just_done", rule: "finished_unseen" });
     const url = "https://example.com/pull/1";
-    expect(at(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(0.5), pr_url: url, stage: "review", pr_status: { url, state: "open", draft: false, review: "pending", checks: "none", conflicts: false, checked_at: new Date(NOW).toISOString() } }))).toMatchObject({ section: "pr", rule: "pr_open" });
+    expect(at(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(0.5), pr_url: url, stage: "review", pr_status: { url, state: "open", draft: false, review: "pending", checks: "none", conflicts: false, checked_at: new Date(NOW).toISOString() } }))).toMatchObject({ section: "parked", rule: "pr_open" });
     // seen, it is no longer open work: every count reads it the same way
     expect(todoBucket(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(0.5) }), lookup, NOW)).toBe("closed");
     expect(todoBucket(todo("t", { agents: [agent("unseen")] }), lookup, NOW)).toBe("open");
@@ -188,19 +188,19 @@ describe("triage (docs/assistant/todo-status-sop.md, decision table)", () => {
     const facts = { url: "https://example.com/pull/7", state: "open" as const, draft: false, review: "required" as const, checks: "pending" as const, conflicts: false, checked_at: new Date(NOW - 60_000).toISOString() };
     const td = todo("waiting-pr", { pr_url: `${facts.url}/`, pr_status: facts, delivery: { state: "pr" }, supervision: { supervisor: "c", state: "parked", parked: { reason: "Wait", waiting_on: "someone_else", until: hoursAgo(-4), count: 1 } } });
     expect(waitingForMerge(td, lookup, NOW)).toBe(true);
-    expect(triage(td, lookup, NOW)).toMatchObject({ section: "pr", rule: "pr_open" });
-    expect(triageTodos([td], lookup, NOW)).toMatchObject({ open: 1, todoCounts: { pr: 1 } });
+    expect(triage(td, lookup, NOW)).toMatchObject({ section: "parked", rule: "pr_open" });
+    expect(triageTodos([td], lookup, NOW)).toMatchObject({ open: 1, todoCounts: { parked: 1 } });
   });
 
   it("does not infer waiting for merge from stale, unknown, mismatched, draft, merged or closed facts", () => {
     const facts = { url: "https://example.com/pull/7", state: "open" as const, draft: false, review: "approved" as const, checks: "success" as const, conflicts: false, checked_at: new Date(NOW - 16 * 60_000).toISOString() };
-    expect(triage(todo("legacy", { pr_url: facts.url, delivery: { state: "pr" } }), lookup, NOW).section).not.toBe("pr");
+    expect(triage(todo("legacy", { pr_url: facts.url, delivery: { state: "pr" } }), lookup, NOW).section).not.toBe("parked");
     expect(waitingForMerge(todo("stale", { pr_url: facts.url, pr_status: facts }), lookup, NOW)).toBe(false);
     expect(waitingForMerge(todo("mismatch", { pr_url: facts.url, pr_status: { ...facts, url: "https://example.com/pull/8", checked_at: new Date(NOW).toISOString() } }), lookup, NOW)).toBe(false);
     for (const patch of [{ draft: true }, { state: "merged" as const }, { state: "closed" as const }]) {
       const td = todo("terminal", { pr_url: facts.url, delivery: { state: "pr" }, pr_status: { ...facts, checked_at: new Date(NOW).toISOString(), ...patch } });
       expect(waitingForMerge(td, lookup, NOW)).toBe(false);
-      expect(triage(td, lookup, NOW).section).not.toBe("pr");
+      expect(triage(td, lookup, NOW).section).not.toBe("parked");
     }
   });
 
@@ -260,12 +260,12 @@ describe("triageTodos", () => {
     ];
     const r = triageTodos(list, lookup, NOW);
     expect(r.sections.working.map((g) => [g.lead.id, g.members.map((m) => m.id)])).toEqual([["fix", ["fix", "test"]]]);
-    expect(r.sections.pr.map((g) => g.members.map((m) => m.id))).toEqual([["pr-a", "pr-b"]]);
+    expect(r.sections.parked.map((g) => g.members.map((m) => m.id))).toEqual([["pr-a", "pr-b"]]);
     expect(r.sections.other.map((g) => g.lead.id)).toEqual(["lone"]);
   });
 
   it("lists the unfinished sections open above Just finished, Shelved and Done folded with Done last (#5707)", () => {
-    expect(TRIAGE_SECTIONS).toEqual(["waiting", "working", "pr", "parked", "other", "just_done", "shelved", "done"]);
+    expect(TRIAGE_SECTIONS).toEqual(["waiting", "working", "parked", "other", "just_done", "shelved", "done"]);
     expect([...FOLDED_SECTIONS]).toEqual(["shelved", "done"]);
   });
 

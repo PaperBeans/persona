@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { ComposeListItemV2, ContentItemV2, CapsuleSegmentButtonV2, SegmentButtonV2Items } from '@kit.ArkUI';
 import { ClientModel } from '../models/ClientModel';
 import { MarkdownText } from './MarkdownText';
@@ -77,14 +80,14 @@ export struct ResourcePage {
         TextArea({ text: this.content, placeholder: tr('content') }).onChange((value: string) => this.content = value).height(Tokens.inputExpanded)
       }
       if (this.model.error) Text(tr(this.model.error)).fontColor($r('app.color.persona_danger'))
-      Button(tr('save')).enabled(this.kind === 'knowledge' || this.title.trim().length > 0).onClick(() => this.save()).id('resource.save')
+      Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('save')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('save', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('save')).bindTips(tr('save')).enabled(this.kind === 'knowledge' || this.title.trim().length > 0).onClick(() => this.save()).id('resource.save')
     }.padding(Tokens.page).width('100%')
   }
   @Builder listContent() {
     Column() {
       Row({ space: Tokens.gap }) {
         Search({ value: this.search, placeholder: tr('search') }).onChange((value: string) => this.search = value).layoutWeight(1)
-        if (this.kind === 'todo') Button(tr('add')).onClick(() => this.edit()).height(Tokens.touch).id('todo.add')
+        if (this.kind === 'todo') Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('add')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('add', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('add')).bindTips(tr('add')).onClick(() => this.edit()).id('todo.add')
         if (this.kind === 'knowledge') {
           Select(['projects', 'chats', 'people', 'docs', 'meetings', 'events', 'recordings'].map((value: string): SelectOption => ({ value: tr(value) })))
             .value(tr(this.model.knowledgeKind)).onSelect((index: number) => {
@@ -116,17 +119,17 @@ export struct ResourcePage {
               .onChange((done: boolean) => this.model.saveResource(this.model.selected, this.model.selected.title, this.model.selected.detail, done))
               .accessibilityText(tr('done'))
           }
-          if (this.model.selected.kind !== 'inbox') Button(tr('edit')).onClick(() => this.edit(this.model.selected))
-          Button(tr('handoff')).onClick(() => this.onHandoff(this.model.selected))
-          if (this.model.selected.kind === 'todo') Button(tr('delete')).onClick(() => this.confirmDelete())
-          if (this.model.selected.kind === 'inbox') Button(tr(this.model.selected.isDone() ? 'reopen' : 'process'))
+          if (this.model.selected.kind !== 'inbox') Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('edit')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('edit', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('edit')).bindTips(tr('edit')).onClick(() => this.edit(this.model.selected))
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('handoff')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('handoff', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('handoff')).bindTips(tr('handoff')).onClick(() => this.onHandoff(this.model.selected))
+          if (this.model.selected.kind === 'todo') Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('delete')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('delete', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('delete')).bindTips(tr('delete')).onClick(() => this.confirmDelete())
+          if (this.model.selected.kind === 'inbox') Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.model.selected.isDone() ? 'reopen' : 'process')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.link); else SymbolGlyph(IconActions.symbol(this.model.selected.isDone() ? 'reopen' : 'process')).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.model.selected.isDone() ? 'reopen' : 'process', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr(this.model.selected.isDone() ? 'reopen' : 'process')).bindTips(tr(this.model.selected.isDone() ? 'reopen' : 'process'))
             .onClick(() => this.model.processInbox(this.model.selected))
           if (this.model.error) Text(tr(this.model.error)).fontColor($r('app.color.persona_danger'))
         }.padding(Tokens.page).alignItems(HorizontalAlign.Start).width('100%')
       }.layoutWeight(1).width('100%')
       if (this.model.selected.kind === 'inbox') {
         TextArea({ text: this.reply, placeholder: tr('reply') }).height(Tokens.inputExpanded).onChange((value: string) => this.reply = value).id('inbox.reply')
-        Button(tr('send')).enabled(this.reply.trim().length > 0).onClick(() => this.confirmReply()).margin(Tokens.inset).id('inbox.send')
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('send')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('send', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('send')).bindTips(tr('send')).enabled(this.reply.trim().length > 0).onClick(() => this.confirmReply()).margin(Tokens.inset).id('inbox.send')
       }
     }.width('100%').height('100%')
   }

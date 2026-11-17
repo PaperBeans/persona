@@ -19,7 +19,7 @@ import PersonaWire
     }
 
     @Test func rowMenuForwardsEachActionOnceAndUsesUpdatedCallbacks() {
-        let actions = AgentRowMenu.Actions()
+        let actions = AgentMenuHandlers()
         let first = session("first", "working")
         let second = session("second", "working")
         actions.close(first)

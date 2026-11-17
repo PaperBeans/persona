@@ -12,8 +12,8 @@ const documents = readdirSync(fixtureDir).filter((f) => f.endsWith('.json')).sor
   file, ...JSON.parse(readFileSync(new URL(file, fixtureDir), 'utf8')),
 }));
 const cases = documents.filter((doc) => doc.operation === 'agents_list').flatMap((doc) => doc.cases);
-assert.equal(cases.length, 30, 'the exact checked-in projection corpus');
-assert.equal(new Set(cases.map((c) => c.name)).size, 30, 'unique case names');
+assert.equal(cases.length, 33, 'the exact checked-in projection corpus');
+assert.equal(new Set(cases.map((c) => c.name)).size, 33, 'unique case names');
 const prefs = {pinsSpaces: [], pinsSessions: [], mutesSpaces: [], mutesSessions: [], mutesAllowed: []};
 
 function nativeInput(c) {
@@ -35,7 +35,7 @@ function nativeInput(c) {
   };
 }
 
-test('the production core adapter matches every unchanged fixture through real NAPI-shaped JSON', async () => {
+test('the production core adapter matches every fixture through real NAPI-shaped JSON', async () => {
   const host = new HostCore(helperPath);
   const adapter = new CoreAgentListAdapter();
   try {

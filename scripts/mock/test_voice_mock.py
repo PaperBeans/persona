@@ -1,7 +1,8 @@
 """The voice mock for the iOS and web voice modes (voice_mock.py, docs/assistant/voice.md 6.8, 6.11): /info at protocol 2, the
 extension in both lists, and the protocol 2 script on the socket (ready → captions → run → link → ask → refused → done;
 interrupt → clear; resend; the conversation turning working; the PCM frames it got), while a protocol 1 start still gets
-mock_hub.py's old script; on demand an unprompted handover, held back and sent anyway (#5904)."""
+mock_hub.py's old script; on demand an unprompted handover, held back and sent anyway (#5904); a system call's surface
+and its hold frames (#9290)."""
 import base64
 import json
 import os
@@ -126,6 +127,7 @@ class VoiceMockTests(unittest.TestCase):
             self.assertEqual(info["protocol"], 2)
             self.assertIn("target", info["features"])
             self.assertIn("speech_gate", info["features"])
+            self.assertIn("hold", info["features"])
             self.assertEqual(info["setup"], [])
             self.assertEqual(self.get(prefix + "/voice/models")["default"], "voice-deep")
             self.assertTrue(self.get(prefix + "/voice/voices?model=voice-fast")["voices"])
@@ -262,6 +264,28 @@ class VoiceMockTests(unittest.TestCase):
             # What the app's settings say of the call (#5904): kept, so a UI test can read it back.
             self.assertIs(log["starts"][-1]["speech_gate"], False)
             self.assertIs(log["starts"][-1]["echo_cancellation"], True)
+            self.assertIsNone(log["starts"][-1]["surface"], "an in-app call says none")
+        finally:
+            ws.close()
+
+    def test_hold_pauses_until_its_off(self):
+        # #9290: a system call's surface is kept; hold on answers link paused, a repeat nothing, off link waking then
+        # live; while held the script's own pause and wake (0.8 s and 1.1 s at this pace) send no link frame.
+        ws = Socket(self.port, "/api/v1/extensions/voice/ws")
+        try:
+            ws.send({"type": "start", "protocol": 2, "target": TARGET, "surface": "call"})
+            self.assertIn("hold", ws.until(lambda f: f["type"] == "ready")[-1]["features"])
+            before = len(self.get("/mock/voice2")["holds"])
+            ws.send({"type": "hold", "on": True})
+            ws.until(lambda f: f["type"] == "link" and f["state"] == "paused", timeout=5)
+            time.sleep(1.5)
+            ws.send({"type": "hold", "on": True})
+            ws.send({"type": "hold", "on": False})
+            frames = ws.until(lambda f: f["type"] == "link" and f["state"] == "live", timeout=5)
+            self.assertEqual([f["state"] for f in frames if f["type"] == "link"], ["waking", "live"])
+            log = self.get("/mock/voice2")
+            self.assertEqual(log["holds"][before:], [True, True, False])
+            self.assertEqual(log["starts"][-1]["surface"], "call")
         finally:
             ws.close()
 

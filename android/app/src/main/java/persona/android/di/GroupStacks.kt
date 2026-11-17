@@ -12,6 +12,7 @@ import persona.core.data.ChatDataRepositories
 import persona.core.data.ScopedHubData
 import persona.core.hub.*
 import persona.feature.chat.ChatAppBindings
+import persona.platform.phonetools.AndroidPhoneTools
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.*
@@ -96,7 +97,11 @@ class GroupStacks @Inject constructor(application: Application, private val runt
             override fun reconnect() = group.reconnect()
             override fun send(message: JsonObject) = connection.send(message)
         }
-        val plain = createChatWiring(data, repositories, connection, view, ::current)
+        val plain = createChatWiring(data, repositories, connection, view, ::current,
+            // The conversation's Undo of the assistant's calendar write (iOS `CalendarTool.remove`): this phone's own
+            // delete, so it is not a tool call that would ask the user to confirm again. The current group's phone is the
+            // only phone these cards can undo on: a card made on another phone has no event here and says so.
+            quickResults = persona.core.contracts.api.PhoneQuickResults { id -> AndroidPhoneTools(app) { true }.removeCalendarEvent(id) })
         return GroupStack(group, data, connection, repositories, plain.inGroup(names), plain)
     }
 

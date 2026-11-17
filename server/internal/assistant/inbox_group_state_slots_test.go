@@ -105,7 +105,7 @@ func wakeSlotsStateTestRequireOnlySend(t *testing.T, h *inboxHub, count int, ses
 	if !strings.HasPrefix(last, session+": ") {
 		t.Fatalf("the latest send went to the wrong conversation: %q, want %s", last, session)
 	}
-	if text != "" && last != session+": "+text {
+	if text != "" && inboxTestNotificationText(last) != session+": "+text {
 		t.Fatalf("the deferred notification changed:\nwant %s: %s\n got %s", session, text, last)
 	}
 }

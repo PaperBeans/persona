@@ -13,8 +13,7 @@ import (
 // Ctrl+B does in the terminal, so the model sees the message at once; the work goes on and its completion comes back
 // as a task notification (#3278).
 
-// backgroundTasksMinVersion is the first Claude Code whose stream-json control channel takes background_tasks
-// (Agent SDK 0.2.139).
+// backgroundTasksMinVersion is the first Claude Code whose stream-json control channel takes background_tasks.
 var backgroundTasksMinVersion = [3]int{2, 1, 139}
 
 // midTurn says whether a message to p now comes in the middle of a turn: it is Claude on the CLI, busy answering. Such
@@ -24,7 +23,7 @@ var backgroundTasksMinVersion = [3]int{2, 1, 139}
 func (p *assistantProc) midTurn() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.agent == "claude" && p.runtime == "" && p.busy
+	return p.agent == "claude" && p.busy
 }
 
 // interjects says whether a message to p now goes in as an interjection that moves foreground work to the background:

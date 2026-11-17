@@ -226,6 +226,7 @@
     <string name="designsystem_series_separator">"; "</string>
     <!-- Chat parts: plans, work rows, the send button -->
     <string name="designsystem_plan_spoken">Plan, step %1$d of %2$d, %3$s</string>
+    <string name="designsystem_count_spoken">%1$s, %2$d</string>
     <string name="designsystem_plan_all_done">All done</string>
     <string name="designsystem_plan_step">Step %1$d/%2$d</string>
     <string name="designsystem_plan_item_done">Done</string>

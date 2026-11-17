@@ -9,6 +9,7 @@ import org.robolectric.annotation.Config
 import persona.core.contracts.DetectedEngine
 import persona.core.contracts.Machine
 import persona.core.contracts.api.*
+import persona.core.domain.engines.Engines
 import persona.core.hub.HubError
 import persona.core.hub.HubFailure
 import kotlinx.coroutines.CompletableDeferred
@@ -69,6 +70,49 @@ class EngineSelectionModelTest {
         live.choose("herdr")
         live.synchronize(machine.copy(engine = "orca"))
         assertEquals("herdr", live.state.value.selected)
+    }
+
+    @Test fun noTerminalEngineIsChosenSavedAndTakenBack() = runBlocking {
+        val withSets = machine.copy(engineHosts = listOf("herdr"))
+        val sent = mutableListOf<String>()
+        val applied = mutableListOf<Machine>()
+        // The hub keeps `engine` herdr for the empty set and says it in `engine_hosts`.
+        val model = EngineSelectionModel(withSets, put = { _, engine ->
+            sent += engine
+            if (engine == Engines.NONE) withSets.copy(engineHosts = emptyList()) else withSets.copy(engine = engine, engineHosts = listOf(engine))
+        }, applied = { applied += it })
+        assertEquals("herdr", model.state.value.selected)
+        model.choose(Engines.NONE)
+        assertTrue(model.save("m1"))
+        assertEquals(listOf(Engines.NONE), sent)
+        assertEquals(Engines.NONE, model.state.value.selected)
+        assertEquals(emptyList<String>(), applied.single().engineHosts)
+        // A push that says the same changes nothing; one from another client moves the picker until it is edited.
+        model.synchronize(withSets.copy(engineHosts = emptyList()))
+        assertEquals(Engines.NONE, model.state.value.selected)
+        model.synchronize(withSets.copy(engine = "orca", engineHosts = listOf("orca")))
+        assertEquals("orca", model.state.value.selected)
+        // Back to an engine.
+        model.choose("herdr")
+        assertTrue(model.save("m1"))
+        assertEquals("herdr", model.state.value.selected)
+        assertEquals(listOf(Engines.NONE, "herdr"), sent)
+    }
+
+    @Test fun aMachineSavedWithoutEnginesOpensOnNoTerminalEngineAndAFailedSaveStays() = runBlocking {
+        val offline = machine.copy(online = false, engines = emptyList(), engineHosts = emptyList())
+        val model = EngineSelectionModel(offline, put = { _, _ -> throw java.io.IOException("reset") }, applied = {})
+        assertEquals(Engines.NONE, model.state.value.selected)
+        model.choose("orca")
+        assertFalse(model.save("m1"))
+        assertEquals("orca", model.state.value.selected)
+        model.choose(Engines.NONE)
+        assertNull(model.state.value.error)
+        // Offline is saved too, and the hub's answer keeps the choice.
+        val saved = EngineSelectionModel(offline.copy(engineHosts = listOf("herdr")), put = { _, _ -> offline }, applied = {})
+        saved.choose(Engines.NONE)
+        assertTrue(saved.save("m1"))
+        assertEquals(Engines.NONE, saved.state.value.selected)
     }
 
     @Test fun noSecondSaveWhileOneIsRunning() = runBlocking {

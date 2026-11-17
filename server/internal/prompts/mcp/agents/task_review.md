@@ -1,10 +1,10 @@
-Review a task you handed out after checking its work. Accepted closes it (its Agent is stopped once it stays still; its terminal stays); rework sends gaps to the same Agent (at most 2 rounds; a third is refused unless it carries a complete owner decision). A stopped Agent is read-only: use agent_start for a replacement. A task only waiting for something is not a decision; park it with source-backed evidence. A needs_user verdict is only for an answerable owner-only decision and requires why_owner, reason, recommend, 2–4 options (recommended first, each with leads_to), and cost_of_waiting. Otherwise decide within your authority, send the Agent on, rework, or close it.
+Verify handed-out work. accepted closes it, stopping its idle Agent but keeping the terminal. rework sends gaps to that Agent: at most 2 rounds; a third requires a complete owner decision. A stopped Agent is read-only: replace with agent_start. External waits use parked with source evidence, not needs_user. Only answerable owner-only decisions use needs_user: why_owner, reason, recommend, 2–4 options (recommended first, each with leads_to), cost_of_waiting. Otherwise act within your authority, rework or close.
 
-For accepted with outcome done (the default) and nonempty current done_when, checks must contain each current criterion exactly once with met=true and nonblank evidence. Missing, duplicate, unknown or unmet checks, or blank evidence, are refused before any review or completion is written; user_check does not relax this. outcome cannot, cancelled and tasks without done_when keep their existing behavior. Other verdicts may omit checks; omitted progress stays unchanged. The completion report lists each criterion as met, not met or dropped (with its scope change), then also_done. Judge against the brief after logged scope changes, not a later handover; use task_review for every task a 督办 message says waits for review and do not accept on the Agent's word alone.
+accepted with outcome done (default) and current done_when requires every criterion exactly once in checks, met=true with nonblank evidence. Refuse missing/duplicate/unknown/unmet checks before writing; user_check cannot bypass this. outcome cannot, cancelled and no-criteria tasks are unchanged. Other verdicts may omit checks without erasing progress. Report each criterion as met, not met or dropped (logged scope change), then also_done. Judge the scoped brief, not a later handover or the Agent's word; review every task supervision asks you to.
 
-On supervised tasks, accepted and needs_user send one conclusion card in Lark with verdict, one-sentence reason and one link; needs_user also includes recommend, which the owner's “OK” selects. Give outcome, reason and link for accepted, and reason and recommend for needs_user. Do not duplicate the card. A deployed task's existing “Please verify” card is passed by acceptance; set user_check only when the owner must still inspect the result themselves. A needs_user decision defaults to recommend after 24 hours or its deadline unless why_owner is irreversible or visible_to_others; those never default and are reminded daily. A decision waiting 24 hours is rechecked once. Use can_wait only when nobody is blocked today, waiting costs little and no deadline is within 12 hours; the schema describes when the briefing hold is honored. Owner replies “You decide”, “This isn't what I asked for” and “Tell me the background first” return to supervision; do not ask the same question again or take an irreversible/externally visible step for them.
+Supervised accepted/needs_user send one Lark conclusion card (verdict, reason, link; needs_user adds recommend, selected by “OK”); do not duplicate it. Give accepted's outcome/reason/link or needs_user's reason/recommend. Acceptance passes an existing “Please verify” card; user_check means the owner must still inspect. needs_user defaults to recommend after 24h/deadline except irreversible or visible_to_others: never default those, remind daily. Recheck once at 24h. can_wait requires nobody blocked today, low waiting cost and no deadline within 12h (see schema). “You decide”, “This isn't what I asked for”, “Tell me the background first” return to supervision: don't repeat the question or take irreversible/external action.
 
-From a conversation other than main, on a task it does not supervise, only accepted and cancelled apply: send gaps with agent_send. A leader's needs_user also reaches main. Cancel only a duplicate or unwanted task; cancellation closes and archives its Agents and ends their waiting cards.
+A non-main conversation reviewing another supervisor's task may only accept/cancel; send gaps with agent_send. A leader's needs_user reaches main too. Cancel only duplicates/unwanted tasks; their Agents close/archive and waiting cards end.
 
 ```json
 {
@@ -132,9 +132,24 @@ From a conversation other than main, on a task it does not supervise, only accep
           },
           "description": "required for person_reply and merge_review: the request has already been sent"
         },
-        "ready": {"type": "boolean", "enum": [true], "description": "merge_review only: the named reviewer can review the PR/MR"}
+        "ready": {"type": "boolean", "enum": [true], "description": "merge_review only: the named reviewer can review the PR/MR"},
+        "reply": {
+          "type": "object",
+          "required": ["source", "brand", "app_id", "account_open_id", "person_open_id", "chat_id", "thread_id", "request_message_id"],
+          "properties": {
+            "source": {"type": "string", "enum": ["larkcli"]},
+            "brand": {"type": "string", "enum": ["feishu", "lark"]},
+            "app_id": {"type": "string"},
+            "account_open_id": {"type": "string"},
+            "person_open_id": {"type": "string", "description": "expected human OpenID in this app, not self"},
+            "chat_id": {"type": "string"},
+            "thread_id": {"type": "string", "description": "provider topic ID, not root-message ID"},
+            "request_message_id": {"type": "string"}
+          },
+          "description": "person_reply: exact IDs from a configured lark-cli reader, never names. contact.url must be the sent request's matching topic AppLink. A verified reply asks the current supervisor to review, not direct Agent delivery"
+        }
       },
-      "description": "required for parked; do not supply recorded_by. Inspect the source receipt; the tool records your attestation, not an independent provider check. recorded_by is server-authored for the current task_review conversation and is output only. Missing evidence on a legacy park means unrecorded, not verified"
+      "description": "required for parked. Inspect the source receipt: this records your attestation, not a provider check. Do not supply recorded_by (current conversation, server-authored/output only). Legacy missing evidence is unrecorded, not verified"
     }
   }
 }

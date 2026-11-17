@@ -64,10 +64,10 @@ func (c *conversation) ending(reason string) {
 }
 
 // callLines are what the call's last line counts of the conversation's own: the user's lines (captions and typed) and
-// the model's that had words, and how often its upstream paused.
+// the model's that had words, how often its upstream paused, and how often the app put it on hold.
 type callLines struct {
-	user, model, pauses int
-	meeting             string // a meeting call's Talk spans and audio (meetingCall.meetingLog)
+	user, model, pauses, holds int
+	meeting                    string // a meeting call's Talk spans and audio (meetingCall.meetingLog)
 }
 
 // summary is the call's last line, after "conversation closed".
@@ -91,10 +91,14 @@ func (c *conversation) summary(n callLines) string {
 	if !l.opened.IsZero() {
 		took = time.Since(l.opened).Round(time.Second)
 	}
+	holds := ""
+	if n.holds > 0 {
+		holds = fmt.Sprintf(", holds %d", n.holds)
+	}
 	return fmt.Sprintf("after %v (%s): user lines %d (typed %d), model lines %d, delegations %d, function calls %d, runs %d%s, "+
-		"observed turns %d, cards asked %d, reconnects %d, pauses %d, nudges %d%s", took, firstNonEmpty(l.reason, "ended"), n.user,
+		"observed turns %d, cards asked %d, reconnects %d, pauses %d, nudges %d%s%s", took, firstNonEmpty(l.reason, "ended"), n.user,
 		l.typed, n.model, l.delegations, l.calls, len(l.runs), byState, l.observed, l.cards, l.reconnects, n.pauses, l.nudges,
-		n.meeting)
+		holds, n.meeting)
 }
 
 // errorRunes is the most of the service's own words on an error of a live session that the log keeps.
@@ -249,6 +253,9 @@ func (c *conversation) logStart(s *startFrame, p *Provider) {
 			echo = map[bool]string{true: "on", false: "off"}[*s.EchoCancellation]
 		}
 		more = append(more, fmt.Sprintf("meeting call for recording %s (echo cancellation %s)", c.meeting.recording, echo))
+	}
+	if s.Surface == surfaceCall { // only the one value: the log never says what an app wrote there (it is shared)
+		more = append(more, "surface call")
 	}
 	extra := ""
 	if len(more) > 0 {

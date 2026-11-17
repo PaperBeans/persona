@@ -79,6 +79,14 @@
     {
       "name": "persona_subtle",
       "value": "#F1F3F6"
+    },
+    {
+      "name": "persona_ai",
+      "value": "#5B4FD6"
+    },
+    {
+      "name": "persona_teal",
+      "value": "#087F8C"
     }
   ]
 }

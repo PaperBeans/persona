@@ -57,7 +57,8 @@ export function createPiHost(deps, options = {}) {
   const agent = options.agent ?? 'pi'
   const instancePrefix = options.instancePrefix ?? 'pi'
   const interactionPrefix = options.interactionPrefix ?? 'pi'
-  const resumeCommand = options.resumeCommand ?? ['pi', '--session']
+  // --approve: the resume runs in a herdr tab nobody watches, where pi's project Trust prompt would hold it (#9462).
+  const resumeCommand = options.resumeCommand ?? ['pi', '--approve', '--session']
   const pid = deps.pid ?? process.pid
   const listDisk = options.listDisk === true && web !== undefined
   const log = deps.log ?? (() => {})

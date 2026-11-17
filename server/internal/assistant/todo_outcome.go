@@ -147,6 +147,9 @@ func (s *Service) goRecordTaskOutcome(t Todo, doneAt time.Time) {
 	s.tasks.outcomeRuns.Add(1)
 	go func() {
 		defer s.tasks.outcomeRuns.Done()
+		if t.Source != nil {
+			s.sourceReportStep(t.ID, true) // a final answer need not wait for the model-written summary
+		}
 		s.recordTaskOutcome(t, doneAt)
 		s.sourceReportNow(t.ID) // the outcome is as written as it will be: tell where the request came from (todo_source.go)
 	}()

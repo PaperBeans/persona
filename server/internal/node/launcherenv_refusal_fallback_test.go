@@ -2,8 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/json"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -247,51 +245,6 @@ func TestRefusalFallbackInGeneratedSettings(t *testing.T) {
 				t.Fatal(err)
 			}
 			check("a Persona conversation's settings (main "+map[bool]string{true: "yes", false: "no"}[main]+")", read(t, path))
-		}
-	}
-}
-
-// The main conversation on the Agent SDK: the bridge's child gets it in its environment, replacing the node's, and in
-// the settings env the persona_start line pins. An empty value from the launcher's environment reaches both.
-func TestRefusalFallbackReachesTheSDKStart(t *testing.T) {
-	agentSandboxFakes(t, macSandbox)
-	b := sdkBridge{js: jsRuntime{Path: "/opt/bin/node"}, script: "/x/bridge.mjs", claude: "/opt/bin/claude"}
-	n := agentNode(t, false)
-	profile := filepath.Join(n.home, "profile")
-	if err := os.MkdirAll(profile, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("CLAUDE_CONFIG_DIR", profile)
-	n.setManaged(refusalLaunchers())
-	for _, tc := range []struct {
-		launcher, want string // "-": not set by Persona, the node's stays
-	}{
-		{"gw", "1"},
-		{"emptied", ""},
-		{"listed", "-"},
-		{"official", "-"},
-	} {
-		s := sdkStart{id: "s1", cwd: filepath.Join(n.dir, "assistant"), configDir: profile, mcp: map[string]any{}}
-		cmd, first, err := n.sdkCommand(b, tc.launcher, s, []string{"PATH=/usr/bin", refusalFallbackOff + "=0"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var start struct {
-			Options struct{ Settings struct{ Env map[string]any } }
-		}
-		if err := json.Unmarshal(first, &start); err != nil {
-			t.Fatal(err)
-		}
-		pinned, set := start.Options.Settings.Env[refusalFallbackOff]
-		proc := envEntries(cmd.Environ(), refusalFallbackOff)
-		if tc.want == "-" {
-			if set || len(proc) != 1 || proc[0] != "0" {
-				t.Errorf("%s: settings %v (set %v), process %q; want the node's own", tc.launcher, pinned, set, proc)
-			}
-			continue
-		}
-		if !set || pinned != tc.want || len(proc) != 1 || proc[0] != tc.want {
-			t.Errorf("%s: settings %v (set %v), process %q; want %q in both", tc.launcher, pinned, set, proc, tc.want)
 		}
 	}
 }

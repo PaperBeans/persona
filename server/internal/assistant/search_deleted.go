@@ -34,6 +34,10 @@ func (s *Service) finishDeletedConversation(ctx context.Context, machine, id str
 	if err := s.dropSearchIndex(ctx, s.searchDB(), machine, id); err != nil {
 		return err
 	}
+	// A deleted conversation takes its user-defined tags with it (conversation_tags.go); a missing record is fine.
+	if err := s.dropConversationTags(ctx, id); err != nil {
+		return err
+	}
 	s.sessionsChanged(machine)
 	s.publish(ctx)
 	return nil

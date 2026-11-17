@@ -104,7 +104,7 @@ struct PlanSheet: View {
             .background(Theme.pageBackground)
             .navigationTitle(String(localized: "Plan [Plan Sheet]"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done [Extension System Presentation c0b3fb]") { dismiss() } } }
+            .toolbar { SheetClose { dismiss() } }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)

@@ -90,14 +90,10 @@ struct SettingsView: View {
                 plugins = nil
             }
             .pageToolbar {
-                    // As a sheet over the shell (docs/apple/ios.md「New shell」): ChatGPT's × to close it.
+                    // As a sheet over the shell (docs/apple/ios.md「New shell」): ✕ at the leading corner, as every presented
+                    // page (#9653); Esc closes it too: a phone's full-screen cover has no swipe down.
                     if shell != nil || inSheet {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button { model.shellSettings = false } label: { Label("Close", systemImage: Theme.Icon.close) }
-                                .foregroundStyle(Color.primary)
-                                .keyboardShortcut(.cancelAction) // Esc closes it too: a phone's full-screen cover has no swipe down
-                                .accessibilityIdentifier("settings-close")
-                        }
+                        SheetClose(id: "settings-close") { model.shellSettings = false }
                     }
                 }
                 .navigationTitle("Settings")
@@ -373,6 +369,10 @@ struct SettingsView: View {
             #endif
         }
         else if d.bool(forKey: "openTriageSettings") { p.append(SettingsPage.triage) }
+        else if let a = d.string(forKey: "openAbout") { // About (YES), or its Export Diagnostics (export, #9460)
+            p.append(SettingsPage.about)
+            if a == "export" { p.append(SettingsPage.devExport) }
+        }
         else if d.string(forKey: "openKnowledgeSelection") != nil { p.append(SettingsPage.knowledgeSelection) } // (rule | chat | doc: with that sheet)
         else if d.string(forKey: "openAppearance") == "layout" { p.append(SettingsPage.layout) } // Layout (#2530)
         else if d.string(forKey: "openAppearance") == "navigation" { p.append(SettingsPage.navigation) } // Navigation (#6332)
@@ -418,6 +418,8 @@ enum SettingsPage: Hashable {
     /// account its chats follow; nil: the current assistant's).
     case feishu(manager: String? = nil)
     case models, agents, appearance, about, pairing, computers
+    /// Settings › About › Export Diagnostics (Developing Persona, #9460).
+    case devExport
     /// Settings › Session Triage (docs/assistant/agent-work.md「开关」).
     case triage
     /// Assistant Profile › Standing Authorizations (#7002): the go-aheads Persona answers for the owner, each revocable.
@@ -521,6 +523,7 @@ private struct SettingsDestinations: ViewModifier {
         case .agents: SettingsAgentView()
         case .appearance: AppearanceSettingsPage()
         case .about: SettingsAboutPage()
+        case .devExport: DevExportPage()
         case .pairing: SettingsPairingPage()
         case .computers: MachinesView(settingsScope: true)
         case .persona: PersonaSettingsPage()
@@ -1229,7 +1232,7 @@ private struct PairSheetChrome: ViewModifier {
             .navigationTitle("Connect Hub")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                SheetClose { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { Task { await connect() } } label: { if connecting { ProgressView() } else { Text("Connect [V N C Page a55741]") } }
                         .disabled(connecting || (!passwordMode && token.isEmpty) || url.isEmpty)

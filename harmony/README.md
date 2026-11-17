@@ -47,7 +47,6 @@ control; the core owns pinned/quiet/folded groups, quick filters, search and ord
 fold controls use the existing native tokens and components. The core lane's `tests/core-host/agent-sort-adapter.test.mjs`
 verifies **30/30** unchanged `agents_list` fixtures through the production adapter and real core. The portable
 `agent-workspace` suite also uses a synchronous real-core host fake, checking row identity, folds, preferences and
-offline-history membership. These are host-only results, not a HAP/NAPI or physical-device run (**blocked: no physical
-device**). No DevEco CLI is installed in this environment, so no native screenshot or release HAP was produced.
+offline-history membership. These are host checks, not HAP/NAPI or physical-device qualification. Build the actual HAP and collect the three-category native evidence in the verification guide; record unavailable real-device capabilities separately.
 
 The application icon reuses Persona's approved artwork. Run `python3 scripts/export-icons.py` from this directory to regenerate its layers, startup image and provenance manifest. The system applies its own launcher mask.

@@ -525,6 +525,7 @@ struct GitHubMarkdown: View {
     var body: some View {
         Markdown(text)
             .markdownTheme(.persona)
+            .asksBeforePictures() // other people wrote it (#9474)
             .readingContent()
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)

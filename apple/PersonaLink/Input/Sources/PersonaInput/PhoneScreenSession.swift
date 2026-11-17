@@ -117,6 +117,8 @@ final class PhoneScreenSession {
         }
         AX.setFullScreen(e, false)
         AX.setMinimized(e, false)
+        // Every window starts from the base width: one that needed a wider mode must not leave the next one small.
+        if d.width != d.fit.baseWidth { _ = d.set(width: d.fit.baseWidth, place: false) }
         var got = fill(e, d)
         // An app with a minimum size stays larger: a wider mode of the same shape holds it, and the picture scales.
         if let g = got {
@@ -130,9 +132,15 @@ final class PhoneScreenSession {
         AX.focus(e, pid: key.pid)
         placed = key
         let app = NSRunningApplication(processIdentifier: key.pid)
+        // Terminals and editors: bigger text while on the phone (PhoneScreenZoom), noted before the keys go so a crash
+        // still undoes it.
+        // Only once the record with the steps is on disk (#9540): a failed save sends no key.
+        PhoneScreenZoom.raise(&restore, pid: key.pid, window: key.id, steps: PhoneScreenZoom.steps(for: app?.bundleIdentifier),
+                              save: { RestoreFile.save($0) }, send: { AX.zoom(pid: key.pid, steps: $0) })
         let w = PhoneScreenWindow(pid: key.pid, window: key.id, app: app?.localizedName ?? "", bundle: app?.bundleIdentifier,
                                   title: AX.string(e, kAXTitleAttribute) ?? "", placed: true, frame: got?.phoneRect)
-        return PhoneScreenReply(ok: true, display: d.rect, placed: w)
+        // The arrangement too: the display may have changed width, and the phone finds it on the picture by all of them.
+        return PhoneScreenReply(ok: true, display: d.rect, displays: Displays.arrangement(known: [d.id: 2]), placed: w)
     }
 
     /// The window over the display's area (a fitted window first goes back to the base width).
@@ -145,11 +153,20 @@ final class PhoneScreenSession {
         defer { if placed == key { placed = nil } }
         guard let r = restore.record(pid: key.pid, window: key.id) else { return }
         if let e = AX.element(key) {
+            let undo = PhoneScreenZoom.undo(r)
+            if undo != 0 { // the text size back first: the keys go to the app's front window
+                AXUIElementPerformAction(e, kAXRaiseAction as CFString)
+                AX.set(e, kAXMainAttribute, kCFBooleanTrue)
+                AX.zoom(pid: key.pid, steps: undo)
+            }
             AX.move(e, to: CGRect(r.frame))
             if r.fullScreen { AX.setFullScreen(e, true) }
             if r.minimized { AX.setMinimized(e, true) }
         } else if NSRunningApplication(processIdentifier: key.pid) != nil, AX.windows(pid: key.pid) == nil {
             return // its app does not answer: keep the record for the next try
+        } else if PhoneScreenZoom.undo(r) != 0, let app = NSRunningApplication(processIdentifier: key.pid),
+                  PhoneScreenZoom.appWide.contains(app.bundleIdentifier ?? "") {
+            AX.zoom(pid: key.pid, steps: PhoneScreenZoom.undo(r)) // the window is gone, but the app's zoom is the app's
         }
         restore.remove(pid: key.pid, window: key.id)
         _ = save()
@@ -157,6 +174,15 @@ final class PhoneScreenSession {
 
     private func putBackLeftovers() {
         for r in restore.records { putBack(WindowKey(pid: r.pid, id: r.window)) }
+    }
+
+    /// `--phone-screen-restore` (#9500): what a helper that died left on its display, put back without a session (the
+    /// node runs it when it starts, and after a session ended with records still there). How many records it handled
+    /// and how many it kept (an app that didn't answer).
+    func restoreOnly() -> (done: Int, kept: Int) {
+        let had = restore.records.count
+        putBackLeftovers()
+        return (had - restore.records.count, restore.records.count)
     }
 
     // MARK: end
@@ -198,25 +224,40 @@ final class PhoneScreenSession {
 /// `~/.persona/phone-screen.json`, gone while there is nothing to put back. A few hundred bytes, read once a session and
 /// written before each move (the move must not happen without it).
 nonisolated enum RestoreFile {
-    static var url: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".persona/phone-screen.json") }
+    static let store = PhoneScreenRestoreStore(
+        url: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".persona/phone-screen.json"))
 
-    static func load() -> PhoneScreenRestore {
-        guard let data = try? Data(contentsOf: url) else { return PhoneScreenRestore() }
-        return (try? JSONDecoder().decode(PhoneScreenRestore.self, from: data)) ?? PhoneScreenRestore()
-    }
+    static func load() -> PhoneScreenRestore { store.readRecords() }
 
-    static func save(_ restore: PhoneScreenRestore) -> Bool {
-        if restore.records.isEmpty {
-            try? FileManager.default.removeItem(at: url)
-            return true
+    static func save(_ restore: PhoneScreenRestore) -> Bool { store.writeRecords(restore) }
+}
+
+/// `--phone-screen-restore`: put back what the records say, then exit (0, or 1 without Accessibility). The records are
+/// read off the main thread, the windows moved on it.
+enum PhoneScreenRestoreRun {
+    static func run() -> Never {
+        DispatchQueue.global().async {
+            let left = RestoreFile.load()
+            DispatchQueue.main.async {
+                guard !left.records.isEmpty else {
+                    print("phone_screen_restore: nothing")
+                    exit(0)
+                }
+                guard AX.trusted else {
+                    print("phone_screen_restore: no accessibility")
+                    exit(1)
+                }
+                let r = MainActor.assumeIsolated { () -> (done: Int, kept: Int) in
+                    let s = PhoneScreenSession()
+                    s.adopt(left)
+                    return s.restoreOnly()
+                }
+                print("phone_screen_restore: put back \(r.done), kept \(r.kept)")
+                exit(0)
+            }
         }
-        do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try JSONEncoder().encode(restore).write(to: url, options: .atomic)
-            return true
-        } catch {
-            return false
-        }
+        RunLoop.main.run()
+        exit(0)
     }
 }
 

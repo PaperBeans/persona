@@ -59,6 +59,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.node.requireDensity
+import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import persona.core.designsystem.icons.PhIcon
@@ -432,43 +435,95 @@ fun JRadio(selected: Boolean, onClick: (() -> Unit)?, modifier: Modifier = Modif
 
 // ------------------------------------------------------------------ segmented filters and chips
 
-data class JSegment(val label: String, val count: Int? = null, val status: Status? = null)
+/**
+ * One choice of [JSegmented]. [countTone]: the [count] in a capsule of that state's colours ([JToneCount]: none at 0,
+ * 99+ past 99) after the label, spoken with it ("Needs you, 12"); none: the count follows the label as plain text.
+ */
+data class JSegment(val label: String, val count: Int? = null, val status: Status? = null, val countTone: Status? = null)
 
 /**
- * A small set of mutually exclusive filters: a sliding pill in glass, underlined text tabs in brief, a ruled
- * strip of cells on the board. [compact] reduces spacing only; text keeps the ambient font scale.
+ * A small set of mutually exclusive filters. On Glass one pill slides to the chosen segment
+ * (`GlassSlidingPill`, `Theme.Motion.state`) and the label colour fades with it. An index outside
+ * the list draws no pill. Brief keeps underlined text tabs and Board a ruled strip of cells.
+ * [compact] reduces spacing only; text keeps the ambient font scale. [revealIn]: the [modifier]'s sideways scroll, in
+ * which the selected option is kept whole in sight ([revealWhenSelected]), [revealMargin] clear of an edge with more past
+ * it (where a fade covers it).
  */
 @Composable
-fun JSegmented(options: List<JSegment>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, compact: Boolean = false) {
+fun JSegmented(options: List<JSegment>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, compact: Boolean = false,
+               revealIn: androidx.compose.foundation.ScrollState? = null, revealMargin: Dp = Tokens.Space.flush) =
+    JSegmentedStrip(options, selected, onSelect, modifier, compact, revealIn, revealMargin)
+
+/**
+ * Brief's tabs scrolling in a strip [viewport] px wide that fades at an edge with more past it: when the edge falls between
+ * two tabs, or shows less than [peek] of the next, their gaps narrow, to no less than [JSegmented]'s compact gap, so that
+ * much of the next one shows under the fade ([peekGap]).
+ */
+internal data class TabPeek(val viewport: Int, val peek: Dp)
+
+/** [JSegmented], and in Brief with [peek] its tabs spaced so the next one past the edge shows ([TabPeek]). */
+@Composable
+internal fun JSegmentedStrip(options: List<JSegment>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, compact: Boolean = false,
+                             revealIn: androidx.compose.foundation.ScrollState? = null, revealMargin: Dp = Tokens.Space.flush, peek: TabPeek? = null) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
     fun text(segment: JSegment) = segment.label + (segment.count?.let { " $it" } ?: "")
     when (PersonaTheme.style) {
-        AppStyle.Glass -> Row(
-            modifier.clipDrawing(CircleShape).background(palette.surface)
+        // One pill, not a background on each segment. iOS: the system's sliding thumb (`Picker` `.segmented`).
+        AppStyle.Glass -> GlassSlidingPill(
+            selected = selected,
+            count = options.size,
+            color = palette.action,
+            modifier = modifier.clipDrawing(CircleShape).background(palette.surface)
                 .border(1.dp, Brush.verticalGradient(listOf(palette.strokeTop, palette.strokeBottom)), CircleShape)
                 .padding(if (compact) Tokens.Space.xxs else 4.dp.dense),
-        ) {
-            options.forEachIndexed { index, segment ->
-                val on = index == selected
-                Box(
-                    Modifier.clip(CircleShape).background(if (on) palette.action else Color.Transparent)
-                        .clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = on }
-                        .padding(horizontal = if (compact) Tokens.Space.s else 16.dp.dense, vertical = 9.dp.dense),
-                    contentAlignment = Alignment.Center,
-                ) { Text(text(segment), style = type.labelSmall, color = if (on) palette.onAction else palette.ink2, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }
+            segmentModifier = { index -> Modifier.revealWhenSelected(revealIn, index == selected, revealMargin) },
+        ) { index ->
+            val segment = options[index]
+            val on = index == selected
+            val spoken = segment.countTone?.let { spokenCount(segment.label, segment.count) }
+            Box(
+                Modifier.clip(CircleShape)
+                    .clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = on; spoken?.let { contentDescription = it } }
+                    .padding(horizontal = if (compact) Tokens.Space.s else 16.dp.dense, vertical = 9.dp.dense),
+                contentAlignment = Alignment.Center,
+            ) {
+                // One weight, as this row always had. Only the colour fades (`GlassSegmentLabel`).
+                val label: @Composable (String) -> Unit = {
+                    GlassSegmentLabel(
+                        it, selected = on, selectedColor = palette.onAction, idleColor = palette.ink2,
+                        style = type.labelSmall, softWrap = false,
+                    )
+                }
+                if (segment.countTone == null) label(text(segment))
+                else TonedSegmentLabel(segment, type.labelSmall, if (on) palette.onAction else palette.ink2, onFill = on, label = label)
             }
         }
-        AppStyle.Brief -> Row(modifier, horizontalArrangement = Arrangement.spacedBy(if (compact) Tokens.Space.s else 22.dp.dense)) {
-            options.forEachIndexed { index, segment ->
-                val on = index == selected
-                Column(
-                    Modifier.clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = on }.padding(vertical = 6.dp.dense),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(text(segment), style = type.label, color = if (on) palette.ink else palette.ink3, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(6.dp.dense))
-                    Box(Modifier.size(20.dp, 2.5.dp).clip(CircleShape).background(if (on) palette.ink else Color.Transparent))
+        AppStyle.Brief -> {
+            val gap = if (compact) Tokens.Space.s else JSegmentedBriefGap
+            val tabs: @Composable () -> Unit = {
+                options.forEachIndexed { index, segment ->
+                    val on = index == selected
+                    val spoken = segment.countTone?.let { spokenCount(segment.label, segment.count) }
+                    Column(
+                        Modifier.revealWhenSelected(revealIn, on, revealMargin).clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = on; spoken?.let { contentDescription = it } }.padding(vertical = 6.dp.dense),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        if (segment.countTone == null) Text(text(segment), style = type.label, color = if (on) palette.ink else palette.ink3, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                        else TonedSegmentLabel(segment, type.label, if (on) palette.ink else palette.ink3)
+                        Spacer(Modifier.height(6.dp.dense))
+                        Box(Modifier.size(20.dp, 2.5.dp).clip(CircleShape).background(if (on) palette.ink else Color.Transparent))
+                    }
+                }
+            }
+            if (peek == null) Row(modifier, horizontalArrangement = Arrangement.spacedBy(gap)) { tabs() }
+            else androidx.compose.ui.layout.Layout(tabs, modifier) { measurables, constraints ->
+                val placeables = measurables.map { it.measure(androidx.compose.ui.unit.Constraints(maxHeight = constraints.maxHeight)) }
+                val spacing = peekGap(placeables.map { it.width }, peek.viewport, gap.roundToPx(), peek.peek.roundToPx(), Tokens.Space.s.roundToPx())
+                val width = placeables.sumOf { it.width } + spacing * (placeables.size - 1).coerceAtLeast(0)
+                layout(width, placeables.maxOfOrNull { it.height } ?: 0) {
+                    var x = 0
+                    placeables.forEach { it.placeRelative(x, 0); x += it.width + spacing }
                 }
             }
         }
@@ -479,25 +534,153 @@ fun JSegmented(options: List<JSegment>, selected: Int, onSelect: (Int) -> Unit, 
                 val on = index == selected
                 if (index > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(palette.line))
                 val accent = palette.accent
+                val spoken = segment.countTone?.let { spokenCount(segment.label, segment.count) }
                 Box(
-                    Modifier.weight(1f, fill = false)
+                    Modifier.weight(1f, fill = false).revealWhenSelected(revealIn, on, revealMargin)
                         // The selected one's underline is drawn, not laid out: a fillMaxWidth line widened that segment to
                         // its whole share of the row (the image editor's "Pen" took the row's width, "Box" stayed small).
                         .drawWithContent {
                             drawContent()
                             if (on) drawRect(accent, Offset(0f, size.height - 2.dp.toPx()), Size(size.width, 2.dp.toPx()))
                         }
-                        .clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = on },
+                        .clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = on; spoken?.let { contentDescription = it } },
                 ) {
-                    Text(
-                        text(segment), style = type.labelSmall.copy(fontWeight = if (on) FontWeight.Bold else FontWeight.Medium),
+                    val padding = Modifier.padding(horizontal = if (compact) Tokens.Space.s else 14.dp.dense, vertical = 10.dp.dense)
+                    val style = type.labelSmall.copy(fontWeight = if (on) FontWeight.Bold else FontWeight.Medium)
+                    if (segment.countTone == null) Text(
+                        text(segment), style = style,
                         color = if (on) palette.ink else palette.ink2, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = if (compact) Tokens.Space.s else 14.dp.dense, vertical = 10.dp.dense),
+                        modifier = padding,
                     )
+                    else TonedSegmentLabel(segment, style, if (on) palette.ink else palette.ink2, padding)
                 }
             }
         }
     }
+}
+
+/** The room between two of Brief's tabs ([JSegmented]); a bar that splits its tabs in two keeps it between the parts. */
+internal val JSegmentedBriefGap: Dp get() = 22.dp.dense
+
+/**
+ * The gap between tabs of [widths] in a strip [viewport] wide ([TabPeek]): [gap] while they fit or while the edge shows at
+ * least [peek] of the first tab past it; else the narrowest gap, down to [least], that brings [peek] of that tab into sight,
+ * and [gap] again when even [least] can't.
+ */
+internal fun peekGap(widths: List<Int>, viewport: Int, gap: Int, peek: Int, least: Int): Int {
+    if (widths.size < 2 || viewport <= 0 || widths.sum() + gap * (widths.size - 1) <= viewport) return gap
+    var before = 0
+    for ((index, width) in widths.withIndex()) {
+        val start = before + gap * index
+        if (start + width > viewport) {
+            if (index == 0 || viewport - start >= peek) return gap
+            val narrower = (viewport - peek - before) / index
+            return if (narrower >= least) minOf(narrower, gap) else gap
+        }
+        before += width
+    }
+    return gap
+}
+
+/**
+ * A [JSegment] with a toned count: its label, then the count's capsule (none at 0); [onFill]: on the selected pill's fill.
+ * [label] draws the label (Glass's fades with its sliding pill).
+ */
+@Composable
+private fun TonedSegmentLabel(segment: JSegment, style: androidx.compose.ui.text.TextStyle, color: Color, modifier: Modifier = Modifier,
+                              onFill: Boolean = false,
+                              label: @Composable (String) -> Unit = { Text(it, style = style, color = color, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        label(segment.label)
+        val tone = segment.countTone ?: return@Row
+        segment.count?.takeIf { it > 0 }?.let { Spacer(Modifier.width(JChipTokens.countGap)); JToneCount(it, tone, onFill = onFill) }
+    }
+}
+
+/**
+ * While [selected], a choice in a row that scrolls sideways with [scroll] is scrolled whole into sight, by as little as it
+ * takes, when it is first placed and whenever it becomes selected (a search or a link choosing it, not only a tap); one
+ * already in sight stays where it is. [margin]: it stays that far from an edge the row can still scroll past, clear of
+ * a fade there. Only that row moves, never the page around it. Null [scroll]: nothing.
+ */
+fun Modifier.revealWhenSelected(scroll: androidx.compose.foundation.ScrollState?, selected: Boolean, margin: Dp = Tokens.Space.flush): Modifier =
+    if (scroll == null) this else this.then(RevealWhenSelected(scroll, selected, margin))
+
+private data class RevealWhenSelected(val scroll: androidx.compose.foundation.ScrollState, val selected: Boolean, val margin: Dp) :
+    androidx.compose.ui.node.ModifierNodeElement<RevealNode>() {
+    override fun create() = RevealNode(scroll, selected, margin)
+    override fun update(node: RevealNode) = node.update(scroll, selected, margin)
+    override fun androidx.compose.ui.platform.InspectorInfo.inspectableProperties() {
+        name = "revealWhenSelected"
+        properties["selected"] = selected
+        properties["margin"] = margin
+    }
+}
+
+private class RevealNode(private var scroll: androidx.compose.foundation.ScrollState, private var selected: Boolean, private var margin: Dp) :
+    Modifier.Node(), androidx.compose.ui.node.LayoutAwareModifierNode {
+    /** Where it sits along the row's content, from its last placement. */
+    private var start = -1
+    private var end = -1
+    private var pending = selected
+
+    override fun onPlaced(coordinates: androidx.compose.ui.layout.LayoutCoordinates) {
+        start = coordinates.positionInParent().x.toInt()
+        end = start + coordinates.size.width
+        if (pending) reveal()
+    }
+
+    fun update(scroll: androidx.compose.foundation.ScrollState, selected: Boolean, margin: Dp) {
+        this.scroll = scroll
+        this.margin = margin
+        if (selected && !this.selected) pending = true
+        this.selected = selected
+        if (pending) reveal()
+    }
+
+    private fun reveal() {
+        if (start < 0 || !isAttached) return
+        pending = false
+        if (!selected) return
+        coroutineScope.launch {
+            // Once the frame that placed it is done: a scroll written while the row is still being placed (its first
+            // frame, a choice made from outside) was taken but never moved the row.
+            androidx.compose.runtime.withFrameNanos { }
+            val viewport = scroll.viewportSize
+            // Clear of a fade at an edge with more past it; the row stops at its ends, where nothing fades.
+            val inset = with(requireDensity()) { margin.roundToPx() }.coerceAtMost((viewport - (end - start)) / 2).coerceAtLeast(0)
+            val target = when {
+                !selected || viewport <= 0 -> return@launch
+                start - inset < scroll.value -> start - inset
+                end + inset > scroll.value + viewport -> end + inset - viewport
+                else -> return@launch
+            }
+            scroll.scrollTo(target.coerceIn(0, scroll.maxValue))
+        }
+    }
+}
+
+/** What TalkBack hears for a choice with a toned count: its name and the exact number ("Needs you, 12"), the name alone at 0. */
+@Composable
+internal fun spokenCount(label: String, count: Int?): String =
+    count?.takeIf { it > 0 }?.let { stringResource(R.string.designsystem_count_spoken, label, it) } ?: label
+
+/** A count's words in a badge: "99+" past 99 (iOS `CountBadge.text`). */
+internal fun countBadgeText(count: Int): String = if (count > 99) "99+" else "$count"
+
+/**
+ * A count in a capsule of [tone]'s colours, as [JSectionHeader]'s `countTone` draws it (iOS `CountBadge`: Needs you's look
+ * for what waits for the user, [Status.Idle]'s for a neutral total): nothing at 0, "99+" past 99. Pass the exact number
+ * in the control's spoken name ([spokenCount]).
+ */
+@Composable
+internal fun JToneCount(count: Int, tone: Status, modifier: Modifier = Modifier, onFill: Boolean = false) {
+    if (count <= 0) return
+    val colors = PersonaTheme.palette.status(tone)
+    // On a selected chip's fill the tint alone could vanish (a grey on black): it sits on the page's opaque surface.
+    Text(countBadgeText(count), modifier.clip(CircleShape).then(if (onFill) Modifier.background(PersonaTheme.palette.surfaceOpaque) else Modifier).background(colors.tint)
+        .padding(horizontal = SectionHeaderTokens.countPadding, vertical = SectionHeaderTokens.countPaddingVertical),
+        style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.SemiBold), color = colors.text, maxLines = 1, softWrap = false)
 }
 
 /**
@@ -550,10 +733,14 @@ fun JChip(
     /** Bounds the label inside a weighted chip while keeping its icons and count visible. */
     boundedLabel: Boolean = false,
     breathes: Boolean = true,
+    /** The [count] in a capsule of this state's colours ([JToneCount]: none at 0, 99+ past 99), spoken with the text
+     *  ("Needs you, 12"): the Inbox's section bar (#9053). None: quiet digits, as before. */
+    countTone: Status? = null,
 ) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
     val shape = RoundedCornerShape(PersonaTheme.shapes.chip)
+    val spoken = countTone?.let { spokenCount(text, count) }
     val edgeless = Color.Transparent
     val (fill, plainInk, border) = when {
         accent && !selected -> Triple(palette.accentSoft, palette.accent, if (style == AppStyle.Board) palette.line else edgeless)
@@ -575,6 +762,7 @@ fun JChip(
                     .semantics { if (role == Role.Checkbox) this.selected = selected }
                 else -> Modifier
             })
+            .then(if (spoken != null) Modifier.semantics { contentDescription = spoken } else Modifier)
             .padding(start = JChipTokens.horizontalPadding, end = if (onRemove != null) Tokens.Space.xs else JChipTokens.horizontalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -590,7 +778,10 @@ fun JChip(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        count?.let {
+        if (countTone != null) count?.takeIf { it > 0 }?.let {
+            Spacer(Modifier.width(JChipTokens.countGap))
+            JToneCount(it, countTone, onFill = selected && style != AppStyle.Board)
+        } else count?.let {
             Spacer(Modifier.width(JChipTokens.countGap))
             Text("$it", style = PersonaTheme.type.micro, color = if (selected && style != AppStyle.Board) ink else palette.ink3, maxLines = 1, softWrap = false)
         }

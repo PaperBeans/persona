@@ -26,6 +26,7 @@ private data class AgentReadingLayout(
     val canScrollBackward: Boolean,
     val entries: List<AgentTreeEntry>,
     val hasFooter: Boolean,
+    val restoring: Boolean,
 )
 
 /** Keep the middle row at its screen position while live updates move or resize the items around it. */
@@ -35,17 +36,27 @@ internal fun KeepAgentReadingPosition(
     tree: List<AgentTreeEntry>,
     paginationFooter: Boolean,
     scope: List<Any?>,
+    restoring: Boolean,
 ) {
     val currentTree = rememberUpdatedState(tree)
     val hasFooter = rememberUpdatedState(paginationFooter)
+    val restoreInProgress = rememberUpdatedState(restoring)
     LaunchedEffect(state, scope) {
         var reading: AgentReadingRow? = null
         var settledRows = emptyList<AgentReadingRow>()
         var pendingCorrection: PendingReadingCorrection? = null
         snapshotFlow {
             AgentReadingLayout(state.layoutInfo, state.isScrollInProgress, state.canScrollBackward,
-                currentTree.value, hasFooter.value)
-        }.collect { (layout, scrolling, scrolled, entries, footer) ->
+                currentTree.value, hasFooter.value, restoreInProgress.value)
+        }.collect { (layout, scrolling, scrolled, entries, footer, restoring) ->
+            if (restoring) {
+                // Process restoration owns the list until its key-based scroll finishes. An anchor taken from the
+                // list's index-based restored layout would otherwise immediately undo that scroll.
+                reading = null
+                settledRows = emptyList()
+                pendingCorrection = null
+                return@collect
+            }
             if (scrolling) {
                 reading = null
                 settledRows = emptyList()

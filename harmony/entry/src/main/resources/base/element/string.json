@@ -4082,7 +4082,7 @@
     },
     {
       "name": "knowledge_recording_transcribe",
-      "value": "Transcribe Mandarin"
+      "value": "Transcribe & save to Knowledge"
     },
     {
       "name": "knowledge_recording_retry_upload",
@@ -4166,7 +4166,7 @@
     },
     {
       "name": "knowledge_recording_retry_transcribe",
-      "value": "Retry Mandarin transcription"
+      "value": "Retry & save to Knowledge"
     },
     {
       "name": "knowledge_recording_delete_local",
@@ -4663,6 +4663,42 @@
     {
       "name": "agent_collapse",
       "value": "Collapse"
+    },
+    {
+      "name": "knowledge_agent_configuration",
+      "value": "Agent task setup"
+    },
+    {
+      "name": "control_expanded",
+      "value": "Expanded"
+    },
+    {
+      "name": "control_collapsed",
+      "value": "Collapsed"
+    },
+    {
+      "name": "knowledge_filter_kind",
+      "value": "Type"
+    },
+    {
+      "name": "knowledge_filter_tag",
+      "value": "Tags"
+    },
+    {
+      "name": "knowledge_recording_save_notice",
+      "value": "The transcript and recording details will be saved to the knowledge base on this hub. Audio stays on this device. Offline transcription supports Mandarin Chinese."
+    },
+    {
+      "name": "forget_hub_notice",
+      "value": "Remove this connection’s credentials, local recordings and cached data from this device. Data on the hub will remain."
+    },
+    {
+      "name": "increase",
+      "value": "Increase"
+    },
+    {
+      "name": "decrease",
+      "value": "Decrease"
     }
   ]
 }

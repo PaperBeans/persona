@@ -5,10 +5,15 @@ import PersonaCoreTestSupport
 
 @MainActor
 final class PersonaCoreContinuityTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        ProductionContinuityShadow.shared.installForTests()
+    }
+
     func testEveryContinuityFixtureThroughRealCBinding() throws {
         let result = try ContinuityBindingReplay.replayAll()
-        XCTAssertEqual(result.cases, 38)
-        XCTAssertEqual(result.steps, 94)
+        XCTAssertEqual(result.cases, 39)
+        XCTAssertEqual(result.steps, 95)
         print("iOS C binding: \(result.cases) cases, \(result.steps) steps, \(result.patches) patches")
     }
 
@@ -17,13 +22,13 @@ final class PersonaCoreContinuityTests: XCTestCase {
         for `case` in cases {
             try NativeChatStoreContinuityReplay.replayShadow(`case`)
         }
-        XCTAssertEqual(cases.count, 38)
+        XCTAssertEqual(cases.count, 39)
     }
 
     func testEveryContinuityFixtureAgainstNativeChatStore() throws {
         let result = try NativeChatStoreContinuityReplay.replayAll()
-        XCTAssertEqual(result.cases, 38)
-        XCTAssertEqual(result.steps, 94)
+        XCTAssertEqual(result.cases, 39)
+        XCTAssertEqual(result.steps, 95)
         print("iOS native ChatStore: \(result.cases) cases, \(result.steps) steps")
     }
 
@@ -40,6 +45,7 @@ final class PersonaCoreContinuityTests: XCTestCase {
         let model = AppModel(stateFolder: folder)
         model.linksUpForTests = false
         let store = model.chat(key)
+        store.setContinuityShadowEnabledForFixtureReplay(true)
         XCTAssertEqual(store.covered, 1)
         let requests = Mutex<[String]>([])
         model.linkHooksForTests = (
@@ -68,5 +74,8 @@ final class PersonaCoreContinuityTests: XCTestCase {
         XCTAssertLessThan(started.duration(to: .now), .milliseconds(500))
         for _ in 0..<200 where store.covered != 2 { try await Task.sleep(for: .milliseconds(5)) }
         XCTAssertEqual(store.covered, 2)
+        let shadow = try await ProductionContinuityShadow.shared.compare(store)
+        XCTAssertGreaterThan(shadow.compared, 0)
+        XCTAssertEqual(shadow.mismatches, 0)
     }
 }

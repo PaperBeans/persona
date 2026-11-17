@@ -48,9 +48,17 @@ final class MeetingRoomUITests: XCTestCase {
         let invite = element(app, "meeting-room-invite")
         XCTAssertTrue(invite.waitForExistence(timeout: 10), "Persona still in: \(app.debugDescription)")
         XCTAssertFalse(speaker.isEnabled, "the speaker without Persona")
+        // The thread says it left where it happened (#8731), after the header's joined row.
+        XCTAssertTrue(element(app, "meeting-thread-left").waitForExistence(timeout: 10), "no left row: \(app.debugDescription)")
         try shot(app, "alone")
         invite.tap()
         XCTAssertTrue(persona.waitForExistence(timeout: 10), "Persona not back: \(app.debugDescription)")
+        // Joined again, after the left row (the header's joined row may be on the thread's earlier page by now).
+        let left = element(app, "meeting-thread-left")
+        XCTAssertTrue(waitFor(10) {
+            app.descendants(matching: .any).matching(identifier: "meeting-thread-joined").allElementsBoundByIndex
+                .contains { $0.frame.minY > left.frame.minY }
+        }, "no joined row for the invite: \(app.debugDescription)")
 
         // End asks first; a tap outside the question keeps the meeting going (the dialog shows no Cancel on iOS 26).
         let end = app.buttons["recording-stop"].firstMatch
@@ -62,6 +70,26 @@ final class MeetingRoomUITests: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
         XCTAssertTrue(waitFor(5) { !confirm.exists }, "the question stays")
         XCTAssertTrue(element(app, "meeting-thread-header").exists, "the room left after Keep Going")
+    }
+
+    /// The B2 experiment (#8731): Settings › Meetings ends with an Experimental switch, off until turned on, for echo
+    /// cancellation with the speaker. Turned back off at the end: the app's settings outlive the test.
+    @MainActor func testTheEchoExperimentIsASwitchOffUntilTurnedOn() throws {
+        let hub = try mockHub()
+        XCUIDevice.shared.appearance = ProcessInfo.processInfo.environment["PERSONA_SHOTS_APPEARANCE"] == "dark" ? .dark : .light
+        let app = XCUIApplication()
+        app.launchArguments = ["-pairURL", pair(hub), "-tab", "settings", "-openMeetingSettings", "YES"]
+        app.launchPinned()
+        let echo = app.switches["settings-meeting-echo-speaker"].firstMatch
+        XCTAssertTrue(element(app, "settings-meeting-invite").waitForExistence(timeout: 20), app.debugDescription)
+        for _ in 0..<4 where !echo.isHittable { app.swipeUp() }
+        XCTAssertTrue(echo.waitForExistence(timeout: 5), "no experiment: \(app.debugDescription)")
+        XCTAssertEqual(echo.value as? String, "0", "the experiment is off until turned on")
+        try shot(app, "settings")
+        echo.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertTrue(waitFor(5) { echo.value as? String == "1" }, "not turned on")
+        echo.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertTrue(waitFor(5) { echo.value as? String == "0" }, "not turned off again")
     }
 
     // MARK: Helpers

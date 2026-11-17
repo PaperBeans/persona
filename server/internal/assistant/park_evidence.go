@@ -7,19 +7,22 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/nwverse/persona/server/internal/connectorwire"
 )
 
 // ParkEvidence records the supervisor's source-backed account of an external wait. It is not a provider receipt
 // fetched by the hub: the supervisor must inspect the linked source before recording it. nil means a legacy park
 // without recorded evidence, not a verified contact. RecordedBy is set by task_review, never trusted from its input.
 type ParkEvidence struct {
-	Kind       string       `json:"kind"`
-	Target     string       `json:"target"`
-	URL        string       `json:"url,omitempty"`
-	Wake       string       `json:"wake"`
-	Contact    *ParkContact `json:"contact,omitempty"`
-	Ready      bool         `json:"ready,omitempty"`
-	RecordedBy string       `json:"recorded_by,omitempty"`
+	Kind       string                        `json:"kind"`
+	Target     string                        `json:"target"`
+	URL        string                        `json:"url,omitempty"`
+	Wake       string                        `json:"wake"`
+	Contact    *ParkContact                  `json:"contact,omitempty"`
+	Ready      bool                          `json:"ready,omitempty"`
+	RecordedBy string                        `json:"recorded_by,omitempty"`
+	Reply      *connectorwire.LarkReplyWatch `json:"reply,omitempty"`
 }
 
 // ParkContact names an already sent request, not a draft, a proposed reminder or a send whose outcome is unknown.
@@ -40,6 +43,10 @@ func (e *ParkEvidence) clone() *ParkEvidence {
 	if e.Contact != nil {
 		c := *e.Contact
 		out.Contact = &c
+	}
+	if e.Reply != nil {
+		w := *e.Reply
+		out.Reply = &w
 	}
 	return &out
 }
@@ -111,6 +118,9 @@ func readParkEvidence(input *ParkEvidence, waitingOn, until string, now time.Tim
 	}
 	if e.Kind != "person_reply" && e.Kind != "merge_review" && (e.Contact != nil || e.Ready) {
 		missing = append(missing, "evidence.contact and ready apply to person_reply/merge_review only")
+	}
+	if e.Reply != nil && (e.Kind != "person_reply" || !parkReplyBinding(e)) {
+		missing = append(missing, "evidence.reply (person_reply only: larkcli source, brand, app_id, account_open_id, person_open_id, chat_id, thread_id and request_message_id matching the sent topic link)")
 	}
 	return e, missing
 }

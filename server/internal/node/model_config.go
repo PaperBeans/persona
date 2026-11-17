@@ -24,15 +24,17 @@ type modelExecution struct {
 	// PlanThen: the permission mode a start in plan mode goes on in once its plan is approved (planthen.go); never
 	// part of a fingerprint.
 	PlanThen string `json:"-"`
-	// Runtime: the assistant's runtime, proto.AssistantRuntimeAgentSDK or "" (the CLI; "cli" reads as ""). Omitted
-	// when empty so a fingerprint from before #2455 stays the same.
-	Runtime string `json:",omitempty"`
-	IsMain  bool   `json:",omitempty"`
+	IsMain   bool   `json:",omitempty"`
 	// FollowsSetting: a leader/background supervisor conversation the manager sends with the main chat's model
 	// setting (#7824). With IsMain it identifies the protected conversations whose recovery is visible and reversible;
 	// worker Agent conversations have neither flag.
 	FollowsSetting bool   `json:",omitempty"`
 	ConfigDir      string `json:"-"` // a conversation's directory, not its model; retained across process restarts
+	// MainCompactWindow: the compaction window the manager holds the main conversation to (assistant.main_compact_window,
+	// #7314), sent with is_main; 0 (another conversation, a launcher Persona does not manage, an older manager, the
+	// setting at 0) leaves the launcher's (assistantCompactionPolicy). Omitted when 0, so a fingerprint from before it
+	// stays the same.
+	MainCompactWindow int `json:",omitempty"`
 	// SupervisionInstructions is manager-authorized role policy, never task or event data.
 	// It changes the execution fingerprint so a role change resumes in a fresh process.
 	SupervisionInstructions string `json:",omitempty"`
@@ -46,6 +48,8 @@ type modelExecution struct {
 	// Goal: a Claude Code /goal condition typed after the first message of a new start is in (startgoal.go). Per start,
 	// never part of a fingerprint, never kept for a resume.
 	Goal string `json:"-"`
+	// InPane is session.start's in_pane: a failed start's kept tab to start in (startremedy.go).
+	InPane string `json:"-"`
 }
 
 func supervisionRuntimeRefusal(ctx context.Context) error {
@@ -70,11 +74,8 @@ func (m modelExecution) checkModel() error {
 }
 
 // executionFingerprint also detects a managed provider changed before the next turn (any of its fields, the #2455 ones
-// included), and the runtime changed: another process, resumed on the same conversation.
+// included): another process, resumed on the same conversation.
 func (n *Node) executionFingerprint(launcher string, m modelExecution) string {
-	if m.Runtime == proto.AssistantRuntimeCLI {
-		m.Runtime = ""
-	}
 	raw, _ := json.Marshal(m)
 	if l, ok := n.managedCatalog(launcher); ok { // as named: the same before and after a withheld one's pull (its Rev)
 		v, _ := json.Marshal(l)
@@ -108,12 +109,12 @@ func (n *Node) assistantModel(ctx context.Context, id string) (string, modelExec
 		Model                   string  `json:"model"`
 		Effort                  string  `json:"effort"`
 		ModelFingerprint        string  `json:"model_fingerprint"`
-		Runtime                 string  `json:"runtime"`
 		IsMain                  bool    `json:"is_main"`
+		MainCompact             int     `json:"main_compact_window"`
 		SupervisionInstructions *string `json:"supervision_instructions"`
 	}
 	if n.peer == nil || n.peer.Call(ctx, "assistant.model", map[string]any{"session_id": id}, &res) != nil {
 		return "", modelExecution{}
 	}
-	return res.Launcher, (modelExecution{Model: res.Model, Effort: res.Effort, UseEffort: res.ModelFingerprint != "", Fingerprint: res.ModelFingerprint, Runtime: res.Runtime, IsMain: res.IsMain}).withSupervision(res.SupervisionInstructions)
+	return res.Launcher, (modelExecution{Model: res.Model, Effort: res.Effort, UseEffort: res.ModelFingerprint != "", Fingerprint: res.ModelFingerprint, IsMain: res.IsMain, MainCompactWindow: res.MainCompact}).withSupervision(res.SupervisionInstructions)
 }

@@ -692,6 +692,11 @@ nonisolated struct APIClient: Sendable {
         struct Body: Encodable { var text: String }
         _ = try await request("POST", "/api/v1/machines/\(machine)/computer/clipboard", body: Body(text: text))
     }
+    /// Phone Screen (#9314, docs/protocol/protocol.md): start / windows / place / stop for the live screen whose RFB
+    /// stream carries `pair`. A refusal keeps the node's code (`APIError.code`: busy, permission, not_signed_in…).
+    func phoneScreen(machine: String, _ body: PhoneScreenRequest) async throws -> PhoneScreenReply {
+        try JSON.decoder.decode(PhoneScreenReply.self, from: await request("POST", "/api/v1/machines/\(machine)/computer/phone-screen", body: body))
+    }
     /// The apps always allowed for the assistant on this Mac (#1507), and taking one back (asked again next time).
     func computerApps(machine: String) async throws -> [ComputerApp] {
         struct Out: Decodable { var apps: [ComputerApp] }
@@ -2172,6 +2177,18 @@ nonisolated struct APIClient: Sendable {
             var usage: Usage
         }
         return try await get("/api/v1/usage", as: Body.self).usage.hourly ?? []
+    }
+    /// Every computer's tokens on each of the last `days` days (1–371) in the user's zone, oldest first, the last today
+    /// (`GET /api/v1/usage/days`, docs/server/machines.md "Token usage history"): the assistant's on the Persona page.
+    /// 404 from a hub before it.
+    func usageDays(_ days: Int) async throws -> UsageDays {
+        struct Body: Decodable { var usage: UsageDays }
+        return try await currentAssistantSettings().get("/api/v1/usage/days", query: ["days": String(days)], as: Body.self).usage
+    }
+    /// The last `days` days (1–7) by the hour, each computer's share and the total (`GET /api/v1/usage/hours`).
+    func usageHours(_ days: Int = 7) async throws -> UsageHours {
+        struct Body: Decodable { var usage: UsageHours }
+        return try await currentAssistantSettings().get("/api/v1/usage/hours", query: ["days": String(days)], as: Body.self).usage
     }
     /// Whether this device has the Home Screen widgets, alone: while its app is not open, the hub wakes it to write them
     /// again when the agents' counts change (#5721). An older hub keeps the field and does nothing with it.

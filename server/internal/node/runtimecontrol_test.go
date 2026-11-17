@@ -393,7 +393,7 @@ func TestRuntimeLauncherAvailabilityCheck(t *testing.T) {
 		if method != "launchers.check" {
 			return nil, errors.New("unexpected shell fallback")
 		}
-		var p struct{ Launcher, Cwd, Prompt string }
+		var p struct{ Launcher, Cwd, Prompt, Model string }
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
@@ -401,13 +401,13 @@ func TestRuntimeLauncherAvailabilityCheck(t *testing.T) {
 		if _, err := os.Stat(p.Cwd); err != nil {
 			return nil, err
 		}
-		if p.Launcher != "paseo-claude" || p.Prompt == "" {
+		if p.Launcher != "paseo-claude" || p.Prompt == "" || p.Model != "opus" {
 			return nil, errors.New("missing check parameters")
 		}
 		return proto.LauncherCheck{OK: true, Model: "native-model", Answer: "OK"}, nil
 	}
 	host.mu.Unlock()
-	result := n.launcherCheck(context.Background(), "paseo-claude")
+	result := n.launcherCheck(context.Background(), "paseo-claude", "opus")
 	if !result.OK || result.Model != "native-model" || result.Agent != "claude" || result.Answer != "OK" {
 		t.Fatalf("native check: %+v", result)
 	}
@@ -431,10 +431,50 @@ func TestRuntimeLauncherAvailabilityCheck(t *testing.T) {
 func TestRuntimeAvailabilityCheckRequiresOptIn(t *testing.T) {
 	n, _ := runtimeNode(t)
 	host := dialRuntime(t, n, paseoEngineHello())
-	if _, handled := n.runtimeLauncherCheck(context.Background(), n.runtimes.launcherRuntime("paseo-claude"), "paseo-claude", t.TempDir(), "probe"); handled {
+	if _, handled := n.runtimeLauncherCheck(context.Background(), n.runtimes.launcherRuntime("paseo-claude"), "paseo-claude", t.TempDir(), "probe", ""); handled {
 		t.Fatal("older runtime intercepted the shell check")
 	}
 	if len(host.got("launchers.check")) != 0 {
 		t.Fatal("unsupported check reached runtime")
+	}
+}
+
+// The launcher a runtime runs the assistant on carries the Agent launcher it was set up to run it for
+// (proto.Launcher.AssistantFor: integrations/grok's grok-chat for the Paseo provider grok); another launcher of it, a
+// name no launcher may have and its own name do not.
+func TestRuntimeAssistantLauncherSaysWhatItRunsTheAssistantFor(t *testing.T) {
+	n, _ := runtimeNode(t)
+	h := map[string]any{"runtime": "grok-chat", "name": "Grok", "agent": "grok", "launcher": "grok-chat",
+		"caps": map[string]any{"start": true, "send": true, "interrupt": true, "assistant": true},
+		"launchers": []map[string]any{
+			{"name": "grok-chat", "agent": "grok", "display_name": "Grok", "assistant_for": "grok"},
+			{"name": "grok-side", "agent": "grok", "assistant_for": "grok"},
+		}}
+	host := dialRuntime(t, n, h)
+	got := func() map[string]proto.Launcher {
+		raw, err := nodeCall(t, n, "launchers.list", map[string]any{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var res struct {
+			Launchers []proto.Launcher `json:"launchers"`
+		}
+		_ = json.Unmarshal(raw, &res)
+		out := map[string]proto.Launcher{}
+		for _, l := range res.Launchers {
+			out[l.Name] = l
+		}
+		return out
+	}
+	ls := got()
+	if l := ls["grok-chat"]; !l.Assistant || l.AssistantFor != "grok" || l.DisplayName != "Grok" {
+		t.Fatalf("grok-chat: %+v", l)
+	}
+	if l := ls["grok-side"]; l.Assistant || l.AssistantFor != "" {
+		t.Fatalf("a launcher that does not run the assistant says what it runs it for: %+v", l)
+	}
+	for _, bad := range []string{"bad name!", "grok-chat"} {
+		_ = host.peer.Notify("runtime.launchers", map[string]any{"launchers": []map[string]any{{"name": "grok-chat", "agent": "grok", "assistant_for": bad}}})
+		waitFor(t, "the new launchers "+bad, func() bool { l := got()["grok-chat"]; return l.Assistant && l.AssistantFor == "" })
 	}
 }

@@ -134,6 +134,52 @@ final class MeetingTalkUITests: XCTestCase {
 
     // MARK: Without a call
 
+    /// A tap (#9658) opens Talk as the page's talk window: it stays on through the sample's quiet stretch (2 s of quiet after
+    /// 3 s of hum, which ends the Lock Screen's window), says to tap when done, and the next tap ends the span: one
+    /// `talk on`, one `talk off`, no audio outside it.
+    @MainActor func testATappedTalkStaysOnUntilTheNextTap() throws {
+        let hub = try mockHub()
+        let app = try meetingPage(hub)
+        XCTAssertNotNil(waitForCall(hub), "no meeting call")
+        let talk = element(app, "meeting-talk")
+        XCTAssertTrue(talk.waitForExistence(timeout: 15), "no Talk:\n\(app.debugDescription)")
+        // The first span goes to the call only once the Wording has been on screen for a moment.
+        XCTAssertTrue(element(app, "meeting-talk-privacy").waitForExistence(timeout: 10), "no first-use note")
+        sleep(2)
+        talk.tap()
+        XCTAssertTrue(waitFor(10) { ((try? self.voice(hub))?["talking"] as? Bool) == true }, "a tap did not turn Talk on")
+        sleep(7)
+        XCTAssertEqual((try voice(hub))["talking"] as? Bool, true, "a tapped Talk ended on a pause")
+        XCTAssertEqual((try voice(hub))["talk_off"] as? Int ?? 0, 0, "a tapped Talk ended on a pause")
+        let caption = element(app, "meeting-ask-caption")
+        XCTAssertTrue(caption.exists, "nothing says Persona hears:\n\(app.debugDescription)")
+        try shot(app, "tapped")
+        talk.tap()
+        XCTAssertTrue(waitFor(15) { ((try? self.voice(hub))?["talk_off"] as? Int ?? 0) >= 1 }, "the next tap did not end Talk")
+        let after = try voice(hub)
+        XCTAssertEqual(after["talk_on"] as? Int, 1, "one span")
+        XCTAssertEqual(after["talking"] as? Bool, false)
+        XCTAssertEqual(after["audio_out"] as? Int, 0, "audio went outside the span")
+    }
+
+    /// A tapped Talk left on turns itself off at the minute and the caption says why (#9658); the span still goes.
+    @MainActor func testATappedTalkTurnsOffAtTheMinuteAndSaysWhy() throws {
+        let hub = try mockHub()
+        let app = try meetingPage(hub)
+        XCTAssertNotNil(waitForCall(hub), "no meeting call")
+        let talk = element(app, "meeting-talk")
+        XCTAssertTrue(talk.waitForExistence(timeout: 15), "no Talk:\n\(app.debugDescription)")
+        XCTAssertTrue(element(app, "meeting-talk-privacy").waitForExistence(timeout: 10), "no first-use note")
+        sleep(2)
+        talk.tap()
+        XCTAssertTrue(waitFor(10) { ((try? self.voice(hub))?["talking"] as? Bool) == true }, "a tap did not turn Talk on")
+        XCTAssertTrue(waitFor(75) { ((try? self.voice(hub))?["talk_off"] as? Int ?? 0) >= 1 }, "Talk did not turn off at the minute")
+        let caption = element(app, "meeting-ask-caption")
+        XCTAssertTrue(waitFor(3) { caption.exists && caption.label.contains("已关闭") }, "the caption doesn't say why Talk stopped: \(caption.label)")
+        try shot(app, "turned-off")
+        XCTAssertEqual((try voice(hub))["audio_out"] as? Int, 0, "audio went outside the span")
+    }
+
     /// A listener has no call: held Talk cuts the segment, the phone transcribes the span (made up in the sample) and asks
     /// the room with `…/ask` (`spoken: true`, its `question_source` `spoken`); nothing reaches the voice socket.
     @MainActor func testAListenersTalkIsAskedThroughAsk() throws {

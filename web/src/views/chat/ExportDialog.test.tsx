@@ -7,6 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
 import type { Item, Session } from "../../lib/types";
+import { localTime } from "../../lib/chat-export";
 
 const hub = vi.hoisted(() => ({
   queries: [] as string[],
@@ -14,6 +15,7 @@ const hub = vi.hoisted(() => ({
   hold: null as Promise<void> | null,
   reply: "The guard runs twice.",
   result: null as string | null,
+  stalled: "" as "" | "empty-first" | "repeat",
 }));
 vi.mock("../../lib/api", async (original) => {
   const real = await original<typeof import("../../lib/api")>();
@@ -30,6 +32,7 @@ vi.mock("../../lib/api", async (original) => {
       }
       if (route.endsWith("/full")) throw new real.ApiError(404, "not found", {});
       const before = new URLSearchParams(query).get("before_seq");
+      if (hub.stalled === "empty-first") return { items: [], has_more: true };
       const items: Item[] = before
         ? [{ id: "u1#0", seq: 1, role: "user", kind: "text", text: "Why does login loop?", ts: "2026-11-14T10:00:00Z" }]
         : [
@@ -37,7 +40,7 @@ vi.mock("../../lib/api", async (original) => {
             { id: "u3#0", seq: 3, role: "assistant", kind: "text", text: hub.reply, ts: "2026-11-14T10:02:00Z" },
             ...(hub.result === null ? [] : [{ id: "result1", seq: 4, role: "assistant" as const, kind: "tool_result" as const, tool_use_id: "t1", text: hub.result }]),
           ];
-      return { items, has_more: !before };
+      return { items: before && hub.stalled === "repeat" ? [] : items, has_more: hub.stalled === "repeat" || !before };
     }),
   };
 });
@@ -69,6 +72,7 @@ beforeEach(() => {
   hub.hold = null;
   hub.reply = "The guard runs twice.";
   hub.result = null;
+  hub.stalled = "";
   blobs = [];
   onClose.mockClear();
   vi.mocked(toast).mockClear();
@@ -154,6 +158,17 @@ describe("the export dialog", () => {
     act(() => byTestId("export-copy").click());
     await flush();
     expect(vi.mocked(copyText).mock.calls[0][0]).toContain("## Persona · ");
+  });
+
+  it.each(["empty-first", "repeat"] as const)("warns when %s prevents reading all history", async (stalled) => {
+    hub.stalled = stalled;
+    await open();
+    const from = localTime("2026-11-14T10:01:00Z");
+    expect(status()).toContain(stalled === "empty-first" ? t("chat-export.partial_unknown") : t("chat-export.partial_note", { from }));
+    act(() => byTestId("export-copy").click());
+    await flush();
+    const md = vi.mocked(copyText).mock.calls[0][0];
+    expect(md).toContain(stalled === "empty-first" ? t("chat-export.partial_unknown") : t("chat-export.partial", { from }));
   });
 });
 

@@ -159,13 +159,7 @@ struct InboxSameMatterPicker: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button { dismiss() } label: {
-                        Text(String(localized: "Cancel")).lineLimit(1)
-                    }
-                    .accessibilityIdentifier("inbox.sameMatter.cancel")
-                    .disabled(busy != nil)
-                }
+                SheetClose(id: "inbox.sameMatter.cancel", disabled: busy != nil) { dismiss() }
             }
             .task(id: item.key) { await loadTree() }
             .onChange(of: query) { _, _ in deriveCandidates() }

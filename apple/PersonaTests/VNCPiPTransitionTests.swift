@@ -26,6 +26,23 @@ import Testing
         #expect(VNCPiPPlacement.source(page: .zero, in: window, safeTop: 62, size: size, margin: 16) == r)
     }
 
+    /// Phone Screen: the source lies over the display the page shows, the part the small window shows, not over the
+    /// whole picture running off the view; with whole frames over the whole picture, as before.
+    @Test func overThePartTheSmallWindowShows() {
+        let picture = VNCPagePicture(whole: CGRect(x: -760, y: 60, width: 1162, height: 760), shown: CGRect(x: 0, y: 60, width: 402, height: 760))
+        #expect(VNCPiPPlacement.page(picture, cut: true) == picture.shown)
+        #expect(VNCPiPPlacement.page(picture, cut: false) == picture.whole)
+        #expect(VNCPiPPlacement.page(nil, cut: true) == nil)
+    }
+
+    /// The source's size where no page shows the picture follows what the small window shows: Phone Screen's display
+    /// (portrait) is taller than wide, the Mac's screen wider, 16:10 before it is known.
+    @Test func theSourceTakesTheShapeItShows() {
+        #expect(VNCPiPPlacement.size(CGSize(width: 1080, height: 2042), width: 192) == CGSize(width: 192, height: 363))
+        #expect(VNCPiPPlacement.size(CGSize(width: 3000, height: 2042), width: 192) == CGSize(width: 192, height: 131))
+        #expect(VNCPiPPlacement.size(.zero, width: 192) == CGSize(width: 192, height: 120))
+    }
+
     @Test func restoreAnswersOnce() {
         let restore = VNCPiPRestore(), answers = Answers()
         #expect(!restore.pending)

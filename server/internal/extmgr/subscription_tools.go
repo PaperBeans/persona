@@ -494,6 +494,7 @@ func (a saveArgs) patch(revision int64, recipe *subscriptions.Recipe) (subscript
 	if a.Existing != "" && !slices.Contains([]string{subscriptions.ExistingDigest, subscriptions.ExistingBaseline, subscriptions.ExistingDeliver}, a.Existing) {
 		return p, badArgs("existing is digest, baseline or deliver")
 	}
+	// "" clears fallback_tier at runtime; the MCP schema enum omits "" because Gemini rejects empty enum values.
 	if a.FallbackTier != nil && !slices.Contains([]string{"", "fyi", "action", "wait"}, *a.FallbackTier) {
 		return p, badArgs(`fallback_tier is "", fyi, action or wait`)
 	}

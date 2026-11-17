@@ -168,8 +168,11 @@ What you see is what you share (#7261). Share as Image (iOS `MessageShareCard`, 
 - **Its fallback where it only draws live**: a card with an HTML page on its first page is its fallback on both. On iOS a card with pictures that load later (an `image`, a `grid` or `carousel`, a row's thumbnail or avatar picture) is its fallback too: the picture is drawn offscreen at once, and Android records the live card, so its pictures show once loaded.
 - **Never cut or widened by its source**: a card's JSON does not count as a wide code block (`ShareCardBlocks`). The 3,000-character cut never splits a card: iOS counts a card as long as its fallback and leaves out a card past the cut whole; Android cuts before a card the cut would split.
 - **Text stays text**: Copy and Share Text keep the message's text as it is.
+- **Several at once** (#9468): Export Image for picked messages (iOS `ChatExportRenderer`, docs/apple/ios.md "Forwarding a message") draws each reply's cards from the same parts (`ShareCardParts`), taking each message whole up to a forward's 20,000 characters instead of the single card's 3,000.
 
-Tests: `ShareCardPartsTests` (iOS), `MessagePictureTest` and `AssistantCardsTest.whatAPictureDraws` (Android). The web has no share-as-image of a message.
+- **On the web** (#9469): Export image for picked messages (`web/src/views/chat/ExportImage.tsx`, docs/web/web.md "Forwarding a message") draws each reply with the chat's own Markdown, so its cards are the chat's cards; nothing on them answers in a picture, and a code block's Copy and a diagram's tools are left out. The web has no share-as-image of a single message.
+
+Tests: `ShareCardPartsTests` (iOS), `MessagePictureTest` and `AssistantCardsTest.whatAPictureDraws` (Android).
 
 ## Examples and stages
 

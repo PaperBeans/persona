@@ -355,8 +355,8 @@ func (n *Node) resumeCodex(ctx context.Context, launch host.Launcher, id string,
 	} else {
 		time.Sleep(300 * time.Millisecond) // the fresh shell loads ~/.zshrc; typed input is buffered either way
 	}
-	shells := paneShells(ctx, created)
-	done, err := n.runAgentCommand(ctx, launch, created, ws, "", n.agentCommand(shellQuote(n.bin)+" codex-start "+shellQuote(file), shellQuote, shells...), shells...) // typedstart.go
+	shells := n.startPaneShells(ctx, launch, created)
+	done, err := n.runAgentCommand(ctx, launch, created, ws, "", n.agentStartCommand(shellQuote(n.bin)+" codex-start "+shellQuote(file), shellQuote, shells...), shells...) // typedstart.go
 	if err != nil {
 		if adoptedPane(ctx) != nil && prompt != "" && n.codexMessageMayHaveGone(ctx, pane, file) {
 			return unconfirmedStart(err) // a switch's message may be in it (engine_switch.go)
@@ -393,8 +393,8 @@ func (n *Node) newTab(ctx context.Context, launch host.Launcher, cwd, ws, tabNam
 	if c := adoptedPane(ctx); c != nil { // "Run Agent Here": the pane the user picked, not a new tab (panes_actions.go)
 		return c, nil
 	}
-	if c, ok := ctx.Value(reusedTabKey{}).(*host.Created); ok && c != nil { // a failed start's kept tab (startremedy.go)
-		return c, nil
+	if c, err := keptClaimOf(ctx).tab(ctx); err != nil || c != nil { // a failed start's kept tab (startremedy.go)
+		return c, err
 	}
 	var created *host.Created
 	var err error

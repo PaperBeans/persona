@@ -57,6 +57,7 @@
   "admission_procs": "已经有 {count} 个 claude 进程在跑，达到上限 {limit}。",
   "admission_load": "负载 {load} 超过 {cores} 核 × {multiplier} 的闸线。",
   "admission_direction_full": "这个方向已经有 {running} 个 Agent 在跑，达到上限 {limit}。",
+  "admission_launcher_group_full": "启动器组 {group} 已经有 {running} 个任务在跑，达到上限 {limit}。",
   "admission_refused": "电脑 {machine} 现在不能启动这个 Agent：{reason}{recommend}",
   "admission_recommend": "推荐电脑：{machine}。",
   "admission_reroute": "已从 {from} 改派到 {to}：{reason}",

@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { ClientModel } from '../models/ClientModel';
 import { AssistantFeedModel } from '../models/AssistantFeed';
 import { AssistantViewModel } from '../models/AssistantView';
@@ -134,8 +137,7 @@ export struct AssistantViewCard {
         Text(tr('assistant_feed_view_unavailable')).fontSize(Tokens.body).fontColor($r('sys.color.font_secondary'))
       } else {
         if (this.showTitle && this.presentation.pageTitle) Row({ space: Tokens.gap }) {
-          if (this.presentation.pageStack.length > 0) Button(tr('back')).buttonStyle(ButtonStyleMode.TEXTUAL)
-            .height(Tokens.touch).onClick(() => this.presentation?.back())
+          if (this.presentation.pageStack.length > 0) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('back')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('back', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('back')).bindTips(tr('back')).onClick(() => this.presentation?.back())
           Text(this.presentation.pageTitle).fontSize(Tokens.body).fontWeight(FontWeight.Medium)
             .layoutWeight(1).accessibilityLevel('yes')
         }.width('100%')
@@ -145,7 +147,7 @@ export struct AssistantViewCard {
           .fontColor($r('sys.color.font_secondary')).width('100%')
         if (this.presentation.actionError) Text(tr('assistant_view_submit_failed')).fontSize(Tokens.meta)
           .fontColor($r('app.color.persona_danger')).width('100%')
-        if (this.presentation.canRetryOriginal) Button(tr('assistant_view_retry_original')).height(Tokens.touch)
+        if (this.presentation.canRetryOriginal) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('assistant_view_retry_original')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('assistant_view_retry_original', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('assistant_view_retry_original')).bindTips(tr('assistant_view_retry_original'))
           .enabled(this.effectiveActive() && !this.presentation.busy)
           .onClick(() => this.presentation?.retryOriginal().catch(() => {}))
         if (!this.presentation.valid || !this.presentation.complete) {

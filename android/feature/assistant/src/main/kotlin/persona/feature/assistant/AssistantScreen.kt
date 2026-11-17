@@ -1382,9 +1382,16 @@ internal fun AssistantDrawer(
      */
     fullWindowSearch: Boolean = false,
     onFullSearch: () -> Unit = {},
+    /**
+     * The place row that stays shaded while that place is the page's root (iOS `shownPlace`).
+     * Null: the phone drawer, which shades the open conversation as before.
+     */
+    shadedPlace: String? = null,
     /** Folds the sidebar column from its own header while it sits beside the page; null in a drawer or floating overlay. */
     onFoldColumn: (() -> Unit)? = null,
 ) {
+    // iOS UnifiedSidebar.atRoot (UnifiedSidebar.swift:39–41): a place root shades its row, not a conversation.
+    val shadeConversations = shadedPlace == null || shadedPlace == AssistantSidebarShade.Conversation
     // "All chats" opens the rest of the conversations in place: this app has no all-conversations page.
     var showAllChats by rememberSaveable { mutableStateOf(false) }
     // Recent folds on its own too (#6228): the choice is kept on this device across cold starts (the web's
@@ -1455,7 +1462,7 @@ internal fun AssistantDrawer(
             // Its session keeps its id and title; only the row reads differently.
             item(key = "persona") {
                 val mainHit = found?.firstOrNull { it.session.key == groups.main?.key }?.hit
-                PersonaRow(groups.main, selected = groups.main != null && groups.main.key == active, hasMain = hasMain,
+                PersonaRow(groups.main, selected = shadeConversations && groups.main != null && groups.main.key == active, hasMain = hasMain,
                     name = assistantName,
                     onMain = {
                         val main = groups.main
@@ -1478,18 +1485,18 @@ internal fun AssistantDrawer(
                 val position = GroupPosition.of(moreIndex++, totalMore)
                 item { JGroupItem(position) { content() } }
             }
-            if (onInbox != null) more { DrawerItem(stringResource(R.string.assistant_origin_inbox), PhIcons.Tray, badge = inboxCount, onClick = onInbox) }
-            if (showTodos && onTodos != null) more { DrawerItem(stringResource(R.string.assistant_todos), PhIcons.ListChecks, badge = todoCount, onClick = onTodos) }
-            more { DrawerItem(stringResource(AssistantInfo.Schedule.title), PhIcons.Clock) { onInfo(AssistantInfo.Schedule) } }
-            more { DrawerItem(stringResource(AssistantInfo.Knowledge.title), PhIcons.BookOpen) { onInfo(AssistantInfo.Knowledge) } }
+            if (onInbox != null) more { DrawerItem(stringResource(R.string.assistant_origin_inbox), PhIcons.Tray, badge = inboxCount, onClick = onInbox, selected = shadedPlace == AssistantSidebarShade.Inbox) }
+            if (showTodos && onTodos != null) more { DrawerItem(stringResource(R.string.assistant_todos), PhIcons.ListChecks, badge = todoCount, onClick = onTodos, selected = shadedPlace == AssistantSidebarShade.Todos) }
+            more { DrawerItem(stringResource(AssistantInfo.Schedule.title), PhIcons.Clock, onClick = { onInfo(AssistantInfo.Schedule) }) }
+            more { DrawerItem(stringResource(AssistantInfo.Knowledge.title), PhIcons.BookOpen, onClick = { onInfo(AssistantInfo.Knowledge) }, selected = shadedPlace == AssistantSidebarShade.Knowledge) }
             if (onHealth != null) more { DrawerItem(stringResource(R.string.assistant_health), PhIcons.Heart, onHealth) }
             if (!drawer) {
-                more { DrawerItem(stringResource(AssistantInfo.Session.title), PhIcons.Info) { onInfo(AssistantInfo.Session) } }
-                more { DrawerItem(stringResource(AssistantInfo.Launcher.title), PhIcons.RocketLaunch) { onInfo(AssistantInfo.Launcher) } }
+                more { DrawerItem(stringResource(AssistantInfo.Session.title), PhIcons.Info, onClick = { onInfo(AssistantInfo.Session) }) }
+                more { DrawerItem(stringResource(AssistantInfo.Launcher.title), PhIcons.RocketLaunch, onClick = { onInfo(AssistantInfo.Launcher) }) }
             }
             pages.forEach { page -> more {
                 JRow(page.label, onClick = { onPage(page.key) }, leading = { JIcon(page.icon, null) },
-                    chevron = true,
+                    chevron = true, selected = shadedPlace == page.key,
                     trailing = {
                         if (page.badge > 0) JBadge(page.badge)
                         else if (page.dot) JStatusDot(Status.NeedsYou, breathes = false)
@@ -1509,7 +1516,7 @@ internal fun AssistantDrawer(
             if (found != null) {
                 val rows = found.filter { groups.main == null || it.session.key != groups.main.key }
                 itemsIndexed(rows, key = { _, row -> "found-" + row.session.key.path }) { index, row ->
-                    ConversationRow(row.session, selected = row.session.key == active,
+                    ConversationRow(row.session, selected = shadeConversations && row.session.key == active,
                         position = GroupPosition.of(index, rows.size),
                         onOpen = {
                             row.hit?.let { MessageJumps.request(row.session.machineId, row.session.sessionId, it.itemId) }
@@ -1537,7 +1544,7 @@ internal fun AssistantDrawer(
                 DirectionLeadRows(groups.tree?.direction(session.sessionId)?.takeUnless { it.secretary },
                     groups.names[session.sessionId] ?: session.conversationTitle(conversationWords()),
                     GroupPosition.of(index, groups.directions.size), onOpenTodo, onOpenAgent) { position, disclosure ->
-                    ConversationRow(session, selected = session.key == active,
+                    ConversationRow(session, selected = shadeConversations && session.key == active,
                         position = position,
                         onOpen = { onOpen(session.key) }, onEnd = onEnd?.let { action -> { action(session) } },
                         onCopy = { onCopy(session) }, onArchive = onArchive?.let { action -> { action(session) } },
@@ -1558,7 +1565,7 @@ internal fun AssistantDrawer(
                         size = Tokens.Space.l, tint = PersonaTheme.palette.ink3) })
             }
             if (recentOpen) itemsIndexed(groups.recent, key = { _, session -> "recent-" + session.key.path }) { index, session ->
-                ConversationRow(session, selected = session.key == active,
+                ConversationRow(session, selected = shadeConversations && session.key == active,
                     position = GroupPosition.of(index, groups.recent.size),
                     onOpen = { onOpen(session.key) }, onEnd = onEnd?.let { action -> { action(session) } },
                     onCopy = { onCopy(session) }, onArchive = onArchive?.let { action -> { action(session) } },
@@ -1580,7 +1587,7 @@ internal fun AssistantDrawer(
                 // its own name, and its menu only copies (the hub refuses to pin, archive or end it; its row shows the
                 // built-in name, so a rename would show nowhere).
                 val builtIn = session.sessionId == groups.background
-                ConversationRow(session, selected = session.key == active,
+                ConversationRow(session, selected = shadeConversations && session.key == active,
                     position = GroupPosition.of(index, groups.others.size),
                     onOpen = { onOpen(session.key) }, onEnd = onEnd?.takeUnless { builtIn }?.let { action -> { action(session) } },
                     onCopy = { onCopy(session) }, onArchive = onArchive?.takeUnless { builtIn }?.let { action -> { action(session) } },
@@ -1777,16 +1784,17 @@ private fun PersonaRow(main: Session?, selected: Boolean, hasMain: Boolean, name
 }
 
 @Composable
-private fun DrawerItem(title: String, icon: PhIcon, onClick: () -> Unit) {
-    JRow(title, leadingIcon = icon, onClick = onClick)
+private fun DrawerItem(title: String, icon: PhIcon, onClick: () -> Unit, selected: Boolean = false) {
+    JRow(title, leadingIcon = icon, onClick = onClick, selected = selected)
 }
 
 @Composable
-private fun DrawerItem(title: String, icon: PhIcon, badge: Int, onClick: () -> Unit) {
+private fun DrawerItem(title: String, icon: PhIcon, badge: Int, onClick: () -> Unit, selected: Boolean = false) {
     JRow(
         title,
         leadingIcon = icon,
         onClick = onClick,
+        selected = selected,
         trailing = if (badge > 0) ({ JBadge(badge) }) else null
     )
 }

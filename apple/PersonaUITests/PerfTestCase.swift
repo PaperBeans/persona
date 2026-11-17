@@ -48,9 +48,10 @@ class PerfTestCase: XCTestCase {
     /// the test waits `settle` seconds so first loads (history pages, images, metrics) are done before measuring.
     @MainActor @discardableResult
     func launch(_ args: [String], ready: XCUIElement? = nil, timeout: TimeInterval = 30, settle: UInt32 = 3) -> XCUIApplication {
+        let shadow = ProcessInfo.processInfo.environment["PERSONA_CONTINUITY_SHADOW"] == "1"
         if !Self.pairedHubs.contains(hub) {
             let first = XCUIApplication()
-            first.launchArguments = ["-pairURL", pair, "-dev.openChat", ""]
+            first.launchArguments = ["-pairURL", pair, "-dev.openChat", "", "-showContinuityShadow", shadow ? "YES" : "NO"]
             first.launchPinned()
             acceptIconAlert()
             sleep(4)
@@ -58,7 +59,9 @@ class PerfTestCase: XCTestCase {
             Self.pairedHubs.insert(hub)
         }
         app = XCUIApplication()
-        app.launchArguments = ["-pairURL", pair, "-showFrameProbe", "YES"] + args
+        let diagnostic = (ProcessInfo.processInfo.environment["PERSONA_PERF_EXTRA_ARGS"] ?? "")
+            .split(whereSeparator: \.isWhitespace).map(String.init)
+        app.launchArguments = ["-pairURL", pair, "-showFrameProbe", "YES", "-showContinuityShadow", shadow ? "YES" : "NO"] + diagnostic + args
         app.launchPinned()
         allowNotifications()
         acceptIconAlert()

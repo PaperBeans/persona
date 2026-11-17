@@ -27,7 +27,7 @@ struct MessagingComposeSheet: View {
             .themedGroupedPage()
             .navigationTitle(view.title ?? String(localized: "Continue Sending"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.lineLimit(1) } }
+            .toolbar { SheetClose { dismiss() } }
             .onAppear(perform: seed)
             .onChange(of: view) { _, _ in seed() }
         }

@@ -385,25 +385,27 @@ func lastIfEmpty(a, b string) int {
 }
 
 // spaceNames is what the kept rows of machines call each counted space: the first named row of a space, in its
-// machine's list order.
+// machine's list order, then among the archived rows told apart (Machine.archived), which named it in the list too.
 func (h *Hub) spaceNames(machines map[string]bool, counted map[sessionlist.Place]sessionlist.PlaceCount) map[sessionlist.Place]string {
 	names := map[sessionlist.Place]string{}
 	for _, m := range h.machinesNow() {
 		if !machines[m.cfg.ID] {
 			continue
 		}
-		list := m.keptSessions()
-		for i := range list { // by index: a range value copies every (large) session it passes
-			s := &list[i]
-			if s.SpaceName == "" {
-				continue
-			}
-			p := sessionlist.Place{Machine: m.cfg.ID, Key: cmp.Or(s.SpaceID, s.WorkspaceID)}
-			if _, ok := counted[p]; !ok {
-				continue
-			}
-			if _, named := names[p]; !named {
-				names[p] = s.SpaceName
+		list, archived := m.keptWhole()
+		for _, rows := range [2][]proto.Session{list, archived} {
+			for i := range rows { // by index: a range value copies every (large) session it passes
+				s := &rows[i]
+				if s.SpaceName == "" {
+					continue
+				}
+				p := sessionlist.Place{Machine: m.cfg.ID, Key: cmp.Or(s.SpaceID, s.WorkspaceID)}
+				if _, ok := counted[p]; !ok {
+					continue
+				}
+				if _, named := names[p]; !named {
+					names[p] = s.SpaceName
+				}
 			}
 		}
 	}

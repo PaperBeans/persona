@@ -8,7 +8,8 @@ import { useInboxBadge } from "../lib/inbox";
 import { useLarkHome } from "../lib/lark-chats";
 import { agentKey } from "../lib/pins";
 import { NAV_PAGES, extensionNavKey, sidebarActiveKey } from "../lib/persona-nav";
-import { arrangePages, useSidebarPrefs } from "../lib/sidebar-pages";
+import { arrangeSections, useSidebarPrefs } from "../lib/sidebar-pages";
+import { useStartPageCheck } from "../lib/start-page";
 import { useExtensionSlot } from "../lib/extension-slots";
 import { toneOf } from "../lib/extension-ui";
 import { BADGE_TONE, navIcon, pageRoute } from "./extensions/ExtensionSlots";
@@ -64,7 +65,7 @@ export function useGo(onNavigate?: () => void): GoFn {
 }
 
 /** One entry of the pages under Persona ("Overview", "Inbox" … "Settings", and the extensions' pages). */
-export type NavPage = { k: string; to: Route; icon: IconName; label: string; short?: string; badge?: number | string; badgeTone?: keyof typeof BADGE_CLASS; hint?: string; title?: string };
+export type NavPage = { k: string; to: Route; icon: IconName; label: string; short?: string; badge?: number | string; badgeTone?: keyof typeof BADGE_CLASS; hint?: string; title?: string; group?: { id: string; title: string } };
 
 /** The sidebar's pages ("Overview" … "Settings", the extensions' pages) and the connection, shared by the sidebar and its rail. */
 export function useNavPages() {
@@ -90,8 +91,9 @@ export function useNavPages() {
   // "Messages" needs the hub to read Feishu (feature `lark`) as well as this browser's switch
   const larkHome = larkSwitch && lark;
   const extensionPages = useExtensionSlot("nav_page");
-  // off unless turned on in Settings › General › Agent (#2475)
-  const boardOn = useWorkspaceBoardSetting().enabled === true;
+  // off unless turned on in Settings › General › Agent (#2475); null until the hub answered
+  const board = useWorkspaceBoardSetting().enabled;
+  const boardOn = board === true;
 
   const main = assistant?.main ? assistant.conversations.find((c) => c.session_id === assistant.main) : undefined;
   const page: Record<(typeof NAV_PAGES)[number], NavPage | false> = {
@@ -112,16 +114,20 @@ export function useNavPages() {
     ...(k === "settings"
       ? extensionPages.map((u) => {
           const key = extensionNavKey(u.extension, u.id);
-          return { k: key, to: pageRoute(u.extension, u.id), icon: navIcon(u.icon), label: u.title, badge: u.badge?.text || undefined, badgeTone: BADGE_TONE[toneOf(u.badge?.tone)], title: u.extension_name ? `${u.title} · ${u.extension_name}` : u.title };
+          return { k: key, to: pageRoute(u.extension, u.id), icon: navIcon(u.icon), label: u.title, badge: u.badge?.text || undefined, badgeTone: BADGE_TONE[toneOf(u.badge?.tone)], title: u.extension_name ? `${u.title} · ${u.extension_name}` : u.title, group: u.group };
         })
       : []),
     ...(page[k] ? [page[k]] : []),
   ]);
 
   // as arranged in Settings › General › Sidebar pages: the list, and the pages that wait under More (docs/web/web.md "The sidebar's pages")
-  const { shown: pages, more } = arrangePages(all, useSidebarPrefs());
+  // and in their groups (#9071): `pages` is every group's in order, for the rail, the drawer and ⌘K
+  const { sections, more } = arrangeSections(all, useSidebarPrefs());
+  const pages = sections.flatMap((s) => s.pages);
+  // the start page this load opened on, if it is not there after all, gives way to the main chat (lib/start-page.ts)
+  useStartPageCheck((k) => all.some((p) => p.k === k), extensionPages, board !== null);
 
-  return { phase, online, total, main, pages, more, all };
+  return { phase, online, total, main, pages, sections, more, all };
 }
 
 /** The pages under "More" as menu rows (the phone's grid, the rail): a choice opens the page, then `onNavigate`

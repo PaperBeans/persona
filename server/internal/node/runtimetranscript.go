@@ -244,7 +244,18 @@ func (n *Node) mergeRuntimeTranscript(s *proto.Session) string {
 	}
 	own := s.Background
 	n.setBackground(s, m) // as for a pane's session: its workflows, and the background tasks not shown as them
-	s.Background = append(s.Background, own...)
+	// Paseo's native inventory can name the same Claude task as the transcript. Keep the transcript's richer
+	// details (including its local output file), and add only work it does not already describe.
+	seen := make(map[string]bool, len(s.Background)+len(own))
+	for _, task := range s.Background {
+		seen[task.ID] = true
+	}
+	for _, task := range own {
+		if !seen[task.ID] {
+			s.Background = append(s.Background, task)
+			seen[task.ID] = true
+		}
+	}
 	s.Loop, s.Goal, s.Plan = m.loop, m.goal, m.plan
 	s.Subagents = n.subagents(s.SessionID)
 	return t

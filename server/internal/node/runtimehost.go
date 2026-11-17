@@ -244,8 +244,12 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		// sessions over (runtimecontrol.go). workspaces: runtime.workspaces is kept and, for a runtime with
 		// caps.workspaces that is the machine's engine, listed as its catalog and asked to make worktrees
 		// (runtimeworkspaces.go).
+		features := []string{"prefer_running", "resume_argv", "handover", "transcript", "launchers", "start_params", "modes", "resume", "codex_thread", "unlisted_transcripts", "workspaces"}
+		if !h.isDaemon() {
+			features = append(features, "leader_tools")
+		}
 		res := map[string]any{"protocol": RuntimeProtocol, "node_version": rh.version, "hub": rh.current() != nil,
-			"features": []string{"prefer_running", "resume_argv", "handover", "transcript", "launchers", "start_params", "modes", "resume", "codex_thread", "unlisted_transcripts", "workspaces"}}
+			"features": features}
 		if offer := rh.packageOffer(h, hello); offer != nil {
 			res["update"] = offer
 		}
@@ -269,17 +273,30 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		// The assistant's tools (ask_user, schedule_followup…) only for a runtime that runs the assistant, with the
 		// command gates' tools among them (assistant_runtime.go).
 		var p struct {
-			Assistant bool `json:"assistant"`
+			Assistant  bool   `json:"assistant"`
+			LeaderOnly bool   `json:"leader_only"`
+			SessionID  string `json:"session_id"`
 		}
 		_ = json.Unmarshal(params, &p)
+		if p.SessionID != "" && !rh.reg.owns(h, p.SessionID) {
+			return map[string]any{"tools": []proto.Tool{}}, nil
+		}
 		assistant := p.Assistant && h.assistant()
 		var res struct {
 			Tools []proto.Tool `json:"tools"`
 		}
-		if err := n.peer.Call(ctx, "mcp.tools", map[string]any{"assistant": assistant}, &res); err != nil {
+		query := map[string]any{"assistant": assistant}
+		if p.SessionID != "" {
+			query["session_id"] = p.SessionID
+			query["guest"] = n.guestOf(p.SessionID) != nil
+		}
+		if p.LeaderOnly {
+			query["leader_only"] = true
+		}
+		if err := n.peer.Call(ctx, "mcp.tools", query, &res); err != nil {
 			return nil, err
 		}
-		if assistant {
+		if assistant && !p.LeaderOnly {
 			res.Tools = append(res.Tools, n.gateTools()...)
 		}
 		if res.Tools == nil {
@@ -305,6 +322,9 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		}
 		// As the assistant only for one of the assistant's conversations that this runtime runs.
 		assistant := p.Assistant && h.assistant() && rh.reg.owns(h, p.SessionID) && n.isAssistantSession(p.SessionID)
+		if !assistant && slices.Contains(callerTools, p.Name) && !rh.reg.owns(h, p.SessionID) {
+			return proto.TextResult("Persona Agent tool requires a session owned by this runtime", true), nil
+		}
 		if p.Name == toolMailSaveAttachment { // writes on this machine (mailattachment.go)
 			return n.saveMailAttachment(ctx, p.Args, p.SessionID, assistant, n.guestOf(p.SessionID) != nil), nil
 		}
@@ -312,7 +332,7 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 			return n.assistantGateTool(ctx, g, p.SessionID, p.Args), nil
 		}
 		var res json.RawMessage
-		err := n.peer.Call(ctx, "mcp.call", map[string]any{"name": p.Name, "args": p.Args, "session_id": p.SessionID, "assistant": assistant}, &res)
+		err := n.peer.Call(ctx, "mcp.call", map[string]any{"name": p.Name, "args": p.Args, "session_id": p.SessionID, "assistant": assistant, "guest": n.guestOf(p.SessionID) != nil}, &res)
 		return res, err
 	}
 	return nil, fmt.Errorf("unknown method %s", method)

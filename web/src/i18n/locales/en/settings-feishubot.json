@@ -78,6 +78,10 @@
   "howto_footer": "The hub opens the persistent connection itself, so it doesn't need a public address.",
   "nudge_title": "Nudge about unanswered cards",
   "nudge_detail": "A card still unanswered after this long gets one reply under it in Lark (in a group topic it mentions you), outside your quiet hours",
+  "source_report_delay_title": "Reply timing for the original group",
+  "source_report_delay_detail": "Wait this long after the result is ready so you can preview it and cancel. Immediately skips the preview.",
+  "source_report_delay_now": "Immediately",
+  "source_report_delay_minutes": "{minutes} min",
   "combined_footer": "One Lark app: talk to Persona through the bot, and collect what mentions you into the Inbox with “Collect my Lark messages”.",
   "lark_name": "Lark",
   "credentials_shared_note": "The bot and “Collect my Lark messages” share this app.",
@@ -104,5 +108,7 @@
   "larkcli_profile_default": "lark-cli's default profile",
   "larkcli_profile_fixed": "{name} (set in the config file)",
   "feature_answer_new_card_title": "Answer as a new card",
-  "feature_answer_new_card_detail": "When a run finishes, its answer is sent as a new card at the bottom of the chat, so Lark notifies you, and the progress card folds up. Off: the answer is written into the progress card"
+  "feature_answer_new_card_detail": "When a run finishes, its answer is sent as a new card at the bottom of the chat, so Lark notifies you, and the progress card folds up. Off: the answer is written into the progress card",
+  "source_report_full_title": "Reply with the complete final answer",
+  "source_report_full_detail": "Everyone in the original group can see the final answer. When off, the bot sends a short result."
 }

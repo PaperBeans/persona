@@ -235,8 +235,8 @@
   "grouping_status": "状态",
   "grouping_folder": "目录",
   "grouping_direction": "常驻",
+  "grouping_request": "按要求",
   "direction_unlisted_other": "另有 {count} 个没完成的待办不在常驻分组里，比如主管 Agent 带着的子任务。按状态分组可以看到全部待办。",
-  "section_just_done": "刚做完待看",
   "section_pr": "等合并",
   "section_other": "其余没完成",
   "section_shelved": "暂无进展",
@@ -268,7 +268,7 @@
   "filter_empty_month": "本月没有到期的待办",
   "filter_empty_body": "换个筛选看看。",
   "summary_filtered": "{filter}：没完成 {open} · 已搁置 {parked} · 暂无进展 {shelved} · 已完成 {done}",
-  "section_parked": "已搁置",
+  "section_parked": "搁置",
   "ask_chat_route": "回答决定：{title}",
   "ask_chat_hint": "下一条消息会作为这项决定的答案保存到任务。只想讨论、还不决定时，请先取消此定向。"
 }

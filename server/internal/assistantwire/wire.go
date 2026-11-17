@@ -56,6 +56,9 @@ type Hello struct {
 	// SecretHandoffGate: the hub lets only a device that may approve a hand-off card say yes to one, and names it in
 	// HTTPRequest.HandoffApprover. An older hub never sends it; a manager then shows no hand-off card at all.
 	SecretHandoffGate bool `json:"secret_handoff_gate,omitempty"`
+	// ArchivedApart: the hub takes a machine's archived rows apart from its list (EventFleetArchived, #6836). An older
+	// hub never sends it, and a manager then tells them inside EventFleetSessions as before.
+	ArchivedApart bool `json:"archived_apart,omitempty"`
 	// QuietPush: the hub's push tiering switch (the low-distraction switch, docs/server/server.md) is on. The manager
 	// then holds back what is its own to send, by the same levels the hub filters pushes by: a supervised card is not
 	// handed to the owner on a timeout, a P1 escalation and conclusion / progress cards post nothing. An older hub never
@@ -187,6 +190,9 @@ const (
 	// ConnectorsSnapshots: {tz} → {snapshots: [connectorwire.SnapshotData]}, the live states of the signed-in connectors
 	// that keep one (the chats waiting on the user, today's meetings), those that answered within a few seconds.
 	ConnectorsSnapshots = "connectors.snapshots"
+	// ConnectorsLarkReply: connectorwire.LarkReplyWatch -> connectorwire.LarkReplyObservation. A narrow read of an
+	// explicitly bound Lark topic, through the configured built-in reader; it never sends or changes read state.
+	ConnectorsLarkReply = "connectors.lark_reply"
 
 	// AppInteractions is the hub's interaction queue (InteractionsGet, InteractionsAnswer).
 	AppInteractions = "interactions"
@@ -220,12 +226,13 @@ const (
 	InteractionsAnswer = "interactions.answer"
 )
 
-// ModelBinding is what a purpose runs on: a provider (launcher.<name> for a launcher) with a model and effort.
+// ModelBinding is what a purpose runs on: a provider (launcher.<name> for a launcher) with a model and effort. A
+// binding an older hub stored with the main chat's "runtime" ("cli" or "agentsdk") reads without it, as the CLI every
+// assistant conversation runs on; the key is gone from the next write.
 type ModelBinding struct {
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
 	Effort   string `json:"effort,omitempty"`
-	Runtime  string `json:"runtime,omitempty"` // main chat only: cli (default) or agentsdk; kept across a provider change
 	// ConfigDir is the main chat's only: the Claude profile its new conversations start in (#4633). None is Persona's
 	// own profile (the default); "legacy" is this computer's existing Claude Code setup. Kept across a provider change;
 	// an existing conversation keeps the profile it was started in.
@@ -412,9 +419,11 @@ type SessionView struct {
 	MachineID string `json:"machine_id"`
 	SessionID string `json:"session_id"`
 	// Title is "MMDD | kind | topic" or the user's own (titles.go); the main conversation's is always "Persona".
-	Title    string   `json:"title,omitempty"`
-	Archived bool     `json:"archived,omitempty"`
-	Queued   []string `json:"queued,omitempty"` // messages from other conversations waiting for its turn to end
+	Title    string `json:"title,omitempty"`
+	Archived bool   `json:"archived,omitempty"`
+	// Tags are the conversation's user-defined labels (assistant/conversation_tags.go); absent or empty for one without.
+	Tags   []string `json:"tags,omitempty"`
+	Queued []string `json:"queued,omitempty"` // messages from other conversations waiting for its turn to end
 	// Origin is who opened the conversation (docs/protocol/protocol.md "Origin of assistant chats": user, channel, inbox, task, spawned,
 	// lark_agent, extension) and OriginRef what of (the inbox item, the task, the conversation, the channel, the
 	// extension); both "" while it is not known.

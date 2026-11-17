@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { SshConfiguration, SshTunnel } from '../models/SshTunnel';
 import { Tokens } from '../design/Tokens';
 import { tr } from '../design/Strings';
@@ -94,10 +97,10 @@ export struct SshSettingsPage {
           TextInput({ text: this.passphrase, placeholder: tr('ssh_passphrase') }).type(InputType.Password).maxLength(4096)
             .onChange((value: string) => this.passphrase = value).height(Tokens.input)
         }.width('100%').enabled(!this.busy && this.tunnel.loaded)
-        Button(tr('ssh_save_enable')).width('100%').constraintSize({ minHeight: Tokens.touch })
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('ssh_save_enable')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('ssh_save_enable', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('ssh_save_enable')).bindTips(tr('ssh_save_enable'))
           .enabled(!this.busy && this.tunnel.loaded && !!this.sshHost.trim() && !!this.username.trim() && !!this.hostKey.trim())
           .onClick(() => this.confirmSave())
-        if (this.tunnel.configuration.enabled) Button(tr('ssh_disable')).width('100%').constraintSize({ minHeight: Tokens.touch })
+        if (this.tunnel.configuration.enabled) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('ssh_disable')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('ssh_disable', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('ssh_disable')).bindTips(tr('ssh_disable'))
           .enabled(!this.busy).onClick(() => this.disable())
       }.padding(Tokens.page).width('100%')
     }.width('100%').height('100%').backgroundColor($r('app.color.persona_canvas'))

@@ -64,3 +64,10 @@ func (n *Node) agentCommand(cmd string, q func(string) string, shells ...string)
 	}
 	return "unset " + strings.Join(assistantOnlyEnvNames(), " ") + " && " + cmd
 }
+
+// agentStartCommand is agentCommand for a command that may go into a start file. On Windows the outer pane is
+// PowerShell, but Git Bash reads that file, so the command carries the same PERSONA_HOME and unset prefix as on
+// macOS and Linux. herdr's separate resume_argv path keeps using agentCommand with the pane's own shell.
+func (n *Node) agentStartCommand(cmd string, q func(string) string, shells ...string) string {
+	return n.agentCommand(cmd, q, startCommandShells(shells)...)
+}

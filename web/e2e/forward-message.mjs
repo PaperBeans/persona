@@ -5,9 +5,10 @@
 // note typed and sent goes out as one message, the `<persona-context kind="forward">` block before the note
 // (spec/fixtures/forward); the sent bubble shows the forward as a card, and a click on it opens the original chat.
 // Then the same with Persona (the main chat) as the target. Several at once (#3838): Forward to's Select messages… ›
-// the reply is picked and the bar takes the composer's place › Cancel leaves the chat as it was › again, with none picked
-// Forward is off › your message and the reply › Forward 2 › the blog's Agent: one card over its box, and the hub gets two
-// blocks in the chat's order, then the note; the sent bubble shows them as one card.
+// the reply is picked and the bar takes the composer's place › Cancel leaves the chat as it was › again from the message
+// menu's last row, Select messages (#9469), which never shows Forward to › with none picked Forward is off › your message
+// and the reply › Forward › the blog's Agent: one card over its box, and the hub gets two blocks in the chat's order, then
+// the note; the sent bubble shows them as one card.
 //
 // Needs the web page against the fake hub, which echoes what is sent into the transcript, and Chrome (Edge with
 // --channel msedge, any Chromium through --executable):
@@ -170,6 +171,18 @@ async function startPicking(page, phone, where, quiet) {
   return bar;
 }
 
+/** The message menu's last row, Select messages (#9469): the chat picks with the reply picked, Forward to never shows. */
+async function startPickingFromMenu(page, phone, where) {
+  const menu = await openActions(page, phone);
+  const last = menu.getByRole("menuitem").last();
+  if ((await last.textContent())?.trim() !== "Select messages") fail(`${where}: the reply's actions do not end in Select messages`);
+  await last.click();
+  const bar = page.locator("main [data-pick-bar]");
+  await bar.waitFor({ state: "visible" });
+  if (await page.locator("[data-forward-dialog]").count()) fail(`${where}: Select messages showed Forward to`);
+  return bar;
+}
+
 /** Several at once (#3838), from the review chat to the blog's Agent. */
 async function forwardSeveral(page, phone, tag) {
   const where = `several-${tag}`;
@@ -189,15 +202,17 @@ async function forwardSeveral(page, phone, tag) {
   if (await page.locator('main [role="checkbox"]').count()) fail(`${where}: messages are still checkboxes after Cancel`);
   await page.locator("main textarea").last().waitFor({ state: "visible" });
   ok(`${where}: Select messages… picked the reply; Cancel left the chat as it was`);
-  // again: with none picked Forward is off
-  bar = await startPicking(page, phone, where, true);
+  // again, from the message menu: with none picked Forward is off
+  bar = await startPickingFromMenu(page, phone, where);
+  if ((await count(bar)) !== "1 selected" || (await box(REPLY).getAttribute("aria-checked")) !== "true") fail(`${where}: the menu's Select messages did not pick the reply`);
+  ok(`${where}: the message menu's Select messages picked the reply`);
   await box(REPLY).click();
-  const forward = bar.getByRole("button", { name: /^Forward \d+$/ });
+  const forward = bar.getByTestId("pick-forward");
   if ((await count(bar)) !== "0 selected" || !(await forward.isDisabled())) fail(`${where}: Forward is not off with none picked`);
   await shot(page, `${where}-4-none`);
   await box(ASK).click();
   await box(REPLY).click();
-  if ((await forward.textContent())?.trim() !== "Forward 2") fail(`${where}: the bar's button says ${await forward.textContent()}`);
+  if ((await count(bar)) !== "2 selected" || (await forward.textContent())?.trim() !== "Forward") fail(`${where}: the bar says ${await count(bar)}, ${await forward.textContent()}`);
   await forward.click();
   const dialog = page.locator('[role="dialog"]').filter({ has: page.locator("[data-forward-dialog]") });
   await dialog.waitFor({ state: "visible" });

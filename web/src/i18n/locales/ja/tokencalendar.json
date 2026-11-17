@@ -1,0 +1,7 @@
+{
+  "line": "今日 {today}トークン · 過去30日間 {month}",
+  "day_line": "{day} · {tokens}トークン",
+  "kinds": "入力 {input} · 出力 {output} · キャッシュ書き込み {write} · キャッシュ読み取り {read}",
+  "grid": "1日ごとのトークン使用量。矢印キーで日を選べます。",
+  "read_day": "{day}：{tokens}トークン"
+}

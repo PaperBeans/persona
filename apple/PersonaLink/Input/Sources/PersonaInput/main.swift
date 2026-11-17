@@ -19,6 +19,8 @@ import PersonaInputKit
 //                            one live screen's Phone Screen session on the node's socket: says the token, then
 //                            "granted" or "missing", then answers JSON requests until the node closes it, putting
 //                            windows and displays back as it ends
+//   --phone-screen-restore   puts back what a Phone Screen session that died left (windows, text size), then exits;
+//                            the node runs it at start and after a session ends with records left (#9500)
 //   --phone-screen-set|-mode|-has …
 //                            the short-lived child that configures displays for that session (DisplayConfig)
 
@@ -32,6 +34,8 @@ enum PersonaInputMain {
             return granted ? 0 : 1
         case "--phone-screen-set", "--phone-screen-mode", "--phone-screen-has":
             return DisplayConfig.run(argv)
+        case "--phone-screen-restore":
+            PhoneScreenRestoreRun.run()
         case "--request-permission":
             let granted = CGRequestPostEventAccess()
             print("post_event: \(granted ? "granted" : "missing")")

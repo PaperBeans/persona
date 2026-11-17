@@ -69,6 +69,16 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 			return nil, planInvalid{err}
 		}
 		s.resolveTaskRepo(ctx, &p.Tasks[i]) // where it runs after the card's edits (its workspace, not the plan's cwd)
+		task := &p.Tasks[i]
+		if task.Continues != "" && task.Brief == nil {
+			// Cards saved before briefs must bind the current scope before they can start.
+			if err := s.planBriefs(ctx, "", p.Conversation, p.Tasks[i:i+1]); err != nil {
+				return nil, planInvalid{err}
+			}
+		}
+		if err := s.checkContinuationScope(task); err != nil {
+			return nil, planInvalid{err}
+		}
 	}
 	p.State = planStarted
 	for i := range p.Tasks {
@@ -89,6 +99,10 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 	}
 	for i := range p.Tasks {
 		t := &p.Tasks[i]
+		if err := s.checkPlannedInbox(ctx, p.Conversation, *t); err != nil {
+			t.Error = err.Error()
+			continue
+		}
 		var todo Todo
 		if t.ReuseTodo != "" {
 			// The todo is already there with its own title, notes and task card in the conversation's feed (a Lark topic
@@ -107,8 +121,16 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 			}
 		} else {
 			title, retitle := s.taskTitle(ctx, t.Title, t.Prompt) // the assistant's own title stays when it is a real one
-			todo, err = s.createTaskTodoAs(ctx, t.ReservedTodoID, title, t.Prompt, p.Conversation, p.ID, t.Project)
+			if t.InboxItem != "" {
+				s.tasks.mu.Lock()
+				s.tasks.reusing[t.ReservedTodoID] = true
+				s.tasks.mu.Unlock()
+			}
+			todo, err = s.createTaskTodoAs(ctx, t.ReservedTodoID, title, t.Prompt, p.Conversation, p.ID, t.Project, t.InboxItem)
 			if err != nil {
+				if t.InboxItem != "" {
+					s.releaseTakenTodo(t.ReservedTodoID)
+				}
 				t.Error = err.Error()
 				continue
 			}
@@ -116,6 +138,24 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 				s.nameTodoLater(ctx, todo.ID, title, t.Prompt)
 			}
 		}
+		if keep, err := s.linkPlannedInbox(ctx, p.Conversation, *t, todo); err != nil {
+			t.Error = err.Error()
+			if keep {
+				t.TodoID = todo.ID
+			}
+			if t.ReuseTodo != "" {
+				s.releaseTakenTodo(t.ReuseTodo)
+			} else {
+				if !keep {
+					if err := s.deleteTodo(ctx, todo.ID); err != nil {
+						s.logf("task %s: undo Inbox admission: %v", todo.ID, err)
+					}
+				}
+				s.releaseTakenTodo(todo.ID)
+			}
+			continue
+		}
+		todo = s.startPieces(ctx, *t, todo) // its place in a request (todo_pieces.go)
 		t.TodoID = todo.ID
 		s.briefStarted(ctx, p, t, todo) // what was asked, kept from now on (task_brief_plan.go)
 		s.setTaskStageKind(ctx, todo.ID, "", "", taskStageKind(t.Readonly, t.DoneWhen, todo.PRURL), false)
@@ -128,17 +168,17 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 					s.taskCard(ctx, sup, todo.ID, "") // the leader sees its task's card too; the plan's stays where it was made
 				}
 			}
-			s.superviseTodo(ctx, todo.ID, sup, t.DoneWhen, t.ExpectMinutes)
+			s.supervisePlanTask(ctx, todo.ID, sup, t)
 		} else if sup, ok := s.defaultPlanSupervisor(ctx, p.Conversation, t.Parent); ok {
 			// Any other conversation's task is its own to supervise: its signals go to the conversation that planned it,
 			// which also sees its card and reviews it. No second card when that is the planning conversation itself.
 			if t.ReuseTodo == "" && sup != p.Conversation {
 				s.taskCard(ctx, sup, todo.ID, "")
 			}
-			s.superviseTodo(ctx, todo.ID, sup, t.DoneWhen, t.ExpectMinutes)
+			s.supervisePlanTask(ctx, todo.ID, sup, t)
 		}
 		if t.Parent != "" { // a task leader's worker: supervised by its leader's agent, with no conversation to show a card in
-			s.superviseTodo(ctx, todo.ID, p.Conversation, t.DoneWhen, t.ExpectMinutes)
+			s.supervisePlanTask(ctx, todo.ID, p.Conversation, t)
 			continue
 		}
 		if t.ReuseTodo != "" {
@@ -153,13 +193,37 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 	}
 	s.event(ctx, map[string]any{"type": "task_plan", "plan": p})
 	for i := range p.Tasks {
-		if task := p.Tasks[i]; task.TodoID != "" {
+		if task := p.Tasks[i]; task.TodoID != "" && task.Error == "" {
 			s.startPlanTaskAsync(p.ID, p.Conversation, i, task, false, func() {
-				s.releaseTakenTodo(task.ReuseTodo) // linked or failed: the todo is no longer in the gap
+				held := task.ReuseTodo
+				if held == "" && task.InboxItem != "" {
+					held = task.TodoID
+				}
+				s.releaseTakenTodo(held) // linked or failed: the todo is no longer in the gap
 			})
 		}
 	}
 	return p, nil
+}
+
+// supervisePlanTask keeps a continuation's ledger in step with its brief even
+// if the scope changed between accepting the card and preparing dispatch.
+func (s *Service) supervisePlanTask(ctx context.Context, id, supervisor string, t *PlanTask) {
+	if t.Continues == "" {
+		s.superviseTodo(ctx, id, supervisor, t.DoneWhen, t.ExpectMinutes)
+		return
+	}
+	_, _, err := s.updateSupervision(ctx, id, func(v *Supervision) bool {
+		brief, ok := s.briefOfTodo(t.Continues)
+		if !ok {
+			return false
+		}
+		v.Supervisor, v.DoneWhen, v.ExpectMinutes = supervisor, cleanDoneWhen(brief.Criteria), brief.ExpectNow
+		return true
+	})
+	if err != nil {
+		s.logf("task %s: supervision: %v", id, err)
+	}
 }
 
 // notReusable is the refusal of a todo_id: it says why, so the assistant can plan again without it.
@@ -249,6 +313,9 @@ func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation stri
 	if task.Continues == id {
 		var todo Todo
 		todo, err = s.taskTodoForConversation(conversation, id)
+		if err == nil && task.Brief != nil {
+			err = s.checkContinuationScope(&task)
+		}
 		if err == nil {
 			stopped, err = s.stopContinuedTaskAgents(ctx, todo)
 		}

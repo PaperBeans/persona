@@ -785,7 +785,8 @@ private struct LiftedMessage: View {
         let count = MessageActionBar.count(id: lift.bar.id, isUser: lift.bar.isUser, menu: menu, pending: lift.bar.pending,
                                            deletes: lift.bar.delete != nil)
         let barWidth = min(MessageActionBar.width(count: count), bounds.width - 2 * Theme.Space.s)
-        let bar = CGSize(width: barWidth, height: MessageActionBar.height)
+        let selects = MessageActionBar.selects(id: lift.bar.id, menu: menu, pending: lift.bar.pending)
+        let bar = CGSize(width: barWidth, height: MessageActionBar.height(selects: selects))
         let p = LiftLayout.place(message: message, press: lift.press.y + pad.top + above, bar: bar, bounds: bounds,
                                  margin: Theme.Space.s, gap: Theme.Space.s, trailing: lift.bar.isUser,
                                  part: lift.part != nil ? above : nil, pressInSight: Theme.Size.tapTarget)

@@ -128,6 +128,7 @@ func fold(run []proto.Item) proto.Item {
 	}
 	fo.Changes = foldChanges(run)
 	fo.Usage = foldUsage(run)
+	fo.Sources = foldSources(run)
 	return proto.Item{ID: "fold:" + first.ID, Seq: first.Seq, TS: first.TS, Role: "assistant", Kind: proto.KindFold, Fold: fo}
 }
 

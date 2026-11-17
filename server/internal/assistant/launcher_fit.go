@@ -167,7 +167,7 @@ func (s *Service) fitLauncher(ctx context.Context, m Device, own startPick, para
 		})
 	}
 	to := launcherInstead(m, list)
-	for _, k := range []string{"model", "effort", "model_fingerprint", "runtime"} {
+	for _, k := range []string{"model", "effort", "model_fingerprint"} {
 		delete(params, k)
 	}
 	params["launcher"] = to

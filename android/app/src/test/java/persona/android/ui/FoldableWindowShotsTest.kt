@@ -16,11 +16,9 @@ import persona.feature.assistant.AssistantSidebarContent
 import android.app.Application
 import android.content.ComponentName
 import android.graphics.Bitmap
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -71,7 +69,14 @@ import java.io.File
 @Config(application = Application::class, sdk = [35], qualifiers = "en-w673dp-h951dp-mdpi")
 class FoldableWindowShotsTest {
     @get:Rule val rule = createEmptyComposeRule()
-    @After fun resetAssistant() = AssistantManagerChoice.reset()
+    private var animationScale: Float? = null
+    @After fun resetAssistant() {
+        AssistantManagerChoice.reset()
+        animationScale?.let { scale ->
+            Settings.Global.putFloat(ApplicationProvider.getApplicationContext<Application>().contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE, scale)
+        }
+    }
     private val agent = Session("computer", "agent", title = "Plan a weekend trip", state = "unread",
         cwd = "/example/travel", updatedAt = "2026-11-12T09:00:00Z")
     private val route = ChatRoute(agent.machineId, agent.sessionId, ConversationKind.Agent)
@@ -121,6 +126,14 @@ class FoldableWindowShotsTest {
     }
 
     @Test fun uprightInnerScreen() = windows("upright")
+    @Test fun uprightOverlayPickMotionLight() = overlayPickMotion(dark = false)
+    @Test fun uprightOverlayPickMotionDark() = overlayPickMotion(dark = true)
+    @Test fun uprightOverlayPickMotionBriefLight() = overlayPickMotion(dark = false, style = AppStyle.Brief)
+    @Test fun uprightOverlayPickMotionBriefDark() = overlayPickMotion(dark = true, style = AppStyle.Brief)
+    @Test fun uprightOverlayPickMotionBoardLight() = overlayPickMotion(dark = false, style = AppStyle.Board)
+    @Test fun uprightOverlayPickMotionBoardDark() = overlayPickMotion(dark = true, style = AppStyle.Board)
+    @Test fun uprightOverlayPickIsInstantWithReducedMotion() = overlayPickMotion(dark = false, reduced = true)
+    @Test fun uprightOverlayPickIsInstantWithSystemAnimationsOff() = overlayPickMotion(dark = true, systemOff = true)
     @Test fun uprightInnerScreenLarge() = windows("upright-large", large = true)
     @Config(qualifiers = "en-w951dp-h673dp-mdpi")
     @Test fun landscapeInnerScreen() = windows("landscape")
@@ -132,6 +145,106 @@ class FoldableWindowShotsTest {
     @Test fun wideWindowWithSwitcher() = windows("wide-switcher", withSwitcher = true)
     @Config(qualifiers = "en-w1000dp-h800dp-mdpi")
     @Test fun wideWindowAtMaximumDivider() = windows("wide-max", dragMax = true)
+
+    /**
+     * iOS SplitNavigation.swift:125-146, 178-208: the sidebar replaces the detail immediately; only hideOverlay moves.
+     * The real decorated Agents list and chat must retain that distinction on an upright open foldable (673 x 951dp).
+     */
+    private fun overlayPickMotion(dark: Boolean, style: AppStyle = AppStyle.Glass, reduced: Boolean = false, systemOff: Boolean = false) {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        Shadows.shadowOf(app.packageManager).addActivityIfNotPresent(ComponentName(app, ComponentActivity::class.java))
+        animationScale = Settings.Global.getFloat(app.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+        Settings.Global.putFloat(app.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, if (systemOff) 0f else 1f)
+        val prefs = preferences()
+        val dependencies = object : AgentsDependencies {
+            override fun sessions() = repositories
+            override fun interactions() = this@FoldableWindowShotsTest.interactions
+            override fun connection() = this@FoldableWindowShotsTest.connection
+            override fun sender() = this@FoldableWindowShotsTest.sender
+            override fun preferences() = prefs
+            override fun machines(): MachineManagement? = null
+        }
+        val shown = mutableStateOf(false)
+        val stack = mutableStateListOf<NavKey>(AgentsRoute, route)
+        val navigator = AppNavigator(mapOf(AppTab.Agents to stack), { AppTab.Agents }, {}, chatTab = { AppTab.Agents })
+        val listNavigator = object : Navigator by navigator {
+            override fun navigate(key: NavKey) = pickAgentsList(navigator, stack, shown, key)
+        }
+        var listCompositions = 0
+        rule.mainClock.autoAdvance = false
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity -> activity.setContent {
+                // Leave PersonaTheme's default system-motion lookup in place for the system-off regression test.
+                PersonaTheme(style = style, darkTheme = dark) {
+                  CompositionLocalProvider(LocalReduceMotion provides (reduced || PersonaTheme.reduceMotion)) {
+                    val overlay = rememberAgentsOverlayStrategy(true, shown)
+                    val transitions = rememberPageTransitions()
+                    val provider = entryProvider<NavKey> {
+                        agentsEntries(navigator, dependencies, listNavigator = listNavigator)
+                        entry<ChatRoute> { key ->
+                            Box(Modifier.fillMaxSize().testTag("detail:${key.sessionId}")) {
+                                ChatScreen(SessionKey(key.machineId, key.sessionId), chats, sender, interactions, repositories, onBack = navigator::back)
+                            }
+                        }
+                    }
+                    Box(Modifier.fillMaxSize().background(PersonaTheme.palette.background).testTag("shot")) {
+                        NavDisplay(backStack = stack, onBack = navigator::back,
+                            sceneStrategies = listOf(overlay),
+                            entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), rememberViewModelStoreNavEntryDecorator()),
+                            transitionSpec = { transitions.push }, popTransitionSpec = { transitions.pop },
+                            predictivePopTransitionSpec = { transitions.predictivePop },
+                            entryProvider = { key ->
+                                val entry = provider(key)
+                                NavEntry(key, entry.contentKey, entry.metadata) {
+                                    if (key == AgentsRoute) {
+                                        SideEffect { listCompositions++ }
+                                        Box(Modifier.fillMaxSize().testTag("motion-list")) { entry.Content() }
+                                    } else entry.Content()
+                                }
+                            })
+                    }
+                  }
+                }
+            } }
+            awaitText("The trip outline is ready.")
+            rule.runOnIdle { shown.value = true }
+            rule.mainClock.advanceTimeBy(1_000)
+            awaitText(otherAgent.displayTitle)
+            val before = capture("motion-before", style, dark, settle = false)
+            rule.onNodeWithText(otherAgent.displayTitle, useUnmergedTree = true).performClick()
+            Snapshot.sendApplyNotifications()
+            repeat(2) { rule.mainClock.advanceTimeByFrame() }
+            assertTrue("a pick closes the overlay on the tap frame", !shown.value)
+            rule.onNodeWithTag("detail:${agent.sessionId}").assertDoesNotExist()
+            rule.onNodeWithTag("detail:${otherAgent.sessionId}").assertExists()
+            val detail = rule.onNodeWithTag("detail:${otherAgent.sessionId}").getUnclippedBoundsInRoot()
+            assertEquals("replacement does not slide", 0f, detail.left.value, 0f)
+            assertEquals(673f, (detail.right - detail.left).value, 0f)
+            val compositionsAfterPick = listCompositions
+            val instant = reduced || systemOff
+            if (instant) {
+                rule.onNodeWithTag("motion-list").assertDoesNotExist()
+                capture("motion-reduced-first", style, dark, settle = false)
+                rule.mainClock.advanceTimeBy(1_000)
+                capture("motion-reduced-end", style, dark, settle = false)
+                rule.onNodeWithTag("motion-list").assertDoesNotExist()
+                // Chat data arrives asynchronously; pin navigation geometry, independently of the loading content.
+                assertEquals("reduced motion is at its final position on the first frame", detail,
+                    rule.onNodeWithTag("detail:${otherAgent.sessionId}").getUnclippedBoundsInRoot())
+            } else {
+                rule.mainClock.advanceTimeBy(80)
+                val list = rule.onNodeWithTag("motion-list").getUnclippedBoundsInRoot()
+                assertTrue("the list is sliding away: $list", list.left.value in -319f..-1f)
+                val mid = capture("motion-mid", style, dark, settle = false)
+                assertEquals("animation frames do not recompose the list", compositionsAfterPick, listCompositions)
+                rule.mainClock.advanceTimeBy(1_000)
+                rule.onNodeWithTag("motion-list").assertDoesNotExist()
+                val end = capture("motion-end", style, dark, settle = false)
+                assertTrue("mid-frame differs from start", !mid.sameAs(before))
+                assertTrue("mid-frame differs from end", !mid.sameAs(end))
+            }
+        }
+    }
 
     private fun windows(window: String, large: Boolean = false, dragMax: Boolean = false, withSwitcher: Boolean = false) {
         AssistantManagerChoice.choose("hub", null, "assistant")
@@ -269,14 +382,16 @@ class FoldableWindowShotsTest {
                             AgentsEmptyPage { agentsOverShown.value = true }
                         }
                     }
+                    val pageTransitions = rememberPageTransitions()
                     Box(Modifier.fillMaxSize().background(PersonaTheme.palette.background).testTag("shot")) {
                         JShellDrawer(drawerShown.value, onDismiss = { drawerShown.value = false }, drawer = { sidebar(false) }) {
                             CompositionLocalProvider(LocalAgentsTabSplit provides agentsTabSplit) {
                                 NavDisplay(backStack = stack, onBack = navigator::back,
                                     entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), rememberViewModelStoreNavEntryDecorator(), chrome),
                                     sceneStrategies = listOf(overlay, listDetail.strategy),
-                                transitionSpec = { ContentTransform(EnterTransition.None, ExitTransition.None) },
-                                popTransitionSpec = { ContentTransform(EnterTransition.None, ExitTransition.None) },
+                                transitionSpec = { pageTransitions.push },
+                                popTransitionSpec = { pageTransitions.pop },
+                                predictivePopTransitionSpec = { pageTransitions.predictivePop },
                                 entryProvider = { key ->
                                     val provider = entryProvider<NavKey> {
                                         entry<AssistantRoute> {
@@ -439,8 +554,8 @@ class FoldableWindowShotsTest {
         } while (System.nanoTime() < deadline)
         error("Missing $text: ${rule.onRoot().printToString()}")
     }
-    private fun capture(stage: String, style: AppStyle, dark: Boolean): Bitmap {
-        frames()
+    private fun capture(stage: String, style: AppStyle, dark: Boolean, settle: Boolean = true): Bitmap {
+        if (settle) frames()
         val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
         val out = File("build/foldable-window-shots").also { it.mkdirs() }
         File(out, "$stage-${style.name.lowercase()}-${if (dark) "dark" else "light"}.png").outputStream()

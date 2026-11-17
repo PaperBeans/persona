@@ -1180,9 +1180,10 @@ struct FullOutputSheet: View {
                     }
                 }
                 #else
-                ToolbarItem(placement: .confirmationAction) { Button("Done [Extension System Presentation c0b3fb]") { dismiss() }.lineLimit(1) }
+                // ✕ at the leading corner, the page's own Copy All at the trailing one (#9653).
+                SheetClose { dismiss() }
                 if let text {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: .primaryAction) {
                         Button { UIPasteboard.general.string = text } label: { Label("Copy All [Tool Views 1c5144]", systemImage: Theme.Icon.copy) }
                     }
                 }

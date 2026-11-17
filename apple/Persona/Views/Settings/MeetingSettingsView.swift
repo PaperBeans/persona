@@ -13,6 +13,8 @@ struct MeetingSettingsView: View {
     @State private var saving = false
     /// Hub transcription's settings, made once the page shows (its model reads this phone's Wi-Fi rule: P3).
     @State private var transcription: MeetingTranscriptionSettings?
+    /// This phone's experiment (#8731 B2): echo cancellation turned on with the speaker mid-meeting.
+    @StoredValue(MeetingRecorder.echoWithSpeakerKey) private var echoWithSpeaker = false
 
     var body: some View {
         SettingsForm {
@@ -65,6 +67,17 @@ struct MeetingSettingsView: View {
                 Text("The hub holds Persona to these limits in a meeting, whatever it is asked.")
             }
             .font(Theme.Font.secondary)
+            if MeetingAttendees.conversation(model) {
+                // Off until a phone has measured how long the microphone stops and how far-off voices sound with it.
+                Section {
+                    Toggle(isOn: $echoWithSpeaker) { Text("Echo Cancellation with the Speaker") }
+                        .accessibilityIdentifier("settings-meeting-echo-speaker")
+                } header: {
+                    Text("Experimental [Meeting Settings]")
+                } footer: {
+                    Text("Turning on the speaker during a meeting stops the microphone for a moment.")
+                }
+            }
         }
         .themedPage()
         .navigationTitle(String(localized: "Meetings"))

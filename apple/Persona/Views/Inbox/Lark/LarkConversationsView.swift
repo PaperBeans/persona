@@ -161,7 +161,6 @@ private struct LarkConversationsPage: View {
             }
             .listStyle(.plain)
             .listSectionSpacing(0)
-            .tabSwitchListRoom()  // its end clear of the open Duo's floating tabs' switch (#4231)
             .accessibilityIdentifier("feishu-conversations")
             .onAppear {
                 store.willChange = { [weak scroll] in scroll?.reader.willChange() }
@@ -190,7 +189,10 @@ private struct LarkConversationsPage: View {
             .pageSearchable(text: $query, prompt: String(localized: "lark.searchChats", defaultValue: "Search chats", comment: "Search field over the Lark chats list"))
             .navigationTitle("Messages [Quote Views 4da199]")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar(shell == nil ? .visible : .hidden, for: .navigationBar)
+            // Under the Duo's side bars Lark Settings stands with the system's items at the column's top, as on the open
+            // Duo's tab, and the rail keeps the foot for the face and the system's search (#9837); no title there.
+            .toolbar(shell == nil || railEdge != nil ? .visible : .hidden, for: .navigationBar)
+            .toolbar(removing: shell != nil && railEdge != nil ? .title : nil)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let shell, railEdge == nil { topBar(shell) }
             }
@@ -200,6 +202,7 @@ private struct LarkConversationsPage: View {
             .pageToolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { openConnectionSettings() } label: { Label("Lark Settings", systemImage: Theme.Icon.settings) }
+                        .accessibilityIdentifier("feishu-settings")
                 }
             }
             }
@@ -388,12 +391,13 @@ private struct LarkConversationsPage: View {
         .shellTopBarScaled().modifier(ShellBarAtRest(page: 2))
     }
 
-    /// The bar as the side rail (iPhone Duo): the face and Lark Settings, then the switch at the foot of the column.
+    /// The bar as the side rail (iPhone Duo): the tab bar, the face, and under it the system's search (#9837: it lay over
+    /// Lark Settings there, which is with the page's buttons at the column's top now).
     private func sideRail(_ shell: ShellState, edge: HorizontalEdge) -> some View {
         @Bindable var model = model
         return ShellSideRail(edge: edge) {
             ShellPersonaButton(id: "feishu-sidebar") { shell.drawer.open() }
-            ShellCircleButton(symbol: Theme.Icon.settings, label: String(localized: "Lark Settings"), id: "feishu-settings") { openConnectionSettings() }
+            ShellRailSlot()
         } switcher: {
             ShellSwitch(tab: $model.selectedTab, axis: .vertical) { EmptyView() } workMenu: { EmptyView() }
         }

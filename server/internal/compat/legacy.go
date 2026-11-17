@@ -93,7 +93,7 @@ func LegacyTool(name string) string {
 }
 func Source(name string) string { return proto.CanonicalLauncherSource(name) }
 
-var runtimePackages = [][2]string{{"jarvis-dsh-runtime", "persona-dsh-runtime"}, {"jarvis-pi-runtime", "persona-pi-runtime"}, {"jarvis-paseo-runtime", "persona-paseo-runtime"}, {"jarvis-agent-sdk-runtime", "persona-agent-sdk-runtime"}}
+var runtimePackages = [][2]string{{"jarvis-dsh-runtime", "persona-dsh-runtime"}, {"jarvis-pi-runtime", "persona-pi-runtime"}, {"jarvis-paseo-runtime", "persona-paseo-runtime"}}
 
 func RuntimePackage(name string) string {
 	for _, pair := range runtimePackages {

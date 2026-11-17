@@ -138,7 +138,7 @@ final class RecentTaskChatsUITests: XCTestCase {
         item.tap()
         XCTAssertTrue(item.waitForNonExistence(timeout: 5), "the menu stayed open")
         try hubHolds(true)
-        app.navigationBars.buttons["完成"].firstMatch.tap()
+        app.navigationBars.buttons["sheet-close"].firstMatch.tap()
         showSidebar(timeout: 10)
         sidebarTop()
         // at the largest text sizes the fifth row is further down the drawer

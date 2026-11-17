@@ -75,6 +75,9 @@ def env(cfg: dict) -> dict:
         "PERSONA_WRANGLER": os.path.expanduser(get(cfg, "publish.wrangler", "")),
         # Meta glasses (docs/apple/meta-glasses.md): the project.yml include that adds the Meta Wearables SDK is on only for YES.
         "PERSONA_META_WEARABLES": "YES" if get(cfg, "app.meta_wearables.enabled", False) is True else "NO",
+        # Siri calls (docs/apple/siri.md "Calling Persona"): the project.yml include that adds the SiriKit extension is on
+        # only for YES (app.siri_calls; its entitlement is in OPT_IN, its App IDs in asc_signing.py).
+        "PERSONA_SIRI_CALLS": "YES" if opted_in(cfg, "app.siri_calls") else "NO",
     }
     # Which Xcode builds (and releases) the app; a DEVELOPER_DIR already in the environment wins. iPhone Duo needs
     # Xcode 27 or later: built with an older one, the app does not reach under the status bar and the camera.
@@ -122,6 +125,11 @@ def watch_app_group(cfg: dict) -> str:
     return group
 
 
+def call_intents_bundle_id(cfg: dict) -> str:
+    """The SiriKit extension (apple/siri-calls.yml, app.siri_calls): a child of the app's Bundle ID, as the others."""
+    return get(cfg, "app.bundle_id", "") + ".callintents"
+
+
 def provisioning_profiles(cfg: dict) -> dict[str, str]:
     """Configured signing names are account resources, not product display names."""
     bid = get(cfg, "app.bundle_id", "")
@@ -133,6 +141,10 @@ def provisioning_profiles(cfg: dict) -> dict[str, str]:
         bid + ".notify": "Persona Notify App Store",
         bid + ".share": "Persona Share App Store",
     }
+    # Only in a build with the extension: without it the export options stay as they were. A dict literal assigned to
+    # `profiles`, as above: the privacy check reads the published default names from such literals only.
+    if opted_in(cfg, "app.siri_calls"):
+        profiles = {**profiles, call_intents_bundle_id(cfg): "Persona Call Intents App Store"}
     overrides = get(cfg, "app_store.provisioning_profiles", {})
     if not isinstance(overrides, dict):
         sys.exit("app_store.provisioning_profiles must be a Bundle ID to profile name object")
@@ -144,7 +156,8 @@ def provisioning_profiles(cfg: dict) -> dict[str, str]:
 
 
 # The app's entitlements. The opt-in ones need the capability on the App ID first (CarPlay voice: Apple's approval,
-# docs/apple/carplay.md; HealthKit background delivery, docs/assistant/health.md; HomeKit, docs/apple/phone-tools.md "Home"); the generated copy sits in apple/,
+# docs/apple/carplay.md; HealthKit background delivery, docs/assistant/health.md; HomeKit, docs/apple/phone-tools.md "Home";
+# Siri calls, SIRIKIT, docs/operations/release.md "Siri calls"); the generated copy sits in apple/,
 # outside the Persona/ source folder, so XcodeGen does not pick it up as a resource.
 APP_ENTITLEMENTS = os.path.join("Persona", "Resources", "Persona.entitlements")
 OPT_IN_ENTITLEMENTS = "PersonaOptIn.entitlements"
@@ -153,6 +166,10 @@ OPT_IN = {
     "app.carplay_voice": "com.apple.developer.carplay-voice-based-conversation",
     "app.health_background_delivery": "com.apple.developer.healthkit.background-delivery",
     "app.homekit": "com.apple.developer.homekit",
+    # With the SiriKit extension (env PERSONA_SIRI_CALLS): the app holds Siri's entitlement. apple/siri-calls.yml signs
+    # with its own generated copy (PersonaSiriCalls.entitlements): XcodeGen sets CODE_SIGN_ENTITLEMENTS from the target's
+    # `entitlements` path over PERSONA_APP_ENTITLEMENTS.
+    "app.siri_calls": "com.apple.developer.siri",
 }
 
 

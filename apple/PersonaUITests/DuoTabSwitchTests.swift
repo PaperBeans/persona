@@ -1,13 +1,14 @@
 import XCTest
 
-/// iPhone Duo in the Separate layout (#4231, the design of #4206): one switch on both displays, the shell's upright
-/// capsule of the pages' symbols (Assistant, Agents, Messages), at the bottom-trailing corner where the thumb reaches it:
-/// - closed, the outer display: at the foot of the side rail, in the system's column down the right;
-/// - open on its side: at the foot of the system's column down the right, in the system's tab bar's place;
-/// - open upright: floating over the page's bottom-trailing corner, its foot level with the composer's, which leaves it
-///   room; the keyboard sends it away and the composer takes the whole width back.
-/// The Agents count hangs off its segment's corner toward the page. Settings › Appearance › Sidebar switches between
-/// Merged (the one sidebar) and Separate at once, and the choice is kept.
+/// iPhone Duo in the Separate layout (#4231): one tab bar on both displays, the pages' symbols over their names
+/// (Assistant, Agents, Messages), the chosen one's symbol on the Theme Color's circle, counts red at a symbol's corner:
+/// - closed, the outer display: in the shell's rail down the system's column on the right, centred on the status bar, in
+///   the column's lower middle;
+/// - open on its side: the same in the system's column on the right, in the system's tab bar's place;
+/// - open upright: along the window's foot, centred, the pages keeping its room as for the system's tab bar, so the
+///   composer stands on it at the whole width.
+/// The keyboard sends it away. Settings › Appearance › Sidebar switches between Merged (the one sidebar) and Separate at
+/// once, and the choice is kept.
 ///
 /// The posture is set before the run (scripts' display tool or Xcode's Device Hub; `XCUIDevice.orientation` does not
 /// turn the open Duo): the test reads it from the window. Against scripts/mock/mock_hub.py (PERSONA_MOCK_HUB).
@@ -43,6 +44,17 @@ final class DuoTabSwitchTests: XCTestCase {
         app.launchArguments = ["-pairURL", pair, "-tab", "assistant", "-app.tab", "assistant", "-dev.openChat", "",
                                "-integrations.lark.enabled", "YES"] + extra
         app.launchPinned(navigation: layoutPinned)
+        dismissSystemAlerts()
+    }
+
+    /// A fresh simulator's notification prompt can come up over the app (and its tab bar) after an install.
+    private func dismissSystemAlerts() {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        guard springboard.alerts.firstMatch.waitForExistence(timeout: 3) else { return }
+        for label in ["允许", "Allow", "好", "OK"] {
+            let button = springboard.alerts.buttons[label].firstMatch
+            if button.exists { button.tap(); return }
+        }
     }
 
     @MainActor private func element(_ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
@@ -53,40 +65,53 @@ final class DuoTabSwitchTests: XCTestCase {
         }
     }
 
-    /// One upright capsule of symbols, the same on both displays: three segments a tap target square each, one above the
-    /// other, each named for VoiceOver (not by its symbol); at the bottom-trailing corner; no system tab bar under it.
-    @MainActor func testOneUprightSwitchOfSymbolsAtTheCorner() {
+    /// One tab bar, the same on both displays: three items of a symbol over a name, each more than a tap target and named
+    /// for VoiceOver (not by its symbol), the chosen one marked; down the system's column centred on the status bar in its
+    /// lower middle, or along the foot upright; no system tab bar under it; the Agents count at its symbol's corner.
+    @MainActor func testOneTabBarOfSymbolsAndNames() {
         let ids = ["shell-assistant", "shell-agents", "shell-feishu"]
         let segments = ids.map(element)
         XCTAssertTrue(segments[2].waitForExistence(timeout: 10), "no Messages segment:\n\(app.debugDescription)")
         for (id, s) in zip(ids, segments) {
-            XCTAssertEqual(s.frame.width, 44, accuracy: 1.5, "\(id) is not a tap target wide: \(s.frame)")
-            XCTAssertEqual(s.frame.height, 44, accuracy: 1.5, "\(id) is not a tap target tall: \(s.frame)")
-            XCTAssertEqual(s.frame.midX, segments[0].frame.midX, accuracy: 1, "\(id) is not under Assistant")
+            XCTAssertEqual(s.frame.width, 56, accuracy: 1.5, "\(id) is not an item wide: \(s.frame)")
+            XCTAssertEqual(s.frame.height, 56, accuracy: 1.5, "\(id) is not an item tall: \(s.frame)")
             XCTAssertFalse(s.label.isEmpty || s.label.contains("sparkles") || s.label.contains("chevron") || s.label.contains("bubble"),
                            "\(id) has no name of its own: \(s.label)")
         }
-        XCTAssertLessThan(segments[0].frame.maxY, segments[1].frame.minY + 1, "Agents is not under Assistant")
-        XCTAssertLessThan(segments[1].frame.maxY, segments[2].frame.minY + 1, "Messages is not under Agents")
         XCTAssertTrue(segments[0].isSelected, "Assistant is not the chosen one")
         let window = app.windows.firstMatch.frame
-        // Low in the window, at its trailing edge: past the page's content on the side bars, 12 pt in when floating.
-        XCTAssertGreaterThan(segments[2].frame.maxY, window.maxY - 120, "the switch is not at the foot: \(segments[2].frame) in \(window)")
-        XCTAssertGreaterThan(segments[0].frame.minX, window.maxX - 90, "the switch is not at the trailing edge: \(segments[0].frame) in \(window)")
         if posture == .upright {
-            XCTAssertEqual(window.maxX - segments[0].frame.maxX, 12 + 4, accuracy: 2, "not 12 pt from the edge: \(segments[0].frame)")
+            // Along the foot, centred, side by side.
+            for s in segments { XCTAssertEqual(s.frame.midY, segments[0].frame.midY, accuracy: 1, "not side by side: \(s.frame)") }
+            XCTAssertLessThan(segments[0].frame.maxX, segments[1].frame.minX + 1, "Agents is not after Assistant")
+            XCTAssertEqual(segments[1].frame.midX, window.midX, accuracy: 2, "the bar is not centred: \(segments[1].frame) in \(window)")
+            XCTAssertGreaterThan(segments[1].frame.maxY, window.maxY - 120, "the bar is not at the foot: \(segments[1].frame) in \(window)")
+        } else {
+            // Down the system's column: centred on the status bar (49 pt from the edge on both displays), stacked, in the
+            // column's lower middle rather than at its foot.
+            for s in segments {
+                XCTAssertEqual(s.frame.midX, window.maxX - 49, accuracy: 3, "not centred on the status bar: \(s.frame) in \(window)")
+            }
+            XCTAssertLessThan(segments[0].frame.maxY, segments[1].frame.minY + 1, "Agents is not under Assistant")
+            XCTAssertLessThan(segments[1].frame.maxY, segments[2].frame.minY + 1, "Messages is not under Agents")
+            XCTAssertGreaterThan(segments[1].frame.midY, window.height * 0.4, "the bar is not low in the column: \(segments[1].frame)")
+            XCTAssertLessThan(segments[2].frame.maxY, window.maxY - window.height * 0.15, "the bar is a block at the foot: \(segments[2].frame)")
+            // As high above the screen's foot folded and open, so it stays put as the Duo folds: the home indicator's 34 pt,
+            // the face and the page's action under it on the outer display (their room on the open Duo, 144.5 pt at the
+            // default text size, `TabSwitchLayout.sideFoot`) and the capsule's 8 pt under its last item.
+            XCTAssertEqual(window.maxY - segments[2].frame.maxY, 186.7, accuracy: 1,
+                           "the bar's foot is not where it is on the other display: \(segments[2].frame) in \(window)")
         }
         if posture != .outer {
             let narrow = NSPredicate { item, _ in ((item as? XCUIElementAttributes)?.frame.width ?? .infinity) <= 60 }
             let systemTab = app.buttons.matching(NSPredicate(format: "label == %@", "Persona")).matching(narrow).firstMatch
             XCTAssertFalse(systemTab.exists, "the system's tab bar is still there:\n\(app.debugDescription)")
         }
-        // The Agents count (the mock hub has Agents waiting) hangs off its segment's corner toward the page: on its top
-        // leading corner, out past the capsule's edge, above the segment's middle.
+        // The Agents count (the mock hub has Agents waiting) is on its symbol's top trailing corner, as a tab bar badges.
         let agents = segments[1], count = element("shell-agents-count")
-        XCTAssertTrue(count.waitForExistence(timeout: 10), "no Agents count on the switch:\n\(app.debugDescription)")
-        XCTAssertTrue(count.frame.intersects(agents.frame.insetBy(dx: -12, dy: -12)), "the count is not on its segment: \(count.frame) vs \(agents.frame)")
-        XCTAssertLessThan(count.frame.midX, agents.frame.minX + 8, "the count is not toward the page: \(count.frame) vs \(agents.frame)")
+        XCTAssertTrue(count.waitForExistence(timeout: 10), "no Agents count on the tab bar:\n\(app.debugDescription)")
+        XCTAssertTrue(count.frame.intersects(agents.frame), "the count is not on its item: \(count.frame) vs \(agents.frame)")
+        XCTAssertGreaterThan(count.frame.midX, agents.frame.midX, "the count is not at the trailing corner: \(count.frame) vs \(agents.frame)")
         XCTAssertLessThan(count.frame.midY, agents.frame.midY, "the count is not at the top: \(count.frame) vs \(agents.frame)")
         shot("switch")
     }
@@ -126,10 +151,10 @@ final class DuoTabSwitchTests: XCTestCase {
             ["shell-composer-send", "shell-composer-mic", "shell-composer-voice", "shell-composer-stop"].map(self.element)
                 .filter { $0.exists }.map(\.frame.maxX).max() ?? field.frame.maxX
         }
-        let capsuleStart = agents.frame.minX - 4
         if posture == .upright {
-            XCTAssertLessThanOrEqual(composerEnd(), capsuleStart - 6, "the composer runs under the switch: \(composerEnd()) vs \(capsuleStart)")
-            XCTAssertEqual(messages.frame.maxY, field.frame.maxY, accuracy: 24, "the switch's foot is not by the composer's")
+            // The composer stands on the bar at the whole width, as on the system's tab bar.
+            XCTAssertLessThanOrEqual(field.frame.maxY, agents.frame.minY, "the composer runs under the bar: \(field.frame) vs \(agents.frame)")
+            XCTAssertGreaterThan(composerEnd(), agents.frame.maxX, "the composer does not take the whole width")
         }
         shot("keyboard-down")
         field.tap()
@@ -138,9 +163,6 @@ final class DuoTabSwitchTests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: NSNull())], timeout: 5), .completed,
                        "the switch stayed over the keyboard:\n\(app.debugDescription)")
         sleep(1)
-        if posture == .upright {
-            XCTAssertGreaterThan(composerEnd(), capsuleStart, "the composer did not take the whole width back")
-        }
         shot("keyboard-up")
         let dismiss = element("shell-composer-dismiss-keyboard")
         if dismiss.exists { dismiss.tap() } else { app.keyboards.buttons.allElementsBoundByIndex.last?.tap() }

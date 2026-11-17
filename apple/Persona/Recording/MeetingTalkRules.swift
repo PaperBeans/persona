@@ -105,7 +105,8 @@ nonisolated enum MeetingCallRule {
 nonisolated enum MeetingTalkSource: Equatable, Sendable {
     /// Held on the meeting page.
     case hold
-    /// VoiceOver's double tap on the page's Talk (it can't hold): a talk window, its hint saying where the words go.
+    /// A tap on the page's Talk (#9658), or VoiceOver's double tap (it can't hold): the page's talk window, ended by the
+    /// next tap, its hint saying where the words go.
     case pageWindow
     /// The Live Activity's Talk, on the Lock Screen or in the island: a talk window.
     case activity
@@ -114,9 +115,11 @@ nonisolated enum MeetingTalkSource: Equatable, Sendable {
 /// What a tap on the Live Activity's Talk / Done does (`MeetingCallRule.activityTap`).
 nonisolated enum MeetingActivityTap: Equatable, Sendable { case open, close, ignore }
 
-/// The Lock Screen's and the island's talk window (#3862 phase 4): their buttons can't be held, so a tap opens it, and it
-/// ends on another tap, 2 seconds of silence after speech, 20 seconds without speech, or 60 seconds in all. Pure: the
-/// caller hands in the microphone's level and the time.
+/// A talk window (#3862 phase 4): Talk opened by a tap rather than held. The Lock Screen's and the island's end on
+/// another tap, 2 seconds of silence after speech, 20 seconds without speech, or 60 seconds in all. The meeting page's
+/// (`onPage`, #9658) does not end 2 seconds after speech: Talk is in sight to tap when done, and a pause to think is
+/// common in a meeting, so a quiet stretch ends it only after 20 seconds, as before any speech, or at 60 seconds. Pure:
+/// the caller hands in the microphone's level and the time.
 ///
 /// What counts as speech is the owner's voice, not the room's: the microphone hears the whole room, and people talking
 /// at a normal level would otherwise keep a window open for its full 60 seconds, all of it going to the voice service.
@@ -128,7 +131,7 @@ nonisolated struct MeetingTalkWindow: Equatable, Sendable {
     nonisolated enum End: Equatable, Sendable {
         /// Another tap.
         case tapped
-        /// 2 seconds of silence after speech.
+        /// A quiet stretch after speech: 2 seconds, or 20 on the page (`quietEnd`).
         case silence
         /// 20 seconds without speech.
         case noSpeech
@@ -163,13 +166,17 @@ nonisolated struct MeetingTalkWindow: Equatable, Sendable {
     let opened: Date
     /// The level a buffer must reach to count as speech in this window.
     let speechThreshold: Float
+    /// How long a quiet stretch after speech lasts before it ends the window: `silenceAfterSpeech`, or on the page
+    /// `noSpeechLimit`.
+    let quietEnd: TimeInterval
     /// When speech was last heard; nil before any.
     private(set) var lastSpeech: Date?
     private(set) var ended: End?
 
-    init(opened: Date, room: Room = Room()) {
+    init(opened: Date, room: Room = Room(), onPage: Bool = false) {
         self.opened = opened
         speechThreshold = Self.threshold(room)
+        quietEnd = onPage ? Self.noSpeechLimit : Self.silenceAfterSpeech
     }
 
     var heardSpeech: Bool { lastSpeech != nil }
@@ -200,7 +207,7 @@ nonisolated struct MeetingTalkWindow: Equatable, Sendable {
         let end: End? = if now.timeIntervalSince(opened) >= Self.limit {
             .limit
         } else if let lastSpeech {
-            now.timeIntervalSince(lastSpeech) >= Self.silenceAfterSpeech ? .silence : nil
+            now.timeIntervalSince(lastSpeech) >= quietEnd ? .silence : nil
         } else {
             now.timeIntervalSince(opened) >= Self.noSpeechLimit ? .noSpeech : nil
         }

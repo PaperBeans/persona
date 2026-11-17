@@ -4,7 +4,12 @@ import SwiftUI
 /// How touches on the Mac's screen work (#1343), kept per Mac on this device: Mouse Mode (the default) points where
 /// the finger is, Trackpad Mode moves the pointer like a trackpad.
 enum VNCMode: String, CaseIterable {
-    case mouse, trackpad
+    /// `phone`: Phone Screen (#9314), one of the Mac's windows on a portrait display of its own; offered only where the
+    /// Mac can (`MachinePhoneScreen`), and touched as a phone is (VNCScreenUIView).
+    case mouse, trackpad, phone
+
+    /// The touch acts where the finger is (Mouse Mode, Phone Screen), not at the pointer (Trackpad Mode).
+    var underFinger: Bool { self != .trackpad }
 
     private static func key(_ ref: MachineRef) -> String { "vnc.mode." + ScreenCredentials.key(ref) }
     static func of(_ ref: MachineRef) -> VNCMode { VNCMode(rawValue: UserDefaults.standard.string(forKey: key(ref)) ?? "") ?? .mouse }
@@ -19,6 +24,8 @@ enum VNCMode: String, CaseIterable {
 /// - Trackpad Mode: one finger moves the pointer by as much; a tap clicks where it is; a tap then a drag drags; two only
 ///   scroll, never zoom (#6196: pinching zoomed by mistake while scrolling). Zoomed in from ⋯, the picture follows the
 ///   pointer.
+/// - Phone Screen (#9314): as a phone: a tap clicks there; one finger scrolls, with a coast; held half a second then
+///   dragged, it drags (selects text); held and lifted, it is the right button. Two fingers and pinching as in Mouse Mode.
 /// Two fingers scroll as VNCWheel says: slowly the Mac's content follows them (a notch a Mac point), quicker drags go
 /// further, the notches go out a display frame at a time, and a flick coasts.
 /// With `region` set (one of the Mac's displays, #80) only that part of the framebuffer is shown, zoomed and touched;
@@ -37,10 +44,13 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
     var interactive = false { didSet { if interactive != oldValue { enable() } } }
     /// Zoomed in or back to fitted, for ⋯'s Zoom In / Zoom to Fit (after the change, never during the page's update).
     var onZoom: (Bool) -> Void = { _ in }
-    /// Where the Mac's whole picture is drawn, in screen points, as it moves (the page's, for the small window's
-    /// transition, #6333); nil: not reported.
-    var onPicture: ((CGRect) -> Void)?
-    private var reported: CGRect?
+    /// Where the Mac's whole picture is drawn, and the part of it shown (one display), in screen points, as they move
+    /// (the page's, for the small window's transition, #6333); nil: not reported.
+    var onPicture: ((VNCPagePicture) -> Void)?
+    private var reported: VNCPagePicture?
+    /// The small window's source (VNCPiP): its frames come already cut to this part of the framebuffer (Phone Screen's
+    /// display, RFBSession.smallWindowPart), so they are laid out as that part alone; nil: whole frames.
+    var framesCut: CGRect? { didSet { if framesCut != oldValue { setNeedsLayout() } } }
     /// The part of the framebuffer shown, in pixels; nil: all of it. A new one starts unzoomed, with the pointer on it
     /// (moved to its middle when it was elsewhere): Trackpad Mode clicks and drags where the pointer is.
     var region: CGRect? {
@@ -82,6 +92,14 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
     private var lastTap = Date.distantPast
     private var dragging = false
     private var lastPan = CGPoint.zero
+    /// Phone Screen's long press (#9314): where it went down, and whether it has turned into a drag.
+    private var heldAt = CGPoint.zero
+    private var heldDrag = false
+    /// The display shown alone (`VNCDisplay.id`), for its own scale when the Mac's displays differ (#9314).
+    var regionID: String?
+    /// Phone Screen upright (#9500): the picture fills the view's width and the keyboard covers its bottom rather than
+    /// shrinking it (`VNCZoom.phoneFit`).
+    var fillsWidth = false { didSet { if fillsWidth != oldValue { shown = nil; setNeedsLayout() } } }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -123,7 +141,7 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
 
     /// Touches while interactive; pinching only in Mouse Mode (#6196).
     private func enable() {
-        for g in gestures { g.isEnabled = interactive && (g !== pinch || mode == .mouse) }
+        for g in gestures { g.isEnabled = interactive && (g !== pinch || mode.underFinger) }
     }
 
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
@@ -137,14 +155,26 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
         return s.width > 0 ? s : CGSize(width: 16, height: 10)
     }
 
-    /// The part of the framebuffer shown: the region while it lies on the framebuffer, else all of it.
+    /// The part of the framebuffer shown: the frames' cut, else the region while it lies on the framebuffer, else all
+    /// of it.
     private var visible: CGRect {
+        if let framesCut, !framesCut.isEmpty { return framesCut }
         let whole = CGRect(origin: .zero, size: screenSize)
         guard let region, !region.isEmpty, whole.contains(region) else { return whole }
         return region
     }
 
-    private var fitted: CGRect { VNCZoom.fit(visible.size, in: bounds) }
+    private var fitted: CGRect {
+        guard fillsWidth else { return VNCZoom.fit(visible.size, in: bounds) }
+        var pointer: CGPoint?
+        if let s = session, visible.contains(s.pointer), visible.height > 0 {
+            pointer = CGPoint(x: (s.pointer.x - visible.minX) / visible.width, y: (s.pointer.y - visible.minY) / visible.height)
+        }
+        return VNCZoom.phoneFit(visible.size, in: bounds, pointer: pointer, margin: Theme.Space.xxl)
+    }
+
+    /// Phone Screen's picture is taller than the view (the keyboard is up): two fingers move it to show the rest.
+    private var overhangs: Bool { fillsWidth && fitted.height > bounds.height + 1 }
     private var rect: CGRect { shown ?? fitted }
     private var viewport: VNCViewport { VNCViewport(visible: visible, rect: rect) }
 
@@ -159,6 +189,8 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
     override func layoutSubviews() {
         super.layoutSubviews()
         if bounds.size != laidOut {
+            // Phone Screen: only moved to see under the keyboard (not zoomed), it goes back as the view changes size.
+            if fillsWidth, let r = shown, abs(r.width - bounds.width) < 1 { shown = nil }
             if let r = shown, laidOut.width > 0 {
                 shown = VNCZoom.turned(r, picture: visible.size, from: CGRect(origin: .zero, size: laidOut), to: bounds)
             }
@@ -173,7 +205,8 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
         CATransaction.setDisableActions(true)
         let port = viewport
         clip.frame = port.rect
-        display.frame = port.framebufferFrame(screenSize)
+        // Frames already cut to the part shown fill it; whole ones are drawn whole and clipped to it.
+        display.frame = framesCut != nil ? CGRect(origin: .zero, size: port.rect.size) : port.framebufferFrame(screenSize)
         #if os(iOS) && canImport(PersonaScreenKit)
         if showsVideo, let v = session?.video {
             video.isHidden = !v.showing
@@ -189,10 +222,11 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
             // visionOS has no screen (and no small window, `VNCPiP.supported`): the window's own points.
             let space: any UICoordinateSpace = window
             #endif
-            let whole = convert(display.frame.offsetBy(dx: port.rect.minX, dy: port.rect.minY), to: space)
-            if whole != reported {
-                reported = whole
-                onPicture(whole)
+            let picture = VNCPagePicture(whole: convert(port.framebufferFrame(screenSize).offsetBy(dx: port.rect.minX, dy: port.rect.minY), to: space),
+                                         shown: convert(port.rect, to: space))
+            if picture != reported {
+                reported = picture
+                onPicture(picture)
             }
         }
         if let s = session {
@@ -208,10 +242,11 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
             pointerLayer.isHidden = s.phase != .live || !port.visible.contains(s.pointer)
             #if DEBUG
             // UI tests measure (the frame rate, the latency) and look (the pointer's size in points, #3075; the zoom and
-            // where the pointer is drawn, #6196).
-            accessibilityValue = String(format: "fps=%.0f;latency=%.0f;mode=%@;pointer=%.0fx%.0f;zoom=%.2f;at=%.0f,%.0f;picture=%@", // i18n-ignore
+            // where the pointer is drawn, #6196; the small window's source's frames cut to Phone Screen's display, in pixels).
+            accessibilityValue = String(format: "fps=%.0f;latency=%.0f;mode=%@;pointer=%.0fx%.0f;zoom=%.2f;at=%.0f,%.0f;picture=%@;drawn=%.0fx%.0f;cut=%.0fx%.0f", // i18n-ignore
                                         s.fps, s.latency ?? -1, mode.rawValue, pointerLayer.frame.width, pointerLayer.frame.height,
-                                        port.rect.width / max(fitted.width, 1), at.x, at.y, video.isHidden ? "vnc" : "video") // i18n-ignore
+                                        port.rect.width / max(fitted.width, 1), at.x, at.y, video.isHidden ? "vnc" : "video",
+                                        port.rect.width, port.rect.height, framesCut?.width ?? 0, framesCut?.height ?? 0) // i18n-ignore
             #endif
         }
         CATransaction.commit()
@@ -272,7 +307,7 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
     @objc private func tapped(_ g: UITapGestureRecognizer) {
         guard let s = session else { return }
         switch mode {
-        case .mouse: s.click(at: toScreen(g.location(in: self)))
+        case .mouse, .phone: s.click(at: toScreen(g.location(in: self)))
         case .trackpad: s.click(at: pointer(s))
         }
         lastTap = Date()
@@ -280,18 +315,46 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
 
     @objc private func rightTapped(_ g: UITapGestureRecognizer) {
         guard let s = session else { return }
-        s.click(at: mode == .mouse ? toScreen(g.location(in: self)) : pointer(s), button: 4)
+        s.click(at: mode.underFinger ? toScreen(g.location(in: self)) : pointer(s), button: 4)
     }
 
     @objc private func held(_ g: UILongPressGestureRecognizer) {
-        guard g.state == .began, mode == .mouse, let s = session else { return }
-        s.click(at: toScreen(g.location(in: self)), button: 4)
+        guard let s = session else { return }
+        let p = g.location(in: self)
+        if mode == .phone {
+            // Held still half a second: a drag once it moves (the button goes down where it was held), else the right button.
+            switch g.state {
+            case .began:
+                heldAt = p
+                heldDrag = false
+            case .changed:
+                if !heldDrag, hypot(p.x - heldAt.x, p.y - heldAt.y) > Theme.Space.s {
+                    heldDrag = true
+                    s.move(to: toScreen(heldAt), buttons: 0)
+                    s.move(to: toScreen(heldAt), buttons: 1)
+                }
+                if heldDrag { s.move(to: toScreen(p), buttons: 1) }
+            case .ended:
+                if heldDrag { s.move(to: toScreen(p), buttons: 0) } else { s.click(at: toScreen(heldAt), button: 4) }
+                heldDrag = false
+            default:
+                if heldDrag { s.move(to: toScreen(p), buttons: 0) }
+                heldDrag = false
+            }
+            place()
+            return
+        }
+        guard g.state == .began, mode == .mouse else { return }
+        s.click(at: toScreen(p), button: 4)
     }
 
     @objc private func panned(_ g: UIPanGestureRecognizer) {
         guard let s = session else { return }
         let p = g.location(in: self)
         switch (mode, g.state) {
+        case (.phone, _): // one finger scrolls, as on a phone
+            scroll(g, lifted: g.state == .ended || g.state == .cancelled || g.state == .failed)
+            return
         case (.mouse, .began):
             s.move(to: toScreen(p), buttons: 0)
             s.move(to: toScreen(p), buttons: 1)
@@ -321,21 +384,14 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
         guard let s = session else { return }
         let lifted = g.state == .ended || g.state == .cancelled || g.state == .failed
         defer { if lifted { two.ended() } }
-        if g.state == .began {
-            wheel.began()
-            macScale = VNCDisplays.pixelsPerMacPoint(AppModel.shared.screenDisplays(s.ref), framebuffer: s.size)
-            scrollSpeed = VNCScrollSpeed.current.factor
-            byPixels = s.scrollsByPixels
-            if byPixels { pixels.began() }
-            scrolling = false
-        }
+        if g.state == .began { scrollBegan(s) }
         // Trackpad Mode: only a scroll. Mouse Mode: a scroll or a pinch, whichever the fingers show first; until then the
         // travel stays in the translation, for the scroll.
         let meaning: VNCTwoFingers.Meaning = mode == .trackpad ? .scroll
             : lifted || g.numberOfTouches < 2 ? two.meaning : two.moved(center: g.location(in: self), spread: spread(g))
         guard meaning != .undecided else { return }
         let t = g.translation(in: self)
-        if shown != nil, mode == .mouse { // zoomed in: two fingers move the picture
+        if shown != nil && mode.underFinger || overhangs { // zoomed in (or taller than the view): two fingers move the picture
             var r = rect
             r.origin.x += t.x
             r.origin.y += t.y
@@ -348,20 +404,28 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
             g.setTranslation(.zero, in: self)
             return
         }
+        scroll(g, lifted: lifted, begins: false)
+    }
+
+    /// A pan as a scroll at the fingers (the pointer in Trackpad Mode): two fingers, or one in Phone Screen.
+    private func scroll(_ g: UIPanGestureRecognizer, lifted: Bool, begins: Bool = true) {
+        guard let s = session else { return }
+        if begins, g.state == .began { scrollBegan(s) }
+        let t = g.translation(in: self)
         // Mac points a view point at this zoom: slowly, the Mac's content moves as far as the fingers over its picture.
         let perPoint = viewport.pixelsPerPoint / macScale * scrollSpeed
         let velocity = g.velocity(in: self).y
         if byPixels {
             // The Mac's pointer where the scroll began, as a trackpad's stays: the scroll goes to what is under it.
             if !scrolling {
-                wheelAt = mode == .mouse ? toScreen(g.location(in: self)) : pointer(s)
+                wheelAt = mode.underFinger ? toScreen(g.location(in: self)) : pointer(s)
                 s.move(to: wheelAt)
             }
             pixels.moved(t.y, velocity: velocity, perPoint: perPoint)
             if lifted { pixels.released(velocity: g.state == .ended ? velocity : 0, perPoint: perPoint) }
         } else {
             if !scrolling { _ = s.scrollBegan() } // the first on a Mac that may not yet: its node asks macOS, once
-            wheelAt = mode == .mouse ? toScreen(g.location(in: self)) : pointer(s)
+            wheelAt = mode.underFinger ? toScreen(g.location(in: self)) : pointer(s)
             wheel.moved(t.y, velocity: velocity, perPoint: perPoint)
             if g.state == .ended { wheel.released(velocity: velocity, perPoint: perPoint) }
         }
@@ -372,6 +436,16 @@ final class VNCScreenUIView: UIView, UIGestureRecognizerDelegate {
             link.add(to: .main, forMode: .common)
             wheelFrames = link
         }
+    }
+
+    /// A scroll starts: the wheel or the pixel scroll ready, at the Mac's points for the part shown.
+    private func scrollBegan(_ s: RFBSession) {
+        wheel.began()
+        macScale = VNCDisplays.pixelsPerMacPoint(AppModel.shared.screenDisplays(s.ref), framebuffer: s.size, shown: regionID)
+        scrollSpeed = VNCScrollSpeed.current.factor
+        byPixels = s.scrollsByPixels
+        if byPixels { pixels.began() }
+        scrolling = false
     }
 
     /// A display frame: the wheel's notches due now; none left and not coasting, the frames stop (what is left over
@@ -486,12 +560,16 @@ struct VNCScreen: UIViewRepresentable {
     var interactive = false
     /// One of the Mac's displays to show alone (its frame on the framebuffer); nil: all of them.
     var region: CGRect? = nil
+    /// That display's id (`VNCDisplay.id`), for its scale when the Mac's displays differ (#9314).
+    var regionID: String? = nil
+    /// Phone Screen upright: the picture fills the width and the keyboard covers it (#9500).
+    var fillsWidth = false
     /// The view, for the page's Center Pointer and Zoom In.
     var onView: (VNCScreenUIView) -> Void = { _ in }
     /// Zoomed in or back to fitted.
     var onZoom: (Bool) -> Void = { _ in }
-    /// Where the whole picture is drawn, in screen points (VNCScreenUIView.onPicture).
-    var onPicture: ((CGRect) -> Void)? = nil
+    /// Where the whole picture and the part shown are drawn, in screen points (VNCScreenUIView.onPicture).
+    var onPicture: ((VNCPagePicture) -> Void)? = nil
 
     func makeUIView(context: Context) -> VNCScreenUIView {
         let v = VNCScreenUIView()
@@ -513,6 +591,8 @@ struct VNCScreen: UIViewRepresentable {
         v.mode = mode
         v.interactive = interactive
         v.region = region
+        v.regionID = regionID
+        v.fillsWidth = fillsWidth
         _ = (session.pointer, session.size, session.cursor?.width, session.phase, session.fps) // redrawn as they change
         #if os(iOS) && canImport(PersonaScreenKit)
         _ = (session.video.showing, session.video.rect)

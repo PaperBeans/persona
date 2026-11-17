@@ -42,9 +42,20 @@ var tagVersion = lazyre.New(`^[0-9A-Za-z][0-9A-Za-z._-]*$`)
 // repository's releases/latest/download, the release's own releases/download/v<version>, which a newer release does
 // not change. "" for any other base: there they are only beside latest.json.
 func releaseBase(base, version string) string {
-	repo := githubLatestRepo(strings.TrimSuffix(base, "/"))
-	if repo == "" || !tagVersion.MatchString(version) {
+	if !tagVersion.MatchString(version) {
 		return ""
+	}
+	var repo string
+	trimmed := strings.TrimSuffix(base, "/")
+	if repo = githubLatestRepo(trimmed); repo == "" {
+		u, err := url.Parse(trimmed)
+		if err != nil || u.Scheme != "https" || u.Host != "github.com" || !strings.HasSuffix(u.Path, BetaFeedPath) {
+			return ""
+		}
+		repo = strings.TrimSuffix(u.Path, BetaFeedPath)
+		if len(strings.Split(strings.Trim(repo, "/"), "/")) != 2 {
+			return ""
+		}
 	}
 	return (&url.URL{Scheme: "https", Host: "github.com", Path: repo + "/releases/download/v" + version}).String()
 }

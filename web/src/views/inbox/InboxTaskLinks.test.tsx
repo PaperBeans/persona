@@ -51,6 +51,47 @@ it("keeps the task link while its Agent is starting and never substitutes an old
   expect(host.querySelectorAll("[data-inbox-task-links] a")).toHaveLength(1);
 });
 
+it("shows every explicitly sourced task and its current Agent after reload, without needing the legacy link", () => {
+  todos = [
+    { ...todo, inbox_item: item.id },
+    { ...todo, id: "todo_second", title: "Check the fix", inbox_item: item.id,
+      lineage: [{ todo_id: "todo_second", current: true, machine: "worker", session_id: "verify", agent: "Verification", started: "" }] },
+    { ...todo, id: "unrelated", title: "Unrelated work" },
+    { ...todo, id: "other_item", inbox_item: "other:event", title: "Another item" },
+    { ...todo, id: "other_manager", manager: "other", inbox_item: item.id, title: "Another manager" },
+  ];
+  draw({ ...item, agent: undefined });
+  const links = [...host.querySelectorAll<HTMLAnchorElement>("[data-inbox-task-links] a")];
+  expect(links.map((x) => x.getAttribute("href"))).toEqual([
+    "/todos?id=todo_linked", "/s/worker/current", "/todos?id=todo_second", "/s/worker/verify",
+  ]);
+  expect(host.querySelector("[data-inbox-task-links]")?.textContent).not.toMatch(/Unrelated|Another|Previous|draft-processing/);
+  act(() => root.unmount());
+  root = createRoot(host);
+  draw({ ...item, agent: undefined });
+  expect(host.querySelectorAll("[data-inbox-task-links] a")).toHaveLength(4);
+  act(() => host.querySelectorAll<HTMLAnchorElement>("[data-inbox-task-links] a")[3].click());
+  expect(location.pathname).toBe("/s/worker/verify");
+});
+
+it("deduplicates the legacy task link and follows its replacement worker", () => {
+  todos = [{ ...todo, inbox_item: item.id, lineage: [
+    { todo_id: todo.id, machine: "worker", session_id: "current", current: false, started: "" },
+    { todo_id: todo.id, machine: "worker", session_id: "replacement", agent: "Replacement", current: true, started: "" },
+  ] }];
+  draw();
+  const links = [...host.querySelectorAll<HTMLAnchorElement>("[data-inbox-task-links] a")];
+  expect(links.map((x) => x.getAttribute("href"))).toEqual(["/todos?id=todo_linked", "/s/worker/replacement"]);
+});
+
+it("keeps source-only relationships scoped to the item's manager", () => {
+  todos = [{ ...todo, inbox_item: item.id, manager: "other" }];
+  draw({ ...item, agent: undefined });
+  expect(host.querySelector("[data-inbox-task-links]")).toBeNull();
+  draw({ ...item, manager: "other", agent: undefined });
+  expect(host.querySelectorAll("[data-inbox-task-links] a")).toHaveLength(2);
+});
+
 it("uses active workers on an older hub without lineage, excluding released and failed Agents", () => {
   todos = [{ ...todo, lineage: undefined, agents: [todo.agents![1], { ...todo.agents![0], released_at: "2026-01-01" }, { ...todo.agents![0], session_id: "failed", start_error: "Unavailable" }] }];
   draw();

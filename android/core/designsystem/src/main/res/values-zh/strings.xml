@@ -196,6 +196,7 @@
     <string name="designsystem_channel_source">来自 %1$s</string>
     <string name="designsystem_series_separator">；</string>
     <string name="designsystem_plan_spoken">计划，第 %1$d 步，共 %2$d 步，%3$s</string>
+    <string name="designsystem_count_spoken">%1$s，%2$d</string>
     <string name="designsystem_plan_all_done">全部完成</string>
     <string name="designsystem_plan_step">Step %1$d/%2$d</string>
     <string name="designsystem_plan_item_done">已完成</string>

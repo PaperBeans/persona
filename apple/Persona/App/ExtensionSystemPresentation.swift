@@ -114,9 +114,7 @@ private struct ExtensionSystemPresentation: ViewModifier {
                     }
                 }
                 .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done [Extension System Presentation c0b3fb]") { app.extensionOpen = nil }.lineLimit(1)
-                    }
+                    SheetClose { app.extensionOpen = nil }
                 }
             }
             .environment(app)

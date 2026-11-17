@@ -35,3 +35,12 @@ test("local login-item IPC is separate from the surviving hub window's public br
   const hub = await source("ipc.ts");
   for (const name of ["desktop:login-get", "desktop:login-set"]) assert.match(hub, new RegExp(`"${name}"`));
 });
+
+test("quitting while setup is the only window does not open setup again (#9458)", async () => {
+  const main = await source("main.ts");
+  const closed = main.slice(main.indexOf('setup.once("closed"'), main.indexOf("const removeIPC = installSetupIPC"));
+  assert.ok(closed.includes("if (quitting) return;"), "setup's closed handler must stop once the app is quitting");
+  assert.ok(closed.indexOf("if (quitting) return;") < closed.indexOf("showMain()"), "the quitting check must come before reopening");
+  // Every quit (menu, Dock, signal, tray) passes before-quit, which runs before windows close.
+  assert.match(main, /app\.on\("before-quit", \(\) => \{ quitting = true;/);
+});

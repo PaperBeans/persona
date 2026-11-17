@@ -215,11 +215,23 @@ class RepairIntegrationTests(unittest.TestCase):
         gh.assert_not_called()
         self.assertEqual(self.git("ls-remote", "origin", "refs/heads/pr-watch/*"), "")
 
-    def test_a_model_repair_still_refuses_a_moved_base(self):
+    def test_an_ordinary_repair_refuses_a_forward_moving_base(self):
+        newer = self.push_main("newer")
         (self.repo / "repair.txt").write_text("repair\n")
         self.git("add", "repair.txt")
         with patch.object(pr_watch_repair, "verify", return_value=[]), self.passthrough(), \
-                patch.object(pr_watch_repair, "pr_snapshot", return_value=dict(self.pr, baseRefOid="d" * 40)):
+                patch.object(pr_watch_repair, "pr_snapshot", return_value=dict(self.pr, baseRefOid=newer)):
+            with self.assertRaisesRegex(pr_watch_repair.WatchError, "head/base moved"):
+                pr_watch_repair.commit_and_push_repair("example/one", self.pr, str(self.repo), self.main, "failure",
+                                                       {"profile": "commands", "commands": [["true"]]})
+        self.assertEqual(self.git("ls-remote", "origin", "refs/heads/fix/example").split()[0], self.head)
+
+    def test_a_model_repair_refuses_a_rewritten_base(self):
+        rewritten = self.push_main("rewritten", parent=self.base)
+        (self.repo / "repair.txt").write_text("repair\n")
+        self.git("add", "repair.txt")
+        with patch.object(pr_watch_repair, "verify", return_value=[]), self.passthrough(), \
+                patch.object(pr_watch_repair, "pr_snapshot", return_value=dict(self.pr, baseRefOid=rewritten)):
             with self.assertRaisesRegex(pr_watch_repair.WatchError, "head/base moved"):
                 pr_watch_repair.commit_and_push_repair("example/one", self.pr, str(self.repo), self.main, "failure",
                                                        {"profile": "commands", "commands": [["true"]]})

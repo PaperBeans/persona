@@ -90,7 +90,14 @@
     <string name="inbox_empty_filtered_title">没有符合筛选的未处理内容</string>
     <string name="inbox_empty_filtered_text">清除筛选后，可以看到整个收件箱。</string>
     <string name="inbox_empty_caught_up_title">都看完了</string>
-    <string name="inbox_empty_caught_up_text">这个筛选下没有东西。</string>
+    <string name="inbox_empty_caught_up_text">新的消息和邮件会出现在这里。</string>
+    <string name="inbox_grouping_title">分组方式</string>
+    <string name="inbox_empty_action_title">没有需要你处理的</string>
+    <string name="inbox_empty_working_title">没有进行中的</string>
+    <string name="inbox_empty_fyi_title">没有要看的</string>
+    <string name="inbox_empty_done_title">还没有已处理的</string>
+    <string name="inbox_empty_section_text">其余的在上面的其他分区里。</string>
+    <string name="inbox_empty_done_text">标为已处理的会出现在这里。</string>
     <string name="inbox_group_fyi">知悉即可</string>
     <string name="inbox_mark_all_seen">全部看过</string>
     <string name="inbox_clear_all">全部清除</string>

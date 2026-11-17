@@ -21,7 +21,7 @@ import (
 // fields differ from them (a field added, renamed, retyped or retagged by a change that did not update this file),
 // appendSession leaves every session to the reflect encoder: the session is sent whole, only slower, until its line
 // here and this hash are brought up to date. TestSessionWireMatchesReflect fails meanwhile and prints the new hash.
-const sessionWireLayout = 0xeed39ba02c556d64
+const sessionWireLayout = 0x3eda488a48f98e7c
 
 var sessionWireCurrent = sessionLayout() == sessionWireLayout && hierarchyLayout() == hierarchyWireLayout
 
@@ -97,6 +97,18 @@ func appendSession(b []byte, s *Session) ([]byte, bool) {
 	w.boolean(`"archived":`, s.Archived, true)
 	w.boolean(`"title_manual":`, s.TitleManual, true)
 	w.boolean(`"bypass_available":`, s.BypassAvailable, true)
+	if s.Tags != nil { // omitempty on *[]string drops only a nil pointer; a non-nil one is written, even when its slice is nil or empty (as the reflect encoder does)
+		if len(*s.Tags) == 0 {
+			w.key(`"tags":`)
+			if *s.Tags == nil {
+				w.b = append(w.b, "null"...)
+			} else {
+				w.b = append(w.b, '[', ']')
+			}
+		} else {
+			w.strs(`"tags":`, *s.Tags)
+		}
+	}
 	w.str(`"title":`, s.Title, false)
 	w.str(`"cwd":`, s.Cwd, false)
 	w.str(`"workspace_cwd":`, s.WorkspaceCwd, true)
@@ -156,10 +168,10 @@ func appendSession(b []byte, s *Session) ([]byte, bool) {
 	w.str(`"space_id":`, s.SpaceID, true)
 	w.str(`"space_name":`, s.SpaceName, true)
 	w.integer(`"space_index":`, int64(s.SpaceIndex), true)
+	w.integer(`"slot_index":`, int64(s.SlotIndex), true)
 	w.str(`"parent_space_id":`, s.ParentSpaceID, true)
 	w.str(`"slot_id":`, s.SlotID, true)
 	w.str(`"slot_name":`, s.SlotName, true)
-	w.integer(`"slot_index":`, int64(s.SlotIndex), true)
 	if s.PaneIndex != nil {
 		w.integer(`"pane_index":`, int64(*s.PaneIndex), false)
 	}
@@ -252,8 +264,6 @@ func appendSession(b []byte, s *Session) ([]byte, bool) {
 	w.str(`"attention_reason":`, s.AttentionReason, true)
 	w.str(`"failure_reason":`, s.FailureReason, true)
 	w.str(`"external_url":`, s.ExternalURL, true)
-	w.str(`"runtime":`, s.Runtime, true)
-	w.str(`"runtime_fallback":`, s.RuntimeFallback, true)
 	w.str(`"chat":`, s.Chat, true)
 	w.str(`"topic":`, s.Topic, true)
 	w.strs(`"dispatched":`, s.Dispatched)

@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { t } from "../i18n";
 import type { AgentSession } from "../lib/agents";
 import type { Session } from "../lib/types";
-import { setAgentDetails, setContextAsUsed } from "../lib/context-usage";
+import { setAgentDetails } from "../lib/context-usage";
 import { AgentRow, PersonaRow, SessionRow } from "./Sidebar";
 import { conversationMenuItems } from "./ConversationMenu";
 
@@ -107,23 +107,20 @@ describe("an agent's row with 「Agent 行显示详情」 (#2430)", () => {
   const render = (s: Session, extra = {}) => renderToStaticMarkup(<SessionRow {...rowProps} s={s} active={false} {...extra} />);
   afterEach(() => {
     setAgentDetails(false);
-    setContextAsUsed(false);
   });
   it("is byte for byte the same as before while the setting is off", () => {
     expect(render(detailed)).toBe(render(session)); // the model and context change nothing
     expect(render(detailed)).not.toContain("opus 5.5");
   });
-  it("adds a second line with folder, model and what is left when on", () => {
+  it("adds a second line with folder, model and labelled context used when on", () => {
     setAgentDetails(true);
     const html = render(detailed);
     expect(html).toContain("opus 5.5");
-    expect(html).toContain("61%");
+    expect(html).toContain("上下文 39%");
     expect(html).toContain("code");
   });
-  it("shows what is used with 「上下文显示为已用」 and warns at 80%", () => {
+  it("uses amber caution from 80% context used", () => {
     setAgentDetails(true);
-    setContextAsUsed(true);
-    expect(render(detailed)).toContain("39%");
     expect(render({ ...detailed, context_tokens: 170000 })).toContain("text-orange");
     const danger = render({ ...detailed, context_tokens: 185000 });
     expect(danger).toContain("text-orange");

@@ -7,6 +7,20 @@ import persona.core.contracts.api.ExtensionDetail
 import persona.core.contracts.api.ExtensionPackMember
 
 class ExtensionDetailTest {
+    @Test fun integerStepDecodesFromTheFormAndIsOptional() {
+        val detail = ExtensionDetail.decode(JsonCodec.parseToJsonElement("""{
+            "id":"example",
+            "form":{"fields":[
+                {"name":"goal","type":"integer","step":250},
+                {"name":"count","type":"integer"},
+                {"name":"large","type":"integer","step":9007199254740991}
+            ]}
+        }"""))
+        assertEquals(250L, detail.form[0].step)
+        assertNull(detail.form[1].step)
+        assertEquals(9007199254740991L, detail.form[2].step)
+    }
+
     @Test fun installedDetailsRetainDependencyStatesAndPackConstraints() {
         val detail = ExtensionDetail.decode(JsonCodec.parseToJsonElement("""{
             "id":"example-pack",

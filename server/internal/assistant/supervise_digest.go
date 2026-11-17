@@ -211,6 +211,7 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 		return false
 	}
 	if len(entries) == 0 {
+		s.agentDecisionRepliesTold(ctx, holds)
 		s.turnsTold(ctx, holds) // said the same within the window: told
 		b.mu.Lock()
 		if b.last.Equal(now) {
@@ -227,6 +228,7 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 		}
 		s.parkedDueTold(ctx, kept) // told for good: not again after a restart (parked.go)
 		s.parkDecidedTold(ctx, kept)
+		s.agentDecisionRepliesTold(ctx, kept)
 		s.turnsTold(ctx, holds) // and how a turn ended: kept went, the rest of them was said the same within the window
 	}()
 	background := to != here.Main && to == here.BackgroundSupervisor // the leader's message, told that the tasks are not its own (supervise_background.go)
@@ -248,7 +250,9 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 	queued := b.queued[to]
 	b.mu.Unlock()
 	msg := relayMsg{From: superviseTool, FromTitle: "督办", Tool: superviseTool, At: now.UTC()}
-	if len(queued) > 0 && !slices.ContainsFunc(kept, func(g superviseSignal) bool { return g.Kind == sigPRConflict }) {
+	if len(queued) > 0 && !slices.ContainsFunc(kept, func(g superviseSignal) bool {
+		return g.Kind == sigPRConflict || g.Kind == sigDraftPR || g.Kind == sigDecisionReply
+	}) {
 		// The last message may still wait in the queue: this one takes its place with both.
 		all := mergeSignals(queued, kept)
 		var allEntries []prompts.SuperviseEntry
@@ -268,6 +272,7 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 		}
 	}
 	msg.Text, msg.Urgent = render(entries), anyDecision(kept)
+	msg.Interject = slices.ContainsFunc(kept, func(g superviseSignal) bool { return g.Kind == sigDecisionReply })
 	if background {
 		s.logf("supervise: %d signal(s) to the background supervisor %s", len(entries), short(to))
 	} else if to != here.Main {
@@ -276,7 +281,7 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 		s.logf("supervise: %d signal(s) to the main conversation", len(entries))
 	}
 	c, ok := s.session(ctx, here.MachineID, to)
-	if !ok || c.Status == proto.StatusWorking || c.Starting || s.relayWaits(to, msg) {
+	if !ok || c.Starting || !msg.Interject && (c.Status == proto.StatusWorking || s.relayWaits(to, msg)) {
 		if !s.queueDigest(to, msg, kept, now, prev) {
 			return false
 		}
@@ -297,9 +302,11 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 		return accepted
 	}
 	accepted = true
-	b.mu.Lock()
-	b.setQueuedLocked(to, nil)
-	b.mu.Unlock()
+	if !msg.Interject { // an in-turn decision reply can pass an older supervision relay; keep that relay tracked
+		b.mu.Lock()
+		b.setQueuedLocked(to, nil)
+		b.mu.Unlock()
+	}
 	return true
 }
 
@@ -322,8 +329,10 @@ func (b *superviseBook) setQueuedLocked(to string, list []superviseSignal) {
 // place), the message still queued for it (supervise.queued) stays as it was, the last message is prev again (nothing went
 // out), and the digest is tried again in the urgent gap, or later when the gap after prev has not passed yet.
 func (s *Service) queueDigest(to string, msg relayMsg, kept []superviseSignal, at, prev time.Time) bool {
-	if slices.ContainsFunc(kept, func(g superviseSignal) bool { return g.Kind == sigPRConflict }) {
-		// Rendered relays cannot recheck PR facts when drained. Keep these signals pending, so the next
+	if slices.ContainsFunc(kept, func(g superviseSignal) bool {
+		return g.Kind == sigPRConflict || g.Kind == sigDraftPR || g.Kind == sigDecisionReply
+	}) {
+		// Rendered relays cannot recheck PR facts or a decision round when drained. Keep these signals pending, so the next
 		// dispatch revalidates them; deliverDigest releases the unaccepted dedup reservation.
 		s.restoreDigest(kept, at, prev)
 		return false
@@ -407,7 +416,28 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 	}
 	v := t.Supervision
 	st := v.state(t)
+	var replyAsk acceptAsk
+	var draft *TodoPRStatus
 	switch g.Kind {
+	case sigDraftPR:
+		if t.PRURL != g.PRURL && !slices.Contains(t.PRs, g.PRURL) {
+			return prompts.SuperviseEntry{}, false
+		}
+		draft = prFacts(t, g.PRURL)
+		if draft == nil || draft.State != "open" || !draft.Draft || !draft.Own || draft.HeadOID == "" ||
+			g.Key != draft.URL+"@"+draft.HeadOID || draft.CheckedAt.IsZero() || !s.stageFollows(t.ID, draft.URL) {
+			return prompts.SuperviseEntry{}, false
+		}
+		if age := time.Since(draft.CheckedAt); age < 0 || age > triagePRStatusFreshFor {
+			return prompts.SuperviseEntry{}, false
+		}
+	case sigDecisionReply:
+		a, ok := s.askCopy(t.ID)
+		if st != reviewNeedsUser || !ok || !a.AcceptedAt.IsZero() || a.AgentReply == nil ||
+			!a.AgentReply.ToldAt.IsZero() || agentDecisionReplyKey(a) != g.Key || acceptAskStale(&a, t) || acceptAskEnded(&a, t) {
+			return prompts.SuperviseEntry{}, false
+		}
+		replyAsk = a
 	case sigPRConflict:
 		p := t.PRStatus
 		if p == nil || p.URL != t.PRURL || p.State != "open" || !p.Conflicts || p.HeadOID == "" ||
@@ -463,7 +493,7 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 			return prompts.SuperviseEntry{}, false // decided or reviewed again meanwhile
 		}
 	case sigRecheck:
-		if a, ok := s.askCopy(t.ID); st != reviewNeedsUser || !ok || !a.AcceptedAt.IsZero() ||
+		if a, ok := s.askCopy(t.ID); st != reviewNeedsUser || !ok || !a.AcceptedAt.IsZero() || a.AgentReply != nil ||
 			"recheck@"+a.AskedAt.UTC().Format(time.RFC3339Nano) != g.Key {
 			return prompts.SuperviseEntry{}, false // answered, or asked again, meanwhile
 		}
@@ -480,6 +510,15 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 	}
 	e := prompts.SuperviseEntry{ID: t.ID, Title: t.Title, Kind: g.Kind, Detail: g.Detail, Minutes: g.Minutes, DoneWhen: v.DoneWhen,
 		Round: v.Round, Link: todoLink(web, t.ID), Quiet: t.Quiet}
+	if draft != nil {
+		e.Detail = prompts.RenderDraftPR(prompts.DraftPR{Language: answerLanguage(string(s.botLang(ctx))),
+			URL: draft.URL, Head: draft.HeadOID})
+	}
+	if g.Kind == sigDecisionReply {
+		e.AgentReply = &prompts.DecisionAgentReply{Language: answerLanguage(string(s.botLang(ctx))),
+			Machine: replyAsk.AgentReply.MachineID, Session: replyAsk.AgentReply.SessionID}
+		return e, true // the reply's exact session is in AgentReply; no arbitrary last Agent is evidence
+	}
 	if a := v.AutoReview; g.Kind == sigReview && a != nil && a.Round == v.Round && (a.State == autoClean || a.State == autoBlocking || a.State == autoFailed) {
 		e.Review = &prompts.SuperviseReviewed{State: a.State, Count: a.Count, Blocking: a.Blocking, Findings: a.Findings, Error: a.Error}
 	}

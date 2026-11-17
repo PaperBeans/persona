@@ -9,7 +9,7 @@ Create a Persona to-do when the user asks or agrees to record work or a reminder
   "properties": {
     "title": {
       "type": "string",
-      "description": "what is to be done, in a line"
+      "description": "what is to be done, in a line, in the user's language"
     },
     "notes": {
       "type": "string",
@@ -43,6 +43,17 @@ Create a Persona to-do when the user asks or agrees to record work or a reminder
     "project": {
       "type": "string",
       "description": "Existing knowledge-base project slug/name (kb_list projects), preferably a long-term work area. Set only when clear; do not invent near-duplicates."
+    },
+    "part_of": {
+      "type": "string",
+      "description": "Request to-do id this is a piece of; hand out via task_plan todo_id."
+    },
+    "after": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "With part_of: sibling piece ids it waits for."
     },
     "repository_bindings": {
       "type": "object",

@@ -238,6 +238,12 @@
     <string name="settings_ext_preview_again">再プレビュー</string>
     <string name="settings_ext_uninstall_title">%1$sをアンインストールしますか？</string>
     <string name="settings_ext_uninstall_text">停止して設定とシークレットを削除します。提供しているコネクタも一緒に削除されます。</string>
+    <string name="settings_ext_uninstall_keep_result">パッケージも削除されますが、データフォルダはハブのマシンに残ります。手動でのクリーンアップが必要な項目は、アンインストール後に一覧表示されます。</string>
+    <string name="settings_ext_uninstall_delete_data_result">パッケージとデータフォルダも削除されます。手動でのクリーンアップが必要な項目は、アンインストール後に一覧表示されます。</string>
+    <string name="settings_ext_removal_warnings_text">アンインストールは完了しました。一部の項目は手動でクリーンアップする必要があります。</string>
+    <string name="settings_ext_removal_warnings_header">手動クリーンアップが必要な項目</string>
+    <string name="settings_ext_removal_copy">警告をすべてコピー</string>
+    <string name="settings_ext_removal_done">OK</string>
     <string name="settings_ext_dependents_title">依存する拡張機能も無効にしますか？</string>
     <string name="settings_ext_dependents_text">%1$sは%2$sに依存しているため、一緒に無効になります。</string>
     <string name="settings_ext_dependents_unnamed">他の拡張機能が%1$sに依存しているため、一緒に無効になります。</string>

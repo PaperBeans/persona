@@ -378,7 +378,7 @@ private struct ManagerCodeSheet: View {
             .navigationTitle(page.shown.map { String(localized: "Install “\($0.name)”") } ?? "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done [Extension System Presentation c0b3fb]") { dismiss() }.lineLimit(1) }
+                SheetClose { dismiss() }
             }
         }
         .presentationDetents([.large])

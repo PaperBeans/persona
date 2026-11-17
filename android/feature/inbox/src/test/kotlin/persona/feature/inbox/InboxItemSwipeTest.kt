@@ -121,7 +121,7 @@ class InboxItemSwipeTest {
 
     private fun screen(inbox: FakeInbox) {
         inbox.conversationInbox.value = InboxConversations(inbox, "synthetic-pairing", owner, ReplyComposers(inbox, owner))
-        rule.setContent { PersonaTheme(reduceMotion = true) { InboxScreen(inbox, navigator) } }
+        rule.setContent { PersonaTheme(reduceMotion = true) { OnAll { InboxScreen(inbox, navigator) } } }
         rule.waitForIdle()
     }
 

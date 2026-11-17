@@ -49,7 +49,8 @@ private fun scopedRootAgentList(
 ): AgentListResult {
     fun projected(rows: List<AgentSession>, effective: AgentListSettings) = adapter?.project(persona.core.data.AgentListAdapter.Input(
         rows, machines, preferences.pins, preferences.mutes, effective, todos, directions, held, now,
-    )) ?: buildFlatAgentList(rows, machines, preferences.pins, preferences.mutes, effective, todos, directions)
+    )) ?: buildFlatAgentList(rows.map { it.copy(heldInList = it.id == held) }, machines, preferences.pins, preferences.mutes,
+        effective, todos, directions)
     if (preferences.range == AgentRange.Running)
         return projected(rows, settings)
     val history = rows.filter { !it.session.isLive && !(preferences.range == AgentRange.All && (it.session.isCodexTask || settings.nativePinned(it.session))) && settings.admitsHistory(it.session) && !(settings.hideBotmux && it.session.isBotmux) }

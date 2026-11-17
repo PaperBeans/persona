@@ -53,6 +53,9 @@ class ShadowAnswerCodecTest {
         assertTrue("the direct real JNI pick must return before the queued comparison: $encodedPick", direct.isNotEmpty())
         val corePick = direct
         val decodedPick = JsonCodec.decodeFromString<CoreTransition>(corePick)
+        // The core keeps the emptied Other entry, as iOS's QuestionForm.pick does (other[q.question] = ""), while Kotlin's
+        // builder removes the key. #9238 decided this with the iOS oracle: the difference stays reported as `other-state`,
+        // and this test pins both sides so neither is changed to match the other by accident.
         assertEquals("core pick's other key count", 1, decodedPick.other.size)
         assertEquals("core pick's empty value", true, decodedPick.other.values.single().isEmpty())
         assertTrue(picked.allowed)

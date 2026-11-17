@@ -1,3 +1,7 @@
+import { IconActions } from '../design/IconActions';
+import { Symbols } from '../design/Symbols';
+import { Colors } from '../design/Colors';
+import { ButtonStyles, SelectStyles } from '../design/Controls';
 import { ClientModel } from '../models/ClientModel';
 import { KnowledgeDirectory, KnowledgeSearchHit, KnowledgeWorkspace } from '../models/KnowledgeWorkspace';
 import { ResourceRow, Wire } from '../models/Wire';
@@ -16,6 +20,7 @@ const KB_KINDS: string[] = ['projects', 'chats', 'people', 'docs', 'meetings', '
 
 @ComponentV2
 export struct KnowledgeWorkspacePage {
+  @Local dispatchExpanded: boolean = false;
   @Require @Param model: ClientModel;
   @Param row: ResourceRow | undefined = undefined;
   @Param list: ResourceRow[] = [];
@@ -124,21 +129,44 @@ export struct KnowledgeWorkspacePage {
   private selectKind(index: number): void { if (index >= 0 && index < KB_KINDS.length) this.workspace.setKind(KB_KINDS[index]); }
   private selectTag(index: number): void { this.workspace.setTag(index === 0 ? '' : this.workspace.tags[index - 1] || ''); }
 
+  @Builder knowledgeFilters() {
+    Menu() {
+      MenuItemGroup({ header: tr('knowledge_filter_kind') }) {
+        ForEach(this.kindOptions(), (option: SelectOption, index: number) => {
+          MenuItem({ content: option.value }).selected(this.kindLabel(this.workspace.kind) === option.value).selectIcon(true)
+            .onClick(() => this.selectKind(index))
+        }, (option: SelectOption) => JSON.stringify(option.value))
+      }
+      if (!this.workspace.query.trim()) MenuItemGroup({ header: tr('knowledge_filter_tag') }) {
+        ForEach(this.tagOptions(), (option: SelectOption, index: number) => {
+          MenuItem({ content: option.value }).selected((this.workspace.tag ? '#' + this.workspace.tag : tr('knowledge_all_tags')) === option.value).selectIcon(true)
+            .onClick(() => this.selectTag(index))
+        }, (option: SelectOption) => JSON.stringify(option.value))
+      }
+    }.width(Tokens.popupWidth)
+  }
+
   @Builder listContent() {
     Column({ space: Tokens.gap }) {
-      Search({ value: this.workspace.query, placeholder: tr('knowledge_search') })
-        .onChange((value: string) => this.workspace.setQuery(value)).id('knowledge.search')
       Row({ space: Tokens.gap }) {
-        Select(this.kindOptions()).value(this.kindLabel(this.workspace.kind)).layoutWeight(1)
-          .onSelect((index: number) => this.selectKind(index)).id('knowledge.kind')
-        if (!this.workspace.query.trim()) {
-          Select(this.tagOptions()).value(this.workspace.tag ? '#' + this.workspace.tag : tr('knowledge_all_tags')).layoutWeight(1)
-            .onSelect((index: number) => this.selectTag(index)).id('knowledge.tag')
-        }
-        Button(tr('refresh')).height(Tokens.touch).onClick(() => this.workspace.refresh()).id('knowledge.refresh')
-        if (this.workspace.kind === 'recordings') Button(tr('knowledge_recording_open')).height(Tokens.touch)
-          .enabled(this.model.connected && !this.model.demo).onClick(() => this.openRecording()).id('knowledge.recording.open')
+        Search({ value: this.workspace.query, placeholder: tr('knowledge_search') })
+          .onChange((value: string) => this.workspace.setQuery(value)).layoutWeight(1).id('knowledge.search')
+        if (!this.workspace.query.trim()) Button({ type: ButtonType.Normal }) {
+          Row({ space: Tokens.fine }) {
+            SymbolGlyph(Symbols.filter).fontSize(Tokens.symbolFont).fontColor([Colors.link])
+            Text(this.kindLabel(this.workspace.kind) + (this.workspace.tag ? ' · #' + this.workspace.tag : ''))
+              .fontSize(Tokens.body).fontColor(Colors.link).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+        }.buttonStyle(ButtonStyleMode.TEXTUAL).backgroundColor(Color.Transparent).height(Tokens.chrome)
+          .padding({ left: Tokens.gap, right: Tokens.gap }).constraintSize({ maxWidth: Tokens.master / 2 })
+          .responseRegion({ x: 0, y: -Tokens.fine, width: '100%', height: Tokens.touch })
+          .accessibilityText(tr('agent_filter_button') + ' · ' + this.kindLabel(this.workspace.kind) + (this.workspace.tag ? ' · #' + this.workspace.tag : ''))
+          .bindMenu(this.knowledgeFilters).id('knowledge.filters')
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(Symbols.refresh).fontSize(Tokens.symbolFont).fontColor([Colors.link]) }
+          .attributeModifier(ButtonStyles.chrome).accessibilityText(tr('refresh')).onClick(() => this.workspace.refresh()).id('knowledge.refresh')
       }.width('100%')
+      if (this.workspace.kind === 'recordings') Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('knowledge_recording_open')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('knowledge_recording_open', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('knowledge_recording_open')).bindTips(tr('knowledge_recording_open'))
+        .enabled(this.model.connected && !this.model.demo).onClick(() => this.openRecording()).id('knowledge.recording.open')
       if (this.workspace.error) Text(tr(this.workspace.error)).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger')).width('100%')
       if (this.workspace.loading && !this.workspace.entries.length && !this.workspace.results.length) LoadingProgress().width(Tokens.touch).height(Tokens.touch)
       if (this.workspace.query.trim()) {
@@ -162,7 +190,11 @@ export struct KnowledgeWorkspacePage {
           ForEach(this.entryRowBindings, (binding: BoundRow<ResourceRow>) => {
             ListItem() {
               Column({ space: Tokens.fine }) {
-                Text(binding.value.title || binding.value.id).fontSize(Tokens.body).fontWeight(FontWeight.Medium).maxLines(2).width('100%')
+                Row({ space: Tokens.gap }) {
+                  SymbolGlyph(Symbols.document).fontSize(Tokens.symbolFont).fontColor([Colors.ai])
+                  Text(binding.value.title || binding.value.id).fontSize(Tokens.body).fontWeight(FontWeight.Medium).maxLines(2).layoutWeight(1)
+                  SymbolGlyph(Symbols.expand).fontSize(Tokens.meta).fontColor([Colors.secondary])
+                }.width('100%')
                 if (this.rowSubtitle(binding.value)) Text(this.rowSubtitle(binding.value)).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).maxLines(3).width('100%')
               }.alignItems(HorizontalAlign.Start).padding(Tokens.inset).width('100%')
             }.onClick(() => this.workspace.openEntry(binding.value).then((next: ResourceRow) => this.onOpenResource(next)).catch(() => undefined))
@@ -220,29 +252,33 @@ export struct KnowledgeWorkspacePage {
       } } });
   }
 
+  private editSaveKey(): string {
+    if (this.workspace.writeState === 'unknown') return 'result_unknown';
+    return ['sending', 'pending'].includes(this.workspace.writeState) ? this.workspace.writeState : 'save';
+  }
+
   @Builder editForm() {
     Column({ space: Tokens.gap }) {
       Text(tr('knowledge_edit_metadata')).fontSize(Tokens.body).fontWeight(FontWeight.Medium)
-      Select(['P0', 'P1', 'P2', 'P3'].map((value: string): SelectOption => ({ value: value }))).value(this.workspace.editImportance)
+      Select(['P0', 'P1', 'P2', 'P3'].map((value: string): SelectOption => ({ value: value }))).attributeModifier(SelectStyles.inline).value(this.workspace.editImportance)
         .onSelect((index: number) => this.workspace.setEditImportance(['P0', 'P1', 'P2', 'P3'][index] || 'P2')).id('knowledge.edit.importance')
       TextInput({ text: this.workspace.editRelevance, placeholder: tr('knowledge_relevance') }).type(InputType.Number)
         .onChange((value: string) => this.workspace.setEditRelevance(value)).id('knowledge.edit.relevance')
       TextInput({ text: this.workspace.editTags, placeholder: tr('knowledge_tags') }).onChange((value: string) => this.workspace.setEditTags(value)).id('knowledge.edit.tags')
       if (this.workspace.selected.path === 'projects') {
-        Select([{ value: tr('knowledge_project_short') }, { value: tr('knowledge_project_long') }])
+        Select([{ value: tr('knowledge_project_short') }, { value: tr('knowledge_project_long') }]).attributeModifier(SelectStyles.inline)
           .value(this.workspace.editProjectKind === 'long' ? tr('knowledge_project_long') : tr('knowledge_project_short') )
           .onSelect((index: number) => this.workspace.setEditProjectKind(index === 1 ? 'long' : 'short')).id('knowledge.edit.project_kind')
         Select([{ value: tr('knowledge_status_active') }, { value: tr('knowledge_status_paused') },
-          { value: tr('knowledge_status_done') }, { value: tr('knowledge_status_ignored') }])
+          { value: tr('knowledge_status_done') }, { value: tr('knowledge_status_ignored') }]).attributeModifier(SelectStyles.inline)
           .value(tr('knowledge_status_' + this.workspace.editStatus))
           .onSelect((index: number) => this.workspace.setEditStatus(['active', 'paused', 'done', 'ignored'][index] || 'active')).id('knowledge.edit.status')
       }
       Row({ space: Tokens.gap }) {
-        Button(tr('cancel')).layoutWeight(1).height(Tokens.touch).onClick(() => this.workspace.editOpen = false)
-        Button(tr(this.workspace.writeState === 'pending' || this.workspace.writeState === 'unknown' ? this.workspace.writeState : 'save'))
-          .layoutWeight(1).height(Tokens.touch).enabled(this.workspace.canSaveEdit())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('cancel')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('cancel', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('cancel')).bindTips(tr('cancel')).onClick(() => this.workspace.editOpen = false)
+        Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.editSaveKey())) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.onAction); else SymbolGlyph(IconActions.symbol(this.editSaveKey())).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.editSaveKey(), true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr(this.editSaveKey())).bindTips(tr(this.editSaveKey())).enabled(this.workspace.canSaveEdit())
           .onClick(() => this.workspace.saveEdit()).id('knowledge.edit.save')
-      }.width('100%')
+      }.width('100%').justifyContent(FlexAlign.End)
     }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
   }
 
@@ -253,21 +289,33 @@ export struct KnowledgeWorkspacePage {
           if (Wire.text(Wire.object(this.workspace.detail, 'meta'), 'importance')) Text(Wire.text(Wire.object(this.workspace.detail, 'meta'), 'importance') + ' · ' + tr('knowledge_relevance') + ' ' + String(Wire.number(Wire.object(this.workspace.detail, 'meta'), 'relevance')))
             .fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).width('100%')
           if (this.workspace.selected.detail) Text(this.workspace.selected.detail).fontSize(Tokens.body).width('100%')
+        if (Wire.text(this.workspace.detail, 'summary')) {
+          Column({ space: Tokens.gap }) { Text(tr(this.workspace.selected.path === 'recordings' ? 'knowledge_recording_summary' : 'knowledge_profile')).fontSize(Tokens.body).fontWeight(FontWeight.Medium)
+            MarkdownText({ text: Wire.text(this.workspace.detail, 'summary'), onLink: (url: string) => this.openSafeLink(url) })
+          }.width('100%').alignItems(HorizontalAlign.Start)
+        }
+
           Row({ space: Tokens.gap }) {
-            Button(tr('knowledge_ask_persona')).layoutWeight(1).height(Tokens.touch).onClick(() => this.askPersona()).id('knowledge.ask')
-            Button(tr('knowledge_edit_metadata')).layoutWeight(1).height(Tokens.touch)
+            Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('knowledge_ask_persona')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('knowledge_ask_persona', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('knowledge_ask_persona')).bindTips(tr('knowledge_ask_persona')).onClick(() => this.askPersona()).id('knowledge.ask')
+            Button({ type: ButtonType.Circle }) { SymbolGlyph(Symbols.edit).fontSize(Tokens.symbolFont).fontColor([Colors.link]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('knowledge_edit_metadata'))
               .onClick(() => this.workspace.beginEdit()).id('knowledge.edit.open')
           }.width('100%')
-          if (this.workspace.selected.path === 'projects') {
+          if (this.workspace.selected.path === 'projects') Button({ type: ButtonType.Normal }) {
+            Row({ space: Tokens.gap }) {
+            SymbolGlyph(Symbols.agent).fontSize(Tokens.symbolFont).fontColor([Colors.ai])
+            Text(tr('knowledge_agent_configuration')).fontSize(Tokens.body).fontColor(Colors.link).layoutWeight(1)
+            SymbolGlyph(this.dispatchExpanded ? Symbols.up : Symbols.down).fontSize(Tokens.meta).fontColor([Colors.secondary])
+          }.width('100%')
+          }.attributeModifier(ButtonStyles.quiet).width('100%').onClick(() => this.dispatchExpanded = !this.dispatchExpanded).accessibilityText(tr('knowledge_agent_configuration')).accessibilityDescription(tr(this.dispatchExpanded ? 'control_expanded' : 'control_collapsed')).id('knowledge.dispatch.toggle')
+          if (this.workspace.selected.path === 'projects' && this.dispatchExpanded) {
             TextArea({ text: this.workspace.agentDraft, placeholder: tr('knowledge_agent_prompt') }).height(Tokens.inputExpanded)
               .onChange((value: string) => this.workspace.setAgentDraft(value)).id('knowledge.agent.prompt')
             if (this.workspace.directoryTargets.length) {
-              Select(this.directoryOptions()).value(this.workspace.directoryTargets[this.workspace.selectedDirectory]?.label || '').onSelect((index: number) => this.workspace.selectedDirectory = index)
+              Select(this.directoryOptions()).attributeModifier(SelectStyles.inline).value(this.workspace.directoryTargets[this.workspace.selectedDirectory]?.label || '').onSelect((index: number) => this.workspace.selectedDirectory = index)
                 .id('knowledge.agent.directory')
               TextInput({ text: this.workspace.agentLauncher, placeholder: tr('launcher') }).onChange((value: string) => this.workspace.setAgentLauncher(value))
                 .id('knowledge.agent.launcher')
-              Button(tr('knowledge_start_agent')).enabled(!!this.workspace.agentDraft.trim() && !!this.workspace.agentLauncher.trim() && !this.workspace.busy)
-                .height(Tokens.touch).onClick(() => this.confirmDispatch()).id('knowledge.agent.start')
+              Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('knowledge_start_agent')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('knowledge_start_agent', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('knowledge_start_agent')).bindTips(tr('knowledge_start_agent')).enabled(!!this.workspace.agentDraft.trim() && !!this.workspace.agentLauncher.trim() && !this.workspace.busy).onClick(() => this.confirmDispatch()).id('knowledge.agent.start')
             } else Text(tr('knowledge_agent_unavailable')).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary'))
           }
           if (this.workspace.error) Text(tr(this.workspace.error)).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger')).width('100%')
@@ -276,7 +324,7 @@ export struct KnowledgeWorkspacePage {
         if (this.workspace.agents.length) {
           Column({ space: Tokens.gap }) {
             Text(tr('knowledge_project_agents')).fontSize(Tokens.body).fontWeight(FontWeight.Medium)
-            ForEach(this.agentRowBindings, (binding: BoundRow<ResourceRow>) => Button(binding.value.title || binding.value.id).width('100%').height(Tokens.touch)
+            ForEach(this.agentRowBindings, (binding: BoundRow<ResourceRow>) => Button({ type: ButtonType.Normal }) { this.navigationLabel(binding.value.title || binding.value.id) }.buttonStyle(ButtonStyleMode.TEXTUAL).backgroundColor(Color.Transparent).padding(0).width('100%')
               .onClick(() => this.onChat(binding.value)).id('knowledge.agent.' + binding.value.id), (binding: BoundRow<ResourceRow>) => binding.key)
           }.width('100%').alignItems(HorizontalAlign.Start)
         }
@@ -286,11 +334,6 @@ export struct KnowledgeWorkspacePage {
             ForEach(this.workspace.matches, (match: Record<string, Object>, index: number) => Text(Wire.text(match, 'line'))
               .fontSize(Tokens.meta).width('100%').id('knowledge.match.' + String(index)),
               (match: Record<string, Object>, index: number) => JSON.stringify([index, Wire.text(match, 'id'), JSON.stringify(match)]))
-          }.width('100%').alignItems(HorizontalAlign.Start)
-        }
-        if (Wire.text(this.workspace.detail, 'summary')) {
-          Column({ space: Tokens.gap }) { Text(tr(this.workspace.selected.path === 'recordings' ? 'knowledge_recording_summary' : 'knowledge_profile')).fontSize(Tokens.body).fontWeight(FontWeight.Medium)
-            MarkdownText({ text: Wire.text(this.workspace.detail, 'summary'), onLink: (url: string) => this.openSafeLink(url) })
           }.width('100%').alignItems(HorizontalAlign.Start)
         }
         if (Wire.strings(this.workspace.detail, 'log').length) {
@@ -308,19 +351,24 @@ export struct KnowledgeWorkspacePage {
         if (this.workspace.selected.path === 'projects' && Wire.rows(this.workspace.detail, 'moments').length) {
           Column({ space: Tokens.gap }) {
             Text(tr('knowledge_related_moments')).fontSize(Tokens.body).fontWeight(FontWeight.Medium)
-            ForEach(Wire.rows(this.workspace.detail, 'moments'), (moment: Record<string, Object>) => Button(Wire.text(moment, 'author') + ' · ' + Wire.text(moment, 'text'))
-              .width('100%').height(Tokens.touch).onClick(() => this.loadMoment(Wire.text(moment, 'id'))).id('knowledge.moment.' + Wire.text(moment, 'id')),
+            ForEach(Wire.rows(this.workspace.detail, 'moments'), (moment: Record<string, Object>) => Button({ type: ButtonType.Normal }) { this.navigationLabel(Wire.text(moment, 'author') + ' · ' + Wire.text(moment, 'text')) }.buttonStyle(ButtonStyleMode.TEXTUAL).backgroundColor(Color.Transparent).padding(0).width('100%').onClick(() => this.loadMoment(Wire.text(moment, 'id'))).id('knowledge.moment.' + Wire.text(moment, 'id')),
               (moment: Record<string, Object>, index: number) => JSON.stringify([index, Wire.text(moment, 'id'), JSON.stringify(moment)]))
             if (this.momentText) MarkdownText({ text: this.momentText, onLink: (url: string) => this.openSafeLink(url) })
           }.width('100%').alignItems(HorizontalAlign.Start)
         }
         this.relatedEntries(UIUtils.makeBinding((): Record<string, Object> => this.workspace.detail))
-        if (Wire.text(Wire.object(this.workspace.detail, 'meta'), 'url')) Button(tr('knowledge_open_link')).height(Tokens.touch).onClick(() => this.openSafeLink(Wire.text(Wire.object(this.workspace.detail, 'meta'), 'url')))
+        if (Wire.text(Wire.object(this.workspace.detail, 'meta'), 'url')) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('knowledge_open_link')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('knowledge_open_link', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('knowledge_open_link')).bindTips(tr('knowledge_open_link')).onClick(() => this.openSafeLink(Wire.text(Wire.object(this.workspace.detail, 'meta'), 'url')))
         if (Wire.text(this.workspace.detail, 'path')) Text(Wire.text(this.workspace.detail, 'path')).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).width('100%')
-        if (this.workspace.selected.path === 'recordings') Button(tr('knowledge_forget_recording')).enabled(this.workspace.canDeleteRecording())
-          .height(Tokens.touch).onClick(() => this.confirmDeleteRecording()).id('knowledge.recording.delete')
+        if (this.workspace.selected.path === 'recordings') Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('knowledge_forget_recording')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('knowledge_forget_recording', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('knowledge_forget_recording')).bindTips(tr('knowledge_forget_recording')).enabled(this.workspace.canDeleteRecording()).onClick(() => this.confirmDeleteRecording()).id('knowledge.recording.delete')
       }.padding(Tokens.page).width('100%').alignItems(HorizontalAlign.Start)
-    }.scrollable(ScrollDirection.Vertical).scrollBar(BarState.Auto).width('100%').height('100%')
+    }.align(Alignment.TopStart).scrollable(ScrollDirection.Vertical).scrollBar(BarState.Auto).width('100%').height('100%')
+  }
+
+  @Builder navigationLabel(label: string) {
+    Row({ space: Tokens.gap }) {
+      Text(label).fontSize(Tokens.body).fontColor(Colors.ink).layoutWeight(1)
+      SymbolGlyph(Symbols.expand).fontSize(Tokens.meta).fontColor([Colors.secondary])
+    }.width('100%').constraintSize({ minHeight: Tokens.touch }).padding({ top: Tokens.inset, bottom: Tokens.inset })
   }
 
   @Builder relatedEntries(detail: Binding<Record<string, Object>>) {
@@ -328,7 +376,7 @@ export struct KnowledgeWorkspacePage {
       Column({ space: Tokens.gap }) {
         Text(tr('knowledge_related')).fontSize(Tokens.body).fontWeight(FontWeight.Medium)
         ForEach(Wire.rows(detail.value, 'links'), (item: Record<string, Object>) => {
-          Button(Wire.text(item, 'title', Wire.text(item, 'id'))).width('100%').height(Tokens.touch).onClick(() => this.openRelated(item)).id('knowledge.related.' + Wire.text(item, 'kind') + '.' + Wire.text(item, 'id'))
+          Button({ type: ButtonType.Normal }) { this.navigationLabel(Wire.text(item, 'title', Wire.text(item, 'id'))) }.buttonStyle(ButtonStyleMode.TEXTUAL).backgroundColor(Color.Transparent).padding(0).width('100%').onClick(() => this.openRelated(item)).id('knowledge.related.' + Wire.text(item, 'kind') + '.' + Wire.text(item, 'id'))
         }, (item: Record<string, Object>, index: number) => JSON.stringify([index, Wire.text(item, 'kind') + '/' + Wire.text(item, 'id'), JSON.stringify(item)]))
       }.width('100%').alignItems(HorizontalAlign.Start)
     }
@@ -344,10 +392,9 @@ export struct KnowledgeWorkspacePage {
             Text(Wire.text(action, 'what')).fontSize(Tokens.meta).layoutWeight(1)
           }.width('100%').id('knowledge.minutes.action.' + Wire.text(action, 'id'))
         }, (action: Record<string, Object>, index: number) => JSON.stringify([index, Wire.text(action, 'id'), JSON.stringify(action)]))
-        if (this.selectedActions.length) Button(tr('knowledge_minutes_add_todos')).height(Tokens.touch).onClick(() => this.confirmAddTodos())
+        if (this.selectedActions.length) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('knowledge_minutes_add_todos')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('knowledge_minutes_add_todos', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('knowledge_minutes_add_todos')).bindTips(tr('knowledge_minutes_add_todos')).onClick(() => this.confirmAddTodos())
       }
-      Button(tr('knowledge_minutes_make')).enabled(!this.workspace.busy && this.workspace.writeState !== 'pending' && this.workspace.writeState !== 'unknown')
-        .height(Tokens.touch).onClick(() => this.workspace.makeMinutes()).id('knowledge.minutes.make')
+      Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('knowledge_minutes_make')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('knowledge_minutes_make', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('knowledge_minutes_make')).bindTips(tr('knowledge_minutes_make')).enabled(!this.workspace.busy && this.workspace.writeState !== 'pending' && this.workspace.writeState !== 'unknown').onClick(() => this.workspace.makeMinutes()).id('knowledge.minutes.make')
       if (Wire.rows(detail.value, 'segments').length) {
         Text(tr('knowledge_transcript')).fontSize(Tokens.body).fontWeight(FontWeight.Medium)
         ForEach(Wire.rows(detail.value, 'segments'), (line: Record<string, Object>, index: number) => Text(Wire.text(line, 'text'))

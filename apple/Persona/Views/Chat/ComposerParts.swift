@@ -56,6 +56,9 @@ struct ComposerRow<MenuItems: View>: View {
                                      history: history.map { MacComposerHistory(key: $0, text: $text, focus: { focused.wrappedValue = true }) }, send: send)
                     #endif
                     .focused(focused)
+                    #if os(iOS)
+                    .returnSends(text: $text, canSend: canSend, gate: gate?.action, send: sendTyped) // #8178
+                    #endif
                     .padding(.horizontal, Theme.Space.l)
                     .padding(.vertical, Theme.Space.m)
                     .scaledFrame(minHeight: Theme.Size.tapTarget)

@@ -70,7 +70,7 @@ func otherAgentCommand(launcher, resume, prompt string, shells ...string) string
 // break as a space (csh ends the command at one, quote open or not).
 func typedArg(text string, shells ...string) string {
 	text = strings.ReplaceAll(inertControls(text), "\t", " ")
-	if !takesAssign(shells...) {
+	if !takesAssign(startCommandShells(shells)...) {
 		text = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(text)
 	}
 	return text
@@ -97,7 +97,7 @@ func (n *Node) startOtherAgent(ctx context.Context, launch host.Launcher, cwd, l
 	}
 	// A Codex wrapper is told to herdr as Codex (hostherdr.go); a compatible CLI is herdr's to detect. The node's
 	// directory in front, the assistant's environment left out (agentenv.go).
-	shells := paneShells(ctx, created)
+	shells := n.startPaneShells(ctx, launch, created)
 	// The first message keeps its line breaks only in a start file: typed out, the line may meet csh, which runs each
 	// line on its own (typedArg), and Orca does not say which shell it opened.
 	argShells := shells
@@ -107,7 +107,7 @@ func (n *Node) startOtherAgent(ctx context.Context, launch host.Launcher, cwd, l
 	cmd := withHerdrAgent(typedHerdrAgent(launch, kind, shells...), otherAgentCommand(launcher, resume, prompt, argShells...))
 	// Not in the agent sandbox (agentsandbox.go).
 	n.notePaneStart(launcher)
-	done, err := n.runAgentCommand(ctx, launch, created, ws, "", n.agentCommand(cmd, shellQuote, shells...), shells...) // typedstart.go
+	done, err := n.runAgentCommand(ctx, launch, created, ws, "", n.agentStartCommand(cmd, shellQuote, shells...), shells...) // typedstart.go
 	if err != nil {
 		return nil, err
 	}

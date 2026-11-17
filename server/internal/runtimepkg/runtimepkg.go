@@ -53,12 +53,11 @@ const (
 // (integrations/runtime-sdk/lib/package.js PACKAGES). Keep the two in step: a file one side counts and the other does
 // not makes every hello look like another version.
 var Packages = map[string][]string{
-	"persona-dsh-runtime": {"dsh/package.json", "dsh/lib/*.js", "runtime-sdk/package.json", "runtime-sdk/index.js", "runtime-sdk/lib/*.js"},
-	"persona-pi-runtime":  {"pi/package.json", "pi/index.js", "pi/companion.mjs", "pi/lib/*.js", "runtime-sdk/package.json", "runtime-sdk/index.js", "runtime-sdk/lib/*.js"},
+	"persona-dsh-runtime":         {"dsh/package.json", "dsh/lib/*.js", "runtime-sdk/package.json", "runtime-sdk/index.js", "runtime-sdk/lib/*.js"},
+	"persona-pi-runtime":          {"pi/package.json", "pi/index.js", "pi/companion.mjs", "pi/lib/*.js", "runtime-sdk/package.json", "runtime-sdk/index.js", "runtime-sdk/lib/*.js"},
+	"persona-antigravity-runtime": {"antigravity/package.json", "antigravity/companion.mjs", "antigravity/mcp-proxy.mjs", "antigravity/lib/*.js", "runtime-sdk/package.json", "runtime-sdk/index.js", "runtime-sdk/lib/*.js"},
 	// The Paseo bridge is not loaded by another program: the node writes it out and runs it (node/paseobridge.go).
 	"persona-paseo-runtime": {"paseo/package.json", "paseo/bridge.mjs", "paseo/lib/*.js", "runtime-sdk/package.json", "runtime-sdk/index.js", "runtime-sdk/lib/*.js"},
-	// The Agent SDK bridge, likewise run by the node (the assistant's agentsdk runtime): one bundled file, the SDK in it.
-	"persona-agent-sdk-runtime": {"agent-sdk/package.json", "agent-sdk/dist/bridge.mjs"},
 }
 
 // ClaudeCodePlugin is the Persona plugin for Claude Code (integrations/claude-code-plugin): no runtime loads it, the

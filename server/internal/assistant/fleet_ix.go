@@ -36,7 +36,7 @@ type pending struct {
 	persistenceErr error
 	// local is set for interactions the manager resolves itself (screen dialogs, Codex cards): it acts on the answer,
 	// and an error goes back to whoever answered (prompt_changed: nothing was pressed).
-	local func(proto.Resolution) error
+	local func(context.Context, proto.Resolution) error
 	// orphaned is set while no hook waits on a resumable interaction (its node went away, or the manager restarted):
 	// it ends the interaction unless the hook claims it again in time.
 	orphaned *time.Timer
@@ -531,16 +531,16 @@ func (s *Service) resolveRemembered(id string, r proto.Resolution, remember bool
 }
 
 func (s *Service) resolveWithStanding(id string, r proto.Resolution, remember bool, authorization *standingResolution) error {
-	return s.resolveAnswer(id, r, remember, authorization, nil)
+	return s.resolveAnswer(context.Background(), id, r, remember, authorization, nil)
 }
 
 // resolveApproved is resolve for an app's answer the hub relayed, with the device it vouched may approve a hand-off
 // card (nil: none). Only this way does a hand-off card take more than a no (secret_handoff.go).
-func (s *Service) resolveApproved(id string, r proto.Resolution, approver *assistantwire.HandoffApprover) error {
-	return s.resolveAnswer(id, r, true, nil, approver)
+func (s *Service) resolveApproved(ctx context.Context, id string, r proto.Resolution, approver *assistantwire.HandoffApprover) error {
+	return s.resolveAnswer(ctx, id, r, true, nil, approver)
 }
 
-func (s *Service) resolveAnswer(id string, r proto.Resolution, remember bool, authorization *standingResolution,
+func (s *Service) resolveAnswer(ctx context.Context, id string, r proto.Resolution, remember bool, authorization *standingResolution,
 	approver *assistantwire.HandoffApprover) error {
 	// A manager work card is answered in the manager, not by the stopped agent. Its local dismiss/defer choices remain
 	// valid, but an answer that would send text must be refused before the card is claimed and its answer is retried.
@@ -649,7 +649,7 @@ func (s *Service) resolveAnswer(id string, r proto.Resolution, remember bool, au
 	// only the one waiting on the card (p.local, p.done) gets what was typed into them.
 	told := redacted(p.ix, r)
 	if p.local != nil {
-		err := p.local(r)
+		err := p.local(ctx, r)
 		if err != nil {
 			status = "failed"
 			s.fleet.mu.Lock()
@@ -862,7 +862,8 @@ func (s *Service) expireLoop(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		s.retrySeen(ctx) // a database that failed when the manager started
+		s.retrySeen(ctx)                // a database that failed when the manager started
+		s.republishFinished(time.Now()) // Just finished rows whose window ended (#9751)
 		s.fleet.mu.Lock()
 		var plans []string
 		seen := map[string]bool{}

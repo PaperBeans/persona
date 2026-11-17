@@ -274,12 +274,25 @@ class CheckFastScriptsTests(unittest.TestCase):
 
     def test_an_apple_change_runs_the_l10n_suite(self):
         self.break_suite("test_apple_l10n.py")
+        self.commit_on_top("scripts/test/test_apple_no_callkit.py", PASSING, "base")
         self.write("apple/Persona/Views/Settings/Options.swift", 'let s = "中文"\n')
         code, out = self.check_fast()
         self.assertEqual(1, code, out)
         self.assertIn("FAIL     scripts/test/test_apple_l10n.py", out)
+        self.assertIn("PASS     scripts/test/test_apple_no_callkit.py", out)
         self.assertIn("SKIP  apple/** builds and tests", out)  # the Mac-only checks are still reported
         self.assertNotIn("test_doc_paths.py", out)
+
+    def test_an_apple_or_xcconfig_change_runs_the_callkit_guard(self):
+        # It reads every Apple source and build file, and the xcconfig scripts/persona_config.py writes (#9290).
+        self.break_suite("test_apple_no_callkit.py")
+        for path in ("apple/Persona/Calls/Call.swift", "scripts/persona_config.py"):
+            with self.subTest(path=path):
+                self.write(path, "changed\n")
+                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
+                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
+                self.assertEqual(1, code, out)
+                self.assertIn("FAIL     scripts/test/test_apple_no_callkit.py", out)
 
     def test_token_inputs_run_the_token_suite(self):
         self.commit_on_top("scripts/assets/test_gen_tokens.py", FAILING, "base")

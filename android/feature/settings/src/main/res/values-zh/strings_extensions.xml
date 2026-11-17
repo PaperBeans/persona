@@ -238,6 +238,12 @@
     <string name="settings_ext_preview_again">重新预览</string>
     <string name="settings_ext_uninstall_title">卸载 %1$s？</string>
     <string name="settings_ext_uninstall_text">会停掉它，删掉它的设置和密钥；它提供的连接器也一起去掉。</string>
+    <string name="settings_ext_uninstall_keep_result">软件包也会删除，数据文件夹会保留在 hub 所在的机器上。卸载后若还有需要手动清理的项目，会逐条列出。</string>
+    <string name="settings_ext_uninstall_delete_data_result">软件包和数据文件夹也会删除。卸载后若还有需要手动清理的项目，会逐条列出。</string>
+    <string name="settings_ext_removal_warnings_text">已卸载。还有一些项目需要你手动清理。</string>
+    <string name="settings_ext_removal_warnings_header">需要手动清理</string>
+    <string name="settings_ext_removal_copy">复制全部警告</string>
+    <string name="settings_ext_removal_done">好</string>
     <string name="settings_ext_dependents_title">一起停用依赖它的扩展？</string>
     <string name="settings_ext_dependents_text">%1$s 依赖 %2$s，会一起停用。</string>
     <string name="settings_ext_dependents_unnamed">其他扩展依赖 %1$s，会一起停用。</string>

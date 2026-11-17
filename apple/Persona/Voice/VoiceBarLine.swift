@@ -28,11 +28,13 @@ nonisolated struct VoiceBarLine: Equatable, Sendable {
         case notSent
         /// The computer is offline: nothing said can go.
         case offline
+        /// A system call to Persona on hold (#9290): nothing said goes and nothing plays until it is off hold.
+        case held
 
         /// Worth saying to VoiceOver as it comes (docs/assistant/voice.md 6.6「无障碍」): it asks for the user, or the voice stops.
         var announced: Bool {
             switch self {
-            case .needsTap, .asking, .notSent, .offline, .paused: true
+            case .needsTap, .asking, .notSent, .offline, .paused, .held: true
             case .ready, .muted, .handing, .working, .waiting: false
             }
         }
@@ -92,9 +94,10 @@ nonisolated struct VoiceBarLine: Equatable, Sendable {
 
     /// The second line now. `cards`: the bound conversation's pending ones; `label`: who works in it (「Claude」,
     /// 「Codex」, the persona's name for its own conversations); `dismissed`: refusals put away with Never Mind; `resendable`:
-    /// the refused runs the connection up now still knows (`VoiceConversation.canResend`).
+    /// the refused runs the connection up now still knows (`VoiceConversation.canResend`); `held`: a system call to
+    /// Persona on hold (`VoiceConversation.held`).
     static func make(phase: VoicePhase, link: VoiceLink, runs: [VoiceRun], session: Session?, cards: [Interaction],
-                     muted: Bool, asking: String? = nil, notice: VoiceFailure? = nil, label: String,
+                     muted: Bool, held: Bool = false, asking: String? = nil, notice: VoiceFailure? = nil, label: String,
                      dismissed: Set<String> = [], resendable: Set<String> = []) -> VoiceBarLine {
         let live = runs.filter { !dismissed.contains($0.id) && $0.state != .folded }
         // What did not go, while it is the latest word on it: a later instruction that went takes its place.
@@ -104,13 +107,19 @@ nonisolated struct VoiceBarLine: Equatable, Sendable {
         if notice?.code == .machineOffline {
             return VoiceBarLine(kind: .offline, text: String(localized: "This computer is offline; what you say can’t be sent"), since: nil, actions: [])
         }
+        let working = session?.status == .working || session?.state == .working
+        if held {
+            // Not the paused, listening, muted or asking line: speaking does nothing until the call is off hold. Stop Claude
+            // still works.
+            let stop: [Action] = working && session?.canInterrupt != false ? [.stopAgent] : []
+            return VoiceBarLine(kind: .held, text: String(localized: "The call is on hold; nothing you say is sent"), since: nil, actions: stop)
+        }
         if let asking, cards.contains(where: { $0.id == asking }) {
             return VoiceBarLine(kind: .asking, text: String(localized: "\(label) is asking you; just say your answer"), since: nil, actions: [])
         }
         if !cards.isEmpty {
             return VoiceBarLine(kind: .needsTap, text: String(localized: "Needs a tap from you"), since: nil, actions: [])
         }
-        let working = session?.status == .working || session?.state == .working
         let open = live.filter(\.state.isOpen)
         let stop: [Action] = working && session?.canInterrupt != false ? [.stopAgent] : []
         let since = working ? session?.stateSince ?? open.compactMap(\.startedAt?.date).min()
@@ -207,8 +216,10 @@ nonisolated struct VoiceBarStatus: Equatable, Sendable {
     var text: String
     var orb: VoiceOrb.Phase
 
-    /// `working`: the bound conversation works (the orb's ring laps); `tool`: a read-only tool the voice runs.
-    static func make(phase: VoicePhase, link: VoiceLink, muted: Bool, working: Bool, tool: String? = nil) -> VoiceBarStatus {
+    /// `working`: the bound conversation works (the orb's ring laps); `tool`: a read-only tool the voice runs; `held`: a
+    /// system call to Persona on hold (the call screen's On Hold, whatever the connection does meanwhile).
+    static func make(phase: VoicePhase, link: VoiceLink, muted: Bool, working: Bool, tool: String? = nil, held: Bool = false) -> VoiceBarStatus {
+        if held, !phase.isEnded { return VoiceBarStatus(text: String(localized: "On Hold [Call Screen]"), orb: .paused) }
         switch phase {
         case .connecting:
             return VoiceBarStatus(text: String(localized: "Connecting… [Feishu Bot Model 8be0ea]"), orb: .connecting)

@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import type { WindowState } from "./window-state.js";
 
-/** The state file contains geometry only, never a hub credential or web storage. */
+/** The state file holds the window's geometry, the hub's address and the island switch (#7669), never a credential or web storage. */
 export class JSONStore {
   private static pendingWrites = new Map<string, Promise<void>>();
   private static writeSequence = 0;

@@ -166,7 +166,7 @@ not looked up on every redraw.
 every push and every frame of a scroll.
 
 **Counter-examples.**
-- `apple/Persona/Views/Inbox/Lark/LarkInline.swift:303`: compiles a regular expression on every call, from every Lark card node's `body`.
+- Fixed before: `apple/Persona/Views/Inbox/Lark/LarkInline.swift` compiled a regular expression on every call, and another per attribute, from every Lark card node's `body`; the three fixed expressions are now `static let`.
 - `apple/Persona/Views/Knowledge/KnowledgeView.swift:1092`: a new `DateFormatter` per call from `body` (`apple/Persona/Views/Knowledge/KnowledgeView.swift:826`).
 - Fixed before, `apple/Shared/StateNames.swift`: `StateName.text` called `interfaceText(_:)` each time it was read. With an explicit locale,
   `String(localized:)` reads the string tables on every call (1–2 ms each on the simulator, against the cached lookup of
@@ -639,7 +639,6 @@ Grep counts are across `apple/` without tests; they are leads to read, not each 
 
 **P4: work in `body`**
 
-- `apple/Persona/Views/Inbox/Lark/LarkInline.swift:303`: `cardMarkdown` compiles an `NSRegularExpression` on every call, and another per attribute (`apple/Persona/Views/Inbox/Lark/LarkInline.swift:310`), for every card node's `body` (`apple/Persona/Views/Inbox/Lark/LarkCard.swift:327`). 45 uncached `NSRegularExpression(` sites in all.
 - `apple/Persona/Views/Knowledge/KnowledgeView.swift:1092`: a new `DateFormatter` per call, from `body` (`apple/Persona/Views/Knowledge/KnowledgeView.swift:826`); same in `apple/Persona/Views/Settings/ExtensionCodeViews.swift:382-389` (`ISO8601DateFormatter`, `RelativeDateTimeFormatter`).
 - `apple/Shared/Models.swift:2505`: `storageText` creates a `ByteCountFormatter` on each read; 35 callers, many in rows and in a progress label (`apple/Persona/Views/Chat/VideoFileView.swift:145`).
 - `apple/Persona/Views/Session/ReviewPage.swift:267-283`: rebuilds a file's diff rows, scans them for the widest line number and filters the drafts once per line, on every `body`.

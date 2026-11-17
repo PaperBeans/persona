@@ -1,7 +1,11 @@
 package persona.feature.chat
 
-import persona.core.designsystem.text
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
+import persona.core.designsystem.text
+import persona.core.designsystem.stableAlpha
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.draw.rotate
@@ -31,6 +35,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import persona.core.designsystem.LocalizedFormats
@@ -69,6 +75,8 @@ import persona.core.designsystem.Status
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.WorkflowIcon
 import persona.core.designsystem.rememberCopy
+import persona.core.designsystem.rememberOpenEdge
+import persona.core.designsystem.unfolding
 import persona.core.domain.sort.WorkflowSummary
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
@@ -76,6 +84,7 @@ import persona.core.domain.tasks.AssistantExtra
 import persona.core.domain.tasks.AssistantLines
 import persona.core.domain.tasks.orphanedLine
 import persona.core.domain.tasks.QuickResult
+import persona.core.domain.tasks.QuickResultUndo
 import persona.core.domain.tasks.Interruption
 import persona.core.domain.tasks.InterruptBatch
 import persona.core.domain.tasks.InterruptLook
@@ -177,7 +186,7 @@ internal fun AssistantExtraLine(payload: Any, host: AssistantTaskHost?) {
     if (host == null) return
     when (payload) {
         is AssistantExtra.Day -> DayLine(payload.date)
-        is AssistantExtra.Quick -> QuickResultCard(payload.result)
+        is AssistantExtra.Quick -> QuickResultLine(payload.result, host)
         is AssistantExtra.Feed -> FeedLine(payload.item, host)
         is persona.core.domain.tasks.DispatchHint -> DispatchHandoffCards(payload, host)
     }
@@ -232,14 +241,16 @@ private fun FeedLine(item: FeedItem, host: AssistantTaskHost) {
 @Composable
 internal fun AnsweredLine(item: FeedItem, title: String, onOpenTask: (() -> Unit)?) {
     var open by rememberSaveable(item.id) { mutableStateOf(false) }
+    val edge = rememberOpenEdge(item.id)
+    val revealing = edge.revealing(open)
     val items = remember(item) { item.answeredItems() }
     val expandable = items.isNotEmpty()
     val shape = if (open) PersonaTheme.shapes.cardShape else CircleShape
     val toggleLabel = stringResource(if (open) R.string.chat_tasks_collapse else R.string.chat_tasks_expand)
     val toggleState = stringResource(if (open) R.string.chat_tasks_expanded else R.string.chat_tasks_collapsed)
     val openTaskLabel = stringResource(R.string.chat_tasks_open_task)
-    Column(Modifier.then(if (open) Modifier.fillMaxWidth() else Modifier).clip(shape).background(PersonaTheme.palette.surfaceStrong)
-        .animateContentSize()) {
+    // Opened answers fade in place (iOS AnsweredLine, TaskViews.swift:587, ChatPin.swift:707-726). The same on iPhone and iPad.
+    Column(Modifier.then(if (open) Modifier.fillMaxWidth() else Modifier).clip(shape).background(PersonaTheme.palette.surfaceStrong)) {
         Row(Modifier.then(if (expandable) Modifier.clickable(onClickLabel = toggleLabel) { open = !open } else Modifier)
             .semantics { if (expandable) stateDescription = toggleState }
             .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
@@ -254,7 +265,7 @@ internal fun AnsweredLine(item: FeedItem, title: String, onOpenTask: (() -> Unit
                 modifier = Modifier.rotate(if (open) 90f else 0f))
         }
         if (open) SelectionContainer {
-            Column(Modifier.fillMaxWidth().padding(start = Tokens.Space.m, end = Tokens.Space.m, bottom = Tokens.Space.m)
+            Column(Modifier.unfolding(revealing).fillMaxWidth().padding(start = Tokens.Space.m, end = Tokens.Space.m, bottom = Tokens.Space.m)
                 .testTag("answered-detail"), verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
                 items.forEach { qa ->
                     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
@@ -282,13 +293,17 @@ private fun sentTitle(item: FeedItem, title: String): String =
 @Composable
 internal fun SentLine(item: FeedItem, title: String, onOpenTask: (() -> Unit)?) {
     var open by rememberSaveable(item.id) { mutableStateOf(false) }
+    val edge = rememberOpenEdge(item.id)
+    val revealing = edge.revealing(open)
     val text = item.field("text").orEmpty()
     val first = remember(text) { SentToAgents.firstLine(text) }
     val shape = if (open) PersonaTheme.shapes.cardShape else CircleShape
     val toggleLabel = stringResource(if (open) R.string.chat_tasks_collapse else R.string.chat_tasks_expand)
     val toggleState = stringResource(if (open) R.string.chat_tasks_expanded else R.string.chat_tasks_collapsed)
+    // Brief and Board keep AgentSentLine, which fades its text (SentViews.swift:30, ChatPin.swift:707-726).
+    // iPhone assistant chats use the new layout and draw RoutedExchange instead, which has no .unfolding (AgentExchange.swift:29, ChatLayout.swift:39-40).
     Column(Modifier.then(if (open) Modifier.fillMaxWidth() else Modifier).clip(shape).background(PersonaTheme.palette.surfaceStrong)
-        .animateContentSize().testTag("sent-line")) {
+        .testTag("sent-line")) {
         Row(Modifier.clickable(onClickLabel = toggleLabel) { open = !open }.semantics { stateDescription = toggleState }
             .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
@@ -302,7 +317,7 @@ internal fun SentLine(item: FeedItem, title: String, onOpenTask: (() -> Unit)?) 
             JIcon(PhIcons.CaretRight, decorative = true, size = Tokens.Space.m, tint = PersonaTheme.palette.ink3,
                 modifier = Modifier.rotate(if (open) 90f else 0f))
         }
-        if (open) SentText(text, Modifier.padding(start = Tokens.Space.m, end = Tokens.Space.m, bottom = Tokens.Space.m))
+        if (open) SentText(text, Modifier.unfolding(revealing).padding(start = Tokens.Space.m, end = Tokens.Space.m, bottom = Tokens.Space.m))
     }
 }
 
@@ -336,7 +351,6 @@ private fun TaskSentList(todoId: String, host: AssistantTaskHost) {
 internal fun TaskSentRows(sent: List<FeedItem>) {
     var open by rememberSaveable(sent.first().id) { mutableStateOf(false) }
     var shown by rememberSaveable(sent.first().id) { mutableStateOf<String?>(null) }
-    val locale = currentLocale
     val toggleState = stringResource(if (open) R.string.chat_tasks_expanded else R.string.chat_tasks_collapsed)
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
         Row(Modifier.clip(PersonaTheme.shapes.controlShape).clickable { open = !open }.semantics { stateDescription = toggleState }
@@ -348,25 +362,32 @@ internal fun TaskSentRows(sent: List<FeedItem>) {
             JIcon(PhIcons.CaretRight, decorative = true, size = Tokens.Space.m, tint = PersonaTheme.palette.ink3,
                 modifier = Modifier.rotate(if (open) 90f else 0f))
         }
-        if (open) sent.forEach { item ->
-            val text = item.field("text").orEmpty()
-            val isOpen = shown == item.id
-            Column(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.controlShape).background(PersonaTheme.palette.surfaceStrong)
-                .animateContentSize().testTag("task-sent-entry")) {
-                Row(Modifier.fillMaxWidth().clickable { shown = if (isOpen) null else item.id }
-                    .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                    AssistantLines.time(item.at)?.let { Text(LocalizedFormats.format(it, LocalizedFormats.TIME, locale),
-                        style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3, maxLines = 1) }
-                    if (item.interrupting) JIcon(PhIcons.Stop, decorative = true, size = Tokens.Space.m, tint = PersonaTheme.palette.ink2)
-                    Text(SentToAgents.firstLine(text), Modifier.weight(1f), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    JIcon(PhIcons.CaretRight, decorative = true, size = Tokens.Space.m, tint = PersonaTheme.palette.ink3,
-                        modifier = Modifier.rotate(if (isOpen) 90f else 0f))
-                }
-                if (isOpen) SentText(text, Modifier.padding(start = Tokens.Space.m, end = Tokens.Space.m, bottom = Tokens.Space.m))
-            }
+        if (open) sent.forEach { item -> TaskSentEntry(item, shown == item.id) { shown = if (shown == item.id) null else item.id } }
+    }
+}
+
+/**
+ * One instruction Persona sent: its time and first line, and the whole text when opened.
+ * iOS removed `TaskSentList` (#5569), so this row is not `.unfolding`. It keeps the size change it had.
+ */
+@Composable
+private fun TaskSentEntry(item: FeedItem, open: Boolean, onToggle: () -> Unit) {
+    val text = item.field("text").orEmpty()
+    val locale = currentLocale
+    Column(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.controlShape).background(PersonaTheme.palette.surfaceStrong)
+        .animateContentSize().testTag("task-sent-entry")) {
+        Row(Modifier.fillMaxWidth().clickable(onClick = onToggle)
+            .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+            AssistantLines.time(item.at)?.let { Text(LocalizedFormats.format(it, LocalizedFormats.TIME, locale),
+                style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3, maxLines = 1) }
+            if (item.interrupting) JIcon(PhIcons.Stop, decorative = true, size = Tokens.Space.m, tint = PersonaTheme.palette.ink2)
+            Text(SentToAgents.firstLine(text), Modifier.weight(1f), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            JIcon(PhIcons.CaretRight, decorative = true, size = Tokens.Space.m, tint = PersonaTheme.palette.ink3,
+                modifier = Modifier.rotate(if (open) 90f else 0f))
         }
+        if (open) SentText(text, Modifier.padding(start = Tokens.Space.m, end = Tokens.Space.m, bottom = Tokens.Space.m))
     }
 }
 
@@ -744,21 +765,58 @@ private fun InterruptBatchCard(batch: InterruptBatch, host: AssistantTaskHost, t
     }
 }
 
+/**
+ * What the assistant added on the phone, with Undo as on iOS `QuickResultCard`: the event comes off the phone and the
+ * card reads Undone, dimmed; Android has no reminders store, so reminder cards keep none (`TasksStore.canUndoQuickResult`).
+ */
 @Composable
-internal fun QuickResultCard(result: QuickResult) {
+private fun QuickResultLine(result: QuickResult, host: AssistantTaskHost) {
+    val undos by host.tasks.quickResultUndos.collectAsStateWithLifecycle()
+    val state = result.itemId?.let { undos[it] } ?: QuickResultUndo.Added
+    val feedback = persona.core.designsystem.LocalAppFeedback.current
+    val failed = stringResource(R.string.chat_tasks_quick_undo_failed)
+    val haptics = persona.core.designsystem.rememberHaptics()
+    val scope = rememberCoroutineScope()
+    QuickResultCard(result, state, onUndo = if (host.tasks.canUndoQuickResult(result)) ({
+        haptics(persona.core.designsystem.Haptic.Tap)
+        scope.launch {
+            // Success buzzes as iOS's `Haptics.success()`; a failure is the chat's error toast.
+            if (host.tasks.undoQuickResult(result)) haptics(persona.core.designsystem.Haptic.Success)
+            else feedback?.notice(failed, persona.core.designsystem.FeedbackStyle.Error)
+        }
+    }) else null)
+}
+
+/** The card itself; the chat passes its Undo state and what a tap on Undo does. */
+@Composable
+internal fun QuickResultCard(result: QuickResult, undoState: QuickResultUndo = QuickResultUndo.Added, onUndo: (() -> Unit)? = null) {
     val locale = currentLocale
     val time = AssistantLines.time(result.time)?.let { LocalizedFormats.format(it, LocalizedFormats.MONTH_DAY_TIME, locale) }
-    Row(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.cardShape).background(PersonaTheme.palette.sunken).padding(Tokens.Space.m),
+    val undone = undoState == QuickResultUndo.Undone
+    // Undone gives way, as the same card does on iOS.
+    val alpha by animateFloatAsState(if (undone) QuickResultUndoneAlpha else 1f,
+        if (PersonaTheme.reduceMotion) snap() else tween(PersonaTheme.motion.standard), label = "quick-result-undone")
+    Row(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.cardShape).background(PersonaTheme.palette.sunken).padding(Tokens.Space.m)
+        .stableAlpha(alpha),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
         JIcon(if (result.reminder) PhIcons.BellSimple else PhIcons.CalendarCheck, decorative = true,
             tint = if (result.reminder) PersonaTheme.palette.caution else PersonaTheme.palette.accent)
         Column(Modifier.weight(1f)) {
-            Text(stringResource(if (result.reminder) R.string.chat_tasks_quick_reminder else R.string.chat_tasks_quick_calendar), style = PersonaTheme.type.bodyStrong, color = PersonaTheme.palette.ink)
+            Text(stringResource(when {
+                undone -> R.string.chat_tasks_quick_undone
+                result.reminder -> R.string.chat_tasks_quick_reminder
+                else -> R.string.chat_tasks_quick_calendar
+            }), style = PersonaTheme.type.bodyStrong, color = PersonaTheme.palette.ink)
             Text(listOfNotNull(time, result.title, result.place).joinToString(" · "), style = PersonaTheme.type.caption,
                 color = PersonaTheme.palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        if (!undone && onUndo != null) JButton(stringResource(R.string.chat_tasks_quick_undo), onUndo,
+            kind = JButtonKind.Secondary, size = JButtonSize.Small, enabled = undoState != QuickResultUndo.Undoing)
     }
 }
+
+/** How far an undone quick result gives way (iOS's 0.6 on the same card). */
+private const val QuickResultUndoneAlpha = 0.6f
 
 // ── Today ──
 
