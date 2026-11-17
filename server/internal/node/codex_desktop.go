@@ -143,13 +143,13 @@ func (n *Node) sendCodexDesktop(ctx context.Context, src codexSource, text strin
 	if err != nil {
 		return refusal("bad_image", err.Error(), nil)
 	}
-	input := []map[string]any{}
-	if text != "" {
-		input = append(input, map[string]any{"type": "text", "text": text, "text_elements": []any{}})
-	}
-	for _, p := range paths {
-		input = append(input, map[string]any{"type": "localImage", "path": p})
-	}
+	// While the App runs a turn in the thread the message waits here and goes in once, as a turn of its own, when the
+	// turn ends (codex_desktop_queue.go): a start-turn into a running turn is steered into it and then run again.
+	return n.sendOrHoldCodexDesktop(ctx, src, codexDesktopMessage{text: text, paths: paths})
+}
+
+// startCodexDesktopTurn asks the window owning src's thread to run a turn with input, as the App's own composer does.
+func (n *Node) startCodexDesktopTurn(ctx context.Context, src codexSource, input []map[string]any) error {
 	ctx, cancel := context.WithTimeout(ctx, codexDesktopTimeout)
 	defer cancel()
 	c, err := dialCodexDesktop(ctx, src.home)
@@ -444,7 +444,7 @@ func slotCodexDesktop(list []proto.Session) {
 		if s.SpaceKind != "codex_app" {
 			continue
 		}
-		s.SlotIndex = next[s.SpaceID]
+		s.SlotIndex = int32(next[s.SpaceID])
 		next[s.SpaceID]++
 	}
 }

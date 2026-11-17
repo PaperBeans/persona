@@ -28,7 +28,14 @@ var launcherCheckTimeout = 150 * time.Second
 // launcherCheck answers Settings › Models' "Test": runs the launcher once, headless, with a one-word prompt in an empty
 // directory, and says whether an answer came back, how long it took and which model answered. It is a real request
 // (a few tokens).
-func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherCheck {
+func (n *Node) launcherCheck(ctx context.Context, name string, models ...string) proto.LauncherCheck {
+	model := ""
+	if len(models) > 0 {
+		model = models[0]
+	}
+	if model != "" && !proto.ValidModelID(model) {
+		return proto.LauncherCheck{Error: "invalid model"}
+	}
 	if name != "claude" && !shellcmd.NameRe.MatchString(name) {
 		return proto.LauncherCheck{Error: fmt.Sprintf("invalid launcher %q", name)}
 	}
@@ -58,7 +65,7 @@ func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherChe
 	// A runtime's launcher, as a start in ctx's host runs it: where that host's engine runs only its own launchers, its
 	// provider of the name, whatever launcher of the shell's or of Persona's has it too (#8140).
 	if h := n.runtimeOfIn(ctx, name); h != nil {
-		if result, handled := n.runtimeLauncherCheck(ctx, h, name, dir, prompt); handled {
+		if result, handled := n.runtimeLauncherCheck(ctx, h, name, dir, prompt, model); handled {
 			return result
 		}
 	}
@@ -71,6 +78,9 @@ func (n *Node) launcherCheck(ctx context.Context, name string) proto.LauncherChe
 	// The flag that keeps the run off the disk goes between before and after: a transcript per check, a hundred a day on
 	// each computer, filled the newest offline sessions the list keeps and pushed the user's own Agents out (#2959).
 	before, noSave, after := checkArgs(agent, prompt)
+	if model != "" {
+		after += " --model " + shellQuote(model)
+	}
 	if agent == "claude" {
 		// No hooks: the check is no session of the user's, and Persona's own hooks can hold it past the timeout (#3412;
 		// the model list does the same, launcher_models.go). claudeSettings merges this with what the launcher needs from

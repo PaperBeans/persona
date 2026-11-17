@@ -228,9 +228,22 @@ func (s *Service) toolTaskScope(ctx context.Context, self string, args json.RawM
 	}
 	s.clearOverdue(t.ID)
 	var b strings.Builder
-	fmt.Fprintf(&b, "Logged on task %s's brief (the owner sees it in the next digest); the brief itself is unchanged. done_when now: %s; expect_minutes %d; its clock restarts and runs to %s.",
-		t.ID, criteriaWords(brief.Criteria, nil), brief.ExpectNow, brief.DueAt.In(s.location(ctx)).Format("2006-01-02 15:04"))
-	b.WriteString(" The agent was not told: send it what changed with agent_send.")
+	fmt.Fprintf(&b, "Logged on task %s's brief (the owner sees it in the next digest). Scope revision: %s. "+
+		"Original brief goal: %q. Original criteria: %s. Effective criteria: %s. Dropped criteria: ",
+		t.ID, brief.ClockAt.Format(time.RFC3339Nano), brief.Goal, criteriaWords(brief.DoneWhen, nil), criteriaWords(brief.Criteria, nil))
+	dropped := (&taskBrief{rec: brief.briefRecord, st: briefState{Log: brief.Log}}).dropped()
+	for i, criterion := range dropped {
+		if i > 0 {
+			b.WriteString("; ")
+		}
+		fmt.Fprintf(&b, "%q", criterion.Criterion)
+	}
+	if len(dropped) == 0 {
+		b.WriteString("none")
+	}
+	fmt.Fprintf(&b, ". expect_minutes %d; the clock restarts and runs to %s.", brief.ExpectNow,
+		brief.DueAt.In(s.location(ctx)).Format("2006-01-02 15:04"))
+	b.WriteString(" To replace the agent against this scope, pass scope_revision to task_plan with continues. To notify the same live agent, send the change with agent_send.")
 	return b.String(), nil
 }
 

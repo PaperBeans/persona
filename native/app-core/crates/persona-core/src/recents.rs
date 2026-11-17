@@ -1,9 +1,97 @@
 //! The on-device recent-conversation and recent-setup lists (`spec/fixtures/recents`).
 //! These functions only transform their inputs; storage and the current time belong to the clients.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// Fixture-facing operation input for host projections. `existing` supplies the shown operation's persistence
+/// predicate explicitly, as a list rather than a closure. `domain` selects the existing fixture document and
+/// `operation` one of its pure transformations; expected values stay outside the core.
+#[derive(Debug, Deserialize)]
+pub struct Input {
+    pub domain: String,
+    pub operation: String,
+    pub input: Value,
+}
+
+/// The complete fixture-shaped result, keeping arrays, indexes and model strings exact.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum Projection {
+    After { after: Vec<String> },
+    Setups { after: Vec<RecentSetup> },
+    Shown { shown: Vec<String> },
+    Cards { cards: Vec<SetupCard> },
+    Model { model: String },
+}
+
+/// Apply one of the existing pure operations without changing its behavior or introducing storage.
+pub fn input_fixture(input: &Input) -> Result<Projection, String> {
+    let object = input
+        .input
+        .as_object()
+        .ok_or_else(|| "input must be an object".to_owned())?;
+    let strings = |key: &str| -> Result<Vec<String>, String> {
+        serde_json::from_value(object.get(key).cloned().ok_or_else(|| format!("missing {key}"))?)
+            .map_err(|error| format!("{key}: {error}"))
+    };
+    let text = |key: &str| -> Result<&str, String> {
+        object
+            .get(key)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("{key} must be a string"))
+    };
+    let setups = |key: &str| -> Result<Vec<RecentSetup>, String> {
+        serde_json::from_value(object.get(key).cloned().ok_or_else(|| format!("missing {key}"))?)
+            .map_err(|error| format!("{key}: {error}"))
+    };
+    match (input.domain.as_str(), input.operation.as_str()) {
+        ("recent_conversations", "open") => Ok(Projection::After {
+            after: open_conversation(&strings("before")?, text("opened")?),
+        }),
+        ("recent_conversations", "shown") => {
+            let existing: BTreeSet<String> = strings("existing")?.into_iter().collect();
+            let limit = object
+                .get("limit")
+                .and_then(Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or_else(|| "limit must be a nonnegative integer".to_owned())?;
+            Ok(Projection::Shown {
+                shown: shown_conversations(
+                    &strings("entries")?,
+                    text("current")?,
+                    |key| existing.contains(key),
+                    limit,
+                ),
+            })
+        }
+        ("recent_setups", "record") => Ok(Projection::Setups {
+            after: record_setup(
+                &setups("before")?,
+                &serde_json::from_value(object.get("setup").cloned().ok_or_else(|| "missing setup".to_owned())?)
+                    .map_err(|error| format!("setup: {error}"))?,
+            ),
+        }),
+        ("recent_setups", "cards") => Ok(Projection::Cards {
+            cards: setup_cards(
+                &setups("entries")?,
+                &serde_json::from_value::<Vec<Machine>>(
+                    object
+                        .get("machines")
+                        .cloned()
+                        .ok_or_else(|| "missing machines".to_owned())?,
+                )
+                .map_err(|error| format!("machines: {error}"))?,
+            ),
+        }),
+        ("recent_setups", "model") => Ok(Projection::Model {
+            model: setup_model(&setups("entries")?, text("machine")?, text("launcher")?).to_owned(),
+        }),
+        _ => Err("unknown recents operation".to_owned()),
+    }
+}
 
 pub const MAX_RECENT_CONVERSATIONS: usize = 10;
 pub const MAX_RECENT_SETUPS: usize = 20;

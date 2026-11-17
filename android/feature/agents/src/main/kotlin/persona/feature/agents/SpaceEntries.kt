@@ -70,7 +70,7 @@ private fun SpaceDestination(route: SpaceRoute, navigator: Navigator, dependenci
             AgentsViewModel(dependencies.sessions(), dependencies.interactions(), dependencies.connection(), dependencies.sender(),
                 dependencies.preferences(), operations, wiring.mainSender, scope, renamer, hubGroups = dependencies.groups(),
                 listContext = kotlinx.coroutines.Dispatchers.Default, listAdapter = dependencies.listAdapter(),
-                visibleChat = dependencies.visibleChat())
+                visibleChat = dependencies.visibleChat(), heldChat = dependencies.heldChat())
         }
         val creationService = LocalAgentCreationService.current
         val starPrompt = persona.core.designsystem.LocalStarPrompt.current

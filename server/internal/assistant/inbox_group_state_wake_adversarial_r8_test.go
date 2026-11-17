@@ -23,7 +23,7 @@ func TestAdversarialInboxGroupStateWakeR8FollowSurvivesCurrentAgentStop(t *testi
 	rest, changed := h.applyGroupStates(ctx, inboxGroupStateTestSource(), []connector.InboxThing{report})
 	requireInboxGroupStateChange(t, rest, changed, it)
 	h.deliverPending(ctx)
-	_, _, err := h.suggest(ctx, "session-1", suggestIn{
+	_, _, err := h.suggest(ctx, "session-1", suggestIn{ProcessingTurn: inboxTestProcessingTurn(h, "session-1"),
 		Recap:  "The owner replied; keep waiting while the synthetic Agent finishes",
 		Follow: &suggestFollow{Who: "Example teammate", Next: "Wait for the answer", CheckIn: "4h"},
 	})
@@ -41,7 +41,7 @@ func TestAdversarialInboxGroupStateWakeR8FollowSurvivesCurrentAgentStop(t *testi
 	if state, _, _ := handlingNow(h, it); state != HandlingLooking {
 		t.Fatalf("the current Agent's stop left handling %q, want looking", state)
 	}
-	if _, _, err := h.suggest(ctx, "session-1", suggestIn{Recap: "The Agent finished; the wait is unchanged"}); err != nil {
+	if _, _, err := h.suggest(ctx, "session-1", suggestIn{ProcessingTurn: inboxTestProcessingTurn(h, "session-1"), Recap: "The Agent finished; the wait is unchanged"}); err != nil {
 		t.Fatal(err)
 	}
 

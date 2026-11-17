@@ -109,6 +109,11 @@ class PathTests(unittest.TestCase):
         self.assertTrue(paths.select(["scripts/ci/server-shards.py"])["server"])
         self.assertTrue(paths.select(["scripts/ci/android-shards.py"])["android"])
 
+    def test_the_callkit_guards_select_the_apple_lane(self):
+        # The Apple lane runs both against real builds (#9290).
+        for filename in ("scripts/release/check_no_callkit.py", "scripts/test/test_apple_no_callkit.py"):
+            self.assertTrue(paths.select([filename])["apple"], filename)
+
     def test_deleted_and_renamed_old_paths_are_relevant(self):
         self.assertTrue(paths.select(["apple/Old.swift", "docs/archive/new.md"])["apple"])
         self.assertTrue(paths.select([".github/workflows/release.yml"])["image"])

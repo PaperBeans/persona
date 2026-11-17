@@ -194,7 +194,7 @@ func (s *Service) acceptTryAs(ctx context.Context, id, card string, byDefault bo
 // acceptTryAsDismissalLocked holds only this task's action lock across its send, not the book mutex.
 func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card string, byDefault bool) (acceptResult, error) {
 	t, todoOK := s.todoNow(id)
-	if todoOK {
+	if todoOK && byDefault { // Hidden is not answered: no default is taken for a dismissed round
 		if dismissed, err := s.decisionDismissed(ctx, t); err != nil || dismissed {
 			return acceptResult{}, err
 		}
@@ -212,13 +212,23 @@ func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card strin
 		b.mu.Unlock()
 		return acceptResult{}, nil
 	}
+	completeDismissal := func() {}
+	if todoOK && !byDefault {
+		var err error
+		completeDismissal, err = s.prepareDismissalForAnswer(ctx, t)
+		if err != nil {
+			b.mu.Unlock()
+			return acceptResult{}, err
+		}
+	}
+	previousDueAt := a.DueAt
 	a.AcceptedAt = time.Now().UTC()
 	if byDefault {
 		a.ByDefault, a.DueAt = true, a.AcceptedAt
 	}
 	if err := s.saveAcceptErrLocked(ctx); err != nil {
 		// Kept only in memory, it would wait again after a restart: not accepted, and nothing that follows one runs.
-		a.AcceptedAt, a.ByDefault, a.DueAt = time.Time{}, false, time.Time{}
+		a.AcceptedAt, a.ByDefault, a.DueAt = time.Time{}, false, previousDueAt
 		b.mu.Unlock()
 		s.logf("task %s: acceptance: save: %v", id, err)
 		return acceptResult{}, fmt.Errorf("%w: %w", errAcceptStore, err)
@@ -227,6 +237,7 @@ func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card strin
 	b.mu.Unlock()
 	s.askChanged(ctx) // it no longer waits
 	if !decideAsk(&cp) && !cp.Conclusion {
+		completeDismissal()
 		s.taskVerified(ctx, id, cp)
 		return acceptSucceeded(), nil
 	}
@@ -251,6 +262,7 @@ func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card strin
 	case cp.Conclusion:
 		// Seen: the review already closed the task and told where it came from; "verified" is for deployed work.
 	}
+	completeDismissal()
 	s.updateAskCards(ctx, id, cp)
 	return result, nil
 }

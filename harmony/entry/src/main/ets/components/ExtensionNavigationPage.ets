@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { ExtensionNavigation, ExtensionNavigationEntry } from '../models/ExtensionNavigation';
 import { extensionIcon } from '../design/ExtensionIcons';
 import { Tokens } from '../design/Tokens';
@@ -12,7 +15,7 @@ export struct ExtensionNavigationPage {
       if (this.directory.loading) LoadingProgress().width(Tokens.touch).height(Tokens.touch)
       if (this.directory.error) Row({ space: Tokens.gap }) {
         Text(tr(this.directory.error)).fontSize(Tokens.meta).layoutWeight(1)
-        Button(tr('retry')).height(Tokens.touch).enabled(!this.directory.loading).onClick(() => this.directory.refresh())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).enabled(!this.directory.loading).onClick(() => this.directory.refresh())
       }.padding(Tokens.page).width('100%')
       if (this.directory.ready && !this.directory.entries.length) Text(tr('no_applications')).fontSize(Tokens.body).padding(Tokens.page)
       List() {

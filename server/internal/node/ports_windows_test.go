@@ -70,7 +70,7 @@ func TestScanListenersFindsAChildsServer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			found, err := scanListeners(context.Background(), procs, map[string][]int{"w1:p1": {1 << 30, os.Getpid()}})
+			found, err := scanListeners(context.Background(), procs, map[string][]int{"w1:p1": {1 << 30, os.Getpid()}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -95,7 +95,7 @@ func TestScanListenersFindsAChildsServer(t *testing.T) {
 			if procs, err = listProcs(context.Background()); err != nil { // the table again: it has the sibling now
 				t.Fatal(err)
 			}
-			other, err := scanListeners(context.Background(), procs, map[string][]int{"w2:p1": {1 << 30, sib.Process.Pid}})
+			other, err := scanListeners(context.Background(), procs, map[string][]int{"w2:p1": {1 << 30, sib.Process.Pid}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -25,6 +25,41 @@ func TestWorktreesDirIn(t *testing.T) {
 	}
 }
 
+func TestTerminalDefaultShellIn(t *testing.T) {
+	for _, tc := range []struct{ name, config, want string }{
+		{"basic string", "[terminal]\ndefault_shell = \"C:\\\\Program Files\\\\Git\\\\bin\\\\BASH.EXE\"\n", `C:\Program Files\Git\bin\BASH.EXE`},
+		{"literal string", "[terminal]\n" + `default_shell = 'C:\Program Files\Git\bin\bash.exe'` + "\n", `C:\Program Files\Git\bin\bash.exe`},
+		{"forward slashes", "[terminal] # shell\ndefault_shell = \"C:/Program Files/Git/bin/BaSh.ExE\" # bash\n", "C:/Program Files/Git/bin/BaSh.ExE"},
+		{"top level ignored", "default_shell = \"bash\"\n[terminal]\n", ""},
+		{"another table ignored", "[worktrees]\ndefault_shell = \"bash\"\n[terminal]\n", ""},
+		{"missing", "[terminal]\n", ""},
+		{"unterminated", "[terminal]\ndefault_shell = \"bash\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := configStringIn(tc.config, "terminal", "default_shell"); got != tc.want {
+				t.Fatalf("default_shell = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTerminalDefaultShellReadsHerdrsConfigFile(t *testing.T) {
+	noHerdrConfigEnv(t)
+	home := t.TempDir()
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[terminal]\ndefault_shell = 'C:/Program Files/Git/bin/bash.exe'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HERDR_CONFIG_PATH", path)
+	if got, want := TerminalDefaultShell(home), "C:/Program Files/Git/bin/bash.exe"; got != want {
+		t.Fatalf("default_shell = %q, want %q", got, want)
+	}
+	t.Setenv("HERDR_CONFIG_PATH", filepath.Join(t.TempDir(), "missing.toml"))
+	if got := TerminalDefaultShell(home); got != "" {
+		t.Fatalf("unreadable config gave %q", got)
+	}
+}
+
 // noHerdrConfigEnv keeps the machine's own herdr config out of a test: no $HERDR_CONFIG_PATH, $XDG_CONFIG_HOME or
 // %APPDATA%, so herdr's config file is the one under the home the test passes.
 func noHerdrConfigEnv(t *testing.T) {

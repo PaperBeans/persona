@@ -139,6 +139,68 @@ func TestFinalPassAfterTheWait(t *testing.T) {
 	}
 }
 
+// A try that never reached the upstream (upstream_unavailable, nothing billed) is tried again after each of
+// finalUnreachableRetries before the live sentences are final; one that billed first counts as failed, two retries
+// (#9535).
+func TestFinalPassRetriesWhileUnreachable(t *testing.T) {
+	h := newHubFixture(t)
+	h.meetingAudio(meetingRec)
+	h.tr.set(func(f *fakeTranscriber) { f.replay = jobScript{refuse: extwire.TEUpstreamUnavailable} })
+	finalGapWait = 0
+	h.finalState(meetingRec, "final")
+	if n := len(h.tr.jobsOf(extwire.TranscriptionReplay)); n != 1+len(finalUnreachableRetries) {
+		t.Fatalf("%d tries", n)
+	}
+	m, _, _ := h.engine().MeetingRead(meetingRec)
+	if tr := m.Transcription; tr.FinalTries != 6 || tr.FinalUnreachable != 6 {
+		t.Fatalf("tries %d, unreachable %d", tr.FinalTries, tr.FinalUnreachable)
+	}
+	if got := h.hubTexts(meetingRec); !slices.Equal(got, []string{"Live one.", "Live two."}) {
+		t.Fatalf("the final transcript %q", got)
+	}
+
+	h.meetingAudio(meetingOther)
+	h.tr.set(func(f *fakeTranscriber) {
+		f.replay = jobScript{failAt: 1, failCode: extwire.TEUpstreamUnavailable, usage: 1}
+	})
+	h.finalState(meetingOther, "final")
+	if n := len(h.tr.jobsOf(extwire.TranscriptionReplay)) - 6; n != 1+len(finalRetries) {
+		t.Fatalf("billed, then unavailable: %d tries", n)
+	}
+	m, _, _ = h.engine().MeetingRead(meetingOther)
+	if tr := m.Transcription; tr.FinalTries != 3 || tr.FinalUnreachable != 0 || tr.UsageSeconds < 3 {
+		t.Fatalf("billed, then unavailable: %+v", tr)
+	}
+}
+
+// finalRetryAfter keeps the two budgets apart: unreachable tries use theirs whatever failed before, and a failed try
+// counts only the tries that were not unreachable.
+func TestFinalRetryAfter(t *testing.T) {
+	for _, c := range []struct {
+		tries, unreachable int
+		now                bool
+		wait               time.Duration
+		ok                 bool
+	}{
+		{1, 0, false, time.Minute, true},
+		{2, 0, false, 5 * time.Minute, true},
+		{3, 0, false, 0, false},
+		{1, 1, true, time.Minute, true},
+		{5, 5, true, time.Hour, true},
+		{6, 6, true, 0, false},
+		{4, 2, true, 5 * time.Minute, true},  // two failed tries before: the unreachable budget is untouched
+		{4, 2, false, 5 * time.Minute, true}, // the second failed try, after two unreachable ones
+		{5, 2, false, 0, false},              // the third: unreachable tries do not lengthen the failed budget
+		{7, 5, false, 5 * time.Minute, true}, // a failed try after a long outage: its second
+		{0, 0, false, 0, false},
+	} {
+		wait, ok := finalRetryAfter(kb.MeetingTranscription{FinalTries: c.tries, FinalUnreachable: c.unreachable}, c.now)
+		if wait != c.wait || ok != c.ok {
+			t.Errorf("tries %d, unreachable %d, this one unreachable %v: %v %v, want %v %v", c.tries, c.unreachable, c.now, wait, ok, c.wait, c.ok)
+		}
+	}
+}
+
 // A pass that fails is tried again twice, then the live sentences are final; a contribution without replay makes
 // them final at once; with no audio at all the state is failed.
 func TestFinalPassRetriesAndFallbacks(t *testing.T) {

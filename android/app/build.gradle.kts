@@ -20,6 +20,13 @@ val googleOAuthScheme = providers.gradleProperty("personaGoogleOAuthScheme")
     ?: System.getenv("PERSONA_GOOGLE_OAUTH_SCHEME")?.takeIf { it.isNotBlank() }
     ?: "persona.oauth.unset"
 
+// "No hub yet?" on the welcome page opens this public page (publish.getting_started_url in the build config, passed by
+// scripts/app/android.sh). https only: anything else leaves the link out, and "unset" is the manifest's no-value marker.
+val gettingStartedUrl = (providers.gradleProperty("personaGettingStartedUrl").orNull?.takeIf { it.isNotBlank() }
+    ?: System.getenv("PERSONA_GETTING_STARTED_URL")?.takeIf { it.isNotBlank() })
+    ?.trim()?.takeIf { it.startsWith("https://") && it.none(Char::isWhitespace) }
+    ?: "unset"
+
 // The commit the About page shows. Only an explicit, public input counts (docs/android/android.md "Build commit"):
 // -PpersonaBuildCommit, then PERSONA_BUILD_COMMIT; with neither, the build says "unknown". It never asks git, and a value
 // that is not a commit fails the build rather than put a branch name or a path in the APK.
@@ -92,6 +99,7 @@ android {
         versionName = providers.gradleProperty("personaVersionName").orElse("0.1").get()
         manifestPlaceholders["appLabel"] = appLabel
         manifestPlaceholders["googleOAuthScheme"] = googleOAuthScheme
+        manifestPlaceholders["gettingStartedUrl"] = gettingStartedUrl
         resValue("string", "persona_build_commit", buildCommit)
     }
     buildTypes {

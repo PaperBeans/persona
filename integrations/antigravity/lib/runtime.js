@@ -1,11 +1,11 @@
 import { daemonBinary, mcpServers } from './compat.js'
-import { contextWrapped } from '../../runtime-sdk/lib/compat.js'
+import { contextWrapped, wirePackageName } from '../../runtime-sdk/lib/compat.js'
 // Antigravity (agy) runtime for Persona (docs/integrations/runtimes.md).
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { createRuntime, interactionId, page, RpcError, snippet, summaryOf } from '../../runtime-sdk/index.js'
+import { createRuntime, installCurrent, interactionId, page, RpcError, snippet, summaryOf, verifyPackage } from '../../runtime-sdk/index.js'
 import { isAssistantDir } from '../../runtime-sdk/lib/identity.js'
 import { AgyAcpClient } from './acp.js'
 import { discoverModels, mapModels } from './models.js'
@@ -71,6 +71,16 @@ export function createAgyRuntime(options = {}) {
   let catalogTimer
   const catalogAbort = new AbortController()
   let stopped = false
+  const update = options.update?.store && typeof options.update.name === 'string' && typeof options.update.hash === 'string'
+    ? { ...options.update, name: wirePackageName(options.update.name) }
+    : undefined
+  const idleCheckMs = options.idleCheckMs ?? 5000
+  let want = ''
+  const bad = new Set()
+  let installing = false
+  let exiting = false
+  let idleTimer
+  let inFlight = 0
   const launchers = [{ name: 'agy', agent: RUNTIME, models: [] }]
 
   function publishModels(entries = catalog) {
@@ -148,6 +158,8 @@ export function createAgyRuntime(options = {}) {
       assistant: true,
       socketPath: options.socketPath,
       log,
+      ...(update ? { package: { name: update.name, hash: update.hash }, onUpdate: (offer) => void takeUpdate(offer) } : {}),
+      retryMs: options.retryMs,
     },
   )
 
@@ -280,6 +292,7 @@ export function createAgyRuntime(options = {}) {
     } finally {
       asks.delete(ac)
       if (asks.size === 0 && permissionAsks.get(rawId) === asks) permissionAsks.delete(rawId)
+      if (want) setImmediate(() => { void maybeExit() })
     }
 
     if (res?.allow && allowOpt) {
@@ -326,7 +339,7 @@ export function createAgyRuntime(options = {}) {
 
   function historyOf(rawId) {
     // Refresh cached items emitted before native failures used the shared API-error format.
-    return `agy:${rawId}:full:api-errors:content-v2`
+    return `agy:${rawId}:full:api-errors:content-v2:step-ids-v2`
   }
 
   function cutMatches(cut, transcript) {
@@ -643,38 +656,50 @@ export function createAgyRuntime(options = {}) {
     return mcpServers(personadBin, pid, isAsst)
   }
 
+  async function busyCall(fn) {
+    inFlight++
+    try {
+      return await fn()
+    } finally {
+      inFlight--
+      if (want) void maybeExit()
+    }
+  }
+
   async function check(params) {
     if (!params.cwd || !params.prompt) throw new Error('Availability checks require a temporary workspace and prompt')
-    const started = Date.now()
-    const deadline = started + (options.checkTimeoutMs ?? 75_000)
-    const remaining = () => Math.max(1, deadline - Date.now())
-    let rawId
-    try {
-      await acp.ensureStarted()
-      const session = await acp.call('session/new', { cwd: params.cwd, mcpServers: [] }, remaining())
-      rawId = session.sessionId
-      if (!rawId) throw new Error('Antigravity returned no check session')
-      // Probes have no tools or phone permission cards. The existing archived-session guard cancels their requests.
-      archived.add(rawId)
-      const probe = { text: '' }
-      checkTurns.set(rawId, probe)
-      if (session.models?.availableModels) publishModels(session.models.availableModels)
-      const model = configuredModel()
-      if (model) await acp.call('session/set_model', { sessionId: rawId, modelId: model }, remaining())
-      await acp.call('session/set_mode', { sessionId: rawId, modeId: 'default' }, remaining())
-      const result = await acp.call('session/prompt', { sessionId: rawId, prompt: [{ type: 'text', text: params.prompt }] }, remaining())
-      if (result?.stopReason !== 'end_turn') throw new Error(`Antigravity availability check ended with ${result?.stopReason || 'no stop reason'}`)
-      if (!probe.text.trim()) throw new Error('Antigravity availability check returned no answer')
-      return { ok: true, agent: RUNTIME, model: model || session.models?.currentModelId, answer: probe.text.trim().slice(0, 400), millis: Date.now() - started }
-    } finally {
-      if (rawId) {
-        await acp.cancel(rawId)
-        await acp.closeSession(rawId)
-        checkTurns.delete(rawId)
-        sessionModels.delete(rawId)
-        sessionModes.delete(rawId)
+    return busyCall(async () => {
+      const started = Date.now()
+      const deadline = started + (options.checkTimeoutMs ?? 75_000)
+      const remaining = () => Math.max(1, deadline - Date.now())
+      let rawId
+      try {
+        await acp.ensureStarted()
+        const session = await acp.call('session/new', { cwd: params.cwd, mcpServers: [] }, remaining())
+        rawId = session.sessionId
+        if (!rawId) throw new Error('Antigravity returned no check session')
+        // Probes have no tools or phone permission cards. The existing archived-session guard cancels their requests.
+        archived.add(rawId)
+        const probe = { text: '' }
+        checkTurns.set(rawId, probe)
+        if (session.models?.availableModels) publishModels(session.models.availableModels)
+        const model = configuredModel()
+        if (model) await acp.call('session/set_model', { sessionId: rawId, modelId: model }, remaining())
+        await acp.call('session/set_mode', { sessionId: rawId, modeId: 'default' }, remaining())
+        const result = await acp.call('session/prompt', { sessionId: rawId, prompt: [{ type: 'text', text: params.prompt }] }, remaining())
+        if (result?.stopReason !== 'end_turn') throw new Error(`Antigravity availability check ended with ${result?.stopReason || 'no stop reason'}`)
+        if (!probe.text.trim()) throw new Error('Antigravity availability check returned no answer')
+        return { ok: true, agent: RUNTIME, model: model || session.models?.currentModelId, answer: probe.text.trim().slice(0, 400), millis: Date.now() - started }
+      } finally {
+        if (rawId) {
+          await acp.cancel(rawId)
+          await acp.closeSession(rawId)
+          checkTurns.delete(rawId)
+          sessionModels.delete(rawId)
+          sessionModes.delete(rawId)
+        }
       }
-    }
+    })
   }
 
   async function applySessionOptions(rawId, { model, permission_mode, effort }) {
@@ -710,149 +735,154 @@ export function createAgyRuntime(options = {}) {
   }
 
   async function start(params) {
-    const cwd = params.cwd || home
-    const isAsst = Boolean(params.assistant) || isAssistantDir(cwd)
-    const res = await acp.newSession({ cwd, mcpServers: [] })
-    const rawId = res.sessionId
-    createdAt.set(rawId, Date.now())
-    sessionConfiguration(rawId, res)
-    const pid = toPersonaId(rawId)
-    sessionCwds.set(rawId, cwd)
-    if (isAsst) assistants.add(pid)
+    return busyCall(async () => {
+      const cwd = params.cwd || home
+      const isAsst = Boolean(params.assistant) || isAssistantDir(cwd)
+      const res = await acp.newSession({ cwd, mcpServers: [] })
+      const rawId = res.sessionId
+      createdAt.set(rawId, Date.now())
+      sessionConfiguration(rawId, res)
+      const pid = toPersonaId(rawId)
+      sessionCwds.set(rawId, cwd)
+      if (isAsst) assistants.add(pid)
 
-    try {
-      await loadSession(rawId, cwd, mcpServersFor(pid, isAsst))
-      await applySessionOptions(rawId, {
-        model: params.model || configuredModel(),
-        permission_mode: params.permission_mode || configuredMode(),
-        effort: params.effort,
-      })
-    } catch (err) {
-      archived.add(rawId)
-      await acp.closeSession(rawId)
-      rt.sessionsChanged()
-      throw err
-    }
+      try {
+        await loadSession(rawId, cwd, mcpServersFor(pid, isAsst))
+        await applySessionOptions(rawId, {
+          model: params.model || configuredModel(),
+          permission_mode: params.permission_mode || configuredMode(),
+          effort: params.effort,
+        })
+      } catch (err) {
+        archived.add(rawId)
+        await acp.closeSession(rawId)
+        rt.sessionsChanged()
+        throw err
+      }
 
-    const session = {
-      session_id: pid,
-      title: basename(cwd) || LABEL,
-      cwd,
-      status: params.prompt ? 'working' : 'done',
-      updated_at: new Date().toISOString(),
-      rev: 1,
-      model: sessionModels.get(rawId),
-      launcher: 'agy',
-      effort: sessionModes.get(rawId)?.effort,
-      agent_label: LABEL,
-      space_id: cwd,
-      space_name: basename(cwd),
-      permission_mode: effectiveModeOf(rawId) !== 'default' ? effectiveModeOf(rawId) : undefined,
-    }
-
-    if (params.prompt) {
-      await send({
+      const session = {
         session_id: pid,
-        text: params.prompt,
-        client_msg_id: `start-${Date.now()}`,
-        assistant: isAsst,
-        mode: params.permission_mode,
-        model: params.model,
-        effort: params.effort,
-      })
-    }
+        title: basename(cwd) || LABEL,
+        cwd,
+        status: params.prompt ? 'working' : 'done',
+        updated_at: new Date().toISOString(),
+        rev: 1,
+        model: sessionModels.get(rawId),
+        launcher: 'agy',
+        effort: sessionModes.get(rawId)?.effort,
+        agent_label: LABEL,
+        space_id: cwd,
+        space_name: basename(cwd),
+        permission_mode: effectiveModeOf(rawId) !== 'default' ? effectiveModeOf(rawId) : undefined,
+      }
 
-    rt.sessionsChanged()
-    return { session }
+      if (params.prompt) {
+        await send({
+          session_id: pid,
+          text: params.prompt,
+          client_msg_id: `start-${Date.now()}`,
+          assistant: isAsst,
+          mode: params.permission_mode,
+          model: params.model,
+          effort: params.effort,
+        })
+      }
+
+      rt.sessionsChanged()
+      return { session }
+    })
   }
 
   async function send(params) {
-    const rawId = ownedId(params.session_id)
-    const pid = toPersonaId(rawId)
-    if (rewinding.has(pid)) throw new RpcError('The conversation is being rewound', 'rewind_busy')
-    completedTurns.delete(pid)
-    if (archived.has(rawId)) throw new Error('Antigravity session is closed')
-    const cwd = sessionCwds.get(rawId) || home
-    const isAsst = Boolean(params.assistant) || assistants.has(pid) || isAssistantDir(cwd)
-    if (isAsst) assistants.add(pid)
+    return busyCall(async () => {
+      const rawId = ownedId(params.session_id)
+      const pid = toPersonaId(rawId)
+      if (rewinding.has(pid)) throw new RpcError('The conversation is being rewound', 'rewind_busy')
+      completedTurns.delete(pid)
+      if (archived.has(rawId)) throw new Error('Antigravity session is closed')
+      const cwd = sessionCwds.get(rawId) || home
+      const isAsst = Boolean(params.assistant) || assistants.has(pid) || isAssistantDir(cwd)
+      if (isAsst) assistants.add(pid)
 
-    await loadSession(rawId, cwd, mcpServersFor(pid, isAsst))
-    await applySessionOptions(rawId, {
-      model: params.model,
-      permission_mode: params.mode,
-      effort: params.effort,
-    })
+      await loadSession(rawId, cwd, mcpServersFor(pid, isAsst))
+      await applySessionOptions(rawId, {
+        model: params.model,
+        permission_mode: params.mode,
+        effort: params.effort,
+      })
 
-    if (rewinding.has(pid)) throw new RpcError('The conversation is being rewound', 'rewind_busy')
+      if (rewinding.has(pid)) throw new RpcError('The conversation is being rewound', 'rewind_busy')
 
-    const blocks = []
-    let fullText = params.text || ''
-    if (typeof params.context === 'string' && params.context.trim()) {
-      const ctx = params.context.trim()
-      const wrapped =
-        contextWrapped(ctx)
-          ? ctx
-          : `<persona-context>\n${ctx}\n</persona-context>`
-      fullText = `${wrapped}\n\n${fullText}`
-    }
-    if (fullText) {
-      blocks.push({ type: 'text', text: fullText })
-    }
-    if (Array.isArray(params.images)) {
-      for (const img of params.images) {
-        if (img?.data) {
-          blocks.push({
-            type: 'image',
-            data: img.data,
-            mimeType: img.media_type || img.mime || 'image/png',
-          })
+      const blocks = []
+      let fullText = params.text || ''
+      if (typeof params.context === 'string' && params.context.trim()) {
+        const ctx = params.context.trim()
+        const wrapped =
+          contextWrapped(ctx)
+            ? ctx
+            : `<persona-context>\n${ctx}\n</persona-context>`
+        fullText = `${wrapped}\n\n${fullText}`
+      }
+      if (fullText) {
+        blocks.push({ type: 'text', text: fullText })
+      }
+      if (Array.isArray(params.images)) {
+        for (const img of params.images) {
+          if (img?.data) {
+            blocks.push({
+              type: 'image',
+              data: img.data,
+              mimeType: img.media_type || img.mime || 'image/png',
+            })
+          }
         }
       }
-    }
 
-    const prevTurn = activeTurns.get(pid)
-    if (prevTurn?.pollTimer) clearInterval(prevTurn.pollTimer)
-    const pollTimer = setInterval(() => syncTranscriptAppend(rawId), 400)
-    const turnToken = Symbol('turn')
-    const turn = { streamingText: '', newMessage: false, startedAt: Date.now(), pollTimer, token: turnToken }
-    const prevPromise = prevTurn?.promise || Promise.resolve()
-    const promise = prevPromise
-      .catch(() => {})
-      .then(() => {
-        if (archived.has(rawId)) return
-        promptFailures.delete(rawId)
-        promptTurns.set(pid, turn)
-        rt.streamEnd(pid)
-        return acp.prompt(rawId, blocks)
-      })
-      .catch((err) => {
-        if (!stopped && !cancelling.has(rawId)) {
-          promptFailures.set(rawId, { input: inputKey(rawId), fields: {
-            turn_error: err.message, turn_error_after_work: Boolean(turn.streamingText || turn.newMessage),
-          } })
-        }
-        log(`agy prompt error (${pid}): ${err.message}`)
-      })
-      .finally(async () => {
-        if (!stopped) await readNativeError(rawId)
-        // The turn is over: a card still waiting has nothing to answer for any more.
-        cancelling.delete(rawId)
-        withdrawPermissionAsks(rawId, 'the turn ended')
-        if (promptTurns.get(pid) === turn) {
-          promptTurns.delete(pid)
+      const prevTurn = activeTurns.get(pid)
+      if (prevTurn?.pollTimer) clearInterval(prevTurn.pollTimer)
+      const pollTimer = setInterval(() => syncTranscriptAppend(rawId), 400)
+      const turnToken = Symbol('turn')
+      const turn = { streamingText: '', newMessage: false, startedAt: Date.now(), pollTimer, token: turnToken }
+      const prevPromise = prevTurn?.promise || Promise.resolve()
+      const promise = prevPromise
+        .catch(() => {})
+        .then(() => {
+          if (archived.has(rawId)) return
+          promptFailures.delete(rawId)
+          promptTurns.set(pid, turn)
           rt.streamEnd(pid)
-        }
-        if (activeTurns.get(pid)?.token === turnToken) {
-          clearInterval(pollTimer)
-          activeTurns.delete(pid)
-          completedTurns.add(pid)
-          syncTranscriptAppend(rawId)
-          rt.sessionsChanged()
-        }
-      })
-    turn.promise = promise
-    activeTurns.set(pid, turn)
-    rt.sessionsChanged()
+          return acp.prompt(rawId, blocks)
+        })
+        .catch((err) => {
+          if (!stopped && !cancelling.has(rawId)) {
+            promptFailures.set(rawId, { input: inputKey(rawId), fields: {
+              turn_error: err.message, turn_error_after_work: Boolean(turn.streamingText || turn.newMessage),
+            } })
+          }
+          log(`agy prompt error (${pid}): ${err.message}`)
+        })
+        .finally(async () => {
+          if (!stopped) await readNativeError(rawId)
+          // The turn is over: a card still waiting has nothing to answer for any more.
+          cancelling.delete(rawId)
+          withdrawPermissionAsks(rawId, 'the turn ended')
+          if (promptTurns.get(pid) === turn) {
+            promptTurns.delete(pid)
+            rt.streamEnd(pid)
+          }
+          if (activeTurns.get(pid)?.token === turnToken) {
+            clearInterval(pollTimer)
+            activeTurns.delete(pid)
+            completedTurns.add(pid)
+            syncTranscriptAppend(rawId)
+            rt.sessionsChanged()
+          }
+          if (want) void maybeExit()
+        })
+      turn.promise = promise
+      activeTurns.set(pid, turn)
+      rt.sessionsChanged()
+    })
   }
 
   async function interrupt(params) {
@@ -937,23 +967,77 @@ export function createAgyRuntime(options = {}) {
       return { prompt: target.text, restore: 'conversation', code_restored: false, input_cleared: true }
     } finally {
       rewinding.delete(pid)
+      if (want) void maybeExit()
     }
   }
 
   async function modes(params) {
-    const rawId = ownedId(params.session_id)
-    if (archived.has(rawId)) throw new Error('Antigravity session is closed')
-    if (params.model && (activeTurns.has(toPersonaId(rawId)) || nativeWorking(readConversationStates().get(rawId)))) {
-      throw new Error('Antigravity session is busy')
-    }
-    const cwd = sessionCwds.get(rawId) || home
-    await loadSession(rawId, cwd, mcpServersFor(toPersonaId(rawId), assistants.has(toPersonaId(rawId))))
-    await applySessionOptions(rawId, {
-      model: params.model,
-      permission_mode: params.permission_mode,
-      effort: params.effort,
+    return busyCall(async () => {
+      const rawId = ownedId(params.session_id)
+      if (archived.has(rawId)) throw new Error('Antigravity session is closed')
+      if (params.model && (activeTurns.has(toPersonaId(rawId)) || nativeWorking(readConversationStates().get(rawId)))) {
+        throw new Error('Antigravity session is busy')
+      }
+      const cwd = sessionCwds.get(rawId) || home
+      await loadSession(rawId, cwd, mcpServersFor(toPersonaId(rawId), assistants.has(toPersonaId(rawId))))
+      await applySessionOptions(rawId, {
+        model: params.model,
+        permission_mode: params.permission_mode,
+        effort: params.effort,
+      })
+      rt.sessionsChanged()
     })
-    rt.sessionsChanged()
+  }
+
+  /** No owned ACP turn, probe, rewind or phone card is in flight. */
+  function idle() {
+    return inFlight === 0 && activeTurns.size === 0 && rewinding.size === 0 && checkTurns.size === 0 && !rt.busy()
+  }
+
+  async function maybeExit() {
+    if (!want || !update?.exit || stopped || exiting || !idle()) return
+    exiting = true
+    const target = want
+    clearInterval(idleTimer)
+    await stop()
+    update.exit(target)
+  }
+
+  async function takeUpdate(offer) {
+    if (!update || installing || stopped || exiting || offer?.name !== update.name ||
+        offer.hash === update.hash || offer.hash === want || bad.has(offer.hash)) return
+    installing = true
+    try {
+      const { hash, files } = verifyPackage(await rt.fetchPackage(update.name), update.name)
+      if (stopped || exiting || hash === update.hash || bad.has(hash)) return
+      installCurrent(update.store, hash, files)
+      log(`installed ${update.name} ${hash.slice(0, 12)} from the node (running ${update.hash.slice(0, 12)})`)
+      if (!update.exit) return
+      want = hash
+      clearInterval(idleTimer)
+      idleTimer = setInterval(() => { void maybeExit() }, idleCheckMs)
+      idleTimer.unref?.()
+      await maybeExit()
+    } catch (err) {
+      bad.add(offer.hash)
+      log(`${update.name} update to ${String(offer?.hash || '').slice(0, 12)} failed: ${err.message}`)
+    } finally {
+      installing = false
+    }
+  }
+
+  /** Resolves once agy is gone. */
+  function stop() {
+    stopped = true
+    clearInterval(idleTimer)
+    clearInterval(catalogTimer)
+    catalogAbort.abort()
+    rt.stop()
+    // A turn's transcript poll would otherwise keep running; acp.stop() fails the prompts themselves.
+    for (const turn of activeTurns.values()) clearInterval(turn.pollTimer)
+    activeTurns.clear()
+    promptTurns.clear()
+    return acp.stop()
   }
 
   return {
@@ -963,17 +1047,7 @@ export function createAgyRuntime(options = {}) {
       catalogTimer.unref?.()
       return rt.start()
     },
-    /** Resolves once agy is gone. */
-    stop: () => {
-      stopped = true
-      clearInterval(catalogTimer)
-      catalogAbort.abort()
-      rt.stop()
-      // A turn's transcript poll would otherwise keep running; acp.stop() fails the prompts themselves.
-      for (const turn of activeTurns.values()) clearInterval(turn.pollTimer)
-      activeTurns.clear()
-      promptTurns.clear()
-      return acp.stop()
-    },
+    stop,
+    idle,
   }
 }

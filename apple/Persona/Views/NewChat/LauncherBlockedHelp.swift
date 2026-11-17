@@ -104,9 +104,7 @@ struct LauncherBlockedHelp: View {
             .navigationTitle(block.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Text("Done [Extension System Presentation c0b3fb]").lineLimit(1) }
-                }
+                SheetClose { dismiss() }
             }
         }
         .sheet(isPresented: $addingProvider) { ProviderWizard(start: .pick) }

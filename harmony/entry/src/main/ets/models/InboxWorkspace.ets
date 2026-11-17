@@ -218,6 +218,7 @@ export class InboxWorkspace {
   @Trace feedLoading: boolean = false;
   @Trace error: string = '';
   @Trace writeState: string = '';
+  private writeOutbound: boolean = false;
   @Trace replyDraft: string = '';
   @Trace replyTargetChanged: boolean = false;
   @Trace draftLoading: boolean = false;
@@ -331,10 +332,13 @@ export class InboxWorkspace {
   isGeneric(): boolean { return this.currentIsGeneric; }
   capability(name: string): boolean { return this.sourceCapabilities.includes(name); }
   hasConversation(): boolean { return !!this.currentConversation && !!this.currentSource && (!this.isThreadReference() || this.referenceThreadLoaded); }
+  canWrite(): boolean {
+    return !this.handoffBusy && !this.attachmentBusy && !['sending', 'saving', 'pending', 'unknown'].includes(this.writeState);
+  }
   canSendGeneric(): boolean {
     const threadTargetReady = !this.isThreadReference() || this.referenceThreadLoaded && !!this.currentThreadRootMessage &&
       this.currentThreadCanReply && this.threadReply && this.threadReplyTo === this.currentThreadRootMessage;
-    return !!this.client?.connected && !!this.boundRepo && threadTargetReady && (!this.referenceMode || !this.replyTargetChanged) &&
+    return this.canWrite() && !!this.client?.connected && !!this.boundRepo && threadTargetReady && (!this.referenceMode || !this.replyTargetChanged) &&
       this.currentIsGeneric && !!Wire.text(this.sourceMe, 'user_id') && Wire.bool(this.sourceStatus, 'configured') &&
       Wire.bool(this.sourceStatus, 'connected') && Wire.bool(this.sourceStatus, 'signed_in');
   }
@@ -420,7 +424,25 @@ export class InboxWorkspace {
     this.clearDetailState();
   }
 
+  private admitWrite(owner: OwnerSnapshot): boolean {
+    if (!this.owns(owner)) return false;
+    this.writeOutbound = true;
+    return true;
+  }
+  private writeFailureState(error: Error): string {
+    if (error instanceof HttpFailure) return error.resultPending ? 'pending' : error.resultUnknown ? 'unknown' : 'failed';
+    return this.writeOutbound ? 'unknown' : 'failed';
+  }
+  private interruptWrite(): void {
+    if (this.writeState === 'sending' || this.writeState === 'saving') {
+      this.writeState = this.writeOutbound ? 'unknown' : 'failed';
+      if (this.writeOutbound) this.error = 'result_unknown';
+    }
+    this.writeOutbound = false;
+  }
+
   onDisconnected(): void {
+    this.interruptWrite();
     this.revision++; this.boundRepo = undefined; this.error = 'offline'; this.loading = false; this.detailLoading = false; this.feedLoading = false; this.draftLoading = true; this.attachmentBusy = false; this.handoffBusy = false;
     if (this.readTimer !== -1) clearTimeout(this.readTimer); this.readTimer = -1;
     this.visibleReadTarget = ''; this.visibleReadOwner = undefined; this.visibleReadIds = []; this.visibleReadPositions = {}; this.visibleReadBadges = {};
@@ -432,6 +454,7 @@ export class InboxWorkspace {
     let repo: HubRepository;
     try { repo = this.client.repo(); }
     catch (error) { this.error = error instanceof Error ? error.message : 'offline'; return; }
+    this.interruptWrite();
     this.boundRepo = repo;
     this.revision++;
     if (this.readTimer !== -1) clearTimeout(this.readTimer); this.readTimer = -1;
@@ -495,7 +518,7 @@ export class InboxWorkspace {
     this.feedBefore = ''; this.threadRoot = ''; this.isTopicList = false; this.currentSource = ''; this.currentConversation = '';
     this.currentAccount = ''; this.currentAccountName = ''; this.currentIsGeneric = false; this.sourceCapabilities = [];
     this.sourceStatus = {}; this.sourceMe = {}; this.quickReactions = []; this.mailTranslation = {}; this.translationError = '';
-    this.translatedMailUid = 0; this.translationBusy = false; this.showOriginal = true; this.writeState = ''; this.attachment = undefined; this.attachmentBusy = false;
+    this.translatedMailUid = 0; this.translationBusy = false; this.showOriginal = true; this.writeState = ''; this.writeOutbound = false; this.attachment = undefined; this.attachmentBusy = false;
     this.threadReplyTo = ''; this.threadReply = false; this.handoffDraft = ''; this.handoffBusy = false;
     this.referenceMode = false; this.referenceThreadId = ''; this.referenceThreadTitle = '';
     this.currentThreadRootMessage = ''; this.currentThreadCanReply = false; this.referenceThreadLoaded = false;
@@ -1118,6 +1141,7 @@ export class InboxWorkspace {
     if (!value || !this.canSendGeneric() || !this.currentConversation) { this.error = 'write_unsupported'; return false; }
     const owner = this.capture(), source = this.currentSource, conversation = this.currentConversation, account = this.currentAccount;
     const clientId = util.generateRandomUUID();
+    this.writeOutbound = false; this.writeState = 'sending'; this.error = '';
     let me: Record<string, Object>;
     try { me = await this.readCurrentMe(owner); }
     catch (error) { if (this.owns(owner)) { this.error = this.errorCode(error as Error); this.writeState = 'failed'; } return false; }
@@ -1127,15 +1151,18 @@ export class InboxWorkspace {
     if (thread) body['thread'] = true;
     const path = '/api/v1/messaging/' + segment(source) + '/conversations/' + segment(conversation) + '/messages' + managerQuery(owner.managerId, Wire.payload(['account'], [account]));
     this.writeState = 'sending'; this.error = '';
+    let acknowledged = false;
     try {
-      await owner.repo.call(path, 'POST', body, clientId);
+      await owner.repo.call(path, 'POST', body, clientId, () => this.admitWrite(owner));
       if (!this.owns(owner)) return false;
+      acknowledged = true;
       this.replyDraft = ''; this.threadReplyTo = ''; this.threadReply = false; this.writeState = 'sent';
       if (this.draftReady) await this.persistDraft(owner, this.selected, '');
       if (!this.owns(owner)) return false;
       await this.refreshConversation(); return this.owns(owner);
     } catch (error) {
-      if (this.owns(owner)) { this.writeState = error instanceof HttpFailure && error.resultPending ? 'pending' : error instanceof HttpFailure && error.resultUnknown ? 'unknown' : 'failed'; this.error = this.errorCode(error as Error); }
+      if (acknowledged) { if (this.owns(owner)) this.error = this.errorCode(error as Error); return this.owns(owner); }
+      if (this.owns(owner)) { this.writeState = this.writeFailureState(error as Error); this.error = this.errorCode(error as Error); }
       return false;
     }
   }
@@ -1166,7 +1193,22 @@ export class InboxWorkspace {
     else await this.loadLegacyLarkMessages(owner, this.currentConversation, this.currentAccount, start, this.isTopicList);
   }
 
+  private receiptEntry(receipt: Record<string, Object>): Record<string, Object> {
+    return Wire.has(receipt, 'item') ? Wire.object(receipt, 'item') : receipt;
+  }
+
+  private acknowledgeEntry(row: ResourceRow, requireItem: boolean = false): (receipt: Record<string, Object>) => boolean {
+    const expectedId = row.id;
+    return (receipt: Record<string, Object>): boolean => {
+      if ((requireItem && !Wire.has(receipt, 'item')) || !expectedId || Wire.text(this.receiptEntry(receipt), 'id') !== expectedId) {
+        throw new HttpFailure(200, 'result_unknown', true);
+      }
+      return true;
+    };
+  }
+
   async replyInbox(text: string, confirmation: string): Promise<boolean> {
+    if (!this.canWrite()) return false;
     if (this.referenceMode) return false;
     const value = text.trim(); if (!value || !this.canReplyToItem()) { this.error = 'reply_unsupported'; return false; }
     if (!confirmation || confirmation !== this.replyConfirmationSnapshot(value)) { this.error = 'confirmation_required'; return false; }
@@ -1179,20 +1221,23 @@ export class InboxWorkspace {
       body['expected_uid'] = uid; body['expected_version'] = version;
     }
     const path = this.targetActionPath(row, 'reply');
-    this.writeState = 'sending'; this.error = '';
+    this.writeOutbound = false; this.writeState = 'sending'; this.error = '';
+    let acknowledged = false;
     try {
-      const result = await owner.repo.call(path, 'POST', body, clientId);
+      const result = await owner.repo.call(path, 'POST', body, clientId, () => this.admitWrite(owner), false,
+        this.acknowledgeEntry(row));
       if (!this.owns(owner)) return false;
-      const item = Wire.object(result, 'item'), data = Object.keys(item).length ? item : result;
+      const data = this.receiptEntry(result);
       const updated = this.detailRow(data, row); this.selected = updated; this.selectedKey = updated.key(); this.detail = data;
       this.items = updateResourceList(this.items, updated);
-      this.replyDraft = ''; this.writeState = 'sent';
+      this.replyDraft = ''; this.writeState = 'sent'; acknowledged = true;
       if (this.draftReady) await this.persistDraft(owner, row, '');
       if (!this.owns(owner)) return false;
       return true;
     } catch (error) {
+      if (acknowledged) { if (this.owns(owner)) this.error = this.errorCode(error as Error); return this.owns(owner); }
       if (!this.owns(owner)) return false;
-      this.writeState = error instanceof HttpFailure && error.resultPending ? 'pending' : error instanceof HttpFailure && error.resultUnknown ? 'unknown' : 'failed';
+      this.writeState = this.writeFailureState(error as Error);
       this.error = this.errorCode(error as Error);
       if (error instanceof HttpFailure && error.code === 'mail_reply_target_changed') {
         // A stale target is reread, but the retained text never gets submitted again without a new confirmation.
@@ -1204,28 +1249,28 @@ export class InboxWorkspace {
   }
 
   async processInbox(): Promise<boolean> {
+    if (!this.canWrite()) return false;
     if (this.referenceMode) return false;
     if (!this.selectedKey) return false;
     const row = this.selected, owner = this.capture(row), nextDone = !done(row), path = this.targetActionPath(row, 'done');
-    this.writeState = 'saving'; this.error = '';
+    this.writeOutbound = false; this.writeState = 'saving'; this.error = '';
     try {
-      const result = await owner.repo.call(path, 'POST', Wire.payload(['done'], [nextDone]));
+      const result = await owner.repo.call(path, 'POST', Wire.payload(['done'], [nextDone]), '', () => this.admitWrite(owner), false, this.acknowledgeEntry(row));
       if (!this.owns(owner)) return false;
-      const updated = this.detailRow(result, row);
-      if (updated.id && updated.id !== row.id) throw new Error('identity_changed');
-      updated.id = row.id; this.selected = updated; this.selectedKey = updated.key(); this.detail = result; this.items = updateResourceList(this.items, updated);
+      const data = this.receiptEntry(result), updated = this.detailRow(data, row);
+      this.selected = updated; this.selectedKey = updated.key(); this.detail = data; this.items = updateResourceList(this.items, updated);
       this.writeState = ''; return true;
-    } catch (error) { if (this.owns(owner)) { this.writeState = 'failed'; this.error = this.errorCode(error as Error); } return false; }
+    } catch (error) { if (this.owns(owner)) { this.writeState = this.writeFailureState(error as Error); this.error = this.errorCode(error as Error); } return false; }
   }
 
   async handoff(text: string): Promise<ResourceRow | undefined> {
     if (this.referenceMode) return undefined;
-    if (this.handoffBusy || ['pending', 'unknown'].includes(this.writeState)) return undefined;
+    if (!this.canWrite()) return undefined;
     const value = text.trim(); if (!value || !this.selectedKey) { this.error = 'text_required'; return undefined; }
     const row = this.selected, owner = this.capture(row), clientId = util.generateRandomUUID();
-    const path = this.targetActionPath(row, 'handoff'); this.handoffBusy = true; this.handoffDraft = value; this.error = '';
+    const path = this.targetActionPath(row, 'handoff'); this.handoffBusy = true; this.writeOutbound = false; this.writeState = 'sending'; this.handoffDraft = value; this.error = '';
     try {
-      const response = await owner.repo.call(path, 'POST', Wire.payload(['text', 'client_id'], [value, clientId]), clientId);
+      const response = await owner.repo.call(path, 'POST', Wire.payload(['text', 'client_id'], [value, clientId]), clientId, () => this.admitWrite(owner), false, this.acknowledgeEntry(row, true));
       if (!this.owns(owner)) return undefined;
       this.writeState = 'handed_off'; this.handoffDraft = '';
 
@@ -1260,7 +1305,7 @@ export class InboxWorkspace {
       }
       if (!target && this.owns(owner)) this.error = 'inbox_handoff_target_unavailable';
       return target;
-    } catch (error) { if (this.owns(owner)) { this.writeState = error instanceof HttpFailure && error.resultPending ? 'pending' : error instanceof HttpFailure && error.resultUnknown ? 'unknown' : 'failed'; this.error = this.errorCode(error as Error); } return undefined; }
+    } catch (error) { if (this.owns(owner)) { this.writeState = this.writeFailureState(error as Error); this.error = this.errorCode(error as Error); } return undefined; }
     finally { if (this.owns(owner)) this.handoffBusy = false; }
   }
 
@@ -1404,49 +1449,61 @@ export class InboxWorkspace {
   toggleOriginal(): void { if (Object.keys(this.mailTranslation).length) this.showOriginal = !this.showOriginal; }
 
   setAttachment(value: InboxAttachmentDraft): void {
+    if (!this.canWrite()) return;
     if (!value.data.byteLength || value.data.byteLength > MAX_UPLOAD_BYTES || !value.name || !value.mime) { this.error = 'attachment_limit'; return; }
     if (value.kind === 'image' && (value.data.byteLength > 7.5 * 1024 * 1024 || !/^image\/(jpeg|png|webp|gif)$/.test(value.mime))) { this.error = 'attachment_limit'; return; }
     this.attachment = value; this.error = '';
   }
-  removeAttachment(): void { this.attachment = undefined; }
+  removeAttachment(): void { if (this.canWrite()) this.attachment = undefined; }
   canSendAttachment(): boolean { return !!this.attachment && this.canSendGeneric() && this.capability('attachments') && this.hasConversation(); }
 
   async sendAttachment(): Promise<boolean> {
     const attachment = this.attachment, row = this.selected;
     if (!attachment || !this.canSendAttachment()) { this.error = 'write_unsupported'; return false; }
     const owner = this.capture(row), source = this.currentSource, conversation = this.currentConversation, account = this.currentAccount;
+    this.writeOutbound = false; this.attachmentBusy = true; this.writeState = 'sending'; this.error = '';
+    const replyTo = this.threadReplyTo, thread = this.threadReply;
     let me: Record<string, Object>;
-    try { me = await this.readCurrentMe(owner); } catch (error) { if (this.owns(owner)) this.error = this.errorCode(error as Error); return false; }
+    try { me = await this.readCurrentMe(owner); } catch (error) { if (this.owns(owner)) { this.error = this.errorCode(error as Error); this.attachmentBusy = false; this.writeState = 'failed'; } return false; }
     if (!this.owns(owner)) return false;
     const clientId = util.generateRandomUUID();
     const queryValues: Record<string, Object> = Wire.payload(['client_id', 'name', 'mime', 'kind', 'account'], [clientId, attachment.name, attachment.mime, attachment.kind, account]);
-    if (this.threadReplyTo) {
-      if (!this.capability('attachment_replies')) { this.error = 'attachment_reply_unsupported'; return false; }
-      queryValues['reply_to'] = this.threadReplyTo; queryValues['thread'] = this.threadReply ? '1' : '';
+    if (replyTo) {
+      if (!this.capability('attachment_replies')) { this.error = 'attachment_reply_unsupported'; this.attachmentBusy = false; this.writeState = 'failed'; return false; }
+      queryValues['reply_to'] = replyTo; queryValues['thread'] = thread ? '1' : '';
     }
     const path = '/api/v1/messaging/' + segment(source) + '/conversations/' + segment(conversation) + '/attachments' + managerQuery(owner.managerId, queryValues);
     this.attachmentBusy = true; this.error = ''; this.writeState = 'sending';
     const mutations = owner.repo.mutations;
-    if (!mutations) { this.attachmentBusy = false; this.error = 'storage_unavailable'; return false; }
+    if (!mutations) { this.attachmentBusy = false; this.writeState = 'failed'; this.error = 'storage_unavailable'; return false; }
     let record: MutationRecord | undefined;
+    let acknowledged = false;
     try {
       const mutationPath = '/api/v1/messaging/' + segment(source) + '/conversations/' + segment(conversation) + '/attachments' + managerQuery(owner.managerId, Wire.payload(['account'], [account]));
       const admitted: MutationRecord = await mutations.begin(mutationPath, 'POST', '', clientId);
       record = admitted;
-      if (!this.owns(owner)) return false;
+      if (!this.owns(owner)) { await mutations.finish(admitted, 'failed'); return false; }
+      this.writeOutbound = true;
       const response = await owner.repo.transport.requestBytes(path, 'POST', attachment.data, attachment.mime, admitted.id);
       if (!this.owns(owner)) return false;
-      const result = Wire.parse(util.TextDecoder.create('utf-8', { fatal: true }).decodeToString(new Uint8Array(response.data)));
+      if (response.data.byteLength > Wire.maxBytes) throw new HttpFailure(200, 'result_unknown', true);
+      const receipt: Object = JSON.parse(util.TextDecoder.create('utf-8', { fatal: true }).decodeToString(new Uint8Array(response.data))) as Object;
+      if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) throw new HttpFailure(200, 'result_unknown', true);
+      const result = receipt as Record<string, Object>;
+      const messageId = result['message_id'];
+      if (messageId !== undefined && (typeof messageId !== 'string' || Array.from(messageId as string).length > 200)) throw new HttpFailure(200, 'result_unknown', true);
       // A generic attachment receipt may be accepted without a message_id; the protocol forbids resending it automatically.
       if (Wire.text(result, 'state') === 'pending' || Wire.text(result, 'state') === 'unknown') throw new HttpFailure(202, 'result_unknown', true, Wire.text(result, 'state') === 'pending');
+      acknowledged = true; this.attachment = undefined; this.writeState = 'sent';
       await mutations.finish(admitted, 'done');
       if (!this.owns(owner)) return false;
-      this.attachment = undefined; this.writeState = 'sent'; await this.refreshConversation(); return this.owns(owner);
+      await this.refreshConversation(); return this.owns(owner);
     } catch (error) {
+      if (acknowledged) { if (this.owns(owner)) this.error = this.errorCode(error as Error); return this.owns(owner); }
       if (record && record.state === 'pending') {
         try { await mutations.finish(record, error instanceof HttpFailure && error.resultPending ? 'pending' : error instanceof HttpFailure && !error.resultUnknown ? 'failed' : 'unknown'); } catch (_) { }
       }
-      if (this.owns(owner)) { this.writeState = error instanceof HttpFailure && error.resultPending ? 'pending' : error instanceof HttpFailure && error.resultUnknown ? 'unknown' : 'failed'; this.error = this.errorCode(error as Error); }
+      if (this.owns(owner)) { this.writeState = this.writeFailureState(error as Error); this.error = this.errorCode(error as Error); }
       return false;
     } finally { if (this.owns(owner)) this.attachmentBusy = false; }
   }

@@ -3,7 +3,7 @@ import { api, errorText } from "../lib/api";
 // The Persona tab: the headless assistant on the hub's machine (docs/assistant/assistant.md). `/` (and the old `/persona`) is the main
 // conversation, `/persona/<id>` one of them, `/persona/new` a new one-off conversation. With no main conversation yet, the first
 // message on `/` starts it.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MentionSource } from "./chat/ComposerPanel";
 import { startConversation } from "../lib/assistant-start";
 import { feedCacheScope, mainConversationMachine, readFeedCache } from "../lib/feed-cache";
@@ -30,11 +30,13 @@ import { DayLine } from "./assistant/Tasks";
 import { ShellHeaderSlots, ShellSwitch } from "./ShellSwitch";
 import { StartSessionButton } from "./StartSessionButton";
 import { conversationTitle } from "./assistant/conversations";
-import { formatList, t } from "../i18n";
+import { t } from "../i18n";
 import { useAssistantTitle, useShownOffline } from "./ManagerParts";
 import { chosenManager, noteConversation, noteRoutedConversation, ownerHeaders, sameManager, shownManager, useShownManager } from "../lib/manager-choice";
-import { useScopedMachines } from "../lib/current-assistant";
 import type { AssistantInfo, Session } from "../lib/types";
+
+/** Every computer's tokens a day under the things to ask (#9506): a lazy chunk, not on the first screen. */
+const TokenCalendar = lazy(() => import("./assistant/TokenCalendar"));
 
 /** The example questions of a hub without readiness (its `suggestions` replace them, docs/assistant/onboarding.md 4.7). */
 const SUGGESTIONS = [t("personaassistant.suggestion_meetings"), t("personaassistant.suggestion_agents"), t("personaassistant.suggestion_lark"), t("personaassistant.suggestion_projects")];
@@ -235,8 +237,6 @@ function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?:
   const mention = useMemo<MentionSource>(() => ({ self: "persona-new", files: () => [], workspaces: true,
     skills: { manager, launcher: selectedLauncher, environment: assistant?.launcher ?? "" },
   }), [manager, selectedLauncher, assistant?.launcher]);
-  // the starter names the current assistant's computers, the ones it can work on
-  const machines = useScopedMachines();
   const persona = usePersona();
   const [seed, setSeed] = useState(0);
 
@@ -326,7 +326,6 @@ function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?:
     setSeed((x) => x + 1);
   };
 
-  const online = machines.filter((m) => m.online);
   // the hub's example questions when it gives them: a local one opens help here and is not sent (4.4)
   const hubSuggestions = gate.readiness?.suggestions;
   const suggestions: { key: string; title: string; onClick: () => void; hint?: string }[] = hubSuggestions
@@ -404,7 +403,8 @@ function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?:
             />
             <h1 className="text-[22px] font-semibold tracking-tight text-ink">{t("personaassistant.empty_title")}</h1>
             <p className="mt-1.5 text-[13px] text-ink-2">
-              {offline ? offline.body : setup ? t("personaassistant.empty_body_setup") : online.length ? t("personaassistant.empty_body_machines", { machines: formatList(online.map((m) => m.name), { type: "conjunction", style: "narrow" }) }) : t("personaassistant.empty_body")}
+              {/* no computers named: the calendar under the questions took their place (#9506) */}
+              {offline ? offline.body : setup ? t("personaassistant.empty_body_setup") : t("personaassistant.empty_body")}
             </p>
           </div>
           )}
@@ -438,6 +438,11 @@ function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?:
               </button>
             ))}
           </div>
+          )}
+          {!docked && !offline && !setup && !sending && (
+            <Suspense fallback={null}>
+              <TokenCalendar />
+            </Suspense>
           )}
         </div>
       </div>

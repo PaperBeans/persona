@@ -26,6 +26,10 @@ final class MessageMenu {
     @ObservationIgnored var forward: ((MessageBarInfo) -> Void)?
     /// The message whose Forward was tapped: the chat shows the picker (`ForwardSheet`).
     var forwarding: ForwardDraft?
+    /// Select Messages (#9468): the chat starts selecting with this message picked. nil: the chat does not select (the
+    /// Mac); `selectable` says whether a message can be picked (an injected line or a `/loop` tick cannot).
+    @ObservationIgnored var select: ((String) -> Void)?
+    @ObservationIgnored var selectable: (String) -> Bool = { _ in false }
     /// Where the chat's messages come from ("app › leader"), printed on share cards (read when sharing: the
     /// session may not be loaded yet when the chat binds the menu).
     @ObservationIgnored var source: () -> String = { "" }
@@ -515,6 +519,21 @@ struct MessageActionBar: View {
         #endif
     }
 
+    /// Select Messages, a row of its own under the actions (#9468, as Telegram's menu ends in Select): on iPhone and iPad,
+    /// for a message in the transcript of a chat that selects.
+    static func selects(id: String, menu: MessageMenu, pending: Bool) -> Bool {
+        #if os(iOS)
+        return !pending && menu.select != nil && menu.selectable(id)
+        #else
+        return false
+        #endif
+    }
+
+    /// The bar's height, with the Select Messages row when it has one.
+    static func height(selects: Bool) -> CGFloat { selects ? height + selectRow + Theme.Size.hairline : height }
+    /// The Select Messages row's height: a list row's.
+    static let selectRow: CGFloat = 44
+
     /// A reply ends in ⋯ with Branch to New Chat when the session can fork and the reply is a Claude transcript line of its
     /// own (`<uuid>#<n>`).
     static func forks(id: String, isUser: Bool, menu: MessageMenu) -> Bool {
@@ -578,14 +597,46 @@ struct MessageActionBar: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) { ForEach(items) { action($0) } }
-            .padding(.horizontal, Theme.Space.sm)
-            .frame(height: Self.height)
-            .dynamicTypeSize(...Self.barTypeSize)
+        let actions = items
+        // The row and its divider take the actions' width: they would fill all the room the lift layer offers.
+        let width = CGFloat(actions.count) * itemWidth + 2 * Theme.Space.sm
+        VStack(spacing: Theme.Space.flush) {
+            HStack(spacing: 0) { ForEach(actions) { action($0) } }
+                .padding(.horizontal, Theme.Space.sm)
+                .frame(height: Self.height)
+            if Self.selects(id: id, menu: menu, pending: pending) {
+                Divider().frame(width: width)
+                selectRow(width: width)
+            }
+        }
+        .dynamicTypeSize(...Self.barTypeSize)
         .background(Theme.Lift.bar, in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
         // Its edge over the dimmed chat.
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).stroke(Theme.cardStroke, lineWidth: 0.5))
         .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
+    }
+
+    /// Select Messages (#9468): the chat starts selecting with this message picked. As wide as the actions above it.
+    private func selectRow(width: CGFloat) -> some View {
+        let title = String(localized: "Select Messages [Message Menu]")
+        return Button {
+            menu.select?(id)
+            menu.close()
+        } label: {
+            HStack(spacing: Theme.Space.s) {
+                ThemedIcon(Theme.Icon.pickMessages).font(Theme.Font.heading).scaledFrame(height: Theme.Size.iconS)
+                Text(title).font(Theme.Font.secondary).lineLimit(1).minimumScaleFactor(0.8)
+                Spacer(minLength: Theme.Space.flush)
+            }
+            .padding(.horizontal, Theme.Space.l)
+            .frame(width: width, height: Self.selectRow)
+            .foregroundStyle(.primary)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityShowsLargeContentViewer { ThemedIcon(Theme.Icon.pickMessages); Text(title) }
+        .accessibilityIdentifier("chat.selectMessages")
     }
 
     private func action(_ item: Item) -> some View {

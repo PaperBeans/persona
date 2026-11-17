@@ -355,7 +355,7 @@ fun TodosScreen(
     val underTop = remember(view) { if (view == TodosView.Calendar) { { false } } else { { listState.canScrollBackward } } }
     JPage(
         title = stringResource(R.string.agents_todos_title),
-        onBack = onBack,
+        onBack = if (LocalIsSidebarRoot.current) null else onBack,
         underTop = underTop,
         actions = {
             // on the calendar a new to-do is due on the day it shows, all day (iOS TodosView)

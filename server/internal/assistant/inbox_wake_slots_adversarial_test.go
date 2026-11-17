@@ -43,7 +43,7 @@ func TestWakeSlotsAdversarialTestInstructAfterDeferredStopDoesNotRestoreAgent(t 
 		t.Fatalf("uncapped instruction at full capacity: %d %v", code, out)
 	}
 	toldConv(t, h, "Investigate after the stop") // the user's note and the held stop are both delivered immediately
-	if _, _, err := h.suggest(ctx, "s1", suggestIn{Recap: "Recap after the instruction and Agent result"}); err != nil {
+	if _, _, err := h.suggest(ctx, "s1", suggestIn{ProcessingTurn: inboxTestProcessingTurn(h, "s1"), Recap: "Recap after the instruction and Agent result"}); err != nil {
 		t.Fatal(err)
 	}
 	state, _, back := handlingNow(h, it)

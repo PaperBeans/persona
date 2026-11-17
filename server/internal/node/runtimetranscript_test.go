@@ -322,7 +322,8 @@ func TestRuntimeTranscriptKeepsTheRuntimesBackground(t *testing.T) {
 	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
 		{"session_id": "paseo-a5", "transcript": sdkSession, "agent": "claude", "title": "Fix the build", "cwd": "/w/app",
 			"status": "idle", "space_id": "prj_1", "space_name": "app",
-			"background": []map[string]any{{"id": "paseo-b5", "kind": "agent", "description": "Review the fix"}}},
+			"background": []map[string]any{{"id": "b1", "kind": "shell", "description": "Native background command"},
+				{"id": "paseo-b5", "kind": "agent", "description": "Review the fix"}}},
 		{"session_id": "paseo-b5", "agent": "codex", "title": "Review the fix", "cwd": "/w/app", "status": "working",
 			"space_id": "prj_1", "space_name": "app", "is_subagent": true, "parent_session_id": "paseo-a5"},
 	}})
@@ -334,6 +335,9 @@ func TestRuntimeTranscriptKeepsTheRuntimesBackground(t *testing.T) {
 	}
 	if !slices.Equal(tasks, []string{"shell b1 ", "agent paseo-b5 Review the fix"}) {
 		t.Fatalf("background %q", tasks)
+	}
+	if task := got["paseo-a5"].Background[0]; task.Command != "make watch" || task.OutputFile != "/tmp/tasks/b1.output" {
+		t.Fatalf("duplicate native task replaced transcript details: %+v", task)
 	}
 	child := got["paseo-b5"]
 	if !child.IsSubagent || child.ParentSessionID != "paseo-a5" || child.RootSessionID != "paseo-a5" ||

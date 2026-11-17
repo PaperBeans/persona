@@ -13,11 +13,19 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import persona.core.designsystem.icons.PhIcon
+
+/**
+ * The mark iOS puts on a row that swipes (`SwipeRowMark`, `AssistantSidebar.swift:719`, applied at line 1802).
+ * The open drawer yields a leftward drag on a node that carries it (line 500), including when the row sits in a
+ * vertical list that would otherwise take the move (lines 540-544). The key draws nothing.
+ */
+val SwipeRowMark = SemanticsPropertyKey<Unit>("SwipeRowMark")
 
 /**
  * The tint iOS gives a swipe action (`.tint(Theme.positive)` for finishing something, `.tint(Theme.accent)` for putting it
@@ -112,7 +120,7 @@ fun JSwipeActions(
     }
     CompositionLocalProvider(LocalSwipeActions provides screenReader) {
         SwipeToDismissBox(
-            state = state, modifier = modifier,
+            state = state, modifier = modifier.semantics { this[SwipeRowMark] = Unit },
             enableDismissFromStartToEnd = start != null, enableDismissFromEndToStart = end != null,
             onDismiss = onDismiss,
             backgroundContent = {

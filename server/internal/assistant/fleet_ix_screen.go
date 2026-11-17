@@ -141,7 +141,7 @@ func (s *Service) createScreenInteraction(machine string, sess proto.Session) {
 	}
 	back, rang, told := s.screenBackLocked(machine, sess.SessionID, id, d != nil, time.Now())
 	// Back from a detach: its predecessor's ring is carried (announced), and whether it was the user's (told).
-	p := &pending{ix: ix, announced: rang || !back && d != nil, told: told, local: func(r proto.Resolution) error {
+	p := &pending{ix: ix, announced: rang || !back && d != nil, told: told, local: func(_ context.Context, r proto.Resolution) error {
 		if r.Dismiss {
 			return nil
 		}

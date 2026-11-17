@@ -9,6 +9,14 @@ export const RUNTIME = 'agy'
 export const LABEL = 'Antigravity'
 export const PREFIX = 'agy-'
 
+// Kept off native JSON: an appended replacement branch is a new logical step even when its timestamp repeats.
+const STEP_IDENTITY = Symbol('persona.agy.stepIdentity')
+
+function stepIdentity(step, branch = '') {
+  const birth = typeof step.created_at === 'string' ? step.created_at : ''
+  return birth || branch ? createHash('sha256').update(birth).update('\n').update(branch).digest('hex').slice(0, 20) : ''
+}
+
 const OWN_TOOLS = {
   run_command: 'Bash',
   view_file: 'Read',
@@ -138,6 +146,8 @@ export function stepsToItems(steps, opts = {}) {
     const seq = idx + 1
     if (seq > maxSeq) maxSeq = seq
     const ts = step.created_at || new Date().toISOString()
+    const identity = step[STEP_IDENTITY] ?? stepIdentity(step)
+    const line = identity ? `${seq}@${identity}` : String(seq)
 
     switch (step.type) {
       case 'USER_INPUT': {
@@ -148,7 +158,7 @@ export function stepsToItems(steps, opts = {}) {
         afterWork = false
         const text = cleanUserText(step.content)
         if (!text) break
-        const item = { id: `${seq}#0`, seq, role: 'user', kind: 'text', text, ts }
+        const item = { id: `${line}#0`, seq, role: 'user', kind: 'text', text, ts }
         items.push(opts.full ? item : light(item))
         break
       }
@@ -156,14 +166,14 @@ export function stepsToItems(steps, opts = {}) {
         turnError = undefined
         let sub = 0
         if (typeof step.thinking === 'string' && step.thinking.trim()) {
-          const item = { id: `${seq}#${sub++}`, seq, role: 'assistant', kind: 'thinking', text: step.thinking.trim(), ts }
+          const item = { id: `${line}#${sub++}`, seq, role: 'assistant', kind: 'thinking', text: step.thinking.trim(), ts }
           items.push(opts.full ? item : light(item))
         }
         if (typeof step.content === 'string' && step.content.trim()) {
           const text = step.content.trim()
           lastText = snippet(text)
           afterWork = true
-          const item = { id: `${seq}#${sub++}`, seq, role: 'assistant', kind: 'text', text, ts }
+          const item = { id: `${line}#${sub++}`, seq, role: 'assistant', kind: 'text', text, ts }
           items.push(opts.full ? item : light(item))
         }
         const calls = Array.isArray(step.tool_calls) ? step.tool_calls : []
@@ -171,12 +181,12 @@ export function stepsToItems(steps, opts = {}) {
         for (let k = 0; k < calls.length; k++) {
           const tc = calls[k]
           if (!tc || typeof tc !== 'object') continue
-          const callId = `call_${seq}_${k}`
+          const callId = `call_${line}_${k}`
           const toolName = mapToolName(tc.name || 'tool')
           const toolInput = mapToolInput(tc.name || 'tool', tc.args)
           pendingCalls.push({ callId, idx })
           const item = {
-            id: `${seq}#${sub++}`,
+            id: `${line}#${sub++}`,
             seq,
             role: 'assistant',
             kind: 'tool_use',
@@ -192,7 +202,7 @@ export function stepsToItems(steps, opts = {}) {
       case 'GENERIC': {
         afterWork = true
         const paired = pendingCalls.shift()
-        const callId = paired ? paired.callId : `call_${seq}_0`
+        const callId = paired ? paired.callId : `call_${line}_0`
         let rawOut = step.error || step.content || ''
         if (opts.full && opts.brainDir && Array.isArray(step.truncated_fields) && step.truncated_fields.includes('content')) {
           const outFile = join(opts.brainDir, '.system_generated', 'steps', String(idx), 'output.txt')
@@ -205,7 +215,7 @@ export function stepsToItems(steps, opts = {}) {
         const text = step.error ? String(step.error) : cleanGenericOutput(rawOut)
         const isError = Boolean(step.error) || step.status === 'ERROR'
         const resItem = {
-          id: `${seq}#0`,
+          id: `${line}#0`,
           seq,
           role: 'user',
           kind: 'tool_result',
@@ -219,7 +229,7 @@ export function stepsToItems(steps, opts = {}) {
           step.media.forEach((m, mi) => {
             if (m && typeof m.mime_type === 'string' && m.mime_type.startsWith('image/')) {
               items.push({
-                id: `${seq}#img${mi}`,
+                id: `${line}#img${mi}`,
                 seq,
                 role: 'user',
                 kind: 'image',
@@ -237,7 +247,7 @@ export function stepsToItems(steps, opts = {}) {
         turnError = { turn_error: String(text), ...step.turn_error, turn_error_after_work: afterWork }
         // Clients display this shared API-error format outside the collapsed work summary.
         const message = String(text).startsWith('API Error:') ? String(text) : `API Error: ${text}`
-        items.push({ id: `${seq}#0`, seq, role: 'assistant', kind: 'text', text: message, ts })
+        items.push({ id: `${line}#0`, seq, role: 'assistant', kind: 'text', text: message, ts })
         break
       }
       default:
@@ -298,7 +308,7 @@ export function readTranscript(brainDir, full = false) {
         if (Number.isInteger(index) && Number.isInteger(previous?.step_index) && index <= previous.step_index) {
           // Native exports append replacement steps after a rewind. A status update keeps the step's identity.
           if (index < previous.step_index || step.type !== previous.type || step.created_at !== previous.created_at) {
-            branch = createHash('sha256').update(trimmed).digest('hex').slice(0, 20)
+            branch = createHash('sha256').update(branch).update('\n').update(trimmed).digest('hex').slice(0, 20)
             revision = ''
           } else if (JSON.stringify(previous) !== JSON.stringify(step)) {
             // A planner step can gain its completed response while keeping its index and branch.
@@ -306,6 +316,8 @@ export function readTranscript(brainDir, full = false) {
           }
           while (out.length && out.at(-1).step_index >= index) out.pop()
         }
+        // Compute once with the parsed record, rather than rehashing every step on each session-list pass.
+        if (step && typeof step === 'object') Object.defineProperty(step, STEP_IDENTITY, { value: stepIdentity(step, branch) })
         out.push(step)
       } catch {}
     }

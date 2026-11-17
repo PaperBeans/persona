@@ -62,20 +62,20 @@ func TestPaseoBridgeJSRuntime(t *testing.T) {
 	old := fake("node-old", "16.20.0")
 	t.Setenv("PERSONA_NODEJS", old)
 	t.Setenv("PATH", dir) // nothing else to find
-	if js, err := findJSRuntime(context.Background(), t.TempDir()); err == nil && js.Path == old {
+	if js, err := findPaseoJSRuntime(context.Background(), t.TempDir()); err == nil && js.Path == old {
 		t.Fatal("a Node.js older than the bridge needs was taken")
 	}
 	app := fake("Paseo", "22.20.0")
 	t.Setenv("PERSONA_NODEJS", app)
 	t.Setenv("WANT_ELECTRON", "1")
-	js, err := findJSRuntime(context.Background(), t.TempDir())
+	js, err := findPaseoJSRuntime(context.Background(), t.TempDir())
 	if err != nil || js.Path != app || !js.Electron {
 		t.Fatalf("the app binary: %+v %v", js, err)
 	}
 	t.Setenv("WANT_ELECTRON", "")
 	node := fake("node", "22.16.0")
 	t.Setenv("PERSONA_NODEJS", node)
-	if js, err := findJSRuntime(context.Background(), t.TempDir()); err != nil || js.Path != node || js.Electron {
+	if js, err := findPaseoJSRuntime(context.Background(), t.TempDir()); err != nil || js.Path != node || js.Electron {
 		t.Fatalf("node: %+v %v", js, err)
 	}
 }
@@ -119,7 +119,7 @@ func TestPaseoDaemonRuntimeOnlyWhilePaseoAnswers(t *testing.T) {
 	if js, why := paseoDaemonRuntime(ctx, home); js.Path != "" || why != "" {
 		t.Fatalf("a Paseo that does not answer: %+v %q", js, why)
 	}
-	_, _ = findJSRuntime(ctx, home)
+	_, _ = findPaseoJSRuntime(ctx, home)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestPaseoDaemonRuntimeOnlyWhilePaseoAnswers(t *testing.T) {
 	if js, why := paseoDaemonRuntime(ctx, home); js.Path != "" || !strings.Contains(why, other) {
 		t.Fatalf("Paseo answers, its pid is another program: %+v %q", js, why)
 	}
-	_, _ = findJSRuntime(ctx, home)
+	_, _ = findPaseoJSRuntime(ctx, home)
 	if b, _ := os.ReadFile(ran); strings.Contains(string(b), other) {
 		t.Fatalf("another program was run: %s", b)
 	}
@@ -142,7 +142,7 @@ func TestPaseoDaemonRuntimeOnlyWhilePaseoAnswers(t *testing.T) {
 	if js, _ := paseoDaemonRuntime(ctx, home); js.Path != app || !js.Electron {
 		t.Fatalf("Paseo on its app: %+v", js)
 	}
-	js, err := findJSRuntime(ctx, home)
+	js, err := findPaseoJSRuntime(ctx, home)
 	if err != nil || js.Path != app || !js.Electron || js.Version != "22.20.0" {
 		t.Fatalf("the daemon's runtime first: %+v %v", js, err)
 	}

@@ -5,7 +5,8 @@
   "work_hint": "工具调用及其结果、思考过程，以及 Agent 在两次回复之间说的话。",
   "reading": "正在读取对话… 已读 {n} 条",
   "ready": "{n} 条消息 · {size}",
-  "partial_note": "对话太长，一次导出放不下：文件从 {from} 开始。",
+  "partial_note": "部分消息未能读取；最早保留的消息时间为 {from}。",
+  "partial_unknown": "部分消息未能读取。",
   "changed": "读取过程中对话变了，请重试。",
   "retry": "重试",
   "copy": "复制",
@@ -23,6 +24,7 @@
   "result": "结果",
   "error": "出错",
   "image": "图片",
+  "cut_unknown": "部分内容未导出。",
   "cut": "还有 {n} 个字没有导出",
-  "partial": "从 {from} 开始：更早的消息没有读取。"
+  "partial": "部分消息未能读取；最早保留的消息时间为 {from}。"
 }

@@ -186,6 +186,17 @@ class MeetingTranscriptionMockTests(Transcription, unittest.TestCase):
         self.assertEqual(final["meta"]["chars"], sum(len(s["text"]) for s in final["segments"][1:]))
         self.assertNotIn(CAP_LINE.rstrip("。"), json.dumps(final["minutes"], ensure_ascii=False))
 
+    def test_the_note_takers_role_frame(self):
+        """A meeting Persona isn't invited to (#8851) sends the role notes: the socket takes it as the hub does, no
+        bad_frame, and keeps it on the timeline."""
+        rid = self.recording()
+        ws = self.socket(rid)
+        ws.send({"type": "role", "at": 0, "attendance": "notes"})
+        self.pcm(ws, 4)
+        self.assertIsNone(ws("error", wait=0.3))
+        self.assertIn({"at": 0, "attendance": "notes"}, self.observed(rid)["timeline"]["roles"])
+        self.end(ws, 4)
+
     def test_echo_is_the_answers_words_not_its_time(self):
         rid = self.recording()
         ws = self.socket(rid)

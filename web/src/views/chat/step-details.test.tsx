@@ -61,13 +61,15 @@ afterEach(() => {
 });
 
 describe("a Codex file change (G001)", () => {
-  it("counts its patch's lines and opens it as a diff", () => {
+  it("counts its patch's lines and opens it in the changes panel", () => {
     render(step(use("Edit", { file_path: "/w/src/a.ts", change: "update", diff: "@@ -1,2 +1,3 @@\n keep\n-old\n+new\n+more" }), result("update /w/src/a.ts")));
     expect(host.textContent).toContain("+2");
     expect(host.textContent).toContain("-1");
     openRow();
-    const lines = [...document.querySelectorAll("[data-diff-line]")].map((l) => l.getAttribute("data-diff-line"));
-    expect(lines).toEqual(["same", "del", "add", "add"]);
+    expect(document.querySelector("[data-diff-line]")).toBeNull();
+    expect(panels.opened).toEqual([
+      expect.objectContaining({ kind: "changes", mid: "m", sid: "s", at: { path: "/w/src/a.ts", call: "c1" } }),
+    ]);
   });
 
   it("opens the file when the patch is empty (an empty new file, a pure move)", () => {

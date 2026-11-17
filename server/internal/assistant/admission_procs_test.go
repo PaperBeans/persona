@@ -33,7 +33,7 @@ func TestAdmissionProcsIdleProcessesDoNotFillSlots(t *testing.T) {
 	}
 	s.fleetKeepPrevious("busy", admissionFleetRows(statuses...))
 
-	release, err := s.admitAgentStart(context.Background(), "busy")
+	release, err := s.admitAgentStart(context.Background(), "busy", "work")
 	if err != nil {
 		t.Fatalf("idle processes must not fill the working-session cap, got %v", err)
 	}
@@ -53,7 +53,7 @@ func TestAdmissionProcsWorkingSessionsHitCap(t *testing.T) {
 	}
 	s.fleetKeepPrevious("busy", admissionFleetRows(statuses...))
 
-	_, err := s.admitAgentStart(context.Background(), "busy")
+	_, err := s.admitAgentStart(context.Background(), "busy", "work")
 	if err == nil || !strings.Contains(err.Error(), admissionText(s, "admission_procs", i18n.Args{
 		"count": 20, "limit": 20})) {
 		t.Fatalf("20 working sessions must hit the cap, got %v", err)
@@ -74,7 +74,7 @@ func TestAdmissionProcsWithoutOSTelemetryUsesFleetSnapshot(t *testing.T) {
 		}
 		s.fleetKeepPrevious("busy", admissionFleetRows(statuses...))
 
-		_, err := s.admitAgentStart(context.Background(), "busy")
+		_, err := s.admitAgentStart(context.Background(), "busy", "work")
 		if err == nil || !strings.Contains(err.Error(), admissionText(s, "admission_procs", i18n.Args{
 			"count": 20, "limit": 20})) {
 			t.Fatalf("nil OS telemetry must not bypass 20 working sessions, got %v", err)
@@ -89,7 +89,7 @@ func TestAdmissionProcsWithoutOSTelemetryUsesFleetSnapshot(t *testing.T) {
 		d.samples["busy"].ClaudeProcs = nil
 		s.fleetKeepPrevious("busy", admissionFleetRows(proto.StatusIdle, proto.StatusOffline))
 
-		release, err := s.admitAgentStart(context.Background(), "busy")
+		release, err := s.admitAgentStart(context.Background(), "busy", "work")
 		if err != nil {
 			t.Fatalf("nil OS telemetry with an all-idle snapshot must admit, got %v", err)
 		}
@@ -106,7 +106,7 @@ func TestAdmissionProcsAllIdleSnapshotIsZero(t *testing.T) {
 	d.samples["busy"] = admissionSample(1.0, 16*1024*1024*1024, 2*1024*1024*1024, 20)
 	s.fleetKeepPrevious("busy", admissionFleetRows(proto.StatusIdle, proto.StatusIdle, proto.StatusOffline))
 
-	release, err := s.admitAgentStart(context.Background(), "busy")
+	release, err := s.admitAgentStart(context.Background(), "busy", "work")
 	if err != nil {
 		t.Fatalf("an all-idle snapshot must read as zero working sessions, got %v", err)
 	}
@@ -123,7 +123,7 @@ func TestAdmissionProcsFallbackWithoutFleetSnapshot(t *testing.T) {
 	if _, ok := s.workingSessions("busy"); ok {
 		t.Fatal("a machine with no snapshot must report ok=false")
 	}
-	if _, err := s.admitAgentStart(context.Background(), "busy"); err == nil ||
+	if _, err := s.admitAgentStart(context.Background(), "busy", "work"); err == nil ||
 		!strings.Contains(err.Error(), admissionText(s, "admission_procs", i18n.Args{
 			"count": 20, "limit": 20})) {
 		t.Fatalf("without a fleet snapshot the OS process count must still deny, got %v", err)

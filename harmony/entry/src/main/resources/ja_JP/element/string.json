@@ -4082,7 +4082,7 @@
     },
     {
       "name": "knowledge_recording_transcribe",
-      "value": "中国語の文字起こし"
+      "value": "文字起こしをナレッジへ保存"
     },
     {
       "name": "knowledge_recording_retry_upload",
@@ -4166,7 +4166,7 @@
     },
     {
       "name": "knowledge_recording_retry_transcribe",
-      "value": "中国語の文字起こしを再試行"
+      "value": "文字起こしを再試行してナレッジへ保存"
     },
     {
       "name": "knowledge_recording_delete_local",
@@ -4663,6 +4663,42 @@
     {
       "name": "agent_collapse",
       "value": "折りたたむ"
+    },
+    {
+      "name": "knowledge_agent_configuration",
+      "value": "Agent タスクの設定"
+    },
+    {
+      "name": "control_expanded",
+      "value": "展開済み"
+    },
+    {
+      "name": "control_collapsed",
+      "value": "折りたたみ済み"
+    },
+    {
+      "name": "knowledge_filter_kind",
+      "value": "種類"
+    },
+    {
+      "name": "knowledge_filter_tag",
+      "value": "タグ"
+    },
+    {
+      "name": "knowledge_recording_save_notice",
+      "value": "文字起こしと録音情報をこの Hub のナレッジベースに保存します。音声はこの端末に残ります。オフライン文字起こしは中国語普通話に対応しています。"
+    },
+    {
+      "name": "forget_hub_notice",
+      "value": "この接続の認証情報、端末内の録音、キャッシュを削除します。Hub 上のデータは残ります。"
+    },
+    {
+      "name": "increase",
+      "value": "増やす"
+    },
+    {
+      "name": "decrease",
+      "value": "減らす"
     }
   ]
 }

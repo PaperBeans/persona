@@ -162,22 +162,26 @@ struct SyncEventTests {
         #expect(Session.resumeLine(cwd: "", command: "claude --resume", id: "abc") == "claude --resume abc")
     }
 
-    @MainActor @Test func rowMenuEqualityIncludesPermissions() {
-        let actions = AgentRowMenu.Actions()
-        let key = SessionKey(machineID: "m", sessionID: "s")
-        let old = AgentRowMenu(key: key, pinned: false, muted: false, looping: false, live: true, actions: actions)
-        let external = AgentRowMenu(key: key, pinned: false, muted: false, looping: false, live: true, terminal: false, attachable: true, actions: actions)
+    @MainActor @Test func rowMenuEqualityIncludesPermissions() throws {
+        let actions = AgentMenuHandlers()
+        let base = try JSON.decoder.decode(Session.self, from: Data(#"{"machine_id":"m","session_id":"s","status":"working","state":"working"}"#.utf8))
+        let old = AgentActionMenu(facts: AgentActionFacts(session: base), handlers: actions)
+        var externalSession = base
+        externalSession.sourceKind = "runtime"
+        externalSession.capabilities = try JSON.decoder.decode(SessionCapabilities.self, from: Data(#"{"attach":true}"#.utf8))
+        externalSession.capabilities?.attach = true
+        let external = AgentActionMenu(facts: AgentActionFacts(session: externalSession), handlers: actions)
         #expect(old != external)
         var attached = external
-        attached.attachable = false
+        attached.facts.session.capabilities?.attach = false
         #expect(attached != external)
         #expect(external == external)
         // A runtime's session renames and closes where its node says so (#6294): the menu redraws when that changes.
         var runtime = external
-        runtime.renamable = false
+        runtime.facts.session.capabilities?.rename = false
         #expect(runtime != external)
         runtime = external
-        runtime.closable = false
+        runtime.facts.session.capabilities?.close = false
         #expect(runtime != external)
     }
 

@@ -296,11 +296,6 @@ func (s *Service) askRound(id, asked string) (*acceptAsk, error) {
 func (s *Service) chooseOption(ctx context.Context, id, asked, label string) (acceptResult, error) {
 	s.reviewDismissals.actions.acquire(id)
 	defer s.reviewDismissals.actions.release(id)
-	if t, ok := s.todoNow(id); ok {
-		if dismissed, err := s.decisionDismissed(ctx, t); err != nil || dismissed {
-			return acceptResult{}, err
-		}
-	}
 	a, err := s.askRound(id, asked)
 	if err != nil || a == nil {
 		return acceptResult{}, err
@@ -314,6 +309,10 @@ func (s *Service) chooseOption(ctx context.Context, id, asked, label string) (ac
 		return acceptResult{}, errDecisionOption
 	}
 	t, _ := s.todoNow(id)
+	completeDismissal, err := s.prepareDismissalForAnswer(ctx, t)
+	if err != nil {
+		return acceptResult{}, err
+	}
 	l := s.botLang(ctx)
 	s.deadlineAnswered(ctx, id, a.AskedAt) // their own answer: no default at its deadline, even if the send fails
 	msg := i18n.T(l, "assistant-reports.decision_chosen_to_agent", i18n.Args{"option": label, "leads_to": a.Options[i].LeadsTo})
@@ -345,6 +344,7 @@ func (s *Service) chooseOption(ctx context.Context, id, asked, label string) (ac
 		s.userDecided(ctx, id)
 	}
 	s.endAsk(ctx, id, a.AskedAt, "", label)
+	completeDismissal()
 	return result, nil
 }
 
@@ -364,18 +364,16 @@ func (s *Service) routeDecisionAnswer(ctx context.Context, conversation, id, ask
 	if !ok || t.Origin != conversation {
 		return FeedItem{}, i18n.Err("assistant-tasks.route_no_task")
 	}
-	if dismissed, err := s.decisionDismissed(ctx, t); err != nil || dismissed {
-		if err != nil {
-			return FeedItem{}, err
-		}
-		return FeedItem{}, i18n.Err("assistant-feishu_cards.already_handled")
-	}
 	a, err := s.askRound(id, asked)
 	if err != nil {
 		return FeedItem{}, err
 	}
 	if a == nil {
 		return FeedItem{}, i18n.Err("assistant-feishu_cards.already_handled")
+	}
+	completeDismissal, err := s.prepareDismissalForAnswer(ctx, t)
+	if err != nil {
+		return FeedItem{}, err
 	}
 	s.deadlineAnswered(ctx, id, a.AskedAt)
 	item, err := s.routeToTaskChecked(ctx, conversation, id, text, func(cur Todo) bool {
@@ -391,6 +389,7 @@ func (s *Service) routeDecisionAnswer(ctx context.Context, conversation, id, ask
 	if _, err := s.insertDecision(ctx, st, row); err != nil {
 		return FeedItem{}, err
 	}
+	completeDismissal()
 	s.decisionsChanged(ctx, id, at)
 	s.userDecided(ctx, id)
 	s.endAsk(ctx, id, a.AskedAt, "", row.Choice)
@@ -437,11 +436,6 @@ func (s *Service) endAsk(ctx context.Context, id string, asked time.Time, respon
 func (s *Service) ownerCannotAnswer(ctx context.Context, id, asked, response string) (bool, error) {
 	s.reviewDismissals.actions.acquire(id)
 	defer s.reviewDismissals.actions.release(id)
-	if t, ok := s.todoNow(id); ok {
-		if dismissed, err := s.decisionDismissed(ctx, t); err != nil || dismissed {
-			return false, err
-		}
-	}
 	if !slices.Contains(ownerResponses, response) {
 		return false, nil
 	}
@@ -450,6 +444,10 @@ func (s *Service) ownerCannotAnswer(ctx context.Context, id, asked, response str
 		return false, err
 	}
 	t, _ := s.todoNow(id)
+	completeDismissal, err := s.prepareDismissalForAnswer(ctx, t)
+	if err != nil {
+		return false, err
+	}
 	now := time.Now().UTC()
 	stays := response == respondExplainFirst || response == respondDecideYourself && neverDefault(a.WhyOwner)
 	v, _, err := s.updateSupervision(ctx, id, func(v *Supervision) bool {
@@ -469,6 +467,7 @@ func (s *Service) ownerCannotAnswer(ctx context.Context, id, asked, response str
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", errAcceptStore, err)
 	}
+	completeDismissal()
 	if response == respondExplainFirst {
 		s.deadlineAnswered(ctx, id, a.AskedAt) // they asked for more first: its default is not taken meanwhile
 		b := &s.accept
@@ -544,7 +543,7 @@ func (s *Service) sweepDecisionAges(now time.Time) {
 	defer cancel()
 	for _, w := range s.awaitingAcceptance(ctx) {
 		a := w.ask
-		if !decideAsk(&a) {
+		if !decideAsk(&a) || a.AgentReply != nil {
 			continue
 		}
 		// One that recommends nothing goes back as undecidable instead (undecidableSignal): not both.
@@ -557,7 +556,7 @@ func (s *Service) sweepDecisionAges(now time.Time) {
 		b := &s.accept
 		b.mu.Lock()
 		cur := b.asks[w.todo]
-		if cur == nil || !cur.AskedAt.Equal(a.AskedAt) || !cur.AcceptedAt.IsZero() {
+		if cur == nil || !cur.AskedAt.Equal(a.AskedAt) || !cur.AcceptedAt.IsZero() || cur.AgentReply != nil {
 			b.mu.Unlock()
 			continue
 		}
@@ -595,24 +594,32 @@ func (s *Service) undecidableSignal(ctx context.Context, t Todo, now time.Time) 
 		return superviseSignal{}, false
 	}
 	r := v.Reviews[len(v.Reviews)-1]
-	if !r.RestateAt.IsZero() || now.Sub(r.At) < decisionSettle {
+	legacy := v.legacyOwnerPriorityReview() != nil
+	if !r.RestateAt.IsZero() || !legacy && now.Sub(r.At) < decisionSettle {
 		return superviseSignal{}, false
 	}
 	a, ok := s.askCopy(t.ID)
-	if ok && decideAsk(&a) && !acceptAskStale(&a, t) {
+	if !legacy && ok && decideAsk(&a) && !acceptAskStale(&a, t) {
 		if a.AcceptedAt.IsZero() && a.Recommend != "" || !a.AcceptedAt.IsZero() && now.Sub(a.AcceptedAt) < decisionSettle {
 			return superviseSignal{}, false // answerable, or its answer is on its way to the agent
 		}
 	}
-	if _, _, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
+	_, changed, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
 		n := len(v.Reviews)
-		if n == 0 || !v.Reviews[n-1].At.Equal(r.At) || !v.Reviews[n-1].RestateAt.IsZero() {
+		if v.State != reviewNeedsUser || n == 0 || !v.Reviews[n-1].At.Equal(r.At) || !v.Reviews[n-1].RestateAt.IsZero() {
+			return false
+		}
+		if current, ok := s.todoNow(t.ID); !ok || current.DoneAt != nil {
 			return false
 		}
 		v.Reviews[n-1].RestateAt = now.UTC()
 		return true
-	}); err != nil {
+	})
+	if err != nil {
 		s.logf("task %s: undecidable: %v", t.ID, err)
+		return superviseSignal{}, false
+	}
+	if !changed {
 		return superviseSignal{}, false
 	}
 	s.logf("task %s: waits for the owner with nothing they can answer: back to its supervisor to restate it", t.ID)

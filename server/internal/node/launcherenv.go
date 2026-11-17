@@ -12,9 +12,8 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// A provider's environment for claude (#2455, docs/integrations/launchers.md): one pure function both ways of running the main
-// conversation and every Agent use, the CLI (its --settings env, `personad launch`'s env) and the Agent SDK bridge (the
-// child's env and settings.env). Cindy's env-builder, the Anthropic part.
+// A provider's environment for claude (#2455, docs/integrations/launchers.md): one pure function the main conversation
+// and every Agent use on the CLI (its --settings env, `personad launch`'s env). Cindy's env-builder, the Anthropic part.
 
 // legacyEnvClear: what `personad launch` has always dropped from the shell (another launcher or account) before a
 // managed launcher from before #2455 runs. A trailing "*" is a prefix.
@@ -578,7 +577,8 @@ func providerEnv(l proto.ManagedLauncher, model, effort string, mainConversation
 		env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = strconv.Itoa(w)
 	}
 	// The compact window the provider declares, else its model's window; none when neither is known, and Claude Code
-	// compacts by the model it knows. The same for an assistant conversation, main or not, as for an agent (#3066).
+	// compacts by the model it knows. The same for an assistant conversation as for an agent (#3066); an assistant start
+	// writes its own, which holds the main conversation to assistant.main_compact_window (#7314, perStartEnv).
 	if c := cmp.Or(l.CompactWindow, w); c > 0 {
 		env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = strconv.Itoa(c)
 	}
@@ -665,8 +665,8 @@ func envList(env map[string]string) []string {
 }
 
 // perStartEnv: what an assistant start decides (its compact window, the launcher's declared one as
-// assistantCompactionPolicy reads it; its thinking level, switched while it runs) and so never goes into settings env,
-// which would win over the start's own environment.
+// assistantCompactionPolicy reads it, capped for the main conversation; its thinking level, switched while it runs) and
+// so never goes into settings env, which would win over the start's own environment.
 var perStartEnv = []string{"CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_EFFORT_LEVEL"}
 
 // pinnedEnv is env without perStartEnv: the part pinned over the user's ~/.claude/settings.json (the gateway, its key,

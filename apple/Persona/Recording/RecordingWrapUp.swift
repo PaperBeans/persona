@@ -42,8 +42,8 @@ struct RecordingWrapUp: View {
             }
             .safeAreaInset(edge: .top, spacing: Theme.Space.flush) {
                 HStack {
+                    RecordingCornerButton(kind: .close, identifier: "recording-wrapup-done") { finish() }
                     Spacer(minLength: Theme.Space.flush)
-                    RecordingSheetCloseButton(title: String(localized: "Done"), identifier: "recording-wrapup-done") { finish() }
                 }
                 .padding(.horizontal, Theme.Space.page)
             }

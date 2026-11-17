@@ -13,7 +13,8 @@
   "error": "Error",
   "image": "Image",
   "cut": "{n} more characters not included",
-  "partial": "Starts at {from}: earlier messages were not read."
+  "cutUnknown": "Some text was not included.",
+  "partial": "Some messages could not be read. Earliest retained message: {from}."
  },
  "meta": {
   "title": "Fix the  login\nredirect",
@@ -138,7 +139,7 @@
      "text": "While you were away"
     }
    ],
-   "markdown": "# Fix the login redirect\n\n- Agent: Claude Code\n- Computer: MacBook\n- Folder: ~/code/app\n- Exported: 2026-11-14 18:00\n\n## You · 2026-11-14 10:01\n\nWhy does login redirect to /home twice?\n\n_[Image]_\n\n## Claude Code · 2026-11-14 10:09\n\nThe guard runs once on mount\n\nand again after the token refresh.\n\nI'll move it into the router.\n\n_Context compacted_\n\n## Persona · 2026-11-14 10:12\n\nTask “Login redirect” is done\n\nReview the change.\n\n## You · 2026-11-14 10:13\n\nCan you also check the logout path?\n\n## Claude Code · 2026-11-14 10:14\n\nLogout is fine: it\n\n_22 more characters not included_\n\n## From release-bot · 2026-11-14 10:15\n\nFYI the CI is green.\n"
+   "markdown": "# Fix the login redirect\n\n- Agent: Claude Code\n- Computer: MacBook\n- Folder: ~/code/app\n- Exported: 2026-11-14 18:00\n\n## You · 2026-11-14 10:01\n\nWhy does login redirect to /home twice?\n\n_[Image]_\n\n## Claude Code · 2026-11-14 10:09\n\nThe guard runs once on mount\n\nand again after the token refresh.\n\nI'll move it into the router.\n\n_Context compacted_\n\n## Persona · 2026-11-14 10:12\n\nTask “Login redirect” is done\n\nReview the change.\n\n## You · 2026-11-14 10:13\n\nCan you also check the logout path?\n\n## Claude Code · 2026-11-14 10:14\n\nLogout is fine: it\n\n_Some text was not included._\n\n## From release-bot · 2026-11-14 10:15\n\nFYI the CI is green.\n"
   },
   {
    "name": "work_steps",
@@ -234,7 +235,7 @@
      "text": "Done."
     }
    ],
-   "markdown": "# Fix the login redirect\n\n- Agent: Claude Code\n- Computer: MacBook\n- Folder: ~/code/app\n- Exported: 2026-11-14 18:00\n\n## You · 2026-11-14 10:01\n\nRun the tests\n\n## Claude Code · 2026-11-14 10:02\n\n<details>\n<summary>Thinking</summary>\n\nI should run npm test first.\n\n</details>\n\n<details>\n<summary>Bash: npm test -- --run</summary>\n\n**Input**\n\n```json\n{\n  \"command\": \"npm test -- --run\",\n  \"description\": \"Run tests\"\n}\n```\n\n**Result**\n\n```\nTests  12 passed\nDone in 3s\n```\n\n</details>\n\nAll 12 pass. The config looks like this:\n\n```ts\nexport default {}\n```\n\n<details>\n<summary>Read: /repo/src/&lt;secret&gt;.ts</summary>\n\n**Input**\n\n```json\n{\n  \"file_path\": \"/repo/src/<secret>.ts\"\n}\n```\n\n**Error**\n\n```\nFile not found\n```\n\n_5000 more characters not included_\n\n</details>\n\n<details>\n<summary>Result</summary>\n\n**Result**\n\n```\noutput of a call before the export starts\n```\n\n</details>\n\nDone.\n"
+   "markdown": "# Fix the login redirect\n\n- Agent: Claude Code\n- Computer: MacBook\n- Folder: ~/code/app\n- Exported: 2026-11-14 18:00\n\n## You · 2026-11-14 10:01\n\nRun the tests\n\n## Claude Code · 2026-11-14 10:02\n\n<details>\n<summary>Thinking</summary>\n\nI should run npm test first.\n\n</details>\n\n<details>\n<summary>Bash: npm test -- --run</summary>\n\n**Input**\n\n```json\n{\n  \"command\": \"npm test -- --run\",\n  \"description\": \"Run tests\"\n}\n```\n\n**Result**\n\n```\nTests  12 passed\nDone in 3s\n```\n\n</details>\n\nAll 12 pass. The config looks like this:\n\n```ts\nexport default {}\n```\n\n<details>\n<summary>Read: /repo/src/&lt;secret&gt;.ts</summary>\n\n**Input**\n\n```json\n{\n  \"file_path\": \"/repo/src/<secret>.ts\"\n}\n```\n\n**Error**\n\n```\nFile not found\n```\n\n_Some text was not included._\n\n</details>\n\n<details>\n<summary>Result</summary>\n\n**Result**\n\n```\noutput of a call before the export starts\n```\n\n</details>\n\nDone.\n"
   },
   {
    "name": "work_off",
@@ -347,7 +348,7 @@
      "text": "…and that was the fix."
     }
    ],
-   "markdown": "# Fix the login redirect\n\n- Agent: Claude Code\n- Computer: MacBook\n- Folder: ~/code/app\n- Exported: 2026-11-14 18:00\n\n> Starts at 2026-11-14 10:30: earlier messages were not read.\n\n## Claude Code · 2026-11-14 10:30\n\n…and that was the fix.\n"
+   "markdown": "# Fix the login redirect\n\n- Agent: Claude Code\n- Computer: MacBook\n- Folder: ~/code/app\n- Exported: 2026-11-14 18:00\n\n> Some messages could not be read. Earliest retained message: 2026-11-14 10:30.\n\n## Claude Code · 2026-11-14 10:30\n\n…and that was the fix.\n"
   }
  ]
 }

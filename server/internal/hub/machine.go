@@ -61,6 +61,14 @@ type Machine struct {
 	responseFences       map[string]*conversationResponseFence
 	// lists decodes the manager's lists (fleet.sessions), only the sessions whose bytes changed (fleet_link.go).
 	lists proto.SessionListDecoder
+	// archived are the archived rows the manager archivedBy tells apart from its list (fleet.archived, #6836), in the
+	// order told, and archivedAt each one's index by id. The apps never get them (Hub.shown leaves archived rows out);
+	// everything else that read the manager's list when they were in it reads them too (session, sessionList,
+	// keptWhole), so a row answers the same either way (a port it listens on, a lookup by id, a busy agent). Replaced
+	// whole, never changed in place.
+	archived   []proto.Session
+	archivedAt map[string]int
+	archivedBy string
 	// raws are the bytes each session of the list rawsOf names came in, by id ("" for an id the list names twice),
 	// when that list was decoded from them: a list kept any other way since has none (rawsFor). Never changed: a new
 	// list gets a new map.
@@ -299,12 +307,13 @@ func (m *Machine) notify(event string, params any) error {
 	return p.Notify(event, params)
 }
 
+// sessionList is a copy of the manager's whole list: its list, then the archived rows it told apart (archived).
+// What the apps get leaves archived rows out (Hub.shown) either way.
 func (m *Machine) sessionList() []proto.Session {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]proto.Session, len(m.sessions))
-	copy(out, m.sessions)
-	return out
+	out := make([]proto.Session, 0, len(m.sessions)+len(m.archived))
+	return append(append(out, m.sessions...), m.archived...)
 }
 
 // keptSessions is the machine's list itself, not a copy: only to be read (Machine.sessions). The pushes read a busy
@@ -315,6 +324,16 @@ func (m *Machine) keptSessions() []proto.Session {
 	return m.sessions
 }
 
+// keptWhole is keptSessions and the archived rows told apart (archived), neither copied, only to be read: the
+// manager's whole list, for what reads every row it listed rather than what the apps get (port access, busy agents,
+// space names).
+func (m *Machine) keptWhole() (list, archived []proto.Session) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sessions, m.archived
+}
+
+// session is session id as the manager listed it: in its list, else among its archived rows (archived).
 func (m *Machine) session(id string) (proto.Session, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -323,7 +342,39 @@ func (m *Machine) session(id string) (proto.Session, bool) {
 			return m.sessions[i], true
 		}
 	}
+	if i, ok := m.archivedAt[id]; ok {
+		return m.archived[i], true
+	}
 	return proto.Session{}, false
+}
+
+// setArchived keeps list as the archived rows manager told apart (fleet.archived).
+func (m *Machine) setArchived(manager string, list []proto.Session) {
+	at := archivedIndex(list)
+	m.mu.Lock()
+	m.archived, m.archivedAt, m.archivedBy = list, at, manager
+	m.mu.Unlock()
+}
+
+// archivedIndex is each row's index in list by id, the first for an id listed twice, as a lookup in the list finds it.
+func archivedIndex(list []proto.Session) map[string]int {
+	at := make(map[string]int, len(list))
+	for i := range list {
+		if _, ok := at[list[i].SessionID]; !ok {
+			at[list[i].SessionID] = i
+		}
+	}
+	return at
+}
+
+// archivedOnlyOf drops the archived rows unless manager told them: a list from another manager (the machine moved to
+// one that tells them in its list) has its own.
+func (m *Machine) archivedOnlyOf(manager string) {
+	m.mu.Lock()
+	if m.archivedBy != manager {
+		m.archived, m.archivedAt, m.archivedBy = nil, nil, ""
+	}
+	m.mu.Unlock()
 }
 
 // watcherJoined counts one more app subscribed to session id, watcherLeft one fewer. Neither tells the node: the
@@ -417,14 +468,22 @@ func (m *Machine) setSessionListRaws(list []proto.Session, raws []string) {
 	for _, s := range list {
 		listed[s.SessionID] = true
 	}
+	// An archived row told apart (archived) is still the manager's, as when it came in the list.
+	gone := func(id string) bool {
+		if listed[id] {
+			return false
+		}
+		_, archived := m.archivedAt[id]
+		return !archived
+	}
 	for id := range m.lastSeq {
-		if !listed[id] && !m.watchStateInUseLocked(id) {
+		if gone(id) && !m.watchStateInUseLocked(id) {
 			delete(m.lastSeq, id)
 		}
 	}
 	var unsettled []string
 	for id, state := range m.nodeWatch {
-		if state == nodeWatchUnknown && !listed[id] && m.watchers[id] <= 0 {
+		if state == nodeWatchUnknown && gone(id) && m.watchers[id] <= 0 {
 			unsettled = append(unsettled, id)
 		}
 	}
@@ -485,14 +544,16 @@ func (m *Machine) settleEnded(id string) {
 	delete(m.lastSeq, id)
 }
 
-// listsLocked reports whether the node's last list has session id; m.mu is held.
+// listsLocked reports whether the node's last list has session id, among the archived rows told apart too
+// (archived); m.mu is held.
 func (m *Machine) listsLocked(id string) bool {
-	for _, s := range m.sessions {
-		if s.SessionID == id {
+	for i := range m.sessions {
+		if m.sessions[i].SessionID == id {
 			return true
 		}
 	}
-	return false
+	_, ok := m.archivedAt[id]
+	return ok
 }
 
 // watchStateInUseLocked reports whether an app watches session id or the node may be watching it; m.mu is held.
@@ -677,6 +738,16 @@ func (m *Machine) onEvent(event string, params json.RawMessage) {
 			// Each session is still what its bytes give but for its rev, which its kept row is checked against too
 			// (encodeKept): the sessions whose rev changed are encoded again, the others' rows still hold.
 			m.rawsOf = keptListOf(m.sessions)
+		}
+		// An archived row told apart (archived) takes its rev as it did in the list: a lookup by id reads it.
+		cloned := false
+		for id, r := range p.Revs {
+			if i, ok := m.archivedAt[id]; ok {
+				if !cloned {
+					m.archived, cloned = slices.Clone(m.archived), true // replaced whole, never changed in place
+				}
+				m.archived[i].Rev = r
+			}
 		}
 		m.mu.Unlock()
 		// Every app, not only those watching: this is what lets them pull a session before it is opened.

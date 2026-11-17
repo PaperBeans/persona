@@ -5,7 +5,7 @@
 import { act, Profiler } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Sheet } from "../../../lib/sheets";
+import { delimitedSheet, type Sheet } from "../../../lib/sheets";
 import { SheetView } from "./SheetView";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -117,5 +117,26 @@ describe("SheetView grid redraws", () => {
     pointer("pointermove", 2);
     expect(commits).toBe(1);
     expect(selection()).toBe("A2:A3");
+  });
+});
+
+describe("SheetView inferred CSV cells", () => {
+  it.each([
+    ['name;notes\nAlice;"one,two,three,four"\n', "one,two,three,four"],
+    ['name,notes\nAlice,"one;two;three;four"\n', "one;two;three;four"],
+  ])("draws and copies quoted punctuation as one cell in %j", async (text, note) => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      act(() => root.render(<SheetView key="csv" sheets={[delimitedSheet("data.csv", text)]} />));
+      expect.soft([...grid().querySelectorAll("div")].some((cell) => cell.childElementCount === 0 && cell.textContent === note)).toBe(true);
+      act(() => { grid().dispatchEvent(new KeyboardEvent("keydown", { key: "a", ctrlKey: true, bubbles: true })); });
+      await act(async () => { grid().dispatchEvent(new KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true })); });
+      expect.soft(writeText).toHaveBeenCalledExactlyOnceWith(`name\tnotes\nAlice\t${note}`);
+    } finally {
+      if (original) Object.defineProperty(navigator, "clipboard", original);
+      else Reflect.deleteProperty(navigator, "clipboard");
+    }
   });
 });

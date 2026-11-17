@@ -1091,6 +1091,15 @@ nonisolated extension APIClient {
         try await getDecodedOffMain("/api/v1/todos", as: TodosResponse.self).todos
     }
 
+    /// The list, unless it is still the one tagged `etag` (a 304: nil list, #9590), and its tag. Most `todos` events
+    /// change nothing the list holds; reading it again was about 200 KB each on a busy hub.
+    func todos(etag: String?) async throws -> (list: [TodoItem]?, etag: String?) {
+        let answer = try await conditionalGet("/api/v1/todos", query: [:], etag: etag)
+        guard let data = answer.data else { return (nil, answer.etag) }
+        let list = try await Task.detached(priority: .userInitiated) { try JSON.decoder.decode(TodosResponse.self, from: data).todos }.value
+        return (list, answer.etag)
+    }
+
     /// Starts an open plan; `edits` replace the fields the user changed (by index), `remember` lets this kind start
     /// without asking next time. `scheduleGrant` (#8045) lets the scheduled task whose run planned it start this kind by
     /// itself from now on: sent only when set, so a hub before it never sees the key.

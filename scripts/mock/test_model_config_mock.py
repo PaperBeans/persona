@@ -254,6 +254,8 @@ class MeetingModelMockTests(MockHubTests):
             self.assertNotIn("runtime", own["effective"])
 
     def test_runtime_is_rejected_and_never_inherited(self):
+        """The runtime as an older hub keeps it (MOCK_MODEL_DEFAULTS stands for one), for the clients' picker that stays for
+        such hubs; a current hub offers no runtimes and accepts and ignores one in a save (#9799)."""
         main_path = "/api/v1/model-config/purposes/assistant"
         main = self.request(main_path, {"revision": 0, "runtime": "agentsdk", "model": "main-model"})["purpose"]
         self.assertEqual(main["effective"]["runtime"], "agentsdk")

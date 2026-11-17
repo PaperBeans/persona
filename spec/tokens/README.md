@@ -14,6 +14,7 @@ Design values shared across clients and documented platform-specific differences
 | 同上 | `common.<mode>` | `Theme.brand/danger/positive/caution/cautionText/ai/loop/countBadge`、代码和终端色、`Theme.Diff`、`Theme.Hue`、`Theme.Fill` |
 | 同上 | `system.<mode>` | `Theme.systemPage/systemCard`、SwiftUI 的 `Color.primary/secondary`、UIKit 系统 fill 的显式回退值；见下文限制 |
 | `color.status.json` | `status.<mode>.<state>` | `ios/Shared/StatusPalette.swift`；待唤醒和已屏蔽的映射取 `ios/Persona/Views/Chats/ChatsView.swift` 的分组表 |
+| `color.metric.json` | `metric.<mode>.<series>` | `apple/Persona/Views/Machines/MetricCharts.swift` `MetricColor`; Android's additional disk series uses its own neutral slate |
 | `dimension.json` | `radius`、`space`、`size`、`watch` | `Theme.Radius`、`Theme.Space`、`Theme.Size`、`Theme.Watch`；触控区取 `docs/archive/redesign/README.md` D7，胶囊按短边的一半。共享 `size.*` 必须与 iOS 同名同值 |
 | `dimension-android.json` | `android.size` | Android 专用布局尺寸，不冒充 iOS 的 `Theme.Size`；由生成器输出 `Tokens.Android.Size`，与共享尺寸分开校验 |
 | `type.json` | `type.<level>` | `Theme.Font` 的九个层级（display、title、heading、body、secondary、caption、sectionHeader、label、code）：文本样式、字重，以及 `Theme.Level` 的 iPhone 字号和行高倍数 |
@@ -139,7 +140,7 @@ CSS 在 `:root` 暴露全路径变量，例如 `--semantic-native-light-accent`�
 
 底线为按钮字与主色 3.5、主色链接与页面 3、用户气泡正文 4.5。其余正文、次要文字、状态字、计数、diff 符号与终端文字按 4.5；大字按 3，但达到大字尺寸和字重条件前仍按正文要求。状态标签还检查 `text / tint / pageBackground` 的透明度合成结果。点色与发丝描边不作为文字对比度规则；实际控件的非文字边界与焦点可见性仍需组件验收。
 
-当前 339 个 token，29 条规则展开为 348 个组合，77 个不达标（底线 1 项，已列入已知例外；建议项 76 项）。按风格归类如下，同一公共色在不同风格中分别计数。
+当前 351 个 token，29 条规则展开为 348 个组合，77 个不达标（底线 1 项，已列入已知例外；建议项 76 项）。按风格归类如下，同一公共色在不同风格中分别计数。
 
 | 风格 | 浅色不达标 | 深色不达标 |
 | --- | --- | --- |

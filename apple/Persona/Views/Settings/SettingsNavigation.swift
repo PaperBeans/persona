@@ -148,6 +148,7 @@ struct SettingsAboutPage: View {
     var body: some View {
         SettingsForm {
             Section { LabeledContent("Version", value: version) }
+            DevModeSection()
             Section {
                 DisclosureGroup("Diagnostics") {
                     LabeledContent("Build") { Text(commit).font(Theme.Font.code).textSelection(.enabled) }

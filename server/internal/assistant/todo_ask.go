@@ -138,7 +138,7 @@ func (s *Service) pushDecisionErr(ctx context.Context, id string) (bool, error) 
 	for _, o := range a.Options {
 		n.Todo.Options = append(n.Todo.Options, o.Label)
 	}
-	if d := deadlineText(l, s.location(ctx), a.Deadline, a.Reversible, time.Now()); d != "" {
+	if d := deadlineText(l, s.location(ctx), a.Deadline, a.Reversible, time.Now()); d != "" && a.AgentReply == nil {
 		n.Body += "\n" + d
 	}
 	// Self-contained (#3804): where it came from and stands, what each option leads to, what waiting costs.

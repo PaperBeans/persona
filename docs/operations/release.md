@@ -12,8 +12,8 @@ outside the repo, e.g. `~/.appstoreconnect/`), `app_store.app_id` (the app recor
 
 | Item | Notes |
 | --- | --- |
-| Bundle ID | iOS `<bundle_id>`, watch `<bundle_id>.watchkitapp`, Live Activity `<bundle_id>.liveactivity`, notification service extension `<bundle_id>.notify` (push relay, `docs/operations/push-relay.md`), share extension `<bundle_id>.share` (#4586); new watch widget `app.watch_widget_bundle_id` (default `<bundle_id>.watchkitapp.widgets`, #1147). `scripts/release/asc_signing.py` covers these targets; #1147 did not register the new resources |
-| App ID capabilities | iOS: `PUSH_NOTIFICATIONS`, `USERNOTIFICATIONS_TIMESENSITIVE` (time-sensitive notifications, #1572), `HEALTHKIT`, `APP_GROUPS`; Live Activity: `APP_GROUPS`; watch app and watch widget: `APP_GROUPS` using the separate configured watch group. The App Group itself can only be created on the website and attached to App IDs ("App Group" below) |
+| Bundle ID | iOS `<bundle_id>`, watch `<bundle_id>.watchkitapp`, Live Activity `<bundle_id>.liveactivity`, notification service extension `<bundle_id>.notify` (push relay, `docs/operations/push-relay.md`), share extension `<bundle_id>.share` (#4586); new watch widget `app.watch_widget_bundle_id` (default `<bundle_id>.watchkitapp.widgets`, #1147); with `app.siri_calls` only, the SiriKit extension `<bundle_id>.callintents` ("Siri calls" below). `scripts/release/asc_signing.py` covers these targets; #1147 did not register the new resources |
+| App ID capabilities | iOS: `PUSH_NOTIFICATIONS`, `USERNOTIFICATIONS_TIMESENSITIVE` (time-sensitive notifications, #1572), `HEALTHKIT`, `APP_GROUPS`, and `SIRIKIT` with `app.siri_calls` only; Live Activity: `APP_GROUPS`; watch app and watch widget: `APP_GROUPS` using the separate configured watch group. The App Group itself can only be created on the website and attached to App IDs ("App Group" below) |
 | Provisioning profiles | "Persona App Store", "Persona Watch App Store", "Persona Share App Store", etc. (`IOS_APP_STORE`; the share extension's was added 2026-11-06, so run `asc_signing.py` once before its first release to register its Bundle ID and profile); `asc_signing.py` deletes and recreates them and installs them into `~/Library/MobileDevice/Provisioning Profiles/` |
 | Signing identity | `Apple Distribution: … (team_id)` in the login keychain |
 | App Store Connect App ID | After creating the app record on the website, put it in the config's `app_store.app_id` |
@@ -65,7 +65,7 @@ What `release.sh` does:
    the archive uses automatically signed development profiles (so `aps-environment` in the archive is `development`), and export re-signs with the App Store profiles to
    `production`. With `NO_UPLOAD=1`, `destination` changes from `upload` to `export`, and it additionally checks that `aps-environment` in the exported ipa
    really is `production`.
-6. `scripts/release/entitlements.py check`: in the archive (plus the exported ipa with `NO_UPLOAD=1`), every bundle carries its target's keychain groups, and the group name in Info.plist is among them; see "entitlements" below.
+6. `scripts/release/entitlements.py check`: in the archive (plus the exported ipa with `NO_UPLOAD=1`), every bundle carries its target's keychain groups, and the group name in Info.plist is among them; see "entitlements" below. It also fails when any binary in the app links CallKit; see "No CallKit" below.
 7. `git tag -f testflight/<build number>`.
 
 A build shows up in TestFlight about 10–30 minutes after archiving. `asc_testflight.py wait [minutes] [build number]` checks every 30 seconds until
@@ -237,6 +237,44 @@ Steps on the developer website (developer.apple.com › Account › Certificates
 5. After a release export, `scripts/release/entitlements.py check` verifies the App Groups of the app and its extensions, including both watch bundles.
 
 The #1147 system-surface store is independent of Fleet's avatar files, because it contains per-device credentials. Validate first unlock, offline expiry, pairing/rotation/removal, WidgetCenter full reports (including removal of the last configuration), paired-watch direct requests, and real background `extension_widget` pushes on devices before claiming acceptance. Simulator-only unsigned builds cannot validate App Group signing or background APNs delivery. No build, screenshots or device acceptance were run for #1147 while builds were paused.
+
+## No CallKit (#9290)
+
+App Review rejects a build offered in China when **any** binary in it links `CallKit.framework`, even weakly and even when the only use is a `CXCallObserver` inside an SDK. Calls go through LiveCommunicationKit (LCK). The system LCK framework links CallKit itself; that is Apple's binary, not the app's, and does not count. Only the Mach-O files inside `Persona.app` count. LCK reports its errors in CallKit's domains (`com.apple.CallKit.error.…`). Compare those as strings, and never `import CallKit` for a constant.
+
+Two checks:
+
+- **Sources** (`scripts/test/test_apple_no_callkit.py`, no build needed): every Swift and Objective-C file under `apple/` (all targets and their tests, `Shared`, the local packages) must not import CallKit or name a `CX…` type, outside comments and strings. An unused import counts, in any spelling: ``import `CallKit` ``, `import` and the name on different lines, `@import CallKit;`. The XcodeGen specs, `Package.swift` manifests, module maps, xcconfig files and the xcconfig `scripts/persona_config.py` writes must not mention CallKit outside a comment (`sdk: CallKit.framework`, `-framework` / `-weak_framework CallKit`, `-lswiftCallKit`, `.linkedFramework("CallKit")`, a Call Directory extension). It runs in `scripts/ci/guards.sh`, at the start of `scripts/ci/apple.sh`, and in `scripts/check-fast.sh` for `apple/` changes.
+- **Binaries** (`scripts/release/check_no_callkit.py <.app | .ipa | .xcarchive>`): every file in the bundle that starts with a Mach-O magic number is checked, whatever its name (the main binary, `*.debug.dylib`, `Frameworks/*`, `PlugIns/*.appex`, the Watch app and its extensions), in every architecture. `otool -arch all -L` lists the dylib load commands, and any install name with CallKit in it fails the check (`CallKit.framework`, `libswiftCallKit.dylib`, weak or re-exported). The check prints `binary [arch] → dependency` for each one. An otool error, or a bundle with no Mach-O in it, also fails. On success it prints `no CallKit: N Mach-O files checked`. Only the binaries show what a remote package or a prebuilt framework links. `scripts/ci/apple.sh` runs it on the device build and on the simulator build-for-testing app. `entitlements.py check` runs it on the release archive, and with `NO_UPLOAD=1` or `UPLOADER=asc` on the exported ipa too. Export re-signs the binaries but does not change their load commands, so the archive check also covers the default upload.
+
+Run them by hand:
+
+```sh
+python3 scripts/test/test_apple_no_callkit.py
+python3 scripts/release/check_no_callkit.py <Persona.app | .ipa | .xcarchive>
+```
+
+## Siri calls (#9290, off by default)
+
+"Call Persona using Persona" goes through SiriKit (`docs/apple/siri.md`, "Calling Persona"). The app is single-scene, so the intent needs an Intents extension (`PersonaCallIntents`, bundle ID `<bundle_id>.callintents`) with its own App ID and App Store profile, and the app needs the Siri entitlement (`com.apple.developer.siri`) with `SIRIKIT` on its App ID. That is account work, so it is behind config.json `app.siri_calls` (default `false`, `docs/operations/config.md`). The App Shortcut **Call Persona** ("Hey Siri, call Persona") needs none of it and ships in every build.
+
+With the switch off, the project, the signing preflight (`asc_signing.py --check`), the export options and `entitlements.py check` are exactly what they were. With it on:
+
+- `persona_config.py env` exports `PERSONA_SIRI_CALLS=YES`, so xcodegen merges `apple/siri-calls.yml`: the extension target embedded in the app; the app signed with `apple/PersonaSiriCalls.entitlements` (its entitlements plus `com.apple.developer.siri`, written by xcodegen, git-ignored); `NSSiriUsageDescription` (translated in `InfoPlist.xcstrings`) and `PersonaSiriCalls` put into the built Info.plist before signing, as the commit stamp is; and Siri's example phrases (`AppIntentVocabulary.plist`, en / zh-Hans / ja; without them App Store Connect refuses the upload with ITMS-90626). No tracked file is rewritten, so the release worktree stays clean, which the unattended worker checks after every step. That is also why the app's entitlements path is in `apple/app-entitlements.yml`: in an XcodeGen merge `project.yml`'s own values win over every include's, while a later include's win over an earlier one's, so only a path set in an include can be moved by the overlay.
+- The export options name the extension's profile, "Persona Call Intents App Store" (`persona_config.py export-options`), and `persona_config.py xcconfig` lists the entitlement in `apple/PersonaOptIn.entitlements` too.
+- `asc_signing.py` asks for `SIRIKIT` on the iPhone App ID and for the extension's Bundle ID ("Persona Call Intents") and profile. `--check` (the start of every `release.sh`, the unattended worker's included) fails until both are there: that is why the switch must not be turned on first.
+- `entitlements.py check` fails when the exported app lacks the Siri entitlement.
+
+Enabling it, once, by the account's maintainer (Account Holder or Admin, or the App Manager API key the scripts use), in this order:
+
+1. Make a copy of the config with `"siri_calls": true` under `app` (outside the repository, like the config itself) and prepare the app's App ID with it: `PERSONA_CONFIG=<copy> python3 scripts/release/asc_signing.py --only <bundle_id>`. This turns `SIRIKIT` on and rebuilds "Persona App Store" (changing a capability invalidates the old profile anyway). The other targets' profiles are left alone. Releases from the real config, still off, go on working: a profile that allows Siri signs an app that doesn't ask for it.
+2. Register the extension and make its profile: `PERSONA_CONFIG=<copy> python3 scripts/release/asc_signing.py --only <bundle_id>.callintents`. It needs no capability (Siri's entitlement is the app's).
+3. Signing development builds with these profiles: run both again with `--dev`.
+4. `PERSONA_CONFIG=<copy> python3 scripts/release/asc_signing.py --check` must pass, then `PERSONA_CONFIG=<copy> NO_UPLOAD=1 ./scripts/release/release.sh`: archive, export with the extension's profile, and `entitlements.py check` on the ipa (the Siri entitlement, no CallKit in the extension either).
+5. Turn `app.siri_calls` on in the real config, and in the unattended release worker's config if it has its own. The next release carries the extension.
+6. On a phone, from TestFlight: Persona asks once whether it may use Siri (allow it; Settings › Apps › Persona › Siri changes it later). Say "Call Persona using Persona" and, in those languages, "用 Persona 打给 Persona" and "PersonaでPersonaに電話して": the call page opens and the call connects. Check it locked (Siri asks to unlock first, also with AirPods) and with AirPods.
+
+Not known yet: how App Review in China treats a SiriKit call extension (it is Intents, not CallKit, so `check_no_callkit.py` passes; no report either way was found), and whether Beta App Review asks why a call intent is there (the #8734 review notes on calls apply). To turn it off again, set the switch to `false`; SIRIKIT and the extension's App ID can stay on the account.
 
 ## Changing the store name
 

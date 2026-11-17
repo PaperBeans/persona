@@ -240,3 +240,33 @@ func TestCallLogTellsCallsApart(t *testing.T) {
 		t.Errorf("starts %v", starts)
 	}
 }
+
+// The start line says a system call's surface (#9290, start.surface "call"), and only that value: an in-app call says
+// none, and a surface it does not know is not written (the log is shared).
+func TestCallLogSurface(t *testing.T) {
+	for _, tt := range []struct {
+		name    string // not the value: the test's log lines begin with its name
+		surface any
+		want    bool
+	}{{"call", "call", true}, {"in-app", nil, false}, {"unknown", "zebra-surface-61", false}, {"another case", "Call", false}} {
+		t.Run(tt.name, func(t *testing.T) {
+			hub := agentHub(t)
+			up := boundUpstream(t, false)
+			pl := testPlugin(t, liveProvider(up), hub.server(t))
+			logs := captureLog(t, pl)
+			more := map[string]any{}
+			if tt.surface != nil {
+				more["surface"] = tt.surface
+			}
+			a := dialApp(t, pl, boundStart("a1", more))
+			a.until(ofType("ready"))
+			line := logs.wait("call 1: start: protocol 2", "target m/a1")
+			if got := strings.HasSuffix(line, ", surface call"); got != tt.want {
+				t.Errorf("start line: %s", line)
+			}
+			if strings.Contains(logs.String(), "zebra-surface") {
+				t.Errorf("the log has the raw surface:\n%s", logs.String())
+			}
+		})
+	}
+}

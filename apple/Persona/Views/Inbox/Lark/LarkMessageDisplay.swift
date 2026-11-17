@@ -225,7 +225,7 @@ struct LarkEditHistoryView: View {
                 } else { Text("Edit history is hidden").foregroundStyle(.secondary) }
             }
             .themedPage().navigationTitle("Edit History").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done [Extension System Presentation c0b3fb]") { dismiss() }.lineLimit(1) } }
+            .toolbar { SheetClose { dismiss() } }
         }
     }
 }

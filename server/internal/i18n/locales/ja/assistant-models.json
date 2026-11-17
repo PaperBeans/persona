@@ -126,8 +126,6 @@
   "triage_in_use": "次の拡張機能は「メッセージの振り分け」で受信トレイを振り分けています：{names}。このモデルを変更する前に、設定 › 拡張機能 でオフにしてください",
   "list_separator": "、",
   "err_api_as_launcher": "この用途の直接API接続はランチャーとして実行できません",
-  "err_runtime_invalid": "実行方式はcliまたはagentsdkにしてください",
-  "err_runtime_assistant_only": "実行方式を選べるのはメインチャットだけです",
   "err_config_dir_invalid": "新しい会話のプロファイルは private または legacy にしてください",
   "err_config_dir_assistant_only": "新しい会話のプロファイルを選べるのはメインチャットだけです",
   "err_meeting_room_claude_only": "会議中の会話は Claude Code でのみ動きます。Claude Code のランチャーか Messages API の接続を選んでください。",

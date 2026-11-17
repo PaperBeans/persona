@@ -620,6 +620,10 @@ private fun ChatPage(
             backgroundRecords = assistantPresentation.background, onOpenBackground = { backgroundOpen = true },
             onOpenSetup = chrome.onOpenSetup?.let { open -> { page: persona.core.contracts.BriefSetupPage -> open(page, session?.manager) } })
     }
+    // A task's or an agent's own detail is a sheet on a phone; a wide window pushes the same page into this column, as
+    // iOS's `detailPresentation` does on an iPad or an open Duo (#9347). The chat stays composed under it, so Back finds
+    // it at the same scroll position; "All" stays a sheet at any width, as iOS's board is.
+    val pushedDetail = taskHost?.let { host -> host.sheet.value?.takeIf { it.pushesOnWide(LocalLargeWindowInput.current) } }
     fun approveTray(captured: List<Pair<Interaction, Resolution>>) = interactionController.approve(captured, taskAgentSessions)
     fun sendTray(draft: TrayDraft) = interactionController.sendTray(draft) { current ->
         when (current) {
@@ -657,8 +661,9 @@ private fun ChatPage(
             }
         }
     }
-    // Drawn whatever the composer area shows: a read-only assistant conversation's task cards open their sheet too.
-    taskHost?.let { AssistantTaskSheets(it) }
+    // Drawn whatever the composer area shows: a read-only assistant conversation's task cards open their sheet too. A
+    // wide window's page is drawn over the chat instead (below).
+    if (pushedDetail == null) taskHost?.let { AssistantTaskSheets(it) }
     if (backgroundOpen) CompositionLocalProvider(LocalAssistantTaskHost provides taskHost) {
         AssistantBackgroundRecords(assistantPresentation.background, key, loader,
             onToggle = ::toggle, onFold = ::expand, folding = folding, foldErrors = foldErrors, hideTaskPrompts = foldsBackground,
@@ -689,7 +694,7 @@ private fun ChatPage(
     val fixModel = chrome.onFixModel?.let { open -> { action: persona.core.designsystem.ReadinessActionId -> open(action, session?.launcher, session?.manager) } }
     // Nothing is up over the page: the header may fold by itself (iOS waits while a sheet or menu is presented).
     val headerBusy by rememberUpdatedState(chrome.covered || overlay || chromeOverlay || linkVisible || statusSheet || activitySheet ||
-        terminalHelp || taskPageVisible || fullText != null || search.visible)
+        terminalHelp || taskPageVisible || fullText != null || search.visible || pushedDetail != null)
     LaunchedEffect(headerFold, foldsHeader, reduceMotion) {
         if (!foldsHeader || reduceMotion) return@LaunchedEffect
         while (true) {
@@ -738,8 +743,8 @@ private fun ChatPage(
     ChatSearchNavigation(search, chatList, lines, foldErrors.keys)
     ChatMessageJump(key, repository, chatList, lines, snapshot.hasOlder, snapshot.loading || snapshot.loadingOlder, search,
         onItem = { jumpItem = it }, onNotice = { notice = it })
-    LaunchedEffect(list, chrome.covered, search.visible, search.pending, search.returning, chatList.restored, chatList.programmaticScroll, overlay, chromeOverlay, fullText, linkVisible, statusSheet, terminalHelp, taskPageVisible, lifecycle, snapshot.verified) {
-        if (chrome.covered || search.visible || search.pending || search.returning || !chatList.restored || chatList.programmaticScroll || overlay || chromeOverlay || fullText != null || linkVisible || statusSheet || terminalHelp || taskPageVisible || lifecycle != Lifecycle.State.RESUMED || !snapshot.verified) return@LaunchedEffect
+    LaunchedEffect(list, chrome.covered, search.visible, search.pending, search.returning, chatList.restored, chatList.programmaticScroll, overlay, chromeOverlay, fullText, linkVisible, statusSheet, terminalHelp, taskPageVisible, pushedDetail, lifecycle, snapshot.verified) {
+        if (chrome.covered || search.visible || search.pending || search.returning || !chatList.restored || chatList.programmaticScroll || overlay || chromeOverlay || fullText != null || linkVisible || statusSheet || terminalHelp || taskPageVisible || pushedDetail != null || lifecycle != Lifecycle.State.RESUMED || !snapshot.verified) return@LaunchedEffect
         snapshotFlow {
             if (list.isScrollInProgress) null else list.layoutInfo.visibleItemsInfo.mapNotNull { visible ->
                 currentLinesByKey[visible.key]?.seenItem()
@@ -795,7 +800,9 @@ private fun ChatPage(
             // Until the page is measured (its first frame) the window's height stands in.
             val pageHeight: () -> Dp = { with(pageDensity) { (if (pageHeightPx >= 0) pageHeightPx else windowHeightPx).toDp() } }
             val trayMax: () -> Dp = { pageHeight() * AssistantTrayTokens.maximumHeightFraction }
-            Box(Modifier.fillMaxSize().padding(bottom = linkInset).onSizeChanged { pageHeightPx = it.height }) {
+            Box(Modifier.fillMaxSize().padding(bottom = linkInset).onSizeChanged { pageHeightPx = it.height }
+                // The chat under a page a wide window pushed into this column: drawn as it was, and out of screen readers' way.
+                .then(if (pushedDetail != null) Modifier.clearAndSetSemantics {} else Modifier)) {
                 // The rule a question a supervisor passed up suggests, under its card (#4929); a hub from before sends none.
                 val ruleLine: (@Composable (Interaction) -> Unit)? = if (tasks == null) null else { card ->
                     RuleSuggestionLine("card:${card.id}", card.suggestion, tasks, { notice = operationFeedback(it).text.resolve(res) },
@@ -1193,6 +1200,11 @@ private fun ChatPage(
                         }
                     }
                 }
+            }
+            // The detail a wide window pushed into this column (#9347): the sheet's page, over the chat it leaves composed.
+            pushedDetail?.let { open ->
+                val host = taskHost ?: return@let
+                Box(Modifier.fillMaxSize()) { AssistantTaskPage(open, host, onDismiss = { host.sheet.value = null }) }
             }
             if (search.visible) ChatSearchScreen(search, searchableItems, projection.turns.size, snapshot.hasOlder,
                 repository, key, snapshot.history, onClose = { search.close(chatList) })

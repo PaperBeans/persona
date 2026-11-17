@@ -139,3 +139,112 @@ func TestPutUsagesOneTransaction(t *testing.T) {
 		t.Fatalf("rows = %v, want %v", rows, want)
 	}
 }
+
+// Past a week the ten-minute rows roll up into one row an hour; the calendar sums every machine's rows (or each
+// machine's) into spans of time, each row in the span its start is in.
+func TestUsageHistory(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	now := time.Now().Truncate(time.Hour)
+	b := func(at time.Time, model string, out int64) proto.UsageBucket {
+		return proto.UsageBucket{Minute: at.Unix(), Model: model, Launcher: "claude", Input: 1, CacheRead: 10, Output: out, Requests: 1}
+	}
+	old := now.Add(-8 * 24 * time.Hour)
+	if err := d.PutUsage(ctx, "m1", []proto.UsageBucket{b(old.Add(5*time.Minute), "opus", 1), b(old.Add(25*time.Minute), "opus", 2),
+		b(old.Add(65*time.Minute), "opus", 4), b(now.Add(-time.Hour), "opus", 8)}, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.PutUsage(ctx, "m2", []proto.UsageBucket{b(old.Add(30*time.Minute), "gpt", 16)}, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.RollupUsage(ctx, now.Add(-27*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.RollupUsageHours(ctx, now.Add(-7*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var steps map[int]int
+	if err := func() error {
+		steps = map[int]int{}
+		rows, err := d.pool.Query(ctx, `SELECT step, count(*) FROM machine_usage GROUP BY step`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var step, n int
+			if err := rows.Scan(&step, &n); err != nil {
+				return err
+			}
+			steps[step] = n
+		}
+		return rows.Err()
+	}(); err != nil {
+		t.Fatal(err)
+	}
+	// m1's first hour is one row, its second another, m2's hour one; the hour-old minute stays a minute.
+	if want := map[int]int{UsageMinuteStep: 1, UsageHourStep: 3}; !maps.Equal(steps, want) {
+		t.Fatalf("rows by step = %v, want %v", steps, want)
+	}
+
+	// Two spans: the old hour and its next, then up to now and a minute; every machine summed, then each apart.
+	bounds := []time.Time{old, old.Add(time.Hour), old.Add(2 * time.Hour), now.Add(time.Minute)}
+	spans, err := d.UsageSpans(ctx, bounds, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spans) != 3 || spans[0].Span != 0 || spans[0].Output != 19 || spans[0].Requests != 3 || spans[0].CacheRead != 30 ||
+		spans[1].Span != 1 || spans[1].Output != 4 || spans[2].Span != 2 || spans[2].Output != 8 || spans[0].Machine != "" {
+		t.Fatalf("spans = %+v", spans)
+	}
+	spans, err = d.UsageSpans(ctx, bounds[:2], true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spans) != 2 || spans[0].Machine != "m1" || spans[0].Output != 3 || spans[1].Machine != "m2" || spans[1].Output != 16 {
+		t.Fatalf("by machine = %+v", spans)
+	}
+	if spans, err := d.UsageSpans(ctx, bounds[:1], false); err != nil || spans != nil {
+		t.Fatalf("one bound = %+v, %v", spans, err)
+	}
+}
+
+// A backfill stores an hour only when the machine had no row in it (the live meter's count stays), adds nothing
+// when sent again, and records how far it got.
+func TestUsageBackfill(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	now := time.Now().Truncate(time.Hour)
+	h1, h2, h3 := now.Add(-40*time.Hour), now.Add(-39*time.Hour), now.Add(-38*time.Hour)
+	if err := d.PutUsage(ctx, "m1", []proto.UsageBucket{{Minute: h2.Add(10 * time.Minute).Unix(), Model: "opus", Output: 5, Requests: 1}}, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := d.UsageBackfill(ctx, "m1"); err != nil || !b.Through.IsZero() || !b.Done.IsZero() || b.Hours != 0 {
+		t.Fatalf("before = %+v, %v", b, err)
+	}
+	hour := func(at time.Time, model string, out int64) proto.UsageBucket {
+		return proto.UsageBucket{Minute: at.Unix(), Model: model, Launcher: "claude", CacheRead: 100, Output: out, Requests: 1}
+	}
+	sent := []proto.UsageBucket{hour(h1, "opus", 1), hour(h1, "sonnet", 2), hour(h2, "opus", 40), hour(h3, "opus", 8)}
+	stored, err := d.PutUsageBackfill(ctx, "m1", sent, h3, false)
+	if err != nil || stored != 2 { // h1 (both models) and h3; h2 had the live meter's minute
+		t.Fatalf("stored %d, %v", stored, err)
+	}
+	// Sent again (a scan that was cut off before its record): nothing more.
+	if stored, err = d.PutUsageBackfill(ctx, "m1", sent, h3, false); err != nil || stored != 0 {
+		t.Fatalf("again: stored %d, %v", stored, err)
+	}
+	spans, err := d.UsageSpans(ctx, []time.Time{h1, h2, h3, h3.Add(time.Hour)}, false)
+	if err != nil || len(spans) != 3 || spans[0].Output != 3 || spans[1].Output != 5 || spans[2].Output != 8 || spans[0].Requests != 2 {
+		t.Fatalf("spans = %+v, %v", spans, err)
+	}
+	// The last request: no hours, done. Through stays the latest, done is kept.
+	if _, err := d.PutUsageBackfill(ctx, "m1", nil, time.Time{}, true); err != nil {
+		t.Fatal(err)
+	}
+	b, err := d.UsageBackfill(ctx, "m1")
+	if err != nil || !b.Through.Equal(h3) || b.Done.IsZero() || b.Hours != 2 {
+		t.Fatalf("record = %+v, %v", b, err)
+	}
+	if b, _ := d.UsageBackfill(ctx, "m2"); !b.Done.IsZero() {
+		t.Fatalf("another machine's = %+v", b)
+	}
+}

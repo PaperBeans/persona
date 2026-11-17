@@ -667,4 +667,15 @@ import PersonaWire
         let plain = RecordingActivity.content(entry: off, recording: true, interrupted: false, elapsed: 10, previous: nil, now: .now, answer: "x")
         #expect(plain.persona == nil && plain.answer == nil)
     }
+
+    /// The B2 experiment (#8731): the speaker turned on mid-meeting turns echo cancellation on only where the switch is on,
+    /// never on the simulator (voice processing doesn't run there); the speaker turned off changes nothing. Off by default.
+    @Test func echoCancellationWithTheSpeakerIsAnExperiment() throws {
+        #expect(MeetingRecorder.echoWithSpeaker(speaks: true, experiment: true, simulator: false))
+        #expect(!MeetingRecorder.echoWithSpeaker(speaks: true, experiment: false, simulator: false))
+        #expect(!MeetingRecorder.echoWithSpeaker(speaks: true, experiment: true, simulator: true))
+        #expect(!MeetingRecorder.echoWithSpeaker(speaks: false, experiment: true, simulator: false))
+        let store = try #require(UserDefaults(suiteName: "meeting-echo-\(UUID())"))
+        #expect(!store.bool(forKey: MeetingRecorder.echoWithSpeakerKey))
+    }
 }

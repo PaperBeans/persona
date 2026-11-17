@@ -45,6 +45,8 @@ type UIPlace struct {
 	Opens     string           `json:"opens,omitempty"`
 	Badge     *extension.Badge `json:"badge,omitempty"`
 	Connector string           `json:"connector,omitempty"`
+	// Group: the sidebar group a nav_page names (#9071), its title in the request's language.
+	Group *extension.UIGroup `json:"group,omitempty"`
 }
 
 // uiPlaces are the plugins' UI of placement (every slot's but launcher sections' when it is empty); for launcher
@@ -58,6 +60,9 @@ func (ps *extensions) localizeUI(l i18n.Lang, places []UIPlace) []UIPlace {
 		}
 		places[i].Title = p.L10n.UITitle(l, u.ID, u.Title)
 		places[i].ExtensionName = p.L10n.Name(l, u.ExtensionName)
+		if g := u.Group; g != nil {
+			places[i].Group = &extension.UIGroup{ID: g.ID, Title: p.L10n.GroupTitle(l, g.ID, g.Title)}
+		}
 	}
 	return places
 }
@@ -96,7 +101,7 @@ func (ps *extensions) uiPlaces(placement, base string) []UIPlace {
 				continue
 			}
 			place := UIPlace{Extension: p.Record.ID, ExtensionName: p.Manifest.Name, ID: u.ID, Title: u.Title, Placement: u.Placement,
-				Size: slot.Size, Icon: u.Icon, Opens: u.Opens, Connector: u.Connector}
+				Size: slot.Size, Icon: u.Icon, Opens: u.Opens, Connector: u.Connector, Group: u.Group}
 			if extension.PageSlot(u.Placement) {
 				place.Placement = "extension_page" // the old paths answer plugin_page (legacyUIPlaces)
 			}

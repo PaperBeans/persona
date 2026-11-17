@@ -6,10 +6,14 @@ import Observation
 // ChatView: ChatView is rebuilt per key and is the hot path (docs/apple/ios-state.md), it only asks `VoiceCalls.isBound`.
 
 /// Where a call was started from. The rules that end a call when the phone's app goes away (background, leaving the
-/// page, the screen lock) are the phone's only: a call started from the car goes on.
+/// page, the screen lock) are the phone's only: a call started from the car goes on, and so does a system call.
 nonisolated enum VoiceSurface: String, Equatable, Hashable, Sendable {
     case phone
     case carPlay
+    /// A system call to Persona (#9290): LiveCommunicationKit's, on the main conversation, run by `PersonaCalls`. It goes
+    /// on in the background, locked and off the page; the system owns its audio session, and an interruption holds it
+    /// instead of ending it.
+    case call
 }
 
 nonisolated enum VoiceLiveState: Equatable, Sendable {
@@ -67,6 +71,8 @@ nonisolated enum VoiceEnd: Equatable, Sendable {
     case noHub
     /// A fatal `error` frame.
     case failed(code: VoiceErrorCode?, message: String)
+    /// Persona's urgent call was answered: the voice chat ended first, so its audio could not end the call's (#9290).
+    case urgentCall
 
     /// Ended by the user's own doing: nothing stays on the page. After any other ending 「语音已结束 · 继续」 stays until
     /// the page goes (docs/assistant/voice.md 1.2 L).
@@ -136,6 +142,24 @@ nonisolated struct VoiceMeeting: Equatable, Sendable {
     static let feature = "meeting"
 }
 
+/// A system call on hold (#9290): the extension that lists this feature in `ready` hears `hold` frames, and pauses the
+/// realtime upstream until the hold ends. Without it the call still holds here (silence up, nothing played).
+nonisolated enum VoiceHold {
+    static let feature = "hold"
+}
+
+/// What a system call's voice tells its manager (`PersonaCalls`, #9290), through `VoiceDeps.callEvents`.
+nonisolated enum VoiceCallEvent: Equatable, Sendable {
+    /// The first `ready`: the call is connected.
+    case ready
+    case ended(VoiceEnd)
+    /// The audio session was interrupted: the call holds, it does not end.
+    case interrupted
+    case interruptionEnded(shouldResume: Bool)
+    /// The page muted or unmuted the voice itself (the bar's Mute): the system hears it.
+    case muted(Bool)
+}
+
 /// Only Send What I Just Said (docs/assistant/voice.md 6.7, #5904): whether the extension's user-speech gate holds back what
 /// the voice hands over when the user was not heard asking for it just before, remembered on this device per group and
 /// extension. On unless the user turned it off; the call's `start` says which (`speech_gate`).
@@ -174,6 +198,18 @@ struct VoiceDeps {
     /// Whether the user-speech gate is on for the group's extension on this device (`VoiceSpeechGate`; the tests set
     /// its preference under their own group).
     var speechGate: (_ group: String, _ extensionID: String) -> Bool = VoiceSpeechGate.isOn(group:extensionID:)
+    /// A system call's manager (`PersonaCalls`): it hears the call connect, end, be interrupted and be muted on the page.
+    /// nil for every other call.
+    var callEvents: (@MainActor (VoiceCallEvent) -> Void)? = nil
+
+    /// A system call to Persona (#9290): the system's audio session (`audio`, which its manager activates and
+    /// deactivates as the system does), and its manager told what happens (`events`).
+    static func systemCall(group: String, audio: any SystemCallAudio, events: @escaping @MainActor (VoiceCallEvent) -> Void) -> VoiceDeps {
+        var deps = live(group: group)
+        deps.audio = { audio }
+        deps.callEvents = events
+        return deps
+    }
 
     static func live(group: String) -> VoiceDeps {
         VoiceDeps(api: { AppModel.shared.api(group) },
@@ -225,10 +261,19 @@ struct VoiceDeps {
     private(set) var speechGate = true
     /// Instructions that did not go whose line the user put away (Never Mind): the bar no longer offers anything for them.
     private(set) var dismissed: Set<String> = []
-    /// The microphone sends silence while muted; the voice still speaks.
+    /// The microphone sends silence while muted; the voice still speaks. A system call's mute is its manager's
+    /// (`setCallMuted`); set here (the bar's Mute), the manager hears it so the system's call UI says the same.
     var muted = false {
-        didSet { uplink.isMuted = muted }
+        didSet {
+            uplink.isMuted = muted || held
+            if surface == .call, oldValue != muted, !applyingCallMute { deps.callEvents?(.muted(muted)) }
+        }
     }
+    /// A system call on hold (#9290: the system paused it, or its audio was interrupted): the microphone sends silence,
+    /// the voice is dropped and nothing plays, the quiet minutes stop counting. Only `PersonaCalls` sets it.
+    private(set) var held = false
+    /// When the call first connected (its first `ready`): what its duration counts from.
+    private(set) var connectedAt: Date?
     /// About 20 times a second: read by the orb only.
     let levels = VoiceLevels()
     /// A meeting call's Talk span is open (`talk(_:)`).
@@ -280,6 +325,7 @@ struct VoiceDeps {
     /// Bumped by every start and end: an await that comes back after it does nothing.
     @ObservationIgnored private var epoch = 0
     @ObservationIgnored private var timers: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var applyingCallMute = false
 
     init(key: SessionKey, extensionID: String, surface: VoiceSurface, recent: [VoiceLine] = [], meeting: VoiceMeeting? = nil,
          deps: VoiceDeps) {
@@ -317,7 +363,7 @@ struct VoiceDeps {
             }
         }
         uplink = VoiceUplink(gated: meeting != nil)
-        uplink.isMuted = muted
+        uplink.isMuted = muted || held
         uplink.onLevel { @Sendable [weak self] level in
             Task { @MainActor in
                 guard let self, !self.phase.isEnded else { return }
@@ -389,7 +435,9 @@ struct VoiceDeps {
         link = .live
         levels.reset()
         if speaking { speaking = false }
+        if held { held = false }
         phase = .ended(reason)
+        deps.callEvents?(.ended(reason))
     }
 
     private func end(_ reason: VoiceEnd, epoch: Int) {
@@ -427,6 +475,36 @@ struct VoiceDeps {
         uplink.talk(false) { socket?.send(text: VoiceMessage.talk(false)) }
         lastActivity = deps.clock.now
         return true
+    }
+
+    /// A system call's mute, from its manager (the system's Mute, AirPods, the call page through the system).
+    func setCallMuted(_ on: Bool) {
+        applyingCallMute = true
+        muted = on
+        applyingCallMute = false
+    }
+
+    /// On hold or off it, from a system call's manager: silence goes up, what the voice was saying is dropped and nothing
+    /// plays until it is off; the quiet minutes start again from then. An extension that takes `hold` hears both.
+    func setHeld(_ on: Bool) {
+        guard held != on else { return }
+        held = on
+        uplink.isMuted = muted || held
+        if on {
+            // What the microphone caught while the connection waited for `ready` stays here: the extension never hears
+            // speech from a held call, and one without `hold` gets its silence.
+            uplink.discardHeld()
+            dropSpeech()
+        } else {
+            lastActivity = deps.clock.now
+        }
+        refreshPhase()
+        sendHold()
+    }
+
+    private func sendHold() {
+        guard ready, features.contains(VoiceHold.feature), let socket else { return }
+        socket.send(text: VoiceMessage.hold(held))
     }
 
     /// Interrupt Voice: stops what the voice says (never the agent). What was queued is dropped here at once.
@@ -509,7 +587,8 @@ struct VoiceDeps {
         VoiceStart(model: model, voice: voice, target: VoiceTarget(key), recent: recent, history: history,
                    resume: runs.filter { $0.state.isOpen }, echoCancellation: audio?.cancelsEcho,
                    speechGate: meeting == nil ? speechGate : nil,
-                   mode: meeting == nil ? nil : VoiceStart.meetingMode, recordingID: meeting?.recordingID.uuidString.lowercased())
+                   mode: meeting == nil ? nil : VoiceStart.meetingMode, recordingID: meeting?.recordingID.uuidString.lowercased(),
+                   surface: surface == .call ? VoiceStart.callSurface : nil)
     }
 
     var history: [VoiceLine] {
@@ -561,7 +640,8 @@ struct VoiceDeps {
         case .text(let text):
             if let frame = VoiceFrame.parse(text) { handle(frame) }
         case .data(let pcm):
-            if ready { audio?.play(pcm) }
+            // On hold nothing plays: what the voice says meanwhile is dropped, not saved for later.
+            if ready, !held { audio?.play(pcm) }
         case .closed(let close):
             socket = nil
             dropped(close, generation: generation)
@@ -671,9 +751,15 @@ struct VoiceDeps {
         attempt = 0
         features = r.features
         if let t = r.target { target = t }
+        // Still on hold after a reconnect: the new connection's extension hears it again, before any audio goes up.
+        if held { sendHold() }
         uplink.open(rate: r.inputRate) { @Sendable pcm in socket.send(data: pcm) }
         lastActivity = deps.clock.now
         refreshPhase()
+        if connectedAt == nil {
+            connectedAt = deps.clock.now
+            deps.callEvents?(.ready)
+        }
     }
 
     private func caption(_ t: VoiceTranscript) {
@@ -746,7 +832,10 @@ struct VoiceDeps {
         case .outputLevel(let level):
             levels.set(output: level)
         case .interrupted:
-            end(.interrupted)
+            // A system call holds instead: its manager hears it (#9290).
+            if surface == .call { deps.callEvents?(.interrupted) } else { end(.interrupted) }
+        case .interruptionEnded(let resume):
+            if surface == .call { deps.callEvents?(.interruptionEnded(shouldResume: resume)) }
         case .reset:
             end(.audioReset)
         case .failed:
@@ -767,6 +856,8 @@ struct VoiceDeps {
             while true {
                 do { try await clock.sleep(for: Self.idleCheck) } catch { return }
                 guard let self, self.isCurrent(epoch) else { return }
+                // On hold the quiet minutes do not count (they start again when it goes on).
+                if self.held { continue }
                 if VoiceIdle.expired(now: clock.now, lastActivity: self.lastActivity, openRuns: self.runs.contains { $0.state.isOpen },
                                      targetWorking: self.targetBusy, playing: self.playing) {
                     self.end(.idle)

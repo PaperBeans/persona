@@ -34,5 +34,8 @@
   "notice_turn_off": "Turn off",
   "notice_got_it": "Got it",
   "notice_dismiss": "Don't show again",
-  "notice_open": "Open Settings › Hub"
+  "notice_open": "Open Settings › Hub",
+  "state_building": "Building…",
+  "state_backing_up": "Backing up…",
+  "state_applying_backup": "Preparing backup programs…"
 }

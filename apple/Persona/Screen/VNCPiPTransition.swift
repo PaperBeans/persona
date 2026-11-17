@@ -14,6 +14,30 @@ nonisolated enum VNCPiPPlacement {
         if let page, page.width >= 1, page.height >= 1 { return page }
         return CGRect(x: bounds.maxX - size.width - margin, y: bounds.minY + safeTop + margin, width: size.width, height: size.height)
     }
+
+    /// The page's picture the source lies over: the part the small window shows. With frames cut to one display (Phone
+    /// Screen) that is the display as the page draws it; with whole frames, the whole picture, even where only one
+    /// display shows.
+    static func page(_ picture: VNCPagePicture?, cut: Bool) -> CGRect? {
+        guard let picture else { return nil }
+        return cut ? picture.shown : picture.whole
+    }
+
+    /// The source's size where no page shows the picture: `width` wide in the shape of what the small window shows
+    /// (`picture`, pixels: the Mac's whole picture or Phone Screen's display), 16:10 before it is known; a portrait one
+    /// is `width` wide too, so it is taller.
+    static func size(_ picture: CGSize, width: CGFloat) -> CGSize {
+        let ratio = picture.width > 1 && picture.height > 1 ? picture.height / picture.width : 10.0 / 16
+        return CGSize(width: width, height: (width * ratio).rounded())
+    }
+}
+
+/// Where the live screen's page draws the Mac's picture, in screen points (VNCScreenUIView.onPicture): all of the
+/// framebuffer (zoomed in or showing one display, partly off the view), and the part shown (the display shown, or all
+/// of it).
+nonisolated struct VNCPagePicture: Equatable, Sendable {
+    var whole: CGRect
+    var shown: CGRect
 }
 
 /// Restore's completion (#6333): the system grows the small window back into the source once it is called, so it waits

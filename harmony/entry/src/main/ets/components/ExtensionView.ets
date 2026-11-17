@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { UIUtils } from '@kit.ArkUI';
 import type { Binding } from '@kit.ArkUI';
 import { reconcileJsonProjection } from '../core/JsonProjection';
@@ -53,7 +56,8 @@ function initials(value: string, fallback: string): string {
 }
 
 function toneKey(value: string): string {
-  if (value === 'positive') return 'app.color.persona_brand';
+  if (value === 'positive') return 'app.color.persona_positive';
+  if (value === 'caution') return 'app.color.persona_working';
   if (value === 'danger') return 'app.color.persona_danger';
   return 'sys.color.font_secondary';
 }
@@ -69,6 +73,8 @@ interface NativeActionButton {
   title: string;
   event: string;
   role: string;
+  tone?: string;
+  identity?: string;
   summary: string;
   values: ExtensionViewRecord;
 }
@@ -243,6 +249,7 @@ export struct ExtensionView {
   @Local projectionGeneration: number = 0;
   private projectionOwner: ExtensionPresentation | undefined = undefined;
   private projectionScope: string = '';
+  private menuEpoch: number = 0;
   @Local searchDraft: string = '';
   @Local filterDraft: string = '';
   @Local tabDraft: string = '';
@@ -269,10 +276,10 @@ export struct ExtensionView {
   private searchTimer: number = -1;
 
   aboutToAppear(): void { this.syncProjection(); this.lineResultsRevision = this.model.lineResultRevision; this.syncToolbar(); this.syncControls(); }
-  aboutToDisappear(): void { this.clearSearchTimer(); this.cancelControlFlights(); }
+  aboutToDisappear(): void { this.menuEpoch++; this.clearSearchTimer(); this.cancelControlFlights(); }
   @Monitor('active') visibilityChanged(): void {
     if (this.active) { this.syncProjection(); this.syncToolbar(); this.syncControls(); this.resumeControlFlights(); }
-    else { this.clearSearchTimer(); this.cancelControlFlights(); }
+    else { this.menuEpoch++; this.clearSearchTimer(); this.cancelControlFlights(); }
   }
   @Monitor('model', 'model.revision', 'model.viewVersion') viewChanged(): void { this.syncProjection(); this.syncToolbar(); this.syncControls(); this.settleControlFlights(); }
   @Monitor('model.busy', 'model.error') actionStateChanged(): void {
@@ -709,9 +716,10 @@ export struct ExtensionView {
       }.width('100%').alignItems(VerticalAlign.Center)
         .onClick(() => { if (Wire.has(item, 'action')) this.runAction(Wire.object(item, 'action'), key, 'press', {}, '', Wire.text(item, 'title')); })
       if (Wire.has(item, 'control')) this.rowControl(Wire.object(item, 'control'), key, UIUtils.makeBinding((): string => Wire.text(item, 'title')))
-      ForEach(this.choices(item['actions']), (candidate: Record<string, Object>, index: number) => {
-        this.actionButton(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(candidate, 'action'), key: key, title: Wire.text(candidate, 'title'), event: 'press', role: Wire.text(candidate, 'role'), summary: '', values: {} })))
-      }, (candidate: Record<string, Object>, index: number) => Wire.text(Wire.object(candidate, 'action'), 'id', String(index)))
+      if (this.choices(item['actions']).some((candidate: Record<string, Object>) => !!Wire.text(Wire.object(candidate, 'action'), 'id'))) Button({ type: ButtonType.Circle }) {
+        Image($r('sys.media.ohos_ic_public_more')).width(Tokens.symbol).height(Tokens.symbol).fillColor(Colors.link)
+      }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('more')).enabled(this.model.canInteract())
+        .bindMenu(this.rowActionMenu(item, key))
     }.width('100%').padding(Tokens.inset).backgroundColor($r('sys.color.comp_background_secondary'))
       .border({ width: Tokens.hairline, color: $r('sys.color.font_secondary'), radius: Tokens.gap })
   }
@@ -724,13 +732,67 @@ export struct ExtensionView {
   @Builder private thumbnailView(thumbnail: ExtensionViewRecord) {
     if (Wire.text(thumbnail, 'path') || Wire.text(thumbnail, 'url')) ExtensionImage({ ui: this.model, budget: this.imageBudget, active: this.active, source: thumbnail, alt: '', aspect: Wire.text(thumbnail, 'aspect', 'square'), imageHeight: 56 }).width(72).height(56)
   }
+  @Builder private actionGroup(buttons: Binding<NativeActionButton>[]) {
+    if (buttons.some((button: Binding<NativeActionButton>) => !!Wire.text(button.value.action, 'id'))) {
+      Button({ type: ButtonType.Circle }) {
+        Image($r('sys.media.ohos_ic_public_more')).width(Tokens.symbol).height(Tokens.symbol).fillColor(Colors.link)
+      }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('more')).enabled(this.model.canInteract())
+        .bindMenu(this.actionGroupMenu(buttons))
+    }
+  }
+  @Builder private actionGroupMenu(buttons: Binding<NativeActionButton>[]) {
+    Menu() {
+      ForEach(buttons, (button: Binding<NativeActionButton>) => {
+        if (Wire.text(button.value.action, 'id')) this.actionMenuItem(button)
+      }, (button: Binding<NativeActionButton>, index: number) => button.value.identity || Wire.text(button.value.action, 'id') + ':' + String(index))
+    }
+  }
+  private tileActions(tile: ExtensionViewRecord, key: string): Binding<NativeActionButton>[] {
+    const buttons: Binding<NativeActionButton>[] = [];
+    if (Wire.has(tile, 'action')) buttons.push(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(tile, 'action'), key: key, title: Wire.text(tile, 'title'), event: 'press', role: '', summary: Wire.text(tile, 'title'), values: {} })));
+    this.choices(tile['actions']).forEach((entry: Record<string, Object>) => buttons.push(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(entry, 'action'), key: key, title: Wire.text(entry, 'title'), event: 'press', role: Wire.text(entry, 'role'), summary: '', values: {} }))));
+    return buttons;
+  }
+  private reviewActions(): Binding<NativeActionButton>[] {
+    const buttons: Binding<NativeActionButton>[] = [];
+    if (Wire.has(Wire.object(this.renderView(), 'review'), 'discard')) buttons.push(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(Wire.object(this.renderView(), 'review'), 'discard'), key: this.rootKey(), title: tr('discard'), event: 'press', role: 'destructive', summary: Wire.text(Wire.object(this.renderView(), 'review'), 'name'), values: {} })));
+    this.choices(Wire.object(this.renderView(), 'review')['buttons']).forEach((button: Record<string, Object>) => buttons.push(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(button, 'action'), key: this.rootKey(), title: Wire.text(button, 'title'), event: 'submit', role: Wire.text(button, 'role'), tone: Wire.text(button, 'tone'), summary: Wire.text(Wire.object(this.renderView(), 'review'), 'name'), values: this.safeActionValues(Wire.text(Wire.object(this.renderView(), 'review'), 'name'), this.model.fieldValue('@review')) }))));
+    return buttons;
+  }
+  @Builder private rowActionMenu(item: ExtensionViewRecord, key: string) {
+    Menu() {
+      ForEach(this.choices(item['actions']), (candidate: Record<string, Object>) => {
+        if (Wire.text(Wire.object(candidate, 'action'), 'id')) this.actionMenuItem(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(candidate, 'action'), key: key,
+          title: Wire.text(candidate, 'title'), event: 'press', role: Wire.text(candidate, 'role'), summary: '', values: {} })))
+      }, (candidate: Record<string, Object>, index: number) => Wire.text(Wire.object(candidate, 'action'), 'id', String(index)))
+    }
+  }
+  @Builder private actionMenuItem(button: Binding<NativeActionButton>) {
+    MenuItem({ content: button.value.title || Wire.text(button.value.action, 'id') })
+      .contentFontColor(button.value.role === 'destructive' || button.value.tone === 'danger' ? Colors.danger : Colors.ink).constraintSize({ minHeight: Tokens.touch })
+      .enabled(this.model.canInteract()).onClick(this.menuAction(button))
+  }
+  private menuAction(button: Binding<NativeActionButton>): () => void {
+    const owner = this.model, scope = owner.presentationKey || this.rootKey();
+    const generation = this.projectionGeneration, epoch = this.menuEpoch;
+    return (): void => {
+      if (!this.active || this.model !== owner || (owner.presentationKey || this.rootKey()) !== scope ||
+        this.projectionGeneration !== generation || this.menuEpoch !== epoch || !owner.canInteract()) return;
+      const current = button.value;
+      if (!Wire.text(current.action, 'id')) return;
+      this.runAction(current.action, current.key, current.event, current.values, current.role, current.summary || current.title);
+    };
+  }
+
+  @Builder private actionMenu(button: Binding<NativeActionButton>) {
+    Menu() { this.actionMenuItem(button) }
+  }
   @Builder private actionButton(button: Binding<NativeActionButton>) {
-    if (Wire.text(button.value.action, 'id')) Button(button.value.title || Wire.text(button.value.action, 'id'))
-      .role(button.value.role === 'destructive' ? ButtonRole.ERROR : ButtonRole.NORMAL)
-      .enabled(this.model.canInteract()).height(Tokens.touch).onClick(() => {
-        const current = button.value;
-        this.runAction(current.action, current.key, current.event, current.values, current.role, current.summary || current.title);
-      })
+    if (Wire.text(button.value.action, 'id')) Button({ type: ButtonType.Circle }) {
+      Image($r('sys.media.ohos_ic_public_more')).width(Tokens.symbol).height(Tokens.symbol)
+        .fillColor(button.value.role === 'destructive' || button.value.tone === 'danger' ? Colors.danger : Colors.link)
+    }.attributeModifier(ButtonStyles.icon).accessibilityText(button.value.title || Wire.text(button.value.action, 'id'))
+      .enabled(this.model.canInteract()).bindMenu(this.actionMenu(button))
   }
 
   @Builder private rowControl(control: ExtensionViewRecord, key: string, label: Binding<string>) {
@@ -750,9 +812,9 @@ export struct ExtensionView {
       }.width('100%')
     } else if (Wire.text(control, 'kind') === 'stepper') {
       Row({ space: Tokens.gap }) {
-        Button('−').enabled(this.controlCanEdit(control, key)).onClick(() => this.stepControl(control, key, -1))
+        Button({ type: ButtonType.Circle }) { SymbolGlyph($r('sys.symbol.minus')).fontSize(Tokens.symbolFont).fontColor([Colors.link]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('decrease') + ' ' + label.value).enabled(this.controlCanEdit(control, key)).onClick(() => this.stepControl(control, key, -1))
         Text(this.controlDisplay(control, key)).fontSize(Tokens.body)
-        Button('+').enabled(this.controlCanEdit(control, key)).onClick(() => this.stepControl(control, key, 1))
+        Button({ type: ButtonType.Circle }) { SymbolGlyph($r('sys.symbol.plus')).fontSize(Tokens.symbolFont).fontColor([Colors.link]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('increase') + ' ' + label.value).enabled(this.controlCanEdit(control, key)).onClick(() => this.stepControl(control, key, 1))
       }.width('100%')
     }
   }
@@ -947,7 +1009,7 @@ export struct ExtensionView {
         .backgroundColor($r('sys.color.comp_background_secondary')).padding(Tokens.gap)
       if (Wire.bool(item, 'truncated') && Wire.has(item, 'load')) this.actionButton(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(item, 'load'), key: key, title: tr('extension_ui_load_more'), event: 'press', role: '', summary: '', values: { path: Wire.text(item, 'path'), from: String(Wire.number(item, 'start_line', 1) + displayedLineCount(Wire.text(item, 'text'))) } })))
       if (Wire.text(item, 'line_url')) {
-        if (safeHTTPS(codeLineAddress(item))) Button(tr('extension_ui_open_lines'), { buttonStyle: ButtonStyleMode.TEXTUAL }).onClick(() => this.link(codeLineAddress(item)))
+        if (safeHTTPS(codeLineAddress(item))) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('extension_ui_open_lines')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('extension_ui_open_lines', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('extension_ui_open_lines')).bindTips(tr('extension_ui_open_lines')).onClick(() => this.link(codeLineAddress(item)))
       }
       this.returnedLines(key, UIUtils.makeBinding((): string => Wire.text(item, 'path')))
     }.width('100%')
@@ -1073,8 +1135,8 @@ export struct ExtensionView {
       ForEach(this.lineResultValues(key, path.value), (line: Object, index: number) => Text(String(Wire.number(this.matchingLineResult(key, path.value), 'start', 1) + this.lineResultOffset(key, path.value) + index) + '  ' + String(line))
         .fontSize(Tokens.meta).fontFamily('monospace').width('100%'), (line: Object, index: number) => String(index) + ':' + JSON.stringify(line))
       Row({ space: Tokens.gap }) {
-        if (this.hasEarlierLineWindow(key, path.value)) Button(tr('back')).onClick(() => this.moveLineWindow(key, path.value, false))
-        if (this.hasMoreLineWindows(key, path.value)) Button(tr('more')).onClick(() => this.moveLineWindow(key, path.value, true))
+        if (this.hasEarlierLineWindow(key, path.value)) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('back')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('back', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('back')).bindTips(tr('back')).onClick(() => this.moveLineWindow(key, path.value, false))
+        if (this.hasMoreLineWindows(key, path.value)) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('more')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('more', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('more')).bindTips(tr('more')).onClick(() => this.moveLineWindow(key, path.value, true))
       }.width('100%')
     }
   }
@@ -1089,10 +1151,22 @@ export struct ExtensionView {
     return tr('extension_ui_load_context') + ' ' + range.side + ' ' + String(range.from) + '–' + String(range.to);
   }
   @Builder private diffContextButtons(item: ExtensionViewRecord, key: string, boundary: 'top' | 'between' | 'bottom', afterHunk: number = -1) {
-    ForEach(this.contextRangesAt(item, boundary, afterHunk), (range: ExtensionDiffContextRange, index: number) =>
-      this.actionButton(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(item, 'context'), key: key, title: this.contextTitle(range), event: 'press', role: '', summary: '', values: diffContextValues(Wire.text(item, 'path'), range) }))),
-      (range: ExtensionDiffContextRange, index: number) => range.side + ':' + String(range.from) + ':' + String(range.to))
+    this.actionGroup(this.contextRangeActions(item, key, boundary, afterHunk))
   }
+  private contextRangeActions(item: ExtensionViewRecord, key: string, boundary: 'top' | 'between' | 'bottom', afterHunk: number): Binding<NativeActionButton>[] {
+    const path = Wire.text(item, 'path');
+    return this.contextRangesAt(item, boundary, afterHunk).map((range: ExtensionDiffContextRange): Binding<NativeActionButton> => {
+      const identity = path + ':' + range.side + ':' + String(range.from) + ':' + String(range.to);
+      return UIUtils.makeBinding((): NativeActionButton => {
+        const current = this.contextRangesAt(item, boundary, afterHunk).find((value: ExtensionDiffContextRange) =>
+          value.side === range.side && value.from === range.from && value.to === range.to);
+        const valid = !!current && Wire.text(item, 'path') === path;
+        return { action: valid ? Wire.object(item, 'context') : {}, key: key, title: this.contextTitle(range), event: 'press', role: '', summary: '',
+          identity: identity, values: valid && current ? diffContextValues(path, current) : {} };
+      });
+    });
+  }
+
   private expandRequests(item: ExtensionViewRecord): ExtensionDiffExpandRequest[] {
     return diffExpandRequests(Wire.text(item, 'path'), Wire.text(item, 'status'), this.choices(item['hunks']));
   }
@@ -1150,11 +1224,16 @@ export struct ExtensionView {
         if (Wire.has(thread, 'reply')) {
           TextArea({ text: this.model.fieldValue(key + ':reply:' + String(index)), placeholder: tr('reply') }).height(Tokens.input)
             .onChange((value: string) => this.model.setFieldValue(key + ':reply:' + String(index), value))
-          this.actionButton(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(thread, 'reply'), key: key, title: tr('reply'), event: 'submit', role: '', summary: Wire.text(thread, 'id'), values: threadReplyValues(Wire.text(thread, 'id'), this.model.fieldValue(key + ':reply:' + String(index))) })))
         }
-        if (Wire.has(thread, 'resolve')) this.actionButton(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(thread, 'resolve'), key: key, title: Wire.bool(thread, 'resolved') ? tr('extension_ui_reopen_thread') : tr('extension_ui_resolve_thread'), event: 'press', role: '', summary: '', values: { thread: Wire.text(thread, 'id'), resolved: String(!Wire.bool(thread, 'resolved')) } })))
+        this.actionGroup(this.threadActions(thread, key, index))
       }.width('100%')
     }, (_thread: Record<string, Object>, index: number) => String(index))
+  }
+  private threadActions(thread: ExtensionViewRecord, key: string, index: number): Binding<NativeActionButton>[] {
+    const buttons: Binding<NativeActionButton>[] = [];
+    if (Wire.has(thread, 'reply')) buttons.push(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(thread, 'reply'), key: key, title: tr('reply'), event: 'submit', role: '', summary: Wire.text(thread, 'id'), values: threadReplyValues(Wire.text(thread, 'id'), this.model.fieldValue(key + ':reply:' + String(index))) })));
+    if (Wire.has(thread, 'resolve')) buttons.push(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(thread, 'resolve'), key: key, title: Wire.bool(thread, 'resolved') ? tr('extension_ui_reopen_thread') : tr('extension_ui_resolve_thread'), event: 'press', role: '', summary: '', values: { thread: Wire.text(thread, 'id'), resolved: String(!Wire.bool(thread, 'resolved')) } })));
+    return buttons;
   }
   @Builder private commentComposer(item: ExtensionViewRecord, key: string) {
     Row({ space: Tokens.gap }) {
@@ -1193,8 +1272,7 @@ export struct ExtensionView {
       TextArea({ text: this.model.fieldValue(key + ':' + Wire.text(item, 'name'), Wire.text(item, 'value')), placeholder: Wire.text(item, 'placeholder') })
         .height(Tokens.inputExpanded).onChange((value: string) => this.model.setFieldValue(key + ':' + Wire.text(item, 'name'), value))
       Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap }) {
-        ForEach(this.choices(item['buttons']), (button: Record<string, Object>, index: number) => this.actionButton(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(button, 'action'), key: key, title: Wire.text(button, 'title'), event: 'submit', role: '', summary: Wire.text(item, 'title'), values: this.safeActionValues(Wire.text(item, 'name'), this.model.fieldValue(key + ':' + Wire.text(item, 'name'), Wire.text(item, 'value'))) }))),
-          (button: Record<string, Object>, index: number) => Wire.text(Wire.object(button, 'action'), 'id', String(index)))
+        this.actionGroup(this.choices(item['buttons']).map((button: Record<string, Object>): Binding<NativeActionButton> => UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(button, 'action'), key: key, title: Wire.text(button, 'title'), event: 'submit', role: Wire.text(button, 'role'), tone: Wire.text(button, 'tone'), summary: Wire.text(item, 'title'), values: this.safeActionValues(Wire.text(item, 'name'), this.model.fieldValue(key + ':' + Wire.text(item, 'name'), Wire.text(item, 'value'))) }))))
       }.width('100%')
     }.width('100%')
   }
@@ -1231,8 +1309,7 @@ export struct ExtensionView {
       if (Wire.has(tile, 'badge')) this.badgeView(Wire.object(tile, 'badge'))
       if (Wire.has(tile, 'spark')) this.spark(Wire.object(tile, 'spark'))
       if (Wire.has(tile, 'control')) this.rowControl(Wire.object(tile, 'control'), key, UIUtils.makeBinding((): string => Wire.text(tile, 'title')))
-      if (Wire.has(tile, 'action')) this.actionButton(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(tile, 'action'), key: key, title: Wire.text(tile, 'title'), event: 'press', role: '', summary: Wire.text(tile, 'title'), values: {} })))
-      ForEach(this.choices(tile['actions']), (entry: Record<string, Object>, index: number) => this.actionButton(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(entry, 'action'), key: key, title: Wire.text(entry, 'title'), event: 'press', role: Wire.text(entry, 'role'), summary: '', values: {} }))), (entry: Record<string, Object>, index: number) => String(index))
+      this.actionGroup(this.tileActions(tile, key))
     }.width(200).padding(Tokens.inset).backgroundColor($r('sys.color.comp_background_tertiary'))
       .border({ width: Tokens.hairline, color: $r('sys.color.font_secondary'), radius: Tokens.gap })
   }
@@ -1246,9 +1323,7 @@ export struct ExtensionView {
         }.width('100%')
         TextArea({ text: this.model.fieldValue('@review'), placeholder: Wire.text(Wire.object(this.renderView(), 'review'), 'placeholder') }).height(Tokens.input)
           .onChange((value: string) => this.model.setFieldValue('@review', value))
-        if (Wire.has(Wire.object(this.renderView(), 'review'), 'discard')) this.actionButton(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(Wire.object(this.renderView(), 'review'), 'discard'), key: this.rootKey(), title: tr('discard'), event: 'press', role: 'destructive', summary: Wire.text(Wire.object(this.renderView(), 'review'), 'name'), values: {} })))
-        ForEach(this.choices(Wire.object(this.renderView(), 'review')['buttons']), (button: Record<string, Object>, index: number) => this.actionButton(UIUtils.makeBinding((): NativeActionButton => ({ action: Wire.object(button, 'action'), key: this.rootKey(), title: Wire.text(button, 'title'), event: 'submit', role: '', summary: Wire.text(Wire.object(this.renderView(), 'review'), 'name'), values: this.safeActionValues(Wire.text(Wire.object(this.renderView(), 'review'), 'name'), this.model.fieldValue('@review')) }))),
-          (button: Record<string, Object>, index: number) => Wire.text(Wire.object(button, 'action'), 'id', String(index)))
+        this.actionGroup(this.reviewActions())
       }.width('100%').padding(Tokens.inset).backgroundColor($r('sys.color.comp_background_tertiary'))
         .border({ width: Tokens.hairline, color: $r('sys.color.font_secondary'), radius: Tokens.gap })
     }

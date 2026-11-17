@@ -92,8 +92,62 @@ struct UrgentCallCardTests {
         func say(_ text: String) async { said.append(text) }
         func listen() async -> String? { lines.isEmpty ? nil : lines.removeFirst() }
         func stop() {}
+        func stopListening() {}
         var canHear: Bool { true }
     }
+
+    /// A voice whose lines and turns take as long as the test says, as `UrgentCallVoice`'s do: `say` returns once the
+    /// line is finished or `stop` cut it, `listen` once the owner answered or a stop came.
+    final class SlowOwner: UrgentCallSpeech {
+        private(set) var said: [String] = []
+        private(set) var stops = 0
+        private(set) var listenStops = 0
+        private var saying: CheckedContinuation<Void, Never>?
+        private var hearing: CheckedContinuation<String?, Never>?
+        var speaking: Bool { saying != nil }
+        var listening: Bool { hearing != nil }
+
+        func say(_ text: String) async {
+            said.append(text)
+            await withCheckedContinuation { saying = $0 }
+        }
+
+        func listen() async -> String? { await withCheckedContinuation { hearing = $0 } }
+
+        func stop() {
+            stops += 1
+            endLine()
+            answer(nil)
+        }
+
+        func stopListening() {
+            listenStops += 1
+            answer(nil)
+        }
+
+        var canHear: Bool { true }
+
+        /// The line was said to its end.
+        func endLine() {
+            let saying = saying
+            self.saying = nil
+            saying?.resume()
+        }
+
+        /// The owner said `text` (nil: nothing).
+        func answer(_ text: String?) {
+            let hearing = hearing
+            self.hearing = nil
+            hearing?.resume(returning: text)
+        }
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async {
+        let deadline = Date.now.addingTimeInterval(2)
+        while !condition(), Date.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    private func settle() async { for _ in 0..<50 { await Task.yield() } }
 
     private let ring = UrgentCallRing(id: "call_1", title: "云账单扣费失控", manager: "", conversationID: "conv", attempt: 1, group: "urgent-test")
 
@@ -124,11 +178,210 @@ struct UrgentCallCardTests {
         #expect(answered.map(\.resolution) == [Resolution(allow: true)])
     }
 
+    /// On hold (#9290) nothing is said or heard; once it is off, the call goes on where it was.
+    @Test func onHoldNothingIsSaidOrHeardUntilTheHoldEnds() async {
+        let owner = Owner(["没有了，挂断吧"])
+        var ended = false
+        let session = UrgentCallSession(ring: ring, voice: owner, card: nil, resolve: { _, _ in }, ended: { _ in ended = true })
+        session.setHeld(true)
+        session.start()
+        for _ in 0..<50 { await Task.yield() }
+        #expect(owner.said.isEmpty && !ended)
+        session.setHeld(false)
+        let deadline = Date.now.addingTimeInterval(2)
+        while !ended, Date.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(ended && !owner.said.isEmpty)
+    }
+
+    /// Muted from the system: Persona still speaks, but listens only once the mute is off (and a muted wait is no silence).
+    @Test func mutedPersonaSpeaksButDoesNotListen() async {
+        let owner = Owner(["没有了，挂断吧"])
+        var ended = false
+        let session = UrgentCallSession(ring: ring, voice: owner, card: nil, resolve: { _, _ in }, ended: { _ in ended = true })
+        session.setMuted(true)
+        session.start()
+        for _ in 0..<50 { await Task.yield() }
+        #expect(owner.said.count == 1 && owner.lines.count == 1 && !ended, "the introduction, then waiting")
+        session.setMuted(false)
+        let deadline = Date.now.addingTimeInterval(2)
+        while !ended, Date.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(ended && owner.lines.isEmpty)
+    }
+
+    /// Held while Persona speaks (#9290): the line stops, nothing is said or heard on hold, and off hold the line is
+    /// said again, whole, and the call goes on.
+    @Test func aHoldWhilePersonaSpeaksSaysTheLineAgainAfterIt() async {
+        let owner = SlowOwner()
+        var ended = false
+        let session = UrgentCallSession(ring: ring, voice: owner, card: nil, resolve: { _, _ in }, ended: { _ in ended = true })
+        session.start()
+        await waitUntil { owner.speaking }
+        let introduction = owner.said
+        session.setHeld(true)
+        #expect(owner.stops == 1 && !owner.speaking, "the line stops")
+        await settle()
+        #expect(owner.said == introduction && !owner.listening, "on hold nothing is said or heard")
+        session.setHeld(false)
+        await waitUntil { owner.speaking }
+        #expect(owner.said == introduction + introduction, "said again, whole")
+        #expect(session.lines.filter { $0.who == .persona }.count == 1, "once in the transcript")
+        owner.endLine()
+        await waitUntil { owner.listening }
+        owner.answer("没有了，挂断吧")
+        await waitUntil { owner.speaking }
+        owner.endLine()
+        await waitUntil { ended }
+        #expect(ended)
+    }
+
+    /// Muted while Persona speaks: the line goes on (muted, Persona still speaks), and the turn listens only once the
+    /// mute is off.
+    @Test func aMuteWhilePersonaSpeaksLetsTheLineFinish() async {
+        let owner = SlowOwner()
+        var ended = false
+        let session = UrgentCallSession(ring: ring, voice: owner, card: nil, resolve: { _, _ in }, ended: { _ in ended = true })
+        session.start()
+        await waitUntil { owner.speaking }
+        session.setMuted(true)
+        #expect(owner.stops == 0 && owner.speaking, "the line goes on")
+        owner.endLine()
+        await settle()
+        #expect(!owner.listening, "muted: not listening")
+        session.setMuted(false)
+        await waitUntil { owner.listening }
+        owner.answer("没有了，挂断吧")
+        await waitUntil { owner.speaking }
+        owner.endLine()
+        await waitUntil { ended }
+        #expect(ended)
+    }
+
+    /// Muted while it listens: what it had is not the owner's answer, and no silence either ("Are you still there?");
+    /// it listens again once the mute is off.
+    @Test func aMuteWhileListeningListensAgainAfterIt() async {
+        let owner = SlowOwner()
+        let session = UrgentCallSession(ring: ring, voice: owner, card: nil, resolve: { _, _ in }, ended: { _ in })
+        session.start()
+        await waitUntil { owner.speaking }
+        owner.endLine()
+        await waitUntil { owner.listening }
+        session.setMuted(true)
+        #expect(owner.listenStops == 1 && !owner.listening)
+        await settle()
+        #expect(owner.said.count == 1 && !owner.listening && !owner.speaking)
+        session.setMuted(false)
+        await waitUntil { owner.listening }
+        #expect(owner.listening && owner.said.count == 1)
+        session.hangUp()
+    }
+
+    /// Muted and held before it began, then off hold while still muted: Persona speaks, and does not listen.
+    @Test func offHoldButStillMutedPersonaSpeaksButDoesNotListen() async {
+        let owner = SlowOwner()
+        let session = UrgentCallSession(ring: ring, voice: owner, card: nil, resolve: { _, _ in }, ended: { _ in })
+        session.setMuted(true)
+        session.setHeld(true)
+        session.start()
+        await settle()
+        #expect(owner.said.isEmpty)
+        session.setHeld(false)
+        await waitUntil { owner.speaking }
+        #expect(owner.said.count == 1, "the hold is over: Persona speaks, muted or not")
+        owner.endLine()
+        await settle()
+        #expect(!owner.listening, "but listens only once unmuted")
+        session.hangUp()
+    }
+
     @Test func aReadBackTurnedDownAnswersNothing() async {
         var card = Interaction(id: "ix_3", machineID: "server", sessionID: "conv", kind: .question)
         card.questions = [Question(question: "要不要现在停掉？", header: nil, multiSelect: false, options: [QuestionOption(label: "现在停掉")])]
         let answered = await call(card, owner: ["现在停掉", "不对"])
         #expect(answered.isEmpty)
+    }
+}
+
+/// The urgent call's own voice (#9290): a line `stop` cuts returns at once, in the phone's voice, in the hub's streamed
+/// speech, and while that speech is still being fetched (and nothing fetched plays after); a mute's `stopListening`
+/// cuts nothing being said.
+@MainActor
+struct UrgentCallVoiceTests {
+    @MainActor final class Saying {
+        var done = false
+    }
+
+    /// Says `text` on a task of its own.
+    private func say(_ voice: UrgentCallVoice, _ text: String) -> Saying {
+        let saying = Saying()
+        Task {
+            await voice.say(text)
+            saying.done = true
+        }
+        return saying
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async {
+        let deadline = Date.now.addingTimeInterval(2)
+        while !condition(), Date.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    private func settle() async { for _ in 0..<50 { await Task.yield() } }
+
+    @Test func aStopCutsThePhonesVoice() async {
+        let device = FakeDeviceSpeech()
+        let voice = UrgentCallVoice(language: "en", device: device, player: { FakePlayer() }, speech: { _, _ in nil })
+        let saying = say(voice, "Hello")
+        await waitUntil { !device.said.isEmpty }
+        voice.stopListening()
+        await settle()
+        #expect(!saying.done, "a mute cuts nothing said")
+        voice.stop()
+        await waitUntil { saying.done }
+        #expect(saying.done && device.stops == 1)
+        let next = say(voice, "Again")
+        await waitUntil { device.said.count == 2 }
+        device.finish()
+        await waitUntil { next.done }
+        #expect(next.done, "a line said to its end returns")
+    }
+
+    @Test func aStopCutsTheHubsSpeechAsItPlays() async {
+        let device = FakeDeviceSpeech()
+        let player = FakePlayer()
+        let (audio, feed) = AsyncThrowingStream<Data, Error>.makeStream()
+        let voice = UrgentCallVoice(language: "en", device: device, player: { player },
+                                    speech: { _, _ in VoiceSpeech(rate: 24000, audio: audio) })
+        let saying = say(voice, "Hello")
+        await waitUntil { player.rate != nil }
+        feed.yield(.pcm(480))
+        await waitUntil { !player.pieces.isEmpty }
+        voice.stopListening()
+        await settle()
+        #expect(!saying.done && !player.stopped, "a mute cuts nothing said")
+        voice.stop()
+        await waitUntil { saying.done }
+        #expect(saying.done && player.stopped)
+        await settle()
+        #expect(device.said.isEmpty, "cut, not said again in the phone's voice")
+        feed.finish()
+    }
+
+    @Test func aStopWhileTheHubsSpeechIsFetchedReturnsAndNothingPlaysAfter() async {
+        let device = FakeDeviceSpeech()
+        var players = 0
+        var fetched: CheckedContinuation<VoiceSpeech?, Never>?
+        let voice = UrgentCallVoice(language: "en", device: device, player: { players += 1; return FakePlayer() },
+                                    speech: { _, _ in await withCheckedContinuation { fetched = $0 } })
+        let saying = say(voice, "Hello")
+        await waitUntil { fetched != nil }
+        voice.stop()
+        await waitUntil { saying.done }
+        #expect(saying.done, "at once, the speech still on its way")
+        let (audio, feed) = AsyncThrowingStream<Data, Error>.makeStream()
+        fetched?.resume(returning: VoiceSpeech(rate: 24000, audio: audio))
+        await settle()
+        #expect(players == 0 && device.said.isEmpty, "what came after the stop is not played")
+        feed.finish()
     }
 }
 
@@ -151,7 +404,7 @@ struct UrgentCallIsolationTests {
                                                        maximumConversationsPerConversationGroup: 1, includesConversationInRecents: false,
                                                        supportsVideo: false, supportedHandleTypes: [.generic])
         nonisolated(unsafe) let manager = ConversationManager(configuration: config)
-        nonisolated(unsafe) let delegate: any ConversationManagerDelegate = UrgentCallLCKDelegate()
+        nonisolated(unsafe) let delegate: any ConversationManagerDelegate = PersonaCallsLCKDelegate()
         await offMain {
             delegate.conversationManagerDidBegin(manager)
             delegate.conversationManagerDidReset(manager)
@@ -167,10 +420,14 @@ struct UrgentCallIsolationTests {
         #expect(UrgentCallPush.shared.token == nil)
     }
 
-    /// The call page's cover, on every launch, reads only the presenter: no call center's LiveCommunicationKit manager.
+    /// The call pages' covers, on every launch, read only the presenter and the call manager's state: no
+    /// LiveCommunicationKit manager (#9264).
     @Test @MainActor func launchingMakesNoCallManager() {
         _ = UrgentCallPresenter.shared.session
-        #expect(!UrgentCallCenter.shared.managerMade)
+        _ = PersonaCalls.shared.presented
+        _ = PersonaCalls.shared.ownerCall
+        _ = PersonaCalls.shared.urgentInProgress
+        #expect(!PersonaCalls.shared.systemMade)
     }
 
     /// Every system callback in the call code is written `nonisolated`, so a new one cannot quietly be the main actor's.

@@ -396,8 +396,8 @@ func (s *Service) startConversationOn(ctx context.Context, p StartParams, main b
 			guestID = newGuestSessionID()
 			p.NewSessionID = guestID
 		}
-		// The Agent SDK bridge discovers its tools before assistant.send returns. Register the guest's restriction
-		// first, as roomCreate does, so that first discovery is the declared list rather than an empty one.
+		// The conversation's MCP server can discover its tools before assistant.send returns. Register the guest's
+		// restriction first, as roomCreate does, so that first discovery is the declared list rather than an empty one.
 		if err := s.guestSet(ctx, machine, guestID, p.GuestTools); err != nil {
 			return proto.Session{}, err
 		}
@@ -1066,6 +1066,7 @@ func (s *Service) sendParamsOwn(ctx context.Context, p SendParams) (map[string]a
 	if params == nil {
 		params = map[string]any{}
 	}
+	delete(params, "runtime") // every assistant conversation runs on Claude Code's CLI (finishModel)
 	text, _ := params["text"].(string)
 	own := !contextTagRe.MatchString(text)
 	params["is_main"] = false
@@ -1076,9 +1077,9 @@ func (s *Service) sendParamsOwn(ctx context.Context, p SendParams) (map[string]a
 		return nil, false, err // an ended room: 409 meeting_ended (meeting_room.go)
 	}
 	if s.isGuest(ctx, p.MachineID, p.SessionID) {
-		// A guest conversation keeps what it started on: no launcher, model, runtime or mode picked for a message
-		// (the node refuses a change too, node/assistant_guest.go).
-		for _, k := range []string{"launcher", "model", "effort", "model_fingerprint", "runtime", "permission_mode"} {
+		// A guest conversation keeps what it started on: no launcher, model or mode picked for a message (the node
+		// refuses a change too, node/assistant_guest.go).
+		for _, k := range []string{"launcher", "model", "effort", "model_fingerprint", "permission_mode"} {
 			delete(params, k)
 		}
 		return params, own, nil
@@ -1132,6 +1133,7 @@ func (s *Service) sendModel(ctx context.Context, machine, sid string, p map[stri
 	ctx = withLauncherPurpose(ctx, "assistant")
 	cfg := s.settings(ctx)
 	p["is_main"] = cfg.Main != "" && cfg.Main == sid && cfg.mainRouteMachine() == machine
+	putMainCompactWindow(cfg, p)
 	if cfg.InterjectBackground != nil && *cfg.InterjectBackground {
 		p["interject_background"] = true
 	}

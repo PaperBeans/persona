@@ -156,13 +156,19 @@ func Document(item sessionlist.Item) (sessionlist.SearchDocument, error) {
 			}
 		}
 		if row.Work.Phase == "blocked" {
-			errors = append(errors, row.Work.Line)
+			errors = append(errors, textfmt.SearchMarkdown(row.Work.Line))
 			d.HasErrors = true
 		}
 	}
 	d.ErrorText = strings.Join(errors, " · ")
 	d.HasErrors = d.HasErrors || row.StartError != "" || row.TurnError != "" || failure != "" || row.AttentionReason != "" || d.State == "needs_you" || row.PendingInteractions > 0
-	d.AgentText = textfmt.SearchMarkdown(strings.Join([]string{row.LastText, work}, "\n"))
+	d.AgentText = textfmt.SearchMarkdown(row.LastText)
+	if shownWork := textfmt.SearchMarkdown(work); shownWork != "" {
+		if d.AgentText != "" {
+			d.AgentText += "\n"
+		}
+		d.AgentText += shownWork
+	}
 	d.Metadata = strings.Join([]string{row.Cwd, row.RepoRoot, row.Branch, row.SpaceName, row.SlotName, d.HarnessLabel, shortModel(model), row.Activity}, " · ")
 	return d, nil
 }

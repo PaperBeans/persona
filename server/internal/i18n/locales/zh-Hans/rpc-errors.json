@@ -81,5 +81,6 @@
   "assistant_service_tier_refused": "Codex 没能在第一条消息前启用 Fast。这次没有发送，请重试或改用 Standard。",
   "assistant_supervision_busy": "这个对话的任务跟进职责变了。请等它当前的工作结束后再试，这次没有发送。",
   "assistant_supervision_runtime": "请用 Claude Code 或 Codex 对话跟进任务。这个 Agent 不支持独立的跟进指令，这次没有启动或发送任何内容。",
-  "assistant_supervision_node_outdated": "请先更新这台电脑的 Persona Link，再在这里跟进任务。当前版本不能应用独立的任务指令，这次没有启动或发送任何内容。"
+  "assistant_supervision_node_outdated": "请先更新这台电脑的 Persona Link，再在这里跟进任务。当前版本不能应用独立的任务指令，这次没有启动或发送任何内容。",
+  "omp_resume_unknown": "Persona 还不能从这里恢复这个 omp 会话，请在电脑上用 omp --resume 接着它。这次没有发送。"
 }

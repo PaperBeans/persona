@@ -195,7 +195,10 @@ Widgets/faces/<id>_<rev>/    the chosen package's pictures, one per state, at th
   when it goes to the background; at least every 20 minutes while it runs (`HomeWidgetWriter.heartbeat`); and when the
   hub's widget push wakes it (#5721). That push is sent within seconds when Needs You changes; other changes are coalesced to at most one
   every 15 minutes per device. The app writes only when the bytes changed, then reloads only the kinds whose part
-  changed (`WidgetCenter.reloadTimelines(ofKind:)`): WidgetKit budgets reloads. The writer is `HomeWidgetWriter`; what
+  changed (`WidgetCenter.reloadTimelines(ofKind:)`) and that are placed (`HomeWidgetData.installed`; every kind until
+  that is known): WidgetKit budgets reloads. A change of only the live numbers (each working row's activity line, the
+  machines' load, today's tokens; `HomeWidgetWriter.settled`) is written at most once a minute (`livePause`), the latest
+  then: a working fleet changed them every few seconds, a rewrite and a reload each time (#9592). The writer is `HomeWidgetWriter`; what
   the watch's summary follows asks it for a write (`AppModel.summariesChanged`), and a recording that starts or stops
   writes at once (`RecordingActivity`).
 - **Waking the app** (#5721): from the foreground the app tells the hub whether any of the widgets is on a screen

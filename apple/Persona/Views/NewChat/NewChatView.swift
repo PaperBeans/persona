@@ -518,11 +518,9 @@ struct NewChatView: View {
             .navigationTitle("New Chat [Quick Actions ea4b29]")
             .navigationBarTitleDisplayMode(.inline)
             .pageToolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        attachments.cancelUploads()
-                        dismiss()
-                    }
+                SheetClose {
+                    attachments.cancelUploads()
+                    dismiss()
                 }
                 #if os(macOS)
                 // A Mac sheet's primary button sits beside Cancel and answers ⏎ (docs/apple/mac.md「Mapping from iOS」).

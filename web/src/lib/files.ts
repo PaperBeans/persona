@@ -274,6 +274,21 @@ export function parseDiff(diff: string): DiffLine[] {
   return out;
 }
 
+/** Git C-quotes special path bytes even with core.quotepath off (node gitCmd / gitQuote). */
+function unquoteGitPath(path: string): string | null {
+  const escapes: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\": 92 };
+  const bytes: number[] = [];
+  for (const token of path.match(/\\(?:[0-7]{1,3}|.)|[^\\]+/g) ?? []) {
+    if (!token.startsWith("\\")) bytes.push(...new TextEncoder().encode(token));
+    else {
+      const byte = /^[0-7]/.test(token[1]) ? parseInt(token.slice(1), 8) : escapes[token[1]];
+      if (byte === undefined || byte > 255) return null;
+      bytes.push(byte);
+    }
+  }
+  return new TextDecoder("utf-8", { ignoreBOM: true }).decode(new Uint8Array(bytes));
+}
+
 /** A multi-file diff (git show) cut into one diff per file, keyed by the new path. */
 export function splitDiff(diff: string): Record<string, string> {
   const res: Record<string, string> = {};
@@ -286,9 +301,10 @@ export function splitDiff(diff: string): Record<string, string> {
     if (line.startsWith("diff --git ")) {
       flush();
       buf = [];
-      // diff --git a/x b/x → x (b/ taken from the end, so paths with spaces work)
+      // The -z file list uses raw paths; the diff headers may quote the same names.
+      const quoted = / "b\/((?:[^"\\]|\\.)*)"$/.exec(line);
       const i = line.lastIndexOf(" b/");
-      path = i >= 0 ? line.slice(i + 3) : null;
+      path = quoted ? unquoteGitPath(quoted[1]) : i >= 0 ? line.slice(i + 3) : null;
     }
     buf.push(line);
   }

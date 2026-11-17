@@ -78,6 +78,10 @@
   "howto_footer": "永続接続はハブから接続するため、ハブにパブリックアドレスは不要です。",
   "nudge_title": "未回答のカードをリマインド",
   "nudge_detail": "カードがこの時間たっても未回答なら、その下に一度だけ返信でお知らせします（グループのトピックではあなたにメンションします）。おやすみ時間中は終了後に送ります",
+  "source_report_delay_title": "元のグループに返信するまでの時間",
+  "source_report_delay_detail": "結果がまとまったら、この時間内にプレビューして返信を取り消せます。「すぐに返信」を選ぶとプレビューを省略します。",
+  "source_report_delay_now": "すぐに返信",
+  "source_report_delay_minutes": "{minutes} 分",
   "combined_footer": "1つの Lark アプリで、ボットを通じて Persona と話し、「自分の Lark メッセージを集める」であなたへのメンションを受信トレイに集めます。",
   "lark_name": "Lark",
   "credentials_shared_note": "ボットと「自分の Lark メッセージを集める」はこのアプリを共用します。",
@@ -104,5 +108,7 @@
   "larkcli_profile_default": "lark-cli の既定プロファイル",
   "larkcli_profile_fixed": "{name}（設定ファイルで指定）",
   "feature_answer_new_card_title": "回答を新しいカードで送る",
-  "feature_answer_new_card_detail": "ひと区切りしたら回答をチャットのいちばん下に新しいカードとして送り（Lark が通知します）、進捗カードはその場で折りたたみます。オフのときは回答を進捗カードに書き込みます"
+  "feature_answer_new_card_detail": "ひと区切りしたら回答をチャットのいちばん下に新しいカードとして送り（Lark が通知します）、進捗カードはその場で折りたたみます。オフのときは回答を進捗カードに書き込みます",
+  "source_report_full_title": "最終回答の全文を返信",
+  "source_report_full_detail": "元のグループの全員が最終回答を読めます。オフにすると短い結果を返信します。"
 }

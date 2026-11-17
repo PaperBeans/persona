@@ -75,13 +75,17 @@ final class MeetingRecordingUITests: XCTestCase {
 
     /// The meeting's Live Activity: Dynamic Island compact and expanded, Lock Screen. PERSONA_MEETING_PHASE=recording
     /// (default) | paused | interrupted | stopped (stale, as after iOS ended the app, #9108). Shots, not a pass / fail check
-    /// of the drawing; the Lock Screen's Stop is checked.
+    /// of the drawing. The Lock Screen's End is checked (#8731 V4): a link that opens the meeting and asks before it ends
+    /// anything; while it records, the question shows and a tap outside it keeps recording.
+    /// A new simulator (#9348) first asks about notifications and may show the icon-change alert: either one eats the
+    /// Home press, so no activity starts. Both are answered before Home.
     @MainActor func testLiveActivityShots() throws {
         let hub = try mockHub()
         let phase = ProcessInfo.processInfo.environment["PERSONA_MEETING_PHASE"] ?? "recording"
         let app = XCUIApplication()
         app.launchArguments = ["-pairURL", pair(hub), "-tab", "assistant", "-openShellPage", "recordings", "-showMeetingSample", phase]
         app.launchPinned()
+        clearLaunchAlerts()
         XCTAssertTrue(app.descendants(matching: .any)["recording-now-title"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
         sleep(2)
         XCUIDevice.shared.press(.home)
@@ -98,18 +102,48 @@ final class MeetingRecordingUITests: XCTestCase {
         XCUIDevice.shared.perform(NSSelectorFromString("pressLockButton"))
         sleep(3)
         // The system's first question about Live Activities (Allow / Always Allow): the activity's own buttons are
-        // Bookmark and Stop, so its Allow is the system's.
+        // Bookmark, Ask Persona and End, so its Allow is the system's.
         for label in ["Allow", "允许", "Always Allow", "始终允许"] {
             let b = springboard.buttons[label].firstMatch
             if b.exists { b.tap(); sleep(2) }
         }
         try screen("lock-\(phase)")
-        let stop = springboard.buttons.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "停止", "Stop")).firstMatch
-        XCTAssertTrue(stop.waitForExistence(timeout: 5), "no Stop on the Lock Screen:\n\(springboard.debugDescription)")
-        // Unlock (swipe up; no passcode on the simulator): a locked simulator hangs the next test run.
+        let end = springboard.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "结束", "End")).firstMatch
+        XCTAssertTrue(end.waitForExistence(timeout: 5), "no End on the Lock Screen:\n\(springboard.debugDescription)")
+        guard phase == "recording" else {
+            unlock(springboard)
+            return
+        }
+        // End opens the meeting (unlocking first: no passcode on the simulator) and asks; nothing has ended.
+        end.tap()
+        if !app.wait(for: .runningForeground, timeout: 5) { unlock(springboard) }
+        let ask = app.buttons.matching(NSPredicate(format: "label IN %@", ["停止录音", "结束并生成纪要"])).firstMatch
+        XCTAssertTrue(ask.waitForExistence(timeout: 10), "End didn't ask:\n\(app.debugDescription)")
+        try screen("lock-end-asks")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: ask)
+        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 5), .completed, "the question stays")
+        XCTAssertTrue(app.descendants(matching: .any)["recording-now-title"].firstMatch.exists, "the meeting ended")
+    }
+
+    /// Unlocks (swipe up; no passcode on the simulator): a locked simulator hangs the next test run.
+    @MainActor private func unlock(_ springboard: XCUIApplication) {
         let bottom = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.99))
         bottom.press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)))
         sleep(1)
+    }
+
+    /// A new simulator's launch alerts (#9348): notifications are allowed (the activity's Stop and the minutes' notice need
+    /// them), and the icon-change alert's only button closes it. Up to two, whichever comes first.
+    @MainActor private func clearLaunchAlerts() {
+        let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        for _ in 0..<2 {
+            guard alert.waitForExistence(timeout: 3) else { return }
+            let allow = alert.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
+            if allow.exists { allow.tap() } else { alert.buttons.firstMatch.tap() }
+            sleep(1)
+        }
     }
 
     /// The hub's minutes on the meeting's page: the Summary's cards (#5026; `MinutesCardsUITests` has the rest), a time that

@@ -42,6 +42,8 @@ func (h *Manager) assistantAppCall(ctx context.Context, p assistantwire.AppCall)
 		return map[string]any{"connectors": signedIn, "clis": clis, "lark_cli": h.cfg != nil && h.cfg.Lark.CLI != nil}, nil
 	case assistantwire.AppConnectors + " " + assistantwire.ConnectorsSnapshots:
 		return map[string]any{"snapshots": h.connectorSnapshots(ctx, a.TZ)}, nil
+	case assistantwire.AppConnectors + " " + assistantwire.ConnectorsLarkReply:
+		return h.observeLarkReply(ctx, p.Params)
 	case assistantwire.AppPlugins + " " + assistantwire.PluginsAssistant:
 		return map[string]any{"instructions": h.extensions.extensionInstructions(ctx, a.BaseDigest), "skills": h.extensions.extensionSkillsFor(a.MachineID)}, nil
 	case assistantwire.AppPlugins + " " + assistantwire.PluginsProjectContext: // extension_prompt_context.go

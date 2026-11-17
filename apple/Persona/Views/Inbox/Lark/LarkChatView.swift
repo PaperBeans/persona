@@ -615,7 +615,6 @@ struct LarkChatView: View {
         }
         .disabled(savingOutgoing || !draftLoaded || outbox.invalidated)
         .padding(.top, !attachments.isEmpty || preparingAttachment ? Theme.Space.s : 0)
-        .tabSwitchRoom() // beside the open Duo's floating tabs' switch (#4231); the bar's color still across
         .background {
             if messageComposer || encryptionDraft != nil || !attachments.isEmpty || preparingAttachment {
                 barBackground.ignoresSafeArea(edges: .bottom)
@@ -652,7 +651,6 @@ struct LarkChatView: View {
             .buttonStyle(.plain)
             .padding(.trailing, Theme.Space.l)
             .padding(.bottom, Theme.Space.s)
-            .tabSwitchRoom()
             .accessibilityLabel(n > 0 ? String(localized: "\(n) new messages, jump to latest") : String(localized: "Jump to Latest"))
             .accessibilityValue(jumping ? String(localized: "Loading [Lark Chat View f020e4]") : "")
             .accessibilityIdentifier("lark.jumpLatest")

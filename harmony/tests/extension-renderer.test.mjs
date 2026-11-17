@@ -271,8 +271,8 @@ test('whole-file line replies open at the requested interval and expose bounded 
   assert.match(renderer, /this\.rememberLineRequest\(key, payload\)/);
 
   assert.match(renderer, /lines\.slice\(state\.offset, state\.offset \+ state\.limit\)/);
-  assert.match(renderer, /Button\(tr\('back'\)\)\.onClick\(\(\) => this\.moveLineWindow\(key, path\.value, false\)\)/);
-  assert.match(renderer, /Button\(tr\('more'\)\)\.onClick\(\(\) => this\.moveLineWindow\(key, path\.value, true\)\)/);
+  assert.match(renderer, /\.accessibilityText\(tr\('back'\)\)[^\n]*\.onClick\(\(\) => this\.moveLineWindow\(key, path\.value, false\)\)/);
+  assert.match(renderer, /\.accessibilityText\(tr\('more'\)\)[^\n]*\.onClick\(\(\) => this\.moveLineWindow\(key, path\.value, true\)\)/);
   assert.doesNotMatch(renderer, /more lines/);
 
   const fixture = fixtureClient(), model = new ExtensionUIModel();

@@ -222,6 +222,18 @@ final class RecordingCapture {
     }
     #endif
 
+    #if os(iOS)
+    /// The speaker turned on while a room meeting records (#8731 B2, an experiment behind Settings › Meetings' switch): its
+    /// engine turns the system's echo cancellation on from now to the end, as a meeting that starts taking part has it
+    /// (`RecordingSegmentWriter.turnOnVoiceProcessing`); the microphone stops for a moment. Nothing when it is on already
+    /// or this is no room meeting; an engine that won't start again pauses the recording, as a route change does.
+    func turnOnEchoCancellation() {
+        guard meetingCall, !cancelsEcho, let writer, state == .recording || state == .paused else { return }
+        do { cancelsEcho = try writer.turnOnVoiceProcessing(running: state == .recording) }
+        catch { microphoneChangeFailed() }
+    }
+    #endif
+
     /// Persona started or stopped attending a meeting with the live view (#3862 phase 2,
     /// `RecordingAttendance.shortSegments`): its segments are 15 seconds from now on, in front or not; the open one closes
     /// as soon as it is longer. Off again, the usual 30 / 60 s.
@@ -282,7 +294,14 @@ final class RecordingCapture {
         self.shortSegments = shortSegments && !day
         self.meetingCall = meetingCall && !day && !rolling
         cancelsEcho = false
+        #if DEBUG
+        // An audio file in place of the microphone (`-openMeetingAudio`, #9417): the microphone isn't asked for. Never for
+        // an all-day recording.
+        let fileInput = day ? nil : RecordingFileInput.requested()
+        let allowed = fileInput != nil ? true : await Self.permission()
+        #else
         let allowed = await Self.permission()
+        #endif
         guard generation == token, state == .starting else { return }
         guard allowed else { failStarting(String(localized: "Allow Persona to use the microphone in Settings")); return }
         if let problem = Self.resourceProblem(starting: true) { failStarting(problem.message); return }
@@ -311,6 +330,9 @@ final class RecordingCapture {
                 writer.callPlayerFormat = Self.callFormat
                 writer.voiceProcessing = echoCancellation
             }
+            #endif
+            #if DEBUG
+            writer.fileInput = fileInput
             #endif
             writer.listener = listeners
             connect(writer)

@@ -11,10 +11,21 @@ HTTP MCP servers. Authenticate Grok normally before starting the companion. No c
 node integrations/grok/companion.mjs \
   --socket "$HOME/.persona/runtime.sock" \
   --grok-bin /absolute/path/to/grok \
-  --model <model-id-from-grok> --effort <supported-level>
+  --model <model-id-from-grok> --effort <supported-level> \
+  --assistant-for grok   # optional: the Paseo provider running this same Grok CLI and account
 ```
 
+Why two entries: a Paseo provider (for example `grok`, labelled "Grok · Official") starts Agents through Paseo's ACP
+bridge, and the Paseo runtime does not declare the assistant capability, so the main chat cannot run on it. This companion
+is the assistant runtime for the same CLI: it supplies the assistant's private context, its Persona tools, phone approval
+and the permission modes (`docs/integrations/runtimes.md`, "Assistant").
+
 Optional flags: `--grok-home` selects the native transcript directory; `--launcher` selects another unique launcher name;
+`--display-name` is what the apps call it (default `Grok`); `--assistant-for <launcher>` names the Agent launcher on this
+computer that runs the same Grok CLI and account but can't run assistant chats, such as a Paseo provider `grok`: the main
+chat's menu then shows that one as "Can start Agents … For assistant chats, choose Grok" instead of only refusing it. Set it
+only when the two really are the same account; nothing is inferred from names, and a message is never moved from one to
+the other;
 `--permission-mode` selects the default (`default`, `acceptEdits`, `auto`, `plan`, `bypassPermissions`). An explicit
 conversation setting overrides it. `auto` uses the phone's permission decisions; it does not claim Grok's own automatic
 approval classifier. To align an unattended Paseo profile, use its actual model ID and `thinkingOptionId`, and set

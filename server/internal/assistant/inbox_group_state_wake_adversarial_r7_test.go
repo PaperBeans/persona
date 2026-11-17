@@ -25,7 +25,7 @@ func TestAdversarialInboxGroupStateWakeR7FollowKeepsCurrentAgent(t *testing.T) {
 	requireInboxGroupStateChange(t, rest, changed, it)
 	h.deliverPending(ctx)
 
-	_, _, err := h.suggest(ctx, "session-1", suggestIn{
+	_, _, err := h.suggest(ctx, "session-1", suggestIn{ProcessingTurn: inboxTestProcessingTurn(h, "session-1"),
 		Recap:  "The owner replied; still waiting for the synthetic answer",
 		Follow: &suggestFollow{Who: "Example teammate", Next: "Wait for the answer", CheckIn: "4h"},
 	})

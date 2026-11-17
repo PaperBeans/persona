@@ -1,3 +1,7 @@
+import { Symbols } from '../design/Symbols';
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles, SelectStyles } from '../design/Controls';
 import { common } from '@kit.AbilityKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { filePreview } from '@kit.PreviewKit';
@@ -691,7 +695,7 @@ export struct SessionTools {
 
       if (this.workspace.trashUndo.length && this.workspace.canEditFiles()) Row({ space: Tokens.gap }) {
         Text(tr('session_tools_trashed_count').replace('{count}', String(this.workspace.trashUndo.length))).fontSize(Tokens.meta).layoutWeight(1)
-        Button(tr('session_tools_restore')).onClick(() => this.restoreTrash()).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('session_tools_restore')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('session_tools_restore', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('session_tools_restore')).bindTips(tr('session_tools_restore')).onClick(() => this.restoreTrash())
       }.padding({ left: Tokens.inset, right: Tokens.inset, bottom: Tokens.gap })
 
       if (this.transferError) Text(this.transferError).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger')).padding(Tokens.inset)
@@ -773,8 +777,8 @@ export struct SessionTools {
     Column({ space: Tokens.fine }) {
       Text(tr('file_transfer_status_unknown') + ' · ' + record.targetName).fontSize(Tokens.body).width('100%')
       Flex({ wrap: FlexWrap.Wrap, space: { main: LengthMetrics.vp(Tokens.gap), cross: LengthMetrics.vp(Tokens.gap) } }) {
-        if (record.id) Button(tr('file_transfer_check_status')).flexGrow(1).flexShrink(0).constraintSize({ minHeight: Tokens.touch }).onClick(() => this.checkTransfer(record.key))
-        if (!record.acknowledged) Button(tr('file_transfer_i_checked')).flexGrow(1).flexShrink(0).constraintSize({ minHeight: Tokens.touch }).onClick(() => this.acknowledgeTransfer(record.key))
+        if (record.id) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('file_transfer_check_status')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('file_transfer_check_status', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('file_transfer_check_status')).bindTips(tr('file_transfer_check_status')).flexShrink(0).onClick(() => this.checkTransfer(record.key))
+        if (!record.acknowledged) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('file_transfer_i_checked')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('file_transfer_i_checked', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('file_transfer_i_checked')).bindTips(tr('file_transfer_i_checked')).flexShrink(0).onClick(() => this.acknowledgeTransfer(record.key))
       }.width('100%')
       if (record.code) Text(tr('file_transfer_error') + ': ' + record.code).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
       if (record.acknowledged) Text(tr('file_transfer_possible_duplicate')).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary'))
@@ -810,8 +814,8 @@ export struct SessionTools {
         if (this.currentTransfer()?.code) Text(tr('file_transfer_error') + ': ' + (this.currentTransfer()?.code || ''))
           .fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
         if (this.currentTransfer()?.cancelUnknown) Text(tr('file_transfer_cancel_unknown')).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
-        if (this.currentTransfer()?.state === 'running' && this.currentTransfer()?.id) Button(tr('file_transfer_cancel_transfer'))
-          .enabled(!this.currentTransfer()?.cancelBusy).constraintSize({ minHeight: Tokens.touch }).onClick(() => this.cancelTransfer(this.currentTransferCancelKey()))
+        if (this.currentTransfer()?.state === 'running' && this.currentTransfer()?.id) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('file_transfer_cancel_transfer')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('file_transfer_cancel_transfer', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('file_transfer_cancel_transfer')).bindTips(tr('file_transfer_cancel_transfer'))
+          .enabled(!this.currentTransfer()?.cancelBusy).onClick(() => this.cancelTransfer(this.currentTransferCancelKey()))
       }
       ForEach(this.workspace.fileTransfer.unknownForSource(), (record: FileTransferRecord) => {
         this.transferUnknownRow(record)
@@ -823,8 +827,8 @@ export struct SessionTools {
         }.width('100%').alignItems(HorizontalAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart).scrollBar(BarState.Auto)
       Flex({ wrap: FlexWrap.Wrap, space: { main: LengthMetrics.vp(Tokens.gap), cross: LengthMetrics.vp(Tokens.gap) } }) {
-        Button(tr('cancel')).flexGrow(1).flexShrink(0).constraintSize({ minHeight: Tokens.touch }).onClick(() => this.transferOpen = false)
-        Button(tr('file_transfer_confirm_send')).flexGrow(1).flexShrink(0).constraintSize({ minHeight: Tokens.touch })
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('cancel')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('cancel', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('cancel')).bindTips(tr('cancel')).flexShrink(0).onClick(() => this.transferOpen = false)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('file_transfer_confirm_send')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('file_transfer_confirm_send', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('file_transfer_confirm_send')).bindTips(tr('file_transfer_confirm_send')).flexShrink(0)
           .enabled(this.workspace.fileTransfer.canStart() && !this.workspace.fileTransfer.createBusy)
           .onClick(() => this.confirmFileTransfer()).id('session.files.transfer.confirm')
       }.width('100%')
@@ -834,10 +838,10 @@ export struct SessionTools {
   @Builder fileViewer() {
     Column({ space: Tokens.gap }) {
       Row({ space: Tokens.gap }) {
-        Button(tr('download')).enabled(!!this.workspace.selectedFile).onClick(() => this.saveDownload()).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('download')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('download', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('download')).bindTips(tr('download')).enabled(!!this.workspace.selectedFile).onClick(() => this.saveDownload())
         if (!this.workspace.selectedFileIsText && this.workspace.selectedFile && this.model.features.includes('file_download'))
-          Button(tr('session_tools_preview_file')).enabled(!this.previewBusy && !this.pickerBusy)
-            .onClick(() => this.previewSelectedFile()).height(Tokens.touch)
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('session_tools_preview_file')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('session_tools_preview_file', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('session_tools_preview_file')).bindTips(tr('session_tools_preview_file')).enabled(!this.previewBusy && !this.pickerBusy)
+            .onClick(() => this.previewSelectedFile())
       }.width('100%').justifyContent(FlexAlign.End)
       Text(this.workspace.selectedFile + ' · ' + this.sizeText(this.workspace.selectedFileSize) +
         (this.workspace.selectedFileMime ? ' · ' + this.workspace.selectedFileMime : ''))
@@ -850,7 +854,7 @@ export struct SessionTools {
           Text(this.workspace.selectedFileText).fontFamily('monospace').fontSize(Tokens.meta).copyOption(CopyOptions.LocalDevice)
             .width('100%').textAlign(TextAlign.Start)
         }.layoutWeight(1).width('100%')
-        if (this.workspace.fileHasMore) Button(tr('load_more')).onClick(() => this.workspace.loadMoreText()).height(Tokens.touch)
+        if (this.workspace.fileHasMore) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('load_more')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('load_more', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('load_more')).bindTips(tr('load_more')).onClick(() => this.workspace.loadMoreText())
         if (this.workspace.fileTruncated && !this.workspace.fileHasMore) Text(tr('session_tools_truncated')).fontSize(Tokens.meta)
       } else {
         Column({ space: Tokens.gap }) {
@@ -878,8 +882,8 @@ export struct SessionTools {
         .fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
       if (this.workspace.fileWriteError) Text(this.workspace.fileWriteError).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
       Row({ space: Tokens.gap }) {
-        Button(tr('cancel')).layoutWeight(1).height(Tokens.touch).onClick(() => this.fileEditSheetOpen = false)
-        Button(tr('continue')).layoutWeight(1).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('cancel')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('cancel', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('cancel')).bindTips(tr('cancel')).onClick(() => this.fileEditSheetOpen = false)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('continue')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('continue', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('continue')).bindTips(tr('continue'))
           .enabled(this.workspace.canEditFiles() && !this.fileEditBusy && !['pending', 'unknown'].includes(this.workspace.fileWriteState))
           .onClick(() => this.confirmFileEdit()).id('session.files.edit.confirm')
       }.width('100%')
@@ -891,8 +895,8 @@ export struct SessionTools {
     Column() {
       Row({ space: Tokens.gap }) {
         Text(tr('git')).fontSize(Tokens.title).layoutWeight(1)
-        Button(tr('refresh')).onClick(() => this.workspace.loadGit()).height(Tokens.touch)
-        Button(tr('more')).bindMenu(this.gitMenu).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('refresh')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('refresh', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('refresh')).bindTips(tr('refresh')).onClick(() => this.workspace.loadGit())
+        Button({ type: ButtonType.Circle }) { Image($r('sys.media.ohos_ic_public_more')).width(Tokens.symbol).height(Tokens.symbol).fillColor(Colors.link) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('more')).bindTips(tr('more')).bindMenu(this.gitMenu)
       }.padding({ left: Tokens.page, right: Tokens.page, top: Tokens.inset, bottom: Tokens.gap })
       if (this.workspace.gitError) Text(this.workspace.gitError).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger')).padding(Tokens.inset)
       if (this.workspace.gitBusy) LoadingProgress().height(Tokens.touch).width(Tokens.touch)
@@ -969,19 +973,16 @@ export struct SessionTools {
       if (this.gitSheetMode === 'commit') {
         TextArea({ text: this.gitDraftMessage, placeholder: tr('session_tools_commit_message') }).height(Tokens.inputExpanded)
           .onChange((value: string) => this.gitDraftMessage = value).id('session.git.commit_message')
-        Button(tr('session_tools_commit')).enabled(this.workspace.canWriteGit() && !!this.gitDraftMessage.trim() && !this.workspace.gitWriteBusy)
-          .height(Tokens.touch).width('100%').onClick(() => this.confirmGitWrite('commit')).id('session.git.commit')
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('session_tools_commit')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('session_tools_commit', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('session_tools_commit')).bindTips(tr('session_tools_commit')).enabled(this.workspace.canWriteGit() && !!this.gitDraftMessage.trim() && !this.workspace.gitWriteBusy).onClick(() => this.confirmGitWrite('commit')).id('session.git.commit')
       } else if (this.gitSheetMode === 'branch') {
         if (this.workspace.gitBranches.length) {
           Select(this.branchOptions()).selected(Math.max(0, this.gitSelectedBranch)).value(this.branchLabel(this.workspace.gitBranches[this.gitSelectedBranch] || this.workspace.gitBranches[0]))
             .onSelect((index: number) => this.gitSelectedBranch = index).id('session.git.branch')
-          Button(tr('session_tools_switch_branch')).enabled(this.workspace.canWriteGit() && !this.workspace.gitBranches[this.gitSelectedBranch]?.current)
-            .height(Tokens.touch).width('100%').onClick(() => this.confirmGitWrite('switch')).id('session.git.switch')
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('session_tools_switch_branch')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('session_tools_switch_branch', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('session_tools_switch_branch')).bindTips(tr('session_tools_switch_branch')).enabled(this.workspace.canWriteGit() && !this.workspace.gitBranches[this.gitSelectedBranch]?.current).onClick(() => this.confirmGitWrite('switch')).id('session.git.switch')
         } else Text(tr('session_tools_no_branches')).fontSize(Tokens.meta)
         TextInput({ text: this.gitNewBranchName, placeholder: tr('session_tools_new_branch') })
           .onChange((value: string) => this.gitNewBranchName = value).id('session.git.new_branch')
-        Button(tr('session_tools_create_branch')).enabled(this.workspace.canWriteGit() && !!this.gitNewBranchName.trim())
-          .height(Tokens.touch).width('100%').onClick(() => this.confirmGitWrite('create')).id('session.git.create_branch')
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('session_tools_create_branch')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('session_tools_create_branch', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('session_tools_create_branch')).bindTips(tr('session_tools_create_branch')).enabled(this.workspace.canWriteGit() && !!this.gitNewBranchName.trim()).onClick(() => this.confirmGitWrite('create')).id('session.git.create_branch')
       } else if (this.gitSheetMode === 'stash_push') {
         TextInput({ text: this.gitStashMessage, placeholder: tr('session_tools_stash_message') })
           .onChange((value: string) => this.gitStashMessage = value).id('session.git.stash_message')
@@ -990,24 +991,23 @@ export struct SessionTools {
           Toggle({ type: ToggleType.Switch, isOn: this.gitStashUntracked }).onChange((value: boolean) => this.gitStashUntracked = value)
             .accessibilityText(tr('session_tools_stash_untracked')).id('session.git.stash_untracked')
         }.width('100%')
-        Button(tr('session_tools_stash_save')).enabled(this.workspace.canWriteGit() && !this.workspace.gitWriteBusy)
-          .height(Tokens.touch).width('100%').onClick(() => this.confirmGitWrite('stash_push')).id('session.git.stash_save')
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('session_tools_stash_save')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('session_tools_stash_save', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('session_tools_stash_save')).bindTips(tr('session_tools_stash_save')).enabled(this.workspace.canWriteGit() && !this.workspace.gitWriteBusy).onClick(() => this.confirmGitWrite('stash_push')).id('session.git.stash_save')
       }
       if (this.workspace.gitWriteState === 'pending' || this.workspace.gitWriteState === 'unknown')
         Text(tr('session_tools_write_' + this.workspace.gitWriteState)).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
       if (this.workspace.gitWriteError) Text(this.workspace.gitWriteError).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
       if (this.workspace.gitWriteBusy) LoadingProgress().height(Tokens.touch).width(Tokens.touch)
-      Button(tr('cancel')).height(Tokens.touch).width('100%').onClick(() => this.gitSheetOpen = false)
+      Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('cancel')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('cancel', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('cancel')).bindTips(tr('cancel')).onClick(() => this.gitSheetOpen = false)
     }.alignItems(HorizontalAlign.Start).padding(Tokens.page).width('100%')
   }
 
   @Builder diffViewer() {
     Column({ space: Tokens.gap }) {
       Text(this.workspace.gitDiffPath).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary'))
-      if (this.gitDiffHasBoth()) Row({ space: Tokens.gap }) {
-        Button(tr('session_tools_unstaged')).enabled(this.workspace.gitDiffStaged).onClick(() => { this.workspace.gitDiffStaged = false; this.workspace.loadGitDiff(); })
-        Button(tr('session_tools_staged')).enabled(!this.workspace.gitDiffStaged).onClick(() => { this.workspace.gitDiffStaged = true; this.workspace.loadGitDiff(); })
-      }
+      if (this.gitDiffHasBoth()) Select([{ value: tr('session_tools_unstaged') }, { value: tr('session_tools_staged') }])
+        .attributeModifier(SelectStyles.inline).selected(this.workspace.gitDiffStaged ? 1 : 0)
+        .value(tr(this.workspace.gitDiffStaged ? 'session_tools_staged' : 'session_tools_unstaged'))
+        .onSelect((index: number) => { this.workspace.gitDiffStaged = index === 1; this.workspace.loadGitDiff(); })
       if (this.workspace.gitDiffError) Text(this.workspace.gitDiffError).fontColor($r('app.color.persona_danger'))
       if (this.workspace.gitDiffBusy) LoadingProgress().layoutWeight(1).width(Tokens.touch).height(Tokens.touch)
       else if (this.workspace.gitDiff) Scroll() {
@@ -1023,10 +1023,10 @@ export struct SessionTools {
     Column({ space: Tokens.gap }) {
       Row({ space: Tokens.gap }) {
         Text(tr('terminal')).fontSize(Tokens.title).layoutWeight(1)
-        if (this.workspace.terminalControlState === 'active') Button(tr('release')).onClick(() => this.workspace.setTerminalControl(false)).height(Tokens.touch)
-        else if (this.workspace.terminalControlState === 'busy') Button(tr('takeover')).enabled(this.workspace.canControlTerminal())
-          .onClick(() => this.confirmTerminalControl(true)).height(Tokens.touch)
-        else Button(tr('control')).enabled(this.workspace.canControlTerminal()).onClick(() => this.confirmTerminalControl()).height(Tokens.touch)
+        if (this.workspace.terminalControlState === 'active') Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('release')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('release', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('release')).bindTips(tr('release')).onClick(() => this.workspace.setTerminalControl(false))
+        else if (this.workspace.terminalControlState === 'busy') Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('takeover')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('takeover', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('takeover')).bindTips(tr('takeover')).enabled(this.workspace.canControlTerminal())
+          .onClick(() => this.confirmTerminalControl(true))
+        else Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('control')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('control', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('control')).bindTips(tr('control')).enabled(this.workspace.canControlTerminal()).onClick(() => this.confirmTerminalControl())
       }.padding({ left: Tokens.page, right: Tokens.page, top: Tokens.inset, bottom: Tokens.gap })
       Text(this.controlDescription()).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).padding({ left: Tokens.page, right: Tokens.page })
       if (this.workspace.terminalError) Text(this.workspace.terminalError).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger')).padding(Tokens.inset)
@@ -1043,7 +1043,7 @@ export struct SessionTools {
           Button('↑').onClick(() => this.workspace.sendTerminalKey('up'))
           Button('↓').onClick(() => this.workspace.sendTerminalKey('down'))
           Button('Ctrl-C').onClick(() => this.workspace.sendTerminalKey('ctrl_c'))
-          Button(tr('send')).layoutWeight(1).onClick(() => this.sendTerminalInput()).height(Tokens.touch)
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('send')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('send', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('send')).bindTips(tr('send')).onClick(() => this.sendTerminalInput())
         }.padding({ left: Tokens.page, right: Tokens.page, bottom: Tokens.inset })
       }
     }.width('100%').height('100%')
@@ -1053,9 +1053,9 @@ export struct SessionTools {
     Column({ space: Tokens.gap }) {
       Row({ space: Tokens.gap }) {
         Text(tr('session_tools_terminal_screen')).fontSize(Tokens.title).layoutWeight(1)
-        Button(tr('refresh')).onClick(() => this.workspace.refreshScreen()).height(Tokens.touch)
-        if (this.workspace.screenControlRequested) Button(tr('release')).onClick(() => this.workspace.revokeScreenControl()).height(Tokens.touch)
-        else Button(tr('control')).enabled(this.workspace.canControlScreen()).onClick(() => this.confirmScreenControl()).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('refresh')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('refresh', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('refresh')).bindTips(tr('refresh')).onClick(() => this.workspace.refreshScreen())
+        if (this.workspace.screenControlRequested) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('release')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('release', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('release')).bindTips(tr('release')).onClick(() => this.workspace.revokeScreenControl())
+        else Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('control')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('control', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('control')).bindTips(tr('control')).enabled(this.workspace.canControlScreen()).onClick(() => this.confirmScreenControl())
       }.padding({ left: Tokens.page, right: Tokens.page, top: Tokens.inset, bottom: Tokens.gap })
       Text(tr(this.workspace.screenControlRequested ? 'session_tools_terminal_screen_control_active' : 'session_tools_terminal_screen_view_only'))
         .fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).padding({ left: Tokens.page, right: Tokens.page })
@@ -1074,7 +1074,7 @@ export struct SessionTools {
           Button('↑').onClick(() => this.sendTerminalScreenKey('up'))
           Button('↓').onClick(() => this.sendTerminalScreenKey('down'))
           Button('Ctrl-C').onClick(() => this.sendTerminalScreenKey('ctrl+c'))
-          Button(tr('send')).layoutWeight(1).onClick(() => this.sendTerminalScreenText()).height(Tokens.touch)
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('send')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('send', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('send')).bindTips(tr('send')).onClick(() => this.sendTerminalScreenText())
         }.padding({ left: Tokens.page, right: Tokens.page, bottom: Tokens.inset })
       }
     }.width('100%').height('100%')
@@ -1093,10 +1093,8 @@ export struct SessionTools {
       if (binding.value.command.length) Text(this.previewCommand(binding.value)).fontSize(Tokens.meta).fontFamily('monospace').maxLines(3)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
       Text(binding.value.cwd || this.workspace.cwd).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).maxLines(2)
-      if (binding.value.listening && binding.value.port > 0) Button(tr('session_tools_preview_open')).enabled(this.workspace.canUsePreview())
-        .height(Tokens.touch).onClick(() => this.openReadyPreview(binding.value)).width('100%')
-      else if (binding.value.command.length) Button(tr('start')).enabled(this.workspace.canStartPreview() && !binding.value.problem)
-        .height(Tokens.touch).onClick(() => this.confirmStartPreview(binding.value)).width('100%')
+      if (binding.value.listening && binding.value.port > 0) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('session_tools_preview_open')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('session_tools_preview_open', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('session_tools_preview_open')).bindTips(tr('session_tools_preview_open')).enabled(this.workspace.canUsePreview()).onClick(() => this.openReadyPreview(binding.value))
+      else if (binding.value.command.length) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('start')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('start', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('start')).bindTips(tr('start')).enabled(this.workspace.canStartPreview() && !binding.value.problem).onClick(() => this.confirmStartPreview(binding.value))
     }.alignItems(HorizontalAlign.Start).padding(Tokens.inset).width('100%')
   }
 
@@ -1104,11 +1102,11 @@ export struct SessionTools {
     Column({ space: Tokens.gap }) {
       Row({ space: Tokens.gap }) {
         Text(tr('preview')).fontSize(Tokens.title).layoutWeight(1)
-        Button(tr('refresh')).onClick(() => this.workspace.loadPreviewServers()).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('refresh')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('refresh', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('refresh')).bindTips(tr('refresh')).onClick(() => this.workspace.loadPreviewServers())
         if (this.workspace.previewState === 'live') {
-          Button(tr('back')).onClick(() => this.previewAction('back')).height(Tokens.touch)
-          Button(tr('session_tools_forward')).onClick(() => this.previewAction('forward')).height(Tokens.touch)
-          Button(tr('refresh')).onClick(() => this.previewAction('reload')).height(Tokens.touch)
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(Symbols.collapse).fontSize(Tokens.symbolFont).fontColor([IconActions.color('back', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('back')).bindTips(tr('back')).onClick(() => this.previewAction('back'))
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(Symbols.expand).fontSize(Tokens.symbolFont).fontColor([IconActions.color('session_tools_forward', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('session_tools_forward')).bindTips(tr('session_tools_forward')).onClick(() => this.previewAction('forward'))
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('refresh')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('refresh', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('refresh')).bindTips(tr('refresh')).onClick(() => this.previewAction('reload'))
         }
       }.padding({ left: Tokens.page, right: Tokens.page, top: Tokens.inset, bottom: Tokens.gap })
       if (this.workspace.previewError) Text(tr(this.workspace.previewError)).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger')).padding(Tokens.inset)
@@ -1121,16 +1119,16 @@ export struct SessionTools {
         Row({ space: Tokens.gap }) {
           TextInput({ text: this.previewPathDraft, placeholder: tr('session_tools_preview_path') }).layoutWeight(1)
             .onChange((value: string) => this.previewPathDraft = value).height(Tokens.touch)
-          Button(tr('open')).onClick(() => this.sendPreviewNavigation()).height(Tokens.touch)
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('open')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('open', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('open')).bindTips(tr('open')).onClick(() => this.sendPreviewNavigation())
         }.padding({ left: Tokens.inset, right: Tokens.inset })
         Image(this.previewPixels).objectFit(ImageFit.Contain).aspectRatio(this.previewRatio).width('100%').layoutWeight(1)
         Row({ space: Tokens.gap }) {
           TextInput({ text: this.previewInput, placeholder: tr('session_tools_preview_input') }).layoutWeight(1)
             .onChange((value: string) => this.previewInput = value).height(Tokens.touch)
-          Button(tr('send')).onClick(() => this.sendPreviewText()).height(Tokens.touch)
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('send')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('send', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('send')).bindTips(tr('send')).onClick(() => this.sendPreviewText())
         }.padding({ left: Tokens.inset, right: Tokens.inset })
-        if (this.workspace.previewExternalUrl) Button(tr('session_tools_preview_external_link'))
-          .onClick(() => this.openPreviewExternal()).height(Tokens.touch).width('100%')
+        if (this.workspace.previewExternalUrl) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('session_tools_preview_external_link')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('session_tools_preview_external_link', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('session_tools_preview_external_link')).bindTips(tr('session_tools_preview_external_link'))
+          .onClick(() => this.openPreviewExternal())
       } else {
         List() {
           ForEach(this.previewRowBindings, (binding: BoundRow<WorkspacePreviewServer>) => ListItem() { this.previewServerRow(binding) }

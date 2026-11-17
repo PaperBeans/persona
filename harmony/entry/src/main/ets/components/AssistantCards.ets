@@ -1,3 +1,5 @@
+import { IconActions } from '../design/IconActions';
+import { Symbols } from '../design/Symbols';
 import { util } from '@kit.ArkTS';
 import { NativeEnvironment, nativeEnvironment } from '../platform/NativeEnvironment';
 import { nativeSheetInset } from '../platform/NativeInsets';
@@ -145,20 +147,31 @@ export struct AssistantCards {
   }
 
   @Builder planSummary(item: Record<string, Object>) {
-    Column({ space: Tokens.gap }) {
-      Text(tr('assistant_feed_plan')).fontSize(Tokens.body).fontWeight(FontWeight.Medium).width('100%')
-      if (Object.keys(this.plan(item)).length > 0) {
-        Text(this.planSummaryTitle(item)).fontSize(Tokens.body).width('100%')
-        if (this.planTasks(item).length > 1) Text(this.planSummaryMore(item))
-          .fontSize(Tokens.meta).fontColor(Colors.secondary).width('100%')
-      } else Text(tr('assistant_feed_plan_unavailable')).fontSize(Tokens.meta).fontColor(Colors.secondary).width('100%')
-      Button(tr('assistant_detail_view_plan')).attributeModifier(ButtonStyles.secondary).width('100%').enabled(this.active)
-        .onClick(() => this.openDetail(item)).id('assistant.detail.plan.' + Wire.text(item, 'id'))
-    }.width('100%').padding(Tokens.page).alignItems(HorizontalAlign.Start).backgroundColor(Colors.grouped)
+    Button({ type: ButtonType.Normal }) {
+      Row({ space: Tokens.inset }) {
+        SymbolGlyph(Symbols.document).fontSize(Tokens.symbolFont).fontColor([Colors.ai])
+        Column({ space: Tokens.fine }) {
+          Text(tr('assistant_feed_plan')).fontSize(Tokens.meta).fontColor(Colors.ai).width('100%')
+          Text(this.planSummaryTitle(item)).fontSize(Tokens.body).fontWeight(FontWeight.Medium).fontColor(Colors.ink).width('100%')
+          if (this.planTasks(item).length > 1) Text(this.planSummaryMore(item)).fontSize(Tokens.meta).fontColor(Colors.secondary).width('100%')
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        SymbolGlyph(Symbols.expand).fontSize(Tokens.meta).fontColor([Colors.secondary])
+      }.width('100%').alignItems(VerticalAlign.Center)
+    }.buttonStyle(ButtonStyleMode.NORMAL).backgroundColor(Colors.grouped).borderRadius(Tokens.card)
+      .padding(Tokens.page).width('100%').enabled(this.active).onClick(() => this.openDetail(item))
+      .id('assistant.detail.plan.' + Wire.text(item, 'id')).accessibilityText(tr('assistant_detail_view_plan') + ' ' + this.planSummaryTitle(item) + (this.planTasks(item).length > 1 ? ' ' + this.planSummaryMore(item) : ''))
+  }
+
+  @Builder planMenu(item: Record<string, Object>) {
+    Menu() {
+      MenuItem({ content: tr('assistant_detail_dismiss_plan') })
+        .enabled(this.feed.planCanDismiss(this.planId(item)))
+        .onClick(() => this.feed.dismissPlan(this.planId(item), JSON.stringify(this.plan(item))))
+    }
   }
 
   @Builder planCard(item: Record<string, Object>) {
-    Column({ space: Tokens.gap }) {
+    Column({ space: Tokens.page }) {
       if (!Object.keys(this.plan(item)).length) {
         Text(tr('assistant_feed_plan_unavailable')).fontSize(Tokens.body).fontColor($r('sys.color.font_secondary'))
       } else {
@@ -167,7 +180,7 @@ export struct AssistantCards {
           else Row({ space: Tokens.gap }) {
             Text(tr(this.feed.planActionError(this.planId(item)) || this.feed.error || 'assistant_detail_plan_refresh'))
               .fontSize(Tokens.meta).fontColor(Colors.secondary).layoutWeight(1)
-            Button(tr('retry')).attributeModifier(ButtonStyles.quiet).onClick(() => this.feed.refreshPlan(this.planId(item)))
+            Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).onClick(() => this.feed.refreshPlan(this.planId(item)))
           }.width('100%')
         }
         Row({ space: Tokens.gap }) {
@@ -183,35 +196,34 @@ export struct AssistantCards {
           ComposeListItemV2({ contentItemV2: new ContentItemV2({ primaryText: tr('assistant_feed_remember') }),
             operateItemV2: new OperateItemV2({ checkbox: new OperateCheckV2({ isCheck: this.feed.rememberPlan(this.planId(item)),
               accessibilityText: tr('assistant_feed_remember'), onChange: (_checked: boolean) => this.feed.toggleRememberPlan(this.planId(item)) }) }) })
-          Column({ space: Tokens.gap }) {
-            Button(tr('assistant_feed_start')).attributeModifier(ButtonStyles.primary).width('100%')
+          Row({ space: Tokens.inset }) {
+            Button({ type: ButtonType.Circle }) { SymbolGlyph(Symbols.edit).fontSize(Tokens.symbolFont).fontColor([Colors.link]) }
+              .attributeModifier(ButtonStyles.chrome).accessibilityText(tr('edit')).enabled(this.feed.planCanEdit(this.planId(item)))
+              .onClick(() => this.feed.editPlan(this.planId(item))).id('assistant.plan.edit')
+            Button({ type: ButtonType.Circle }) { Image(Symbols.more).width(Tokens.symbol).height(Tokens.symbol).fillColor(Colors.link) }
+              .attributeModifier(ButtonStyles.chrome).accessibilityText(tr('more')).enabled(this.feed.planCanDismiss(this.planId(item)))
+              .bindMenu(this.planMenu(item)).id('assistant.plan.more')
+            Blank().layoutWeight(1)
+            Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('assistant_feed_start')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('assistant_feed_start', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('assistant_feed_start')).bindTips(tr('assistant_feed_start')).id('assistant.plan.start')
               .enabled(this.feed.planCanStart(this.planId(item)) && this.planTasks(item).length > 0)
               .onClick(() => this.feed.startPlan(this.planId(item), this.feed.rememberPlan(this.planId(item)), undefined,
                 JSON.stringify(this.plan(item))))
-            Button(tr('edit')).attributeModifier(ButtonStyles.secondary).width('100%').enabled(this.feed.planCanEdit(this.planId(item)))
-              .onClick(() => this.feed.editPlan(this.planId(item)))
-          }.width('100%')
-          Row({ space: Tokens.gap }) {
-            Blank().layoutWeight(1)
-            Button(tr('more')).attributeModifier(ButtonStyles.quiet).enabled(this.feed.planCanDismiss(this.planId(item)))
-              .bindMenu([{ value: tr('assistant_detail_dismiss_plan'), action: () =>
-                this.feed.dismissPlan(this.planId(item), JSON.stringify(this.plan(item))) }])
           }.width('100%')
         }
         if (this.feed.planActionError(this.planId(item)) && this.feed.planIsFresh(this.planId(item))) Row({ space: Tokens.gap }) {
           Text(tr(this.feed.planActionError(this.planId(item)))).fontSize(Tokens.meta).fontColor(Colors.needs).layoutWeight(1)
-          Button(tr('refresh')).attributeModifier(ButtonStyles.quiet).enabled(!this.feed.planLoading(this.planId(item)))
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('refresh')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('refresh', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('refresh')).bindTips(tr('refresh')).enabled(!this.feed.planLoading(this.planId(item)))
             .onClick(() => this.feed.refreshPlan(this.planId(item))).accessibilityText(tr('refresh'))
         }.width('100%')
       }
     }.width('100%').padding(Tokens.page).alignItems(HorizontalAlign.Start)
-      .backgroundColor(Colors.grouped)
+      .backgroundColor(Colors.canvas)
   }
 
   @Builder plannedTask(task: Record<string, Object>, index: number) {
-    Column({ space: Tokens.gap }) {
+    Column({ space: Tokens.page }) {
       Text((index + 1).toString() + '. ' + Wire.text(task, 'title', tr('assistant_feed_task')))
-        .fontSize(Tokens.body).fontWeight(FontWeight.Medium).width('100%')
+        .fontSize(Tokens.title).fontWeight(FontWeight.Medium).fontColor(Colors.ink).width('100%')
       Flex({ wrap: FlexWrap.Wrap, space: { main: LengthMetrics.vp(Tokens.gap), cross: LengthMetrics.vp(Tokens.gap) } }) {
         if (Wire.text(task, 'machine')) Text(this.machineLabel(Wire.text(task, 'machine')))
           .fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary')).constraintSize({ maxWidth: '100%' })
@@ -222,17 +234,19 @@ export struct AssistantCards {
       }.width('100%')
       if (Wire.text(task, 'why')) Text(Wire.text(task, 'why')).fontSize(Tokens.meta)
         .fontColor($r('sys.color.font_secondary')).width('100%')
+      if (this.taskGoal(task) || this.taskOutOfBounds(task).length || this.taskDoneWhen(task).length || this.taskBriefSource(task).length)
+        Divider().strokeWidth(Tokens.hairline).color(Colors.divider)
       if (this.taskGoal(task)) Column({ space: Tokens.fine }) {
-        Text(tr('assistant_detail_goal')).fontSize(Tokens.meta).fontColor(Colors.secondary).width('100%')
+        Text(tr('assistant_detail_goal')).fontSize(Tokens.meta).fontWeight(FontWeight.Medium).fontColor(Colors.ai).width('100%')
         Text(this.taskGoal(task)).fontSize(Tokens.body).width('100%')
       }.width('100%').alignItems(HorizontalAlign.Start)
       if (this.taskOutOfBounds(task).length > 0) Column({ space: Tokens.fine }) {
-        Text(tr('assistant_detail_out_of_bounds')).fontSize(Tokens.meta).fontColor(Colors.secondary).width('100%')
+        Text(tr('assistant_detail_out_of_bounds')).fontSize(Tokens.meta).fontWeight(FontWeight.Medium).fontColor(Colors.ink).width('100%')
         ForEach(this.taskOutOfBounds(task), (value: string, valueIndex: number) =>
           Text(value).fontSize(Tokens.body).width('100%'), (_value: string, valueIndex: number) => String(valueIndex))
       }.width('100%').alignItems(HorizontalAlign.Start)
       if (this.taskDoneWhen(task).length > 0) Column({ space: Tokens.fine }) {
-        Text(tr('assistant_detail_done_when')).fontSize(Tokens.meta).fontColor(Colors.secondary).width('100%')
+        Text(tr('assistant_detail_done_when')).fontSize(Tokens.meta).fontWeight(FontWeight.Medium).fontColor(Colors.ink).width('100%')
         ForEach(this.taskDoneWhen(task), (value: string, valueIndex: number) =>
           Text(value).fontSize(Tokens.body).width('100%'), (_value: string, valueIndex: number) => String(valueIndex))
       }.width('100%').alignItems(HorizontalAlign.Start)
@@ -241,6 +255,8 @@ export struct AssistantCards {
         ForEach(this.taskBriefSource(task), (value: string, valueIndex: number) =>
           Text(value).fontSize(Tokens.body).width('100%'), (_value: string, valueIndex: number) => String(valueIndex))
       }.width('100%').alignItems(HorizontalAlign.Start)
+      if (Wire.text(task, 'prompt') && (this.taskGoal(task) || this.taskOutOfBounds(task).length || this.taskDoneWhen(task).length || this.taskBriefSource(task).length))
+        Divider().strokeWidth(Tokens.hairline).color(Colors.divider)
       if (Wire.text(task, 'prompt')) MarkdownText({ text: Wire.text(task, 'prompt'), onLink: (address: string) => this.onLink(address) })
       if (Wire.text(task, 'error')) Text(Wire.text(task, 'error')).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
     }.width('100%').alignItems(HorizontalAlign.Start).padding({ top: Tokens.gap, bottom: Tokens.gap })
@@ -301,14 +317,29 @@ export struct AssistantCards {
     ForEach([this.receiptViewStamp], (_stamp: string) => { this.receiptSummaryContent(item, this.receiptView) }, (stamp: string) => stamp)
   }
 
+  private receiptTone(projection: AssistantReceiptProjection): ResourceColor {
+    if (projection.outcome === 'done') return Colors.positive;
+    if (projection.outcome === 'failed') return Colors.danger;
+    return Colors.secondary;
+  }
+
   @Builder receiptSummaryContent(item: Record<string, Object>, projection: AssistantReceiptProjection) {
-    Column({ space: Tokens.gap }) {
-      Text(projection.title || tr('assistant_feed_receipt')).fontSize(Tokens.body).fontWeight(FontWeight.Medium).width('100%')
-      Text(tr('assistant_detail_receipt_' + projection.outcome)).fontSize(Tokens.meta).fontColor(projection.outcome === 'done' ? Colors.positive : Colors.secondary)
-      if (projection.summary) Text(projection.summary).fontSize(Tokens.body).width('100%').maxLines(3)
-      Button(tr('assistant_detail_view_receipt')).attributeModifier(ButtonStyles.secondary).width('100%').enabled(this.active)
-        .onClick(() => this.openDetail(item)).id('assistant.detail.receipt.' + Wire.text(item, 'id'))
-    }.width('100%').padding(Tokens.page).alignItems(HorizontalAlign.Start).backgroundColor(Colors.grouped)
+    Button({ type: ButtonType.Normal }) {
+      Row({ space: Tokens.inset }) {
+        SymbolGlyph(projection.outcome === 'done' ? Symbols.check : Symbols.document).fontSize(Tokens.symbolFont)
+          .fontColor([this.receiptTone(projection)])
+        Column({ space: Tokens.fine }) {
+          Row({ space: Tokens.gap }) {
+            Text(projection.title || tr('assistant_feed_receipt')).fontSize(Tokens.body).fontWeight(FontWeight.Medium).fontColor(Colors.ink).layoutWeight(1)
+            Text(tr('assistant_detail_receipt_' + projection.outcome)).fontSize(Tokens.meta).fontColor(this.receiptTone(projection))
+          }.width('100%')
+          if (projection.summary) Text(projection.summary).fontSize(Tokens.body).fontColor(Colors.secondary).width('100%').maxLines(3)
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        SymbolGlyph(Symbols.expand).fontSize(Tokens.meta).fontColor([Colors.secondary])
+      }.width('100%')
+    }.buttonStyle(ButtonStyleMode.NORMAL).backgroundColor(Colors.grouped).borderRadius(Tokens.card)
+      .padding(Tokens.page).width('100%').enabled(this.active).onClick(() => this.openDetail(item))
+      .id('assistant.detail.receipt.' + Wire.text(item, 'id')).accessibilityText(tr('assistant_detail_view_receipt') + ' ' + projection.title + ' ' + tr('assistant_detail_receipt_' + projection.outcome) + ' ' + projection.summary)
   }
 
   @Builder receiptCriteriaRow(criterion: AssistantReceiptCriterion) {
@@ -350,15 +381,15 @@ export struct AssistantCards {
         .fontSize(Tokens.meta).fontColor(Colors.secondary).width('100%')
       if (this.feed.todoError) {
         Text(tr(this.feed.todoError)).fontSize(Tokens.meta).fontColor(Colors.secondary).width('100%')
-        Button(tr('retry')).attributeModifier(ButtonStyles.quiet).width('100%').onClick(() => this.feed.refresh())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).onClick(() => this.feed.refresh())
       }
       if (this.feed.error) Row({ space: Tokens.gap }) {
         Text(tr(this.feed.error)).fontSize(Tokens.meta).fontColor(Colors.needs).layoutWeight(1)
-        Button(tr('refresh')).attributeModifier(ButtonStyles.quiet).onClick(() =>
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('refresh')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('refresh', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('refresh')).bindTips(tr('refresh')).onClick(() =>
           this.feed.locateItem(Wire.text(item, 'id'), 'receipt'))
       }.width('100%')
       if (projection.recovery) {
-        Button(tr('assistant_detail_' + projection.recovery)).attributeModifier(ButtonStyles.primary).width('100%')
+        Button({ type: ButtonType.Circle }) { if (IconActions.busy('assistant_detail_' + projection.recovery)) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.onAction); else SymbolGlyph(IconActions.symbol('assistant_detail_' + projection.recovery)).fontSize(Tokens.symbolFont).fontColor([IconActions.color('assistant_detail_' + projection.recovery, true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('assistant_detail_' + projection.recovery)).bindTips(tr('assistant_detail_' + projection.recovery))
           .enabled(projection.recovery === 'retry' ? this.feed.canRetryReceipt(Wire.text(item, 'id'), todoId) :
             this.feed.canContinueReceipt(Wire.text(item, 'id'), todoId))
           .onClick(() => this.feed.retryReceipt(Wire.text(item, 'id'), todoId, projection.recovery))
@@ -446,17 +477,17 @@ export struct AssistantCards {
       }
       if (this.messageState(item) === 'open') {
         Row({ space: Tokens.gap }) {
-          Button(tr('assistant_feed_send')).enabled(this.feed.messageCanSend(item)).height(Tokens.touch).onClick(() => this.confirmSend(item))
-          Button(tr('assistant_feed_dismiss')).enabled(this.feed.messageCanDismiss(item)).height(Tokens.touch)
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('assistant_feed_send')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('assistant_feed_send', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('assistant_feed_send')).bindTips(tr('assistant_feed_send')).enabled(this.feed.messageCanSend(item)).onClick(() => this.confirmSend(item))
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('assistant_feed_dismiss')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('assistant_feed_dismiss', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('assistant_feed_dismiss')).bindTips(tr('assistant_feed_dismiss')).enabled(this.feed.messageCanDismiss(item))
             .onClick(() => this.feed.dismissMessage(this.messageId(item)))
         }.width('100%')
       } else if (this.messageState(item) === 'pending') {
-        Button(tr('refresh')).height(Tokens.touch).onClick(() => this.feed.refresh())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('refresh')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('refresh', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('refresh')).bindTips(tr('refresh')).onClick(() => this.feed.refresh())
       } else if (this.messageState(item) === 'dismissed' && this.feed.messageCanUndo(item)) {
-        Button(tr('assistant_feed_undo_dismiss')).height(Tokens.touch).onClick(() => this.feed.undoDismissMessage(this.messageId(item)))
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('assistant_feed_undo_dismiss')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('assistant_feed_undo_dismiss', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('assistant_feed_undo_dismiss')).bindTips(tr('assistant_feed_undo_dismiss')).onClick(() => this.feed.undoDismissMessage(this.messageId(item)))
       }
       if (Wire.text(this.itemBody(item), 'filed_at')) Text(tr('assistant_feed_filed_elsewhere')).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary'))
-      if (Wire.text(item, 'ref')) Button(tr('assistant_feed_open_inbox')).height(Tokens.touch).onClick(() => this.openInbox(item))
+      if (Wire.text(item, 'ref')) Button({ type: ButtonType.Normal }) { Row({ space: Tokens.inset }) { Text(tr('assistant_feed_open_inbox')).fontSize(Tokens.body).fontColor(Colors.ink).layoutWeight(1); SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(Tokens.meta).fontColor([Colors.secondary]) }.width('100%').constraintSize({ minHeight: Tokens.touch }) }.buttonStyle(ButtonStyleMode.TEXTUAL).backgroundColor(Color.Transparent).width('100%').padding({ left: Tokens.page, right: Tokens.page }).onClick(() => this.openInbox(item))
     }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.page)
       .backgroundColor($r('sys.color.comp_background_tertiary'))
   }
@@ -552,9 +583,9 @@ export struct AssistantCards {
         }.width('100%').alignItems(HorizontalAlign.Start)
       }.layoutWeight(1).width('100%').align(Alignment.TopStart)
       if (this.feed.error) Text(tr(this.feed.error)).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger'))
-      Column({ space: Tokens.gap }) {
-        Button(tr('cancel')).attributeModifier(ButtonStyles.secondary).width('100%').onClick(() => this.feed.cancelPlanEdit())
-        Button(tr('assistant_feed_start')).attributeModifier(ButtonStyles.primary).width('100%')
+      Row({ space: Tokens.gap }) {
+        Blank().layoutWeight(1)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('assistant_feed_start')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('assistant_feed_start', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('assistant_feed_start')).bindTips(tr('assistant_feed_start')).id('assistant.plan.editor.start')
           .enabled(this.feed.planCanStart(this.feed.editingPlanId) && this.feed.editTasks.every((task: PlanEditTask) =>
             task.title.trim().length > 0 && task.prompt.trim().length > 0 && task.machine.trim().length > 0 && task.cwd.trim().length > 0 &&
             (task.readonly || task.permission === 'bypassPermissions')))

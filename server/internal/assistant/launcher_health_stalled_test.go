@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -57,7 +58,7 @@ func TestStalledStartReportsDoNotChangeExistingHealth(t *testing.T) {
 		s.StartEnded(ctx, StartEnded{MachineID: "l4", Launcher: "work", Code: proto.CodeAgentStartStalled, Error: "stalled"})
 		s.followStarts(ctx, DeviceSessions{MachineID: "l4", Sessions: []proto.Session{{SessionID: "pending", Launcher: "work", StartErrorCode: proto.CodeAgentStartStalled, StartError: "stalled"}}})
 		synctest.Wait()
-		if got := healthState(s, "l4", "work"); got != before {
+		if got := healthState(s, "l4", "work"); !reflect.DeepEqual(got, before) {
 			t.Fatalf("stalled start changed existing health: before %+v, after %+v", before, got)
 		}
 		if len(f.checked) != 0 {
@@ -162,7 +163,7 @@ func TestStartWaitEndedSaysNothingOfTheLauncher(t *testing.T) {
 				before := s.recordHealth(ctx, "box", "work", healthResult{ok: true, source: healthSourceCheck})
 				s.recordStartFailure(ctx, "box", "work", err)
 				synctest.Wait()
-				if got := healthState(s, "box", "work"); got != before {
+				if got := healthState(s, "box", "work"); !reflect.DeepEqual(got, before) {
 					t.Fatalf("an ended wait changed the record: before %+v, after %+v", before, got)
 				}
 				if len(f.checked) != 0 {

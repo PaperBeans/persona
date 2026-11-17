@@ -70,7 +70,11 @@ internal fun MachinesScreen(
     val deployLine: @Composable (Machine?) -> Unit = { info ->
         if (info != null && showsDeploy(info)) MachineDeployLine(info, info.id in acting.deployStarting, actions?.let { { it.deploy(info.id) } })
     }
-    var selection by rememberSaveable(machineId, state.range) { mutableStateOf<Long?>(null) }
+    var selection by rememberSaveable(machineId) { mutableStateOf<Long?>(null) }
+    val activeSelection = retainedMetricSelection(selection, state.now, state.range.seconds)
+    LaunchedEffect(selection, activeSelection) {
+        if (selection != activeSelection) selection = activeSelection
+    }
     // The dashboard's are every manager's: only the ones of a listed computer, or of one the list doesn't know at all.
     val known = remember(allMachines) { allMachines.mapTo(HashSet()) { it.id } }
     val listed = remember(machines) { machines.mapTo(HashSet()) { it.id } }
@@ -123,7 +127,8 @@ internal fun MachinesScreen(
     JListPage(
         title = if (machineId == null) stringResource(R.string.machines_title) else machine?.displayName ?: stringResource(R.string.machines_title_detail),
         summary = if (machineId == null) machineSummaryText(listSummary) else null,
-        onBack = navigator::back, largeTitle = machineId == null,
+        onBack = if (machineId == null && LocalIsSidebarRoot.current) null else navigator::back,
+        largeTitle = machineId == null,
         state = listState,
         actions = {
             if (machineId == null && adds && canAdd) JIconButton(PhIcons.Plus, stringResource(ReadinessActionId.AddComputer.label), addComputer)
@@ -224,10 +229,10 @@ internal fun MachinesScreen(
                 JSectionHeader(stringResource(R.string.machines_history))
                 JSegmented(MetricRange.entries.map { JSegment(stringResource(R.string.machines_range_hours, when (it) {
                     MetricRange.Hour -> 1; MetricRange.SixHours -> 6; MetricRange.Day -> 24
-                })) }, MetricRange.entries.indexOf(state.range), { selection = null; model.selectRange(MetricRange.entries[it]) })
+                })) }, MetricRange.entries.indexOf(state.range), { model.selectRange(MetricRange.entries[it]) })
                 Text(stringResource(R.string.machines_long_press_hint), Modifier.padding(vertical = 8.dp.dense), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)
             }
-            if (selection != null) item("selection") { JTextButton(stringResource(R.string.machines_back_to_now), { selection = null }) }
+            if (activeSelection != null) item("selection") { JTextButton(stringResource(R.string.machines_back_to_now), { selection = null }) }
             // Disk history is in bytes; the chart reads it against the disk's size, so only when that is known.
             val diskTotal = (current?.diskTotal ?: metric.latest?.diskTotal)?.takeIf { it > 0 }
             val chartKinds = listOf(listOf(MetricKind.Cpu), listOf(MetricKind.Memory), listOf(MetricKind.Rx, MetricKind.Tx), listOf(MetricKind.Load)) +
@@ -244,7 +249,7 @@ internal fun MachinesScreen(
                         MetricKind.Cpu -> current?.cpu; MetricKind.Memory -> current?.memUsed?.toDouble()
                         MetricKind.Rx -> current?.netRx; MetricKind.Tx -> current?.netTx; MetricKind.Load -> current?.load
                         MetricKind.Disk -> percent(current?.diskUsed, current?.diskTotal)
-                    } }, state.now, state.range.seconds, state.history?.step ?: state.range.step, selection, { selection = it },
+                    } }, state.now, state.range.seconds, state.history?.step ?: state.range.step, activeSelection, { selection = it },
                     reference = system?.cores?.takeIf { kinds.first() == MetricKind.Load && it > 0 }?.toDouble())
             }
             if (system?.os == "linux" && !current?.cores.isNullOrEmpty()) item("cores") { CoreBars(current.cores!!) }

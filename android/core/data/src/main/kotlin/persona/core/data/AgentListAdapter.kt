@@ -33,6 +33,7 @@ interface AgentListAdapter {
 class KotlinAgentListAdapter : AgentListAdapter {
     override fun project(input: AgentListAdapter.Input): AgentListResult = with(input) {
         // scopedAgentList retains range, forest and history preprocessing outside this boundary.
-        buildFlatAgentList(sessions, machines, pins, mutes, settings.copy(now = now), todos, directions)
+        val withHeld = sessions.map { it.copy(heldInList = held != null && it.id == held) }
+        buildFlatAgentList(withHeld, machines, pins, mutes, settings.copy(now = now), todos, directions)
     }
 }

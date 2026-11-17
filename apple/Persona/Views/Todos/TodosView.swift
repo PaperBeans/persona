@@ -167,7 +167,6 @@ struct TodosView: View {
         .themedPage()
         // The first row close to the bar, as the Agents list keeps it: not the grouped list's first-section margin.
         .contentMargins(.top, Theme.Space.xs, for: .scrollContent)
-        .tabSwitchListRoom()  // its end clear of the open Duo's floating tabs' switch (#4231)
         .refreshable {
             await store.refresh()
         }
@@ -507,15 +506,9 @@ struct TodosView: View {
             .navigationTitle("New To-Do")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showCreate = false }
-                        .lineLimit(1)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add [Beautiful U I Bridge 7a8a11]") { add() }
-                        .lineLimit(1)
-                        .disabled(creatingTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
+                SheetClose { showCreate = false }
+                SheetConfirm(id: "todo.create.add", name: String(localized: "Add [Beautiful U I Bridge 7a8a11]"),
+                             disabled: creatingTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { add() }
             }
         }
         .presentationDetents([.medium])

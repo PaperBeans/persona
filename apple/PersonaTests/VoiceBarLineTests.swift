@@ -26,10 +26,10 @@ struct VoiceBarLineTests {
     }
 
     private static func line(_ runs: [VoiceRun] = [], session: Session? = session(), cards: [Interaction] = [], link: VoiceLink = .live,
-                             muted: Bool = false, asking: String? = nil, notice: VoiceFailure? = nil,
+                             muted: Bool = false, held: Bool = false, asking: String? = nil, notice: VoiceFailure? = nil,
                              dismissed: Set<String> = [], resendable: Set<String> = []) -> VoiceBarLine {
-        VoiceBarLine.make(phase: .live(.listening), link: link, runs: runs, session: session, cards: cards, muted: muted, asking: asking,
-                          notice: notice, label: "Claude", dismissed: dismissed, resendable: resendable)
+        VoiceBarLine.make(phase: .live(.listening), link: link, runs: runs, session: session, cards: cards, muted: muted, held: held,
+                          asking: asking, notice: notice, label: "Claude", dismissed: dismissed, resendable: resendable)
     }
 
     @Test func nothingGoingOnSaysWhereWordsGo() {
@@ -156,6 +156,22 @@ struct VoiceBarLineTests {
         #expect(Self.line([refused, Self.run(.folded, id: "voice-2")]).kind == .notSent, "a folded run says nothing of its own")
     }
 
+    /// A call to Persona on hold (#9290; the hub's `hold` pauses the voice's link too): never Speak to Resume, Just Speak,
+    /// the muted line or Just Say Your Answer, since nothing said goes until it is off hold. Stop Claude still works, and
+    /// what did not go or an offline computer still says so.
+    @Test func onHoldTheLineSaysSoInsteadOfAskingToSpeak() {
+        let ready = Self.line()
+        for l in [Self.line(held: true), Self.line(link: .paused, held: true), Self.line(muted: true, held: true),
+                  Self.line(cards: [Self.card("question")], held: true, asking: "ix1")] {
+            #expect(l.kind == .held && l.actions.isEmpty && l.text != ready.text && !l.text.isEmpty)
+        }
+        let working = Self.line([Self.run(.working)], session: Self.working, link: .paused, held: true)
+        #expect(working.kind == .held && working.actions == [.stopAgent])
+        #expect(Self.line([Self.run(.refused, code: "empty")], held: true).kind == .notSent)
+        #expect(Self.line(held: true, notice: VoiceFailure(code: .machineOffline, message: "x", fatal: false)).kind == .offline)
+        #expect(VoiceBarLine.Kind.held.announced, "the voice stops: VoiceOver hears it")
+    }
+
     @Test func announcedKinds() {
         #expect(VoiceBarLine.Kind.needsTap.announced && VoiceBarLine.Kind.paused.announced && VoiceBarLine.Kind.notSent.announced)
         #expect(!VoiceBarLine.Kind.working.announced && !VoiceBarLine.Kind.ready.announced)
@@ -164,8 +180,9 @@ struct VoiceBarLineTests {
     // MARK: The first line
 
     @Test func statusBesideTheOrb() {
-        func status(_ phase: VoicePhase, link: VoiceLink = .live, muted: Bool = false, working: Bool = false, tool: String? = nil) -> VoiceBarStatus {
-            VoiceBarStatus.make(phase: phase, link: link, muted: muted, working: working, tool: tool)
+        func status(_ phase: VoicePhase, link: VoiceLink = .live, muted: Bool = false, working: Bool = false, tool: String? = nil,
+                    held: Bool = false) -> VoiceBarStatus {
+            VoiceBarStatus.make(phase: phase, link: link, muted: muted, working: working, tool: tool, held: held)
         }
         #expect(status(.connecting) == VoiceBarStatus(text: "正在连接…", orb: .connecting))
         #expect(status(.reconnecting(attempt: 2)).orb == .connecting)
@@ -178,6 +195,12 @@ struct VoiceBarLineTests {
         #expect(status(.live(.speaking), link: .waking).orb == .connecting)
         #expect(status(.live(.listening), tool: "查日程").text == "正在查日程…")
         #expect(status(.ended(.lost)).orb == .ended)
+        // A call to Persona on hold says so, as its call screen does, whatever the link or the mute.
+        let onHold = VoiceBarStatus(text: "通话保持中", orb: .paused)
+        #expect(status(.live(.listening), link: .paused, held: true) == onHold)
+        #expect(status(.live(.listening), muted: true, held: true) == onHold)
+        #expect(status(.reconnecting(attempt: 1), held: true) == onHold)
+        #expect(status(.ended(.user), held: true).orb == .ended)
     }
 }
 

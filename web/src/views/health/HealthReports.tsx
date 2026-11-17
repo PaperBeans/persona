@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, enc, errorText, fileDownloadURL } from "../../lib/api";
 import { bytes } from "../../lib/format";
-import { onHubEvent, useStore } from "../../lib/store";
+import { onHubEvent } from "../../lib/store";
 import { Button, Dialog, Loading, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { Markdown } from "../../ui/Markdown";
@@ -11,19 +11,22 @@ import { SectionTitle } from "../assistant/parts";
 import { t } from "../../i18n";
 import { reportsPath, type HealthReport } from "./reports";
 
-export function HealthReports({ version }: { version: number }) {
-  const mid = useStore((s) => s.assistant?.machine_id);
+/** `mid`: the health space's machine as the space's own list names it, where uploads go; never the machine of the
+ *  assistant the Persona page shows, since the space stays the default manager's (docs/assistant/managers.md "Clients").
+ *  `unavailable`: why that list, and so the machine, could not be read. */
+export function HealthReports({ mid, unavailable = "", version }: { mid?: string; unavailable?: string; version: number }) {
   const [list, setList] = useState<HealthReport[] | null>(null);
-  const [error, setError] = useState("");
+  const [failure, setFailure] = useState("");
+  const error = failure || (mid ? "" : unavailable);
   const [open, setOpen] = useState<HealthReport | null>(null);
   const load = useCallback(async () => {
     if (!mid) return;
     try {
       const r = await api<{ reports: HealthReport[] }>(reportsPath(mid));
       setList(r.reports ?? []);
-      setError("");
+      setFailure("");
     } catch (e) {
-      setError(errorText(e));
+      setFailure(errorText(e));
     }
   }, [mid]);
   useEffect(() => {

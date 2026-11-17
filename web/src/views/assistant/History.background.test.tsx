@@ -88,8 +88,8 @@ describe("全部对话's background supervisor (#5082)", () => {
     expect(await menuOf("后台督办")).toEqual(["复制会话 ID"]);
     await act(async () => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     const full = await menuOf("对话 morning");
-    expect(full).toHaveLength(4); // 设为常驻 (with its accelerator), 重命名…, 复制会话 ID, 归档
-    expect(full).toEqual(expect.arrayContaining(["重命名…", "复制会话 ID", "归档"]));
+    expect(full).toHaveLength(5); // 设为常驻 (with its accelerator), 重命名…, 编辑标签…, 复制会话 ID, 归档
+    expect(full).toEqual(expect.arrayContaining(["重命名…", "编辑标签…", "复制会话 ID", "归档"]));
   });
 
   it("goes by its origin on a hub that does not name it", async () => {

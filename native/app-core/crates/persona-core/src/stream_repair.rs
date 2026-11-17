@@ -1,9 +1,12 @@
-//! Bounded fence, table, final-block-marker and inline projection of Apple's `StreamRepair` and its end state.
+//! Bounded fence, table, final-block-marker, inline, math-end and plain-open-fence projection of Apple's
+//! `StreamRepair`.
 //!
-//! Display math is recognized only to keep it out of inline repair; `.math` end reporting, rendering and
-//! `plainOpenFence` are not implemented.
+//! MathMarkdown's `display` predicate is included only for end reporting; formula rewriting and rendering are not
+//! implemented. The plain-fence projection takes the caller's drawn-info predicate as explicit input.
 
 use serde::{Deserialize, Serialize};
+use unicode_general_category::GeneralCategory;
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Input {
@@ -14,6 +17,18 @@ pub struct Input {
 pub struct Projection {
     pub repaired: String,
     pub end: &'static str,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlainFenceInput {
+    pub text: String,
+    /// Exact info strings for which the caller draws a picture. This replaces Apple's `drawn` closure.
+    pub drawn: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PlainFenceProjection {
+    pub text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -212,7 +227,7 @@ impl<'a> Scan<'a> {
                 if value == end {
                     math_end = None;
                     block_start = index + 1;
-                    closed_last = (index + 1 == lines.len()).then_some("math-isolated");
+                    closed_last = (index + 1 == lines.len()).then_some("math");
                 }
                 continue;
             }
@@ -487,18 +502,179 @@ fn project_end(text: &str) -> &'static str {
     if scan.fence.is_some() {
         return "code";
     }
-    if let Some(closed) = scan.closed_last {
-        if scan.ends_with_newline || closed == "math-isolated" {
-            // A closed formula stays out of inline repair, but this bounded end projection does not implement `.math`.
-            "text"
-        } else {
-            closed
-        }
-    } else if scan.table().is_some() {
-        "table"
-    } else {
-        "text"
+    if scan.math_open {
+        return "math";
     }
+    if let Some(closed) = scan.closed_last {
+        if !scan.ends_with_newline {
+            return closed;
+        }
+    } else if !scan.ends_with_newline && scan.lines.last().is_some_and(|line| is_display_math(trimmed(line))) {
+        return "math";
+    }
+    if scan.table().is_some() { "table" } else { "text" }
+}
+
+/// Apple `StreamRepair.plainOpenFence`: strip only the still-open fence's drawn info string. Its Scan trimming is
+/// space/tab/CR, while the subsequent info predicate uses Foundation `.whitespacesAndNewlines`.
+pub fn plain_open_fence(input: &PlainFenceInput) -> PlainFenceProjection {
+    let text = &input.text;
+    if !text.contains("```") && !text.contains("~~~") {
+        return PlainFenceProjection { text: text.clone() };
+    }
+    let scan = Scan::new(text);
+    let Some(ref open) = scan.fence else {
+        return PlainFenceProjection { text: text.clone() };
+    };
+    let line = scan.lines[open.line];
+    let scalars = text.chars().collect::<Vec<_>>();
+    let mut run = scan.scalar_offset(open.line);
+    let line_end = run + line.chars().count();
+    while run < line_end && is_space_like(scalars[run]) {
+        run += 1;
+    }
+    while run < line_end && scalars[run] == open.character {
+        run += 1;
+    }
+    let info = scalars[run..line_end]
+        .iter()
+        .collect::<String>()
+        .trim_matches(is_whitespace_and_newline)
+        .to_owned();
+    let text = if !info.is_empty() && input.drawn.contains(&info) {
+        scalars[..run].iter().collect::<String>() + &scalars[line_end..].iter().collect::<String>()
+    } else {
+        text.clone()
+    };
+    PlainFenceProjection { text }
+}
+
+fn is_whitespace_and_newline(character: char) -> bool {
+    matches!(character, '\t'..='\r')
+        || unicode_general_category::get_general_category(character) == GeneralCategory::SpaceSeparator
+        || matches!(character, '\u{0085}' | '\u{2028}' | '\u{2029}')
+}
+
+/// Apple `MathMarkdown.display`: a trimmed line containing exactly one formula. Its inline scanner uses Swift
+/// `Character` indices, so this separate predicate walks extended graphemes rather than reusing scalar offsets.
+fn is_display_math(line: &str) -> bool {
+    for (open, close) in [("$$", "$$"), ("\\[", "\\]")] {
+        if line.graphemes(true).count() > open.len() + close.len()
+            && let Some(tex) = line.strip_prefix(open).and_then(|rest| rest.strip_suffix(close))
+            && !tex.contains(close)
+            && !tex.trim_matches(is_math_whitespace).is_empty()
+        {
+            return true;
+        }
+    }
+    let mut spans = inline_math_spans(line);
+    let Some((0, end)) = spans.next() else {
+        return false;
+    };
+    end == line.len() && spans.next().is_none()
+}
+
+fn inline_math_spans(line: &str) -> impl Iterator<Item = (usize, usize)> {
+    let graphemes = line.grapheme_indices(true).collect::<Vec<_>>();
+    let mut spans = Vec::new();
+    let mut index = 0;
+    let mut tick = 0;
+    while index < graphemes.len() && spans.len() < 2 {
+        let (start, character) = graphemes[index];
+        let next = graphemes.get(index + 1).map_or(line.len(), |(offset, _)| *offset);
+        if character == "`" {
+            let count = (index..graphemes.len())
+                .take_while(|next| graphemes[*next].1 == "`")
+                .count();
+            tick = if tick == 0 {
+                count
+            } else if tick == count {
+                0
+            } else {
+                tick
+            };
+            index += count;
+            continue;
+        }
+        if tick > 0 {
+            index += 1;
+            continue;
+        }
+        if character == "\\" && index + 1 < graphemes.len() {
+            if graphemes[index + 1].1 == "("
+                && let Some(close) = find_math_pair(&graphemes, index + 2, "\\", ")")
+            {
+                let end = graphemes.get(close + 2).map_or(line.len(), |(offset, _)| *offset);
+                spans.push((start, end));
+                index = close + 2;
+            } else {
+                index += 2;
+            }
+            continue;
+        }
+        if character == "$"
+            && index + 1 < graphemes.len()
+            && graphemes[index + 1].1 != "$"
+            && !is_math_character_whitespace(graphemes[index + 1].1.chars().next().unwrap_or(' '))
+            && let Some(span) = closing_inline_dollar(&graphemes, index)
+            && plausible_math(&line[next..graphemes[span].0])
+        {
+            let end = graphemes.get(span + 1).map_or(line.len(), |(offset, _)| *offset);
+            spans.push((start, end));
+            index = span + 1;
+            continue;
+        }
+        index += 1;
+    }
+    spans.into_iter()
+}
+
+/// Locate the first candidate `$`, applying Apple's escape, close and money rules. A rejected candidate ends the
+/// search for this opener rather than letting a later dollar close it.
+fn closing_inline_dollar(graphemes: &[(usize, &str)], open: usize) -> Option<usize> {
+    let mut index = open + 1;
+    while index < graphemes.len() {
+        let (_, character) = graphemes[index];
+        if character == "\\" {
+            index += 2;
+            continue;
+        }
+        if character == "$" {
+            let after_digit = graphemes
+                .get(index + 1)
+                .is_some_and(|(_, next)| next.chars().next().is_some_and(|c| c.is_numeric()));
+            let before = graphemes[index - 1].1;
+            let valid = !is_math_character_whitespace(before.chars().next().unwrap_or(' '))
+                && !after_digit
+                && graphemes.get(index + 1).is_none_or(|(_, next)| *next != "$");
+            return valid.then_some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn find_math_pair(graphemes: &[(usize, &str)], start: usize, first: &str, second: &str) -> Option<usize> {
+    (start..graphemes.len().saturating_sub(1))
+        .find(|index| graphemes[*index].1 == first && graphemes[*index + 1].1 == second)
+}
+
+/// Foundation `.whitespaces` contains Unicode Zs and tab, unlike the inline scanner's broader
+/// `Character.isWhitespace` or Rust's `char::is_whitespace`. Keep these two Apple predicates separate.
+fn is_math_whitespace(character: char) -> bool {
+    character == '\t' || unicode_general_category::get_general_category(character) == GeneralCategory::SpaceSeparator
+}
+
+fn is_math_character_whitespace(character: char) -> bool {
+    character.is_whitespace()
+}
+
+fn is_math_wide(character: char) -> bool {
+    matches!(character as u32, 0x3000..=0x9fff | 0xff00..=0xffef)
+}
+
+fn plausible_math(tex: &str) -> bool {
+    tex.graphemes(true).count() <= 400 && (!tex.chars().any(is_math_wide) || tex.contains("\\text"))
 }
 
 fn starts_block(line: &str) -> bool {
@@ -883,7 +1059,7 @@ impl InlineRepair {
     }
 }
 
-/// Repairs the named bounded slices; display math's end remains `text` in this projection.
+/// Repairs the named bounded slices, including Apple's math end classification.
 pub fn project(input: &Input) -> Projection {
     Projection {
         repaired: project_repair(&input.text),

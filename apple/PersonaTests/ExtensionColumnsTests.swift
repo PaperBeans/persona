@@ -145,11 +145,15 @@ struct ExtensionColumnsTests {
         let fixed = height(50, most: 2, minimum: nil)
         // To a hundredth of a point: the hosting view adds its float error to the sum.
         func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) < 0.01 }
-        #expect(near(two, 30 + 10 + 20), "two to a line: \(two)")
-        #expect(near(one, 10 + 30 + 20 + 2 * 10), "narrower, one to a line: \(one)")
-        #expect(near(three, 30), "three to a line: \(three)")
-        #expect(near(capped, 30 + 10 + 20), "at most its columns: \(capped)")
-        #expect(near(fixed, 30 + 10 + 20), "fixed columns, whatever the width: \(fixed)")
+        // Named and typed outside #expect: Xcode 26.0 times out inferring the literal sums inside the macro (#9497).
+        let twoLines: CGFloat = 30 + 10 + 20
+        let threeLines: CGFloat = 10 + 30 + 20 + 2 * 10
+        let oneLine: CGFloat = 30
+        #expect(near(two, twoLines), "two to a line: \(two)")
+        #expect(near(one, threeLines), "narrower, one to a line: \(one)")
+        #expect(near(three, oneLine), "three to a line: \(three)")
+        #expect(near(capped, twoLines), "at most its columns: \(capped)")
+        #expect(near(fixed, twoLines), "fixed columns, whatever the width: \(fixed)")
     }
 
     // MARK: The list

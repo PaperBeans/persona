@@ -4,9 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -25,6 +30,9 @@ type phoneWorld struct {
 	granted bool
 	signed  map[string]bool
 	closers map[string][]io.Closer // what screenLogins.attach bound to each pair
+	// records: the helper's restore file here; restores: how many times --phone-screen-restore ran.
+	records  string
+	restores atomic.Int32
 }
 
 func newPhoneWorld(t *testing.T, preflight string) *phoneWorld {
@@ -49,6 +57,7 @@ func newPhoneWorld(t *testing.T, preflight string) *phoneWorld {
 	swap(t, &screenSigner, func(string) (helperSigner, error) { return nil, nil })
 	swap(t, &inputPermissions, &inputPermissionCache{ttl: time.Minute})
 	swap(t, &inputPreflight, func(context.Context, string) string { return preflight })
+	w.records = filepath.Join(t.TempDir(), "phone-screen.json")
 	swap(t, &phoneStart, func(context.Context, string) (net.Conn, bool, error) {
 		w.starts.Add(1)
 		node, helper := net.Pipe()
@@ -57,7 +66,10 @@ func newPhoneWorld(t *testing.T, preflight string) *phoneWorld {
 	})
 	w.node = &Node{logger: log.New(io.Discard, "", 0)}
 	w.node.phones = &phoneScreens{logf: t.Logf,
-		signed: func(pair string) bool { w.mu.Lock(); defer w.mu.Unlock(); return w.signed[pair] },
+		signed:       func(pair string) bool { w.mu.Lock(); defer w.mu.Unlock(); return w.signed[pair] },
+		restoreFile:  func() string { return w.records },
+		restoreRun:   func(context.Context, string) error { w.restores.Add(1); return nil },
+		restoreAfter: 10 * time.Millisecond,
 		attach: func(pair string, c io.Closer) bool {
 			w.mu.Lock()
 			defer w.mu.Unlock()
@@ -272,5 +284,75 @@ func TestPhoneScreenRefusals(t *testing.T) {
 	}
 	if _, err := w.node.screenPhone(context.Background(), []byte(`{"op":"start"}`)); rpcCode(err) != "bad_request" {
 		t.Fatalf("no pair: %v", err)
+	}
+}
+
+// What a helper that died left (#9500: a terminal's text size must not stay raised) is put back when the node starts
+// and after a session ends, by --phone-screen-restore: only with records on disk, only with the helper allowed, and
+// never while a session runs (that session puts them back as it starts).
+func TestPhoneScreenLeftoversArePutBack(t *testing.T) {
+	ctx := context.Background()
+	w := newPhoneWorld(t, "post_event: granted\nphone_screen: 1 granted\n")
+	w.node.phones.restoreLeftovers(ctx)
+	if n := w.restores.Load(); n != 0 {
+		t.Fatalf("ran %d times with nothing to put back", n)
+	}
+	if err := os.WriteFile(w.records, []byte(`{"records":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w.node.phones.restoreLeftovers(ctx)
+	if n := w.restores.Load(); n != 1 {
+		t.Fatalf("ran %d times with records left", n)
+	}
+
+	// A session running: it handles them itself.
+	if _, err := w.ask(t, map[string]any{"pair": "P", "op": "start", "width": 402, "height": 760}); err != nil {
+		t.Fatal(err)
+	}
+	w.node.phones.restoreLeftovers(ctx)
+	if n := w.restores.Load(); n != 1 {
+		t.Fatalf("ran beside a live session (%d)", n)
+	}
+	// The session ends (its helper died, say) with the records still there: put back a moment later.
+	w.endStream("P")
+	eventually(t, "the leftovers put back after the session", func() bool { return w.restores.Load() == 2 })
+
+	// Without Accessibility nothing runs (it couldn't move a window).
+	w2 := newPhoneWorld(t, "post_event: granted\nphone_screen: 1 missing\n")
+	if err := os.WriteFile(w2.records, []byte(`{"records":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w2.node.phones.restoreLeftovers(ctx)
+	if n := w2.restores.Load(); n != 0 {
+		t.Fatalf("ran without the permission (%d)", n)
+	}
+}
+
+// `open -W` fails when the helper finished before it could wait (#9500's follow-up): with the records gone that is a
+// done restore, never logged as a failure; with records still there the failure is logged.
+func TestPhoneScreenRestoreLogsNoFalseFailure(t *testing.T) {
+	ctx := context.Background()
+	w := newPhoneWorld(t, "post_event: granted\nphone_screen: 1 granted\n")
+	var mu sync.Mutex
+	var lines []string
+	w.node.phones.logf = func(f string, a ...any) { mu.Lock(); lines = append(lines, fmt.Sprintf(f, a...)); mu.Unlock() }
+	w.node.phones.restoreRun = func(context.Context, string) error {
+		_ = os.Remove(w.records) // the helper put everything back and exited before open could wait
+		return errors.New("open: exit status 1: Unable to block on application")
+	}
+	if err := os.WriteFile(w.records, []byte(`{"records":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w.node.phones.restoreLeftovers(ctx)
+	w.node.phones.restoreRun = func(context.Context, string) error { return errors.New("open: no such app") }
+	if err := os.WriteFile(w.records, []byte(`{"records":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w.node.phones.restoreLeftovers(ctx)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(lines) != 2 || strings.Contains(lines[0], "Unable") || !strings.Contains(lines[0], "put back") ||
+		!strings.Contains(lines[1], "no such app") {
+		t.Fatalf("logged %q", lines)
 	}
 }

@@ -93,7 +93,11 @@ class ChatDataRepositories private constructor(
     /** [sessions] with [shownSessions] as its list, for the pages that take a repository (the Persona tab). */
     val shownRepository = sessions.showing(shownSessions)
     val chats = HubChatRepository(transport, connection, items, sessions, scope,
-        foreground, seen = preferenceTransport?.let { remote -> { key -> remote.seen(key) } }, transcript = transcript,
+        foreground, seen = preferences?.let { repository -> { key ->
+            // Keep the same local read snapshot used by the Agents list, not only the hub transport's receipt.
+            repository.markSeen(key, sessions.sessions.value.firstOrNull { it.key == key }
+                ?.let { "${it.updatedAt.orEmpty()}|${it.rev ?: ""}" }.orEmpty())
+        } }, transcript = transcript,
         awaitingTranscript = awaitingTranscript, releaseAfterMillis = CLOSED_CHAT_RELEASE_MILLIS, continuityFactory = continuityFactory)
 
     suspend fun close(discard: Boolean = false) = withContext(NonCancellable + Dispatchers.IO) {

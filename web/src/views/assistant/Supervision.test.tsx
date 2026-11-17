@@ -1,6 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Todo } from "../../lib/todos";
+import { makeSessionLookup } from "../../lib/todos";
+import type { Session } from "../../lib/types";
 import { Icon } from "../../ui/icons";
 import { FeedLineView } from "./Tasks";
 import { LatestReport, ReviewBadge } from "./Supervision";
@@ -62,6 +64,16 @@ describe("a supervised task", () => {
     expect(html).toContain("go test: PASS");
     expect(html).toContain("agent:box/s1");
     expect(html).toContain('dateTime="2026-11-11T01:00:00Z"');
+  });
+  it("does not display stale parked metadata while the task's Agent is working", () => {
+    const live: Todo = { ...todo, agents: [{ machine_id: "demo", session_id: "worker", linked_at: "2026-11-11T00:00:00Z" }],
+      supervision: { supervisor: "main", state: "parked", done_when: ["Tests pass"],
+        parked: { reason: "Earlier external wait", until: "2026-11-18T09:00:00Z", waiting_on: "someone_else", count: 1 } } };
+    const lookup = makeSessionLookup([{ machine_id: "demo", session_id: "worker", state: "working", status: "working" } as Session]);
+    const html = renderToStaticMarkup(<ReviewChecklist todo={live} lookup={lookup} />);
+    expect(html).toContain('data-testid="review-checklist"');
+    expect(html).not.toContain('data-task-wait-info=');
+    expect(html).not.toContain("Earlier external wait");
   });
   it("tints accepted work green but keeps reviews requiring user input neutral", () => {
     const accepted = renderToStaticMarkup(<ReviewBadge todo={{ ...todo, done_at: "2026-11-05T10:00:00Z", supervision: { ...todo.supervision!, state: "accepted" } }} />);

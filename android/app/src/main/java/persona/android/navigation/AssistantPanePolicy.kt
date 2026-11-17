@@ -36,10 +36,15 @@ internal fun assistantPanePolicy(
     val assistantRoot = tab == AppTab.Persona && destinations.singleOrNull() == AssistantRoute
     val assistantSecondary = tab == AppTab.Persona && secondary.isNotEmpty() &&
         secondary.all(::isAssistantSecondaryDestination)
+    // A place that replaced the conversation as the stack's root still keeps the column, in one pane (#9667).
+    // A drill on it is already [assistantSecondary] via drop(1).
+    val placeRoot = tab == AppTab.Persona && destinations.singleOrNull()?.let {
+        it != AssistantRoute && isAssistantSecondaryDestination(it)
+    } == true
     val inboxSecondary = tab == AppTab.Persona && secondary.isNotEmpty() && secondary.all(::isInboxDestination)
     return AssistantPanePolicy(
-        keepSharedSidebar = regular && (assistantRoot || assistantSecondary),
-        singleRightStack = regular && assistantSecondary,
+        keepSharedSidebar = regular && (assistantRoot || assistantSecondary || placeRoot),
+        singleRightStack = regular && (assistantSecondary || placeRoot),
         keepWidePhoneListDetail = !regular && widePhone && inboxSecondary,
     )
 }

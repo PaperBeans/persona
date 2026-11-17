@@ -138,7 +138,7 @@ func listKeyFixture(n int) []proto.Session {
 	for i := range list {
 		s := proto.Session{SessionID: fmt.Sprintf("s%02d-0f3c9a1e-7b2d-4c5e-9a8b", i), Status: proto.StatusIdle,
 			Title: fmt.Sprintf("修 listKey 的分配 %d", i), PaneID: fmt.Sprintf("%%%d", i), SpaceName: "persona",
-			SlotID: "w1:t1", SlotName: "server", SlotIndex: i % 4, LastText: "已建 issue 并认领，接着看 sessions.go 的 publish",
+			SlotID: "w1:t1", SlotName: "server", SlotIndex: int32(i % 4), LastText: "已建 issue 并认领，接着看 sessions.go 的 publish",
 			UpdatedAt: at.Add(time.Duration(i) * time.Minute), SourceKind: "claude"}
 		if i%2 == 1 {
 			pane := i % 3

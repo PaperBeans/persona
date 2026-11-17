@@ -12,137 +12,120 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/prompts"
-	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // Exercise the RPC decoder, real process startup, state persistence and idle resume,
 // rather than testing only a flag builder or fingerprint in isolation.
 func TestAssistantSupervisionStartupResumeIsolation(t *testing.T) {
-	for _, runtime := range []string{"", proto.AssistantRuntimeAgentSDK} {
-		t.Run("runtime="+runtime, func(t *testing.T) {
-			f := sdkTest(t)
-			ctx, cwd := context.Background(), t.TempDir()
-			policy := prompts.RenderSupervisionInstructions()
-			sendMethod := "assistant.send"
-			send := func(id, text, instructions string) string {
-				t.Helper()
-				raw, err := nodeCall(t, f.n, sendMethod, map[string]any{
-					"session_id": id, "cwd": cwd, "launcher": "claude", "runtime": runtime,
-					"text": text, "supervision_instructions": instructions,
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				var result struct {
-					ID string `json:"session_id"`
-				}
-				if err := json.Unmarshal(raw, &result); err != nil {
-					t.Fatalf("send result: %s (%v)", raw, err)
-				}
-				if sendMethod == "session.send" {
-					result.ID = id
-				}
-				if result.ID == "" {
-					t.Fatalf("send result has no session: %s", raw)
-				}
-				f.idle(t, result.ID)
-				return result.ID
-			}
-			checkStartup := func(id, want string, resume bool) {
-				t.Helper()
-				if runtime == proto.AssistantRuntimeAgentSDK {
-					o := f.start(t)
-					system, _ := o["systemPrompt"].(map[string]any)
-					if want == "" && system != nil || want != "" && (system["append"] != want || system["preset"] != "claude_code") {
-						t.Fatal("SDK system instructions differ from exact authorized policy")
-					}
-					if resume && o["resume"] != id {
-						t.Fatal("role switch started a new SDK conversation instead of resuming")
-					}
-				} else {
-					args := f.file("cli-argv")
-					if want != "" && !strings.Contains(args, "--append-system-prompt "+want) {
-						t.Fatal("CLI did not receive exact policy bytes")
-					}
-					if want == "" && strings.Contains(args, "--append-system-prompt") {
-						t.Fatal("ordinary CLI received supervisor policy")
-					}
-					if resume && !strings.Contains(args, "--resume "+id) {
-						t.Fatal("role switch did not resume the CLI conversation")
-					}
-				}
-			}
-			clearStartup := func() {
-				t.Helper()
-				_ = os.Remove(filepath.Join(f.dir, "cli-argv"))
-				_ = os.Remove(filepath.Join(f.dir, "start.json"))
-			}
-			id := send("", "First task facts", policy)
-			first := f.proc(id)
-			checkStartup(id, policy, false)
-			if got, _ := f.n.state.get(id); got.SupervisionInstructions != policy {
-				t.Fatal("state did not retain supervision policy for node-local resume")
-			}
-			send(id, "Changed task evidence, same supervisor", policy)
-			if f.proc(id) != first {
-				t.Fatal("new event data needlessly restarted the process")
-			}
-			// A role change must neither kill active work nor send new input on the old
-			// system policy. An idle retry below applies it before delivery.
-			first.mu.Lock()
-			first.busy = true
-			first.mu.Unlock()
-			if _, err := nodeCall(t, f.n, "assistant.send", map[string]any{"session_id": id, "launcher": "claude",
-				"runtime": runtime, "text": "Do not deliver on the old role", "supervision_instructions": ""}); refusalCode(err) != "busy" {
-				t.Fatalf("active role change was not held: %v", err)
-			}
-			if f.proc(id) != first || !first.alive() {
-				t.Fatal("role change killed active work")
-			}
-			first.mu.Lock()
-			first.busy = false
-			first.mu.Unlock()
-			path := filepath.Join(t.TempDir(), id+".jsonl")
-			if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			f.n.mu.Lock()
-			f.n.paths[id] = path
-			f.n.mu.Unlock()
-			clearStartup()
-			sendMethod = "session.send" // internal manager messages must refresh roles too
-			send(id, "Role removed", "")
-			sendMethod = "assistant.send"
-			ordinary := f.proc(id)
-			if ordinary == first {
-				t.Fatal("removing the role without a model fingerprint kept privileged process policy")
-			}
-			checkStartup(id, "", true)
-			clearStartup()
-			send(id, "Role granted again", policy)
-			if f.proc(id) == ordinary {
-				t.Fatal("granting the role did not restart")
-			}
-			checkStartup(id, policy, true)
-			// A separate ordinary conversation shares exactly the same cwd.
-			clearStartup()
-			side := send("", "Unrelated ordinary chat", "")
-			if side == id || f.proc(side).cwd != cwd {
-				t.Fatal("fixture did not create a separate same-directory conversation")
-			}
-			checkStartup(side, "", false)
-			if f.proc(id).model.SupervisionInstructions != policy {
-				t.Fatal("ordinary chat changed its neighbor's policy")
-			}
-			// A local resend with no manager metadata keeps the persisted role.
-			if _, err := f.n.assistantSend(ctx, id, cwd, "", "Local resume", nil, "", ""); err != nil {
-				t.Fatal(err)
-			}
-			f.idle(t, id)
-			if f.proc(id).model.SupervisionInstructions != policy {
-				t.Fatal("node-local send lost the persisted supervisor role")
-			}
+	f := cliTest(t)
+	ctx, cwd := context.Background(), t.TempDir()
+	policy := prompts.RenderSupervisionInstructions()
+	sendMethod := "assistant.send"
+	send := func(id, text, instructions string) string {
+		t.Helper()
+		raw, err := nodeCall(t, f.n, sendMethod, map[string]any{
+			"session_id": id, "cwd": cwd, "launcher": "claude",
+			"text": text, "supervision_instructions": instructions,
 		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			ID string `json:"session_id"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			t.Fatalf("send result: %s (%v)", raw, err)
+		}
+		if sendMethod == "session.send" {
+			result.ID = id
+		}
+		if result.ID == "" {
+			t.Fatalf("send result has no session: %s", raw)
+		}
+		f.idle(t, result.ID)
+		return result.ID
+	}
+	checkStartup := func(id, want string, resume bool) {
+		t.Helper()
+		args := f.file("cli-argv")
+		if want != "" && !strings.Contains(args, "--append-system-prompt "+want) {
+			t.Fatal("CLI did not receive exact policy bytes")
+		}
+		if want == "" && strings.Contains(args, "--append-system-prompt") {
+			t.Fatal("ordinary CLI received supervisor policy")
+		}
+		if resume && !strings.Contains(args, "--resume "+id) {
+			t.Fatal("role switch did not resume the CLI conversation")
+		}
+	}
+	clearStartup := func() {
+		t.Helper()
+		_ = os.Remove(filepath.Join(f.dir, "cli-argv"))
+	}
+	id := send("", "First task facts", policy)
+	first := f.proc(id)
+	checkStartup(id, policy, false)
+	if got, _ := f.n.state.get(id); got.SupervisionInstructions != policy {
+		t.Fatal("state did not retain supervision policy for node-local resume")
+	}
+	send(id, "Changed task evidence, same supervisor", policy)
+	if f.proc(id) != first {
+		t.Fatal("new event data needlessly restarted the process")
+	}
+	// A role change must neither kill active work nor send new input on the old
+	// system policy. An idle retry below applies it before delivery.
+	first.mu.Lock()
+	first.busy = true
+	first.mu.Unlock()
+	if _, err := nodeCall(t, f.n, "assistant.send", map[string]any{"session_id": id, "launcher": "claude",
+		"text": "Do not deliver on the old role", "supervision_instructions": ""}); refusalCode(err) != "busy" {
+		t.Fatalf("active role change was not held: %v", err)
+	}
+	if f.proc(id) != first || !first.alive() {
+		t.Fatal("role change killed active work")
+	}
+	first.mu.Lock()
+	first.busy = false
+	first.mu.Unlock()
+	path := filepath.Join(t.TempDir(), id+".jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.n.mu.Lock()
+	f.n.paths[id] = path
+	f.n.mu.Unlock()
+	clearStartup()
+	sendMethod = "session.send" // internal manager messages must refresh roles too
+	send(id, "Role removed", "")
+	sendMethod = "assistant.send"
+	ordinary := f.proc(id)
+	if ordinary == first {
+		t.Fatal("removing the role without a model fingerprint kept privileged process policy")
+	}
+	checkStartup(id, "", true)
+	clearStartup()
+	send(id, "Role granted again", policy)
+	if f.proc(id) == ordinary {
+		t.Fatal("granting the role did not restart")
+	}
+	checkStartup(id, policy, true)
+	// A separate ordinary conversation shares exactly the same cwd.
+	clearStartup()
+	side := send("", "Unrelated ordinary chat", "")
+	if side == id || f.proc(side).cwd != cwd {
+		t.Fatal("fixture did not create a separate same-directory conversation")
+	}
+	checkStartup(side, "", false)
+	if f.proc(id).model.SupervisionInstructions != policy {
+		t.Fatal("ordinary chat changed its neighbor's policy")
+	}
+	// A local resend with no manager metadata keeps the persisted role.
+	if _, err := f.n.assistantSend(ctx, id, cwd, "", "Local resume", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	f.idle(t, id)
+	if f.proc(id).model.SupervisionInstructions != policy {
+		t.Fatal("node-local send lost the persisted supervisor role")
 	}
 }
 
@@ -250,7 +233,7 @@ func TestSupervisionModelLookupAndFingerprint(t *testing.T) {
 }
 
 func TestAssistantSupervisionStoppedCompactionRefreshesRole(t *testing.T) {
-	f := sdkTest(t)
+	f := cliTest(t)
 	ctx, cwd := context.Background(), t.TempDir()
 	ex := modelExecution{SupervisionInstructions: prompts.RenderSupervisionInstructions()}
 	id, err := f.n.assistantSend(ctx, "", cwd, "claude", "Task facts", nil, "", "", ex)
@@ -384,7 +367,7 @@ func TestAssistantSupervisionNativeCodexStartupResume(t *testing.T) {
 		if err := json.Unmarshal(raw, &result); err != nil || result.ID == "" {
 			t.Fatalf("native Codex send: %s (%v)", raw, err)
 		}
-		sdkWait(t, "native Codex turn completion", func() bool {
+		cliWait(t, "native Codex turn completion", func() bool {
 			p := proc(result.ID)
 			if p == nil {
 				return false

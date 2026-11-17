@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -342,6 +343,57 @@ func TestSubscriptionSaveCreatesPausesAndDeletes(t *testing.T) {
 	}
 	if _, _, err := e.h.subs.Get(context.Background(), id); err == nil {
 		t.Fatal("still there")
+	}
+}
+
+func TestSubscriptionSaveFallbackTierSchemaAndEmptyReset(t *testing.T) {
+	var schema struct {
+		Properties map[string]struct {
+			Enum        []string `json:"enum"`
+			Description string   `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(mcpTool("subscription_save").InputSchema, &schema); err != nil {
+		t.Fatalf("subscription_save schema: %v", err)
+	}
+	ft := schema.Properties["fallback_tier"]
+	if !slices.Equal(ft.Enum, []string{"fyi", "action", "wait"}) {
+		t.Fatalf("fallback_tier enum = %q, want [fyi action wait]", ft.Enum)
+	}
+	if !strings.Contains(ft.Description, `""`) {
+		t.Fatalf("fallback_tier description should explain empty-string clearing: %q", ft.Description)
+	}
+
+	e := newToolEnv(t)
+	s := e.made()
+	out, isErr := e.call("subscription_save", fmt.Sprintf(`{"action":"update","id":%q,"revision":%d,"fallback_tier":"wait"}`, s.ID, s.Revision))
+	if isErr || out["saved"] != true {
+		t.Fatalf("set fallback_tier: %v", out)
+	}
+	if prev := out["previous"].(map[string]any); prev["fallback_tier"] != "" {
+		t.Fatalf("previous fallback_tier: %v", prev)
+	}
+	cur, _, err := e.h.subs.Get(context.Background(), s.ID)
+	if err != nil || cur.FallbackTier != "wait" {
+		t.Fatalf("stored fallback_tier = %q, err = %v", cur.FallbackTier, err)
+	}
+
+	// Clearing fallback_tier with "" remains supported at runtime even though "" is not in the schema enum.
+	out, isErr = e.call("subscription_save", fmt.Sprintf(`{"action":"update","id":%q,"revision":%d,"fallback_tier":""}`, s.ID, cur.Revision))
+	if isErr || out["saved"] != true {
+		t.Fatalf("clear fallback_tier: %v", out)
+	}
+	if prev := out["previous"].(map[string]any); prev["fallback_tier"] != "wait" {
+		t.Fatalf("previous fallback_tier after clear: %v", prev)
+	}
+	cleared, _, err := e.h.subs.Get(context.Background(), s.ID)
+	if err != nil || cleared.FallbackTier != "" {
+		t.Fatalf("cleared fallback_tier = %q, err = %v", cleared.FallbackTier, err)
+	}
+
+	cards := e.cardCount()
+	if out, isErr := e.call("subscription_save", fmt.Sprintf(`{"action":"update","id":%q,"revision":%d,"fallback_tier":"unknown"}`, s.ID, cleared.Revision)); !isErr || out["code"] != "bad_request" || e.cardCount() != cards {
+		t.Fatalf("invalid fallback_tier: %v (cards=%d, want %d)", out, e.cardCount(), cards)
 	}
 }
 

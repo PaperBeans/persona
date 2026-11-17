@@ -174,7 +174,8 @@ func TestRuntimeArchivedTranscriptIsTheNodes(t *testing.T) {
 // agent of another provider archived in Paseo, opened from an old link after the node restarted), is refused with that
 // runtime's not-found, which the manager and the apps read as "not on that computer", not with the node's transcript
 // lookup failing (a 502 the iOS app showed as the computer failing, #8131). Asked again within the minute, the same
-// answer, without asking the runtime again. An id of another runtime's shape is not answered for: the node's own way.
+// answer, without asking the runtime again. An id of another runtime's shape is not answered for: the node's own way
+// (its transcript lookup's not_found, #9551).
 func TestRuntimeMissingSessionIsNotFound(t *testing.T) {
 	n, _ := runtimeNode(t)
 	host := dialRuntime(t, n, paseoHello())
@@ -201,14 +202,15 @@ func TestRuntimeMissingSessionIsNotFound(t *testing.T) {
 		t.Fatalf("the runtime was asked %d times", got)
 	}
 
-	// Another runtime's refusal of an id it does not give: not its word to give.
+	// Another runtime's refusal of an id it does not give: not its word to give. The node answers itself: it has no
+	// transcript of it either, its own not_found (#9551).
 	other := dialRuntime(t, n, dshHello())
 	other.mu.Lock()
 	other.answer = refuse
 	other.mu.Unlock()
 	_, err := nodeCall(t, n, "session.items", map[string]any{"session_id": "ses_4b1d", "limit": 20})
 	var re *rpc.Error
-	if err == nil || errors.As(err, &re) && re.Code == "not_found" {
+	if !errors.As(err, &re) || re.Code != "not_found" || re.Message != "transcript for session ses_4b1d not found" {
 		t.Fatalf("an id no runtime gives: %v", err)
 	}
 }

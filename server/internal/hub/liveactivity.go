@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"net/http"
 	"slices"
@@ -1044,6 +1045,10 @@ func (la *liveActivities) routes(api *http.ServeMux) {
 				v.ActivityID, v.PushToken = body.ActivityID, body.PushToken
 			}
 		})
+		if errors.Is(err, db.ErrPushRegistrationConflict) {
+			writeErrCode(w, http.StatusConflict, pushRegistrationRequired, i18n.Err("push.registration_required"))
+			return
+		}
 		if err != nil {
 			writeErr(w, http.StatusServiceUnavailable, i18n.Err("http-status.unavailable"))
 			return

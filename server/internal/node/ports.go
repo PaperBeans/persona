@@ -200,7 +200,7 @@ func (n *Node) scanPorts(ctx context.Context) (changed bool) {
 	var found map[string][]listener
 	if len(roots) > 0 {
 		var err error
-		if found, err = scanListeners(ctx, procs, roots); err != nil {
+		if found, err = scanListeners(ctx, procs, roots, n.panesOfPID); err != nil {
 			return failed(err)
 		}
 	}
@@ -215,6 +215,10 @@ func (n *Node) scanPorts(ctx context.Context) (changed bool) {
 	n.ports.byPane = next
 	return changed
 }
+
+// panesOfPID are the panes a process's engine pane variables name (its environment, cached per process), as the
+// hosts write PaneIDs.
+func (n *Node) panesOfPID(pid int) []string { return n.enginePaneRefs(paneEnvOfPID(pid)) }
 
 // portsOf is a pane's ports from the last scan.
 func (n *Node) portsOf(pane string) []proto.Port {
@@ -402,8 +406,10 @@ func listProcs(ctx context.Context) (map[int]proc, error) {
 	}
 }
 
-// scanListeners finds, for each pane, the listeners of the processes it owns (owned) in procs.
-func scanListeners(ctx context.Context, procs map[int]proc, roots map[string][]int) (map[string][]listener, error) {
+// scanListeners finds, for each pane, the listeners of the processes it owns (owned) in procs. On Windows, where Git
+// Bash breaks the process tree, also those of a process whose environment names the pane (panesOf, paneListeners).
+func scanListeners(ctx context.Context, procs map[int]proc, roots map[string][]int,
+	panesOf func(pid int) []string) (map[string][]listener, error) {
 	var err error
 	owners := map[int]string{} // pid -> pane
 	var all []int
@@ -422,7 +428,8 @@ func scanListeners(ctx context.Context, procs map[int]proc, roots map[string][]i
 			}
 		}
 	}
-	if len(all) == 0 {
+	// Windows reads every listener anyway, and a server whose process tree Git Bash broke is in none of roots' trees.
+	if len(all) == 0 && runtime.GOOS != "windows" {
 		return nil, nil
 	}
 	var ls []listener
@@ -430,7 +437,7 @@ func scanListeners(ctx context.Context, procs map[int]proc, roots map[string][]i
 	case "linux":
 		ls = procfsListeners("/proc", all)
 	case "windows":
-		ls, err = winListeners(all)
+		ls, err = winListeners(owners, roots, panesOf) // adds to owners the processes it finds by their environment
 	default:
 		ls, err = lsofListeners(ctx, all)
 	}

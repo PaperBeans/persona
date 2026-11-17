@@ -580,8 +580,8 @@ struct TerminalPanel: View {
         }
     }
 
-    /// Over the page (TerminalCover): a bar on top in every state — its size on the left, the handle, settings and Close
-    /// on the right. Dragged down it takes the terminal with it (far or fast enough: closed); a tap on the handle or on
+    /// Over the page (TerminalCover): a bar on top in every state — Close and its size on the left (#9653), the handle,
+    /// settings on the right. Dragged down it takes the terminal with it (far or fast enough: closed); a tap on the handle or on
     /// Close closes it. With no terminal (#4328) only the handle and Close: size and settings have nothing to act on.
     /// A terminal that can be renamed (#6996) has ⋯ in the settings button's place: Rename… and Terminal Settings.
     private func grabBar(_ g: TerminalGrab) -> some View {
@@ -593,6 +593,16 @@ struct TerminalPanel: View {
                 .onTapGesture { Haptics.tap(); g.close() }
                 .accessibilityHidden(true) // Close says it
             HStack(spacing: Theme.Space.sm) {
+                // The way out first, at the leading corner, as on every presented page (#9653).
+                Button { Haptics.tap(); g.close() } label: {
+                    ThemedIcon(Theme.Icon.clear).symbolRenderingMode(.hierarchical).font(Theme.Font.title)
+                        .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(fg.opacity(0.75))
+                .accessibilityLabel("Close Terminal")
+                .accessibilityIdentifier("terminal-close")
                 if !noTerminal {
                     if feed.wantsControl, feed.control != .off { sizeChip } else { wrapToggle }
                     if feed.loading { ProgressView().controlSize(.mini).tint(fg) }
@@ -618,19 +628,10 @@ struct TerminalPanel: View {
                     .foregroundStyle(fg.opacity(0.75))
                     .accessibilityLabel("Terminal Settings")
                 }
-                Button { Haptics.tap(); g.close() } label: {
-                    ThemedIcon(Theme.Icon.clear).symbolRenderingMode(.hierarchical).font(Theme.Font.title)
-                        .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(fg.opacity(0.75))
-                .accessibilityLabel("Close Terminal")
-                .accessibilityIdentifier("terminal-close")
             }
         }
-        .padding(.leading, Theme.Space.m)
-        .padding(.trailing, Theme.Space.xs)
+        .padding(.leading, Theme.Space.xs)
+        .padding(.trailing, Theme.Space.m)
         .scaledFrame(height: Theme.Size.tapTarget)
         .contentShape(.rect)
         .modifier(TerminalGrabDrag(grab: g))
@@ -1294,7 +1295,7 @@ struct ActivitySheet: View {
             .background(Theme.pageBackground)
             .navigationTitle(loop != nil && background.isEmpty ? String(localized: "Loop") : loop == nil ? String(localized: "Background Task") : String(localized: "Loop & Background Tasks"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done [Extension System Presentation c0b3fb]") { dismiss() } } }
+            .toolbar { SheetClose { dismiss() } }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
@@ -1596,7 +1597,7 @@ struct SubagentTreeSheet: View {
             .background(Theme.pageBackground)
             .navigationTitle("All Subagents")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done [Extension System Presentation c0b3fb]") { dismiss() } } }
+            .toolbar { SheetClose { dismiss() } }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)

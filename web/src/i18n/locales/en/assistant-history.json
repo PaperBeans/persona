@@ -27,5 +27,18 @@
   "title_placeholder": "Chat title",
   "rename_hint": "A title you set won't be replaced by an automatic one.",
   "built_in": "Built-in",
-  "display_options": "Display options"
+  "display_options": "Display options",
+  "tags_saved": "Saved the tags of \"{title}\"",
+  "tag_filter": "Filter by tag",
+  "tag_empty": "No chats carry the tag \"{tag}\"",
+  "tag_clear": "Clear filter",
+  "tag_mark": "Tag: {tag}",
+  "edit_tags_ellipsis": "Edit tags…",
+  "tags_title": "Edit tags",
+  "tags_placeholder": "Add a tag",
+  "tags_add": "Add",
+  "tags_remove": "Remove tag {tag}",
+  "tags_hint": "Press Enter to add a tag. A conversation carries at most {max} tags, each at most {length} characters.",
+  "tag_too_long": "A tag can be at most {max} characters.",
+  "tag_count_limit": "A conversation can carry at most {max} tags."
 }

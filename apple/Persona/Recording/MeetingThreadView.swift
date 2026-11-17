@@ -97,7 +97,8 @@ struct MeetingThreadView: View {
             resubscribe()
         })
         .onChange(of: wanted) { resubscribe() }
-        .onChange(of: RoomInput(items: signature(roomKey), asks: meeting.asks, ended: !entry.active), initial: true) { rebuildRoom() }
+        .onChange(of: RoomInput(items: signature(roomKey), asks: meeting.asks, ended: !entry.active,
+                                presence: entry.attendance?.presence ?? []), initial: true) { rebuildRoom() }
         .onChange(of: signature(followupKey), initial: true) { rebuildFollowup() }
         .onChange(of: sends) { markDelivered() }
         .onChange(of: JustMeInput(asks: mine, chats: chatKeys(mine).map { signature($0) }), initial: true) { rebuildReplies() }
@@ -175,7 +176,7 @@ struct MeetingThreadView: View {
         }
         // While it records the meeting hasn't ended: a line from it with nothing after (a withdrawn photo's) is no end.
         roomEntries = MeetingThread.room(model.chat(key).items, recordingID: entry.id, asks: asks.map { MeetingThread.AskInfo($0) },
-                                         ended: !entry.active)
+                                         ended: !entry.active, presence: entry.attendance?.presence ?? [])
         roomRows = mode == .after ? MeetingThread.merged(roomEntries, asks: asks) : roomEntries.map { .entry($0) }
         let photos = Set(MeetingThread.photoIDs(roomEntries))
         if roomPhotos != photos { roomPhotos = photos }
@@ -445,6 +446,9 @@ struct MeetingThreadView: View {
         case .joined:
             quiet(String(localized: "Persona joined the meeting"))
                 .accessibilityIdentifier("meeting-thread-joined")
+        case .left:
+            quiet(String(localized: "Persona left the meeting"))
+                .accessibilityIdentifier("meeting-thread-left")
         case .ended:
             quiet(String(localized: "The meeting ended"))
                 .accessibilityIdentifier("meeting-thread-ended")
@@ -676,6 +680,7 @@ private struct RoomInput: Equatable {
     var items: String
     var asks: [MeetingAskWire.Ask]
     var ended: Bool
+    var presence: [RecordingPresence]
 }
 
 // MARK: Photos
@@ -959,8 +964,8 @@ struct MeetingPhotoViewer: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .themedGroupedPage()
-                .overlay(alignment: .topTrailing) {
-                    RecordingSheetCloseButton(title: String(localized: "Done"), identifier: "meeting-photo-viewer-done") { dismiss() }
+                .overlay(alignment: .topLeading) {
+                    RecordingCornerButton(kind: .close, identifier: "meeting-photo-viewer-done") { dismiss() }
                         .padding(.horizontal, Theme.Space.page)
                 }
             }

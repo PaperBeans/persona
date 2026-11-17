@@ -18,11 +18,11 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// The agent sandbox at Persona's own agent starts (docs/server/agent-sandbox.md, #5357): the assistant's Claude on the CLI and
-// on the Agent SDK (started by the node), a managed launcher (`personad launch`, run by a pane's shell) and a Codex
-// started from the phone (`personad codex-start`, the same). Off unless turned on; on, a start whose agent has a
-// sandbox of its own that would clash, or whose sandbox cannot be told, is not wrapped and says why. A start that
-// cannot be wrapped runs as before.
+// The agent sandbox at Persona's own agent starts (docs/server/agent-sandbox.md, #5357): the assistant's Claude on the CLI
+// (started by the node), a managed launcher (`personad launch`, run by a pane's shell) and a Codex started from the
+// phone (`personad codex-start`, the same). Off unless turned on; on, a start whose agent has a sandbox of its own that
+// would clash, or whose sandbox cannot be told, is not wrapped and says why. A start that cannot be wrapped runs as
+// before.
 
 // agentSandboxEnv turns the agent sandbox on or off for the process that reads it, over the switch file.
 const agentSandboxEnv = "PERSONA_AGENT_SANDBOX"

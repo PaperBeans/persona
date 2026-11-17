@@ -286,10 +286,87 @@ import PersonaWire
         }
     }
 
-    @Test func progressRingIsExclusiveToTheCircularAccessory() {
-        #expect(ExtensionSurfaceContent.usesProgressRing(family: "accessory_circular"))
+    @Test func progressPresentationFollowsFamilyAndStyle() {
+        for family in ["small", "medium", "large", "accessory_circular", "accessory_rectangular", "accessory_inline"] {
+            for style: String? in [nil, "bar", "ring", "donut"] {
+                let expected: ExtensionSurfaceContent.ProgressPresentation = family == "accessory_circular" ? .accessoryGauge
+                    : ["small", "medium", "large"].contains(family) && style == "ring" ? .ring : .bar
+                #expect(ExtensionSurfaceContent.progressPresentation(family: family, style: style) == expected)
+            }
+        }
+        // The original exclusivity assertion still holds for an omitted style, including unknown families.
         for family in ["small", "medium", "large", "accessory_rectangular", "accessory_inline", "", "circular"] {
-            #expect(!ExtensionSurfaceContent.usesProgressRing(family: family))
+            #expect(ExtensionSurfaceContent.progressPresentation(family: family, style: nil) == .bar)
+        }
+        for family in ["", "circular"] {
+            #expect(ExtensionSurfaceContent.progressPresentation(family: family, style: "ring") == .bar)
+        }
+        let progress = ExtensionComponent.progress(ExtensionProgressComponent(style: "ring"))
+        let view = ExtensionView(sections: [ExtensionSection(items: [progress])])
+        #expect(ExtensionSurfaceContent.items(view, family: "accessory_inline").isEmpty)
+    }
+
+    @Test func mediumColumnsRequireOneExactProgressAndChartSection() {
+        let metric = ExtensionComponent.metric(ExtensionMetricComponent(label: "Water", value: "750 / 2000"))
+        let ring = ExtensionComponent.progress(ExtensionProgressComponent(label: "To go", ratio: 0.375, style: "ring"))
+        let bar = ExtensionComponent.progress(ExtensionProgressComponent(label: "To go", ratio: 0.375, style: "bar"))
+        let omitted = ExtensionComponent.progress(ExtensionProgressComponent(label: "To go", ratio: 0.375))
+        let unknown = ExtensionComponent.progress(ExtensionProgressComponent(label: "To go", ratio: 0.375, style: "donut"))
+        let series = ExtensionChartSeries(points: [ExtensionChartPoint(label: "11-11", value: 750)])
+        let chart = ExtensionComponent.chart(ExtensionChartComponent(kind: "bar", series: [series]))
+        let valid = ExtensionView(sections: [ExtensionSection(items: [metric, ring, chart])])
+        // A ring or a bar (#9644): stacked under a metric, a bar overflows the medium canvas too.
+        for progress in [ring, bar, omitted, unknown] {
+            #expect(ExtensionSurfaceContent.usesMediumColumns(ExtensionView(sections: [ExtensionSection(items: [metric, progress, chart])]), family: "medium"))
+            #expect(ExtensionSurfaceContent.usesMediumColumns(ExtensionView(sections: [ExtensionSection(items: [progress, chart])]), family: "medium"))
+        }
+        let invalid = [
+            ExtensionView(sections: [ExtensionSection(items: [metric, ring]), ExtensionSection(items: [chart])]),
+            ExtensionView(sections: [ExtensionSection(items: [metric, bar]), ExtensionSection(items: [chart])]),
+            ExtensionView(sections: [ExtensionSection(items: [metric, ring, chart]), ExtensionSection()]),
+            ExtensionView(sections: [ExtensionSection(items: [metric, ring, .chart(ExtensionChartComponent(kind: "bar", series: [series, series]))])]),
+            ExtensionView(sections: [ExtensionSection(items: [metric, ring, .chart(ExtensionChartComponent(kind: "candlestick", series: [series]))])]),
+            ExtensionView(sections: [ExtensionSection(items: [metric, bar, .chart(ExtensionChartComponent(kind: "candlestick", series: [series]))])]),
+            ExtensionView(sections: [ExtensionSection(items: [metric, ring])]),
+            ExtensionView(sections: [ExtensionSection(items: [metric, bar])]),
+            ExtensionView(sections: [ExtensionSection(items: [metric, metric, chart])]),
+            ExtensionView(sections: [ExtensionSection(items: [chart, ring, metric])]),
+            ExtensionView(sections: [ExtensionSection(items: [metric, ring, chart, .text(ExtensionTextComponent(text: "Extra"))])]),
+            ExtensionView(sections: [ExtensionSection(items: [metric, bar, .text(ExtensionTextComponent(text: "Extra"))])]),
+            ExtensionView(sections: [ExtensionSection(items: [ring, .chart(ExtensionChartComponent(kind: "bar"))])]),
+        ]
+        for view in invalid {
+            #expect(!ExtensionSurfaceContent.usesMediumColumns(view, family: "medium"))
+        }
+        for family in ["small", "large", "accessory_circular", "accessory_rectangular", "accessory_inline"] {
+            #expect(!ExtensionSurfaceContent.usesMediumColumns(valid, family: family))
+        }
+    }
+
+    @Test func fixedCanvasFitsSmallWidgetsMediumColumnsAndRingLayouts() {
+        let metric = ExtensionComponent.metric(ExtensionMetricComponent(label: "Water", value: "750 / 2000"))
+        let ring = ExtensionComponent.progress(ExtensionProgressComponent(label: "To go", ratio: 0.375, style: "ring"))
+        let bar = ExtensionComponent.progress(ExtensionProgressComponent(label: "To go", ratio: 0.375))
+        let series = ExtensionChartSeries(points: [ExtensionChartPoint(label: "11-11", value: 750)])
+        let chart = ExtensionComponent.chart(ExtensionChartComponent(kind: "bar", series: [series]))
+        func one(_ items: [ExtensionComponent]) -> ExtensionView { ExtensionView(sections: [ExtensionSection(items: items)]) }
+        // Every small widget (#9644), whatever its items.
+        for view in [one([metric, bar]), one([metric]), one([metric, ring]), one([.text(ExtensionTextComponent(text: "Note"))])] {
+            #expect(ExtensionSurfaceContent.fitsCanvas(view, family: "small"))
+        }
+        // Medium: columns, or a ring anywhere; a stacked bar layout is left as it was.
+        #expect(ExtensionSurfaceContent.fitsCanvas(one([metric, bar, chart]), family: "medium"))
+        #expect(ExtensionSurfaceContent.fitsCanvas(one([metric, ring]), family: "medium"))
+        #expect(!ExtensionSurfaceContent.fitsCanvas(one([metric, bar]), family: "medium"))
+        #expect(!ExtensionSurfaceContent.fitsCanvas(one([metric, bar, .text(ExtensionTextComponent(text: "Extra"))]), family: "medium"))
+        // Large: only with a ring, as before.
+        #expect(ExtensionSurfaceContent.fitsCanvas(one([metric, ring, chart]), family: "large"))
+        #expect(!ExtensionSurfaceContent.fitsCanvas(one([metric, bar, chart]), family: "large"))
+        // Accessory families never: their progress is a gauge or a bar whatever the style.
+        for family in ["accessory_circular", "accessory_rectangular", "accessory_inline"] {
+            for view in [one([metric, bar]), one([ring]), one([metric, ring, chart])] {
+                #expect(!ExtensionSurfaceContent.fitsCanvas(view, family: family))
+            }
         }
     }
 

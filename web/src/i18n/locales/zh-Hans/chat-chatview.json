@@ -66,6 +66,7 @@
   "route_no_images": "直接发给任务暂不支持图片，请移除图片后重试",
   "not_live": "不是实时的",
   "not_live_reload": "重新加载",
+  "agent_status_repository": "打开仓库",
   "composer_source": "来源",
   "call_not_loaded": "这一步不在已载入的记录里，往上翻一翻再试",
   "refresh_failed": "刷新失败",

@@ -312,6 +312,8 @@ struct AssistantReadinessTests {
 
     @Test func turnErrorCodesBecomeFixes() throws {
         #expect(TurnErrorFix(code: "not_logged_in")?.action == "connect_model")
+        // The CLI's own sign-in, which the Claude desktop app's does not give, in every language (#9366).
+        #expect(TurnErrorFix(code: "not_logged_in")?.detail.contains("claude auth login") == true)
         #expect(TurnErrorFix(code: "auth_failed")?.action == "edit_provider")
         #expect(TurnErrorFix(code: "model_route")?.action == "connect_model")
         #expect(TurnErrorFix(code: "rate_limited") == nil && TurnErrorFix(code: nil) == nil)

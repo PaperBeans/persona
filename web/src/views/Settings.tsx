@@ -20,7 +20,7 @@ import { Group, Row, Pill, RowConfirm, Switch } from "./settings/SettingsParts";
 import { LanguageRow } from "./settings/LanguageRow";
 import { RecentChatsRow, TextSizeRow, ThemeColorPicker } from "./settings/LookSettings";
 import { setReplyMotionEnabled, useReplyMotionSetting } from "../ui/stream/motion";
-import { setAgentDetails, setContextAsUsed, useAgentDetails, useContextAsUsed } from "../lib/context-usage";
+import { setAgentDetails, useAgentDetails } from "../lib/context-usage";
 import { setSidebarTerminals, useSidebarTerminals } from "../lib/sidebar-terminals";
 import { HubList } from "./Hubs";
 import { useDisconnect } from "./DisconnectBrowser";
@@ -31,6 +31,7 @@ import { useInboxSourcesShown } from "../lib/subscriptions";
 import { ModelConfiguration } from "./settings/ModelConfiguration";
 import { AgentSettings } from "./settings/AgentSettings";
 import { SidebarPagesGroup } from "./settings/SidebarPages";
+import { StartPageGroup } from "./settings/StartPage";
 import { AgentGroup } from "./settings/AgentGroup";
 import { AssistantSettings } from "./settings/AssistantSettings";
 import { PersonaPicker } from "./assistant/Persona";
@@ -39,6 +40,7 @@ import { TranslationSettings } from "./settings/TranslationSettings";
 import { ShortcutSettings } from "./settings/ShortcutSettings";
 import { NotificationSettings } from "./settings/NotificationSettings";
 import { DesktopSettings } from "./settings/DesktopSettings";
+import { DevModeRows } from "./settings/DevModeSettings";
 import { ChannelList, ChannelPage } from "./settings/Channels";
 import { ConnectDevice } from "./settings/ConnectDevice";
 import { settingsTarget } from "../lib/channels";
@@ -645,6 +647,7 @@ function General({ onModel }: { onModel: () => void }) {
       </Group>
 
       <DesktopSettings />
+      <StartPageGroup />
       <SidebarPagesGroup />
 
       <section id="settings-translation" className="scroll-mt-4">
@@ -660,6 +663,7 @@ function General({ onModel }: { onModel: () => void }) {
             github.com/nwverse/persona
           </a>
         </Row>
+        <DevModeRows />
       </Group>
     </>
   );
@@ -681,7 +685,6 @@ function AgentPreferences() {
   const workBrowserReady = useStore((s) => s.features.includes("sessions_dimensions"));
   const sidebarTerminals = useSidebarTerminals();
   const agentDetails = useAgentDetails();
-  const contextAsUsed = useContextAsUsed();
   return (
     <Group title={t("settings.agent_preferences")} anchor="agent-preferences">
       <AgentOpenRow />
@@ -691,9 +694,6 @@ function AgentPreferences() {
       </Row>}
       <Row label={t("context.details")} hint={t("context.details_hint")} wrapHint anchor="agent-details">
         <Switch on={agentDetails} onChange={setAgentDetails} label={t("context.details")} />
-      </Row>
-      <Row label={t("context.as_used")} hint={t("context.as_used_hint")} wrapHint anchor="context-as-used">
-        <Switch on={contextAsUsed} onChange={setContextAsUsed} label={t("context.as_used")} />
       </Row>
     </Group>
   );

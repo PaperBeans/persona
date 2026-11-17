@@ -46,7 +46,7 @@ func (s *Service) mainChatFit(ctx context.Context, machine, name string) (mainCh
 		case err != nil || allowed[name]:
 			return mainChatFits, nil
 		}
-		return mainChatRefused, s.mainChatRefusal(ctx, machine, name)
+		return mainChatRefused, s.mainChatRefusal(ctx, machine, name, "")
 	}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -63,7 +63,9 @@ func (s *Service) mainChatFit(ctx context.Context, machine, name string) (mainCh
 	case err != nil || slices.ContainsFunc(fits, named):
 		return mainChatFits, nil
 	case slices.ContainsFunc(picker, named):
-		return mainChatRefused, s.mainChatRefusal(ctx, machine, name)
+		label := launcherLabel(picker[slices.IndexFunc(picker, named)])
+		instead, _ := assistantFor(fits, name)
+		return mainChatRefused, s.mainChatRefusal(ctx, machine, label, launcherLabel(instead))
 	}
 	return mainChatGone, nil
 }
@@ -162,11 +164,32 @@ func (s *Service) mainChatInstead(ctx context.Context, d Device, name, kind stri
 // agentKind is the agent a launcher starts: claude when it names none (or is gone: it ran the main chat's kind).
 func agentKind(agent string) string { return cmp.Or(agent, "claude") }
 
-// mainChatRefusal says that launcher can't run the assistant on machine, for the user's language.
-func (s *Service) mainChatRefusal(ctx context.Context, machine, launcher string) error {
+// mainChatRefusal says that launcher can't run the assistant on machine, for the user's language, and names instead
+// when a launcher there declares it runs the assistant for that one (assistantFor; "" when none does).
+func (s *Service) mainChatRefusal(ctx context.Context, machine, launcher, instead string) error {
 	d, _ := s.device(ctx, machine)
-	return i18n.Err("assistant-start.launcher_not_main_chat", i18n.Args{"launcher": launcher, "machine": firstNonEmpty(d.Name, machine)})
+	args := i18n.Args{"launcher": launcher, "machine": firstNonEmpty(d.Name, machine), "instead": instead}
+	if instead != "" {
+		return i18n.Err("assistant-start.launcher_not_main_chat_instead", args)
+	}
+	return i18n.Err("assistant-start.launcher_not_main_chat", args)
 }
+
+// assistantFor is the launcher in fits (the main chat's list on a computer) that declares it runs the assistant for
+// that computer's Agent launcher name (proto.Launcher.AssistantFor): integrations/grok's grok-chat for the Paseo provider
+// grok when its companion was set up so. Only a declaration counts, never a likeness of names or agents: two launchers
+// of one agent may run another account or gateway. The picker points name at it; nothing runs on it in name's place.
+func assistantFor(fits []ConfiguredLauncher, name string) (ConfiguredLauncher, bool) {
+	i := slices.IndexFunc(fits, func(f ConfiguredLauncher) bool { return f.Assistant && f.AssistantFor == name && f.Name != name })
+	if i < 0 {
+		return ConfiguredLauncher{}, false
+	}
+	return fits[i], true
+}
+
+// launcherLabel is the name people know l by: its display name (a runtime's or Paseo's for its provider) or its own;
+// "" for none.
+func launcherLabel(l ConfiguredLauncher) string { return cmp.Or(l.DisplayName, l.Name) }
 
 // ---- what can't run the assistant's conversations, and why ----
 
@@ -186,6 +209,7 @@ type unavailableLauncher struct {
 	API         string `json:"api,omitempty"` // a direct API provider's protocol: messages | responses | chat
 	Code        string `json:"code"`
 	Reason      string `json:"reason"`
+	Instead     string `json:"instead,omitempty"` // the launcher set up to run the assistant for this one here (assistantFor), by name
 }
 
 // mainChatUnavailable lists what the main chat's model panel shows as unavailable on machine, with why in lang: the
@@ -213,7 +237,8 @@ func (s *Service) mainChatUnavailable(ctx context.Context, machine string, picke
 		return stored[i], true
 	}
 	d, _ := s.device(ctx, machine)
-	notMainChat := i18n.T(lang, "assistant-model_pick.unavailable_not_main_chat", i18n.Args{"machine": firstNonEmpty(d.Name, machine)})
+	where := firstNonEmpty(d.Name, machine)
+	notMainChat := i18n.T(lang, "assistant-model_pick.unavailable_not_main_chat", i18n.Args{"machine": where})
 	for _, l := range picker {
 		if seen[l.Name] {
 			continue
@@ -224,6 +249,9 @@ func (s *Service) mainChatUnavailable(ctx context.Context, machine string, picke
 			Reason: notMainChat}
 		if m, ok := managed(l.Name); ok {
 			u.DisplayName = m.DisplayName
+		} else if f, ok := assistantFor(fits, l.Name); ok { // the launcher set up to run the assistant for this one
+			u.Instead = f.Name
+			u.Reason = i18n.T(lang, "assistant-model_pick.unavailable_not_main_chat_instead", i18n.Args{"machine": where, "instead": launcherLabel(f)})
 		}
 		out = append(out, u)
 	}

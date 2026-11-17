@@ -150,6 +150,9 @@ type TriageConfig struct {
 	MaxWakes int `json:"max_wakes,omitempty"`
 	// SettleSeconds: how long a stopped session stays stopped before its turn is triaged. Default 15.
 	SettleSeconds int `json:"settle_seconds,omitempty"`
+	// JustFinishedHours: how long after its turn ended a done turn nobody has seen stays Just finished on the lists
+	// (proto.WorkState.JustFinished, #9751). Default 3.
+	JustFinishedHours int `json:"just_finished_hours,omitempty"`
 }
 
 // WorkReport is the snapshot's work (Snapshot.Work): where each agent stands after its latest turn, as the manager

@@ -315,7 +315,7 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		prompt += "\n\n" + prompts.RenderTaskDoneWhen(t.DoneWhen)
 	}
 	if t.TodoID != "" && !s.isWorkMachine(m.ID) {
-		prompt += "\n\n" + prompts.RenderTaskHandoff()
+		prompt += "\n\n" + s.taskHandoff(ctx, m.ID, fit)
 	}
 	switch {
 	case t.Role == roleLeader: // what it may hand out, and how its workers reach it (task_leader.go)
@@ -385,6 +385,9 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		params["session_id"] = expectID
 	}
 	s.setPlanThen(ctx, m.ID, params)
+	if err := s.checkContinuationScope(t); err != nil {
+		return "", "", err
+	}
 	sentAt := time.Now()
 	err = s.call(ctx, m.ID, DeviceSessionStart, params, &res)
 	// Extras the agent it landed on cannot have (ultracode #3596, a start goal: start_defaults.go) are each dropped
@@ -396,6 +399,9 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 			delete(params, "goal")
 			s.logf("task %s: start: %s; starting without a goal", t.TodoID, reason)
 			t.noteWhy(i18n.T(s.lang(ctx), "assistant-tasks.start_goal_skipped", i18n.Args{"reason": reason}))
+			if err := s.checkContinuationScope(t); err != nil {
+				return "", "", err
+			}
 			err = s.call(ctx, m.ID, DeviceSessionStart, params, &res)
 			continue
 		}
@@ -403,6 +409,9 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 			skipped, refused = reason, true
 			delete(params, "ultracode")
 			s.logf("task %s: start: %s; starting without ultracode", t.TodoID, skipped)
+			if err := s.checkContinuationScope(t); err != nil {
+				return "", "", err
+			}
 			err = s.call(ctx, m.ID, DeviceSessionStart, params, &res)
 			continue
 		}

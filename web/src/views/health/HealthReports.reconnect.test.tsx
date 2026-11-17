@@ -12,18 +12,14 @@ vi.mock("../../lib/api", async (orig) => ({
   ...(await orig<typeof import("../../lib/api")>()),
   api: (path: string) => new Promise((resolve, reject) => hub.requests.push({ path, resolve, reject })),
 }));
-vi.mock("../../lib/store", async (orig) => {
-  const real = await orig<typeof import("../../lib/store")>();
-  return {
-    ...real,
-    useStore: <T,>(select: (s: ReturnType<typeof real.getState>) => T): T => select({ ...real.getState(), assistant: { machine_id: "mac" } } as ReturnType<typeof real.getState>),
-    onHubEvent: (type: string, l: () => void) => {
-      if (type !== "hello") return () => {};
-      hub.hello.add(l);
-      return () => void hub.hello.delete(l);
-    },
-  };
-});
+vi.mock("../../lib/store", async (orig) => ({
+  ...(await orig<typeof import("../../lib/store")>()),
+  onHubEvent: (type: string, l: () => void) => {
+    if (type !== "hello") return () => {};
+    hub.hello.add(l);
+    return () => void hub.hello.delete(l);
+  },
+}));
 
 import { HealthReports } from "./HealthReports";
 
@@ -51,7 +47,7 @@ afterEach(async () => {
 
 describe("the reports card", () => {
   it("reads the list again on the next hello after it failed, and drops the error", async () => {
-    await act(async () => root.render(<HealthReports version={0} />));
+    await act(async () => root.render(<HealthReports mid="mac" version={0} />));
     expect(reads()).toHaveLength(1);
     await act(async () => reads()[0].reject(new TypeError("Failed to fetch")));
     expect(card()).toContain("没读到");
@@ -64,7 +60,7 @@ describe("the reports card", () => {
   });
 
   it("reads it again on a hello after a good read too, so a report added or deleted elsewhere shows", async () => {
-    await act(async () => root.render(<HealthReports version={0} />));
+    await act(async () => root.render(<HealthReports mid="mac" version={0} />));
     await act(async () => reads()[0].resolve({ reports: [] }));
     expect(card()).toContain("还没有");
     await act(async () => hub.hello.forEach((l) => l()));

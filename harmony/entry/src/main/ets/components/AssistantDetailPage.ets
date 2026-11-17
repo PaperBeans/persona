@@ -1,3 +1,4 @@
+import { IconActions } from '../design/IconActions';
 import { ClientModel } from '../models/ClientModel';
 import { AssistantFeedModel } from '../models/AssistantFeed';
 import { AssistantCards } from './AssistantCards';
@@ -148,7 +149,7 @@ export struct AssistantDetailPage {
         Text(tr(this.feed.itemLookupStatus === 'missing' || this.feed.itemLookupStatus === 'mismatch' ?
           'assistant_detail_not_found' : this.feed.error || 'failed'))
           .fontSize(Tokens.body).fontColor(Colors.secondary).width('100%')
-        Button(tr('retry')).attributeModifier(ButtonStyles.quiet).width('100%').onClick(() => this.retryLookup()).id('assistant.detail.retry')
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).onClick(() => this.retryLookup()).id('assistant.detail.retry')
       }
     }.width('100%').alignItems(HorizontalAlign.Center).padding(Tokens.page)
   }

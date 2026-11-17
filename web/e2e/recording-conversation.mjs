@@ -272,7 +272,7 @@ async function running(theme, lang = "en", width = 1440) {
   const section = page.locator("[data-meeting-conversation]");
   await section.getByText(ask().answer, { exact: true }).waitFor();
   await settle(page);
-  assert.deepEqual(await kinds(page), ["joined", "lines", "lines", "heard", "answer", "question", "answer"]);
+  assert.deepEqual(await kinds(page), ["lines", "lines", "heard", "answer", "question", "answer"]);
   assert.equal(await section.getByRole("status").innerText(), s.room_ready_participant);
   assert.ok(await section.getByText(fill(s.thread_lines_other, { count: 3 }), { exact: true }).isVisible());
   assert.ok(await section.getByText(fill(s.thread_heard, { clock: "30:10" }), { exact: true }).isVisible());
@@ -338,7 +338,7 @@ async function after(theme, lang = "en", width = 1440) {
   await section.getByRole("separator").waitFor();
   await section.getByText("draft", { exact: true }).waitFor();
   await settle(page);
-  assert.deepEqual(await kinds(page), ["joined", "lines", "lines", "heard", "answer", "question", "answer", "material", "question", "answer"]);
+  assert.deepEqual(await kinds(page), ["lines", "lines", "heard", "answer", "question", "answer", "material", "question", "answer"]);
   const seed = section.locator('li[data-thread="material"] button');
   assert.equal(await seed.innerText(), s.thread_material);
   assert.equal(await seed.getAttribute("aria-expanded"), "false");
@@ -434,7 +434,7 @@ async function stuck(theme, lang = "en", width = 1440) {
   const section = page.locator("[data-meeting-conversation]");
   await section.locator(`li[data-ask="${spokenAsk}"]`).waitFor();
   await settle(page);
-  assert.deepEqual(await kinds(page), ["joined", "lines", "lines", "heard", "answer", "question", "question"]);
+  assert.deepEqual(await kinds(page), ["lines", "lines", "heard", "answer", "question", "question"]);
   const questions = section.locator('li[data-thread="question"]');
   assert.ok(await questions.nth(0).getByText(s.ask_failed_no_answer, { exact: true }).isVisible());
   assert.ok(await questions.nth(1).getByText(s.ask_pending, { exact: true }).isVisible());
@@ -475,7 +475,7 @@ async function photosRunning(theme, lang = "en", width = 1440) {
   await section.getByText(ask().answer, { exact: true }).waitFor();
   await photos.locator('[data-photo-thumb="ready"]').nth(1).waitFor();
   await section.locator('li[data-thread="photo"] [data-photo-thumb="ready"]').nth(1).waitFor();
-  assert.deepEqual(await kinds(page), ["joined", "lines", "lines", "photo", "photo", "heard", "answer", "question", "answer", "photo"]);
+  assert.deepEqual(await kinds(page), ["lines", "lines", "photo", "photo", "heard", "answer", "question", "answer", "photo"]);
   const entries = section.locator('li[data-thread="photo"]');
   assert.ok(await entries.nth(0).getByText(fill(s.photo_label, { n: 1 }), { exact: true }).isVisible());
   assert.ok(await entries.nth(0).getByText(photosList()[0].note, { exact: true }).isVisible());

@@ -16,7 +16,7 @@ What people do on an iPhone they can also do on Android, most-used first. Whatev
 
 **F3. Editing files and reviewing code in a session.** iOS uploads into a folder (replace or keep both), renames, moves and trashes with Undo, and has a review page: pick the scope (uncommitted, branch or commit), select lines, comment, then send the review or add it to the composer; comment blocks show as cards in messages. Android's files pages are read-only and it has no review page. Requirement: both, as on iOS.
 
-**F4. Main chat cards.** iOS shows the questions the assistant answered for you, with the answer and a way to change it; HTML cards; and Undo on quick results (an event or reminder made on this phone). Android shows a "by assistant" line, every HTML card's fallback, and quick results without Undo. Requirement: all three.
+**F4. Main chat cards.** iOS shows the questions the assistant answered for you, with the answer and a way to change it; HTML cards; and Undo on quick results (an event or reminder made on this phone). Android shows a "by assistant" line, every HTML card's fallback, and quick results with Undo on the calendar events this phone made (#9340; reminders keep none, there is no reminders store to delete from). Requirement: all three.
 
 **F5. Lark replies.** iOS sends @ mentions, images and files, and shows topic groups as one card per topic (#576, #511). Android sends text and threaded replies. Requirement: as on iOS.
 
@@ -57,7 +57,7 @@ Each gets an iOS issue: answering questions and terminal choices from notificati
 | F1 | `apple/Persona/Views/Interactions/PermissionInputForm.swift` | resolve with `values` | model ready, Allow blocked | core/domain, feature/chat | S |
 | F2 | `apple/Persona/Views/NewChat/NewChatView.swift` and its folder | sessions, launchers, worktree, workspaces, files | none of the five | feature/agents, core/contracts, core/hub | L, five PRs |
 | F3 | `apple/Persona/Views/Session/FolderEdits.swift`, `apple/Persona/Views/Session/ReviewPage.swift` | files edits, git review | read-only files and git | feature/files, core/domain, feature/chat | M + L |
-| F4 | `apple/Persona/Views/Interactions/DelegateViews.swift` and others | interaction history, reanswer, HTML actions | text line, HTML off, no Undo | feature/assistant, feature/chat, feature/settings | M |
+| F4 | `apple/Persona/Views/Interactions/DelegateViews.swift` and others | interaction history, reanswer, HTML actions | text line, HTML off, calendar Undo done | feature/assistant, feature/chat, feature/settings | M |
 | F5 | `apple/Persona/Views/Inbox/Lark/LarkComposer.swift` and its folder | Lark members, images, files, topics | text only | feature/inbox | M to L |
 | F6 | `apple/Persona/Views/Todos/TodoDetailView.swift` | `PATCH /api/v1/todos/{id}` | title and notes only | core/hub, feature/chat | M |
 | F7 | `apple/Persona/Views/Chats/NodeActions.swift` and the grouping code | worktree, git, workspaces | four groupings | core/domain, feature/agents | M to L |
@@ -87,7 +87,7 @@ Each gets an iOS issue: answering questions and terminal choices from notificati
 
 - Answered for you: a store for `GET /api/v1/interactions/history`, `POST /api/v1/interactions/{id}/reanswer` and the `interaction_reanswered` event, then the card and the change sheet, reusing `DecisionOption`.
 - HTML cards (S): the sandbox and bridge exist in `android/feature/settings/src/main/kotlin/persona/feature/settings/AssistantHtml.kt` but stay switched off until the security check in `docs/assistant/assistant-views.md` passes on a real phone. Run the check, then switch them on.
-- Undo on quick results (S): iOS undoes on the phone only; there is no hub endpoint. Keep the item id in `QuickResult`, add a delete to the calendar tools, and show Undo only for items this phone made. Whether the result says which phone made it needs checking; if not, the hub adds that field.
+- Undo on quick results (S): done for calendar events (#9340). iOS undoes on the phone only; there is no hub endpoint. `QuickResult` keeps the created item's numeric id, `CalendarTools.remove` deletes it through the same provider path without a second confirmation (the user is undoing the assistant's own write), `TasksStore.quickResultUndos` remembers the undone ids for the app's run, and the card reads Undone and dims as on iOS. Reminder cards keep no Undo: Android has no reminders store, so `phone_reminders_create` is never declared there. A tool result does not say which phone made the item, so Undo is offered for any numeric id: an iPhone's item has none and shows no button, while another Android phone's numeric id is only found out when the delete finds no such event (the chat's toast says "Couldn't undo"); a field naming the phone would be the hub's change if that ever matters.
 
 ### F5. Lark replies (M to L)
 

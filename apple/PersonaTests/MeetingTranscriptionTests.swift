@@ -741,7 +741,11 @@ struct MeetingGapUploadTests {
         typealias T = MeetingTranscription
         #expect(T.needsGaps(e, meeting: nil, expired: false, synced: true, done: false))
         #expect(!T.needsGaps(e, meeting: nil, expired: true, synced: true, done: false), "never past `days`")
-        #expect(!T.needsGaps(e, meeting: nil, expired: false, synced: false, done: false), "after the complete upload")
+        #expect(!T.needsGaps(e, meeting: nil, expired: false, synced: false, done: false), "after the latest upload")
+        // The phone's own text isn't waited for (#9491).
+        var untranscribed = e
+        untranscribed.segments[0].sentences = nil
+        #expect(T.needsGaps(untranscribed, meeting: nil, expired: false, synced: true, done: false))
         #expect(!T.needsGaps(e, meeting: nil, expired: false, synced: true, done: true))
         var final = MeetingTranscription.Meeting()
         final.hub = MeetingTranscriptionView(mode: .hub, state: "final")

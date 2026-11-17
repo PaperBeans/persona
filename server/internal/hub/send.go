@@ -272,9 +272,13 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 		p["text"] = h.todoStartText(r.Context(), assistantwire.TodoHandoff{TodoID: start.todoID, Text: text, New: true,
 			MachineID: m.cfg.ID, Cwd: start.cwd})
 	}
-	if s, ok := m.session(sid); ok && m.isAssistant(s) {
-		// The user is talking in it again: back in the list, and it works for them, not for a chain of conversations.
-		h.asstOf(h.sessionOwner(m.cfg.ID, sid)).UserSpoke(r.Context(), assistantwire.SessionRef{MachineID: m.cfg.ID, SessionID: sid})
+	if s, ok := m.session(sid); ok && (m.isAssistant(s) || isText && strings.TrimSpace(text) != "") {
+		// The manager also observes owner messages to Agents before delivery, so a task's decision default can pause.
+		spoke := assistantwire.UserSpokeParams{SessionRef: assistantwire.SessionRef{MachineID: m.cfg.ID, SessionID: sid}}
+		if !m.isAssistant(s) && isText && personSent(r.Context()) {
+			spoke.Text = text
+		}
+		h.asstOf(h.sessionOwner(m.cfg.ID, sid)).userSpoke(r.Context(), spoke)
 	}
 	s, known := m.session(sid)
 	picked := "" // a model picked in the chat's chip that the message runs on (#1644)

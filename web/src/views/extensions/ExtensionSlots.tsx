@@ -57,7 +57,7 @@ export function ExtensionNavPage({ extension, ui, onToggleSidebar }: { extension
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className={cx("mx-auto flex flex-col px-4 py-6 sm:px-8", wide ? "max-w-[1680px]" : "max-w-[880px]")}>
           <Suspense fallback={<Loading />}>
-            <ExtensionUI key={`${extension}/${ui}/${n}`} extension={extension} ui={ui} title={title} bare state={state} onWide={setWide} />
+            <ExtensionUI key={`${extension}/${ui}/${n}`} extension={extension} ui={ui} title={title} bare state={state} onWide={setWide} remember />
           </Suspense>
         </div>
       </div>

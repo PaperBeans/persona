@@ -2,17 +2,33 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // A worker's completed turn is still undelivered when its stopped leader refuses
 // the first send. A manager restart must not consume the persisted turn signal.
 func TestStoppedLeaderReviewSurvivesManagerRestart(t *testing.T) {
+	checkLeaderReviewDelivery(t, proto.StatusInterrupted, false)
+}
+
+func TestOfflineLeaderReviewSurvivesManagerRestart(t *testing.T) {
+	checkLeaderReviewDelivery(t, proto.StatusOffline, false)
+}
+
+func TestOfflineLeaderReviewIsToldAfterConfirmation(t *testing.T) {
+	checkLeaderReviewDelivery(t, proto.StatusOffline, true)
+}
+
+func checkLeaderReviewDelivery(t *testing.T, status string, confirmed bool) {
+	t.Helper()
 	ctx := context.Background()
 	database := &profileTaskStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}
 	s, f := newQuietServiceOn(t, database)
@@ -31,13 +47,63 @@ func TestStoppedLeaderReviewSurvivesManagerRestart(t *testing.T) {
 	s.taskWorking(ctx, "box", worker)
 	stopLeader(f, worker)
 	f.setSessions("box",
-		proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: proto.StatusInterrupted, Capabilities: &proto.SessionCapabilities{Read: true, Terminal: true}, UpdatedAt: time.Now()},
+		proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: status, Capabilities: &proto.SessionCapabilities{Read: true, Terminal: true}, UpdatedAt: time.Now()},
 		proto.Session{SessionID: worker, MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: proto.StatusDone, State: proto.StateUnread, LastText: "做完了，PR https://github.com/o/r/pull/7 已合并", UpdatedAt: time.Now()})
+	entered, release := make(chan struct{}), make(chan struct{})
+	releaseSend := sync.OnceFunc(func() { close(release) })
+	defer releaseSend()
+	if status == proto.StatusOffline {
+		f.mu.Lock()
+		f.beforeSend = func() {
+			close(entered)
+			<-release
+		}
+		f.mu.Unlock()
+		if confirmed {
+			failSends(f, nil)
+		} else {
+			failSends(f, &rpc.Error{Code: "peer_unconfirmed", Message: "not taken", Data: json.RawMessage(`{"delivered":"unknown"}`)})
+		}
+	}
 	s.taskTurnEnded(ctx, "box", worker)
 	turnsQuiet(t, s, w.ID)
-	waitFor(t, "the stopped leader to refuse the review", func() bool { return len(sendsTo(f, "box", "s1")) > 0 })
-	// Wait until the digest that made the refused RPC has either rolled its
-	// reservation back (old behavior) or consumed it (new behavior).
+	if status == proto.StatusOffline {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("offline leader did not start resuming")
+		}
+		s.supervise.dedupMu.Lock()
+		s.supervise.dedupMu.Unlock()
+		turn, ok := s.turnOf(ctx, w.ID)
+		if !ok || turn.Signal == nil || turn.Signal.Told != nil {
+			t.Fatalf("while the send was in flight, Told changed: %+v", turn.Signal)
+		}
+		var history map[string]superviseFingerprint
+		if _, err := database.Setting(ctx, superviseDedupKey, &history); err != nil {
+			t.Fatal(err)
+		}
+		for key := range history {
+			if strings.Contains(key, w.ID) && strings.Contains(key, `"review"`) {
+				t.Fatalf("the in-flight review was recorded in persistent deduplication: %s", key)
+			}
+		}
+		releaseSend()
+	}
+	if confirmed {
+		waitFor(t, "the confirmed review to be persisted as Told", func() bool {
+			var ledger taskTurnsDoc
+			_, err := database.Setting(ctx, taskTurnsKey, &ledger)
+			return err == nil && ledger.Turns[w.ID].Signal != nil && ledger.Turns[w.ID].Signal.Told != nil
+		})
+		if got := deliveredTo(f, "s1"); len(got) != 1 {
+			t.Fatalf("the leader should have received the review once: %q", got)
+		}
+		return
+	}
+	waitFor(t, "the first send to the leader", func() bool { return len(sendsTo(f, "box", "s1")) > 0 })
+	waitFor(t, "the failed delivery to escalate", func() bool { return leaderEscalations(f) == 1 })
+	// Wait for the digest to finish its bookkeeping.
 	s.supervise.dedupMu.Lock()
 	s.supervise.dedupMu.Unlock()
 	if got := deliveredTo(f, "s1"); len(got) != 0 {
@@ -59,6 +125,9 @@ func TestStoppedLeaderReviewSurvivesManagerRestart(t *testing.T) {
 	beforePending, beforePendingOK := s.supervise.pending[w.ID+"|review"]
 	beforeSent := s.supervise.sent[w.ID+"|review"]
 	s.supervise.mu.Unlock()
+	if !beforeOK || beforeTurn.Signal == nil || beforeTurn.Signal.Told != nil {
+		t.Fatalf("an unconfirmed delivery changed Told: %+v", beforeTurn.Signal)
+	}
 	t.Logf("before restart: turn=%+v ok=%v signal=%+v pending=%+v pendingOK=%v sent=%q", beforeTurn, beforeOK, beforeTurn.Signal, beforePending, beforePendingOK, beforeSent)
 
 	restarted, hub := restartedOn(t, database)

@@ -26,6 +26,10 @@ func (c *conversation) readApp() {
 				c.mu.Unlock()
 				continue
 			}
+			if c.sus.onHold { // the user is on another call: none of it is for the model, nor kept for the wake (suspend.go)
+				c.mu.Unlock()
+				continue
+			}
 			up, ready, w := c.up, c.ready, c.w
 			voiced := c.pace.heard(now, ms)
 			held := c.held(b, voiced) // paused or waking: kept for the next session (suspend.go)
@@ -79,6 +83,8 @@ func (c *conversation) readApp() {
 			}
 		case "talk":
 			c.talkFrame(msg.On) // a Talk span opens or closes (meeting.go)
+		case "hold":
+			c.holdFrame(msg.On) // the call goes on hold or comes back (suspend.go, #9290)
 		case "resend":
 			// The user tapped "Resend" / "Clear and send" under a run a 409 refused (protocol 2): their own act, not the model's,
 			// so not held to the user-speech gate.

@@ -158,6 +158,8 @@ type conversation struct {
 	modelAt time.Time
 	// talkIgnored: a talk frame came on a call that is not a meeting call, and was logged (meeting.go).
 	talkIgnored bool
+	// holdIgnored: a hold frame came on a call that takes none (protocol 1, a meeting call), and was logged (suspend.go).
+	holdIgnored bool
 }
 
 type outFrame struct {
@@ -478,7 +480,7 @@ func (c *conversation) shutdown() {
 	}
 	c.closed = true
 	up, w := c.up, c.w
-	lines := callLines{user: c.userSeq, model: c.asstSeq, pauses: c.sus.pauses, meeting: c.meeting.meetingLog()}
+	lines := callLines{user: c.userSeq, model: c.asstSeq, pauses: c.sus.pauses, holds: c.sus.holds, meeting: c.meeting.meetingLog()}
 	for id, t := range c.pending {
 		t.Stop()
 		delete(c.pending, id)

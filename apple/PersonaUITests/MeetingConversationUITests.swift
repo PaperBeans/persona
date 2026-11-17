@@ -213,7 +213,7 @@ final class MeetingConversationUITests: XCTestCase {
         stop.tap()
         confirmStop(app)
         let divider = element(app, "meeting-after-divider")
-        XCTAssertTrue(divider.waitForExistence(timeout: 20) || element(app, "meeting-after-status").exists,
+        XCTAssertTrue(divider.waitForExistence(timeout: 20) || element(app, "meeting-after-facts").exists,
                       "the page didn't go on after Stop:\n\(app.debugDescription)")
         XCTAssertTrue(waitFor(30) { (try? self.room(hub, self.live))?["state"] as? String == "ended" }, "the room never ended")
         let field = element(app, "meeting-ask-field")

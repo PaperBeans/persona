@@ -59,7 +59,7 @@ func (h *Manager) selfSettings() []selfSetting {
 	if h.mail != nil {
 		out = append(out, selfSetting{key: "mail.accounts", title: ss(l, "title_mail"),
 			about: "the user's mail accounts: Persona reads them in the inbox and mail_* use them. add connects (IMAP and SMTP) before saving; " +
-				"the password is typed on the phone, never pass one. Gmail can only be added in the app (Google sign-in)",
+				"the password is typed on the phone, never pass one. Gmail: with Google sign-in set up it is added in the app (Sign In with Google); otherwise a Gmail address with an app password (not the Google password; needs 2-Step Verification, made at myaccount.google.com/apppasswords) is typed in the app's Add Mail Account page. If the hub machine cannot reach Gmail, an admin sets google.proxy (http://[user:pass@]host:port or socks5://[user:pass@]host:port) in manager.json and restarts the hub",
 			value: `add: {"email", "provider": "imap|feishu" (default imap; feishu = Feishu / Lark mail), "name"?, "username"?, "imap_host"?, ` +
 				`"imap_port"?, "smtp_host"?, "smtp_port"?, "smtp_security"?: "tls|starttls"}; most providers need only the email. remove: the account id`,
 			get: h.getMailAccounts, add: h.addMailAccount, remove: h.removeMailAccount})

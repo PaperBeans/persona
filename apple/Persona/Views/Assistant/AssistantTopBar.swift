@@ -172,6 +172,7 @@ struct AssistantTopBar: View {
         .padding(.horizontal, Theme.Space.l)
         .padding(.top, Theme.Space.xxs)
         .frame(height: Self.height, alignment: .top)
+        .barScreenshotBanner()
         .background(alignment: .top) { BarFog(solid: Self.fogSolid, fade: Self.fade) }
     }
     #endif
@@ -273,6 +274,7 @@ struct AssistantTopBar: View {
         .padding(.horizontal, Theme.Space.l)
         .padding(.top, Theme.Space.xxs)
         .frame(height: Self.height, alignment: .top)
+        .barScreenshotBanner()
         .background(alignment: .top) { BarFog(solid: Self.fogSolid, fade: Self.fade) }
         .connectionDetails($showLink)
         .modifier(ShellBarAtRest(page: 0)) // ShellMovingBar stands in while the strip slides
@@ -323,6 +325,7 @@ struct AssistantTopBar: View {
         #endif
         .padding(.top, Self.topInset)
         .frame(height: Self.height, alignment: .top)
+        .barScreenshotBanner()
         .background(alignment: .top) {
             // Solid down to the bar's bottom edge, fading out below it (fading under the pill let the messages show
             // through the name).
@@ -721,6 +724,25 @@ extension AppModel {
 /// `TopFog` behind a floating bar, as its background: from the top of the screen (under the status bar) down to `solid`
 /// below the safe area's top, then fading out over `fade`, and across the whole width. On iPhone Duo's outer screen
 /// the status bar stands at the side: a fog only as wide as the page stopped beside it, a hard edge (#283).
+private extension View {
+    /// What a screenshot shows of the bar (#9508): the assistant's avatar and name with "(Persona)" in its row of
+    /// buttons, down to where the fog starts to fade (the fog under both carries on below). Under the bar the page's
+    /// color with the fog's own over it, so at rest the bar looks as it did; under the banner the page's color alone.
+    func barScreenshotBanner() -> some View {
+        screenshotBanner(solid: AssistantTopBar.fogSolid, fade: Theme.Space.m) {
+            ZStack {
+                Theme.pageBackground
+                Rectangle().fill(.regularMaterial)
+                Theme.pageBackground.opacity(0.82)
+            }
+        } bannerBackdrop: {
+            Theme.pageBackground
+        } banner: {
+            ScreenshotBannerContent(row: (AssistantTopBar.topInset, Theme.Size.tapTarget))
+        }
+    }
+}
+
 struct BarFog: View {
     var solid: CGFloat
     var fade: CGFloat

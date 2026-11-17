@@ -3,6 +3,7 @@ package node
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,13 +28,13 @@ import (
 )
 
 // Starting a Codex from the phone (docs/integrations/codex.md "Starting from the phone"). A Codex launcher (plain `codex`, or an alias whose
-// command is codex) runs in a new herdr tab with the first message as its prompt argument: Codex makes the thread
+// command is codex) runs in a new herdr tab with an optional first message as its prompt argument: Codex makes the thread
 // itself — on the shared app-server daemon for a plain 0.163, where #220 joins it (codex_daemon.go); in its own process
 // for 0.153 or a launcher with -c, on the terminal route. Neither the message nor the launcher's words (an alias can
-// carry a key) go through a shell or onto the screen: they are written to a file only the user can read, the tab runs
-// `personad codex-start <file>`, and that execs the words with the message as one argument after "--". The start answers once the new thread is known — the rollout in that directory, begun after the
+// carry a key) are parsed as shell code or typed onto the screen: they are written to a file only the user can read, the tab runs
+// `personad codex-start <file>`, and that runs the words with any message as one argument after "--". A start with a message answers once the new thread is known — the rollout in that directory, begun after the
 // launch, whose first message is exactly this one — with that thread's id, so the phone opens the session that is
-// there; it fails, with what the tab shows, when none comes in time.
+// there; it fails, with what the tab shows, when none comes in time. Without a message it returns a waiting row (codex_waiting.go).
 
 // codexStartWait is how long a start waits for Codex's thread (a trust dialog, a slow ~/.zshrc, the first turn).
 var codexStartWait = 60 * time.Second
@@ -227,8 +230,8 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 		delete(n.codexStarting, pane)
 		n.mu.Unlock()
 	}()
-	shells := paneShells(ctx, created)
-	cmd := n.agentCommand(shellQuote(n.bin)+" codex-start "+shellQuote(file), shellQuote, shells...) // agentenv.go
+	shells := n.startPaneShells(ctx, launch, created)
+	cmd := n.agentStartCommand(shellQuote(n.bin)+" codex-start "+shellQuote(file), shellQuote, shells...) // agentenv.go
 	began := time.Now()
 	if err := n.settleShell(ctx, pane); err != nil { // the fresh shell at rest first (shellsettle.go, #2570)
 		return nil, n.startTabFailed(ctx, launch, created, ws, "", err)
@@ -520,8 +523,8 @@ type codexStartFile struct {
 }
 
 // CodexStart is `personad codex-start <file>`: it claims a codexStartFile (renames it away, then reads and removes
-// it), changes to its directory, then runs its words with the message as one more argument after "--", in place of
-// itself. No shell sees either. Claimed by a rename, the file is either this process's or withdrawn by the node (a
+// it), changes to its directory, then runs its words with any message as one more argument after "--", in place of
+// itself. Neither is parsed as shell code. Claimed by a rename, the file is either this process's or withdrawn by the node (a
 // switch whose start gave up on it, codexMessageMayHaveGone): never both. The file's agent replaces a HERDR_AGENT the
 // shell had: appended, the inherited one would come first, and that is the one getenv and herdr read.
 func CodexStart(args []string) error {
@@ -538,25 +541,35 @@ func CodexStart(args []string) error {
 	}
 	words := f.Argv
 	env := os.Environ()
+	var explicit []string
 	if f.Dir != "" {
 		if err := os.Chdir(f.Dir); err != nil {
 			return fmt.Errorf("%s %v", codexStartError, err)
 		}
 		if _, set := os.LookupEnv("PWD"); set { // what the shell said its directory was: the one it runs in now
 			env = append(withoutEnv(env, []string{"PWD"}), "PWD="+f.Dir)
+			explicit = append(explicit, "PWD="+f.Dir)
 		}
 	}
 	if f.Agent != "" {
 		env = append(withoutEnv(env, []string{herdrAgentEnv}), herdrAgentEnv+"="+f.Agent)
+		explicit = append(explicit, herdrAgentEnv+"="+f.Agent)
 	}
 	for len(words) > 0 && shellcmd.AssignRe.MatchString(words[0]) {
 		env = append(env, words[0])
+		explicit = append(explicit, words[0])
 		words = words[1:]
 	}
 	if len(words) == 0 {
 		return errors.New(codexStartError + " no command")
 	}
 	path, err := exec.LookPath(words[0])
+	if err != nil && words[0] == "codex" && runtime.GOOS != "windows" {
+		// A native launcher may exist only as an rc function or on the rc-provided PATH.
+		if _, shellErr := exec.LookPath(codexStartShellProgram()); shellErr == nil {
+			path, err = words[0], nil
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("%s %s not found in PATH", codexStartError, words[0])
 	}
@@ -580,7 +593,7 @@ func CodexStart(args []string) error {
 	if f.Prompt != "" { // a resume without a message (`personad tab-start`, pi.go) runs the words alone
 		argv = append(argv, "--", f.Prompt)
 	}
-	path, argv, env, _ = codexStartExec(path, argv, env)
+	path, argv, env, _ = codexStartExec(path, argv, env, explicit)
 	return osproc.Exec(path, argv, env)
 }
 
@@ -618,19 +631,55 @@ func codexStartNotef(w io.Writer, format string, a ...any) {
 	fmt.Fprintf(w, codexStartNote+" "+format+"\n", a...)
 }
 
+// The rc file may change directory or export defaults. Restore the start's decisions without parsing them as code.
+// Only the names of the saved environment entries reach argv; values can be secrets. Indirection never evals them.
+// A carrier holds the whole NAME=value assignment: even NAME= is nonempty and restores an explicitly empty value.
+const codexNativeStartScript = `
+builtin cd -- "$1" || exit
+shift
+while [ "$1" != -- ]; do
+  if [ -n "${ZSH_VERSION-}" ]; then
+    [ -n "${(P)1}" ] || exit 1
+    builtin export "${(P)1}" || exit
+  else
+    [ -n "${!1}" ] || exit 1
+    builtin export "${!1}" || exit
+  fi
+  builtin unset "$1" || exit
+  shift
+done
+shift
+"$@"
+`
+
 // codexStartExec is what codex-start execs for its words (path, argv, env): in the agent sandbox when it is on
 // (agentsandbox.go), for a Codex only when it is sure to run danger-full-access in its own process (codexInner). A
 // managed launcher (`personad launch`) is left to Launch, which wraps its own start; other words (pi resumed by
 // tab-start) are not in this phase. Not wrapped, they come back as they are.
-func codexStartExec(path string, argv, env []string) (string, []string, []string, sandbox.AgentStatus) {
+func codexStartExec(path string, argv, env, explicit []string) (string, []string, []string, sandbox.AgentStatus) {
 	if len(argv) == 0 || filepath.Base(argv[0]) != "codex" {
 		return path, argv, env, sandbox.AgentStatus{State: sandbox.AgentOff}
 	}
 	home, _ := os.UserHomeDir()
 	cwd, _ := os.Getwd()
 	inner := func() *sandbox.StatusReason { return codexInnerReason(argv, env, cwd, home) }
+	run := append([]string{path}, argv[1:]...)
+	if argv[0] == "codex" && runtime.GOOS != "windows" {
+		// A different shell's rc file must not override the user's native launcher function.
+		if shell, err := exec.LookPath(codexStartShellProgram()); err == nil {
+			// Resolve a same-name function after its rc file, without expanding aliases twice or parsing data as code.
+			run = []string{shell, "-ic", codexNativeStartScript, "persona-codex-start", cwd}
+			prefix := "__PERSONA_CODEX_START_" + rand.Text() + "_"
+			for i, assignment := range explicit {
+				name := prefix + strconv.Itoa(i)
+				env = append(env, name+"="+assignment)
+				run = append(run, name)
+			}
+			run = append(append(run, "--"), argv...)
+		}
+	}
 	logf := func(format string, a ...any) { codexStartNotef(os.Stderr, format, a...) }
-	wrapped, wenv, st := wrapAgent("codex-start", home, identity.DataDir(home), cwd, nil, inner, append([]string{path}, argv[1:]...), env, logf)
+	wrapped, wenv, st := wrapAgent("codex-start", home, identity.DataDir(home), cwd, nil, inner, run, env, logf)
 	if wrapped[0] == path {
 		return path, argv, env, st
 	}

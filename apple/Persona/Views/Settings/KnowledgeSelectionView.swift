@@ -413,12 +413,8 @@ private struct KnowledgeRuleEditor: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheetCancel(unsaved: draft != opened) { dismiss() }
         .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button { Task { await persist() } } label: {
-                    if saving { ProgressView() } else { Text(String(localized: "Save")).lineLimit(1) }
-                }
-                .disabled(draft == nil || draft == opened || saving)
-                .accessibilityIdentifier("knowledge-rule-save")
+            SheetConfirm(id: "knowledge-rule-save", disabled: draft == nil || draft == opened, busy: saving) {
+                Task { await persist() }
             }
         }
         .interactiveDismissDisabled(saving)
@@ -525,16 +521,8 @@ private struct KnowledgeItemEditor: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheetCancel(unsaved: draft != opened, when: inSheet) { close() }
         .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button { Task { await persist() } } label: {
-                    if saving {
-                        ProgressView()
-                    } else {
-                        Text(isNew ? String(localized: "Add [Beautiful U I Bridge 7a8a11]") : String(localized: "Save")).lineLimit(1)
-                    }
-                }
-                .disabled(draft == nil || (!isNew && draft == opened) || saving)
-                .accessibilityIdentifier("knowledge-item-save")
+            SheetConfirm(id: "knowledge-item-save", disabled: draft == nil || (!isNew && draft == opened), busy: saving) {
+                Task { await persist() }
             }
         }
         .interactiveDismissDisabled(saving)

@@ -2,6 +2,58 @@
 //! (`spec/fixtures/sort/session_state.json`, `hub_state.json`).
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// A host fixture projection, kept here so ArkTS and JNI share the same decoding and validation rather than growing
+/// separate state rules. It is not a production adapter, NAPI export or persisted client state.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixtureInput {
+    pub kind: String,
+    pub input: Value,
+}
+
+/// Project one session_state or hub_state fixture into its complete JSON result.
+pub fn project_fixture(input: &FixtureInput) -> Result<Value, String> {
+    match input.kind.as_str() {
+        "session_state" => {
+            let sessions: Vec<ClientSession> = serde_json::from_value(input.input["sessions"].clone())
+                .map_err(|_| "session_state: sessions does not decode".to_owned())?;
+            let rows: Vec<_> = sessions.iter().map(session_state).collect();
+            serde_json::to_value(serde_json::json!({"sessions": rows})).map_err(|e| e.to_string())
+        }
+        "hub_state" => {
+            let session = input.input.get("session").ok_or("hub_state: session is missing")?;
+            let status = session
+                .get("status")
+                .and_then(Value::as_str)
+                .ok_or("hub_state: status is not a string")?;
+            let pending_interactions = session
+                .get("pending_interactions")
+                .and_then(Value::as_i64)
+                .ok_or("hub_state: pending_interactions is not an integer")?;
+            let timestamp = |value: &Value| -> Result<Option<i128>, String> {
+                if value.is_null() {
+                    return Ok(None);
+                }
+                let text = value.as_str().ok_or("hub_state: timestamp is not a string or null")?;
+                utc_timestamp(text)
+                    .map(Some)
+                    .ok_or("hub_state: invalid timestamp".into())
+            };
+            let updated_at = timestamp(session.get("updated_at").unwrap_or(&Value::Null))?;
+            let seen_at = timestamp(input.input.get("seen_at").unwrap_or(&Value::Null))?;
+            let state = AgentState::from_hub(&HubSession {
+                status,
+                pending_interactions,
+                updated_at,
+                seen_at,
+            });
+            Ok(serde_json::json!({"state": state.as_str()}))
+        }
+        _ => Err("state: unknown projection kind".into()),
+    }
+}
 
 /// A state known to every client. A future wire value decodes as `Unknown`.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]

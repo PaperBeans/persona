@@ -6,8 +6,8 @@ import PersonaCoreTestSupport
 final class PersonaCoreContinuityTests: XCTestCase {
     func testEveryFixtureThroughTheRealCBinding() throws {
         let result = try ContinuityBindingReplay.replayAll()
-        XCTAssertEqual(result.cases, 38)
-        XCTAssertEqual(result.steps, 94)
+        XCTAssertEqual(result.cases, 39)
+        XCTAssertEqual(result.steps, 95)
         print("PersonaCore C binding: \(result.cases) cases, \(result.steps) steps, \(result.patches) drained patches")
     }
 

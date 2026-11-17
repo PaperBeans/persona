@@ -104,6 +104,35 @@ class AppleCIPreparationTests(unittest.TestCase):
         self.assertIn('"${IOS_UNIT_SELECTION[@]}"', script[execution:])
         self.assertIn('IOS_TESTS=("${IOS_COMMON[@]}"', script)
 
+    def test_callkit_is_checked_before_any_build_and_in_both_built_apps(self):
+        # #9290: the source guard in every lane before anything compiles; the binary check on each app right after
+        # its build, the device one before the simulator build, the simulator one before a simulator is created.
+        script = SCRIPT.read_text()
+        source = script.index(
+            "ci_run 'No CallKit in Apple sources and build settings' 120 python3 \"$CI_ROOT/scripts/test/test_apple_no_callkit.py\"")
+        self.assertLess(script.index('trap cleanup EXIT'), source)
+        self.assertLess(source, script.index("ci_run 'Build PersonaCore XCFramework before package resolution'"))
+        self.assertLess(source, script.index('if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = packages ]'))
+        device_build = script.index("ci_run 'Unsigned iOS and embedded watch/extensions build' 1800")
+        device_check = script.index("ci_run 'No CallKit in the device build' 300")
+        simulator_build = script.index("ci_run 'Build iOS offline unit tests' 1800")
+        simulator_check = script.index("ci_run 'No CallKit in the simulator build' 300")
+        create = script.index("ci_run 'Create stock iOS 26.0 test simulator' 100")
+        self.assertLess(device_build, device_check)
+        self.assertLess(device_check, simulator_build)
+        self.assertLess(simulator_build, simulator_check)
+        self.assertLess(simulator_check, create)
+        # Each check reads the products of the build before it.
+        self.assertIn('-derivedDataPath "$OUTPUT/ios-device"', script[device_build:device_check])
+        self.assertIn('python3 "$CI_ROOT/scripts/release/check_no_callkit.py" \\\n'
+                      '    "$OUTPUT/ios-device/Build/Products/Debug-iphoneos/Persona.app"', script[device_check:simulator_build])
+        self.assertIn('IOS_COMMON=("${XCODE[@]}" -scheme Persona -derivedDataPath "$OUTPUT/ios-tests"', script)
+        self.assertIn('python3 "$CI_ROOT/scripts/release/check_no_callkit.py" \\\n'
+                      '    "$OUTPUT/ios-tests/Build/Products/Debug-iphonesimulator/Persona.app"', script[simulator_check:create])
+        guards = (ROOT / 'scripts/ci/guards.sh').read_text()
+        self.assertIn("ci_run 'No CallKit in Apple sources and build settings' 120 python3 scripts/test/test_apple_no_callkit.py",
+                      guards)
+
     def test_native_mac_lane_is_removed_and_ios_excludes_the_old_hub_lab(self):
         script = SCRIPT.read_text()
         self.assertNotIn('macOS offline unit tests', script)

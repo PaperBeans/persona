@@ -154,7 +154,7 @@ func TestScreenInteractionResolveRunsLocally(t *testing.T) {
 	s.fleet.mu.Lock()
 	s.ixMapLocked()["scr_x"] = &pending{
 		ix:    proto.Interaction{ID: "scr_x", MachineID: "mac", SessionID: "s1", Kind: proto.IxScreen},
-		local: func(r proto.Resolution) error { ran <- r; return nil },
+		local: func(_ context.Context, r proto.Resolution) error { ran <- r; return nil },
 	}
 	s.fleet.mu.Unlock()
 	if err := s.resolve("scr_x", proto.Resolution{Keys: []string{"down", "enter"}}); err != nil {

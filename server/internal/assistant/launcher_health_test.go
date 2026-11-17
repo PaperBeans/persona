@@ -574,8 +574,8 @@ func TestLauncherHealthRecheckThrottleAndFailure(t *testing.T) {
 	}
 }
 
-// Records a probe cannot settle are not rechecked on the spot: a subscription usage limit (the request would be
-// refused too) and a launcher missing from the terminal's shell (the probe's login shell runs it fine).
+// A fresh usage limit waits for the recheck throttle (TestUsageLimitRuleUnknownResetIsRechecked: after it); a
+// launcher missing from the terminal's shell cannot be rechecked in the probe's login shell, where it runs fine.
 func TestLauncherHealthRecheckSkipsSpecialRecords(t *testing.T) {
 	s, f := launcherHealthHub(t)
 	ctx := context.Background()

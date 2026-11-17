@@ -245,8 +245,12 @@ class StreamRepairBindingFixtureTest {
             "a  b" to "a  b",
         )
         for ((input, repaired) in cases) {
-            assertEquals("Apple inline repair: ${input.replace("\n", "\\n")}",
-                expected(repaired, if (input.startsWith("```\na")) "code" else "text"), replay(input))
+            val end = when {
+                input.startsWith("```\na") -> "code"
+                input == "${'$'}${'$'}\nx^2 + **y" -> "math"
+                else -> "text"
+            }
+            assertEquals("Apple inline repair: ${input.replace("\n", "\\n")}", expected(repaired, end), replay(input))
         }
         println("JNI StreamRepair inline replay: ${cases.size} complete {repaired,end} expectations")
     }
@@ -280,19 +284,104 @@ class StreamRepairBindingFixtureTest {
         println("JNI StreamRepair inline boundaries: ${cases.size} complete expectations plus wrong-object rejection")
     }
 
-    @Test fun displayMathIsIsolatedButItsEndStateRemainsUnimplemented() {
-        // Scan keeps TeX out of inline repair. This bounded projection does not yet expose Apple's `.math` end.
-        for (input in listOf(
-            "${'$'}${'$'}\nx^2",
-            "${'$'}${'$'}\nx^2\n${'$'}${'$'}",
-            "${'$'}${'$'}\nx^2\n${'$'}${'$'}\n",
-            "\\[\nx",
-            "${'$'}${'$'}E=mc^2${'$'}${'$'}",
-            "质能 ${'$'}E=mc^2${'$'}",
-        )) {
-            assertEquals("display-math projection boundary: ${input.replace("\n", "\\n")}",
-                expected(input, "text"), replay(input))
+    @Test fun mathEndMatchesEveryExplicitAppleAssertion() {
+        // Exact StreamRepairTests.tellsWhereTheTextEnds math assertions, with repair fixed by StreamRepair.repair.
+        val cases = listOf(
+            "${'$'}${'$'}\nx^2" to expected("${'$'}${'$'}\nx^2", "math"),
+            "${'$'}${'$'}\nx^2\n${'$'}${'$'}" to expected("${'$'}${'$'}\nx^2\n${'$'}${'$'}", "math"),
+            "${'$'}${'$'}\nx^2\n${'$'}${'$'}\n" to expected("${'$'}${'$'}\nx^2\n${'$'}${'$'}\n", "text"),
+            "\\[\nx" to expected("\\[\nx", "math"),
+            "${'$'}${'$'}E=mc^2${'$'}${'$'}" to expected("${'$'}${'$'}E=mc^2${'$'}${'$'}", "math"),
+            "质能 ${'$'}E=mc^2${'$'}" to expected("质能 ${'$'}E=mc^2${'$'}", "text"),
+        )
+        for ((input, complete) in cases) {
+            assertEquals("Apple math end: ${input.replace("\n", "\\n")}", complete, replay(input))
         }
+        val actual = replay("${'$'}${'$'}\nx^2")
+        assertThrows("math must not be downgraded to text", AssertionError::class.java) {
+            assertEquals("wrong math end", expected("${'$'}${'$'}\nx^2", "text"), actual)
+        }
+        assertThrows("inline math in prose must not become display math", AssertionError::class.java) {
+            assertEquals("wrong prose math end", expected("质能 ${'$'}E=mc^2${'$'}", "math"), replay("质能 ${'$'}E=mc^2${'$'}"))
+        }
+        println("JNI StreamRepair math end: ${cases.size} explicit complete {repaired,end} expectations")
+    }
+
+    @Test fun mathDisplayBoundariesFollowTheApplePredicate() {
+        // Direct consequences of StreamRepair.end, MathMarkdown.display/inlineSpans and withoutIndentSoFar.
+        // These complete expected objects are independently transcribed, not generated from Rust output.
+        val cases = listOf(
+            "\\[\nx\n\\]" to expected("\\[\nx\n\\]", "math"),
+            "\\[\nx\n\\]\n" to expected("\\[\nx\n\\]\n", "text"),
+            "   ${'$'}${'$'}\n x" to expected("   ${'$'}${'$'}\n x", "math"),
+            "    ${'$'}${'$'}\nx" to expected("    ${'$'}${'$'}\nx", "text"),
+            "${'$'}${'$'}\nx\n  " to expected("${'$'}${'$'}\nx\n", "math"),
+            "    ${'$'}${'$'}\nx\n  " to expected("    ${'$'}${'$'}\nx\n", "text"),
+            "${'$'}${'$'}\nx\n${'$'}${'$'}\n  " to expected("${'$'}${'$'}\nx\n${'$'}${'$'}\n", "text"),
+            "\\[\nx\n  " to expected("\\[\nx\n", "math"),
+            "  ${'$'}${'$'} x^2 ${'$'}${'$'}  " to expected("  ${'$'}${'$'} x^2 ${'$'}${'$'}  ", "math"),
+            "${'$'}${'$'}x${'$'}${'$'}" to expected("${'$'}${'$'}x${'$'}${'$'}", "math"),
+            "${'$'}${'$'}${'$'}${'$'}" to expected("${'$'}${'$'}${'$'}${'$'}", "text"),
+            "${'$'}${'$'} ${'$'}${'$'}" to expected("${'$'}${'$'} ${'$'}${'$'}", "text"),
+            "${'$'}${'$'}x${'$'}${'$'}${'$'}${'$'}" to expected("${'$'}${'$'}x${'$'}${'$'}${'$'}${'$'}", "text"),
+            "\\[x\\]" to expected("\\[x\\]", "math"),
+            "\\[x\n\\]" to expected("\\[x\n\\]", "text"),
+            "${'$'}${'$'}x${'$'}${'$'} and *b" to expected("${'$'}${'$'}x${'$'}${'$'} and *b*", "text"),
+            "${'$'}x${'$'}" to expected("${'$'}x${'$'}", "math"),
+            "  ${'$'} x^2 ${'$'}  " to expected("  ${'$'} x^2 ${'$'}  ", "text"),
+            "${'$'}x^2${'$'} " to expected("${'$'}x^2${'$'} ", "math"),
+            "${'$'}E=mc^2${'$'} and *b" to expected("${'$'}E=mc^2${'$'} and *b*", "text"),
+            "${'$'}5${'$'}" to expected("${'$'}5${'$'}", "math"),
+            "${'$'}5-${'$'}10" to expected("${'$'}5-${'$'}10", "text"),
+            "价格 ${'$'} 5 ${'$'}" to expected("价格 ${'$'} 5 ${'$'}", "text"),
+            "\\${'$'}x\\${'$'}" to expected("\\${'$'}x\\${'$'}", "text"),
+            "${'$'}x" to expected("${'$'}x", "text"),
+            "${'$'}x${'$'}${'$'}" to expected("${'$'}x${'$'}${'$'}", "text"),
+            "${'$'}${'$'}x${'$'}" to expected("${'$'}${'$'}x${'$'}", "text"),
+            "${'$'}x${'$'} ${'$'}y${'$'}" to expected("${'$'}x${'$'} ${'$'}y${'$'}", "text"),
+            "${'$'}一个月${'$'}" to expected("${'$'}一个月${'$'}", "text"),
+            "${'$'}\\text{米}${'$'}" to expected("${'$'}\\text{米}${'$'}", "math"),
+            "${'$'}\\text{字} + \\text{符}${'$'}" to expected("${'$'}\\text{字} + \\text{符}${'$'}", "math"),
+            "${'$'}x + y${'$'}" to expected("${'$'}x + y${'$'}", "math"),
+            "`${'$'}x${'$'}`" to expected("`${'$'}x${'$'}`", "text"),
+            "`${'$'}x${'$'}" to expected("`${'$'}x${'$'}`", "text"),
+            "`${'$'}x${'$'}` ${'$'}y${'$'}" to expected("`${'$'}x${'$'}` ${'$'}y${'$'}", "text"),
+            "\\(x\\)" to expected("\\(x\\)", "math"),
+            "\\(x\\) and *b" to expected("\\(x\\) and *b*", "text"),
+            "\\(x" to expected("\\(x", "text"),
+            "\\(一个月\\)" to expected("\\(一个月\\)", "math"),
+            "`\\(x\\)`" to expected("`\\(x\\)`", "text"),
+        )
+        for ((input, complete) in cases) {
+            assertEquals("MathMarkdown display boundary: ${input.replace("\n", "\\n")}", complete, replay(input))
+        }
+        val atLimit = "${'$'}${"x".repeat(400)}${'$'}"
+        val aboveLimit = "${'$'}${"x".repeat(401)}${'$'}"
+        assertEquals("400-Character formula is plausible", expected(atLimit, "math"), replay(atLimit))
+        assertEquals("401-Character formula is not plausible", expected(aboveLimit, "text"), replay(aboveLimit))
+        val combiningAtLimit = "${'$'}${"é".repeat(400)}${'$'}"
+        val combiningAboveLimit = "${'$'}${"é".repeat(401)}${'$'}"
+        assertEquals("400 extended graphemes are plausible even with 800 scalars",
+            expected(combiningAtLimit, "math"), replay(combiningAtLimit))
+        assertEquals("401 extended graphemes exceed the limit",
+            expected(combiningAboveLimit, "text"), replay(combiningAboveLimit))
+        val characterWhitespace = listOf("", " ", " ")
+        for (space in characterWhitespace) {
+            assertEquals("Character whitespace cannot follow a dollar opener",
+                expected("${'$'}${space}x${'$'}", "text"), replay("${'$'}${space}x${'$'}"))
+            assertEquals("Character whitespace cannot precede a dollar closer",
+                expected("${'$'}x${space}${'$'}", "text"), replay("${'$'}x${space}${'$'}"))
+        }
+        for (tex in listOf("", "", "\r", "", " ", " ")) {
+            val input = "${'$'}${'$'}${tex}${'$'}${'$'}"
+            assertEquals("Foundation whitespaces do not trim this display TeX scalar",
+                expected(input, "math"), replay(input))
+        }
+        assertEquals("fence wins over math-looking contents", expected("```\n${'$'}${'$'}\nx\n```", "code"), replay("```\n${'$'}${'$'}\nx\n```"))
+        assertThrows("wrong display repaired string is rejected", AssertionError::class.java) {
+            assertEquals("wrong display repair", expected("${'$'}${'$'}E=mc^2${'$'}${'$'}!", "math"), replay("${'$'}${'$'}E=mc^2${'$'}${'$'}"))
+        }
+        println("JNI StreamRepair math display: ${cases.size + 17} source-derived boundaries plus wrong-object rejection")
     }
 
     @Test fun everythingBeforeTheLastLineStaysAsItWasForEveryApplePrefix() {
@@ -319,7 +408,90 @@ class StreamRepairBindingFixtureTest {
         println("JNI StreamRepair Apple prefix replay: ${reply.codePointCount(0, reply.length) + 1} scalar prefixes plus finished controls")
     }
 
+    @Test fun plainOpenFenceMatchesEveryExplicitAppleAssertion() {
+        val drawn = listOf("mermaid", "math")
+        // StreamRepairTests.drawsAnOpenPictureFenceAsPlainCode: exact input/output pairs, not Rust-derived expected.
+        val cases = listOf(
+            "看图：\n```mermaid\ngraph TD" to "看图：\n```\ngraph TD",
+            "  ~~~ math \nx^2\n" to "  ~~~\nx^2\n",
+            "```mermaid\ngraph TD\n```\n" to "```mermaid\ngraph TD\n```\n",
+            "```mermaid\na\n```\n```swift\nlet" to "```mermaid\na\n```\n```swift\nlet",
+            "```swift\nlet" to "```swift\nlet",
+        )
+        for ((input, expected) in cases) {
+            assertEquals("Apple plainOpenFence assertion: ${input.replace("\n", "\\n")}",
+                expected, plainFence(input, drawn))
+        }
+        assertThrows("wrong complete plain-fence expectation is rejected", AssertionError::class.java) {
+            assertEquals("```mermaid\ngraph TD", plainFence("看图：\n```mermaid\ngraph TD", drawn))
+        }
+        println("JNI StreamRepair plainOpenFence: ${cases.size} explicit Apple assertions")
+    }
+
+    @Test fun plainOpenFenceBoundariesFollowTheAppleScannerAndPredicate() {
+        val drawn = listOf("mermaid", "math")
+        val cases = listOf(
+            "" to "",
+            "mermaid" to "mermaid",
+            "`mermaid`" to "`mermaid`",
+            "``mermaid\nx" to "``mermaid\nx",
+            "```code```\nx" to "```code```\nx",
+            "    ```mermaid\nx" to "    ```\nx",
+            "\t~~~math \nx" to "\t~~~\nx",
+            "````math \nx" to "````\nx",
+            "```mermaid" to "```",
+            "```mermaid\n" to "```\n",
+            "```mermaid\r" to "```",
+            "```mermaid\r\nx" to "```\nx",
+            "\r```mermaid\nx" to "\r```\nx",
+            "```mermaid \nx" to "```\nx",
+            " ```mermaid\nx" to " ```mermaid\nx",
+            "```\u000bmermaid\nx" to "```\nx",
+            "```mermaid\u0085\nx" to "```\nx",
+            "```mermaid \nx" to "```\nx",
+            "```mermaid \nx" to "```\nx",
+            "```mermaid extra\nx" to "```mermaid extra\nx",
+            "```MERMAID\nx" to "```MERMAID\nx",
+            "```mermaid\nx\n~~~\n" to "```\nx\n~~~\n",
+            "````mermaid\nx\n```\n" to "````\nx\n```\n",
+            "```mermaid\nx\n```\n~~~math\ny" to "```mermaid\nx\n```\n~~~\ny",
+            "${'$'}${'$'}\n```mermaid\nx" to "${'$'}${'$'}\n```mermaid\nx",
+            "```mermaid\n${'$'}${'$'}\nx" to "```\n${'$'}${'$'}\nx",
+            "```mermaid\nx" to "```mermaid\nx",
+        )
+        val predicates = cases.map { (input, _) ->
+            if (input == "```mermaid\nx") listOf("math") else drawn
+        }
+        for ((index, pair) in cases.withIndex()) {
+            assertEquals("plain-fence source boundary $index: ${pair.first.replace("\n", "\\n").replace("\r", "\\r")}",
+                pair.second, plainFence(pair.first, predicates[index]))
+        }
+        assertEquals("empty drawn input preserves the info", "```mermaid\nx", plainFence("```mermaid\nx", emptyList()))
+        assertEquals("drawn receives the complete trimmed info, not its first word", "```\nx",
+            plainFence("```mermaid extra\nx", listOf("mermaid extra")))
+        assertEquals("Unicode and extended-grapheme info reaches the predicate intact", "```\nx",
+            plainFence("```图 é \nx", listOf("图 é")))
+        assertThrows("wrong non-drawn predicate expectation is rejected", AssertionError::class.java) {
+            assertEquals("```\nx", plainFence("```swift\nx", drawn))
+        }
+        println("JNI StreamRepair plainOpenFence: ${cases.size + 4} source-derived boundaries")
+    }
+
+    private fun plainFence(text: String, drawn: List<String>): String {
+        val input = buildJsonObject {
+            put("text", text)
+            put("drawn", kotlinx.serialization.json.JsonArray(drawn.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+        }.toString()
+        val output = NativeBridge.projectPlainOpenFence(input)
+        assertTrue("JNI returned no plain-fence projection", output.isNotEmpty())
+        return (Json.parseToJsonElement(output) as JsonObject).getValue("text").jsonPrimitive.content
+    }
+
     @Test fun rejectsMalformedInputAndWrongExpectedObjects() {
+        assertEquals("", NativeBridge.projectPlainOpenFence("{\"text\":\"```mermaid\"}"))
+        assertEquals("", NativeBridge.projectPlainOpenFence("{\"drawn\":[]}"))
+        assertEquals("", NativeBridge.projectPlainOpenFence("{\"text\":1,\"drawn\":[]}"))
+        assertEquals("", NativeBridge.projectPlainOpenFence("not JSON"))
         assertEquals("", NativeBridge.projectStreamRepair("{\"invalid\":true}"))
         assertEquals("", NativeBridge.projectStreamRepair("not JSON"))
         val input = "text\n```ts\nconst a"

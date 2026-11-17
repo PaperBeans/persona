@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/update"
@@ -91,6 +92,41 @@ const agentRunning = `<?xml version="1.0" encoding="UTF-8"?>
 `
 
 const unitRunningHub = "[Unit]\nDescription=hub\n\n[Service]\nExecStart=\"%s/persona-hub\" run\n"
+
+func TestUpdateServiceProbeDoesNotBlockStatusOrReserveStaleCandidate(t *testing.T) {
+	h := serviceCase{programs: []string{"persona-manager"}, files: map[string]string{"user/old.service": unitRunningHub}}.hub(t)
+	u := h.upd
+	if _, err := u.check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	probing, release := make(chan struct{}), make(chan struct{})
+	u.services.state = func(bool, string) (bool, bool) { close(probing); <-release; return false, true }
+	done := make(chan error, 1)
+	go func() { done <- u.begin(context.Background(), false) }()
+	<-probing
+	viewed := make(chan struct{})
+	go func() {
+		u.view()
+		u.mu.Lock()
+		u.release = nil // A settings/source change invalidates the probed object.
+		u.mu.Unlock()
+		close(viewed)
+	}()
+	select {
+	case <-viewed:
+	case <-time.After(time.Second):
+		close(release)
+		<-done
+		t.Fatal("service probe held the update mutex and blocked status")
+	}
+	close(release)
+	if err := <-done; err != errUpdateBusy {
+		t.Fatalf("stale candidate accepted: %v", err)
+	}
+	if u.view().State == "downloading" || len(h.execs()) != 0 {
+		t.Fatal("stale candidate started installing")
+	}
+}
 
 // A release without persona-hub or persona-manager for this platform is not installed while a service runs that
 // program: it would go on starting the old build beside the new personad. The app shows why, the history says it

@@ -66,6 +66,7 @@
   "route_no_images": "タスクへの直接送信では画像はまだ使えません。画像を外してもう一度お試しください。",
   "not_live": "リアルタイムではありません",
   "not_live_reload": "再読み込み",
+  "agent_status_repository": "リポジトリを開く",
   "composer_source": "ソース",
   "call_not_loaded": "このステップは読み込まれた履歴にありません。上にスクロールしてもう一度お試しください",
   "refresh_failed": "更新できませんでした",

@@ -251,16 +251,69 @@ public nonisolated struct PathMarkdown: Sendable {
         }
     }
 
-    // Links written ([text](url), images: the formulas are `![tex](persona-math:…)`), reference links, and <autolinks>
-    // (bare links are made those by `Links.markdown` first).
-    static let protected = try! NSRegularExpression(pattern: #"!?\[[^\]\n]*\]\([^)\n]*\)|!?\[[^\]\n]*\]\[[^\]\n]*\]|<[^\s<>]+>|^\s*\[[^\]\n]+\]:.*$"#)
+    /// Links written ([text](url), images: the formulas are `![tex](persona-math:…)`), reference links, and <autolinks>
+    /// (bare links are made those by `Links.markdown` first), and a line that defines a reference (`[a]: url`): where
+    /// paths and code spans are left alone. Ranges in UTF-16, in order.
+    ///
+    /// The same matches as `!?\[[^\]\n]*\]\([^)\n]*\)|!?\[[^\]\n]*\]\[[^\]\n]*\]|<[^\s<>]+>|^\s*\[[^\]\n]+\]:.*$`, but
+    /// in one pass: the expression looked for each `[`'s `]` from scratch, so a line of 8,000 unclosed `[` took 1.5 s
+    /// (#9173), with no time limit when copying code (`CodeCopy`).
+    static func protectedRanges(in line: String) -> [NSRange] {
+        let u = Array(line.utf16)
+        let n = u.count
+        guard n > 0 else { return [] }
+        let newline: UInt16 = 0x0A, open: UInt16 = 0x5B, close: UInt16 = 0x5D, paren: UInt16 = 0x28, closeParen: UInt16 = 0x29
+        // From each place, the first `]` (or `)`) before the line ends; n when there is none.
+        var nextClose = [Int](repeating: n, count: n + 1), nextParen = [Int](repeating: n, count: n + 1)
+        for i in stride(from: n - 1, through: 0, by: -1) {
+            nextClose[i] = u[i] == close ? i : u[i] == newline ? n : nextClose[i + 1]
+            nextParen[i] = u[i] == closeParen ? i : u[i] == newline ? n : nextParen[i + 1]
+        }
+        func space(_ c: UInt16) -> Bool { Unicode.Scalar(c)?.properties.isWhitespace ?? false }
+        /// `[text](url)` or `[text][ref]` from the `[` at `i`: where it ends (past its last character).
+        func bracketed(_ i: Int) -> Int? {
+            let j = nextClose[i + 1]
+            guard j + 1 < n else { return nil }
+            if u[j + 1] == paren, nextParen[j + 2] < n { return nextParen[j + 2] + 1 }
+            if u[j + 1] == open, nextClose[j + 2] < n { return nextClose[j + 2] + 1 }
+            return nil
+        }
+        var out: [NSRange] = []
+        var i = 0
+        while i < n {
+            var end: Int?
+            if u[i] == 0x21, i + 1 < n, u[i + 1] == open { end = bracketed(i + 1) } // ![image](url)
+            if end == nil, u[i] == open { end = bracketed(i) }
+            if end == nil, u[i] == 0x3C { // <autolink>
+                var k = i + 1
+                while k < n, u[k] != 0x3C, u[k] != 0x3E, !space(u[k]) { k += 1 }
+                if k < n, u[k] == 0x3E, k > i + 1 { end = k + 1 }
+            }
+            if end == nil, i == 0 { // [ref]: url, the whole line
+                var k = 0
+                while k < n, space(u[k]), u[k] != newline { k += 1 }
+                if k < n, u[k] == open, nextClose[k + 1] < n, nextClose[k + 1] > k + 1,
+                   nextClose[k + 1] + 1 < n, u[nextClose[k + 1] + 1] == 0x3A {
+                    var e = n
+                    if let nl = u[(nextClose[k + 1] + 2)...].firstIndex(where: { $0 == newline || $0 == 0x0D }) { e = nl }
+                    end = e
+                }
+            }
+            if let e = end, e > i {
+                out.append(NSRange(location: i, length: e - i))
+                i = e
+            } else {
+                i += 1
+            }
+        }
+        return out
+    }
 
     /// The paths of one line (outside a code block), as far as they are found by `deadline`.
     private static func spots(in line: String, until deadline: ContinuousClock.Instant) -> [Spot] {
         let ns = line as NSString
-        let all = NSRange(location: 0, length: ns.length)
         let code = codeSpans(Array(line.utf16))
-        let links = BoundedRegex.matches(protected, in: line, range: all, until: deadline).matches.map(\.range)
+        let links = protectedRanges(in: line)
             .filter { r in !code.contains { NSLocationInRange(r.location, $0.whole) } }
         func covered(_ r: NSRange) -> Bool {
             links.contains { NSIntersectionRange($0, r).length > 0 } || code.contains { NSIntersectionRange($0.whole, r).length > 0 }

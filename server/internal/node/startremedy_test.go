@@ -1,7 +1,6 @@
 package node
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -86,7 +85,9 @@ func TestStartInAKeptTab(t *testing.T) {
 	}
 }
 
-func TestReusingKeptTabClaimsOnlyOnce(t *testing.T) {
+// Only one start holds a kept tab at a time; the others are refused until it is released, and a released tab is
+// kept again (startremedy.go).
+func TestKeptTabIsClaimedOnce(t *testing.T) {
 	n, _, _ := herdrNode(t)
 	created := &host.Created{Pane: host.PaneRef{ID: "w1:p2", Kind: host.Herdr}, SlotID: "w1:t2", SpaceID: "w1"}
 	n.mu.Lock()
@@ -95,23 +96,35 @@ func TestReusingKeptTabClaimsOnlyOnce(t *testing.T) {
 	}
 	n.mu.Unlock()
 	start := make(chan struct{})
-	got := make(chan bool, 2)
+	got := make(chan *keptClaim, 2)
 	for range 2 {
 		go func() {
 			<-start
-			ctx := n.reusingKeptTab(context.Background(), "w1:p2")
-			_, ok := ctx.Value(reusedTabKey{}).(*host.Created)
-			got <- ok
+			c, err := n.claimKeptTab("w1:p2")
+			if c == nil && rpcCode(err) != "start_tab_taken" {
+				t.Errorf("the second claim: %v", err)
+			}
+			got <- c
 		}()
 	}
 	close(start)
-	claimed := 0
+	var held *keptClaim
 	for range 2 {
-		if <-got {
-			claimed++
+		if c := <-got; c != nil {
+			if held != nil {
+				t.Fatal("kept tab was claimed twice")
+			}
+			held = c
 		}
 	}
-	if claimed != 1 {
-		t.Fatalf("kept tab was claimed %d times, want exactly once", claimed)
+	if held == nil {
+		t.Fatal("kept tab was not claimed")
+	}
+	if _, ok := n.keptStartTab("w1:p2"); ok {
+		t.Error("start.keys could type into a held tab")
+	}
+	held.release()
+	if c, err := n.claimKeptTab("w1:p2"); c == nil || err != nil {
+		t.Errorf("a released tab is not kept again: %v", err)
 	}
 }

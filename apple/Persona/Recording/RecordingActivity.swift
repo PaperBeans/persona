@@ -72,7 +72,9 @@ import OSLog
             asked.flatMap { e in e.answer.map { Answer(text: $0, at: seen(.ask, e.id.uuidString, now: now)) } },
             said.map { Answer(text: $0.text, at: seen(.call, $0.id, now: now)) },
         ])
-        let topic = entry.attendance?.liveView == true ? MeetingTopic.current(MeetingConversation.shared.meeting(id).topics)?.title : nil
+        let topics = entry.attendance?.liveView == true ? MeetingConversation.shared.meeting(id).topics : []
+        let topic = MeetingTopic.current(topics)?.title
+        let topicPlace = Self.place(of: topic, in: topics)
         // Talk (#3862 phase 4): whether a span is open, read here so the activity follows it at once.
         let talking = MeetingCall.shared.talk?.recording == id
         // Hub transcription (#3862 phase 5): the hub's latest line while it transcribes, else the phone's own, said so.
@@ -83,7 +85,8 @@ import OSLog
         let drawn = Self.content(entry: entry, recording: state == .recording, interrupted: interrupted,
                                  elapsed: capture.timeline, previous: previous, now: now,
                                  answer: answered?.text, answeredAt: answered?.at,
-                                 topic: topic, roomMissing: roomMissing, talking: talking, transcribed: transcribed)
+                                 topic: topic, topicPlace: topicPlace, roomMissing: roomMissing, talking: talking,
+                                 transcribed: transcribed)
         // Once a minute while it records, the activity hears it still does (#9108): when iOS ends the app, it goes stale.
         let content = Self.alive(drawn, now: now)
         if let alive = content.aliveAt { wake(at: Date(timeIntervalSince1970: alive + Self.aliveEvery)) }
@@ -166,8 +169,8 @@ import OSLog
     /// Screen says "On iPhone: …").
     nonisolated static func content(entry: RecordingEntry, recording: Bool, interrupted: Bool, elapsed: Double,
                                     previous: Content?, now: Date, answer: String? = nil, answeredAt: Date? = nil,
-                                    topic: String? = nil, roomMissing: Bool = false, talking: Bool = false,
-                                    transcribed: Transcribed? = nil) -> Content {
+                                    topic: String? = nil, topicPlace: TopicPlace? = nil, roomMissing: Bool = false,
+                                    talking: Bool = false, transcribed: Transcribed? = nil) -> Content {
         let phase: Content.Phase = recording ? .recording : interrupted ? .interrupted : .paused
         let keep = recording && previous?.phase == .recording
         let since = recording ? (keep ? previous?.runningSince : nil) ?? now.timeIntervalSince1970 - elapsed : nil
@@ -180,14 +183,32 @@ import OSLog
         let fresh = answeredAt.map { now.timeIntervalSince($0) < Self.answerShown } ?? true
         let showsAnswer = answer != nil && (line == nil || fresh)
         let fellBack = !showsAnswer && line != nil && !hubLines && transcribed?.shown.fellBack == true
-        return Content(phase: phase, runningSince: since, elapsed: keep ? previous?.elapsed ?? elapsed : elapsed,
+        let shownTopic = liveView ? Self.cut(topic, Self.topicLength) : nil
+        var content = Content(phase: phase, runningSince: since, elapsed: keep ? previous?.elapsed ?? elapsed : elapsed,
                        title: String(entry.displayTitle.prefix(Self.titleLength)), meeting: entry.isMeeting, marks: entry.marks.count,
                        persona: attended ? entry.attendance?.role.rawValue : nil,
                        answer: showsAnswer ? answer : nil,
-                       topic: liveView ? Self.cut(topic, Self.topicLength) : nil,
+                       topic: shownTopic,
                        line: showsAnswer ? nil : line,
                        talking: MeetingCallRule.talkOffered(entry, roomMissing: roomMissing) ? recording && talking : nil,
                        fellBack: fellBack ? true : nil)
+        if shownTopic != nil, let topicPlace {
+            content.topicNumber = topicPlace.number
+            content.topicCount = topicPlace.count
+        }
+        return content
+    }
+
+    /// Where a topic stands among the room's topics (#8731 V4, "2 / 4"): its place from 1 and how many there are. nil
+    /// without a topic, or one the list doesn't hold.
+    nonisolated struct TopicPlace: Hashable, Sendable {
+        var number: Int
+        var count: Int
+    }
+
+    nonisolated static func place(of topic: String?, in topics: [MeetingTopic]) -> TopicPlace? {
+        guard let topic, let index = topics.firstIndex(where: { $0.title == topic }) else { return nil }
+        return TopicPlace(number: index + 1, count: topics.count)
     }
 
     /// How long to hold `next` back when `shown` went out at `sentAt` (pure, for the tests): an answer, a phase, the

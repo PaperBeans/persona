@@ -2,6 +2,12 @@
 
 Pitfalls, odd behavior and the trade-offs made at the time (originally in `CLAUDE.md`; index in `docs/lessons/README.md`). Put new lessons in the matching section; if none fits, start a new one.
 
+## Saving mail attachments
+
+- Enforce a save limit while spooling, not after writing the attachment to disk (#9398). Keep reading and hashing the
+  full decoded attachment when its identity depends on its content, so the ID still matches and the IMAP connection
+  remains synchronized. Test a large attachment, the exact limit, a wrong ID, and a subsequent mailbox request.
+
 ## Sending attachments
 
 - Don't extend the client_id idempotency of text / images to files: the Lark gateway's direct file upload doesn't go through the outbox, and an unknown result must not be uploaded again. An API success whose receipt is lost or can't be parsed is also unknown; only an explicit rejection allows a retry. Test mocks must tell a 429 rejection apart from a receipt lost after acceptance, rather than always returning 502 and assuming a retry is safe.

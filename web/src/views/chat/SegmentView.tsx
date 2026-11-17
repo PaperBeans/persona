@@ -1,4 +1,4 @@
-import { type CSSProperties, Fragment, memo, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, Fragment, lazy, memo, type ReactNode, Suspense, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { clock } from "../../lib/format";
 import { stripCloseout } from "../../lib/closeout";
 import { getSession, getState, useStore } from "../../lib/store";
@@ -43,9 +43,13 @@ import { Icon } from "../../ui/icons";
 import { WorkGroup, WorkNodes, type WorkProps } from "./WorkGroup";
 import { TurnChanges, turnChangesHeight } from "./TurnChanges";
 import { turnChanges } from "../../lib/turn-changes";
+import type { Step } from "../../lib/turns";
 import { useCallSeeker } from "./jump";
 import { t } from "../../i18n";
 import { useMessageFeedback } from "../../lib/message-send";
+
+// a finished reply's Sources row (#9132): its chunk loads only for a turn that looked something up on the web
+const TurnSources = lazy(() => import("./TurnSources").then((m) => ({ default: m.TurnSources })));
 
 /** A message longer than this many lines folds to ten of them (FOLDED), with "Expand" under it (the reference client's UserMessage). */
 export const BUBBLE_MAX_LINES = 14;
@@ -378,12 +382,14 @@ export const SegmentView = memo(function SegmentView({
   // the session's folder from the store, so the card follows it when it comes in after the transcript
   const cwd = useStore(() => (counted ? getSession(mid, sid)?.cwd : undefined));
   const changes = useMemo(() => (counted ? turnChanges(own, cwd) : null), [counted, own, cwd]);
+  // the web pages the finished exchange used, in a Persona conversation and an Agent's alike (#9132)
+  const sourced = !live && !trace && Boolean(seg.user) && own.some(webStep);
   // what the finished exchange used, for its reply bar (#5426): the work summary's time when it has one summary
   const usage = !live && !trace ? usageKey(seg.usage) : undefined;
   const groups = usage ? nodes.filter((n) => n.kind === "group") : [];
   const usageMs = groups.length === 1 ? groups[0].durationMs : undefined;
   const switched = Boolean(seg.engineSwitch);
-  const guess = useMemo(() => (offscreen ? ({ "--seg-est": `${segmentHeight(seg.user, nodes, divided, switched) + (changes ? 12 + turnChangesHeight(changes) : 0)}px` } as CSSProperties) : undefined), [offscreen, seg.user, nodes, divided, switched, changes]);
+  const guess = useMemo(() => (offscreen ? ({ "--seg-est": `${segmentHeight(seg.user, nodes, divided, switched) + (changes ? 12 + turnChangesHeight(changes) : 0) + (sourced ? 14 + SOURCES_HEIGHT : 0)}px` } as CSSProperties) : undefined), [offscreen, seg.user, nodes, divided, switched, changes, sourced]);
   return (
     <section ref={box} className={offscreen ? "seg-cv flex flex-col gap-3.5" : "flex flex-col gap-3.5"} style={guess} data-segment>
       {/* the first message the conversation's new engine got (#5054): the switch divider above it, the user's words below */}
@@ -401,10 +407,19 @@ export const SegmentView = memo(function SegmentView({
       {!live && <Fragment key="before-words">{beforeWords}</Fragment>}
       {streaming !== undefined && liveRow}
       {(latestItem || streaming !== undefined) && !onlyCloseout && <div key="latest-text" data-latest-text><LatestAnswer item={latestItem} streaming={streaming} mid={mid} sid={sid} noCloseout={noCloseout || undefined} done={(!live && !busy) || undefined} cut={(!live && seg.cut) || undefined} usage={usage} usageMs={usageMs} /></div>}
+      {sourced && <Suspense key="turn-sources" fallback={null}><TurnSources steps={own} /></Suspense>}
       {changes && <TurnChanges key="turn-changes" changes={changes} mid={mid} sid={sid} cwd={cwd} />}
     </section>
   );
 });
+
+/** The Sources row's height as drawn (TurnSources.tsx: one line of chips), for an exchange's estimate. */
+const SOURCES_HEIGHT = 28;
+
+/** A step that may name web pages: a web call, or folded work that carries some (lib/turn-sources.ts reads them). */
+function webStep(s: Step): boolean {
+  return s.kind === "tool" ? s.use.tool_name === "WebSearch" || s.use.tool_name === "WebFetch" : s.kind === "fold" && Boolean(s.item.fold?.sources?.length);
+}
 
 /** The message's transcript item that carried the switch's block (its rest is fetched from it when the hub cut it). */
 function switchItem(seg: Segment): Item | undefined {

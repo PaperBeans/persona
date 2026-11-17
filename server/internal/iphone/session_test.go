@@ -295,6 +295,11 @@ func TestReadOnlyRetriedOnceAfterDrop(t *testing.T) {
 
 func TestDeadlineAfterSendIsUncertainForInputOnly(t *testing.T) {
 	m, p := testManager(t, Record{Address: "192.0.2.5"})
+	// The link first: a call's 100 ms below is for its answer, not for bringing a link up, which under a full parallel
+	// run took longer and left the call unsent (unreachable, not uncertain).
+	if _, err := call(t, m, "device_info", 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
 	var timeouts []int64
 	p.handler = func(l *fakeLink, r request) { timeouts = append(timeouts, r.TimeoutMS) } // never answers
 	if _, err := call(t, m, "launch_app", 100*time.Millisecond); Code(err) != CodeUncertain {

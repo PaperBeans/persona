@@ -831,3 +831,176 @@ test('acknowledged reply retains the captured Hub key and clears its stored draf
  const data=mailDetail('scoped-reply'),f=makeHarness({rows:[data],details:{'scoped-reply':data}}),w=new InboxWorkspace(),row=rowFor(data);row.group=f.client.profile.id;await w.open(f.client,row);w.replyDraft='Reply once';w.setReplyDraft('Reply once');await w.draftWrite;
  assert.equal(await w.replyInbox('Reply once',w.replyConfirmationSnapshot('Reply once')),true);assert.equal(w.selected.key(),row.key());assert.equal(w.replyDraft,'');await w.close();
 });
+
+test('account lookup acquires send admission before awaiting and an unknown result cannot be cleared by Process',async()=>{
+ const chat=conversationDetail();let hold=false,release;const gate=new Promise(resolve=>release=resolve);
+ const f=makeHarness({rows:[chat],details:{'chat-1':chat},handle:async call=>{
+  if(hold&&pathOnly(call.path)==='/api/v1/messaging/chat/me')await gate;
+  if(call.method==='POST'&&pathOnly(call.path).endsWith('/messages'))throw new HttpFailure(0,'result_unknown',true);
+ }});
+ const workspace=new InboxWorkspace();await workspace.open(f.client,rowFor(chat));workspace.setReplyDraft('Keep this');await workspace.draftWrite;hold=true;
+ const first=workspace.sendConversation('Keep this');assert.equal(workspace.writeState,'sending');assert.equal(workspace.canWrite(),false);
+ assert.equal(await workspace.sendConversation('Keep this'),false);assert.equal(await workspace.processInbox(),false);assert.equal(await workspace.handoff('Keep this'),undefined);
+ release();assert.equal(await first,false);assert.equal(workspace.writeState,'unknown');assert.equal(workspace.replyDraft,'Keep this');
+ assert.equal(await workspace.processInbox(),false);assert.equal(await workspace.sendConversation('Keep this'),false);
+ assert.equal(f.calls.filter(c=>c.method==='POST'&&pathOnly(c.path).endsWith('/messages')).length,1);await workspace.close();
+});
+
+test('attachment account lookup and a hidden handoff share the write gate',async()=>{
+ for(const operation of ['attachment','handoff']){
+  const chat=conversationDetail();let hold=false,release;const gate=new Promise(resolve=>release=resolve);
+  const f=makeHarness({rows:[chat],details:{'chat-1':chat},handle:async call=>{
+   if(hold&&operation==='attachment'&&pathOnly(call.path)==='/api/v1/messaging/chat/me')await gate;
+   if(hold&&operation==='handoff'&&pathOnly(call.path).endsWith('/handoff')){await gate;throw new HttpFailure(0,'result_unknown',true);}
+  },bytes:async()=>({data:new TextEncoder().encode('{"state":"pending"}').buffer,contentType:'application/json'})});
+  const workspace=new InboxWorkspace();await workspace.open(f.client,rowFor(chat));workspace.setAttachment(new InboxAttachmentDraft('notes.txt','text/plain','file',new TextEncoder().encode('synthetic').buffer));hold=true;
+  const first=operation==='attachment'?workspace.sendAttachment():workspace.handoff('Synthetic handoff');
+  assert.equal(workspace.canWrite(),false,operation);assert.equal(await workspace.sendConversation('Do not resend'),false);assert.equal(await workspace.sendAttachment(),false);assert.equal(await workspace.processInbox(),false);
+  release();await first;assert.equal(workspace.writeState,operation==='attachment'?'pending':'unknown');assert.equal(workspace.canWrite(),false);
+  assert.equal(await workspace.processInbox(),false);assert.equal(await workspace.handoff('Do not resend'),undefined);
+  assert.equal(f.byteCalls.length,operation==='attachment'?1:0);assert.equal(f.calls.filter(c=>c.method==='POST'&&pathOnly(c.path).endsWith('/handoff')).length,operation==='handoff'?1:0);await workspace.close();
+ }
+});
+
+test('disconnect distinguishes a known-unsent account lookup from an outbound write',async()=>{
+ for(const phase of ['lookup','outbound']){
+  const chat=conversationDetail();let hold=false,release;const gate=new Promise(resolve=>release=resolve);
+  const f=makeHarness({rows:[chat],details:{'chat-1':chat},handle:async call=>{
+   if(hold&&((phase==='lookup'&&pathOnly(call.path).endsWith('/me'))||(phase==='outbound'&&call.method==='POST'&&pathOnly(call.path).endsWith('/messages'))))await gate;
+  }});
+  const workspace=new InboxWorkspace();await workspace.open(f.client,rowFor(chat));workspace.setReplyDraft('Retained');await workspace.draftWrite;hold=true;
+  const request=workspace.sendConversation('Retained');
+  if(phase==='outbound')await waitFor(()=>f.calls.some(c=>c.method==='POST'&&pathOnly(c.path).endsWith('/messages')));
+  workspace.onDisconnected();f.state.generation++;hold=false;release();await request;
+  assert.equal(workspace.writeState,phase==='lookup'?'failed':'unknown');await workspace.reconnect();
+  assert.equal(workspace.writeState,phase==='lookup'?'failed':'unknown');assert.equal(workspace.canWrite(),phase==='lookup');assert.equal(workspace.replyDraft,'Retained');await workspace.close();
+ }
+});
+
+test('an attachment freezes its confirmed reply target before the account lookup',async()=>{
+ const chat=conversationDetail();let hold=false,release;const gate=new Promise(resolve=>release=resolve);
+ const f=makeHarness({rows:[chat],details:{'chat-1':chat},handle:async call=>{if(hold&&pathOnly(call.path).endsWith('/me'))await gate;},bytes:async()=>({data:new TextEncoder().encode('{}').buffer,contentType:'application/json'})});
+ const workspace=new InboxWorkspace();await workspace.open(f.client,rowFor(chat));workspace.setThreadTarget('m-1',true);
+ workspace.setAttachment(new InboxAttachmentDraft('notes.txt','text/plain','file',new TextEncoder().encode('synthetic').buffer));hold=true;
+ const request=workspace.sendAttachment();workspace.threadReplyTo='';workspace.threadReply=false;release();await request;
+ assert.equal(f.byteCalls.length,1);assert.equal(queryValue(f.byteCalls[0].path,'reply_to'),'m-1');assert.equal(queryValue(f.byteCalls[0].path,'thread'),'1');await workspace.close();
+});
+
+test('a non-generic reply keeps its capability visible while an uncertain write blocks submission',async()=>{
+ const data=mailDetail();const f=makeHarness({rows:[data],details:{'mail-1':data}});const workspace=new InboxWorkspace();await workspace.open(f.client,rowFor(data));
+ workspace.replyDraft='Do not hide';workspace.writeState='unknown';assert.equal(workspace.canReplyToItem(),true);assert.equal(workspace.canWrite(),false);
+ assert.equal(await workspace.replyInbox('Do not hide',workspace.replyConfirmationSnapshot('Do not hide')),false);assert.equal(workspace.replyDraft,'Do not hide');assert.equal(workspace.writeState,'unknown');await workspace.close();
+});
+
+test('disconnect during journal admission prevents every old item write from reaching transport',async()=>{
+ for(const operation of ['conversation','reply','process','handoff']){
+  const data=operation==='conversation'?conversationDetail():mailDetail();const f=makeHarness({rows:[data],details:{[data.id]:data}});const workspace=new InboxWorkspace();await workspace.open(f.client,rowFor(data));
+  let entered,release;const started=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve),begin=f.repo.mutations.begin.bind(f.repo.mutations);
+  f.repo.mutations.begin=async(...args)=>{entered();await gate;return begin(...args);};
+  const request=operation==='conversation'?workspace.sendConversation('Synthetic'):operation==='reply'?workspace.replyInbox('Synthetic',workspace.replyConfirmationSnapshot('Synthetic')):operation==='process'?workspace.processInbox():workspace.handoff('Synthetic');
+  await started;workspace.onDisconnected();f.state.generation++;release();await request;await workspace.reconnect();
+  assert.equal(f.calls.filter(call=>call.method==='POST').length,0,operation);assert.equal(workspace.writeState,'failed',operation);assert.equal(workspace.canWrite(),true,operation);await workspace.close();
+ }
+});
+
+test('processing and malformed attachment receipts retain uncertain-write protection',async()=>{
+ for(const outcome of ['pending','unknown']){
+  const data=mailDetail();const f=makeHarness({rows:[data],details:{[data.id]:data},handle:async call=>{
+   if(call.method==='POST'&&pathOnly(call.path).endsWith('/done'))throw new HttpFailure(202,'result_unknown',true,outcome==='pending');
+  }});const workspace=new InboxWorkspace();await workspace.open(f.client,rowFor(data));assert.equal(await workspace.processInbox(),false);assert.equal(workspace.writeState,outcome);assert.equal(await workspace.processInbox(),false);assert.equal(workspace.canWrite(),false);await workspace.close();
+ }
+ for(const bytes of [new Uint8Array([255]),new TextEncoder().encode(JSON.stringify({extra:'x'.repeat(4*1024*1024)})),...['not JSON','','null','[]','42','"receipt"','{"message_id":42}','{"message_id":null}',JSON.stringify({message_id:'x'.repeat(201)})].map(value=>new TextEncoder().encode(value))]){
+  const data=conversationDetail();const f=makeHarness({rows:[data],details:{[data.id]:data},bytes:async()=>({data:bytes.buffer,contentType:'application/json'})});const workspace=new InboxWorkspace();await workspace.open(f.client,rowFor(data));
+  workspace.setAttachment(new InboxAttachmentDraft('notes.txt','text/plain','file',new TextEncoder().encode('synthetic').buffer));assert.equal(await workspace.sendAttachment(),false);assert.equal(workspace.writeState,'unknown');assert.equal(await workspace.sendAttachment(),false);assert.equal(f.byteCalls.length,1);assert.equal(workspace.canWrite(),false);await workspace.close();
+ }
+});
+
+test('a successful reply stays sent if later local draft cleanup fails',async()=>{
+ const data=conversationDetail();const f=makeHarness({rows:[data],details:{[data.id]:data}});const workspace=new InboxWorkspace();await workspace.open(f.client,rowFor(data));workspace.replyDraft='One synthetic message';workspace.persistDraft=async()=>{throw new Error('local storage unavailable');};
+ assert.equal(await workspace.sendConversation('One synthetic message'),true);assert.equal(workspace.writeState,'sent');assert.equal(workspace.replyDraft,'');assert.equal(f.calls.filter(call=>call.method==='POST'&&pathOnly(call.path).endsWith('/messages')).length,1);await workspace.close();
+});
+
+test('a new write resets outbound admission after a successful write in the same workspace',async()=>{
+ for(const operation of ['reply','process','handoff']){
+  const data=mailDetail();const f=makeHarness({rows:[data],details:{[data.id]:data}});const workspace=new InboxWorkspace();await workspace.open(f.client,rowFor(data));
+  assert.equal(await workspace.replyInbox('First',workspace.replyConfirmationSnapshot('First')),true);
+  let entered,release;const started=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve),begin=f.repo.mutations.begin.bind(f.repo.mutations);
+  f.repo.mutations.begin=async(...args)=>{entered();await gate;return begin(...args);};
+  const request=operation==='reply'?workspace.replyInbox('Second',workspace.replyConfirmationSnapshot('Second')):operation==='process'?workspace.processInbox():workspace.handoff('Second');
+  await started;workspace.onDisconnected();f.state.generation++;release();await request;await workspace.reconnect();
+  assert.equal(workspace.writeState,'failed',operation);assert.equal(workspace.canWrite(),true,operation);assert.equal(f.calls.filter(call=>call.method==='POST').length,1,operation);await workspace.close();
+ }
+});
+
+test('a reply receipt for a different item is uncertain and cannot leave an actionable sending state',async()=>{
+ const data=mailDetail();const f=makeHarness({rows:[data],details:{[data.id]:data},handle:async call=>call.method==='POST'&&pathOnly(call.path).endsWith('/reply')?{item:mailDetail('another-item')}:undefined});
+ const workspace=new InboxWorkspace();await workspace.open(f.client,rowFor(data));workspace.setReplyDraft('Keep this');await workspace.draftWrite;
+ assert.equal(await workspace.replyInbox('Keep this',workspace.replyConfirmationSnapshot('Keep this')),false);assert.equal(workspace.writeState,'unknown');assert.equal(workspace.replyDraft,'Keep this');assert.equal(workspace.canWrite(),false);await workspace.close();
+ const reopened=new InboxWorkspace();await reopened.open(f.client,rowFor(data));assert.equal(reopened.replyDraft,'Keep this');
+ assert.equal(await reopened.replyInbox('Keep this',reopened.replyConfirmationSnapshot('Keep this')),false);assert.equal(reopened.writeState,'unknown');
+ assert.equal(f.calls.filter(call=>call.method==='POST'&&pathOnly(call.path).endsWith('/reply')).length,1);await reopened.close();
+});
+
+
+test('attachment receipt accepts an empty object or a bounded Unicode message id without resending',async()=>{
+ for(const receipt of [{},{message_id:'m-1'},{message_id:'😀'.repeat(200)}]){
+  const data=conversationDetail();const f=makeHarness({rows:[data],details:{[data.id]:data},bytes:async()=>({data:new TextEncoder().encode(JSON.stringify(receipt)).buffer,contentType:'application/json'})});
+  const workspace=new InboxWorkspace();await workspace.open(f.client,rowFor(data));workspace.setAttachment(new InboxAttachmentDraft('notes.txt','text/plain','file',new TextEncoder().encode('synthetic').buffer));
+  assert.equal(await workspace.sendAttachment(),true);assert.equal(workspace.writeState,'sent');assert.equal(workspace.attachment,undefined);assert.equal(f.byteCalls.length,1);assert.equal(await workspace.sendAttachment(),false);assert.equal(f.byteCalls.length,1);await workspace.close();
+ }
+});
+
+test('item writes keep malformed receipts unknown across restored storage without clearing drafts or dispatching twice', async () => {
+  const session = { machine_id: 'server', session_id: 'untrusted-target' };
+  for (const operation of ['reply', 'done', 'handoff']) {
+    const receipts = ['', '{}', 'null', '[]', '42', '""', '{"id":""}', '{"id":42}', '{"id":"other-item"}',
+      '{"item":{}}', '{"item":null}', '{"id":"mail-1","item":null}', '{"id":"mail-1","item":{}}', '{"item":[]}', '{"item":{"id":42}}', JSON.stringify({ item: { id: 'other-item' }, session })];
+    if (operation === 'handoff') receipts.push(JSON.stringify({ id: 'mail-1', session }));
+    for (const raw of receipts) {
+      const data = mailDetail(), f = makeHarness({ rows: [data], details: { [data.id]: data } });
+      const originalRequest = f.repo.transport.request.bind(f.repo.transport);
+      f.repo.transport.request = async (path, method = 'GET', body = '', op = '') => {
+        if (method === 'POST' && pathOnly(path).endsWith('/' + operation)) {
+          f.calls.push({ path, method, body: body ? JSON.parse(body) : {}, op });
+          return raw;
+        }
+        return originalRequest(path, method, body, op);
+      };
+      const run = (workspace) => operation === 'reply' ? workspace.replyInbox('Retain this draft', workspace.replyConfirmationSnapshot('Retain this draft')) :
+        operation === 'done' ? workspace.processInbox() : workspace.handoff('Retain this draft');
+      const workspace = new InboxWorkspace(); await workspace.open(f.client, rowFor(data));
+      workspace.setReplyDraft('Retain this draft'); await workspace.draftWrite;
+      assert.equal(await run(workspace), operation === 'handoff' ? undefined : false, operation + ':' + raw);
+      assert.equal(workspace.writeState, 'unknown'); assert.equal(workspace.replyDraft, 'Retain this draft');
+      if (operation === 'handoff') assert.equal(workspace.handoffDraft, 'Retain this draft');
+      const blocked = f.repo.mutations.blocked(); assert.equal(blocked.length, 1); assert.equal(blocked[0].state, 'unknown');
+      await workspace.close();
+
+      // A new store owner must restore the persisted journal, rather than use its in-memory records.
+      const restoredLocal = { get: key => f.local.get(key), put: (key, value) => f.local.put(key, value), remove: key => f.local.remove(key) };
+      const restoredRepo = new HubRepository(new EndpointConfig('https://hub.example.test', 'hub-1', '', '', 'work'), restoredLocal);
+      f.state.repo = restoredRepo;
+      const reopened = new InboxWorkspace(); await reopened.open(f.client, rowFor(data));
+      assert.equal(reopened.replyDraft, 'Retain this draft');
+      assert.equal(await run(reopened), operation === 'handoff' ? undefined : false);
+      assert.equal(reopened.writeState, 'unknown'); assert.equal(restoredRepo.mutations.blocked()[0].state, 'unknown');
+      assert.equal(f.calls.filter(call => call.method === 'POST').length, 1, operation + ':' + raw);
+      assert.equal(reopened.replyDraft, 'Retain this draft'); await reopened.close();
+    }
+  }
+});
+
+test('reply and process accept a matching direct entry or item envelope before completing their journal', async () => {
+  for (const operation of ['reply', 'done']) for (const wrapped of [false, true]) {
+    const data = mailDetail(), updated = { ...data, done: operation === 'done' };
+    const f = makeHarness({ rows: [data], details: { [data.id]: data }, handle: async call =>
+      call.method === 'POST' && pathOnly(call.path).endsWith('/' + operation) ? (wrapped ? { item: updated } : updated) : undefined });
+    const workspace = new InboxWorkspace(); await workspace.open(f.client, rowFor(data));
+    workspace.setReplyDraft('One reply'); await workspace.draftWrite;
+    assert.equal(operation === 'reply' ? await workspace.replyInbox('One reply', workspace.replyConfirmationSnapshot('One reply')) : await workspace.processInbox(), true);
+    assert.equal(workspace.detail.id, data.id); assert.equal(f.repo.mutations.blocked().length, 0);
+    if (operation === 'reply') { assert.equal(workspace.writeState, 'sent'); assert.equal(workspace.replyDraft, ''); }
+    else assert.equal(workspace.detail.done, true);
+    await workspace.close();
+  }
+});

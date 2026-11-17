@@ -644,7 +644,7 @@ struct FeishuDocsOutlineSheet: View {
             .listStyle(.plain)
             .navigationTitle("Folder [Task Views 52daa7]")
             .navigationBarTitleDisplayMode(.inline)
-            .macSheetDone { dismiss() }
+            .sheetDone { dismiss() }
         }
     }
 }

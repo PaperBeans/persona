@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { hasRequestPieces } from "./request-pieces";
 import type { Machine, Session } from "./types";
 import {
   DECISIONS_FIRST,
@@ -252,7 +253,8 @@ describe("待办列表排序 (sortTodos)", () => {
     // the same order as the board's sections
     const sections = sorted.map((t) => BOARD_ORDER.indexOf(boardSectionOf({ todo: t, status: todoStatus(t, lookup) })));
     expect(sections).toEqual([...sections].sort((a, b) => a - b));
-    expect(new Set(sections).size).toBe(BOARD_ORDER.length);
+    // Parked comes from task triage, not an Agent status (parked-grouping.test.ts).
+    expect(new Set(sections).size).toBe(BOARD_ORDER.filter((section) => section !== "parked").length);
   });
 
   it("同状态下按创建时间倒序排（新的在前）", () => {
@@ -893,5 +895,17 @@ describe("a to-do's decisions shown (#6447)", () => {
     expect(shownDecisions(["a", "b"], "first")).toEqual(["a", "b"]);
     expect(shownDecisions([], "first")).toEqual([]);
     expect(list).toHaveLength(12);
+  });
+});
+
+describe("hasRequestPieces", () => {
+  const td = (id: string, extra: Partial<Todo> = {}): Todo => ({ id, title: id, created_at: "2026-11-10T00:00:00Z", updated_at: "2026-11-10T00:00:00Z", ...extra });
+  it("is a to-do part_of another listed one, or two to-dos of one plan", () => {
+    expect(hasRequestPieces([td("a"), td("b")])).toBe(false);
+    expect(hasRequestPieces([td("a"), td("b", { part_of: "a" })])).toBe(true);
+    // a request whose to-do is not listed, or a to-do naming itself, is no piece here
+    expect(hasRequestPieces([td("b", { part_of: "gone" }), td("c", { part_of: "c" })])).toBe(false);
+    expect(hasRequestPieces([td("a", { plan_id: "p" }), td("b", { plan_id: "q" })])).toBe(false);
+    expect(hasRequestPieces([td("a", { plan_id: "p" }), td("b", { plan_id: "p" })])).toBe(true);
   });
 });

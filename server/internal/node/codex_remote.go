@@ -396,7 +396,8 @@ func (c *codexRemote) refresh() error {
 			t.parent = "parent-managed"
 		}
 		if t.parent != "" && validID(t.parent) {
-			t.parent = c.n.registerCodex(c.spec.Home, t.parent, "")
+			// Keep the raw thread ID: decorateCodexSession maps ancestry to public IDs once.
+			c.n.registerCodex(c.spec.Home, t.parent, "")
 		}
 		if t.files == nil {
 			t.files = map[string][]string{}

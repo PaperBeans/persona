@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -434,7 +435,8 @@ internal fun homeSwitcherOccupiedBounds(capsuleWidth: Int, badgeWidth: Int?, bad
 
 /**
  * Measures real control widths, then tries centered full, centered compact, gap full, gap compact and stacked.
- * Non-Glass styles start at gap full. Measurement candidates hide their semantics; only the selected one is placed.
+ * Non-Glass styles start at gap full. Measurement candidates hide their semantics and do not run the pill
+ * spring (`LocalSlidingPillAnimate`); only the selected one is placed.
  */
 @Composable
 private fun HomeNavigationLayout(
@@ -463,10 +465,14 @@ private fun HomeNavigationLayout(
             ) { trailing() }
         }.first().measure(androidx.compose.ui.unit.Constraints())
         val full = subcompose(2) {
-            Box(Modifier.clearAndSetSemantics {}) { fullSwitcher() }
+            CompositionLocalProvider(LocalSlidingPillAnimate provides false) {
+                Box(Modifier.clearAndSetSemantics {}) { fullSwitcher() }
+            }
         }.first().measure(androidx.compose.ui.unit.Constraints())
         val compact = subcompose(3) {
-            Box(Modifier.clearAndSetSemantics {}) { compactSwitcher() }
+            CompositionLocalProvider(LocalSlidingPillAnimate provides false) {
+                Box(Modifier.clearAndSetSemantics {}) { compactSwitcher() }
+            }
         }.first().measure(androidx.compose.ui.unit.Constraints())
         val accessory = endAccessory?.let { content ->
             subcompose(4) {
@@ -561,11 +567,26 @@ private fun GlassHomeSwitcher(
     val density = androidx.compose.ui.platform.LocalDensity.current
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     Box(modifier) {
-        Row(Modifier.testTag("home-switcher").floatingSurface(CircleShape).padding(surfacePadding)) {
-            items.forEach { item ->
-                val chosen = item.key == selected
-                val labelStyle = PersonaTheme.type.body.copy(fontSize = PersonaTheme.type.body.fontSize * HomeTokens.shellTextStep,
-                    fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal)
+        // One pill for the whole switch. iOS `ShellSwitch` / `SwitchMotion` (`ShellComponents.swift`):
+        // a tap glides it on `Theme.Motion.state`, and the label's colour and weight change inside that
+        // same animation (lines 325 and 336). There is no shell strip here, so it does not follow a finger.
+        // A missing key is not a segment: no pill, rather than one under the first.
+        GlassSlidingPill(
+            selected = items.indexOfFirst { it.key == selected },
+            count = items.size,
+            color = if (PersonaTheme.darkTheme) HomeTokens.segmentDark else HomeTokens.segmentLight,
+            modifier = Modifier.testTag("home-switcher").floatingSurface(CircleShape).padding(surfacePadding),
+        ) { index ->
+            val item = items[index]
+            val chosen = item.key == selected
+            val body = PersonaTheme.type.body
+            // The chosen weight's size is the old single measurement. The other weight is only the
+            // crossfade (`GlassSegmentLabel`): SwiftUI fades the glyphs when the font changes.
+            fun fitted(weight: FontWeight): androidx.compose.ui.text.TextStyle {
+                val labelStyle = body.copy(
+                    fontSize = body.fontSize * HomeTokens.shellTextStep,
+                    fontWeight = weight,
+                )
                 val measured = textMeasurer.measure(item.label, style = labelStyle, maxLines = 1)
                 val available = with(density) { textWidth.toPx() }
                 val fit = (available / measured.size.width.coerceAtLeast(1)).coerceAtMost(1f)
@@ -583,15 +604,16 @@ private fun GlassHomeSwitcher(
                     }
                     candidate
                 } else baseFittedSize
-                Box(Modifier.width(segmentWidth).height(HomeTokens.segmentHeight * scale)
-                    .clip(CircleShape).background(if (chosen) {
-                        if (PersonaTheme.darkTheme) HomeTokens.segmentDark else HomeTokens.segmentLight
-                    } else Color.Transparent)
-                    .clickable(role = Role.Tab) { onClick(item) }
-                    .semantics { this.selected = chosen }, contentAlignment = Alignment.Center) {
-                    Text(item.label, style = labelStyle.copy(fontSize = fittedSize),
-                        color = if (chosen) palette.ink else palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+                return labelStyle.copy(fontSize = fittedSize)
+            }
+            Box(Modifier.width(segmentWidth).height(HomeTokens.segmentHeight * scale)
+                .clip(CircleShape)
+                .clickable(role = Role.Tab) { onClick(item) }
+                .semantics { this.selected = chosen }, contentAlignment = Alignment.Center) {
+                GlassSegmentLabel(
+                    item.label, selected = chosen, selectedColor = palette.ink, idleColor = palette.ink2,
+                    style = fitted(FontWeight.SemiBold), idleStyle = fitted(FontWeight.Normal),
+                )
             }
         }
         val waiting = items.lastOrNull()?.badge ?: 0

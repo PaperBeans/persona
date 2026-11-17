@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { KnowledgeRecording } from '../models/KnowledgeRecording';
 import type { KnowledgeRecordingEntry } from '../models/KnowledgeRecording';
 import { Tokens } from '../design/Tokens';
@@ -35,6 +38,16 @@ export struct KnowledgeRecordingView {
     return this.model.transcriptionState === 'failed' ? tr('knowledge_recording_retry_transcribe') : tr('knowledge_recording_transcribe');
   }
 
+  private confirmTranscription(): void {
+    const owner = this.model, entry = owner.entry;
+    if (!entry || !owner.canTranscribe()) return;
+    this.getUIContext().showAlertDialog({ title: this.transcribeLabel(), message: tr('knowledge_recording_save_notice'),
+      primaryButton: { value: tr('cancel'), action: () => {} },
+      secondaryButton: { value: tr('confirm'), action: () => {
+        if (this.model === owner && owner.entry === entry && owner.canTranscribe()) owner.transcribeAndUpload().catch(() => false);
+      } } });
+  }
+
   private recordingOptions(): SelectOption[] {
     return this.model.entries.map((entry: KnowledgeRecordingEntry): SelectOption => ({
       value: entry.startedAt.replace('T', ' ').slice(0, 19)
@@ -50,9 +63,9 @@ export struct KnowledgeRecordingView {
   build() {
     Column({ space: Tokens.gap }) {
       Row({ space: Tokens.gap }) {
-        Button(tr('knowledge_recording_start')).enabled(this.model.canStart()).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('knowledge_recording_start')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('knowledge_recording_start', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('knowledge_recording_start')).bindTips(tr('knowledge_recording_start')).enabled(this.model.canStart())
           .onClick(() => this.model.start().catch(() => false)).id('knowledge.recording.start')
-        Button(tr('knowledge_recording_stop')).enabled(this.model.canStop()).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('knowledge_recording_stop')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('knowledge_recording_stop', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('knowledge_recording_stop')).bindTips(tr('knowledge_recording_stop')).enabled(this.model.canStop())
           .onClick(() => this.model.stop().catch(() => false)).id('knowledge.recording.stop')
       }.width('100%')
 
@@ -73,21 +86,21 @@ export struct KnowledgeRecordingView {
         .fontColor($r('app.color.persona_danger')).width('100%').id('knowledge.recording.error')
 
       if (this.model.captureState === 'stopped' && this.model.transcriptionState !== 'complete') {
-        Button(this.transcribeLabel()).enabled(this.model.canTranscribe()).height(Tokens.touch)
-          .onClick(() => this.model.transcribeAndUpload().catch(() => false)).id('knowledge.recording.transcribe')
+        Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.model.transcriptionState === 'failed' ? 'knowledge_recording_retry_transcribe' : 'knowledge_recording_transcribe')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.onAction); else SymbolGlyph(IconActions.symbol(this.model.transcriptionState === 'failed' ? 'knowledge_recording_retry_transcribe' : 'knowledge_recording_transcribe')).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.model.transcriptionState === 'failed' ? 'knowledge_recording_retry_transcribe' : 'knowledge_recording_transcribe', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(this.transcribeLabel()).bindTips(this.transcribeLabel()).enabled(this.model.canTranscribe())
+          .onClick(() => this.confirmTranscription()).id('knowledge.recording.transcribe')
       }
       if (this.model.transcriptionState === 'transcribing') {
-        Button(tr('cancel')).height(Tokens.touch).onClick(() => this.model.cancelTranscription()).id('knowledge.recording.cancel')
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('cancel')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('cancel', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('cancel')).bindTips(tr('cancel')).onClick(() => this.model.cancelTranscription()).id('knowledge.recording.cancel')
       }
       if (this.model.canRetryUpload()) {
-        Button(tr('knowledge_recording_retry_upload')).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('knowledge_recording_retry_upload')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('knowledge_recording_retry_upload', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('knowledge_recording_retry_upload')).bindTips(tr('knowledge_recording_retry_upload'))
           .onClick(() => this.model.retryUpload().catch(() => false)).id('knowledge.recording.retry_upload')
       }
       if (this.model.entry && this.model.entry.transcript) {
         Text(this.model.entry.transcript).fontSize(Tokens.body).width('100%').id('knowledge.recording.transcript')
       }
       if (this.model.canDeleteLocal()) {
-        Button(tr('knowledge_recording_delete_local')).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('knowledge_recording_delete_local')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('knowledge_recording_delete_local', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('knowledge_recording_delete_local')).bindTips(tr('knowledge_recording_delete_local'))
           .onClick(() => this.onDeleteLocal()).id('knowledge.recording.delete_local')
       }
     }.padding(Tokens.inset).width('100%').alignItems(HorizontalAlign.Start)

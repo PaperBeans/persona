@@ -156,11 +156,9 @@ struct TranslationChatPicker: View {
             .sheetCancel(unsaved: opened.map { $0 != Set(selected.map(\.id)) } ?? false) { dismiss() }
             .onAppear { if opened == nil { opened = Set(selected.map(\.id)) } }
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done [Extension System Presentation c0b3fb]") {
-                        save(selected)
-                        dismiss()
-                    }
+                SheetConfirm(id: "translation-chats-save") {
+                    save(selected)
+                    dismiss()
                 }
             }
             .task { await load() }

@@ -113,7 +113,7 @@ func (n *Node) decorateCodexSession(s *proto.Session, src codexSource, legacy st
 	}
 	if s.RepoRoot != "" && !app.inNoProject(chat) {
 		s.SpaceID, s.SpaceName = projectSpace+s.RepoRoot, firstNonEmpty(app.folderName(s.RepoRoot), filepath.Base(s.RepoRoot))
-		s.SpaceIndex = app.folderPlace(s.RepoRoot)
+		s.SpaceIndex = int32(app.folderPlace(s.RepoRoot))
 	} else {
 		s.SpaceID, s.SpaceName = "codex-chats:"+src.home, "Codex 对话"
 	}

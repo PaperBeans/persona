@@ -108,12 +108,13 @@ func TestPRStatusPollReturnsTerminalPRToSupervision(t *testing.T) {
 	for _, terminal := range []string{"merged", "closed"} {
 		t.Run(terminal, func(t *testing.T) {
 			s, _, task := newSupervisedService(t)
-			ctx, now := context.Background(), time.Now()
+			ctx := context.Background()
 			url := "https://github.com/example/app/pull/12"
 			s.setTaskStage(ctx, task.ID, "review", url)
 			if _, err := reviewErr(s, task.ID, mergePark(url)); err != nil {
 				t.Fatal(err)
 			}
+			now := time.Now()
 			f := &statusForge{status: TodoPRStatus{State: "open", Checks: "success", Review: "required"}}
 			s.deploy.forge = f
 			s.sweepPRStatuses(ctx, now)

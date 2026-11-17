@@ -400,6 +400,10 @@ nonisolated extension Item {
 final class ChatStore {
     let key: SessionKey
     @ObservationIgnored private let cacheFolder: URL?
+    #if DEBUG
+    @ObservationIgnored var initialContinuitySnapshot: NativeContinuitySnapshot?
+    @ObservationIgnored var continuityShadowEnabled = true
+    #endif
     private(set) var items: [Item] = []
     private(set) var rows: [ChatRow] = []
     private(set) var blocks: [ChatBlock] = []
@@ -549,6 +553,12 @@ final class ChatStore {
     /// cache, several exchanges behind). Without a span (an older hub) batches are trusted, as before.
     @discardableResult
     func apply(_ new: [Item], span: ItemSpan, backlog: Bool = false, hasMore: Bool? = nil, moreAfter: Bool = false) -> Gap {
+        apply(.batch(backlog && span.from == nil ? .latest : .pushed, items: new, span: span,
+                     backlog: backlog, hasMore: hasMore, moreAfter: moreAfter)) ?? .none
+    }
+
+    /// The native implementation behind the shared adapter. Its result is the only production result.
+    func applyNative(_ new: [Item], span: ItemSpan, backlog: Bool = false, hasMore: Bool? = nil, moreAfter: Bool = false) -> Gap {
         let new = new.publicRefusals()
         arrivedAt = .now
         defer { newestArrived() }
@@ -559,12 +569,12 @@ final class ChatStore {
         }
         if let h = span.history { history = h }
         guard let to = span.to else {
-            merge(new, backlog: backlog, hasMore: hasMore)
+            mergeNative(new, backlog: backlog, hasMore: hasMore)
             covered = max(covered, lastSeq)
             return moreAfter ? .reload : .none
         }
         if let from = span.from {
-            merge(new, backlog: backlog, hasMore: hasMore)
+            mergeNative(new, backlog: backlog, hasMore: hasMore)
             // No baseline yet: the backlog from the end sets one. A batch from line 0 (a new session watched from its
             // first line) is its own baseline: without it, holes after it went unnoticed. If the backlog already came
             // and set none (the transcript did not exist yet) and the first lines' push was lost, only the latest
@@ -577,7 +587,7 @@ final class ChatStore {
         // A page from the end.
         if let first = new.first { newestFrom = (first.seq, first.part) }
         if covered > 0, let first = new.first?.seq, first > covered + 1 {
-            replace(with: new, hasMore: hasMore ?? true, span: span)
+            replaceNative(with: new, hasMore: hasMore ?? true, span: span)
             if backlog { loadedOnce = true }
             return .none
         }
@@ -601,6 +611,18 @@ final class ChatStore {
     }
 
     func merge(_ new: [Item], backlog: Bool = false, hasMore: Bool? = nil) {
+        // Legacy merges keep the native reducer and the shadow's previous snapshot in lockstep. Production adapter
+        // inputs arrive through applyNative; this path only prevents direct native callers from creating a stale base.
+        #if DEBUG
+        updateContinuitySnapshotForNativeMutation()
+        #endif
+        mergeNative(new, backlog: backlog, hasMore: hasMore)
+        #if DEBUG
+        updateContinuitySnapshotForNativeMutation()
+        #endif
+    }
+
+    private func mergeNative(_ new: [Item], backlog: Bool = false, hasMore: Bool? = nil) {
         let new = new.publicRefusals()
         if backlog || !new.isEmpty { error = nil } // data arrived: a stale "machine is offline" no longer applies
         // A replayed disk cache can hold an id twice. Keep the newest copy before indexing, but only after collecting
@@ -737,12 +759,16 @@ final class ChatStore {
 
     /// The work a fold stood for, fetched (`AppModel.unfold`): it takes the fold's place.
     func unfold(_ fold: Item, into work: [Item]) {
+        apply(.range(work, fold: fold, more: false))
+    }
+
+    func unfoldNative(_ fold: Item, into work: [Item]) {
         guard let i = items.firstIndex(where: { $0.id == fold.id }) else { return }
         let retained = items.remove(at: i)
         ids.remove(fold.id)
         opened[fold.id] = retained // the caller may hold an older copy without the latest promotion
         settled = nil
-        merge(work.filter { $0.kind != .fold })
+        mergeNative(work.filter { $0.kind != .fold })
         scheduleRebuild()
     }
 
@@ -1034,6 +1060,10 @@ final class ChatStore {
 
     /// Starts over from the latest page: what came in between was too much to fetch, and a hole would never fill.
     func replace(with latest: [Item], hasMore: Bool, span: ItemSpan = ItemSpan()) {
+        apply(.batch(.reloaded, items: latest, span: span, hasMore: hasMore))
+    }
+
+    func replaceNative(with latest: [Item], hasMore: Bool, span: ItemSpan = ItemSpan()) {
         let latest = latest.publicRefusals()
         arrivedAt = .now
         defer { newestArrived() }
@@ -1047,8 +1077,8 @@ final class ChatStore {
         newestFrom = latest.first.map { ($0.seq, $0.part) }
         self.hasMore = hasMore
         if let h = span.history { history = h }
-        merge(latest)
-        merge(keep)
+        mergeNative(latest)
+        mergeNative(keep)
         covered = span.to ?? lastSeq
         scheduleRebuild() // also when the page is empty
     }
@@ -1076,8 +1106,12 @@ final class ChatStore {
     }
 
     func prepend(_ older: [Item], hasMore: Bool) {
+        _ = apply(.batch(.older, items: older, span: ItemSpan(), hasMore: hasMore))
+    }
+
+    func prependNative(_ older: [Item], hasMore: Bool) {
         self.hasMore = hasMore
-        merge(older)
+        mergeNative(older)
     }
 
     /// Live preview: the lines Claude is currently printing, cut above the input box.

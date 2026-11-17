@@ -134,6 +134,7 @@ public struct NativeChatStoreContinuityReplay {
         ChatCache.save(key, items: items, hasMore: initial.boolean("has_more") ?? false,
                        history: initial.text("history"), covered: initial.number("covered"), in: folder)
         let store = ChatStore(key: key, cacheFolder: folder)
+        store.setContinuityShadowEnabledForFixtureReplay(false)
         if initial.flag("loaded_once") { store.merge([], backlog: true) }
         var opened: Item?
         var range: [Item] = []

@@ -1,3 +1,4 @@
+import { IconActions } from '../design/IconActions';
 import { LengthMetrics } from '@kit.ArkUI';
 import { QuestionDraft } from '../models/QuestionWorkspace';
 import { Symbols } from '../design/Symbols';
@@ -86,6 +87,19 @@ export struct InteractionDecisionForm {
   private submitButtonLabel(): string {
     return this.request.kind === 'screen' && interactionScreenMulti(this.request) ?
       interactionScreenSubmitLabel(this.request) : tr('confirm');
+  }
+
+  private submitIconKey(): string {
+    if (this.request.kind === 'plan' || this.request.kind === 'permission') {
+      if (this.selected === 'deny') return 'deny';
+      if (this.selected === 'approve') return 'approve';
+    }
+    return 'confirm';
+  }
+  private submitIconLabel(): string {
+    if ((this.request.kind === 'plan' || this.request.kind === 'permission') && ['approve', 'deny'].includes(this.selected))
+      return tr('confirm') + ' ' + tr(this.selected === 'deny' ? 'deny' : this.request.kind === 'permission' ? 'allow' : 'approve');
+    return this.submitButtonLabel();
   }
 
   private submitButtonOption(): string {
@@ -488,49 +502,49 @@ export struct InteractionDecisionForm {
   }
 
   @Builder responseFooter() {
-    Column({ space: Tokens.gap }) {
-      if (this.deferred && !this.readOnly) Button(tr('interaction_question_reopen')).attributeModifier(ButtonStyles.secondary).width('100%')
+    Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.End, alignItems: ItemAlign.Center, space: { main: LengthMetrics.vp(Tokens.gap), cross: LengthMetrics.vp(Tokens.gap) } }) {
+      if (this.deferred && !this.readOnly) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('interaction_question_reopen')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('interaction_question_reopen', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('interaction_question_reopen')).bindTips(tr('interaction_question_reopen'))
         .onClick(() => this.deferred = false).id('interaction.reopen')
       else if (!this.readOnly && this.request.kind === 'question') {
-        if (this.pinFooter || this.fillAvailable) Flex({ wrap: FlexWrap.Wrap, alignItems: ItemAlign.Center, space: { main: LengthMetrics.vp(0), cross: LengthMetrics.vp(Tokens.gap) } }) {
-          if (this.pinFooter || this.canDefer()) Button(tr('interaction_question_later')).attributeModifier(ButtonStyles.quiet).flexGrow(1).flexShrink(0).margin({ end: LengthMetrics.vp(Tokens.gap) }).enabled(this.canDefer())
+        if (this.pinFooter || this.fillAvailable) Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.End, alignItems: ItemAlign.Center, space: { main: LengthMetrics.vp(0), cross: LengthMetrics.vp(Tokens.gap) } }) {
+          if (this.pinFooter || this.canDefer()) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('interaction_question_later')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('interaction_question_later', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('interaction_question_later')).bindTips(tr('interaction_question_later')).flexShrink(0).margin({ end: LengthMetrics.vp(Tokens.gap) }).enabled(this.canDefer())
             .onClick(() => { this.deferred = true; this.onLater(); }).id('interaction.later')
-          if (interactionScreenCanCancel(this.request) && !this.pinFooter) Button(tr('cancel')).attributeModifier(ButtonStyles.secondary).flexGrow(1).flexShrink(0).margin({ end: LengthMetrics.vp(Tokens.gap) })
+          if (interactionScreenCanCancel(this.request) && !this.pinFooter) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('cancel')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('cancel', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('cancel')).bindTips(tr('cancel')).flexShrink(0).margin({ end: LengthMetrics.vp(Tokens.gap) })
             .enabled(this.canRespond()).onClick(() => this.submit('cancel')).id('interaction.cancel')
           if (interactionScreenCanCancel(this.request) && this.pinFooter) Button({ type: ButtonType.Circle }) { Image(Symbols.more).width(Tokens.symbol).height(Tokens.symbol).fillColor(Colors.ink) }
             .attributeModifier(ButtonStyles.chrome).enabled(this.canRespond()).accessibilityText(tr('more'))
             .margin({ end: LengthMetrics.vp(Tokens.gap) }).bindMenu([{ value: tr('interaction_question_cancel'), action: () => this.submit('cancel') }]).flexShrink(0).id('interaction.more')
-          Button(tr('confirm')).attributeModifier(ButtonStyles.primary).flexGrow(1).flexShrink(0).enabled(this.canSubmit())
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('confirm')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('confirm', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('confirm')).bindTips(tr('confirm')).flexShrink(0).enabled(this.canSubmit())
             .onClick(() => this.submit('answer')).id('interaction.submit')
         }.width('100%')
         else {
-          if (this.canDefer()) Button(tr('interaction_question_later')).attributeModifier(ButtonStyles.quiet).width('100%')
+          if (this.canDefer()) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('interaction_question_later')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('interaction_question_later', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('interaction_question_later')).bindTips(tr('interaction_question_later'))
             .onClick(() => { this.deferred = true; this.onLater(); }).id('interaction.later')
-          if (interactionScreenCanCancel(this.request)) Button(tr('cancel')).attributeModifier(ButtonStyles.secondary).width('100%')
+          if (interactionScreenCanCancel(this.request)) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('cancel')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('cancel', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('cancel')).bindTips(tr('cancel'))
             .enabled(this.canRespond()).onClick(() => this.submit('cancel')).id('interaction.cancel')
-          Button(tr('confirm')).attributeModifier(ButtonStyles.primary).width('100%').enabled(this.canSubmit())
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('confirm')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('confirm', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('confirm')).bindTips(tr('confirm')).enabled(this.canSubmit())
             .onClick(() => this.submit('answer')).id('interaction.submit')
         }
       } else if (!this.readOnly && this.request.kind === 'elicitation') {
         if (interactionElicitationMode(this.request) === 'url' && interactionElicitationUrl(this.request)) {
-          Button(tr('open')).attributeModifier(ButtonStyles.secondary).width('100%').enabled(this.canRespond())
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('open')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('open', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('open')).bindTips(tr('open')).enabled(this.canRespond())
             .onClick(() => this.openUrl()).id('interaction.open')
-          Button(tr('continue')).attributeModifier(ButtonStyles.primary).width('100%').enabled(this.canSubmit())
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('continue')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('continue', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('continue')).bindTips(tr('continue')).enabled(this.canSubmit())
             .onClick(() => this.submit('accept')).id('interaction.continue')
         } else if (interactionElicitationMode(this.request) !== 'url' && interactionElicitationSupported(this.request)) {
-          Button(tr('confirm')).attributeModifier(ButtonStyles.primary).width('100%').enabled(this.canSubmit())
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('confirm')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('confirm', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('confirm')).bindTips(tr('confirm')).enabled(this.canSubmit())
             .onClick(() => this.submit('accept')).id('interaction.accept')
         }
-        Button(tr('deny')).attributeModifier(ButtonStyles.secondary).width('100%').enabled(this.canRespond())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('deny')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('deny', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('deny')).bindTips(tr('deny')).enabled(this.canRespond())
           .onClick(() => this.submit('decline')).id('interaction.decline')
-        Button(tr('cancel')).attributeModifier(ButtonStyles.quiet).width('100%').enabled(this.canRespond())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('cancel')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('cancel', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('cancel')).bindTips(tr('cancel')).enabled(this.canRespond())
           .onClick(() => this.submit('cancel')).id('interaction.cancel')
       } else if (!this.readOnly) {
-        Button(this.submitButtonLabel()).attributeModifier(ButtonStyles.primary).width('100%').enabled(this.canSubmit())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol(this.submitIconKey())).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.submitIconKey(), this.submitIconKey() !== 'deny')]) }.attributeModifier(this.submitIconKey() === 'deny' ? ButtonStyles.icon : ButtonStyles.iconPrimary).accessibilityText(this.submitIconLabel()).bindTips(this.submitIconLabel()).enabled(this.canSubmit())
           .onClick(() => this.submit(this.submitButtonOption())).id('interaction.submit')
       }
       if (this.model.error) Text(tr(this.model.error)).fontSize(Tokens.meta).fontColor(Colors.needs).width('100%')
-    }.width('100%').alignItems(HorizontalAlign.Start).padding({ top: Tokens.gap })
+    }.width('100%').padding({ top: Tokens.gap })
 
   }
 

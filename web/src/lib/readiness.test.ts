@@ -130,6 +130,26 @@ describe("turn errors", () => {
     expect(turnErrorFix(undefined)).toBeNull();
   });
 
+  it("says a signed-out CLI is the one to sign in, not the desktop app, in every language (#9366)", async () => {
+    const words = {
+      en: ["Claude Code CLI", "Claude desktop app's sign-in doesn't count", "claude auth login", "API key"],
+      "zh-Hans": ["Claude Code 命令行", "Claude 桌面版登录了也不算", "claude auth login", "API Key"],
+      ja: ["Claude Code CLI", "Claude デスクトップアプリのログインはこれに含まれません", "claude auth login", "API キー"],
+    };
+    try {
+      for (const [lang, [cli, desktop, command, key]] of Object.entries(words)) {
+        await initI18n(lang);
+        const fix = turnErrorFix("not_logged_in")!;
+        expect(fix.title).toContain(cli);
+        expect(fix.detail).toContain(desktop);
+        expect(fix.detail).toContain(command);
+        expect(fix.detail).toContain(key);
+      }
+    } finally {
+      await initI18n("zh-Hans");
+    }
+  });
+
   it("reads Claude Code's own refusals as model errors (the hub's markers)", () => {
     // i18n-ignore: Claude Code's words
     expect(parseAPIError("Not logged in · Please run /login")).toMatchObject({ code: "not_logged_in", transient: false });

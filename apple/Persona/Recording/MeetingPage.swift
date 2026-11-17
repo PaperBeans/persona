@@ -21,6 +21,9 @@ struct MeetingPage: View {
     /// After mode, pushed where Back doesn't return to the recording's page (the minutes push opens it over Recordings,
     /// #3862 phase 6): Open Minutes / Open Recording push that page, as in the sheet, with no Done.
     var opensRecording = false
+    /// After mode, opened by Talk about this meeting (#3862 phase 6): the conversation part first, there even before a
+    /// follow-up exists (#8731 V3).
+    var talks = false
 
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -56,6 +59,12 @@ struct MeetingPage: View {
     /// The first answer about the minutes is in: until then the status card says nothing about them.
     @State private var minutesAsked = false
     @State private var opening = false
+    /// After the meeting, in one screen (#8731 V3): the part under the summary, the map full screen, the minutes' cards
+    /// (worked out when the minutes change, P4) and the transcript's rows.
+    @State private var afterPart: MeetingAfterPart?
+    @State private var mapFull = false
+    @State private var minutesCards: RecordingMinutesCards.Summary?
+    @State private var transcriptItems: [RecordingTimeline.Item] = []
     /// The composer's field has the keyboard: the top of the page steps aside as the bar's controls do, so the thread
     /// keeps its height.
     @FocusState private var writing: Bool
@@ -416,7 +425,6 @@ struct MeetingPage: View {
                     RecordingJumpButton(unread: shown.ids.filter { !seen.contains($0) }.count) { following = true }
                         .padding(.trailing, Theme.Space.page)
                         .padding(.bottom, Theme.Space.s)
-                        .tabSwitchRoom() // left of the open Duo's floating tabs' switch (#4231)
                         .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: Theme.Recording.arrivalOffset)))
                 }
             }
@@ -515,39 +523,53 @@ struct MeetingPage: View {
     // MARK: After the meeting
 
     @ViewBuilder private func afterPage(_ entry: RecordingEntry) -> some View {
-        // The minutes' state stays above the thread, which follows its end (DESIGN_SYSTEM 3.6: the end of a recording shows
-        // its follow-through): the card, or one line while the keyboard is up. The structure stays the same, so the
-        // thread's scroll view keeps its place.
+        // One screen (#8731 V3): the meeting's facts, its summary, to-dos and map, then its parts by name. The
+        // conversation follows its newest end, as the thread did; the other parts open at the top. With the keyboard up the
+        // conversation takes the screen under a one-line status, as before.
+        let parts = afterParts(entry)
+        // The part picked; until one is, Conversation when Talk about this meeting opened the page, else Minutes.
+        let picked = afterPart ?? (talks ? .conversation : .minutes)
+        let part = parts.contains(picked) ? picked : .minutes
         VStack(spacing: Theme.Space.s) {
             if writing {
                 statusLine(entry)
-            } else {
-                statusCard(entry)
-                    .padding(.horizontal, Theme.Space.page)
-                    .padding(.top, Theme.Space.s)
-            }
-            scroller {
-                VStack(alignment: .leading, spacing: Theme.Space.l) {
-                    if let captureError {
-                        NoticeBanner(text: captureError, tone: .danger)
-                            .accessibilityIdentifier("meeting-capture-error")
-                    }
+                scroller {
                     thread(entry)
+                        .padding(.horizontal, Theme.Space.page)
+                        .padding(.vertical, Theme.Space.s)
                 }
-                .padding(.horizontal, Theme.Space.page)
-                .padding(.vertical, Theme.Space.s)
+            } else if part == .conversation {
+                scroller {
+                    VStack(alignment: .leading, spacing: Theme.Space.l) {
+                        afterOverview(entry, parts: parts, part: part)
+                        thread(entry)
+                    }
+                    .padding(.horizontal, Theme.Space.page)
+                    .padding(.vertical, Theme.Space.s)
+                }
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Space.l) {
+                        afterOverview(entry, parts: parts, part: part)
+                        afterPartContent(entry, part)
+                    }
+                    .padding(.horizontal, Theme.Space.page)
+                    .padding(.vertical, Theme.Space.s)
+                }
+                .scrollDismissesKeyboard(.interactively)
             }
         }
         .animation(reduceMotion ? nil : Theme.Motion.state, value: writing)
-        .safeAreaInset(edge: .top, spacing: Theme.Space.flush) {
-            if let close {
-                HStack {
-                    Spacer(minLength: Theme.Space.flush)
-                    RecordingSheetCloseButton(title: String(localized: "Done"), identifier: "recording-wrapup-done") { close() }
-                }
-                .padding(.horizontal, Theme.Space.page)
-            }
+        // In the sheet its ✕ at the leading corner (#9653, `SheetClose`); pushed, the back button there. The ⋯ trailing.
+        .toolbar {
+            if let close { SheetClose(id: "recording-wrapup-done") { close() } }
+            ToolbarItem(placement: .topBarTrailing) { afterMenu(entry) }
         }
+        .toolbar(.visible, for: .navigationBar)
+        .fullScreenCover(isPresented: $mapFull) { mapPage(entry) }
+        // Typing goes to the conversation: it is where the answer comes.
+        .onChange(of: writing) { _, now in if now { afterPart = .conversation } }
+        .onChange(of: minutes.ready, initial: true) { _, ready in cardsFollow(ready, entry: entry) }
         .safeAreaInset(edge: .bottom, spacing: Theme.Space.flush) { afterBar(entry) }
         .voiceUnavailableAlert($voiceNote, model: model)
         // Whether the follow-up's hub has a voice to call (at most once a minute, `VoiceSupport`). The id says whether the
@@ -560,13 +582,120 @@ struct MeetingPage: View {
         }
         // Pushed from the recording's page, the back button returns there: no way to push it again from here. In the
         // sheet, and opened over Recordings by the minutes push, Open is the way to the minutes.
-        .modifier(OpensRecording(id: id, enabled: opens, opening: $opening))
+        .modifier(OpensRecording(id: id, enabled: true, opening: $opening))
         .tabActiveTask(id: "\(entry.revision)|\(minutes.round)|\(entry.transcribedAll)") { await followMinutes() }
         .onChange(of: minutes.state) { old, new in
             // Only minutes that come while the page waits for them are news: a past meeting's, there as it opens, are not.
             guard case .ready = new, [RecordingMinutesModel.State.writing, .waitingForSync, .waitingForText].contains(old) else { return }
             AccessibilityNotification.Announcement(String(localized: "Minutes ready")).post()
         }
+    }
+
+    /// The parts a meeting shows under its summary: Photos where the room took them, Conversation where the room or a
+    /// follow-up has one (the composer writes to it).
+    private func afterParts(_ entry: RecordingEntry) -> [MeetingAfterPart] {
+        MeetingAfterPart.shown(photos: entry.roomMeeting && entry.attendance?.photos == true,
+                               conversation: talks || entry.roomMeeting || conversation.followupKey(id) != nil)
+    }
+
+    /// The top of the screen: why it ended badly (when it did), the facts, the summary, the to-dos, the map, the parts.
+    @ViewBuilder private func afterOverview(_ entry: RecordingEntry, parts: [MeetingAfterPart], part: MeetingAfterPart) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            if let captureError {
+                NoticeBanner(text: captureError, tone: .danger)
+                    .accessibilityIdentifier("meeting-capture-error")
+            }
+            MeetingAfterHeader(entry: entry)
+            if minutes.ready != nil || minutesShown {
+                MeetingSummaryCard(summary: minutes.ready.flatMap(MeetingAfterSummary.make)) { minutesLine }
+            }
+            if let cards = minutesCards, let actions = cards.cards.first(where: { $0.kind == .actions }) {
+                MinutesCard(card: actions, recording: id, offered: cards.offered, addable: cards.addable, asking: minutes.asking,
+                            add: { ids in addTodos(ids, entry: entry) }, show: { _ in afterPart = .transcript })
+                    .environment(\.minutesBoxed, true)
+            }
+            let topics = MeetingAfterMap.topics(minutes: minutes.ready, live: conversation.meeting(id).topics)
+            if !topics.isEmpty { MeetingMapCard(topics: topics) { mapFull = true } }
+            MeetingTabRow(pages: parts, page: Binding(get: { part }, set: { afterPart = $0 }), title: \.title) {
+                "meeting-after-tab-\($0.rawValue)"
+            }
+        }
+    }
+
+    /// The part picked under the summary (Conversation is the thread, laid out by `afterPage`).
+    @ViewBuilder private func afterPartContent(_ entry: RecordingEntry, _ part: MeetingAfterPart) -> some View {
+        switch part {
+        case .minutes:
+            if let cards = minutesCards {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    RecordingMinutesSummary(entry: entry, model: minutes, synced: sync.status(entry) == .synced, summary: cards) { _ in
+                        afterPart = .transcript
+                    }
+                }
+                .environment(\.minutesBoxed, true)
+            } else {
+                Group {
+                    if minutesShown { minutesLine } else { Text("No minutes for this recording.").foregroundStyle(.secondary) }
+                }
+                .font(Theme.Font.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .transcript:
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                RecordingTimelineRows(entry: entry, exchanges: [], paused: false, items: $transcriptItems)
+            }
+            // A container of its own, so its rows keep their identifiers (`recording-timeline-sentence`).
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("meeting-after-transcript")
+        case .photos:
+            MeetingAfterPhotos(recording: id)
+        case .conversation:
+            thread(entry)
+        }
+    }
+
+    /// The page's menu after the meeting: Rename, and the recording's own page (its audio, sharing and deleting).
+    private func afterMenu(_ entry: RecordingEntry) -> some View {
+        Menu {
+            Button { renaming = id } label: { Label("Rename", systemImage: Theme.Icon.edit) }
+            Button { opening = true } label: { Label("Recording Details", systemImage: Theme.Icon.recording) }
+                .accessibilityIdentifier("meeting-after-details")
+        } label: {
+            ThemedIcon(Theme.Icon.more).font(Theme.Font.heading)
+                .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+        }
+        .accessibilityLabel(Text("More"))
+        .accessibilityIdentifier("meeting-after-menu")
+    }
+
+    /// The whole map full screen: the meeting room's Map page.
+    private func mapPage(_ entry: RecordingEntry) -> some View {
+        NavigationStack {
+            MeetingTopicMap(title: entry.displayTitle,
+                            topics: MeetingAfterMap.topics(minutes: minutes.ready, live: conversation.meeting(id).topics))
+                .themedGroupedPage()
+                .navigationTitle(String(localized: "Meeting Map [Meeting After]"))
+                .navigationBarTitleDisplayMode(.inline)
+                // A presented page: its ✕ at the leading corner (#9653).
+                .toolbar { SheetClose(id: "meeting-map-done") { mapFull = false } }
+        }
+    }
+
+    /// The minutes' cards, worked out again only when the minutes change (P4).
+    private func cardsFollow(_ ready: RecordingMinutes?, entry: RecordingEntry) {
+        guard let ready else {
+            if minutesCards != nil { minutesCards = nil }
+            return
+        }
+        let next = RecordingMinutesCards.summary(ready, sentences: entry.sentences, shown: .init(entry.meeting))
+        if next != minutesCards {
+            withAnimation(reduceMotion || minutesCards != nil ? nil : Theme.Motion.reveal) { minutesCards = next }
+        }
+    }
+
+    /// Makes action items to-dos (`RecordingMinutesModel.add`): one, or all those left.
+    private func addTodos(_ ids: [String], entry: RecordingEntry) {
+        Task { await minutes.add(ids, to: entry, synced: sync.status(entry) == .synced) }
     }
 
     /// The composer, or while a voice call bound to the follow-up runs its bar in the composer's place (#3862 phase 6, the
@@ -585,7 +714,6 @@ struct MeetingPage: View {
                     .padding(.horizontal, Theme.Space.page)
                     .padding(.vertical, Theme.Space.s)
                     .frame(maxWidth: .infinity)
-                    .tabSwitchRoom() // beside the open Duo's floating tabs' switch (#4231)
                     .background { Theme.groupedPage.ignoresSafeArea(edges: .bottom) }
                     .transition(.opacity)
             } else {
@@ -601,30 +729,6 @@ struct MeetingPage: View {
         guard let key, capture.state == .idle, conversation.followupHold(entry) == nil,
               VoiceSupport.shared.availability(for: model.session(key), group: key.group).isAvailable else { return nil }
         return { voiceNote = VoiceEntry.start(key, model: model) }
-    }
-
-    /// The title, when the meeting ran, where the minutes are, and (in the sheet) the way to them. The composer is the
-    /// page's primary control, so Open is a standard button.
-    private func statusCard(_ entry: RecordingEntry) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            afterTitle(entry)
-            minutesLine
-            if opens {
-                Button { opening = true } label: {
-                    Text(openTitle)
-                        .font(Theme.Font.bodyStrong).lineLimit(1).minimumScaleFactor(0.7)
-                        .frame(maxWidth: .infinity)
-                        .scaledFrame(minHeight: Theme.Size.tapTarget)
-                }
-                .themedButton()
-                .accessibilityIdentifier("recording-wrapup-open")
-            }
-        }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .surface(in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("meeting-after-status")
     }
 
     /// The card's one-line form: where the minutes are (when the meeting ran, before the hub says), and Open as an icon.
@@ -654,14 +758,6 @@ struct MeetingPage: View {
         .padding(.top, Theme.Space.s)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("meeting-after-status")
-    }
-
-    /// The meeting's title and when it ran.
-    @ViewBuilder private func afterTitle(_ entry: RecordingEntry) -> some View {
-        Text(entry.displayTitle).font(Theme.Font.title).lineLimit(Theme.Recording.pageTitleLines)
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityIdentifier("recording-wrapup-title")
-        Text(Self.span(entry)).font(Theme.Font.secondary).foregroundStyle(.secondary)
     }
 
     private var openTitle: String { minutesReady ? String(localized: "Open Minutes") : String(localized: "Open Recording") }
@@ -966,7 +1062,7 @@ private struct OpensRecording: ViewModifier {
 
     func body(content: Content) -> some View {
         if enabled {
-            content.navigationDestination(isPresented: $opening) { RecordingDetailView(id: id) }
+            content.navigationDestination(isPresented: $opening) { RecordingDetailView(id: id, fromMeetingPage: true) }
         } else {
             content
         }

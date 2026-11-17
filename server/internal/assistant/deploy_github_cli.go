@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -27,14 +28,18 @@ func githubCLIGet(ctx context.Context, path string, out any) error {
 	stdout, stderr := githubCLIBuffer{limit: 4 << 20}, githubCLIBuffer{limit: 4096}
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
+	if runErr != nil && ctx.Err() != nil {
+		// The context killed gh, possibly after it had written a 200's headers: what is left is not a response to trust.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("authenticated GitHub CLI timed out (retry later): %w", ctx.Err())
+		}
+		return fmt.Errorf("authenticated GitHub CLI interrupted: %w", ctx.Err())
+	}
 	if stdout.exceeded {
 		return fmt.Errorf("authenticated GitHub CLI response exceeds size limit")
 	}
 	resp, err := githubCLIResponse(stdout.Bytes())
 	if err != nil {
-		if ctx.Err() != nil {
-			return fmt.Errorf("authenticated GitHub CLI unavailable: %w", ctx.Err())
-		}
 		if runErr != nil {
 			return fmt.Errorf("authenticated GitHub CLI unavailable (no anonymous fallback): %s; %s",
 				githubDiagnostic(runErr.Error()), githubDiagnostic(stderr.String()))

@@ -73,6 +73,34 @@ type AdmissionSettings struct {
 	HubMaxClaudeProcs *int   `json:"hub_max_claude_procs,omitempty"`
 	// Machines overrides any machine's lines by its id.
 	Machines map[string]MachineAdmission `json:"machines,omitempty"`
+	// LauncherGroups caps tasks across launchers that draw on one shared resource (one subscription account pool behind
+	// several launchers, say). Empty, the default: no launcher line at all.
+	LauncherGroups []LauncherGroup `json:"launcher_groups,omitempty"`
+}
+
+// LauncherGroup is a set of launchers, by name, that share one budget, and the most tasks that may run on them at once
+// across every computer. Names are matched exactly, because a launcher's agent kind cannot tell a launcher that draws on
+// the pool from a compatible one that does not. A launcher belongs to at most one group.
+type LauncherGroup struct {
+	Name      string   `json:"name"`
+	Launchers []string `json:"launchers"`
+	Cap       int      `json:"cap"`
+}
+
+// launcherGroup is the group launcher belongs to; false when no group names it.
+func (cfg AdmissionSettings) launcherGroup(launcher string) (LauncherGroup, bool) {
+	launcher = strings.TrimSpace(launcher)
+	if launcher == "" {
+		return LauncherGroup{}, false
+	}
+	for _, g := range cfg.LauncherGroups {
+		for _, name := range g.Launchers {
+			if strings.TrimSpace(name) == launcher {
+				return g, true
+			}
+		}
+	}
+	return LauncherGroup{}, false
 }
 
 // MachineAdmission is one machine's line overrides.
@@ -88,17 +116,27 @@ type admissionLimits struct {
 	maxProcs     int
 	loadPerCore  float64
 	directionCap int
+	// group is the launcher group of the start's launcher; grouped is false when none names it (no launcher line).
+	group   LauncherGroup
+	grouped bool
+}
+
+// withLauncher adds the launcher line of the start's launcher (already resolved by startLauncher) to lim.
+func (lim admissionLimits) withLauncher(cfg AdmissionSettings, launcher string) admissionLimits {
+	lim.group, lim.grouped = cfg.launcherGroup(launcher)
+	return lim
 }
 
 // admissionBook keeps the setting cache and the in-flight claims that make check-then-start atomic: a start counts
-// against its machine and direction from the moment it passes until its agent is linked into the todo (or the start
-// fails), so neither concurrent admits nor the 10-second metrics gap can let two starts take the last slot.
+// against its machine, direction and launcher group from the moment it passes until its agent is linked into the todo
+// (or the start fails), so neither concurrent admits nor the 10-second metrics gap can let two starts take the last slot.
 type admissionBook struct {
 	mu              sync.Mutex
 	cached          *AdmissionSettings
 	at              time.Time
 	machineClaims   map[string]int
 	directionClaims map[string]int
+	groupClaims     map[string]int // by launcher group name
 }
 
 // admissionSettings reads the setting with the same short cache as the assistant's own settings; a storeless hub uses
@@ -370,7 +408,13 @@ func (s *Service) admitTaskStart(ctx context.Context, t *PlanTask) (func(), erro
 	}
 	cfg := s.admissionSettings(ctx)
 	direction := s.taskDirection(ctx, t)
-	lim := s.limitsFor(ctx, t.Machine, direction, t.Project, cfg)
+	launcher := s.startLauncher(ctx, t.Launcher)
+	lim := s.limitsFor(ctx, t.Machine, direction, t.Project, cfg).withLauncher(cfg, launcher)
+	// A full launcher group is checked first: no machine frees a slot in it, so the task waits on the group (with no
+	// queue time limit) rather than on a machine line it might also hit, and a flexible task is not moved for nothing.
+	if violation := s.groupViolation(lim); violation != nil {
+		return nil, s.admissionRefused(ctx, t.Machine, direction, violation)
+	}
 	if violation := s.machineViolation(ctx, t.Machine, lim); violation != nil {
 		if t.MachinePolicy != machineFlexible {
 			return nil, s.admissionRefused(ctx, t.Machine, direction, violation)
@@ -381,7 +425,7 @@ func (s *Service) admitTaskStart(ctx context.Context, t *PlanTask) (func(), erro
 		}
 		from, _ := s.machineByName(ctx, t.Machine)
 		s.reroutePlanTask(ctx, t, from, alt, violation.Text(s.lang(ctx)))
-		lim = s.limitsFor(ctx, t.Machine, direction, t.Project, cfg)
+		lim = s.limitsFor(ctx, t.Machine, direction, t.Project, cfg).withLauncher(cfg, launcher)
 	}
 	// Atomic decision: evaluate against the current claims and reserve the slot in one critical section, so two
 	// concurrent starts cannot both observe room and both take the last slot.
@@ -461,7 +505,8 @@ func (s *Service) admissionRefused(ctx context.Context, machineID, direction str
 		machine = firstNonEmpty(d.Name, machineID)
 	}
 	recommend := ""
-	if alt, ok := s.recommendMachine(ctx, machineID, nil); ok {
+	// Another computer frees no slot in a launcher group, so a group refusal names none.
+	if alt, ok := s.recommendMachine(ctx, machineID, nil); ok && (reason == nil || reason.Key != admissionGroupFullKey) {
 		recommend = i18n.T(s.lang(ctx), "assistant-tasks.admission_recommend", i18n.Args{
 			"machine": firstNonEmpty(alt.Name, alt.ID)})
 	}
@@ -472,14 +517,19 @@ func (s *Service) admissionRefused(ctx context.Context, machineID, direction str
 	}
 }
 
-// checkAgentStart is the agent_start tool's machine-level check without a claim: run it before the phone confirmation
-// card so the user is never asked to approve a start that will be refused.
-func (s *Service) checkAgentStart(ctx context.Context, machineID string) error {
+// checkAgentStart is the agent_start tool's machine-level and launcher-group check without a claim: run it before the
+// phone confirmation card so the user is never asked to approve a start that will be refused. launcher is the one the
+// start runs (startLauncher already applied).
+func (s *Service) checkAgentStart(ctx context.Context, machineID, launcher string) error {
 	if s.devs == nil || !s.admissionEnabled(ctx) {
 		return nil
 	}
 	cfg := s.admissionSettings(ctx)
-	if violation := s.machineViolation(ctx, machineID, s.limitsFor(ctx, machineID, "", "", cfg)); violation != nil {
+	lim := s.limitsFor(ctx, machineID, "", "", cfg).withLauncher(cfg, launcher)
+	if violation := s.groupViolation(lim); violation != nil {
+		return s.admissionRefused(ctx, machineID, "", violation)
+	}
+	if violation := s.machineViolation(ctx, machineID, lim); violation != nil {
 		return s.admissionRefused(ctx, machineID, "", violation)
 	}
 	return nil
@@ -487,13 +537,13 @@ func (s *Service) checkAgentStart(ctx context.Context, machineID string) error {
 
 // admitAgentStart re-checks the (possibly rerouted) target and atomically reserves its machine slot. The release runs
 // once the session.start attempt ends: an agent_start tool call is not linked to a todo, so there is no later ledger
-// to carry the count.
-func (s *Service) admitAgentStart(ctx context.Context, machineID string) (func(), error) {
+// to carry the count. A full launcher group refuses it at once: a tool call cannot wait in the admission queue.
+func (s *Service) admitAgentStart(ctx context.Context, machineID, launcher string) (func(), error) {
 	if s.devs == nil || !s.admissionEnabled(ctx) {
 		return func() {}, nil
 	}
 	cfg := s.admissionSettings(ctx)
-	lim := s.limitsFor(ctx, machineID, "", "", cfg)
+	lim := s.limitsFor(ctx, machineID, "", "", cfg).withLauncher(cfg, launcher)
 	release, violation := s.claimIfAllowed(ctx, machineID, "", lim)
 	if violation != nil {
 		return nil, s.admissionRefused(ctx, machineID, "", violation)
@@ -510,6 +560,9 @@ func (s *Service) claimIfAllowed(ctx context.Context, machineID, direction strin
 	release := func() {}
 	s.admission.mu.Lock()
 	defer s.admission.mu.Unlock()
+	if violation := s.groupViolationLocked(lim); violation != nil {
+		return release, violation
+	}
 	if violation := s.machineViolationWith(machineID, lim, s.admission.machineClaims[machineID]); violation != nil {
 		return release, violation
 	}
@@ -528,9 +581,17 @@ func (s *Service) claimIfAllowed(ctx context.Context, machineID, direction strin
 	if s.admission.directionClaims == nil {
 		s.admission.directionClaims = map[string]int{}
 	}
+	if s.admission.groupClaims == nil {
+		s.admission.groupClaims = map[string]int{}
+	}
 	s.admission.machineClaims[machineID]++
 	if direction != "" {
 		s.admission.directionClaims[direction]++
+	}
+	group := ""
+	if lim.grouped {
+		group = lim.group.Name
+		s.admission.groupClaims[group]++
 	}
 	var done bool
 	return func() {
@@ -546,7 +607,36 @@ func (s *Service) claimIfAllowed(ctx context.Context, machineID, direction strin
 		if direction != "" && s.admission.directionClaims[direction] > 0 {
 			s.admission.directionClaims[direction]--
 		}
+		if group != "" && s.admission.groupClaims[group] > 0 {
+			s.admission.groupClaims[group]--
+		}
 	}, nil
+}
+
+// admissionGroupFullKey is the refusal of a full launcher group. The admission queue waits it out without a time
+// limit (task_queue.go): a shared pool that is full is expected to free up, and nothing else can be done meanwhile.
+const admissionGroupFullKey = "assistant-tasks.admission_launcher_group_full"
+
+// groupViolation is the launcher-group line against the claims held right now, WITHOUT taking a claim.
+func (s *Service) groupViolation(lim admissionLimits) *i18n.Message {
+	if !lim.grouped {
+		return nil
+	}
+	s.admission.mu.Lock()
+	defer s.admission.mu.Unlock()
+	return s.groupViolationLocked(lim)
+}
+
+// groupViolationLocked is groupViolation for a caller holding admission.mu.
+func (s *Service) groupViolationLocked(lim admissionLimits) *i18n.Message {
+	if !lim.grouped {
+		return nil
+	}
+	if running := s.groupCountLocked(lim.group) + s.admission.groupClaims[lim.group.Name]; running >= lim.group.Cap {
+		return admissionMessage(admissionGroupFullKey, i18n.Args{
+			"group": lim.group.Name, "running": running, "limit": lim.group.Cap})
+	}
+	return nil
 }
 
 // taskDirection resolves the direction (supervising conversation) a plan task's running agents count against: its
@@ -593,6 +683,59 @@ func (s *Service) directionCountLocked(direction string) int {
 		}
 	}
 	return n
+}
+
+// groupCountLocked is the ledger part of a launcher group's in-flight count, on every computer: open tasks, of any
+// direction, whose linked execution Agent is working a turn on one of the group's launchers in the fleet's latest
+// session snapshot. A task counts once however many agents it links, and the tasks directionIdle leaves out of a
+// direction leave the group too, so "a running task" means the same in both lines. Like directionCountLocked it takes
+// only the todo read lock, then reads the fleet snapshot after releasing it.
+func (s *Service) groupCountLocked(g LauncherGroup) int {
+	members := make(map[string]bool, len(g.Launchers))
+	for _, name := range g.Launchers {
+		if name = strings.TrimSpace(name); name != "" {
+			members[name] = true
+		}
+	}
+	type linkedAgent struct{ machine, session string }
+	var tasks [][]linkedAgent
+	s.todos.mu.RLock()
+	for _, t := range s.todos.todos {
+		if t.DoneAt != nil || t.Cancelled() || directionIdle(t) {
+			continue
+		}
+		var agents []linkedAgent
+		for _, a := range t.Agents {
+			if a.active() {
+				agents = append(agents, linkedAgent{a.MachineID, a.SessionID})
+			}
+		}
+		if len(agents) > 0 {
+			tasks = append(tasks, agents)
+		}
+	}
+	s.todos.mu.RUnlock()
+	n := 0
+	for _, agents := range tasks {
+		for _, a := range agents {
+			machine := a.machine
+			if s.devs != nil {
+				machine = s.devs.Canonical(machine)
+			}
+			if row := s.fleetPrevious(machine)[a.session]; row.Status == proto.StatusWorking && members[row.Launcher] {
+				n++
+				break // one slot per task
+			}
+		}
+	}
+	return n
+}
+
+// groupInFlight counts a launcher group's running tasks plus starts admitted but not linked yet (tests, diagnostics).
+func (s *Service) groupInFlight(g LauncherGroup) int {
+	s.admission.mu.Lock()
+	defer s.admission.mu.Unlock()
+	return s.groupCountLocked(g) + s.admission.groupClaims[g.Name]
 }
 
 // directionIdle says an open task's linked agent is not consuming a direction slot: parked tasks, tasks waiting for
@@ -710,6 +853,27 @@ func (cfg AdmissionSettings) validate() error {
 	for k, cap := range cfg.DirectionCapByProject {
 		if strings.TrimSpace(k) == "" || cap <= 0 {
 			return fmt.Errorf("direction_cap_by_project entries need a non-empty project slug and a positive cap")
+		}
+	}
+	names, members := map[string]bool{}, map[string]string{}
+	for _, g := range cfg.LauncherGroups {
+		name := strings.TrimSpace(g.Name)
+		if name == "" || g.Cap <= 0 || len(g.Launchers) == 0 {
+			return fmt.Errorf("launcher_groups entries need a name, at least one launcher and a positive cap")
+		}
+		if names[name] {
+			return fmt.Errorf("launcher_groups: the name %q is used twice", name)
+		}
+		names[name] = true
+		for _, l := range g.Launchers {
+			l = strings.TrimSpace(l)
+			if l == "" {
+				return fmt.Errorf("launcher_groups: %q lists an empty launcher name", name)
+			}
+			if other, ok := members[l]; ok {
+				return fmt.Errorf("launcher_groups: launcher %q is in both %q and %q; a launcher belongs to one group", l, other, name)
+			}
+			members[l] = name
 		}
 	}
 	for id, m := range cfg.Machines {

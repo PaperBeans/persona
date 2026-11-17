@@ -124,6 +124,48 @@ struct HomeWidgetTests {
         #expect(await Self.written(store) { $0.recording?.id == "r" } != nil)
     }
 
+    /// Only live numbers moved (a working row's activity line): written at most once a `livePause`, the latest then;
+    /// anything else at once, with the latest line (#9592).
+    @Test func liveNumbersWaitTheirPause() async throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "home-widgets-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = HomeSnapshotStore(root: dir)
+        let writer = HomeWidgetWriter(store: store, livePause: 0.6)
+        var source = HomeSnapshot(paired: true)
+        source.agents.rows = [.init(id: "m/s", title: "Agent", state: .working, detail: "Reading")]
+        writer.source = { source }
+        writer.flush()
+        _ = try #require(await Self.written(store) { $0.agents.rows.first?.detail == "Reading" })
+        source.agents.rows[0].detail = "Editing"
+        writer.flush()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(store.read()?.agents.rows.first?.detail == "Reading", "an activity line alone waits")
+        #expect(await Self.written(store) { $0.agents.rows.first?.detail == "Editing" } != nil, "and goes once the pause is over")
+        source.agents.rows[0].detail = "Testing"
+        source.inbox = .init(needsYou: 2)
+        writer.flush()
+        let now = try #require(await Self.written(store) { $0.inbox?.needsYou == 2 })
+        #expect(now.agents.rows.first?.detail == "Testing")
+    }
+
+    @Test func settledLeavesOutOnlyTheLiveNumbers() {
+        var a = HomeSnapshot(paired: true)
+        a.agents.rows = [.init(id: "m/s", title: "Agent", state: .working, detail: "Reading")]
+        a.machines = [.init(id: "m", name: "Mac", online: true, working: 1, load: 40)]
+        a.usage = .init(tokensToday: 10, tpm: 2, hourly: [1, 2])
+        var b = a
+        b.agents.rows[0].detail = "Editing"
+        b.machines[0].load = 80
+        b.usage?.tokensToday = 20
+        b.usage?.hourly = [1, 2, 3]
+        #expect(HomeWidgetWriter.settled(a) == HomeWidgetWriter.settled(b))
+        b.agents.rows[0].state = .needsYou
+        #expect(HomeWidgetWriter.settled(a) != HomeWidgetWriter.settled(b), "a state is no live number")
+        b = a
+        b.machines[0].working = 2
+        #expect(HomeWidgetWriter.settled(a) != HomeWidgetWriter.settled(b))
+    }
+
     private static func written(_ store: HomeSnapshotStore, _ ok: (HomeSnapshot) -> Bool) async -> HomeSnapshot? {
         for _ in 0..<100 {
             if let s = store.read(), ok(s) { return s }

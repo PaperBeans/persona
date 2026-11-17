@@ -1,4 +1,4 @@
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToReadableStream, renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Outgoing } from "./Composer";
 import type { MentionSource } from "./ComposerPanel";
@@ -222,23 +222,28 @@ describe("the reply bar while a message is sent", () => {
 });
 
 describe("Agent context usage", () => {
-  it("leaves the header and appears in the row below the composer, at the right of the folder; no empty row when there is neither", () => {
+  it("leaves the header and appears in the row below the composer, at the right of the folder; no empty row when there is neither", async () => {
+    async function render() {
+      const stream = await renderToReadableStream(<ChatView mid="hub" sid="c1" />);
+      await stream.allReady;
+      return new Response(stream).text();
+    }
     const was = captured.session;
     try {
       captured.session = { ...was, agent: "claude", context_tokens: 78000, context_window: 200000 };
-      const html = renderToStaticMarkup(<ChatView mid="hub" sid="c1" />);
+      const html = (await render());
       const header = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
-      expect(header).not.toContain("61%");
+      expect(header).not.toContain("上下文 39%");
       expect(html).toContain('data-composer-usage');
-      expect(html).toContain('aria-valuenow="61"');
+      expect(html).toContain('aria-valuenow="39"');
       expect(html.indexOf('data-testid="composer"')).toBeLessThan(html.indexOf("data-composer-usage"));
-      expect(html.indexOf("data-composer-source")).toBeLessThan(html.indexOf('aria-valuenow="61"'));
+      expect(html.indexOf("data-composer-source")).toBeLessThan(html.indexOf('aria-valuenow="39"'));
       captured.session = { ...was, agent: "claude", context_tokens: undefined, context_window: undefined };
-      const unknown = renderToStaticMarkup(<ChatView mid="hub" sid="c1" />);
+      const unknown = (await render());
       expect(unknown).toContain("data-composer-source");
       expect(unknown).not.toContain("aria-valuenow");
       captured.session = { ...was, agent: "claude", cwd: "", context_tokens: undefined, context_window: undefined };
-      expect(renderToStaticMarkup(<ChatView mid="hub" sid="c1" />)).not.toContain('data-composer-usage');
+      expect((await render())).not.toContain('data-composer-usage');
     } finally {
       captured.session = was;
     }

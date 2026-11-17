@@ -12,7 +12,7 @@ import { appArchiveDeps, archiveAgent, archiveSession } from "../../lib/agent-ar
 import type { Interaction } from "../../lib/types";
 import { defaults, elicitationDraft, elicitationResolution, elicitationSource, fields, numberInputMode, saveElicitationDraft, urlHost, urlTarget, validate, type ElicitationAction, type Field, type Values } from "../../lib/elicitation";
 import { answerLines } from "../../lib/answered";
-import { interactionCanAnswer, sessionTitle } from "../../lib/format";
+import { answerBlock, interactionCanAnswer, sessionTitle } from "../../lib/format";
 import { interactionAsk } from "../../lib/inbox";
 import { plainMarkdown } from "../../lib/plain-markdown";
 import { cardToolName, mcpServerLabel } from "../../lib/turns";
@@ -1406,11 +1406,16 @@ export function AnsweredSummary({ answered }: { answered: Answered[] }) {
  *  loads with the first card that carries one. A slot, not an import: Tasks imports this file. */
 export const underCard: { line?: (ix: Interaction & { disabled?: boolean }) => React.ReactNode; /** The cards (by id) Always was answered on: their line stays to say what was made. */ made?: Set<string> } = {};
 
+/** Under a card this page can't answer (#7497): why, and Live link where there is one. Its own chunk, loaded with the
+ *  first blocked card, since most cards are answerable; until it is in, the card stays as it is. */
+const CardBlockedLine = lazyPage(() => import("./CardBlockedLine").then((m) => m.CardBlockedLine));
+
 export function InteractionCard({ ix }: { ix: Interaction }) {
   // a child session's card on its parent's page (#5120): its row is the one the parent's chat holds (a paging hub's
   // summary, which the store's complete rows never have)
   const child = useChildRow(ix.machine_id, ix.session_id);
-  const canApprove = useStore(() => interactionCanAnswer(ix, child ?? getSession(ix.machine_id, ix.session_id)));
+  const block = useStore(() => answerBlock(ix, child ?? getSession(ix.machine_id, ix.session_id)));
+  const canApprove = block === null;
   const managerWork = ix.kind === "question" && ix.tool_name === "persona_triage";
   // an answer still on its way (the hub away, apiOp retrying) holds the card, also after leaving the chat and coming back
   const { pending, line } = usePendingLine(ix);
@@ -1438,6 +1443,8 @@ export function InteractionCard({ ix }: { ix: Interaction }) {
             <CardAbout.Provider value={about}>
             {/* a question a supervisor passed up may carry a suggested rule: its line goes under the card (#5802) */}
             <fieldset disabled={pending || (!canApprove && !managerWork)} className={canApprove ? "contents" : undefined}>{card}</fieldset>
+            {/* a manager work card still takes its local defer and dismiss here: no "can't answer here" line */}
+            {block && !managerWork && <Suspense fallback={null}><CardBlockedLine ix={ix} block={block} /></Suspense>}
             {underCard.line?.(canApprove ? ix : { ...ix, disabled: true })}
             </CardAbout.Provider>
           </AskedFrom.Provider>

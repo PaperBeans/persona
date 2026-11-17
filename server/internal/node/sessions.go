@@ -303,6 +303,8 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 	from = len(out)
 	out = n.appendOffline(out, seen)
 	n.markInterrupted(out[from:], seen) // the restart cut these off (#1917)
+	// omp's stopped sessions (ompdisk.go)
+	out = append(out, n.ompOfflineRows(seen)...)
 	for i := from; i < len(out); i++ {
 		n.decorateIn(&out[i], pass)
 		n.markStopped(&out[i]) // read-only (stopped.go, #4754)

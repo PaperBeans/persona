@@ -1,6 +1,7 @@
 // The paged list by group: one folding section for each computer, project, space or account (the sidebar's to-do and
 // state too, #6662), with how many sessions it holds and how many of them need the user on its heading. The first few
-// sections start open on their newest sessions (by to-do every to-do's, "Not on a to-do" folded);
+// sections start open on their newest sessions (by to-do every to-do's, "Not on a to-do" folded; by state Just finished
+// too, #9751);
 // a section reads its own sessions while it is open, a page at a time, and stops when it is folded, so the groups of a
 // long list cost nothing until someone looks into one.
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -9,7 +10,7 @@ import { shortPath } from "../../lib/format";
 import { filterQuery, PAGE_SIZE, SessionList, type ListChangeHint, type ListFilters } from "../../lib/session-list";
 import { onHubEvent } from "../../lib/store";
 import { SectionList } from "../../lib/section-list";
-import { groupMachines, holdsPlace, type GroupDimension, type SessionGroup, type SessionPlace } from "../../lib/session-groups";
+import { groupMachines, holdsPlace, JUST_FINISHED_KEY, type GroupDimension, type SessionGroup, type SessionPlace } from "../../lib/session-groups";
 import { onShownHint } from "../../lib/shown-hints";
 import { useFolded } from "../../lib/use-folded";
 import { nestUnderParents } from "../../lib/side-sessions";
@@ -57,7 +58,7 @@ export function GroupedSessions<T>({ groups, dimension, kind, scope, source, ren
   return (
     <div data-session-groups={dimension}>
       {shown.map((group, i) => (
-        <GroupSection key={group.key} group={group} first={i === 0} startsOpen={dimension === "todo" ? !group.rest : i < SESSION_LIST_METRICS.groupsOpen} dimension={dimension} kind={kind} scope={scope} source={source}
+        <GroupSection key={group.key} group={group} first={i === 0} startsOpen={dimension === "todo" ? !group.rest : i < SESSION_LIST_METRICS.groupsOpen || (dimension === "state" && group.key === JUST_FINISHED_KEY)} dimension={dimension} kind={kind} scope={scope} source={source}
           renderRow={renderRow} name={groupName(group)} machineName={machineName} several={several} holds={Boolean(open && holdsPlace(group, dimension, open))} foldScope={foldScope} />
       ))}
       {groups.length > shown.length && (

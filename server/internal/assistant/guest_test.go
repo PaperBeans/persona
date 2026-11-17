@@ -116,8 +116,8 @@ func TestGuestConversationStart(t *testing.T) {
 	}
 }
 
-// A guest's first tool discovery happens before assistant.send answers on the Agent SDK. Its registered id and
-// declared tools must already exist at that point, not after the node has started a model with an empty list.
+// A guest's first tool discovery can happen before assistant.send answers. Its registered id and declared tools must
+// already exist at that point, not after the node has started a model with an empty list.
 func TestGuestConversationRegistersBeforeDiscovery(t *testing.T) {
 	f, s, _ := guestService(t)
 	devices := newFleetDevs()
@@ -186,11 +186,12 @@ func TestGuestConversationFailedStartForgetsRegistration(t *testing.T) {
 	}
 }
 
-// A guest keeps the purpose's launcher, model and Agent SDK choice. Its
-// no-built-in-tools restriction is the node's, on either runtime.
-func TestGuestConversationKeepsTheSDK(t *testing.T) {
+// A guest keeps the purpose's launcher and model, on Claude Code's CLI: a record an older hub stored with the Agent
+// SDK runtime starts it with no runtime. Its no-built-in-tools restriction is the node's.
+func TestGuestConversationKeepsThePurposesModel(t *testing.T) {
 	f, s, _ := guestService(t)
-	if err := s.saveModelRecord(context.Background(), "lark.agent", 0, ModelBinding{Provider: "launcher.claude", Runtime: proto.AssistantRuntimeAgentSDK}); err != nil {
+	if err := s.store().PutSetting(context.Background(), modelRecordKey("lark.agent"),
+		json.RawMessage(`{"revision":1,"binding":{"provider":"launcher.claude","model":"test-guest","runtime":"agentsdk"}}`)); err != nil {
 		t.Fatal(err)
 	}
 	w := postConversation(t, s, `{"prompt":"search","purpose":"lark.agent","guest":{"tools":["lark_chats"]}}`)
@@ -198,16 +199,11 @@ func TestGuestConversationKeepsTheSDK(t *testing.T) {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	send := f.sends[len(f.sends)-1]
-	if send["runtime"] != proto.AssistantRuntimeAgentSDK {
+	if _, ok := send["runtime"]; ok {
 		t.Fatalf("guest runtime: %v", send["runtime"])
 	}
-	if send["launcher"] == nil || send["model_fingerprint"] == nil {
+	if send["launcher"] != "claude" || send["model"] != "test-guest" || send["model_fingerprint"] == nil {
 		t.Fatalf("guest lost its model binding: %v", send)
-	}
-	// The purpose's selection reaches the node without changing the guest contract.
-	binding, err := s.resolveModel(context.Background(), "lark.agent")
-	if err != nil || binding.Runtime != proto.AssistantRuntimeAgentSDK {
-		t.Fatalf("main runtime: %q (%v)", binding.Runtime, err)
 	}
 }
 

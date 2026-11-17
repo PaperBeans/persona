@@ -387,9 +387,14 @@ nonisolated struct VoiceStart: Equatable, Sendable {
     /// `"meeting"`, with the recording whose room `target` is. nil for every other call.
     var mode: String? = nil
     var recordingID: String? = nil
+    /// `"call"` for a system call (a call to Persona, #9290); nil for in-app and CarPlay calls. Informational: the hub
+    /// writes it in the call log's start line, and an extension that does not know it ignores it.
+    var surface: String? = nil
 
     /// The mode of a meeting call: bound to the recording's room, hearing only Talk spans.
     static let meetingMode = "meeting"
+    /// The surface of a system call.
+    static let callSurface = "call"
 }
 
 /// Text frames the app sends.
@@ -400,7 +405,13 @@ nonisolated enum VoiceMessage {
                           target: s.target.map { TargetFrame(machineID: $0.machineID, sessionID: $0.sessionID) },
                           recent: s.recent.isEmpty ? nil : s.recent, history: s.history.isEmpty ? nil : s.history,
                           resume: s.resume.isEmpty ? nil : ResumeFrame(runs: s.resume.map(ResumeRun.init)),
-                          echoCancellation: s.echoCancellation, speechGate: s.speechGate))
+                          echoCancellation: s.echoCancellation, speechGate: s.speechGate, surface: nonEmpty(s.surface)))
+    }
+
+    /// A system call went on hold (`true`) or off it (#9290): the extension pauses the realtime upstream at once and
+    /// nothing wakes it until the hold ends. Sent only to an extension whose `ready` lists `hold` (`VoiceHold.feature`).
+    static func hold(_ on: Bool) -> String {
+        encode(HoldFrame(on: on))
     }
 
     /// A meeting call's Talk span opens (`true`) or closes (#3862 phase 4): the app sends the microphone's audio only
@@ -453,9 +464,10 @@ nonisolated enum VoiceMessage {
         var resume: ResumeFrame?
         var echoCancellation: Bool?
         var speechGate: Bool?
+        var surface: String?
 
         enum CodingKeys: String, CodingKey {
-            case type, model, voice, mode, target, recent, history, resume
+            case type, model, voice, mode, target, recent, history, resume, surface
             case protocolVersion = "protocol"
             case recordingID = "recording_id"
             case echoCancellation = "echo_cancellation"
@@ -465,6 +477,11 @@ nonisolated enum VoiceMessage {
 
     private struct TalkFrame: Encodable {
         let type = "talk"
+        var on: Bool
+    }
+
+    private struct HoldFrame: Encodable {
+        let type = "hold"
         var on: Bool
     }
 

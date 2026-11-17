@@ -116,7 +116,7 @@ final class LarkMessageDisplayFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["编辑历史已隐藏"].waitForExistence(timeout: 10), "an open history sheet must react to settings changes")
         try await change(hub, key: "show_edit_history", value: true)
         XCTAssertTrue(app.staticTexts["原定会议室 A"].waitForExistence(timeout: 10))
-        app.buttons["完成"].firstMatch.tapCenter()
+        app.buttons["sheet-close"].firstMatch.tapCenter()
         try await change(hub, key: "anti_recall", value: false)
         XCTAssertTrue(app.buttons["李雷：消息已撤回"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["已留存的评审时间：周五下午"].exists)

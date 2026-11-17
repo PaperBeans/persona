@@ -144,6 +144,20 @@ struct StyleSpecTests {
         #expect(PersonaPalette.contrast(hex.dark, Theme.ChatBox.personaHex.dark) >= 4.5)
     }
 
+    /// Inline code's ink (`Theme.Reply.codeInk`, #9477) is text with no background under it: ≥ 4.5:1 on every page and
+    /// card and on Persona's reply box, in light and dark, and quieter than the body text but not as quiet as
+    /// `secondaryInk`.
+    @Test func inlineCodeReadsAsText() {
+        let ink = Theme.Reply.codeInk, hex = Theme.Reply.codeInkHex
+        let found = Self.below(4.5) { (ink, $0.page) } + Self.below(4.5) { (ink, $0.card) }
+        #expect(found.isEmpty, "the inline code ink under 4.5:1: \(found)")
+        #expect(Self.hex(ink) == hex.light && Self.hex(ink, .dark) == hex.dark)
+        #expect(PersonaPalette.contrast(hex.light, Theme.ChatBox.personaHex.light) >= 4.5)
+        #expect(PersonaPalette.contrast(hex.dark, Theme.ChatBox.personaHex.dark) >= 4.5)
+        #expect(PersonaPalette.contrast(hex.light, 0xFFFFFF) > PersonaPalette.contrast(Theme.Reply.secondaryInkHex.light, 0xFFFFFF))
+        #expect(PersonaPalette.contrast(hex.dark, 0x000000) > PersonaPalette.contrast(Theme.Reply.secondaryInkHex.dark, 0x000000))
+    }
+
     /// The Mac window's chrome a style brings (`StyleSpec.MacChrome`, Lark's), in the style's own colors: a selected
     /// row's icon in the accent ≥ 3:1 on the sections column's raised block and on the selection's wash over the side
     /// column and over the page, the row's words ≥ 4.5:1 on that wash, and the white letter ≥ 3:1 on every monogram

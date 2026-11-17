@@ -24,12 +24,28 @@ struct ReplyTextTests {
         let bold = s.attribute(.font, at: 4, effectiveRange: nil) as? UIFont
         let traits = bold?.fontDescriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any]
         #expect((traits?[.weight] as? CGFloat ?? 0) >= UIFont.Weight.semibold.rawValue)
+        // Inline code on no background, in its own ink (#9477).
         let code = (s.string as NSString).range(of: "swift test")
-        #expect(s.attribute(.backgroundColor, at: code.location, effectiveRange: nil) != nil)
+        #expect(s.attribute(.backgroundColor, at: code.location, effectiveRange: nil) == nil)
+        #expect(s.attribute(.foregroundColor, at: code.location, effectiveRange: nil) as? UIColor == look.codeInk)
         // A link keeps its color and is not followed: a tap on the words is about the selection.
         let link = (s.string as NSString).range(of: "PR")
         #expect(s.attribute(.link, at: link.location, effectiveRange: nil) == nil)
         #expect(s.attribute(.foregroundColor, at: link.location, effectiveRange: nil) as? UIColor == look.link)
+    }
+
+    /// Inline code that meets a CJK letter has the chat's thin space on that side (`InlineCodeGap`, #9477), which
+    /// copies as nothing; in a written link the code is the link's color, in an agent's quiet words theirs.
+    @Test func inlineCodeRoomAndInk() {
+        let s = reply("用`pnpm`装依赖，提交是 `3854bdc`。")
+        #expect(s.string == "用\u{2009}pnpm\u{2009}装依赖，提交是 3854bdc。")
+        #expect(ReplyText.copyText(s) == "用pnpm装依赖，提交是 3854bdc。")
+        let linked = reply("见 [`docs/API.md`](https://example.com/docs)")
+        let at = (linked.string as NSString).range(of: "docs/API.md").location
+        #expect(linked.attribute(.foregroundColor, at: at, effectiveRange: nil) as? UIColor == look.link)
+        let quiet = ReplyText.Look(.reply(quiet: true), traits: UITraitCollection(preferredContentSizeCategory: .large))
+        let q = ReplyText.attributed("跑 `make`", look: quiet, width: 360)
+        #expect(q.attribute(.foregroundColor, at: (q.string as NSString).range(of: "make").location, effectiveRange: nil) as? UIColor == quiet.color)
     }
 
     /// Outside a fence `a*b*c` would be emphasis (`abc`); inside it is code, kept as written, monospaced, on the code
@@ -327,10 +343,10 @@ struct ReplyTextTests {
         #expect(shown(text) != text) // as a reply it would lose marks
     }
 
-    /// Sizes in em are whole points, as MarkdownUI draws them (`round(size × scale)`, #3188): inline code at 17 is 15,
-    /// the first heading 22, an agent's quiet words 15.
+    /// Sizes in em are whole points, as MarkdownUI draws them (`round(size × scale)`, #3188): inline code at 17 is 16
+    /// (#9477), the first heading 22, an agent's quiet words 15.
     @Test func emSizesAreWholePointsAsTheChatDraws() {
-        #expect(ReplyMetrics.points(ReplyMetrics.inlineCode, of: 17) == 15)
+        #expect(ReplyMetrics.points(ReplyMetrics.inlineCode, of: 17) == 16)
         #expect(ReplyMetrics.points(ReplyMetrics.heading1.size, of: 17) == 22)
         let s = reply("以 `cb3b` 开头\n\n# 标题")
         let code = (s.string as NSString).range(of: "cb3b").location, title = (s.string as NSString).range(of: "标题").location

@@ -453,6 +453,26 @@ func (e *Engine) audioGaps(id string, end float64) [][2]float64 {
 	return gaps
 }
 
+// audioHeldEnd is where the audio the hub holds of recording id ends, in seconds: 0 with none, or once it is gone. A
+// hub-mode recording ends no earlier (#9587): a phone killed mid-segment loses the segment it was writing, which the
+// hub got over the socket. The caller may hold meetMu (never audioRec.mu).
+func (e *Engine) audioHeldEnd(id string) float64 {
+	st := e.Store
+	rec := st.audioRec(id)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	st.recFilesMu.RLock()
+	defer st.recFilesMu.RUnlock()
+	if rec.gone() != nil || rec.loadLocked(st, id) != nil {
+		return 0
+	}
+	held := rec.heldLocked()
+	if len(held) == 0 {
+		return 0
+	}
+	return held[len(held)-1][1]
+}
+
 // refreshGaps writes recording id's gaps to meeting.json when the audio changed them (PartTranscription moves then),
 // until the final pass starts; the gaps after it (meeting.json's once the final pass started).
 func (e *Engine) refreshGaps(id string) [][2]float64 {

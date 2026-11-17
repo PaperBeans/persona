@@ -32,7 +32,7 @@ struct HandoffCardView: View {
 
     var body: some View {
         let state = HandoffCardState.of(card, conversation: item.conversation, item: inboxItem, newest: newest)
-        if state == .live && tasks.laterMessages.contains(item.id) {
+        if state == .live && tasks.isLater(item) {
             laterLine
         } else {
             full(state)

@@ -266,6 +266,8 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 		Priority           string          `json:"priority"`
 		Project            string          `json:"project"`
 		Kind               string          `json:"kind"`
+		PartOf             json.RawMessage `json:"part_of"`
+		After              json.RawMessage `json:"after"`
 		RepositoryBindings json.RawMessage `json:"repository_bindings"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
@@ -302,6 +304,18 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 	if err := s.setTodoProject(ctx, &a.Project, &plan); err != nil {
 		return "", err
 	}
+	pieces, err := pieceArgs(a.PartOf, a.After)
+	if err != nil {
+		return "", err
+	}
+	if pieces.set() && kind == db.KindConcern {
+		return "", errors.New("a concern is no piece of a request: leave part_of and after out")
+	}
+	links, err := s.checkPieces("", pieces)
+	if err != nil {
+		return "", err
+	}
+	plan.PartOf, plan.After = links.PartOf, links.After
 	if t, ok := s.openTodoLike(title, kind, plan); ok {
 		if bindings != nil {
 			return "", fmt.Errorf("to-do %s already exists; associations were not changed: read todo_repositories_get and edit with todo_repositories_set", t.ID)
@@ -326,6 +340,15 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 		return "Created under your direction (you supervise it; to have an Agent do it, use task_plan with todo_id " + t.ID +
 			"): " + todoLine(t, now, loc), nil
 	}
+	if plan.PartOf != nil && *plan.PartOf != "" && self != "" && s.workerRefusal(ctx, machine, self) == nil {
+		// a piece the conversation will hand out itself: its own, so that task_plan's todo_id can run an Agent on it
+		t, err := s.createPieceTodo(ctx, self, title, strings.TrimSpace(a.Notes), plan, bindings)
+		if err != nil {
+			return "", fmt.Errorf("the to-do could not be saved, nothing changed: %w", err)
+		}
+		return "Created as a piece of " + t.PartOf + " (to have an Agent do it when its turn comes, use task_plan with todo_id " + t.ID +
+			"): " + todoLine(t, now, loc), nil
+	}
 	t, err := s.createPlainTodo(ctx, title, strings.TrimSpace(a.Notes), plan, bindings)
 	if err != nil {
 		return "", fmt.Errorf("the to-do could not be saved, nothing changed: %w", err)
@@ -342,6 +365,8 @@ func (s *Service) toolTodoUpdate(ctx context.Context, machine, self string, args
 		Remind   json.RawMessage `json:"remind"`
 		Priority json.RawMessage `json:"priority"`
 		Project  json.RawMessage `json:"project"`
+		PartOf   json.RawMessage `json:"part_of"`
+		After    json.RawMessage `json:"after"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("arguments: %w", err)
@@ -385,8 +410,21 @@ func (s *Service) toolTodoUpdate(ctx context.Context, machine, self string, args
 		}
 		changed = changed || set
 	}
+	pieces, err := pieceArgs(a.PartOf, a.After)
+	if err != nil {
+		return "", err
+	}
+	if pieces.set() && t.isConcern() {
+		return "", errors.New("a concern is no piece of a request: leave part_of and after out")
+	}
+	links, err := s.checkPieces(t.ID, pieces)
+	if err != nil {
+		return "", err
+	}
+	e.PartOf, e.After = links.PartOf, links.After
+	changed = changed || !pieces.empty()
 	if !changed {
-		return "", errors.New("nothing to change: give title, notes, due, remind, priority or project")
+		return "", errors.New("nothing to change: give title, notes, due, remind, priority, project, part_of or after")
 	}
 	if ok, err := s.confirmOutbound(ctx, machine, self, "todo_update", t.Title, args); err != nil || !ok {
 		return todoNotAllowed(err)
@@ -582,6 +620,7 @@ func todoLine(t Todo, now time.Time, loc *time.Location) string {
 	if t.Project != "" {
 		fmt.Fprintf(&b, " · project %s", t.Project)
 	}
+	b.WriteString(pieceLine(t))
 	b.WriteString(todoDue(t, now, loc))
 	if t.RemindAt != nil {
 		fmt.Fprintf(&b, " · remind %s", t.RemindAt.In(loc).Format(toolTimeLayout))

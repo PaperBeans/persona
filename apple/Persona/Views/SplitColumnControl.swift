@@ -182,9 +182,17 @@ struct SplitColumnControl: UIViewControllerRepresentable {
         // MARK: The drag
 
         private func begin(_ split: UISplitViewController, opening: Bool) {
-            guard let window = split.view.window, let root = window.rootViewController?.view,
-                  let screen = root.snapshotView(afterScreenUpdates: false),
-                  let screenAgain = root.snapshotView(afterScreenUpdates: false) else { return }
+            guard let window = split.view.window, let root = window.rootViewController?.view else { return }
+            // The pictures leave the capture layer out as a screenshot does: the bars in them, not the screenshot banner
+            // (#9508), until the pictures are gone.
+            ScreenshotBanner.beginReveal()
+            // A picture of the frame already drawn still leaves them out: with bars in the layer, one after it updates.
+            let fresh = ScreenshotBanner.hasLayers
+            guard let screen = root.snapshotView(afterScreenUpdates: fresh),
+                  let screenAgain = root.snapshotView(afterScreenUpdates: false) else {
+                ScreenshotBanner.endReveal()
+                return
+            }
             let width = split.primaryColumnWidth
             let full = 0...window.bounds.width
             // Beside the page where it keeps its least width (`SplitPageMin`); elsewhere the column lies over the page.
@@ -273,6 +281,7 @@ struct SplitColumnControl: UIViewControllerRepresentable {
                     d.animator.stopAnimation(true)
                     d.overlay.removeFromSuperview()
                     self.drag = nil
+                    ScreenshotBanner.endReveal()
                 }
             }
             // Reduce Motion: the line where it settles at once, no spring; the pictures only fade.

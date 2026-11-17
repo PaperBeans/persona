@@ -46,6 +46,8 @@ export interface PagedSessionListProps<T> {
   /** The hub names this collection's projects and spaces (`sessions_catalog`): a repository checked out on several
    *  computers is one project, a space is one computer's. Without it the groups are the count maps' paths and ids. */
   catalog?: boolean;
+  /** The hub lists the Just finished rows apart (`sessions_just_finished`, #9751): By state draws them a section. */
+  justFinished?: boolean;
   /** Where a row is, as the hub groups by it: the group holding the open row opens by itself. */
   placeOf?: (row: T) => SessionPlace;
   /** "Active within" (#4236): a row's last activity in ms, the key `compare` orders by, newest first. Given, the list
@@ -109,7 +111,7 @@ export function scrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-export function PagedSessionList<T>({ root, path, identity, compare, removeIdentity, event, renderRow, personal = false, label, catalog = false, placeOf, activeAt, needsYou, isOpen, parentOf, grouping, failureText = sameText }: PagedSessionListProps<T>) {
+export function PagedSessionList<T>({ root, path, identity, compare, removeIdentity, event, renderRow, personal = false, label, catalog = false, justFinished = false, placeOf, activeAt, needsYou, isOpen, parentOf, grouping, failureText = sameText }: PagedSessionListProps<T>) {
   const [query, setQuery] = useState("");
   const [typed, setTyped] = useState("");
   // the sidebar's groupings take ⌘K's words (#6589); every other list its own field's, once typing pauses
@@ -256,7 +258,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
     if (facetScoped) setFacetAttempt((n) => n + 1);
     else void root.retry().catch(() => {});
   }, [facetScoped, root]);
-  const grouped = useSessionGroups({ dimension, catalog: cataloged, countsPath, scope: groupScope, facets, facetQuery, facetsError: facetsFailure, retryFacets, waiting: sections ? scopeNeeds : 0, event, todos: grouping?.todos });
+  const grouped = useSessionGroups({ dimension, catalog: cataloged, countsPath, scope: groupScope, facets, facetQuery, facetsError: facetsFailure, retryFacets, waiting: sections ? scopeNeeds : 0, event, todos: grouping?.todos, justFinished });
   // "Recently updated" as the complete list orders its computers and spaces (lib/agent-sort.ts): by their newest session,
   // as far as the root's newest page tells (the hub reads no group's time); the ones it has none of keep their order
   // after them, and the sessions on no space stay last. Its to-dos keep the To-dos page's order there too.

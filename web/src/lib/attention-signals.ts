@@ -274,21 +274,31 @@ export function useAttentionSignals(label: string, pane: { mid: string; sid: str
   useEffect(() => {
     const desktop = window.personaDesktop;
     if (!desktop) return;
+    // What this socket was last told: the shell repeats its presence every 30 s whether it changed or not, and a
+    // repeat tells the hub nothing new. A hello is a new socket, told again.
+    let told: "on" | "off" | undefined;
     const reconcile = () => {
       if (!appSocketReady()) return;
       // A newer web app can run in an older desktop: missing additive capabilities retain the browser behavior.
       const active = desktop.desktopPresence?.().active ?? true;
-      if (active && systemNotifyActive()) {
+      const want = active && systemNotifyActive() ? "on" : "off";
+      if (want === told) return;
+      told = want;
+      if (want === "on") {
         send({ type: "register_desktop", device_name: desktop.deviceName });
         return;
       }
       if (getState().features.includes(DESKTOP_UNREGISTER_FEATURE)) send({ type: "unregister_desktop" });
       else disconnect(); // Old hub: only closing this socket can withdraw its desktop registration.
     };
-    const offHello = onHello(reconcile);
+    const offHello = onHello(() => {
+      told = undefined;
+      reconcile();
+    });
     // Recovery must also work after an old hub's socket-close withdrawal: there is no new hello without reconnecting.
+    // Only a socket that is gone is opened again: connect() replaces an open one, which every presence repeat did.
     const restore = () => {
-      if ((desktop.desktopPresence?.().active ?? true) && systemNotifyActive()) connect();
+      if (!appSocketReady() && (desktop.desktopPresence?.().active ?? true) && systemNotifyActive()) connect();
       reconcile();
     };
     const offPresence = desktop.onPresenceChange?.(restore) ?? (() => {});

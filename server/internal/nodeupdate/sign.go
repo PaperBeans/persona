@@ -20,6 +20,10 @@ import (
 // certificate; when that fails, one signed ad hoc under the configured identifier (the build is new either way, so
 // that costs no permission that still applied); when that fails too, the upload as it came.
 func (m *Manager) signedStage(ctx context.Context, u *upload) (string, string) {
+	if preserveOfficial(ctx, u.Path) {
+		m.logSign("node signing: update %s keeps its official release signature", u.Spec.Version)
+		return u.Path, u.Spec.SHA256
+	}
 	if m.signer == nil {
 		return u.Path, u.Spec.SHA256
 	}

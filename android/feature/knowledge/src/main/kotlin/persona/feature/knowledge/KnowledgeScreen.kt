@@ -75,7 +75,8 @@ internal fun KnowledgeScreen(model: KnowledgeViewModel, navigator: Navigator) {
     var ignored by rememberSaveable(page.scope?.path) { mutableStateOf(false) }
     val search = page.filter.query.isNotBlank()
     val shown = if (search) page.groups.isNotEmpty() else page.entries.isNotEmpty()
-    JListPage(stringResource(R.string.knowledge_title), onBack = navigator::back, largeTitle = true,
+    // A regular-width root draws the sidebar button (LocalIsSidebarRoot); elsewhere this Back stays (iOS sidebarRootPage).
+    JListPage(stringResource(R.string.knowledge_title), onBack = if (LocalIsSidebarRoot.current) null else navigator::back, largeTitle = true,
         refreshing = page.loading && shown, onRefresh = model::refresh,
         actions = {
             if (!search) JIconButton(PhIcons.FunnelSimple, page.filter.tag?.let { stringResource(R.string.knowledge_filter_tag_current, it) }

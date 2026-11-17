@@ -29,8 +29,8 @@ class HarmonyCoreIntegrationTest(unittest.TestCase):
         self.assertIn("fixtureArgument('coreReplay')", runner)
         self.assertIn('nativeCoreTests()', runner)
         replay = (ENTRY / 'src/ohosTest/ets/test/NativeCore.test.ets').read_text()
-        self.assertIn("expect(cases).assertEqual(38)", replay)
-        self.assertIn("expect(steps).assertEqual(94)", replay)
+        self.assertIn("expect(cases).assertEqual(39)", replay)
+        self.assertIn("expect(steps).assertEqual(95)", replay)
         self.assertIn('expect(patch.ops.length).assertEqual(1)', replay)
         self.assertIn("expect(patch.ops[0].kind).assertEqual('update')", replay)
         self.assertIn("getRawFileContent('core-fixtures/continuity.json')", replay)
@@ -42,12 +42,12 @@ class HarmonyCoreIntegrationTest(unittest.TestCase):
             subprocess.run([sys.executable, '-I', str(ROOT / 'native/app-core/scripts/package-ohos-fixtures.py'),
                             '--fixtures', str(ROOT / 'spec/fixtures/continuity'), '--output', str(output)], check=True)
             manifest = json.loads((output / 'manifest.json').read_text())
-            self.assertEqual(manifest['cases'], 38)
-            self.assertEqual(manifest['steps'], 94)
+            self.assertEqual(manifest['cases'], 39)
+            self.assertEqual(manifest['steps'], 95)
             documents = json.loads((output / 'continuity.json').read_text())
             self.assertEqual(len(documents), 5)
-            self.assertEqual(sum(len(document['document']['cases']) for document in documents), 38)
-            self.assertEqual(sum(len(case['input']['events']) for document in documents for case in document['document']['cases']), 94)
+            self.assertEqual(sum(len(document['document']['cases']) for document in documents), 39)
+            self.assertEqual(sum(len(case['input']['events']) for document in documents for case in document['document']['cases']), 95)
 
 
 if __name__ == '__main__':

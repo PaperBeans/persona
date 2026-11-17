@@ -139,7 +139,6 @@
   "room_ended": "The meeting is over.",
   "room_ended_copy": "The meeting is over. A copy of its conversation is still on the assistant’s computer and is deleted once that computer can be reached.",
   "room_deleted": "The meeting’s conversation was deleted with its transcript.",
-  "thread_joined": "Persona joined the meeting",
   "thread_lines_one": "{count} line from the meeting",
   "thread_lines_other": "{count} lines from the meeting",
   "thread_ended": "The meeting ended",

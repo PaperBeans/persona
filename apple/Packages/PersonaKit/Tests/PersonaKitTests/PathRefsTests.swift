@@ -140,6 +140,21 @@ struct PathRefsTests {
         #expect(paths("saved to ~/报告/\(hash32)") == ["~/报告/\(hash32)"])
         #expect(ContinuousClock.now - started < .milliseconds(500))
     }
+
+    /// The answer an iPhone froze on until the watchdog killed it (#9173): model names in code spans, an organization
+    /// then a long ASCII name with no extension. Before #8911 each was tried 2^n ways in the row's body: 120 ms for a
+    /// 28-character one, more than five seconds (never, in practice) for the 33 to 40-character ones below.
+    @Test func finishesAtOnceOnModelNamesInCodeSpans() {
+        let names = ["acme/halfbody_person_detection", "acme/head-detection-v2", "acme/image-eva02-large-tagger-v1",
+                     "vendor/dinov3-vitl16-pretrain-lvd1689m", "lab/eva02_large_patch14_clip_336", "acme/ml-tagger-onnx"]
+        let answer = "模型已经在后台下载：\n\n| 模型 | 大小 |\n|---|---:|\n"
+            + names.map { "| `\($0)` v1.0_s | 1.2 GB |" }.joined(separator: "\n")
+            + "\n\n下载日志：`work/download_heavy.log`，清单：`work/models/manifest.json`。对比图：`~/Pictures/对比图-v2.1/正面vs背面.jpg`、`侧面vs背面.jpg`。"
+        let started = ContinuousClock.now
+        for name in names { #expect(PathRefs.codePathRef(name) == nil, "\(name) is no file") }
+        #expect(PathMarkdown(answer).paths == ["work/download_heavy.log", "work/models/manifest.json", "~/Pictures/对比图-v2.1/正面vs背面.jpg"])
+        #expect(ContinuousClock.now - started < .milliseconds(200))
+    }
 }
 
 /// An answer's Markdown with its paths linked: only the ones there, in text and whole code spans, with the line;
@@ -196,5 +211,53 @@ struct PathMarkdownTests {
         let md = "生成了 `~/报告/第四季度 终稿.docx`。"
         let out = PathMarkdown(md).linked { $0 == "~/报告/第四季度 终稿.docx" }
         #expect(out.markdown == "生成了 [`~/报告/第四季度 终稿.docx`](\(link("~/报告/第四季度 终稿.docx")))。")
+    }
+}
+
+/// Where a line's links are, so its paths and code spans are left alone (`PathMarkdown.protectedRanges`, #9173): the
+/// matches the expression it replaced found, in one pass.
+struct ProtectedRangesTests {
+    /// The expression the scanner replaced: the reference for what it has to find.
+    private static let expression = try! NSRegularExpression(pattern: #"!?\[[^\]\n]*\]\([^)\n]*\)|!?\[[^\]\n]*\]\[[^\]\n]*\]|<[^\s<>]+>|^\s*\[[^\]\n]+\]:.*$"#)
+
+    private func expected(_ line: String) -> [NSRange] {
+        Self.expression.matches(in: line, range: NSRange(location: 0, length: (line as NSString).length)).map(\.range)
+    }
+
+    /// The same numbers on every run, so a failure can be run again.
+    private struct Seeded: RandomNumberGenerator {
+        var state: UInt64
+        mutating func next() -> UInt64 {
+            state &+= 0x9E37_79B9_7F4A_7C15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
+        }
+    }
+
+    @Test func findsWhatTheExpressionFound() {
+        let written = ["见 [文档](https://example.com/a/b.md) 和 ![公式](persona-math:x%2Fy)", "[a][ref] 和 [b][]", "<https://example.com/x>",
+                       "  [ref]: https://example.com/a.md \"标题\"", "[ref]:", "[]: x", "[a](b", "[a]", "![a](u) ![b](", "<a b>", "<>",
+                       "[a](u)[b](v)<w>", "!![a](u)", "[[a](u)", "[a]]((u)", "[a](u))", "\u{3000}[r]: x", "[r]: x\r", ""]
+        for line in written { #expect(PathMarkdown.protectedRanges(in: line) == expected(line), "\(line)") }
+        var rng = Seeded(state: 9173)
+        let pieces = ["[", "]", "(", ")", "<", ">", "!", ":", " ", "\t", "\u{3000}", "a", "中", "/", ".md"]
+        for _ in 0..<5_000 {
+            let line = (0..<Int.random(in: 0...24, using: &rng)).map { _ in pieces.randomElement(using: &rng)! }.joined()
+            #expect(PathMarkdown.protectedRanges(in: line) == expected(line), "\(line)")
+        }
+    }
+
+    /// The expression looked for each `[`'s `]` from scratch: 1.5 s for this line, and copying code had no time limit.
+    @Test func staysFastOnALineOfUnclosedBrackets() {
+        let lines = [String(repeating: "[", count: 8_000), String(repeating: "![x](u ", count: 1_200), String(repeating: "[a](", count: 2_000)]
+        let started = ContinuousClock.now
+        for line in lines {
+            #expect(PathMarkdown.protectedRanges(in: line).isEmpty)
+            #expect(PathMarkdown(line + " `src/a.ts`").paths == ["src/a.ts"])
+            #expect(CodeCopyMarkdown.linked(line + " `x`").hasSuffix("(\(CodeCopyURL.make("x")!.absoluteString))"))
+        }
+        #expect(ContinuousClock.now - started < .milliseconds(300))
     }
 }

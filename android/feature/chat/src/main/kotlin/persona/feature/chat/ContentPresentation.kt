@@ -10,6 +10,10 @@ import persona.core.domain.lines.ChatLine
 import persona.core.domain.ComputerSteps
 import persona.core.domain.MessageContext
 import persona.core.domain.decodeXmlEntities
+import persona.core.domain.diff.LineDiff
+import persona.core.domain.diff.Shown
+import persona.core.domain.diff.WordSpan
+import persona.core.domain.diff.foldUnchanged
 import persona.core.domain.isInterjectContext
 import persona.core.domain.lines.WorkItem
 import persona.core.domain.messageText
@@ -191,10 +195,29 @@ internal fun MessageModel.editText(): String =
         // Its files go along again: the tags were taken out of the text for the cards.
         if (attached.isEmpty()) "" else attached.joinToString("\n", prefix = "\n\n") { it.toXml() }
 
-internal data class DiffLine(val text: String, val sign: Char, val old: Int?, val new: Int?)
-internal data class ToolDiff(val lines: List<DiffLine>) {
+/** One line of a tool's diff; [changed] are the words that changed in a line paired with the one it was changed from or to. */
+internal data class DiffLine(val text: String, val sign: Char, val old: Int?, val new: Int?, val changed: List<WordSpan> = emptyList())
+
+/** A row of the diff as drawn: a line (by its index in [ToolDiff.lines]) or a fold standing for [count] unchanged ones. */
+internal sealed interface DiffRow {
+    data class Line(val index: Int, val line: DiffLine) : DiffRow
+    data class Fold(val from: Int, val count: Int) : DiffRow
+}
+
+/** [foldsContext]: an edit's old and new text compared, so its long runs of unchanged lines fold until Show All; a patch shows whole. */
+internal data class ToolDiff(val lines: List<DiffLine>, val foldsContext: Boolean = false) {
     val added get() = lines.count { it.sign == '+' }
     val removed get() = lines.count { it.sign == '-' }
+
+    /** What shows until Show All: [lines] with each long run of unchanged ones as one fold row. */
+    fun folded(): List<DiffRow> =
+        if (!foldsContext) lines.mapIndexed { index, line -> DiffRow.Line(index, line) }
+        else foldUnchanged(lines.map { it.sign == '+' || it.sign == '-' }).map {
+            when (it) {
+                is Shown.Line -> DiffRow.Line(it.index, lines[it.index])
+                is Shown.Fold -> DiffRow.Fold(it.from, it.count)
+            }
+        }
 }
 
 private fun JsonObject.string(key: String) = (get(key) as? JsonPrimitive)?.contentOrNull
@@ -221,21 +244,20 @@ internal fun toolDiff(item: Item): ToolDiff? {
     }
     val lines = buildList {
         edits.forEach { edit ->
-            val old = contentLines(edit.string("old_string") ?: return null)
-            val new = contentLines(edit.string("new_string") ?: return null)
-            val prefix = old.zip(new).takeWhile { it.first == it.second }.size
-            var suffix = 0
-            while (suffix < minOf(old.size, new.size) - prefix && old[old.lastIndex - suffix] == new[new.lastIndex - suffix]) suffix++
+            val old = edit.string("old_string") ?: return null
+            val new = edit.string("new_string") ?: return null
             // Edit inputs contain snippets, so no absolute file line numbers are inferred.
-            old.take(prefix).forEach { add(DiffLine(it, ' ', null, null)) }
-            old.subList(prefix, old.size - suffix).forEach { add(DiffLine(it, '-', null, null)) }
-            new.subList(prefix, new.size - suffix).forEachIndexed { index, line ->
-                add(DiffLine(line, '+', null, if (item.toolName == "Write") index + 1 else null))
+            LineDiff(old, new).lines.forEach { line ->
+                val sign = when (line.kind) {
+                    LineDiff.Kind.Context -> ' '
+                    LineDiff.Kind.Del -> '-'
+                    LineDiff.Kind.Add -> '+'
+                }
+                add(DiffLine(line.text, sign, null, if (item.toolName == "Write") line.newLine else null, line.changed))
             }
-            old.takeLast(suffix).forEach { add(DiffLine(it, ' ', null, null)) }
         }
     }
-    return ToolDiff(lines)
+    return ToolDiff(lines, foldsContext = true)
 }
 
 private val hunkHeader = Regex("^@@ -(\\d+)(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@.*")

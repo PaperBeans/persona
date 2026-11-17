@@ -100,12 +100,13 @@ func (s *Service) resolveStart(ctx context.Context, params map[string]any) (star
 // Auto Accept).
 type startAgent struct {
 	agent      string
+	source     string // the selected launcher's provenance, retained through fitting and health detours
 	autoAccept bool
 }
 
 // launcherStartAgent is what launcher l runs.
 func launcherStartAgent(l ConfiguredLauncher) startAgent {
-	return startAgent{agent: l.AgentType, autoAccept: l.AutoAccept}
+	return startAgent{agent: l.AgentType, source: l.Source, autoAccept: l.AutoAccept}
 }
 
 // allowAll: the Agents Persona itself starts on the launcher (agent_start, a planned task, a read-only one too) run with
@@ -136,7 +137,7 @@ func (s *Service) fitLauncher(ctx context.Context, m Device, own startPick, para
 		}
 		for _, l := range s.storedLaunchers(ctx) {
 			if l.Name == name {
-				return "", startAgent{agent: l.AgentType()}, nil
+				return "", startAgent{agent: l.AgentType(), source: "persona"}, nil
 			}
 		}
 		return "", startAgent{}, nil
@@ -167,7 +168,7 @@ func (s *Service) fitLauncher(ctx context.Context, m Device, own startPick, para
 		})
 	}
 	to := launcherInstead(m, list)
-	for _, k := range []string{"model", "effort", "model_fingerprint", "runtime"} {
+	for _, k := range []string{"model", "effort", "model_fingerprint"} {
 		delete(params, k)
 	}
 	params["launcher"] = to

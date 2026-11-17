@@ -197,7 +197,7 @@ func TestInboxGroupStateHandledRepliedNotifiesOnce(t *testing.T) {
 	}
 	want := prompts.RenderInboxHandlingNote(prompts.NoteSelfReplied,
 		prompts.InboxHandlingNote{Owner: "示例用户", Text: localTime})
-	if notes[0] != want || !strings.Contains(notes[0], localTime) {
+	if inboxTestNotificationText(notes[0]) != want || !strings.Contains(notes[0], localTime) {
 		t.Fatalf("delivered note = %q, want %q with the source time in the user's zone", notes[0], want)
 	}
 
@@ -225,7 +225,7 @@ func TestInboxGroupStateRepliedOnceAfterChainEviction(t *testing.T) {
 	requireInboxGroupStateChange(t, rest, changed, it)
 	requireInboxGroupStatePending(t, it, prompts.NoteSelfReplied, "2026-11-13 06:30")
 	h.deliverPending(ctx)
-	if _, _, err := h.suggest(ctx, "session-1", suggestIn{Recap: "Synthetic recap after the source reply"}); err != nil {
+	if _, _, err := h.suggest(ctx, "session-1", suggestIn{Recap: "Synthetic recap after the source reply", ProcessingTurn: inboxTestProcessingTurn(h, "session-1")}); err != nil {
 		t.Fatal(err)
 	}
 	if notes := notesOf(h.f, "session-1"); len(notes) != 1 {
@@ -336,7 +336,7 @@ func TestInboxGroupStateHandledReadNotifiesOnce(t *testing.T) {
 	h.deliverPending(context.Background())
 	notes := notesOf(h.f, "session-1")
 	want := prompts.RenderInboxHandlingNote(prompts.NoteSelfRead, prompts.InboxHandlingNote{Owner: "示例用户"})
-	if len(notes) != 1 || notes[0] != want {
+	if len(notes) != 1 || inboxTestNotificationText(notes[0]) != want {
 		t.Fatalf("delivered notes = %q, want %q", notes, want)
 	}
 	rest, changed = h.applyGroupStates(context.Background(), inboxGroupStateTestSource(), []connector.InboxThing{report})

@@ -768,6 +768,9 @@ func TestInboxInstructRecapOnlyReturnsToWaiting(t *testing.T) {
 	if state, _, _ := handlingNow(h, it); state != HandlingLooking {
 		t.Fatalf("after the instruction: %q", state)
 	}
+	// The recap answers the prompt that carries the instruction, and so the processing turn issued with it (#9447).
+	// That prompt goes out in the background: written before it lands, the recap would hold the earlier turn.
+	toldConv(t, h, "先问问他预算")
 	if _, err := suggestTool(t, h, `{"recap":"问过了，等他回预算"}`); err != nil {
 		t.Fatal(err)
 	}
@@ -795,6 +798,7 @@ func TestInboxInstructRecapOnlyReturnsToAgent(t *testing.T) {
 	if code, out := suggestionCall(t, h, it.ID, `{"version":0,"action":"instruct","text":"顺便看看文档"}`); code != 200 {
 		t.Fatalf("instruct: %d %v", code, out)
 	}
+	toldConv(t, h, "顺便看看文档") // the recap answers the delivered instruction and its turn
 	if _, err := suggestTool(t, h, `{"recap":"交给它去查了"}`); err != nil {
 		t.Fatal(err)
 	}
@@ -818,6 +822,7 @@ func TestInboxRejectRecapOnlyReturnsToWaiting(t *testing.T) {
 	if state, _, _ := handlingNow(h, it); state != HandlingLooking {
 		t.Fatalf("after the rejection: %q", state)
 	}
+	toldConv(t, h, "驳回了你的建议") // the recap answers the delivered rejection and its turn
 	if _, err := suggestTool(t, h, `{"recap":"他不要这个说法，等新口径"}`); err != nil {
 		t.Fatal(err)
 	}

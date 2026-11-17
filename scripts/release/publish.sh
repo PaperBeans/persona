@@ -302,7 +302,7 @@ done
 
 # The manifest hubs update from: version, build number, commit and every download's sha256 (not signed, the user's
 # call: it guards against a broken download over HTTPS, docs/operations/hub-update.md "Security").
-"$host_bin" release manifest --dir "$OUT/bin" --version "$VERSION" --build "$BUILD" --commit "$COMMIT" --out "$OUT/bin/latest.json"
+"$host_bin" release manifest --dir "$OUT/bin" --version "$VERSION" --build "$BUILD" --commit "$COMMIT" --channel "${RELEASE_CHANNEL:-release}" --out "$OUT/bin/latest.json"
 # The latest.json about to go up, read back against the downloads it lists: sizes and sha256s, this machine's binaries
 # run (version -v), the others' build number. A manifest of another build than its binaries (v0.2.1, #4522) stops here.
 "$host_bin" release verify --dir "$OUT/bin" --manifest "$OUT/bin/latest.json"

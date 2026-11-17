@@ -441,7 +441,11 @@
         "name": {"type": "string"},
         "description": {"type": "string"},
         "input_schema": {"description": "A JSON Schema with type object."},
-        "shell": {"type": "array", "items": {"type": "string"}, "description": "Words that run the tool in a shell instead (a gated command's); runtimes refuse them in an assistant conversation."}
+        "shell": {"type": "array", "items": {"type": "string"}, "description": "Words that run the tool in a shell instead (a gated command's); runtimes refuse them in an assistant conversation."},
+        "defer_loading": {
+          "type": "boolean",
+          "description": "Set by Persona itself on an assistant conversation's tool list: a rarely used tool is sent by name only and loaded with tool search when needed (#7317). A connector does not need to send it; the manager sets it on every list whatever a connector sent."
+        }
       },
       "required": ["name", "description", "input_schema"]
     },

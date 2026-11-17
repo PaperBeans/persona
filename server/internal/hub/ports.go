@@ -14,6 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/streams"
 )
@@ -147,22 +148,26 @@ func (h *Hub) openPort(w http.ResponseWriter, r *http.Request, m *Machine) {
 const screenPort = 5900
 
 // portAllowed: an agent on the machine listens on port, or the user opened it, or it is the screen of a Mac the
-// plugin cua or ego is on for (ego's first-run setup is done over it, #1507).
+// plugin cua or ego is on for (ego's first-run setup is done over it, #1507). An agent is any row of the manager's
+// list, an archived one too: told apart from the list (Machine.archived, #6836) it allows what it allowed in it.
 func (h *Hub) portAllowed(m *Machine, port int) bool {
 	if port == screenPort && h.screenAllowed(m) { // the manager's report: cua or ego is on for it
 		return true
 	}
-	m.mu.Lock()
-	for _, s := range m.sessions {
-		for _, p := range s.Ports {
+	list, archived := m.keptWhole()
+	return listensOn(list, port) || listensOn(archived, port) || h.ports.has(m.cfg.ID, port)
+}
+
+// listensOn reports whether a session of list listens on port.
+func listensOn(list []proto.Session, port int) bool {
+	for i := range list { // by index: a range value copies every (large) session it passes
+		for _, p := range list[i].Ports {
 			if p.Port == port {
-				m.mu.Unlock()
 				return true
 			}
 		}
 	}
-	m.mu.Unlock()
-	return h.ports.has(m.cfg.ID, port)
+	return false
 }
 
 // connectPort is GET …/ports/{port}/connect: a WebSocket whose binary messages are one TCP connection's bytes to

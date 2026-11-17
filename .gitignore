@@ -21,6 +21,8 @@ florak/
 /apple/Config.xcconfig
 # Generated when an opt-in entitlement is on (config.json app.carplay_voice, app.health_background_delivery, app.homekit): the app's entitlements plus those.
 /apple/PersonaOptIn.entitlements
+# Written by xcodegen with config.json app.siri_calls on (apple/siri-calls.yml): the app's entitlements plus Siri's.
+/apple/PersonaSiriCalls.entitlements
 /apple/PersonaCarPlay.entitlements
 # Personal notes for coding agents working in this checkout (machines, accounts); see CLAUDE.md.
 /CLAUDE.local.md

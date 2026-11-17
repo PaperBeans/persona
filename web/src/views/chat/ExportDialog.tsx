@@ -31,7 +31,9 @@ export function exportWords(persona: string): ExportWords {
     error: text("error"),
     image: text("image"),
     cut: (n) => text("cut", { n }),
+    cutUnknown: text("cut_unknown"),
     partial: (from) => text("partial", { from }),
+    partialUnknown: text("partial_unknown"),
   };
 }
 
@@ -40,7 +42,7 @@ export function messageCount(items: readonly Item[]): number {
   return items.filter((i) => i.kind === "text" && (i.role === "user" || i.role === "assistant") && i.text?.trim()).length;
 }
 
-type Reading = { state: "reading"; count: number } | { state: "ready"; markdown: string; messages: number; partial: string } | { state: "failed"; error: string };
+type Reading = { state: "reading"; count: number } | { state: "ready"; markdown: string; messages: number; partial: boolean; from: string } | { state: "failed"; error: string };
 
 export interface ExportTarget {
   session: Session;
@@ -79,8 +81,8 @@ export function ExportDialog({ open, target, onClose }: { open: boolean; target:
           { title, agent, computer: machineName, folder: session.cwd, exported: localTime(new Date().toISOString()) },
           { work, partial, words: exportWords(persona.name) },
         );
-        const first = items.find((i) => i.ts)?.ts;
-        setReading({ state: "ready", markdown, messages: messageCount(items), partial: partial && first ? localTime(first) : "" });
+        const first = items.find((i) => i.ts && localTime(i.ts))?.ts;
+        setReading({ state: "ready", markdown, messages: messageCount(items), partial, from: first ? localTime(first) : "" });
       },
       (e: unknown) => {
         if (stopped || (e instanceof ExportStopped && e.why === "cancelled")) return;
@@ -152,7 +154,7 @@ export function ExportDialog({ open, target, onClose }: { open: boolean; target:
           {ready && (
             <span className="block text-ink-2">
               {text("ready", { n: ready.messages, size: bytes(new Blob([ready.markdown]).size) })}
-              {ready.partial && <span className="mt-1 block text-orange">{text("partial_note", { from: ready.partial })}</span>}
+              {ready.partial && <span className="mt-1 block text-orange">{ready.from ? text("partial_note", { from: ready.from }) : text("partial_unknown")}</span>}
             </span>
           )}
           {reading.state === "failed" && (

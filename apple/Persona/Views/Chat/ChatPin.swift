@@ -554,6 +554,9 @@ import SwiftUI
 
             override func didMoveToWindow() {
                 super.didMoveToWindow()
+                // Only on the way in: a list built again (`ChatView.listBuild`) takes the old one out after the new one is
+                // in, and the old one's probe, leaving, handed the pin the list on its way out (nil a moment later).
+                guard window != nil else { return }
                 var v = superview
                 while let s = v, !(s is UIScrollView) { v = s.superview }
                 if let list = v as? UIScrollView { pin?.list = list }

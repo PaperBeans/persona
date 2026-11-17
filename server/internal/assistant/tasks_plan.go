@@ -119,6 +119,10 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 				return "", fmt.Errorf("task %d: %v", i+1, err)
 			}
 		}
+		t.InboxHandoff = ""
+		if err := s.planInboxSource(ctx, machine, sessionID, t); err != nil {
+			return "", fmt.Errorf("task %d: %w", i+1, err)
+		}
 		if t.Model != "" && !proto.ValidModelID(t.Model) { // it goes to the agent as --model (#1644)
 			return "", fmt.Errorf("task %d: model %q is not a model id: %s", i+1, t.Model, proto.ModelIDRule)
 		}
@@ -200,6 +204,13 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		if t.Continues == "" {
 			if _, err := s.reusableTodo(ctx, sessionID, t.ReuseTodo, false); err != nil {
 				return "", fmt.Errorf("task %d: %v", i+1, err)
+			}
+		}
+	}
+	if scope == nil {
+		for i := range a.Tasks {
+			if err := s.planPieces(&a.Tasks[i]); err != nil {
+				return "", fmt.Errorf("task %d: %w", i+1, err)
 			}
 		}
 	}

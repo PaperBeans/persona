@@ -37,8 +37,9 @@ var codexAppModelLists = struct {
 	sync.Mutex
 	at     map[string]time.Time
 	got    map[string]map[string]codexModelEfforts // home → model → its efforts
+	failed map[string]string                       // home → the failure last logged, not logged again on each retry (#9845)
 	flight singleflight.Group
-}{at: map[string]time.Time{}, got: map[string]map[string]codexModelEfforts{}}
+}{at: map[string]time.Time{}, got: map[string]map[string]codexModelEfforts{}, failed: map[string]string{}}
 
 // readCodexAppModels asks the codex the App bundles (codexAppCLI) for the models it lists for home, hidden ones too (a
 // chat may run one). A variable: tests answer their own.
@@ -69,9 +70,17 @@ func (n *Node) codexAppEfforts(home, model string) []string {
 			ctx, cancel := context.WithTimeout(context.Background(), codexAppSeedWait)
 			defer cancel()
 			got, err := readCodexAppModels(ctx, home)
+			codexAppModelLists.Lock()
+			repeated := err != nil && codexAppModelLists.failed[home] == err.Error()
 			if err != nil {
-				n.logf("codex app %s: model/list: %v; its chats offer every effort level", home, err)
 				got = models // the list kept, if any; asked again after the TTL
+				codexAppModelLists.failed[home] = err.Error()
+			} else {
+				delete(codexAppModelLists.failed, home)
+			}
+			codexAppModelLists.Unlock()
+			if err != nil && !repeated {
+				n.logf("codex app %s: model/list: %v; its chats offer every effort level", home, err)
 			}
 			codexAppModelLists.Lock()
 			codexAppModelLists.at[home], codexAppModelLists.got[home] = time.Now(), got

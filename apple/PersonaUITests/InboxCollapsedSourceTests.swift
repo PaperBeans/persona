@@ -155,7 +155,9 @@ final class InboxCollapsedSourceTests: XCTestCase {
         app = XCUIApplication()
         let pair = "persona://pair?url=" + inboxHub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         app.launchArguments = ["-pairURL", pair, "-tab", "assistant", "-app.tab", "assistant", "-dev.openChat", "",
-                               "-openSplitFresh", "YES", "-inbox.kind", "", "-inbox.source", ""]
+                               "-openSplitFresh", "YES", "-inbox.kind", "", "-inbox.source", "",
+                               // the next item is FYI: every section stacked (the section bar's All, #9053)
+                               "-showInboxSection", "all"]
         app.launchPinned()
         acceptIconAlert()
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10), "no app window")

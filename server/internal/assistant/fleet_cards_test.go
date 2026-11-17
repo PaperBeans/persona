@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/link"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -846,7 +847,7 @@ func TestResolveScreenChanged(t *testing.T) {
 	changed := &rpc.Error{Code: screen.PromptChanged, Message: "变了", Data: json.RawMessage(`{"delivered":"none"}`)}
 	put := func(id string) {
 		s.fleet.mu.Lock()
-		s.ixMapLocked()[id] = &pending{ix: proto.Interaction{ID: id, Kind: proto.IxScreen}, local: func(proto.Resolution) error { return changed }}
+		s.ixMapLocked()[id] = &pending{ix: proto.Interaction{ID: id, Kind: proto.IxScreen}, local: func(context.Context, proto.Resolution) error { return changed }}
 		s.fleet.mu.Unlock()
 	}
 	put("scr_a")
@@ -882,7 +883,7 @@ func TestCodexCardsFollowTheNodesList(t *testing.T) {
 	s := ft.s
 	s.fleet.mu.Lock()
 	s.ixMapLocked()["scr_mac_s1"] = &pending{ix: proto.Interaction{ID: "scr_mac_s1", MachineID: "mac", SessionID: "s1", Kind: proto.IxScreen},
-		local: func(proto.Resolution) error { return nil }}
+		local: func(context.Context, proto.Resolution) error { return nil }}
 	s.fleet.mu.Unlock()
 	ended := endedCards(s)
 	q := proto.Interaction{ID: "cxq_1", SessionID: "s1", Kind: proto.IxQuestion, Agent: "codex", ExpiresAt: time.Now().Add(time.Hour),
@@ -914,6 +915,41 @@ func TestCodexCardsFollowTheNodesList(t *testing.T) {
 	}
 	if len(pendingIDs(s)) != 0 {
 		t.Fatalf("still pending after the answer: %v", pendingIDs(s))
+	}
+}
+
+type answerProvenanceDevices struct {
+	Devices
+	owners []bool
+}
+
+func (d *answerProvenanceDevices) CallNode(ctx context.Context, id, method string, params json.RawMessage) (json.RawMessage, error) {
+	if method == "codex.answer" {
+		d.owners = append(d.owners, devicewire.IsOwnerAnswer(ctx))
+	}
+	return d.Devices.CallNode(ctx, id, method, params)
+}
+
+func TestCodexCardAnswerCarriesBusProvenance(t *testing.T) {
+	ft, _ := newCardFleet(t, false)
+	d := &answerProvenanceDevices{Devices: ft.s.devs}
+	ft.s.devs = d
+	handler := ft.s.fleetHandler(http.NotFoundHandler())
+	for _, owner := range []bool{true, false} {
+		id := fmt.Sprintf("cxq_%t", owner)
+		listCodex(ft.s, proto.Interaction{ID: id, SessionID: "s1", Kind: proto.IxQuestion, Agent: "codex",
+			ExpiresAt: time.Now().Add(time.Hour)})
+		response, err := serveHTTP(context.Background(), handler, assistantwire.HTTPRequest{
+			Method: http.MethodPost, Path: "/api/v1/interactions/" + id + "/resolve", OwnerAnswer: owner,
+			Header: http.Header{"Owner-Answer": {"true"}},
+			Body:   []byte(`{"answers":{"Color?":"Red"},"owner_input":true,"owner_answer":true}`),
+		}, nil)
+		if err != nil || response.Status != http.StatusOK {
+			t.Fatalf("resolve with owner=%t: response %+v, error %v", owner, response, err)
+		}
+	}
+	if !slices.Equal(d.owners, []bool{true, false}) {
+		t.Errorf("node call provenance: %v", d.owners)
 	}
 }
 

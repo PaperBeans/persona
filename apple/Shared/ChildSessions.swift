@@ -219,6 +219,8 @@ struct FetchHint: Equatable {
 
     private var running = false
     private(set) var waiting = Waiting.none
+    /// A lookup is out: what it answers may stand at any revision.
+    var isRunning: Bool { running }
 
     /// Begin `hint`. False: one is already running, and `hint` replaces whatever was waiting.
     mutating func start(_ hint: String?) -> Bool {

@@ -437,16 +437,9 @@ struct TodoQuickAddSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .lineLimit(1)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add [Beautiful U I Bridge 7a8a11]", action: add)
-                        .lineLimit(1)
-                        .disabled(trimmed.isEmpty || saving)
-                        .accessibilityIdentifier("todo.calendar.newAdd")
-                }
+                SheetClose { dismiss() }
+                SheetConfirm(id: "todo.calendar.newAdd", name: String(localized: "Add [Beautiful U I Bridge 7a8a11]"),
+                             disabled: trimmed.isEmpty || saving, action: add)
             }
             #if os(macOS)
             .macSheet()

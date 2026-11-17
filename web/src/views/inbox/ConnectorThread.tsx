@@ -419,7 +419,7 @@ function Bubble({ id, m, head, group, lit, onQuote, onReply }: {
                 <span className="truncate">{mediaLine(x)}</span>
               </p>
             ))}
-            {m.text && (id === "larkcli" ? <LarkInboxContent key={m.id} text={m.text} markdown={m.format === "markdown"} /> : m.format === "markdown" ? <Markdown text={m.text} small /> : <span className="whitespace-pre-wrap select-text">{m.text}</span>)}
+            {m.text && (id === "larkcli" ? <LarkInboxContent key={m.id} text={m.text} markdown={m.format === "markdown"} /> : m.format === "markdown" ? <Markdown text={m.text} small askImages /> : <span className="whitespace-pre-wrap select-text">{m.text}</span>)}
           </div>
         )}
         <span className="mt-0.5 flex items-center gap-1.5 px-1 text-[10.5px] text-ink-3 tabular-nums">
@@ -503,7 +503,7 @@ function GitHubThread({ id, item, page, older, onOlder, onSend }: {
           <GitHubHeader chat={chat} reference={ref} />
           {chat.body && (
             <Card id={id} who={chat.author} at={undefined} title={t("inbox-connectorthread.description_by", { name: chat.author?.name ?? "" })}>
-              <Markdown text={chat.body} small />
+              <Markdown text={chat.body} small askImages />
             </Card>
           )}
           {page.before && <div className="mt-3"><OlderButton busy={older} onClick={onOlder} /></div>}
@@ -603,7 +603,7 @@ function TimelineEntry({ id, m }: { id: string; m: ThreadMessage }) {
     );
   }
   if (m.kind === "check" && m.check) return <CheckRow check={m.check} at={m.at} />;
-  const text = m.text ? (m.format === "markdown" ? <Markdown text={m.text} small /> : <p className="whitespace-pre-wrap">{m.text}</p>) : null;
+  const text = m.text ? (m.format === "markdown" ? <Markdown text={m.text} small askImages /> : <p className="whitespace-pre-wrap">{m.text}</p>) : null;
   if (m.kind === "review") {
     return (
       <Card id={id} who={m.sender} at={m.at} url={m.url} tone={REVIEW_TONE[m.review ?? ""]} title={`${m.sender.name} ${reviewLabel(m.review)}`}>

@@ -99,7 +99,8 @@ type gateKey struct {
 // gateGrant is a call larkCheck let through, to go once.
 type gateGrant struct {
 	command, method, path, query string
-	body                         any  // the JSON body confirmed; nil: any (not JSON, cut short, an upload, $… in it)
+	body                         any  // the JSON body confirmed, when bodyBound (nil there is JSON null)
+	bodyBound                    bool // false: any body (not JSON, cut short, an upload, $… in it)
 	bodyUseNumber                bool // an edited grant compares JSON numbers without float64 rounding
 	until                        time.Time
 	// session is the conversation larkCheck decided for, and through how it let the call through: what the ledger says
@@ -220,7 +221,7 @@ func (p *gateProxy) grant(command, session string, c larkCall, through proto.Lar
 	if !strings.Contains(c.Body, "$") {
 		var v any
 		if json.Unmarshal([]byte(c.Body), &v) == nil {
-			g.body = v
+			g.body, g.bodyBound = v, true
 		}
 	}
 	p.mu.Lock()
@@ -280,7 +281,7 @@ func (p *gateProxy) take(k gateKey, method, path, query string, body []byte, isJ
 			}
 			candidate, candidateParsed = sentNumbers, numbersParsed
 		}
-		if g.body != nil && (!candidateParsed || !reflect.DeepEqual(g.body, candidate)) {
+		if g.bodyBound && (!candidateParsed || !reflect.DeepEqual(g.body, candidate)) {
 			continue
 		}
 		p.grants = slices.Delete(p.grants, i, i+1)

@@ -759,10 +759,14 @@ func TestDecisionWithoutLiveAgentIsRecordedForSupervisor(t *testing.T) {
 					t.Fatal(err)
 				}
 				key := "undelivered|" + a.AskedAt.UTC().Format(time.RFC3339Nano)
+				// A digest removes pending signals before marking them sent. Take the snapshot
+				// outside that interval, after any in-flight digest has finished.
+				s.supervise.dedupMu.Lock()
 				s.supervise.mu.Lock()
 				g, pending := s.supervise.pending[todo.ID+"|"+sigIdle]
 				told := s.supervise.sent[todo.ID+"|"+sigIdle] == key
 				s.supervise.mu.Unlock()
+				s.supervise.dedupMu.Unlock()
 				if tc.want == http.StatusBadGateway {
 					if len(decisions) != 0 || askOf(s, todo.ID).AcceptedAt.IsZero() == false ||
 						todoNow(s, todo.ID).Supervision.State != reviewNeedsUser || pending && g.Key == key || told {

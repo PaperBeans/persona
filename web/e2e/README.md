@@ -60,6 +60,45 @@ drawn after it with the header where it was tapped, and a search for `make step-
 fold. Only the mock's own reads leave the browser; other origins are blocked. Screenshots and `results.json`
 (`results-big.json`) go to the artifact directory; a 240-second watchdog ends the run, and the last line is the verdict.
 
+## Sidebar groups (#9071)
+
+```sh
+MOCK_EXTENSIONS=1 MOCK_EXTENSION_COLUMNS=1 MOCK_SIDEBAR_GROUPS=1 PORT=<port> python3 scripts/mock/mock_hub.py &
+(cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port> --strictPort &)
+node web/e2e/sidebar-groups.mjs <loopback-web-origin> <artifact-directory> [Chromium executable]
+# a hub without the route: the mock with MOCK_NAVIGATION=off as well
+node web/e2e/sidebar-groups.mjs <loopback-web-origin> <artifact-directory> --old-hub [Chromium executable]
+```
+
+Against an exclusively owned mock-backed web server, in Simplified Chinese. Made-up extension pages name 工作台, 资产 and
+家里; the run checks that Today comes in under 工作台, then in Settings › General › Sidebar pages makes "Life" and renames
+it 生活, moves built-in and extension pages between groups (Calendar from its manifest's 工作台 to 生活), moves 生活 up and
+Pages to the end, and removes a group with Undo. It checks the sidebar's groups and their pages, that no page is lost, that
+the hub keeps the arrangement and that a second browser draws the same groups; `--old-hub` that the arrangement stays in
+the browser and the setting says so. Light and dark screenshots of the sidebar (the phone's drawer open) and of the editor
+at 1440 × 900 and 390 × 844, and `results.json`, go to the artifact directory; a 300-second watchdog ends the run.
+
+## Start page (#9071)
+
+```sh
+MOCK_EXTENSIONS=1 MOCK_EXTENSION_COLUMNS=1 PORT=<port> python3 scripts/mock/mock_hub.py &
+(cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port> --strictPort &)
+node web/e2e/start-page.mjs <loopback-web-origin> <artifact-directory> [Chromium executable]
+# a hub without the route: the mock with MOCK_NAVIGATION=off as well
+node web/e2e/start-page.mjs <loopback-web-origin> <artifact-directory> --old-hub [Chromium executable]
+```
+
+Against an exclusively owned mock-backed web server, in English. It checks that a fresh hub opens on the main chat, that
+Settings › General › Start page lists the main chat first and selected, then Overview and the made-up extension's Today;
+that choosing Today saves it to the hub (`PUT /api/v1/navigation`) and a new tab opens on Today while the Persona row and a
+reload stay on the main chat; that a second browser (another device) opens on the main chat the first time, reads the
+choice at its hello and opens on Today from its next opening; and that a Today the hub's extension list leaves out opens
+from the browser's copy and then gives way to the main chat, the choice kept and the setting saying why. `--old-hub`
+checks that a hub answering 404 leaves the choice in the browser and the setting says so. Light and dark screenshots of
+the setting and of the app opened on Today (Today moved first with Sidebar pages' ↑, as that setting already allows) at
+1440 × 900 and 390 × 844, and `results.json`, go to the artifact directory. The run sets the mock's start page and puts it
+back to the default; a 240-second watchdog ends it, and the last line is the verdict.
+
 ## An extension's dashboard page: UI version 8's columns layout (#9158)
 
 ```sh
@@ -77,6 +116,42 @@ the grid's width one under another, and the "Needs me" rows one a line; with Set
 at both widths and no card's content wider than the card. Only the mock's own requests leave the browser. Screenshots
 (the window, and the whole page at the same width) and `results.json` go to the artifact directory; a 180-second watchdog ends the
 run, and the last line is the verdict.
+
+## Extension pages on reload: the last places and view at first paint (#9283)
+
+```sh
+MOCK_EXTENSIONS=1 MOCK_EXTENSION_COLUMNS=1 PORT=<port> python3 scripts/mock/mock_hub.py &
+(cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port> --strictPort &)
+node web/e2e/extension-first-paint.mjs <loopback-web-origin> <artifact directory> [--shots-only] [Chromium executable]
+```
+
+Against an exclusively owned mock-backed web server, in English, light and dark, 1440 × 900. Every request the hub would
+relay to the manager (`/api/v1/extensions…`) is held for a second in the browser, as a far hub takes. The made-up "Today"
+page is loaded three times in one profile. The first load has kept nothing: its sidebar entry and header title come only
+after the first relayed answer. The second draws the sidebar's entry, the header's title and icon and the page's last view
+(marked as updating, inert) before the first relayed answer, and the extension's drawing then replaces it. The third's first
+paint is photographed while every relayed request is still held (`first-paint-after-<theme>.png`). `--shots-only` takes only
+that photograph (`first-paint-before-<theme>.png`), for a build without the cache. Only the mock's own requests leave the
+browser. Screenshots and `results.json` go to the artifact directory; a 180-second watchdog ends the run, and the last line
+is the verdict.
+
+## An extension's quota card: UI version 9's gauge (#9337)
+
+```sh
+MOCK_EXTENSIONS=1 MOCK_EXTENSION_GAUGE=1 PORT=<port> python3 scripts/mock/mock_hub.py &
+(cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port> --strictPort &)
+node web/e2e/extension-gauge.mjs <loopback-web-origin> <artifact-directory> [Chromium executable]
+```
+
+Against an exclusively owned mock-backed web server (Vite or `vite preview`), in English, light and dark. It opens a made-up
+gateway's "Quota" page and checks what jsdom cannot lay out: the three rings in order, each read out as "title: value unit, N%"
+(a meter, or a button for the one with an action), its arc filled to the ratio in the named color the browser resolves, its value
+centred in the ring and not cut, its title below, the ring inside its tile, and the reset times under the rings; at 1440 × 900 the
+four status tiles in one row above three rings side by side of one width, and pressing the low ring answers its toast; at 390 × 844
+two rings a line; with Settings › Appearance's Large text the values still whole and centred at both widths; with Reduce Motion the
+arc does not ease. It waits for the page's finite animations to end, never for a fixed time. Only the mock's own requests leave the
+browser. Screenshots and `results.json` go to the artifact directory; a 180-second watchdog ends the run, and the last line is the
+verdict.
 
 ## User-input navigation acceptance
 
@@ -361,3 +436,21 @@ open, **Done** in an opened item's header leaves the list where it was (it used 
 opens the long Inbox and records how many rows were there at the first draw (at most 100), that all of them come in the
 end, the elements under `main` and the long tasks. Screenshots and `results.json` go to the artifact directory; a
 four-minute watchdog ends the run, and it prints a final pass / fail / timeout line.
+
+## Long tasks in a long conversation (#9795)
+
+```sh
+node web/e2e/chat-long-tasks.mjs <web origin> <artifact-directory> [--items <n>] [--secs <s>] [--chromium <executable>]
+```
+
+Opens the real app in a fresh headless browser with every hub request and the socket answered in the browser by invented
+data, and every other origin refused, so it can be pointed at any server of the web bundle (Vite, `vite preview`, or a
+hub serving its build) without reaching a hub. The text is shaped like real chats: branch and repository names without
+an extension, quotes and tables. Two scenarios: an Agent chat of `--items` items (2,000 by default) opening, watched for
+10 seconds after its newest message is on the page; then the main conversation (240 items and a question) while a reply
+naming 80 branches streams for `--secs` seconds (30 by default), a delta about every 80 ms and a tool call every
+second. A trivial script is run in the page again and again; one not answered within 5 seconds counts as stuck.
+`results.json` has, per scenario, when the newest message was drawn, the longest task and those over 1 second, the
+slowest answer and the stuck ones; a screenshot of each is taken when the page can still draw. It fails on any task over
+1 second, a stuck answer, a page error, a request leaving the origin, or a conversation not drawn within 30 seconds;
+the last line is the verdict, and a watchdog ends a run that overruns with a timeout verdict.

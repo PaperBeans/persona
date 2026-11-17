@@ -598,7 +598,7 @@ function Section({ k, title, count, open, onToggle, action, menu, children }: { 
         {menu && (
           <button type="button" onClick={jump.open} aria-haspopup="menu" aria-expanded={Boolean(jump.anchor)} className="inline-flex h-6 items-center gap-0.5 rounded-[6px] px-1.5 text-[11.5px] whitespace-nowrap text-ink-3 transition-colors hover:bg-hover hover:text-ink">
             {t("inbox-inboxlist.jump_to")}
-            <Icon name="chevronDown" size={10} stroke={2.4} />
+            <Icon name="chevron" size={10} stroke={2.4} />
           </button>
         )}
         {menu && jump.anchor && <Menu anchor={jump.anchor} onClose={jump.close} align="right" width={220} items={menu} />}

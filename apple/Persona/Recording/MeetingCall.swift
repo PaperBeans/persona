@@ -47,7 +47,8 @@ import OSLog
     nonisolated struct Talk: Equatable, Sendable {
         var id = UUID()
         var recording: UUID
-        /// Held on the page, or a talk window (VoiceOver on the page, the Lock Screen's tap).
+        /// Held on the page, or a talk window (a tap or VoiceOver on the page, the Lock Screen's tap). A hold let go at
+        /// once becomes the page's window (`keepOpen`).
         var source: MeetingTalkSource
         /// It goes to the meeting call (else it is asked without one).
         var viaCall: Bool
@@ -72,12 +73,11 @@ import OSLog
     nonisolated enum Note: Equatable, Sendable {
         /// Asked without the call, and the transcript holds no words for the span.
         case nothingHeard
-        /// Let go almost at once: Talk is held while speaking.
-        case holdLonger
+        /// The page's talk window ended by itself after 20 seconds without speech (`MeetingTalkWindow`, #9658).
+        case quiet
+        /// The page's talk window reached its 60 seconds.
+        case limit
     }
-
-    /// A span shorter than this was a tap, not a hold.
-    static let shortestHold: TimeInterval = 0.5
     /// How often a talk window looks at the microphone's level.
     static let windowTick: Duration = .milliseconds(100)
     /// How long a note stays under Talk.
@@ -98,6 +98,9 @@ import OSLog
     @ObservationIgnored private var privacyOnScreen: (recording: UUID, since: Date)?
     @ObservationIgnored private var windowTask: Task<Void, Never>?
     @ObservationIgnored private var holdTask: Task<Void, Never>?
+    /// Where the open span's press lies on the tap's clock: a hold that turns into a window takes the room's level from
+    /// before it (`keepOpen`).
+    @ObservationIgnored private var pressPosition: Double = 0
     @ObservationIgnored private var noteTask: Task<Void, Never>?
     /// A span let go on the call whose `talk off` waits for the tap's last buffer of it (`closeOnCall`).
     @ObservationIgnored private var talkOff: (recording: UUID, task: Task<Void, Never>)?
@@ -251,7 +254,8 @@ import OSLog
             privacySeen = true
             MeetingTalkPrivacy.seen()
         }
-        if opened.window { openWindow(room: tap.room(before: position)) } else { capHold(opened.id) }
+        pressPosition = position
+        if opened.window { openWindow(room: tap.room(before: position), onPage: source == .pageWindow) } else { capHold(opened.id) }
         log.info("talk: \(String(describing: source), privacy: .public) opened, \(viaCall ? "to the call" : "asked without it", privacy: .public)")
         return true
     }
@@ -267,7 +271,6 @@ import OSLog
         holdTask?.cancel()
         holdTask = nil
         let end = capture.timeline
-        let short = talk.source == .hold && Date.now.timeIntervalSince(talk.opened) < Self.shortestHold
         // The call lost it before `sync` saw it: asked without the call, as `fellOff` has it.
         if let lost = talk.lost(callTalking: callTalking(talk.recording)) {
             log.notice("talk: the meeting call lost the span, asked without it")
@@ -278,9 +281,21 @@ import OSLog
             closeOnCall(talk.recording, through: capture.listenPosition(.release))
         } else {
             capture.flushSegment()
-            if ask, !short { Task { await askWithout(talk, end: end) } }
+            if ask { Task { await askWithout(talk, end: end) } }
         }
-        if short { showNote(.holdLonger) }
+    }
+
+    /// The page's Talk let go before it was a hold (`Theme.Hold.delay`, #9658): a tap. The span the touch opened stays
+    /// open as the page's talk window (its first words kept), until the next tap, or 20 seconds without speech, or 60
+    /// seconds (`MeetingTalkWindow`, `onPage`).
+    func keepOpen() {
+        guard var talk, talk.source == .hold else { return }
+        talk.source = .pageWindow
+        self.talk = talk
+        holdTask?.cancel()
+        holdTask = nil
+        openWindow(room: tap.room(before: pressPosition), onPage: true)
+        log.info("talk: a tap keeps it open as the page's window")
     }
 
     /// The page's Talk went with a hold still open (the page left, Just Me turned on, the button gone before the finger
@@ -351,8 +366,9 @@ import OSLog
     }
 
     /// `room`: what the tap heard just before the window opened, so the room's own talking isn't taken for the owner's.
-    private func openWindow(room: MeetingTalkWindow.Room) {
-        window = MeetingTalkWindow(opened: .now, room: room)
+    /// `onPage`: the page's window, which says why when it ends by itself (`Note.quiet`, `Note.limit`).
+    private func openWindow(room: MeetingTalkWindow.Room, onPage: Bool) {
+        window = MeetingTalkWindow(opened: .now, room: room, onPage: onPage)
         windowTask?.cancel()
         windowTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -363,6 +379,7 @@ import OSLog
                 if let end {
                     self.log.info("talk: window ended (\(String(describing: end), privacy: .public))")
                     self.endTalk()
+                    if onPage, let note = Self.note(after: end) { self.showNote(note) }
                     return
                 }
             }
@@ -386,6 +403,15 @@ import OSLog
             return
         }
         MeetingAsk.shared.ask(entry, text: words, spoken: true)
+    }
+
+    /// What the page says when its talk window ended by itself: after 20 quiet seconds, or at its limit.
+    nonisolated static func note(after end: MeetingTalkWindow.End) -> Note? {
+        switch end {
+        case .silence, .noSpeech: .quiet
+        case .limit: .limit
+        case .tapped: nil
+        }
     }
 
     private func showNote(_ next: Note?) {

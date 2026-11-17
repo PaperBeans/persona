@@ -18,6 +18,10 @@ final class LiveActivityActionTests: XCTestCase {
         sleep(1)
         XCUIDevice.shared.perform(NSSelectorFromString("pressLockButton"))
         sleep(2)
+        // Unlocked and on the home screen again whatever happens next (#9692): a failure below (an assertion, a tap that
+        // finds nothing) ends the test without running a `defer`, and a locked simulator fails every UI test after it.
+        // Teardown blocks run after a failure too.
+        addTeardownBlock { @MainActor [self] in unlock(springboard) }
         XCUIDevice.shared.perform(NSSelectorFromString("pressLockButton"))
         sleep(2)
         let deny = springboard.buttons.matching(NSPredicate(format: "label CONTAINS %@", "拒绝")).firstMatch
@@ -26,7 +30,6 @@ final class LiveActivityActionTests: XCTestCase {
         let allowActivities = springboard.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "Always Allow", "允许"])).firstMatch
         if !deny.exists, allowActivities.exists { allowActivities.tap(); sleep(1) }
 
-        defer { unlock(springboard) }
         XCTAssertTrue(deny.waitForExistence(timeout: 10), "no 拒绝 on the lock screen activity:\n\(springboard.debugDescription)")
         XCTAssertTrue(springboard.buttons.matching(NSPredicate(format: "label CONTAINS %@", "允许")).firstMatch.exists)
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -49,8 +52,14 @@ final class LiveActivityActionTests: XCTestCase {
         XCTAssertEqual((got["resolution"] as? [String: Any])?["allow"] as? Bool, false)
     }
 
+    /// Wakes the phone, unlocks it (a swipe up: no passcode on the simulator) and goes to the home screen. Harmless when it
+    /// is unlocked already: the swipe up from the bottom edge goes home too.
     @MainActor private func unlock(_ springboard: XCUIApplication) {
+        XCUIDevice.shared.press(.home)
+        sleep(1)
         springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.99))
             .press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)))
+        sleep(1)
+        XCUIDevice.shared.press(.home)
     }
 }

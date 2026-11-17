@@ -27,8 +27,8 @@ func (n *Node) codexAssistantArgs(key, home string, windows ...int) ([]string, b
 	return codexArgsForHome(n.bin, key, home, !personaMCPOnly, windows...), personaMCPOnly
 }
 
-// codexArgsForHome: windows[0] is a compact limit to pass (a managed launcher's declared one, #3066); none or 0 passes
-// none, and Codex compacts by its config or its model's default.
+// codexArgsForHome: windows[0] is a compact limit to pass (a managed launcher's declared one, #3066, capped for the
+// main conversation, #7314); none or 0 passes none, and Codex compacts by its config or its model's default.
 func codexArgsForHome(bin, key, home string, legacyMCP bool, windows ...int) []string {
 	q := func(s string) string { b, _ := json.Marshal(s); return string(b) } // a JSON string is a TOML basic string
 	mcpEnv := "{PERSONA_ASSISTANT=" + q("1") + ",PERSONA_SESSION_ID=" + q(key)

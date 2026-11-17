@@ -9,6 +9,10 @@ extension View {
         modifier(Surface(shape: shape, tint: tint, interactive: interactive))
     }
 
+    /// A lens gliding over a bar's items (iPhone Duo's tab bar, #9837): clear Liquid Glass in the glass styles, over the
+    /// items, bending them as it passes; in the others the style's soft pill, under them (`StyleSpec.usesGlass` says which).
+    func lensSurface<S: Shape>(in shape: S) -> some View { modifier(LensSurface(shape: shape)) }
+
     /// A list row on the style's canvas (plain lists paint rows white otherwise).
     @ViewBuilder func themedRow() -> some View {
         if StyleSpec.current.usesGlass { self } else { listRowBackground(Color.clear) }
@@ -24,6 +28,22 @@ extension View {
             self
         } else {
             scrollContentBackground(.hidden).background(Theme.pageBackground)
+        }
+    }
+}
+
+private struct LensSurface<S: Shape>: ViewModifier {
+    var shape: S
+
+    func body(content: Content) -> some View {
+        if StyleSpec.current.usesGlass {
+            #if os(visionOS)
+            content.background(.ultraThinMaterial, in: shape)
+            #else
+            content.glassEffect(.clear, in: shape)
+            #endif
+        } else {
+            content.background(Theme.Shell.segment, in: shape)
         }
     }
 }

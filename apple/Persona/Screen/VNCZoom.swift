@@ -69,6 +69,24 @@ nonisolated enum VNCZoom {
         return CGRect(x: bounds.midX - w / 2, y: bounds.midY - h / 2, width: w, height: h)
     }
 
+    /// Phone Screen's picture (#9500): as wide as the view, never shrunk to fit its height. With the keyboard up the view is
+    /// shorter than the picture: it stays at its size, its top at the view's top, moved up just enough that `pointer`
+    /// (a point of the picture, 0…1, where the user last tapped) is `margin` above the view's bottom, as far as the picture
+    /// reaches. The page uses it only with the phone upright (`VNCScreenUIView.fillsWidth`); on its side the plain fit.
+    static func phoneFit(_ size: CGSize, in bounds: CGRect, pointer: CGPoint?, margin: CGFloat) -> CGRect {
+        let plain = fit(size, in: bounds)
+        guard size.width > 0, size.height > 0, bounds.width > 0, plain.width < bounds.width - 0.5,
+              size.height / size.width > bounds.height / bounds.width else { return plain }
+        let h = bounds.width * size.height / size.width
+        var y = bounds.minY
+        if let p = pointer, (0...1).contains(p.y) {
+            let at = p.y * h // the pointer's height in the picture
+            let room = bounds.height - margin
+            if at > room { y = bounds.minY - min(at - room, h - bounds.height) }
+        }
+        return CGRect(x: bounds.minX, y: y, width: bounds.width, height: h)
+    }
+
     /// `r` scaled by `k` with the view's point `anchor` staying where it is.
     static func zoomed(_ r: CGRect, by k: CGFloat, at anchor: CGPoint) -> CGRect {
         CGRect(x: anchor.x - (anchor.x - r.minX) * k, y: anchor.y - (anchor.y - r.minY) * k, width: r.width * k, height: r.height * k)

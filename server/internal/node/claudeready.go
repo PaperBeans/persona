@@ -132,7 +132,7 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 			// The tab's shell could not run the command (a launcher its rc files do not define, a claude not on its
 			// PATH): it said so right after it and is back at its prompt, and claude will not come (#1642).
 			// Or it did not take the typed line at all: a startup question ate its head (#2570). The start types it again.
-			if probe != nil && !sawClaude && !running && (mayHaveShellMiss(screen) || mayBeRejected(screen)) {
+			if probe != nil && !sawClaude && !running && (mayHaveShellMiss(screen) || probe.mayBeRejected(screen)) {
 				if full, rerr := n.readPane(ctx, pane, "recent-unwrapped", 60); rerr == nil {
 					refused, other := probe.verdict(full, func() bool { return n.shellBackOrUnknown(ctx, pane) })
 					if refused != nil {

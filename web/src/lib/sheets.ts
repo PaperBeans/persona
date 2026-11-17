@@ -33,8 +33,26 @@ export function separatorOf(name: string, text: string): string {
   const ext = name.toLowerCase().split(".").pop() ?? "";
   if (ext === "tsv" || ext === "tab") return "\t";
   const head = text.slice(0, 4096).split(/\r?\n/).slice(0, 5).join("\n");
-  const count = (c: string) => head.split(c).length - 1;
-  const [best] = [",", ";", "\t"].map((c) => [c, count(c)] as const).sort((a, b) => b[1] - a[1]);
+  const counts: Record<string, number> = { ",": 0, ";": 0, "\t": 0 };
+  let quoted = false, fieldStart = true;
+  for (let i = head.charCodeAt(0) === 0xfeff ? 1 : 0; i < head.length; i++) {
+    const c = head[i];
+    if (quoted) {
+      if (c === '"') {
+        if (head[i + 1] === '"') i++;
+        else quoted = false;
+      }
+    } else if (c === '"' && fieldStart) {
+      quoted = true;
+      fieldStart = false;
+    } else {
+      const separator = c === "," || c === ";" || c === "\t";
+      if (separator) counts[c]++;
+      // A quote inside an unquoted value (inch") is literal, as in parseDelimited.
+      fieldStart = separator || c === "\n" || c === "\r";
+    }
+  }
+  const [best] = [",", ";", "\t"].map((c) => [c, counts[c]] as const).sort((a, b) => b[1] - a[1]);
   return best[1] > 0 ? best[0] : ",";
 }
 

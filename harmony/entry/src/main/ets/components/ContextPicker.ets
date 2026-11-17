@@ -1,3 +1,4 @@
+import { IconActions } from '../design/IconActions';
 import { ClientModel } from '../models/ClientModel';
 import { HttpFailure } from '../platform/HubTransport';
 import { HubRepository, segment } from '../models/HubRepository';
@@ -84,7 +85,7 @@ export struct ContextPicker {
       if (this.loading) LoadingProgress().width(Tokens.touch).height(Tokens.touch)
       else if (this.failed) {
         Text(tr(this.errorKey)).fontSize(Tokens.meta).fontColor(Colors.secondary).padding(Tokens.page)
-        if (this.errorKey !== 'permission_denied') Button(tr('retry')).attributeModifier(ButtonStyles.quiet).onClick(() => this.load()).id('context.retry')
+        if (this.errorKey !== 'permission_denied') Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).onClick(() => this.load()).id('context.retry')
       }
       else {
         List() {

@@ -22,8 +22,9 @@ const JOURNAL_LIMIT = 16_384;
 const validCounts = (counts: ListCounts | undefined): counts is ListCounts => !!counts && typeof counts.total === "number" &&
   typeof counts.revision === "string" && !!counts.machine && !!counts.project && !!counts.group && !!counts.state;
 // todo: `sessions_todo` (#6662), a to-do's id or "none"; waiting, pane_source and exclude_pane_source: the sidebar's
-// quick filters (`sessions_quick_filters`, #6662)
-const FILTER_KEYS = ["state", "machine_id", "project", "group", "source", "provider", "q", "parent_session_id", "todo", "waiting", "pane_source", "exclude_pane_source"] as const;
+// quick filters (`sessions_quick_filters`, #6662); just_finished: the Just finished rows or the other seen ones
+// (`sessions_just_finished`, #9751)
+const FILTER_KEYS = ["state", "machine_id", "project", "group", "source", "provider", "q", "parent_session_id", "todo", "waiting", "pane_source", "exclude_pane_source", "just_finished"] as const;
 /** The filters that take several values, each a machine and value pair spelled as a JSON array (`sessions_catalog`,
  * docs/protocol/protocol.md "Projects and spaces"): the rows at any of the places, in any of the spaces. */
 const PAIR_KEYS = ["place", "space"] as const;
@@ -58,6 +59,8 @@ export interface ListCounts {
   pane_source?: Record<string, number>;
   /** How many of `state.working` only wait in the background (#6045); absent when none. */
   background_waiting?: number;
+  /** How many of `state.idle` are Just finished (#9751, `sessions_just_finished`); absent when none. */
+  just_finished?: number;
   revision: string;
 }
 export interface ListPage<T> {

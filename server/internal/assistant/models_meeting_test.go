@@ -51,7 +51,7 @@ func TestMeetingPurposesInTheCatalog(t *testing.T) {
 	f.mu.Lock()
 	f.modelExts = []assistantwire.ModelExtension{{ID: "curator", Name: "Curator"}}
 	f.mu.Unlock()
-	setModel(t, s, "assistant", ModelBinding{Provider: "launcher.claude", Model: "main-model", Effort: "high", Runtime: proto.AssistantRuntimeAgentSDK})
+	setModel(t, s, "assistant", ModelBinding{Provider: "launcher.claude", Model: "main-model", Effort: "high"})
 	l := s.requestCtxLang(context.Background())
 	r := modelRequest(s, "GET", "", "")
 	var catalog struct {
@@ -83,9 +83,8 @@ func TestMeetingPurposesInTheCatalog(t *testing.T) {
 		}
 		parent := purposeOf(t, s, c.parent)
 		follows := parent.Effective
-		follows.Runtime = "" // the room never takes the main chat's runtime
 		if p.Kind != c.kind || p.Launch != c.launch || p.Parent != c.parent || p.CategoryID != c.parent || p.Group != mc(l, c.group) ||
-			p.MachineID != c.machine || !slices.Equal(p.Fields, c.fields) || len(p.Uses) != 0 || len(p.Runtimes) != 0 {
+			p.MachineID != c.machine || !slices.Equal(p.Fields, c.fields) || len(p.Uses) != 0 {
 			t.Fatalf("%s: %+v", c.id, p)
 		}
 		if p.Name != purposeName(l, c.id) || p.Description != purposeDescription(l, c.id) || p.Description == "" ||
@@ -245,9 +244,9 @@ func TestMeetingPurposeSameProviderKeepsInheritedFields(t *testing.T) {
 
 // The room runs on Claude Code's CLI only: it offers and accepts a Claude Code launcher on the assistant's computer,
 // including one backed by a Messages API connection. It refuses Codex, a Responses connection, and a hub.json Messages
-// connection (which is not a launcher) with the localized reason before anything is stored, and refuses a runtime. Its
-// effective binding carries no runtime even while the main chat runs on the Agent SDK; following a main chat on Codex,
-// its status says rooms can't start, until a Claude Code launcher is picked here while the main chat stays on Codex.
+// connection (which is not a launcher) with the localized reason before anything is stored. Following a main chat on
+// Codex, its status says rooms can't start, until a Claude Code launcher is picked here while the main chat stays on
+// Codex.
 func TestMeetingRoomRunsOnlyOnClaudeCode(t *testing.T) {
 	s, f, _ := modelService(t)
 	ctx := context.Background()
@@ -285,10 +284,6 @@ func TestMeetingRoomRunsOnlyOnClaudeCode(t *testing.T) {
 			}
 		}
 	}
-	w := modelRequest(s, http.MethodPatch, purposeMeetingRoom, `{"revision":0,"runtime":"agentsdk"}`)
-	if w.Code != http.StatusBadRequest || errorOf(t, w.Body.Bytes()) != i18n.T(l, "assistant-models.err_runtime_assistant_only") {
-		t.Fatalf("runtime: %d %s", w.Code, w.Body.String())
-	}
 	if r := modelRecordOf(t, s, purposeMeetingRoom); r.Revision != 0 || r.Binding != (ModelBinding{}) {
 		t.Fatalf("a refused save was stored: %+v", r)
 	}
@@ -300,18 +295,6 @@ func TestMeetingRoomRunsOnlyOnClaudeCode(t *testing.T) {
 	}
 	if w := modelRequest(s, http.MethodPut, purposeMeetingRoom, `{"revision":2,"provider":null}`); w.Code != http.StatusOK {
 		t.Fatalf("reset: %d %s", w.Code, w.Body.String())
-	}
-
-	// A main chat on the Agent SDK: the room follows its launcher, on the CLI.
-	setModel(t, s, "assistant", ModelBinding{Provider: "launcher.claude", Model: "main-model", Runtime: proto.AssistantRuntimeAgentSDK})
-	main := purposeOf(t, s, "assistant")
-	p = purposeOf(t, s, purposeMeetingRoom)
-	if main.Effective.Runtime != proto.AssistantRuntimeAgentSDK || p.Effective.Runtime != "" || p.Effective.Provider != main.Effective.Provider ||
-		p.Effective.Model != "main-model" || slices.Contains(p.Fields, "runtime") || len(p.Runtimes) != 0 {
-		t.Fatalf("the room %+v, the main chat %+v", p, main)
-	}
-	if b, err := s.resolveModel(ctx, purposeMeetingRoom); err != nil || b.Runtime != "" {
-		t.Fatalf("resolved with a runtime: %+v %v", b, err)
 	}
 
 	// A main chat on Codex: the room says why it can't start, and a model saved alone on it is refused.

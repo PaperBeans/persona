@@ -33,6 +33,19 @@ data class AgentListSettings(
     val now: java.time.Instant = java.time.Instant.now(),
     /** Read-only source catalog for the repository tree; no preference is changed by a source pin. */
     val workspaces: List<persona.core.contracts.api.AgentWorkspace> = emptyList(),
+    /** Which tap produced this list. A page built before the tap carries an older one (#9600). */
+    val tapEpoch: Int = 0,
+    /**
+     * Grouping chosen by a tap before the phone has finished saving it (`AgentsMenus.swift:405`).
+     * Null: use the saved grouping. Cleared once the save lands, or set back when the save fails
+     * (`PinsStore.swift:131`, `:139`, `:163`).
+     */
+    val pendingGrouping: AgentGrouping? = null,
+    /**
+     * Tabs folded by a tap before the phone has finished saving them (`ChatsView.swift:2080`).
+     * Null: use the saved set.
+     */
+    val pendingFoldedTabs: Set<String>? = null,
 ) {
     private val nativePinnedWorkspaces by lazy {
         workspaces.filter { it.source == "paseo" && it.nativePinTime != null }
@@ -182,8 +195,9 @@ data class AgentMachineGroup(
  */
 fun agentRank(session: AgentSession, mutes: AgentPreferences = AgentPreferences()): Int = when {
     session.state == AgentState.NeedsYou -> 0
-    (session.state == AgentState.Working || session.state == AgentState.Unread || session.isWaiting) && mutes.mutes(session) -> 6
-    session.state == AgentState.Unread -> 1
+    (session.state == AgentState.Working || session.state == AgentState.Unread ||
+        session.isQuiet && session.heldInList || session.isWaiting) && mutes.mutes(session) -> 6
+    session.state == AgentState.Unread || session.isQuiet && session.heldInList -> 1
     session.awaitsReply(mutes) -> 2
     session.state == AgentState.Working -> if (session.waitsInBackground) 4 else 3
     session.isWaiting -> 5
@@ -224,8 +238,10 @@ fun buildAgentList(
     settings: AgentListSettings = AgentListSettings(), todos: List<Todo> = emptyList(),
     /** The hub's direction tree, which "By direction" ([AgentGrouping.Direction]) is built from; null: none to group by. */
     directions: DirectionTree? = null,
+    /** The open agent that was Unread when opened (iOS `AgentListOrder.held`), until its chat is left. */
+    held: String? = null,
 ): AgentListResult {
-    val listed = foldRows(sessions, settings.hierarchy)
+    val listed = foldRows(sessions.map { it.copy(heldInList = it.id == held) }, settings.hierarchy)
     // By App and Recently Used list every agent (offline included), so a subtask hangs under its parent even when the
     // parent is offline (iOS `CodexTasks.build` with `runs: nil`).
     val runs: ((AgentSession) -> Boolean)? = when (settings.grouping) {

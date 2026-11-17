@@ -23,6 +23,9 @@ nonisolated enum VoiceAudioEvent: Equatable, Sendable {
     case outputLevel(Float)
     /// A phone call, or another app, took the audio session (docs/assistant/voice.md 6.5「来电」).
     case interrupted
+    /// The interruption is over (`shouldResume`: the system says the audio may go on). Only audio the system owns says
+    /// it (a call to Persona, #9290): an in-app call ended at `interrupted`.
+    case interruptionEnded(shouldResume: Bool)
     /// The system's media services restarted: every audio object is gone.
     case reset
     /// The route changed (headphones, Bluetooth) and the microphone could not be set up again on the new one.
@@ -107,6 +110,23 @@ nonisolated enum VoiceCapture: Equatable, Sendable {
     /// The microphone records with echo cancellation: what the speaker plays is taken out of it. Without it the voice
     /// can come back as the user's caption, which the `start` frame tells the extension (docs/assistant/voice.md 3.2).
     var cancelsEcho: Bool { get }
+}
+
+/// A system call's audio (#9290, a call to Persona): the system owns the audio session. It activates it for the call
+/// (`activate`, LiveCommunicationKit's `didActivate`) and takes it away (`deactivate`: a hold, another call) without the
+/// call ending; the app never sets the category or activates it, and never moves the route by itself.
+@MainActor protocol SystemCallAudio: VoiceAudio {
+    /// The system activated the session: the engine starts (now, or once `start` has come).
+    func activate()
+    /// The system took the session away: the engine stops, the call goes on.
+    func deactivate()
+    /// On hold: nothing starts the engine (an activation, a route change) until it is off hold again.
+    func setHeld(_ held: Bool)
+    /// Each time the engine runs (voice processing on, the microphone open).
+    var onRunning: (@MainActor () -> Void)? { get set }
+    /// Just before a new engine starts on the session the call has (a route change rebuilt it): turning voice processing
+    /// on can surface as a system mute again. `onRunning` follows once it runs.
+    var onStarting: (@MainActor () -> Void)? { get set }
 }
 
 /// The microphone and the voice's loudness, about 20 times a second: an object of its own, so only the orb redraws.

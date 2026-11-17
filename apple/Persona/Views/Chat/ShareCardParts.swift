@@ -22,10 +22,11 @@ enum ShareCardParts {
     /// Very long answers are cut: a picture of ten screens helps nobody.
     static let maxChars = 3000
 
-    static func of(_ message: String) -> [ShareCardPart] {
+    /// `limit`: the most words drawn (several messages exported at once take each one's whole, up to a forward's limit).
+    static func of(_ message: String, limit: Int = maxChars) -> [ShareCardPart] {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         var parts: [ShareCardPart] = []
-        var budget = maxChars
+        var budget = limit
         var position = text.startIndex
         /// Adds words; false when they had to be cut, which ends the picture.
         func words(_ s: Substring) -> Bool {

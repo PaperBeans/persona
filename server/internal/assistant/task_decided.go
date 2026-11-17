@@ -90,11 +90,11 @@ func (s *Service) toolTaskDecided(ctx context.Context, machine, self string, arg
 func (s *Service) decisionTold(ctx context.Context, id, label, machine, session, said string) (bool, error) {
 	s.reviewDismissals.actions.acquire(id)
 	defer s.reviewDismissals.actions.release(id)
-	if t, ok := s.todoNow(id); ok {
-		if dismissed, err := s.decisionDismissed(ctx, t); err != nil || dismissed {
-			return false, err
-		}
-	}
+	return s.decisionToldLocked(ctx, id, label, machine, session, said)
+}
+
+// decisionToldLocked also serves exact owner replies observed under the task's action lock.
+func (s *Service) decisionToldLocked(ctx context.Context, id, label, machine, session, said string) (bool, error) {
 	a, err := s.askRound(id, "")
 	if err != nil || a == nil {
 		return false, err
@@ -103,6 +103,11 @@ func (s *Service) decisionTold(ctx context.Context, id, label, machine, session,
 	if !slices.ContainsFunc(a.Options, func(o DecisionOption) bool { return o.Label == label }) {
 		return false, errDecisionOption
 	}
+	t, _ := s.todoNow(id)
+	completeDismissal, err := s.prepareDismissalForAnswer(ctx, t)
+	if err != nil {
+		return false, err
+	}
 	s.deadlineAnswered(ctx, id, a.AskedAt)
 	if st := s.todoDB(); st != nil {
 		at, dec := decisionNow(), "dec_"+randomHex(8)
@@ -110,7 +115,7 @@ func (s *Service) decisionTold(ctx context.Context, id, label, machine, session,
 			Question: cmp.Or(a.Reason, i18n.T(s.botLang(ctx), "assistant-reports.verdict_decide")), Choice: decisionText(label),
 			Reason: decisionText(said), Source: db.DecisionManual, SourceMachine: machine, SourceSession: session,
 			CreatedAt: at}); err != nil {
-			s.logf("task %s: decision: %v", id, err)
+			return false, err
 		} else if ok {
 			s.ownerDecided(id, dec, a.WhyOwner)
 			s.decisionsChanged(ctx, id, at)
@@ -122,5 +127,6 @@ func (s *Service) decisionTold(ctx context.Context, id, label, machine, session,
 		chosen = "" // as "OK" takes it
 	}
 	s.endAsk(ctx, id, a.AskedAt, "", chosen)
+	completeDismissal()
 	return true, nil
 }

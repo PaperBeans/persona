@@ -76,8 +76,8 @@ final class PlaceMapUITests: XCTestCase {
                       "the route's full map does not mark where the line starts")
         sleep(2)
         try shot(app, "route-sheet")
-        let close = app.buttons.matching(NSPredicate(format: "label IN %@", ["完成", "Done"])).firstMatch
-        XCTAssertTrue(close.exists, "the route's full map has no Done")
+        let close = app.buttons["sheet-close"].firstMatch
+        XCTAssertTrue(close.exists, "the route's full map has no ✕")
         close.tap()
         let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: routeSheet)
         XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed, "Done did not close the route's full map")
@@ -106,8 +106,8 @@ final class PlaceMapUITests: XCTestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "tapping the map did not open the full map")
         sleep(2)
         try shot(app, "here-sheet")
-        let done = app.buttons.matching(NSPredicate(format: "label IN %@", ["完成", "Done"])).firstMatch
-        XCTAssertTrue(done.exists, "the full map has no Done")
+        let done = app.buttons["sheet-close"].firstMatch
+        XCTAssertTrue(done.exists, "the full map has no ✕")
         done.tap()
         let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: sheet)
         XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 5), .completed, "Done did not close the full map")

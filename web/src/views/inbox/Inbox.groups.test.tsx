@@ -149,6 +149,17 @@ describe("inbox groups (#2059)", () => {
     expect(head("done", "month").textContent).toContain("1 个月前1");
   });
 
+  it("draws the Jump to down arrow and still opens its groups menu", async () => {
+    const jump = host.querySelector<HTMLButtonElement>('[data-section="done"] button[aria-haspopup="menu"]');
+    expect(jump).not.toBeNull();
+    const arrow = jump!.querySelector('svg[width="10"]');
+    expect(arrow?.querySelector("path")?.getAttribute("d")).toBeTruthy();
+    expect(arrow?.getAttribute("stroke-width")).toBe("2.4");
+    await click(jump);
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent?.includes("7 天前"))).toBe(true);
+  });
+
   it("an old hub without history (404): Done has only the list's items", async () => {
     act(() => root.unmount());
     calls.historyStatus = 404;

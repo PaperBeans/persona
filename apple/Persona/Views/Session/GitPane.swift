@@ -344,7 +344,6 @@ struct GitPane: View {
             .padding(.trailing, Theme.Space.m)
             .surface(in: .rect(cornerRadius: Theme.Radius.panel, style: .continuous))
             .padding(.horizontal, Theme.Space.page).padding(.bottom, Theme.Space.s)
-            .tabSwitchRoom() // beside the open Duo's floating tabs' switch (#4231)
             // The list runs on under the bar: back it with the page and fade the list out above it, or the rows and
             // commits scrolled under it read through its words.
             .background(alignment: .top) {
@@ -705,7 +704,7 @@ struct GitDiffSheet: View {
             .navigationSubtitle(target.file.folder.isEmpty ? String(localized: "Repository root") : target.file.folder)
             .navigationBarTitleDisplayMode(.inline)
             .pageToolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done [Extension System Presentation c0b3fb]") { dismiss() } }
+                SheetClose { dismiss() }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button { UIPasteboard.general.string = diff?.diff } label: { Label("Copy Diff", systemImage: Theme.Icon.copy) }
@@ -805,7 +804,7 @@ struct GitCommitSheet: View {
             .themedPage()
             .navigationTitle(commit.short)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done [Extension System Presentation c0b3fb]") { dismiss() } } }
+            .toolbar { SheetClose { dismiss() } }
             .task { await load() }
             .onHubReconnect(group) { if error != nil { Task { await load() } } }
             #if os(macOS)

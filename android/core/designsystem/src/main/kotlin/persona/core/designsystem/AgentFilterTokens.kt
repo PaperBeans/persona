@@ -13,9 +13,7 @@ internal object AgentFilterTokens {
     val contentGap get() = Tokens.Space.xs + Tokens.Size.line
     val dot = Tokens.Size.dotS
     val icon = Tokens.Size.iconXS
-    val fadeEnd = Tokens.Size.badge
-    const val collapsedCharacters = 2
-    const val focusDelayMillis = 90L
-    const val focusFraction = 0.45f
+    /** How far an edge of the status strip fades while more choices are hidden past it, as wide as a choice is tall (#9121); the text size scales it. */
+    val fade = chipHeight
     const val selectedFillAlpha = 0.15f
 }

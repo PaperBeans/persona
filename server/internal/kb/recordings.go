@@ -659,6 +659,16 @@ func (e *Engine) putRecording(rawID string, u RecordingUpload, now time.Time) (p
 		t := r.EndedAt.UTC()
 		r.EndedAt = &t
 	}
+	// An ended hub-mode meeting is as long as the audio the hub holds when the upload says less (#9587): a phone killed
+	// mid-segment loses the segment it was writing and ends the recording before it, while the hub got that audio.
+	if r.EndedAt != nil && r.HubTranscribed() {
+		if held := e.audioHeldEnd(id); held > r.Duration {
+			r.Duration = held
+			if end := r.StartedAt.Add(time.Duration(held * float64(time.Second))); end.After(*r.EndedAt) {
+				r.EndedAt = &end
+			}
+		}
+	}
 	if r.Renamed != "" && u.Title != r.Title { // the phone renamed it since the web did: the newer name wins (#8877)
 		r.Renamed, r.RenamedAt = "", nil
 	}

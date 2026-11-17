@@ -41,7 +41,7 @@ func (s *Service) skillCatalogFor(ctx context.Context, machine, sid string, para
 		}
 	}
 	request := map[string]any{"catalog": true, "cwd": cwd, "session_id": sid, "machine_id": machine, "skill_owner": s.skillOwner()}
-	for _, key := range []string{"launcher", "runtime", "config_dir"} {
+	for _, key := range []string{"launcher", "config_dir"} {
 		if value, ok := params[key]; ok {
 			request[key] = value
 		}

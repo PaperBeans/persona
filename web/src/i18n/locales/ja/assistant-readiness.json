@@ -19,7 +19,7 @@
   "help_install_after": "インストールが終わったらここに戻ってください。しばらくすると更新されます。",
   "use_api_key": "API キーを使う",
   "help_login_title": "Claude Code にログイン",
-  "help_login_body": "{machine} でターミナルを開き、次の言葉を入力して Return を押し、ブラウザで一度ログインします：",
+  "help_login_body": "Persona は {machine} の Claude Code CLI を使い、Claude デスクトップアプリのログインはこれに含まれません。そのコンピュータでターミナルを開き、次のコマンドを実行して、ブラウザで一度ログインします：",
   "help_login_after": "ログインできたらここに戻って、メッセージを送ってみてください。",
   "help_what_title": "Persona にできること",
   "help_what_body": "Persona はあなた専用のアシスタントです。パソコンとモデルをつなぐと、次のことができます：",

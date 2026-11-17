@@ -1,8 +1,10 @@
 import XCTest
 
-/// The dictation bar (#5843): the shell composer's mic tapped turns it into [✕] wave [■] [↑]. ✕ drops what was heard,
-/// ■ puts it into the draft without sending, ↑ puts it in and sends. Words come from `-showDictationSample` (a simulator
-/// has no microphone). Against scripts/mock/mock_hub.py (TEST_RUNNER_PERSONA_MOCK_HUB=http://127.0.0.1:<port>).
+/// The dictation bar (#5843): the shell composer's mic tapped turns it into [✕] wave and ■ ↑. ✕ drops what was heard,
+/// ■ puts it into the draft without sending, ↑ puts it in and sends; ■ is where the mic was, so a second tap there stops
+/// (#9619). Held, the mic dictates while held and letting go keeps the words; a slide left drops them (#9619). Words come
+/// from `-showDictationSample` (a simulator has no microphone). Against scripts/mock/mock_hub.py
+/// (TEST_RUNNER_PERSONA_MOCK_HUB=http://127.0.0.1:<port>).
 final class DictationBarTests: XCTestCase {
     private let main = "server/b2e4d6f8-0000-4000-8000-000000000001"
     private let words = "dictated words here"
@@ -27,11 +29,11 @@ final class DictationBarTests: XCTestCase {
         super.tearDown()
     }
 
-    @MainActor private func openMain() {
+    @MainActor private func openMain(_ more: [String] = []) {
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         app = XCUIApplication()
         app.launchArguments = ["-pairURL", pair, "-app.tab", "assistant", "-tab", "assistant", "-openAssistant", main,
-                               "-showDictationSample", words]
+                               "-showDictationSample", words] + more
         app.launchPinned()
         XCTAssertTrue(mic.waitForExistence(timeout: 30), "no mic")
         clearDraft()
@@ -158,5 +160,90 @@ final class DictationBarTests: XCTestCase {
         XCTAssertEqual(all.count, before + 1, "↑ did not send")
         XCTAssertTrue(all.last?.contains(words) == true, "↑ sent something else: \(all.last ?? "")")
         XCTAssertEqual(draft, "", "the draft kept the sent words")
+    }
+
+    /// Where the mic is on the screen, as the finger finds it again.
+    @MainActor private func micSpot() -> XCUICoordinate {
+        let frame = mic.frame
+        return app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY))
+    }
+
+    /// The bar is not up: the mic took the touch as a hold, not a tap.
+    @MainActor private func barShut() -> Bool { wait(2) { !self.bar("cancel").isHittable } }
+
+    @MainActor func testASecondTapWhereTheMicWasStopsWithoutSending() throws {
+        openMain()
+        let before = try sent().count
+        let spot = micSpot()
+        dictate()
+        spot.tap()
+        XCTAssertTrue(closed(), "a second tap where the mic was did not end dictation")
+        offBarUnnamed("after the second tap")
+        XCTAssertEqual(draft, words, "the second tap did not put the words in the draft")
+        XCTAssertEqual(try sent().count, before, "the second tap sent the message")
+        clearDraft()
+    }
+
+    /// A slow tap, longer than Telegram's 0.19 s and shorter than `Theme.Hold.delay`, is still a tap.
+    @MainActor func testASlowTapIsStillATap() throws {
+        openMain()
+        mic.press(forDuration: 0.2)
+        XCTAssertTrue(wait { self.mic.label == self.listening && self.bar("cancel").isHittable }, "a 0.2 s press did not open the bar")
+        bar("cancel").tap()
+        XCTAssertTrue(closed(), "the bar did not close")
+        XCTAssertEqual(draft, "", "✕ kept the words")
+    }
+
+    @MainActor func testHoldingDictatesAndLettingGoKeepsTheWords() throws {
+        openMain()
+        let before = try sent().count
+        mic.press(forDuration: 3)
+        XCTAssertTrue(closed(), "dictation went on after the finger lifted")
+        XCTAssertTrue(barShut(), "letting go of the hold counted as a tap and opened the bar")
+        XCTAssertEqual(draft, words, "letting go did not keep what was heard")
+        XCTAssertEqual(try sent().count, before, "a hold sent the message")
+        clearDraft()
+    }
+
+    @MainActor func testHoldingAndSlidingLeftDropsTheWords() throws {
+        openMain()
+        let before = try sent().count
+        let spot = micSpot()
+        spot.press(forDuration: 2.5, thenDragTo: spot.withOffset(CGVector(dx: -220, dy: 0)))
+        XCTAssertTrue(closed(), "dictation went on after the slide")
+        XCTAssertTrue(barShut(), "the slide's end counted as a tap and opened the bar")
+        XCTAssertEqual(draft, "", "the slide left kept the words")
+        XCTAssertEqual(try sent().count, before, "a hold sent the message")
+    }
+
+    /// TEST_RUNNER_PERSONA_SHOTS=<dir> (TEST_RUNNER_PERSONA_SHOTS_APPEARANCE names them light / dark): the mic idle, tapped
+    /// (the bar, ■ where the mic was), held, and held with the finger slid toward cancel (`-showDictationHold`).
+    @MainActor func testShots() throws {
+        guard ProcessInfo.processInfo.environment["PERSONA_SHOTS"] != nil else { throw XCTSkip("needs PERSONA_SHOTS") }
+        openMain()
+        shot("mic-idle")
+        dictate()
+        shot("mic-tapped")
+        bar("cancel").tap()
+        XCTAssertTrue(closed(), "the bar did not close")
+        for (name, left) in [("mic-held", "0"), ("mic-sliding", "110")] {
+            app.terminate()
+            openMain(["-showDictationHold", left])
+            sleep(3)
+            shot(name)
+        }
+    }
+
+    private func shot(_ name: String) {
+        let s = app.screenshot()
+        let a = XCTAttachment(screenshot: s)
+        a.name = name
+        a.lifetime = .keepAlways
+        add(a)
+        if let dir = ProcessInfo.processInfo.environment["PERSONA_SHOTS"] {
+            let look = ProcessInfo.processInfo.environment["PERSONA_SHOTS_APPEARANCE"].map { "-" + $0 } ?? ""
+            let device = UIDevice.current.userInterfaceIdiom == .pad ? "-ipad" : ""
+            try? s.pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent(name + device + look + ".png"))
+        }
     }
 }

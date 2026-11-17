@@ -39,6 +39,9 @@ struct PromptComposer: View {
     var onCommand: (PromptCommand) -> Bool = { _ in false }
     /// What goes with the message, quoted over the draft inside the bar's surface (#986).
     var quotes: Binding<[ContextRef]>? = nil
+    /// The new assistant's one-shot control request; other prompt composers leave both of these nil.
+    var dictationRequest: DictationRequest? = nil
+    var takeDictation: ((DictationRequest) -> Bool)? = nil
     var send: () -> Void
 
     @State private var bar = PromptBarModel(selectedModelID: "")
@@ -91,6 +94,13 @@ struct PromptComposer: View {
             }
             PromptBar(model: bar, sources: mentionRows, commands: commands, models: models, placeholder: placeholder,
                       options: o, onSend: { _ in if !disabled { stopDictation(); commitTyped(); send() } })
+                #if os(iOS)
+                // Return Key Sends (#8178): as the bar's send, which empties the draft after; not while its @ or / list is up.
+                .returnSends(text: $text, canSend: !disabled && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasAttachments),
+                             paused: bar.token != nil || bar.isSourceMenuOpen || bar.isModelMenuOpen) {
+                    stopDictation(); commitTyped(); send(); text = ""
+                }
+                #endif
                 #if os(iOS) || os(visionOS)
                 .mask { SendCutout(cut: stopping, control: Self.control, inset: Self.barInset).fill(style: FillStyle(eoFill: true)) }
                 .overlay(alignment: .bottomTrailing) { sharedButtons }
@@ -110,6 +120,13 @@ struct PromptComposer: View {
             .onChange(of: bar.token?.kind == .mention) { _, open in if open { mentionRows = mentions() } }
             .onChange(of: dictation.isListening) { _, on in bar.isListening = on }
             .onDisappear { stopDictation() }
+            #if os(iOS)
+            .tabActiveTask(id: dictationRequest) {
+                guard let request = dictationRequest, takeDictation?(request) == true else { return }
+                guard !dictation.isListening else { return }
+                dictation.toggle(into: $text, onFailure: { focused.wrappedValue = true })
+            }
+            #endif
             #if DEBUG
             .task { await debugMenu() }
             #endif

@@ -855,9 +855,7 @@ private struct AttachPhotoEditor: View {
                     ProgressView().tint(.white)
                 }
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dismiss() }.accessibilityIdentifier("image-edit-cancel")
-                    }
+                    SheetClose(id: "image-edit-cancel") { dismiss() }
                 }
                 .toolbarBackground(.black, for: .navigationBar)
                 .toolbarColorScheme(.dark, for: .navigationBar)
@@ -1607,11 +1605,13 @@ extension AttachMoreSection {
     /// `scan`: Scan Document (#3720), next to Take Photo. `meeting`: Persona's main conversation's Meeting Recording
     /// (#3723), the sidebar's row by its words: with a recording under way it says so and opens it. `context`: Add as
     /// Context › Knowledge Note… / To-do… / Inbox Item… (#3721), folded under Mention.
-    static func common(voice: (() -> Void)?, camera: (() -> Void)?, scan: (() -> Void)? = nil, glasses: (() -> Void)?,
-                       meeting: (() -> Void)? = nil, mention: @escaping () -> Void,
+    static func common(voice: (() -> Void)?, call: (() -> Void)? = nil, camera: (() -> Void)?, scan: (() -> Void)? = nil,
+                       glasses: (() -> Void)?, meeting: (() -> Void)? = nil, mention: @escaping () -> Void,
                        context: ((ContextPickKind) -> Void)? = nil) -> [AttachMoreSection] {
         var capture: [AttachMoreRow] = []
         if let voice { capture.append(AttachMoreRow(id: "composer-menu-voice", title: String(localized: "Voice Chat"), symbol: Theme.Icon.voiceChannel, action: voice)) }
+        // Persona's main conversation (#9290): a phone call to Persona through the system's call UI, beside the chat's own voice.
+        if let call { capture.append(AttachMoreRow(id: "composer-menu-call", title: String(localized: "Call Persona"), symbol: Theme.Icon.callPersona, action: call)) }
         if let camera { capture.append(AttachMoreRow(id: "composer-menu-camera", title: String(localized: "Take Photo [Chat View 6e3a10]"), symbol: Theme.Icon.camera, action: camera)) }
         if let scan { capture.append(AttachMoreRow(id: "composer-menu-scan", title: String(localized: "Scan Document"), symbol: Theme.Icon.scanDocument, action: scan)) }
         if let glasses { capture.append(AttachMoreRow(id: "attach-glasses", title: String(localized: "Glasses Photo"), symbol: Theme.Icon.glasses, action: glasses)) }

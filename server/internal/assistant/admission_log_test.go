@@ -36,7 +36,7 @@ func TestAdmissionRefusalIsLogged(t *testing.T) {
 	}
 
 	// The agent_start path has no direction: the line omits the field rather than printing an empty direction.
-	if _, err := s.admitAgentStart(ctx, "busy"); err == nil {
+	if _, err := s.admitAgentStart(ctx, "busy", "work"); err == nil {
 		t.Fatal("the agent_start check must be refused too")
 	}
 	wantNoDirection := "admission: refused: machine=busy reason=assistant-tasks.admission_memory"

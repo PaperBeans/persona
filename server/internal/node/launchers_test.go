@@ -235,3 +235,12 @@ func TestWorkAgentsOnPathAreLaunchers(t *testing.T) {
 		t.Fatalf("launchers %v, want %v", got, want)
 	}
 }
+
+func TestAliasLauncherEnvironmentReset(t *testing.T) {
+	words := []string{"export", "ANTHROPIC_BASE_URL=https://old.example.com", ";",
+		"ANTHROPIC_MODEL=old", "env", "-i", "claude", "--model", "explicit"}
+	got, _, ok := aliasLauncher(words)
+	if !ok || got.BaseURL != "" || got.Model != "explicit" {
+		t.Errorf("launcher after environment reset: %+v, found=%t", got, ok)
+	}
+}

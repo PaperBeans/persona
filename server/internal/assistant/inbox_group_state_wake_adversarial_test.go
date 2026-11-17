@@ -38,7 +38,7 @@ func TestAdversarialInboxGroupStateWakeAgentStopRecapDoesNotResumeStoppedAgent(t
 		t.Fatalf("handling after Agent stop = %q, want looking before the recap", state)
 	}
 
-	if _, _, err := h.suggest(ctx, "session-1", suggestIn{Recap: "Synthetic recap after the Agent stopped"}); err != nil {
+	if _, _, err := h.suggest(ctx, "session-1", suggestIn{ProcessingTurn: inboxTestProcessingTurn(h, "session-1"), Recap: "Synthetic recap after the Agent stopped"}); err != nil {
 		t.Fatal(err)
 	}
 	state, wake, back := handlingNow(h, it)
@@ -115,7 +115,7 @@ func TestAdversarialInboxGroupStateWakeOldSweepDoesNotSettleNewReply(t *testing.
 	followCheckNoFailure(t, h, it)
 
 	h.deliverPending(ctx)
-	if _, _, err := h.suggest(ctx, "session-1", suggestIn{Recap: "Synthetic recap after the stale sweep"}); err != nil {
+	if _, _, err := h.suggest(ctx, "session-1", suggestIn{ProcessingTurn: inboxTestProcessingTurn(h, "session-1"), Recap: "Synthetic recap after the stale sweep"}); err != nil {
 		t.Fatal(err)
 	}
 	if state, _, _ := handlingNow(h, it); state != HandlingWaiting {
@@ -200,7 +200,7 @@ func TestAdversarialInboxGroupStateWakeOldTimeoutSweepDoesNotSettleNewReply(t *t
 	followCheckNoFailure(t, h, it)
 
 	h.deliverPending(ctx)
-	if _, _, err := h.suggest(ctx, "session-1", suggestIn{Recap: "Synthetic recap after the stale timeout sweep"}); err != nil {
+	if _, _, err := h.suggest(ctx, "session-1", suggestIn{ProcessingTurn: inboxTestProcessingTurn(h, "session-1"), Recap: "Synthetic recap after the stale timeout sweep"}); err != nil {
 		t.Fatal(err)
 	}
 	if state, _, _ := handlingNow(h, it); state != HandlingWaiting {

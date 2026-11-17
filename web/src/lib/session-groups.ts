@@ -5,7 +5,7 @@
 import { t } from "../i18n";
 import { baseName } from "./format";
 import { LIST_PAIRS_MAX, listPair, type ListCounts, type ListFilters } from "./session-list";
-import { STATE_LABEL } from "./state-labels";
+import { STATE_LABEL, stateName } from "./state-labels";
 import type { AgentState } from "./types";
 
 export const SESSIONS_CATALOG_FEATURE = "sessions_catalog";
@@ -15,6 +15,9 @@ export const SESSIONS_TODO_FEATURE = "sessions_todo";
 /** The hub selects the sidebar's quick filters on the paged list: `waiting=0|1` and `exclude_pane_source=<origin>`
  *  (docs/protocol/protocol.md "Quick filters", #6662). */
 export const SESSIONS_QUICK_FILTERS_FEATURE = "sessions_quick_filters";
+/** The hub lists the Just finished rows apart: `just_finished=0|1` and the counts' `just_finished`
+ *  (docs/protocol/protocol.md "Just finished rows", #9751). */
+export const SESSIONS_JUST_FINISHED_FEATURE = "sessions_just_finished";
 
 export type GroupDimension = "machine" | "project" | "group" | "state" | "todo";
 
@@ -111,9 +114,9 @@ export function catalogGroups(catalog: SessionCatalog, dimension: "project" | "g
 /** The groups of a counts read: computers on any hub, and on a hub without the catalog (or for personal agents)
  * projects by path and spaces or accounts by id. The busiest first. A computer, a space id and an account are named by
  * their key: the list has their names. `machine` narrows a space id to one computer. */
-export function countGroups(counts: ListCounts | null, dimension: GroupDimension, o: { machine?: string; needs?: ListCounts | null; todos?: TodoNames } = {}): SessionGroup[] {
+export function countGroups(counts: ListCounts | null, dimension: GroupDimension, o: { machine?: string; needs?: ListCounts | null; todos?: TodoNames; justFinished?: boolean } = {}): SessionGroup[] {
   // states and to-dos have orders of their own
-  if (dimension === "state") return stateGroups(counts);
+  if (dimension === "state") return stateGroups(counts, o.justFinished ?? false);
   if (dimension === "todo") return todoGroups(counts, o.todos, o.needs?.todo ?? {});
   const waiting = o.needs?.[dimension] ?? {};
   return Object.entries(counts?.[dimension] ?? {}).filter(([key, n]) => key && n > 0)
@@ -128,12 +131,21 @@ export function countGroups(counts: ListCounts | null, dimension: GroupDimension
 }
 
 /** A list by state (#6662): a section per state with sessions, in the quick filters' order. Its own number is the
- *  needs-you count, so no badge beside it. */
-function stateGroups(counts: ListCounts | null): SessionGroup[] {
+ *  needs-you count, so no badge beside it. On a hub that lists them apart (`justFinished`), the seen rows whose done
+ *  turn nobody looked at have a Just finished section before Seen, whose number leaves them out (#9751). */
+function stateGroups(counts: ListCounts | null, justFinished: boolean): SessionGroup[] {
   const by = counts?.state ?? {};
-  return STATE_ORDER.filter((s) => (by[s] ?? 0) > 0)
-    .map((s): SessionGroup => ({ key: s, name: STATE_LABEL[s as AgentState] ?? s, count: by[s]!, needs: 0, places: [], filters: { state: s } }));
+  const finished = Math.min(counts?.just_finished ?? 0, by.idle ?? 0);
+  const group = (key: string, name: string, count = 0, filters: ListFilters = { state: key }): SessionGroup[] =>
+    count > 0 ? [{ key, name, count, needs: 0, places: [], filters }] : [];
+  return STATE_ORDER.flatMap((s) => s === "idle" && justFinished
+    ? [...group(JUST_FINISHED_KEY, stateName("just_finished"), finished, { state: s, just_finished: "1" }),
+      ...group(s, STATE_LABEL.idle, (by.idle ?? 0) - finished, { state: s, just_finished: "0" })]
+    : group(s, STATE_LABEL[s as AgentState] ?? s, by[s]));
 }
+
+/** The key of a list by state's Just finished section: what a Just finished session's place says it is in. */
+export const JUST_FINISHED_KEY = "just_finished";
 
 /** A list by to-do (#6662): a section per open to-do with sessions, those with sessions that need the user first, then
  *  the To-dos page's order; one the page does not know (another assistant's, not loaded yet) after them; the sessions on

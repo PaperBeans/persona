@@ -54,6 +54,9 @@ func (h *Hub) startDevices(ctx context.Context) {
 		}
 		if w, ok := saved.Machines[mc.ID]; ok && (w.Until.IsZero() || w.Until.After(time.Now())) {
 			m.info, m.sessions, m.warmUntil = w.Info, w.Sessions, until
+			if len(w.Archived) > 0 {
+				m.archived, m.archivedAt, m.archivedBy = w.Archived, archivedIndex(w.Archived), w.ArchivedBy
+			}
 			if !w.Until.IsZero() && w.Until.Before(until) {
 				m.warmUntil = w.Until
 			}
@@ -135,10 +138,19 @@ func (h *Hub) reconcileKeptMachines() {
 	}
 }
 
-// markUnknownLocked shows m's sessions that are not offline as unknown, in a copy of its list: the kept list is never
-// changed in place (Machine.sessions). m.mu is held.
+// markUnknownLocked shows m's sessions that are not offline as unknown, its archived rows told apart (archived) as
+// well, as when they were in its list, in copies: the kept lists are never changed in place (Machine.sessions). m.mu
+// is held.
 func (m *Machine) markUnknownLocked() {
-	list := slices.Clone(m.sessions)
+	m.sessions = markedUnknown(m.sessions)
+	if len(m.archived) > 0 {
+		m.archived = markedUnknown(m.archived) // the same rows in the same order: archivedAt still holds
+	}
+}
+
+// markedUnknown is a copy of list with the sessions that are not offline shown as unknown.
+func markedUnknown(list []proto.Session) []proto.Session {
+	list = slices.Clone(list)
 	for i := range list {
 		if list[i].Status != proto.StatusOffline {
 			list[i].Status = proto.StatusUnknown
@@ -147,7 +159,7 @@ func (m *Machine) markUnknownLocked() {
 			}
 		}
 	}
-	m.sessions = list
+	return list
 }
 
 // devicesUp: the manager that carries the machines is connected and has reported them.

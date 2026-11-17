@@ -285,6 +285,10 @@ final class RecordingSync {
     func status(_ entry: RecordingEntry) -> Status {
         // An all-day recording's text isn't in its entry (`RecordingDaySummaries` has its state): nothing here to send.
         if entry.isDay { return .waiting }
+        #if DEBUG && os(iOS)
+        // A replayed meeting (`MeetingReplay`, #9417) never goes to a hub.
+        if MeetingReplay.holds(entry.id) { return .waiting }
+        #endif
         if isExpired(entry) { return .expired }
         if uploading == entry.id { return .uploading }
         if let have = store.synced[entry.id], have >= entry.revision { return .synced }

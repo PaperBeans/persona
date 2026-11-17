@@ -455,6 +455,9 @@ private fun WorkStep(step: WorkItem, session: SessionKey, loader: ImageLoader, o
                 return
             }
             var open by remember(call.id) { mutableStateOf(false) }
+            // Tool details fade in place (ToolViews.swift:564, ChatPin.swift:707-726). TodoWrite does not: it is the plan bar.
+            val detailEdge = rememberOpenEdge(call.id)
+            val detailRevealing = detailEdge.revealing(open)
             val diff = remember(call.use.item) { toolDiff(call.use.item) }
             val todos = remember(call.use.item) { todoEntries(call.use.item) }
             val searchItem = LocalChatSearchItem.current
@@ -490,7 +493,7 @@ private fun WorkStep(step: WorkItem, session: SessionKey, loader: ImageLoader, o
                         style = PersonaTheme.type.caption)
                 }
                 // Right of the rail on Glass, under the step's words (iOS's timeline, `detailLeading`).
-                if (open) Column(Modifier.fillMaxWidth().workDetail(Tokens.Space.m),
+                if (open) Column(Modifier.unfolding(detailRevealing).fillMaxWidth().workDetail(Tokens.Space.m),
                     verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                     // A tool that operates a Mac says its steps in words on Glass, its output and picture with them (iOS ComputerToolDetail).
                     val computer = PersonaTheme.style == AppStyle.Glass && persona.core.domain.ComputerSteps.isComputerTool(call.name)

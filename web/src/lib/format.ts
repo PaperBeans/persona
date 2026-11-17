@@ -43,6 +43,14 @@ export function interactionCanAnswer(ix: Pick<Interaction, "session_id">, sessio
   return ix.session_id === "" || sessionCan(session, "approve");
 }
 
+/** Why this page can't answer a card (#7497), as iOS (#6868) and Android (`approvalBlockedReason`) say it: null when it
+ *  can; "attach" when linking the session live would let it (a Codex thread Persona hasn't joined yet); else "computer",
+ *  an unknown session included. */
+export function answerBlock(ix: Pick<Interaction, "session_id">, session: Session | undefined): "attach" | "computer" | null {
+  if (interactionCanAnswer(ix, session)) return null;
+  return sessionCan(session, "attach") ? "attach" : "computer";
+}
+
 // The node writes some reasons with their own "View only: " in Chinese, which the subtitle adds already (#7803;
 // Android's READ_ONLY_PREFIX).
 const NODE_READ_ONLY_PREFIX = "仅查看："; // i18n-ignore: the node's prefix it strips
@@ -103,12 +111,19 @@ export function sessionDeletable(s: Session): boolean {
   return !s.assistant && DELETABLE_STATUSES.has(s.status) && !s.starting;
 }
 
-// docs/protocol/agent-states.md: needs you → unread → awaiting reply (seen, awaiting the user's reply, #5096) → working → idle → unknown → offline
-const RANK: Record<AgentState, number> = { needs_you: 0, unread: 1, working: 3, idle: 4, unknown: 5, offline: 6 };
+// docs/protocol/agent-states.md: needs you → unread → awaiting reply (seen, awaiting the user's reply, #5096) → working →
+// just finished (done before anybody looked, #9751) → idle → unknown → offline
+const RANK: Record<AgentState, number> = { needs_you: 0, unread: 1, working: 3, idle: 5, unknown: 6, offline: 7 };
 
-// A seen agent awaiting the user's reply ranks between unread and working. The comparator has no mutes: a muted one
-// awaiting a reply ranks so here too (the sidebar's By Status sections and folds go by lib/agent-groups.ts awaitsReply).
-const rankOf = (s: Session) => (stateOf(s) === "idle" && s.awaits_reply ? 2 : RANK[stateOf(s)]);
+// A seen agent awaiting the user's reply ranks between unread and working, a just finished one between working and the
+// seen ones. The comparator has no mutes: a muted one ranks so here too (the sidebar's By Status sections and folds go
+// by lib/agent-groups.ts awaitsReply and justFinished).
+function rankOf(s: Session): number {
+  const st = stateOf(s);
+  if (st === "idle" && s.awaits_reply) return 2;
+  if (st === "idle" && s.work?.just_finished) return 4;
+  return RANK[st];
+}
 
 export function stateOf(s: Session): AgentState {
   if (s.state) return s.state;

@@ -171,10 +171,7 @@ struct GitPRSheet: View {
                             .accessibilityIdentifier("git.pr.github")
                     }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Text("Done [Extension System Presentation c0b3fb]").lineLimit(1) }
-                        .disabled(pr.busy != nil)
-                }
+                SheetClose(disabled: pr.busy != nil) { dismiss() }
             }
             .confirmationDialog(Text(asking.map(askTitle) ?? ""), isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }),
                                 titleVisibility: .visible, presenting: asking) { how in
@@ -463,9 +460,7 @@ struct GitPRCreateSheet: View {
             .navigationSubtitle(status.branch ?? "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button { dismiss() } label: { Text("Cancel").lineLimit(1) }.disabled(pr.busy != nil)
-                }
+                SheetClose(disabled: pr.busy != nil) { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     if pr.busy == .create {
                         ProgressView()

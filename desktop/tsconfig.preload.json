@@ -16,5 +16,5 @@
     "sourceMap": true,
     "types": ["node"]
   },
-  "include": ["src/preload.cts", "src/setup-preload.cts", "src/contract.cts", "src/link-contract.cts", "src/notification-permission.cts", "../spec/desktop-bridge.d.ts"]
+  "include": ["src/preload.cts", "src/setup-preload.cts", "src/island-preload.cts", "src/contract.cts", "src/link-contract.cts", "src/notification-permission.cts", "../spec/desktop-bridge.d.ts"]
 }

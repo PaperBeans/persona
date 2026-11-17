@@ -188,8 +188,8 @@ export default function nativeCoreTests(): void {
           } finally { native.coreClose(handle); }
         }
       }
-      expect(cases).assertEqual(38);
-      expect(steps).assertEqual(94);
+      expect(cases).assertEqual(39);
+      expect(steps).assertEqual(95);
     });
     it('a_repeated_item_is_one_update_and_close_is_idempotent', 0, async (): Promise<void> => {
       const chat = 'update';

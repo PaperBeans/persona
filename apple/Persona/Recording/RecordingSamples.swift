@@ -208,10 +208,12 @@ enum RecordingSamples {
         // The summary card's meeting alone, the unnamed ones alone, or the others alone: a run syncs only the made-up
         // meetings it shows.
         let untitled = ["untitled", "untitled-page", "untitled-live"].contains(mode)
-        let others = mode == "overview" ? [liveMeeting, pastMeeting, untitledMeeting, untitledNote]
+        // `after-…` (#8731 V3): the same made-up meetings, opened after the meeting.
+        let overview = mode == "overview" || mode == "after-overview"
+        let others = overview ? [liveMeeting, pastMeeting, untitledMeeting, untitledNote]
             : untitled ? [liveMeeting, pastMeeting, overviewMeeting] : [overviewMeeting, untitledMeeting, untitledNote]
         for id in others where RecordingLibrary.shared.entry(id) != nil { try? RecordingLibrary.shared.remove(id) }
-        if mode == "overview" { installOverviewMeeting(); return }
+        if overview { installOverviewMeeting(); return }
         if untitled { installUntitled(live: mode == "untitled-live"); return }
         let start = Date(timeIntervalSince1970: 1_800_003_600)
         let meeting = RecordingMeeting(eventID: "sample-weekly", title: "产品周会", start: start, end: start.addingTimeInterval(3600),
@@ -233,7 +235,7 @@ enum RecordingSamples {
         ]
         past.marks = [44]
         try? RecordingLibrary.shared.save(past)
-        if mode == "minutes" || mode == "pending" { return }
+        if ["minutes", "pending", "after-minutes", "after-pending"].contains(mode) { return }
         if mode == "flow" { startFlow(meeting); return }
 
         RecordingLibrary.shared.restore(liveMeeting)

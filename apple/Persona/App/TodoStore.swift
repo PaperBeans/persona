@@ -87,11 +87,19 @@ final class TodoStore {
         return todos.filter { !$0.isDone && scope.owner($0.manager) == owner }
     }
 
+    /// Reads the list unless it is still the one tagged (`APIClient.todos(etag:)`); tests answer it themselves.
+    typealias Read = @MainActor (APIClient, String?) async throws -> (list: [TodoItem]?, etag: String?)
+    private let read: Read
+    /// The last list read and its tag: when the hub says it did not change (304), that list is applied again, as a
+    /// full read of it would have been, without reading it (#9590).
+    private var lastRead: (etag: String, list: [TodoItem])?
+
     init(cachedTodos: [TodoItem]? = nil,
          cacheWriter: (@MainActor ([TodoItem]) -> Void)? = { StateCache.save(TodoStore.stateName, $0) },
          hubListChanged: @escaping @MainActor () -> Void = {
         AppModel.shared.summariesChanged() // its questions name their tasks
-    }, managers: Managers = .one) {
+    }, managers: Managers = .one, read: @escaping Read = { try await $0.todos(etag: $1) }) {
+        self.read = read
         self.managers = managers
         let initial = cachedTodos ?? StateCache.load(Self.stateName, as: [TodoItem].self) ?? []
         let initialIndex = Self.index(initial)
@@ -139,6 +147,7 @@ final class TodoStore {
 
     func forget() {
         generation += 1
+        lastRead = nil
         reads.reset()
         activeReadRevision = nil
         loading = false
@@ -182,8 +191,17 @@ final class TodoStore {
             }
         }
         do {
-            let list = try await api.todos()
+            let answer = try await read(api, lastRead?.etag)
             guard generation == requestedGeneration, mutationRevision == requestedRevision, !Task.isCancelled else { return }
+            let list: [TodoItem]
+            if let fresh = answer.list {
+                list = fresh
+                lastRead = answer.etag.map { ($0, fresh) }
+            } else if let kept = lastRead?.list {
+                list = kept
+            } else {
+                return // a 304 to a tag this store did not send
+            }
             isSupported = true
             spacesSupported = TodosLogic.supportsSpaces(list)
             apply(list)

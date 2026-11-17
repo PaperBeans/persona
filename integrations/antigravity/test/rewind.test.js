@@ -89,6 +89,49 @@ test('native rewind preserves the prefix, resets watched history and persists th
   assert.equal((await node.peer.call('session.items', { session_id: SESSION })).history, replacement.history)
 })
 
+test('rewound identical inputs and replacement replies cannot reuse earlier item identities', async (t) => {
+  const { node, transcript, rewind, db } = await fixture(t)
+  const initial = await node.peer.call('session.items', { session_id: SESSION })
+  await rewind()
+  // Native exports append the repeated input at its old index, potentially with the same timestamp.
+  appendFileSync(transcript, [records[2], { ...records[3], content: 'Replacement answer' }]
+    .map((step) => JSON.stringify(step)).join('\n') + '\n')
+  db.exec('UPDATE conversation_summaries SET step_count = 4')
+  const replacement = await node.peer.call('session.items', { session_id: SESSION })
+  assert.deepEqual(replacement.items.slice(0, 2), initial.items.slice(0, 2), 'retained prefix stays stable')
+  assert.equal(replacement.items[2].text, initial.items[2].text)
+  assert.equal(replacement.items[2].seq, initial.items[2].seq)
+  assert.notEqual(replacement.items[2].id, initial.items[2].id, 'a pending send must not inherit the old echo binding')
+  assert.notEqual(replacement.items[3].id, initial.items[3].id, 'the old expanded reply must not match the new reply')
+  const full = await node.peer.call('session.item', { session_id: SESSION, item_id: replacement.items[3].id })
+  assert.equal(full.text, 'Replacement answer')
+  await assert.rejects(node.peer.call('session.item', { session_id: SESSION, item_id: initial.items[3].id }), /not found/)
+
+  appendFileSync(transcript, JSON.stringify({ ...records[3], content: 'Completed replacement answer' }) + '\n')
+  const completed = await node.peer.call('session.items', { session_id: SESSION })
+  assert.equal(completed.items[3].id, replacement.items[3].id, 'same-step completion keeps its identity')
+  assert.equal(completed.items[3].text, 'Completed replacement answer')
+
+  appendFileSync(transcript, [records[2], { ...records[3], content: 'Completed replacement answer' }]
+    .map((step) => JSON.stringify(step)).join('\n') + '\n')
+  const repeated = await node.peer.call('session.items', { session_id: SESSION })
+  assert.notEqual(repeated.items[2].id, completed.items[2].id, 'another identical replacement is another send')
+  assert.notEqual(repeated.items[3].id, completed.items[3].id)
+  assert.deepEqual(repeated.items.slice(0, 2), initial.items.slice(0, 2))
+})
+
+test('complete export replacement also distinguishes new steps at reused indices', async (t) => {
+  const { node, transcript, db } = await fixture(t)
+  const initial = await node.peer.call('session.items', { session_id: SESSION })
+  const next = records.map((step, index) => index < 2 ? step : { ...step, created_at: '2026-01-02T00:00:00Z' })
+  writeFileSync(transcript, next.map((step) => JSON.stringify(step)).join('\n') + '\n')
+  db.exec('UPDATE conversation_summaries SET step_count = 4')
+  const replaced = await node.peer.call('session.items', { session_id: SESSION })
+  assert.deepEqual(replaced.items.slice(0, 2), initial.items.slice(0, 2))
+  assert.notEqual(replaced.items[2].id, initial.items[2].id)
+  assert.notEqual(replaced.items[3].id, initial.items[3].id)
+})
+
 test('moved prompts and native busy state refuse before mutation', async (t) => {
   const { rewind, calls, nativeFile } = await fixture(t)
   await assert.rejects(rewind({ occurrence: 2, prompts_after: 0 }), (e) => e.code === 'rewind_mismatch')

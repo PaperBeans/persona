@@ -3,10 +3,13 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -267,5 +270,72 @@ read l4
 		if !strings.Contains(string(b), want) {
 			t.Errorf("missing %s in:\n%s", want, b)
 		}
+	}
+}
+
+// A home whose App's codex cannot list its models is asked again after each TTL, but the same failure is logged once
+// (#9845): again only when it changes, or after a read that worked.
+func TestCodexAppModelListFailureIsLoggedOnce(t *testing.T) {
+	home := t.TempDir()
+	defer func(f func(context.Context, string) (map[string]codexModelEfforts, error)) { readCodexAppModels = f }(readCodexAppModels)
+	var mu sync.Mutex
+	answer := func() (map[string]codexModelEfforts, error) { return nil, errors.New("codex not found in PATH") }
+	asks := 0
+	readCodexAppModels = func(context.Context, string) (map[string]codexModelEfforts, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		asks++
+		return answer()
+	}
+	t.Cleanup(func() {
+		codexAppModelLists.Lock()
+		delete(codexAppModelLists.at, home)
+		delete(codexAppModelLists.got, home)
+		delete(codexAppModelLists.failed, home)
+		codexAppModelLists.Unlock()
+	})
+	n := remoteTestNode(t)
+	var logs syncBuffer
+	n.logger = log.New(&logs, "", 0)
+	read := func(want int, answering func() (map[string]codexModelEfforts, error)) {
+		t.Helper()
+		mu.Lock()
+		answer = answering
+		mu.Unlock()
+		codexAppModelLists.Lock()
+		if _, ok := codexAppModelLists.at[home]; ok {
+			codexAppModelLists.at[home] = time.Now().Add(-codexAppModelsTTL) // its TTL is over
+		}
+		codexAppModelLists.Unlock()
+		n.codexAppEfforts(home, "gpt-x")
+		waitFor(t, "the App's codex asked", func() bool {
+			mu.Lock()
+			defer mu.Unlock()
+			codexAppModelLists.Lock()
+			defer codexAppModelLists.Unlock()
+			at, ok := codexAppModelLists.at[home]
+			return asks == want && ok && time.Since(at) < codexAppModelsTTL
+		})
+	}
+	failing := func(msg string) func() (map[string]codexModelEfforts, error) {
+		return func() (map[string]codexModelEfforts, error) { return nil, errors.New(msg) }
+	}
+	logged := func() int { return strings.Count(logs.String(), "its chats offer every effort level") }
+	read(1, failing("codex not found in PATH"))
+	read(2, failing("codex not found in PATH"))
+	read(3, failing("codex not found in PATH"))
+	if got := logged(); got != 1 {
+		t.Fatalf("the same failure three times was logged %d times:\n%s", got, logs.String())
+	}
+	read(4, failing("timed out"))
+	if got := logged(); got != 2 {
+		t.Fatalf("a different failure was not logged (%d lines):\n%s", got, logs.String())
+	}
+	read(5, func() (map[string]codexModelEfforts, error) {
+		return map[string]codexModelEfforts{"gpt-x": {levels: []string{"low"}}}, nil
+	})
+	read(6, failing("timed out"))
+	if got := logged(); got != 3 {
+		t.Fatalf("a failure after a read that worked was not logged (%d lines):\n%s", got, logs.String())
 	}
 }

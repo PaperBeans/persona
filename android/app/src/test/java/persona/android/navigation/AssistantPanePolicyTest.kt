@@ -89,6 +89,26 @@ class AssistantPanePolicyTest {
     }
 
     @Test
+    fun aSidebarPlaceRootKeepsTheColumnWithoutASecondPane() {
+        for (root in listOf(
+            InboxRoute,
+            TodosRoute,
+            KnowledgeRoute,
+            MachinesRoute,
+            TodoDetailRoute("todo"),
+            ExtensionUiRoute("extension", "page", "Page"),
+        )) {
+            val alone = policy(listOf(root))
+            assertTrue(root.toString(), alone.keepSharedSidebar)
+            assertTrue(root.toString(), alone.singleRightStack)
+            assertFalse(policy(listOf(root), regular = false).keepSharedSidebar)
+        }
+        val drilled = policy(listOf(InboxRoute, MailRoute("item")))
+        assertTrue(drilled.keepSharedSidebar)
+        assertTrue(drilled.singleRightStack)
+    }
+
+    @Test
     fun assistantRootSettingsAndAgentsKeepTheirOwnPolicies() {
         val root = policy(listOf(AssistantRoute))
         assertTrue(root.keepSharedSidebar)

@@ -1,3 +1,4 @@
+import { IconActions } from '../design/IconActions';
 import { Theme, SymbolGlyphModifier } from '@kit.ArkUI';
 import { ComposerOverlayWorkspace, ComposerOverlaySession } from '../models/ComposerOverlayWorkspace';
 import { composerPopupLayout, ComposerPopupLayout } from '../core/ComposerPopupLayout';
@@ -308,8 +309,11 @@ export struct Conversation {
   private composerOwnerKey(): string { return JSON.stringify([this.model.scope(), this.model.connectionGeneration(), this.model.target()]); }
   private composerAvailable(): boolean { return this.active && !this.model.decision && this.model.canCompose(); }
   private openComposerActions(event: ClickEvent): void {
-    if (!this.composerAvailable() || !this.showContextMenu) return;
-    this.actionIntent = new ComposerActionIntent(this.composerOwnerKey(), this.preserveInput(event), this.actionsRequest);
+    this.requestComposerActions(this.preserveInput(event));
+  }
+  private requestComposerActions(preserveInput: boolean): void {
+    if (!this.composerAvailable() || !this.showContextMenu || this.nativeChooser('actions')) return;
+    this.actionIntent = new ComposerActionIntent(this.composerOwnerKey(), preserveInput, this.actionsRequest);
     this.onShowActions();
   }
   private openFallbackActions(): void { if (!this.active || !this.showContextMenu || this.composerAvailable()) return; this.actionIntent = undefined; this.chooser.retire(); this.onShowActions(); }
@@ -372,6 +376,12 @@ export struct Conversation {
   private attachmentMenuOptions(): MenuOptions {
     const session = this.chooser.session;
     return { onWillAppear: () => { if (session) this.chooser.begin(session); }, onDidDisappear: () => { if (session) this.finishChooser(session); } };
+  }
+  private actionContextMenuOptions(): ContextMenuOptions {
+    const session = this.chooser.session;
+    return { preview: MenuPreviewMode.IMAGE,
+      onWillAppear: () => { if (session) this.chooser.begin(session); },
+      onDidDisappear: () => { if (session) this.finishChooser(session); } };
   }
   private chooserPopupOptions(): CustomPopupOptions {
     const session = this.chooser.session, layout = this.chooserLayout();
@@ -459,6 +469,11 @@ export struct Conversation {
       if (!this.active || this.attachmentKey !== key || this.model.target() !== key) return;
       await this.attachments.open(this.model, host as common.UIAbilityContext, row);
     }).catch(() => { if (this.attachmentKey === key) { this.attachments.errorKey = 'chat_attachment_storage_unavailable'; this.attachments.busy = true; } });
+  }
+  private primaryActionKey(): string {
+    if (this.primaryStop()) return 'stop';
+    if (this.model.stopPending() || this.sending || this.model.operationState === 'pending') return 'pending';
+    return this.model.operationState === 'unknown' ? 'result_unknown' : 'send';
   }
   private sendCurrent(): boolean { return this.mounted && this.active && this.admission(); }
   private async sendDraft(): Promise<void> {
@@ -660,8 +675,7 @@ export struct Conversation {
   @Builder message(entry: RepeatItem<ConversationLine>) {
     Column({ space: Tokens.gap }) {
       if (entry.item.message!.work) {
-        Button(tr('work_summary'), { type: ButtonType.Normal }).onClick(() => { this.toggle(entry.item.message!.id); if (this.expanded.includes(entry.item.message!.id)) this.model.expandWork(entry.item.message!); })
-          .fontColor($r('sys.color.font_secondary')).backgroundColor(Color.Transparent).height(Tokens.touch)
+        Button({ type: ButtonType.Circle }) { SymbolGlyph((this.expanded.includes(entry.item.message!.id) ? Symbols.up : Symbols.down)).fontSize(Tokens.symbolFont).fontColor([IconActions.color('work_summary', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('work_summary')).bindTips(tr('work_summary')).onClick(() => { this.toggle(entry.item.message!.id); if (this.expanded.includes(entry.item.message!.id)) this.model.expandWork(entry.item.message!); }).backgroundColor(Color.Transparent)
         if (this.expanded.includes(entry.item.message!.id)) {
           Text(entry.item.message!.work).fontFamily('monospace').fontSize(Tokens.meta).copyOption(CopyOptions.LocalDevice)
         }
@@ -687,10 +701,10 @@ export struct Conversation {
       }
       if (entry.item.message!.deliveryState && entry.item.message!.deliveryState !== 'done' && !entry.item.message!.failed) Text(tr(entry.item.message!.deliveryState === 'unknown' ? 'result_unknown' : entry.item.message!.deliveryState)).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary'))
       if (entry.item.message!.failed) Text(tr('failed')).fontColor($r('app.color.persona_danger')).fontSize(Tokens.meta)
-      if (entry.item.message!.localOperation && this.model.canCheckLocalMessage(entry.item.message!.localOperation)) Button(tr('checked'), { buttonStyle: ButtonStyleMode.TEXTUAL }).height(Tokens.touch).onClick(() => this.confirmChecked(entry.item.message!.localOperation))
-      if (entry.item.message!.localOperation && this.model.canRestoreMessage(entry.item.message!.localOperation)) Button(tr('restore_draft'), { buttonStyle: ButtonStyleMode.TEXTUAL }).height(Tokens.touch).onClick(() => this.restoreDraft(entry.item.message!))
+      if (entry.item.message!.localOperation && this.model.canCheckLocalMessage(entry.item.message!.localOperation)) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('checked')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('checked', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('checked')).bindTips(tr('checked')).onClick(() => this.confirmChecked(entry.item.message!.localOperation))
+      if (entry.item.message!.localOperation && this.model.canRestoreMessage(entry.item.message!.localOperation)) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('restore_draft')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('restore_draft', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('restore_draft')).bindTips(tr('restore_draft')).onClick(() => this.restoreDraft(entry.item.message!))
     }.width('100%').alignItems(entry.item.message!.role === 'user' ? HorizontalAlign.End : HorizontalAlign.Start).padding({ left: Tokens.page, right: Tokens.page, top: Tokens.gap, bottom: Tokens.gap })
-      .bindContextMenu(this.messageMenuBuilder(entry), ResponseType.LongPress)
+      .bindContextMenu(this.messageMenuBuilder(entry), ResponseType.LongPress, { preview: MenuPreviewMode.IMAGE })
   }
   @Builder actionsMenu() {
     Menu() {
@@ -710,34 +724,34 @@ export struct Conversation {
       if (this.model.error) {
         Row() {
           Text(tr(this.model.error)).fontSize(Tokens.meta).layoutWeight(1)
-          Button(tr('retry')).onClick(() => this.model.refresh())
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).onClick(() => this.model.refresh())
         }.padding(Tokens.inset)
       }
       if (this.model.unresolvedWrites.length) {
         Row({ space: Tokens.gap }) {
           Text(tr('result_unknown')).layoutWeight(1)
-          Button(tr('refresh')).onClick(() => this.model.reconcileWrites())
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('refresh')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('refresh', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('refresh')).bindTips(tr('refresh')).onClick(() => this.model.reconcileWrites())
           if (this.model.unresolvedWrites.some((record) => record.state === 'unknown' && !record.requiresReceipt))
-            Button(tr('checked')).onClick(() => { const record = this.model.unresolvedWrites.find((item) => item.state === 'unknown' && !item.requiresReceipt); if (record) this.confirmChecked(record.id); })
+            Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('checked')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('checked', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('checked')).bindTips(tr('checked')).onClick(() => { const record = this.model.unresolvedWrites.find((item) => item.state === 'unknown' && !item.requiresReceipt); if (record) this.confirmChecked(record.id); })
         }.padding(Tokens.inset)
       }
       List({ scroller: this.scroller, space: Tokens.gap }) {
-        if (this.readingFailed) ListItem() { Button(tr('retry')).attributeModifier(ButtonStyles.quiet).onClick(() => this.retryReading()) }
+        if (this.readingFailed) ListItem() { Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).onClick(() => this.retryReading()) }
         if (this.feed.error && this.feed.error !== this.model.error) ListItem() {
-          Row({ space: Tokens.gap }) { Text(tr(this.feed.error)).fontSize(Tokens.meta).layoutWeight(1); Button(tr('retry')).onClick(() => this.feed.refresh()) }.padding(Tokens.inset)
+          Row({ space: Tokens.gap }) { Text(tr(this.feed.error)).fontSize(Tokens.meta).layoutWeight(1); Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).onClick(() => this.feed.refresh()) }.padding(Tokens.inset)
         }
         if (this.model.selected.kind === 'conversation') ListItem() {
           AssistantCards({ model: this.model, feed: this.feed, active: this.active && this.model.connected, onOpenResource: (row: ResourceRow) => this.onOpenResource(row), dockOnly: true, onOpenCard: (itemId: string, kind: string) => this.onOpenCard(itemId, kind), onOpenSession: (row: ResourceRow) => this.onOpenResource(row),
             onOpenTodo: (row: ResourceRow) => this.onOpenResource(row), onOpenInbox: (row: ResourceRow) => this.onOpenResource(row), onLink: (address: string) => this.onLink(address) })
         }
-        if (this.model.hasMoreMessages || this.feed.nextCursor) ListItem() { Button(tr('load_more')).enabled(!this.readingLoading).onClick(() => this.loadEarlier()) }
+        if (this.model.hasMoreMessages || this.feed.nextCursor) ListItem() { Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('load_more')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('load_more', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('load_more')).bindTips(tr('load_more')).enabled(!this.readingLoading).onClick(() => this.loadEarlier()) }
         Repeat(this.lines).each((entry: RepeatItem<ConversationLine>) => {
           ListItem() {
             if (entry.item.message) this.message(entry)
             else if (entry.item.card) AssistantCards({ model: this.model, feed: this.feed, active: this.active && this.model.connected, onOpenResource: (row: ResourceRow) => this.onOpenResource(row), item: entry.item.card, onOpenCard: (itemId: string, kind: string) => this.onOpenCard(itemId, kind), onOpenSession: (row: ResourceRow) => this.onOpenResource(row),
               onOpenTodo: (row: ResourceRow) => this.onOpenResource(row), onOpenInbox: (row: ResourceRow) => this.onOpenResource(row), onLink: (address: string) => this.onLink(address) })
             else if (entry.item.decision) this.questionCard(entry)
-          }.id('chat.line.' + entry.item.id)
+          }.padding({ left: entry.item.message ? 0 : Tokens.page, right: entry.item.message ? 0 : Tokens.page }).id('chat.line.' + entry.item.id)
         }).key((line: ConversationLine) => line.id).virtualScroll({ totalCount: this.lines.length, reusable: false })
       }.layoutWeight(1).width('100%').id('chat.transcript')
         .bindSheet(this.questions.shown, this.questionContent(), { title: { title: tr('interaction_question_reopen') }, height: SheetSize.LARGE, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY, showClose: true, onWillAppear: () => this.presentedQuestion = this.questions.beginPresentation(), onAppear: () => { this.questionLayoutReady = true; this.measureQuestion(); }, onWillDismiss: (action: DismissSheetAction) => this.questions.dismiss(this.presentedQuestion, () => action.dismiss()), onDisappear: () => { this.questionLayoutReady = false; this.questions.endPresentation(this.presentedQuestion); this.presentedQuestion = undefined; } })
@@ -757,11 +771,11 @@ export struct Conversation {
     const valid = this.questions.ticket(sheet); return (address: string): void => { if (valid()) this.onLink(address); };
   }
   @Builder questionCard(entry: RepeatItem<ConversationLine>) {
-    if (['open', 'pending', 'unknown'].includes(entry.item.decision!.status)) Column({ space: Tokens.gap }) {
-      Text(questionPrompt(entry.item.decision!) || tr('question')).fontSize(Tokens.title).fontWeight(FontWeight.Medium).fontColor(Colors.ink).maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-      Button(tr(entry.item.decision!.status === 'open' ? 'interaction_question_reopen' : entry.item.decision!.status === 'unknown' ? 'result_unknown' : 'pending')).attributeModifier(ButtonStyles.secondary).width('100%')
+    if (['open', 'pending', 'unknown'].includes(entry.item.decision!.status)) Row({ space: Tokens.inset }) {
+      Text(questionPrompt(entry.item.decision!) || tr('question')).fontSize(Tokens.title).fontWeight(FontWeight.Medium).fontColor(Colors.ink).maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+      Button({ type: ButtonType.Circle }) { if (IconActions.busy(entry.item.decision!.status === 'open' ? 'interaction_question_reopen' : entry.item.decision!.status === 'unknown' ? 'result_unknown' : 'pending')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.link); else SymbolGlyph(IconActions.symbol(entry.item.decision!.status === 'open' ? 'interaction_question_reopen' : entry.item.decision!.status === 'unknown' ? 'result_unknown' : 'pending')).fontSize(Tokens.symbolFont).fontColor([IconActions.color(entry.item.decision!.status === 'open' ? 'interaction_question_reopen' : entry.item.decision!.status === 'unknown' ? 'result_unknown' : 'pending', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr(entry.item.decision!.status === 'open' ? 'interaction_question_reopen' : entry.item.decision!.status === 'unknown' ? 'result_unknown' : 'pending')).bindTips(tr(entry.item.decision!.status === 'open' ? 'interaction_question_reopen' : entry.item.decision!.status === 'unknown' ? 'result_unknown' : 'pending'))
         .enabled(this.active && this.model.canApprove() && entry.item.decision!.status === 'open').onClick(() => this.openQuestion(entry.item.decision!)).id('interaction.open.' + entry.item.decision!.id)
-    }.width('100%').padding(Tokens.page).alignItems(HorizontalAlign.Start).backgroundColor(Colors.question).borderRadius(Tokens.card)
+    }.width('100%').padding(Tokens.page).alignItems(VerticalAlign.Center).backgroundColor(Colors.question).borderRadius(Tokens.card)
     else InteractionDecisionForm({ model: this.model, request: entry.item.decision!, readOnly: true, onLink: (address: string) => this.onLink(address) })
   }
   @Builder questionContent() {
@@ -780,7 +794,7 @@ export struct Conversation {
           onRemove: (id: string) => this.attachments.remove(id), onEdit: (id: string) => this.attachments.editPhoto(id), onPreview: (item: ChatAttachment) => this.preview(item) })
       if (this.model.sourceContext) Row({ space: Tokens.gap }) {
         Text(this.model.contextTitle()).fontSize(Tokens.meta).fontColor(Colors.ink).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-        Button(tr('remove')).attributeModifier(ButtonStyles.quiet).enabled(!this.sending).onClick(() => this.model.removeContext())
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('remove')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('remove', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('remove')).bindTips(tr('remove')).enabled(!this.sending).onClick(() => this.model.removeContext())
       }.width('100%')
       GridRow({ columns: this.composerColumns(), gutter: { x: 0, y: Tokens.gap } }) {
         GridCol({ span: this.expandedComposer() ? this.composerColumns() : this.composerColumns() - this.leftColumns() - this.sendColumns(), order: this.expandedComposer() ? 0 : 1 }) {
@@ -803,7 +817,8 @@ export struct Conversation {
               .bindMenu(this.nativeChooser('attachments'), this.attachmentNativeMenu, this.attachmentMenuOptions())
             if (this.showContextMenu) Button({ type: ButtonType.Circle }) { Image(Symbols.more).width(Tokens.symbol).height(Tokens.symbol).fillColor(Colors.ink) }
               .attributeModifier(ButtonStyles.quiet).width(Tokens.touch).height(Tokens.touch).padding(0).accessibilityText(tr('more')).onClick((event: ClickEvent) => this.openComposerActions(event))
-              .bindMenu(this.nativeChooser('actions'), this.attachmentNativeMenu, this.attachmentMenuOptions()).id('chat.more')
+              .parallelGesture(LongPressGesture().onAction(() => this.requestComposerActions(false)))
+              .bindContextMenu(this.nativeChooser('actions'), this.attachmentNativeMenu, this.actionContextMenuOptions()).id('chat.more')
           }.width('100%').constraintSize({ minHeight: Tokens.touch }).alignItems(VerticalAlign.Center)
         }
         if (this.expandedComposer() && !this.verticalActions()) GridCol({ span: this.composerColumns() - this.leftColumns() - this.sendColumns(), order: 3 }) {
@@ -813,10 +828,15 @@ export struct Conversation {
           }.width('100%').constraintSize({ minHeight: Tokens.touch })
         }
         GridCol({ span: this.verticalActions() ? this.composerColumns() : this.sendColumns(), order: this.expandedComposer() ? this.verticalActions() ? 1 : 4 : 2 }) {
-          Button(tr(this.primaryStop() ? 'stop' : this.model.stopPending() || this.sending ? 'pending' : 'send')).attributeModifier(ButtonStyles.primary).padding(0).width(this.expandedComposer() ? '100%' : Tokens.touch).alignSelf(ItemAlign.End)
+          Row() {
+          Button({ type: ButtonType.Circle }) {
+            if (IconActions.busy(this.primaryActionKey())) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.onAction)
+            else SymbolGlyph(this.primaryActionKey() === 'stop' ? Symbols.stop : IconActions.symbol(this.primaryActionKey())).fontSize(Tokens.symbolFont).fontColor([Colors.onAction])
+          }.accessibilityText(tr(this.primaryActionKey())).attributeModifier(ButtonStyles.primary).padding(0).width(Tokens.touch).height(Tokens.touch)
             .enabled(this.sendCurrent() && (this.primaryStop() || this.model.canSend() && !this.model.stopPending() && !this.sending && !this.attachments.busy && !this.model.draftLoading &&
               (this.model.draft.trim().length > 0 || this.attachments.attachments.length > 0) && this.model.operationState !== 'pending' && this.model.operationState !== 'unknown'))
             .onClick(() => { if (!this.sendCurrent()) return; if (this.primaryStop()) this.model.stop(() => this.sendCurrent()); else this.sendDraft(); }).id('chat.send')
+          }.width('100%').justifyContent(FlexAlign.End)
         }
       }.width('100%').onAreaChange((_old: Area, area: Area) => { const width = Number(area.width); if (Number.isFinite(width) && width > 0) this.composerWidth = width; })
     }.padding(Tokens.gap).backgroundColor(Colors.subtle).borderRadius(Tokens.capsule).width('100%').id('chat.composer')
@@ -832,7 +852,7 @@ export struct Conversation {
       if (this.showContextMenu) Button({ type: ButtonType.Circle }) { Image(Symbols.more).width(Tokens.symbol).height(Tokens.symbol).fillColor(Colors.ink) }
         .attributeModifier(ButtonStyles.quiet).width(Tokens.touch).height(Tokens.touch).padding(0).accessibilityText(tr('more')).onClick(() => this.openFallbackActions())
         .bindMenu(this.actionsVisible, this.actionsMenu, this.actionMenuOptions(this.actionsRequest)).id('chat.more.fallback')
-      if (this.hasNew && !this.atEnd) Button(tr('latest')).attributeModifier(ButtonStyles.quiet).onClick(() => { this.scroller.scrollEdge(Edge.Bottom); this.atEnd = true; this.anchor.atEnd = true; this.hasNew = false; }).id('chat.latest')
+      if (this.hasNew && !this.atEnd) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('latest')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('latest', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('latest')).bindTips(tr('latest')).onClick(() => { this.scroller.scrollEdge(Edge.Bottom); this.atEnd = true; this.anchor.atEnd = true; this.hasNew = false; }).id('chat.latest')
     }.width('100%').constraintSize({ maxWidth: Tokens.readingMax }).height('100%')
       .padding({ left: Tokens.page, right: Tokens.page, bottom: Tokens.footer, top: Tokens.gap })
   }
@@ -843,12 +863,12 @@ export struct Conversation {
       if (this.showContextMenu && (this.model.decision || !this.model.canCompose())) Button({ type: ButtonType.Circle }) { Image(Symbols.more).width(Tokens.symbol).height(Tokens.symbol).fillColor(Colors.ink) }
         .attributeModifier(ButtonStyles.quiet).width(Tokens.touch).height(Tokens.touch).padding(0).accessibilityText(tr('more')).onClick(() => this.openFallbackActions())
         .bindMenu(this.actionsVisible, this.actionsMenu, this.actionMenuOptions(this.actionsRequest)).id('chat.more.fallback')
-      if (this.hasNew && !this.atEnd) Button(tr('latest')).attributeModifier(ButtonStyles.quiet).onClick(() => { this.scroller.scrollEdge(Edge.Bottom); this.atEnd = true; this.anchor.atEnd = true; this.hasNew = false; }).id('chat.latest')
+      if (this.hasNew && !this.atEnd) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('latest')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('latest', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('latest')).bindTips(tr('latest')).onClick(() => { this.scroller.scrollEdge(Edge.Bottom); this.atEnd = true; this.anchor.atEnd = true; this.hasNew = false; }).id('chat.latest')
       if (this.model.canCompose() && !this.model.decision) {
-        if (this.attachments.busy && !this.sending && (this.attachments.errorKey === 'chat_attachment_storage_unavailable' || this.model.error === 'cache_unavailable')) Button(tr('retry')).onClick(() => { this.attachmentKey = ''; this.syncAttachments(); })
+        if (this.attachments.busy && !this.sending && (this.attachments.errorKey === 'chat_attachment_storage_unavailable' || this.model.error === 'cache_unavailable')) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).onClick(() => { this.attachmentKey = ''; this.syncAttachments(); })
         this.composer()
       } else if (!this.model.canSend() && !this.model.decision) {
-        if (this.model.canAttach()) Button(tr('attach_live')).onClick(() => this.model.attach())
+        if (this.model.canAttach()) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('attach_live')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('attach_live', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('attach_live')).bindTips(tr('attach_live')).onClick(() => this.model.attach())
         Text(tr('read_only')).fontSize(Tokens.meta).padding(Tokens.page)
       }
       }.width('100%').constraintSize({ maxWidth: Tokens.readingMax }).padding({ left: Tokens.page, right: Tokens.page, bottom: Tokens.footer, top: Tokens.gap }).onAreaChange((_before: Area, area: Area): void => {

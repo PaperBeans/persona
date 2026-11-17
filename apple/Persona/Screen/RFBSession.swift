@@ -137,6 +137,9 @@ import PersonaScreenKit
             }
         }
         client = c
+        // A new connection: the Mac ended Phone Screen with the last one, so the small window shows all of it until the
+        // page cuts it again.
+        cutSmallWindow(nil)
         phase = .connecting
         pictured = false
         lastFrame = nil
@@ -158,6 +161,27 @@ import PersonaScreenKit
     /// display or a zoomed-in part is shown: macOS's Screen Sharing leaves most smaller requests unanswered (#3067).
     func show(in layer: AVSampleBufferDisplayLayer, timed: Bool = false) { sink.add(layer, timed: timed) }
     func hide(from layer: AVSampleBufferDisplayLayer) { sink.remove(layer) }
+
+    /// The part of the picture the small window shows (the timed layers, VNCPiP, #9659), in framebuffer pixels, and the
+    /// framebuffer's size it was cut for: Phone Screen's portrait display alone, at its own pixels, so the small window
+    /// is portrait and sharp. Nil: all of it. The page sets it; it stays while the small window has the Mac, and a new
+    /// connection starts without it. Not observed: the small window reads it as it draws.
+    @ObservationIgnored private(set) var smallWindowCut: (rect: CGRect, framebuffer: CGSize)?
+
+    /// The small window shows `rect` of the picture as it is now (nil: all of it).
+    func cutSmallWindow(_ rect: CGRect?) {
+        let now = rect.map { (rect: $0, framebuffer: size) }
+        guard now?.rect != smallWindowCut?.rect || now?.framebuffer != smallWindowCut?.framebuffer else { return }
+        smallWindowCut = now
+        sink.cut(rect, of: size)
+    }
+
+    /// What the small window shows of the picture now: the cut while the picture is still the size it was cut for.
+    var smallWindowPart: CGRect? {
+        guard let c = smallWindowCut, c.framebuffer == size, c.rect.width >= 2, c.rect.height >= 2,
+              CGRect(origin: .zero, size: size).contains(c.rect.integral) else { return nil }
+        return c.rect.integral
+    }
 
     /// Video follows the connection: a live one (signed in) is what it binds to; anything else ends it.
     private func followVideo() {

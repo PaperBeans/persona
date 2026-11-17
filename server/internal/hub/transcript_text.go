@@ -114,6 +114,8 @@ func noticeText(l i18n.Lang, s string) string {
 	switch {
 	case s == transcript.InterruptedNotice:
 		return tt(l, "interrupted")
+	case s == transcript.OmpStoppedNotice:
+		return tt(l, "omp_stopped")
 	case s == loopFired:
 		return tt(l, "loop_fired")
 	case strings.HasPrefix(s, loopFired+"："):

@@ -2,13 +2,6 @@ package persona.feature.assistant.proactive
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.Saver
@@ -173,22 +166,13 @@ internal fun ProactiveScreen(
         allRuns = { push(ProactivePage.RunList(it)) },
     )
 
-    val reduceMotion = PersonaTheme.reduceMotion
+    val pageTransitions = rememberPageTransitions()
     Box(modifier.fillMaxSize()) {
-        // The same slide as the app's own pages: in from the right over the page below, back out to the right.
+        // The same slide as the app's own pages, including RTL and reduced motion.
         AnimatedContent(
             pages, Modifier.fillMaxSize(), label = "proactive-pages", contentKey = { it.last().key },
             transitionSpec = {
-                when {
-                    reduceMotion -> ContentTransform(EnterTransition.None, ExitTransition.None, sizeTransform = null)
-                    targetState.size >= initialState.size -> ContentTransform(
-                        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { width -> width },
-                        slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { width -> -width / 4 }, sizeTransform = null)
-                    else -> ContentTransform(
-                        slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { width -> -width / 4 },
-                        slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { width -> width },
-                        targetContentZIndex = -1f, sizeTransform = null)
-                }
+                if (targetState.size >= initialState.size) pageTransitions.push else pageTransitions.pop
             },
         ) { stack ->
             val page = stack.last()

@@ -40,6 +40,10 @@ type PlanTask struct {
 	Title   string `json:"title"`
 	Prompt  string `json:"prompt"`
 	Machine string `json:"machine"`
+	// InboxItem explicitly names the handed-off item this task is for, never the conversation's latest item.
+	InboxItem string `json:"inbox_item,omitempty"`
+	// InboxHandoff is the hub-owned operation validated when the plan was made.
+	InboxHandoff string `json:"inbox_handoff,omitempty"`
 	// MachinePolicy defaults to fixed; only explicit flexible tasks may move to another machine.
 	MachinePolicy string `json:"machine_policy,omitempty"`
 	Cwd           string `json:"cwd"`
@@ -91,10 +95,11 @@ type PlanTask struct {
 	// round), for ContinuesWhy: it keeps that to-do and its brief instead of creating another. Brief is
 	// the hub's: the brief as it will be kept, shown on the plan card so that "Start" confirms it; never what the tool
 	// call or a card's edit says.
-	Goal         string   `json:"goal,omitempty"`
-	OutOfBounds  []string `json:"out_of_bounds,omitempty"`
-	Continues    string   `json:"continues,omitempty"`
-	ContinuesWhy string   `json:"continues_why,omitempty"`
+	Goal          string   `json:"goal,omitempty"`
+	OutOfBounds   []string `json:"out_of_bounds,omitempty"`
+	Continues     string   `json:"continues,omitempty"`
+	ContinuesWhy  string   `json:"continues_why,omitempty"`
+	ScopeRevision string   `json:"scope_revision,omitempty"`
 	// StartedWhy: why the assistant starts this on its own, when the owner did not just ask for it.
 	StartedWhy string     `json:"started_why,omitempty"`
 	Brief      *TaskBrief `json:"brief,omitempty"`
@@ -110,6 +115,11 @@ type PlanTask struct {
 	// this task is a worker of; the hub's, never what a tool call or an edit says.
 	Role   string `json:"role,omitempty"`
 	Parent string `json:"parent,omitempty"`
+	// PartOf and After: the request the task's to-do is a piece of and the pieces of it the to-do waits for
+	// (todo_pieces.go), checked when the plan is made and written on the to-do when the task starts; left out, a task on
+	// a to-do (todo_id) keeps that to-do's own. Not what the apps send back with an edit.
+	PartOf string   `json:"part_of,omitempty"`
+	After  []string `json:"after,omitempty"`
 	// Project: the knowledge-base project the task's todo goes in (#2581, todo_project.go), checked and kept as its slug
 	// when the plan is made; "" for none.
 	Project string `json:"project,omitempty"`
@@ -277,8 +287,8 @@ type tasksState struct {
 	retrying map[string]*taskStart
 	// outcomes: the completions whose outcome was recorded (todo_outcome.go, outcomeKey).
 	outcomes map[string]time.Time
-	// reusing: the todos a started plan took over (PlanTask.ReuseTodo) whose agent is not linked yet, so that a second
-	// plan cannot take the same todo in that gap (takeTodoForTask).
+	// reusing holds taken-over todos and newly created Inbox tasks until their first Agent is linked or failed.
+	// Another plan cannot take a task while its source binding or first start is still being admitted.
 	reusing map[string]bool
 	// outcomeRuns are the outcome recordings still going (goRecordTaskOutcome; the tests wait on them).
 	outcomeRuns sync.WaitGroup

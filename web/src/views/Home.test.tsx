@@ -374,6 +374,14 @@ describe("tasks in progress", () => {
     expect(concernCard).toContain("rounded-full");
     expect(html.match(/data-testid="todo-concern"/g)).toHaveLength(1);
   });
+  it("stretches a row of task cards to one height with the agent line at the bottom", () => {
+    fake.todos = [todo("a", { stage: "dev", agents: [{ machine_id: "mac", session_id: "w", linked_at: "x" }] }), todo("b", { agents: [{ machine_id: "mac", session_id: "v", linked_at: "x" }] })];
+    const html = render([]);
+    fake.todos = [];
+    expect(html).toContain("items-stretch");
+    for (const id of ["a", "b"]) expect(html.slice(html.indexOf(`data-task="${id}"`) - 120, html.indexOf(`data-task="${id}"`))).toContain("h-full");
+    expect(html).toContain("mt-auto flex");
+  });
   it("offers See all past six tasks", () => {
     fake.todos = Array.from({ length: 7 }, (_, i) => todo(`t${i}`));
     const html = render([]);

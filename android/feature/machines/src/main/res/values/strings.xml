@@ -110,6 +110,7 @@
     <string name="machines_reconnecting">Reconnecting…</string>
     <string name="machines_reconnect">Reconnect</string>
     <string name="machines_engine_note">Only sessions in the chosen engine are shown.</string>
+    <string name="machines_engine_note_none">Shows the desktop apps\' sessions. Starting or continuing a session from your phone is off.</string>
     <string name="machines_botmux">Also show botmux sessions</string>
     <string name="machines_botmux_note">When botmux is installed on this computer, its sessions are listed with the chosen engine\'s. Off: they are not listed and botmux is not run.</string>
     <string name="machines_notice_botmux_failed">Couldn\'t save the botmux switch: %1$s</string>

@@ -41,6 +41,7 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -76,10 +77,20 @@ class NewAgentAttachmentsShotsTest {
 
     private fun out(): File = File(System.getProperty("persona.shots") ?: "build/new-agent-attachments-shots").also { it.mkdirs() }
 
-    /** FileProvider keeps each authority's roots for the process; every test here has a cache directory of its own. */
-    @org.junit.Before fun forgetFileProviderRoots() {
+    /**
+     * Every test here has a cache directory of its own, so each gets a FileProvider of its own. FileProvider keeps each authority's
+     * roots for the process, and a provider keeps the folders of its first use for good; Robolectric makes the provider when
+     * something first asks the content resolver. A thumbnail the previous test left decoding can be that something once its test is
+     * over (its file is gone, so the decoder asks again), and a provider bound to that test's cache directory deletes nothing: a
+     * cancelled camera's file stays, and no wait removes it. This one comes from the manifest, replaces whatever is registered and
+     * takes its folders now.
+     */
+    @org.junit.Before fun ownFileProvider() {
         val cache = androidx.core.content.FileProvider::class.java.getDeclaredField("sCache").apply { isAccessible = true }
         (cache.get(null) as MutableMap<*, *>).clear()
+        val provider = Robolectric.buildContentProvider(androidx.core.content.FileProvider::class.java).create().get()
+        // There is nothing to delete: the call makes the provider take its folders under this test.
+        provider.delete(Uri.parse("content://${context.packageName}.chat.files/chat-captures/none"), null, null)
     }
 
     private val machines = listOf(Machine("mac-a", "MacBook", online = true), Machine("work-b", "Workstation", online = true))
@@ -212,8 +223,13 @@ class NewAgentAttachmentsShotsTest {
         show(model, camera)
         takePhoto(camera)
         assertEquals(listOf("TakePicture"), camera.launched)
+        // The page deletes the file it gave the camera as soon as the camera says Cancel. Wait for the folder as the removal
+        // above does, then check the draft and the folder; a file left comes with what the page asked the content resolver to delete.
+        runCatching { rule.waitUntil(30_000) { captures.listFiles().isNullOrEmpty() } }
+        rule.waitForIdle()
         assertTrue(model.state.value.attachments.isEmpty())
-        assertTrue(captures.listFiles().isNullOrEmpty())
+        val deleted = org.robolectric.Shadows.shadowOf(context.contentResolver).deleteStatements.map { it.uri.lastPathSegment }
+        assertEquals("deleted through the content resolver: $deleted", emptyList<String>(), captures.list().orEmpty().toList())
     }
 
     @Test fun aCodexLauncherHasNoAddRowAndSaysWhyAttachmentsHoldTheStart() {

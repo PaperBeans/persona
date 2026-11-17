@@ -98,7 +98,7 @@ struct ReadinessSheets: ViewModifier {
             .sheet(item: Binding(get: { route.flatMap { r -> ReadinessRoute? in
                 switch r { case .link, .addComputer, .confirmComputer: nil; default: r } } }, set: { route = $0 }),
                    onDismiss: { model.readinessChanged() }) { r in
-                sheet(r).overTabSwitch()
+                sheet(r)
             }
             .sheet(item: Binding(get: { route.flatMap { if case .link(let u) = $0 { LinkTarget(url: u) } else { nil } } },
                                  set: { if $0 == nil { route = nil } })) { LinkSheet(target: $0) }
@@ -113,7 +113,7 @@ struct ReadinessSheets: ViewModifier {
                 MachinesView()
                     .navigationDestination(for: MachineDetailRoute.self) { MachineDetailView(ref: $0.ref) }
                     .navigationDestination(for: TerminalsRoute.self) { TerminalsView(only: $0.machine) }
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { DoneButton { route = nil } } }
+                    .toolbar { SheetClose { route = nil } }
             }
         case .providerWizard:
             ProviderWizard(start: .pick) { model.readinessChanged() }
@@ -122,19 +122,11 @@ struct ReadinessSheets: ViewModifier {
                 Group {
                     if let name, !name.isEmpty { ModelLauncherDetailView(name: name) } else { ModelLaunchersView() }
                 }
-                .toolbar { ToolbarItem(placement: .cancellationAction) { DoneButton { route = nil } } }
+                .toolbar { SheetClose { route = nil } }
             }
         case .link, .addComputer, .confirmComputer:
             EmptyView()
         }
-    }
-}
-
-/// Done on a sheet's own stack.
-private struct DoneButton: View {
-    var action: () -> Void
-    var body: some View {
-        Button(action: action) { Text("Done [Extension System Presentation c0b3fb]").lineLimit(1) }
     }
 }
 
@@ -257,7 +249,7 @@ struct ReadinessHelpView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Text("OK [Recordings Section de32e2]").lineLimit(1) } } }
+        .toolbar { SheetClose { dismiss() } }
     }
 
     private var title: String {
@@ -281,8 +273,8 @@ struct ReadinessHelpView: View {
             para(String(localized: "Come back here once it's installed; this updates shortly after."), secondary: true)
             useKey
         case "login_claude":
-            para(String(localized: "On \(name), open Terminal, type this word, press Return, and sign in once in the browser as it asks:"))
-            CommandLine(text: "claude")
+            para(String(localized: "Persona runs the Claude Code CLI on \(name), and the Claude desktop app's sign-in doesn't count for it. Open Terminal there, run this command and sign in once in the browser:"))
+            CommandLine(text: "claude auth login")
             para(String(localized: "Once signed in, come back here and send a message to try it."), secondary: true)
             useKey
         case "how_to_connect_model":

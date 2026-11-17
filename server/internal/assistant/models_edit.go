@@ -18,7 +18,9 @@ type modelPatch struct {
 	Provider json.RawMessage `json:"provider"`
 	Model    json.RawMessage `json:"model"`
 	Effort   json.RawMessage `json:"effort"`
-	Runtime  json.RawMessage `json:"runtime"`
+	// Runtime is accepted and ignored, whatever its value: an older app still sends the main chat's "cli" or
+	// "agentsdk", and every assistant conversation runs on Claude Code's CLI.
+	Runtime json.RawMessage `json:"runtime"`
 	// ConfigDir: the main chat's profile for new conversations (#4633), private (stored as none) or legacy.
 	ConfigDir json.RawMessage `json:"config_dir"`
 }
@@ -38,7 +40,7 @@ func patchModel(b ModelBinding, in modelPatch) (ModelBinding, error) {
 	for _, f := range []struct {
 		raw json.RawMessage
 		dst *string
-	}{{in.Provider, &b.Provider}, {in.Model, &b.Model}, {in.Effort, &b.Effort}, {in.Runtime, &b.Runtime}, {in.ConfigDir, &b.ConfigDir}} {
+	}{{in.Provider, &b.Provider}, {in.Model, &b.Model}, {in.Effort, &b.Effort}, {in.ConfigDir, &b.ConfigDir}} {
 		if f.raw == nil {
 			continue
 		}
@@ -54,12 +56,6 @@ func patchModel(b ModelBinding, in modelPatch) (ModelBinding, error) {
 			return b, i18n.Err("assistant-models.err_field_invalid")
 		}
 		*f.dst = v
-	}
-	if b.Runtime != "" && !slices.Contains(assistantRuntimes, b.Runtime) {
-		return b, i18n.Err("assistant-models.err_runtime_invalid")
-	}
-	if b.Runtime == proto.AssistantRuntimeCLI {
-		b.Runtime = "" // the default, stored as none: an explicit cli fingerprints like no choice
 	}
 	if b.ConfigDir != "" && !slices.Contains(assistantConfigDirs, b.ConfigDir) {
 		return b, i18n.Err("assistant-models.err_config_dir_invalid")

@@ -23,8 +23,7 @@ import (
 //     whatever the turn was doing goes to the background or stops ("stopped"), and they start the next request.
 //
 // Measured on Claude Code 2.1.322. One that sends no command_lifecycle shows no queue, as before; one without these
-// control requests answers them with an error, which the strip shows. The Agent SDK bridge forwards neither
-// (integrations/agent-sdk, CONTROLS): a conversation on it says so.
+// control requests answers them with an error, which the strip shows.
 
 // assistantInput is one user message written to claude: its id, what the user wrote and the message's content
 // (the live snapshot, any images, the words) to write it again.

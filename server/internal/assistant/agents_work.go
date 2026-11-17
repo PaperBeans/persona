@@ -91,6 +91,11 @@ func settleOf(c assistantwire.TriageConfig) time.Duration {
 	return time.Duration(cmp0(c.SettleSeconds, 15)) * time.Second
 }
 
+// justFinishedFor is how long a done turn nobody has seen stays Just finished (#9751).
+func justFinishedFor(c assistantwire.TriageConfig) time.Duration {
+	return time.Duration(cmp0(c.JustFinishedHours, 3)) * time.Hour
+}
+
 func cmp0(n, def int) int {
 	if n > 0 {
 		return n

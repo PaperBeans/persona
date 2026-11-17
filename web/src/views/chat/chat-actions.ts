@@ -17,7 +17,7 @@ export interface ChatActions {
   /** Every image of the loaded conversation, oldest first. A function: read when the viewer opens, not on every push. */
   images: () => Item[];
   /** "Forward" (#3899): opens Forward to for a message of this chat, including when this chat is read-only. */
-  forward?: (pick: ForwardPick) => void;
+  forward?: (pick: ForwardPick, now?: boolean) => void;
   /** Picking messages to forward at once (#3838), set with `forward`: while it is on, each message with a Forward is a
    *  checkbox instead of its actions. */
   pick?: MessagePick;

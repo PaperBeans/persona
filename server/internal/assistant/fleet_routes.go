@@ -45,7 +45,7 @@ func (s *Service) fleetHandler(next http.Handler) http.Handler {
 		if a, ok := assistantwire.HandoffApproverOf(r.Context()); ok {
 			approver = &a
 		}
-		if err := s.resolveApproved(id, res, approver); err != nil {
+		if err := s.resolveApproved(r.Context(), id, res, approver); err != nil {
 			switch {
 			case errors.Is(err, errHandoffElsewhere):
 				apierr.WriteCode(w, http.StatusForbidden, proto.CodeSecretHandoffElsewhere, err)

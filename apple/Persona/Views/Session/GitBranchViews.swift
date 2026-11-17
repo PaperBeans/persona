@@ -70,10 +70,7 @@ struct GitBranchesSheet: View {
             .navigationSubtitle(status.branch ?? String(localized: "Detached HEAD"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Text("Done [Extension System Presentation c0b3fb]").lineLimit(1) }
-                        .disabled(switching)
-                }
+                SheetClose(disabled: switching) { dismiss() }
             }
             .confirmationDialog(Text(asking.map { $0.create ? String(localized: "Create \($0.branch)?") : String(localized: "Switch to \($0.branch)?") } ?? ""),
                                 isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }),
@@ -224,10 +221,7 @@ struct GitStashesSheet: View {
             .navigationSubtitle(status.branch ?? String(localized: "Detached HEAD"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Text("Done [Extension System Presentation c0b3fb]").lineLimit(1) }
-                        .disabled(stashing)
-                }
+                SheetClose(disabled: stashing) { dismiss() }
             }
             .confirmationDialog(Text("Drop This Stash?"), isPresented: Binding(get: { dropping != nil }, set: { if !$0 { dropping = nil } }),
                                 titleVisibility: .visible, presenting: dropping) { e in

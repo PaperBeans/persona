@@ -84,6 +84,47 @@ func TestBackgroundWaitingCount(t *testing.T) {
 	}
 }
 
+// Just finished rows (#9751) stay in the idle count, for older apps, and are counted apart too; just_finished=1 lists
+// them and just_finished=0 the other rows, a parent showing its children's work by its folded state with Roots is not
+// one, and the key takes only a boolean.
+func TestJustFinishedFilterAndCount(t *testing.T) {
+	var index Index
+	items := make([]Item, 4)
+	for n := range items {
+		items[n] = testItem(fmt.Sprintf("row-%d", n), n)
+		items[n].State = "idle"
+	}
+	items[1].JustFinished, items[2].JustFinished = true, true
+	index.Replace("demo", items)
+	counts, err := index.Counts(Options{})
+	if err != nil || counts.State["idle"] != 4 || counts.JustFinished != 2 {
+		t.Fatalf("counts: %+v %v", counts, err)
+	}
+	total := func(o Options) int {
+		t.Helper()
+		return mustQuery(t, &index, o).Total
+	}
+	if total(Options{State: "idle", JustFinished: "1"}) != 2 || total(Options{State: "idle", JustFinished: "0"}) != 2 {
+		t.Fatal("just_finished split the seen rows wrongly")
+	}
+	items[2].Fold = &Fold{State: "working"}
+	items[2].Full = testPayload{ID: items[2].ID, Title: "Its child works"}
+	index.Replace("demo", items)
+	if total(Options{Roots: true, JustFinished: "1"}) != 1 || total(Options{JustFinished: "1"}) != 2 {
+		t.Fatal("just_finished did not follow the folded state with roots")
+	}
+	if counts, _ = index.Counts(Options{Roots: true}); counts.JustFinished != 1 {
+		t.Fatalf("roots count: %+v", counts)
+	}
+	v, err := Parse(url.Values{"just_finished": {"true"}, "state": {"idle"}})
+	if err != nil || v.JustFinished != "1" || !Enabled(url.Values{"just_finished": {"0"}}) {
+		t.Fatalf("parse: %+v %v", v, err)
+	}
+	if _, err := Parse(url.Values{"just_finished": {"2"}}); err == nil {
+		t.Fatal("accepted just_finished=2")
+	}
+}
+
 // Sessions by to-do (#6662): todo=<id> lists the rows on that to-do, todo=none the rows on none; the counts have each
 // to-do's rows and, under "", the rows on none. A row moved to another to-do moves with it, in a delta too, and the
 // filter binds a cursor as the others do.

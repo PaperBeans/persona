@@ -96,9 +96,10 @@ struct ProviderWizard: View {
                 .navigationTitle(title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbar }
-                // Cancel on the first step (a Mac asks first once something is typed); Back after it.
+                // ✕ on the first step (a Mac asks first once something is typed); Back after it. Finished, the bar's own ✕
+                // (a wizard that starts on the import ends on its first step).
                 .sheetCancel(unsaved: !wizard.name.isEmpty || !wizard.apiKey.isEmpty || !wizard.presetKey.isEmpty,
-                             when: step == start) { dismiss() }
+                             when: step == start && !finished) { dismiss() }
                 .animation(Theme.Motion.standard, value: step)
                 // Again once the hub's features are in (a sheet opened while connecting starts without them).
                 .task(id: wizard.presetsFlow) {
@@ -144,47 +145,68 @@ struct ProviderWizard: View {
     // MARK: Bar
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        if step != start && step != .done {
-            ToolbarItem(placement: .cancellationAction) {
+        leadingItem
+        saveItem
+        wordItem
+    }
+
+    /// Finished: only the way out, ✕ at the leading corner (#9653). Between steps: Back there.
+    @ToolbarContentBuilder private var leadingItem: some ToolbarContent {
+        if finished {
+            SheetClose(id: "wizard.done") { dismiss() }
+        } else if showsBack {
+            ToolbarItem(placement: .topBarLeading) {
                 Button("Back [Provider Wizard View da336f]") { back() }.lineLimit(1).accessibilityIdentifier("wizard.back")
             }
         }
-        ToolbarItem(placement: .confirmationAction) {
-            switch step {
-            case .pick: EmptyView()
-            case .connect:
-                Button("Next [Inbox Line acfc4e]") { Task { await toModels() } }.lineLimit(1)
-                    .disabled(!wizard.connectionReady || wizard.discovering)
-                    .accessibilityIdentifier("wizard.next")
-            case .models:
-                Button { Task { await save() } } label: {
-                    if wizard.saving { ProgressView() } else { Text("Save").lineLimit(1) }
-                }
-                .disabled(!wizard.canSave)
-                .accessibilityIdentifier("wizard.save")
-            case .key:
-                Button { Task { await savePreset() } } label: {
-                    if wizard.saving { ProgressView() } else { Text("Save").lineLimit(1) }
-                }
-                .disabled(!wizard.canSavePreset)
-                .accessibilityIdentifier("wizard.save")
-            case .done:
-                Button("Done [Extension System Presentation c0b3fb]") { dismiss() }.lineLimit(1).accessibilityIdentifier("wizard.done")
-            case .claude:
-                if wizard.claudeTry?.ok == true {
-                    Button("Done [Extension System Presentation c0b3fb]") { dismiss() }.lineLimit(1).accessibilityIdentifier("wizard.done")
-                }
-            case .getModel: EmptyView()
-            case .importZshrc:
-                switch imports.phase {
-                case .preview, .importing:
-                    Button("Import") { Task { await runImport() } }.lineLimit(1)
-                        .disabled(!imports.canImport).accessibilityIdentifier("import.confirm")
-                case .done:
-                    Button("Done [Extension System Presentation c0b3fb]") { dismiss() }.lineLimit(1).accessibilityIdentifier("import.done")
-                default: EmptyView()
-                }
-            }
+    }
+
+    /// Save as the ✓ (#9653).
+    @ToolbarContentBuilder private var saveItem: some ToolbarContent {
+        if savesHere {
+            SheetConfirm(id: "wizard.save", disabled: !canSaveHere, busy: wizard.saving) { Task { await saveHere() } }
+        }
+    }
+
+    /// Next and Import stay words: they say more than ✓.
+    @ToolbarContentBuilder private var wordItem: some ToolbarContent {
+        if step == .connect || importsReady {
+            ToolbarItem(placement: .confirmationAction) { wordButton }
+        }
+    }
+
+    @ViewBuilder private var wordButton: some View {
+        if step == .connect {
+            Button("Next [Inbox Line acfc4e]") { Task { await toModels() } }.lineLimit(1)
+                .disabled(!wizard.connectionReady || wizard.discovering)
+                .accessibilityIdentifier("wizard.next")
+        } else {
+            Button("Import") { Task { await runImport() } }.lineLimit(1)
+                .disabled(!imports.canImport).accessibilityIdentifier("import.confirm")
+        }
+    }
+
+    private var savesHere: Bool { step == .models || step == .key }
+    private var canSaveHere: Bool { step == .models ? wizard.canSave : wizard.canSavePreset }
+
+    private func saveHere() async {
+        if step == .models { await save() } else { await savePreset() }
+    }
+
+    private var showsBack: Bool { step != start && step != .done }
+
+    /// The import's list is up: Import takes what is ticked.
+    private var importsReady: Bool {
+        step == .importZshrc && (imports.phase == .preview || imports.phase == .importing)
+    }
+
+    /// Nothing left to do but leave: saved, a working Claude sign-in, or an import done.
+    private var finished: Bool {
+        switch step {
+        case .done: true
+        case .claude: wizard.claudeTry?.ok == true
+        case .importZshrc: imports.phase == .done
+        default: false
         }
     }
 

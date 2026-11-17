@@ -137,7 +137,7 @@ class InboxOneRowTest {
     private fun screen(inbox: FakeInbox) {
         inbox.conversationInbox.value = InboxConversations(inbox, "synthetic-pairing", owner, ReplyComposers(inbox, owner))
         rule.setContent { PersonaTheme(reduceMotion = true) {
-            Box(Modifier.testTag("inbox-one-row").background(PersonaTheme.palette.background)) { InboxScreen(inbox, navigator) }
+            Box(Modifier.testTag("inbox-one-row").background(PersonaTheme.palette.background)) { OnAll { InboxScreen(inbox, navigator) } }
         } }
         rule.waitForIdle()
     }
@@ -234,12 +234,15 @@ class InboxOneRowTest {
         screen(inbox)
         // Both In progress rows show, exactly once each: the hub's working section and the older hub's running agent
         // join the same one section, so there is one In progress title and neither row is swallowed.
-        rule.onAllNodesWithText(res.getString(R.string.inbox_section_working)).assertCountEquals(1)
+        // The section bar (#9053) names the sections too: its choices are left out of the count.
+        fun inList(text: String) = androidx.compose.ui.test.hasText(text) and
+            androidx.compose.ui.test.SemanticsMatcher.keyNotDefined(androidx.compose.ui.semantics.SemanticsProperties.Selected)
+        rule.onAllNodes(inList(res.getString(R.string.inbox_section_working))).assertCountEquals(1)
         rule.onAllNodesWithText("Hub is on it").assertCountEquals(1)
         rule.onAllNodesWithText("Agent is on it").assertCountEquals(1)
         rule.onNodeWithText("Just so you know").assertExists()
         rule.onNodeWithText(res.getString(R.string.inbox_bay_needs_you)).assertExists()
-        rule.onNodeWithText(res.getString(R.string.inbox_group_fyi)).assertExists()
+        rule.onNode(inList(res.getString(R.string.inbox_group_fyi))).assertExists()
     }
 
     private fun historyInbox() = FakeInbox(listOf(InboxRecord(InboxItem("recent", kind = "dm", title = "Handled yesterday",

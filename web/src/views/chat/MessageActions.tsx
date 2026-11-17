@@ -9,6 +9,7 @@
 // (lib/forward.ts); it took the place of "Hand to Persona". "Use as context" attaches it to this chat's next message. Sharing
 // as a card is the phone's. "Start a new session" (#2137: a new conversation with what was said up to this reply) is there
 // when the session can branch. Beside your own bubbles, Forward and Use as context live in ⋯ to keep the hover bar compact.
+// The right-click / long-press menu ends in Select messages (#9469), after a line: picking starts with the message picked.
 // While the chat picks messages to forward at once (#3838, Forward to's Select messages…), a message with a Forward has a
 // checkbox over it (Picking.tsx PickRow, which comes with Forward to): a click anywhere on it picks it or unpicks it, the
 // tick before it; its menus and bars are off. Not picking, the row is drawn as it always was.
@@ -261,7 +262,10 @@ export function MessageActions({
 
   if (!actions.length) return <div className={className}>{children}</div>;
 
-  const items: MenuItem[] = [...actions, ...extras].map((a, i) => ({ ...a, divider: i === actions.length && i > 0 }));
+  // the menu ends in Select messages (#9469, iOS's row under the bar): picking starts with this one picked
+  const send = chat?.forward;
+  const select: MenuItem[] = send && pick && !picking ? [{ key: "pick", label: t("chat-messageactions.pick"), icon: "check", divider: true, onSelect: () => send(pick, true) }] : [];
+  const items: MenuItem[] = [...[...actions, ...extras].map((a, i) => ({ ...a, divider: i === actions.length && i > 0 })), ...select];
 
   return (
     <div

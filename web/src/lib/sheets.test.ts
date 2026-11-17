@@ -56,6 +56,33 @@ describe("parseDelimited", () => {
     expect(separatorOf("x.csv", "single")).toBe(",");
     expect(delimitedSheet("t.tsv", "a\tb\n1\t2").rows[1]).toEqual(["1", "2"]);
   });
+
+  it.each([
+    ["name;notes\nAlice;\"one,two,three,four\"\n", ";", "one,two,three,four"],
+    ["name,notes\nAlice,\"one;two;three;four\"\n", ",", "one;two;three;four"],
+    ['name;notes\nAlice;"say ""hello, friend"", please"\n', ";", 'say "hello, friend", please'],
+    ['\uFEFF"name";"notes"\n"Alice";"one,two,three,four"\n', ";", "one,two,three,four"],
+    ['name;notes\r\nAlice;"one,two\r\nthree,four"\r\n', ";", "one,two\r\nthree,four"],
+  ])("does not count quoted punctuation as a separator in %j", (text, separator, note) => {
+    expect.soft(separatorOf("data.csv", text)).toBe(separator);
+    expect.soft(delimitedSheet("data.csv", text).rows).toEqual([["name", "notes"], ["Alice", note]]);
+  });
+
+  it("keeps literal quotes in unquoted fields and the existing format defaults", () => {
+    const literal = 'a;b,c\ninch";2';
+    expect(separatorOf("data.csv", literal)).toBe(";");
+    expect(delimitedSheet("data.csv", literal).rows).toEqual([["a", "b,c"], ['inch"', "2"]]);
+    expect(separatorOf("data.csv", "a,b;c")).toBe(",");
+    expect(separatorOf("data.csv", "single")).toBe(",");
+    expect(separatorOf("data.csv", "")).toBe(",");
+    for (const name of ["data.tsv", "data.tab"]) expect(separatorOf(name, 'a;b\n"c,d,e,f"')).toBe("\t");
+  });
+
+  it("keeps the 4096-code-unit and first-five-physical-line sampling bounds", () => {
+    expect(separatorOf("data.csv", "x".repeat(4095) + "," + ";".repeat(20))).toBe(",");
+    expect(separatorOf("data.csv", "😀".repeat(2047) + ",;" + "\t".repeat(20))).toBe(",");
+    expect(separatorOf("data.csv", "a,b\n".repeat(5) + ";".repeat(20))).toBe(",");
+  });
 });
 
 describe("workbookSheets", () => {

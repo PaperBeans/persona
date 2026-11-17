@@ -17,9 +17,12 @@
 #   SHOTS_FROZEN=<ISO time>        e.g. 2026-11-02T04:00:00+00:00: freeze the mock hub's and the emulator's clock,
 #                                  turn animations off, put the status bar in demo mode (needs adb root) and
 #                                  capture each page only once it has held still
+#   SHOTS_GETTING_STARTED_URL=<https URL>  show the welcome page's "No hub yet?" link in the capture (default: none, so captures
+#                                  do not depend on the local config)
 #   SHOTS_SETTLE=<seconds>         wait after each launch before the capture (default 2)
 # Compare two capture directories with scripts/app/android_shots_diff.py.
 # The application id comes from ~/.config/persona/config.json: android.application_id, else app.bundle_id.
+# The welcome page's "No hub yet?" link comes from the same file: publish.getting_started_url (https only; none: no link).
 # release signs with android.release_keystore (and android.release_key_alias, android.release_keystore_password_command,
 # android.release_key_password_command) from the same file; with none configured it uses the SDK's local debug keystore
 # (~/.android/debug.keystore), the key debug builds on this computer are signed with, so it updates one in place.
@@ -103,11 +106,16 @@ print(moment.astimezone(timezone.utc).strftime("%m%d%H%M%Y.%S"))' "$SHOTS_FROZEN
   OUTPUT=$(cd "$OUTPUT" && pwd)
 fi
 cd android
+if [ "$COMMAND" = shots ] || [ "$COMMAND" = shots-live ]; then
+  GETTING_STARTED=${SHOTS_GETTING_STARTED_URL:-}
+else
+  GETTING_STARTED=$(python3 ../scripts/persona_config.py get publish.getting_started_url 2>/dev/null || true)
+fi
 [ -f local.properties ] || echo "sdk.dir=$SDK" > local.properties
 case "$COMMAND" in
-  test) ./gradlew -q -PpersonaApplicationId="$APP_ID" test ;;
-  lint) ./gradlew -q -PpersonaApplicationId="$APP_ID" lint ;;
-  apk) ./gradlew -q -PpersonaApplicationId="$APP_ID" :app:assembleDebug && ls -la app/build/outputs/apk/debug/app-debug.apk ;;
+  test) ./gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" test ;;
+  lint) ./gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" lint ;;
+  apk) ./gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" :app:assembleDebug && ls -la app/build/outputs/apk/debug/app-debug.apk ;;
   release)
     config() { python3 ../scripts/persona_config.py get "$1" 2>/dev/null || true; }
     # || true: with no build-tools ls fails, and under pipefail the script would stop here without the message below
@@ -138,7 +146,7 @@ case "$COMMAND" in
     # About shows the commit this APK is built from: this repository's HEAD, passed explicitly (unknown when it cannot be read).
     BUILD_COMMIT=$(git -C .. rev-parse HEAD 2>/dev/null || true)
     [[ $BUILD_COMMIT =~ ^[0-9a-f]{40}$ ]] || BUILD_COMMIT=unknown
-    ./gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaBuildCommit="$BUILD_COMMIT" :app:assembleRelease
+    ./gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" -PpersonaBuildCommit="$BUILD_COMMIT" :app:assembleRelease
     UNSIGNED=app/build/outputs/apk/release/app-release-unsigned.apk
     SIGNED=app/build/outputs/apk/release/app-release.apk
     python3 ../scripts/release/check_android_shrink.py "$UNSIGNED" app/build/outputs/mapping/release --build-tools "$TOOLS"
@@ -156,11 +164,11 @@ case "$COMMAND" in
       "$ADB" -s "$SERIAL" shell am start -n "$APP_ID/persona.android.MainActivity" >/dev/null
     fi ;;
   install)
-    ./gradlew -q -PpersonaApplicationId="$APP_ID" :app:assembleDebug
+    ./gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" :app:assembleDebug
     "$ADB" ${ADB_ARGS[@]+"${ADB_ARGS[@]}"} install -r app/build/outputs/apk/debug/app-debug.apk
     "$ADB" ${ADB_ARGS[@]+"${ADB_ARGS[@]}"} shell am start -n "$APP_ID/persona.android.MainActivity" >/dev/null ;;
   shots|shots-live)
-    ./gradlew -q -PpersonaApplicationId="$APP_ID" -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug
+    ./gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug
     "$ADB" -s "$SERIAL" install -r app/build/outputs/apk/debug/app-debug.apk >/dev/null
     "$ADB" -s "$SERIAL" shell pm clear "$APP_ID" >/dev/null
     MOCK_PID=""

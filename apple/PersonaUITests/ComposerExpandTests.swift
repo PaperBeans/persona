@@ -92,7 +92,7 @@ final class ComposerExpandTests: XCTestCase {
         let send = element("composer-page-send")
         XCTAssertEqual(collapse.label, collapseLabel)
         XCTAssertTrue(pageDismiss.exists)
-        XCTAssertGreaterThan(collapse.frame.midX, app.frame.midX, "collapse is not in the upper-right corner")
+        XCTAssertLessThan(collapse.frame.midX, app.frame.midX, "collapse is not in the upper-left corner (#9653)")
         XCTAssertGreaterThan(send.frame.minY, page.frame.midY, "send is not below the page editor")
         shot("03-expanded")
         collapse.tap()

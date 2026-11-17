@@ -81,5 +81,6 @@
   "assistant_service_tier_refused": "Codex は最初のメッセージの前に Fast を適用できませんでした。メッセージは送信されていません。もう一度試すか、Standard を選んでください。",
   "assistant_supervision_busy": "この会話のタスク管理の役割が変わりました。現在の作業が終わってから、もう一度お試しください。何も送信していません。",
   "assistant_supervision_runtime": "タスク管理には Claude Code または Codex の会話を使ってください。この Agent は独立した管理用の指示に対応していません。何も開始・送信していません。",
-  "assistant_supervision_node_outdated": "ここでタスクを管理する前に、このコンピューターの Persona Link を更新してください。現在のバージョンは独立したタスク指示を適用できません。何も開始・送信していません。"
+  "assistant_supervision_node_outdated": "ここでタスクを管理する前に、このコンピューターの Persona Link を更新してください。現在のバージョンは独立したタスク指示を適用できません。何も開始・送信していません。",
+  "omp_resume_unknown": "この omp セッションは、まだ Persona から再開できません。コンピューターで omp --resume を使って続けてください。何も送信していません。"
 }

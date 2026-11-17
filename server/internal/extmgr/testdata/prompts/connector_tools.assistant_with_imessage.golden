@@ -149,12 +149,11 @@
           "fallback_tier": {
             "type": "string",
             "enum": [
-              "",
               "fyi",
               "action",
               "wait"
             ],
-            "description": "without a triage model: \"\" FYI (Needs you with a due date), fyi, action, or wait for the model"
+            "description": "without a triage model: fyi, action, wait for the model, or \"\" to clear (FYI; Needs you if due)"
           },
           "to_inbox": {
             "type": "boolean",

@@ -243,6 +243,11 @@
     <plurals name="chat_content_show_all_lines">
         <item quantity="other">すべて表示（%1$d行）</item>
     </plurals>
+    <plurals name="chat_diff_unchanged_lines">
+        <item quantity="other">… %1$d行は変更なし</item>
+    </plurals>
+    <string name="chat_diff_line_added">追加</string>
+    <string name="chat_diff_line_removed">削除</string>
     <plurals name="chat_todos_progress">
         <item quantity="other">ToDo %1$d/%2$d件完了</item>
     </plurals>
@@ -335,6 +340,9 @@
     <string name="chat_tasks_interrupt_all_handled">→ すべて対応済み</string>
     <string name="chat_tasks_quick_reminder">リマインダーを追加しました</string>
     <string name="chat_tasks_quick_calendar">カレンダーに追加しました</string>
+    <string name="chat_tasks_quick_undo">取り消す</string>
+    <string name="chat_tasks_quick_undone">取り消しました</string>
+    <string name="chat_tasks_quick_undo_failed">取り消せませんでした</string>
     <string name="chat_today_done_one">完了：%1$s</string>
     <plurals name="chat_today_done_many">
         <item quantity="other">%1$d件のタスクが完了</item>

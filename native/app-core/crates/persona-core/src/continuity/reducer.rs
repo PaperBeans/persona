@@ -227,6 +227,13 @@ impl Reducer {
             .filter(|item| item.is_work())
             .map(|item| (*item).clone())
             .collect();
+        if evidence.is_empty() {
+            return if deduplicated {
+                Self::newest_copies(items)
+            } else {
+                items
+            };
+        }
         let items = if deduplicated {
             Self::newest_copies(items)
         } else {
@@ -253,6 +260,10 @@ impl Reducer {
         let deduplicated = self.items.len() != self.ids.len();
         let incoming = new.into_iter().map(Arc::new).collect::<Vec<_>>();
         self.items = Self::retain_promotion(std::mem::take(&mut self.items), &self.opened, &incoming, deduplicated);
+        if deduplicated {
+            self.items = Self::newest_copies(std::mem::take(&mut self.items));
+            self.ids = self.items.iter().map(|item| item.id.clone()).collect();
+        }
         if deduplicated {
             self.items.sort_by_key(|item| item.key());
         }
@@ -289,15 +300,19 @@ impl Reducer {
             !(old.kind != "fold" && old.is_work() && folds.iter().any(|fold| fold.folds(old))
                 || old.kind == "fold" && batch_work.iter().any(|work| old.folds(work)))
         });
-        self.ids = self.items.iter().map(|i| i.id.clone()).collect();
+        let retained_ids: HashSet<String> = self.items.iter().map(|item| item.id.clone()).collect();
+        self.ids.retain(|id| retained_ids.contains(id));
+        self.ids.extend(fresh.iter().map(|item| item.id.clone()));
+        let incoming_ids: HashSet<&str> = fresh.iter().map(|item| item.id.as_str()).collect();
+        self.items.retain(|item| !incoming_ids.contains(item.id.as_str()));
         let existing_first = self.first_seq();
         for item in fresh {
             self.insert_shared(item);
         }
-        let reaches_start = match (new_min, existing_first.or_else(|| self.items.first().map(|i| i.seq))) {
-            (Some(min), Some(first)) => min <= first,
-            _ => false,
-        };
+        if deduplicated {
+            self.items.sort_by_key(|item| item.key());
+        }
+        let reaches_start = new_min.is_some_and(|min| min <= existing_first.unwrap_or(i64::MAX));
         if let Some(more) = has_more
             && backlog
             && (!self.loaded_once || self.items.len() <= new_len)
@@ -311,15 +326,36 @@ impl Reducer {
     }
 
     fn merge_shared(&mut self, items: Vec<Arc<Item>>) {
-        for item in items {
-            self.insert_shared(item);
+        let mut by_id: std::collections::HashMap<String, usize> = self
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| (item.id.clone(), index))
+            .collect();
+        for item in Self::newest_copies(items) {
+            if let Some(index) = by_id.get(&item.id).copied()
+                && self.items[index].seq == item.seq
+                && self.items[index].part() == item.part()
+            {
+                if self.items[index].json() != item.json() {
+                    self.items[index] = item;
+                }
+            } else {
+                by_id.insert(item.id.clone(), self.items.len());
+                self.ids.insert(item.id.clone());
+                self.items.push(item);
+            }
         }
     }
 
     fn insert_shared(&mut self, item: Arc<Item>) {
         // A repeated full item replaces the old copy, including changed receipt metadata. Keep its Arc when nothing
         // changed so the runtime's incremental diff stays cheap for append-only pushes.
-        if let Some(old) = self.items.iter_mut().find(|old| old.id == item.id) {
+        if let Some(old) = self
+            .items
+            .iter_mut()
+            .find(|old| old.id == item.id && old.seq == item.seq && old.part() == item.part())
+        {
             if old.json() != item.json() {
                 *old = item;
             }
@@ -356,6 +392,37 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(reducer.items()[0].json()).unwrap(),
             serde_json::json!({"id":"1#0","seq":1,"kind":"text","text":"新版","supervision_user":true})
         );
+    }
+
+    #[test]
+    fn replaced_fold_work_keeps_ids_for_later_pages() {
+        let mut reducer = Reducer::new();
+        reducer.restore(
+            Item::list_from_json(r#"[{"id":"fold:1#0","seq":1,"role":"assistant","kind":"fold","fold":{"through_seq":4,"through_id":"4#0"}}]"#).unwrap(),
+            Some("h".into()),
+            4,
+            Some(false),
+            true,
+        );
+        let first = Item::list_from_json(r#"[{"id":"1#0","seq":1,"role":"assistant","kind":"thinking","text":"第一步"},{"id":"2#0","seq":2,"role":"assistant","kind":"tool_use","tool_name":"Read"}]"#).unwrap();
+        reducer.merge(first, false, None);
+        assert!(reducer.items().iter().any(|item| item.id == "1#0"));
+        assert!(reducer.ids.contains("1#0"));
+        let next =
+            Item::list_from_json(r#"[{"id":"3#0","seq":3,"role":"assistant","kind":"tool_result","text":"后续"}]"#)
+                .unwrap();
+        reducer.merge(next, false, None);
+        assert_eq!(
+            reducer.items().iter().map(|item| item.id.as_str()).collect::<Vec<_>>(),
+            ["1#0", "2#0", "3#0"]
+        );
+        let repeated =
+            Item::list_from_json(r#"[{"id":"1#0","seq":1,"role":"assistant","kind":"thinking","text":"更新"}]"#)
+                .unwrap();
+        reducer.merge(repeated, false, None);
+        assert_eq!(reducer.items().len(), 3);
+        assert_eq!(reducer.ids.len(), 3);
+        assert!(reducer.items()[0].json().contains("更新"));
     }
 
     #[test]

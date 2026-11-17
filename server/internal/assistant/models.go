@@ -21,9 +21,6 @@ import (
 // asks only what its plugins need (models_hub.go). Every model call is made from here, with the keys only the
 // assistant opens.
 
-// assistantRuntimes is what GET /model-config offers for the main chat's runtime.
-var assistantRuntimes = []string{proto.AssistantRuntimeCLI, proto.AssistantRuntimeAgentSDK}
-
 // The Claude profiles GET /model-config offers for the main chat's new conversations (#4633): Persona's own profile
 // (the default, stored as none) or this computer's existing Claude Code setup, resolved as the node resolves
 // config_dir "legacy" (docs/assistant/assistant.md). Selecting one copies nothing between profiles.
@@ -82,11 +79,10 @@ type ModelPurpose struct {
 	Limit         *ai.Pause    `json:"limit,omitempty"` // the connection is held: quota used up or busy (ai/limit.go)
 	Fields        []string     `json:"fields"`
 	ProviderIDs   []string     `json:"provider_ids"`
-	Runtimes      []string     `json:"runtimes,omitempty"`    // assistant only: the runtimes it can run on
 	ConfigDirs    []string     `json:"config_dirs,omitempty"` // assistant only: the profiles its new conversations can start in
 }
 
-// launch is the purpose's execution form, independent of its provider or runtime.
+// launch is the purpose's execution form, independent of its provider.
 // API and plugin purposes never launch a process, even when their parent does.
 func (p ModelPurpose) launch() string {
 	if p.Kind != "launcher" {
@@ -121,7 +117,7 @@ func agentsOverride(id string) bool { return id == purposeAgent || id == purpose
 // modelPurposes are the uses; Name, Group and Uses hold catalog names (assistant-models), read in a language by
 // localized.
 var modelPurposes = []ModelPurpose{
-	{ID: "assistant", Group: "group_default", Kind: "launcher", Runtimes: assistantRuntimes, ConfigDirs: assistantConfigDirs, Uses: []ModelUse{{Name: "use_chat"}, {Name: "use_schedule"}, {Name: "use_meeting_room"}}},
+	{ID: "assistant", Group: "group_default", Kind: "launcher", ConfigDirs: assistantConfigDirs, Uses: []ModelUse{{Name: "use_chat"}, {Name: "use_schedule"}, {Name: "use_meeting_room"}}},
 	{ID: "agent.new", Group: "group_default", Kind: "launcher", Uses: []ModelUse{{Name: "use_new_agent"}, {Name: "use_inbox_agent"}, {Name: "use_lark_agent"}}},
 	{ID: "kb", Group: "group_default", Kind: "api", Uses: []ModelUse{{Name: "use_translate"}, {Name: "use_draft"}, {Name: "use_knowledge"}, {Name: "use_projects"}, {Name: "use_titles"},
 		{Name: "use_meeting_minutes"}, {Name: "use_meeting_answer"}}},

@@ -81,7 +81,7 @@ func TestAssistantCLICommandWindowsPathsUseForwardSlashes(t *testing.T) {
 			} else {
 				n = windowsScriptNode(t, c.bin)
 			}
-			cmd := n.assistantCLICommand("bash", c.launcher, n.dir, []string{"-p"}, []string{"CLAUDE_CONFIG_DIR=" + c.profile})
+			cmd := n.assistantCLICommand("bash", c.launcher, n.dir, false, []string{"-p"}, []string{"CLAUDE_CONFIG_DIR=" + c.profile})
 			script, ok := strings.CutSuffix(icScript(t, cmd.Args), ` "$@"`)
 			if !ok {
 				t.Fatalf("no \"$@\": %q", cmd.Args)
@@ -142,7 +142,7 @@ func TestScriptPathsUnchangedOffWindows(t *testing.T) {
 	const profile, bin = `/home/a\b/O'profile`, `/opt/a\b/personad`
 	n := &Node{bin: bin, home: t.TempDir(), dir: t.TempDir(), logger: log.New(io.Discard, "", 0)}
 	n.managed.byID = map[string]proto.ManagedLauncher{"work": {Name: "work"}}
-	cmd := n.assistantCLICommand("/bin/sh", "work", n.dir, nil, []string{"CLAUDE_CONFIG_DIR=" + profile})
+	cmd := n.assistantCLICommand("/bin/sh", "work", n.dir, false, nil, []string{"CLAUDE_CONFIG_DIR=" + profile})
 	if want := "CLAUDE_CONFIG_DIR=" + shellQuote(profile) + " " + shellQuote(bin) + ` launch work "$@"`; cmd.Args[2] != want {
 		t.Fatalf("got %q, want %q", cmd.Args[2], want)
 	}

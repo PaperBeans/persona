@@ -83,6 +83,9 @@ type Settings struct {
 	// MainBackgroundFolded: the apps fold the main conversation's background rounds (another conversation's message,
 	// a scheduled task or follow-up) into one line that opens on request (#4314). nil is on (the default).
 	MainBackgroundFolded *bool `json:"main_background_folded,omitempty"`
+	// MainCompactWindow: the compaction window, in tokens, the main conversation is held to when its launcher declares a
+	// larger one (#7314, main_compact_window.go); nil is 400000, 0 follows the launcher.
+	MainCompactWindow *int `json:"main_compact_window,omitempty"`
 	// RecentTaskChats: the apps' sidebar Recent lists the chats a scheduled task or the background supervisor started
 	// too, by last activity with the others (#8324; since #6228 they are only in All chats). Display only, one value
 	// for every device. nil is off (the default).
@@ -144,6 +147,9 @@ type Settings struct {
 	// them (Claude Code 2.1.139 or later, node/assistant_interject.go). nil is off (the default). A round the
 	// user did not start is moved to the background by their message either way (owner_preempt.go).
 	InterjectBackground *bool `json:"interject_background,omitempty"`
+	// LoadAllTools: every Persona tool of an assistant conversation is loaded up front, as before #7317. nil is off
+	// (the default): only the frequently used ones are, the rest wait behind ToolSearch (tool_loading.go).
+	LoadAllTools *bool `json:"load_all_tools,omitempty"`
 	// NextSuggestions: chats that have no suggestion of their own (Persona's conversations, Codex and the other
 	// runtimes) get the next message suggested by the suggest.next model after a turn (#4644, suggest_next.go). nil is
 	// off (the default).
@@ -613,6 +619,9 @@ func (s *Service) profileRoutes() {
 			return
 		}
 		out := s.view(r.Context(), archived == "1" || archived == "true", space)
+		if tag := strings.TrimSpace(r.URL.Query().Get("tag")); tag != "" {
+			out.Conversations = slices.DeleteFunc(out.Conversations, func(c proto.Session) bool { return !hasTag(c, tag) })
+		}
 		if r.Header.Get(RoleHeader) == roleExtension {
 			out.StartDefaults = nil // read with its own scope (GET /api/v1/assistant/start-defaults), not assistant.ask
 		}

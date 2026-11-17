@@ -86,6 +86,7 @@ const showcaseImages: Plugin = {
 // After start the page also fetches, once the browser is idle, the chunks of each lazyPage(…, { idle: true }) and
 // what they import beyond those files (src/lib/lazy-page.ts): the build fails if they send more than IDLE_TIER_BUDGET.
 function startupPreload(): Plugin {
+  let enforceBudgets = true;
   let startup: string[] | undefined; // the first screen's files, set by transformIndexHtml for the client page
   let screens: [string, string[]][] = []; // each language's first screen of the App (not the live screen)
   const idle = new Set<string>(); // the modules lazyPage loads at idle, found by transform
@@ -95,6 +96,7 @@ function startupPreload(): Plugin {
     name: "startup-preload",
     apply: "build",
     configResolved(config) {
+      enforceBudgets = config.mode !== "development-update";
       logger = config.logger;
     },
     async transform(code, id) {
@@ -114,6 +116,9 @@ function startupPreload(): Plugin {
     async writeBundle({ dir }, bundle) {
       if (!startup) this.error("startup-preload: index.html was not transformed, so the first screen's files are unknown");
       await brotliCopies(dir!, startup);
+      // The Web development updater gates on compilation. Release builds retain
+      // their performance budgets; all modes still validate modules and resources.
+      if (!enforceBudgets) return;
       const bytes = await firstScreenBytes(dir!, screens, Object.keys(bundle));
       const overBudget = firstScreenOverBudget(bytes);
       if (overBudget) this.error(overBudget);

@@ -38,6 +38,8 @@ type Translation struct {
 	Secrets map[string]*SecretText `json:"secrets,omitempty"`
 	// UI: the titles of its ui contributions (pages), by contribution id.
 	UI map[string]string `json:"ui,omitempty"`
+	// Groups: the titles of the sidebar groups its nav_pages name (UIGroup), by group id.
+	Groups map[string]string `json:"groups,omitempty"`
 }
 
 // FieldText is a configuration property's text: its title, description and confirmation (x-confirm), its choices'
@@ -86,6 +88,11 @@ func ParseTranslation(raw []byte) (*Translation, error) {
 	for _, id := range sortedKeys(t.UI) {
 		if n := utf8.RuneCountInString(strings.TrimSpace(t.UI[id])); n > 40 {
 			return nil, fmt.Errorf("ui.%s: at most 40 characters", id)
+		}
+	}
+	for _, id := range sortedKeys(t.Groups) {
+		if n := utf8.RuneCountInString(strings.TrimSpace(t.Groups[id])); n > 40 {
+			return nil, fmt.Errorf("groups.%s: at most 40 characters", id)
 		}
 	}
 	for _, name := range sortedKeys(t.Secrets) {
@@ -252,6 +259,15 @@ func (ts Translations) UITitle(l i18n.Lang, id, own string) string {
 	var texts []string
 	for _, t := range ts.chain(l) {
 		texts = append(texts, t.UI[id])
+	}
+	return firstText(own, texts...)
+}
+
+// GroupTitle is the title of sidebar group id (own) in l.
+func (ts Translations) GroupTitle(l i18n.Lang, id, own string) string {
+	var texts []string
+	for _, t := range ts.chain(l) {
+		texts = append(texts, t.Groups[id])
 	}
 	return firstText(own, texts...)
 }

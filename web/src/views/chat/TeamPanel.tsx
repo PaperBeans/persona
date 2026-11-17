@@ -9,7 +9,7 @@ import { sessionTitle, stateOf } from "../../lib/format";
 import { agentLabel } from "../../lib/mentions";
 import { STATE_LABEL, stateName } from "../../lib/state-labels";
 import { getSession, useStore } from "../../lib/store";
-import { awaitsReply } from "../../lib/agent-groups";
+import { awaitsReply, justFinished } from "../../lib/agent-groups";
 import { shownWorker, showWorker, teamWorkers, workerCount } from "../../lib/team";
 import { sidesAmong } from "../../lib/side-fold";
 import { shownSide, showSide } from "../../lib/side-panel";
@@ -38,9 +38,16 @@ export function stripStep(width: number): number {
 }
 
 /** A pill's hover text: which Agent, its title and its state, as the pane tabs said it. */
-export function workerHint(w: Session, awaiting: boolean): string {
+export function workerHint(w: Session, awaiting: boolean, finished = false): string {
+  return [agentLabel(w), sessionTitle(w), pillState(w, awaiting, finished)].filter(Boolean).join(" · ");
+}
+
+/** A pill's state word: Awaiting your reply (#5096) and Just finished (#9751) over the seen state they stand on. */
+function pillState(w: Session, awaiting: boolean, finished: boolean): string {
   const st = stateOf(w);
-  return [agentLabel(w), sessionTitle(w), awaiting && st === "idle" ? stateName("awaits_reply") : STATE_LABEL[st]].filter(Boolean).join(" · ");
+  if (st === "idle" && awaiting) return stateName("awaits_reply");
+  if (st === "idle" && finished) return stateName("just_finished");
+  return STATE_LABEL[st];
 }
 
 export function TeamPanel({ mid, sid, worker, onClose }: { mid: string; sid: string; worker?: string; onClose: () => void }) {
@@ -74,9 +81,8 @@ export function TeamPanel({ mid, sid, worker, onClose }: { mid: string; sid: str
 }
 
 /** A side pill's hover text and spoken name: its title and its state (no engine or model name, DESIGN_SYSTEM 5.6). */
-export function sideHint(w: Session, awaiting: boolean): string {
-  const st = stateOf(w);
-  return [sessionTitle(w), awaiting && st === "idle" ? stateName("awaits_reply") : STATE_LABEL[st]].filter(Boolean).join(" · ");
+export function sideHint(w: Session, awaiting: boolean, finished = false): string {
+  return [sessionTitle(w), pillState(w, awaiting, finished)].filter(Boolean).join(" · ");
 }
 
 export function SidesPanel({ mid, sid, side, at, onClose }: { mid: string; sid: string; side?: string; at?: string; onClose: () => void }) {
@@ -134,7 +140,7 @@ const SIDE_WORDS: StripWords = { label: "chat-teampanel.side_sessions", left: "c
  *  that way and the edges fading; a mouse wheel scrolls it too. The shown pill is kept in view. Arrow keys, Home and End
  *  move between the pills as in any tab list. The Side sessions panel's strip is the same; its pills are named by their
  *  hover text (`named`: title and state), as their state is said nowhere else in words. */
-function SessionStrip({ members: workers, shown, controls, onPick, words, hint, named = false }: { members: Session[]; shown?: string; controls: string; onPick: (w: Session) => void; words: StripWords; hint: (w: Session, awaiting: boolean) => string; named?: boolean }) {
+function SessionStrip({ members: workers, shown, controls, onPick, words, hint, named = false }: { members: Session[]; shown?: string; controls: string; onPick: (w: Session) => void; words: StripWords; hint: (w: Session, awaiting: boolean, finished: boolean) => string; named?: boolean }) {
   const scroller = useRef<HTMLDivElement>(null);
   const pills = useRef<(HTMLButtonElement | null)[]>([]);
   const [more, setMore] = useState({ left: false, right: false });
@@ -200,6 +206,7 @@ function SessionStrip({ members: workers, shown, controls, onPick, words, hint, 
           const on = i === at;
           const st = stateOf(w);
           const awaiting = awaitsReply(w, mutes);
+          const finished = justFinished(w, mutes);
           return (
             <button
               key={w.session_id}
@@ -211,8 +218,8 @@ function SessionStrip({ members: workers, shown, controls, onPick, words, hint, 
               aria-selected={on}
               aria-controls={controls}
               tabIndex={on ? 0 : -1}
-              title={hint(w, awaiting)}
-              aria-label={named ? hint(w, awaiting) : undefined}
+              title={hint(w, awaiting, finished)}
+              aria-label={named ? hint(w, awaiting, finished) : undefined}
               onClick={() => !on && onPick(w)}
               onKeyDown={(e) => {
                 const to = nextTab(i, e.key, workers.length);
@@ -226,7 +233,7 @@ function SessionStrip({ members: workers, shown, controls, onPick, words, hint, 
                 on ? "border-ink bg-ink text-surface" : "border-line bg-field text-ink hover:bg-hover",
               )}
             >
-              <StatusMark state={st} awaiting={awaiting} size="sm" label={false} />
+              <StatusMark state={st} awaiting={awaiting} finished={finished} size="sm" label={false} />
               <span className="min-w-0 truncate font-medium">{sessionTitle(w)}</span>
             </button>
           );

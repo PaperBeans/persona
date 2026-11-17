@@ -7,6 +7,21 @@ import { t } from "../../i18n";
 /** A conversation as `GET /api/v1/assistant?archived=1` lists it. */
 export type Conversation = Session & { archived?: boolean };
 
+/** The write rules the hub enforces (server's conversationTagMaxRunes / conversationTagsMax), mirrored so the editor
+ *  refuses what the API would. */
+export const TAG_MAX_LENGTH = 32;
+export const TAGS_MAX = 10;
+
+/** Trim, drop empties and de-duplicate to the first occurrence, exactly as the hub's normalization does. */
+export function normalizeTags(input: string[]): string[] {
+  const out: string[] = [];
+  for (const raw of input) {
+    const tag = raw.trim();
+    if (tag && !out.includes(tag)) out.push(tag);
+  }
+  return out;
+}
+
 /** "1101 | fix | search box overlaps the top bar" (docs/assistant/assistant.md "Chat titles") → head "1101 | fix | " and topic; null for other titles. */
 export function splitTitle(title: string): { head: string; topic: string } | null {
   const m = /^(\d{4}\s*\|\s*[^|]+?\s*\|\s*)(.+)$/.exec(title.trim());
@@ -46,6 +61,19 @@ export function filterConversations<T extends Conversation>(list: T[], query: st
   const q = fold(query.trim());
   if (!q) return list;
   return list.filter((s) => fold(conversationTitle(s)).includes(q) || fold(s.last_text ?? "").includes(q));
+}
+
+/** Every tag in use, each once and sorted: the filter chips' row (docs/assistant/assistant.md "Conversation tags"). */
+export function inUseTags<T extends Conversation>(list: T[]): string[] {
+  const seen = new Set<string>();
+  for (const s of list) for (const tag of s.tags ?? []) seen.add(tag);
+  return [...seen].sort((a, b) => a.localeCompare(b));
+}
+
+/** Only the conversations carrying this exact tag; an empty filter is the whole list. */
+export function withTag<T extends Conversation>(list: T[], tag: string): T[] {
+  if (!tag) return list;
+  return list.filter((s) => s.tags?.includes(tag));
 }
 
 function time(s: Session): number {

@@ -624,11 +624,8 @@ struct AssistantTaskEditor: View {
         .sheetCancel(unsaved: !Self.same(opened, draft), when: creating) { dismiss() }
         .toolbar {
             if creating {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add [Beautiful U I Bridge 7a8a11]") {
-                        Task { if await persist(leaving: false) != nil { dismiss() } }
-                    }
-                    .disabled(!isValid || running)
+                SheetConfirm(id: "schedule-add", disabled: !isValid || running) {
+                    Task { if await persist(leaving: false) != nil { dismiss() } }
                 }
             }
         }
@@ -1378,10 +1375,7 @@ struct AssistantMemoryEditor: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .sheetCancel(unsaved: opened.map { $0 != text } ?? false) { dismiss() }
                 .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { Task { await save() } } label: { if saving { ProgressView() } else { Text("Save") } }
-                            .disabled(saving)
-                    }
+                    SheetConfirm(id: "memory-file-save", busy: saving) { Task { await save() } }
                 }
                 .onAppear { if opened == nil { opened = text } }
         }

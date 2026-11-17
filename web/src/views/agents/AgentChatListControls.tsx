@@ -16,7 +16,7 @@ import {
   type SearchPlan,
   type SearchScope,
 } from "../../lib/agent-chatlist-filter";
-import { awaitsReply, sessionSource, sourceName, type AgentMutes } from "../../lib/agent-groups";
+import { awaitsReply, justFinished, sessionSource, sourceName, type AgentMutes } from "../../lib/agent-groups";
 import { ago, backgroundWaiting, sessionPreview, sessionTitle, stateOf, tabLabel } from "../../lib/format";
 import { sessionCard } from "../../lib/folded-rows";
 import { machineWithHub } from "../../lib/mesh";
@@ -346,9 +346,10 @@ export const AgentChatListRow = memo(function AgentChatListRow({
 }) {
   const st = stateOf(s);
   const awaiting = awaitsReply(s, mutes);
+  const finished = justFinished(s, mutes);
   const ix = useStore((state) => sessionCard(state.interactions, s.machine_id, s.session_id));
   const draft = draftLine(useLeftDraft(`${s.machine_id}/${s.session_id}`));
-  const line: { lead?: string; text: string; tone?: "needs" | "reply" } | undefined = draft ?? rowLine(s, ix, awaiting);
+  const line: { lead?: string; text: string; tone?: "needs" | "reply" } | undefined = draft ?? rowLine(s, ix, awaiting, finished);
   const previewText = line?.text || plainMarkdown(sessionPreview(s)) || s.activity || "";
   const now = useNow(60_000, Boolean(s.updated_at));
   const timeLabel = s.updated_at ? ago(s.updated_at, now) : "";
@@ -401,7 +402,7 @@ export const AgentChatListRow = memo(function AgentChatListRow({
         <span className="relative mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-inset shadow-hairline">
           <SessionMark s={s} size={17} />
           <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-canvas ring-1 ring-canvas">
-            <StatusMark state={st} size="sm" awaiting={awaiting} waiting={backgroundWaiting(s)} />
+            <StatusMark state={st} size="sm" awaiting={awaiting} finished={finished} waiting={backgroundWaiting(s)} />
           </span>
         </span>
 

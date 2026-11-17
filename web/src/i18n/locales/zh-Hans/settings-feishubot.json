@@ -78,6 +78,10 @@
   "howto_footer": "长连接由 hub 主动连出去，hub 不需要公网地址。",
   "nudge_title": "提醒未回答的卡片",
   "nudge_detail": "卡片等这么久还没回答，就在它下面回复提醒一次（话题群里会 @ 你），免打扰时段内顺延到结束后",
+  "source_report_delay_title": "回复原群的等待时间",
+  "source_report_delay_detail": "结论准备好后，在这段时间内可以预览并取消回复。选择「立即」会跳过预览。",
+  "source_report_delay_now": "立即",
+  "source_report_delay_minutes": "{minutes} 分钟",
   "combined_footer": "一个飞书应用：用机器人和 Persona 对话，用「收我的飞书消息」把 @你的内容收进收件箱。",
   "lark_name": "飞书",
   "credentials_shared_note": "机器人和「收我的飞书消息」共用这个应用。",
@@ -104,5 +108,7 @@
   "larkcli_profile_default": "lark-cli 默认配置",
   "larkcli_profile_fixed": "{name}（由配置文件指定）",
   "feature_answer_new_card_title": "回复发成新卡片",
-  "feature_answer_new_card_detail": "一轮结束时，回复作为新卡片发在对话最下面，飞书会提醒你，进度卡原地折叠。关闭时回复写进原来的进度卡"
+  "feature_answer_new_card_detail": "一轮结束时，回复作为新卡片发在对话最下面，飞书会提醒你，进度卡原地折叠。关闭时回复写进原来的进度卡",
+  "source_report_full_title": "回传完整最终答复",
+  "source_report_full_detail": "原群里的所有人都能看到这份最终答复。关闭时，机器人只回简短结论。"
 }

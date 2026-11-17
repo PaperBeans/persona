@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { common } from '@kit.AbilityKit';
 import { ClientModel } from '../models/ClientModel';
 import { RemoteDocument, loadRemoteDocument } from '../models/RemoteDocument';
@@ -40,10 +43,10 @@ export struct RemoteDocumentPage {
   build() {
     Column({ space: Tokens.gap }) {
       if (this.loading) LoadingProgress().width(Tokens.touch).height(Tokens.touch)
-      if (this.error) { Text(tr(this.error)).fontSize(Tokens.meta); Button(tr('retry')).onClick(() => this.load()) }
+      if (this.error) { Text(tr(this.error)).fontSize(Tokens.meta); Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).onClick(() => this.load()) }
       if (this.document) {
         if (this.document.text) Scroll() { MarkdownText({ text: this.document.text, onLink: (address: string) => this.onLink(address) }) }.layoutWeight(1).width('100%')
-        Button(tr('session_tools_preview_file')).enabled(!this.opening).onClick(() => this.preview()).id('document.preview')
+        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('session_tools_preview_file')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('session_tools_preview_file', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('session_tools_preview_file')).bindTips(tr('session_tools_preview_file')).enabled(!this.opening).onClick(() => this.preview()).id('document.preview')
       }
     }.padding(Tokens.page).width('100%').height('100%')
   }

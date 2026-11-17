@@ -80,6 +80,8 @@ internal fun nativeExtensionDisplay(state: NativeStreamState): ExtensionViewStat
 /** Existing native renderer and design system only: no extension JS, effects, fetch or executable state. */
 @Composable
 internal fun NativeExtensionStreamPage(adapter: NativeExtensionStreamAdapter, title: String, onBack: () -> Unit,
+    /** False at a regular-width sidebar root: the shell's sidebar button replaces Back (iOS sidebarRootPage). A stream pop still calls [onBack]. */
+    showBack: Boolean = true,
     onPush: (persona.core.contracts.api.ExtensionViewPush) -> Unit = {},
     presentations: kotlinx.coroutines.flow.Flow<NativeStreamPresentation>? = null) {
     val session = adapter.session
@@ -240,7 +242,7 @@ internal fun NativeExtensionStreamPage(adapter: NativeExtensionStreamAdapter, ti
         // UI version 8: a columns view takes the pane's whole width, as many columns of cards as it has room for
         ExtensionPageWidth(view) { columns, fullWidth ->
             SideEffect { drawnColumns[0] = columns }
-            JListPage(title = view?.title?.takeIf { it.isNotBlank() } ?: title, onBack = onBack, largeTitle = false, state = local.list,
+            JListPage(title = view?.title?.takeIf { it.isNotBlank() } ?: title, onBack = if (showBack) onBack else null, largeTitle = false, state = local.list,
                 refreshing = state.loading && view != null, onRefresh = { scope.launch { session.requestSnapshot() } }, fullWidth = fullWidth) {
                 if (view == null) item("native-loading") { JLoading() }
                 extensionViewItems("native-page", pageState, base, streamSectionKeys = displayedTree?.view?.sections?.map { it.key!! }, columns = columns)

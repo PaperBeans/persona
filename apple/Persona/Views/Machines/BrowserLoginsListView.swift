@@ -51,7 +51,6 @@ struct BrowserLoginsListView: View {
                 }
             }
         }
-        .tabSwitchListRoom() // its end clear of the open Duo's floating tabs' switch (#4231)
         #if !os(macOS)
         .environment(\.editMode, $editMode)
         #endif
@@ -70,7 +69,6 @@ struct BrowserLoginsListView: View {
             if left != chosen { chosen = left }
         }
         .toolbar { toolbar }
-        .tabSwitchBottomBarRoom(shown: selecting) // Clear clear of the open Duo's floating tabs' switch (#4231)
         .browserLoginsClearDialog($clearing, busy: logins.busy) { sites in
             guard await logins.clear(sites) else { return }
             chosen.subtract(sites)

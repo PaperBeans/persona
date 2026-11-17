@@ -83,7 +83,7 @@ func (s *Service) fitEngineLauncher(ctx context.Context, m Device, host string, 
 	}
 	model, _ := params["model"].(string)
 	effort, _ := params["effort"].(string)
-	for _, k := range []string{"model", "effort", "model_fingerprint", "runtime"} {
+	for _, k := range []string{"model", "effort", "model_fingerprint"} {
 		delete(params, k)
 	}
 	params["launcher"] = to

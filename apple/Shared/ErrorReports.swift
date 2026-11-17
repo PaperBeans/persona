@@ -156,7 +156,8 @@ nonisolated final class ErrorReportQueue: @unchecked Sendable {
     /// Writes `report` at once (the crash handler calls it right before the app dies); false when it could not.
     @discardableResult
     func write(_ report: ExtensionErrorReport) -> Bool {
-        lock.withLock {
+        DevProbe.error(report) // kept on the device too while Developing Persona is on (#9460)
+        return lock.withLock {
             guard let json = try? JSON.encoder.encode(report) else { return false }
             let ms = Int64(((ErrorReports.date(report.time) ?? now()).timeIntervalSince1970 * 1000).rounded(.down))
             let id = String(report.id.filter { $0.isLetter || $0.isNumber || $0 == "-" }.prefix(64))

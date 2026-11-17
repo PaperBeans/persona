@@ -365,6 +365,24 @@ import PersonaWire
         #expect(blank.topic == nil && blank.line == nil)
     }
 
+    /// The current topic's place among the room's topics ("Topic: … · 2 / 4", #8731 V4): from 1, with how many there are;
+    /// none for a topic the list doesn't hold, and none on the activity where it carries no topic.
+    @Test func theActivityCarriesTheTopicsPlace() {
+        let topics = [MeetingTopic(title: "Release date", state: "done"), MeetingTopic(title: "Load test", state: "current"),
+                      MeetingTopic(title: "Cache", state: "open"), MeetingTopic(title: "Export cap", state: "open")]
+        let place = RecordingActivity.place(of: "Load test", in: topics)
+        #expect(place == RecordingActivity.TopicPlace(number: 2, count: 4))
+        #expect(RecordingActivity.place(of: "Elsewhere", in: topics) == nil)
+        #expect(RecordingActivity.place(of: nil, in: topics) == nil)
+        let c = RecordingActivity.content(entry: meeting(live(), lines: ["first"]), recording: true, interrupted: false,
+                                          elapsed: 100, previous: nil, now: now, topic: "Load test", topicPlace: place)
+        #expect(c.topic == "Load test" && c.topicNumber == 2 && c.topicCount == 4)
+        let plain = RecordingActivity.content(entry: meeting(live(liveView: false), lines: ["first"]), recording: true,
+                                              interrupted: false, elapsed: 100, previous: nil, now: now, topic: "Load test",
+                                              topicPlace: place)
+        #expect(plain.topic == nil && plain.topicNumber == nil && plain.topicCount == nil)
+    }
+
     /// The third line is the latest answer for 60 s after it came, then the latest line; with no line yet the answer stays
     /// (as it always does without the live view). Only one of the two is ever carried.
     @Test func theAnswerShowsForAMinuteThenTheLine() {

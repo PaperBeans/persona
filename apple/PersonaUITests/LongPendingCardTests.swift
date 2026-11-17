@@ -143,7 +143,7 @@ final class LongPendingCardTests: XCTestCase {
         let last = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@",
                                                                           "git status --short", "git status --short")).firstMatch
         XCTAssertTrue(last.exists, "the sheet holds the command's last line")
-        app.buttons["完成"].firstMatch.tap()
+        app.buttons["sheet-close"].firstMatch.tap()
         XCTAssertTrue(app.buttons["permission-command.expand"].firstMatch.waitForExistence(timeout: 5), "back to the card")
     }
 

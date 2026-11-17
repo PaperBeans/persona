@@ -145,9 +145,7 @@ struct FileInfoSheet: View {
             .navigationTitle(String(localized: "Info [File Info]"))
             .navigationBarTitleDisplayMode(.inline)
             .pageToolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done [Extension System Presentation c0b3fb]") { dismiss() }.lineLimit(1)
-                }
+                SheetClose { dismiss() }
             }
             .accessibilityIdentifier("files.info")
         }

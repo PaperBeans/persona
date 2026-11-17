@@ -148,7 +148,7 @@ func changedMachines(old, now map[string]SessionView) []string {
 	}
 	for id, v := range now {
 		o, ok := old[id]
-		if !ok || o.Title != v.Title || o.Archived != v.Archived || o.Origin != v.Origin || o.OriginRef != v.OriginRef || !slices.Equal(o.Queued, v.Queued) || o.MachineID != v.MachineID ||
+		if !ok || o.Title != v.Title || o.Archived != v.Archived || !slices.Equal(o.Tags, v.Tags) || o.Origin != v.Origin || o.OriginRef != v.OriginRef || !slices.Equal(o.Queued, v.Queued) || o.MachineID != v.MachineID ||
 			!sameModelPick(o.ModelPick, v.ModelPick) {
 			add(v.MachineID)
 			if ok {

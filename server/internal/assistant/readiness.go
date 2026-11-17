@@ -12,6 +12,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -598,17 +599,20 @@ func (s *Service) readinessModel(ctx context.Context, lang i18n.Lang, d Device, 
 				st.AltActions = []ReadinessAction{{ID: alt}}
 			}
 			if code == proto.TurnErrorNotLoggedIn {
-				// The machine may already have other launchers (a signed-in Codex, a gateway alias from ~/.zshrc):
-				// offer switching the main chat to one before steering to an API key (#4355). Their sign-in state is
-				// not probed — the list is the offer.
-				if n := s.otherLaunchers(ctx, d.ID, launcher); n > 0 {
+				// The machine may already have other launchers that run the main chat (a signed-in Codex, a gateway
+				// alias from ~/.zshrc): offer switching the main chat to one before steering to an API key (#4355).
+				// Their sign-in state is not probed — the list is the offer. The Claude desktop app's launcher runs no
+				// main chat, but an Agent started with it runs in the app on the app's own sign-in, which the CLI does
+				// not share (#9366): the words say so.
+				others, desktop := s.signedOutOptions(ctx, d.ID, launcher)
+				if others > 0 {
 					st.AltActions = append(st.AltActions, ReadinessAction{ID: "main_chat_model"})
-					name := d.Name
-					if name == "" {
-						name = i18n.T(lang, "assistant-readiness.this_computer")
-					}
-					st.Detail = i18n.T(lang, "assistant-readiness.model_not_logged_in_switch_detail", i18n.Args{"machine": name})
 				}
+				name := d.Name
+				if name == "" {
+					name = i18n.T(lang, "assistant-readiness.this_computer")
+				}
+				st.Detail = i18n.T(lang, "assistant-readiness."+notLoggedInDetail(others > 0, desktop), i18n.Args{"machine": name})
 			}
 			return st, false
 		}
@@ -819,22 +823,45 @@ const (
 	launcherGone
 )
 
-// otherLaunchers counts machine's launchers other than launcher: what the main chat could switch to. Any doubt
-// (the machine is slow to answer, the list failed) is zero: the offer is made only from a list that is there.
-func (s *Service) otherLaunchers(ctx context.Context, machine, launcher string) int {
+// signedOutOptions is what machine offers when launcher's Claude Code CLI is signed out: others counts its other
+// launchers that can run the main chat (what Settings › Model lists for it, assistantLaunchersOf), desktop says it
+// has the Claude desktop app's launcher, which starts an Agent in the app on the app's own sign-in
+// (node/claudedesktop_new.go) but runs no main chat. Any doubt (the machine is slow to answer, the list failed) is
+// zero and false: the offer is made only from a list that is there.
+func (s *Service) signedOutOptions(ctx context.Context, machine, launcher string) (others int, desktop bool) {
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	list, err := s.machineLaunchers(cctx, machine)
+	picker, err := s.pickerLaunchers(cctx, machine)
 	if err != nil {
-		return 0
+		return 0, false
 	}
-	n := 0
-	for _, l := range list {
+	desktop = slices.ContainsFunc(picker, func(l ConfiguredLauncher) bool {
+		return compat.Source(l.Source) == proto.SourceClaudeDesktop
+	})
+	fits, err := s.assistantLaunchersOf(cctx, machine, picker)
+	if err != nil {
+		return 0, desktop
+	}
+	for _, l := range fits {
 		if l.Name != launcher {
-			n++
+			others++
 		}
 	}
-	return n
+	return others, desktop
+}
+
+// notLoggedInDetail is the key of the not_logged_in model step's words: the CLI's sign-in to fix, and the main chat's
+// other launchers to switch to and the desktop app's launcher to start Agents with when the machine has them.
+func notLoggedInDetail(others, desktop bool) string {
+	switch {
+	case others && desktop:
+		return "model_not_logged_in_switch_desktop_detail"
+	case others:
+		return "model_not_logged_in_switch_detail"
+	case desktop:
+		return "not_logged_in_desktop_detail"
+	}
+	return "not_logged_in_detail"
 }
 
 // readinessLauncher looks launcher up among what machine can start: the agent it starts ("" Claude Code; a runtime's

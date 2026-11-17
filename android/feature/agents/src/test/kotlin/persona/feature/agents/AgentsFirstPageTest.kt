@@ -137,6 +137,8 @@ class AgentsFirstPageTest {
             status.value = SessionListStatus(loaded = true, total = 1)
         }
 
+        // The page says loaded once it is built from the loaded status: one more pass of the main looper after the status.
+        rule.waitForIdle()
         rule.waitUntil(5_000) { model.page.value.loaded }
         rule.onNodeWithText("Recovered task").assertIsDisplayed()
         placeholders.assertDoesNotExist()

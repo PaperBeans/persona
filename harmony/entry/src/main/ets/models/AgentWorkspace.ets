@@ -1,7 +1,7 @@
 import type { ClientModel } from './ClientModel';
 import { ResourceRow, Wire } from './Wire';
-import type { AgentListAdapter, AgentListInput, AgentListRow } from '../core/AgentListAdapter';
-import type { CoreAgentListGroup } from '../core/AgentListProjection';
+import type { AgentListAdapter } from '../core/AgentListAdapter';
+import type { AgentListInput, AgentListRow, AgentListPreferences, CoreAgentListGroup } from '../core/AgentListProjection';
 import { CoreAgentListAdapter } from '../core/AgentListAdapter';
 
 interface AgentRepository {
@@ -176,7 +176,7 @@ export class AgentWorkspace {
       const saved = Wire.parse(await client.loadView('agent-workspace'));
       if (!this.loadCurrent(client, revision)) return;
       this.quickFilter = ['all', 'needsYou', 'unread', 'working', 'backgroundWaiting'].includes(Wire.text(saved, 'quick')) ? Wire.text(saved, 'quick') :
-        ({needs_you: 'needsYou'}[Wire.text(saved, 'quick')] || 'all');
+        (Wire.text(saved, 'quick') === 'needs_you' ? 'needsYou' : 'all');
       this.groupingMode = ['state', 'machine', 'space'].includes(Wire.text(saved, 'grouping')) ? Wire.text(saved, 'grouping') : 'state';
       this.machineFilter = Wire.text(saved, 'machine'); this.search = Wire.text(saved, 'search');
       this.history = Wire.bool(saved, 'history');
@@ -672,7 +672,7 @@ export class AgentWorkspace {
   }
 
   private rebuild(): void {
-    let groups;
+    let groups: CoreAgentListGroup[];
     try {
       groups = this.adapter.project(this.makeListInput()).groups;
     } catch (_) {
@@ -688,13 +688,15 @@ export class AgentWorkspace {
       const frozenIds = new Set<string>(this.frozenGroups.flatMap((group) => group.memberIds));
       const rowsById = new Map<string, ResourceRow>();
       groups.forEach((group) => group.visible_rows.forEach((id) => {
-        if (frozenIds.has(id)) rowsById.set(id, byId.get(id));
+        const row = byId.get(id);
+        if (frozenIds.has(id) && row) rowsById.set(id, row);
       }));
       this.groups = this.frozenGroups.map((group) => {
         const copy = this.copyGroup(group);
         const projected = groups.find((entry) => entry.id === group.id);
         if (projected) copy.folded = projected.folded;
-        copy.rows = group.memberIds.filter((id) => rowsById.has(id)).map((id) => rowsById.get(id));
+        copy.rows = [];
+        group.memberIds.forEach((id: string) => { const row = rowsById.get(id); if (row) copy.rows.push(row); });
         return copy;
       }).filter((group) => group.rows.length > 0 || group.totalRowCount > 0);
       return;
@@ -704,14 +706,15 @@ export class AgentWorkspace {
       native.folded = group.folded; native.parent = group.parent || ''; native.stateCounts = group.state_counts || {};      native.spoken = group.spoken || ''; native.totalRowCount = group.rows.length;
       native.memberIds = group.rows.slice();
       native.showMachine = group.id.startsWith('machine/');
-      native.rows = group.visible_rows.map((id) => byId.get(id)).filter((row): row is ResourceRow => !!row);
+      native.rows = [];
+      group.visible_rows.forEach((id: string) => { const row = byId.get(id); if (row) native.rows.push(row); });
       return native;
     });
     if (this.readingDetail && this.sourceReady() && !this.freezeSuppressed && !this.frozenGroups) this.frozenGroups = this.copyGroups(this.groups);
   }
 
   private makeListInput(): AgentListInput {
-    const rows = this.latestSourceRows.map((row: ResourceRow): AgentListRow => {
+    const rows: AgentListRow[] = this.latestSourceRows.map((row: ResourceRow): AgentListRow => {
       const raw = row.data();
       raw['machine_id'] = rowMachine(row); raw['session_id'] = rowSession(row); raw['title'] = row.title;
       raw['cwd'] = row.path; raw['state'] = row.state; raw['manager'] = row.manager; raw['app_hub_group'] = row.group;
@@ -720,23 +723,23 @@ export class AgentWorkspace {
     return {rows, history: this.history, grouping: this.groupingMode, quick: this.quickFilter,
       machineFilter: this.machineFilter, query: this.search, reading: this.readingDetail,
       kept: this.frozenGroups?.flatMap((group) => group.memberIds) || [],
-      machines: this.client?.directoryOwners().flatMap((owner: ClientModel) => {
-        const current = owner.machines.map((row: ResourceRow) =>
-          ({id: row.id, name: row.title, group: owner.profile.id, manager: row.manager || owner.profile.manager}));
+      machines: this.client?.directoryOwners().flatMap((owner: ClientModel): Record<string, Object>[] => {
+        const current: Record<string, Object>[] = owner.machines.map((row: ResourceRow): Record<string, Object> =>
+          ({ 'id': row.id, 'name': row.title, 'group': owner.profile.id, 'manager': row.manager || owner.profile.manager }));
         this.historyRows.filter((session) => (session.group || owner.profile.id) === owner.profile.id && session.manager === owner.profile.manager)
           .forEach((session) => {
             if (!current.some((machine) => machine['id'] === rowMachine(session))) {
-              current.push({id: rowMachine(session), name: this.ownerFor(session)?.machineName(rowMachine(session)) || rowMachine(session),
-                group: owner.profile.id, manager: session.manager});
+              current.push({ 'id': rowMachine(session), 'name': this.ownerFor(session)?.machineName(rowMachine(session)) || rowMachine(session),
+                'group': owner.profile.id, 'manager': session.manager });
             }
           });
         return current;
       }) || [],
-      coreSettings: {sort: 'state', folded: this.folded, expanded_idle: this.expandedIdle, expanded_quiet: this.expandedQuiet,
-        compact: false, history: this.history, now: new Date().toISOString(), held: this.heldSession},
-      preferencesFor: (row: AgentListRow) => this.preferencesFor(row.source as ResourceRow),
-      machineIdentity: (row: AgentListRow) => this.machineIdentity(row.source as ResourceRow),
-      machineName: (row: AgentListRow) => {
+      coreSettings: { 'sort': 'state', 'folded': this.folded, 'expanded_idle': this.expandedIdle, 'expanded_quiet': this.expandedQuiet,
+        'compact': false, 'history': this.history, 'now': new Date().toISOString(), 'held': this.heldSession },
+      preferencesFor: (row: AgentListRow): AgentListPreferences => this.preferencesFor(row.source as ResourceRow),
+      machineIdentity: (row: AgentListRow): string => this.machineIdentity(row.source as ResourceRow),
+      machineName: (row: AgentListRow): string => {
         const source = row.source as ResourceRow;
         const machine = this.ownerFor(source)?.machines.find((item: ResourceRow) => item.id === rowMachine(source) && item.manager === source.manager);
         return machine?.title || rowMachine(source);

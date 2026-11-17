@@ -18,6 +18,19 @@ import persona.core.contracts.api.AssistantRepository
 import persona.core.contracts.api.AssistantSnapshot
 import persona.core.designsystem.*
 
+/**
+ * Which sidebar row stays shaded for the page root beside the column (#9667).
+ * iOS `UnifiedSidebar.shownPlace` (UnifiedSidebar.swift:39–44); [None] has no place row.
+ */
+object AssistantSidebarShade {
+    const val Conversation = "conversation"
+    const val Inbox = "inbox"
+    const val Todos = "todos"
+    const val Knowledge = "knowledge"
+    const val Machines = "machines"
+    const val None = "none"
+}
+
 /** The real shared history remains available even while a secondary page hides the Assistant root. */
 @Composable
 fun AssistantSidebarContent(
@@ -50,6 +63,12 @@ fun AssistantSidebarContent(
      * Compact windows keep the drawer's inline search.
      */
     fullWindowSearch: Boolean = false,
+    /**
+     * Which place row stays shaded at regular width, including while drilled in
+     * (iOS `UnifiedSidebar.shownPlace`, UnifiedSidebar.swift:39–44).
+     * Null keeps the phone drawer's conversation shading.
+     */
+    shadedPlace: String? = null,
     /** When the sidebar is a column beside the page, folds the column from its own header; null in a drawer or overlay. */
     onFoldColumn: (() -> Unit)? = null,
 ) {
@@ -166,6 +185,7 @@ fun AssistantSidebarContent(
                 found = foundChats, searchPartial = searchPartial,
                 fullWindowSearch = fullWindowSearch,
                 onFullSearch = { if (fullWindowSearch) fullSearchOpen = true },
+                shadedPlace = shadedPlace,
                 onFoldColumn = onFoldColumn)
         }
     }

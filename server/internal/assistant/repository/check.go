@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/netaddr"
+	"github.com/nwverse/persona/server/internal/pinneddial"
 )
 
 const (
@@ -230,58 +231,7 @@ func checkFailure(ctx context.Context, err error) error {
 	return &CheckError{"network"}
 }
 
-// Every address has already passed the destination policy. Stagger bounded
-// numeric dials so a black-holed address cannot consume the whole check. There
-// is no second destination DNS lookup, request retry or change to TLS verification.
+// Every address has already passed the destination policy (pinneddial.Pinned).
 func dialPinned(parent context.Context, network, port string, ips []net.IPAddr, dial func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
-	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
-	type result struct {
-		conn net.Conn
-		err  error
-	}
-	results := make(chan result)
-	next, active := 0, 0
-	start := func() {
-		target := net.JoinHostPort(ips[next].IP.String(), port)
-		next++
-		active++
-		go func() {
-			conn, err := dial(ctx, network, target)
-			select {
-			case results <- result{conn, err}:
-			case <-ctx.Done():
-				if conn != nil {
-					_ = conn.Close()
-				}
-			}
-		}()
-	}
-	start()
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case r := <-results:
-			active--
-			if r.err == nil && r.conn != nil {
-				return r.conn, nil
-			}
-			if r.conn != nil {
-				_ = r.conn.Close()
-			}
-			if next == len(ips) && active == 0 {
-				return nil, r.err
-			}
-			if next < len(ips) {
-				start()
-			}
-		case <-ticker.C:
-			if next < len(ips) && active < 4 {
-				start()
-			}
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
+	return pinneddial.Pinned(parent, network, port, ips, dial)
 }

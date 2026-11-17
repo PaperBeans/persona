@@ -37,7 +37,8 @@ type suggestIn struct {
 	Follow   *suggestFollow   `json:"follow"`
 	Reported *suggestReported `json:"reported"`
 	// Item names the event: needed from a conversation it was handed to (Hand to AI, inbox_handoff.go).
-	Item string `json:"item"`
+	Item           string `json:"item"`
+	ProcessingTurn string `json:"processing_turn"`
 }
 
 var errNotProcessing = i18n.ErrEnglish("inbox-errors.not_processing")
@@ -46,6 +47,8 @@ var errNotProcessing = i18n.ErrEnglish("inbox-errors.not_processing")
 type errSuggestion struct{ msg string }
 
 func (e errSuggestion) Error() string { return e.msg }
+
+var errStaleInboxTurn = errSuggestion{"this Inbox processing turn has been superseded or its processing_turn is missing; nothing was written; end this turn"}
 
 var errSuggestFiled = errSuggestion{"this inbox item is already filed, so the suggestion was not submitted and the user cannot see it; end this turn"}
 var errReportedFiled = errSuggestion{"this inbox item is already filed, so the reported step was not recorded; end this turn"}
@@ -165,6 +168,10 @@ func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestI
 			b.mu.Unlock()
 			return "", nil, nil, false, errNotProcessing
 		}
+	}
+	if from == nil && in.ProcessingTurn != it.Agent.ProcessingTurn {
+		b.mu.Unlock()
+		return "", nil, nil, false, errStaleInboxTurn
 	}
 	if from == nil && (in.Kind != "" || in.Follow != nil) && !it.open() {
 		b.mu.Unlock()
@@ -330,9 +337,9 @@ func suggestWritesTitle(it *InboxItem) bool {
 }
 
 // inboxDraft keeps the reply drafted in conversation sessionID (inbox_draft, the older name): suggest with kind reply.
-func (s *Service) inboxDraft(ctx context.Context, sessionID, text, note string, proposed []DocChange) (string, *DocChange, error) {
-	id, refused, err := s.suggest(ctx, sessionID, suggestIn{Kind: SuggestReply, Text: text, Note: note, Changes: proposed})
-	if err != nil && !errors.Is(err, errInboxNotPersisted) && !errors.Is(err, errSuggestFiled) {
+func (s *Service) inboxDraft(ctx context.Context, sessionID, text, note string, proposed []DocChange, processingTurn string) (string, *DocChange, error) {
+	id, refused, err := s.suggest(ctx, sessionID, suggestIn{Kind: SuggestReply, Text: text, Note: note, Changes: proposed, ProcessingTurn: processingTurn})
+	if err != nil && !errors.Is(err, errInboxNotPersisted) && !errors.Is(err, errSuggestFiled) && !errors.Is(err, errStaleInboxTurn) {
 		return "", nil, nil
 	}
 	return id, refused, err

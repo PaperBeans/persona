@@ -70,6 +70,13 @@ import UIKit
     /// Where `entry`'s minutes are now. `synced`: the hub has this revision of its text.
     func load(_ entry: RecordingEntry, synced: Bool) async {
         let meeting = entry.isMeeting
+        #if DEBUG && os(iOS)
+        // A replayed meeting (`MeetingReplay`, #9417): its tape's minutes once it ended, none before.
+        if MeetingReplay.holds(entry.id) {
+            state = entry.active ? .waitingForText : MeetingReplay.minutes(for: entry.id).map { .ready($0) } ?? .waitingForSync
+            return
+        }
+        #endif
         if entry.active || !entry.transcribedAll {
             if case .ready = state { return } // a re-transcription keeps showing the minutes it has
             state = meeting ? .waitingForText : .none

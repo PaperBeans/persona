@@ -65,6 +65,11 @@ const (
 	// background, or the others) and exclude_pane_source=<origin> (all but that origin's rows): the web sidebar's quick
 	// filters on the paged list, docs/protocol/protocol.md "Quick filters" (#6662). An older hub ignores both keys.
 	featureSessionsQuickFilters = "sessions_quick_filters"
+	// featureSessionsJustFinished: a paged GET /api/v1/sessions takes just_finished=0|1 (seen rows whose done turn
+	// nobody had looked at while it is new, or the others), and its counts have just_finished, docs/protocol/protocol.md
+	// "Just finished rows" (#9751). An older hub ignores the key and lists every seen row, so an app sends it only to a
+	// hub that says this.
+	featureSessionsJustFinished = "sessions_just_finished"
 )
 
 // sessionsSideFoldFeatures is sessions_side_fold while every manager that carries Agents (the default one, each
@@ -211,7 +216,8 @@ func indexedRow(mid, id string, row *proto.Session, stamp bool, manager, root st
 	}
 	item := sessionlist.Item{
 		ID: id, Machine: mid, Project: project, Group: group, PaneSource: pane,
-		State: row.State, BackgroundWaiting: row.BackgroundWaiting, Source: row.SourceKind, Provider: row.Agent, UpdatedAt: row.UpdatedAt,
+		State: row.State, BackgroundWaiting: row.BackgroundWaiting, JustFinished: row.Work != nil && row.Work.JustFinished,
+		Source: row.SourceKind, Provider: row.Agent, UpdatedAt: row.UpdatedAt,
 		Fold: indexedFold(mid, row, root, todo, indexed.Fold), Private: healthSession(row), Assistant: row.Assistant,
 	}
 	// What q finds a row by: the fields the apps' own searches read, the branch too (#4770).
@@ -455,7 +461,7 @@ func runtimeSummary(s proto.Session) runtimeRowSummary {
 	if s.Work != nil {
 		out.Work = &proto.WorkState{Phase: s.Work.Phase, On: s.Work.On, Line: rowText(s.Work.Line, 180),
 			Wait: rowText(s.Work.Wait, 180), Then: rowText(s.Work.Then, 180), WakeAt: s.Work.WakeAt, ResetsAt: s.Work.ResetsAt,
-			Attempts: s.Work.Attempts, Max: s.Work.Max, Deferred: s.Work.Deferred, Agent: s.Work.Agent}
+			Attempts: s.Work.Attempts, Max: s.Work.Max, Deferred: s.Work.Deferred, JustFinished: s.Work.JustFinished, Agent: s.Work.Agent}
 		if c := s.Work.Closeout; c != nil { // the row's part of it: where it stands, not the account of what it did
 			out.Work.Closeout = &proto.Closeout{Status: c.Status, Merged: c.Merged, Deployed: c.Deployed,
 				Waiting: rowText(c.Waiting, 180), Missing: rowText(c.Missing, 180), Checked: c.Checked}

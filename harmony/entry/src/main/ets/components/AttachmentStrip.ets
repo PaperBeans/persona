@@ -1,3 +1,4 @@
+import { IconActions } from '../design/IconActions';
 import { ChatAttachment } from '../models/ChatAttachments';
 import { Tokens } from '../design/Tokens';
 import { Colors } from '../design/Colors';
@@ -26,7 +27,7 @@ export struct AttachmentStrip {
         if (item.status === 'unknown' || item.status === 'uploading')
           Text(tr(item.status === 'uploading' ? 'chat_attachment_uploading' : 'chat_attachment_upload_unknown')).fontSize(Tokens.meta).fontColor(Colors.secondary)
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-      Button(tr('remove')).attributeModifier(ButtonStyles.quiet).enabled(this.actionsEnabled).onClick(() => this.onRemove(item.id))
+      Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('remove')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('remove', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('remove') + ' ' + item.name).bindTips(tr('remove') + ' ' + item.name).enabled(this.actionsEnabled).onClick(() => this.onRemove(item.id))
     }.width('100%').constraintSize({ minHeight: Tokens.touch }).alignItems(VerticalAlign.Center)
   }
   build() {

@@ -721,13 +721,24 @@
         "opens": {"type": "string", "description": "overview_card, capsule_card and widget only: a nav_page or extension_page of the same extension."},
         "connector": {"type": "string", "description": "inbox_item only: one of the extension's own connectors."},
         "families": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "view.schema.json#/$defs/WidgetFamily"}, "description": "widget only (and needed there): the sizes it can be drawn at."},
-        "refresh_minutes": {"type": "integer", "minimum": 15, "maximum": 1440, "description": "widget only: how often the widget is drawn again on its own (30 when not said)."}
+        "refresh_minutes": {"type": "integer", "minimum": 15, "maximum": 1440, "description": "widget only: how often the widget is drawn again on its own (30 when not said)."},
+        "group": {"$ref": "#/$defs/UIGroup", "description": "nav_page only: the sidebar group the page goes in unless the user put it elsewhere (#9071). Title translated in l10n's groups."}
       },
       "required": ["id", "title", "placement"],
       "anyOf": [
         {"properties": {"placement": {"const": "widget"}}, "required": ["families"]},
         {"properties": {"placement": {"not": {"const": "widget"}}}, "not": {"anyOf": [{"required": ["families"]}, {"required": ["refresh_minutes"]}]}}
       ]
+    },
+    "UIGroup": {
+      "description": "A sidebar group a nav_page names (docs \"UI slots\"): pages of any extension naming the same id share it.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 40}
+      },
+      "required": ["id", "title"]
     },
     "AgentSourceItem": {
       "type": "object",

@@ -1,27 +1,70 @@
 package devices
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 
 	"github.com/nwverse/persona/server/internal/devicewire"
+	"github.com/nwverse/persona/server/internal/nodeproto"
 )
 
-// ownerInputParams marks a session.send the owner typed in their own app (owner_input): the node may hand it to a
-// Claude outside Persona's terminals as the person's own input, through Persona's plugin there (node/ccplugin.go,
-// docs/integrations/claude-integration.md "Owner input through the Persona plugin"). The mark comes only from the
-// hub's human-input submission, which it attaches to a full-role device's own message (hub/sharing_caller.go: not a
-// link or answer-only token, not the master token, not a member hub); any owner_input a caller put in the params is
-// dropped, so no assistant, extension, channel or relay can claim it.
+// ownerInputParams rebuilds owner_input on session.send from the Hub's verified full-device provenance.
 func ownerInputParams(p devicewire.NodeCall, params json.RawMessage) (json.RawMessage, error) {
+	return rewriteOwnerInput(params, trustedHumanInput(p))
+}
+
+func trustedHumanInput(p devicewire.NodeCall) bool {
+	return p.Submission != nil && p.Submission.Kind == "human_input" && p.Submission.ID != "" &&
+		p.Caller != nil && p.Caller.Kind == "device"
+}
+
+type ownerControlKey struct{}
+
+var errReservedOwnerControl = errors.New("owner control is reserved for the devices manager")
+
+func reservedOwnerControl(method string) bool {
+	return method == nodeproto.OwnerInterrupt || method == nodeproto.OwnerCardAnswer
+}
+
+// ownerControlMethod uses a distinct RPC with newer nodes. A new node cannot mistake parameters
+// passed through an older manager for owner authorization.
+func ownerControlMethod(ctx context.Context, method string) string {
+	authorized, _ := ctx.Value(ownerControlKey{}).(string)
+	if authorized == method {
+		switch method {
+		case "session.interrupt":
+			return nodeproto.OwnerInterrupt
+		case "codex.answer":
+			return nodeproto.OwnerCardAnswer
+		}
+	}
+	return method
+}
+
+func carriesOwnerInput(method string) bool {
+	return method == "session.send" || method == "session.interrupt" || method == "codex.answer"
+}
+
+func rewriteOwnerInput(params json.RawMessage, owner bool) (json.RawMessage, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(params, &fields); err != nil {
 		return nil, err
 	}
-	_, claimed := fields["owner_input"]
-	delete(fields, "owner_input")
-	owner := p.Submission != nil && p.Submission.Kind == "human_input" && p.Submission.ID != "" &&
-		p.Caller != nil && p.Caller.Kind == "device"
+	// Every key encoding/json would read as owner_input goes, not only the exact one: a node decodes the params into a
+	// struct, whose field match ignores case, so OWNER_INPUT would otherwise pass for the mark (#9607).
+	claimed := false
+	for k := range fields {
+		if strings.EqualFold(k, "owner_input") {
+			delete(fields, k)
+			claimed = true
+		}
+	}
 	if owner {
+		if fields == nil {
+			fields = make(map[string]json.RawMessage)
+		}
 		fields["owner_input"] = json.RawMessage("true")
 	} else if !claimed {
 		return params, nil

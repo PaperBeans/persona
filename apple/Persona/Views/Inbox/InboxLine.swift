@@ -173,9 +173,8 @@ struct InboxLineSection: View {
                     TodoDetailView(todoID: r.id, onOpenAgent: pushChat == nil ? nil : { key in
                         pendingAgent = key
                         todo = nil
-                    }).macSheetDone { todo = nil }
+                    }).sheetDone { todo = nil }
                 }
-                .overTabSwitch()
                 #if os(macOS)
                 .macSheet()
                 #endif

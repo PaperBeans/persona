@@ -1600,6 +1600,73 @@
         }
       ],
       "derived": true
+    },
+    {
+      "name": "empty_legacy_latest_keeps_existing_items",
+      "description": "An empty latest page without a span merges without discarding the cached list, as in iOS ChatStore.apply.",
+      "source": [
+        "apple/Shared/ChatStore.swift: apply"
+      ],
+      "input": {
+        "initial": {
+          "items": [
+            {
+              "id": "1#0",
+              "seq": 1,
+              "role": "assistant",
+              "kind": "text",
+              "text": "Cached item"
+            },
+            {
+              "id": "2#0",
+              "seq": 2,
+              "role": "assistant",
+              "kind": "text",
+              "text": "Cached answer"
+            }
+          ],
+          "covered": 1,
+          "history": "h",
+          "has_more": true,
+          "loaded_once": false
+        },
+        "events": [
+          {
+            "kind": "http_latest",
+            "items": [],
+            "history": "h",
+            "has_more": false
+          }
+        ]
+      },
+      "expected": [
+        {
+          "items": [
+            {
+              "id": "1#0",
+              "seq": 1,
+              "role": "assistant",
+              "kind": "text",
+              "text": "Cached item"
+            },
+            {
+              "id": "2#0",
+              "seq": 2,
+              "role": "assistant",
+              "kind": "text",
+              "text": "Cached answer"
+            }
+          ],
+          "item_ids": ["1#0", "2#0"],
+          "covered": 2,
+          "history": "h",
+          "has_more": true,
+          "loaded_once": true,
+          "gap": "none",
+          "actions": []
+        }
+      ],
+      "derived": true
     }
   ]
 }

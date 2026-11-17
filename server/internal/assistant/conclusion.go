@@ -107,7 +107,7 @@ func (s *Service) conclusionCard(ctx context.Context, t Todo, a acceptAsk) *feis
 			c.Markdown(against)
 		}
 	}
-	if d := deadlineText(l, s.location(ctx), a.Deadline, a.Reversible, time.Now()); d != "" && decideAsk(&a) && a.AcceptedAt.IsZero() {
+	if d := deadlineText(l, s.location(ctx), a.Deadline, a.Reversible, time.Now()); d != "" && decideAsk(&a) && a.AcceptedAt.IsZero() && a.AgentReply == nil {
 		c.Markdown(feishubot.EscapeMarkdown(d))
 	}
 	// Self-contained (#3804): where it came from and stands, what each option leads to, what waiting costs.

@@ -195,7 +195,7 @@ fn continuity_fixtures_through_runtime() {
             }
         }
     }
-    assert_eq!((cases, steps), (38, 94), "every continuity case and step replays");
+    assert_eq!((cases, steps), (39, 95), "every continuity case and step replays");
 }
 
 #[test]
@@ -233,6 +233,158 @@ fn one_chats_drain_does_not_consume_another_chats_wakeup() {
     );
     let patch: ChatPatch = wire::decode(&runtime.drain("b")).unwrap();
     assert_eq!(patch.ops.len(), 1);
+}
+
+#[test]
+fn drain_commits_one_complete_patch_instead_of_mixing_state_with_old_ops() {
+    let host = Arc::new(Recorder::default());
+    let runtime = Runtime::new(host);
+    assert!(runtime.dispatch(&wire::encode(&Action::OpenChat {
+        chat: "a".into(),
+        snapshot: ChatSnapshot::default(),
+    })));
+    assert!(runtime.flush(Duration::from_secs(5)));
+    let _ = runtime.drain("a");
+    for seq in 1..=2 {
+        let batch = WireBatch {
+            items_json: format!(r#"[{{"id":"{seq}#0","seq":{seq},"role":"assistant","kind":"text","text":"new"}}]"#),
+            history: Some("h".into()),
+            from_seq: Some(seq - 1),
+            to_seq: Some(seq),
+            ..WireBatch::default()
+        };
+        assert!(runtime.dispatch(&wire::encode(&Action::Chat {
+            chat: "a".into(),
+            event: ChatEvent::Pushed { batch },
+        })));
+        assert!(runtime.flush(Duration::from_secs(5)));
+        let patch: ChatPatch = wire::decode(&runtime.drain("a")).unwrap();
+        assert_eq!(patch.ops.len(), 1);
+        assert_eq!(patch.covered, seq);
+        assert!(!patch.loaded_once);
+        let idle: ChatPatch = wire::decode(&runtime.drain("a")).unwrap();
+        assert!(idle.ops.is_empty());
+        assert_eq!(
+            idle.version, patch.version,
+            "an unchanged drain keeps the committed version"
+        );
+        assert_eq!(idle.covered, patch.covered);
+        assert_eq!(idle.history, patch.history);
+        assert_eq!(idle.loaded_once, patch.loaded_once);
+    }
+}
+
+#[test]
+fn drained_state_suppresses_noop_publishes_and_wakes() {
+    let host = Arc::new(Recorder::default());
+    let runtime = Runtime::new(host.clone());
+    assert!(runtime.dispatch(&wire::encode(&Action::OpenChat {
+        chat: "a".into(),
+        snapshot: ChatSnapshot {
+            items_json: r#"[{"id":"1#0","seq":1,"role":"assistant","kind":"text","text":"cached"}]"#.into(),
+            history: Some("h".into()),
+            covered: 1,
+            has_more: Some(false),
+            loaded_once: true,
+        },
+    })));
+    assert!(runtime.flush(Duration::from_secs(5)));
+    let initial: ChatPatch = wire::decode(&runtime.drain("a")).unwrap();
+    assert_eq!(initial.ops.len(), 1);
+    host.changes.lock().unwrap().clear();
+    let mut verified: Option<ChatPatch> = None;
+    for _ in 0..2 {
+        assert!(runtime.dispatch(&wire::encode(&Action::Chat {
+            chat: "a".into(),
+            event: ChatEvent::Latest {
+                batch: WireBatch {
+                    items_json: "[]".into(),
+                    history: Some("h".into()),
+                    to_seq: Some(1),
+                    backlog: true,
+                    has_more: Some(false),
+                    ..WireBatch::default()
+                },
+            },
+        })));
+        assert!(runtime.flush(Duration::from_secs(5)));
+        let patch: ChatPatch = wire::decode(&runtime.drain("a")).unwrap();
+        if host.changes.lock().unwrap().is_empty() {
+            verified = Some(patch);
+            break;
+        }
+        // The first latest page verifies this restored chat. Its changed state must be drained before testing no-ops.
+        assert!(patch.verified);
+        assert!(patch.ops.is_empty());
+        host.changes.lock().unwrap().clear();
+    }
+    let verified = verified.expect("the first changed latest is followed by a no-op");
+    for _ in 0..3 {
+        assert!(runtime.dispatch(&wire::encode(&Action::Chat {
+            chat: "a".into(),
+            event: ChatEvent::Latest {
+                batch: WireBatch {
+                    items_json: "[]".into(),
+                    history: Some("h".into()),
+                    to_seq: Some(1),
+                    backlog: true,
+                    has_more: Some(false),
+                    ..WireBatch::default()
+                },
+            },
+        })));
+        assert!(runtime.flush(Duration::from_secs(5)));
+        assert!(
+            host.changes.lock().unwrap().is_empty(),
+            "an unchanged drained chat must stay asleep"
+        );
+        let patch: ChatPatch = wire::decode(&runtime.drain("a")).unwrap();
+        assert_eq!(patch.version, verified.version);
+        assert!(patch.ops.is_empty());
+        assert_eq!(patch.covered, 1);
+        assert!(patch.loaded_once);
+    }
+}
+
+#[test]
+fn appending_to_one_cached_item_does_not_duplicate_it() {
+    let host = Arc::new(Recorder::default());
+    let runtime = Runtime::new(host);
+    let initial = r#"[{"id":"1#0","seq":1,"role":"user","kind":"text","text":"synthetic"}]"#;
+    assert!(runtime.dispatch(&wire::encode(&Action::OpenChat {
+        chat: "a".into(),
+        snapshot: ChatSnapshot {
+            items_json: initial.into(),
+            covered: 12,
+            loaded_once: true,
+            ..ChatSnapshot::default()
+        },
+    })));
+    assert!(runtime.flush(Duration::from_secs(5)));
+    let _ = runtime.drain("a");
+    let batch = WireBatch {
+        items_json: r#"[{"id":"13#0","seq":13,"role":"assistant","kind":"text","text":"new"}]"#.into(),
+        history: Some("h".into()),
+        from_seq: Some(12),
+        to_seq: Some(15),
+        ..WireBatch::default()
+    };
+    assert!(runtime.dispatch(&wire::encode(&Action::Chat {
+        chat: "a".into(),
+        event: ChatEvent::Pushed { batch }
+    })));
+    assert!(runtime.flush(Duration::from_secs(5)));
+    let patch: ChatPatch = wire::decode(&runtime.drain("a")).unwrap();
+    let kinds: Vec<&str> = patch
+        .ops
+        .iter()
+        .map(|op| match op {
+            ListOp::Insert { .. } => "insert",
+            ListOp::Update { .. } => "update",
+            ListOp::Remove { .. } => "remove",
+        })
+        .collect();
+    assert_eq!(kinds, ["insert"], "one retained cached item plus one new item");
 }
 
 #[test]

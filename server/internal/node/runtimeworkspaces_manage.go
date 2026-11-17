@@ -72,12 +72,13 @@ func (h *runtimeConn) workspaceSessions(id string) []string {
 }
 
 // workspaceAtWork: one of h's sessions in workspace id may still be writing in it: starting, working, waiting for the
-// user, or in a state the runtime does not say. Idle, done and stopped ones are not (the archive ends them).
+// user, running background tasks, or in a state the runtime does not say. A finished foreground turn alone does
+// not mean that its shell commands or delegated agents have stopped writing.
 func (h *runtimeConn) workspaceAtWork(id string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return slices.ContainsFunc(h.sessions, func(s proto.Session) bool {
-		return s.WorkspaceID == id && (s.Starting || !slices.Contains([]string{proto.StatusIdle, proto.StatusDone, proto.StatusOffline}, s.Status))
+		return s.WorkspaceID == id && (s.Starting || len(s.Background) > 0 || !slices.Contains([]string{proto.StatusIdle, proto.StatusDone, proto.StatusOffline}, s.Status))
 	})
 }
 

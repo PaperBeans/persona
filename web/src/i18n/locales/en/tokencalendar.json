@@ -1,0 +1,7 @@
+{
+  "line": "Today {today} tokens · Last 30 days {month}",
+  "day_line": "{day} · {tokens} tokens",
+  "kinds": "Input {input} · Output {output} · Cache write {write} · Cache read {read}",
+  "grid": "Tokens a day. Arrow keys pick a day.",
+  "read_day": "{day}: {tokens} tokens"
+}

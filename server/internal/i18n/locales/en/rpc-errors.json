@@ -81,5 +81,6 @@
   "assistant_service_tier_refused": "Codex couldn’t apply Fast before the first message. Nothing was sent; try again or choose Standard.",
   "assistant_supervision_busy": "This conversation's task-follow-up role changed. Wait for its current work to finish, then try again. Nothing was sent.",
   "assistant_supervision_runtime": "Use a Claude Code or Codex conversation for task follow-up. This Agent does not support its separate instructions. Nothing was started or sent.",
-  "assistant_supervision_node_outdated": "Update this computer's Persona Link before following up tasks here. Its current version cannot apply separate task instructions. Nothing was started or sent."
+  "assistant_supervision_node_outdated": "Update this computer's Persona Link before following up tasks here. Its current version cannot apply separate task instructions. Nothing was started or sent.",
+  "omp_resume_unknown": "Persona can’t resume this omp session from here yet. Continue it on the computer with omp --resume. Nothing was sent."
 }

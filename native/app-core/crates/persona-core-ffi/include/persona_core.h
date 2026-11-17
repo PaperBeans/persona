@@ -79,6 +79,8 @@ PersonaCoreBytes persona_core_project_stream_chunks(const uint8_t *input, size_t
 // Repairs a streaming fence, table or final-block marker (stream_repair::Input). Returns the complete
 // {repaired, end} JSON.
 PersonaCoreBytes persona_core_project_stream_repair(const uint8_t *input, size_t length);
+// Removes the drawn info string of a still-open picture fence (stream_repair::PlainFenceInput). Returns {text} JSON.
+PersonaCoreBytes persona_core_project_plain_open_fence(const uint8_t *input, size_t length);
 // Projects static transcript rows into turns (turns::Input). Returns a JSON array of complete turn objects. The
 // caller applies the checked-in current-iOS overlay (spec/fixtures/lines/ios/differences.json) to the fixture's
 // expected turns before comparing; the core never applies it.
@@ -86,6 +88,10 @@ PersonaCoreBytes persona_core_project_turns(const uint8_t *input, size_t length)
 // Projects the first represented work segment's viewed-image line (viewed_images::Input). Returns the complete
 // {id, image_ids, is_input, type} JSON, or an empty buffer when no image produces a viewed line.
 PersonaCoreBytes persona_core_project_viewed_images(const uint8_t *input, size_t length);
+// Applies one recent-conversation or recent-setup operation (recents::Input). The shown operation supplies its
+// persistence predicate as an explicit existing string list. Returns the complete fixture-shaped JSON, or an empty
+// buffer for malformed input or an unknown operation. No storage, clock or production adapter is involved.
+PersonaCoreBytes persona_core_project_recents(const uint8_t *input, size_t length);
 // Projects background-task calls, descriptions and notice status sequences (task_index::Input). Returns the complete
 // Index JSON.
 PersonaCoreBytes persona_core_project_task_index(const uint8_t *input, size_t length);

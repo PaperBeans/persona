@@ -530,9 +530,7 @@ struct RunAgentHereSheet: View {
             .navigationTitle("Run Agent Here")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.lineLimit(1).disabled(busy)
-                }
+                SheetClose(disabled: busy) { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     if busy {
                         ProgressView()
@@ -920,7 +918,7 @@ struct NewWorktreeSheet: View {
                 .navigationTitle(workspace == nil ? String(localized: "New Worktree") : String(localized: "workspace.newChildTitle", defaultValue: "New Worktree"))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.lineLimit(1).disabled(busy) }
+                    SheetClose(disabled: busy) { dismiss() }
                     ToolbarItem(placement: .confirmationAction) {
                         if busy { ProgressView() }
                         else {

@@ -101,7 +101,7 @@ struct TaskDetailSheet: View {
                                                  @ViewBuilder mark: () -> Mark,
                                                  @ViewBuilder menu: () -> Items) -> some View {
         HStack(spacing: Theme.Space.s) {
-            if pushed { closeButton }
+            closeButton
             mark()
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                 Text(title).font(Theme.Font.heading).lineLimit(2)
@@ -117,7 +117,6 @@ struct TaskDetailSheet: View {
                 .clipShape(.circle)
                 .accessibilityLabel("More")
             }
-            if !pushed { closeButton }
         }
         .padding(.horizontal, Theme.Space.page)
         .padding(.top, Theme.Space.l) // below the sheet's grabber
@@ -174,7 +173,7 @@ extension TaskDetailSheet {
         }
     }
 
-    /// ✕ at the sheet's trailing edge; ‹ at the pushed page's leading one.
+    /// The way out, first in the header (#9653): ✕ for the sheet, ‹ for the pushed page.
     private var closeButton: some View {
         Button { dismiss() } label: {
             ThemedIcon(pushed ? Theme.Icon.back : Theme.Icon.close).font(Theme.Font.secondaryStrong)
@@ -227,10 +226,7 @@ struct TaskBoardSheet: View {
             .navigationTitle("Tasks")
             .navigationBarTitleDisplayMode(.inline)
             .pageToolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: { ThemedIcon(Theme.Icon.close) }
-                        .accessibilityLabel("Close")
-                }
+                SheetClose(id: "tasks-board-close") { dismiss() }
             }
         }
         .confirmTaskRemoval($removing)

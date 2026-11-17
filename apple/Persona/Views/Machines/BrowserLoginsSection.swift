@@ -282,9 +282,7 @@ private struct CookiePickSheet: View {
             .navigationTitle("Choose Sites to Import")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { file = nil }.lineLimit(1).disabled(busy)
-                }
+                SheetClose(id: "browser-logins-close", disabled: busy) { file = nil }
                 ToolbarItem(placement: .confirmationAction) {
                     let n = file?.cookies.count ?? 0
                     Button(n > 0 ? String(localized: "Import \(n)") : String(localized: "Import")) { Task { await run() } }

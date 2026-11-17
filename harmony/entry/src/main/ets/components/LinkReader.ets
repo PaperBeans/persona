@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { webview } from '@kit.ArkWeb';
 import { readerLink, readerHost } from '../platform/ReaderLink';
 import { Tokens } from '../design/Tokens';
@@ -32,10 +35,10 @@ export struct LinkReader {
       if (this.loading) Progress({ value: this.progress, total: 100, type: ProgressType.Linear }).width('100%')
       if (this.backward || this.failed) {
         Row({ space: Tokens.gap }) {
-          if (this.backward) Button(tr('back'), { buttonStyle: ButtonStyleMode.TEXTUAL }).onClick(() => this.controller.backward())
+          if (this.backward) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('back')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('back', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('back')).bindTips(tr('back')).onClick(() => this.controller.backward())
           if (this.failed) {
             Text(tr('connection_failed')).fontSize(Tokens.meta).layoutWeight(1)
-            Button(tr('retry')).onClick(() => { this.failed = false; this.controller.refresh(); })
+            Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).onClick(() => { this.failed = false; this.controller.refresh(); })
           }
         }.padding(Tokens.inset).width('100%')
       }

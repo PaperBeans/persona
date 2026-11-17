@@ -571,3 +571,68 @@ func TestGoldenBriefFactsBriefs(t *testing.T) {
 			{Date: "2026-11-02", By: briefByRoutine, Goal: "巡检", Now: "不做了", Cancelled: true},
 		}}))
 }
+
+func TestContinuationUsesAuthorizedScope(t *testing.T) {
+	s, f, asked := briefService(t, "keep the recurring check enabled")
+	const original = "the recurring check stays enabled"
+	const effective = "report the result of one inspection"
+	got, isErr := tool(t, s, "task_plan", briefTask(map[string]any{
+		"title": "Verify the recurring check", "goal": "Check the existing schedule",
+		"prompt": "Verify the check's status", "done_when": []string{original},
+	}))
+	if isErr {
+		t.Fatal(got)
+	}
+	waitFor(t, "original start", func() bool { return len(onlyTodo(s).Agents) == 1 })
+	todo := onlyTodo(s)
+	f.mu.Lock()
+	fresh, _ := f.starts[0]["prompt"].(string)
+	f.mu.Unlock()
+	plan := &TaskPlan{ID: "waiting-continuation", Conversation: "conv1", State: planOpen, Tasks: []PlanTask{
+		{Title: "Continue task", Prompt: "Continue the earlier work", Machine: "box", Continues: todo.ID, ContinuesWhy: "The earlier Agent stopped"},
+	}}
+	ctx := context.Background()
+	if err := s.planBriefs(ctx, "", plan.Conversation, plan.Tasks); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.savePlan(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	f.setItems(proto.Item{ID: "m2", Seq: 2, TS: asked.Add(time.Hour), Role: "user", Kind: proto.KindText,
+		Text: "Cancel the recurring check and do one inspection."})
+	reply, isErr := tool(t, s, "task_scope", map[string]any{
+		"todo_id": todo.ID, "change": "Cancel the recurring check", "why": "The owner requested one inspection",
+		"done_when": []string{effective},
+	})
+	if isErr || !strings.Contains(reply, "Effective criteria:") || !strings.Contains(reply, "Dropped criteria:") {
+		t.Fatalf("task_scope: %s", reply)
+	}
+	brief, _ := s.briefOfTodo(todo.ID)
+	if _, err := s.startPlan(ctx, plan.ID, nil, false); err == nil || !strings.Contains(err.Error(), "scope of "+todo.ID+" changed") {
+		t.Fatalf("stale card start: %v", err)
+	}
+	args := map[string]any{"title": "Inspect once", "prompt": "Inspect once, without re-enabling any schedule",
+		"continues": todo.ID, "continues_why": "The owner cancelled recurring work",
+		"scope_revision": plan.Tasks[0].Brief.ClockAt.Format(time.RFC3339Nano)}
+	if got, isErr := tool(t, s, "task_plan", briefTask(args)); !isErr || !strings.Contains(got, "scope of "+todo.ID+" changed") {
+		t.Fatalf("stale scope revision: %s", got)
+	}
+	args["scope_revision"] = brief.ClockAt.Format(time.RFC3339Nano)
+	if got, isErr := tool(t, s, "task_plan", briefTask(args)); isErr {
+		t.Fatal(got)
+	}
+	waitFor(t, "replacement start", func() bool { return len(onlyTodo(s).Agents) == 2 })
+	f.mu.Lock()
+	replacement, _ := f.starts[len(f.starts)-1]["prompt"].(string)
+	starts := len(f.starts)
+	f.mu.Unlock()
+	if starts != 2 || todoCount(s) != 1 || strings.Count(replacement, effective) != 1 || strings.Contains(replacement, original) {
+		t.Fatalf("replacement: %d starts, %d to-dos, prompt %q", starts, todoCount(s), replacement)
+	}
+	if !strings.Contains(fresh, original) || brief.Request == nil || brief.Request.Text != "keep the recurring check enabled" ||
+		len(brief.Log) != 1 || len(brief.Log[0].Dropped) != 1 || brief.Log[0].Dropped[0] != original {
+		t.Fatalf("original assignment or scope history lost: %+v", brief)
+	}
+	t.Logf("synthetic full prompts (runes/bytes): fresh %d/%d, re-scoped continuation %d/%d",
+		len([]rune(fresh)), len(fresh), len([]rune(replacement)), len(replacement))
+}

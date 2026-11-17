@@ -278,6 +278,13 @@ internal class CalendarTools(
             .also { CalendarWrites.delete(it) }
     }
 
+    /**
+     * The event [id] that a quick result's Undo takes back, deleted as a whole with no second before → after card
+     * (iOS `CalendarTool.remove`): the user is undoing the assistant's own write. A repeating event is refused like any
+     * other delete without its occurrence, so a card whose event repeats leaves the event alone.
+     */
+    fun remove(id: Long): PhoneToolResult = delete(prepareDelete(buildJsonObject { put("id", id.toString()) }))
+
     fun update(prepared: CalendarUpdatePreparation): PhoneToolResult {
         val plan = beforeWrite {
             requireUnchanged(prepared.args, prepared.snapshot)

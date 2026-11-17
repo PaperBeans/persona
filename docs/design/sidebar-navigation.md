@@ -233,3 +233,17 @@ switch the detail without a push when a sidebar item is chosen; only drilling do
   Agent and then another replace the root with no transition (`testTheAgentsTabSwitchesItsRootWithoutAPush`). Run on the iPad, the open Duo upright and
   on its side, and an iPhone.
 
+**Android** (#9667). A regular window — the sidebar column beside the page, or over it — follows this section. `SidebarPageRoots`
+(`android/app/src/main/java/persona/android/navigation/SidebarPageRoots.kt`) is the pure model, with the same steps as `SidebarPageRoots.swift`: a place
+replaces the Assistant stack's root and does not animate; a drill-down pushes; each root keeps its path; picking the root in
+front pops; the shaded row follows the root (`AssistantSidebarShade`). The conversation and the fixed places (Inbox, To-dos,
+Knowledge and Computers) stay composed while another is in front, so the conversation keeps its non-saveable history, local
+operations, running effects and list anchor, and those places keep their list, filter and scroll. Folding inserts the
+conversation under that same list and unfolding removes it, so that page is not rebuilt. A to-do opened as its own root, or an
+extension page, keeps only its path and is composed only while it is in front (`SidebarRootHosts`). Folding that root copies it onto the conversation and leaves the fixed places composed. A place the phone drawer
+pushed over the conversation is promoted onto its own host when the window becomes regular, and that promotion rebuilds the
+page. The root's top-leading control is the conversation's sidebar button (`resolveHomeLeadingAction`), never Back.
+System Back at a place root returns to the conversation as a root switch, with no push or pop. System Back at the conversation
+root leaves the app. The compact phone drawer still pushes a place that has no host yet over the conversation. A fixed place that already has a host is shown on that host. Health and
+Scheduled Tasks are not navigation destinations on Android; picking them shows the conversation page, where those screens already open.
+

@@ -27,5 +27,18 @@
   "title_placeholder": "对话标题",
   "rename_hint": "你起的标题不会再被自动标题覆盖。",
   "built_in": "内置",
-  "display_options": "显示选项"
+  "display_options": "显示选项",
+  "tags_saved": "已保存「{title}」的标签",
+  "tag_filter": "按标签筛选",
+  "tag_empty": "没有对话带有标签「{tag}」",
+  "tag_clear": "清除筛选",
+  "tag_mark": "标签：{tag}",
+  "edit_tags_ellipsis": "编辑标签…",
+  "tags_title": "编辑标签",
+  "tags_placeholder": "添加标签",
+  "tags_add": "添加",
+  "tags_remove": "移除标签 {tag}",
+  "tags_hint": "按回车添加标签。每个对话最多 {max} 个标签，每个标签最多 {length} 个字符。",
+  "tag_too_long": "单个标签最多 {max} 个字符。",
+  "tag_count_limit": "一个对话最多加 {max} 个标签。"
 }

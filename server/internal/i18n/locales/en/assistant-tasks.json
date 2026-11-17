@@ -57,6 +57,7 @@
   "admission_procs": "{count} claude processes are already running, at its limit of {limit}.",
   "admission_load": "Load {load} exceeds {cores} cores × {multiplier}.",
   "admission_direction_full": "This direction already has {running} agents running, at its limit of {limit}.",
+  "admission_launcher_group_full": "Launcher group {group} already has {running} tasks running, at its limit of {limit}.",
   "admission_refused": "Computer {machine} cannot start this agent: {reason}.{recommend}",
   "admission_recommend": " Recommended computer: {machine}.",
   "admission_reroute": "Moved from {from} to {to}: {reason}",

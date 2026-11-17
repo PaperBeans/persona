@@ -132,7 +132,7 @@ func TestAssistantCompactionRPCAndSpare(t *testing.T) {
 	}
 }
 
-func TestAssistantCompactionSettingsAndSDK(t *testing.T) {
+func TestAssistantCompactionSettings(t *testing.T) {
 	n := assistantNode(t)
 	n.dir = t.TempDir()
 	settings := filepath.Join(t.TempDir(), "settings.json")
@@ -164,15 +164,6 @@ func TestAssistantCompactionSettingsAndSDK(t *testing.T) {
 		if overrides[name] != "off" {
 			t.Errorf("development skill %s is not hidden: %v", name, s["skillOverrides"])
 		}
-	}
-	start := sdkStart{settings: path, mcp: map[string]any{}, compaction: &c, env: map[string]string{"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "200000", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000"}}
-	opts, err := start.options("claude")
-	if err != nil {
-		t.Fatal(err)
-	}
-	env = opts["settings"].(map[string]any)["env"].(map[string]any)
-	if env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] != "400000" || env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] != "1000000" {
-		t.Fatalf("SDK clamped policy back down: %v", env)
 	}
 	if mode, err := os.Stat(path); err != nil || mode.Mode().Perm() != 0o600 {
 		t.Fatalf("settings permissions: %v %v", mode, err)
@@ -269,10 +260,10 @@ func TestAssistantShellLauncherCompaction(t *testing.T) {
 						t.Fatalf("claude saw %s=%q, want %q (the launcher's own)", k, got, want)
 					}
 				}
-				// Only Persona's own tools are eagerly loaded (mcpserver's alwaysLoad marker); other MCP servers
-				// keep the ordinary ToolSearch deferral instead of a process-wide disable (#5838).
-				if got := envValue(lines, "ENABLE_TOOL_SEARCH"); got != "" {
-					t.Fatalf("ToolSearch was disabled process-wide: %q", got)
+				// Tool search is on, also for a conversation that ran without it (#7317), and never disabled
+				// process-wide: false would load every MCP server's tools up front (#5838).
+				if got := envValue(lines, "ENABLE_TOOL_SEARCH"); got != "true" {
+					t.Fatalf("claude saw ENABLE_TOOL_SEARCH=%q, want \"true\" (never false: #5838)", got)
 				}
 			})
 		}
@@ -417,19 +408,20 @@ func TestAssistantIdleCompactFromWindow(t *testing.T) {
 	}
 }
 
-func TestAssistantSDKCompactionStart(t *testing.T) {
-	f := sdkTest(t)
+// A managed launcher's start carries its declared window, for the main conversation too, and its model's 1M as the
+// context window.
+func TestAssistantCompactionStartOnAManagedLauncher(t *testing.T) {
+	f := cliTest(t)
+	f.fakeLaunch(t)
 	f.n.setManaged([]proto.ManagedLauncher{{Name: "gw", Model: "big", CompactWindow: 200000, Models: []proto.ProviderModel{{ID: "big", ContextWindow: 1000000}}}})
-	execution := sdkExec(proto.AssistantRuntimeAgentSDK)
+	execution := cliExec()
 	execution.IsMain = true
 	id, err := f.n.assistantSend(context.Background(), "", t.TempDir(), "gw", "hello", nil, "", "", execution)
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := f.start(t)
-	env := opts["settings"].(map[string]any)["env"].(map[string]any)
-	// The launcher's declared 200000, for the main conversation too; its model's 1M as the context window.
-	if env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] != "200000" || env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] != "1000000" || f.proc(id).compactIdleAt != 150000 {
-		t.Fatalf("SDK start: %v, idle %d", env, f.proc(id).compactIdleAt)
+	p := f.proc(id)
+	if envValue(p.cmd.Env, "CLAUDE_CODE_AUTO_COMPACT_WINDOW") != "200000" || envValue(p.cmd.Env, "CLAUDE_CODE_MAX_CONTEXT_TOKENS") != "1000000" || p.compactIdleAt != 150000 {
+		t.Fatalf("start env %v, idle %d", p.cmd.Env, p.compactIdleAt)
 	}
 }

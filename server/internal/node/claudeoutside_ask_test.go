@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/screen"
 )
@@ -39,11 +40,12 @@ func TestAnOutsideClaudesQuestionIsACard(t *testing.T) {
 	noPaneEnv(t)
 	shortPeerWait(t, 3*time.Second)
 	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
-	p := writeTranscript(t, home, home, sidA, time.Now(),
-		`{"type":"user","uuid":"u1","timestamp":"2026-11-04T09:00:00Z","cwd":"`+home+`","sessionId":"`+sidA+`","message":{"role":"user","content":"tidy the inbox"}}`,
+	p := modeTranscript(t, home, home, "bypassPermissions")
+	appendLines(t, p,
 		`{"type":"assistant","uuid":"a1","timestamp":"2026-11-04T09:00:05Z","sessionId":"`+sidA+`","message":{"role":"assistant","content":[{"type":"text","text":"A few things first:"}]}}`,
 		askCall(sidA, "toolu_multi", multiAsk))
 	inbox := newFakeInbox(t, p)
+	inbox.setMode(peerModeBypass)
 	writeOutsideClaude(t, home, sidA, "claude-desktop-3p", "waiting", inbox, nil)
 
 	s := byID(listSessions(t, n))[sidA]
@@ -71,10 +73,18 @@ func TestAnOutsideClaudesQuestionIsACard(t *testing.T) {
 
 	answers := map[string]string{"Which setting wins?": "Account", "Which counts show?": "Unread, Mentions",
 		"How are long rows shown?": "Only the first two lines", "Alert on a mention?": "Never"}
-	if err := n.codexAnswer(context.Background(), sidA, ix.ID, proto.Resolution{Answers: answers}); err != nil {
-		t.Fatalf("answer: %v", err)
+	params := map[string]any{"session_id": sidA, "id": ix.ID, "resolution": proto.Resolution{Answers: answers}, "owner_input": true}
+	if _, err := request(t, n, "codex.answer", params); refusalCode(err) != peerHeld {
+		t.Fatalf("unmarked answer: %v", err)
 	}
-	pr, content := inboxPriority(t, inbox, 0)
+	delete(params, "owner_input")
+	if _, err := request(t, n, nodeproto.OwnerCardAnswer, params); err != nil {
+		t.Fatalf("owner answer: %v", err)
+	}
+	if h := envelopeHead(t, inbox, 1); h != `<cross-session-message from-name="Persona" from-mode="bypass">` {
+		t.Fatalf("owner answer envelope: %q", h)
+	}
+	pr, content := inboxPriority(t, inbox, 1)
 	if pr != "now" {
 		t.Fatalf("the answer went at %q", pr)
 	}

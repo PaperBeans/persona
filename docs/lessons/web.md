@@ -1,5 +1,44 @@
 # Lessons: web UI and interactions
 
+## A lazy waiting row needs a lazy ordering boundary (#9390)
+
+Ordering an unopened tray from its shared classifier imports the age computation on the first screen even when the
+row is lazy. Keep canonical classification and counts unchanged; order the waiting list inside its existing lazy
+boundary. To-dos similarly orders only the already-classified waiting groups in its lazy page, preserving the other
+sections and counts. Check the boundary regression and every language's measured first-screen budget; do not hide
+growth with an exemption, a larger budget or unrelated catalog changes. New waiting copy stays in its own lazy namespace.
+On a clickable task row, stop propagation only for links, controls and the portalled editor. Stopping every click
+on a metadata wrapper makes its plain text a dead area: test both text-to-row selection and separate control actions.
+Copying a reminder should dismiss the editor only after success, so the phone's confirmation toast does not cover
+its footer. Keep the editor on failure, and do not discard text edited while clipboard permission was pending.
+
+## Transcript cut sizes are bytes, not characters (#9442)
+
+A page's `full_size` signals a truncated item and measures the original UTF-8 bytes; the displayed text may also
+include a truncation note. Request full text by the marker, not by subtracting character counts. If it remains cut,
+the missing character count is unknown; reserve numeric counts for clipping locally held complete text.
+
+## A stalled export page is incomplete history (#9430)
+
+When a page promised older history, an empty page or one without an older new item must stop paging and mark the export
+partial. A page outside the requested range must not overwrite collected messages. Show the incomplete warning even
+when no usable timestamp was returned; a file that stopped safely must not look complete.
+
+## Historical times need their own UTC offset (#9422)
+
+Do not format a past event with the UTC offset at page load: daylight-saving changes can shift the displayed time
+and date. Resolve the browser's local offset at the event's instant, and test both seasonal directions across midnight.
+Chart axes too (#9863): a step added to one offset-shifted start drifts an hour off midnight across a change; lay each
+day's round times out with `Date`'s local fields (`clockTicks` in `web/src/lib/machine-detail.ts`).
+
+## ZIP preview limits must check actual bytes (#9384)
+
+A central-directory size is untrusted: limiting only its declared uncompressed size still allows a small deflate
+stream to inflate far beyond the limit. Count the streamed output and cancel on overflow; also bound the directory
+range before requesting it. Exercise both with forged ZIP metadata, not only normal generated archives. A Range
+request can also receive a full 200 or a malformed 206: bound the HTTP body itself, validate the returned range,
+and test with real streamed responses (#9405).
+
 ## Vite module IDs use forward slashes on Windows (#9341)
 
 `fileURLToPath` returns host-native paths, while Vite's module IDs use forward slashes. Normalize config directories

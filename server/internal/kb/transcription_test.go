@@ -604,3 +604,65 @@ func TestPutRecordingLeavesTheUploadAlone(t *testing.T) {
 		t.Fatalf("stored segments %q", got)
 	}
 }
+
+// A phone killed mid-segment loses the segment it was writing and uploads its end before it, while the hub got that
+// audio over the socket (#9587): an ended hub-mode meeting's duration, ended_at and the transcription's end are the
+// longer of the upload's and the audio held. The upload's stand when they are longer; a device-mode meeting, whose
+// audio the hub never holds, keeps the upload's.
+func TestHubMeetingEndsNoEarlierThanItsAudio(t *testing.T) {
+	now := time.Date(2026, 11, 10, 14, 0, 0, 0, goldenZone)
+	start := now.Add(-time.Hour).UTC()
+	at := func(sec float64) time.Time { return start.Add(time.Duration(sec * float64(time.Second))) }
+	for _, c := range []struct {
+		name                 string
+		uploaded, held, want float64
+	}{
+		{"the hub holds more", 24, 25.4, 25.4},
+		{"the upload is longer", 24, 20, 24},
+		{"nothing held", 24, 0, 24},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e, _ := hubEngine(t, nil)
+			hubMeeting(t, e, recID, now)
+			if c.held > 0 {
+				if _, err := e.AudioPut(recID, 0, pcmAt(0, secs(c.held))); err != nil {
+					t.Fatal(err)
+				}
+			}
+			u := hubUpload(2, start, true, nil, "一句", "两句")
+			u.Duration = c.uploaded
+			end := at(c.uploaded)
+			u.EndedAt = &end
+			putRecording(t, e, recID, u, now)
+			m, r, err := e.MeetingRead(recID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Duration != c.want || r.EndedAt == nil || !r.EndedAt.Equal(at(c.want)) {
+				t.Fatalf("duration %v ended %v, want %v", r.Duration, r.EndedAt, c.want)
+			}
+			if m.Transcription == nil || m.Transcription.End != c.want {
+				t.Fatalf("transcription end %+v, want %v", m.Transcription, c.want)
+			}
+			// A later upload of the same short length keeps what the audio says.
+			u.Revision = 3
+			putRecording(t, e, recID, u, now.Add(time.Minute))
+			if _, r, _ = e.MeetingRead(recID); r.Duration != c.want {
+				t.Fatalf("a later upload took it back to %v", r.Duration)
+			}
+		})
+	}
+	t.Run("device mode", func(t *testing.T) {
+		e, _ := hubEngine(t, nil)
+		u := recUpload(1, start, true, "一句", "两句")
+		u.Kind = RecordingMeeting
+		u.SetTranscription(TranscriptionDevice, nil)
+		u.Duration = 24
+		end := at(24)
+		u.EndedAt = &end
+		putRecording(t, e, recID, u, now)
+		if _, r, err := e.MeetingRead(recID); err != nil || r.Duration != 24 || !r.EndedAt.Equal(end) {
+			t.Fatalf("device mode: duration %v ended %v %v", r.Duration, r.EndedAt, err)
+		}
+	})
+}

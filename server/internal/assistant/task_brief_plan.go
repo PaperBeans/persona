@@ -117,6 +117,9 @@ func (s *Service) planBriefs(ctx context.Context, machine, conversation string, 
 			if err != nil {
 				return fmt.Errorf("task %d: continues: %v", i+1, err)
 			}
+			if t.ScopeRevision != "" && t.ScopeRevision != brief.ClockAt.Format(time.RFC3339Nano) {
+				return fmt.Errorf("task %d: the scope of %s changed; read its brief and plan the continuation again", i+1, prev.ID)
+			}
 			// Its own prompt stays its own; what done means is the brief's, as its scope changes left it.
 			t.DoneWhen, t.ExpectMinutes = brief.Criteria, brief.ExpectNow
 			t.Brief = &brief
@@ -134,6 +137,20 @@ func (s *Service) planBriefs(ctx context.Context, machine, conversation string, 
 		}
 		v := (&taskBrief{rec: rec}).view()
 		t.Brief = &v
+	}
+	return nil
+}
+
+// checkContinuationScope rejects a plan that was prepared against a different
+// revision of the original brief. ClockAt advances for every scope entry,
+// including changes that keep the effective criteria and expected time.
+func (s *Service) checkContinuationScope(t *PlanTask) error {
+	if t.Continues == "" {
+		return nil
+	}
+	current, ok := s.briefOfTodo(t.Continues)
+	if !ok || t.Brief == nil || current.ID != t.Brief.ID || !current.ClockAt.Equal(t.Brief.ClockAt) {
+		return fmt.Errorf("the scope of %s changed or is unavailable; read its brief and plan the continuation again", t.Continues)
 	}
 	return nil
 }

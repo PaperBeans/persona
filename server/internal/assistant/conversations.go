@@ -202,6 +202,9 @@ type relayMsg struct {
 	// Urgent: a supervision message with a signal that waits on a decision (relay_presence.go). A version that does
 	// not know it drops it on its next save: the message then ranks and waits as any other supervision message.
 	Urgent bool `json:"urgent,omitempty"`
+	// Interject: this supervision message contains a validated decision_reply for a pending round; the node may bring
+	// it into a running assistant turn and move foreground work to the background. It is never persisted in the relay queue.
+	Interject bool `json:"interject,omitempty"`
 	// QueuedAt and Depth are when it was first queued and how long the queue was with it then (the queue wait,
 	// availability.go): kept by a message that takes its place (queuedAs).
 	QueuedAt time.Time `json:"queued_at,omitzero"`
@@ -467,6 +470,9 @@ func (s *Service) deliverRelay(ctx context.Context, machine, to string, msg rela
 	}
 	params := map[string]any{"session_id": to, "text": text, "message_source": msg.source(), "resume_only": true, holdPushesParam: msg.Tool == superviseTool,
 		"once_id": relayMsgID(to, msg)} // every try of it under one id: the node sends it once (relay_once.go)
+	if msg.Interject {
+		params["interject_background"] = true
+	}
 	if pick, ok := s.modelPickOf(ctx, machine, to); ok {
 		s.relayOnPick(ctx, machine, to, params, pick) // the conversation's own pick, as a message typed to it runs on (model_pick.go)
 	} else if s.isBackground(ctx, to) {
@@ -701,6 +707,7 @@ func conversationName(c proto.Session, main string) string {
 func (s *Service) toolConversationsList(ctx context.Context, self string, args json.RawMessage) (string, error) {
 	var a struct {
 		Query           string `json:"query"`
+		Tag             string `json:"tag"`
 		IncludeArchived bool   `json:"include_archived"`
 		Limit           int    `json:"limit"`
 	}
@@ -716,6 +723,7 @@ func (s *Service) toolConversationsList(ctx context.Context, self string, args j
 	list, main := s.conversations(ctx, a.IncludeArchived, space)
 	sort.SliceStable(list, func(i, j int) bool { return list[i].UpdatedAt.After(list[j].UpdatedAt) })
 	q := strings.ToLower(strings.TrimSpace(a.Query))
+	tag := strings.TrimSpace(a.Tag)
 	loc := s.location(ctx)
 	var b strings.Builder
 	n := 0
@@ -724,30 +732,36 @@ func (s *Service) toolConversationsList(ctx context.Context, self string, args j
 		if q != "" && !strings.Contains(strings.ToLower(name+"\n"+c.LastText), q) {
 			continue
 		}
+		if tag != "" && !hasTag(c, tag) {
+			continue
+		}
 		if n >= a.Limit {
 			n++
 			continue
 		}
 		n++
-		var tags []string
+		var marks []string
 		if c.SessionID == main {
-			tags = append(tags, "main")
+			marks = append(marks, "main")
 		}
 		if c.SessionID == self {
-			tags = append(tags, "this conversation")
+			marks = append(marks, "this conversation")
 		}
 		if c.Status == proto.StatusWorking || c.Starting {
-			tags = append(tags, "running")
+			marks = append(marks, "running")
 		}
 		if c.Archived {
-			tags = append(tags, "archived")
+			marks = append(marks, "archived")
 		}
 		if c.Agent == "codex" {
-			tags = append(tags, "codex")
+			marks = append(marks, "codex")
 		}
 		fmt.Fprintf(&b, "- %s 「%s」", c.SessionID, name)
-		if len(tags) > 0 {
-			fmt.Fprintf(&b, " [%s]", strings.Join(tags, ", "))
+		if len(marks) > 0 {
+			fmt.Fprintf(&b, " [%s]", strings.Join(marks, ", "))
+		}
+		if c.Tags != nil && len(*c.Tags) > 0 {
+			fmt.Fprintf(&b, " · tags: %s", strings.Join(*c.Tags, ", "))
 		}
 		if !c.UpdatedAt.IsZero() {
 			fmt.Fprintf(&b, " · last active %s (%s)", c.UpdatedAt.In(loc).Format("01-02 15:04"), ago(c.UpdatedAt))
@@ -758,14 +772,24 @@ func (s *Service) toolConversationsList(ctx context.Context, self string, args j
 		b.WriteString("\n")
 	}
 	if n == 0 {
+		var filters []string
 		if q != "" {
-			return fmt.Sprintf("No conversation matches %q.", a.Query), nil
+			filters = append(filters, fmt.Sprintf("query %q", a.Query))
+		}
+		if tag != "" {
+			filters = append(filters, fmt.Sprintf("tag %q", tag))
+		}
+		if len(filters) > 0 {
+			return "No conversation matches " + strings.Join(filters, " and ") + ".", nil
 		}
 		return "No conversations.", nil
 	}
 	head := fmt.Sprintf("%d conversation(s), newest activity first", n)
 	if !a.IncludeArchived {
 		head += " (archived ones left out)"
+	}
+	if tag != "" {
+		head += fmt.Sprintf(" (tag %q)", tag)
 	}
 	if n > a.Limit {
 		head += fmt.Sprintf("; the first %d", a.Limit)
@@ -877,11 +901,18 @@ func (s *Service) toolConversationArchive(ctx context.Context, self string, args
 
 func (s *Service) toolConversationNew(ctx context.Context, self string, args json.RawMessage) (string, error) {
 	var a struct {
-		Text string `json:"text"`
+		Text string   `json:"text"`
+		Tags []string `json:"tags"`
 	}
 	_ = json.Unmarshal(args, &a)
 	if strings.TrimSpace(a.Text) == "" {
 		return "", errors.New("text is empty")
+	}
+	// Validate the tags before anything is started: an over-long or over-count call must not leave a conversation
+	// behind it.
+	tags, err := normalizeConversationTags(a.Tags)
+	if err != nil {
+		return "", err
 	}
 	if err := s.dispatchNewConversationGuard(ctx, self); err != nil {
 		return "", err
@@ -906,6 +937,14 @@ func (s *Service) toolConversationNew(ctx context.Context, self string, args jso
 		return "", err
 	}
 	s.titleNew(c.MachineID, c.SessionID, time.Now())
+	tagNote := ""
+	if len(tags) > 0 {
+		// The conversation already exists: a tag write that fails must not be reported as a failed start.
+		if _, err := s.setConversationTags(sctx, c.MachineID, c.SessionID, tags, titleByAssistant); err != nil {
+			return fmt.Sprintf("Started conversation %s; it is working on the message now and is named after its first turn. It shows up in the app's sidebar. Its tags could not be saved: %v", c.SessionID, err), nil
+		}
+		tagNote = " It is born with tags: " + strings.Join(tags, ", ") + "."
+	}
 	b := &s.relays
 	b.mu.Lock()
 	if s.relayLocked(ctx) {
@@ -915,7 +954,7 @@ func (s *Service) toolConversationNew(ctx context.Context, self string, args jso
 		s.saveRelayLocked()
 	}
 	b.mu.Unlock()
-	return fmt.Sprintf("Started conversation %s; it is working on the message now and is named after its first turn. It shows up in the app's sidebar.", c.SessionID), nil
+	return fmt.Sprintf("Started conversation %s; it is working on the message now and is named after its first turn. It shows up in the app's sidebar.%s", c.SessionID, tagNote), nil
 }
 
 func (s *Service) toolConversationSend(ctx context.Context, self string, args json.RawMessage) (string, error) {

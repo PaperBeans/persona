@@ -51,6 +51,15 @@ data class PersonaPalette(
     val scrim: Color,
     val dark: Boolean,
     val ai: Color = accent,
+    /**
+     * An added / removed line's tint behind its code, and the words that changed in it, deeper still (iOS `Theme.Diff.addFill` /
+     * `addEmphasis`, `delFill` / `delEmphasis`: `Tokens.Common.<Light|Dark>.Diff`). Glass takes the tokens' own colours; Brief and
+     * Board keep their own diff hue at the tokens' strength ([DiffTintAlpha]).
+     */
+    val diffAddFill: Color = diffAdd.copy(alpha = DiffTintAlpha.addFill),
+    val diffDelFill: Color = diffDel.copy(alpha = DiffTintAlpha.delFill),
+    val diffAddEmphasis: Color = diffAdd.copy(alpha = DiffTintAlpha.addEmphasis),
+    val diffDelEmphasis: Color = diffDel.copy(alpha = DiffTintAlpha.delEmphasis),
     val positiveRole: StatusColors? = null,
     val cautionRole: StatusColors? = null,
     val customRoles: Boolean = false,
@@ -161,6 +170,8 @@ internal object Palettes {
         danger = StatusColors(Tokens.Common.Dark.danger, Tokens.Common.Dark.danger, Tokens.Common.Dark.danger.copy(alpha = 0.12f), Color.Black),
         positive = Tokens.Common.Dark.positive, caution = Tokens.Common.Dark.caution, cautionText = Tokens.Common.Dark.cautionText,
         diffAdd = Tokens.Common.Dark.Diff.add, diffDel = Tokens.Common.Dark.Diff.del,
+        diffAddFill = Tokens.Common.Dark.Diff.addFill, diffDelFill = Tokens.Common.Dark.Diff.delFill,
+        diffAddEmphasis = Tokens.Common.Dark.Diff.addEmphasis, diffDelEmphasis = Tokens.Common.Dark.Diff.delEmphasis,
         terminalBackground = Tokens.Common.Dark.terminalBackground, terminalText = Tokens.Common.Dark.terminalText,
         scrim = Color.Black.copy(alpha = 0.45f), dark = true, ai = Tokens.Common.Dark.ai,
         positiveRole = StatusColors(Tokens.Common.Dark.positive, Tokens.Common.Dark.positive, Tokens.Common.Dark.positive.copy(alpha = 0.12f), Color.Black),
@@ -187,6 +198,8 @@ internal object Palettes {
         danger = StatusColors(Tokens.Common.Light.danger, Tokens.Common.Light.danger, Tokens.Common.Light.danger.copy(alpha = 0.12f)),
         positive = Tokens.Common.Light.positive, caution = Tokens.Common.Light.caution, cautionText = Tokens.Common.Light.cautionText,
         diffAdd = Tokens.Common.Light.Diff.add, diffDel = Tokens.Common.Light.Diff.del,
+        diffAddFill = Tokens.Common.Light.Diff.addFill, diffDelFill = Tokens.Common.Light.Diff.delFill,
+        diffAddEmphasis = Tokens.Common.Light.Diff.addEmphasis, diffDelEmphasis = Tokens.Common.Light.Diff.delEmphasis,
         terminalBackground = Tokens.Common.Light.terminalBackground, terminalText = Tokens.Common.Light.terminalText,
         scrim = Color.Black.copy(alpha = 0.2f), dark = false, ai = Tokens.Common.Light.ai,
         positiveRole = StatusColors(Tokens.Common.Light.positive, Tokens.Common.Light.positive, Tokens.Common.Light.positive.copy(alpha = 0.12f)),
@@ -351,3 +364,11 @@ fun statusTone(status: Status, darkTheme: Boolean): StatusTone =
 /** A diff's words that changed in a line (UI version 5, #3136): the add / delete colour, deeper than the line's own tint. */
 val PersonaPalette.diffAddWord: Color get() = diffAdd.copy(alpha = 0.30f)
 val PersonaPalette.diffDelWord: Color get() = diffDel.copy(alpha = 0.30f)
+
+/** The strength of a diff line's tint and of its changed words' (the tokens' alpha, the same in light and dark), for the styles with a diff hue of their own. */
+internal object DiffTintAlpha {
+    val addFill: Float get() = Tokens.Common.Light.Diff.addFill.alpha
+    val delFill: Float get() = Tokens.Common.Light.Diff.delFill.alpha
+    val addEmphasis: Float get() = Tokens.Common.Light.Diff.addEmphasis.alpha
+    val delEmphasis: Float get() = Tokens.Common.Light.Diff.delEmphasis.alpha
+}

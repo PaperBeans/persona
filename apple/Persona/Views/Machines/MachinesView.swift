@@ -122,7 +122,6 @@ struct MachinesView: View {
             }
             .padding(Theme.Space.l)
         }
-        .tabSwitchListRoom()  // its end clear of the open Duo's floating tabs' switch (#4231)
         #if os(macOS)
         .modifier(MacBelowTitleRowIfAsked()) // under Machines' title in the window: the cards start below it (#1243)
         #endif

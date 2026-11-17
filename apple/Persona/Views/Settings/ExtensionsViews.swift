@@ -689,8 +689,8 @@ private struct ExtensionFieldRow: View {
                         TextField(placeholder, text: numberBinding)
                             .keyboardType(field.type == "integer" ? .numberPad : .decimalPad)
                         if field.type == "integer" {
-                            // A step at a time within its bounds (#2385); typing still works for a far value.
-                            Stepper(value: stepperBinding, in: stepperRange) { Text(title) }
+                            // The hub's step only affects these buttons; typing keeps its own value.
+                            Stepper(onIncrement: stepperAction(up: true), onDecrement: stepperAction(up: false)) { Text(title) }
                                 .labelsHidden()
                                 .fixedSize()
                         }
@@ -733,18 +733,14 @@ private struct ExtensionFieldRow: View {
         return String(localized: "Not set")
     }
 
-    /// The stepper's value: what is set, else the default, else the lowest it may be. A step drops what was typed.
-    private var stepperBinding: Binding<Double> {
-        let key = path.joined(separator: ".")
-        return Binding(get: { page.value(path)?.double ?? field.default?.double ?? field.minimum ?? 0 }, set: { n in
-            page.numberText[key] = nil
-            page.set(.number(n.rounded()), at: path)
-        })
-    }
-
-    private var stepperRange: ClosedRange<Double> {
-        let low = field.minimum ?? -1_000_000_000
-        return low...max(low, field.maximum ?? 1_000_000_000)
+    /// A nil action disables just that direction at its bound. A step drops the typed draft.
+    private func stepperAction(up: Bool) -> (() -> Void)? {
+        guard ExtensionIntegerStepper.canStep(field, current: page.value(path)?.double, up: up) else { return nil }
+        return {
+            let next = ExtensionIntegerStepper.next(field, current: page.value(path)?.double, up: up)
+            page.numberText[path.joined(separator: ".")] = nil
+            page.set(.number(next), at: path)
+        }
     }
 
     /// A number as typed: kept as text until it reads as one (ExtensionModel.numberProblems), then the value.
@@ -1068,25 +1064,20 @@ private struct ExtensionSecretSheet: View {
             .onChange(of: value) { if refusal != nil { refusal = nil } }
             .sheetCancel(unsaved: !value.isEmpty) { close() }
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task {
-                            busy = true
-                            switch await (byReference ? saveReference(value) : save(value)) {
-                            case .saved:
-                                value = ""
-                                refusal = nil
-                                close()
-                            case .refused(let words): refusal = words
-                            case .failed: refusal = nil
-                            }
-                            busy = false
+                SheetConfirm(id: "plugin-secret-save", disabled: value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                             busy: busy) {
+                    Task {
+                        busy = true
+                        switch await (byReference ? saveReference(value) : save(value)) {
+                        case .saved:
+                            value = ""
+                            refusal = nil
+                            close()
+                        case .refused(let words): refusal = words
+                        case .failed: refusal = nil
                         }
-                    } label: {
-                        if busy { ProgressView() } else { Text("Save").lineLimit(1) }
+                        busy = false
                     }
-                    .disabled(busy || value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityIdentifier("plugin-secret-save")
                 }
             }
         }

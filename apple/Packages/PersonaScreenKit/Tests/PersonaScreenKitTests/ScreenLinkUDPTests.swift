@@ -254,6 +254,14 @@ final class ScreenLinkUDPTests: XCTestCase {
         ScreenVideoWire.frame(3, body: Data((0 ..< size).map { UInt8(truncatingIfNeeded: $0 + n) }))
     }
 
+    /// The flows tick every 5 ms only while one carries the video (#9492). With nothing to carry (a page on its sign-in
+    /// form, a route still being proved) the 5 ms clock woke the phone about 200 times a second.
+    func testFlowsTickFastOnlyWhileCarryingTheVideo() {
+        XCTAssertEqual(ScreenLinkSession.flowTickNanoseconds(carrying: true), 5_000_000)
+        XCTAssertEqual(ScreenLinkSession.flowTickNanoseconds(carrying: false), 50_000_000)
+        XCTAssertLessThan(Double(ScreenLinkSession.flowTickNanoseconds(carrying: false)) / 1e9, 0.2, "under the hellos' 0.2 s")
+    }
+
     /// The video moves onto the flow once the route carries the session, comes whole and in order over it, and goes
     /// back to the route's TLS connection when the flow goes silent, from where the phone was.
     func testTheVideoRidesTheFlowAndFallsBackToTheRoute() async throws {

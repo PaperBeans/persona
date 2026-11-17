@@ -515,9 +515,7 @@ struct PlaceMapSheet: View {
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(String(localized: "Done [Place Map]")) { dismiss() }.lineLimit(1)
-                }
+                SheetClose { dismiss() }
             }
         }
     }

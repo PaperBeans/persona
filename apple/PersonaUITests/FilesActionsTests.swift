@@ -132,7 +132,7 @@ final class FilesActionsTests: XCTestCase {
         element(app, "files.select.copy", "Copy To").tap()
         element(app, "files.move.here", "the picker")
         shot(app, "copy-picker-\(scheme)")
-        app.buttons["取消"].firstMatch.tap()
+        app.buttons["sheet-close"].firstMatch.tap()
         element(app, "files.select.compress", "Compress").tap()
         XCTAssertTrue(app.descendants(matching: .any)["files.row.归档.zip"].waitForExistence(timeout: 15), "no zip in the list:\n\(app.debugDescription)")
         shot(app, "compressed-\(scheme)")

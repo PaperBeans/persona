@@ -66,6 +66,7 @@ fun InboxEventScreen(repository: InboxRepository, route: InboxEventRoute, naviga
     }
     val record = listedRecord ?: (lookup as? InboxItemLookupResult.Found)?.record
     val pages = LocalInboxItemPages.current
+    val landing = LocalInboxLanding.current
     val feedback = LocalAppFeedback.current
     val res = LocalResources.current
     val scope = rememberCoroutineScope()
@@ -119,8 +120,9 @@ fun InboxEventScreen(repository: InboxRepository, route: InboxEventRoute, naviga
             is ChainTarget.Page -> navigator.navigate(target.key)
             ChainTarget.Source -> navigator.navigate(pages.open(shown))
             is ChainTarget.Url -> open?.invoke(target.url, inbox.contentSource)
+            // Another item's chain opens it from outside the list: a list beside it moves to it (#9053).
             is ChainTarget.Item -> navigator.navigate(inbox.records.firstOrNull { it.item.id == target.id }
-                ?.let { inboxRowPage(it, pages) } ?: InboxEventRoute(target.id))
+                ?.let { inboxRowPage(it, pages).also { page -> landing?.landBeside(it, page) } } ?: InboxEventRoute(target.id))
             ChainTarget.Inline, ChainTarget.None -> Unit
         }
     }

@@ -196,6 +196,25 @@ class CalendarWriteToolsTest {
         assertEquals(mapOf(CalendarContract.Events.EVENT_LOCATION to "Room 2"), write.values)
     }
 
+    @Test fun theChatsUndoDeletesTheEventByItsOwnIdWithNoConfirmation() {
+        backend.events[1] = plain
+        // #9340: the quick result's Undo takes the event it names off the phone, as iOS CalendarTool.remove does.
+        val result = tools.remove(1)
+        val write = backend.batches.single().single()
+        assertEquals(ProviderWrite.Kind.Delete, write.kind)
+        assertEquals(1L, write.id)
+        val body = Json.parseToJsonElement(result.content.single().jsonObject.getValue("text").jsonPrimitive.content).jsonObject
+        assertEquals("1", body.getValue("id").jsonPrimitive.content)
+        assertEquals(true, body.getValue("deleted").jsonPrimitive.content.toBoolean())
+    }
+
+    @Test fun theChatsUndoRefusesAnEventThisPhoneDoesNotHave() {
+        // The card can come from another phone's write or from an event deleted since: nothing is written, the chat says so.
+        val failure = runCatching { tools.remove(42) }.exceptionOrNull() as PhoneToolFailure
+        assertTrue(failure.message!!.contains("no event with id \"42\""))
+        assertTrue(backend.batches.isEmpty())
+    }
+
     @Test fun deletingOneOccurrenceCancelsOnlyThatOne() {
         seedDaily()
         tools.delete(tools.prepareDelete(args("id" to "2", "occurrence_start" to fourthIso)))

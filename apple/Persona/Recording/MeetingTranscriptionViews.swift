@@ -25,7 +25,7 @@ nonisolated enum MeetingTranscriptionWords {
             return String(localized: "This meeting's audio, Talk included, goes through your hub to the speech service it is set up with. The hub deletes the audio once the minutes are written; the text is kept for \(days) days.")
         }
         if talk {
-            return String(localized: "Audio stays on this iPhone, except while you hold Talk: what is said then goes to the voice service. Its text syncs to Knowledge and is kept for \(days) days.")
+            return String(localized: "Audio stays on this iPhone, except while Talk is on: what is said then goes to the voice service. Its text syncs to Knowledge and is kept for \(days) days.")
         }
         return String(localized: "Audio stays on this device. Its text syncs to Knowledge and is kept for \(days) days.")
     }
@@ -34,7 +34,7 @@ nonisolated enum MeetingTranscriptionWords {
     /// hub transcribes (this meeting's audio, Talk included, goes through the hub).
     static func pagePrivacy(hub: Bool, service: String?) -> String {
         guard hub else {
-            return String(localized: "Audio stays on this iPhone, except while you hold Talk: what is said then goes to the voice service.")
+            return String(localized: "Audio stays on this iPhone, except while Talk is on: what is said then goes to the voice service.")
         }
         if let service {
             return String(localized: "This meeting's audio, Talk included, goes through your hub to \(service), and the hub deletes it once the minutes are written.")
@@ -46,7 +46,7 @@ nonisolated enum MeetingTranscriptionWords {
     static func modePrivacy(_ mode: MeetingTranscriptionMode, service: String?) -> String {
         switch mode {
         case .device:
-            return String(localized: "Audio stays on this iPhone, except while you hold Talk: what is said then goes to the voice service.")
+            return String(localized: "Audio stays on this iPhone, except while Talk is on: what is said then goes to the voice service.")
         case .hub:
             if let service {
                 return String(localized: "A meeting's audio, Talk included, goes through your hub to \(service), and the hub deletes it once the meeting's minutes are written. The transcript and the minutes are kept as long as your retention settings say.")

@@ -143,9 +143,7 @@ struct SubscriptionsSheet: View {
                               title: app.hubFeatures.contains(SubscriptionsUI.sourcesFeature) ? String(localized: "Inbox Sources")
                                   : String(localized: "Subscriptions [Source Subscriptions]"))
                 .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { dismiss() } label: { Text("Done [Extension System Presentation c0b3fb]").lineLimit(1) }
-                    }
+                    SheetClose { dismiss() }
                 }
         }
         .onChange(of: app.assistantReveal) { dismiss() }

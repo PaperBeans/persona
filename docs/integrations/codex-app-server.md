@@ -13,6 +13,12 @@ The source research behind it (2026-11-01: endpoints, thread and approval semant
 
 ## First implementation
 
+Parent thread IDs remain raw inside the app-server connection; session decoration converts them to public IDs exactly
+once. Otherwise a secondary home's child points at a twice-hashed ID instead of its listed parent (#9393). The
+assistant's `agents_list` and live context use the existing fold's root rows and folded states, just like the clients:
+known children stay inspectable through their parent, while missing-parent and unknown-ancestry sessions remain
+independent. Pending child interactions keep their original interaction IDs and are described under the parent.
+
 Entry points are `node/codex_registry.go`, `codex_discovery.go`, and `codex_remote.go`. Reuses RPC envelopes/pending from `assistant_codex.go`, connecting external WebSockets through pluggable message writers and dispatch without putting external instances into assistant-process stop/reap.
 
 - Automatically discovers multiple homes, current-user processes/allowlisted fields, and existing listen/control sockets; configuration is in `docs/operations/config.md`. Only open rollout filenames of selected processes identify a stdio source as still running, never recent files or cwd. These sessions (desktop-bundled stdio app-servers running outside the app sidebar; codex terminal UIs running directly in tmux, such as botmux's Codex; sidebar chats get sidebar-based status through app IPC in #380) derive status from their open rollout: a tail ending mid-turn is working (also if a turn exceeds node's 384 KB tail window and no turn event is present—`task_complete` is always within the last few KB when a turn ends); a tail ending in `task_complete` / `turn_aborted` is done (like idle loaded threads on the same app-server). Only threads with no turn yet or no provable work state are unknown, rather than incorrectly exited or permanently working. The app treats unknown as idle, once placing running desktop tasks under "Idle spaces" (#290). An open rollout not written for over a day (using the later of last-line time and file mtime) no longer counts as running and returns to offline: a bridge running for months kept stdio app-servers holding previously loaded threads open, leaving that history perpetually Unread (#2425). Read-only reasons identify the process holding the file: "app-server is running" or "Codex is running" (terminal UI).

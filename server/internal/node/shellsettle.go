@@ -150,6 +150,7 @@ type keptStart struct {
 	created *host.Created
 	ws      string
 	until   time.Time
+	taken   bool // a start holds it (claimKeptTab): only that start settles or releases it
 }
 
 // keepStartTab keeps the tab of a start that failed waiting on its shell or on the agent's screen, created, open for
@@ -172,7 +173,7 @@ func (n *Node) keepStartTab(launch host.Launcher, created *host.Created, ws, id 
 func (n *Node) expireKeptStart(pane string, until time.Time) {
 	n.mu.Lock()
 	k, ok := n.keptStarts[pane]
-	if !ok || !k.until.Equal(until) {
+	if !ok || k.taken || !k.until.Equal(until) { // a start holding it sets its timer again if it lets it go
 		n.mu.Unlock()
 		return
 	}

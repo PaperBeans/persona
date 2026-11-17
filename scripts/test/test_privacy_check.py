@@ -456,6 +456,8 @@ class OrdinaryWordTests(unittest.TestCase):
         labels = pc.profile_labels((root / "scripts/persona_config.py").read_text(), "provisioning_profiles")
         labels |= pc.profile_labels((root / "scripts/test/fixtures/deployment/persona_config.py.fixture").read_text(), "export_options")
         self.assertIn("Persona Share App Store", labels)
+        # The SiriKit extension's default, set only with app.siri_calls on (#9290): pinning it is as generic as the rest.
+        self.assertIn("Persona Call Intents App Store", labels)
         self.assertGreater(len(labels), 5)  # The public historical fixture contributes its literal labels too.
         with patch.object(pc, "public_profile_labels", return_value=frozenset(labels)):
             for label in labels:
@@ -551,6 +553,71 @@ class OrdinaryWordTests(unittest.TestCase):
         config["lan_host"] = "attic.lan"
         config["profile"] = "Zorb Share Prod"
         self.assertEqual(self.scan(config, "Cellar\n")[2], {self.WORD})
+
+
+class AppIdentifierTests(unittest.TestCase):
+    """An app identifier (a reverse-DNS value held only under a bundle_id, application_id or app_group key) matches as a
+    whole identifier: what the apps derive from it with dots still matches, a longer identifier that only starts the
+    same way (a public default committed on purpose) does not (#9461)."""
+
+    BUNDLE = "com.someone.app"  # a made-up bundle id
+    DERIVED = ["com.someone.app", "group.com.someone.app", "com.someone.app.watchkitapp.widgets",
+               "ABCDE12345.com.someone.app", "COM.SOMEONE.APP", '"com.someone.app"', "(com.someone.app)",
+               "apple/com.someone.app.plist", "com.someone.app/"]
+    LONGER = ["com.someone.appd", "com.someone.app-node", "com.someone.app_test", "com.someone.apps.x",
+              "net.com.someone.appx", "xcom.someone.app", "my-com.someone.app"]
+
+    def scan(self, config, words=""):
+        """pc.term_sources() with only this config and private-words.txt on the machine."""
+        with tempfile.TemporaryDirectory(prefix="privacy-check-test-") as temp:
+            home = Path(temp)
+            directory = home / ".config/persona"
+            directory.mkdir(parents=True)
+            (directory / "config.json").write_text(json.dumps(config))
+            (directory / "private-words.txt").write_text(words)
+            env = {k: v for k, v in os.environ.items() if k not in pc.CONFIG_ENV}
+            env["XDG_CONFIG_HOME"] = str(home / ".config")
+            with patch.object(pc, "HOME", str(home)), patch.object(pc, "ROOT", str(home)), \
+                    patch.dict(os.environ, env, clear=True):
+                return list(pc.term_sources()[0])
+
+    def hits(self, words, text):
+        return pc.problems("see " + text + " here", words)
+
+    def test_derived_identifiers_match_and_longer_ones_do_not(self):
+        words = self.scan({"app": {"bundle_id": self.BUNDLE}})
+        self.assertIn(self.BUNDLE, words)
+        for text in self.DERIVED:
+            with self.subTest(text=text):
+                self.assertEqual(self.hits(words, text), [self.BUNDLE])
+        for text in self.LONGER:
+            with self.subTest(text=text):
+                self.assertEqual(self.hits(words, text), [])
+        self.assertEqual(pc.problems("apple/" + self.BUNDLE + ".plist", words), [self.BUNDLE])
+
+    def test_every_app_identifier_key_counts(self):
+        for section, key, value in [("app", "watch_widget_bundle_id", "com.someone.widgetkit"),
+                                    ("app", "app_group", "group.com.someone.shared"),
+                                    ("app", "watch_app_group", "group.com.someone.watch"),
+                                    ("android", "application_id", "com.someone.droid")]:
+            with self.subTest(key=key):
+                words = self.scan({section: {key: value}})
+                self.assertIn(value, words)
+                self.assertEqual(self.hits(words, value + ".debug"), [value])
+                self.assertEqual(self.hits(words, value + "d"), [])
+
+    def test_the_same_value_elsewhere_keeps_the_substring_match(self):
+        for config, listed in [({"app": {"bundle_id": self.BUNDLE}, "hosts": [self.BUNDLE]}, ""),
+                               ({"app": {"bundle_id": self.BUNDLE}}, self.BUNDLE + "\n")]:
+            with self.subTest(config=config, listed=listed):
+                words = self.scan(config, listed)
+                self.assertEqual(self.hits(words, self.BUNDLE + "d"), [self.BUNDLE])
+
+    def test_other_values_keep_their_matching(self):
+        # a dotted host under another key, and an app-identifier key holding something that is no reverse-DNS id
+        words = self.scan({"lan_host": "build.someone.net", "app": {"bundle_id": "someoneapp"}})
+        self.assertEqual(self.hits(words, "xbuild.someone.network"), ["build.someone.net"])
+        self.assertEqual(self.hits(words, "someoneapps"), ["someoneapp"])
 
 
 class NpmLockTests(unittest.TestCase):
@@ -766,6 +833,25 @@ class PrivacyCheckIntegrationTests(unittest.TestCase):
         self.git("add", "web/package-lock.json")
         result = self.scan()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_full_scan_matches_an_app_identifier_as_a_whole_identifier(self):
+        # #9461: a private bundle id no longer fails the whole-repo scan on a longer public identifier that starts the
+        # same way; what is derived from it with dots still does, and the report never carries the value.
+        config = self.home / ".config/persona/config.json"
+        config.parent.mkdir(parents=True)
+        config.write_text(json.dumps({"app": {"bundle_id": "com.someone.app"}}))
+        (self.repo / "signing.go").write_text('// defaults: com.someone.appd, com.someone.app-node\n')
+        self.git("add", "signing.go")
+        result = self.scan()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        (self.repo / "entitlements.txt").write_text("group.com.someone.app\n")
+        self.git("add", "entitlements.txt")
+        result = self.scan()
+        self.assertNotEqual(result.returncode, 0)
+        output = result.stdout + result.stderr
+        self.assertIn("entitlements.txt:1: private value (15 chars) from config app.bundle_id", output)
+        self.assertNotIn("signing.go", output)
+        self.assertNotIn("com.someone", output)
 
     def test_public_site_address_is_allowed_only_in_public_entry_points(self):
         config = self.home / ".config/persona/config.json"

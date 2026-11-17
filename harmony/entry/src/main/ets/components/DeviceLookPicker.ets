@@ -1,7 +1,8 @@
+import { IconActions } from '../design/IconActions';
 import { LengthMetrics } from '@kit.ArkUI';
 import { DeviceLook, DeviceLookAvatar } from '../models/DeviceLook';
 import { Colors } from '../design/Colors';
-import { ButtonStyles } from '../design/Controls';
+import { ButtonStyles, SelectStyles } from '../design/Controls';
 import { Tokens } from '../design/Tokens';
 import { tr } from '../design/Strings';
 
@@ -48,16 +49,16 @@ export struct DeviceLookPicker {
       ListItem() {
         Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween, alignItems: ItemAlign.Center, space: { main: LengthMetrics.vp(Tokens.inset), cross: LengthMetrics.vp(Tokens.gap) } }) {
           Text(tr('device_look_accent_heading')).fontSize(Tokens.body).flexShrink(0).constraintSize({ maxWidth: '100%' })
-          Select(this.accentChoices()).selected(this.accentIndex()).value(this.accentLabel(this.model.accentId)).enabled(this.active && this.model.ready)
+          Select(this.accentChoices()).attributeModifier(SelectStyles.inline).selected(this.accentIndex()).value(this.accentLabel(this.model.accentId)).enabled(this.active && this.model.ready)
             .onSelect((index: number) => { const id = this.model.accentOptions()[index]; if (this.active && id) this.onAccentSelected(id); })
-            .constraintSize({ maxWidth: '100%' }).id('device-look-accent')
+            .constraintSize({ minHeight: Tokens.touch, maxWidth: '100%' }).id('device-look-accent')
         }.width('100%').constraintSize({ minHeight: Tokens.touch }).padding({ left: Tokens.page, right: Tokens.page, top: Tokens.inset, bottom: Tokens.inset })
       }
       if (this.model.busy || !this.model.ready) ListItem() { LoadingProgress().width(Tokens.touch).height(Tokens.touch) }
       if (this.model.error) ListItem() {
         Row({ space: Tokens.gap }) {
           Text(tr(this.model.error)).fontSize(Tokens.meta).fontColor($r('app.color.persona_danger')).layoutWeight(1)
-          Button(tr('retry')).attributeModifier(ButtonStyles.quiet).enabled(this.active).onClick(() => this.onRefresh())
+          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('retry')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('retry', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('retry')).bindTips(tr('retry')).enabled(this.active).onClick(() => this.onRefresh())
         }.padding({ left: Tokens.page, right: Tokens.page, top: Tokens.inset, bottom: Tokens.inset }).width('100%')
       }
     }

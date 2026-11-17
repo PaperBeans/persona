@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"slices"
 	"strings"
@@ -109,6 +110,8 @@ type InboxAgent struct {
 	Wake    bool        `json:"wake,omitempty"`
 	SentOf  string      `json:"sent_of,omitempty"`
 	Lost    []string    `json:"lost,omitempty"`
+	// ProcessingTurn identifies the latest prompt issued to this processing conversation.
+	ProcessingTurn string `json:"processing_turn,omitempty"`
 	// DeferredAt is when this item's oldest held programmatic wake joined the eligibility queue. WakeSlot reserves
 	// the processing conversation's admitted slot while HandlingAgent (or another non-looking state) hides it from
 	// the ordinary running count. Both are persisted internal bookkeeping and are stripped from listed items.
@@ -357,7 +360,12 @@ func (s *Service) startInboxAgents(ctx context.Context, cfg InboxAgentConfig) {
 		delete(b.listMemo.kept, it.ID) // saved once the start returns: listed as running meanwhile (inbox_list_memo.go)
 		a := b.inboxAgentFor(it, owner, linked[it.Agent.TodoID], larkDefault, loc)
 		a.KnowledgeDir = s.kb.dir // the heading of what the knowledge base knows names where it is
-		jobs = append(jobs, job{it, b.kbChatOf(it), func(kbc *prompts.KBContext) string { a.KB = kbc; return prompts.RenderInboxAgent(a) },
+		turn := rand.Text()
+		it.Agent.ProcessingTurn = turn
+		jobs = append(jobs, job{it, b.kbChatOf(it), func(kbc *prompts.KBContext) string {
+			a.KB = kbc
+			return inboxProcessingPrompt(turn, prompts.RenderInboxAgent(a))
+		},
 			it.Agent.told})
 	}
 	b.mu.Unlock()

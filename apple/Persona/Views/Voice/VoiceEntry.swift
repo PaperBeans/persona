@@ -23,8 +23,12 @@ extension VoiceSupport {
         return session.assistant ? model.persona.name : session.agentLabel
     }
 
-    /// Starts a call bound to `key` where the page offers one; otherwise what to say about it.
+    /// Starts a call bound to `key` where the page offers one; otherwise what to say about it. Not while Persona's
+    /// urgent call rings or is on (#9290): its audio is the system's.
     @discardableResult static func start(_ key: SessionKey, model: AppModel) -> VoiceUnavailableNote? {
+        #if os(iOS)
+        if PersonaCalls.shared.urgentInProgress { return PersonaCalls.urgentNote }
+        #endif
         let availability = VoiceSupport.shared.availability(for: model.session(key), group: key.group)
         guard case .available(let id) = availability else {
             return VoiceUnavailableNote.make(availability, extensionID: VoiceSupport.shared.voiceExtensionID(group: key.group))
@@ -35,6 +39,8 @@ extension VoiceSupport {
         #if DEBUG
         if VoiceSample.silentAudio { deps.audio = { VoiceSample.SilentAudio() } }
         #endif
+        // A call to Persona that is on ends first, and the voice chat starts once the system let its audio go
+        // (`VoiceCalls.endSystemCall`).
         Task { await VoiceCalls.shared.start(key, extensionID: id, surface: .phone, recent: recent, deps: deps) }
         return nil
     }
@@ -83,12 +89,14 @@ struct VoiceEndedStrip: View {
     @Environment(AppModel.self) private var model
     @State private var showDetails = false
     @State private var showModel = false
+    /// Why Continue did not pick the call up (Persona's urgent call is on, #9290).
+    @State private var refusal: VoiceUnavailableNote?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
                 ThemedIcon(Theme.Icon.voiceChannel).font(Theme.Font.labelStrong).foregroundStyle(.secondary)
-                Text("Voice ended · \(note.text)")
+                (call.surface == .call ? Text("Call ended · \(note.text)") : Text("Voice ended · \(note.text)"))
                     .font(Theme.Font.secondary)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
@@ -99,9 +107,19 @@ struct VoiceEndedStrip: View {
                 if let again = note.again {
                     Button {
                         Haptics.tap()
-                        Task { await VoiceCalls.shared.resume(call.key) }
+                        #if os(iOS)
+                        // A system call that ended is not picked up again: Persona is called again (a new system call).
+                        if call.surface == .call {
+                            let group = call.key.group
+                            Task { await PersonaCalls.shared.callPersona(group: group, origin: .app) }
+                            return
+                        }
+                        #endif
+                        Task { refusal = await VoiceCalls.shared.resume(call.key) }
                     } label: {
-                        Label(again == .resume ? String(localized: "Continue") : String(localized: "Retry [Components b8784c]"), systemImage: Theme.Icon.voiceChannel)
+                        // Calling Persona again is Call Persona's glyph, not the in-app voice chat's.
+                        Label(again == .resume ? String(localized: "Continue") : String(localized: "Retry [Components b8784c]"),
+                              systemImage: call.surface == .call ? Theme.Icon.callPersona : Theme.Icon.voiceChannel)
                             .lineLimit(1)
                     }
                     .accessibilityIdentifier("voice-continue")
@@ -136,6 +154,7 @@ struct VoiceEndedStrip: View {
         } message: {
             Text(note.details ?? "")
         }
+        .voiceUnavailableAlert($refusal, model: model)
         // The default assistant's: calls talk to its voice extension.
         .modelConfigurationSheet(isPresented: $showModel, purposeID: "plugin." + call.extensionID, owner: .defaultAssistant)
     }

@@ -243,6 +243,11 @@
     <plurals name="chat_content_show_all_lines">
         <item quantity="other">展开全部（%1$d 行）</item>
     </plurals>
+    <plurals name="chat_diff_unchanged_lines">
+        <item quantity="other">… %1$d 行没变</item>
+    </plurals>
+    <string name="chat_diff_line_added">新增</string>
+    <string name="chat_diff_line_removed">删除</string>
     <plurals name="chat_todos_progress">
         <item quantity="other">%1$d/%2$d 项待办已完成</item>
     </plurals>
@@ -335,6 +340,9 @@
     <string name="chat_tasks_interrupt_all_handled">→ 都处理了</string>
     <string name="chat_tasks_quick_reminder">已加提醒</string>
     <string name="chat_tasks_quick_calendar">已加到日历</string>
+    <string name="chat_tasks_quick_undo">撤销</string>
+    <string name="chat_tasks_quick_undone">已撤销</string>
+    <string name="chat_tasks_quick_undo_failed">没撤销成功</string>
     <string name="chat_today_done_one">做完了：%1$s</string>
     <plurals name="chat_today_done_many">
         <item quantity="other">做完了 %1$d 个任务</item>

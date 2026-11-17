@@ -5,9 +5,6 @@ import android.content.ComponentName
 import android.graphics.Bitmap
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -131,10 +128,12 @@ class AgentsTabNavigationShotsTest {
                                     entry.Content()
                                 }
                             }
+                            val pageTransitions = rememberPageTransitions()
                             NavDisplay(backStack = stacks.getValue(selected), onBack = navigator::back,
                                 entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), rememberViewModelStoreNavEntryDecorator(), chrome),
-                                transitionSpec = { ContentTransform(EnterTransition.None, ExitTransition.None) },
-                                popTransitionSpec = { ContentTransform(EnterTransition.None, ExitTransition.None) },
+                                transitionSpec = { pageTransitions.push },
+                                popTransitionSpec = { pageTransitions.pop },
+                                predictivePopTransitionSpec = { pageTransitions.predictivePop },
                                 entryProvider = entryProvider {
                                     entry<AssistantRoute> {
                                         JPage("Assistant") { padding ->

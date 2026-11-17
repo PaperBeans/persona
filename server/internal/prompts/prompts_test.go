@@ -1,6 +1,7 @@
 package prompts
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -225,6 +226,84 @@ func TestEveryMCPToolIsUsed(t *testing.T) {
 			t.Errorf("%s: description %q, schema %s", n, tool.Description, tool.InputSchema)
 		}
 	}
+}
+
+// Gemini's GenerateContentRequest FunctionDeclaration validator rejects empty enum arrays and empty-string enum
+// entries with 400 INVALID_ARGUMENT. Optional string resets (such as "") belong in description and runtime parsing,
+// never in enum (#9696).
+func TestMCPToolSchemasHaveNoEmptyEnum(t *testing.T) {
+	for _, name := range ToolNames() {
+		var schema any
+		if err := json.Unmarshal(Tool(name).InputSchema, &schema); err != nil {
+			t.Fatalf("%s: bad JSON schema: %v", name, err)
+		}
+		for _, bad := range emptySchemaEnums(schema, name) {
+			t.Errorf("%s", bad)
+		}
+	}
+	var sample any
+	_ = json.Unmarshal([]byte(`{"type":"object","properties":{"enum":{"type":"string","enum":["ok"]},"bad":{"type":"string","enum":["","ok"]},"nested":{"type":"array","items":{"type":"string","enum":[]}}}}`), &sample)
+	if got := emptySchemaEnums(sample, "sample"); !slices.Equal(got, []string{
+		`sample.properties.bad.enum contains an empty string ""`,
+		`sample.properties.nested.items.enum is empty`,
+	}) {
+		t.Fatalf("emptySchemaEnums(sample) = %v", got)
+	}
+}
+
+func emptySchemaEnums(node any, path string) []string {
+	obj, ok := node.(map[string]any)
+	if !ok {
+		return nil
+	}
+	var out []string
+	if raw, has := obj["enum"]; has {
+		vals, ok := raw.([]any)
+		switch {
+		case !ok:
+			out = append(out, path+".enum is not an array")
+		case len(vals) == 0:
+			out = append(out, path+".enum is empty")
+		default:
+			for _, v := range vals {
+				if s, ok := v.(string); ok && s == "" {
+					out = append(out, fmt.Sprintf(`%s.enum contains an empty string ""`, path))
+				}
+			}
+		}
+	}
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		switch k {
+		case "enum":
+			continue
+		case "properties", "$defs", "definitions", "patternProperties":
+			if children, ok := obj[k].(map[string]any); ok {
+				childKeys := make([]string, 0, len(children))
+				for ck := range children {
+					childKeys = append(childKeys, ck)
+				}
+				slices.Sort(childKeys)
+				for _, ck := range childKeys {
+					out = append(out, emptySchemaEnums(children[ck], path+"."+k+"."+ck)...)
+				}
+			}
+		default:
+			switch v := obj[k].(type) {
+			case map[string]any:
+				out = append(out, emptySchemaEnums(v, path+"."+k)...)
+			case []any:
+				for i, item := range v {
+					out = append(out, emptySchemaEnums(item, fmt.Sprintf("%s.%s[%d]", path, k, i))...)
+				}
+			}
+		}
+	}
+	return out
 }
 
 // The "## MCP tools" table in docs/assistant/prompts.md has a row for every mcp/<dir>/, that row names each of the directory's

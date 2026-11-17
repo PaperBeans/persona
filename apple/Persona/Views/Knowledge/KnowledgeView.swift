@@ -85,7 +85,7 @@ struct KnowledgeView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .tabSwitchListRoom()  // its end clear of the open Duo's floating tabs' switch (#4231)
+        .devScreen("knowledge")
         .alert("Couldn't Finish", isPresented: Binding(get: { recordingFailure != nil }, set: { if !$0 { recordingFailure = nil } })) {
             Button("OK [Recordings Section de32e2]") { recordingFailure = nil }.lineLimit(1)
         } message: { Text(recordingFailure ?? "") }
@@ -320,7 +320,7 @@ struct KnowledgeView: View {
     /// conversation), and a swipe deletes it as the Meetings page's rows do (#4938), asked first.
     private func recordingRow(_ e: KBEntry, id: UUID) -> some View {
         NavigationLink {
-            if RecordingLibrary.shared.entry(id)?.isDay == true { RecordingDayView(id: id) } else { RecordingDetailView(id: id) }
+            if RecordingLibrary.shared.entry(id)?.isDay == true { RecordingDayView(id: id) } else { RecordingOpen(id: id) }
         } label: { KBRow(entry: e) }
             .accessibilityIdentifier("kb.recording")
             // Rename (#8873): a touch and hold, and VoiceOver's actions; not a day, named by its date.
@@ -1812,10 +1812,8 @@ struct KBTagEditor: View {
             .navigationTitle(entry.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { Task { await save() } }.disabled(saving)
-                }
+                SheetClose { dismiss() }
+                SheetConfirm(id: "kb-entry-save", name: String(localized: "Save"), busy: saving) { Task { await save() } }
             }
             .onAppear {
                 if capturedAPI == nil { capturedAPI = inheritedAPI ?? model.api?.currentAssistantSettings() }

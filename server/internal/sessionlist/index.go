@@ -35,6 +35,9 @@ type Item struct {
 	// BackgroundWaiting: a working row that only waits on background commands (#6045). It stays in State's count
 	// (older apps call it working) and is counted apart in Counts.BackgroundWaiting too.
 	BackgroundWaiting bool
+	// JustFinished: a seen row whose done turn nobody had looked at, while it is new (proto.WorkState.JustFinished,
+	// #9751). It stays in State's count (older apps call it seen) and is counted apart in Counts.JustFinished too.
+	JustFinished bool
 	// Private: a row a reader with Options.NoPrivate is never shown, in its rows, totals or counts (a health-space
 	// conversation, which an extension's token does not see).
 	Private bool
@@ -128,6 +131,10 @@ type Options struct {
 	// sidebar's hidden botmux sessions). Both bind a cursor as the other filters do (#6662).
 	Waiting           string
 	ExcludePaneSource string
+	// JustFinished (just_finished=1) selects the Just finished items (Item.JustFinished, by their folded state with
+	// Roots: idle), just_finished=0 the others: with state=idle, the web's Just finished and Seen sections (#9751). It
+	// binds a cursor as the other filters do.
+	JustFinished string
 }
 
 // TodoNone is the todo value that selects the items on no to-do: no to-do id is spelled so ("todo_<hex>").
@@ -162,8 +169,11 @@ type Counts struct {
 	Todo map[string]int `json:"todo"`
 	// BackgroundWaiting: how many of State["working"] only wait in the background (#6045): a client that shows them
 	// apart takes them out of its Working count.
-	BackgroundWaiting int    `json:"background_waiting,omitempty"`
-	Revision          string `json:"revision"`
+	BackgroundWaiting int `json:"background_waiting,omitempty"`
+	// JustFinished: how many of State["idle"] are Just finished (#9751): a client that shows them apart takes them out
+	// of its Seen count.
+	JustFinished int    `json:"just_finished,omitempty"`
+	Revision     string `json:"revision"`
 }
 
 // PageWithCounts is a page with its view's current counts (with_counts=1): what a separate ?counts=1 read with the
@@ -200,7 +210,7 @@ type journalEntry struct {
 }
 
 type filters struct {
-	ID, State, Machine, Project, Group, Source, Provider, Q, PaneSource, Manager, Under, Todo, Waiting, ExcludePaneSource string
+	ID, State, Machine, Project, Group, Source, Provider, Q, PaneSource, Manager, Under, Todo, Waiting, ExcludePaneSource, JustFinished string
 	// Places and Spaces are Options' as placesKey spells them: filters stay comparable.
 	Places, Spaces               string
 	Roots, NoPrivate, AgentsOnly bool

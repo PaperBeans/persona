@@ -49,6 +49,17 @@ struct VNCPage: View {
     @State private var smoothScrollingHelp = false
     /// The app went to the background with the page up (not just Control Center or an alert over it).
     @State private var wentBackground = false
+    /// Phone Screen (#9314): this page's portrait display on the Mac and the window sheet.
+    @State private var phone: PhoneScreenLink?
+    @State private var phoneWindows = false
+    /// The display's shape (#9500): the picture's size in points with the keyboard down, read until the display is up and
+    /// then kept. Only the phone turning reads it again; the keyboard, the shortcut row and the lines under the bars,
+    /// which change the picture's height for a while, never do, so the Mac never rebuilds the display for them.
+    @State private var phoneShape: PhoneShape?
+    /// The system keyboard is on screen (it can come up without the Keyboard button, from the key catcher), and the
+    /// picture's last size, read again for the shape once the keyboard is down (the phone may have turned meanwhile).
+    @State private var keyboardUp = false
+    @State private var pictureSize = CGSize.zero
     /// When the app came back from the background with the connection not (yet) known to be down: a drop reported
     /// within `returnWindow` is the suspension's, so it reconnects once by itself (#4243).
     @State private var returnedAt: Date?
@@ -105,12 +116,26 @@ struct VNCPage: View {
                     Color.black
                     if let s = session { content(s) }
                     #if os(iOS) || os(visionOS)
+                    // Over the picture, not above it: a line that came and went would change the picture's shape, and
+                    // with it the display's on the Mac.
+                    if activeMode == .phone, let line = phoneLine {
+                        phoneStatusLine(line)
+                            .padding(.vertical, Theme.Space.xs)
+                            .background(Theme.Fill.scrim)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    }
                     if statsOn, let stats = currentStats {
                         ScreenStatsOverlay(stats: stats) { statsOn = false; ScreenStatsPref.set(false, for: ref) }
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     }
                     #endif
                 }
+                #if os(iOS) || os(visionOS)
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                    pictureSize = size
+                    readPhoneShape(size)
+                }
+                #endif
                 #if os(iOS) || os(visionOS)
                 // Over the keyboard while it is up (the bars ride above it).
                 if typing, let s = session { VNCShortcutBar(session: s, modifiers: modifiers) }
@@ -120,9 +145,16 @@ struct VNCPage: View {
         }
         .background(Color.black.ignoresSafeArea())
         .environment(\.colorScheme, .dark)
+        .devScreen("screen")
         .onAppear {
             session = VNC.hold(ref)
             mode = VNCMode.of(ref)
+            #if os(iOS)
+            // Back from the small window (Restore): the Phone Screen it kept on the Mac, its window still there.
+            if phone == nil { phone = VNCPiP.shared.takePhone(ref) ?? PhoneScreenLink(ref: ref) }
+            #elseif os(visionOS)
+            if phone == nil { phone = PhoneScreenLink(ref: ref) }
+            #endif
             #if os(iOS) || os(visionOS)
             display = VNCDisplayChoice.of(ref)
             // Picture defaults to video on a Mac whose node offers it (it falls back to VNC by itself when it can't show);
@@ -154,12 +186,23 @@ struct VNCPage: View {
         #if os(iOS)
         .task(id: hubProbing) { await probeHub() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in appActive = false }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+            keyboardUp = false
+            readPhoneShape(pictureSize)
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in appActive = true }
         #endif
         .onDisappear {
             #if os(iOS)
             VNCPiP.shared.pagePicture(nil)
+            // Phone Screen stays on the Mac while the small window has this Mac, which shows its portrait display; else
+            // it ends (the Mac puts its windows back and lets the display go) and the small window shows all of the picture.
+            let kept = phone.map { VNCPiP.shared.keepPhone($0) } ?? false
+            if !kept { session?.cutSmallWindow(nil) }
             VNCPiP.shared.pageGone(ref)
+            #elseif os(visionOS)
+            phone?.stop() // the Mac puts its windows back and lets the display go
             #endif
             VNC.release(ref)
         }
@@ -214,6 +257,28 @@ struct VNCPage: View {
             // Only the connection that was asked, still saying live: one started since (a reconnect, a sign-in) is new.
             guard let s = session, s.connection == askedConnection, case .live = s.phase else { return }
             if (s.lastFrame ?? .distantPast) < at { s.reconnect() }
+        }
+        #endif
+        #if os(iOS) || os(visionOS)
+        // Phone Screen (#9314): on while the mode is and the screen is live, for this connection at the picture's shape.
+        .task(id: phoneWant) {
+            guard let phone else { return }
+            // A page just opened on a Phone Screen that is on (Restore from the small window, #9659) has not read the
+            // picture's shape yet: the Mac's display and window stay until it has.
+            if let w = phoneWant { phone.start(pair: w.pair, size: w.size) } else if !phoneShapePending { phone.stop() }
+        }
+        #endif
+        #if os(iOS)
+        // The small window shows what the page does in Phone Screen: the portrait display alone, at its own pixels.
+        .onChange(of: smallWindowCut) { _, cut in session?.cutSmallWindow(cut?.rect) }
+        #endif
+        #if os(iOS) || os(visionOS)
+        .onChange(of: phone?.phase) { _, phase in
+            // Up for the first time with nothing on it: the window list, to pick what goes there.
+            if phase == .on, phone?.placed == nil { phoneWindows = true }
+        }
+        .sheet(isPresented: $phoneWindows) {
+            if let phone { PhoneScreenWindows(link: phone, name: name) }
         }
         #endif
         .sheet(isPresented: $help) { VNCHelp() }
@@ -397,7 +462,11 @@ struct VNCPage: View {
             Picker("Mode", selection: Binding(get: { mode }, set: { mode = $0; VNCMode.set($0, for: ref) })) {
                 Label("Mouse Mode", systemImage: Theme.Icon.pointer).tag(VNCMode.mouse)
                 Label("Trackpad Mode", systemImage: Theme.Icon.trackpad).tag(VNCMode.trackpad)
+                if phoneOffered {
+                    Label("Phone Screen", systemImage: Theme.Icon.phoneScreen).tag(VNCMode.phone)
+                }
             }
+            .accessibilityIdentifier("vnc-mode")
             // Picture channel and its quality bias (#3954), remembered per Mac — only when this Mac's node advertises the
             // video channel, so no Mac shows a control it can't use (the switcher stays hidden until it does). Input stays
             // on RFB in both; only the picture path changes. Video falls back to VNC on its own and says why on the page.
@@ -431,7 +500,7 @@ struct VNCPage: View {
             }
             .accessibilityIdentifier("screen-stats-toggle")
             let displays = offeredDisplays
-            if displays.count > 1 {
+            if displays.count > 1, activeMode != .phone {
                 Picker(selection: Binding(get: { shownDisplay?.id }, set: { display = $0; VNCDisplayChoice.set($0, for: ref) })) {
                     Text("All Displays").tag(String?.none)
                     ForEach(Array(displays.enumerated()), id: \.element.id) { i, d in
@@ -492,6 +561,17 @@ struct VNCPage: View {
             .accessibilityIdentifier("vnc-clipboard")
             #if os(iOS)
             if AppOrientation.phone { rotateButton }
+            #endif
+            #if os(iOS) || os(visionOS)
+            if activeMode == .phone {
+                Button { phoneWindows = true } label: {
+                    ThemedIcon(Theme.Icon.macWindows).font(Theme.Font.heading).scaledFrame(width: Theme.Size.icon, height: Theme.Size.icon)
+                }
+                .themedButton()
+                .disabled(phone?.phase != .on)
+                .accessibilityLabel("Windows")
+                .accessibilityIdentifier("phone-screen-windows-button")
+            }
             #endif
             Spacer(minLength: Theme.Space.s)
             if waiting {
@@ -755,13 +835,15 @@ struct VNCPage: View {
             // It fades as it goes: the system's copy comes over it a few frames after the start, and gone at once it
             // left a blank there until then. It is back at once, where the small window has just grown into it.
             let handedOver = model.vncPiP == ref
-            VNCScreen(session: s, mode: mode, interactive: true, region: shownDisplay?.frame,
+            VNCScreen(session: s, mode: activeMode, interactive: true, region: shownDisplay?.frame, regionID: shownDisplay?.id,
+                      fillsWidth: activeMode == .phone && !railed,
                       onView: { v in DispatchQueue.main.async { screenView = v; zoomed = false } }, onZoom: { zoomed = $0 },
                       onPicture: { VNCPiP.shared.pagePicture($0) })
                 .opacity(handedOver ? 0 : 1)
                 .animation(handedOver ? Theme.Motion.conceal : nil, value: handedOver)
             #else
-            VNCScreen(session: s, mode: mode, interactive: true, region: shownDisplay?.frame,
+            VNCScreen(session: s, mode: activeMode, interactive: true, region: shownDisplay?.frame, regionID: shownDisplay?.id,
+                      fillsWidth: activeMode == .phone && !railed,
                       onView: { v in DispatchQueue.main.async { screenView = v; zoomed = false } }, onZoom: { zoomed = $0 })
             #endif
             #else
@@ -798,13 +880,97 @@ struct VNCPage: View {
     /// The Mac's displays to choose from: the server's screens, else the node's arrangement, else none (VNCDisplays).
     private var offeredDisplays: [VNCDisplay] {
         guard let s = session else { return [] }
-        return VNCDisplays.layout(server: s.screens, machine: model.screenDisplays(ref), framebuffer: s.size)
+        // Phone Screen's arrangement is the Mac's as it answered the start, its display among them (#9314).
+        let machine = activeMode == .phone && phone?.phase == .on && !(phone?.displays.isEmpty ?? true) ? phone?.displays ?? [] : model.screenDisplays(ref)
+        return VNCDisplays.layout(server: s.screens, machine: machine, framebuffer: s.size)
     }
 
-    /// The chosen display while it is there; nil shows them all.
+    /// The chosen display while it is there; nil shows them all. In Phone Screen, its own display once the picture has it.
     private var shownDisplay: VNCDisplay? {
+        if activeMode == .phone, phone?.phase == .on, let d = phone?.display {
+            return offeredDisplays.first { $0.id == "display-\(d.id)" }
+        }
         guard let display else { return nil }
         return offeredDisplays.first { $0.id == display }
+    }
+
+    /// Whether this Mac offers Phone Screen (#9314): its node and Persona Input can. `-showPhoneScreenDemo` forces it
+    /// for screenshots against a mock without it.
+    private var phoneOffered: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-showPhoneScreenDemo") { return true }
+        #endif
+        return model.phoneScreen(ref) != nil
+    }
+
+    /// The mode the touches follow: Phone Screen only where the Mac offers it (a kept choice on a Mac that no longer
+    /// does is Mouse Mode until it does again).
+    private var activeMode: VNCMode { mode == .phone && !phoneOffered ? .mouse : mode }
+
+    /// What Phone Screen needs now: the live connection's pair and the display's shape; nil: off.
+    private var phoneWant: PhoneWant? {
+        guard activeMode == .phone, let s = session, s.phase == .live, let pair = s.pair, let shape = phoneShape else { return nil }
+        return PhoneWant(pair: pair, size: shape.size)
+    }
+
+    /// Phone Screen is the mode but this page has not read the picture's shape yet (it has just opened).
+    private var phoneShapePending: Bool { activeMode == .phone && phoneShape == nil }
+
+    struct PhoneShape: Equatable {
+        var size: CGSize
+        var railed: Bool
+    }
+
+    /// The picture's size as the display's shape (#9500), when it may change: never with the keyboard up; freely until
+    /// the display is up; after that only when the phone turned.
+    private func readPhoneShape(_ size: CGSize) {
+        guard !typing, !keyboardUp, size.width > 0, size.height > 0 else { return }
+        let started = phone.map { $0.phase != .off } ?? false
+        if phoneShape == nil || !started || phoneShape?.railed != railed { phoneShape = PhoneShape(size: size, railed: railed) }
+    }
+
+    struct PhoneWant: Equatable {
+        var pair: String
+        var size: CGSize
+    }
+
+    /// The part of the picture the small window shows (#9659): in Phone Screen, its display as the page shows it; nil: all of it
+    /// (Mouse and Trackpad Mode, one display chosen or not). For this connection and framebuffer: a new one cuts again.
+    private var smallWindowCut: SmallWindowCut? {
+        guard activeMode == .phone, let s = session, let d = shownDisplay else { return nil }
+        return SmallWindowCut(rect: d.frame, framebuffer: s.size, pair: s.pair)
+    }
+
+    struct SmallWindowCut: Equatable {
+        var rect: CGRect
+        var framebuffer: CGSize
+        var pair: String?
+    }
+
+    /// The line under the bars while Phone Screen starts, waits for the picture or can't start.
+    private var phoneLine: (text: String, busy: Bool, failed: Bool)? {
+        switch phone?.phase {
+        case .starting?: return (String(localized: "Setting up the phone screen on \(name)…"), true, false)
+        case .failed(let why)?: return (why, false, true)
+        case .on? where shownDisplay == nil: return (String(localized: "Waiting for the phone screen's picture…"), true, false)
+        default: return nil
+        }
+    }
+
+    private func phoneStatusLine(_ line: (text: String, busy: Bool, failed: Bool)) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
+            if line.busy {
+                ProgressView().controlSize(.mini)
+            } else {
+                ThemedIcon(Theme.Icon.info).font(Theme.Font.caption).foregroundStyle(line.failed ? Theme.caution : .secondary)
+            }
+            Text(line.text).font(Theme.Font.label).foregroundStyle(.secondary)
+                .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Theme.Space.page)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("phone-screen-status")
     }
     #endif
 
@@ -982,6 +1148,7 @@ struct VNCHelp: View {
                     }
                     #endif
                     row(Theme.Icon.displays, String(localized: "Displays"), String(localized: "When the Mac has more than one display, choose one in “…” › Displays to show only that display. Zooming, taps and the pointer then stay on it."))
+                    row(Theme.Icon.phoneScreen, String(localized: "Phone Screen"), String(localized: "Where the Mac offers it, “…” › Phone Screen shows one of its windows on a display shaped like this iPhone, so text is readable without zooming. Pick the window from Windows at the bottom. Tap to click, drag with one finger to scroll, touch and hold then drag to select, and touch and hold to right-click. Switching back to another mode, or closing the screen, puts the Mac's windows back where they were."))
                     #else
                     row(Theme.Icon.pointer, String(localized: "Mouse"), String(localized: "Click for the left mouse button; right-click (or Control-click) for the right button; press and hold the mouse button and move to drag."))
                     row(Theme.Icon.trackpad, String(localized: "Scroll"), String(localized: "Turn the mouse wheel, or swipe with two fingers on a Magic Mouse or trackpad to scroll the view."))
@@ -1017,9 +1184,7 @@ struct VNCHelp: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button { dismiss() } label: { ThemedIcon(Theme.Icon.close) }.accessibilityIdentifier("vnc-help-close")
-                }
+                SheetClose(id: "vnc-help-close") { dismiss() }
             }
         }
         .accessibilityIdentifier("vnc-help-page")

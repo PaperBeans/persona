@@ -60,10 +60,10 @@ internal fun AgentsScreen(
     /** A notification's card to open once it is listed (#4808). */
     cardRequests: CardOpenRequests = AgentsCardOpen,
 ) {
-    val page by model.page.collectAsStateWithLifecycle()
+    val latestPage by model.page.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-    LaunchedEffect(model, listState, page.pagination.paged) {
-        if (!page.pagination.paged) return@LaunchedEffect
+    LaunchedEffect(model, listState, latestPage.pagination.paged) {
+        if (!latestPage.pagination.paged) return@LaunchedEffect
         snapshotFlow {
             val layout = listState.layoutInfo
             val last = layout.visibleItemsInfo.lastOrNull()?.index ?: -1
@@ -75,6 +75,15 @@ internal fun AgentsScreen(
     val everyRequest by model.interactions.pending.collectAsStateWithLifecycle()
     // The current assistant's agents (docs/assistant/managers.md "Clients"), and the cards that are theirs.
     val assistant = persona.core.designsystem.currentAssistant()
+    // What the list draws: the hub's page, held still for a bounded time while it is scrolled (AgentsFeedHold.kt). The
+    // controls and the window size start it over; a rebuilt window is not told apart from a new list.
+    val window = androidx.compose.ui.platform.LocalConfiguration.current
+    // The pill counts what the Needs You section of a page would draw, from the requests the screen shows for that page.
+    val feed = rememberAgentsFeed(latestPage, { p ->
+        agentsFeedNeedsYou(p, shownRequests(everyRequest, group, assistant, p.sessions)) { key -> model.operationState.value.sessions[key]?.closed == true }
+    }, listOf(group?.namespace, assistant.id, assistant.group, latestPage.settings, latestPage.preferences, PersonaTheme.style,
+        window.screenWidthDp, window.screenHeightDp), listState)
+    val page = feed.page
     LaunchedEffect(model, assistant) { model.show(assistant) }
     // The shell keeps the picked computer for the next launch: it follows the filter however that changes (a chip, or
     // let go by a switch of assistant or hub group).
@@ -316,15 +325,33 @@ internal fun AgentsScreen(
                 page.settings.query.isEmpty() && page.settings.quick == AgentQuickFilter.All && !page.pagination.paged
             }, idleRepos = repoTree, hideIdle = hideIdle)
     }
+    // Tap-driven row motion only (#9600). Hub pushes change [tree] with the flag clear, so they stay put.
+    val listTapMotion = remember { ListTapMotion() }
+    // The motion follows this screen's model. A second model (the shot loop, or a new key) must not
+    // leave the flag on the previous one: that list then folds with nothing armed.
+    DisposableEffect(model, listTapMotion) {
+        model.attachListTap(listTapMotion)
+        onDispose { model.detachListTap(listTapMotion) }
+    }
+    // A page built before the tap carries an older generation and is ignored (the list is throttled).
+    LaunchedEffect(page) { listTapMotion.land(page.tapEpoch) }
+    BindListTapMotion(listTapMotion)
+    // The computer chip only (ChatsView.swift:1646). The menu's machine picker sets the filter with no animation (AgentsMenus.swift:141).
+    fun clearMachine() {
+        model.machine("", animate = true)
+        onMachineSelected("")
+    }
     val paginationFooter = page.pagination.paged && !firstPageIncomplete
     val controls = page.settings
     // Use the effective sort and the user's fold choices, which are kept separately from the live list projection.
     // Display includes the Compact/Detailed preference in every style.
+    val restoring = RestoreAgentReadingPosition(listState, tree, paginationFooter, page.loaded)
     KeepAgentReadingPosition(listState, tree, paginationFooter,
         scope = listOf(group?.namespace, assistant.id, assistant.group, controls.grouping, controls.sort,
             controls.quick, controls.machineFilter, controls.query, controls.hideBotmux,
             controls.folded, controls.expandedIdle, controls.expandedQuiet, controls.expandedAll, page.preferences.foldedTabs, expandedTasks,
-            page.preferences.range, page.preferences.display, PersonaTheme.style))
+            page.preferences.range, page.preferences.display, PersonaTheme.style),
+        restoring = restoring)
     // Rows outside the tree name their computer while the list mixes computers, By To-do's their host while it mixes
     // hosts (iOS `rowMachine`, `mixedHosts`; #4338 A9). By Machine's sections are the computers, so rows omit the name
     // (iOS `rowMachine` skips `.machine`).
@@ -374,6 +401,7 @@ internal fun AgentsScreen(
             summary = summary, subtitle = subtitle, greet = true, largeTitle = LocalHomeChrome.current == null,
             titleBusy = connection in setOf(ConnectionState.Connecting, ConnectionState.Updating),
             onTitleClick = if (connection != ConnectionState.Online) connectionDetails else ({ menu = true }), refreshing = refreshing, onRefresh = model::refresh,
+            listScroll = listTapScroll(listTapMotion),
             actions = {
                 if (LocalHomeChrome.current == null) JIconButton(PhIcons.ListChecks, stringResource(R.string.agents_action_todos), { navigator.navigate(persona.core.navigation.TodosRoute) })
                 JIconButton(if (homeChrome) PhIcons.NotePencil else PhIcons.Plus, stringResource(R.string.agents_action_new_session), { newSession() })
@@ -382,6 +410,8 @@ internal fun AgentsScreen(
                 else JIconButton(PersonaIcons.moreMenu, stringResource(R.string.agents_action_list_settings), { menu = true })
             },
         ) {
+            val tapScope = ListTapLazyScope(this, listTapMotion, listState, page.tapEpoch)
+            with(tapScope) {
             item("search") {
                 val settings by model.listSettings.collectAsStateWithLifecycle()
                 androidx.compose.animation.AnimatedVisibility(!homeChrome || searchVisible || settings.query.isNotBlank()) {
@@ -419,8 +449,8 @@ internal fun AgentsScreen(
                 val hint = stringResource(R.string.agents_only_machine_hint)
                 Row(Modifier.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.xs)) {
                     JChip(stringResource(R.string.agents_only_machine, name), Modifier.testTag("agents-machine-filter")
-                        .semantics { onClick(label = hint) { model.machine(""); onMachineSelected(""); true } },
-                        selected = true, onClick = { model.machine(""); onMachineSelected("") },
+                        .semantics { onClick(label = hint) { clearMachine(); true } },
+                        selected = true, onClick = { clearMachine() },
                         role = Role.Button, trailingIcon = persona.core.designsystem.icons.PersonaIcons.clear)
                 }
             }
@@ -693,7 +723,11 @@ internal fun AgentsScreen(
                     is TreeChildrenEntry -> item(entry.key, contentType = "children") {
                         val slot = repoSlots[entry.key]
                         AgentSpaceHeader(stringResource(R.string.agents_child_tasks, entry.count), !entry.expanded,
-                            onToggle = { expandedTasks = if (entry.expanded) expandedTasks - entry.parent.id else expandedTasks + entry.parent.id },
+                            onToggle = {
+                                // Codex subtasks (ChatsView.swift:3289).
+                                listTapMotion.arm(ListTapMotionKind.State)
+                                expandedTasks = if (entry.expanded) expandedTasks - entry.parent.id else expandedTasks + entry.parent.id
+                            },
                             modifier = if (slot != null) Modifier.repoCard(slot.first, slot.last) else Modifier,
                             depth = slot?.level ?: entry.depth, kind = stringResource(R.string.agents_child_tasks_kind))
                     }
@@ -731,7 +765,11 @@ internal fun AgentsScreen(
                     else if (page.pagination.hasMore) JTextButton(stringResource(R.string.agents_page_more), model::loadMore)
                 }
             }
+            tapScope.commit()
+            }
         }
+        AgentsFeedNote(feed, latestPage, Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+            .padding(horizontal = Tokens.Space.page).padding(bottom = Tokens.Space.l))
         persona.core.designsystem.JToastHost(toast, Modifier.align(Alignment.TopCenter).statusBarsPadding())
     }
     }

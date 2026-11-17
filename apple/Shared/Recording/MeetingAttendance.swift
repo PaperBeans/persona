@@ -115,6 +115,10 @@ nonisolated struct RecordingAttendance: Codable, Hashable, Sendable {
     /// the recording, so its hub-mode time ends there for good, also after a relaunch: no socket, and no audio recorded
     /// from then on goes up, live or as a gap. Nil while it may run.
     var hubStopped: RecordingHubStop?
+    /// A room meeting's Persona invited in or taken out while it records (#8731): when, on the wall clock, and whether it
+    /// answers from then on, so the thread says "Persona joined / left the meeting" where it happened (`MeetingThread`).
+    /// How the meeting began is the room's header. Kept on this phone only: no upload carries it.
+    var presence: [RecordingPresence] = []
 
     nonisolated enum StopReason: String, Codable, Sendable {
         case unsupported
@@ -152,7 +156,7 @@ nonisolated struct RecordingAttendance: Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case role, session, sessionTitle, periods, live, liveSegments, spoken, stopped, room, photos, liveView, highlights,
              privateMark, mainPicked, notes
-        case transcription, roles, hubTime, hubRolledBack, hubStopped
+        case transcription, roles, hubTime, hubRolledBack, hubStopped, presence
     }
 
     init(from decoder: Decoder) throws {
@@ -184,6 +188,8 @@ nonisolated struct RecordingAttendance: Codable, Hashable, Sendable {
         hubTime = (try? c.decodeIfPresent([RecordingPeriod].self, forKey: .hubTime)) ?? []
         hubRolledBack = (try? c.decodeIfPresent(Bool.self, forKey: .hubRolledBack)) ?? false
         hubStopped = try? c.decodeIfPresent(RecordingHubStop.self, forKey: .hubStopped)
+        // Written since #8731 B2; a file from before has none, and its thread shows only how the meeting began.
+        presence = (try? c.decodeIfPresent([RecordingPresence].self, forKey: .presence)) ?? []
     }
 
     /// The recording is a meeting that asked for `hub` from `at` on (its start, or a Note turned into a meeting): a
@@ -251,6 +257,14 @@ nonisolated struct RecordingAttendance: Codable, Hashable, Sendable {
         if next.attends { stopped = nil }
     }
 
+    /// A room meeting's role changes while it records (`MeetingRecorder.setRole`): `set`, and Persona's coming in or
+    /// going out (its answering turning on or off) noted at `now` in `presence`.
+    mutating func turn(_ next: MeetingAttendance, at: Double, now: Date) {
+        let answered = sentRole.answers
+        set(next, at: at)
+        if room, sentRole.answers != answered { presence.append(RecordingPresence(at: now, answers: sentRole.answers)) }
+    }
+
     /// The recording writes its short segments (#3862 phase 2, docs/assistant/meeting-minutes.md「Phase 2: live view」), so
     /// a line reaches the page and the room within about 15–30 seconds, in the foreground and the background
     /// (`RecordingAudioSpec.meetingLiveSegmentSeconds`): a room meeting started with the live view that Persona attends as
@@ -315,6 +329,13 @@ nonisolated enum MeetingTranscriptionMode: String, Codable, CaseIterable, Sendab
 nonisolated struct RecordingRoleChange: Codable, Hashable, Sendable {
     var at: Double
     var attendance: MeetingAttendance
+}
+
+/// Persona coming into a room meeting or going out of it (`RecordingAttendance.presence`): when, and whether it answers
+/// from then on.
+nonisolated struct RecordingPresence: Codable, Hashable, Sendable {
+    var at: Date
+    var answers: Bool
 }
 
 /// A stretch with an open end: attending since `start`, until `end` (nil while it goes on).

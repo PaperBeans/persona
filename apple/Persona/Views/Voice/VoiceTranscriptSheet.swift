@@ -44,9 +44,7 @@ struct VoiceTranscriptSheet: View {
             .macSheetDone { dismiss() }
             #else
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done [Extension System Presentation c0b3fb]") { dismiss() }.lineLimit(1)
-                }
+                SheetClose { dismiss() }
             }
             #endif
         }

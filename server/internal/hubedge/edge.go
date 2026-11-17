@@ -35,7 +35,8 @@ type Options struct {
 	// RestoreUpdate puts back what ran before the update to build (the pending marker's binaries, selfupdate.go): its
 	// new slot could not take over (cause), or did not confirm it in time (cause nil). It says which binary to run
 	// now; ok false when no such update is under way (confirmed, or rolled back meanwhile).
-	RestoreUpdate func(build int64, cause error) (binary string, ok bool)
+	// A restoration error is fatal: never fall back to a path whose files may be mixed.
+	RestoreUpdate func(build int64, cause error) (binary string, ok bool, err error)
 
 	// Budgets (zero: the defaults), for the tests.
 	HoldMax, StandbyWait, ReleaseWait, ActivateWait, ConfirmWait time.Duration

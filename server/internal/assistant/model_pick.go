@@ -357,8 +357,19 @@ func (s *Service) modelPickRefusal(ctx context.Context, machine, name string, la
 			return refusal
 		}
 		d, _ := s.device(ctx, machine)
-		return refusePick(http.StatusBadRequest, i18n.Err("assistant-model_pick.err_not_main_chat",
-			i18n.Args{"launcher": name, "machine": firstNonEmpty(d.Name, machine)}))
+		args := i18n.Args{"launcher": name, "machine": firstNonEmpty(d.Name, machine)}
+		if picker, err := s.pickerLaunchers(ctx, machine); err == nil {
+			if i := slices.IndexFunc(picker, func(l ConfiguredLauncher) bool { return l.Name == name }); i >= 0 {
+				args["launcher"] = launcherLabel(picker[i])
+			}
+			if fits, err := s.assistantLaunchersOf(ctx, machine, picker); err == nil {
+				if f, ok := assistantFor(fits, name); ok { // the one set up to run the assistant for it
+					args["instead"] = launcherLabel(f)
+					return refusePick(http.StatusBadRequest, i18n.Err("assistant-model_pick.err_not_main_chat_instead", args))
+				}
+			}
+		}
+		return refusePick(http.StatusBadRequest, i18n.Err("assistant-model_pick.err_not_main_chat", args))
 	}
 	if l, managed := s.managedNamed(ctx, name); managed {
 		if key := s.scopeReason(l, machine); key != "" {

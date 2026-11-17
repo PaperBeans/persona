@@ -216,7 +216,7 @@ struct ContextPickerSheet: View {
             .navigationTitle(model.kind.pageTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                SheetClose { dismiss() }
             }
             .task(id: query) {
                 // The hub searches knowledge: a moment's pause while the words are still being typed.

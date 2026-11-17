@@ -23,7 +23,7 @@ export interface FeedCache {
 // This 64-bit FNV-1a fingerprint avoids copying the token into another storage key; it is not a security
 // boundary, since persona.token already stores the credential in the same localStorage. feedCacheScope clears
 // all cached feeds when the hub or account identity changes, so cache partitioning needs no cryptographic hash.
-function fingerprint(value: string): string {
+export function fingerprint(value: string): string {
   let hash = 0xcbf29ce484222325n;
   for (const byte of new TextEncoder().encode(value)) hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
   return hash.toString(16).padStart(16, "0");
@@ -72,6 +72,10 @@ export function clearFeedCache(): void {
 }
 
 const storageKey = (scope: string) => scope.slice(0, scope.lastIndexOf("."));
+
+/** Another cache's key under the same hub and sign-in (lib/extension-slots.ts, lib/extension-view-cache.ts), null once
+ *  `scope` is not the current one: it starts with the feed's, so signing out or new credentials remove it too. */
+export const scopedKey = (scope: string | null, name: string) => (scope && scope === feedCacheScope() ? `${storageKey(scope)}:${name}` : null);
 
 export function discardFeedCache(scope: string | null): void {
   if (!scope || scope !== feedCacheScope()) return;
@@ -152,7 +156,7 @@ export function readFeedCache(scope: string | null = feedCacheScope()): FeedCach
   }
 }
 
-function containsCredential(raw: string): boolean {
+export function containsCredential(raw: string): boolean {
   const token = localStorage.getItem("persona.token") ?? "";
   return !!token && [token, encodeURIComponent(token), JSON.stringify(token).slice(1, -1)].some((value) => raw.includes(value));
 }

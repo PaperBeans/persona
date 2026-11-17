@@ -25,6 +25,7 @@ struct ContinuousMotionTests {
     static let registry: [String: Entry] = [
         "Persona/DesignSystem/BreathingRing.swift": Entry(count: 1, why: "Needs you: the dot breathes", stillIn: "Persona/DesignSystem/Components.swift"),
         "Persona/DesignSystem/VoiceOrb.swift": Entry(count: 1, why: "A voice call: listening and speaking", stillIn: "Persona/DesignSystem/VoiceOrb.swift"),
+        "Persona/Recording/MeetingFloatingWindow.swift": Entry(count: 1, why: "The floating meeting window's waveform while someone speaks (#8731 V5)", stillIn: "Persona/Recording/MeetingFloatingWindow.swift"),
         "Persona/Recording/RecordingLevelMeter.swift": Entry(count: 2, why: "A meeting recording: the level meter (a 30 fps clock) and the recording dot's blink", stillIn: "Persona/Recording/RecordingLevelMeter.swift"),
         "Persona/DesignSystem/ComposerHoldMic.swift": Entry(count: 1, why: "Recording while the finger holds the mic", stillIn: "Persona/DesignSystem/ComposerHoldMic.swift"),
         "Persona/Views/Assistant/AssistantAvatar.swift": Entry(count: 1, why: "The built-in persona working", stillIn: "Persona/Views/Assistant/AssistantAvatar.swift"),
@@ -34,6 +35,7 @@ struct ContinuousMotionTests {
         "Persona/Views/Chat/ChatView.swift": Entry(count: 1, why: "A chat loading (skeleton)", stillIn: "Persona/Views/Chat/ChatView.swift"),
         "Persona/Views/Chat/ImagePager.swift": Entry(count: 1, why: "An image loading (the system spinner)", stillIn: nil),
         "PersonaWatch/WatchPetView.swift": Entry(count: 1, why: "The Milk Frog's page on the watch", stillIn: "PersonaWatch/WatchPetView.swift"),
+        "Persona/DesignSystem/ShellComponents.swift": Entry(count: 1, why: "iPhone Duo's tab bar: the lens gliding to a newly chosen item, for its 0.65 s, then paused", stillIn: "Persona/DesignSystem/ShellComponents.swift"),
     ]
 
     /// Loops per file, comments left out.

@@ -100,13 +100,6 @@
   "act_tool_what": "Calling {what}",
   "act_run": "Running",
   "act_run_what": "Running {what}",
-  "fallback_shell_launcher": "Launcher {launcher} is a shell command on this computer; the Agent SDK can’t use its settings",
-  "fallback_read_bridge": "Couldn’t read the Agent SDK bridge: {cause}",
-  "fallback_no_bridge": "This personad doesn’t include the Agent SDK bridge",
-  "fallback_write_bridge": "Couldn’t write the Agent SDK bridge: {cause}",
-  "fallback_no_bridge_script": "The Agent SDK bridge package has no bridge.mjs",
-  "fallback_no_node": "No Node.js 22 or later: {cause}",
-  "fallback_no_claude": "Can’t find claude: {cause}",
   "read_only_claude_bg": "A Claude Code background session: view only here; to reply, open it on the computer with claude agents",
   "read_only_claude_no_inbox": "This Claude session has no message channel (an older version, or turned off): view only here; reply on the computer",
   "read_only_claude_inbox": "Persona can’t use this Claude session’s message channel (unknown version or missing key): view only here; reply on the computer",
@@ -133,5 +126,6 @@
   "paseo_ui_state_todo": "To do",
   "paseo_ui_state_blocked": "Blocked",
   "paseo_ui_state_skipped": "Skipped",
-  "paseo_ui_reply_with": "Reply with one of these:"
+  "paseo_ui_reply_with": "Reply with one of these:",
+  "omp_stopped": "This omp session has stopped. For now you can only continue it on the computer (omp --resume); messages can’t be sent to it from here yet."
 }

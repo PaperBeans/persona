@@ -256,6 +256,8 @@
     <string name="designsystem_core_engine_tern">Terminals in Tern</string>
     <string name="designsystem_core_engine_paseo">Agents in Paseo</string>
     <string name="designsystem_core_engine_cindy">Agents in Cindy</string>
+    <string name="designsystem_core_engine_none">No terminal engine</string>
+    <string name="designsystem_core_engine_none_detail">Sessions of the desktop apps only</string>
     <string name="designsystem_core_engine_offline">Offline, no detection info yet</string>
     <string name="designsystem_core_engine_unknown">No detection info yet</string>
     <string name="designsystem_core_engine_found">Detected and available</string>
@@ -263,6 +265,8 @@
     <string name="designsystem_core_engine_missing">Not detected</string>
     <string name="designsystem_core_engine_footer">Only sessions in the chosen engine show. You can change it anytime in machine monitoring in Agents.</string>
     <string name="designsystem_core_engine_footer_offline">The machine is offline; the choice applies once it connects. Only sessions in the chosen engine show.</string>
+    <string name="designsystem_core_engine_footer_none">Shows the desktop apps\' sessions. Starting or continuing a session from your phone is off. You can change it anytime in machine monitoring in Agents.</string>
+    <string name="designsystem_core_engine_footer_none_offline">The machine is offline; the choice applies once it connects. The desktop apps\' sessions show, and starting or continuing a session from your phone is off.</string>
     <string name="designsystem_core_engine_switched">Engine switched</string>
     <string name="designsystem_core_engine_saved_offline">Saved. Applies once connected</string>
     <string name="designsystem_core_tool_run">Run</string>

@@ -228,7 +228,7 @@ func (s *Service) linkInboxTaskURLs(ctx context.Context) {
 		}
 		if a := it.Agent; a != nil && a.TodoID != "" {
 			if sc := inboxScopeOf(it); sc.repo != "" {
-				if t, ok := open[a.TodoID]; ok && !taskOfRepo(t, sc.repo) {
+				if t, ok := open[a.TodoID]; ok && t.InboxItem != it.ID && !taskOfRepo(t, sc.repo) {
 					w := beginWrite(it)
 					unlinked = append(unlinked, it.ID+" from "+a.TodoID)
 					a.TodoID = ""
@@ -279,6 +279,14 @@ func (s *Service) linkInboxTaskURLs(ctx context.Context) {
 // suggestion stays. Saved like any item write; a failed save undoes it.
 func (s *Service) fileTaskDone(ctx context.Context, items []*InboxItem) {
 	b := &s.inbox
+	pending := map[string]bool{}
+	s.todos.mu.RLock()
+	for _, task := range s.todos.todos {
+		if task.InboxItem != "" && (task.DoneAt == nil || task.Cancelled()) {
+			pending[task.InboxItem] = true
+		}
+	}
+	s.todos.mu.RUnlock()
 	var writes []*inboxWrite
 	for _, it := range items {
 		b.mu.Lock()
@@ -291,7 +299,7 @@ func (s *Service) fileTaskDone(ctx context.Context, items []*InboxItem) {
 			continue
 		}
 		t, ok := s.todoNow(id) // not under b.mu: todos.mu is taken on its own
-		if !ok || t.DoneAt == nil || t.Cancelled() {
+		if !ok || t.DoneAt == nil || t.Cancelled() || pending[it.ID] {
 			continue
 		}
 		b.mu.Lock()

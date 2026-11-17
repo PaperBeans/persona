@@ -25,6 +25,7 @@ import androidx.navigation3.ui.NavDisplay
 import persona.android.navigation.PaneHinge
 import persona.android.navigation.detailOf
 import persona.core.navigation.LocalDetailKey
+import persona.core.designsystem.rememberPageTransitions
 
 /**
  * Whether a window has been regular (an open foldable, a tablet) at any point since it was first composed. It only ever
@@ -65,6 +66,7 @@ internal fun SettingsSheetPanes(
     var sheetLeft by remember { mutableFloatStateOf(0f) }
     val density = LocalDensity.current.density
     val latch = remember { RegularWindowLatch(regular) }
+    val pageTransitions = rememberPageTransitions()
     BoxWithConstraints(Modifier.fillMaxSize().onGloballyPositioned { sheetLeft = it.positionInWindow().x }) {
         val sheetHinges = hinges.map { hinge ->
             PaneHinge((hinge.bounds.left - sheetLeft) / density, (hinge.bounds.right - sheetLeft) / density, hinge.isSeparating)
@@ -76,6 +78,9 @@ internal fun SettingsSheetPanes(
             NavDisplay(backStack = stack, onBack = onBack,
                 entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), rememberViewModelStoreNavEntryDecorator()),
                 sceneStrategies = listOf(listDetail.strategy),
+                transitionSpec = { pageTransitions.push },
+                popTransitionSpec = { pageTransitions.pop },
+                predictivePopTransitionSpec = { pageTransitions.predictivePop },
                 entryProvider = { key ->
                     val entry = entries(key)
                     NavEntry(key, entry.contentKey, entry.metadata + paneMetadata(key)) { entry.Content() }

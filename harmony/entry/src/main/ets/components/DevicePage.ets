@@ -1,3 +1,6 @@
+import { IconActions } from '../design/IconActions';
+import { Colors } from '../design/Colors';
+import { ButtonStyles } from '../design/Controls';
 import { common } from '@kit.AbilityKit';
 import { ComposeListItemV2, ContentItemV2 } from '@kit.ArkUI';
 import { ClientModel } from '../models/ClientModel';
@@ -64,8 +67,7 @@ export struct DevicePage {
         ComposeListItemV2({ contentItemV2: new ContentItemV2({ primaryText: tr(row.label) }) }).layoutWeight(1)
         Text(tr('permission_' + row.status)).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary'))
         if (row.canRequest()) {
-          Button(tr(row.status === 'denied' ? 'open_settings' : 'allow'))
-            .height(Tokens.touch).onClick(() => this.device.requestAccess(row.id)).id('device.permission.' + row.id)
+          Button({ type: ButtonType.Circle }) { if (IconActions.busy(row.status === 'denied' ? 'open_settings' : 'allow')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.link); else SymbolGlyph(IconActions.symbol(row.status === 'denied' ? 'open_settings' : 'allow')).fontSize(Tokens.symbolFont).fontColor([IconActions.color(row.status === 'denied' ? 'open_settings' : 'allow', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr(row.status === 'denied' ? 'open_settings' : 'allow')).bindTips(tr(row.status === 'denied' ? 'open_settings' : 'allow')).onClick(() => this.device.requestAccess(row.id)).id('device.permission.' + row.id)
         }
       }.width('100%')
     }.width('100%')
@@ -121,14 +123,13 @@ export struct DevicePage {
             Text((this.model.selected.title || this.model.selected.id)).fontSize(Tokens.meta)
               .fontColor($r('sys.color.font_secondary')).width('100%')
             Row({ space: Tokens.gap }) {
-              Button(tr(this.device.voiceMuted ? 'voice_unmute' : 'voice_mute'))
-                .height(Tokens.touch).onClick(() => this.device.setVoiceMuted(!this.device.voiceMuted)).id('voice.mute')
-              Button(tr('voice_interrupt')).height(Tokens.touch).onClick(() => this.device.interrupt()).id('voice.interrupt')
-              Button(tr('voice_end')).height(Tokens.touch)
+              Button({ type: ButtonType.Circle }) { if (IconActions.busy(this.device.voiceMuted ? 'voice_unmute' : 'voice_mute')) LoadingProgress().width(Tokens.symbol).height(Tokens.symbol).color(Colors.link); else SymbolGlyph(IconActions.symbol(this.device.voiceMuted ? 'voice_unmute' : 'voice_mute')).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.device.voiceMuted ? 'voice_unmute' : 'voice_mute', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr(this.device.voiceMuted ? 'voice_unmute' : 'voice_mute')).bindTips(tr(this.device.voiceMuted ? 'voice_unmute' : 'voice_mute')).onClick(() => this.device.setVoiceMuted(!this.device.voiceMuted)).id('voice.mute')
+              Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('voice_interrupt')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('voice_interrupt', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('voice_interrupt')).bindTips(tr('voice_interrupt')).onClick(() => this.device.interrupt()).id('voice.interrupt')
+              Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('voice_end')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('voice_end', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('voice_end')).bindTips(tr('voice_end'))
                 .onClick(() => this.device.endVoice().catch(() => undefined)).id('voice.end')
             }.width('100%')
           } else {
-            Button(tr('voice_start')).height(Tokens.touch).enabled(this.device.canStartVoice())
+            Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('voice_start')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('voice_start', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('voice_start')).bindTips(tr('voice_start')).enabled(this.device.canStartVoice())
               .onClick(() => this.device.startVoice().catch(() => undefined)).id('voice.start')
           }
         }.alignItems(HorizontalAlign.Start).padding(Tokens.page).width('100%')

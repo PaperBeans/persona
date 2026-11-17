@@ -251,14 +251,18 @@ final class MeetingHubTranscriptionUITests: XCTestCase {
         try shot(app, "page-fell-back")
         try lockScreen(app, "lock-fell-back", says: "本机转写")
 
-        // Stop, then the recording's page (Open Recording): how it was transcribed and how far the hub is (finishing until
-        // its final pass is done), with the stretches it has no audio for when there are any.
+        // Stop, then the recording's page (the after-meeting menu's Recording Details): how it was transcribed and how far
+        // the hub is (finishing until its final pass is done), with the stretches it has no audio for when there are any.
         let stop = app.buttons["recording-stop"].firstMatch
         XCTAssertTrue(stop.waitForExistence(timeout: 10), app.debugDescription)
         stop.tap()
         confirmStop(app)
-        let open = app.buttons["recording-wrapup-open"].firstMatch
-        XCTAssertTrue(open.waitForExistence(timeout: 30), "no Open Recording after Stop:\n\(app.debugDescription)")
+        // After the meeting (#8731 V3): the recording's page is the menu's Recording Details.
+        let menu = app.buttons["meeting-after-menu"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 30), "no after-meeting menu:\n\(app.debugDescription)")
+        menu.tap()
+        let open = app.buttons["meeting-after-details"].firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 5), "no Recording Details:\n\(app.debugDescription)")
         open.tap()
         let facts = element(app, "recording-transcription")
         XCTAssertTrue(facts.waitForExistence(timeout: 30), "the recording's page doesn't say how it was transcribed:\n\(app.debugDescription)")

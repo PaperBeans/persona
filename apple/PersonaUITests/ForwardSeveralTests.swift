@@ -124,7 +124,9 @@ final class ForwardSeveralTests: XCTestCase {
             toggle(answer, in: app)
             toggle(question, in: app)
             XCTAssertTrue(row(question, in: app).isSelected && row(answer, in: app).isSelected, "both are not picked")
-            XCTAssertTrue(forward.isEnabled && forward.label.contains("2"), "Forward does not say 2: \(forward.label)")
+            // The count is beside Cancel since the bar has Forward · Copy · Export Image (#9468).
+            let count = app.staticTexts["chat.pickCount"]
+            XCTAssertTrue(forward.isEnabled && count.label.contains("2"), "the bar does not say 2: \(count.label)")
             sleep(1)
             shot(app, "s2-selecting-\(scheme)")
             forward.tap()

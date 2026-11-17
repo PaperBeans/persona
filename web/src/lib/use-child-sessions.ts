@@ -47,6 +47,16 @@ export function heldChild(mid: string, sid: string): Session | undefined {
   return undefined;
 }
 
+// how each paging chat's list of children reads again, by the same owner as `held`
+const rereads = new Map<object, () => Promise<void>>();
+
+/** Reads again the lists of children that hold mid/sid, after something changed it that no hub hint may follow yet (a
+ *  Live link, #7497): a child's card reads its parent's held row before the store's. Done when they answered. */
+export async function rereadHeldChild(mid: string, sid: string): Promise<void> {
+  const key = rowKey(mid, sid);
+  await Promise.all([...held].filter(([, h]) => h.rows.has(key)).map(([owner]) => rereads.get(owner)?.()));
+}
+
 /** `heldChild`, kept up to date: a child's card and its request card read their row here. */
 export function useChildRow(mid: string, sid: string): Session | undefined {
   const read = () => heldChild(mid, sid);
@@ -130,6 +140,16 @@ export function useChildSessions(mid: string, sid: string, hasChildren: boolean,
   const complete = enabled && (list ? page.loaded && !page.hasMore : !paged && storeLoaded);
   // held while the chat is open, before it paints: its cards find their rows in the same frame
   const owner = useMemo(() => ({}), []);
+  useEffect(() => {
+    if (!list) return;
+    // a read after the one out now (an invalidation's trailing read), and its answer awaited
+    rereads.set(owner, async () => {
+      list.invalidate();
+      await Promise.resolve();
+      await list.load().catch(() => {});
+    });
+    return () => void rereads.delete(owner);
+  }, [list, owner]);
   useLayoutEffect(() => {
     held.set(owner, { parent: rowKey(mid, sid), complete, rows: new Map(rows.map((s) => [rowKey(s.machine_id, s.session_id), s])) });
     tellHeld();

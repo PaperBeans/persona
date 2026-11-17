@@ -196,6 +196,7 @@ assistant.start_defaults GET /api/v1/assistant/worker-presets
 -                    GET /api/v1/fleet
 -                    GET /api/v1/health
 -                    GET /api/v1/hub/update
+-                    GET /api/v1/hub/update/backups
 -                    GET /api/v1/hub/update/history
 -                    GET /api/v1/imessage
 -                    GET /api/v1/imessage/chats
@@ -287,6 +288,7 @@ machines.read        GET /api/v1/machines/{mid}/stat
 -                    GET /api/v1/model-config/purposes/{id}
 -                    GET /api/v1/model-profiles
 -                    GET /api/v1/mutes
+-                    GET /api/v1/navigation
 -                    GET /api/v1/ops/{id}
 -                    GET /api/v1/personas
 -                    GET /api/v1/personas/{id}/{file...}
@@ -302,6 +304,7 @@ notify               GET /api/v1/push/stats/daily
 -                    GET /api/v1/recordings/{id}/live
 -                    GET /api/v1/recordings/{id}/photos
 -                    GET /api/v1/recordings/{id}/photos/{n}
+-                    GET /api/v1/remote-image
 agents.read          GET /api/v1/saved-agent-searches
 agents.read          GET /api/v1/sessions
 agents.read          GET /api/v1/sessions/archived
@@ -325,6 +328,8 @@ todos.read           GET /api/v1/todos
 todos.read           GET /api/v1/todos/{id}/decisions
 todos.read           GET /api/v1/todos/{id}/repositories
 -                    GET /api/v1/usage
+-                    GET /api/v1/usage/days
+-                    GET /api/v1/usage/hours
 -                    GET /api/v1/usage/windows
 agents.read          GET /api/v1/workspace-board
 agents.read          GET /api/v1/workspace-board/activity
@@ -454,6 +459,7 @@ assistant.ask        POST /api/v1/assistant/conversations/{id}/stop
 -                    POST /api/v1/extensions/{id}/-/upgrade
 -                    POST /api/v1/extensions/{id}/-/widget/{ui}
 -                    POST /api/v1/hub/update
+-                    POST /api/v1/hub/update/backups/{id}/apply
 -                    POST /api/v1/hub/update/check
 inbox.write          POST /api/v1/inbox/bulk
 inbox.write          POST /api/v1/inbox/done
@@ -676,6 +682,7 @@ kb.write             PUT /api/v1/kb/{kind}/{id}
 -                    PUT /api/v1/model-config/purposes/{id}
 -                    PUT /api/v1/model-profiles/{id}
 -                    PUT /api/v1/mutes
+-                    PUT /api/v1/navigation
 -                    PUT /api/v1/pins
 -                    PUT /api/v1/push/ln-mode
 -                    PUT /api/v1/push/web/{device}

@@ -93,9 +93,9 @@ struct RecordingLiveView: View {
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("recording-now-title")
         return HStack(alignment: .center, spacing: Theme.Space.m) {
+            RecordingCornerButton(kind: .hide, identifier: "recording-live-hide") { hide() }
             title.frame(maxWidth: .infinity, alignment: .leading)
             pageMenu(entry)
-            RecordingSheetCloseButton(title: String(localized: "Hide"), identifier: "recording-live-hide") { hide() }
         }
     }
 

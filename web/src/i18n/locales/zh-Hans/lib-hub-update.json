@@ -33,5 +33,8 @@
   "notice_turn_off": "关闭",
   "notice_got_it": "知道了",
   "notice_dismiss": "不再提示",
-  "notice_open": "打开设置 › hub"
+  "notice_open": "打开设置 › hub",
+  "state_building": "正在编译…",
+  "state_backing_up": "正在备份…",
+  "state_applying_backup": "正在准备备份程序…"
 }

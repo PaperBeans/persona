@@ -62,8 +62,8 @@ func TestGenerate(t *testing.T) {
 	cmd := map[string]string{"dsh/package.json": "{}", "dsh/lib/a.js": "a", "dsh/lib/b.txt": "no", "runtime-sdk/package.json": "{}",
 		"runtime-sdk/index.js": "i", "runtime-sdk/lib/r.js": "r", "dsh/test/t.js": "no",
 		"pi/package.json": "{}", "pi/index.js": "x", "pi/companion.mjs": "c", "pi/lib/pi.js": "p", "pi/e2e/run.mjs": "no",
+		"antigravity/package.json": "{}", "antigravity/companion.mjs": "c", "antigravity/mcp-proxy.mjs": "m", "antigravity/lib/runtime.js": "a", "antigravity/install.mjs": "no", "antigravity/test/map.test.js": "no",
 		"paseo/package.json": "{}", "paseo/bridge.mjs": "b", "paseo/lib/bridge.js": "l", "paseo/test/bridge.test.js": "no",
-		"agent-sdk/package.json": "{}", "agent-sdk/dist/bridge.mjs": "b", "agent-sdk/src/bridge.mjs": "no", "agent-sdk/build.mjs": "no",
 		"claude-code-plugin/.claude-plugin/plugin.json": "{}", "claude-code-plugin/hooks/hooks.json": "{}",
 		"claude-code-plugin/hooks/register.ts": "r", "claude-code-plugin/hooks/register.test.ts": "no",
 		"claude-code-plugin/test/fixture.json": "no", "claude-code-plugin/node_modules/x/index.js": "no",
@@ -93,7 +93,7 @@ func TestGenerate(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("copied %v, want %v", got, want)
 	}
-	// One part per directory: the three packages that take runtime-sdk share one blob. The stale files are gone.
+	// One part per directory: the four packages that take runtime-sdk share one blob. The stale files are gone.
 	parts, _ := filepath.Glob(filepath.Join(out, "*"+partSuffix))
 	if entries, _ := os.ReadDir(out); len(parts) != 6 || len(entries) != 8 || string(mustRead(t, filepath.Join(out, "README.md"))) != "old" {
 		t.Fatalf("wrote %d parts, %d entries", len(parts), len(entries))
@@ -134,19 +134,20 @@ func TestGenerate(t *testing.T) {
 		t.Fatalf("pi copied %v, want %v", got, want)
 	}
 	got = got[:0]
+	for _, f := range files["persona-antigravity-runtime"] {
+		got = append(got, f.Path)
+	}
+	want = []string{"antigravity/package.json", "antigravity/companion.mjs", "antigravity/mcp-proxy.mjs", "antigravity/lib/runtime.js", "runtime-sdk/package.json", "runtime-sdk/index.js", "runtime-sdk/lib/r.js"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("antigravity copied %v, want %v", got, want)
+	}
+	got = got[:0]
 	for _, f := range files["persona-paseo-runtime"] {
 		got = append(got, f.Path)
 	}
 	want = []string{"paseo/package.json", "paseo/bridge.mjs", "paseo/lib/bridge.js", "runtime-sdk/package.json", "runtime-sdk/index.js", "runtime-sdk/lib/r.js"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("paseo copied %v, want %v", got, want)
-	}
-	got = got[:0]
-	for _, f := range files["persona-agent-sdk-runtime"] {
-		got = append(got, f.Path)
-	}
-	if want = []string{"agent-sdk/package.json", "agent-sdk/dist/bridge.mjs"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("agent-sdk copied %v, want %v", got, want)
 	}
 	// An asset's "/**" takes the directory's files, without tests, dependencies and hidden files.
 	got = got[:0]
@@ -196,7 +197,7 @@ func TestPackagesMatchTheLoader(t *testing.T) {
 func generateIntegrations(t *testing.T) (map[string][]File, string) {
 	t.Helper()
 	src := filepath.Join("..", "..", "..", "integrations")
-	if _, err := os.Stat(filepath.Join(src, "agent-sdk", "dist", "bridge.mjs")); err != nil {
+	if _, err := os.Stat(filepath.Join(src, "runtime-sdk", "package.json")); err != nil {
 		t.Skipf("no integrations checkout beside server/: %v", err)
 	}
 	out := t.TempDir()
@@ -207,8 +208,8 @@ func generateIntegrations(t *testing.T) (map[string][]File, string) {
 	return files, out
 }
 
-// The packages as committed in integrations/ (the Agent SDK bridge bundled in): each unpacks with exactly the files
-// and hash of its sources, and stays under MaxSize, the bound every package is offered and fetched within.
+// The packages as committed in integrations/: each unpacks with exactly the files and hash of its sources, and stays
+// under MaxSize, the bound every package is offered and fetched within.
 func TestGeneratedPackages(t *testing.T) {
 	files, out := generateIntegrations(t)
 	d := &dist{fsys: os.DirFS(out), root: "."}
@@ -226,7 +227,7 @@ func TestGeneratedPackages(t *testing.T) {
 		for _, f := range p.Files {
 			size += len(f.Data)
 		}
-		if size > MaxSize || name == "persona-agent-sdk-runtime" && (len(p.Files) != 2 || size < 100<<10) {
+		if size > MaxSize {
 			t.Fatalf("%s: %d files, %d bytes (MaxSize %d)", name, len(p.Files), size, MaxSize)
 		}
 	}

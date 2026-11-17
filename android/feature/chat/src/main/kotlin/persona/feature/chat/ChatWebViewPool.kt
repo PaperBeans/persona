@@ -193,7 +193,8 @@ internal class ChatWebViewPool(
         settings.javaScriptCanOpenWindowsAutomatically = false
         if (features.supported(WebViewFeature.ALGORITHMIC_DARKENING) &&
             WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
-            WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true)
+            // Optional appearance only: a framework / WebView version mismatch must not make the link card unusable.
+            try { WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true) } catch (_: UnsupportedOperationException) {}
         }
         // Logins embedded in a page (a sign-in frame from another site) need its cookies; every page shares the store.
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)

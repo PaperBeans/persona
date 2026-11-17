@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,8 +12,27 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/nodeclient"
+	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
+
+// noTranscript is file's error for a session id this machine has no transcript for: an unknown id (a stale link, a
+// client that sent the wrong field) or a file that is gone. Its text is the one the node has always given.
+type noTranscript struct{ id string }
+
+func (e noTranscript) Error() string { return fmt.Sprintf("transcript for session %s not found", e.id) }
+
+// readErr is the error a read of a session's history (session.items, session.item, session.image) answers: no
+// transcript is codeNotFound, which the hub serves as 404 not_found (apierr.Call), not a 502 internal error (#9551).
+// Sends, rewinds and the other callers of file keep the plain error: the manager takes a not_found send as "the
+// session is gone" and withdraws its card (assistant sessionNotFound), which a missing file alone must not do.
+func readErr(err error) error {
+	var nt noTranscript
+	if errors.As(err, &nt) {
+		return &rpc.Error{Code: codeNotFound, Message: nt.Error()}
+	}
+	return err
+}
 
 // startingSession reports whether a session without a transcript is one that exists but has not written its first
 // line yet (a headless conversation, or an agent that is live or that Persona started), rather than an unknown id.
@@ -216,7 +236,7 @@ func (n *Node) file(id string) (*transcript.File, error) {
 	} else {
 		p := n.transcriptPath(id)
 		if p == "" {
-			return nil, fmt.Errorf("transcript for session %s not found", id)
+			return nil, noTranscript{id}
 		}
 		f = transcript.NewFile(p)
 	}

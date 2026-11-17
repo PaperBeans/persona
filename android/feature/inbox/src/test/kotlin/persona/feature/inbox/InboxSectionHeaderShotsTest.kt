@@ -98,7 +98,7 @@ class InboxSectionHeaderShotsTest {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
                 PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
                     Box(Modifier.testTag("shot").width(400.dp).height(1000.dp).background(PersonaTheme.palette.background)) {
-                        InboxScreen(inbox, navigator)
+                        OnAll { InboxScreen(inbox, navigator) }
                     }
                 }
             }
@@ -136,7 +136,7 @@ class InboxSectionHeaderShotsTest {
             ) {
                 PersonaTheme(style = appearance, darkTheme = night, reduceMotion = true) {
                     Box(Modifier.testTag("shot").width(400.dp).height(1000.dp).background(PersonaTheme.palette.background)) {
-                        InboxScreen(inbox, navigator)
+                        OnAll { InboxScreen(inbox, navigator) }
                     }
                 }
             }

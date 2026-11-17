@@ -15,6 +15,8 @@ import (
 func spawnFixture(t *testing.T, launcher, mode string) (*Service, *fakeHub, Todo) {
 	t.Helper()
 	s, f := newQuietService(t)
+	// Install metadata before any asynchronous dispatch starts using the hub.
+	s.hub = &taskHandoffTestHub{fakeHub: f, info: map[string]proto.NodeInfo{"box": {Executable: "/test/persona-node"}}}
 	todo := startTaskLeader(t, s, f)
 	// An ordinary worker, not a task leader, may split sessions within its existing assignment.
 	s.todos.mu.Lock()
@@ -222,5 +224,5 @@ func TestNativeSidecarAncestryAloneDoesNotLinkATodo(t *testing.T) {
 }
 
 func TestGoldenTaskHandoff(t *testing.T) {
-	golden(t, "task_handoff", prompts.RenderTaskHandoff())
+	golden(t, "task_handoff", prompts.RenderTaskHandoff(prompts.TaskHandoff{MCP: true}))
 }

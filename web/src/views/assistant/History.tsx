@@ -22,7 +22,7 @@ import { GroupCount } from "../SidebarSection";
 import { Button, Collapse, copyText, cx, Dialog, IconButton, Loading, Menu, StatePill, toast, useMenu, useNow, type MenuItem } from "../../ui/atoms";
 import { InfoTip } from "../../ui/InfoTip";
 import { Icon } from "../../ui/icons";
-import { arrange, conversationTitle, filterConversations, mergeConversations, splitTitle, type Conversation } from "./conversations";
+import { arrange, conversationTitle, filterConversations, inUseTags, mergeConversations, normalizeTags, splitTitle, withTag, TAG_MAX_LENGTH, TAGS_MAX, type Conversation } from "./conversations";
 import { Empty, inputClass, SectionTitle } from "./parts";
 import { Chip } from "../inbox/InboxParts";
 import { autoConversations, autoOrigin, matchesOrigin, originLabel, parseOriginFilter, type OriginFilter } from "../../lib/conversation-origins";
@@ -32,6 +32,7 @@ import { ASSISTANT_SEARCH_FEATURE, markParts, mergeSearch, useAssistantSearch, t
 import { PHONE, useMedia } from "../../lib/viewport";
 import { saveRecentTaskChats } from "../../lib/recent-task-chats";
 import { RECENT_COUNTS, setRecentCount, useRecentCount } from "../../lib/sidebar-recent";
+import { composing } from "../../lib/send-history";
 
 const NONE: Session[] = [];
 // A row's line under its title: the matching words of a search, or else its last message.
@@ -56,6 +57,12 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [renaming, setRenaming] = useState<Conversation | null>(null);
+  /** The tag whose chip narrows the list ("" = no tag filter). */
+  const [activeTag, setActiveTag] = useState("");
+  /** The conversation whose tag editor is open. */
+  const [tagging, setTagging] = useState<Conversation | null>(null);
+  /** Tag sets saved here before the hub has pushed them back: shown until the reload after the save settles. */
+  const [tagEdits, setTagEdits] = useState<Record<string, string[]>>({});
   /** Titles just given here: the sessions pushed by the hub may still carry the old one for a while. */
   const [titles, setTitles] = useState<Record<string, string>>({});
   /** Archived or brought back here: shown so until the hub pushes the session with that mark (the live sessions carry
@@ -93,7 +100,7 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
   useLayoutEffect(() => {
     reads.current++;
     if (priorAccount.current !== account) { priorAccount.current = account; setQuery(""); }
-    setFetched(null); setError(""); setTitles({}); setMarked({}); setRenaming(null);
+    setFetched(null); setError(""); setTitles({}); setMarked({}); setRenaming(null); setActiveTag(""); setTagEdits({}); setTagging(null);
   }, [manager, account]);
   useEffect(() => {
     void load();
@@ -123,9 +130,12 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
       mergeConversations(fetched ?? [], assistant?.conversations ?? [], live, manager).filter(availableConversation).map((s) => {
         const title = titles[s.session_id];
         const archived = marked[s.session_id];
-        return title || archived !== undefined ? { ...s, ...(title ? { title } : {}), ...(archived !== undefined ? { archived } : {}) } : s;
+        const tags = tagEdits[s.session_id];
+        return title || archived !== undefined || tags
+          ? { ...s, ...(title ? { title } : {}), ...(archived !== undefined ? { archived } : {}), ...(tags ? { tags } : {}) }
+          : s;
       }),
-    [fetched, assistant?.conversations, live, manager, titles, marked, deletionRevision],
+    [fetched, assistant?.conversations, live, manager, titles, marked, tagEdits, deletionRevision],
   );
   const background = assistant?.background_supervisor;
   // what was said in them too (#6283): the manager's search, merged into the local matches (titles, last messages), as
@@ -138,6 +148,8 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
     const shown = all.filter((s) => matchesOrigin(s, filter, background));
     const merged = mergeSearch(filterConversations(shown, query), said.answer, all, (r): Conversation => ({
       machine_id: r.machine_id, session_id: r.session_id, title: r.title, cwd: "", status: "idle", assistant: true, archived: r.archived, updated_at: r.updated_at, origin: r.origin,
+      // a backend-only hit carries no tags of its own; the known row does when this chat is in the list
+      tags: all.find((c) => c.session_id === r.session_id)?.tags,
     })).filter(({ chat }) => availableConversation(chat) && matchesOrigin(chat, filter, background));
     const byId = new Map<string, AssistantSearchHit>();
     for (const r of said.answer?.results ?? []) if (r.hits[0] && !r.title_match) byId.set(r.session_id, r.hits[0]);
@@ -145,12 +157,33 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
   }, [all, query, filter, background, said.answer]);
   // the sources there are (#3264): "All" · "Mine" · one per kind of automatic conversation, when there are any
   const sources = useMemo(() => autoConversations(all, assistant?.main, background).groups, [all, assistant?.main, background]);
-  const { main, days, archived } = useMemo(() => arrange(hits, assistant?.main, new Date(nowMs)), [hits, assistant?.main, nowMs]);
+  // the labels in use, each once: the tag chips narrow the list the same way the origin chips do
+  const tagChoices = useMemo(() => inUseTags(all), [all]);
+  const visible = useMemo(() => withTag(hits, activeTag), [hits, activeTag]);
+  const { main, days, archived } = useMemo(() => arrange(visible, assistant?.main, new Date(nowMs)), [visible, assistant?.main, nowMs]);
   const total = all.filter((s) => !s.archived).length;
   const searching = query.trim() !== "";
 
   const after = async () => {
     await Promise.allSettled([refreshAssistant(), load()]);
+  };
+
+  // Full replacement through PUT .../tags; shown at once from tagEdits, rolled back when the hub refuses, then the
+  // reload settles it against the pushed list (the same optimistic shape as archive). Returns whether the hub took it.
+  const saveTags = async (s: Conversation, tags: string[]): Promise<boolean> => {
+    const before = s.tags ?? [];
+    setTagEdits((m) => ({ ...m, [s.session_id]: tags }));
+    try {
+      await api(`/assistant/conversations/${enc(s.session_id)}/tags`, { method: "PUT", json: { tags } });
+      toast(t("assistant-history.tags_saved", { title: conversationTitle(s) }), "ok");
+    } catch (e) {
+      toast(errorText(e), "error");
+      setTagEdits(({ [s.session_id]: _, ...rest }) => rest);
+      if (before.length) setFetched((list) => list?.map((x) => (x.session_id === s.session_id ? { ...x, tags: before } : x)) ?? list);
+      return false;
+    }
+    await after();
+    return true;
   };
 
   const archive = async (s: Conversation, on: boolean) => {
@@ -232,6 +265,20 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
             </div>
           )}
 
+          {/* The labels actually in use: one chip per tag, click to narrow the list to chats carrying it. */}
+          {tagChoices.length > 0 && (
+            <div role="group" aria-label={t("assistant-history.tag_filter")} className="-mt-2 mb-5 flex flex-wrap gap-1.5">
+              {tagChoices.map((tag) => (
+                <Chip key={tag} on={activeTag === tag} onClick={() => setActiveTag((cur) => (cur === tag ? "" : tag))}>
+                  <span className="inline-flex items-center gap-1">
+                    <Icon name="tag" size={11} stroke={2} />
+                    {tag}
+                  </span>
+                </Chip>
+              ))}
+            </div>
+          )}
+
           {loading && (
             <div className="flex justify-center py-16">
               <Loading />
@@ -257,11 +304,14 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
           )}
           {searching && said.answer?.partial && <p className="-mt-3 mb-4 px-1 text-[12px] text-ink-3" role="status">{t("assistant-history.search_partial")}</p>}
           {!loading && searching && hits.length === 0 && all.length > 0 && <Empty icon="search" title={t("assistant-history.no_results", { query: query.trim() })} />}
+          {!loading && !searching && activeTag && visible.length === 0 && (
+            <Empty icon="tag" title={t("assistant-history.tag_empty", { tag: activeTag })} action={<Button tone="quiet" onClick={() => setActiveTag("")}>{t("assistant-history.tag_clear")}</Button>} />
+          )}
 
           {main && (
             <section className="mb-5">
               <div className="overflow-hidden rounded-card bg-surface shadow-card">
-                <ConvRow s={main} main now={nowMs} said={searching ? saidBy.get(main.session_id) : undefined} fit={fit} onRename={setRenaming} onArchive={archive} />
+                <ConvRow s={main} main now={nowMs} said={searching ? saidBy.get(main.session_id) : undefined} fit={fit} onRename={setRenaming} onArchive={archive} onEditTags={setTagging} />
               </div>
             </section>
           )}
@@ -271,7 +321,7 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
               <SectionTitle>{d.title}</SectionTitle>
               <div className="divide-y divide-line overflow-hidden rounded-card bg-surface shadow-card">
                 {d.items.map((s) => (
-                  <ConvRow key={s.session_id} s={s} now={nowMs} said={searching ? saidBy.get(s.session_id) : undefined} fit={fit} onRename={setRenaming} onArchive={archive} />
+                  <ConvRow key={s.session_id} s={s} now={nowMs} said={searching ? saidBy.get(s.session_id) : undefined} fit={fit} onRename={setRenaming} onArchive={archive} onEditTags={setTagging} />
                 ))}
               </div>
             </section>
@@ -294,7 +344,7 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
                 <div inert={!(showArchived || searching)}>
                 <div className="divide-y divide-line overflow-hidden rounded-card bg-surface shadow-card">
                   {archived.map((s) => (
-                    <ConvRow key={s.session_id} s={s} now={nowMs} said={searching ? saidBy.get(s.session_id) : undefined} fit={fit} onRename={setRenaming} onArchive={archive} />
+                    <ConvRow key={s.session_id} s={s} now={nowMs} said={searching ? saidBy.get(s.session_id) : undefined} fit={fit} onRename={setRenaming} onArchive={archive} onEditTags={setTagging} />
                   ))}
                 </div>
                 <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">{t("assistant-history.archived_footer")}</p>
@@ -312,6 +362,15 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
           onDone={(title) => {
             setTitles((t) => ({ ...t, [renaming.session_id]: title }));
             void after();
+          }}
+        />
+      )}
+      {tagging && (
+        <TagsDialog
+          s={tagging}
+          onClose={() => setTagging(null)}
+          onSave={async (tags) => {
+            if (await saveTags(tagging, tags)) setTagging(null);
           }}
         />
       )}
@@ -341,7 +400,11 @@ function ConvChannel({ ids }: { ids?: string[] }) {
   );
 }
 
-function ConvRow({ s, main, now, said, fit, onRename, onArchive }: { s: Conversation; main?: boolean; now: number; said?: AssistantSearchHit; fit?: "phone" | "wide"; onRename: (s: Conversation) => void; onArchive: (s: Conversation, on: boolean) => void }) {
+function ConvRow({ s, main, now, said, fit, onRename, onArchive, onEditTags }: {
+  s: Conversation; main?: boolean; now: number; said?: AssistantSearchHit; fit?: "phone" | "wide";
+  onRename: (s: Conversation) => void; onArchive: (s: Conversation, on: boolean) => void;
+  onEditTags: (s: Conversation) => void;
+}) {
   const menu = useMenu();
   // found by what was said in it: opens at that message (#6283)
   const route: Route = conversationPage(s.session_id, s.machine_id, s.manager, said?.item_id);
@@ -364,6 +427,8 @@ function ConvRow({ s, main, now, said, fit, onRename, onArchive }: { s: Conversa
   const items: MenuItem[] = [
     ...(own && !s.archived ? [leaderItem(s, leader)] : []),
     ...(own ? [{ key: "rename", label: t("assistant-history.rename_ellipsis"), icon: "pencil" as const, onSelect: () => onRename(s) }] : []),
+    // tags are user labels the main chat carries too; only the built-in supervisor keeps its copy-id-only menu
+    ...(!builtIn ? [{ key: "tags", label: t("assistant-history.edit_tags_ellipsis"), icon: "tag" as const, onSelect: () => onEditTags(s) }] : []),
     { key: "copy", label: t("assistant-history.copy_session_id"), icon: "copy", onSelect: () => void copyText(s.session_id) },
     ...(own
       ? [s.archived
@@ -408,6 +473,16 @@ function ConvRow({ s, main, now, said, fit, onRename, onArchive }: { s: Conversa
             </span>
           ) : (
             last && <span className={ROW_LINE}>{last}</span>
+          )}
+          {s.tags && s.tags.length > 0 && (
+            <span data-testid="row-tags" className="mt-1 flex flex-wrap gap-1">
+              {s.tags.map((tag) => (
+                <span key={tag} title={t("assistant-history.tag_mark", { tag })} className="inline-flex h-[18px] items-center gap-0.5 whitespace-nowrap rounded-full bg-field px-1.5 text-label font-medium text-ink-2">
+                  <Icon name="tag" size={9} stroke={2.2} />
+                  {tag}
+                </span>
+              ))}
+            </span>
           )}
         </span>
         <span className="flex shrink-0 flex-col items-end gap-1">
@@ -467,6 +542,95 @@ function RenameDialog({ s, onClose, onDone }: { s: Conversation; onClose: () => 
       >
         <input className={inputClass} value={title} autoFocus onFocus={(e) => e.currentTarget.select()} onChange={(e) => setTitle(e.target.value)} placeholder={t("assistant-history.title_placeholder")} aria-label={t("assistant-history.title_placeholder")} />
         <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-3">{t("assistant-history.rename_hint")}</p>
+      </form>
+    </Dialog>
+  );
+}
+
+/** The "Edit tags" dialog: add a label with Enter (or Add), remove one with its x, save the whole set with one PUT.
+ *  The limits mirror the hub's normalization so the dialog refuses what the API would. */
+function TagsDialog({ s, onClose, onSave }: { s: Conversation; onClose: () => void; onSave: (tags: string[]) => Promise<void> }) {
+  const initial = useMemo(() => normalizeTags(s.tags ?? []), [s.tags]);
+  const [tags, setTags] = useState<string[]>(initial);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const unchanged = tags.length === initial.length && tags.every((v, i) => v === initial[i]);
+
+  const addTag = () => {
+    const tag = draft.trim();
+    if (!tag) return;
+    if (Array.from(tag).length > TAG_MAX_LENGTH) {
+      setError(t("assistant-history.tag_too_long", { max: TAG_MAX_LENGTH }));
+      return;
+    }
+    if (tags.includes(tag)) { // a repeat just collapses, as the hub would
+      setDraft("");
+      setError("");
+      return;
+    }
+    if (tags.length >= TAGS_MAX) {
+      setError(t("assistant-history.tag_count_limit", { max: TAGS_MAX }));
+      return;
+    }
+    setTags([...tags, tag]);
+    setDraft("");
+    setError("");
+  };
+  const save = async () => {
+    if (busy || unchanged) return;
+    setBusy(true);
+    try {
+      await onSave(tags);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog
+      open
+      onClose={() => !busy && onClose()}
+      title={t("assistant-history.tags_title")}
+      width={420}
+      footer={
+        <>
+          <Button tone="quiet" disabled={busy} onClick={onClose}>{t("common.cancel")}</Button>
+          <Button tone="primary" busy={busy} disabled={unchanged} onClick={() => void save()}>{t("common.save")}</Button>
+        </>
+      }
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          addTag();
+        }}
+      >
+        <div className="flex gap-2">
+          <input
+            className={inputClass}
+            value={draft}
+            autoFocus
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !composing(e.nativeEvent) && (e.preventDefault(), addTag())}
+            placeholder={t("assistant-history.tags_placeholder")}
+            aria-label={t("assistant-history.tags_placeholder")}
+          />
+          <Button type="button" tone="quiet" disabled={!draft.trim()} onClick={addTag}>{t("assistant-history.tags_add")}</Button>
+        </div>
+        {tags.length > 0 && (
+          <ul className="mt-2.5 flex flex-wrap gap-1.5">
+            {tags.map((tag) => (
+              <li key={tag} className="inline-flex h-7 items-center gap-1 rounded-control bg-field pl-2.5 pr-1 text-label text-ink-2">
+                <Icon name="tag" size={11} stroke={2} className="shrink-0" />
+                <span className="max-w-[220px] truncate">{tag}</span>
+                <IconButton icon="x" size={20} iconSize={11} label={t("assistant-history.tags_remove", { tag })} disabled={busy} onClick={() => setTags((cur) => cur.filter((x) => x !== tag))} />
+              </li>
+            ))}
+          </ul>
+        )}
+        <p role={error ? "alert" : undefined} className={cx("mt-1.5 text-submeta leading-relaxed", error ? "text-red" : "text-ink-3")}>
+          {error || t("assistant-history.tags_hint", { max: TAGS_MAX, length: TAG_MAX_LENGTH })}
+        </p>
       </form>
     </Dialog>
   );

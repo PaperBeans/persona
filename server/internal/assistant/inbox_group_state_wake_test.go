@@ -101,7 +101,7 @@ func TestInboxGroupStateWakeRepliedRestoresWaiting(t *testing.T) {
 	t.Run("recap only", func(t *testing.T) {
 		h, it := inboxGroupStateWakeOrdinaryReplied(t, true)
 		h.deliverPending(context.Background())
-		if _, _, err := h.suggest(context.Background(), "session-1", suggestIn{Recap: "Synthetic recap without an outcome"}); err != nil {
+		if _, _, err := h.suggest(context.Background(), "session-1", suggestIn{Recap: "Synthetic recap without an outcome", ProcessingTurn: inboxTestProcessingTurn(h, "session-1")}); err != nil {
 			t.Fatal(err)
 		}
 		state, wake, _ := handlingNow(h, it)
@@ -116,6 +116,7 @@ func TestInboxGroupStateWakeRepliedRestoresWaiting(t *testing.T) {
 		h, it := inboxGroupStateWakeOrdinaryReplied(t, true)
 		h.deliverPending(context.Background())
 		in := suggestIn{Kind: SuggestConclusion, Text: "Synthetic conclusion", Outcome: "done"}
+		in.ProcessingTurn = inboxTestProcessingTurn(h, "session-1")
 		if _, _, err := h.suggest(context.Background(), "session-1", in); err != nil {
 			t.Fatal(err)
 		}

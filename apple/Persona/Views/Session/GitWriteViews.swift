@@ -42,10 +42,7 @@ struct GitNewCommitSheet: View {
             .navigationSubtitle(status.branch ?? "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button { dismiss() } label: { Text("Cancel").lineLimit(1) }
-                        .disabled(committing)
-                }
+                SheetClose(disabled: committing) { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     if committing {
                         ProgressView().accessibilityLabel(Text("Committing"))

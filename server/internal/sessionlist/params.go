@@ -15,7 +15,7 @@ import (
 // machine_id filtering. Presence matters: malformed new parameters must be
 // parsed and rejected rather than silently falling back to the legacy API.
 func Enabled(v url.Values) bool {
-	for _, key := range []string{"search", "limit", "cursor", "since", "summary", "state", "project", "group", "counts", "pane_source", "roots", "parent_session_id", "place", "space", "catalog", "todo", "waiting", "exclude_pane_source", "agents_only"} {
+	for _, key := range []string{"search", "limit", "cursor", "since", "summary", "state", "project", "group", "counts", "pane_source", "roots", "parent_session_id", "place", "space", "catalog", "todo", "waiting", "exclude_pane_source", "agents_only", "just_finished"} {
 		if _, exists := v[key]; exists {
 			return true
 		}
@@ -39,7 +39,7 @@ func Parse(v url.Values) (Options, error) {
 			}
 		}
 	}
-	for _, key := range []string{"search", "limit", "cursor", "since", "summary", "state", "machine_id", "project", "group", "source", "provider", "q", "counts", "with_counts", "pane_source", "roots", "parent_session_id", "catalog", "todo", "waiting", "exclude_pane_source", "agents_only"} {
+	for _, key := range []string{"search", "limit", "cursor", "since", "summary", "state", "machine_id", "project", "group", "source", "provider", "q", "counts", "with_counts", "pane_source", "roots", "parent_session_id", "catalog", "todo", "waiting", "exclude_pane_source", "agents_only", "just_finished"} {
 		if values, exists := v[key]; exists && len(values) != 1 {
 			return Options{}, failure("invalid_query", key+" must have exactly one value")
 		}
@@ -113,6 +113,13 @@ func Parse(v url.Values) (Options, error) {
 			return Options{}, err
 		}
 		o.Waiting = map[bool]string{true: "1", false: "0"}[b]
+	}
+	if values, exists := v["just_finished"]; exists {
+		b, err := boolean(values[0])
+		if err != nil {
+			return Options{}, err
+		}
+		o.JustFinished = map[bool]string{true: "1", false: "0"}[b]
 	}
 	if values, exists := v["exclude_pane_source"]; exists {
 		if values[0] == "" {
@@ -227,6 +234,11 @@ func validate(o Options) (Options, error) {
 	default:
 		return Options{}, failure("invalid_query", "waiting must be 0 or 1")
 	}
+	switch o.JustFinished {
+	case "", "0", "1":
+	default:
+		return Options{}, failure("invalid_query", "just_finished must be 0 or 1")
+	}
 	switch o.State {
 	case "", "needs_you", "working", "unread", "idle", "offline", "unknown":
 	default:
@@ -253,7 +265,7 @@ func normalizeQ(s string) string { return strings.ToLower(s) }
 
 func (o Options) filters() filters {
 	return filters{ID: o.ID, State: o.State, Machine: o.Machine, Project: o.Project, Group: o.Group, Source: o.Source, Provider: o.Provider, Q: o.Q, PaneSource: o.PaneSource, Manager: o.Manager,
-		Roots: o.Roots, Under: o.Under, NoPrivate: o.NoPrivate, AgentsOnly: o.AgentsOnly, Places: placesKey(o.Places), Spaces: placesKey(o.Spaces), Todo: o.Todo, Waiting: o.Waiting, ExcludePaneSource: o.ExcludePaneSource}
+		Roots: o.Roots, Under: o.Under, NoPrivate: o.NoPrivate, AgentsOnly: o.AgentsOnly, Places: placesKey(o.Places), Spaces: placesKey(o.Spaces), Todo: o.Todo, Waiting: o.Waiting, ExcludePaneSource: o.ExcludePaneSource, JustFinished: o.JustFinished}
 }
 
 func (o Options) binding() binding {

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
@@ -78,7 +79,18 @@ func New(cfg Config) (*Client, error) {
 	if err != nil || !ok {
 		return nil, errors.New("key is not an EC private key")
 	}
+	if err := checkSigningKey(ek); err != nil {
+		return nil, err
+	}
 	return NewWithKey(cfg, ek), nil
+}
+
+// checkSigningKey enforces ES256's curve and 32-byte signature components before signing.
+func checkSigningKey(key *ecdsa.PrivateKey) error {
+	if key == nil || key.Curve != elliptic.P256() {
+		return errors.New("apns: signing key must use P-256 for ES256")
+	}
+	return nil
 }
 
 // NewWithKey uses a key already in memory (tests).
@@ -126,6 +138,9 @@ func (c *Client) resign(stale string) (string, error) {
 }
 
 func (c *Client) tokenLocked() (string, error) {
+	if err := checkSigningKey(c.key); err != nil {
+		return "", err
+	}
 	now := time.Now().Unix()
 	if c.jwt != "" && now-c.jwtIat < tokenMaxAge {
 		return c.jwt, nil

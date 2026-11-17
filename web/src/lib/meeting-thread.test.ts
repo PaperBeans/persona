@@ -30,7 +30,7 @@ const ask = (id: string, over: Partial<RecordingAsk> = {}): RecordingAsk => ({
 });
 
 describe("the room's thread", () => {
-  it("reads the header, batches, asks and replies apart", () => {
+  it("reads the header (which shows nothing, #9411), batches, asks and replies apart", () => {
     const entries = roomThread([
       header,
       batch(["[0:05] Ada: Today we look at the export flow.", "[0:12] Bo: The cap is still 4 MB.", "(Earlier lines left out: 3.)"]),
@@ -41,13 +41,13 @@ describe("the room's thread", () => {
       item({ role: "assistant", text: "Bo owns it; it is still open." }),
       item({ role: "assistant", kind: "tool_use", tool_name: "meeting_lines" }),
     ], rid.toUpperCase(), [ask(askID, { question_source: "spoken" }), ask(heardID, { question_source: "heard", at: 1810 })]);
-    expect(entries.map((e) => e.kind)).toEqual(["joined", "lines", "question", "answer", "heard", "answer"]);
-    expect(entries[1]).toMatchObject({ lines: [{ clock: "0:05", text: "Ada: Today we look at the export flow." }, { clock: "0:12", text: "Bo: The cap is still 4 MB." }] });
-    expect(entries[2]).toMatchObject({ text: "What did we decide about the export cap last time?", via: "spoken" });
-    expect(entries[3]).toMatchObject({ text: "You kept the 4 MB cap.\n\nBo owns the regression test." });
-    expect(entries[4]).toMatchObject({ clock: "30:10", lines: [{ clock: "29:40", text: "Bo: Who owns the regression test?" }] });
+    expect(entries.map((e) => e.kind)).toEqual(["lines", "question", "answer", "heard", "answer"]);
+    expect(entries[0]).toMatchObject({ lines: [{ clock: "0:05", text: "Ada: Today we look at the export flow." }, { clock: "0:12", text: "Bo: The cap is still 4 MB." }] });
+    expect(entries[1]).toMatchObject({ text: "What did we decide about the export cap last time?", via: "spoken" });
+    expect(entries[2]).toMatchObject({ text: "You kept the 4 MB cap.\n\nBo owns the regression test." });
+    expect(entries[3]).toMatchObject({ clock: "30:10", lines: [{ clock: "29:40", text: "Bo: Who owns the regression test?" }] });
     // Each attempt names its ask, lowercase.
-    expect([entries[2], entries[4]].map((e) => ("ask" in e ? e.ask : undefined))).toEqual([askID, heardID]);
+    expect([entries[1], entries[3]].map((e) => ("ask" in e ? e.ask : undefined))).toEqual([askID, heardID]);
   });
 
   it("tells the end batch from a batch that holds no line", () => {
@@ -75,7 +75,7 @@ describe("the room's thread", () => {
       item({ client_msg_id: "web-1", text: "From an app that does not know rooms" }),
       item({ text: "Persona's notice", injected: { kind: "task_notice", title: "x" } as Item["injected"] }),
     ], rid, [ask(askID)]);
-    expect(entries.map((e) => [e.kind, "via" in e ? e.via : ""])).toEqual([["joined", ""], ["question", "typed"], ["question", "owner"]]);
+    expect(entries.map((e) => [e.kind, "via" in e ? e.via : ""])).toEqual([["question", "typed"], ["question", "owner"]]);
   });
 
   it("gives a heard question the time of its ask when its block has none", () => {
@@ -115,7 +115,7 @@ describe("photos in the room's thread", () => {
       photoImage(otherID),
       batch(["[32:10] Ada: Next item."]),
     ], rid);
-    expect(entries.map((e) => e.kind)).toEqual(["joined", "photo", "photo", "lines"]);
+    expect(entries.map((e) => e.kind)).toEqual(["photo", "photo", "lines"]);
     expect(entries.filter((e) => e.kind === "photo").map((e) => ("photo" in e ? e.photo : ""))).toEqual([photoID, otherID]);
     // Nothing of the photo's text or the note's tool call reads as a batch, the end batch or an answer.
     expect(entries.some((e) => e.kind === "ended" || e.kind === "answer" || e.kind === "image")).toBe(false);

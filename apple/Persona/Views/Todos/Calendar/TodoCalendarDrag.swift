@@ -417,17 +417,10 @@ struct TodoRescheduleSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .lineLimit(1)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        TodoCalendarMove.save(todo.id, to: allDay ? .day(TodosLogic.dayKey(due)) : .at(due))
-                        dismiss()
-                    }
-                    .lineLimit(1)
-                    .accessibilityIdentifier("todo.calendar.rescheduleSave")
+                SheetClose { dismiss() }
+                SheetConfirm(id: "todo.calendar.rescheduleSave", name: String(localized: "Save")) {
+                    TodoCalendarMove.save(todo.id, to: allDay ? .day(TodosLogic.dayKey(due)) : .at(due))
+                    dismiss()
                 }
             }
         }

@@ -14,6 +14,11 @@ import (
 const (
 	// EventFleetSessions is a machine's session list as the apps get it (FleetSessions): after every change.
 	EventFleetSessions = "fleet.sessions"
+	// EventFleetArchived is a machine's archived rows (FleetArchived), to a hub whose hello says Hello.ArchivedApart:
+	// the rows of the machine's list that are archived (proto.Session.Archived, not the assistant's), which the apps
+	// never see. EventFleetSessions then leaves them out. Told when they change, and once per machine after each
+	// handshake; the hub reads them wherever it read the manager's list, except what the apps get (#6836).
+	EventFleetArchived = "fleet.archived"
 	// EventFleetInteraction is a pending interaction that is new or shown again (FleetInteraction).
 	EventFleetInteraction = "fleet.interaction"
 	// EventFleetResolved is an interaction that is over (FleetResolved).
@@ -63,6 +68,12 @@ type FleetSessions struct {
 	MachineID string          `json:"machine_id"`
 	Sessions  []proto.Session `json:"sessions"`
 	Muted     []string        `json:"muted,omitempty"`
+}
+
+// FleetArchived is EventFleetArchived's params: all of the machine's archived rows, replacing the ones told before.
+type FleetArchived struct {
+	MachineID string          `json:"machine_id"`
+	Sessions  []proto.Session `json:"sessions"`
 }
 
 // FleetInteraction is EventFleetInteraction's params.

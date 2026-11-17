@@ -41,7 +41,7 @@ func TestStoppedAgentWorkCardDismissClearsNeedsYou(t *testing.T) {
 	s.work.cards[ix.ID] = ix
 	s.work.loaded = true
 	s.work.mu.Unlock()
-	putPending(s, &pending{ix: ix, local: func(r proto.Resolution) error {
+	putPending(s, &pending{ix: ix, local: func(_ context.Context, r proto.Resolution) error {
 		_, err := s.workAnswer(context.Background(), ix.ID, r)
 		return err
 	}})

@@ -96,7 +96,7 @@ func TestInboxDraftBeforeTheStartReturned(t *testing.T) {
 		it.Agent.SessionID = "session-r1"
 		h.inbox.mu.Unlock()
 	}()
-	if id, refused, _ := h.inboxDraft(context.Background(), "session-r1", "好的", "", nil); id != it.ID || refused != nil {
+	if id, refused, _ := h.inboxDraft(context.Background(), "session-r1", "好的", "", nil, it.Agent.ProcessingTurn); id != it.ID || refused != nil {
 		t.Fatalf("drafted on %q, refused %+v", id, refused)
 	}
 	if it.Agent.State != AgentDrafted || it.Agent.Draft != "好的" {
@@ -110,7 +110,7 @@ func TestInboxDraftBeforeTheStartReturned(t *testing.T) {
 	h.inbox.mu.Lock()
 	h.inbox.items[other.ID] = other
 	h.inbox.mu.Unlock()
-	if id, _, _ := h.inboxDraft(context.Background(), "session-nobody", "hi", "", nil); id != "" {
+	if id, _, _ := h.inboxDraft(context.Background(), "session-nobody", "hi", "", nil, ""); id != "" {
 		t.Fatal("a conversation no item gets drafted")
 	}
 }
@@ -124,16 +124,16 @@ func TestInboxDraft(t *testing.T) {
 	it.Agent = &InboxAgent{State: AgentRunning, SessionID: "s1", MachineID: "server", Task: "t"}
 	h.inbox.items[it.ID] = it
 
-	if id, _, _ := h.inboxDraft(ctx, "other", "hi", "", nil); id != "" {
+	if id, _, _ := h.inboxDraft(ctx, "other", "hi", "", nil, ""); id != "" {
 		t.Fatalf("drafted from a conversation that is not an inbox agent: %q", id)
 	}
 	// A change the item does not list is refused, and nothing is kept.
 	change := DocChange{Ref: "r1", Field: "状态", Value: "完成"}
-	if id, refused, _ := h.inboxDraft(ctx, "s1", "好了", "", []DocChange{change}); id != it.ID || refused == nil || *refused != change ||
+	if id, refused, _ := h.inboxDraft(ctx, "s1", "好了", "", []DocChange{change}, ""); id != it.ID || refused == nil || *refused != change ||
 		it.Agent.State != AgentRunning || it.Agent.Draft != "" {
 		t.Fatalf("a change the item does not offer: %q %v, agent %+v", id, refused, it.Agent)
 	}
-	if id, refused, _ := h.inboxDraft(ctx, "s1", "合了，MR 已经进主干", "agent_read 看到已合入", nil); id != it.ID || refused != nil {
+	if id, refused, _ := h.inboxDraft(ctx, "s1", "合了，MR 已经进主干", "agent_read 看到已合入", nil, ""); id != it.ID || refused != nil {
 		t.Fatalf("draft: %q %v", id, refused)
 	}
 	if a := it.Agent; a.State != AgentDrafted || a.Draft != "合了，MR 已经进主干" || a.Note != "agent_read 看到已合入" || a.DraftedAt == nil {
@@ -146,7 +146,7 @@ func TestInboxDraft(t *testing.T) {
 	h.inbox.mu.Lock()
 	h.inbox.items[doc.ID] = doc
 	h.inbox.mu.Unlock()
-	if id, refused, _ := h.inboxDraft(ctx, "s2", "好了", "", []DocChange{change}); id != doc.ID || refused != nil {
+	if id, refused, _ := h.inboxDraft(ctx, "s2", "好了", "", []DocChange{change}, ""); id != doc.ID || refused != nil {
 		t.Fatalf("a change the item offers: %q %v", id, refused)
 	}
 	if a := doc.Agent; a.State != AgentDrafted || len(a.Changes) != 1 || a.Changes[0] != change {

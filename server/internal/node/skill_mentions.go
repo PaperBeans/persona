@@ -17,7 +17,6 @@ type skillCatalogRequest struct {
 	SessionID string `json:"session_id"`
 	Cwd       string `json:"cwd"`
 	Launcher  string `json:"launcher"`
-	Runtime   string `json:"runtime"`
 	ConfigDir string `json:"config_dir"`
 	Scope     string `json:"-"` // additional node-derived ordinary session identity
 }
@@ -50,7 +49,7 @@ func (n *Node) skillCatalog(ctx context.Context, in skillCatalogRequest) (assist
 	case "codex":
 		entries, out.Complete, err = n.codexSkillCatalog(ctx, in)
 	case "claude":
-		in.ConfigDir, err = n.assistantProfileSelection(ctx, in.SessionID, in.Launcher, in.Runtime, in.ConfigDir, in.SessionID != "")
+		in.ConfigDir, err = n.assistantProfileSelection(ctx, in.SessionID, in.Launcher, in.ConfigDir, in.SessionID != "")
 		if err != nil {
 			return out, err
 		}
@@ -87,8 +86,10 @@ func (n *Node) skillCatalog(ctx context.Context, in skillCatalogRequest) (assist
 	if err != nil {
 		return out, err
 	}
-	identity := []string{in.Owner, in.Machine, in.Cwd, in.Launcher, in.Runtime, in.ConfigDir,
-		n.executionFingerprint(in.Launcher, modelExecution{Runtime: in.Runtime})}
+	// The empty fifth word keeps a CLI conversation's scope, and so each skill's id, what an older node gave: a skill
+	// picked from its catalog still resolves here.
+	identity := []string{in.Owner, in.Machine, in.Cwd, in.Launcher, "", in.ConfigDir,
+		n.executionFingerprint(in.Launcher, modelExecution{})}
 	if in.Scope != "" {
 		identity = append(identity, in.Scope)
 	}
@@ -169,7 +170,7 @@ func (n *Node) selectedSkills(ctx context.Context, id, cwd, launcher, text strin
 	machine := n.machineID
 	n.mu.Unlock()
 	catalog, err := n.skillCatalog(ctx, skillCatalogRequest{Owner: owner, Machine: machine, SessionID: id, Cwd: cwd,
-		Launcher: launcher, Runtime: execution.Runtime, ConfigDir: execution.ConfigDir})
+		Launcher: launcher, ConfigDir: execution.ConfigDir})
 	if err != nil {
 		return nil, skillSelectionError(err)
 	}

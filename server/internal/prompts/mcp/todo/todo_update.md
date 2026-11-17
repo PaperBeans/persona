@@ -1,4 +1,4 @@
-Update supplied title, notes, due/reminder, priority or project immediately, including task to-dos; no confirmation. Omitted fields stay; "" clears notes/due/remind/project. New reminder times notify again. Completion/reopening uses todo_complete/todo_reopen.
+Update supplied title, notes, due/reminder, priority, project, part_of or after immediately, including task to-dos; no confirmation. Omitted fields stay; "" clears notes/due/remind/project/part_of, [] clears after. New reminder times notify again. Completion/reopening uses todo_complete/todo_reopen.
 
 ```json
 {
@@ -38,6 +38,17 @@ Update supplied title, notes, due/reminder, priority or project immediately, inc
     "project": {
       "type": "string",
       "description": "Existing knowledge-base project slug/name (kb_list projects), preferably a long-term work area. Set only when clear; do not invent near-duplicates. \"\" clears."
+    },
+    "part_of": {
+      "type": "string",
+      "description": "Request to-do this is a piece of; changing clears after."
+    },
+    "after": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Sibling piece ids it waits for; replaces old."
     }
   }
 }

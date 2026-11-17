@@ -4082,7 +4082,7 @@
     },
     {
       "name": "knowledge_recording_transcribe",
-      "value": "转写普通话"
+      "value": "转写并保存到知识库"
     },
     {
       "name": "knowledge_recording_retry_upload",
@@ -4166,7 +4166,7 @@
     },
     {
       "name": "knowledge_recording_retry_transcribe",
-      "value": "重试普通话转写"
+      "value": "重试转写并保存到知识库"
     },
     {
       "name": "knowledge_recording_delete_local",
@@ -4663,6 +4663,42 @@
     {
       "name": "agent_collapse",
       "value": "收起"
+    },
+    {
+      "name": "knowledge_agent_configuration",
+      "value": "Agent 任务配置"
+    },
+    {
+      "name": "control_expanded",
+      "value": "已展开"
+    },
+    {
+      "name": "control_collapsed",
+      "value": "已收起"
+    },
+    {
+      "name": "knowledge_filter_kind",
+      "value": "类型"
+    },
+    {
+      "name": "knowledge_filter_tag",
+      "value": "标签"
+    },
+    {
+      "name": "knowledge_recording_save_notice",
+      "value": "文字稿和录音信息将保存到此 Hub 的知识库，音频保留在本机。离线转写支持普通话。"
+    },
+    {
+      "name": "forget_hub_notice",
+      "value": "将移除此连接的凭据、本机录音和缓存数据。Hub 上的数据会保留。"
+    },
+    {
+      "name": "increase",
+      "value": "增加"
+    },
+    {
+      "name": "decrease",
+      "value": "减少"
     }
   ]
 }

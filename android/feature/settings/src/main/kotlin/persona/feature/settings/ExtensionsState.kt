@@ -376,7 +376,12 @@ internal object ExtensionPickers {
     /** A whole number one step down or up from [current] (else the default, else the minimum, else 0), within the field's bounds. */
     fun stepped(field: ExtensionField, current: Long?, up: Boolean): Long {
         val from = current ?: (field.fallback as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()?.toLong() ?: field.minimum?.let { kotlin.math.ceil(it).toLong() } ?: 0L
-        var next = if (up) from + 1 else from - 1
+        val step = field.step ?: 1L
+        var next = if (up) {
+            if (from > Long.MAX_VALUE - step) Long.MAX_VALUE else from + step
+        } else {
+            if (from < Long.MIN_VALUE + step) Long.MIN_VALUE else from - step
+        }
         field.minimum?.let { next = maxOf(next, kotlin.math.ceil(it).toLong()) }
         field.maximum?.let { next = minOf(next, kotlin.math.floor(it).toLong()) }
         return next
@@ -532,6 +537,8 @@ internal data class ExtensionState(
     val packOff: Boolean = false,
     /** The pack's members were partly uninstalled (#1154): said in a dialog. */
     val partial: PackPartial? = null,
+    /** Cleanup left after a successful uninstall: shown until its OK, before leaving this page. */
+    val removalNotice: ExtensionRemovalNotice? = null,
 ) {
     val editable: Boolean get() = detail?.readOnly == false
     val dirty: Boolean get() = detail != null && (draft != detail.config || numberProblems.isNotEmpty())
@@ -632,6 +639,12 @@ internal class ExtensionModel(
 
     fun dismissCascade() = mutable.update { it.copy(cascade = null) }
 
+    /** The cleanup sheet's OK: the page may leave after the warnings have been seen. */
+    fun dismissRemovalNotice() {
+        removal = null
+        mutable.update { it.copy(removalNotice = null) }
+    }
+
     /** Follows the hub's `extension_auth` pushes for this extension while the page is open (#4507), its manager's only (#1834). */
     suspend fun watchAuth() = api.authUpdates.collect { event ->
         if (event.extension == id && ExtensionOwners.of(manager) == pushManager(event.manager)) setAuth(event.auth)
@@ -717,9 +730,14 @@ internal class ExtensionModel(
      */
     suspend fun uninstall(keepData: Boolean, cascade: Boolean = false, members: Boolean = false): Boolean {
         if (state.value.busy || state.value.saving || state.value.loading || state.value.loadFailed || state.value.updates.checking) return false
-        mutable.update { it.copy(busy = true, error = null, partial = null) }
+        removal = null
+        mutable.update { it.copy(busy = true, error = null, partial = null, removalNotice = null) }
         return try {
-            removal = api.uninstall(id, keepData, cascade, members)
+            val completed = api.uninstall(id, keepData, cascade, members)
+            removal = completed
+            val name = state.value.detail?.extension?.name?.ifBlank { null } ?: id
+            val notice = extensionRemovalNotice(res, name, members, completed)
+            mutable.update { it.copy(removalNotice = notice) }
             ExtensionChanges.changed(api)
             true
         } catch (cancelled: CancellationException) { throw cancelled }

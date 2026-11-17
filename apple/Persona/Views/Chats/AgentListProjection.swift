@@ -229,7 +229,6 @@ nonisolated struct AgentListProjection: Sendable {
         var listQuery = SessionListQuery()
         /// The hubs that fold side sessions into their parent's chat (`SideFold`, #7944).
         var sideFold = Set<String>()
-
         func pinned(_ key: SessionKey) -> Bool {
             preferences[key.group]?.pins.sessions.contains("\(key.machineID)/\(key.sessionID)") == true
         }
@@ -317,7 +316,23 @@ nonisolated struct AgentListProjection: Sendable {
     /// Searching can match an Agent-free worktree even when no session matches the query.
     var hasSearchResults: Bool { !base.isEmpty || !tree.isEmpty }
 
-    static func build(_ input: Input) -> Self {
+    static func preparedSessions(_ input: Input) -> [Session] {
+        ChildSessions.fold(SideFold.fold(input.sessions, groups: input.settings.sideFold).listed, asks: input.asks)
+    }
+
+    /// The hub's paged totals for the same immutable space, with manager routing and hub scoping preserved.
+    static func aggregateScope(_ space: SpaceGroup, settings: Settings) -> RuntimeSessionLists.Scope {
+        settings.scope(machine: space.machineID, hub: space.group, space: space.spaceID == "-" ? "" : space.spaceID)
+    }
+
+    static func scopeKey(_ scope: RuntimeSessionLists.Scope) -> String {
+        var components = URLComponents()
+        components.queryItems = [URLQueryItem(name: "hub", value: scope.hub)]
+            + scope.query.parameters.sorted(by: { $0.key < $1.key }).map { URLQueryItem(name: $0.key, value: $0.value) }
+        return components.string ?? ""
+    }
+
+    static func build(_ input: Input, now: Date? = nil) -> Self {
         let settings = input.settings
         let order = settings.order
         var result = Self()
@@ -333,7 +348,7 @@ nonisolated struct AgentListProjection: Sendable {
         // A side session lives in its parent's chat (#7944): a paged window's rows fold here, once per revision (the
         // model's own list is folded already, and folding it again changes nothing). Then the folded children are not
         // rows; what the hub did not fold still goes through CodexTasks below.
-        let sessions = ChildSessions.fold(SideFold.fold(input.sessions, groups: settings.sideFold).listed, asks: input.asks)
+        let sessions = preparedSessions(input)
         result.sessionsByKey = Dictionary(sessions.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
         result.machinesByRef = Dictionary(input.machines.map { ($0.ref, $0) }, uniquingKeysWith: { a, _ in a })
         // Subtasks go under the session that started them, as in the Codex App and on Android: the list and its counts
@@ -373,7 +388,7 @@ nonisolated struct AgentListProjection: Sendable {
                 guard parsed.states.contains(session.state.rawValue.lowercased()) else { return false }
             }
             if let hrs = parsed.sinceHours {
-                guard let updated = session.updatedAt, Date.now.timeIntervalSince(updated) <= hrs * 3600 else { return false }
+                guard let updated = session.updatedAt, (now ?? Date()).timeIntervalSince(updated) <= hrs * 3600 else { return false }
             }
             if settings.query.isEmpty && settings.searchScope == .all { return true }
             if settings.pagedGroups.contains(session.group) && parsed.terms.isEmpty && settings.searchScope == .all { return true }
@@ -412,7 +427,7 @@ nonisolated struct AgentListProjection: Sendable {
         if settings.grouping == "space" {
             let groups = SpaceGroup.build(result.unpinned).map { group in
                 var group = group
-                let scope = settings.scope(machine: group.machineID, hub: group.group, space: group.spaceID == "-" ? "" : group.spaceID)
+                let scope = aggregateScope(group, settings: settings)
                 result.scopes[group.id] = scope
                 group.bounded = settings.pagedGroups.contains(group.group)
                 return group

@@ -111,6 +111,7 @@ plugin management inside phone-driven sessions also reports `HMR transactions ca
 | Rename | Session name → `sessionController.rename`; ignore tab names |
 | Close | `workspaceRegistry.archiveSession(id, {stopActivity: true})`: same as Web GUI archiving; stop the current turn, subagents, background tasks, and scheduled tasks together; then omit from the list. Can be unarchived in DSH |
 | Phone tools | Hub tools (`mcp.tools` forwarded by node) register in DSH as `mcp__persona__<name>`; calls go through node `mcp.call` to the hub with the calling session attached. Result text becomes tool output; error results become tool failures |
+| Agent supervision | Regular Agent sessions get their own Persona tools (such as `report_to_supervisor`) even when assistant support is enabled. At step preparation, DSH checks the calling session with the node and offers `task_plan` and `task_review` only to an active task leader. |
 
 ## Authorization, questions, and plan approval
 

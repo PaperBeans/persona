@@ -719,6 +719,15 @@ type UIItem struct {
 	Families []string `json:"families,omitempty"`
 	// widget only: how often the widget is drawn again on its own (30 when not said).
 	RefreshMinutes int `json:"refresh_minutes,omitempty"`
+	// nav_page only: the sidebar group the page goes in unless the user put it elsewhere (#9071). Title translated in
+	// l10n's groups.
+	Group *UIGroup `json:"group,omitempty"`
+}
+
+// UIGroup: A sidebar group a nav_page names (docs "UI slots"): pages of any extension naming the same id share it.
+type UIGroup struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
 }
 
 type AgentSourceItem struct {
@@ -1094,6 +1103,8 @@ type UIPlace struct {
 	Opens         string `json:"opens,omitempty"`
 	Badge         *Badge `json:"badge,omitempty"`
 	Connector     string `json:"connector,omitempty"`
+	// A nav_page's sidebar group, its title in the request's language (#9071).
+	Group *UIGroup `json:"group,omitempty"`
 }
 
 type UIPlaces struct {
@@ -1431,6 +1442,15 @@ const (
 
 // TextStyles are the values of TextStyle, in order.
 var TextStyles = []string{"body", "secondary", "caption", "code", "title", "headline"}
+
+// ProgressStyle: A progress drawing hint: bar (the default) or ring.
+const (
+	ProgressStyleBar  = "bar"
+	ProgressStyleRing = "ring"
+)
+
+// ProgressStyles are the values of ProgressStyle, in order.
+var ProgressStyles = []string{"bar", "ring"}
 
 // FieldKind: date, time, datetime, multichoice and multiline are UI version 6. Values stay strings: date YYYY-MM-DD,
 // time HH:MM (24 hours), datetime YYYY-MM-DDTHH:MM local to context.tz, multichoice a JSON array of the chosen
@@ -1942,6 +1962,20 @@ type Tile struct {
 	Control *RowControl `json:"control,omitempty"`
 	Actions []RowAction `json:"actions,omitempty"`
 	Action  *Action     `json:"action,omitempty"`
+	// Draws the tile as a ring (UI version 9): never with an image or a spark.
+	Gauge *Gauge `json:"gauge,omitempty"`
+}
+
+// Gauge: A tile's ring (UI version 9), for a quota or a usage: filled to ratio, with the tile's value and the unit in
+// its centre (the percentage when the tile has no value), the title below. Without color, the tile's color, else the
+// app's accent. An older app gets the tile without it: the unit after the value, the percentage in the subtitle, the
+// color as the tile's.
+type Gauge struct {
+	// How full the ring is, 0 to 1.
+	Ratio *float64 `json:"ratio"`
+	// A short word under the value (USD, GB, h), as a control's unit.
+	Unit  string `json:"unit,omitempty"`
+	Color string `json:"color,omitempty"`
 }
 
 // Layout: stack: sections one under another. split: on a wide screen the side pane's sections in a column at the
@@ -3398,6 +3432,10 @@ type ConnectorTool struct {
 	InputSchema json.RawMessage `json:"input_schema"`
 	// Words that run the tool in a shell instead (a gated command's); runtimes refuse them in an assistant conversation.
 	Shell []string `json:"shell,omitempty"`
+	// Set by Persona itself on an assistant conversation's tool list: a rarely used tool is sent by name only and loaded
+	// with tool search when needed (#7317). A connector does not need to send it; the manager sets it on every list
+	// whatever a connector sent.
+	DeferLoading bool `json:"defer_loading,omitempty"`
 }
 
 // ConnectorTools: tools.list and actions.list.
@@ -6163,6 +6201,7 @@ var newDef = map[string]func() any{
 	"AssistantItem":                 func() any { return new(AssistantItem) },
 	"MCPServerItem":                 func() any { return new(MCPServerItem) },
 	"UIItem":                        func() any { return new(UIItem) },
+	"UIGroup":                       func() any { return new(UIGroup) },
 	"AgentSourceItem":               func() any { return new(AgentSourceItem) },
 	"ChannelItem":                   func() any { return new(ChannelItem) },
 	"ChannelCapabilities":           func() any { return new(ChannelCapabilities) },
@@ -6230,6 +6269,7 @@ var newDef = map[string]func() any{
 	"RowAction":                     func() any { return new(RowAction) },
 	"Spark":                         func() any { return new(Spark) },
 	"Tile":                          func() any { return new(Tile) },
+	"Gauge":                         func() any { return new(Gauge) },
 	"SectionLink":                   func() any { return new(SectionLink) },
 	"Tabs":                          func() any { return new(Tabs) },
 	"Tab":                           func() any { return new(Tab) },

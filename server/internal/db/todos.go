@@ -53,6 +53,10 @@ type TodoRow struct {
 	SeenAt *time.Time `json:"seen_at"`
 	// InboxItem is the id of the Inbox row it was made from (#6480), "" for any other to-do. Set when it is made.
 	InboxItem string `json:"inbox_item"`
+	// PartOf is the to-do whose request this one is a piece of, "" for none; After the pieces of that request it waits
+	// for, never nil (docs/assistant/todos.md "Requests in pieces"). The manager checks them before they are written.
+	PartOf string   `json:"part_of"`
+	After  []string `json:"after"`
 }
 
 // KindConcern is a todo for something the owner raised in the main conversation and wants an answer to (#3561,
@@ -106,13 +110,13 @@ type TodoAgentRow struct {
 }
 
 const todoColumns = `id, title, notes, done_at, created_at, updated_at, origin, plan_id, start_error, done_by, done_reason, reopened_at, quiet,
-	due_at, due_date, remind_at, reminded_at, priority, project, kind, seen_at, inbox_item`
+	due_at, due_date, remind_at, reminded_at, priority, project, kind, seen_at, inbox_item, part_of, after_ids`
 
 // todoDest is where a row of todoColumns is scanned to.
 func todoDest(r *TodoRow) []any {
 	return []any{&r.ID, &r.Title, &r.Notes, &r.DoneAt, &r.CreatedAt, &r.UpdatedAt, &r.Origin, &r.PlanID, &r.StartError, &r.DoneBy,
 		&r.DoneReason, &r.ReopenedAt, &r.Quiet, &r.DueAt, &r.DueDate, &r.RemindAt, &r.RemindedAt, &r.Priority, &r.Project, &r.Kind,
-		&r.SeenAt, &r.InboxItem}
+		&r.SeenAt, &r.InboxItem, &r.PartOf, &r.After}
 }
 
 // ListTodos returns all todos ordered by created_at DESC.
@@ -197,10 +201,10 @@ func createTodo(ctx context.Context, executor interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, t TodoRow) error {
 	_, err := executor.Exec(ctx, `INSERT INTO todos (id, title, notes, done_at, created_at, updated_at, origin, plan_id, start_error, done_by,
-		done_reason, reopened_at, quiet, due_at, due_date, remind_at, reminded_at, priority, project, kind, inbox_item)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+		done_reason, reopened_at, quiet, due_at, due_date, remind_at, reminded_at, priority, project, kind, inbox_item, part_of, after_ids)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
 		t.ID, t.Title, t.Notes, t.DoneAt, t.CreatedAt, t.UpdatedAt, t.Origin, t.PlanID, t.StartError, t.DoneBy, t.DoneReason, t.ReopenedAt, t.Quiet,
-		t.DueAt, t.DueDate, t.RemindAt, t.RemindedAt, t.Priority, t.Project, t.Kind, t.InboxItem)
+		t.DueAt, t.DueDate, t.RemindAt, t.RemindedAt, t.Priority, t.Project, t.Kind, t.InboxItem, t.PartOf, nonNilIDs(t.After))
 	return err
 }
 
@@ -214,6 +218,7 @@ func (d *DB) UpdateTodo(ctx context.Context, id string, title *string, notes *st
 // (#2581); the caller has checked it names one.
 type TodoEdit struct {
 	Title, Notes *string
+	InboxItem    *string
 	Done         *bool
 	SetDue       bool
 	DueAt        *time.Time
@@ -225,6 +230,10 @@ type TodoEdit struct {
 	// Origin: the conversation (or agent) the task belongs to now; a task whose supervisor was handed to another
 	// conversation moves with it (assistant/task_leader.go rehome).
 	Origin *string
+	// PartOf and After: the request it is a piece of ("" none) and the pieces it waits for (empty none); the caller has
+	// checked them (assistant/todo_pieces.go).
+	PartOf *string
+	After  *[]string
 }
 
 // Apply makes the edit to cur at the moment at: done stamps done_at (once), not done reopens it (reopened_at, no
@@ -232,6 +241,9 @@ type TodoEdit struct {
 // it: no longer failed, done now by them (#3713). A reminder at another moment is to be pushed again. The store and the
 // store-less memory both change a todo with it.
 func (e TodoEdit) Apply(cur *TodoRow, at time.Time) {
+	if e.InboxItem != nil {
+		cur.InboxItem = *e.InboxItem
+	}
 	if e.Title != nil {
 		cur.Title = *e.Title
 	}
@@ -269,7 +281,21 @@ func (e TodoEdit) Apply(cur *TodoRow, at time.Time) {
 	if e.Origin != nil {
 		cur.Origin = *e.Origin
 	}
+	if e.PartOf != nil {
+		cur.PartOf = *e.PartOf
+	}
+	if e.After != nil {
+		cur.After = nonNilIDs(*e.After)
+	}
 	cur.UpdatedAt = at
+}
+
+// nonNilIDs is ids as the after_ids column takes them: pgx sends a nil slice as NULL, which the column refuses.
+func nonNilIDs(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
 }
 
 func sameMoment(a, b *time.Time) bool {
@@ -302,9 +328,9 @@ func (d *DB) EditTodo(ctx context.Context, id string, e TodoEdit, updatedAt time
 		e.Apply(&cur, updatedAt)
 		_, err = tx.Exec(ctx, `UPDATE todos SET title = $2, notes = $3, done_at = $4, updated_at = $5, start_error = $6,
 			done_by = $7, done_reason = $8, reopened_at = $9, due_at = $10, due_date = $11, remind_at = $12, reminded_at = $13,
-			priority = $14, project = $15, origin = $16 WHERE id = $1`,
+			priority = $14, project = $15, origin = $16, part_of = $17, after_ids = $18, inbox_item = $19 WHERE id = $1`,
 			cur.ID, cur.Title, cur.Notes, cur.DoneAt, cur.UpdatedAt, cur.StartError, cur.DoneBy, cur.DoneReason, cur.ReopenedAt,
-			cur.DueAt, cur.DueDate, cur.RemindAt, cur.RemindedAt, cur.Priority, cur.Project, cur.Origin)
+			cur.DueAt, cur.DueDate, cur.RemindAt, cur.RemindedAt, cur.Priority, cur.Project, cur.Origin, cur.PartOf, nonNilIDs(cur.After), cur.InboxItem)
 		if err != nil {
 			return err
 		}

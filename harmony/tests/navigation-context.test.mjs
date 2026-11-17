@@ -15,7 +15,7 @@ function method(name){
  for(;i<source.length&&depth;i++){const c=source[i];if(quote){if(escape)escape=false;else if(c==='\\')escape=true;else if(c===quote)quote='';}else if(c==='"'||c==="'"||c==='`')quote=c;else if(c==='{')depth++;else if(c==='}')depth--;}
  assert.equal(depth,0,name);return source.slice(start,i);
 }
-const names=['consumeNotification','destinationBackHidden','chatSelectionShown','peerUsesSelect','measurePeerSlot','readingAgentDetail','routeTarget','openRow','mainDestination','openMain','hideChatTitle','newConversation','resolveMainDestination','ensureMainDestination','pushChat','redeem','childKey','routeRow','openSettings','settingsKind','settingsModel','targetReady','openLinkedResource','openFrom','openComputer','handoffResource','restoreTarget','routeShown','dismissChatActions','markDetailReady'];
+const names=['consumeNotification','destinationBackHidden','chatSelectionShown','activeModule','readingAgentDetail','routeTarget','openRow','mainDestination','openMain','hideChatTitle','newConversation','resolveMainDestination','ensureMainDestination','pushChat','redeem','childKey','routeRow','openSettings','settingsKind','settingsModel','targetReady','openLinkedResource','openFrom','openComputer','handoffResource','restoreTarget','routeShown','dismissChatActions','markDetailReady'];
 const NativeNavigation=new Function('NavigationContext','ResourceRow','mainConversationData','Wire','Tokens','return '+stripTypeScriptTypes('class NativeNavigation {'+names.map(method).join('\n')+'}'))(NavigationContext,ResourceRow,mainConversationData,Wire,Tokens);
 function row(id='source',manager='owner-b',kind='conversation'){const r=new ResourceRow(id,id,kind);r.manager=manager;r.machine='machine';r.session=id;return r;}
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};}
@@ -263,13 +263,14 @@ test('reading an Agent retains its queue across native background visibility, an
  pushed.push({name:'session'});primary.section=0;assert.equal(shell.readingAgentDetail(),false);primary.section=1;primary.selected.kind='conversation';assert.equal(shell.readingAgentDetail(),false);
 });
 
-test('each native title host switches peer controls only for its own measured slot',()=>{
- const {shell}=fixture();Object.assign(shell,{environment:{fontScale:1},wide:()=>true,shellPeerWidth:0,mainPeerWidth:0});
- assert.equal(shell.peerUsesSelect(false),false);assert.equal(shell.peerUsesSelect(true),false);
- shell.measurePeerSlot(false,150);assert.equal(shell.peerUsesSelect(false),true);assert.equal(shell.peerUsesSelect(true),false);
- shell.measurePeerSlot(true,220);assert.equal(shell.peerUsesSelect(true),false);
- for(const width of [0,NaN,Infinity,150.5])shell.measurePeerSlot(false,width);assert.equal(shell.shellPeerWidth,150);
- shell.measurePeerSlot(false,220);assert.equal(shell.peerUsesSelect(false),false);shell.environment.fontScale=2;assert.equal(shell.peerUsesSelect(true),true);
+test('peer icons retain native selection and independent accessible names without a text fallback',()=>{
+ const title=source.slice(source.indexOf('  @Builder peerTitle('),source.indexOf('  private selectPeer('));
+ assert.match(title,/CapsuleSegmentButtonV2/);
+ for(const peer of ['persona','agents'])assert.ok(title.includes('symbol: Symbols.'+peer+", accessibilityText: tr('"+peer+"')"));
+ assert.match(title,/\$selectedIndex: \(index: number\) => this\.selectPeer\(index\)/);
+ assert.match(title,/itemMinHeight: LengthMetrics\.vp\(Tokens\.touch\)/);
+ assert.ok(Tokens.headerPeerIcons>=Tokens.touch*2);
+ assert.doesNotMatch(title,/Select\(/);
 });
 
 test('a cached chat selection is highlighted only while its destination context is displayed',()=>{

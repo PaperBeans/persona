@@ -75,6 +75,8 @@ struct ShellView: View {
                 if shell.agentsBuilt {
                     ChatsView()
                         .modifier(ShellPageSlide(shell: shell, index: 1))
+                        // A chat under the Agents page's rail keeps its buttons clear of the tab bar (iPhone Duo, #9837).
+                        .modifier(SideColumnScope(own: true))
                 }
                 if LarkHomePreference.shared.shows, shell.feishuBuilt {
                     LarkConversationsView()
@@ -249,8 +251,7 @@ private struct ShellMovingBar: View {
                         .opacity(max(0, 1 - p) * (model.assistantCurrent == nil ? 0.4 : 1))
                     ShellCircleButton(symbol: Theme.Icon.compose, label: String(localized: "New Session [Chats View 58e21b]"), id: "shell-moving-agents-new") {}
                         .opacity(max(0, 1 - abs(p - 1)))
-                    ShellCircleButton(symbol: Theme.Icon.settings, label: String(localized: "Lark Settings"), id: "shell-moving-feishu-settings") {}
-                        .opacity(max(0, p - 1))
+                    // Messages' slot is the system's search; Lark Settings is at the column's top there (#9837).
                 }
             }
             .allowsHitTesting(false)

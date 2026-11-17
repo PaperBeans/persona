@@ -522,9 +522,13 @@ type Tab struct {
 
 // Snapshot is the whole live layout: workspaces, tabs, panes, agents and focus.
 type Snapshot struct {
-	Workspaces []Workspace `json:"workspaces"`
-	Tabs       []Tab       `json:"tabs"`
-	Agents     []Agent     `json:"agents"`
+	// InventoryIncomplete means a successful reply omitted the pane or agent inventory
+	// (or a list needed to reconstruct it). Display callers can still use its fields,
+	// but destructive callers must not treat missing data as confirmed absence.
+	InventoryIncomplete bool        `json:"-"`
+	Workspaces          []Workspace `json:"workspaces"`
+	Tabs                []Tab       `json:"tabs"`
+	Agents              []Agent     `json:"agents"`
 	// Panes is every pane, agent or not (agent empty): where agents herdr does not detect, such as a compatible CLI, are found.
 	Panes []Agent `json:"panes"`
 	// Layouts are the tabs' split layouts: where each pane sits in its tab (layout.go).

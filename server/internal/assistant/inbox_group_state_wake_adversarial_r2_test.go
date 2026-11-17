@@ -73,7 +73,7 @@ func TestAdversarialInboxGroupStateWakeAgentStopWhileLookingClearsAgentBack(t *t
 	h.inboxAgentTurnSettled(ctx, "server", "agent-session")
 	h.deliverPending(ctx)
 
-	if _, _, err := h.suggest(ctx, "session-1", suggestIn{Recap: "Synthetic recap after the looking stop"}); err != nil {
+	if _, _, err := h.suggest(ctx, "session-1", suggestIn{ProcessingTurn: inboxTestProcessingTurn(h, "session-1"), Recap: "Synthetic recap after the looking stop"}); err != nil {
 		t.Fatal(err)
 	}
 	if state, _, _ := handlingNow(h, it); state != HandlingDone {

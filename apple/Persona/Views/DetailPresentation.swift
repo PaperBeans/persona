@@ -23,7 +23,7 @@ private struct DetailPresentation<Page: View>: ViewModifier {
     func body(content: Content) -> some View {
         content
             .sheet(isPresented: Binding(get: { isPresented && !pushes }, set: { isPresented = $0 })) {
-                page().overTabSwitch()
+                page()
             }
             #if os(iOS)
             .navigationDestination(isPresented: Binding(get: { isPresented && pushes }, set: { isPresented = $0 })) {
