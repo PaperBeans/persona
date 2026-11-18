@@ -215,6 +215,7 @@ func (d *Devices) Run(ctx context.Context) error {
 	d.mu.Unlock()
 	d.loadWarm(ctx)
 	d.loadPathUIDs(ctx)
+	d.restoreRuntimeUsage(ctx, time.Now())
 	go d.reportLoop(mctx)
 	go d.probeServices(mctx)
 	go d.measureLoop(mctx)

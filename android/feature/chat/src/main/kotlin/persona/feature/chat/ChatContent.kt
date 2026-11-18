@@ -319,6 +319,8 @@ internal fun ChatLineContent(
     hideTaskPrompts: Boolean = false,
     /** This line is the turn's error and the hub named its fix ([TurnErrorFix]): an answer, a notice or an API error draws the card. */
     turnFix: TurnErrorFix? = null,
+    /** The session's launcher, named in the card's title when known. */
+    turnLauncher: String? = null,
     /** Opens the session's terminal: the live work line's mark on Glass ([ChatTerminalPlaces.onWorkLine]). */
     onTerminal: (() -> Unit)? = null,
 ) {
@@ -329,7 +331,7 @@ internal fun ChatLineContent(
             line is ChatLine.Row && (line.row.type == "reply" || line.row.type == "notice") -> line.row.item?.item?.text
             else -> null
         }
-        if (raw != null || line is ChatLine.ApiError) return TurnErrorFixCard(turnFix, raw)
+        if (raw != null || line is ChatLine.ApiError) return TurnErrorFixCard(turnFix, raw, turnLauncher)
     }
     when (line) {
         is ChatLine.Row -> when (line.row.type) {

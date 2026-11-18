@@ -401,6 +401,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         #if os(iOS)
         RecordingDayCatchUp.register()
         #endif
+        #if os(iOS)
+        MeetingReplay.shared.clearEnded() // a replayed meeting tape (#10589) left from the last run leaves the recordings
+        #endif
         #if DEBUG
         RecordingSamples.showMeetingIfAsked() // `-showMeetingSample recording|paused|interrupted|minutes|pending|overview`
         #if os(iOS)
@@ -413,6 +416,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // `-openDayCatchUp YES`: runs the all-day catch-up now (the simulator never runs background tasks).
         if UserDefaults.standard.bool(forKey: "openDayCatchUp") { Task { _ = await RecordingDayCatchUp.catchUp() } }
         MeetingReplay.startIfAsked() // `-showMeetingReplay <tape>|sample` (#9417)
+        MeetingTapeLibrary.installSampleIfAsked() // `-openMeetingTapes sample|empty` (#10589)
         MeetingTapeRecorder.startIfAsked() // `-openMeetingAudio <file>`: the meeting it records writes a tape
         #endif
         #endif

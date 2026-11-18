@@ -8517,6 +8517,41 @@
         }
       }
     },
+    "%lld lines [Meeting Tape]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld line"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld lines"
+                }
+              }
+            }
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字起こし %1$lld 行"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld 句转写"
+          }
+        }
+      }
+    },
     "%lld lines added" : {
       "localizations" : {
         "zh-Hans" : {
@@ -15550,6 +15585,52 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "A replay plays on this iPhone only: nothing goes to your hub, nothing is transcribed and no minutes are written. Tapes stay on this iPhone, out of backups, and are deleted when Developing Persona is turned off." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A replay plays on this iPhone only: nothing goes to your hub, nothing is transcribed and no minutes are written. Tapes stay on this iPhone, out of backups, and are deleted when Developing Persona is turned off."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再生はこの iPhone の中だけで行われます。ハブには何も送らず、文字起こしも議事録の作成もしません。テープはこの iPhone だけに保存され、バックアップには含まれず、「Persona を開発中」をオフにすると削除されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回放只在这台 iPhone 上演示：不连 hub、不转写、不写纪要。录带只存在这台 iPhone 上，不进备份；关掉「正在开发 Persona」时一起删掉。"
+          }
+        }
+      }
+    },
+    "A replayed meeting stays on this iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A replayed meeting stays on this iPhone."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再生した会議はこの iPhone の中だけにあります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回放的会议只在这台 iPhone 上。"
+          }
+        }
+      }
     },
     "A review comment on pull request #%lld at %@ (that code has changed since): please check whether it still applies and address it." : {
       "extractionState" : "manual",
@@ -31847,6 +31928,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Choose from Files…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose from Files…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「ファイル」から選ぶ…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从「文件」选取…"
+          }
+        }
+      }
     },
     "Collapse [Question Card]" : {
       "extractionState" : "manual",
@@ -49558,6 +49662,29 @@
       },
       "extractionState" : "manual"
     },
+    "Couldn't get the tape: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't get the tape: %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テープを取得できませんでした：%1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没取到录带：%1$@"
+          }
+        }
+      }
+    },
     "Couldn't get this image. Tap Retry to try again." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50892,6 +51019,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Couldn't read that tape." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't read that tape."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このテープを読み込めませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读不了这盘录带。"
+          }
+        }
+      }
     },
     "Couldn't read the Messages status: %@" : {
       "localizations" : {
@@ -63879,6 +64029,29 @@
       },
       "extractionState" : "manual"
     },
+    "End Replay" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End Replay"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再生を終了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束回放"
+          }
+        }
+      }
+    },
     "End [Meeting Room]" : {
       "localizations" : {
         "en" : {
@@ -64010,6 +64183,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "结束会议？"
+          }
+        }
+      }
+    },
+    "End the Replay?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End the Replay?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再生を終了しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束回放？"
           }
         }
       }
@@ -70090,6 +70286,328 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agent 结束后关掉它的终端"
+          }
+        }
+      }
+    },
+    "Getting it from %@…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Getting it from %1$@…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ から取得中…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在从「%1$@」取…"
+          }
+        }
+      }
+    },
+    "No tapes on this iPhone yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No tapes on this iPhone yet"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この iPhone にはまだテープがありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 上还没有录带"
+          }
+        }
+      }
+    },
+    "Not on your hub" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not on your hub"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ハブには送りません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不连 hub"
+          }
+        }
+      }
+    },
+    "On %@ [Meeting Tapes]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ にあるテープ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 上"
+          }
+        }
+      }
+    },
+    "On This iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On This iPhone"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この iPhone"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 上"
+          }
+        }
+      }
+    },
+    "On Your Computers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On Your Computers"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたのコンピュータ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的电脑上"
+          }
+        }
+      }
+    },
+    "On this iPhone only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On this iPhone only"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この iPhone のみ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只在这台 iPhone 上"
+          }
+        }
+      }
+    },
+    "Play Sound" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Play Sound"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声を再生"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "播放声音"
+          }
+        }
+      }
+    },
+    "Replay a Meeting Tape" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replay a Meeting Tape"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議テープを再生"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回放会议录带"
+          }
+        }
+      }
+    },
+    "Replay a Meeting Tape…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replay a Meeting Tape…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議テープを再生…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回放会议录带…"
+          }
+        }
+      }
+    },
+    "Replaying" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replaying"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再生中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回放中"
+          }
+        }
+      }
+    },
+    "Replaying a tape" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replaying a tape"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テープを再生中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回放录带"
+          }
+        }
+      }
+    },
+    "Silent at 4×." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Silent at 4×."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "4× のときは音声なし。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "4× 时不出声。"
+          }
+        }
+      }
+    },
+    "Stop the recording first, then replay the tape." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop the recording first, then replay the tape."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "録音を終了してからテープを再生してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先结束正在进行的录音，再回放录带。"
           }
         }
       }
@@ -94949,6 +95467,75 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Model not connected: %@ isn't signed in" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Model not connected: %1$@ isn't signed in"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@にログインしてください"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型没接好：%1$@ 没登录"
+          }
+        }
+      }
+    },
+    "Model not connected: the key for %@ is wrong" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Model not connected: the key for %1$@ is wrong"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@のキーが無効です"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型没接好：%1$@ 的 Key 不对"
+          }
+        }
+      }
+    },
+    "Model not connected: this model isn't available on %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Model not connected: this model isn't available on %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@でモデルを使えません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型没接好：%1$@ 用不了这个模型"
+          }
+        }
+      }
     },
     "Model not connected: Claude Code CLI isn't signed in" : {
       "localizations" : {
@@ -136761,6 +137348,29 @@
       },
       "extractionState" : "manual"
     },
+    "Retrying model request (%lld/%lld)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retrying model request (%1$lld/%2$lld)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モデルリクエストを再試行中（%1$lld/%2$lld）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在重试模型请求（%1$lld/%2$lld）"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Retrying…" : {
       "localizations" : {
         "en" : {
@@ -162737,6 +163347,29 @@
       },
       "extractionState" : "manual"
     },
+    "That isn't a meeting tape. Choose its folder, or its tape.json and audio together." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That isn't a meeting tape. Choose its folder, or its tape.json and audio together."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議テープではありません。テープのフォルダ、または tape.json と音声を一緒に選んでください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是会议录带。请选它的文件夹，或者同时选 tape.json 和音频。"
+          }
+        }
+      }
+    },
     "That setting isn't valid, so nothing was saved." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -162756,6 +163389,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这个设置无效，没有保存。"
+          }
+        }
+      }
+    },
+    "That tape is too large." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That tape is too large."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このテープは大きすぎます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这盘录带太大了。"
           }
         }
       }
@@ -168301,6 +168957,29 @@
         }
       }
     },
+    "The meeting tapes on this iPhone are deleted too." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The meeting tapes on this iPhone are deleted too."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この iPhone の会議テープも削除されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 上的会议录带也会一起删掉。"
+          }
+        }
+      }
+    },
     "The meeting's material" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -168597,6 +169276,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "The minutes are the tape's. Nothing is written to your hub." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The minutes are the tape's. Nothing is written to your hub."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "議事録はテープに記録されたものです。ハブには何も書き込みません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "纪要是录带里的那份，不会写到 hub。"
+          }
+        }
+      }
     },
     "The minutes changed. Showing the latest version; review the action items before adding them." : {
       "extractionState" : "manual",
@@ -180106,6 +180808,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "想滚动更顺滑，请在这台 Mac 上允许 Persona Input。"
+          }
+        }
+      }
+    },
+    "To see a computer's tapes here, put each tape's folder in %@ on it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To see a computer's tapes here, put each tape's folder in %1$@ on it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コンピュータのテープをここに表示するには、各テープのフォルダをそのコンピュータの %1$@ に置きます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把每盘录带的文件夹放到电脑的 %1$@ 里，这里就能看到。"
           }
         }
       }
@@ -197793,29 +198518,6 @@
       },
       "extractionState" : "manual"
     },
-    "Working [Call Screen]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Working"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "作業中"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在工作"
-          }
-        }
-      }
-    },
     "Working [Car Play Voice Screen 694b71]" : {
       "localizations" : {
         "en" : {
@@ -204145,6 +204847,41 @@
         }
       }
     },
+    "map changed %lld times" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "map changed once"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "map changed %1$lld times"
+                }
+              }
+            }
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マップ更新 %1$lld 回"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导图变化 %1$lld 次"
+          }
+        }
+      }
+    },
     "merge changes [Standing Authorization phrase]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -206657,6 +207394,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "with sound" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "with sound"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声あり"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有声音"
+          }
+        }
+      }
     },
     "workflow「%@」" : {
       "shouldTranslate" : true,

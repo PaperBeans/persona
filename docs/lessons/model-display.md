@@ -10,3 +10,7 @@
 - After changing a shared helper, also run the new-session tests that depend on it (#2302). Changes to `AgentModel.label` affect the fallback in `defaultModelDetail`, even if the new-session page itself is unchanged. When updating display expectations, retain request assertions for the raw model ID and effort.
 
 If Android's existing input bar has no model list / current-model data, do not add a new query and selection flow just for a display change. Reuse the session model already passed in, and preserve the existing fallback when it is missing.
+
+## A launcher label must survive the narrow composer (#10248)
+
+Two launchers can run the same model. Reuse the panel's launcher name in an Agent's pill and keep it alongside the shortened model at phone width; an engine mark alone cannot distinguish accounts. Keep the full current and queued setups accessible, and preserve the model-only fallback when the session has no explicit launcher. A label correction must not change the launcher or model sent to the hub.

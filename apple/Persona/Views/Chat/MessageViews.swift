@@ -117,7 +117,7 @@ extension View {
     func runFonts() -> some View { modifier(RunFonts()) }
 }
 
-#if os(iOS)
+#if os(iOS) || os(visionOS)
 /// Inline code's ink (#9477): `Theme.Reply.codeInk`, a step quieter than the words, where they are in the body's own
 /// ink. Words drawn in an ink of their own (a quote, a quieter heading, an agent's quiet words between its steps) keep it
 /// for their code too, and so does a written link: code in it is the link's. A copy link (`CodeCopyMarkdown`, what

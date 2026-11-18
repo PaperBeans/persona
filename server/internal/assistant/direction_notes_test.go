@@ -11,6 +11,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // A direction's notes (#10086, direction_notes.go). All ids, names and notes are placeholders.
@@ -187,5 +188,63 @@ func TestGoldenDirectionNotes(t *testing.T) {
 	}
 	if prompts.RenderDirectionNotes(prompts.DirectionNotes{Name: "x"}) != "" || prompts.RenderTodoDirection(prompts.DirectionNotes{Name: "x", ProjectGoal: "y"}) != "" {
 		t.Fatal("nothing to say still rendered a block")
+	}
+}
+
+// A leader's own task_plan (#10623): PlanTask.Supervisor stays empty, the supervision ledger names the leader, and the
+// task's Agent still starts with the direction's notes, wherever it works.
+func TestDirectionNotesReachALeadersOwnTask(t *testing.T) {
+	s, f := newQuietService(t)
+	f.known["lead1"] = true
+	f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle},
+		proto.Session{SessionID: "lead1", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
+	setSettings(t, s, func(v *Settings) { v.Leaders = []string{"lead1"} })
+	b := &s.directions
+	b.mu.Lock()
+	if !s.directionsLocked(context.Background()) {
+		t.Fatal("directions unreadable")
+	}
+	b.m["lead1"] = &direction{MachineID: "server", Project: "another-project", By: directionByUser, At: time.Now(), Name: "Platform"}
+	b.mu.Unlock()
+	if _, err := s.setDirectionNotes(context.Background(), "lead1", "Heavy gates run on the shared runner."); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{
+		"title": "Fix the login crash", "prompt": "Background: the login page crashes.", "machine": "box", "cwd": "/code/app",
+		"readonly": true, "why": "the repository is on box", "done_when": []string{"PR merged"}, "expect_minutes": 30,
+	}}})
+	if _, err := s.toolTaskPlan(context.Background(), "lead1", raw); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the start", func() bool { f.mu.Lock(); defer f.mu.Unlock(); return len(f.starts) == 1 })
+	if v := onlyTodo(s).Supervision; v == nil || v.Supervisor != "lead1" {
+		t.Fatalf("supervision = %+v", v)
+	}
+	f.mu.Lock()
+	p, _ := f.starts[0]["prompt"].(string)
+	f.mu.Unlock()
+	if !strings.HasPrefix(p, `<persona-context kind="context" title="方向 · Platform · 说明"`) || !strings.Contains(p, "Heavy gates run on the shared runner.") {
+		t.Fatalf("first prompt = %q", p)
+	}
+}
+
+// taskSupervisorOf: the ledger's supervisor first, then the handed-over leader, and a worker of a task leader goes by
+// its leader's task.
+func TestTaskSupervisorOf(t *testing.T) {
+	s, _, todo := newSupervisedService(t)
+	s.todos.mu.Lock()
+	s.todos.todos[todo.ID].Supervision.Supervisor = "lead1"
+	s.todos.mu.Unlock()
+	if got := s.taskSupervisorOf(&PlanTask{TodoID: todo.ID}); got != "lead1" {
+		t.Fatalf("own plan: %q", got)
+	}
+	if got := s.taskSupervisorOf(&PlanTask{Supervisor: "lead2"}); got != "lead2" {
+		t.Fatalf("handed over, no ledger yet: %q", got)
+	}
+	if got := s.taskSupervisorOf(&PlanTask{TodoID: "todo_unknown", Parent: todo.ID, Supervisor: "x"}); got != "lead1" {
+		t.Fatalf("a task leader's worker: %q", got)
+	}
+	if got := s.taskSupervisorOf(&PlanTask{}); got != "" {
+		t.Fatalf("nobody: %q", got)
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantskills"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
@@ -30,6 +31,7 @@ import (
 	"github.com/nwverse/persona/server/internal/node/machdiag"
 	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/nodeupdate"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/quota"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -39,6 +41,8 @@ import (
 )
 
 type Node struct {
+	runtimeUsage runtimeUsageReports
+
 	memoryMu     sync.Mutex
 	Version      string
 	skillImports assistantskills.Importer
@@ -70,6 +74,8 @@ type Node struct {
 	// input box, in place of claudeStartWait and claudeReadyWait (tests; claudeready.go). readyPoll replaces only
 	// the Claude/Codex polling interval for scripted hosts; the normal interval remains 500 ms.
 	claudeStart, claudeReady, readyPoll time.Duration
+	// idleCompactWait shortens only the unattended delivery wait in tests, not the running compaction.
+	idleCompactWait time.Duration
 	// shellSettle, shellQuiet, shellAsk: when set, how long a start waits at most for a new tab's shell to settle, how
 	// long its screen must stay the same, and how long a startup question may stay on screen, in place of
 	// shellSettleWait, shellQuietFor and shellQuestionWait (tests; shellsettle.go).
@@ -90,7 +96,8 @@ type Node struct {
 	home         string
 	sessionScope *nodeSessionScope
 	dir          string // ~/.persona
-	bin          string // absolute path of this executable
+	exe          string // this program's file, links followed: what an update replaces ("" in tests: bin)
+	bin          string // the spelling of this program handed to the processes it starts (selfprogram.go)
 	uid          string // the computer's own id (machineuid.go); empty when it could not be read or made
 	// Program is what bin is (nodeproto.ProgramPersonad / ProgramPersonaNode), for node.info; "" says nothing.
 	Program string
@@ -272,6 +279,7 @@ type Node struct {
 	// terminals opened for Agents on engines without marks of their own (finished_close.go); n.mu.
 	finishedSince map[string]finishedClock
 	agentTerms    map[string]bool
+	agentRoots    map[string]bool // first shells of Agent worktrees on engines without tokens (personatab.go)
 
 	expectedTokensMu sync.Mutex
 	expectedTokens   map[string]map[string]string
@@ -356,17 +364,14 @@ func New(version string) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	bin, err := os.Executable()
-	if err != nil {
-		return nil, err
-	}
-	if p, err := filepath.EvalSymlinks(bin); err == nil {
-		bin = p
-	}
 	// ssh sessions get a minimal PATH; herdr and claude usually live in ~/.local/bin.
 	extra := []string{filepath.Join(home, ".local/bin"), filepath.Join(home, "bin"), filepath.Join(home, "go/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/local/go/bin"}
 	os.Setenv("PATH", strings.Join(append(extra, os.Getenv("PATH")), string(os.PathListSeparator)))
 	dir, err := identity.PrepareHome(home)
+	if err != nil {
+		return nil, err
+	}
+	exe, bin, err := selfProgram(home, dir) // after PrepareHome: its alias is one of bin's spellings (selfprogram.go)
 	if err != nil {
 		return nil, err
 	}
@@ -379,6 +384,7 @@ func New(version string) (*Node, error) {
 		bootAt:   time.Now().UTC(), // sessions started before this were the previous herdr server's (interrupted.go)
 		home:     home,
 		dir:      dir,
+		exe:      exe,
 		bin:      bin,
 		logger:   log.New(os.Stderr, "node: ", log.LstdFlags|log.Lmsgprefix),
 		files:    map[string]*transcript.File{},
@@ -775,31 +781,36 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		TabName                 *string       `json:"tab_name"`
 		TZ                      string        `json:"tz"` // the user's time zone
 		// HTTP is a quota plugin's request to send to a launcher's gateway (launchers.http); nil asks for the gateway.
-		HTTP           *quota.Request  `json:"http,omitempty"`
-		Async          bool            `json:"async"`
-		Title          *string         `json:"title"`
-		PermissionMode string          `json:"permission_mode"`
-		PlanThen       string          `json:"plan_then"`     // session.start in plan mode: the mode after its plan (planthen.go)
-		SecretTicket   string          `json:"secret_ticket"` // session.start: a hand-off's values for this new Claude Code start (secretenv.go)
-		Effort         string          `json:"effort"`
-		ServiceTier    string          `json:"service_tier"`
-		Ultracode      *bool           `json:"ultracode"`
-		Goal           string          `json:"goal"` // session.start: a /goal typed after the first message is in (startgoal.go)
-		DismissLost    bool            `json:"dismiss_lost"`
-		ResumeOnly     bool            `json:"resume_only"`
-		OnlyRunning    bool            `json:"only_running"` // assistant.compact: refuse not_running rather than start the process
-		IsMain         bool            `json:"is_main"`
-		MainCompact    int             `json:"main_compact_window"` // assistant.send, session.send, assistant.warm: with is_main (model_config.go)
-		FollowsSetting bool            `json:"follows_setting"`
-		Interject      bool            `json:"interject_background"`
-		AtItemID       string          `json:"at_item_id"`     // session.fork: the reply to branch off at
-		Refresh        bool            `json:"refresh"`        // launchers.models: ask again, not the kept list
-		Purpose        string          `json:"purpose"`        // launchers.models/check: assistant runs outside the Agent engine
-		Configured     bool            `json:"configured"`     // launchers.models, .probe, .http, .model.check: hub.json names this launcher
-		Guest          *guestParams    `json:"guest"`          // assistant.send: a new guest conversation (assistant_guest.go)
-		Origin         string          `json:"origin"`         // assistant.send: the manager-recorded source of this conversation
-		NewSessionID   string          `json:"new_session_id"` // assistant.send: start the new conversation under this id
-		Raw            json.RawMessage `json:"-"`
+		HTTP           *quota.Request                `json:"http,omitempty"`
+		Async          bool                          `json:"async"`
+		Title          *string                       `json:"title"`
+		PermissionMode string                        `json:"permission_mode"`
+		PlanThen       string                        `json:"plan_then"`     // session.start in plan mode: the mode after its plan (planthen.go)
+		SecretTicket   string                        `json:"secret_ticket"` // session.start: a hand-off's values for this new Claude Code start (secretenv.go)
+		Effort         string                        `json:"effort"`
+		ServiceTier    string                        `json:"service_tier"`
+		Ultracode      *bool                         `json:"ultracode"`
+		Goal           string                        `json:"goal"` // session.start: a /goal typed after the first message is in (startgoal.go)
+		DismissLost    bool                          `json:"dismiss_lost"`
+		ResumeOnly     bool                          `json:"resume_only"`
+		OnlyRunning    bool                          `json:"only_running"` // assistant.compact: refuse not_running rather than start the process
+		IsMain         bool                          `json:"is_main"`
+		MainCompact    int                           `json:"main_compact_window"` // assistant.send, session.send, assistant.warm: with is_main (model_config.go)
+		FollowsSetting bool                          `json:"follows_setting"`
+		Interject      bool                          `json:"interject_background"`
+		IdleCompaction *assistantwire.IdleCompaction `json:"idle_compaction"`
+		MessageSource  *proto.MessageSource          `json:"message_source"`
+		ClientMsgID    string                        `json:"client_msg_id"`
+		AtItemID       string                        `json:"at_item_id"`     // session.fork: the reply to branch off at
+		Refresh        bool                          `json:"refresh"`        // launchers.models: ask again, not the kept list
+		Purpose        string                        `json:"purpose"`        // launchers.models/check: assistant runs outside the Agent engine
+		AssistantTurn  bool                          `json:"assistant_turn"` // launchers.check: shaped as an assistant turn (launchercheck_assistant.go)
+		Conversation   string                        `json:"conversation"`   // launchers.check with assistant_turn: the conversation whose profile it runs in
+		Configured     bool                          `json:"configured"`     // launchers.models, .probe, .http, .model.check: hub.json names this launcher
+		Guest          *guestParams                  `json:"guest"`          // assistant.send: a new guest conversation (assistant_guest.go)
+		Origin         string                        `json:"origin"`         // assistant.send: the manager-recorded source of this conversation
+		NewSessionID   string                        `json:"new_session_id"` // assistant.send: start the new conversation under this id
+		Raw            json.RawMessage               `json:"-"`
 
 		Runtime         string                   `json:"runtime"` // external admission only; never selects a native runtime
 		External        *proto.ExternalExecution `json:"external"`
@@ -859,6 +870,19 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 	}
 	if n.codexBlocked(p.ResumeSessionID) && devicewire.IsSessionStart(method) {
 		return nil, refusal("identity_conflict", "会话 ID 与另一来源重复，不能恢复", nil)
+	}
+	if method == "assistant.send" || method == "session.send" {
+		source := prompts.ItemSource(proto.Item{Role: "user", Kind: proto.KindText, Text: p.Text, Source: p.MessageSource, ClientMsgID: p.ClientMsgID})
+		if source == nil && p.ClientMsgID == "" && !prompts.UserAuthoredContext(p.Text) {
+			if injected := prompts.ParseInjected(p.Text); injected != nil && injected.Kind == proto.InjectedTaskNotice {
+				source = &proto.MessageSource{Kind: proto.InjectedTaskNotice}
+			}
+		}
+		input := idleCompactionInput{
+			At: time.Now(), Policy: p.IdleCompaction, Source: source,
+		}
+		ctx = context.WithValue(ctx, idleCompactionInputKey{}, input)
+		n.noteIdleCompactionInput(p.SessionID, input)
 	}
 	if method == "session.skills" {
 		return n.sessionSkillCatalog(ctx, p.SkillOwner, p.SessionID)
@@ -1193,7 +1217,8 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		def, err := n.launcherDefinition(ctx, p.Name)
 		return map[string]any{"definition": def}, err
 	case "launchers.check": // what a start in that host (the default host when none) would run (#8140)
-		return n.launcherCheck(withLauncherPurpose(withStartHost(ctx, p.Host), p.Purpose), p.Name, p.Model), nil
+		return n.launcherCheckWith(withLauncherPurpose(withStartHost(ctx, p.Host), p.Purpose), p.Name, launcherCheckOpts{model: p.Model,
+			assistantTurn: p.AssistantTurn, effort: p.Effort, conversation: p.Conversation, configDir: p.ConfigDir}), nil
 	case "claude.auth_status": // whether Claude Code is signed in as the launcher runs it, no model request (claudeauth.go)
 		return n.claudeAuthStatus(ctx, p.Name)
 	case "launchers.repair": // the hub's launcher health (docs/server/launcher-health.md)
@@ -1226,7 +1251,11 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		n.useBotmux(true, true)
 		return n.listWorkspaces(ctx)
 	case "workspace.resolve":
-		return n.resolveWorkspace(p.Path)
+		var a struct {
+			Terminal bool `json:"terminal"` // cwd as a terminal here opens it (workspaces.go)
+		}
+		_ = json.Unmarshal(params, &a)
+		return n.resolveWorkspace(p.Path, a.Terminal)
 	case "sessions.list":
 		n.configured()          // a hub that lists without engine.use keeps herdr (engine.go)
 		n.useBotmux(true, true) // and one that lists without saying botmux keeps it, as before (hostbotmux.go)
@@ -1304,7 +1333,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			}
 		}
 		// A goal is set after the first message is in, so a start without a first message cannot take one: a new
-		// Claude Code in a terminal is the only start that does (startgoal.go).
+		// Claude Code or Codex in a terminal is the only start that does (startgoal.go, codex_start_goal.go).
 		goal := cleanStartGoal(p.Goal)
 		if goal != "" {
 			kind := p.AgentType
@@ -1320,7 +1349,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			if isDesktopLauncher(p.Launcher) || isCodexAppLauncher(p.Launcher) {
 				kind = "app"
 			}
-			if err := n.checkStartGoal(goal, kind, p.ResumeSessionID, p.Prompt); err != nil {
+			if err := n.checkStartGoal(goal, kind, cmp.Or(p.Host, n.defaultKind()), p.ResumeSessionID, p.Prompt); err != nil {
 				return nil, err
 			}
 		}
@@ -1574,6 +1603,26 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			return nil, err
 		}
 		return ok(nil)
+	case proto.MethodStartContinue: // the owner's answer to a start's startup question, then the start again (startcontinue.go)
+		var a proto.StartContinueParams
+		if err := json.Unmarshal(params, &a); err != nil {
+			return nil, err
+		}
+		s, err := n.startContinue(ctx, a.SessionID, a.Choice)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"session": s}, nil
+	case proto.MethodStartAnswer: // the same answer into a failed task start's kept tab, which the hub starts again in (startcontinue.go)
+		var a proto.StartAnswerParams
+		if err := json.Unmarshal(params, &a); err != nil {
+			return nil, err
+		}
+		typed, err := n.startAnswer(ctx, a.Pane, a.Line, a.Choice)
+		if err != nil {
+			return nil, err
+		}
+		return proto.StartAnswerResult{OK: true, Typed: &typed}, nil
 	case "session.keys":
 		if a, ok := n.agent(p.SessionID); ok {
 			defer n.forgetDialog(a.PaneID) // the dialog it showed may be gone (dialogstatus.go)
@@ -1732,9 +1781,9 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			if strings.TrimSpace(in.Branch) != "" || strings.TrimSpace(in.Path) != "" {
 				return nil, errors.New("Choose automatic naming or an explicit branch and path")
 			}
-			return n.worktreeCreateAutomatic(worktreeComposerContext(ctx, params), in.Kind, in.WorkspaceID, in.Cwd, in.ParentWorkspaceID)
+			return n.worktreeCreateAutomatic(withAgentWorktree(worktreeComposerContext(ctx, params), in.ForAgent), in.Kind, in.WorkspaceID, in.Cwd, in.ParentWorkspaceID)
 		}
-		return n.worktreeCreate(worktreeComposerContext(ctx, params), in.Kind, in.WorkspaceID, in.Cwd, in.Branch, in.Path, in.ParentWorkspaceID)
+		return n.worktreeCreate(withAgentWorktree(worktreeComposerContext(ctx, params), in.ForAgent), in.Kind, in.WorkspaceID, in.Cwd, in.Branch, in.Path, in.ParentWorkspaceID)
 	case methodWorktreeSource, methodWorktreePreset, methodWorktreeDelete:
 		var in worktreeSourceParams
 		if err := json.Unmarshal(params, &in); err != nil {
@@ -2340,7 +2389,7 @@ func (n *Node) info(ctx context.Context) proto.NodeInfo {
 	return proto.NodeInfo{
 		Protocol:           nodeproto.Version,
 		Program:            n.Program,
-		Executable:         n.bin,
+		Executable:         cmp.Or(n.exe, n.bin), // the update target: the file, never a link to it
 		ProtocolMin:        nodeproto.MinManagerVersion,
 		Capabilities:       n.capabilities(), // secret_env only from a resident node (secretenv.go)
 		NodeUpdate:         canUpdate,

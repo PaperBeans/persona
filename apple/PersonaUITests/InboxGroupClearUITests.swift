@@ -90,7 +90,7 @@ final class InboxGroupClearUITests: XCTestCase {
         XCTAssertTrue(group.waitForExistence(timeout: 5), "no group choice in the menu:\n\(app.debugDescription)")
         XCTAssertTrue(app.buttons["inbox.groupClear.section"].firstMatch.exists, "no whole-section choice in the menu")
         XCTAssertTrue(app.buttons["inbox.groupClear.section"].firstMatch.label.contains("知悉即可"), "the section choice does not name FYI")
-        // "看过「飞书」的全部 N 条": the number the group's title shows
+        // "Mark all N items in Feishu as seen": the count shown in the group title
         let shown = Int(group.label.components(separatedBy: "全部 ").last?.components(separatedBy: " ").first ?? "") ?? -1
         sleep(1)
         shot("inbox group seen menu")

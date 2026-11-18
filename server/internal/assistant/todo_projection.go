@@ -1,11 +1,14 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
+	"slices"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistant/todo/projection"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -26,8 +29,16 @@ type todoProjection struct {
 // todoProjectionOf works out the view of every to-do of list at now. list holds the rows as GET /api/v1/todos lists
 // them (formatTodo, with ask, decision_review and orphaned). The sessions read are those of the active runs of the
 // to-dos the projection reads as open (a failed start included, whose runs still date its last activity), each
-// computer asked once (todoRunSessions).
+// computer asked once (todoRunSessions), and with them the pending cards of those runs (todoFactsOf).
 func (s *Service) todoProjectionOf(ctx context.Context, list []listedTodo, now time.Time) todoProjection {
+	facts := s.todoFactsOf(ctx, list)
+	return todoProjection{facts: facts, views: projection.Views(facts, now)}
+}
+
+// todoFactsOf are the rows of list as the projection reads them, with their active runs' sessions and those runs'
+// pending cards (todoRunCards), which say what a run that asks is asking (todoProjectionOf; todo_view_push.go works
+// out the views of a part of the list from them).
+func (s *Service) todoFactsOf(ctx context.Context, list []listedTodo) []projection.Facts {
 	want := map[string]map[string]bool{} // by computer, the session ids of the open to-dos' active runs
 	for i := range list {
 		t := &list[i]
@@ -56,23 +67,48 @@ func (s *Service) todoProjectionOf(ctx context.Context, list []listedTodo, now t
 			sessions[[2]string{machine, c.SessionID}] = c
 		}
 	}
+	cards := s.todoRunCards(want)
 	loc := s.location(ctx)
-	p := todoProjection{facts: make([]projection.Facts, len(list))}
+	facts := make([]projection.Facts, len(list))
 	for i := range list {
 		t := &list[i]
-		p.facts[i] = projectionFacts(*t, sessions, loc)
-		// A computer that did not answer lists nothing: its runs read as offline, and the to-do gets no Inactive mark.
-		if t.DoneAt == nil || t.StartError != "" {
-			for _, a := range t.Agents {
-				if a.ReleasedAt == nil && a.DismissedAt == nil && failed[a.MachineID] {
-					p.facts[i].Unreached = true
-					break
-				}
+		facts[i] = projectionFacts(*t, sessions, loc)
+		if t.DoneAt != nil && t.StartError == "" {
+			continue
+		}
+		for _, a := range t.Agents {
+			if a.ReleasedAt != nil || a.DismissedAt != nil {
+				continue
 			}
+			// A computer that did not answer lists nothing: its runs read as offline, and the to-do gets no Inactive
+			// mark.
+			facts[i].Unreached = facts[i].Unreached || failed[a.MachineID]
+			facts[i].Interactions = append(facts[i].Interactions, cards[[2]string{a.MachineID, a.SessionID}]...)
 		}
 	}
-	p.views = projection.Views(p.facts, now)
-	return p
+	return facts
+}
+
+// todoRunCards are the pending cards of the sessions in want (by computer, the session ids), by computer and
+// session, oldest first. A health conversation's card is marked Private on this copy, as the hub's push treats it
+// (hub/push_payload.go askQuestion), so the view lets neither be answered from a row or a lock screen.
+func (s *Service) todoRunCards(want map[string]map[string]bool) map[[2]string][]proto.Interaction {
+	if len(want) == 0 {
+		return nil
+	}
+	cards := s.pendingOf(want)
+	for _, l := range cards {
+		for i := range l {
+			l[i].Private = l[i].Private || identity.InHealthSpace(l[i].Cwd)
+		}
+		slices.SortFunc(l, func(a, b proto.Interaction) int {
+			if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
+				return c
+			}
+			return cmp.Compare(a.ID, b.ID)
+		})
+	}
+	return cards
 }
 
 // todoRunSessions are those of machine's sessions whose id is in want, each as the apps get it: the node's rows read
@@ -208,7 +244,7 @@ func projectionFacts(t listedTodo, sessions map[[2]string]proto.Session, loc *ti
 	}
 	if a := t.Ask; a != nil {
 		f.Ask = &projection.Ask{Outcome: a.Outcome, Verdict: a.Verdict, Recommend: a.Recommend, AskedAt: a.AskedAt,
-			Question: a.Question, Deadline: a.Deadline, Default: a.Default, ForBriefing: a.ForBriefing}
+			Risk: a.Risk, Question: a.Question, Deadline: a.Deadline, Default: a.Default, ForBriefing: a.ForBriefing}
 		for _, o := range a.Options {
 			f.Ask.Options = append(f.Ask.Options, assistantwire.OwnerAskOption{Label: o.Label, LeadsTo: o.LeadsTo})
 		}

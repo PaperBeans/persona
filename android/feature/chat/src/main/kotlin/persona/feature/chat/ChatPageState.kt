@@ -294,10 +294,12 @@ internal fun rememberChatPageTrays(key: SessionKey, chrome: ChatChromeBindings, 
     }
     val mainConversation by (chrome.tasks?.mainConversation ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) })
         .collectAsStateWithLifecycle()
-    val foldsBackground = renderStyle.compactToolSummary &&
-        persona.core.domain.tasks.BackgroundFolding.foldsConversation(
-            key.sessionId, mainConversation ?: foldSetting.main, foldSetting.on, chrome.leaderConversations,
+    val resolvedMain = mainConversation ?: chrome.mainConversation ?: foldSetting.main
+    val supervisingConversation = renderStyle.compactToolSummary &&
+        persona.core.domain.tasks.BackgroundFolding.supervisesConversation(
+            key.sessionId, resolvedMain, chrome.leaderConversations,
         )
+    val foldsBackground = supervisingConversation && foldSetting.on
     LaunchedEffect(chrome.inboxTrays, chrome.inboxScope, assistantTrays.expanded) {
         if (renderStyle == ChatRenderStyle.Assistant && assistantTrays.expanded == AssistantTray.NeedsYou) {
             try { chrome.inboxScope?.let { chrome.inboxTrays?.refresh(it) } }
@@ -306,7 +308,7 @@ internal fun rememberChatPageTrays(key: SessionKey, chrome: ChatChromeBindings, 
         }
     }
     return ChatPageTrays(assistantTrays, trayApprovingState, traySendingState, trayPlanState, trayScheduleState, traySendIds,
-        inboxDraftsState, traySchedulesState, foldsBackground)
+        inboxDraftsState, traySchedulesState, foldsBackground, supervisingConversation)
 }
 
 /** What [rememberChatPageTrays] hands back to ChatPage: plain values, and the state objects ChatPage reads and writes. */
@@ -320,12 +322,14 @@ internal class ChatPageTrays(
     val inboxDrafts: State<List<AssistantInboxDraft>>,
     val traySchedules: MutableState<List<persona.core.contracts.api.ScheduledTask>>,
     val foldsBackground: Boolean,
+    val supervisingConversation: Boolean,
 )
 
 /** ChatPage's lines: the projection as presented, with task cards, subagents and model changes (moved as is). */
 @Composable
 internal fun rememberChatPageLines(key: SessionKey, renderStyle: ChatRenderStyle,
     snapshot: persona.core.contracts.api.ChatSnapshot, session: Session?, foldsBackground: Boolean,
+    supervisingConversation: Boolean,
     tasks: persona.core.domain.tasks.TasksStore?, taskTodos: List<persona.core.contracts.Todo>, search: ChatSearchState,
     openWork: Set<String>, projection: persona.core.domain.lines.ChatSnapshot, feed: List<persona.core.contracts.FeedItem>,
     taskPlans: Map<String, TaskPlan>, taskCardProjection: Map<String, List<AssistantTaskCard>>,
@@ -335,12 +339,12 @@ internal fun rememberChatPageLines(key: SessionKey, renderStyle: ChatRenderStyle
     // Glass draws the hub's task records among the lines, as iOS does (#4339 C13), and folds a supervision round into one
     // line there rather than moving it to the background record; Brief and Board keep both behind the trays.
     val inlineRecords = PersonaTheme.style == AppStyle.Glass
-    val backgroundFolding = if (foldsBackground || (inlineRecords && renderStyle.compactToolSummary))
+    val backgroundFolding = if (foldsBackground || ((inlineRecords || !supervisingConversation) && renderStyle.compactToolSummary))
         persona.core.domain.tasks.BackgroundFolding(openWork, search.selected?.itemId ?: jumpItem, rounds = foldsBackground) else null
-    val assistantPresentation = remember(projection, snapshot.items, feed, renderStyle, backgroundFolding, inlineRecords) {
+    val assistantPresentation = remember(projection, snapshot.items, feed, renderStyle, backgroundFolding, inlineRecords, supervisingConversation) {
         if (renderStyle.compactToolSummary) {
             val presentation = persona.core.domain.tasks.AssistantConversation.project(projection.lines, snapshot.items, backgroundFolding,
-                inline = inlineRecords)
+                inline = inlineRecords, supervisingConversation = supervisingConversation)
             presentation.copy(background = persona.core.domain.tasks.AssistantLines.lines(presentation.background,
                 persona.core.domain.tasks.AssistantTaskCards.backgroundFeed(feed, inlineRecords)))
         } else persona.core.domain.tasks.AssistantConversation(projection.lines, emptyList())

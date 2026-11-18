@@ -78,6 +78,9 @@ func TestBackgroundMonitorEventsAndLifecycle(t *testing.T) {
 	appendRecord(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "content": []any{
 		map[string]any{"type": "tool_use", "id": "stop-m2", "name": "TaskStop", "input": map[string]any{"task_id": "m2"}},
 	}}})
+	appendRecord(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []any{
+		map[string]any{"type": "tool_result", "tool_use_id": "stop-m2", "content": "Stopped background task m2"},
+	}}})
 	want = want[1:]
 	if got := read(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("TaskStop: got %+v, want %+v", got, want)

@@ -442,7 +442,8 @@ struct AssistantModelSheet: View {
 
     private func row(launcher: String, modelID: String, title: String, detail: String?, ticked: Bool,
                      locked: String?, custom: Bool = false) -> some View {
-        Button {
+        let second = launcherModelRowDetail(owner: launcher, detail: detail)
+        return Button {
             Haptics.tap()
             Task {
                 if await panel.choose(launcher: launcher, model: modelID.isEmpty ? nil : modelID, session: session) {
@@ -454,8 +455,8 @@ struct AssistantModelSheet: View {
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                     Text(title).font(custom ? Theme.Font.heading.monospaced() : Theme.Font.heading)
                         .foregroundStyle(.primary).lineLimit(1)
-                    if let detail {
-                        Text(detail).font(Theme.Font.label.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                    if let second {
+                        Text(second).font(Theme.Font.label.monospaced()).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
                 Spacer(minLength: Theme.Space.s)

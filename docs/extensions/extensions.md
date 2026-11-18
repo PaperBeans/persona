@@ -1729,7 +1729,12 @@ manifest can ask for four things. A hub from before them refuses the manifest, s
       proxy and reaches only the saved addresses, as before.
     - The Go SDK's `ext.SettingsCheckClient(params)` is an HTTP client through `proxy` (an ordinary one without it); in
       another language, use `proxy` as the proxy of the check's requests.
-    - Source runtimes get none yet: their fetches go through the runtime's broker (#1180).
+    - A source runtime uses that same credential through its fixed runtime broker, not a direct proxy connection. The
+      TypeScript SDK's `settingsCheckFetch(params)` returns a fetch for this one check: its requests and every redirect
+      carry the credential to the broker, while ordinary global `fetch` calls and overlapping checks keep their own
+      targets. The broker derives candidate targets from the owner-approved `config:` entries, applies the same DNS,
+      protected-target, redirect, body, deadline and concurrency rules, and accepts no target list or extension identity
+      from the guest. An older hub sends no `proxy`, and the helper behaves like ordinary `fetch`.
   - A refusal saves nothing and is not audited. The route answers 400 `check_failed` with the extension's words.
   - Before the words go back, every secret handed to the check is replaced by `***`: whole, and any prefix or suffix of
     6 characters or more. The words are cut to 300 characters.

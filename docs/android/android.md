@@ -409,6 +409,24 @@ order, assistant switching, real-page phone home/search/empty states in every st
 Advanced folding and owner-aware selection. Captures produced by these tests are **Native JVM Compose renders**,
 not emulator/handset screenshots, and do not prove system dialogs, background survival or live hub transport.
 
+### One read-only About Version generation experiment (#9694)
+
+The production About group remains the unchanged handwritten `AboutSettingsPage`, including native Version/Build
+reads and `BuildCommit.parse`, short-hash presentation and full-value copy. There is no setting, experiment switch,
+new style, app route, generator initialization or runtime. `android/refract/about/README.md` owns the bounded
+Android-only consumer experiment: one shared Swift Version row, an immutable typed model, direct mapping to the
+existing `JRow` and resources, a source-pinned CLI and a deterministic regenerate-and-diff command. Its generated
+Kotlin and its model adapter live only in `:feature:settings`'s test source set; ordinary debug/release source sets
+exclude them. `AboutVersionRefractTest` calls the generated row for comparison, never as the production fallback.
+Removing the experiment leaves the original screen and behavior intact.
+
+The comparison test requires pixel-identical native/generated rows in Glass, Brief and Board, light/dark,
+en/zh-Hans/ja and standard/2x text, plus a localized missing-version fallback. Existing `AboutBuildCommitTest` and
+`AboutBuildCommitShotsTest` retain native Commit coverage. These are **Native JVM Compose component captures**, not
+emulator/handset, accessibility-service, navigation or performance evidence. The pilot makes no three-platform
+readiness, performance-parity or complete-migration claim. The CLI's second-backend schema-validation output stays
+in temporary storage; no iOS/HarmonyOS destination is created.
+
 ### Large-window Settings presentation and hardware keys
 
 On regular and expanded windows, Settings keeps the same `settingsSheetStack`, entries, ViewModel stores and root Close / child Back behavior, but `JSettingsSheet` presents them inside a centered page-sized card. The card uses `SettingsPageSizing` (maximum width and height aliasing `ReadingWidth`, minimum margin `Tokens.Space.xl`) and the actual safe drawing bounds. The existing list-detail directive still decides when to show one pane. Compact and wide-phone windows retain the original full-window sheet. One `movableContentOf` moves the same Settings composition between the two containers, preserving non-saveable state and running effects; a fixed-key `SaveableStateHolder` additionally carries saveable drafts and list state.
@@ -1140,6 +1158,31 @@ Confirm the connection on the pairing page, handle permissions and the checklist
 ```
 
 Wait until the page is ready before taking screenshots. For batch screenshots use `./scripts/app/android.sh shots`; debug direct-entry arguments are below. None connect to a production hub. For scrolling performance see "Interface style performance".
+
+## Process-start pairing restore
+
+`ConnectionRuntime.start()` schedules registry restoration and legacy migration on `Dispatchers.IO` instead of blocking the
+caller with `runBlocking`. It publishes the startup job before starting it; `settled()` joins that job and then takes the
+runtime gate, so callers resume only after the restored groups and selection are installed. `WiredPairingService.restore()`
+exposes that barrier through `PairingService`; implementations without asynchronous restoration return immediately.
+
+The main activity and share sheet keep their existing restore loading UI. Boot and notification receivers use `goAsync`
+(and join the resume job), workers and Glance suspend, and the foreground service promotes before making its deferred
+pairing decision. Notification and surface collectors also wait before reading `isPaired`: the initial `false` means
+restoration is pending, not that the user unpaired, so it must not stop services, clear a saved fleet, publish empty
+shortcuts or answer an action against an empty scope. `FleetFeed.settled()` additionally waits for the saved fleet
+snapshot, so a tile or widget cannot navigate or render from the empty pre-restore value. The tile immediately launches
+`TileRouteActivity` through `startActivityAndCollapse`; that foreground activity waits for the saved fleet and performs the
+final navigation after the tile service is destroyed, without relying on a background `Context.startActivity()`.
+
+`ConnectionRuntimeStartupTest`, `NotificationRuntimePairingRestoreTest`, `ReceiverPairingRestoreTest` and
+`ApproveFirstPairingRestoreTest` cover these barriers with deliberately delayed restoration.
+
+A restored `GroupRuntime` constructs its initial `HubNetwork` from `ConnectivityManager.activeNetwork` and its capabilities,
+including the Android 37 local-network permission state. Its constructor does not dial immediately: `activate()` first
+installs the group's data and reconciliation collectors, then starts the connection. The existing callback and
+`refreshNetwork()` path still handles later changes and local-address details, so the first route selection no longer waits
+for a callback or a second reconnect.
 
 ## Debug against release
 
@@ -1950,6 +1993,7 @@ Ported from old main-line App chat code (d2d484ef, 4588285d) on 2026-11-02, redr
   While the session waits on you, an Agent chat's running summary reads Waiting for you, as the header does, with no elapsed time or spinner (`workSummary(waiting = true)`, #2483); the turn stays the live one and folds and opens as before. It waits on you when the hub's unified state says needs you (a question, plan or permission a hook holds while herdr's status stays `working`), the status says `blocked`, or one of the session's own requests is pending on the phone; the header goes by the same state (`turnWaitsOnYou`, `needsYou` in `ChatState.kt`). A task agent's request alone puts Waiting for you in the header but leaves this turn working.
   Codex commentary is assistant text as in `docs/integrations/codex.md` (#5853). `ItemsDatabase` 5 (`MIGRATION_4_5`, registered in both cache builders) drops cache rows written when those items were thinking; no schema or user data is migrated. `ContinuityNarrationTest` covers expanded narration being replaced by a folded page without losing the final answer outside its seq + block range.
   Paseo's input to an agent (another agent's message, a child's notice, a schedule's run) is a message from another session, a subagent's task note or a notice, as in `docs/integrations/paseo.md` (#8220). `ItemsDatabase` 6 (`MIGRATION_5_6`, registered in both cache builders) drops cache rows that still hold the raw `<paseo-system>` envelopes as the user's messages; no schema or user data is migrated.
+  Codex's `clock.sleep`, SubAgentActivity and CollabAgentToolCall are tool calls (`sleep`, `subagent`, `wait_agent`) as in `docs/integrations/codex.md` (#10436). `ItemsDatabase` 7 (`MIGRATION_6_7`, registered in both cache builders) drops cache rows that still hold them as notices under the calls' ids; no schema or user data is migrated.
 - Tool naming follows iOS `ToolViews.swift` / `PersonaToolNames.swift` (#2753): Persona tools, `conversation_*`, `computer_*` / `browser_*`, `phone_*`, `mail_*` use names stripped of `mcp__x__`, localized verbs (Rename chat, Control computer, Phone, Read Agent chat…), icon and subject. Work row "Control computer macbook"; no app on `computer_state` gives "macbook · Whole screen" localized; `ask_user` first question; `Monitor` description or command first line. Unknown Persona-server tools "Call Persona · github read", others raw name (`namedToolVerb` in `core/domain`, `ToolVerbTest`, `ToolPresentationTest` in `feature/chat`).
 - TodoWrite plan uses `PlanCard`: title completed/total and current item (activeForm while in progress), right Step N/M or checkmark when done;
   tap title collapses to progress hairline. Completed dim/check, running current spinner, pending hollow circle; failed update shows Update failed even collapsed (`planProgress`).

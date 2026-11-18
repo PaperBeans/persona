@@ -19,7 +19,7 @@ whether there's a pending interaction, and whether the user has looked at it in 
 
 List order (each client's rank: web `lib/format.ts`, iOS / Mac `AgentListOrder.rank`, Android `agentRank`): Needs you → Unread → Awaiting reply → Working → Just finished → Seen → Unknown → Not running.
 
-Sort priority of a folded row or tab (which agent it speaks for and which pane it opens on; web `lib/herdr-tree.ts`, Android `tabUrgency`): Needs you → Working → Unread → Seen → Unknown → Not running, with Awaiting reply right after Unread on Android.
+Sort priority of a folded row or tab (which agent it speaks for and which pane it opens on; web `lib/herdr-tree.ts`, Android `tabUrgency`): Needs you → Working → Unread → Seen → Unknown → Not running, with Awaiting reply and then Just finished right after Unread on Android.
 iOS / Mac tab rows (`TabPanes.swift`) go by `AgentState.priority` instead: Needs you → Unread → Working → Seen → Unknown → Not running.
 
 ### Awaiting your reply (#5096)
@@ -95,8 +95,9 @@ session therefore carries `work.just_finished` (`state` is unchanged; older apps
   meeting or a stretch of focused work; the setting changes it.
 - **Not counted**: no push, badge, Needs you count, Live Activity or widget count changes, and the assistant's snapshot
   still lists these turns under "Done (within 24 hours)".
-- **Clients** (#9751): the web first. The shared Rust sort core with HarmonyOS, Android and iOS / Mac follow in their
-  own issues; until then they show these rows as Seen, as before.
+- **Clients** (#9751): the web, and Android (#9786, `docs/android/android-design.md` 2.4), whose open chat keeps its row in
+  this place until it is left, as it keeps an Unread one. The shared Rust sort core with HarmonyOS and iOS / Mac follow
+  in their own issues; until then they show these rows as Seen, as before.
 
 ### Codex (#4865)
 

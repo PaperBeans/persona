@@ -93,9 +93,9 @@
   "mcp_tools.assistant#subscription_sources": 1161,
   "mcp_tools.assistant#supervision_finish": 878,
   "mcp_tools.assistant#task_decided": 662,
-  "mcp_tools.assistant#task_plan": 14184,
+  "mcp_tools.assistant#task_plan": 14046,
   "mcp_tools.assistant#task_plan_withdraw": 941,
-  "mcp_tools.assistant#task_retry": 741,
+  "mcp_tools.assistant#task_retry": 878,
   "mcp_tools.assistant#task_review": 10002,
   "mcp_tools.assistant#task_scope": 1995,
   "mcp_tools.assistant#task_start_keys": 1071,
@@ -123,7 +123,7 @@
   "supervise.background_escalated": 411,
   "supervise.brief": 747,
   "supervise.decisions": 2107,
-  "supervise.digest": 3735,
+  "supervise.digest": 3739,
   "supervise.done_when": 265,
   "supervise.inbox": 1442,
   "supervise.leader_stuck": 363,
@@ -131,5 +131,5 @@
   "supervise.review_rework": 555,
   "supervise.rework": 396,
   "supervise.task_goal": 111,
-  "supervision_instructions": 15684
+  "supervision_instructions": 15682
 }

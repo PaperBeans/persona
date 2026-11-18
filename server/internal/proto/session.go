@@ -409,7 +409,9 @@ type Session struct {
 	TurnError string `json:"turn_error,omitempty"`
 	// TurnErrorKind is what the agent's record says of TurnError, when it says (Claude Code's error field, Codex's
 	// error kinds): TurnErrorTransient (worth a "Continue"), TurnErrorUser (the user must act) or TurnErrorUsageLimit
-	// (a subscription's usage limit, until it resets); empty: read off the text.
+	// (a subscription's usage limit, until it resets); empty: read off the text. Or the hub's own word on a task
+	// Agent's turn that had no output at all (SilentTurnKind: TurnErrorNoOutput, TurnErrorStopped), with TurnError
+	// the sentence for it in the user's language (#10187).
 	TurnErrorKind string `json:"turn_error_kind,omitempty"`
 	// TurnErrorResetsAt is when the subscription usage limit that ended the turn resets (TurnErrorKind
 	// TurnErrorUsageLimit): what the agent's record says (Claude Code's quotaLimits.resetsAt, the full window of a Codex
@@ -484,7 +486,15 @@ const (
 	TurnErrorTransient  = "transient"   // the model service failed for a moment: worth a "Continue"
 	TurnErrorUser       = "user"        // sign-in, context window, the model…: the user must act
 	TurnErrorUsageLimit = "usage_limit" // a subscription's usage limit: it goes on once the limit resets (TurnErrorResetsAt)
+	// The hub's word on a task Agent's turn that ended with no reply, tool call or image (#2349, #10187): no error the
+	// model service reported, and no "Done" either.
+	TurnErrorNoOutput = "no_output" // the model service answered nothing: interrupted, worth a "Continue"
+	TurnErrorStopped  = "stopped"   // Persona's own Stop interrupted it (its conversation was stopped): the owner's to go on with
 )
+
+// SilentTurnKind: kind is the hub's word on a turn with no output (TurnErrorNoOutput, TurnErrorStopped), not an error
+// the model service reported: nothing for Session Triage to ask the user about or to continue by itself.
+func SilentTurnKind(kind string) bool { return kind == TurnErrorNoOutput || kind == TurnErrorStopped }
 
 // Session.TurnErrorCode values (docs/assistant/onboarding.md 4.6).
 const (
@@ -493,6 +503,9 @@ const (
 	TurnErrorModelRoute               = "model_route"                // the model name is not one the service or gateway knows
 	TurnErrorRateLimited              = "rate_limited"               // too many requests, or a usage limit
 	TurnErrorModelFallbackUnavailable = "model_fallback_unavailable" // a refusal selected a model the service cannot use
+	// TurnErrorToolSearchUnsupported: the gateway refused Claude Code's on-demand tool loading (tool search, #10365). The
+	// node now starts that launcher and model with every tool loaded, so a retry works: not the user's to fix.
+	TurnErrorToolSearchUnsupported = "tool_search_unsupported"
 )
 
 // Codes a call refuses with when the assistant's conversation cannot start on a machine (docs/assistant/onboarding.md 4.6, 5.2):

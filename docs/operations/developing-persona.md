@@ -9,7 +9,7 @@ hub or anyone else unless the owner sends the file, and then only as an ordinary
 
 | Client | State |
 | --- | --- |
-| iPhone / iPad | #9460: switch, recording, MetricKit, export with Send to Agent and Share File |
+| iPhone / iPad | #9460: switch, recording, MetricKit, export with Send to Agent and Share File; #10589: Replay a Meeting Tape |
 | Web, desktop app | #9617: switch, recording, export with Send to Agent and Download; #9675: the desktop app's main process |
 | Android | planned, #9618 |
 | Watch | not in the first version (MetricKit is not available on watchOS) |
@@ -18,12 +18,35 @@ hub or anyone else unless the owner sends the file, and then only as an ordinary
 
 - Settings › About, under Version. Stored on the device (iOS `UserDefaults` `devMode.on`, `devMode.since`), never
   synced. Footer: what it records, that the data stays on the device, that turning it off deletes it.
-- While on, the group adds **Recorded** (since when, how much) and **Export Diagnostics…**, and on iOS **Call Handle**
+- While on, the group adds **Recorded** (since when, how much) and **Export Diagnostics…**, and on iOS **Replay a Meeting
+  Tape…** ("Replaying a meeting tape" below) and **Call Handle**
   (**Generic**, the default, or **Email**, `devMode.callHandle`): the kind of handle a call to Persona carries to the
   system, an on-device experiment for the Phone app's Recents (#9887, `docs/apple/calls.md` "Recents and intents"). It
   counts only while the switch is on; turned off, calls carry the generic handle again.
-- Turning it off deletes everything recorded. When something is recorded it asks first: **Export First…** opens the
-  export page, **Turn Off and Delete** goes ahead.
+- Turning it off deletes everything recorded, and on iOS the meeting tapes kept for replays. When something is recorded
+  or a tape is kept it asks first (saying the tapes go too): **Export First…** opens the export page, **Turn Off and
+  Delete** goes ahead.
+
+## Replaying a meeting tape (iOS)
+
+**Who it serves**: people tuning the meeting room (its live transcript, highlights and map) who want to watch a recorded
+meeting again on a real phone, the way the room showed it (#10589). It needs no hub change.
+
+**Replay a Meeting Tape…** opens a page: the speed (1×, 2×, 4×) and **Play Sound** (the tape's audio at 1× and 2×,
+silent at 4×), then the tapes **On This iPhone**, those **On** each of the owner's computers, and **Choose from Files…**.
+A tap starts the tape in the meeting room: its time of its length and its speed (changeable while it plays) under the
+title, only Pause and End; after End, the tape's minutes. Starting asks to stop first while something records.
+
+- **Nothing reaches the hub**: no upload, no hub meeting, no transcription, nothing in the knowledge base, no push, no
+  quota used. What it shows is what the hub produced when the tape was recorded. Re-running the audio through today's hub
+  is a separate issue (#10590).
+- **Where tapes come from**: a computer's `~/.persona/meeting-tapes` (a folder per tape: `tape.json` and the audio it
+  names), listed and downloaded through the hub, which relays the bytes and keeps nothing; or the Files app (AirDrop,
+  a folder on the phone).
+- **What is kept**: the tapes, in Application Support/meeting-tapes, out of backups (a tape holds other people's words).
+  Swipe to delete one; turning the switch off deletes them all. They are never part of the diagnostics package.
+
+The room, its guards and the tape's format: docs/apple/recording.md "A meeting's tape and its replay".
 
 ## What is recorded (iOS)
 
@@ -161,7 +184,8 @@ not one of the API's words is `:id`. `DevModeTests` keeps the Swift list equal t
 
 `apple/Persona/DevMode/`: `DevMode` (the switch, lifecycle, device observers, the minute roll), `DevRecorder` (counting
 and lines), `DevStore` (files, limits), `DevMetrics` (MetricKit), `DevPackage` (the zip), `DevScrub`, `DevModeViews`
-(About's group, Export Diagnostics), `DevSend` (Send To and the hand-off to a chat's box). Shared code reports through `apple/Shared/DevProbe.swift`; requests through
+(About's group, Export Diagnostics), `DevSend` (Send To and the hand-off to a chat's box), `MeetingTapesPage` (Replay a
+Meeting Tape; the tapes are `MeetingTapeLibrary`, the player `MeetingReplay` in `apple/Persona/Recording/`). Shared code reports through `apple/Shared/DevProbe.swift`; requests through
 `HubRedirects.finished` in PersonaWire. DEBUG: `-openAbout YES` opens About, `-openAbout export` its export page.
 Tests: `apple/PersonaTests/DevModeTests.swift`.
 

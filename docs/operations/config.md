@@ -94,7 +94,7 @@ open ports, or a Tailscale account; the hub tries ssh first and falls back to ta
    ```
 
    `ssh_host` is the host name the **hub machine** uses to SSH to this one (each side has its own `~/.ssh/config`, so it can differ from `ssh` in step 1); `id` should match step 1;
-   `name` is the name shown in the App; `icon` is `server` / `laptop` / `desktop`. `remote_bin` is the path of `personad` on that computer; when omitted the hub uses `~/.persona/bin/personad` (the canonical binary the deploy script installs); set it if installed elsewhere.
+   `name` is the name shown in the App; `icon` is `server` / `laptop` / `desktop`. `remote_bin` is the path of `personad` on that computer; when omitted the hub uses `~/.persona/bin/personad` (the canonical binary the deploy script installs); set it if installed elsewhere. It may be a wrapper script that sets the node's environment and runs personad; **Redeploy** over ssh does not replace a script, so update the personad it runs by hand ([node-update.md](node-update.md) "Usage").
    Whose assistant it is and what it should know (`assistant.owner`, `assistant.notes`) go into the built-in manager's `~/.persona/managers/assistant/manager.json` (make it, 0600, if it isn't there yet; see "manager.json" below). For direct public access add `public.tls_listen` and `public.advertise` and open the TLS port per the [network doc](network.md); keep `public_url` as a reachable private-network address.
 
 4. **Restart the hub so it reads the new config**: `./scripts/deploy/deploy.sh <hub machine id>` (or `systemctl --user restart personad` on the hub machine).

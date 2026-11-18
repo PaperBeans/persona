@@ -126,6 +126,7 @@ struct CodeBlockStack: View {
                     }
                     if let more { ExtensionMoreRow(more: more, model: model, link: $link) }
                 }
+                .environment(\.extensionCardInset, CardStyle.padding)
                 .card()
                 if let footer, !footer.isEmpty {
                     Text(footer).font(Theme.Font.label).foregroundStyle(.secondary).padding(.horizontal, Theme.Space.xs)

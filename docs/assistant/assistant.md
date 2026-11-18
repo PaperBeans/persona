@@ -86,7 +86,7 @@ Changing trust does not erase context already delivered to a computer or termina
 | Lark | The open-source version uses official lark-cli ("Lark: lark-cli" below). With a Lark-gateway extension installed, mainly use its skill (extension commands in Bash, both reads and writes), see "Lark: skill supplied by the Lark extension"; MCP `lark_chats` / `lark_messages` / `lark_search` also come from the extension (since #1571 no Lark gateway client in hub, `docs/plans/plan-extensions.md` ("Step 3")). The old read-only `lark_api` and `lark_send` were removed as duplicates of the skill |
 | Control Persona itself | `persona_settings` (`list` first, an assistant tool, `assistant/settings_tool.go`: About Me, default launcher, and `main_tasks_quiet` are assistant-owned settings, read / written by it with its own phone confirmation cards; other settings belong to hub, listed through `app.call settings.list`, read / written through `app.tool persona_settings`, with hub confirmation): read / write triage rules (global `inbox.rules` and per-plugin-source `inbox.rules.<plugin>` for sources declaring `triage_rules`, overriding global when present), every configurable extension's form settings (`extension.<id>`: `get` lists each field, `set` changes only the fields given, each shown before → after on the card, #2385), inbox task-linking rules (`inbox.agent_rules`: which running task a needs-you item belongs to; what the AI twin takes on is inbox policies. Reading or changing it says when the AI twin is off, #5865), About Me, default launcher, "Main chat tasks notify only in main chat" (`assistant.main_tasks_quiet`), per-machine muted Claude config directories (`agents.blocked_claude_dirs`), low-distraction mode for every device (`notifications.low_distraction`, the hub's push grading switch, #8157; `docs/server/server.md` "Push grading (push urgency filtering, `hub/lnmode.go`)"), and add / remove mail accounts. Changes first show a phone confirmation card; added-account passwords / authorization codes are entered on the phone card, never through the model or chat / interaction history. After approval, hub tests IMAP / SMTP and encrypts / saves only if both work. Gmail requires Google sign-in in the App; launchers are written to unified model configuration while retaining existing model and effort |
 | Live snapshot | Each message to the assistant starts with `<persona-context>` (not system prompt, see "Live snapshots and prefix caching"): time (phone timezone), online computers, Needs you / Unread / Working Agents, unread connector chats and @me, today's upcoming meetings, scheduled follow-ups, and up to five open Inbox matters being followed by check time. Agents and tasks include web links: hub `public_url` (default `http://<hostname>:18660` when unset) plus `/s/<machine>/<session id>`, `/todos?id=<to-do id>`; the assistant uses Markdown links when mentioning them. Omit if hub can't supply the address (#2194). The main conversation's task lists (task details, open-task index, waiting to be verified or approved) hold every task; a leader's or side conversation's hold only the ones it handed out or supervises (#8666, `docs/assistant/todos.md`). Include only changes since this chat's previous snapshot (time always included): changed sections, and inside the task details, the Agents section and the unread chats only the rows that changed (#9078). hub gives each source 3 seconds, reuses reads for 45 seconds, and messages wait at most 1.5 seconds for fresh data, not at all while reads take longer than that (#8948) |
-| Faster | When the App displays a new-chat page, `POST /api/v1/assistant/warm` starts a spare node process (`spare`, valid for 10 minutes), used directly by new chats. `personad mcp` marks the Persona tools assistant conversations use often `anthropic/alwaysLoad`; the rest, and other MCP servers' tools, keep Claude Code's ordinary ToolSearch deferral (#5838, #7317): the manager picks them (`coreTools`, `assistant/tool_loading.go`), adding `leader_progress`, `todo_create`, `ask_escalate` and `direction_name` for current leader conversations from their session id; tool loading does not expand caller permissions. `assistant.load_all_tools` (`persona_settings`, off by default) loads every Persona tool up front again, in running conversations too: the change wakes each `personad mcp`'s tool watch (`assistant/mcp_tools_changes.go`), which sends the new list (`notifications/tools/list_changed`); a `personad mcp` older than tool refresh keeps its list until its process restarts. The assistant's processes carry `ENABLE_TOOL_SEARCH=true`, so a conversation that once ran without ToolSearch defers too instead of loading every tool until its next compaction |
+| Faster | When the App displays a new-chat page, `POST /api/v1/assistant/warm` starts a spare node process (`spare`, valid for 10 minutes), used directly by new chats. `personad mcp` marks the Persona tools assistant conversations use often `anthropic/alwaysLoad`; the rest, and other MCP servers' tools, keep Claude Code's ordinary ToolSearch deferral (#5838, #7317): the manager picks them (`coreTools`, `assistant/tool_loading.go`), adding `leader_progress`, `todo_create`, `ask_escalate` and `direction_name` for current leader conversations from their session id; tool loading does not expand caller permissions. `assistant.load_all_tools` (`persona_settings`, off by default) loads every Persona tool up front again, in running conversations too: the change wakes each `personad mcp`'s tool watch (`assistant/mcp_tools_changes.go`), which sends the new list (`notifications/tools/list_changed`); a `personad mcp` older than tool refresh keeps its list until its process restarts. On Anthropic's own API the assistant's processes carry `ENABLE_TOOL_SEARCH=true`, so a conversation that once ran without ToolSearch defers too instead of loading every tool until its next compaction; behind a gateway they carry `false` and load every tool, and a gateway's refusal of tool search is resent once that way and remembered (#10365, `docs/integrations/claude-integration.md` "Tool search behind a gateway (#10365)") |
 | Memory | Claude Code auto memory (`~/.claude/projects/<encoded directory>/memory/*.md`); App Settings can view / edit / delete it (node `assistant.memory`). Codex and DSH read / write the same memory ("Codex", "Agent runtime (DSH)" below), so changing launchers doesn't lose it. Health chats have a separate health space and separate memory (`docs/assistant/health.md`) |
 | About Me | App edits go to settings `assistant.notes`, override `assistant.notes` in the manager's `manager.json`, and append to CLAUDE.md |
 | Phone not in foreground | No phone connected during a `phone_*` call → hub sends a silent push (`content-available`, `persona_wake`) → App connects WS in the background to execute, disconnects after 25 seconds; wait up to 20 seconds. The App proactively disconnects WS on backgrounding, or a suspended socket makes hub think it is online and calls wait 2 minutes. Once disconnected, nothing else in the background reopens it (network recovery, refresh completion, reconnect backoff, `LiveConnection.suspended`, 2026-11-02); only this silent push (`wake()`) connects. The same push with `persona_wake: "widgets"` wakes a phone whose Home Screen widgets show other agent counts than the hub's (`server/internal/hub/widget_wake.go`, #5721): the app connects, writes the widgets again and disconnects |
@@ -804,6 +804,65 @@ Current main chat's first message on 11-01 after 46 idle hours: 254k rewritten, 
   A section left out keeps its heading and its count and names the tool that lists it (`assistant/snapshot_omitted.md`), or says to open the Inbox in the App for Inbox follow-ups: never "none", never missing, since the node sends only changed sections and a missing one would read as unchanged. Never left out: agents waiting for the user or for a reply, running workflows, plan cards waiting for "Start", failed scheduled runs, the calendar and @me chats. If that is still too long, the block is cut and ends with `assistant/snapshot_cut.md`.
 - The live snapshot puts the open-to-do total and `todo_list` entrance immediately after the time, before Agent details, so a hard cut still leaves a way to find the work. After the urgent Agent lists it carries an ID/title index of up to 100 open to-dos, regardless of origin or age (a question to-do is left to its own snapshot line only while that line shows it; once its ask record is pruned it is listed like any other); beyond that it keeps the total and points to `todo_list`. Under budget pressure titles and links are dropped from this index before the separate task-detail section is omitted. Full task details remain limited to 12, with open work ahead of recent closed conversation tasks. Showing a personal to-do does not enroll it for supervision or start an Agent.
 
+## Local request source diagnostics
+
+For people maintaining an Assistant installation, `scripts/diag/assistant_token_report.py --request-breakdown`
+adds a read-only, local source-size report to the existing token diagnostic (#10151). It is off by default: no hub
+setting, background capture, network request or runtime logging is added. Omit the flag to get the existing report.
+The primary Assistant screens and model behavior are unchanged.
+
+```sh
+python3 scripts/diag/assistant_token_report.py --request-breakdown --json scripts/diag/testdata/request_breakdown.jsonl
+python3 scripts/diag/assistant_token_report.py --request-breakdown --json /path/to/local/transcripts
+```
+
+The first command is a synthetic capture with fresh, follow-up, resume and compaction samples. The resume sample's
+1,300-byte tool result dominates; the follow-up includes observed cache reads. The fresh sample deliberately has
+unknown provider usage. These are reproducible fixtures, not measurements of a live installation.
+
+Two boundaries are reported separately:
+
+- `anthropic_request_content` / `responses_request_content`: a complete request object exported locally by the caller.
+  Each JSONL line has `type: "request"`, `runtime: "anthropic"` (Messages) or `"responses"` (OpenAI Responses), and
+  `request` containing the unmodified request object. Optional `usage` is the corresponding provider response's usage
+  object; `lifecycle` may be `fresh`, `followup`, `resume` or `compaction`; optional ISO `timestamp` supports `--since`.
+  This script does not intercept requests or configure a runtime to export them. Use a caller's existing local export
+  when available; some runtimes do not expose their assembled request. Captures contain private material and stay local;
+  only the aggregate report is suitable for sharing. No request ids, tool names, arguments, messages, attachment names
+  or URLs are emitted.
+- `claude_transcript_inventory` / `codex_transcript_inventory`: the content visible in a transcript, counted once per
+  observed block (Claude duplicate response blocks are deduplicated; Codex event mirrors are ignored). This is an
+  inventory across the selected file/time window, **not** a reconstruction of any request's retained context. A
+  compaction marker says `contains_compaction`; it does not prove which history survives. Runtime-owned instructions,
+  tool schemas, current request and retained history remain unknown (`null`, or `?` in text). Codex's recorded base
+  instructions and system/developer messages are exposed only as `observed_instruction_bytes`, a partial inventory.
+  Existing per-kind provider usage stays alongside the inventory in the token report, without inferred joins to requests.
+
+Byte definitions (separate from provider token counters):
+
+- Text is UTF-8 bytes; structured values use compact JSON with sorted keys, Unicode preserved, and no extra spaces.
+  The measurement is content size, not HTTP wire size or tokenizer output. Message role/id envelopes, transport
+  options and provider-owned additions are excluded; request wire bytes and provider context tokens remain unknown.
+- `instructions` measures exported system/developer instructions; `tool_schemas` measures the exported `tools` array.
+  Omitted fields in a complete request export count as zero; unavailable transcript fields count as unknown.
+- `snapshot_or_events` measures `<persona-context>…</persona-context>` blocks including their wrappers.
+  `current_message` is the last user message's remaining text; `history` is other message text. Both may contain
+  Persona event text outside those explicit blocks: no arbitrary content is guessed to be an event or instruction.
+- `tool_results` measures returned text/structured content, excluding separately counted attachments. The largest
+  result is reported only as the stable `tool_results` category and its byte size, never by tool name or call id.
+- `attachments` measures serialized image/file blocks (references, metadata or encoded data as recorded), not decoded
+  media size or image tokens. `other_content` covers remaining blocks, including tool calls and their arguments.
+  Source buckets are disjoint; `observed_content_bytes` is their observed sum (including separately reported observed
+  instructions for an incomplete transcript inventory). `items` counts measured text chunks/structured values, not
+  model calls (the tools array is one value). `dominant_sources` lists the largest observed buckets, ties included;
+  it may include partially observed instructions and does not rank unavailable runtime-owned content.
+- Provider usage counters are copied only when observed as nonnegative integers. Missing counters are unknown, not
+  zero. Anthropic input and cache counters keep their native definitions; Responses input includes cached tokens.
+  They are not derived from byte sizes or made comparable by assuming a bytes-per-token ratio.
+
+Compare runs with the same boundary and input scope. Changing one synthetic source changes only that source's size;
+`python3 scripts/diag/test_request_breakdown.py` checks this, known-size inputs, lifecycle samples, unknowns and privacy.
+
 ## Compaction
 
 Long assistant chats can grow to hundreds of thousands of tokens. After the prompt cache expires, restarting rewrites the whole context; compacting while the cache is warm keeps that restart affordable.
@@ -817,6 +876,51 @@ Long assistant chats can grow to hundreds of thousands of tokens. After the prom
 - **Codex**: a managed launcher's declared window is passed as `-c model_auto_compact_token_limit`, capped by declared `model_context_window` values (launcher arguments, `config.toml`; the smallest across profiles); for the main conversation, also held to `assistant.main_compact_window` (above), which is passed even when the launcher declares only a context window. Otherwise nothing is passed, and Codex compacts by what the launcher's own flags and `config.toml` set, else its model's default. Do not raise Codex's `model_context_window`. `thread/compact/start` exists; idle compaction is still not integrated. **A turn whose compactions make no room is stopped (#10278)**: when what survives a compaction (instructions, tool declarations, the retained request) is above the model's compaction limit, Codex compacts before every step and the turn never ends (one recorded turn: 42 compactions in 31 minutes, each request after one 166–173k tokens against a 124,518-token window). The node reads each request's usage (`thread/tokenUsage/updated`: `last.inputTokens`, `modelContextWindow`); a request right after an automatic compaction that still takes 90% of the window or more made no room, and the second such compaction in a row interrupts the turn (`turn/interrupt`, as Stop) and ends it as the user's to act on (`turn_error_kind: user`, the reason in `node-codex-assistant.compaction_loop_stopped`). If the turn ran on a model the bounded recovery switched to, that switch is dropped, so the next message goes to the configured model instead of the same fallback (`assistant_codex_compaction_loop.go`). A compaction that made room resets the count; the user's own Compact context is not counted.
 - **Scope history (#6481, #3008, #3028, #7314)**: the assistant manager still sends `is_main` with starts and messages (relays get it in `Service.call`). Alone it changes no compaction limit; the main conversation's window comes with `main_compact_window` (above). The node records both with the conversation, and both are part of the execution fingerprint (the window only on a managed launcher), so warm spares and restarts still match by main scope and window.
 - **Rolling upgrades and activation**: the rule is the node's; the main conversation's window also needs the manager that sends it. Update **the resident node's personad binary**; the new limits apply on the next assistant-process start; an idle existing process is resumed with the new policy on its next marked message, while active background tasks are not killed. A hub-only deploy or a download-channel publication without installing the node update is not enough. Publishing and deployment remain separate, approval-gated operations.
+
+### Idle-aware unattended delivery
+
+The main chat can receive supervision, scheduled follow-ups and messages from other conversations while the user is
+away. Before delivering one of these non-user messages, a Claude node can compact the existing conversation in place
+(#8658). This does not change the launcher's window or replace the model's automatic compaction or the idle-process
+reclamation rule above. Other conversations, Codex and external runtimes keep their existing behavior.
+
+Three advanced assistant settings are available through `persona_settings` (changes need the usual user approval),
+and through the assistant settings API:
+
+| Setting | Default | Allowed values |
+| --- | --- | --- |
+| `assistant.idle_auto_compact` | `true` | `true` or `false`; `false` disables this additional compaction |
+| `assistant.idle_auto_compact_minutes` | `30` | Whole minutes, 1-1440 |
+| `assistant.idle_auto_compact_tokens` | `300000` | Whole tokens, 10000-10000000 |
+
+Both limits must be reached. Idle means time since the last **user message received**, not time since the assistant
+last answered: unattended rounds do not restart that clock. Context means the last actual main-model request's
+`input_tokens + cache_read_input_tokens + cache_creation_input_tokens`, or the post-compaction token count, not the
+cumulative totals in `result.usage` or `modelUsage`. Unknown context never triggers compaction.
+
+The manager attaches `idle_compaction: {enabled, idle_minutes, context_tokens}` to the main chat's `assistant.send`
+and `session.send` calls. The node uses structured `message_source` (or the existing protected source metadata), not
+keywords in the message, to distinguish unattended messages. Older nodes ignore the optional policy; a missing
+policy from an older manager leaves delivery unchanged. Upgrade the main chat's node as well as the manager to use
+this feature.
+
+The node sends `/compact` through the same path as manual compaction and reports it in `session.compaction`. The
+unattended message is written only after the compaction command ends, not merely when its boundary is reported.
+A failed compaction still allows the original message through. Delivery waits at most 30 seconds, below the manager's
+90-second relay deadline; a still-running compaction returns a retryable `compacting` refusal and leaves the original
+message unsent in the sender's existing queue. Further unattended retries refuse immediately while compaction is in
+flight, without issuing another `/compact` or consuming another attempt. Delivery can resume after the real result,
+not merely its boundary. The compaction itself retains its separate ten-minute limit. A cancelled request or exited
+process also leaves the message unsent for the existing retry path.
+
+The idle clock, last actual context and attempt latch are kept in the node's existing Postgres-backed session
+record. User activity resets the clock on receipt, even while a send lock is held. A context reduction also restarts
+the idle interval. Dropping below the token threshold rearms compaction; context must then grow back over it and the
+new interval must elapse. Otherwise there is at most one attempt per idle interval, including failed attempts and
+node restarts. The manager carries this node-owned state opaquely through `db.NodeSession` and the existing
+`node_model` settings row, including the policy, idle timestamp, last actual context and attempt latch; no new table
+or migration is needed. A newly observed conversation or a changed policy starts a conservative fresh idle interval rather
+than guessing when the user last spoke.
 
 ### Impossible gateway usage (2026-11-06, #3300)
 
@@ -1152,9 +1256,11 @@ cannot take the message (its process did not start, as a cold start killed on a 
 away), nothing was typed. The hub used to answer the app with the failure and forget the message; a replay of the app's
 operation then read as accepted and the bubble waited for the transcript and went.
 
-- **Kept.** The hub hands such a message (a 5xx with nothing delivered, with a `client_msg_id`) to the conversation's
-  manager, `assistant.keep_undelivered`, with the app's own fields (`text`, `images`, `launcher`, `model`, `effort`),
-  never what `assistant.send_params` added. The manager keeps it in its Postgres (setting `assistant.undelivered`,
+- **Kept.** The hub hands such a message (a 5xx with nothing delivered, or a transport outcome whose delivery is
+  unknown, with a `client_msg_id`) to the conversation's manager, `assistant.keep_undelivered`, with the app's own fields
+  (`text`, `images`, `launcher`, `model`, `effort`), never what `assistant.send_params` added. An unknown first attempt
+  is marked `delivery_unknown` and carries `tried_at`, the original send's start, so the manager looks for it before
+  trying again rather than either dropping it or resending blindly. The manager keeps it in its Postgres (setting `assistant.undelivered`,
   `server/internal/assistant/undelivered.go`). The hub answers 202 `{"delivered":"later"}`, records the send as `later`
   (a retry of the id is answered the same and sends nothing) and tells the chat's subscribers `kept`. A manager that
   cannot keep it leaves the failure as before.
@@ -1647,33 +1753,47 @@ What a task Agent starts with beyond what its caller named can come from an opti
 (`internal/assistant/start_defaults.go`): rules matched by the kind of work, each saying which Agent presets to try,
 which thinking effort, whether ultracode is on, whether a goal is set from the task's acceptance criteria, and whether
 the prompt asks the Agent to plan first. With no policy stored, one past its expiry, or no rule that fits a task, the
-task starts exactly as it would without the feature. A policy's values belong to the one start they were applied to:
-every try of a task starts again from what the task named itself, whichever rule fits it now, and for whatever a policy
-filled in (a preset's launcher, model, effort, tier and the permission mode its agent sets; the policy's effort or
-ultracode) the task's plan keeps the task's own value (its why names a preset the policy picked), so a remedy, a queued
-start, a retry from the card or a manager restart, which read the task back from its plan, never take an expired
-policy's values for the task's own, and the card does not show them as asked for. A rule that fits but fills nothing
-in leaves the start and what the plan keeps exactly as without the feature. The Agent's session shows what it actually runs with. The owner and an
-extension granted the
-`assistant.start_defaults` hub scope read and write it with `GET`/`PUT /api/v1/assistant/start-defaults` (the owner
-also as `start_defaults` in `PUT /api/v1/assistant`); an extension-written policy must expire within one hour, so a
-stopped or uninstalled extension leaves nothing in force. A rule must set something; a rule whose `then` names nothing
-is refused.
+task starts exactly as it would without the feature, except for one built-in default: a new Codex task Agent whose task
+has acceptance criteria starts with them as its goal (below, "The goal"). A policy's values belong to the one start they
+were applied to: every try of a task starts again from what the task named itself, whichever rule fits it now, and for
+whatever a policy filled in (a preset's launcher, model, effort, tier and the permission mode its agent sets; the
+policy's effort or ultracode) the task's plan keeps the task's own value (its why names a preset the policy picked), so
+a remedy, a queued start, a retry from the card or a manager restart, which read the task back from its plan, never take
+an expired policy's values for the task's own, and the card does not show them as asked for. A rule that fits but fills
+nothing in leaves the start and what the plan keeps exactly as without the feature. The Agent's session shows what it
+actually runs with. The owner and an extension granted the `assistant.start_defaults` hub scope read and write it with
+`GET`/`PUT /api/v1/assistant/start-defaults` (the owner also as `start_defaults` in `PUT /api/v1/assistant`); an
+extension-written policy must expire within one hour, so a stopped or uninstalled extension leaves nothing in force. A
+rule must set something; a rule whose `then` names nothing is refused.
 `GET /api/v1/assistant/worker-presets?machine=<id>` (same scope) lists the presets a computer can start. The wire shape
 is in `docs/protocol/protocol.md` ("Start defaults").
 
-- **Matching**, first rule that fits wins: `supervisor` names the class of the conversation that follows the task up,
-  with the dispatch policy's classes (`main`, `leader`, `background_supervisor`, `scheduled`, `other`; a task leader's
-  worker takes the class of the conversation that follows its leader's task up, and a task no conversation follows up
-  matches only a rule naming no class), `role` is `worker` or `leader`, `readonly` matches read-only or writable tasks.
+- **Matching**, first rule that fits wins (the goal alone is decided apart, below): `supervisor` names the class of the
+  conversation that follows the task up, with the dispatch policy's classes (`main`, `leader`, `background_supervisor`,
+  `scheduled`, `other`; a task leader's worker takes the class of the conversation that follows its leader's task up,
+  and a task no conversation follows up matches only a rule naming no class), `role` is `worker` or `leader`, `readonly`
+  matches read-only or writable tasks.
 - **Applied at the task's start** (`startTaskAgent`, after the launcher fit), so retries, remedies, queued starts and
   `task_spawn` children get the same: the first preset whose launcher the computer has and that is not at its usage
   limit (weights share starts among the usable ones; a preset passed over is named in the task's why); then the effort,
-  ultracode and goal on Claude Code only. A caller's own effort, ultracode choice, tier, model or launcher is never
-  replaced, and an effort the caller's tier gives wins over the policy's.
+  ultracode on Claude Code only, and the goal on Claude Code and Codex. A caller's own effort, ultracode choice, tier,
+  model or launcher is never replaced, and an effort the caller's tier gives wins over the policy's.
 - **The goal** is the task's `done_when` as one checkable sentence (`prompts/assistant/task_goal.md`), set by the node
-  after the first message is in the transcript ([agent-goal.md](../integrations/agent-goal.md), "A goal set at the start"). A computer
-  whose node cannot set it starts the Agent without it once, and the task's why says so, as for ultracode.
+  after the first message is in the transcript, as Claude Code's `/goal` or Codex's own `/goal`
+  ([agent-goal.md](../integrations/agent-goal.md), "A goal set at the start"). A computer whose node cannot set it
+  starts the Agent without it once, and the task's why says so, as for ultracode. Only a new start (never a resume) of
+  a task with `done_when` takes one (`startGoalSource`). The goal is decided apart from the rest of the rule: the first
+  fitting rule that names `goal` decides, even when an earlier fitting rule silent on `goal` supplies the presets,
+  effort and the rest. `done_when` sets it on Claude Code and Codex, `off` on neither. When no fitting rule names
+  `goal` (no policy, no rule that fits, or every fitting rule silent on it), a Codex start gets the `done_when` goal by
+  default and a Claude Code start gets none. Codex has no Stop hook, so without a goal it stops after one turn and only
+  the supervisor's rework brings it back (#10510). To turn the default off, add a rule with `"then":{"goal":"off"}`:
+  with an empty `when` and placed after the rules that name a goal for some tasks, it turns the default off for every
+  other task, without hiding any other rule's presets or effort; clearing the policy brings the default back. The
+  default is never sent where the hub already knows the start cannot take a goal (an engine runtime such as Paseo, the
+  Claude desktop or Codex app launcher), and when a node refuses it anyway (a screenless host, an older node) the
+  Agent starts again without it and the refusal is only logged, not put in the task's why: the owner did not ask for
+  that goal. Giving Claude Code the same default is a possible follow-up.
 - **Plan first** adds `prompts/agents/plan_first_task.md` to the prompt: for a launch whose model does not act on an
   effort setting, the prompt is the only lever.
 

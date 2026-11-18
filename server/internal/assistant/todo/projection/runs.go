@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -39,13 +40,15 @@ const (
 	runPersona                    // one of Persona's own conversations works now
 )
 
-// run is one active linked run: its link, its session when the hub lists it (else noSession), and how it stands. s
-// points into the facts' Sessions: a session is 1.5 KB, and every read of the list makes a run of each active link.
+// run is one active linked run: its link, its session when the hub lists it (else noSession), how it stands, and the
+// pending card it asks by (asksBefore; nil: none the hub holds). s and card point into the facts: a session is 1.5 KB,
+// and every read of the list makes a run of each active link.
 type run struct {
 	link  Agent
 	s     *proto.Session
 	found bool
 	kind  runKind
+	card  *proto.Interaction
 }
 
 // noSession is the session of a run the hub does not list: the zero session, never written.
@@ -82,10 +85,32 @@ func activeRuns(f *Facts, now time.Time) []run {
 				break
 			}
 		}
+		for i := range f.Interactions {
+			c := &f.Interactions[i]
+			if c.MachineID != a.MachineID || c.SessionID != a.SessionID {
+				continue
+			}
+			if r.card == nil || asksBefore(c, r.card) {
+				r.card = c
+			}
+		}
 		r.kind = runReading(r, now)
 		out = append(out, r)
 	}
 	return out
+}
+
+// asksBefore: card c, rather than d, is what their run asks: the session's own before the manager's card about its
+// turn, as the session list reads them (a work card may stay up after the agent went on to ask something else), then
+// the older, then the lesser id, so two reads of the same cards name the same one.
+func asksBefore(c, d *proto.Interaction) bool {
+	if cw, dw := c.ToolName == assistantwire.WorkCardTool, d.ToolName == assistantwire.WorkCardTool; cw != dw {
+		return dw
+	}
+	if !c.CreatedAt.Equal(d.CreatedAt) {
+		return c.CreatedAt.Before(d.CreatedAt)
+	}
+	return c.ID < d.ID
 }
 
 // runReading is how run r stands: the first that holds of offline, asks, a usage limit, interrupted, awaits a reply,

@@ -240,15 +240,5 @@
       "todo/thread_reply.md",
       "todo/title_input.md"
     ]
-  },
-  "tools": {
-    "count": 5,
-    "files": [
-      "tools/session_title_input.md",
-      "tools/translate.md",
-      "tools/translate_mail.md",
-      "tools/translate_mail_input.md",
-      "tools/translate_texts.md"
-    ]
   }
 }

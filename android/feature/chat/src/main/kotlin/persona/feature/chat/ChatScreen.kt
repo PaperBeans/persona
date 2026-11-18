@@ -218,6 +218,7 @@ private fun ChatPage(
     val inboxDrafts by pageTrays.inboxDrafts
     var traySchedules by pageTrays.traySchedules
     val foldsBackground = pageTrays.foldsBackground
+    val supervisingConversation = pageTrays.supervisingConversation
     val pageRequests = rememberChatPageRequests(key, chrome, renderStyle, composerService, snapshot, sessionList, machines,
         allRequests, allMessages)
     val machine = pageRequests.machine
@@ -342,7 +343,7 @@ private fun ChatPage(
     var backgroundOpen by rememberSaveable(key.path) { mutableStateOf(false) }
     // The message a hub link named (`?at=`, #2194) while it is being landed on: like a search hit, its drawer opens.
     val childCards = rememberChatChildren(key, session, sessionList, chrome, repository)
-    val pageLines = rememberChatPageLines(key, renderStyle, snapshot, session, foldsBackground, tasks, taskTodos, search,
+    val pageLines = rememberChatPageLines(key, renderStyle, snapshot, session, foldsBackground, supervisingConversation, tasks, taskTodos, search,
         openWork, projection, feed, taskPlans, taskCardProjection, childCards.rows.values.toList())
     var jumpItem by pageLines.jumpItem
     val assistantPresentation = pageLines.assistantPresentation
@@ -1128,6 +1129,7 @@ private fun ChatPage(
                                             ::toggle, ::expand, folding, foldErrors,
                                             lastUserId = lastUserId,
                                             turnFix = turnFix.takeIf { line.contentKey == lines.firstOrNull()?.contentKey },
+                                            turnLauncher = session?.launcher,
                                             onLastLine = { extent -> chatList.reportLastLine(line.contentKey, extent) }, onFullText = { item ->
                                             scope.launch {
                                                 try { fullText = repository.fullText(key, item.id) }

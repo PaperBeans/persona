@@ -17,6 +17,37 @@ import required
 import run
 
 
+class TrustedSourceRootTests(unittest.TestCase):
+    def test_ci_implementation_can_target_an_explicit_source_checkout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            implementation = root / "implementation"
+            target = root / "target"
+            (implementation / "scripts/ci").mkdir(parents=True)
+            (implementation / "scripts/test").mkdir(parents=True)
+            target.mkdir()
+            (implementation / "scripts/ci/run.py").write_bytes(Path(__file__).with_name("run.py").read_bytes())
+            (implementation / "scripts/ci/common.sh").write_bytes(Path(__file__).with_name("common.sh").read_bytes())
+            (implementation / "scripts/test/target.py").write_text("print('implementation-target=' + __import__('pathlib').Path.cwd().name)\n")
+            (target / "scripts").mkdir()
+            (target / "scripts/test").mkdir()
+            (target / "scripts/test/target.py").write_text("raise RuntimeError('worker modified the checker')\n")
+            (implementation / "scripts/ci/guards.sh").write_text(
+                "#!/bin/bash\nsource \"$(dirname \"$0\")/common.sh\"\nci_run Target 10 ci_python scripts/test/target.py\n")
+            (implementation / "scripts/ci/guards.sh").chmod(0o755)
+            environment = dict(os.environ, PERSONA_CI_SOURCE_ROOT=str(target))
+            result = subprocess.run(["bash", str(implementation / "scripts/ci/guards.sh")],
+                                    cwd=implementation, env=environment, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("implementation-target=target", result.stdout)
+            self.assertNotIn("target=implementation", result.stdout)
+            environment.pop("PERSONA_CI_SOURCE_ROOT")
+            result = subprocess.run(["bash", str(implementation / "scripts/ci/guards.sh")],
+                                    cwd=implementation, env=environment, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("implementation-target=implementation", result.stdout)
+
+
 class PathTests(unittest.TestCase):
     def test_docs_do_not_start_macos(self):
         selected = paths.select(["docs/operations/testing.md"])

@@ -27,12 +27,16 @@ func startHerdr(f *fakeHerdr, pane, status string) {
 	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
 }
 
+// agentEnvParam is the env an Agent's new tab starts with (startShellEnv: the Agent mark and the startup switches), as
+// herdr's tab.create / workspace.create take it.
+var agentEnvParam = map[string]any{
+	"PERSONA_AGENT": "1", "DISABLE_AUTO_UPDATE": "true", "DISABLE_UPDATE_PROMPT": "true",
+	"POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD": "true",
+}
+
 // startCmd is the command a Claude start types into its herdr pane (and herdr's resume of it evals): the node's
 // directory in front and the assistant's environment left out (agentenv.go), herdr told the agent is Claude
 // (HERDR_AGENT), then the launcher with Persona's flags.
-// agentEnvParam is the env an Agent's new tab starts with (agentMarkEnv), as herdr's tab.create / workspace.create take it.
-var agentEnvParam = map[string]any{"PERSONA_AGENT": "1"}
-
 func startCmd(launcher, args, dir string) string { return claudeCmd(launcher, args, dir, shellQuote) }
 
 // resumeCmd is startCmd as herdr's resume_argv says it (claudeResumeArgv): quoted without apostrophes.

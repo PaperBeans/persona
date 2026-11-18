@@ -197,7 +197,7 @@ func checkModelCall(p assistantwire.ModelCompleteParams) (checkedCall, error) {
 // instead (model_candidates.go).
 func (s *Service) runModelCall(ctx context.Context, purpose, who, what string, c checkedCall) (any, error) {
 	if chain := s.modelCandidates(ctx, purpose, c.p.Models); chain != nil {
-		return s.runCandidates(ctx, who, c, chain)
+		return s.runCandidates(ctx, purpose, who, c, chain)
 	}
 	b, err := s.resolveModel(ctx, purpose)
 	if err != nil {
@@ -212,7 +212,7 @@ func (s *Service) runModelCall(ctx context.Context, purpose, who, what string, c
 	}
 	var usage assistantwire.ModelUsage
 	started := time.Now()
-	out, outcome, err := s.attemptModel(ctx, config, c, c.timeout, &usage)
+	out, outcome, err := s.attemptModel(ctx, s.countedClient(purpose, "", b.Provider, config), c, c.timeout, &usage)
 	s.logf("assistant: %s model call%s on %s: %s in %s, %d request(s), %d input + %d output tokens (cache read %d, written %d)",
 		who, labelPart(c.p.Label), config.Model, outcome, time.Since(started).Round(time.Millisecond), usage.Requests,
 		usage.InputTokens, usage.OutputTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens)
@@ -222,13 +222,12 @@ func (s *Service) runModelCall(ctx context.Context, purpose, who, what string, c
 	return out, nil
 }
 
-// attemptModel makes c once on config within timeout, adding what it spends to usage: the answer, or the coded
+// attemptModel makes c once on client within timeout, adding what it spends to usage: the answer, or the coded
 // error (*rpc.Error) model.complete returns; outcome is what the log line says (done, failed, refused, invalid output).
-func (s *Service) attemptModel(ctx context.Context, config ai.Config, c checkedCall, timeout time.Duration, usage *assistantwire.ModelUsage) (assistantwire.ModelCompleteResult, string, error) {
+func (s *Service) attemptModel(ctx context.Context, client *ai.Client, c checkedCall, timeout time.Duration, usage *assistantwire.ModelUsage) (assistantwire.ModelCompleteResult, string, error) {
 	p := c.p
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	client := s.aiClient(config)
 	turns := c.turns
 	add := func(u ai.Usage) {
 		usage.InputTokens += u.InputTokens

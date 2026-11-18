@@ -67,7 +67,10 @@ type Settings struct {
 	Former []FormerMain `json:"former_main,omitempty"`
 	// MainTasksQuiet: tasks the main conversation opens are told only there, not pushed, on the Live Activity or in
 	// task badges (#1731). nil is on (the default); the view always says what is in effect.
-	MainTasksQuiet *bool `json:"main_tasks_quiet,omitempty"`
+	MainTasksQuiet         *bool `json:"main_tasks_quiet,omitempty"`
+	IdleAutoCompact        *bool `json:"idle_auto_compact,omitempty"`
+	IdleAutoCompactMinutes *int  `json:"idle_auto_compact_minutes,omitempty"`
+	IdleAutoCompactTokens  *int  `json:"idle_auto_compact_tokens,omitempty"`
 	// StartRequestedTasks: a task_plan task the user asked for in so many words starts without the card's "Start"
 	// (#2559). nil is on (the default).
 	StartRequestedTasks     *bool  `json:"start_requested_tasks,omitempty"`
@@ -514,12 +517,15 @@ func stateDirOn(home, dataDir, name string) string {
 
 type assistantView struct {
 	Settings
-	Manager            string             `json:"manager"`
-	PermissionDefaults permissionDefaults `json:"permission_defaults"`
-	Cwd                string             `json:"cwd"`
-	Conversations      []proto.Session    `json:"conversations"`
-	NotesEffective     string             `json:"notes_effective"`  // what the assistant is told about the user
-	MainTasksQuiet     bool               `json:"main_tasks_quiet"` // in effect (the setting's own is left out while unset)
+	Manager                string             `json:"manager"`
+	PermissionDefaults     permissionDefaults `json:"permission_defaults"`
+	Cwd                    string             `json:"cwd"`
+	Conversations          []proto.Session    `json:"conversations"`
+	NotesEffective         string             `json:"notes_effective"`  // what the assistant is told about the user
+	MainTasksQuiet         bool               `json:"main_tasks_quiet"` // in effect (the setting's own is left out while unset)
+	IdleAutoCompact        bool               `json:"idle_auto_compact"`
+	IdleAutoCompactMinutes int                `json:"idle_auto_compact_minutes"`
+	IdleAutoCompactTokens  int                `json:"idle_auto_compact_tokens"`
 	// StartRequestedTasks is in effect, like MainTasksQuiet.
 	StartRequestedTasks     bool   `json:"start_requested_tasks"`
 	TaskWorkspacePreference string `json:"task_workspace_preference"`
@@ -581,6 +587,7 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 	v.Launcher = s.launcherNow(ctx)
 	out := assistantView{Settings: v, Manager: s.managerIdentity(), PermissionDefaults: s.permissionDefaults(), Conversations: []proto.Session{}, NotesEffective: s.notes(ctx), MainTasksQuiet: quietOn(v.MainTasksQuiet),
 		StartRequestedTasks: quietOn(v.StartRequestedTasks), RecordingDays: recordingDaysOf(v), MinutesDays: kb.MinutesDaysFor(minutesDaysSetting(v), recordingDaysOf(v)),
+		IdleAutoCompact: s.idleAutoCompact(ctx), IdleAutoCompactMinutes: s.idleAutoCompactMinutes(ctx), IdleAutoCompactTokens: s.idleAutoCompactTokens(ctx),
 		MeetingAttendanceDefault: meetingAttendanceOf(v), KBTopics: quietOn(v.KBTopics),
 		MeetingTranscriptionDefault: meetingTranscriptionDefaultOf(v), MeetingGlossary: meetingGlossaryOf(v),
 		MeetingTranscriptionExtension: meetingTranscriptionExtensionOf(v), MeetingTranscriptionReady: s.transcriptionReadyNow(),

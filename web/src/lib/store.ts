@@ -1148,6 +1148,7 @@ export function upsertSession(s: Session) {
       delete merged.background_tasks_count;
       delete merged.workflow_progress;
       merged.background = s.background;
+      merged.background_ended = s.background_ended;
       merged.subagents = s.subagents;
       merged.workflows = s.workflows;
     } else {

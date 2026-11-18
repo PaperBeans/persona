@@ -23,7 +23,7 @@ import { PersonaAvatar, usePersona } from "./assistant/Persona";
 import { managerOf, useRoster } from "../lib/managers";
 import { BrandMark } from "../ui/BrandMark";
 import { OriginMark } from "../ui/ChannelMark";
-import { autoOrigin, originMarkLabel } from "../lib/conversation-origins";
+import { autoOrigin, openerFrom } from "../lib/conversation-origins";
 import { InfoTip } from "../ui/InfoTip";
 import { Icon, type IconName } from "../ui/icons";
 import { UltraMark } from "./chat/Ultracode";
@@ -280,6 +280,8 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
   const source = showState && !s.assistant && !endRoom ? sessionSource(s) : undefined;
   // a Persona conversation the hub opened by itself (#3758, #5195): what opened it, in the source mark's place
   const origin = source ? undefined : autoOrigin(s);
+  // the extension whose own icon that mark draws, which the row's tooltip names too (#10358)
+  const [openerName, setOpenerName] = useState<string>();
   // a desktop app's runtime that can be written to: its mark says where it is and the agent's mark which agent, so the
   // runtime's name at the end only repeats them (it stays in the tooltip); a read-only one still says why
   const sameAsMarks = source === "desktop" && s.source_kind === "runtime" && sessionCan(s, "send");
@@ -343,7 +345,7 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
       onBlur={() => hover(null)}
       aria-current={active ? "page" : undefined}
       // its mark's name is in the row's tooltip too: the mark steps aside while the row is hovered
-      title={`${sessionTitle(s)}${source ? `\n${sourceName(source)}` : ""}${origin ? `\n${originMarkLabel(origin)}` : ""}${sourceSubtitle(s) ? `\n${sourceSubtitle(s)}` : ""}${hint ? `\n${hint}` : ""}${tabIdentity ? `\n${tabIdentity}` : ""}${s.todo ? `\n${t("sidebar.todo_tag", { title: s.todo.title })}` : ""}${preview ? `\n${preview}` : ""}`}
+      title={`${sessionTitle(s)}${source ? `\n${sourceName(source)}` : ""}${origin ? `\n${openerFrom(origin, openerName)}` : ""}${sourceSubtitle(s) ? `\n${sourceSubtitle(s)}` : ""}${hint ? `\n${hint}` : ""}${tabIdentity ? `\n${tabIdentity}` : ""}${s.todo ? `\n${t("sidebar.todo_tag", { title: s.todo.title })}` : ""}${preview ? `\n${preview}` : ""}`}
       // a touch screen: rows a finger can hit (44), and room at the end for the ⋯ that is always there; the open row
       // keeps its ⋯ too, so it has room for it
       className={cx("relative z-10 flex w-full items-center gap-2 rounded-[7px] px-2 sidebar-row transition-transform duration-150 active:scale-[0.98] [@media(pointer:coarse)]:min-h-11", active && CURRENT_ROW, // room for "N agents" and the ⋯ beside it (instead of the ⋯'s own)
@@ -424,7 +426,7 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
         </span>
       )}
       {source && <SourceTag s={s} className={aside} />}
-      {origin && <OriginMark origin={origin} size={16} className={aside} />}
+      {origin && <OriginMark origin={origin} size={16} className={aside} session={s} onName={setOpenerName} />}
       {/* the row's ⋯ takes the end on hover: what is there steps aside instead of showing half under it */}
       {tailShown && <span className={cx(hintFull ? "shrink-0 whitespace-nowrap tabular-nums" : "max-w-[72px] min-w-6 shrink-[20] truncate", "text-[11px] text-ink-3", hintAside)}>{tail}</span>}
       {ageAtEnd && <span data-row-age className={cx("shrink-0 text-[11px] text-ink-3", aside)}>{ago(s.updated_at, Date.now(), "narrow")}</span>}

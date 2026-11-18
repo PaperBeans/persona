@@ -12,7 +12,7 @@ unchanged (Go `server/internal/assistantwire/todo_view_gen_test.go`, Kotlin
 
 | File | What it pins | Cases |
 | --- | --- | --- |
-| `todo_view.json` | One to-do and its runs' sessions → its view | 45: every phase and section at least once, every reason the hub produces |
+| `todo_view.json` | One to-do, its runs' sessions and pending cards → its view | 53: every phase and section at least once, every reason the hub produces, each kind of ask's risk |
 
 ## Format
 
@@ -25,6 +25,11 @@ unchanged (Go `server/internal/assistantwire/todo_view_gen_test.go`, Kotlin
   title comes from.
 - `input.sessions`: the linked sessions as the hub sends them to the apps (`state` already worked out), with the fields
   the case reads, as the triage fixtures carry them.
+- `input.interactions` (optional, added here): the pending cards of its runs as the hub holds them
+  (`proto.Interaction`: `id`, `machine_id`, `session_id`, `kind`, `questions`, `fields`, `secret`, `private`,
+  `reversible`, …; the manager marks a health conversation's card `private`). A run that asks is asked by one of its
+  own: the session's card before Persona's card about its turn (`tool_name` `persona_triage`), then the oldest, then
+  the lesser `id`. A card of a session none of its runs is on is not its.
 - `input.restored_at` (optional): the owner's latest restore of it, which counts as activity.
 - `input.someday_until` (optional): until when the owner put it off (Someday).
 - `input.loc` (optional): the owner's time zone (an IANA name), for a due day; UTC when absent.
@@ -94,6 +99,14 @@ failed start reads as open although `done_at` is stored: `done` holds exactly wh
 | `usage_limit_before_run_waits` | waiting · waiting · `usage_limit` | rows 2, 10 | other · rest |
 | `loop_stays_background` | working · working · `background` | row 5 | working · agent_running |
 | `run_waits_unseen_without_wake` | ready · just_finished · `finished_unseen` | rows 9, 10 | just_done · finished_unseen |
+| `decision_safe_choice` | needs_you · needs_you · `owner_decides`, its ask `safe` as the manager lists it | row 3, 3.7 | waiting · owner_decides |
+| `decision_irreversible_open` | needs_you · needs_you · `owner_decides`, its ask `open` as the manager lists it | row 3, 3.7, 5 decision 4(a) | waiting · owner_decides |
+| `decision_visible_to_others_open` | needs_you · needs_you · `owner_decides`, its ask `open` as the manager lists it | row 3, 3.7, 5 decision 4(a) | waiting · owner_decides |
+| `retry_is_safe` | needs_you · needs_you · `failed_start`, from its step, its retry `safe` | row 1, 3.4 "Steps roll up", 3.7 | other · rest |
+| `failed_start_without_origin_has_no_retry` | needs_you · needs_you · `failed_start`, no ask | row 1 | waiting · failed_start |
+| `run_question_with_options_safe` | needs_you · needs_you · `agent_asks`, a `question` by its card, `safe` | row 2, 3.7 | waiting · agent_asks |
+| `run_plan_open_with_card` | needs_you · needs_you · `agent_asks`, a `plan` by its card, `open` | row 2, 3.7 | waiting · agent_asks |
+| `run_permission_is_tool` | needs_you · needs_you · `agent_asks`, a `tool` by its card, `open` | row 2, 3.7 | waiting · agent_asks |
 
 The last column is what `triageTodo` answers for the same input, for the web's shadow comparison; the view differs
 from it only where 6.3 changes a rule. It was computed with `triageTodo` as of commit `d477f040e2` (the last change to
@@ -141,10 +154,18 @@ no steps.
     `since`), since a session gets a new `state_since` each time it comes to wait on the owner. Each time is written as
     the input lists it.
   - A to-do's decision: `round` is the ask's `asked_at` exactly as listed, `text` its `question`, `recommend` and
-    `options` as listed, `can_wait` its `for_briefing`, `default_at` its `deadline` when its `default` is `taken`.
-  - A failed start: one `retry` ask on the to-do, with no round and no text (line 2 carries the error).
-  - A run that waits on the owner: one `question` ask with `run`, and `text` from the session's `asks` (else its
-    `attention_reason`).
+    `options` as listed, `can_wait` its `for_briefing`, `default_at` its `deadline` when its `default` is `taken`,
+    `risk` the listed ask's `risk` (`open` when it lists none, or a value this projection does not know). The cases
+    copy what the manager lists: `TestTodoFixturesListTheManagersRisk` (`server/internal/assistant/todo_ask_test.go`)
+    checks every listed `risk` in these cases and in `spec/fixtures/todo-counts` against the manager's rule wherever
+    what the ask lists tells it.
+  - A failed start of a to-do with an `origin`: one `retry` ask on the to-do, with no round and no text (line 2 carries
+    the error), `safe`. A failed start with no `origin` has no ask: the hub starts again only a to-do a conversation
+    opened (`POST /api/v1/todos/{id}/retry` refuses the others), so its row only says why it did not start.
+  - A run that waits on the owner: one ask with `run`, and `text` from the session's `asks` (else its
+    `attention_reason`). Its `kind` and `interaction` come from the run's pending card, as `input.interactions` says
+    (see "Risk and the lock screen"); with no card, a `question` with no `interaction`.
+  - `risk` and `lockscreen` on every ask: `lockscreen` is `open_only` exactly when `risk` is `open`, else `answer`.
   - A conclusion that says the work cannot be done: a `decision` with its round and no text or options.
   - A step's ask on its parent's row: `step:<step id>/` and the step's own id.
   - A to-do with steps: its row, when in Needs you or Can wait, lists its own asks and those of every open step in
@@ -156,6 +177,25 @@ no steps.
   up", 6.2 invariant 6): the first step in Needs you, else Working, else Waiting, else Can wait, the oldest step on a
   tie; a step's Can wait leads only a to-do in To do, Just finished or Someday. The to-do then takes the step's phase,
   section, reason, `since`, `can_wait` and line, has no Inactive mark, and lists asks as `asks` says.
+
+### Risk and the lock screen
+
+How risky answering an ask is (proposal 3.7 "Answers and taps per surface", 5 decision 4 (a)): `safe`, the row, its
+card and a push may answer it in place; `open`, the owner answers it after a look, at its home, and a push about it
+offers nothing on the lock screen (`lockscreen` `open_only`).
+
+| Ask | `kind` | `risk` |
+| --- | --- | --- |
+| The to-do's decision, or a conclusion that says it cannot be done | `decision` | the listed ask's `risk`: the manager's rule (`askRisk` in `server/internal/assistant/todo_ask.go`) makes it `open` when `why_owner` is `irreversible` or `visible_to_others`, or Persona would take it at a deadline that cannot be undone, also once that deadline was handled and the list no longer shows it; else `safe` |
+| A failed start's retry | `retry` | `safe` |
+| A run's card a notification may answer: one question with options (single or multiple choice), no fields, not `private` | `question` | `safe` |
+| The same card when its asker says going ahead cannot be undone (`reversible` false) | `question` | `open` |
+| A run's card: several questions, a question to answer in words, a Just me turn's or a health conversation's question (`private`), or a dialog on the screen | `question` | `open` |
+| A run's card: a tool approval | `tool` | `open` |
+| A run's card: a plan | `plan` | `open` |
+| A run's card: fields to fill in, or an MCP server's form | `form` | `open` |
+| A run's card that asks for a password (on the screen, or a field to fill in) | `secret` | `open` |
+| A run that asks with no card the hub holds | `question` | `open` |
 
 ### Line keys
 
@@ -199,8 +239,20 @@ Where the proposal and today's code leave a choice open, these cases make it; ch
 
 - **Can wait comes before the owner's decision.** Row 3 (a decision) would otherwise always hold before row 4 (an ask
   marked can_wait), so a decision with `for_briefing` is read as row 4.
-- **A run's ask is `question` in stage 1.** The session list says that a run waits, not which card it shows (a question,
-  a plan, a tool approval); the kind is refined when the hub reads the run's cards, with answering in place.
+- **A run's ask is what its card asks.** The session list says that a run waits, not which card it shows; the manager
+  hands over the pending cards it holds, and the run's own (the session's card before Persona's card about its turn,
+  as the session list reads them, then the oldest, then the lesser id, so two reads name the same one) says the kind
+  and carries its id (`interaction`), which clients answer through `POST /api/v1/interactions/{id}/resolve`. A run whose card the hub does not hold (it raised it
+  on another manager, or the card ended while the session still says it waits) asks a `question`, `open`.
+- **A run's ask is safe exactly when a notification may answer its card.** Choosing one of the answers offered is what
+  a row or a push can do without the run's page, and the hub's push offers them for one question with options, no
+  fields and nothing private (`proto.Interaction.OneTapQuestion`, which the push and the view share); a plan, a tool
+  approval, a form or a secret needs a look at what the run wants, and so do several questions, a question to answer
+  in words, a dialog on the screen and a card whose asker says going ahead cannot be undone, the card's twin of a
+  decision that cannot be undone. What a tool would do is not read yet.
+- **The decision's risk is the manager's, read off the list.** The list hides a deadline once it was handled and does
+  not carry whether taking a decision at its deadline can be undone, so the rule cannot be worked out from the row; the
+  manager writes it on the listed ask (`risk`), one rule for the list, the view and every place that answers it.
 - **No ask for an interrupted turn or a reply awaited in text**: neither has a card to answer; the owner continues or
   replies in the run's session.
 - **A park's end sets no `next_change_at`**: it passing changes nothing by itself (SOP rule 5a); the hub's wake at that
@@ -219,8 +271,9 @@ Where the proposal and today's code leave a choice open, these cases make it; ch
   the code, a `code` argument (a key of its own) comes beside it, and clients say that instead.
 - **A run's ask id follows the session's `state_since`**, the only moment per ask the session list carries. A session
   that asks twice without leaving Needs you keeps one id, as it keeps one ask in this list; a hub restart resets
-  `state_since`, which gives an open ask a new id, so a client shows it again rather than hide a new one. The cards'
-  own ids take over when the hub reads them, with answering in place.
+  `state_since`, which gives an open ask a new id, so a client shows it again rather than hide a new one. The card's
+  own id rides beside it (`interaction`): it names the card to answer, not the ask, since a session may end one card
+  and show another while it keeps waiting.
 - **A line's run text** prefers the run's `activity` (what it does now) to its `last_text`.
 - **Several runs:** the first that holds of asks, a usage limit, cut off, awaiting a reply, unread, waiting on
   another Agent or a named outside event, background, starting and running decides each run's state. The rows pick a

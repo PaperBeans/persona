@@ -140,6 +140,34 @@ const (
 // OwnerAskHomes are the values of OwnerAskHome, in order.
 var OwnerAskHomes = []string{"todo", "run"}
 
+// OwnerAskRisk: how risky answering an ask is (proposal 3.7, decision 4(a)): safe, the row, the card or a push may
+// answer it in place; open, it cannot be undone, other people will see it or what it asks needs a look, so the owner
+// answers it after a look, on its page or at its run. The manager's rule: a decision is open when why only the owner
+// decides is irreversible or visible_to_others, or Persona would take it at a deadline that cannot be undone; a retry
+// is safe; a run's card is safe when a notification may answer it too (one question with options and no fields, not
+// from a Just me turn or a health conversation) and its asker did not say going ahead cannot be undone, and anything
+// else a run asks is open (a question in words, several questions, a dialog on the screen, a plan, a tool approval, a
+// form, a secret, or a run whose card the hub does not hold). Open: a newer hub may send other values, which clients
+// read as open.
+const (
+	OwnerAskRiskSafe = "safe"
+	OwnerAskRiskOpen = "open"
+)
+
+// OwnerAskRisks are the values of OwnerAskRisk, in order.
+var OwnerAskRisks = []string{"safe", "open"}
+
+// OwnerAskLockscreen: what a push about the ask may offer on the lock screen (proposal 3.7): answer, its answers as
+// actions, each needing the phone unlocked; open_only, no action, a tap opens it. open_only exactly when the risk is
+// open. Open: a newer hub may send other values, which clients read as open_only.
+const (
+	OwnerAskLockscreenAnswer   = "answer"
+	OwnerAskLockscreenOpenOnly = "open_only"
+)
+
+// OwnerAskLockscreens are the values of OwnerAskLockscreen, in order.
+var OwnerAskLockscreens = []string{"answer", "open_only"}
+
 // OwnerAskOption: one option of a decision, as its card lists it.
 type OwnerAskOption struct {
 	// The option in its card's words; an answer names it.
@@ -149,7 +177,8 @@ type OwnerAskOption struct {
 }
 
 // OwnerAsk: one ask that holds the to-do in Needs you or Can wait: the to-do's own (home todo) or one of its runs'
-// (home run). Its risk, lock-screen action and state come with answering in place, after stage 1.
+// (home run), with how risky answering it is and what a push about it may offer on the lock screen. Its state
+// (answered, held for Undo) comes with answering in place.
 type OwnerAsk struct {
 	// Unique within the row and never reused for a later ask, so what a client keeps by id (an answer, a Later) never
 	// lands on a new question. The same while the ask is open, though a hub restart may give an open run's ask a new
@@ -173,6 +202,14 @@ type OwnerAsk struct {
 	CanWait bool `json:"can_wait,omitempty"`
 	// When Persona takes the recommendation unless the owner answers first; absent when it never does.
 	DefaultAt time.Time `json:"default_at,omitzero"`
+	// How risky answering it is. Absent from an older manager: clients read it as open.
+	Risk string `json:"risk,omitempty"`
+	// What a push about it may offer on the lock screen. Absent from an older manager: clients read it as open_only.
+	Lockscreen string `json:"lockscreen,omitempty"`
+	// The id of the run's pending card this ask is (the session's own before Persona's card about its turn, then the
+	// oldest), answered through POST /api/v1/interactions/{id}/resolve; only on a run's ask, and absent while the hub
+	// holds no card for the run (its kind is then question).
+	Interaction string `json:"interaction,omitempty"`
 }
 
 // TodoSummary: the view of a to-do: the row's `view` on GET /api/v1/todos and GET /api/v1/todos/{id}. The manager

@@ -439,10 +439,16 @@ export function interruptedAgent(s?: Session): boolean {
   return st === "unread" || st === "idle";
 }
 
+/** The hub's own word on a turn that had no output at all (#10187): `no_output` (the model service answered nothing) or
+ *  `stopped` (Persona's Stop interrupted it with its conversation). Not a model API error: its turn_error is a sentence
+ *  in the user's language, said as it is. */
+const SILENT_TURN_KINDS: ReadonlySet<string> = new Set(["no_output", "stopped"]);
+
 /** Why the model service cut the agent off (#1516), in words, and whether "Continue" can help (a login or a bad request is
- *  not fixed by going on); undefined when it was not cut off. */
+ *  not fixed by going on); undefined when it was not cut off. A turn with no output says the hub's sentence for it. */
 export function interruption(s?: Session): { reason: string; canContinue: boolean } | undefined {
   if (!interruptedAgent(s)) return undefined;
+  if (SILENT_TURN_KINDS.has(s?.turn_error_kind ?? "")) return { reason: s!.turn_error!.trim(), canContinue: true };
   const info = parseAPIError(s?.turn_error);
   return { reason: info?.reason ?? t("lib-todos.model_request_failed"), canContinue: !info || retryable(info) };
 }

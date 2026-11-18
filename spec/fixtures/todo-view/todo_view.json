@@ -44,7 +44,9 @@
             {
               "id": "todo:retry@2026-11-10T09:00:00Z",
               "kind": "retry",
-              "home": "todo"
+              "home": "todo",
+              "risk": "safe",
+              "lockscreen": "answer"
             }
           ]
         }
@@ -224,7 +226,9 @@
                 "machine_id": "m1",
                 "session_id": "s-ryokan",
                 "title": "Ryokan research"
-              }
+              },
+              "risk": "open",
+              "lockscreen": "open_only"
             }
           ]
         }
@@ -356,6 +360,7 @@
             "verdict": "Needs your decision",
             "recommend": "Ryokan Hanami",
             "asked_at": "2026-11-10T09:00:00Z",
+            "risk": "safe",
             "question": "Which ryokan?",
             "options": [
               {
@@ -418,7 +423,9 @@
                   "label": "Kiyomizu Inn",
                   "leads_to": "Two nights for 51,000 yen, a short walk to the temple"
                 }
-              ]
+              ],
+              "risk": "safe",
+              "lockscreen": "answer"
             }
           ]
         }
@@ -489,6 +496,7 @@
             "verdict": "Needs your decision",
             "recommend": "Maruyama Park",
             "asked_at": "2026-11-10T10:00:00Z",
+            "risk": "safe",
             "question": "Which spot for the picnic?",
             "options": [
               {
@@ -558,7 +566,9 @@
                 }
               ],
               "can_wait": true,
-              "default_at": "2026-11-13T09:00:00Z"
+              "default_at": "2026-11-13T09:00:00Z",
+              "risk": "safe",
+              "lockscreen": "answer"
             }
           ]
         }
@@ -1895,7 +1905,8 @@
           "ask": {
             "outcome": "cannot",
             "verdict": "Cannot be done: every seating is sold out",
-            "asked_at": "2026-11-10T10:00:00Z"
+            "asked_at": "2026-11-10T10:00:00Z",
+            "risk": "safe"
           }
         },
         "sessions": [
@@ -1926,7 +1937,9 @@
               "id": "todo:decision@2026-11-10T10:00:00Z",
               "kind": "decision",
               "home": "todo",
-              "round": "2026-11-10T10:00:00Z"
+              "round": "2026-11-10T10:00:00Z",
+              "risk": "safe",
+              "lockscreen": "answer"
             }
           ]
         }
@@ -2114,6 +2127,7 @@
               "verdict": "Needs your decision",
               "recommend": "Ryokan Hanami",
               "asked_at": "2026-11-10T09:00:00Z",
+              "risk": "safe",
               "question": "Which of the three?",
               "options": [
                 {
@@ -2191,7 +2205,9 @@
                   "label": "Gion House",
                   "leads_to": "Two nights for 38,000 yen, no dinner"
                 }
-              ]
+              ],
+              "risk": "safe",
+              "lockscreen": "answer"
             }
           ],
           "steps": {
@@ -2319,6 +2335,7 @@
             "verdict": "Needs your decision",
             "recommend": "Morning",
             "asked_at": "2026-11-10T09:00:00Z",
+            "risk": "safe",
             "question": "Go in the morning or the afternoon?",
             "options": [
               {
@@ -2402,7 +2419,9 @@
                 "machine_id": "m1",
                 "session_id": "s-guide",
                 "title": "Guide booking"
-              }
+              },
+              "risk": "open",
+              "lockscreen": "open_only"
             },
             {
               "id": "todo:decision@2026-11-10T09:00:00Z",
@@ -2421,7 +2440,9 @@
                   "leads_to": "Lunch first, the temples in the late light"
                 }
               ],
-              "can_wait": true
+              "can_wait": true,
+              "risk": "safe",
+              "lockscreen": "answer"
             }
           ],
           "steps": {
@@ -2544,6 +2565,7 @@
               "verdict": "Needs your decision",
               "recommend": "The 18:00 cruise",
               "asked_at": "2026-11-10T10:00:00Z",
+              "risk": "safe",
               "question": "The 18:00 or the 19:30 cruise?",
               "options": [
                 {
@@ -3283,6 +3305,846 @@
           },
           "since": "2026-11-10T11:30:00Z",
           "rank": 0
+        }
+      }
+    },
+    {
+      "name": "decision_safe_choice",
+      "description": "A decision that can be undone (why only the owner decides is a priority call, and Persona would take the recommendation at a deadline it can undo) is listed safe by the manager (askRisk), and the view keeps the listed risk: the row, its card and a push may answer it, so it may offer its answers on the lock screen.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 row 3",
+        "docs/design/proposals/todos-redesign.md 3.7 \"Answers and taps per surface\"",
+        "docs/design/proposals/todos-redesign.md 5 decision 4(a)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_r1",
+          "title": "Book the tea ceremony",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-09T08:00:00Z",
+          "updated_at": "2026-11-10T09:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m1",
+              "session_id": "s-tea",
+              "linked_at": "2026-11-09T08:01:00Z",
+              "title": "Tea ceremony booking",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "supervision": {
+            "supervisor": "conv_main",
+            "done_when": [
+              "A ryokan is booked for Apr 3 to 5"
+            ],
+            "criteria": [],
+            "state": "needs_user",
+            "round": 0,
+            "reviews": [
+              {
+                "at": "2026-11-10T09:00:00Z",
+                "verdict": "needs_user",
+                "reason": "Which day for the tea ceremony?",
+                "recommend": "Saturday morning",
+                "options": [
+                  {
+                    "label": "Saturday morning",
+                    "leads_to": "The 10:00 seating, before the temples"
+                  },
+                  {
+                    "label": "Sunday afternoon",
+                    "leads_to": "The 15:00 seating, after checking out"
+                  }
+                ]
+              }
+            ],
+            "updated_at": "2026-11-10T09:00:00Z"
+          },
+          "ask": {
+            "outcome": "decide",
+            "verdict": "Needs your decision",
+            "recommend": "Saturday morning",
+            "asked_at": "2026-11-10T09:00:00Z",
+            "risk": "safe",
+            "question": "Which day for the tea ceremony?",
+            "why_owner": "priority",
+            "options": [
+              {
+                "label": "Saturday morning",
+                "leads_to": "The 10:00 seating, before the temples"
+              },
+              {
+                "label": "Sunday afternoon",
+                "leads_to": "The 15:00 seating, after checking out"
+              }
+            ],
+            "deadline": "2026-11-11T09:00:00Z",
+            "default": "taken",
+            "responses": [
+              "decide_yourself",
+              "not_what_i_asked",
+              "explain_first"
+            ]
+          }
+        },
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-tea",
+            "title": "Tea ceremony booking",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T08:50:00Z",
+            "updated_at": "2026-11-10T08:50:00Z",
+            "pending_interactions": 0
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "needs_you",
+          "section": "needs_you",
+          "reason": "owner_decides",
+          "line": {
+            "key": "decision",
+            "args": {
+              "text": "Which day for the tea ceremony?",
+              "recommend": "Saturday morning"
+            }
+          },
+          "since": "2026-11-10T09:00:00Z",
+          "rank": 0,
+          "asks": [
+            {
+              "id": "todo:decision@2026-11-10T09:00:00Z",
+              "kind": "decision",
+              "home": "todo",
+              "round": "2026-11-10T09:00:00Z",
+              "text": "Which day for the tea ceremony?",
+              "recommend": "Saturday morning",
+              "options": [
+                {
+                  "label": "Saturday morning",
+                  "leads_to": "The 10:00 seating, before the temples"
+                },
+                {
+                  "label": "Sunday afternoon",
+                  "leads_to": "The 15:00 seating, after checking out"
+                }
+              ],
+              "default_at": "2026-11-11T09:00:00Z",
+              "risk": "safe",
+              "lockscreen": "answer"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "decision_irreversible_open",
+      "description": "A decision that cannot be undone (why only the owner decides is irreversible) is listed open by the manager (askRisk), and the view keeps the listed risk: the owner answers it after a look, on its page, and a push about it offers nothing on the lock screen.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 row 3",
+        "docs/design/proposals/todos-redesign.md 3.7 \"Answers and taps per surface\"",
+        "docs/design/proposals/todos-redesign.md 5 decision 4(a)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_r2",
+          "title": "Pay the ryokan deposit",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-09T08:00:00Z",
+          "updated_at": "2026-11-10T09:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m1",
+              "session_id": "s-deposit",
+              "linked_at": "2026-11-09T08:01:00Z",
+              "title": "Ryokan deposit",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "supervision": {
+            "supervisor": "conv_main",
+            "done_when": [
+              "A ryokan is booked for Apr 3 to 5"
+            ],
+            "criteria": [],
+            "state": "needs_user",
+            "round": 0,
+            "reviews": [
+              {
+                "at": "2026-11-10T09:00:00Z",
+                "verdict": "needs_user",
+                "reason": "Pay the deposit now?",
+                "recommend": "Pay the deposit",
+                "options": [
+                  {
+                    "label": "Pay the deposit",
+                    "leads_to": "20,000 yen now, not refundable"
+                  },
+                  {
+                    "label": "Wait a week",
+                    "leads_to": "The room is held until Friday"
+                  }
+                ]
+              }
+            ],
+            "updated_at": "2026-11-10T09:00:00Z"
+          },
+          "ask": {
+            "outcome": "decide",
+            "verdict": "Needs your decision",
+            "recommend": "Pay the deposit",
+            "asked_at": "2026-11-10T09:00:00Z",
+            "risk": "open",
+            "question": "Pay the deposit now?",
+            "why_owner": "irreversible",
+            "options": [
+              {
+                "label": "Pay the deposit",
+                "leads_to": "20,000 yen now, not refundable"
+              },
+              {
+                "label": "Wait a week",
+                "leads_to": "The room is held until Friday"
+              }
+            ],
+            "default": "never",
+            "responses": [
+              "decide_yourself",
+              "not_what_i_asked",
+              "explain_first"
+            ]
+          }
+        },
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-deposit",
+            "title": "Ryokan deposit",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T08:50:00Z",
+            "updated_at": "2026-11-10T08:50:00Z",
+            "pending_interactions": 0
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "needs_you",
+          "section": "needs_you",
+          "reason": "owner_decides",
+          "line": {
+            "key": "decision",
+            "args": {
+              "text": "Pay the deposit now?",
+              "recommend": "Pay the deposit"
+            }
+          },
+          "since": "2026-11-10T09:00:00Z",
+          "rank": 0,
+          "asks": [
+            {
+              "id": "todo:decision@2026-11-10T09:00:00Z",
+              "kind": "decision",
+              "home": "todo",
+              "round": "2026-11-10T09:00:00Z",
+              "text": "Pay the deposit now?",
+              "recommend": "Pay the deposit",
+              "options": [
+                {
+                  "label": "Pay the deposit",
+                  "leads_to": "20,000 yen now, not refundable"
+                },
+                {
+                  "label": "Wait a week",
+                  "leads_to": "The room is held until Friday"
+                }
+              ],
+              "risk": "open",
+              "lockscreen": "open_only"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "decision_visible_to_others_open",
+      "description": "A decision other people will see (why only the owner decides is visible_to_others) is listed open by the manager (askRisk), as one that cannot be undone is, and the view keeps the listed risk.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 row 3",
+        "docs/design/proposals/todos-redesign.md 3.7 \"Answers and taps per surface\"",
+        "docs/design/proposals/todos-redesign.md 5 decision 4(a)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_r3",
+          "title": "Share the itinerary",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-09T08:00:00Z",
+          "updated_at": "2026-11-10T09:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m1",
+              "session_id": "s-share",
+              "linked_at": "2026-11-09T08:01:00Z",
+              "title": "Itinerary sharing",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "supervision": {
+            "supervisor": "conv_main",
+            "done_when": [
+              "A ryokan is booked for Apr 3 to 5"
+            ],
+            "criteria": [],
+            "state": "needs_user",
+            "round": 0,
+            "reviews": [
+              {
+                "at": "2026-11-10T09:00:00Z",
+                "verdict": "needs_user",
+                "reason": "Send the itinerary to the group?",
+                "recommend": "Send it to the group chat",
+                "options": [
+                  {
+                    "label": "Send it to the group chat",
+                    "leads_to": "Everyone sees the plan tonight"
+                  },
+                  {
+                    "label": "Keep it to myself for now",
+                    "leads_to": "Share it once the bookings are done"
+                  }
+                ]
+              }
+            ],
+            "updated_at": "2026-11-10T09:00:00Z"
+          },
+          "ask": {
+            "outcome": "decide",
+            "verdict": "Needs your decision",
+            "recommend": "Send it to the group chat",
+            "asked_at": "2026-11-10T09:00:00Z",
+            "risk": "open",
+            "question": "Send the itinerary to the group?",
+            "why_owner": "visible_to_others",
+            "options": [
+              {
+                "label": "Send it to the group chat",
+                "leads_to": "Everyone sees the plan tonight"
+              },
+              {
+                "label": "Keep it to myself for now",
+                "leads_to": "Share it once the bookings are done"
+              }
+            ],
+            "default": "never",
+            "responses": [
+              "decide_yourself",
+              "not_what_i_asked",
+              "explain_first"
+            ]
+          }
+        },
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-share",
+            "title": "Itinerary sharing",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T08:50:00Z",
+            "updated_at": "2026-11-10T08:50:00Z",
+            "pending_interactions": 0
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "needs_you",
+          "section": "needs_you",
+          "reason": "owner_decides",
+          "line": {
+            "key": "decision",
+            "args": {
+              "text": "Send the itinerary to the group?",
+              "recommend": "Send it to the group chat"
+            }
+          },
+          "since": "2026-11-10T09:00:00Z",
+          "rank": 0,
+          "asks": [
+            {
+              "id": "todo:decision@2026-11-10T09:00:00Z",
+              "kind": "decision",
+              "home": "todo",
+              "round": "2026-11-10T09:00:00Z",
+              "text": "Send the itinerary to the group?",
+              "recommend": "Send it to the group chat",
+              "options": [
+                {
+                  "label": "Send it to the group chat",
+                  "leads_to": "Everyone sees the plan tonight"
+                },
+                {
+                  "label": "Keep it to myself for now",
+                  "leads_to": "Share it once the bookings are done"
+                }
+              ],
+              "risk": "open",
+              "lockscreen": "open_only"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "retry_is_safe",
+      "description": "A retry is safe: starting again can be undone, so the row and a push may answer it. Here a step whose start failed leads its parent into Needs you, its retry on the parent's row with the step's id.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 row 1",
+        "docs/design/proposals/todos-redesign.md 3.4 \"Steps roll up\"",
+        "docs/design/proposals/todos-redesign.md 3.7 \"Answers and taps per surface\"",
+        "docs/design/proposals/todos-redesign.md 5 decision 4(a)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_r4",
+          "title": "Plan the Nara day trip",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-09T08:00:00Z",
+          "updated_at": "2026-11-09T08:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [],
+          "quiet": false,
+          "project": "kyoto-trip"
+        },
+        "sessions": [],
+        "steps": [
+          {
+            "id": "todo_r5",
+            "title": "Book the deer park tour",
+            "notes": "",
+            "done_at": "2026-11-10T10:00:00Z",
+            "created_at": "2026-11-09T08:05:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "origin": "conv_main",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "kyoto-trip",
+            "part_of": "todo_r4"
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "needs_you",
+          "section": "needs_you",
+          "reason": "failed_start",
+          "line": {
+            "key": "failed_start",
+            "args": {
+              "error": "Desk Mac is offline",
+              "step": "Book the deer park tour"
+            }
+          },
+          "since": "2026-11-10T10:00:00Z",
+          "next_change_at": "2026-11-12T10:00:00Z",
+          "rank": 0,
+          "asks": [
+            {
+              "id": "step:todo_r5/todo:retry@2026-11-10T10:00:00Z",
+              "kind": "retry",
+              "home": "todo",
+              "risk": "safe",
+              "lockscreen": "answer"
+            }
+          ],
+          "steps": {
+            "done": 0,
+            "total": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "failed_start_without_origin_has_no_retry",
+      "description": "A start that failed on a to-do no conversation opened needs the owner as any failed start does, and line 2 says why it did not start, but it carries no retry: the hub starts again only a to-do a conversation opened.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 row 1",
+        "docs/protocol/protocol.md POST /api/v1/todos/{id}/retry"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_r6",
+          "title": "Order the rail pass",
+          "notes": "",
+          "done_at": "2026-11-10T09:00:00Z",
+          "created_at": "2026-11-10T08:55:00Z",
+          "updated_at": "2026-11-10T09:00:00Z",
+          "start_error": "Desk Mac is offline",
+          "spaces": [],
+          "agents": [],
+          "quiet": false,
+          "project": "kyoto-trip"
+        },
+        "sessions": []
+      },
+      "expected": {
+        "view": {
+          "phase": "needs_you",
+          "section": "needs_you",
+          "reason": "failed_start",
+          "line": {
+            "key": "failed_start",
+            "args": {
+              "error": "Desk Mac is offline"
+            }
+          },
+          "since": "2026-11-10T09:00:00Z",
+          "next_change_at": "2026-11-12T09:00:00Z",
+          "rank": 0
+        }
+      }
+    },
+    {
+      "name": "run_question_with_options_safe",
+      "description": "A run asks a question with options to choose from: the ask is the run's card, by its id, and safe, so the row and a push may answer it.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 row 2",
+        "docs/design/proposals/todos-redesign.md 3.7 \"Answers and taps per surface\"",
+        "docs/design/proposals/todos-redesign.md 5 decision 4(a)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_r7",
+          "title": "Choose the Kyoto ryokan",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-09T08:00:00Z",
+          "updated_at": "2026-11-10T10:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m1",
+              "session_id": "s-choose",
+              "linked_at": "2026-11-09T08:01:00Z",
+              "title": "Ryokan choice",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "project": "kyoto-trip"
+        },
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-choose",
+            "title": "Ryokan choice",
+            "status": "blocked",
+            "state": "needs_you",
+            "state_since": "2026-11-10T11:30:00Z",
+            "updated_at": "2026-11-10T11:30:00Z",
+            "pending_interactions": 1,
+            "asks": "Which ryokan should I book?"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix_ryokan_q",
+            "machine_id": "m1",
+            "session_id": "s-choose",
+            "kind": "question",
+            "created_at": "2026-11-10T11:30:00Z",
+            "expires_at": "2026-11-10T13:30:00Z",
+            "tool_name": "AskUserQuestion",
+            "questions": [
+              {
+                "question": "Which ryokan should I book?",
+                "multi_select": false,
+                "options": [
+                  {
+                    "label": "Ryokan Hanami",
+                    "description": "Dinner included"
+                  },
+                  {
+                    "label": "Kiyomizu Inn",
+                    "description": "A short walk to the temple"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "needs_you",
+          "section": "needs_you",
+          "reason": "agent_asks",
+          "line": {
+            "key": "agent_asks",
+            "args": {
+              "run": "Ryokan choice",
+              "text": "Which ryokan should I book?"
+            }
+          },
+          "since": "2026-11-10T11:30:00Z",
+          "rank": 0,
+          "asks": [
+            {
+              "id": "run:m1/s-choose@2026-11-10T11:30:00Z",
+              "kind": "question",
+              "home": "run",
+              "text": "Which ryokan should I book?",
+              "run": {
+                "machine_id": "m1",
+                "session_id": "s-choose",
+                "title": "Ryokan choice"
+              },
+              "risk": "safe",
+              "lockscreen": "answer",
+              "interaction": "ix_ryokan_q"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "run_plan_open_with_card",
+      "description": "A run asks the owner to approve its plan: the ask is a plan, by its card's id, and open, answered at the run after a look; with nothing in its asks, the text is why the session waits.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 row 2",
+        "docs/design/proposals/todos-redesign.md 3.7 \"Answers and taps per surface\"",
+        "docs/design/proposals/todos-redesign.md 5 decision 4(a)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_r8",
+          "title": "Plan the Osaka day",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-09T08:00:00Z",
+          "updated_at": "2026-11-10T10:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m1",
+              "session_id": "s-osaka",
+              "linked_at": "2026-11-09T08:01:00Z",
+              "title": "Osaka itinerary",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "project": "kyoto-trip"
+        },
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-osaka",
+            "title": "Osaka itinerary",
+            "status": "blocked",
+            "state": "needs_you",
+            "state_since": "2026-11-10T11:30:00Z",
+            "updated_at": "2026-11-10T11:30:00Z",
+            "pending_interactions": 1,
+            "attention_reason": "Wants to go ahead with its plan"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix_osaka_plan",
+            "machine_id": "m1",
+            "session_id": "s-osaka",
+            "kind": "plan",
+            "created_at": "2026-11-10T11:30:00Z",
+            "expires_at": "2026-11-10T13:30:00Z",
+            "tool_name": "ExitPlanMode",
+            "plan": "1. Take the 8:10 train to Osaka\n2. Osaka Castle in the morning\n3. Dotonbori for dinner"
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "needs_you",
+          "section": "needs_you",
+          "reason": "agent_asks",
+          "line": {
+            "key": "agent_asks",
+            "args": {
+              "run": "Osaka itinerary",
+              "text": "Wants to go ahead with its plan"
+            }
+          },
+          "since": "2026-11-10T11:30:00Z",
+          "rank": 0,
+          "asks": [
+            {
+              "id": "run:m1/s-osaka@2026-11-10T11:30:00Z",
+              "kind": "plan",
+              "home": "run",
+              "text": "Wants to go ahead with its plan",
+              "run": {
+                "machine_id": "m1",
+                "session_id": "s-osaka",
+                "title": "Osaka itinerary"
+              },
+              "risk": "open",
+              "lockscreen": "open_only",
+              "interaction": "ix_osaka_plan"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "run_permission_is_tool",
+      "description": "A run asks to use a tool: the ask is a tool approval, by its card's id, and open. A card of a session no run of the to-do is on is not its ask, however old.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 row 2",
+        "docs/design/proposals/todos-redesign.md 3.7 \"Answers and taps per surface\"",
+        "docs/design/proposals/todos-redesign.md 5 decision 4(a)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_r9",
+          "title": "Fill in the visa form",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-09T08:00:00Z",
+          "updated_at": "2026-11-10T10:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m2",
+              "session_id": "s-visa",
+              "linked_at": "2026-11-09T08:01:00Z",
+              "title": "Visa form",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "project": "kyoto-trip"
+        },
+        "sessions": [
+          {
+            "machine_id": "m2",
+            "session_id": "s-visa",
+            "title": "Visa form",
+            "status": "blocked",
+            "state": "needs_you",
+            "state_since": "2026-11-10T11:30:00Z",
+            "updated_at": "2026-11-10T11:30:00Z",
+            "pending_interactions": 1,
+            "attention_reason": "Wants to run a command"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix_other_q",
+            "machine_id": "m2",
+            "session_id": "s-other",
+            "kind": "question",
+            "created_at": "2026-11-10T10:00:00Z",
+            "expires_at": "2026-11-10T14:00:00Z",
+            "questions": [
+              {
+                "question": "Which folder?",
+                "multi_select": false,
+                "options": [
+                  {
+                    "label": "Documents"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "ix_visa_tool",
+            "machine_id": "m2",
+            "session_id": "s-visa",
+            "kind": "permission",
+            "created_at": "2026-11-10T11:30:00Z",
+            "expires_at": "2026-11-10T13:30:00Z",
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "python3 fill_form.py --country JP"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "needs_you",
+          "section": "needs_you",
+          "reason": "agent_asks",
+          "line": {
+            "key": "agent_asks",
+            "args": {
+              "run": "Visa form",
+              "text": "Wants to run a command"
+            }
+          },
+          "since": "2026-11-10T11:30:00Z",
+          "rank": 0,
+          "asks": [
+            {
+              "id": "run:m2/s-visa@2026-11-10T11:30:00Z",
+              "kind": "tool",
+              "home": "run",
+              "text": "Wants to run a command",
+              "run": {
+                "machine_id": "m2",
+                "session_id": "s-visa",
+                "title": "Visa form"
+              },
+              "risk": "open",
+              "lockscreen": "open_only",
+              "interaction": "ix_visa_tool"
+            }
+          ]
         }
       }
     }

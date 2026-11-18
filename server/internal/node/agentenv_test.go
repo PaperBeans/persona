@@ -19,7 +19,7 @@ import (
 // inAgentEnv is agentCommand's line for cmd in an sh-family pane of a node whose directory is dir, written out: what
 // tests that look at a whole typed command expect.
 func inAgentEnv(dir, cmd string, q func(string) string) string {
-	return "unset " + strings.Join(assistantOnlyEnvNames(), " ") + " && PERSONA_HOME=" + q(dir) + " " + agentMarkEnv + " " + cmd
+	return "unset " + strings.Join(agentUnsetNames(), " ") + " && PERSONA_HOME=" + q(dir) + " " + agentMarkEnv + " " + cmd
 }
 
 // jsonPrefix is s as the fake herdr's trace prints it (JSON, & as \u0026) without its closing quote: what a check on

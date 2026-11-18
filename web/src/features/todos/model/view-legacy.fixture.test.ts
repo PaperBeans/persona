@@ -34,6 +34,7 @@ const DECIDED: Record<string, ByDesign> = {
   finished_with_a_limited_run: "usage_limit",
   step_decision_rolls_up: "steps",
   steps_working_and_limited: "steps",
+  retry_is_safe: "steps",
   run_waits_on_agent: "run_waits",
   run_waits_on_external: "run_waits",
   transient_retry_stays_background: "run_waits",

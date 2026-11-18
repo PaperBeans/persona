@@ -127,6 +127,27 @@ func BenchmarkTodosView(b *testing.B) {
 			run(b, fleetTodosForBench(b, 1000, records))
 		})
 	}
+	b.Run("fleet/open=1000/cards=200", func(b *testing.B) {
+		s := fleetTodosForBench(b, 1000, 0)
+		holdCardsForBench(s, 100)
+		run(b, s)
+	})
+}
+
+// holdCardsForBench puts up a card on every tenth of fleetTodosForBench's first n*10 runs, and one on each of n
+// sessions no to-do links: a read hands each run its own card and copies none of the others.
+func holdCardsForBench(s *Service, n int) {
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	s.fleet.mu.Lock()
+	defer s.fleet.mu.Unlock()
+	for i := range n {
+		for _, sid := range []string{fmt.Sprintf("s%06d", i*10), fmt.Sprintf("other%05d", i)} {
+			ix := proto.Interaction{ID: "ix_" + sid, MachineID: "box", SessionID: sid, Kind: proto.IxQuestion,
+				CreatedAt: at, ExpiresAt: at.Add(time.Hour), Questions: []proto.Question{{Question: "Which test first?",
+					Options: []proto.QuestionOption{{Label: "The landscape test"}, {Label: "The rotation test"}}}}}
+			s.ixMapLocked()[ix.ID] = &pending{ix: ix}
+		}
+	}
 }
 
 // reopenForBench opens every to-do of manyTodos again, accepted and not seen, and answers its run's session, idle on

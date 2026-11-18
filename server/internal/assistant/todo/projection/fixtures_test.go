@@ -25,16 +25,18 @@ import (
 
 const fixtures = "../../../../../spec/fixtures/"
 
-// viewInput is a case's input: one to-do as the list carries it, its runs' sessions, and what the row does not carry.
+// viewInput is a case's input: one to-do as the list carries it, its runs' sessions and pending cards, and what the
+// row does not carry.
 type viewInput struct {
-	Now          time.Time         `json:"now"`
-	Todo         json.RawMessage   `json:"todo"`
-	Sessions     []proto.Session   `json:"sessions"`
-	RestoredAt   *time.Time        `json:"restored_at"`
-	SomedayUntil *time.Time        `json:"someday_until"`
-	Loc          string            `json:"loc"`
-	Steps        []json.RawMessage `json:"steps"`
-	Superseded   bool              `json:"superseded"`
+	Now          time.Time           `json:"now"`
+	Todo         json.RawMessage     `json:"todo"`
+	Sessions     []proto.Session     `json:"sessions"`
+	Interactions []proto.Interaction `json:"interactions"`
+	RestoredAt   *time.Time          `json:"restored_at"`
+	SomedayUntil *time.Time          `json:"someday_until"`
+	Loc          string              `json:"loc"`
+	Steps        []json.RawMessage   `json:"steps"`
+	Superseded   bool                `json:"superseded"`
 }
 
 // countsInput is a list case's input: the list as GET /api/v1/todos carries it, and the marks by to-do id.
@@ -99,7 +101,8 @@ func decodeFacts(t *testing.T, raw json.RawMessage, sessions []proto.Session, lo
 	return f
 }
 
-// viewList is a view case's to-do, with its marks, then its steps: the list it is read in.
+// viewList is a view case's to-do, with its marks, then its steps: the list it is read in. Each holds the case's
+// pending cards, as each holds its sessions: a run reads its own.
 func viewList(t *testing.T, in viewInput) []Facts {
 	t.Helper()
 	loc := location(t, in.Loc)
@@ -108,6 +111,9 @@ func viewList(t *testing.T, in viewInput) []Facts {
 	list := []Facts{f}
 	for _, raw := range in.Steps {
 		list = append(list, decodeFacts(t, raw, in.Sessions, loc))
+	}
+	for i := range list {
+		list[i].Interactions = in.Interactions
 	}
 	return list
 }

@@ -178,6 +178,30 @@ public nonisolated enum OwnerAskHome {
     public static let all = ["todo", "run"]
 }
 
+/// How risky answering an ask is (proposal 3.7, decision 4(a)): safe, the row, the card or a push may answer it in
+/// place; open, it cannot be undone, other people will see it or what it asks needs a look, so the owner answers it
+/// after a look, on its page or at its run. The manager's rule: a decision is open when why only the owner decides is
+/// irreversible or visible_to_others, or Persona would take it at a deadline that cannot be undone; a retry is safe;
+/// a run's card is safe when a notification may answer it too (one question with options and no fields, not from a
+/// Just me turn or a health conversation) and its asker did not say going ahead cannot be undone, and anything else a
+/// run asks is open (a question in words, several questions, a dialog on the screen, a plan, a tool approval, a form,
+/// a secret, or a run whose card the hub does not hold). Open: a newer hub may send other values, which clients read
+/// as open.
+public nonisolated enum OwnerAskRisk {
+    public static let safe = "safe"
+    public static let open = "open"
+    public static let all = ["safe", "open"]
+}
+
+/// What a push about the ask may offer on the lock screen (proposal 3.7): answer, its answers as actions, each
+/// needing the phone unlocked; open_only, no action, a tap opens it. open_only exactly when the risk is open. Open: a
+/// newer hub may send other values, which clients read as open_only.
+public nonisolated enum OwnerAskLockscreen {
+    public static let answer = "answer"
+    public static let openOnly = "open_only"
+    public static let all = ["answer", "open_only"]
+}
+
 /// One option of a decision, as its card lists it.
 public nonisolated struct OwnerAskOption: Codable, Hashable, Sendable {
     /// The option in its card's words; an answer names it.
@@ -202,8 +226,9 @@ public nonisolated struct OwnerAskOption: Codable, Hashable, Sendable {
     }
 }
 
-/// One ask that holds the to-do in Needs you or Can wait: the to-do's own (home todo) or one of its runs' (home run).
-/// Its risk, lock-screen action and state come with answering in place, after stage 1.
+/// One ask that holds the to-do in Needs you or Can wait: the to-do's own (home todo) or one of its runs' (home run),
+/// with how risky answering it is and what a push about it may offer on the lock screen. Its state (answered, held
+/// for Undo) comes with answering in place.
 public nonisolated struct OwnerAsk: Codable, Hashable, Sendable {
     /// Unique within the row and never reused for a later ask, so what a client keeps by id (an answer, a Later)
     /// never lands on a new question. The same while the ask is open, though a hub restart may give an open run's ask
@@ -227,8 +252,16 @@ public nonisolated struct OwnerAsk: Codable, Hashable, Sendable {
     public var canWait: Bool?
     /// When Persona takes the recommendation unless the owner answers first; absent when it never does.
     public var defaultAt: String?
+    /// How risky answering it is. Absent from an older manager: clients read it as open.
+    public var risk: String?
+    /// What a push about it may offer on the lock screen. Absent from an older manager: clients read it as open_only.
+    public var lockscreen: String?
+    /// The id of the run's pending card this ask is (the session's own before Persona's card about its turn, then the
+    /// oldest), answered through POST /api/v1/interactions/{id}/resolve; only on a run's ask, and absent while the
+    /// hub holds no card for the run (its kind is then question).
+    public var interaction: String?
 
-    public init(id: String = "", kind: String = "", home: String = "", round: String? = nil, text: String? = nil, run: TodoRunRef? = nil, recommend: String? = nil, options: [OwnerAskOption]? = nil, canWait: Bool? = nil, defaultAt: String? = nil) {
+    public init(id: String = "", kind: String = "", home: String = "", round: String? = nil, text: String? = nil, run: TodoRunRef? = nil, recommend: String? = nil, options: [OwnerAskOption]? = nil, canWait: Bool? = nil, defaultAt: String? = nil, risk: String? = nil, lockscreen: String? = nil, interaction: String? = nil) {
         self.id = id
         self.kind = kind
         self.home = home
@@ -239,6 +272,9 @@ public nonisolated struct OwnerAsk: Codable, Hashable, Sendable {
         self.options = options
         self.canWait = canWait
         self.defaultAt = defaultAt
+        self.risk = risk
+        self.lockscreen = lockscreen
+        self.interaction = interaction
     }
 
     enum CodingKeys: String, CodingKey {
@@ -252,6 +288,9 @@ public nonisolated struct OwnerAsk: Codable, Hashable, Sendable {
         case options
         case canWait = "can_wait"
         case defaultAt = "default_at"
+        case risk
+        case lockscreen
+        case interaction
     }
 
     public init(from decoder: Decoder) throws {
@@ -266,6 +305,9 @@ public nonisolated struct OwnerAsk: Codable, Hashable, Sendable {
         self.options = try? c.decodeIfPresent([OwnerAskOption].self, forKey: .options)
         self.canWait = try? c.decodeIfPresent(Bool.self, forKey: .canWait)
         self.defaultAt = try? c.decodeIfPresent(String.self, forKey: .defaultAt)
+        self.risk = try? c.decodeIfPresent(String.self, forKey: .risk)
+        self.lockscreen = try? c.decodeIfPresent(String.self, forKey: .lockscreen)
+        self.interaction = try? c.decodeIfPresent(String.self, forKey: .interaction)
     }
 }
 

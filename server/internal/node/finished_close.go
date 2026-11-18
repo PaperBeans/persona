@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"log"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -156,9 +157,11 @@ func (n *Node) closeFinishedRound(ctx context.Context, grace time.Duration, now 
 			delete(n.finishedSince, pane)
 		}
 	}
-	for pane := range n.agentTerms {
-		if !n.inFreshLayout(pane, start) {
-			delete(n.agentTerms, pane) // closed, or its engine restarted: a record never outlives its terminal
+	for _, recs := range []map[string]bool{n.agentTerms, n.agentRoots} {
+		for pane := range recs {
+			if !n.inFreshLayout(pane, start) {
+				delete(recs, pane) // closed, or its engine restarted: a record never outlives its terminal
+			}
 		}
 	}
 	n.mu.Unlock()
@@ -186,7 +189,10 @@ func (n *Node) inFreshLayout(pane string, since time.Time) bool {
 }
 
 // finishedPanes are the terminals that may be finished Agents' in the snapshots taken at or after since (only pane,
-// when given): owned by Persona, no Agent in them or bound to them, not kept for a retry, not being watched.
+// when given): owned by Persona, no Agent in them or bound to them, not kept for a retry, not being watched. The first
+// shell of a worktree the assistant made for an Agent (personaWorktreeToken, #10624) is one too, once every other
+// pane of its workspace is such a terminal (or another such shell): never while an Agent, or anything the user
+// opened, is still in that workspace.
 func (n *Node) finishedPanes(since time.Time, only string) []finishedPane {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -206,37 +212,89 @@ func (n *Node) finishedPanes(since time.Time, only string) []finishedPane {
 			continue // this host did not answer this round
 		}
 		_, marks := h.(host.MetadataReporter)
+		agentDone := map[string]finishedPane{} // pane -> a finished Agent terminal
+		var roots []host.Agent
 		for _, p := range l.panes {
-			if p.PaneID == "" || only != "" && p.PaneID != only || p.Agent != "" || inUse[p.PaneID] {
+			if p.PaneID == "" {
 				continue
 			}
-			id := p.Tokens[personaTabToken]
-			if marks && id == "" || !marks && !n.agentTerms[p.PaneID] {
-				continue // not one Persona opened for an Agent
+			if c, ok := n.finishedAgentPaneLocked(h, p, marks, inUse); ok {
+				agentDone[p.PaneID] = c
+			} else if n.worktreeShellLocked(p, marks, inUse) {
+				roots = append(roots, p)
 			}
-			if bound := n.panes[p.PaneID]; bound != "" {
-				if _, running := n.agents[bound]; running {
-					continue
-				}
-				if id == "" || id == "agent" {
-					id = bound
-				}
+		}
+		for _, p := range l.panes {
+			if c, ok := agentDone[p.PaneID]; ok && (only == "" || p.PaneID == only) {
+				out = append(out, c)
 			}
-			if _, kept := n.keptStarts[p.PaneID]; kept || n.codexWaiting[p.PaneID] != nil {
+		}
+		for _, r := range roots {
+			if only != "" && r.PaneID != only {
 				continue
 			}
-			if n.terms[panePrefix+p.PaneID] != nil || validID(id) && n.terms[id] != nil {
-				continue // someone has it open
-			}
-			if validID(id) {
-				if r := n.starts.get(id); r != nil && r.ended.IsZero() {
+			alone := true
+			for _, p := range l.panes {
+				if p.PaneID == "" || p.PaneID == r.PaneID || p.WorkspaceID != r.WorkspaceID {
 					continue
 				}
+				if _, done := agentDone[p.PaneID]; !done && !slices.ContainsFunc(roots, func(q host.Agent) bool { return q.PaneID == p.PaneID }) {
+					alone = false // an Agent, a start, a viewer or the user's own pane is still here
+					break
+				}
 			}
-			out = append(out, finishedPane{p: p, h: h, id: id})
+			if alone && r.WorkspaceID != "" {
+				out = append(out, finishedPane{p: r, h: h})
+			}
 		}
 	}
 	return out
+}
+
+// finishedAgentPaneLocked: p is a terminal Persona opened for an Agent that has finished (finishedPanes). n.mu held.
+func (n *Node) finishedAgentPaneLocked(h host.Host, p host.Agent, marks bool, inUse map[string]bool) (finishedPane, bool) {
+	if p.Agent != "" || inUse[p.PaneID] {
+		return finishedPane{}, false
+	}
+	id := p.Tokens[personaTabToken]
+	if marks && id == "" || !marks && !n.agentTerms[p.PaneID] {
+		return finishedPane{}, false // not one Persona opened for an Agent
+	}
+	if bound := n.panes[p.PaneID]; bound != "" {
+		if _, running := n.agents[bound]; running {
+			return finishedPane{}, false
+		}
+		if id == "" || id == "agent" {
+			id = bound
+		}
+	}
+	if _, kept := n.keptStarts[p.PaneID]; kept || n.codexWaiting[p.PaneID] != nil {
+		return finishedPane{}, false
+	}
+	if n.terms[panePrefix+p.PaneID] != nil || validID(id) && n.terms[id] != nil {
+		return finishedPane{}, false // someone has it open
+	}
+	if validID(id) {
+		if r := n.starts.get(id); r != nil && r.ended.IsZero() {
+			return finishedPane{}, false
+		}
+	}
+	return finishedPane{p: p, h: h, id: id}, true
+}
+
+// worktreeShellLocked: p is the first shell of an Agent's worktree (markWorktreeShell), with no Agent in it, not
+// bound to a session and nobody watching it. n.mu held.
+func (n *Node) worktreeShellLocked(p host.Agent, marks bool, inUse map[string]bool) bool {
+	if p.Agent != "" || inUse[p.PaneID] || n.panes[p.PaneID] != "" || n.terms[panePrefix+p.PaneID] != nil {
+		return false
+	}
+	if _, kept := n.keptStarts[p.PaneID]; kept || n.codexWaiting[p.PaneID] != nil {
+		return false
+	}
+	if marks {
+		return p.Tokens[personaWorktreeToken] != "" && p.Tokens[personaTabToken] == ""
+	}
+	return n.agentRoots[p.PaneID]
 }
 
 // finishedAtRest says whether only a shell is in front of c's pane, and hashes its screen; ok false when the engine
@@ -301,6 +359,7 @@ func (n *Node) closeFinishedPane(ctx context.Context, c finishedPane, screen [32
 	n.mu.Lock()
 	delete(n.finishedSince, p.PaneID)
 	delete(n.agentTerms, p.PaneID)
+	delete(n.agentRoots, p.PaneID)
 	n.mu.Unlock()
 	log.Printf("finished terminal %s (session %s): closed after its grace period", p.PaneID, c.id)
 	return true

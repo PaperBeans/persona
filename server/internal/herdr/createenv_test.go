@@ -2,6 +2,9 @@ package herdr
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -36,6 +39,27 @@ func TestCreateCarriesEnv(t *testing.T) {
 	}
 	if _, has := got["tab.create"]["env"]; has {
 		t.Fatalf("a plain tab got env: %v", got["tab.create"])
+	}
+}
+
+// Through the CLI (no server socket) the variables go as --env KEY=VALUE each, in the order given (#10365: a start
+// tab's several); without any, no --env.
+func TestCreateCarriesEnvOnTheCLI(t *testing.T) {
+	bin, args := cliScript(t, `{"result":{"tab":{"tab_id":"w1:t2"},"root_pane":{"pane_id":"w1:p2"}}}`)
+	c := &Client{Bin: bin, Socket: filepath.Join(t.TempDir(), "missing.sock")}
+	ctx := context.Background()
+	if _, err := c.TabCreate(ctx, "w1", "/tmp", "agent-1", "PERSONA_AGENT=1", "DISABLE_AUTO_UPDATE=true"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(args); strings.TrimSpace(string(b)) !=
+		"tab create --workspace w1 --cwd /tmp --label agent-1 --no-focus --env PERSONA_AGENT=1 --env DISABLE_AUTO_UPDATE=true" {
+		t.Errorf("CLI args %q", b)
+	}
+	if _, err := c.WorkspaceCreate(ctx, "/tmp", "tmp"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(args); strings.Contains(string(b), "--env") {
+		t.Errorf("CLI args without env %q", b)
 	}
 }
 

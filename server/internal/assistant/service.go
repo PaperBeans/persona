@@ -17,6 +17,7 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/assistant/saved"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/prompts"
@@ -115,6 +116,9 @@ type Service struct {
 	// taskRetry is how long a task waits before its one retry after a dropped link (0: taskStartRetryDelay; tests
 	// shorten it).
 	taskRetry time.Duration
+	// continuePolled, when set (tests), is told each time a sent "Continue"'s guard begins its next read of the agent
+	// (n from 1), after it handled the read before: a test waits on the guard with it (continueTask).
+	continuePolled func(n int)
 	// leaderResume bounds each attempt to put a supervision message into a closed task leader agent, and is the first
 	// wait of the retries after one failed (0: leaderResumeWait; tests shorten it, task_leader.go leaderResumeTime).
 	leaderResume time.Duration
@@ -236,6 +240,7 @@ type Service struct {
 	directions directionBook     // directions.go: the leaders' records and what the extensions were told of them
 	lreports   leaderReportBook  // leader_reports.go: what the leaders' tasks were reported as
 	dtree      directionTreeBook // direction_tree.go: the direction tree the apps were last told of
+	tview      todoViewBook      // todo_view_push.go: what the apps were told each to-do is filed under
 	offers     routeBook         // route.go: the directions offered for New chats
 	standing   standingBoard     // feishu_board.go: the standing "waiting for you" card
 	workbench  workbenchState    // feishu_workbench_pin.go: the pinned workbench
@@ -491,6 +496,11 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 		}
 		if _, set := p["interject_background"]; !set && s.interjectBackground(ctx) {
 			p["interject_background"] = true // what the node does with a message that comes while it answers
+		}
+	}
+	if p, ok := params.(map[string]any); ok && (method == DeviceAssistantSend || method == DeviceSessionSend) && p["is_main"] == true {
+		p["idle_compaction"] = assistantwire.IdleCompaction{
+			Enabled: s.idleAutoCompact(ctx), IdleMinutes: s.idleAutoCompactMinutes(ctx), ContextTokens: s.idleAutoCompactTokens(ctx),
 		}
 	}
 	if p, ok := params.(map[string]any); ok && (method == DeviceAssistantSend || method == DeviceAssistantWarm || method == DeviceSessionSend) {
@@ -841,6 +851,7 @@ func (s *Service) TurnStarted(ctx context.Context, r SessionRef) {
 }
 
 func (s *Service) turnStartedObserved(ctx context.Context, r SessionRef, newTurn bool) {
+	s.quietTurnOver(r.MachineID, r.SessionID) // a turn with no output before this one is over (silent_turns.go)
 	s.taskWorking(ctx, r.MachineID, r.SessionID)
 	s.workStartedObserved(ctx, r.MachineID, r.SessionID, time.Now(), newTurn)
 	s.availTurnStarted(r.MachineID, r.SessionID, newTurn, time.Now())
@@ -856,6 +867,7 @@ func (s *Service) TurnEnded(ctx context.Context, r SessionRef) {
 // turnEnded is TurnEnded; meeting: the turn was a meeting's batch's (meeting_turns.go), a side exchange that is
 // neither a task's progress nor triaged, mirrored or a reason to name the conversation.
 func (s *Service) turnEnded(ctx context.Context, r SessionRef, meeting bool) {
+	s.stopTurnEnded(r.MachineID, r.SessionID, time.Now()) // the turn a Stop interrupted, if one did (silent_turns.go)
 	s.clearToolLoop([2]string{r.MachineID, r.SessionID}, loopTurnChanged)
 	go s.registerInlineTurn(context.WithoutCancel(ctx), r)
 	if !meeting {
@@ -919,6 +931,7 @@ func (s *Service) SessionsChanged(ctx context.Context, d DeviceSessions) {
 	s.undeliveredSeen(d)                      // kept owner messages go once their conversation runs again (undelivered.go)
 	s.originsChanged(d.MachineID, d.Sessions) // conversations from before origins were noted (origins.go)
 	s.todosSessionsChanged(ctx, d)
+	s.todoRunsChanged(d.MachineID) // a to-do's view may file it elsewhere now (todo_view_push.go)
 	s.taskStageSessions(ctx, d)
 	s.nativeArchivesListed(d.MachineID) // agent_archive_native.go
 	s.switchQueueListed(d.MachineID)    // a queued launcher switch whose turn ended (agents_switch.go)

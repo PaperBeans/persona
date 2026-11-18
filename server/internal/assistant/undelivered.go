@@ -163,6 +163,13 @@ func (s *Service) KeepUndelivered(ctx context.Context, p assistantwire.KeepUndel
 		// never tried: it goes right after the ones ahead of it, and says so
 		k.Attempts, k.NextAt, k.Error = 0, now, i18n.T(lang, "assistant-undelivered.behind")
 	}
+	if p.Code == assistantwire.CodeDeliveryUnknown {
+		// The first attempt may have typed it. Always look before sending again, even if an older hub omitted the time.
+		k.TriedAt = p.TriedAt
+		if k.TriedAt.IsZero() {
+			k.TriedAt = now
+		}
+	}
 	b.st[p.SessionID] = append(b.st[p.SessionID], k)
 	err := s.saveUndeliveredLocked()
 	b.mu.Unlock()

@@ -173,6 +173,7 @@
               "verdict": "Needs your decision",
               "recommend": "Maruyama Park",
               "asked_at": "2026-11-10T10:00:00Z",
+              "risk": "safe",
               "question": "Which spot for the picnic?",
               "options": [
                 {
@@ -796,6 +797,7 @@
               "verdict": "Needs your decision",
               "recommend": "Ryokan Hanami",
               "asked_at": "2026-11-10T09:00:00Z",
+              "risk": "safe",
               "question": "Which of the three?",
               "options": [
                 {
@@ -952,6 +954,7 @@
               "verdict": "Needs your decision",
               "recommend": "Yes",
               "asked_at": "2026-11-10T10:00:00Z",
+              "risk": "open",
               "question": "Upgrade to the window seats?",
               "options": [
                 {
@@ -1015,6 +1018,7 @@
               "verdict": "Needs your decision",
               "recommend": "Yes",
               "asked_at": "2026-11-10T09:00:00Z",
+              "risk": "safe",
               "question": "Add a day in Nara?",
               "options": [
                 {
@@ -1052,6 +1056,7 @@
               "verdict": "Needs your decision",
               "recommend": "Yes",
               "asked_at": "2026-11-10T09:30:00Z",
+              "risk": "safe",
               "question": "Take the early train?",
               "options": [
                 {
@@ -1673,6 +1678,7 @@
               "verdict": "Needs your decision",
               "recommend": "A minivan",
               "asked_at": "2026-11-10T09:00:00Z",
+              "risk": "safe",
               "question": "Which car?",
               "options": [
                 {
@@ -1709,6 +1715,7 @@
               "verdict": "Needs your decision",
               "recommend": "Tenseien",
               "asked_at": "2026-11-10T11:00:00Z",
+              "risk": "safe",
               "question": "Which onsen?",
               "options": [
                 {

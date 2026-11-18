@@ -66,7 +66,8 @@ What `release.sh` does:
    `production`. With `NO_UPLOAD=1`, `destination` changes from `upload` to `export`, and it additionally checks that `aps-environment` in the exported ipa
    really is `production`.
 6. `scripts/release/entitlements.py check`: in the archive (plus the exported ipa with `NO_UPLOAD=1`), every bundle carries its target's keychain groups, and the group name in Info.plist is among them; see "entitlements" below. It also fails when any binary in the app links CallKit; see "No CallKit" below.
-7. `git tag -f testflight/<build number>`.
+7. `scripts/release/check_mac_imports.py` checks the archived iPhone executable's strong imports against MacOSX.sdk TBD exports, preferring each framework's `System/iOSSupport` copy. An iPhone app on an Apple silicon Mac must not bind a symbol the Mac lacks: dyld otherwise ends its launch before app code. Weak imports pass; libraries with neither a Mac nor an iOS-support stub are outside this comparison. Run it by hand with `python3 scripts/release/check_mac_imports.py <path to Persona.app>/Persona`; findings are printed, a clean check prints nothing.
+8. `git tag -f testflight/<build number>`.
 
 A build shows up in TestFlight about 10–30 minutes after archiving. `asc_testflight.py wait [minutes] [build number]` checks every 30 seconds until
 `processingState=VALID`, then writes the default What to Test and adds it to the `Internal` group; `INVALID` / `FAILED` exits with an error

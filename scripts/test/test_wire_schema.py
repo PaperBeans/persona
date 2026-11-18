@@ -11,18 +11,31 @@ otherwise drop it or fail on it, changing the bytes it writes back. Every defini
 import functools
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+IMPLEMENTATION_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _source_root():
+    configured = os.environ.get("PERSONA_CI_SOURCE_ROOT")
+    if configured:
+        if not Path(configured).is_absolute():
+            raise ValueError("PERSONA_CI_SOURCE_ROOT must be absolute")
+        return Path(configured)
+    return IMPLEMENTATION_ROOT
+
+
+ROOT = _source_root()
 WIRE = ROOT / "schema" / "wire"
 FIXTURES = ROOT / "spec" / "fixtures"
-GENERATOR = ROOT / "scripts" / "gen" / "extension_schema.py"
+GENERATOR = IMPLEMENTATION_ROOT / "scripts" / "gen" / "extension_schema.py"
 
-spec = importlib.util.spec_from_file_location("test_extension_schema", ROOT / "scripts/test/test_extension_schema.py")
+spec = importlib.util.spec_from_file_location("test_extension_schema", IMPLEMENTATION_ROOT / "scripts/test/test_extension_schema.py")
 ext = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ext)
 

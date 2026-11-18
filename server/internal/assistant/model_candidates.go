@@ -216,7 +216,7 @@ func (s *Service) pickedCandidate(ctx context.Context, b ModelBinding) modelCand
 
 // runCandidates makes c on each of chain in turn until one answers with something (that matches the schema, with
 // one). Each has c's timeout, the whole call at most modelCallTimeoutMost.
-func (s *Service) runCandidates(ctx context.Context, who string, c checkedCall, chain []modelCandidate) (any, error) {
+func (s *Service) runCandidates(ctx context.Context, purpose, who string, c checkedCall, chain []modelCandidate) (any, error) {
 	callCtx, cancel := context.WithTimeout(ctx, modelCallTimeoutMost)
 	defer cancel()
 	deadline, _ := callCtx.Deadline()
@@ -242,7 +242,7 @@ func (s *Service) runCandidates(ctx context.Context, who string, c checkedCall, 
 			outcome = "not tried"
 			err = &rpc.Error{Code: assistantwire.CodeModelTimeout, Message: "model.complete: no time left for it"}
 		default:
-			out, outcome, err = s.attemptModel(callCtx, cand.config, c, min(c.timeout, left), &usage)
+			out, outcome, err = s.attemptModel(callCtx, s.countedClient(purpose, "", cand.id, cand.config), c, min(c.timeout, left), &usage)
 			if err == nil && c.schema == nil && strings.TrimSpace(out.Text) == "" {
 				outcome = "empty"
 				err = &rpc.Error{Code: assistantwire.CodeModelFailed, Message: "model.complete: the reply was empty"}

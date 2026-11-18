@@ -1009,7 +1009,7 @@ private struct AgentsList: View {
     /// The agents, the questions and the machines the list shows (`AgentsFeed`): held still while it is scrolled or
     /// out of sight.
     @State private var feed = AgentsFeed()
-    #if DEBUG
+    #if DEBUG && os(iOS)
     @State private var sortShadow = AgentSortShadowObserver()
     #endif
 
@@ -1116,7 +1116,7 @@ private struct AgentsList: View {
 
     @discardableResult
     private func shadowSubmit(active: [SpaceGroup], quiet: [SpaceGroup]) -> Int {
-        #if DEBUG
+        #if DEBUG && os(iOS)
         guard sortShadow.enabled else { return 0 }
         let snapshot = shadowPresentation(active + quiet)
         sortShadow.submit(feed: feed, settings: projectionSettings(), presentation: snapshot)
@@ -1126,7 +1126,7 @@ private struct AgentsList: View {
         #endif
     }
 
-    #if DEBUG
+    #if DEBUG && os(iOS)
     private func shadowPresentation(_ groups: [SpaceGroup]) -> AgentSortPresentation {
         guard sortShadow.enabled else { return .init() }
         var result = AgentSortPresentation(folded: folded, expandedIdle: expandedIdle,
@@ -1629,7 +1629,7 @@ private struct AgentsList: View {
         #endif
         .onChange(of: machineFilter) { _, _ in kept = [] }
         .onAppear {
-            #if DEBUG
+            #if DEBUG && os(iOS)
             sortShadow.enable()
             #endif
             feed.follow(model)
@@ -5290,7 +5290,8 @@ private struct AgentsTop: ViewModifier {
 /// P5): the shell's other page in front, another tab, a page pushed over it. `AgentsList`'s body read the app's tab, the
 /// strip's `moving` and the chat on screen for this, each of which changes on a switch between Assistant and Agents, and so
 /// ran three or four times per switch, over every row (#5438). The list holds its feed while covered, the herdr and
-/// worktree polls stop, and a chat coming on screen closes the workspace opened beside the list.
+/// worktree polls stop, the chats not open are no longer warmed (#10582), and a chat coming on screen closes the
+/// workspace opened beside the list.
 private struct AgentsCoverWatch: View {
     @Environment(AppModel.self) private var model
     @Environment(\.shell) private var shell
@@ -5322,14 +5323,26 @@ private struct AgentsCoverWatch: View {
         return false
     }
 
+    /// Whether the Agents' chats not open are warmed for a tap in this list (`AgentSync.warmWhileInSight`, #10582): in
+    /// sight, and beside the page not folded away (the iPad's column, which `isCovered` leaves to the list's own polls).
+    private func warms(covered: Bool) -> Bool {
+        #if os(iOS)
+        if split?.listHidden == true && split?.drawer != true { return false }
+        #endif
+        return !covered
+    }
+
     var body: some View {
         let isCovered = isCovered
+        let warms = warms(covered: isCovered)
         Color.clear
             .allowsHitTesting(false)
             .accessibilityHidden(true)
             // Whether each machine's herdr runs, and the worktrees, while the list is in sight.
             .modifier(HerdrPolling(watch: herdr, key: herdrKey, covered: isCovered))
             .modifier(WorkspaceCatalogPolling(catalog: catalog, enabled: catalogEnabled, covered: isCovered))
+            // The chats a tap here opens are kept current while the list is in sight, its tab in front, the app active.
+            .tabActiveTask(id: warms) { if warms { await AgentSync.shared.warmWhileInSight() } }
             .onChange(of: isCovered, initial: true) { _, now in
                 covered(now)
                 // Out of sight, the hub's lists read for hints once a window; in sight, as they come.

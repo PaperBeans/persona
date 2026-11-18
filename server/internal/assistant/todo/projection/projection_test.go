@@ -106,6 +106,28 @@ func TestClosedParentKeepsItsStepsApart(t *testing.T) {
 	}
 }
 
+// A part of a list reads a failed start as the whole list does once Superseded, worked out over the whole list, is set
+// on it: the related to-do that finished need not be in the part.
+func TestSupersededFromTheWholeList(t *testing.T) {
+	failed := Facts{ID: "todo_f", Title: "Book the ferry", CreatedAt: hours(-30), UpdatedAt: hours(-3),
+		DoneAt: at(hours(-3)), StartError: "Desk Mac is offline"}
+	finished := Facts{ID: "todo_d", Title: "book the ferry!", CreatedAt: hours(-30), UpdatedAt: hours(-2),
+		DoneAt: at(hours(-2))}
+	whole := Views([]Facts{failed, finished}, testNow)[0]
+	if whole.Phase != assistantwire.TodoPhaseDone || whole.Line == nil || whole.Line.Key != "superseded" {
+		t.Fatalf("the whole list: %+v", whole)
+	}
+	if v := Views([]Facts{failed}, testNow)[0]; v.Reason != assistantwire.TodoReasonFailedStart {
+		t.Fatalf("the part alone: %+v", v)
+	}
+	sup := Superseded([]Facts{{ID: failed.ID, Title: failed.Title, DoneAt: failed.DoneAt, StartError: failed.StartError},
+		{ID: finished.ID, Title: finished.Title, DoneAt: finished.DoneAt}})
+	failed.Superseded = sup[failed.ID]
+	if v := Views([]Facts{failed}, testNow)[0]; !sameView(v, whole) {
+		t.Fatalf("the part with Superseded set: %+v, the whole list's %+v", v, whole)
+	}
+}
+
 // A step that only waits or is To do does not lift a parent that needs the owner; the more urgent of the two wins.
 func TestStepRollsUpOnlyWhenMoreUrgent(t *testing.T) {
 	parent, step := askingStep(nil)
@@ -156,5 +178,122 @@ func TestOwnerDecidesWithoutAReview(t *testing.T) {
 	if v := View(f, testNow); v.Reason != assistantwire.TodoReasonOwnerDecides || v.Line == nil ||
 		v.Line.Key != lineDecision || v.Line.Args != nil || !v.Since.IsZero() {
 		t.Fatalf("%+v", v)
+	}
+}
+
+// A run's ask is what its pending card asks, by the card's id: the session's own card before the manager's about its
+// turn, then the oldest, then the lesser id, whatever order the cards come in. It is safe only when a notification may
+// answer the card too, one question with options and nothing else, and its asker did not say going ahead cannot be
+// undone: a password, fields to fill in, an MCP server's form, a tool approval, a plan, a question to answer in words,
+// several questions, a Just me turn's card (a health conversation's comes marked so), a dialog on the screen, a card
+// that cannot be undone and a run whose card the hub does not hold are open, and open_only on the lock screen. The
+// to-do's own decision is as risky as the list says, and open when the list says nothing it knows.
+func TestRunAskKindAndRiskFromItsCard(t *testing.T) {
+	asks := func(cards ...proto.Interaction) assistantwire.OwnerAsk {
+		f := Facts{ID: "todo_c", CreatedAt: hours(-5), UpdatedAt: hours(-5), Origin: "conv_main",
+			Agents:       []Agent{{MachineID: "m1", SessionID: "s1", Title: "Visa form"}},
+			Sessions:     []proto.Session{{MachineID: "m1", SessionID: "s1", State: proto.StateNeedsYou, StateSince: hours(-1)}},
+			Interactions: cards}
+		v := View(f, testNow)
+		if len(v.Asks) != 1 {
+			t.Fatalf("asks %+v", v.Asks)
+		}
+		return v.Asks[0]
+	}
+	card := func(id, kind string, edit func(*proto.Interaction)) proto.Interaction {
+		c := proto.Interaction{ID: id, MachineID: "m1", SessionID: "s1", Kind: kind, CreatedAt: hours(-1)}
+		if edit != nil {
+			edit(&c)
+		}
+		return c
+	}
+	one := func(kind string, edit func(*proto.Interaction)) []proto.Interaction {
+		return []proto.Interaction{card("ix", kind, edit)}
+	}
+	choose := []proto.Question{{Question: "Which office?",
+		Options: []proto.QuestionOption{{Label: "Tokyo"}, {Label: "Osaka"}}}}
+	safe, open := assistantwire.OwnerAskRiskSafe, assistantwire.OwnerAskRiskOpen
+	for _, tc := range []struct {
+		name       string
+		cards      []proto.Interaction
+		kind, risk string
+	}{
+		{"a question with options", one(proto.IxQuestion, func(c *proto.Interaction) { c.Questions = choose }),
+			assistantwire.OwnerAskKindQuestion, safe},
+		{"one of its questions in words", one(proto.IxQuestion, func(c *proto.Interaction) {
+			c.Questions = append(slices.Clone(choose), proto.Question{Question: "Anything else?"})
+		}), assistantwire.OwnerAskKindQuestion, open},
+		{"a tool approval", one(proto.IxPermission, nil), assistantwire.OwnerAskKindTool, open},
+		{"an approval with fields", one(proto.IxPermission, func(c *proto.Interaction) {
+			c.Fields = []proto.Field{{Key: "passport", Label: "Passport number"}}
+		}), assistantwire.OwnerAskKindForm, open},
+		{"an approval that needs a password", one(proto.IxPermission, func(c *proto.Interaction) {
+			c.Fields = []proto.Field{{Key: "user", Label: "User"}, {Key: "password", Label: "Password", Secret: true}}
+		}), assistantwire.OwnerAskKindSecret, open},
+		{"a screen that asks for a password", one(proto.IxScreen, func(c *proto.Interaction) { c.Secret = true }),
+			assistantwire.OwnerAskKindSecret, open},
+		{"a dialog on the screen", one(proto.IxScreen, nil), assistantwire.OwnerAskKindQuestion, open},
+		{"an MCP server's form", one(proto.IxElicitation, nil), assistantwire.OwnerAskKindForm, open},
+		{"a plan", one(proto.IxPlan, nil), assistantwire.OwnerAskKindPlan, open},
+		{"one to choose several of", one(proto.IxQuestion, func(c *proto.Interaction) {
+			c.Questions = []proto.Question{{Question: "Which sights?", MultiSelect: true,
+				Options: []proto.QuestionOption{{Label: "Kinkaku-ji"}, {Label: "Ginkaku-ji"}}}}
+		}), assistantwire.OwnerAskKindQuestion, safe},
+		{"several questions with options", one(proto.IxQuestion, func(c *proto.Interaction) {
+			c.Questions = append(slices.Clone(choose), proto.Question{Question: "Which day?",
+				Options: []proto.QuestionOption{{Label: "Friday"}, {Label: "Saturday"}}})
+		}), assistantwire.OwnerAskKindQuestion, open},
+		{"a Just me turn's question", one(proto.IxQuestion, func(c *proto.Interaction) {
+			c.Questions, c.Private = choose, true
+		}), assistantwire.OwnerAskKindQuestion, open},
+		{"a question its asker says cannot be undone", one(proto.IxQuestion, func(c *proto.Interaction) {
+			c.Questions, c.Reversible = choose, new(bool)
+		}), assistantwire.OwnerAskKindQuestion, open},
+		{"a question its asker says can be undone", one(proto.IxQuestion, func(c *proto.Interaction) {
+			yes := true
+			c.Questions, c.Reversible = choose, &yes
+		}), assistantwire.OwnerAskKindQuestion, safe},
+		{"the oldest of two cards", []proto.Interaction{
+			card("newer", proto.IxPermission, func(c *proto.Interaction) { c.CreatedAt = hours(-1) }),
+			card("ix", proto.IxQuestion, func(c *proto.Interaction) { c.Questions, c.CreatedAt = choose, hours(-2) }),
+		}, assistantwire.OwnerAskKindQuestion, safe},
+		{"the session's own card before the manager's older one about its turn", []proto.Interaction{
+			card("work", proto.IxQuestion, func(c *proto.Interaction) {
+				c.ToolName, c.Questions, c.CreatedAt = assistantwire.WorkCardTool, choose, hours(-2)
+			}),
+			card("ix", proto.IxPermission, nil),
+		}, assistantwire.OwnerAskKindTool, open},
+		{"two cards of one instant, the lesser id", []proto.Interaction{
+			card("ix_z", proto.IxQuestion, func(c *proto.Interaction) { c.Questions = choose }),
+			card("ix", proto.IxPermission, nil),
+		}, assistantwire.OwnerAskKindTool, open},
+	} {
+		wantLock := assistantwire.OwnerAskLockscreenOpenOnly
+		if tc.risk == safe {
+			wantLock = assistantwire.OwnerAskLockscreenAnswer
+		}
+		backward := slices.Clone(tc.cards)
+		slices.Reverse(backward)
+		for _, cards := range [][]proto.Interaction{tc.cards, backward} {
+			a := asks(cards...)
+			if a.Kind != tc.kind || a.Risk != tc.risk || a.Lockscreen != wantLock || a.Interaction != "ix" {
+				t.Errorf("%s: kind %s, risk %s, lockscreen %s, interaction %q; want %s, %s, %s, ix", tc.name, a.Kind,
+					a.Risk, a.Lockscreen, a.Interaction, tc.kind, tc.risk, wantLock)
+			}
+		}
+	}
+	another := card("ix_other", proto.IxQuestion, func(c *proto.Interaction) { c.SessionID, c.Questions = "s2", choose })
+	if a := asks(another); a.Kind != assistantwire.OwnerAskKindQuestion || a.Interaction != "" || a.Risk != open ||
+		a.Lockscreen != assistantwire.OwnerAskLockscreenOpenOnly {
+		t.Errorf("a run whose card the hub does not hold: %+v", a)
+	}
+
+	for listed, want := range map[string]string{safe: safe, open: open, "": open, "later": open} {
+		f := Facts{ID: "todo_d", CreatedAt: hours(-5), UpdatedAt: hours(-5), Origin: "conv_main", Agents: []Agent{},
+			Ask: &Ask{Outcome: outcomeDecide, Verdict: "Needs your decision", AskedAt: hours(-2), Question: "Which hotel?",
+				Risk: listed}}
+		if v := View(f, testNow); len(v.Asks) != 1 || v.Asks[0].Risk != want {
+			t.Errorf("a decision listed %q: %+v", listed, v.Asks)
+		}
 	}
 }

@@ -212,7 +212,9 @@ nonisolated enum CallOrigin: String, Equatable, Sendable {
         #endif
         return SimulatedCallSystem()
         #else
-        return LCKCallSystem()
+        // Check before naming the LCK-backed type: on a Mac even its delegate conformance must stay untouched.
+        if CallPlatform.isiOSAppOnMac { return UnavailableCallSystem() }
+        return LCKCallSystem.make(isiOSAppOnMac: false) ?? UnavailableCallSystem()
         #endif
     }
 

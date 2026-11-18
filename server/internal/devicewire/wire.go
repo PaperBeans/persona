@@ -400,6 +400,8 @@ type PairConnector struct {
 var Routes = []string{
 	"GET /api/v1/sessions/{mid}/{sid}/skills",
 	"GET /api/v1/sessions/{mid}/{sid}/mode-changes",
+	// The answer to a start's startup question, from a full device (#10365, internal/devices start_continue.go).
+	"POST /api/v1/sessions/{mid}/{sid}/start/continue",
 	"GET /api/v1/machines/{mid}/codex/{sid}/takeover",
 	"POST /api/v1/machines/{mid}/codex/{sid}/takeover",
 	"POST /api/v1/machines/{mid}/reconnect",

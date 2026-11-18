@@ -325,6 +325,7 @@ var Routes = []string{
 	"POST /api/v1/later/{id}/handled", // a question that can wait, marked handled (later.go)
 	"POST /api/v1/todos/{id}/done-check",
 	"POST /api/v1/todos/{id}/retry",
+	"POST /api/v1/todos/{id}/start/answer", // the startup question a task's start stopped on, answered (start_answer.go, #10365)
 	"POST /api/v1/todos/retitle",
 	"POST /api/v1/todos/import/reminders",
 	// Its settings and its main conversation (profile.go, start.go).

@@ -275,7 +275,7 @@ func (s *Service) apiConfig(ctx context.Context, b ModelBinding) (ai.Config, err
 				if err := checkAPITransport(l.Kind, l.API, l.Proxy, l.NoProxy, l.HeadersSealed != ""); err != nil {
 					return c, err
 				}
-				c = ai.Config{API: l.API, BaseURL: l.BaseURL, Model: l.Model, ReasoningEffort: l.Effort, Bearer: l.BearerAuth(), ViaMachine: l.ViaMachine}
+				c = ai.Config{API: l.API, BaseURL: l.LaunchBaseURL(), Model: l.Model, ReasoningEffort: l.Effort, Bearer: l.BearerAuth(), ViaMachine: l.ViaMachine}
 				providerModels = l.Models
 				model, err := resolveAPITierAlias(l, cmp.Or(b.Model, l.Model))
 				if err != nil {
@@ -348,26 +348,7 @@ func (s *Service) purposeModelFor(id, operation string) *ai.Client {
 		if err != nil {
 			return nil, err
 		}
-		route := "api"
-		if c.RunLauncher != "" {
-			route = "cli"
-		} else if c.ViaMachine != "" {
-			route = "api_via_node"
-		}
-		return s.aiClient(c).WithResult(func(reply ai.Reply, err error) {
-			u := reply.Usage
-			paused, _ := modelPaused(err)
-			if u == (ai.Usage{}) && (paused || ai.IsNotConfigured(err)) {
-				return
-			}
-			result := "ok"
-			if err != nil {
-				result = "error"
-			}
-			s.logf("model_usage purpose=%q operation=%q route=%s provider=%q model=%q result=%s usage_reported=%t input_tokens=%d output_tokens=%d cache_read_input_tokens=%d cache_creation_input_tokens=%d",
-				id, operation, route, b.Provider, cmp.Or(reply.Model, c.Model), result, u != (ai.Usage{}),
-				u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens)
-		}), nil
+		return s.countedClient(id, operation, b.Provider, c), nil
 	})
 }
 

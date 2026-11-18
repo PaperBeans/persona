@@ -168,6 +168,30 @@ empty one after a backoff (five minutes), so a Mac where it always fails does no
 output, like ioreg's, holds serial numbers: read only the one line. Tests fake both commands (`newModelLookup` takes
 the runner) and use `synctest`; a node-level test puts hanging fakes first on `PATH`.
 
+## A resolved path is not one every terminal has (2026-11-18, #10365)
+
+A computer whose home is a link (`/home/me -> /data/home/me`) ran its herdr terminals in a container that mounts the
+home at `/home/me` and has no `/data`. The node took its own program from `os.Executable()` plus `EvalSymlinks` (on
+Linux `/proc/self/exe` is already resolved, so dropping `EvalSymlinks` alone changes nothing) and typed that path into
+every managed launcher's start, hook, MCP config and codex-start line: the container answered `No such file or
+directory`, and Persona recorded the launcher as missing in the terminal. Git did the same to task checkouts: `git
+worktree add` writes both links between a worktree and its repository as resolved paths, so inside the container the
+checkout was "not a git repository" and the main checkout listed it as prunable (a `git worktree prune` there deletes
+its record). A path a process on this computer may open has to be the one that process can see, and a link is not
+always visible where the processes run: keep the resolved file for what needs the file itself (an update replaces it,
+macOS attributes Full Disk Access to it, comparisons use `realPath`), and hand out the home's own spelling of the same
+file (`os.SameFile`, `node/selfprogram.go`), in the generated files the doctor compares too, or the node and
+`personad node doctor` rewrite each other's files. Do not reach for git's relative worktree links: they set
+`extensions.relativeWorktrees` in the repository's shared config, and git before 2.48, libgit2 and go-git then refuse
+the whole repository; rewriting the absolute links to the home's spelling works for every git on both sides.
+
+A spelling handed out is not an identity. Once the node answered a task's directory by the home's spelling, the hub's
+check of which to-do writes there compared it as text with Agents recorded under the resolved spelling before the
+upgrade, and found nobody: a second to-do could be started in a directory the first still wrote in. Where the hub
+compares a node's paths, fold the home's two spellings (`home_real`) on both sides, as remembered task kinds do
+(`trustDir`) and task directories now do (`taskDirKey`). And repair git's links wherever a checkout's path is handed to a
+terminal, not only where the node reuses it: a refusal that names a leftover for `{existing}` leads there too.
+
 ## A node binary's name does not prove its platform (2026-11-14, #7206)
 
 The local node package lookup trusted `personad-<os>-<arch>` and `persona-node-<os>-<arch>` filenames without reading the executable, so one misnamed Hub build could be sent to every node of that named platform. Check the Go build info before selecting a local or bundled candidate and ignore a mismatch, allowing the normal release lookup to supply the right build; do not run a cross-platform binary on the Hub. The install path needs its own failure boundary too: verify `.new` before renaming it over the active binary, through direct and nested SSH, and remove it when the check fails. A test that only checks an error message misses whether the old executable survived.
@@ -1098,6 +1122,7 @@ Splitting a registry at its first colon reads `[::1]:5000` as `[`, selecting HTT
   - Go/cgo test executables need virtual-address headroom unrelated to physical memory. A too-small `RLIMIT_AS` can kill pthread startup even on harmless syntax. Native validators use explicit tagged policy, child CPU/FD/file/core limits, Go runtime memory/stack/thread settings and external sampled RSS/wall termination, not a V8 heap claim or independent `prlimit` parser bypass. Use a non-race trusted child for real bounded-process tests and race-instrument the parent separately; TSAN startup failure is not parser acceptance.
   - Never `dup3` onto a fixed FD in an already-running Go supervisor after filesystem reads: netpoll may own FD 3, causing intermittent fatal epoll failures. Keep the sealed policy at its allocated descriptor and use `exec.Cmd.ExtraFiles` to map FD 3 only during the new child exec. Rewind descriptors before bubblewrap's `--ro-bind-data` consumption. A disappeared `/proc/<pid>/status` can precede Wait's completed exit; bound that reaping race instead of misreporting a normal child exit as RSS termination.
   - Verify `pids.max` in both validator pre-parse gates too: requesting `TasksMax` is not proof that the task controller was delegated. Preserve the signed runtime artifact in a sealed memfd and pass it to the trusted launcher with explicit per-run disposal; `--ro-bind-data` consumes the descriptor before the guest starts. Reopening the checked package pathname permits replacement, and opening a parent's `/proc/.../fd` path fails after user-namespace entry. Test the descriptor through the scope and namespace separately from real resource acceptance.
+  - Candidate settings authority is request-bound, never a mutable process-global credential: the source SDK marks only its explicit per-check fetches, the trusted adapter puts that credential only on the outer broker request (redirects included), and the broker carries the exact immutable check through its internal request context. Guest JSON supplies no identity or targets; the credential never enters the upstream request. On a fixed runtime socket, a presented wrong, expired or other-extension credential must fail rather than fall back to ordinary saved-target authority (#1180).
   - Broker overload rejects before the admitted request's body deadline, so it must set `Connection: close` as well. Bind CONNECT-handshake socket closure to cancellation immediately after dialing, not after the proxy answers. A guest's stream-cancellation hook may never settle; start that cleanup without awaiting it when releasing fetch admission after size rejection.
   - Broker deadlines must interrupt socket writes as well as request-body reads: a raw guest can request an allowed multi-MiB response and never read it, retaining global admission after the request expires. Set both deadlines up front and interrupt both on cancellation, including registration changes. Test the stalled response writer independently of guest watchdog death. Fallback-only fixtures must skip when independent kernel enforcement is selected; production capability success is not a development-policy failure.
 
@@ -2664,3 +2689,18 @@ nothing ran the old build after the new one.
 - Lesson: a 409 the client swallows hides a broken ownership model until something else (here a cleanup) depends on
   it. When a fence refuses a live, authenticated client, either let it prove the move or tell it plainly what to do;
   and check what a "looks unused" revocation still owns before treating it as cleanup.
+
+## A new screenshot is not an old resolved exchange (#9124)
+
+Triage reads `[Image: ...]` as text, not the image's contents. Preserve the newest message separately from the
+conversation so an earlier answer or acknowledgement cannot silently close a later screenshot reporting a new
+failure. Stub-model tests prove that input contract and saving the result, not the real model's semantic accuracy;
+keep an original attachment and a live triage readback as separate acceptance evidence.
+
+Keep the newest-preview field in the triage input paths, including the no-write triage preview. The generic
+item builder also feeds drafts, task judging and handling conversations: adding triage labels there changes all
+those inputs. Compare those callers' rendered input bytes, not just triage's golden output.
+
+The tier criteria are shared with event grouping. Describe each event's assigned new activity and unresolved
+requests, not one "current new message" for an entire batch. A mixed-event regression should keep a new request
+and screenshot separate from another event's final acknowledgement, while retaining each event's overall tier.

@@ -1480,6 +1480,7 @@ func (s *Service) Run(ctx context.Context) {
 	go s.searchLoop(ctx)       // the chat search index (search_index.go)
 	go s.undeliveredLoop(ctx)  // the owner's messages that could not go in (undelivered.go)
 	s.scheduleLoop(ctx)
+	s.todoViewsStop() // the To-dos view's timers (todo_view_push.go)
 }
 
 // scheduleLoop starts due tasks. It sleeps until the next one is due (at most scheduleIdle, so a time zone change is
