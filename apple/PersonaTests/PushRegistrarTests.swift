@@ -309,6 +309,38 @@ struct PushRegistrarTests {
         #expect(fake.waits == [.seconds(PushRegistrar.backoff(1)), .seconds(PushRegistrar.backoff(2))])
     }
 
+    /// A registration to every group that one hub missed goes to every hub again after its backoff; only a pass that
+    /// reached them all ends the retries.
+    @Test func aRegistrationThatMissedOneHubIsSentToEveryHubAgain() async {
+        let fake = FakeSystem(), a = Hub(), b = Hub()
+        b.refusing = true
+        fake.allowed = true
+        fake.hubs = [PushRegistrar.Hub(group: "a", api: a.fake.client), PushRegistrar.Hub(group: "b", api: b.fake.client)]
+        let (r, health) = registrar(fake)
+        await r.registerIfPossible()?.value
+        #expect(await r.didRegister(token: token)?.value == ["a"])
+        #expect(a.posts == 1 && b.posts == 1)
+
+        await r.foreground()?.value // back at once: still waiting out the backoff
+        #expect(a.posts == 1 && b.posts == 1)
+        fake.now += PushRegistrar.backoff(1)
+        await r.foreground()?.value // due: every hub again; b still refuses, so the wait doubles
+        #expect(a.posts == 2 && b.posts == 2)
+        fake.now += PushRegistrar.backoff(1)
+        await r.foreground()?.value
+        #expect(a.posts == 2 && b.posts == 2)
+
+        b.refusing = false
+        fake.now += PushRegistrar.backoff(2)
+        await r.foreground()?.value
+        #expect(a.posts == 3 && b.posts == 3)
+        #expect(health.health.routes["b"]?.route == "direct")
+
+        fake.now += PushRegistrar.backoff(3) // every hub took it: nothing left to try again
+        await r.foreground()?.value
+        #expect(a.posts == 3 && b.posts == 3 && a.reads == 0 && b.reads == 0)
+    }
+
     @Test func theBackoff() {
         #expect(PushRegistrar.backoff(1) == 30 && PushRegistrar.backoff(2) == 60 && PushRegistrar.backoff(3) == 120)
         #expect(PushRegistrar.backoff(20) == 3600)

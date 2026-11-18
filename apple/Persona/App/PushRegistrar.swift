@@ -290,16 +290,17 @@ final class PushRegistrar {
                 UrgentCallReach.shared.routes[hub.group] = routes.call
                 #endif
                 health.update { $0.read(routes.push, group: hub.group) }
-                failures[.group(hub.group)] = nil
                 checked[hub.group] = system.now()
                 done.insert(hub.group)
             } catch {
                 // Not the previous route as if current: the page says it couldn't check (#1859).
                 health.update { $0.readFailed(error.localizedDescription, group: hub.group) }
-                fail(.group(hub.group))
             }
         }
-        if target == .all { failures[.all] = nil }
+        // A pass to every group stands for each group's own retry. It ends the retries only when it reached every hub;
+        // one hub it missed keeps it, and the whole registration goes out again after its backoff.
+        if target == .all { for hub in hubs { failures[.group(hub.group)] = nil } }
+        if done.count == hubs.count { failures[target] = nil } else { fail(target) }
         return done
     }
 
