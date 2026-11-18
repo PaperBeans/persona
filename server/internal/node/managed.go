@@ -400,6 +400,11 @@ func Launch(ctx context.Context, name string, args []string, ticket string) erro
 		if len(resp.Clear) == 0 {
 			resp.Clear = legacyEnvClear
 		}
+		// The last guard for a tier alias behind a gateway (#10365), wherever the --model came from (a terminal, an
+		// older node's start, the assistant's own Bash).
+		warn := func(msg string) { fmt.Fprintf(os.Stderr, "personad launch %s: %s\n", name, msg) }
+		args, resp.Args = gatewayModelArgs(args, resp.Env, warn), gatewayModelArgs(resp.Args, resp.Env, warn)
+		resp.Clear = withProviderToolSearch(resp.Clear, resp.Env)
 		resp.Env, resp.Clear = sessionOutput(resp.Env, resp.Clear, resp.MaxOutput, sessionModel(args, resp.Args, resp.Env))
 		resp.Clear = inheritedOutputClear(resp.Clear, resp.Env, os.Getenv) // a session Persona launched runs this one
 		resp.Clear, resp.Env = launchEnvFor(resp.Clear, resp.Env, os.Getenv("PERSONA_ASSISTANT") == "1")
@@ -462,6 +467,57 @@ func LaunchWithSecrets(ctx context.Context, ticket string, argv []string) error 
 	}
 	env := append(withoutEnv(os.Environ(), envNames(secrets)), secrets...)
 	return osproc.Exec(exe, argv, env)
+}
+
+// withProviderToolSearch is clear (what `personad launch` drops from the shell) with ENABLE_TOOL_SEARCH added when env,
+// the provider's environment as the node gave it, sets it (#10365): the shell's value, the assistant's process's
+// included, would otherwise come first in the agent's environment.
+func withProviderToolSearch(clear, env []string) []string {
+	if !slices.Contains(envNames(env), toolSearchEnv) || slices.Contains(clear, toolSearchEnv) {
+		return clear
+	}
+	return append(slices.Clone(clear), toolSearchEnv)
+}
+
+// gatewayModelArgs is a claude's args (before a "--", which starts the prompt) with each --model that names a tier
+// alias behind a gateway (env, the provider's environment as the node gave it, names a Base URL that is not
+// Anthropic's API) replaced by the model env gives that tier, or left out with its value when env gives none, which
+// warn says (#10365): Claude Code would send the alias to the gateway as the model's name.
+func gatewayModelArgs(args, env []string, warn func(string)) []string {
+	if anthropicEndpoint(envValue(env, "ANTHROPIC_BASE_URL")) {
+		return args
+	}
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a, m, pair := args[i], "", false
+		switch {
+		case a == "--":
+			return append(out, args[i:]...)
+		case (a == "--model" || a == "-m") && i+1 < len(args):
+			m, pair = args[i+1], true
+		case strings.HasPrefix(a, "--model="):
+			m = strings.TrimPrefix(a, "--model=")
+		default:
+			out = append(out, a)
+			continue
+		}
+		if pair {
+			i++
+		}
+		r := m
+		if isTierAlias(m) {
+			r = resolveTier(planTier(m), func(k string) string { return envValue(env, k) })
+		}
+		switch {
+		case isTierAlias(r):
+			warn("--model " + m + " is a Claude Code tier the provider names no model for: it runs the provider's default model")
+		case pair:
+			out = append(out, a, r)
+		default:
+			out = append(out, "--model="+r)
+		}
+	}
+	return out
 }
 
 // launchArgv builds the argument vector for starting an agent.

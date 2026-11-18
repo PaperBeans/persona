@@ -7,7 +7,7 @@ import { useReveal } from "./search-reveal";
 import { ago, clock } from "../../lib/format";
 import { retryable, type APIErrorInfo } from "../../lib/api-errors";
 import type { RecoveryExhaustedView } from "../../lib/model-fallback";
-import { runAction, turnErrorFix } from "../../lib/readiness";
+import { runAction, turnErrorFix, type TurnFix } from "../../lib/readiness";
 import { wakeSummary } from "../../lib/tasks";
 import { type ChatLine, type OpenRecap } from "../../lib/turns";
 import { sourceLabel } from "../../lib/message-source";
@@ -34,7 +34,7 @@ export interface LineProps {
   assistant?: boolean;
   /** The hub's word on what to fix for the turn's model error (the session's turn_error_code): the chat's last line only,
    *  so its record reads as its banner did. */
-  fix?: { title: string; detail: string; action: string } | null;
+  fix?: TurnFix | null;
   /** The session is waiting out a subscription usage limit: the last error card says that, not that the turn was interrupted. */
   limit?: string;
   /** The node's recovery chain exhausted every model (#7824): the last error card names the cause and reset time and
@@ -285,7 +285,7 @@ export function ErrorBanner({ line, assistant, limit, fix, exhausted, onRetry, o
   /** Waiting out a subscription usage limit: the banner says when it resets, as the line would. */
   limit?: string;
   /** The hub's word on what to fix for the turn's model error (the session's turn_error_code). */
-  fix?: { title: string; detail: string; action: string } | null;
+  fix?: TurnFix | null;
   /** An exhausted recovery chain (#7824): Retry stays offered even for a parsed non-transient error such as a
    *  safeguards refusal, as long as the caller says the session is idle and can send. */
   exhausted?: RecoveryExhaustedView | null;
@@ -306,7 +306,7 @@ export function ErrorBanner({ line, assistant, limit, fix, exhausted, onRetry, o
       at={line.item.ts}
       fix={f}
       exhausted={shownExhausted}
-      onRetry={onRetry && !f && (shownExhausted || retryable(line.info)) ? onRetry : undefined}
+      onRetry={onRetry && (f ? f.action === "retry" : shownExhausted || retryable(line.info)) ? onRetry : undefined}
       onEditLastMessage={!assistant && line.info.code === "safeguards" ? onEditLastMessage : undefined}
       onDismiss={onDismiss}
     />
@@ -322,7 +322,7 @@ function UsageLimitLine({ text, onDismiss }: { text: string; onDismiss?: () => v
 /** A model API error (cindy's error notice): why, in words, whether it passes by itself under it, then its actions; the
  *  ids, the status code, how many times in a row and the original are under "Error details". One the user must fix (not
  *  signed in, a wrong key, a model that is not there) says so instead, with "Fix it" (docs/assistant/onboarding.md 4.4). */
-function APIErrorCard({ info, count, at, onRetry, onEditLastMessage, fix, onDismiss, exhausted }: { info: APIErrorInfo; count: number; at?: string; onRetry?: () => void; onEditLastMessage?: () => void; fix?: { title: string; detail: string; action: string } | null; onDismiss?: () => void; exhausted?: RecoveryExhaustedView | null }) {
+function APIErrorCard({ info, count, at, onRetry, onEditLastMessage, fix, onDismiss, exhausted }: { info: APIErrorInfo; count: number; at?: string; onRetry?: () => void; onEditLastMessage?: () => void; fix?: TurnFix | null; onDismiss?: () => void; exhausted?: RecoveryExhaustedView | null }) {
   const sub = fix ? fix.detail : info.transient === true ? t("chat-lines.api_transient") : info.transient === false ? t("chat-lines.api_permanent") : "";
   const reason = (fix ? fix.title : info.reason) || t("chat-lines.reply_failed");
   // An exhausted recovery chain says why every model failed and when the configured one recovers (#7824). The cause
@@ -350,9 +350,14 @@ function APIErrorCard({ info, count, at, onRetry, onEditLastMessage, fix, onDism
       onDismiss={onDismiss}
       actions={
         <>
-          {fix && (
-            <Button tone="primary" size="sm" className="touch-hit" onClick={() => runAction(fix.action, { onHelp: () => {} })}>
+          {fix && fix.action !== "retry" && (
+            <Button tone="primary" size="sm" className="touch-hit" onClick={() => runAction(fix.action, { onHelp: () => {}, onPickModel: fix.onPickModel })}>
               {t("chat-lines.fix_it")}
+            </Button>
+          )}
+          {fix?.back && (
+            <Button size="sm" className="touch-hit" onClick={fix.back.run}>
+              {fix.back.label}
             </Button>
           )}
           {onRetry && (

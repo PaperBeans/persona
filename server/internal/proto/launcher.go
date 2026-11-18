@@ -95,6 +95,9 @@ type LauncherCheck struct {
 	Answer string `json:"answer,omitempty"`
 	Millis int    `json:"millis"`
 	Error  string `json:"error,omitempty"`
+	// AssistantTurn: the check ran as the assistant runs a turn of conversation (launchers.check assistant_turn, a node
+	// with launcher_check_assistant_turn, Claude Code launchers only); absent, it was the plain check.
+	AssistantTurn bool `json:"assistant_turn,omitempty"`
 }
 
 // ClaudeAuthStatus is what a node's claude.auth_status found: `claude auth status --json` run as the launcher runs
@@ -173,6 +176,10 @@ type AgentModel struct {
 	Custom bool `json:"custom,omitempty"`
 	// Price is the built-in catalog's exact-entry reference price; nil when unknown or inherited from another model.
 	Price *ModelPrice `json:"price,omitempty"`
+	// Aliases: the other spellings the manager folded into this row because they run the same model with the same
+	// context window on this launcher (Claude Code's tier aliases on a gateway whose tiers name one model, #10365,
+	// assistant/models_launchers_fold.go). Each still picks this row: a saved pick of one keeps working.
+	Aliases []string `json:"aliases,omitempty"`
 }
 
 type LauncherEnv struct {

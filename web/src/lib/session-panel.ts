@@ -35,6 +35,7 @@ function panelModel(m: AgentModel, engine: string, current: boolean, s: Session,
   const out: PanelModel = { id: m.id, name: modelName(m), efforts: rowEfforts(engine, m, listed, current, s) };
   if (m.description) out.description = m.description;
   if (m.resolved) out.resolved = m.resolved;
+  if (m.aliases?.length) out.aliases = m.aliases;
   if (m.default_effort && (!current || s.effort)) out.defaultEffort = m.default_effort;
   if (m.custom) out.custom = true;
   if (m.price) out.price = m.price;

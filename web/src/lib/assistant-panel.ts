@@ -24,6 +24,7 @@ function panelModel(m: AgentModel, engine: string, catalogFast: boolean): PanelM
   const out: PanelModel = { id: m.id, name: modelName(m), efforts: m.efforts ?? (m.custom && engine === "claude" ? ALL_EFFORTS : []) };
   if (m.description) out.description = m.description;
   if (m.resolved) out.resolved = m.resolved;
+  if (m.aliases?.length) out.aliases = m.aliases;
   if (m.default_effort) out.defaultEffort = m.default_effort;
   if (catalogFast && modelSupportsFast(m)) out.fast = true;
   if (m.custom) out.custom = true;

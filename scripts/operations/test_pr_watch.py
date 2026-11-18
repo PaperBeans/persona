@@ -2312,6 +2312,23 @@ class WatcherTests(unittest.TestCase):
         self.assertNotIn("PR_WATCH_WEBHOOK_SECRET", env)
         self.assertEqual(env["GRADLE_USER_HOME"], "/trusted-gradle")
         self.assertNotEqual(env["HOME"], "/maintainer-home")
+        self.assertEqual(env["GOFLAGS"], "-gcflags=all=-dwarf=false -ldflags=-w")
+
+    def test_verification_keeps_explicit_go_flags(self):
+        with patch.dict(os.environ, {"GOFLAGS": "-mod=readonly"}):
+            env = pr_watch_common.verification_env()
+        self.assertEqual(env["GOFLAGS"], "-mod=readonly")
+
+    def test_go_vet_clears_unused_linker_flag(self):
+        names = ["server/internal/agents/cache_test.go"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            test_file = root / names[0]
+            test_file.parent.mkdir(parents=True)
+            test_file.write_text("package agents\n")
+            with patch.object(pr_watch_verify, "checked", return_value=names[0] + "\n"):
+                commands = pr_watch_verify.persona_checks(str(root), pr(title="test: refine relevant tests"), 1, {})
+        self.assertIn(("Changed Go packages vet", ["go", "-C", "server", "vet", "-ldflags=", "./internal/agents"]), commands)
 
     def test_persona_wrapper_owns_lock_and_expects_reviewed_head(self):
         repo = "nwverse/persona"

@@ -31500,6 +31500,33 @@ if MODEL_PICK_MODE and os.environ.get("MOCK_MODEL_FAMILIES") == "1":
     ]}
     LAUNCHER_MODELS["agy"] = {"agent": "agy", "models": [{"id": "默认", "name": "默认", "default": True}]}
 
+# MOCK_MODEL_GATEWAY=1 (with MOCK_MODEL_PICK=1, #10365, docs/assistant/model-config.md "One row per model"): the main chat
+# runs on gateway-api, a Persona-managed gateway provider whose Claude Code tiers all name one model, with the /model list
+# the hub serves for it: one Opus 5.5 row with the tier aliases folded into it, the gateway's other route of that model
+# told apart by its route, Default apart. =raw: the list as the hub served it before, each tier alias a row of its own,
+# every one of them and the route's row reading "Opus 5.5". For the web model panel's before / after screenshots.
+MODEL_GATEWAY_MODE = os.environ.get("MOCK_MODEL_GATEWAY", "")
+if MODEL_PICK_MODE and MODEL_GATEWAY_MODE:
+    MODEL_PICK_LAUNCHERS[:] = [
+        {"name": "gateway-api", "display_name": "Gateway API", "model": "claude-opus-5-5", "agent": "claude", "source": "persona"},
+        {"name": "claude", "model": "opus", "source": "builtin"},
+    ]
+    MODEL_PICK_HOME = MODEL_PICK_DEFAULT = "gateway-api"
+    _gateway_default = {"id": "default", "name": "Default (recommended)", "description": "Use the default model (currently claude-opus-5-5)",
+                        "resolved": "claude-opus-5-5", "default": True, "efforts": _CLAUDE_EFFORTS}
+    _gateway_route = {"id": "kiro/claude-opus-5-5", "name": "Opus 5.5", "description": "From gateway"}
+    if MODEL_GATEWAY_MODE == "raw":
+        LAUNCHER_MODELS["gateway-api"] = {"agent": "claude", "models": [_gateway_default] + [
+            {"id": tier, "name": "Opus 5.5", "description": "Custom %s model (claude-opus-5-5)" % tier.title(), "resolved": "claude-opus-5-5", "efforts": _CLAUDE_EFFORTS}
+            for tier in ("opus", "fable", "sonnet", "haiku")] + [_gateway_route]}
+    else:
+        LAUNCHER_MODELS["gateway-api"] = {"agent": "claude", "models": [
+            _gateway_default,
+            {"id": "claude-opus-5-5", "name": "Opus 5.5", "description": "Custom Opus model (claude-opus-5-5)", "efforts": _CLAUDE_EFFORTS,
+             "aliases": ["opus", "fable", "sonnet", "haiku"]},
+            dict(_gateway_route, name="Opus 5.5 (kiro)"),
+        ]}
+
 
 def model_pick_reset():
     global MODEL_PICK_DEFAULT
@@ -31590,6 +31617,7 @@ MOCK_HELP.append("MOCK_MODEL_PICK=1|picked|otherkind  Persona 对话自己的模
                  "GET /mock/model_pick 看请求，?reset=1 复原；?default=claude|codex|gone 改启动器列表的默认")
 MOCK_HELP.append("MOCK_MODEL_PICK_GROUPS=1  配合 MOCK_MODEL_PICK：几个同为 claude- 开头的启动器（claude-aster / claude-max / claude-desktop）和 codex，看模型面板分组栏的短名")
 MOCK_HELP.append("MOCK_MODEL_FAMILIES=1  配合 MOCK_MODEL_PICK：多个模型家族的长模型列表（claude-max 的 Claude 全系、codex 的 GPT-6、混合厂商的本机网关 aster、work-claude、agy），截模型面板用；主对话默认 claude-max")
+MOCK_HELP.append("MOCK_MODEL_GATEWAY=1|raw  With MOCK_MODEL_PICK: the main chat defaults to gateway-api, a gateway provider whose Claude Code tiers all name one model; 1: the list as the hub folds it (one Opus 5.5 row, the route's row says its route, #10365), raw: as it served it before (five Opus 5.5 rows)")
 
 
 # Switching a running Agent to another provider (#5035, docs/protocol/protocol.md "Switching a running Agent to another

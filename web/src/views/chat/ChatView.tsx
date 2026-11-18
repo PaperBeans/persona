@@ -66,7 +66,7 @@ import { CloseoutCard } from "./CloseoutCard";
 import { shownCloseout } from "../../lib/closeout";
 import { AWAIT_MS, awaitingTurn, DOCK_MAX, turnStart } from "./dock";
 import { HEADER_SLOT, HEADER_SLOT_END, HEADER_SLOT_START } from "./header";
-import { AgentModelPill, AssistantModelPill } from "./ModelPill";
+import { AgentModelPill, AssistantModelPill, useAssistantTurnFix } from "./ModelPill";
 import { switchRefused } from "../../lib/session-models";
 import { mediaMatches, NARROW, NO_HOVER, SHORT, useFinePointer, useMedia } from "../../lib/viewport";
 import { UserBubble } from "./SegmentView";
@@ -132,7 +132,7 @@ import { agentLabel } from "../../lib/mentions";
 import { VoiceBar } from "./voice/VoiceBar";
 import { useVoiceEntry, VoiceEnded, VoiceTail } from "./voice/VoiceParts";
 import { ChatOnlyNote, FailureCard, ReadinessCard, useReadinessGate, type ReadinessGate } from "../assistant/Readiness";
-import { codedFailure, knownAction, refreshReadiness, turnErrorFix, type CodedFailure } from "../../lib/readiness";
+import { codedFailure, knownAction, refreshReadiness, type CodedFailure } from "../../lib/readiness";
 import { FALLBACK_UNAVAILABLE, recoveryExhausted } from "../../lib/model-fallback";
 import { BASE } from "../../lib/base";
 import { usageLimitLabel } from "../../lib/usage-limit";
@@ -165,6 +165,8 @@ const PlanPill = lazy(() => import("./PlanCard").then((m) => ({ default: m.PlanP
 const LazyWrapUpChips = lazy(() => import("../assistant/HandoffCard").then((m) => ({ default: m.WrapUpChips })));
 // a chat that is nowhere (a stale or mistyped link): rare, so its notice and words are a chunk of their own
 const LazyNotFoundNotice = lazy(() => import("./NotFoundNotice").then((m) => ({ default: m.NotFoundNotice })));
+// a start stopped on its tab's shell question, answered from here (#10365): only then
+const ShellQuestion = lazy(() => import("../ShellQuestionCard"));
 // only in a conversation that moved between Claude Code and Codex (#5054): its earlier sessions, read above the live one
 const EarlierStretches = lazy(() => import("./EarlierStretches"));
 // Recovery cards are rare: their rendering and words load only when the session actually carries a fallback record.
@@ -1282,7 +1284,7 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
   const failedEntry = sendFailure?.chat === `${mid}/${sid}` ? outbox.find((e) => e.id === sendFailure.entry && e.state === "failed") : undefined;
   const failure = failedEntry ? sendFailure!.failure : null;
   // the hub's word on the last turn's model error, for its card (5.2 turn_error_code)
-  const turnFix = assistant ? turnErrorFix(session?.turn_error_code) : null;
+  const turnFix = useAssistantTurnFix(session, Boolean(assistant));
   // A subscription usage limit: its error card says when it resumes. The clock drops the wait once the grace is past.
   useNow(30_000, session?.turn_error_kind === "usage_limit");
   const limitLine = session ? usageLimitLabel(session) : undefined;
@@ -2029,6 +2031,7 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
                 <p className="mt-0.5 leading-relaxed text-ink-2 [overflow-wrap:anywhere]">{session.start_error}</p>
               </div>
             ) : <div role="alert" className="rounded-control bg-inset px-3 py-2 text-[13px] text-red">{t("chat-chatview.start_failed", { error: session.start_error })}</div>)}
+            {session?.start_error_code === "shell_waiting" && <Suspense fallback={null}><ShellQuestion session={session} /></Suspense>}
             {starting && !tr.loading && !outgoing && <Loading label={t("chat-chatview.starting_agent")} />}
             {earlier.loadingEarlier && (
               <div className="flex justify-center py-2">

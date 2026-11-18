@@ -342,6 +342,11 @@ def verification_env():
             for key in ("GOCACHE", "GOMODCACHE", "GOPATH", "GOENV"):
                 if values.get(key):
                     env[key] = values[key]
+    # PR build/test checks do not need debug metadata, but keep compiler
+    # optimizations and every test/vet assertion. go vet is analysis, not a link
+    # step, so it explicitly clears the linker flag. Explicit GOFLAGS wins.
+    if "GOFLAGS" not in env:
+        env["GOFLAGS"] = "-gcflags=all=-dwarf=false -ldflags=-w"
     return env
 
 

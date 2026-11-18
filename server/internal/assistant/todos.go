@@ -457,6 +457,7 @@ func (s *Service) todosPushSoon() {
 		p.mu.Lock()
 		p.armed = false
 		p.mu.Unlock()
+		s.todoViewPushed() // every app reads the list again from here (todo_view_push.go)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		s.event(ctx, map[string]any{"type": "todos"})
@@ -789,6 +790,20 @@ func (t Todo) Cancelled() bool {
 	return false
 }
 
+// failedStart: its agent did not start, and it still waits on the owner. Such a to-do is stored done with its
+// start_error (#1077, failTodo), but nothing was done: the To-dos SOP keeps it open (todo-status-sop.md rule 1), a
+// retry or a plan's todo_id reopens it, and the assistant's snapshot counts it open while the app does. A cancelled one
+// is closed for good.
+func (t Todo) failedStart() bool {
+	return t.DoneAt != nil && t.StartError != "" && !t.Cancelled()
+}
+
+// closedForGood: done (by hand, by the hub's judge or a review) or cancelled, and not a failed start that still waits
+// on the owner. Only such a to-do is refused as "already done" where a failed start is taken up again.
+func (t Todo) closedForGood() bool {
+	return t.DoneAt != nil && !t.failedStart()
+}
+
 // AgentAborted reports whether the agent (machineID, sessionID) was let go, replaced or reassigned.
 func (t Todo) AgentAborted(machineID, sessionID string) bool {
 	for _, a := range t.Agents {
@@ -896,12 +911,11 @@ func (s *Service) todoRoutes() {
 	// waiting for the owner carries its ask (todo_ask.go), an open one nobody works on why (tasks_orphan.go); each its
 	// view, and the list its counts (todo_view_routes.go)
 	s.handle("GET /api/v1/todos", func(w http.ResponseWriter, r *http.Request) {
-		list, err := s.listedTodos(r.Context(), true)
+		list, p, err := s.todosViewed(r.Context(), true)
 		if err != nil {
 			apierr.Write(w, http.StatusServiceUnavailable, errTodosUnavailable)
 			return
 		}
-		p := s.viewed(r.Context(), list, time.Now())
 		apierr.WriteJSON(w, todosList{Todos: list, Counts: p.counts()})
 	})
 

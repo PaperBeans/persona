@@ -12,7 +12,7 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { t } from "../../i18n";
 import { agentName } from "../../lib/agent-kind";
-import { onModelPicker, sessionLauncher } from "../../lib/model-switch";
+import { onModelPicker, requestModelPicker, sessionLauncher } from "../../lib/model-switch";
 import { modelSupportsFast } from "../../lib/launcher-models";
 import { effortTitle } from "../../lib/session-actions";
 import { dropPick, launcherOffered, pickFast, usePickedEffort, usePickedFast, usePickedLauncher, usePickedModel } from "../../lib/assistant-chat";
@@ -21,9 +21,10 @@ import { ASSISTANT_MODEL_PICK_FEATURE, ASSISTANT_START_SERVICE_TIER_FEATURE, ass
 import {
   agentCatalogScope, assistantCatalogScope, assistantLaunchers, modelList, pendingView, pillView, readAssistantLaunchers, readForPanel, readModels, readSuperviseDefault, sessionSwitches, superviseDefault, useModelLists, currentModelRow, type PillSetup,
 } from "../../lib/session-models";
-import { hubHas, useStore } from "../../lib/store";
+import { turnErrorFix, type TurnFix } from "../../lib/readiness";
+import { getSession, hubHas, useStore } from "../../lib/store";
 import { CODEX_ULTRA, ultracodeOn } from "../../lib/ultracode";
-import type { Session } from "../../lib/types";
+import type { AssistantInfo, Session } from "../../lib/types";
 import { AgentMark } from "../../ui/AgentMark";
 import { cx, Spinner, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
@@ -241,6 +242,36 @@ export const AgentModelPill = memo(function AgentModelPill({ session }: { sessio
 
 const AssistantModelPanel = lazyOverlay(() => import("./AssistantModelPanel").then((m) => m.AssistantModelPanel));
 
+/** The key a Persona chat's pill opens its panel on (requestModelPicker): apart from an Agent's, which `/model` Enter
+ *  opens, so the text still goes to a Persona chat as it is. */
+export const assistantPickerKey = (mid: string, sid: string) => `assistant:${mid}/${sid}`;
+
+/** AssistantChat.followsDefault of chat `session` (the pill's rule below). */
+function followsDefaultOf(assistant: AssistantInfo | null, session: Session): boolean {
+  return assistant?.main === session.session_id || isBackgroundSupervisor(assistant, session.session_id) ||
+    Boolean(assistant?.leaders?.includes(session.session_id)) || session.origin === "task";
+}
+
+/** A Persona chat's card for its last turn's model error (turnErrorFix of the session's turn_error_code): a model the chat
+ *  can't run opens the chat's own model panel, where another one is picked; while the hub keeps a pick for the chat the
+ *  card also offers the panel's way back (follow the default again, or undo the pick), whose code (lib/assistant-pick.ts)
+ *  loads on the tap, not with the first screen (startup-preload's budget). `on`: a Persona chat. */
+export function useAssistantTurnFix(session: Session | undefined, on: boolean): TurnFix | null {
+  const assistant = useStore((s) => s.assistant);
+  const kept = useStore((s) => hubHas(s.features, ASSISTANT_MODEL_PICK_FEATURE));
+  const fix = on ? turnErrorFix(session?.turn_error_code) : null;
+  if (!fix || !session || fix.action !== "pick_model") return fix;
+  const { machine_id: mid, session_id: sid } = session;
+  fix.onPickModel = () => requestModelPicker(assistantPickerKey(mid, sid));
+  if (kept && session.model_pick) {
+    fix.back = {
+      label: t(followsDefaultOf(assistant, session) ? "chat-modelpill.follow_default" : "chat-modelpill.undo_pick"),
+      run: () => void import("../../lib/assistant-pick").then((m) => m.dropConversationPick(getSession(mid, sid) ?? session)),
+    };
+  }
+  return fix;
+}
+
 /** A Persona chat's pill (#5033): the launcher, model and effort its next message runs on (its own pick, the default, or
  *  what it started with: lib/assistant-models.ts), opening the unified panel (scope "assistant"). `session` absent: the
  *  new-conversation page, whose pick goes with the start. Every Persona chat has one (#9248) and switches whatever its
@@ -256,7 +287,7 @@ export const AssistantModelPill = memo(function AssistantModelPill({ session }: 
   // Without a pick, what the next message runs on is a default: Main chat's for the main conversation, a leader and a
   // scheduled task's own conversation (origin "task"); the supervisor's own model purpose for the background supervisor.
   const supervisor = Boolean(session && isBackgroundSupervisor(assistant, session.session_id));
-  const followsDefault = isMain || supervisor || Boolean(session && (assistant?.leaders?.includes(session.session_id) || session.origin === "task"));
+  const followsDefault = Boolean(session && followsDefaultOf(assistant, session));
   const chat: AssistantChat = { session, isMain, followsDefault, kept, config: assistant?.launcher, ...(supervisor ? { def: superviseDefault(mid) } : {}) };
   const key = assistantPickKey(chat);
   // this page's picks (an older hub, the new-conversation page) draw it again
@@ -307,6 +338,9 @@ export const AssistantModelPill = memo(function AssistantModelPill({ session }: 
   const button = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => setAnchor(null), []);
   useEffect(close, [close, scope]);
+  // a model error's "Fix it" opens it (useAssistantTurnFix): the chat's own pick, not a new provider
+  const sid = session?.session_id;
+  useEffect(() => (sid && mid ? onModelPicker(assistantPickerKey(mid, sid), () => setAnchor(button.current)) : undefined), [mid, sid]);
   const shown = Boolean(anchor) && Boolean(mid);
   // every list again behind the one shown, once per opening
   useEffect(() => {

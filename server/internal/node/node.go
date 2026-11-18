@@ -95,7 +95,8 @@ type Node struct {
 	home         string
 	sessionScope *nodeSessionScope
 	dir          string // ~/.persona
-	bin          string // absolute path of this executable
+	exe          string // this program's file, links followed: what an update replaces ("" in tests: bin)
+	bin          string // the spelling of this program handed to the processes it starts (selfprogram.go)
 	uid          string // the computer's own id (machineuid.go); empty when it could not be read or made
 	// Program is what bin is (nodeproto.ProgramPersonad / ProgramPersonaNode), for node.info; "" says nothing.
 	Program string
@@ -361,17 +362,14 @@ func New(version string) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	bin, err := os.Executable()
-	if err != nil {
-		return nil, err
-	}
-	if p, err := filepath.EvalSymlinks(bin); err == nil {
-		bin = p
-	}
 	// ssh sessions get a minimal PATH; herdr and claude usually live in ~/.local/bin.
 	extra := []string{filepath.Join(home, ".local/bin"), filepath.Join(home, "bin"), filepath.Join(home, "go/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/local/go/bin"}
 	os.Setenv("PATH", strings.Join(append(extra, os.Getenv("PATH")), string(os.PathListSeparator)))
 	dir, err := identity.PrepareHome(home)
+	if err != nil {
+		return nil, err
+	}
+	exe, bin, err := selfProgram(home, dir) // after PrepareHome: its alias is one of bin's spellings (selfprogram.go)
 	if err != nil {
 		return nil, err
 	}
@@ -384,6 +382,7 @@ func New(version string) (*Node, error) {
 		bootAt:   time.Now().UTC(), // sessions started before this were the previous herdr server's (interrupted.go)
 		home:     home,
 		dir:      dir,
+		exe:      exe,
 		bin:      bin,
 		logger:   log.New(os.Stderr, "node: ", log.LstdFlags|log.Lmsgprefix),
 		files:    map[string]*transcript.File{},
@@ -800,6 +799,8 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		AtItemID       string          `json:"at_item_id"`     // session.fork: the reply to branch off at
 		Refresh        bool            `json:"refresh"`        // launchers.models: ask again, not the kept list
 		Purpose        string          `json:"purpose"`        // launchers.models/check: assistant runs outside the Agent engine
+		AssistantTurn  bool            `json:"assistant_turn"` // launchers.check: shaped as an assistant turn (launchercheck_assistant.go)
+		Conversation   string          `json:"conversation"`   // launchers.check with assistant_turn: the conversation whose profile it runs in
 		Configured     bool            `json:"configured"`     // launchers.models, .probe, .http, .model.check: hub.json names this launcher
 		Guest          *guestParams    `json:"guest"`          // assistant.send: a new guest conversation (assistant_guest.go)
 		Origin         string          `json:"origin"`         // assistant.send: the manager-recorded source of this conversation
@@ -1198,7 +1199,8 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		def, err := n.launcherDefinition(ctx, p.Name)
 		return map[string]any{"definition": def}, err
 	case "launchers.check": // what a start in that host (the default host when none) would run (#8140)
-		return n.launcherCheck(withLauncherPurpose(withStartHost(ctx, p.Host), p.Purpose), p.Name, p.Model), nil
+		return n.launcherCheckWith(withLauncherPurpose(withStartHost(ctx, p.Host), p.Purpose), p.Name, launcherCheckOpts{model: p.Model,
+			assistantTurn: p.AssistantTurn, effort: p.Effort, conversation: p.Conversation, configDir: p.ConfigDir}), nil
 	case "claude.auth_status": // whether Claude Code is signed in as the launcher runs it, no model request (claudeauth.go)
 		return n.claudeAuthStatus(ctx, p.Name)
 	case "launchers.repair": // the hub's launcher health (docs/server/launcher-health.md)
@@ -1231,7 +1233,11 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		n.useBotmux(true, true)
 		return n.listWorkspaces(ctx)
 	case "workspace.resolve":
-		return n.resolveWorkspace(p.Path)
+		var a struct {
+			Terminal bool `json:"terminal"` // cwd as a terminal here opens it (workspaces.go)
+		}
+		_ = json.Unmarshal(params, &a)
+		return n.resolveWorkspace(p.Path, a.Terminal)
 	case "sessions.list":
 		n.configured()          // a hub that lists without engine.use keeps herdr (engine.go)
 		n.useBotmux(true, true) // and one that lists without saying botmux keeps it, as before (hostbotmux.go)
@@ -1579,6 +1585,26 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			return nil, err
 		}
 		return ok(nil)
+	case proto.MethodStartContinue: // the owner's answer to a start's startup question, then the start again (startcontinue.go)
+		var a proto.StartContinueParams
+		if err := json.Unmarshal(params, &a); err != nil {
+			return nil, err
+		}
+		s, err := n.startContinue(ctx, a.SessionID, a.Choice)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"session": s}, nil
+	case proto.MethodStartAnswer: // the same answer into a failed task start's kept tab, which the hub starts again in (startcontinue.go)
+		var a proto.StartAnswerParams
+		if err := json.Unmarshal(params, &a); err != nil {
+			return nil, err
+		}
+		typed, err := n.startAnswer(ctx, a.Pane, a.Line, a.Choice)
+		if err != nil {
+			return nil, err
+		}
+		return proto.StartAnswerResult{OK: true, Typed: &typed}, nil
 	case "session.keys":
 		if a, ok := n.agent(p.SessionID); ok {
 			defer n.forgetDialog(a.PaneID) // the dialog it showed may be gone (dialogstatus.go)
@@ -2345,7 +2371,7 @@ func (n *Node) info(ctx context.Context) proto.NodeInfo {
 	return proto.NodeInfo{
 		Protocol:           nodeproto.Version,
 		Program:            n.Program,
-		Executable:         n.bin,
+		Executable:         cmp.Or(n.exe, n.bin), // the update target: the file, never a link to it
 		ProtocolMin:        nodeproto.MinManagerVersion,
 		Capabilities:       n.capabilities(), // secret_env only from a resident node (secretenv.go)
 		NodeUpdate:         canUpdate,

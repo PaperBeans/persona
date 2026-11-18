@@ -195,6 +195,13 @@ To fix it, make the launcher exist where the terminal's shell reads it:
 
 Launcher health keeps such a launcher apart (`not_in_terminal`, `docs/server/launcher-health.md`): the login shell's check passes, so only a start with it that works clears it.
 
+**The node's own program, on a home reached through a link (#10365).** A home that is a link (`/home/me -> /data/home/me`) and a terminal in a container that mounts the home at `/home/me` without the real path: the node's resolved file (`/data/home/me/.persona/bin/personad`) does not exist there, so every managed launcher failed with `…/personad: No such file or directory`, and the Agents there lost Persona's hooks and MCP server, which name the same path.
+The node keeps two spellings of itself (`node/selfprogram.go`): the resolved file stays the update target (`node.info`'s `executable`) and what macOS attributes Full Disk Access to, while every process it starts is handed the data directory's spelling of the same file (`<PERSONA_HOME>/bin/personad`, where the start files already live), else the program under `$HOME`'s own spelling, else the file as it is. `personad node doctor` asks the same function, so the generated hooks, settings and MCP files it checks are the ones the node wrote and `--fix` does not flip them back.
+The checkouts the node makes with git (task and "New worktree…" checkouts on herdr-core or without herdr's worktree command, Agents' own worktrees, review copies) get their two git links rewritten to the home's spelling (`node/worktree_links.go`), and a directory the hub resolves for an Agent to start in (`workspace.resolve` with `terminal`) or a checkout `worktree.prepare` hands back is named the same way, so git and the Agent work inside the container too.
+After the update a `not_in_terminal` record left by the old path still holds until a start with that launcher works: one explicit retry of the failed task (which passes the fixed-machine gate for this kind of record) clears it.
+
+The terminal's shell can also stop before the start types anything, on a question its startup files ask (oh-my-zsh's update question, compinit's insecure directories, a passphrase; #2570, #10365). The start then ends with `shell_waiting`, not a launcher problem: the tab is kept for 10 minutes and the App offers the question's answers. Picking one types it into that tab and starts the Agent there; the message that start refused goes out once it is up (`docs/protocol/protocol.md` "Answering a start's question"). The tab a start opens gets oh-my-zsh's, oh-my-bash's and powerlevel10k's own switches for those questions in its shell's environment where the engine takes one, unset again before the launcher runs (`docs/integrations/engines.md` "What a start tab's shell starts with").
+
 ## Detecting launchers in ~/.zshrc (`launcherScript` in `node/launchers.go`)
 
 node gathers two things in one login-shell invocation (`zsh -ic`, loading `~/.zshrc` first), cached for 1 minute.
@@ -326,6 +333,17 @@ What these agents do not do here, and why:
   of moving to a model the gateway does not serve. A provider with no `models` list, or one that lists all three, keeps Claude Code's fallback. The rule reads the declared list, not what the
   gateway serves: a provider imported from a computer's aliases lists only the model its alias names, so it has the fallback off until its list names all three or its `env` empties the variable. The provider's `env` wins either way:
   `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=` keeps the fallback, `=1` turns it off (`docs/integrations/claude-integration.md`, "Refusal fallback behind a gateway").
+- **Tool search off behind a gateway** (#10365): a managed provider whose Base URL (its own `env`'s `ANTHROPIC_BASE_URL`, else the stored one) is not Anthropic's own API gets
+  `ENABLE_TOOL_SEARCH=false` (both in `personad launch` environment, which then drops an inherited value, and the settings `env` above): every tool is loaded up front, and no request carries
+  `defer_loading` tools, `tool_reference` blocks or the `ToolSearch` tool, which a gateway edge may refuse (`400 request is not representable on this edge: ToolSearch is not supported on this endpoint`).
+  Claude Code keeps tool search off behind such a Base URL by itself, but any value of the variable lifts that rule, and the assistant's processes carry one. The provider's `env` wins:
+  `ENABLE_TOOL_SEARCH=true` opts back in (deferral saves about 23K tokens per request where the gateway carries it); a refusal is then resent once with every tool loaded and remembered for that
+  provider and model (`docs/integrations/claude-integration.md`, "Tool search behind a gateway (#10365)").
+- **No tier alias behind a gateway** (#10365): Claude Code sends a tier variable's value (`ANTHROPIC_DEFAULT_OPUS_MODEL` …) to the gateway as the model's name, so a provider whose default model or tier
+  field held `opus` asked the gateway for "opus" (404). For a provider whose Base URL is not Anthropic's own API, a tier alias (`opus`, `sonnet`, `haiku`, `fable`, `best`, `opusplan`, `default`, `inherit`,
+  with or without `[1m]`) in its default model, a tier field or its `env` counts as unset: the tier's own model, else the default model, else nothing (Claude Code's own ID). A `--model <alias>` the node
+  passes (an assistant conversation, a terminal Agent, a launcher switch, Test, a typed `/model`) becomes the model the provider's environment gives that tier, `[1m]` kept, or is left out (the provider's default;
+  a typed `/model` types `/model default`); `personad launch` does the same to whatever reaches it and says so on stderr when it leaves one out. Plain `claude`, shell launchers and providers on Anthropic's own API keep their aliases.
 - **Authentication method** (`auth`, 2026-11-04): which variable receives the key. `api_key` (default, used by existing launchers) sets `ANTHROPIC_API_KEY`; Claude Code sends
   `x-api-key`, the only method accepted by the official API. `bearer` sets `ANTHROPIC_AUTH_TOKEN` and sends `Authorization: Bearer`, for compatible gateways accepting only Bearer
   (common relay gateways accept both, requiring no change). When the manager directly calls the Messages API with a launcher (triage, translation, etc.), it follows this header choice too; Responses already uses Bearer and needs no selection.

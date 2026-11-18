@@ -15,7 +15,7 @@ import { sessionCan, stateOf } from "./format";
 import { runsAssistant, type AssistantLauncher } from "./assistant-chat";
 import { SUPERVISE_PURPOSE } from "./background-supervisor";
 import {
-  defaultModel, forgetCustomModel, launcherModels, machineLaunchers, modelName, withoutCustom, type AgentModel, type LauncherDefault, type LauncherModels, type UnavailableLauncher,
+  defaultModel, forgetCustomModel, launcherModels, listedModel, machineLaunchers, modelName, withoutCustom, type AgentModel, type LauncherDefault, type LauncherModels, type UnavailableLauncher,
 } from "./launcher-models";
 import { canSwitchModel, isCurrentModel, sessionLauncher } from "./model-switch";
 import { hasEffortOnly, hasModes } from "./session-actions";
@@ -355,7 +355,7 @@ export function pendingView(s: Session, listOf: (launcher: string) => ModelList)
   const ps = s.pending_switch;
   if (!ps?.launcher || ps.launcher === sessionLauncher(s)) return null;
   const models = listOf(ps.launcher).list?.models ?? [];
-  const row = ps.model ? models.find((m) => m.id === ps.model) : defaultModel(models);
+  const row = ps.model ? listedModel(models, ps.model) : defaultModel(models);
   const to = pendingEngine(s);
   const out: PillSetup = { engine: to || sessionEngine(s), provider: ps.launcher, model: row ? modelName(row) : ps.model ? modelLabel(ps.model) : t("chat-modelpill.default_model") };
   const effort = ps.effort || (to ? row?.default_effort : s.effort);

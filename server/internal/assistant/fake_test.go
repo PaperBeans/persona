@@ -179,6 +179,12 @@ type fakeHub struct {
 	// context: a check that takes its time; its error is the call's.
 	checkWait func(ctx context.Context) error
 	checkedAt []time.Time
+
+	// checkParams are the launchers.check params in order; oldCheck: the node runs the plain check whatever it is asked
+	// (no assistant_turn in its answer), as one without launcher_check_assistant_turn
+	checkParams []map[string]any
+	oldCheck    bool
+
 	repairs   []map[string]any
 	repairRes *proto.LauncherRepair
 	onRepair  func(f *fakeHub)
@@ -419,14 +425,17 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 	case assistantwire.DeviceLaunchersCheck:
 		name, _ := a["name"].(string)
 		f.checked = append(f.checked, p.Device+"/"+name)
+		f.checkParams = append(f.checkParams, a)
 		if f.onCheck != nil {
 			f.onCheck(f)
 		}
 		f.checkedAt = append(f.checkedAt, time.Now())
+		turn := a["assistant_turn"] == true && !f.oldCheck && launcherAgent(name) == "claude"
 		if c, ok := f.checks[p.Device+"/"+name]; ok {
+			c.AssistantTurn = c.AssistantTurn || turn
 			return json.Marshal(c)
 		}
-		return json.Marshal(proto.LauncherCheck{OK: true, Agent: launcherAgent(name), Model: "m", Answer: "ok"})
+		return json.Marshal(proto.LauncherCheck{OK: true, Agent: launcherAgent(name), Model: "m", Answer: "ok", AssistantTurn: turn})
 	case assistantwire.DeviceLaunchersRepair:
 		f.repairs = append(f.repairs, a)
 		if f.repairRes == nil {

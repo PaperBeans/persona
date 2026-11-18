@@ -85,7 +85,11 @@ same piece of work finished in a related to-do (the same plan, PR, issue or titl
 retry: rule 1a files it with that work and it counts as closed, on the page, the sidebar's badge and the assistant's
 entries alike (`supersededFailedStarts` in each copy). A failed start that still waits on the owner reads as one on every
 client: not ticked or struck through, why it did not start in red, and its checkbox closes it for good (`"done": true`
-on it clears `start_error`: the owner closed it; `docs/assistant/todos.md`, API overview).
+on it clears `start_error`: the owner closed it; `docs/assistant/todos.md`, API overview). The hub's assistant reads it
+the same way (#10365): its snapshot counts such a to-do open (the open index marks it as not started) for exactly as long
+as this table does (`triageCountsAsOpen`), so a start failing does not take one off the assistant's count, and
+`task_plan`'s `todo_id` takes it up again, reopening it, instead of refusing it as done (`docs/assistant/todos.md`,
+"Retrying on another launcher" for its other way out).
 
 **Waiting on you is only for what the owner must do in person**: answer a question, grant a permission, decide on a
 large feature. A deployed to-do's "Please verify" ask and a "done" conclusion are not: the supervising assistant
@@ -388,7 +392,8 @@ one row the same way and `GET /api/v1/todos/places` the places (`docs/protocol/p
 time in a view is absolute, so the list's bytes, and its `ETag`, stay the same while neither the to-dos nor their runs
 change (a working run's latest line is in its row's view). Across managers the hub only adds the counts up and joins
 the places; it never works out a view. The hello features `todo_view` and `todo_places` say every manager serves them,
-and only while they are listed do the counts cover every manager.
+and only while they are listed do the counts cover every manager. The manager also pushes `{"type":"todos"}` when a
+run's change or time alone changes what a row is filed under (`docs/assistant/todos.md` "Live WebSocket pushes").
 
 No client draws from `view` by default yet: the clients switch to it in stage 2, falling back to the rules above for a
 row without one. Until then every client, and the hub's own triage for the direction tree and leader reports

@@ -344,6 +344,10 @@ func turnErrorCode(text string) string {
 		return proto.TurnErrorNotLoggedIn
 	case strings.Contains(t, "There's an issue with the selected model"):
 		return proto.TurnErrorModelRoute
+	case assistantwire.ToolSearchRefused(t):
+		// Before the classes below: a gateway's words for it may say "not supported" next to "model". The node resent
+		// the turn once with every tool loaded and starts the conversation that way from now on (#10365).
+		return proto.TurnErrorToolSearchUnsupported
 	}
 	switch classifyLauncherError(t) { // the launcher health checks' classes (launcher_health.go)
 	case errKindUsageLimit:

@@ -32,13 +32,24 @@ type todosList struct {
 // briefs also what was asked and who carried it (task_brief.go), which the view does not read. Without views: viewed
 // adds them. An error when the to-dos or their decision reviews cannot be read.
 func (s *Service) listedTodos(ctx context.Context, briefs bool) ([]listedTodo, error) {
+	return s.listedTodosOf(ctx, briefs, nil)
+}
+
+// listedTodosOf is listedTodos of the to-dos whose ids are in ids alone; nil is every to-do.
+func (s *Service) listedTodosOf(ctx context.Context, briefs bool, ids map[string]bool) ([]listedTodo, error) {
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		return nil, err
 	}
 	s.todos.mu.RLock()
-	list := make([]listedTodo, 0, len(s.todos.todos))
+	n := len(s.todos.todos)
+	if ids != nil {
+		n = len(ids)
+	}
+	list := make([]listedTodo, 0, n)
 	for _, t := range s.todos.todos {
-		list = append(list, listedTodo{Todo: formatTodo(copyTodoLocked(t))})
+		if ids == nil || ids[t.ID] {
+			list = append(list, listedTodo{Todo: formatTodo(copyTodoLocked(t))})
+		}
 	}
 	s.todos.mu.RUnlock()
 	if err := s.listDecisionReviews(ctx, list); err != nil {
@@ -76,6 +87,22 @@ func (s *Service) viewed(ctx context.Context, list []listedTodo, now time.Time) 
 	return p
 }
 
+// todosViewed is every to-do as GET /api/v1/todos lists it, each with its view now (the views' clock,
+// todo_view_push.go), and the list's projection. What each row is filed under is held against what the apps were
+// told, and any that reads differently tells them again (todoViewsSeen, todoViewDiffers).
+func (s *Service) todosViewed(ctx context.Context, briefs bool) ([]listedTodo, todoProjection, error) {
+	gen := s.todoViewGen() // before the to-dos are read: a push from then on makes these views old
+	list, err := s.listedTodos(ctx, briefs)
+	if err != nil {
+		return nil, todoProjection{}, err
+	}
+	p := s.viewed(ctx, list, s.todoViewNow())
+	if s.todoViewsSeen(gen, p, nil) {
+		s.todoViewDiffers()
+	}
+	return list, p, nil
+}
+
 func (s *Service) todoViewRoutes() {
 	// GET /api/v1/todos/{id}: one to-do as GET /api/v1/todos lists it, its view included → {"todo": row}; an unknown
 	// id 404 todo_not_found.
@@ -92,12 +119,11 @@ func (s *Service) todoViewRoutes() {
 			apierr.WriteCode(w, http.StatusNotFound, "todo_not_found", errors.New("todo not found"))
 			return
 		}
-		list, err := s.listedTodos(r.Context(), false)
+		list, _, err := s.todosViewed(r.Context(), false)
 		if err != nil {
 			apierr.Write(w, http.StatusServiceUnavailable, errTodosUnavailable)
 			return
 		}
-		s.viewed(r.Context(), list, time.Now())
 		for _, t := range list {
 			if t.ID == id {
 				t.Todo = s.withBrief(t.Todo) // as withBriefFrom gives it in the list
@@ -109,11 +135,11 @@ func (s *Service) todoViewRoutes() {
 	})
 	// GET /api/v1/todos/places: the To-dos sidebar's places with the list's counts (assistantwire.TodoPlaces).
 	s.handle("GET /api/v1/todos/places", func(w http.ResponseWriter, r *http.Request) {
-		list, err := s.listedTodos(r.Context(), false)
+		_, p, err := s.todosViewed(r.Context(), false)
 		if err != nil {
 			apierr.Write(w, http.StatusServiceUnavailable, errTodosUnavailable)
 			return
 		}
-		apierr.WriteJSON(w, s.todoPlaces(r.Context(), s.todoProjectionOf(r.Context(), list, time.Now())))
+		apierr.WriteJSON(w, s.todoPlaces(r.Context(), p))
 	})
 }

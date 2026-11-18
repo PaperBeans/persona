@@ -859,7 +859,12 @@ Apps built with older Xcode do not extend under the status bar and camera on Duo
 - **Vertical side bars**: when the system places bars at the side (outer screen, inner landscape; non-nil `toolbarVerticalEdge`, iOS 27.1 onward), the Agents chat page no longer draws its own header buttons;
   Back, Terminal, Git, Files and ⋯ go into the system toolbar, arranged below the status bar (`ChatView.sideBarItems`, each with title and icon). The content top keeps only a non-collapsing title
   (tap for session info), same-space Agents, loop / background tasks and the sub-Agent status line (`sideHeader`, the same second and third rows as the custom header). Horizontal bars (ordinary iPhone, inner portrait) retain the custom collapsible header.
-  The chat hides the system back button (`navigationBarBackButtonHidden(sideBars)`), leaving only its supplied Back in the side column. Chat destinations must use
+  The pages that hold an Agents chat before it is there do the same (#9971, `DetailHeader`): a task still starting, one whose Agent did not start, a task,
+  an Agent or a side session that is gone put their Back (the system's when pushed, a ✕ of their own in a sheet) and ⋯ in the system bar, so Back is at the top of the side column before and after
+  the Agent comes up, never at the top left first (HIG "Designing for iPhone Duo": the top of the vertical axis is for Back or Close).
+  A chat pushed onto another page, on its chat pane, keeps the system's own Back there (`ChatView.systemBack`, #9971): the system puts it at the top of
+  the column, and iOS's swipe back from anywhere on the page works only on a page that shows the system's Back (`docs/lessons/ios.md`). Otherwise
+  (files / Git back to the chat, a sheet's ✕, a root) the chat hides the system back button and supplies its own Back in the side column. Chat destinations must use
   `.splitDetailPage(ownsBack: true)`: an outer `navigationBarBackButtonHidden(false)` overrides the page's `true`, bringing back the system button
   and stacking two Back buttons (2026-11-04, TestFlight).
   With the keyboard open, this header becomes fog only (title, same-space Agents and sub-Agents hide until the keyboard closes): inner landscape leaves only about 390pt above the keyboard,

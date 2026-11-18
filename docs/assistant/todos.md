@@ -272,6 +272,7 @@ The internal `spawn_from` field carried in session reports is stripped before hu
 
 ### Live WebSocket pushes
 - `{"type":"todos"}`: broadcast on to-do creation, edit, deletion, whole-project link/unlink, Agent association changes, a change of its chat thread, or when its `ask` comes up, is taken or ends ("Waiting for the owner"); clients refetch `GET /api/v1/todos`. The manager sends one per write: the changes made within 100 ms of the first (`todosSettle`; one step of a task writes its to-do from several places) go out as one event, and a change made after it went out sends another, so the last read of every change starts after it (#5995). Separate writes still come in bursts: the App (`TodoStore`) and the web (`todosPushed` in `web/src/lib/store.ts`) keep one such read out at a time, and a push that lands while it is out asks for a single read after it.
+  The same push also goes out when what a row's `view` files it under changes with no write to its to-do (#10226, `server/internal/assistant/todo_view_push.go`): its phase, section, reason, ask ids, the Inactive, Can wait and seen marks or its steps' count, but never its line's arguments, `since`, `next_change_at` or `rank` alone, so a working Agent's steps send nothing (the list's bytes still carry its latest line when a client reads). The one exception is the seen mark: the first step after the owner looked at a working row clears it and pushes once. The manager keeps what each to-do was filed under as first worked out after the last push. Three things work views out and compare: every list read; a change of the sessions on a computer where an open to-do has a run (its node's list, a card, a turn seen), after one second for the rest, recomputing only the open to-dos with a run there, the to-do each is a step of and its steps; and a timer at the earliest `next_change_at` (Just finished's 24 hours, 48 hours to the Inactive mark), recomputing only the to-dos whose moment passed, never more than once a minute and never sleeping more than an hour. The last two never copy the whole list: a failed start among them is held superseded from each to-do's title, PR, plan and close alone. A difference from the recheck or the timer sends one settled push. One a list read finds waits a second first, and a push meanwhile tells it, so changes coming one after another go out as one. Views worked out from to-dos read before a push change nothing. What the apps were told lives in the manager's memory only, so the first views worked out after it starts push once: a run may have come to ask while it was away. Old clients, which work rows out themselves, just read more often when it matters.
 - Session-change push: when to-do/association changes affect sessions, assistant reports a new snapshot; hub compares which computer's sessions changed and re-pushes that computer's `sessions` event.
 
 ### Status codes and roles
@@ -347,7 +348,7 @@ Clients calculate to-do runtime state live from linked active Agents; it is not 
 
 | Priority | State | Condition |
 | :--- | :--- | :--- |
-| 0 | Didn't Start | Agent for a task created from chat failed to launch; assistant ends the to-do (`done_at` + `start_error`, #1077); client shows failure/removal, not active. A supervised task whose new tab is kept by its computer (`shell_waiting`, `agent_start_stalled`) is first remedied, still "starting" to clients ("Remedying a start" below) |
+| 0 | Didn't Start | Agent for a task created from chat failed to launch; assistant ends the to-do (`done_at` + `start_error`, #1077); client shows failure/removal, not active. It still waits on the owner: the To-dos SOP counts it open while rule 1 keeps it in Waiting on you, and so do the assistant's snapshot (marked "（没开起来）" in its open index) and `todo_get` (#10365). A supervised task whose new tab is kept by its computer (`shell_waiting`, `agent_start_stalled`) is first remedied, still "starting" to clients ("Remedying a start" below) |
 | 1 | Done | User marked done, or assistant judged a dispatched task complete (`done_at != null`; client shows **Auto-completed** for `done_by = "auto"`) |
 | 2 | Needs You | A linked active Agent is `needs_you` (waiting for question, plan approval or authorization) |
 | 2.5 | Interrupted | A linked active Agent is stopped (`unread` / `idle`) with `turn_error`: model-service failure interrupted the turn (disconnect, overload, rate limit, expired login…), unfinished (#1516); red, **Continue** on the card sends "继续" ("continue"). A subscription usage limit is not this (the next row) |
@@ -375,6 +376,87 @@ Clients calculate to-do runtime state live from linked active Agents; it is not 
   The hub never resends these starts automatically: a node, especially a runtime bridge, may finish the previous request after its connection drops, and the saved plan has neither a start idempotency key nor a session / pane identity to adopt safely. The reason asks the supervisor or user to wait for the computer to reconnect and inspect its sessions before retrying. An offline computer does not delay recording the failure. No kept tab is invented for `beginRemedy`; existing remedies retain their normal expiry handling. Recovery requires the plan’s saved `TodoID`: it does not guess a task association if the process stopped before that link was saved.
 - **Remedying a start** (#2570, `assistant/start_remedy.go`): when the new tab's shell stopped on a startup question (`shell_waiting`) or Claude's own screen stopped before its input box (`agent_start_stalled`), the computer keeps the tab for 10 minutes (`node/shellsettle.go`). For a supervised task the hub records this on the plan task (`start`: `state` remedying / started / failed, `attempt`, `by`, `machine`, `pane`, `until`, `code`, `reason`) instead of failing the to-do, and the supervision message carries the question, the tab's last lines and the retries left. The main conversation may read the tab (`task_start_screen`), type into it (`task_start_keys`: any text up to 32 characters and keys, with a reason; the node takes them only into that kept tab while no agent runs there) and start again in it (`task_retry`, which also reopens a start that failed for good, in a new tab); at most 3 retries per task, and the hub never retries by itself. Each step is a `start_remedy` feed item. A retry that starts sends the supervisor a `started` signal. The start fails for good (`done_at` + `start_error`, the failed receipt, the bot's report) when the supervision turn that saw it ends with no retry running (the turn of the conversation that message went to, not another supervising conversation's, #4927), when the kept tab expires (checked on the supervisor's tick, so a restart catches up), or when a retry fails without a kept tab. If that turn never told the user (no `notify_user`, task review card or visible finish), the hub writes "Didn't start: <task>. <reason>" into the conversation and pushes it.
 - User marks done while Agent is still launching (can take minutes on a busy machine; `done_at` written first): not **Didn't Start**, to-do stays done with no `start_error`; Agents that do launch join this completed to-do and are stopped by "Stop Agents of completed tasks" under existing rules (only after idle long enough) (#2954).
+
+### Retrying on another launcher
+
+A start can fail because of its launcher on that computer: the new terminal tab's shell cannot run it (`launcher_missing`
+with `where: "terminal"`, for example a Persona-managed launcher whose `personad` the terminal's environment cannot see),
+its health record keeps it off a fixed computer, or its error reads as its key, its model route or its subscription's
+limit. Retrying the same task then fails the same way, and the health record of a terminal failure stays for 6 hours.
+Since #10365 (`assistant/start_retry_launcher.go`):
+
+- **Suggested, never swapped by itself**: such a failure fills the plan task's `retry_with`: the other launchers of the
+  same computer it may start with, plain `claude` first when the computer has Claude Code, then the computer's own and
+  the Persona-managed ones, only those running the same agent as the failed one, never the failed one or one its health
+  record says cannot run there now, and no managed launcher while the terminal could not run `personad` itself (every
+  managed launcher starts through it). The supervision message's failed entry lists them, and the task notice names the
+  first. Any other failure (offline, a dropped link, a stalled tab) suggests none.
+- **Asked for**: `task_retry` with `launcher` (and `model`), or the apps' **Use <launcher> instead** (`POST
+  /api/v1/todos/{id}/retry` with `{"launcher","model"?}`, hello feature `task_retry_launcher`). The launcher is checked
+  before anything is reopened: it must be on that computer, usable there now, and hold a read-only task read-only. A
+  managed one asked for by name is taken even after `personad` was missing (only the suggestions leave it out): the
+  terminal may have been fixed since. The task keeps its computer, directory and workspace (the checkout its
+  first start made is used again), takes that launcher's default model unless one is given (a gateway's model id never
+  carries over to another launcher), drops its tier, and its `why` says what changed. Its permission mode stays when the
+  launcher runs the same agent as the one that failed (a Codex task in plan mode stays in plan mode on another Codex
+  launcher), and is settled again for another agent, or when it was what Allow all gave the last one. The step is a
+  `start_remedy` feed item with `launcher_from` / `launcher_to`.
+- **From the launcher that ran**: a tier, a start-defaults policy or the `agent.new` binding may have chosen the failed
+  start's launcher, which the plan does not keep (it keeps what the task named). The hub records the one that ran as the
+  failed plan task's `error_args.launcher` (the node's coded refusal already names it for `launcher_missing`; the hub adds
+  it otherwise, also with no `error_code`), and a retry compares with that: asking for another launcher pins it on the
+  task and drops the tier, so the policy or the tier does not pick the failed one again; `launcher_from` and
+  `task_retry`'s answer name the one that ran. Only the launcher the task names itself, with no tier and no model, is
+  "the same" and changes nothing.
+- **Nothing started, said so**: when another start of the task is on its way (the owner's Retry, `task_retry`, a plan
+  taking the to-do over) or it started since, a retry asked for on a launcher starts nothing on it: the route answers 409
+  with why (`assistant-tasks.retry_launcher_not_started`) rather than 200, and `task_retry` answers an error, records no
+  move and takes its own remedy mark back. A plain Retry still answers the to-do as it is (a double tap starts one Agent).
+- **The same launcher's tab**: a plain Retry of a start whose shell stopped on a question goes back to the tab its
+  computer still keeps (`in_pane`, until `kept_until`), so an answer typed there is not lost to a new tab that asks
+  again; once the tab is gone, a new one. A retry on another launcher always opens a new tab.
+- **The words**: `launcher_missing` with `where: "terminal"` answers `action: switch_launcher` and a short `summary`
+  (`docs/protocol/protocol.md`, "Errors"). The web's failed rows, the task panel and the to-do page read a failed plan
+  task's code before its text (`lib/start-failure.ts`): a short line for a launcher the terminal cannot run or a
+  workspace left in the way (`worktree_path_taken`), the hub's whole sentence under the details. Their buttons are
+  **Use <launcher> instead** (when the hub suggests one and lists the feature), **Retry** and **Remove**; Retry no longer
+  needs the to-do's `plan_id`. Apple and Android still offer Retry and Remove only.
+
+### Answering a failed start's question
+
+A planned task's start whose new tab's shell stopped on a startup question (`shell_waiting`: oh-my-zsh's update
+question where the tab's environment could not turn it off, compinit's insecure directories, a passphrase) fails with
+its tab kept by the computer for 10 minutes. Its plan task's `error_args` carry the question as the node listed it
+(`line`, `screen`, `pane`, `kept_until`, `kind`, `choices`, `line_mode`, `secret`, `default`; `docs/protocol/protocol.md`
+"Answering a start's question"). Since #10365 (`assistant/start_answer.go`) the owner answers it from the app instead
+of going to the computer:
+
+- **The route**: `POST /api/v1/todos/{id}/start/answer {"choice"}` (hello feature `todo_start_answer`), full devices
+  only (403 `read_only` for a read-only or answer-only device and an extension's token). Only a failed start (done with
+  `start_error`) whose last start stopped with `shell_waiting`, whose tab is still kept (`kept_until` ahead) and whose
+  question offered that choice is answered; otherwise 409 `start_not_waiting`, `start_tab_gone` or `choice_not_offered`,
+  nothing typed and nothing changed. A start the assistant is still remedying, or one starting again, has no question
+  to answer here.
+- **The node types it** (`start.answer {pane, line, choice}`, capability `start_answer`; an older node answers 409
+  `node_outdated`, worded "update Persona on <computer>"): with `start.continue`'s guards, only an answer the question
+  offers, only while that question is still the tab's last line, Ctrl-C alone into a password prompt, never "yes" to
+  an ssh host key, Enter after a key a line-reading question echoes (never after a key a one-key question read). A
+  question no longer on the last line (answered at the computer) gets nothing typed, and the task starts in the tab
+  all the same. The node's reply says which (`{ok, typed}`; a reply without `typed`, from the first `start.answer`,
+  counts as typed).
+- **Then the task starts again in that tab**, as its Retry does there (`retryTaskWith` with `in_pane`): the same to-do
+  reopened, no new tab. The node marks the tab typed (as `task_start_keys` does), so that start waits out the
+  question's line, which stays the last one written until the shell draws its prompt, instead of refusing at once as a
+  plain Retry into a tab whose question is still open does. A question after that one fails the start again with its own answers. The step is a
+  `start_remedy` feed item `{action: "answer", by: "user", choice}`: the answer's id, never what a prompt asked for.
+  When the node typed nothing (the question was answered at the computer, or gone by itself), the step is
+  `{action: "answer_not_typed", by: "user", choice}` instead: the task's history and the supervising assistant never
+  read the owner's answer as the one that took effect.
+- **The web** shows the question card (`views/ShellQuestionCard.tsx`, loaded only for such a failure) on the failed
+  row, the task panel and the to-do page while the tab is kept and the hub lists the feature, beside Retry, which stays.
+  Apple and Android offer Retry only, so the failure's words (`shell_waiting`, also the assistant's notice and 督办
+  detail) offer the answers only "where Persona lists them" and always the way at the computer: answer there, then
+  start again.
 
 ## To-do titles
 
@@ -787,7 +869,7 @@ The line is "New decision: …", "3 new decisions: …", "An agent finished a tu
 - **What is made**: a to-do titled after the first words (as `task_plan`'s are, the model renames it later), the first words as its `notes` (not a decision: no decision is written), `origin` the main conversation, which also supervises it (`superviseTodo`), bound to the topic, with its task card in the main conversation's feed. Only a text or a rich-text message has words (`openingWords`): the bot's @ at the start is taken off (in a group where the bot only gets what @s it every message starts with one), an @ further in is the person's name when the message's mentions give it, and the placeholders of other types (`[语音消息]`, a shared group or card, a location, an unknown type) are not words. A message with no words (a picture, a merged forward, a voice message, a rich text of only pictures, or only "/ai") makes nothing and is answered "say it in a line of text".
 - **Whom it goes to is settled first**: the main conversation must be allowed by the bot's `main` switch and exist; with no one to take it nothing is made and the topic is told why. The binding is made right after the to-do; if another to-do holds the topic by then (`ErrThreadTaken`) the to-do just made is deleted (`removeTodo`, the DELETE route's own code) and the topic is told.
 - **The reply**: one line in the topic, as a reply with `chat_id` and `in_thread` — "To-do "X" opened and handed to the main conversation", with the to-do's web link when the hub has an http(s) address (as the bot's cards' links) — then the hand-over: the first words, quoted line by line (so that a many-line message cannot pass for the instructions around it), and the to-do's id (`prompts/todo/thread_open.md`), sent as the bot's own send (`botSendIn`) so the run answers into the topic. A hand-over that fails leaves the to-do (bound, so a later reply goes to the main conversation) and says so in the topic.
-- **Running an Agent on it**: the hand-over tells the main conversation to give `task_plan` the to-do's id as the task's `todo_id`. That reuses the to-do rather than making one: it must be one the plan's conversation opened or supervises, not done, with no live Agent on it (an Agent let go or dismissed does not count, and since #6427 neither does one whose session is listed stopped or archived, or whose computer the hub no longer knows; an unreachable computer's Agent still counts) and not held by another plan that has started and not yet linked its Agent. When the task starts, the stopped Agents still linked are let go (`released_at` only, so they stay in the to-do's history) before the new one links. It is checked when the plan is made (an error says why, nothing is made) and again when it starts (the task gets the reason as its `error`). The to-do keeps its title and notes, and no second task card is added. A reused to-do has no `plan_id`, so a failed start cannot be retried from the plan card (the to-do is closed with the error as for any failed start; reopen it in the app).
+- **Running an Agent on it**: the hand-over tells the main conversation to give `task_plan` the to-do's id as the task's `todo_id`. That reuses the to-do rather than making one: it must be one the plan's conversation opened or supervises, not done (a failed start is not done: see below), with no live Agent on it (an Agent let go or dismissed does not count, and since #6427 neither does one whose session is listed stopped or archived, or whose computer the hub no longer knows; an unreachable computer's Agent still counts) and not held by another plan that has started and not yet linked its Agent. When the task starts, the stopped Agents still linked are let go (`released_at` only, so they stay in the to-do's history) before the new one links. It is checked when the plan is made (an error says why, nothing is made) and again when it starts (the task gets the reason as its `error`). The to-do keeps its title and notes, and no second task card is added. A reused to-do has no `plan_id`; its failed start is retried all the same (`POST …/retry` and `task_retry` find the plan that binds it, #8770), and the apps offer **Retry** on it. A failed start (`done_at` with its `start_error`, not cancelled: `Todo.failedStart`) may itself be given as `todo_id` (#10365): when the task starts, the to-do is reopened as a Retry reopens it (`start_error` cleared, `reopened_at` set) and the new plan binds it; one whose start is being remedied in a kept tab is refused (`task_retry` is the way there), and a cancelled one is closed for good. A plan taking a to-do over holds the to-do's one start on its way (the claim a Retry, `task_retry` and a Continue take too) from the moment it takes it until its Agent is linked or the start failed, so a Retry of the same failed start and a waiting `todo_id` plan's Start never both start an Agent: whichever comes first starts, the plan's task gets "starting again already" as its `error` (also at plan time while a Retry is on its way), and a Retry meanwhile starts nothing. One whose reopen finds another assistant sharing the store reopened it first starts nothing either. Before, it was refused as "already done", so the assistant fell back on `continues`, which made a new plan and so a new checkout on the same `task/<todo id>` branch.
 - **After that** a reply in the topic goes the way those of a bound topic go: the running Agent, else the main conversation (the origin).
 - **Risks**: a registered group used as a notebook gets a to-do per topic; and a group another bot works in is answered twice (`docs/extensions/bots.md`).
 

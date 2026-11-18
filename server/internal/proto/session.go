@@ -493,6 +493,9 @@ const (
 	TurnErrorModelRoute               = "model_route"                // the model name is not one the service or gateway knows
 	TurnErrorRateLimited              = "rate_limited"               // too many requests, or a usage limit
 	TurnErrorModelFallbackUnavailable = "model_fallback_unavailable" // a refusal selected a model the service cannot use
+	// TurnErrorToolSearchUnsupported: the gateway refused Claude Code's on-demand tool loading (tool search, #10365). The
+	// node now starts that launcher and model with every tool loaded, so a retry works: not the user's to fix.
+	TurnErrorToolSearchUnsupported = "tool_search_unsupported"
 )
 
 // Codes a call refuses with when the assistant's conversation cannot start on a machine (docs/assistant/onboarding.md 4.6, 5.2):

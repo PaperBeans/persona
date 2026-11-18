@@ -242,6 +242,7 @@ func (s *Service) publishList(machine string) []proto.Session {
 	// told as null either way.
 	s.hub.Tell(assistantwire.EventFleetSessions, rpc.Marshaled(b))
 	s.liveChanged(false)
+	s.todoRunsChanged(machine) // a card, a seen turn: a to-do's view may file it elsewhere (todo_view_push.go)
 	return list
 }
 

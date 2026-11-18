@@ -106,6 +106,28 @@ func TestClosedParentKeepsItsStepsApart(t *testing.T) {
 	}
 }
 
+// A part of a list reads a failed start as the whole list does once Superseded, worked out over the whole list, is set
+// on it: the related to-do that finished need not be in the part.
+func TestSupersededFromTheWholeList(t *testing.T) {
+	failed := Facts{ID: "todo_f", Title: "Book the ferry", CreatedAt: hours(-30), UpdatedAt: hours(-3),
+		DoneAt: at(hours(-3)), StartError: "Desk Mac is offline"}
+	finished := Facts{ID: "todo_d", Title: "book the ferry!", CreatedAt: hours(-30), UpdatedAt: hours(-2),
+		DoneAt: at(hours(-2))}
+	whole := Views([]Facts{failed, finished}, testNow)[0]
+	if whole.Phase != assistantwire.TodoPhaseDone || whole.Line == nil || whole.Line.Key != "superseded" {
+		t.Fatalf("the whole list: %+v", whole)
+	}
+	if v := Views([]Facts{failed}, testNow)[0]; v.Reason != assistantwire.TodoReasonFailedStart {
+		t.Fatalf("the part alone: %+v", v)
+	}
+	sup := Superseded([]Facts{{ID: failed.ID, Title: failed.Title, DoneAt: failed.DoneAt, StartError: failed.StartError},
+		{ID: finished.ID, Title: finished.Title, DoneAt: finished.DoneAt}})
+	failed.Superseded = sup[failed.ID]
+	if v := Views([]Facts{failed}, testNow)[0]; !sameView(v, whole) {
+		t.Fatalf("the part with Superseded set: %+v, the whole list's %+v", v, whole)
+	}
+}
+
 // A step that only waits or is To do does not lift a parent that needs the owner; the more urgent of the two wins.
 func TestStepRollsUpOnlyWhenMoreUrgent(t *testing.T) {
 	parent, step := askingStep(nil)

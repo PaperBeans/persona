@@ -244,6 +244,11 @@ func relatedKeys(f Facts) []string {
 	return keys
 }
 
+// Superseded are the failed starts of list whose work finished in a related to-do (supersededFailedStarts). It reads
+// only each to-do's id, title, pr_url, plan_id, done_at, start_error and kind: a caller that works out the views of a
+// part of a list sets Superseded from the whole list's (relate keeps it), so they read as the whole list's views do.
+func Superseded(list []Facts) map[string]bool { return supersededFailedStarts(list) }
+
 // supersededFailedStarts are the failed starts related to a to-do that really finished (closed without a start
 // error): the work got done another way, so nothing is left to retry (#3713). Related to-dos chain; closed and open
 // ones never relate, and an open concern relates to nothing.

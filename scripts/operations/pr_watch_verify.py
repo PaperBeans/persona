@@ -193,7 +193,7 @@ def scoped_test_checks(worktree, base, head, names):
         packages = sorted({"./" + str(Path(name).parent.relative_to("server")) for name in groups["go"]})
         runner = str(Path(__file__).resolve().parent / "pr_watch_go_tests.py")
         commands.append(("Changed Go tests", ["python3", "-I", runner, "--worktree", worktree] + packages))
-        commands.append(("Changed Go packages vet", ["go", "-C", "server", "vet"] + packages))
+        commands.append(("Changed Go packages vet", ["go", "-C", "server", "vet", "-ldflags="] + packages))
         commands.append(("Changed Go formatting", ["python3", "-I", str(Path(__file__).resolve().parent / "pr_watch_go_format.py"),
                                                    "--worktree", worktree] + groups["go"]))
     if groups["python"]:
@@ -299,7 +299,7 @@ def extension_checks(worktree, pr, timeout):
     for module in modules:
         commands.extend([
             (module + " tidy", ["go", "-C", module, "mod", "tidy", "-diff"]),
-            (module + " vet", ["go", "-C", module, "vet", "./..."]),
+            (module + " vet", ["go", "-C", module, "vet", "-ldflags=", "./..."]),
             (module + " tests", ["go", "-C", module, "test", "-race", "./..."]),
         ])
         if module.startswith("extensions/"):

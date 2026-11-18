@@ -126,6 +126,10 @@ type assistantProc struct {
 	// model of the conversation's last reply. compactIdleAt follows the window Claude Code reports for it (followWindow).
 	declaredWindow int
 	replyModel     string
+	// toolSearch: what its start did about Claude Code's tool search, and endpoint where its requests go, "" Anthropic's
+	// own API (assistant_tool_search.go). Set at the start, never changed.
+	toolSearch toolSearchStart
+	endpoint   string
 	// repliedAt: when replyModel last answered (assistant_recovery.go: a transient "model does not exist" on it).
 	repliedAt time.Time
 
@@ -655,7 +659,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	if proto.IsExternalLauncher(launcher) && p != nil && p.alive() && !otherTools && !restartForRecovery && !p.needsRestartFor(want) && !p.instructionsStale() {
 		execution = pinExternalExecution(p, launcher, execution)
 	}
-	if p != nil && (!p.alive() || p.launcher != launcher || p.fingerprint != n.executionFingerprint(launcher, execution) || p.needsRestartFor(want) || p.instructionsStale() || otherTools) {
+	if p != nil && (!p.alive() || p.launcher != launcher || p.fingerprint != n.executionFingerprint(launcher, execution) || p.needsRestartFor(want) || p.instructionsStale() || otherTools || n.toolSearchStale(p)) {
 		p.mu.Lock()
 		active := p.busy || len(p.tasks) > 0
 		if proto.IsExternalLauncher(p.launcher) || proto.IsExternalLauncher(launcher) {

@@ -146,6 +146,29 @@ func TestUndeliveredTryInDoubtIsNotSentAgainWhenItLanded(t *testing.T) {
 	}
 }
 
+// The first transport-unknown attempt keeps its start time. A later manager pass finds the same words in the latest
+// turns, even after the node forgot their client_msg_id, and does not type them again.
+func TestUndeliveredUnknownFirstAttemptChecksTranscriptBeforeRetry(t *testing.T) {
+	s, f := newQuietServiceOn(t, &memStore{})
+	started := time.Now().Add(-time.Minute)
+	_, err := s.KeepUndelivered(context.Background(), assistantwire.KeepUndeliveredParams{MachineID: "server", SessionID: "conv1",
+		Params: map[string]any{"text": "check the backup job", "client_msg_id": "msg-unknown"}, Human: true,
+		Code: assistantwire.CodeDeliveryUnknown, TriedAt: started})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.items = []proto.Item{{ID: "u1", Seq: 1, Role: "user", Kind: proto.KindText, Text: "check the backup job", TS: started.Add(time.Second)}}
+	f.mu.Unlock()
+	s.undeliveredPass(context.Background(), time.Now().Add(time.Hour))
+	if got := ownerSends(f); len(got) != 0 {
+		t.Fatalf("sent again before checking the first attempt: %q", got)
+	}
+	if q := undeliveredOf(t, s, "conv1"); len(q) != 0 {
+		t.Fatalf("still kept after the landed check: %+v", q)
+	}
+}
+
 // Two passes at once (a tick and a wake) send a kept message once: one pass per conversation at a time.
 func TestUndeliveredConcurrentPassesSendOnce(t *testing.T) {
 	s, f := newQuietServiceOn(t, &memStore{})

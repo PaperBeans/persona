@@ -388,10 +388,14 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 		if assistantConv {
 			h.conversationSent(m.cfg.ID, sid, f.status, f.body, outcome)
 		}
-		if assistantConv && outcome == "" && f.status >= http.StatusInternalServerError && asSent != nil {
-			// Nothing was typed because the conversation could not take it (its process did not start, its computer
-			// was away): its manager keeps it and sends it again, and the app is told so instead of a failure (#10194).
-			if status, body, ok := h.keepUndelivered(context.WithoutCancel(ctx), m, sid, asSent, errorCodeOf(f.body), apierr.Reason(f.body)); ok {
+		if assistantConv && (outcome == sendUnknown || f.status >= http.StatusInternalServerError) && asSent != nil {
+			// Nothing was typed, or the connection ended before the outcome was known: the manager keeps the message and
+			// sends it again only after its landed-check, and the app is told it is kept (#10194, #10503).
+			keepCode := errorCodeOf(f.body)
+			if outcome == sendUnknown {
+				keepCode = assistantwire.CodeDeliveryUnknown
+			}
+			if status, body, ok := h.keepUndelivered(context.WithoutCancel(ctx), m, sid, asSent, keepCode, apierr.Reason(f.body)); ok {
 				f.status, f.body, outcome = status, body, sendLater
 			}
 		}
@@ -564,8 +568,12 @@ func (h *Hub) keepUndelivered(ctx context.Context, m *Machine, sid string, msg m
 	var res struct {
 		Undelivered *proto.UndeliveredMessage `json:"undelivered"`
 	}
+	tried := time.Time{}
+	if code == assistantwire.CodeDeliveryUnknown {
+		tried = sendTimingOf(ctx).start
+	}
 	err := h.asstOf(h.sessionOwner(m.cfg.ID, sid)).call(kctx, assistantwire.MethodKeepUndelivered, assistantwire.KeepUndeliveredParams{
-		MachineID: m.cfg.ID, SessionID: sid, Params: msg, Human: personSent(ctx), Lang: string(h.contextLang(ctx)), Code: code, Error: why,
+		MachineID: m.cfg.ID, SessionID: sid, Params: msg, Human: personSent(ctx), Lang: string(h.contextLang(ctx)), Code: code, Error: why, TriedAt: tried,
 	}, &res)
 	if err != nil || res.Undelivered == nil {
 		h.logf("send to %s/%s: not kept for later: %v", m.cfg.ID, sid, err)

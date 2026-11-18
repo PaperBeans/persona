@@ -264,6 +264,9 @@ type SnapshotOwner struct {
 type SnapshotOpenTodo struct {
 	ID, Title, Link string
 	Owner           SnapshotOwner
+	// Failed: its agent did not start, and it still waits on the owner (stored done with its start error, counted open
+	// as the app's To-dos count it).
+	Failed bool
 }
 
 // SnapshotReport is a supervised task's agent's latest report: its kind (progress, question, blocked, done), the step
@@ -706,6 +709,9 @@ type TaskNotice struct {
 	Earlier        []string // what else it went through since the last notice ("waiting on the user", "done"), oldest first
 	Ask            string   // needs: what it asks
 	Text           string   // what its agent said last, or why it did not start
+	// RetryWith: failed because of its launcher there, the launcher the assistant may start it with instead when the
+	// user asks (task_retry's launcher; only the web's card has a button for it, #10365).
+	RetryWith string
 	// Reporting: the notice goes into the conversation that opened the task (one started with report_tasks, such as
 	// a Feishu /agent's, #3192), not the main conversation.
 	Reporting bool
@@ -851,6 +857,9 @@ type SuperviseEntry struct {
 	// lines, and how many retries are left; KeptUntil "" when the start failed for good.
 	KeptUntil, Question, Screen string
 	RetriesLeft                 int
+	// RetryWith: failed because of its launcher on that computer, the other launchers there task_retry may start it
+	// with (PlanTask.RetryWith, #10365), the first suggested.
+	RetryWith []string
 	// ask: the cards waiting, and the task's decisions in effect (prompts/todo/decisions.md, rendered), which
 	// parked_due and park_decided carry too; escalated: the cards a leader gave the user.
 	Asks      []SuperviseAsk

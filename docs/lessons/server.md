@@ -168,6 +168,30 @@ empty one after a backoff (five minutes), so a Mac where it always fails does no
 output, like ioreg's, holds serial numbers: read only the one line. Tests fake both commands (`newModelLookup` takes
 the runner) and use `synctest`; a node-level test puts hanging fakes first on `PATH`.
 
+## A resolved path is not one every terminal has (2026-11-18, #10365)
+
+A computer whose home is a link (`/home/me -> /data/home/me`) ran its herdr terminals in a container that mounts the
+home at `/home/me` and has no `/data`. The node took its own program from `os.Executable()` plus `EvalSymlinks` (on
+Linux `/proc/self/exe` is already resolved, so dropping `EvalSymlinks` alone changes nothing) and typed that path into
+every managed launcher's start, hook, MCP config and codex-start line: the container answered `No such file or
+directory`, and Persona recorded the launcher as missing in the terminal. Git did the same to task checkouts: `git
+worktree add` writes both links between a worktree and its repository as resolved paths, so inside the container the
+checkout was "not a git repository" and the main checkout listed it as prunable (a `git worktree prune` there deletes
+its record). A path a process on this computer may open has to be the one that process can see, and a link is not
+always visible where the processes run: keep the resolved file for what needs the file itself (an update replaces it,
+macOS attributes Full Disk Access to it, comparisons use `realPath`), and hand out the home's own spelling of the same
+file (`os.SameFile`, `node/selfprogram.go`), in the generated files the doctor compares too, or the node and
+`personad node doctor` rewrite each other's files. Do not reach for git's relative worktree links: they set
+`extensions.relativeWorktrees` in the repository's shared config, and git before 2.48, libgit2 and go-git then refuse
+the whole repository; rewriting the absolute links to the home's spelling works for every git on both sides.
+
+A spelling handed out is not an identity. Once the node answered a task's directory by the home's spelling, the hub's
+check of which to-do writes there compared it as text with Agents recorded under the resolved spelling before the
+upgrade, and found nobody: a second to-do could be started in a directory the first still wrote in. Where the hub
+compares a node's paths, fold the home's two spellings (`home_real`) on both sides, as remembered task kinds do
+(`trustDir`) and task directories now do (`taskDirKey`). And repair git's links wherever a checkout's path is handed to a
+terminal, not only where the node reuses it: a refusal that names a leftover for `{existing}` leads there too.
+
 ## A node binary's name does not prove its platform (2026-11-14, #7206)
 
 The local node package lookup trusted `personad-<os>-<arch>` and `persona-node-<os>-<arch>` filenames without reading the executable, so one misnamed Hub build could be sent to every node of that named platform. Check the Go build info before selecting a local or bundled candidate and ignore a mismatch, allowing the normal release lookup to supply the right build; do not run a cross-platform binary on the Hub. The install path needs its own failure boundary too: verify `.new` before renaming it over the active binary, through direct and nested SSH, and remove it when the check fails. A test that only checks an error message misses whether the old executable survived.
