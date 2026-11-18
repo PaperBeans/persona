@@ -102,6 +102,21 @@ type memoryMergeRunOut struct {
 // memoryMergeFault, set by tests, fails the merge of the note it returns an error for.
 var memoryMergeFault func(name string) error
 
+// memoryMergeRace, set by tests, runs between comparing the memory's note at dst and changing it: the model writing it
+// meanwhile.
+var memoryMergeRace func(dst string)
+
+// The calls a new note is published with, set by tests to stand for a file system without hard links or without a
+// rename that refuses to replace, and for a write that fails.
+var (
+	memoryLink            = os.Link
+	memoryRenameNoReplace = renameNoReplace
+	memoryNoteWrite       = (*os.File).Write
+)
+
+// errMemoryNoteBusy: the memory's note changed every time it was looked at; the merge of the copy's is tried later.
+var errMemoryNoteBusy = errors.New("the memory's note kept changing while it was merged")
+
 type memoryNote struct {
 	name string
 	data []byte
@@ -448,6 +463,9 @@ func mergeMemoryNote(dir string, f memoryNote) (action, kept string, memoryMod *
 	for try := 0; try < 3; try++ {
 		info, err := os.Lstat(dst)
 		if os.IsNotExist(err) {
+			if memoryMergeRace != nil {
+				memoryMergeRace(dst)
+			}
 			made, err := createMemoryNote(dst, f)
 			if err != nil {
 				return "", "", nil, nil, err
@@ -474,6 +492,9 @@ func mergeMemoryNote(dir string, f memoryNote) (action, kept string, memoryMod *
 		if !f.mod.After(info.ModTime()) {
 			return memoryMergeConflict, memoryKeptMemory, &mod, nil, nil
 		}
+		if memoryMergeRace != nil {
+			memoryMergeRace(dst)
+		}
 		swapped, err := replaceMemoryNote(dst, f, info, cur)
 		if err != nil {
 			return "", "", nil, nil, err
@@ -482,9 +503,23 @@ func mergeMemoryNote(dir string, f memoryNote) (action, kept string, memoryMod *
 			return memoryMergeConflict, memoryKeptCopy, &mod, cur, nil
 		}
 	}
-	// It changed each time it was looked at: the memory's own version is being written now, and is the newer one.
-	now := time.Now().UTC()
-	return memoryMergeConflict, memoryKeptMemory, &now, nil, nil
+	// It changed each time it was looked at: it is being written now. What is there is the memory's version only if
+	// it is there and not older than the copy's; otherwise nothing is settled, and the note is not recorded, so that a
+	// later check merges it.
+	info, err := os.Lstat(dst)
+	if err == nil {
+		mod := info.ModTime().UTC()
+		if !info.Mode().IsRegular() {
+			return memoryMergeConflict, memoryKeptMemory, &mod, nil, nil
+		}
+		if cur, err := os.ReadFile(dst); err == nil && bytes.Equal(cur, f.data) {
+			return memoryMergeSame, "", nil, nil, nil
+		}
+		if !f.mod.After(info.ModTime()) {
+			return memoryMergeConflict, memoryKeptMemory, &mod, nil, nil
+		}
+	}
+	return "", "", nil, nil, errMemoryNoteBusy
 }
 
 func memoryTemp(dir string, data []byte, mod time.Time) (string, error) {
@@ -494,6 +529,9 @@ func memoryTemp(dir string, data []byte, mod time.Time) (string, error) {
 	}
 	name := tmp.Name()
 	_, err = tmp.Write(data)
+	if err == nil {
+		err = tmp.Sync()
+	}
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
@@ -510,36 +548,65 @@ func memoryTemp(dir string, data []byte, mod time.Time) (string, error) {
 	return name, nil
 }
 
-// createMemoryNote writes f at dst unless something is there: whole or not at all, and never over another file.
+// createMemoryNote writes f at dst unless something is there: whole or not at all, and never over another file. The
+// note is written and synced under a temporary name beside dst first, then published by one call that refuses to
+// replace: a hard link, or where there are none, a rename that refuses to replace. Only a file system with neither
+// gets dst created exclusively and written in place, and taken away again if that write fails.
 func createMemoryNote(dst string, f memoryNote) (bool, error) {
 	tmp, err := memoryTemp(filepath.Dir(dst), f.data, f.mod)
 	if err != nil {
 		return false, err
 	}
 	defer os.Remove(tmp)
-	err = os.Link(tmp, dst)
+	err = memoryLink(tmp, dst)
 	if err == nil {
 		return true, nil
 	}
-	if os.IsExist(err) {
+	if errors.Is(err, os.ErrExist) {
 		return false, nil
 	}
-	// No hard links here: create it exclusively instead.
+	err = memoryRenameNoReplace(tmp, dst)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrExist) {
+		return false, nil
+	}
+	if !errors.Is(err, errNoReplaceRename) {
+		return false, err
+	}
+	return createMemoryNoteInPlace(dst, f)
+}
+
+// createMemoryNoteInPlace creates dst exclusively and writes f into it. A write that fails takes the part written away
+// again: left there, it would pass for the memory's own, newer version on the next check.
+func createMemoryNoteInPlace(dst string, f memoryNote) (bool, error) {
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if os.IsExist(err) {
+	if errors.Is(err, os.ErrExist) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	_, err = out.Write(f.data)
+	mine, statErr := out.Stat()
+	_, err = memoryNoteWrite(out, f.data)
+	if err == nil {
+		err = out.Sync()
+	}
 	if cerr := out.Close(); err == nil {
 		err = cerr
 	}
+	if err == nil && !f.mod.IsZero() {
+		err = os.Chtimes(dst, f.mod, f.mod)
+	}
 	if err != nil {
+		// Unless the name holds someone else's file by now.
+		if now, lerr := os.Lstat(dst); lerr == nil && statErr == nil && os.SameFile(mine, now) {
+			os.Remove(dst)
+		}
 		return false, err
 	}
-	return true, os.Chtimes(dst, f.mod, f.mod)
+	return true, nil
 }
 
 // replaceMemoryNote puts f in the place of dst if dst is still the file that was compared: the same time and size as
@@ -581,9 +648,15 @@ func writeMemoryFile(path string, data []byte, mod time.Time) error {
 	return nil
 }
 
-// copyMemoryTree copies src's regular files to dst, keeping their times. A missing src is an empty memory.
+// copyMemoryTree copies src's regular files to dst, keeping their times. A missing src is an empty memory. A src that
+// is itself a link is followed (WalkDir does not follow its root); links inside it are not.
 func copyMemoryTree(src, dst string) error {
 	if err := os.MkdirAll(dst, 0o700); err != nil {
+		return err
+	}
+	if real, err := filepath.EvalSymlinks(src); err == nil {
+		src = real
+	} else if !os.IsNotExist(err) {
 		return err
 	}
 	err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {

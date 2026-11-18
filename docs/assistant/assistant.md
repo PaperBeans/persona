@@ -1712,7 +1712,8 @@ above), so without this each profile would keep its own.
   until it restarts. A note only a copy has is copied in with its modification time and its `MEMORY.md` line. The
   same file name with the same bytes is left. The same file name with different content keeps the one modified
   later. Notes with different names about the same matter are both kept: reconciling them is not this merge's job.
-- **Nothing is deleted.** The other copies are never written. Each run first saves the memory as it was (`before/`),
+- **Nothing is deleted.** The other copies are never written. Each run first saves the memory as it was (`before/`;
+  a memory directory that is itself a link is followed, so the backup holds its notes),
   then for each note the copy's version (`copies/<n>/`) before it is merged and the version it took the place of
   (`replaced/<n>/`), in `<data dir>/memory-merge/<encoded directory>/<UTC time>/`. The run's manifest records each note
   as soon as its merge, backups and `MEMORY.md` line are done. A note whose bytes a run has recorded is skipped, so each
@@ -1722,7 +1723,11 @@ above), so without this each profile would keep its own.
   after it and the other copies are merged meanwhile. A run interrupted part way leaves its unrecorded notes to the next.
 - **Concurrent writers**: the model writes memory with its own file tools, outside the node's lock. The merge creates a
   new note only if the name is still free, replaces a note only if it has not changed since it was compared (time, size
-  and bytes, read again just before the rename), and re-reads `MEMORY.md` just before replacing it. A `MEMORY.md` line
+  and bytes, read again just before the rename), and re-reads `MEMORY.md` just before replacing it. A new note is
+  written and synced under a temporary name first and published by a hard link, or a rename that refuses to replace
+  where there are no links, so it appears whole; a file system with neither gets it written in place, and a failed
+  write takes it away again. A note still changing after three attempts is recorded as the memory's only if the
+  memory holds a version not older than the copy's; if not, it is left for the next check. A `MEMORY.md` line
   belongs to the note its link points to (the whole file name), not to a note its description mentions.
 - **Telling the user** (`assistant/memory_merge.go`): every ten minutes the manager asks the node for its runs
   (`assistant.memory`, op `merges`). For a run it has not told about (`persona_settings` key `assistant.memory_merge`, the

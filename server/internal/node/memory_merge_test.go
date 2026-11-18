@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -726,5 +727,126 @@ func TestMemoryIndexMatchesTheLinkTarget(t *testing.T) {
 	}
 	if got := readNote(t, n.shared, memoryIndexName); got != "- [Tea](tea.md) — goes with (coffee.md)\n" {
 		t.Errorf("index after deleting coffee.md: %q", got)
+	}
+}
+
+// A note the model keeps rewriting through every attempt, and that is gone when the attempts run out, was not merged:
+// it is not recorded as kept in the memory, and a later check brings it in.
+func TestMemoryMergeGivesUpUnrecordedWhenTheNoteIsGone(t *testing.T) {
+	n := newOneMemoryNode(t)
+	old := time.Now().Add(-72 * time.Hour).Truncate(time.Second)
+	writeNote(t, n.shared, "x.md", "the memory's\n", old)
+	writeNote(t, n.private, "x.md", "the copy's\n", old.Add(24*time.Hour))
+
+	races := 0
+	memoryMergeRace = func(dst string) {
+		races++
+		if races < 3 { // rewritten by the model, still older than the copy's
+			writeNote(t, filepath.Dir(dst), filepath.Base(dst), strings.Repeat("rewritten\n", races), old)
+			return
+		}
+		os.Remove(dst) // and removed at the last attempt
+	}
+	t.Cleanup(func() { memoryMergeRace = nil })
+	n.memoryForUse(n.cwd)
+	if races != 3 || !noteMissing(n.shared, "x.md") {
+		t.Fatalf("races %d, x.md missing %v", races, noteMissing(n.shared, "x.md"))
+	}
+	for _, run := range mergeRunDirs(t, n) {
+		if manifest := readNote(t, run, "manifest.json"); strings.Contains(manifest, `"x.md"`) {
+			t.Fatalf("x.md recorded as merged:\n%s", manifest)
+		}
+	}
+
+	memoryMergeRace = nil
+	retryMemoryMergeNow(n)
+	n.memoryForUse(n.cwd)
+	if got := readNote(t, n.shared, "x.md"); got != "the copy's\n" {
+		t.Fatalf("x.md = %q after the retry", got)
+	}
+}
+
+// On a file system without hard links, a new note is published whole by a rename that refuses to replace; where that
+// is missing too, a write that fails leaves no part of the note, which a later check would take for the memory's own.
+func TestMemoryNoteWithoutLinksIsWholeOrAbsent(t *testing.T) {
+	dir := t.TempDir()
+	mod := time.Now().Add(-time.Hour).Truncate(time.Second)
+	note := memoryNote{name: "a.md", data: []byte(strings.Repeat("a line of the note\n", 100)), mod: mod}
+	memoryLink = func(string, string) error { return &os.LinkError{Op: "link", Err: syscall.ENOTSUP} }
+	t.Cleanup(func() {
+		memoryLink, memoryRenameNoReplace, memoryNoteWrite = os.Link, renameNoReplace, (*os.File).Write
+	})
+	noTemp := func() {
+		t.Helper()
+		if left, _ := filepath.Glob(filepath.Join(dir, ".merge-*")); len(left) != 0 {
+			t.Fatalf("temporary files left behind: %v", left)
+		}
+	}
+
+	// No hard links: the rename that refuses to replace (stood in for, so the test runs on every system).
+	memoryRenameNoReplace = func(from, to string) error {
+		if _, err := os.Lstat(to); err == nil {
+			return &os.LinkError{Op: "rename", Old: from, New: to, Err: os.ErrExist}
+		}
+		return os.Rename(from, to)
+	}
+	if made, err := createMemoryNote(filepath.Join(dir, "a.md"), note); err != nil || !made || readNote(t, dir, "a.md") != string(note.data) {
+		t.Fatalf("rename: %v %v", made, err)
+	}
+	if made, err := createMemoryNote(filepath.Join(dir, "a.md"), memoryNote{name: "a.md", data: []byte("other\n"), mod: mod}); err != nil || made {
+		t.Fatalf("created over an existing note: %v %v", made, err)
+	}
+	noTemp()
+
+	// Neither: written in place, and a write that fails midway leaves nothing.
+	memoryRenameNoReplace = func(string, string) error { return errNoReplaceRename }
+	memoryNoteWrite = func(f *os.File, b []byte) (int, error) {
+		n, _ := f.Write(b[:len(b)/2])
+		return n, syscall.ENOSPC
+	}
+	note.name = "b.md"
+	if made, err := createMemoryNote(filepath.Join(dir, "b.md"), note); err == nil || made {
+		t.Fatalf("a failed write reported %v %v", made, err)
+	}
+	if !noteMissing(dir, "b.md") {
+		t.Fatalf("a part of the note was left: %q", readNote(t, dir, "b.md"))
+	}
+	noTemp()
+	memoryNoteWrite = (*os.File).Write
+	if made, err := createMemoryNote(filepath.Join(dir, "b.md"), note); err != nil || !made || readNote(t, dir, "b.md") != string(note.data) {
+		t.Fatalf("in place: %v %v", made, err)
+	}
+	if info, err := os.Stat(filepath.Join(dir, "b.md")); err != nil || !info.ModTime().Equal(mod) {
+		t.Fatalf("b.md time %v %v", info, err)
+	}
+	noTemp()
+}
+
+// A memory directory that is itself a link (kept in another folder) is backed up whole before a merge changes it.
+func TestMemoryMergeBacksUpAMemoryThatIsALink(t *testing.T) {
+	n := newOneMemoryNode(t)
+	old := time.Now().Add(-72 * time.Hour).Truncate(time.Second)
+	elsewhere := filepath.Join(t.TempDir(), "memory")
+	writeNote(t, elsewhere, "x.md", "the memory's original\n", old)
+	writeNote(t, elsewhere, "keep.md", "kept\n", old)
+	if err := os.MkdirAll(filepath.Dir(n.shared), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, n.shared); err != nil {
+		t.Skip("no symlinks here")
+	}
+	writeNote(t, n.private, "x.md", "the copy's\n", old.Add(24*time.Hour))
+
+	n.memoryForUse(n.cwd)
+	if got := readNote(t, elsewhere, "x.md"); got != "the copy's\n" {
+		t.Fatalf("x.md = %q", got)
+	}
+	runs := mergeRunDirs(t, n)
+	if len(runs) != 1 {
+		t.Fatalf("runs %v", runs)
+	}
+	before := filepath.Join(runs[0], "before")
+	if noteMissing(before, "x.md") || noteMissing(before, "keep.md") || readNote(t, before, "x.md") != "the memory's original\n" || readNote(t, before, "keep.md") != "kept\n" {
+		t.Fatalf("before/ holds %v", dirState(t, before))
 	}
 }
