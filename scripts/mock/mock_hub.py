@@ -11526,6 +11526,9 @@ PREFS_FAIL = [os.environ.get("MOCK_PREFS_FAIL") == "1"]  # Settings › Notifica
 RESOLVED = []  # resolve calls, newest last (GET /mock/resolved)
 RESOLVE_MODE = [os.environ.get("MOCK_RESOLVE", "ok")]  # how answers to cards go: ok | slow | fail (MOCK_RESOLVE, /mock/resolve-mode)
 DEVICES = []  # POST /api/v1/devices, newest last (GET /mock/devices): each one's id, kind and push `features` (#2433)
+# GET /mock/devices/retire?on=1: the hub retired this device's push registration (#9611): its prefs writes answer 409
+# push_registration_required until the app registers again (POST /api/v1/devices), as the hub does (#9612).
+PUSH_RETIRED = [False]
 # The last client_hello's features, platform and version, and the X-Persona-Client of the last GET /api/v1/interactions
 # (GET /mock/hello): the hub lists MCP elicitation cards in REST answers only when the two match (docs/protocol/protocol.md
 # "MCP elicitation").
@@ -26344,6 +26347,9 @@ class H(BaseHTTPRequestHandler):
             return self.send_json({"mode": RESOLVE_MODE[0]})
         if p == "/mock/screen-steps": return self.send_json(mock_screen_steps(q))
         if p == "/mock/devices": return self.send_json({"devices": DEVICES})
+        if p == "/mock/devices/retire":
+            PUSH_RETIRED[0] = q.get("on", ["1"])[0] == "1"
+            return self.send_json({"retired": PUSH_RETIRED[0]})
         if p == "/mock/desktops": return self.send_json(desktops_state())
         if p == "/mock/hello": return self.send_json(HELLO)
         if p == "/mock/phone":
@@ -27253,6 +27259,7 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/v1/devices":  # a push registration: kept without its token, key or grant
             d = json.loads(self.last_body or b"{}")
             DEVICES.append({k: d.get(k) for k in ("device_id", "kind", "features")})
+            PUSH_RETIRED[0] = False
             return self.send_json({"ok": True, "push": {"route": "relay"}})
         if p == "/mock/frames":
             run = json.loads(self.last_body or b"{}")
@@ -28835,6 +28842,9 @@ class H(BaseHTTPRequestHandler):
             LN["on"] = json.loads(self.last_body or b"{}").get("enabled") is True
             return self.send_json({"enabled": LN["on"]})
         if p.startswith("/api/v1/devices/") and p.endswith("/prefs"):  # Settings › Notifications
+            if PUSH_RETIRED[0]:
+                return self.send_json({"error": "mock: register this device for notifications again",
+                                       "code": "push_registration_required"}, 409)
             body = json.loads(self.last_body or b"{}")
             PREFS.update({k: v for k, v in body.items() if k in ("input", "done", "live_activity", "lock_details")})
             if isinstance(body.get("muted_managers"), list):  # 设置 › 管理者 › 推送通知
