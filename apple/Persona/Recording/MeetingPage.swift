@@ -769,7 +769,7 @@ struct MeetingPage: View {
     private func voiceStart(_ key: SessionKey?, entry: RecordingEntry) -> (() -> Void)? {
         guard let key, capture.state == .idle, conversation.followupHold(entry) == nil,
               VoiceSupport.shared.availability(for: model.session(key), group: key.group).isAvailable else { return nil }
-        return { voiceNote = VoiceEntry.start(key, model: model) }
+        return { voiceNote = VoiceEntry.start(key, model: model) { voiceNote = $0 } }
     }
 
     /// The card's one-line form: where the minutes are (when the meeting ran, before the hub says), and Open as an icon.

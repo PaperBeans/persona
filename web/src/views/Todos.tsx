@@ -79,6 +79,8 @@ import { directionTitle, groupsByDirection, useDirectionTree, type Direction } f
 import { DirectionCountsText } from "./DirectionMarks";
 import { FOLDED_SECTIONS, TRIAGE_SECTIONS, checksAsOpen, countsAsOpen, lastActivity, openMergePRs, supersededFailedStarts, triage, triageTodos, type TriageGroup, type TriageResult, type TriageSection } from "../lib/todo-triage";
 import { orderWaitGroups } from "../lib/task-wait";
+import { viewDrawOn } from "../features/todos/model/view-gates";
+import { drawnFromView, openAsDrawn } from "../features/todos/model/view-triage";
 import {
   TODO_LIST_FILTERS,
   TODO_LIST_SORTS,
@@ -298,14 +300,25 @@ export function TodosView({
   // a search and the filter narrow the to-dos first; the sections (or the folders) place what is left
   const filterTodo = (t: Todo) => matchesSearch(t) && inFilter(t);
 
+  // Developing Persona's view switch (docs/web/web.md "Developing Persona"): the sections from the hub's view, a row
+  // without one placed as before
+  const features = useStore((s) => s.features);
+  const fromView = useMemo(() => viewDrawOn(features), [features]);
   const triaged = useMemo(
-    () => orderWaitGroups(triageTodos(todos.filter(filterTodo), lookup, Date.now(), restored, { superseded }), Date.now()),
-    [todos, lookup, restored, search, listFilter, superseded, tick],
+    () => {
+      const r = orderWaitGroups(triageTodos(todos.filter(filterTodo), lookup, Date.now(), restored, { superseded }), Date.now());
+      return fromView ? drawnFromView(r, Date.now()) : r;
+    },
+    [todos, lookup, restored, search, listFilter, superseded, tick, fromView],
   );
   // the header's counts: what the filter shows, whatever is searched
   const triageAll = useMemo(
-    () => (search.trim() ? orderWaitGroups(triageTodos(todos.filter(inFilter), lookup, Date.now(), restored, { superseded }), Date.now()) : triaged),
-    [todos, lookup, restored, search, listFilter, superseded, triaged, tick],
+    () => {
+      if (!search.trim()) return triaged;
+      const r = orderWaitGroups(triageTodos(todos.filter(inFilter), lookup, Date.now(), restored, { superseded }), Date.now());
+      return fromView ? drawnFromView(r, Date.now()) : r;
+    },
+    [todos, lookup, restored, search, listFilter, superseded, triaged, tick, fromView],
   );
   // Where the status sections place each to-do the search and the filter leave: its row's section (a merged row takes
   // its most urgent member's), and whether it counts as open (countsAsOpen, the sidebar badge's rule, its own reading).
@@ -318,10 +331,10 @@ export function TodosView({
       for (const g of triaged.sections[sec])
         for (const m of g.members) {
           row.set(m.id, sec);
-          if (countsAsOpen(m, g.triage.get(m.id)!)) open.add(m.id);
+          if ((fromView ? openAsDrawn : countsAsOpen)(m, g.triage.get(m.id)!)) open.add(m.id);
         }
     return { row, open };
-  }, [triaged]);
+  }, [triaged, fromView]);
   const filteredUncompleted = useSteady(
     useMemo(() => sortTodos(todos.filter((td) => placed.row.has(td.id) && placed.row.get(td.id) !== "done"), lookup), [todos, placed, lookup]),
     sameList,
@@ -842,7 +855,7 @@ export function TodosView({
               )
             ) : (
               byStatus ? (
-              <div className="flex flex-col gap-1" data-testid="todos-sections">
+              <div className="flex flex-col gap-1" data-testid="todos-sections" data-todo-source={fromView ? "view" : undefined}>
                 {hiddenWaitingCount > 0 && <HiddenWaitingLine count={hiddenWaitingCount} filter={listFilter} onShowAll={() => chooseFilter("all")} />}
                 {TRIAGE_SECTIONS.map((sec) =>
                   triaged.sections[sec].length === 0 ? null : (

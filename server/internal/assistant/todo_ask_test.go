@@ -206,14 +206,14 @@ func TestDirectCompletionEndsDecisionWithoutSending(t *testing.T) {
 				if todoNow(e.s, todo.ID).DoneAt == nil {
 					t.Fatal("agent activity reopened the user-completed task")
 				}
-				e.s.closeDoneTaskAgents(ctx, taskCloseRefused{})
+				e.s.closeDoneTaskAgents(ctx, taskCloseRefused{}, doneSeen{})
 				if len(e.f.retires()) != 0 {
 					t.Fatal("completion bypassed the idle grace period")
 				}
 				old := taskCloseIdle
 				taskCloseIdle = 0
 				t.Cleanup(func() { taskCloseIdle = old })
-				e.s.closeDoneTaskAgents(ctx, taskCloseRefused{})
+				e.s.closeDoneTaskAgents(ctx, taskCloseRefused{}, doneSeen{})
 				if got := e.f.retires(); len(got) != map[bool]int{true: 0, false: 1}[tc.closed] {
 					t.Fatalf("idle cleanup: %v", got)
 				}

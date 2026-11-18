@@ -374,6 +374,9 @@ export interface Session {
   /** In a Persona chat, the last this many of `queued` came from other conversations: the assistant delivers them when
    *  the turn ends, and the strip's actions leave them alone (#4342). */
   queued_relayed?: number;
+  /** In a Persona chat, the owner's messages that could not go in and that the assistant keeps and sends again by
+   *  itself, oldest first (#10194, lib/undelivered.ts). Drawn as the owner's bubbles marked not delivered. */
+  undelivered?: UndeliveredMessage[];
   subagents?: Subagent[];
   loop?: LoopInfo;
   /** The goal it works toward until it holds (Claude Code's /goal, a Codex thread goal; docs/integrations/agent-goal.md). */
@@ -1012,4 +1015,19 @@ export interface LiveEvent {
   machine_id: string;
   session_id: string;
   live?: SessionLive | null;
+}
+
+/** One of Session.undelivered: an owner's message kept after it could not go in (proto.UndeliveredMessage). */
+export interface UndeliveredMessage {
+  /** Its client_msg_id. */
+  id: string;
+  text: string;
+  /** How many pictures it carries. */
+  images?: number;
+  at: string;
+  /** waiting: sent again by itself; failed: it gave up (Retry / Delete). */
+  state: "waiting" | "failed";
+  attempts?: number;
+  next_at?: string;
+  error?: string;
 }

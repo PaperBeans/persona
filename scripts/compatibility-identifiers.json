@@ -320,6 +320,14 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "desktop/test/page-routes.test.ts": {
+      "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
+      "tokens": [
+        "jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "docs/assistant/assistant.md": {
       "reason": "Published compatibility documentation naming exact historical MCP tool and settings aliases.",
       "tokens": [

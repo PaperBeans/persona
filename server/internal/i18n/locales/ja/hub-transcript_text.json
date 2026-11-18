@@ -6,6 +6,7 @@
   "schedule_fired": "スケジュール実行が始まりました",
   "schedule_fired_what": "スケジュール実行が始まりました：{what}",
   "codex_extension": "Codex拡張イベント：{kind}（完全な記録は元のセッションにあります）",
+  "codex_heartbeat_quiet": "ハートビートチェックが完了しました。新着情報はありません",
   "codex_event": "Codexイベント：{type}（完全な記録は元のセッションにあります）",
   "shell_completed": "バックグラウンドコマンド完了",
   "shell_failed": "バックグラウンドコマンド失敗",

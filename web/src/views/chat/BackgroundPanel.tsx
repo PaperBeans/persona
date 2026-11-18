@@ -155,15 +155,25 @@ export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; si
   );
 }
 
-function BackgroundList({ session, mid, sid, onOpenRun, onOpenTask }: { session: Session | undefined; mid: string; sid: string; onOpenRun: (task: string) => void; onOpenTask: (task: BackgroundTask) => void }) {
+export function BackgroundList({ session, mid, sid, onOpenRun, onOpenTask, inOverview }: {
+  session: Session | undefined;
+  mid: string;
+  sid: string;
+  onOpenRun: (task: string) => void;
+  onOpenTask: (task: BackgroundTask) => void;
+  inOverview?: boolean;
+}) {
   const owner = credentialOwner();
   // an ended run leaves the list a day after it ended (recentWorkflows): the list's clock moves while something runs
   const busy = Boolean(session?.loop) || (session?.background?.length ?? 0) > 0 || (session?.workflows ?? []).some((w) => w.running);
   const now = useNow(60_000, busy);
-  const { loop, running, tasks, completed } = backgroundSections(session, now);
+  const { loop, running, tasks: allTasks, completed } = backgroundSections(session, now);
+  const subagentIds = inOverview ? new Set(session?.subagents?.map((agent) => agent.id)) : undefined;
+  const tasks = subagentIds ? allTasks.filter((task) => task.kind !== "agent" || !subagentIds.has(task.id)) : allTasks;
   const runningId = useId();
   const completedId = useId();
   if (!loop && !running.length && !tasks.length && !completed.length) {
+    if (inOverview) return null;
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center" data-background-empty>
         <Icon name="list" size={20} className="text-ink-3" />
@@ -172,7 +182,8 @@ function BackgroundList({ session, mid, sid, onOpenRun, onOpenTask }: { session:
     );
   }
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2" data-background-list>
+    <div className={inOverview ? "pb-2" : "min-h-0 flex-1 overflow-y-auto px-1 pb-2"} data-background-list>
+      {inOverview && <h3 className="px-2 pt-3 text-xs font-semibold text-ink-2">{t("sidepanel.background")}</h3>}
       {(loop || running.length > 0 || tasks.length > 0) && (
         <section aria-labelledby={runningId} data-background-section="running">
           <SectionHeader id={runningId} label={t("chat-activity.section_running")} />

@@ -1483,7 +1483,7 @@ extension View {
     /// so the list adds no inset above and below it on top (77.7 pt rows instead of the 52.3 pt the other styles have).
     /// Apply it to the rows (a `Group` of them), not the `Section`: on the section it takes the header's padding too, and
     /// not on a row inside a `NavigationLink`'s label (it does not reach the list there). Other styles keep the list's insets.
-    func bareListRow() -> some View { listRowInsets(.vertical, AppStyle.current.usesBeautifulUI ? 0 : nil) }
+    func bareListRow() -> some View { listRowVerticalInsets(AppStyle.current.usesBeautifulUI ? 0 : nil) }
 
     /// A row of Settings' list that opens `value`: on the Mac it stays selected while that page is open beside the list
     /// (`MacSettingsRowSelection`, #2318). Nothing elsewhere.

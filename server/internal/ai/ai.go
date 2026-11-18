@@ -35,10 +35,11 @@ var errNotConfigured = errors.New("还没有能直接调用的模型：在 设�
 func IsNotConfigured(err error) bool { return errors.Is(err, errNotConfigured) }
 
 type Client struct {
-	cfg     Config
-	http    *http.Client
-	resolve func(context.Context) (*Client, error)
-	run     func(context.Context, Request) (Reply, error)
+	cfg      Config
+	http     *http.Client
+	resolve  func(context.Context) (*Client, error)
+	run      func(context.Context, Request) (Reply, error)
+	onResult func(Reply, error)
 }
 
 // NewResolved resolves the execution configuration at the start of every request.
@@ -48,6 +49,13 @@ func NewResolved(resolve func(context.Context) (*Client, error)) *Client {
 
 // Config returns the immutable connection configuration, never an API response.
 func (c *Client) Config() Config { return c.cfg }
+
+// WithResult returns a client that reports each completed Chat call.
+func (c *Client) WithResult(report func(Reply, error)) *Client {
+	copied := *c
+	copied.onResult = report
+	return &copied
+}
 
 func New(cfg Config) *Client {
 	return NewWith(cfg, nil)
@@ -151,19 +159,7 @@ type Request struct {
 	BoundOutput bool
 }
 
-// Usage is what one request spent, as the upstream counted it (zero where it did not say).
-type Usage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-}
-
-// Add is u and v together (a call made of several requests).
-func (u Usage) Add(v Usage) Usage {
-	return Usage{InputTokens: u.InputTokens + v.InputTokens, OutputTokens: u.OutputTokens + v.OutputTokens,
-		CacheReadInputTokens: u.CacheReadInputTokens + v.CacheReadInputTokens, CacheCreationInputTokens: u.CacheCreationInputTokens + v.CacheCreationInputTokens}
-}
+type Usage = aiwire.Usage
 
 // Reply is the model's answer: its text, whether it stopped at MaxTokens, the model the upstream says answered
 // (the one asked for when it does not say) and what it spent.
@@ -177,6 +173,14 @@ type Reply struct {
 // Chat sends a conversation and returns the reply. A context with a deadline bounds the request by it instead of the
 // client's 60 seconds (a long answer).
 func (c *Client) Chat(ctx context.Context, r Request) (Reply, error) {
+	reply, err := c.chat(ctx, r)
+	if c.onResult != nil {
+		c.onResult(reply, err)
+	}
+	return reply, err
+}
+
+func (c *Client) chat(ctx context.Context, r Request) (Reply, error) {
 	if c.resolve != nil {
 		resolved, err := c.resolve(ctx)
 		if err != nil {

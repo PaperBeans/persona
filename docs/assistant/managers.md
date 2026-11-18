@@ -14,9 +14,19 @@ The document uses Settings CAS and a revision; at most 200 active records contai
 instance, full namespace path, canonical URL, optional name/aliases/purpose and `verified_at`. No credentials,
 computer or checkout are stored. HTTP(S), `git@host:path.git` and `ssh://git@host/path.git` normalize to the same
 identity. GitHub Enterprise and self-hosted GitLab require an explicit provider; nested GitLab groups are preserved.
+A provider extension (#10330, `docs/extensions/repository-providers.md`) is the source of the hosts it claims: an
+address on one of them with no provider chosen goes to it (`repo.parse`, then `repo.check` when saving), its provider
+is `ext:<extension>/<contribution>`, and its name is kept as `provider_name`. An explicit `github` / `gitlab` still wins.
+While that extension is off or gone, its saved references still list, edit (name, aliases, purpose) and bind to
+to-dos; only adding one, changing its address or checking it fails (`repository_provider_off` /
+`repository_no_provider`). Right after a restart, a save that needs a provider waits for the extensions within its
+eight-second budget and, if they are still starting, answers `repository_providers_starting` (409), never
+`repository_no_provider`.
 
-The web form parses locally on every URL/provider change and immediately shows the provider, full repository path,
-canonical web root and an explicit not-yet-checked state. No preview button or remote request is needed. The server
+The web form parses GitHub and GitLab addresses locally on every URL/provider change and immediately shows the
+provider, full repository path, canonical web root and an explicit not-yet-checked state; no remote request is needed
+for them. An address on a provider extension's host, or with one picked, is read through `/preview` before Save is
+enabled; the page lists the sources only once such an extension or a saved row of one exists. The server
 reparses on preview and save; both parsers share `spec/fixtures/repository-remotes.json`. GitHub repository pages
 (such as `/pull/5581`) and GitLab's `/-/` project pages discard their page suffix, ordinary query and fragment.
 GitLab paths without `/-/` keep every namespace segment; ambiguous old page URLs are not guessed by taking two
@@ -45,7 +55,8 @@ The shared server routes serve every caller; repository binding UI currently exi
 Android. Browser fixtures cover synthetic saves, while Go route and isolated database tests cover persistence.
 
 The manager-owned `/api/v1/assistant/repositories` routes list/create; `/{id}` reads/updates/unbinds;
-`/preview` parses without contacting a remote. Mutations require full access. `/{id}/restore` accepts the unbind
+`/preview` parses without contacting a remote (a provider extension's address is read by that extension, answering
+`provider_name` beside the identity); `GET /providers` lists the sources (`docs/protocol/protocol.md`). Mutations require full access. `/{id}/restore` accepts the unbind
 receipt once within ten minutes and restores the original ID and verification evidence, without a new probe.
 The latest 20 removed references are retained for undo. A failed persistence acknowledgement is not success.
 
@@ -84,7 +95,8 @@ manager selector or fetches source. Their descriptions and the existing `task_pl
 resolution: explicit user URLs/paths win, references grant no authorization, and machine/cwd must never be inferred.
 There is no forced lookup preflight, injected list, new prompt or launcher-dependent behavior.
 
-Assistant-only MCP `repository_add(url, provider?, name?, aliases?, purpose?)` adds a reference through the same
+Assistant-only MCP `repository_add(url, provider?, name?, aliases?, purpose?)` (an address on a provider extension's
+host needs no provider) adds a reference through the same
 `saveRepository` service, including normalization, anonymous existence checks, uniqueness, limits and CAS. The
 permission card shows the canonical repository URL and proposed details; only the user's own approval saves it.
 It neither clones nor grants access. The saved ID and verification time are returned and immediately visible to

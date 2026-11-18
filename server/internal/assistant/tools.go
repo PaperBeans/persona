@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/compat"
@@ -448,6 +449,9 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			}
 			err = s.call(lctx, am.ID, DeviceSessionSend, params, &sent)
 			note.sent(lctx, err) // an unknown answer counts for the agent's next turn: it may still arrive
+			if err == nil {
+				s.progressMade(am.ID, c.SessionID, time.Now()) // the supervisor told it something: a new stretch (supervise_progress.go)
+			}
 			if err != nil {
 				if note.reopens() && sendUnknown(err) {
 					// Its own wait ran out, or the link dropped, while the node may still type it in: the model reads
@@ -617,7 +621,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		// The tab is named from the prompt as written; the agent gets its project's background before it (#2820).
 		params := map[string]any{"cwd": a.Cwd, "launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "tab_name": s.tabName(sctx, a.Prompt)}
 		prompt := s.withCloseoutBrief(sctx, a.Prompt, false)
-		params["prompt"] = s.withProjectContext(sctx, am.ID, a.Cwd, prompt)
+		params["prompt"] = s.withProjectContext(sctx, am.ID, a.Cwd, self, prompt)
 		if a.Ultracode {
 			params["ultracode"] = true
 		}
@@ -1240,8 +1244,9 @@ func (s *Service) describeAgents(ctx context.Context, state, machine, query stri
 			session = ix.FoldedUnder
 		}
 		k := [2]string{ix.MachineID, session}
-		what += " (interaction_id=" + ix.ID + ")"
-		pending[k] = append(pending[k], clip(what, 400))
+		// The id goes after the clip: a long request must not cut it off, or interaction_answer has nothing to answer.
+		id := " (interaction_id=" + ix.ID + ")"
+		pending[k] = append(pending[k], clip(what, max(400-utf8.RuneCountInString(id), 1))+id)
 	}
 	type row struct {
 		m Device

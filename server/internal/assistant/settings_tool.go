@@ -174,6 +174,14 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "the whole list of leader conversation ids (conversations_list), [] for none"},
 			get: s.getLeaders,
 			set: s.setLeaders},
+		{Setting: Setting{Key: "assistant.briefing_waits", Title: "Briefing wait rows", Actions: getSet,
+			About: "thresholds for the deterministic per-direction wait rows in morning/evening facts. Defaults come from the existing " +
+				"supervision floors: stalled_minutes=20 (superviseStallMin), silent_minutes=120 (superviseSilentMin), " +
+				"orphan_minutes=10 (orphanOfflineAfter), card_minutes=3 (superviseNeedsAfter); max_rows=15 bounds only non-owner " +
+				"rows per direction, and every owner-wait row is kept. These values do not change supervision notifications",
+			Value: "the whole object {stalled_minutes, silent_minutes, orphan_minutes, card_minutes, max_rows}; minutes 1–10080, max_rows 1–100; null restores the defaults"},
+			get: s.getBriefingWaits,
+			set: s.setBriefingWaits},
 		{Setting: Setting{Key: "assistant.interject_background", Title: "Move running work to the background when I interject", Actions: getSet,
 			About: "off (the default): a message the user sends while a Claude conversation is still answering waits until the command " +
 				"or subagent running in the foreground ends; on: that work moves to the background (it goes on and reports when done) " +
@@ -204,6 +212,17 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.agentTasks(ctx)), nil },
 			set: s.setAgentTasks},
+		{Setting: Setting{Key: "assistant.close_ended_terminals", Title: "Close an Agent's terminal when it ends", Actions: getSet,
+			About: "off (the default): an Agent's terminal tab stays open after it stops, with the shell it ran in, until the user " +
+				"closes it. on: when an Agent Persona started ends, Persona closes the tab it opened for it, the way Archive and " +
+				"close does: when its task is done or cancelled (an idle Agent), and when it quits by itself or is told to (/exit). " +
+				"Never closed: a busy Agent (working, waiting for an answer, background work, subagents or workflows running, a " +
+				"/loop, queued messages, a server it runs), one the user stopped with Stop or that was stopped for being idle, and " +
+				"terminals Persona did not open. The conversation is kept and can be resumed in a new tab. Applies from the next " +
+				"Agent that ends",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.closeEndedTerminals(ctx)), nil },
+			set: s.setCloseEndedTerminals},
 		{Setting: Setting{Key: "assistant.inbox_signals", Title: "Tell a task's supervisor about new Inbox messages on it", Actions: getSet,
 			About: "off (the default): an Inbox message the AI twin's judge links to a task only reaches the twin's handling chat " +
 				"(and a message card once it drafts a reply). on: new messages from other people linked to a supervised task also " +
@@ -405,8 +424,8 @@ var settingTitles = map[string]string{standingAuthorizationsKey: "title_standing
 	"assistant.task_workspace_preference": "title_task_workspace_preference",
 	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher",
 	"assistant.recording_days": "title_recording_days", "assistant.done_needs_delivery": "title_done_needs_delivery",
-	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders", "assistant.background_supervisor_keeps_context": "title_background_supervisor_keeps_context",
-	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "assistant.inbox_signals": "title_inbox_signals", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "model_profiles.tiers": "title_model_tiers",
+	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders", "assistant.briefing_waits": "title_briefing_waits", "assistant.background_supervisor_keeps_context": "title_background_supervisor_keeps_context",
+	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "assistant.close_ended_terminals": "title_close_ended_terminals", "assistant.inbox_signals": "title_inbox_signals", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "model_profiles.tiers": "title_model_tiers",
 	"assistant.load_all_tools":                "title_load_all_tools",
 	"assistant.meeting_transcription_default": "title_meeting_transcription_default",
 	"assistant.meeting_attendance_default":    "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",
@@ -679,6 +698,13 @@ func (s *Service) setAgentTasks(ctx context.Context, v json.RawMessage) (*ownCha
 		"assistant.agent_tasks is %v from the next start, turn end and report on (to-dos made before keep what they have).")
 }
 
+func (s *Service) setCloseEndedTerminals(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	return s.setBoolSetting(ctx, v, s.closeEndedTerminals, "assistant.close_ended_terminals is unchanged", func(l i18n.Lang, before, after string) string {
+		return i18n.T(l, "assistant-settings_tool.change_close_ended_terminals", i18n.Args{"before": before, "after": after})
+	}, func(v *Settings) **bool { return &v.CloseEndedTerminals },
+		"assistant.close_ended_terminals is %v for Agents that end from now on (terminals already left open stay).")
+}
+
 func (s *Service) setInboxSignals(ctx context.Context, v json.RawMessage) (*ownChange, error) {
 	return s.setBoolSetting(ctx, v, s.inboxSignalsOn, "assistant.inbox_signals is unchanged", func(l i18n.Lang, before, after string) string {
 		return i18n.T(l, "assistant-settings_tool.change_inbox_signals", i18n.Args{"before": before, "after": after})
@@ -743,6 +769,9 @@ func (s *Service) setLauncher(ctx context.Context, v json.RawMessage) (*ownChang
 		return nil, errors.New("value must be a launcher name")
 	}
 	name = strings.TrimSpace(name)
+	if proto.IsExternalLauncher(name) {
+		return nil, i18n.Err("external-adapter.purpose_unsupported")
+	}
 	before := s.launcherNow(ctx)
 	ls, err := s.launchers(ctx)
 	if err != nil {

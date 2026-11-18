@@ -111,6 +111,9 @@ extension Theme {
         static let permissions = "lock.shield"
         /// The two little arrows after a value that opens a menu of choices.
         static let choices = "chevron.up.chevron.down"
+        /// The small chevron after an action's words that opens a menu of how far it goes (a pull-down, as UIKit draws
+        /// one): a group title's Mark All Seen in the Inbox (#10422). A value's menu of choices is `choices`.
+        static let pullDown = expand
         static let effort = "gauge.with.dots.needle.50percent"
         /// The effort level left to the model (its own default, Thinking Effort › Auto).
         static let effortAuto = "gauge.with.dots.needle.bottom.50percent"

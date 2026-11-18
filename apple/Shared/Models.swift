@@ -1123,6 +1123,9 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     var queued: [String]?
     /// The last this many queued messages came from other conversations and arrive when this turn ends (#4342).
     var queuedRelayed: Int? = nil
+    /// In a Persona chat, the owner's messages that could not go in and that the assistant keeps and sends again by
+    /// itself, oldest first (#10194): drawn as the owner's bubbles marked not delivered, on every device.
+    var undelivered: [UndeliveredMessage]? = nil
     /// The user's own messages come first; only these can be edited, reordered, deleted or sent now.
     var ownQueuedCount: Int {
         let count = queued?.count ?? 0
@@ -1455,6 +1458,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case queuedRelayed = "queued_relayed"
+        case undelivered
         case listWaiting = "waiting", listBackgroundCount = "background_count", listRunningSubagents = "running_subagents", listRunningWorkflows = "running_workflows"
         case listBackgroundTasksCount = "background_tasks_count", listWorkflowProgress = "workflow_progress"
         case title, cwd, status, launcher, model, agent, effort, efforts, capabilities, attached
@@ -1564,6 +1568,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         stateSince = try c.decodeIfPresent(Date.self, forKey: .stateSince)
         queued = try c.decodeIfPresent([String].self, forKey: .queued)
         queuedRelayed = try c.decodeIfPresent(Int.self, forKey: .queuedRelayed)
+        undelivered = try? c.decodeIfPresent([UndeliveredMessage].self, forKey: .undelivered) // a malformed one never hides the row
         background = try c.decodeIfPresent([BackgroundTask].self, forKey: .background)
         listWaiting = try c.decodeIfPresent(Bool.self, forKey: .listWaiting)
         listBackgroundCount = try c.decodeIfPresent(Int.self, forKey: .listBackgroundCount)
@@ -1632,6 +1637,37 @@ nonisolated struct LenientText: Codable, Hashable, Sendable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
         if let value { try c.encode(value) } else { try c.encodeNil() }
+    }
+}
+
+/// One of `Session.undelivered`: the owner's message the assistant keeps after it could not go in (#10194).
+nonisolated struct UndeliveredMessage: Codable, Hashable, Sendable, Identifiable {
+    /// Its client_msg_id.
+    var id: String
+    var text: String
+    /// How many pictures it carries.
+    var images: Int? = nil
+    var at: Date
+    /// `waiting`: sent again by itself; `failed`: it gave up (Retry / Delete).
+    var state: String
+    var attempts: Int? = nil
+    var nextAt: Date? = nil
+    var error: String? = nil
+
+    var gaveUp: Bool { state == "failed" }
+
+    /// The row's kept messages to draw: not one the transcript has (`landed`: its items' client_msg_ids) nor one this
+    /// phone still draws as sending or arriving (`drawn`: those bubbles' ids), compared case-insensitively. The row can
+    /// come before the send's answer, or lag behind the transcript's line (web `shownUndelivered`).
+    static func shown(_ list: [UndeliveredMessage]?, landed: [String], drawn: [String]) -> [UndeliveredMessage] {
+        guard let list, !list.isEmpty else { return [] }
+        let skip = Set((landed + drawn).map { $0.lowercased() })
+        return list.filter { !skip.contains($0.id.lowercased()) }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, text, images, at, state, attempts, error
+        case nextAt = "next_at"
     }
 }
 

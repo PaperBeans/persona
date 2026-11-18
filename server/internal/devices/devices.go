@@ -693,8 +693,12 @@ func (d *Devices) Call(ctx context.Context, p devicewire.NodeCall) (json.RawMess
 	if p.Method == "sessions.list" {
 		snapshot = new(sessionSnapshot)
 	}
+	modeSID, modeFrom, modeTo, recordMode := m.modeSetFrom(p, params) // the record of mode changes (mode_changes.go)
 	var out json.RawMessage
 	err := m.callWithSnapshot(ctx, p.Method, params, &out, snapshot)
+	if recordMode && err == nil {
+		m.recordModeSet(p.Actor, modeSID, modeFrom, modeTo, out)
+	}
 	d.observeCreationCall(p, params, out, preparation, err)
 	d.finishShareCall(ctx, p, receipt, out, err)
 	m.noteOpened(p.Method, params, err)

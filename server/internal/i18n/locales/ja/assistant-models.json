@@ -140,5 +140,9 @@
   "err_run_no_machine": "このプロバイダーはメインチャットのコンピューターで動きますが、まだ設定されていません。設定 › アシスタントで選んでください",
   "err_run_offline": "{name} はオフラインです。この用途はそこで {launcher} を実行します。オンラインにするか、設定 › モデル構成で別のプロバイダーを選んでください",
   "err_run_logged_out": "{name} で {launcher} にログインしていません。そのコンピューターでログインするか、設定 › モデル構成で別のプロバイダーを選んでください",
-  "err_run_timeout": "{name} の {launcher} が時間内に応答しませんでした"
+  "err_run_timeout": "{name} の {launcher} が時間内に応答しませんでした",
+  "err_candidates_extension_only": "候補モデルを持てるのは拡張機能の用途だけです",
+  "err_candidates_invalid": "候補モデル：「extension」「off」「custom」のいずれかを選び、「custom」のときだけプロバイダーとモデルを重複なく並べてください",
+  "err_candidates_count": "候補モデル：1〜{most} 個並べてください",
+  "err_candidates_not_callable": "{provider} は直接呼び出せないため候補にできません。直接 API のプロバイダーか、アドレスとキーのあるプロバイダーを選んでください"
 }

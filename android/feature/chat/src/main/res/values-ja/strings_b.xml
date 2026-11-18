@@ -261,6 +261,7 @@
     <string name="chat_source_conversation">会話</string>
     <string name="chat_source_patrol">定期チェック</string>
     <string name="chat_source_followup">フォローアップ</string>
+    <string name="chat_source_scheduled_task">定期タスクから送信</string>
     <string name="chat_source_supervision">進捗確認</string>
     <string name="chat_source_unknown">送信元</string>
     <string name="chat_source_expand">もっと見る</string>

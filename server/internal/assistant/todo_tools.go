@@ -277,6 +277,9 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 	if err != nil {
 		return "", err
 	}
+	if err := s.resolveCreateBindings(ctx, bindings); err != nil { // before the store, outside todos.writing
+		return "", s.taskRepositoryToolError(ctx, err)
+	}
 	title := strings.TrimSpace(a.Title)
 	if title == "" {
 		return "", errors.New("title is required")

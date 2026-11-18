@@ -193,7 +193,7 @@ func MorePermissions(cur *Extension, m *Manifest) bool {
 		len(NewTools(was, m)) > 0 || len(newSecrets(was, m)) > 0 ||
 		slices.ContainsFunc(m.Topics(), func(t string) bool { return !slices.Contains(was.Topics(), t) }) ||
 		slices.ContainsFunc(m.Surfaces(), func(t string) bool { return !slices.Contains(was.Surfaces(), t) }) ||
-		len(newChannels(was, m)) > 0 || len(newSendsAsUser(was, m)) > 0 ||
+		len(newChannels(was, m)) > 0 || len(newSendsAsUser(was, m)) > 0 || len(newRepositoryHosts(was, m)) > 0 ||
 		slices.ContainsFunc(m.ContributesTo(), func(t string) bool { return !slices.Contains(was.ContributesTo(), t) })
 }
 
@@ -484,15 +484,33 @@ func (r *Registry) conflictsCandidates(m *Manifest, candidates []*Manifest) erro
 			}
 		}
 	}
-	// A reference names one provider by its scheme, so two installed extensions cannot both claim one.
+	errs = append(errs, claimClashes(m, owners)...)
+	return errors.Join(errs...)
+}
+
+// claimClashes are what m claims that only one installed extension may, and another of owners (installed manifests by
+// extension id) already does: a secret reference scheme (a reference names its provider by it) and a repository host
+// (an address on it goes to its provider). An extension that is off, has a problem or has the contribution switched off
+// keeps its claims. Preview, rollback and dev install ask through conflictsCandidates; validatePlan asks again when the
+// plan commits, so a claim made between the preview and the commit, or by another package of the plan, is refused too.
+func claimClashes(m *Manifest, owners map[string]*Manifest) []error {
+	ids := slices.Sorted(maps.Keys(owners))
+	var errs []error
 	for _, scheme := range m.Schemes() {
-		for otherID, other := range owners {
-			if otherID != m.ID && slices.Contains(other.Schemes(), scheme) {
+		for _, otherID := range ids {
+			if other := owners[otherID]; otherID != m.ID && other != nil && slices.Contains(other.Schemes(), scheme) {
 				errs = append(errs, fmt.Errorf("secret_providers: the scheme %q is already extension %s's", scheme, otherID))
 			}
 		}
 	}
-	return errors.Join(errs...)
+	for _, host := range m.RepositoryHosts() {
+		for _, otherID := range ids {
+			if other := owners[otherID]; otherID != m.ID && other != nil && slices.Contains(other.RepositoryHosts(), host) {
+				errs = append(errs, fmt.Errorf("repository_providers: the host %q is already extension %s's", host, otherID))
+			}
+		}
+	}
+	return errs
 }
 
 // The manifest actually read from the package overrides the planned one with the same ID; the market's description

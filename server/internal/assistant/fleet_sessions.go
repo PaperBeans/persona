@@ -392,6 +392,10 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 				list[i].Queued = append(slices.Clip(list[i].Queued), q...) // the node's slice is shared: never write into it
 				list[i].QueuedRelayed = uint16(min(len(q), math.MaxUint16))
 			}
+			if u := shown[list[i].SessionID].Undelivered; len(u) > 0 {
+				kept := slices.Clone(u) // the owner's messages that could not go in (undelivered.go, #10194)
+				list[i].Undelivered = &kept
+			}
 		}
 		list[i].SeenAt = seen[list[i].SessionID]
 		localizeSession(lang, &list[i]) // the node's Chinese activity line… (fleet_text.go)
@@ -462,6 +466,9 @@ func (s *Service) listedSession(machine, sid string) (proto.Session, bool) {
 	list, err := s.archivedListed(context.Background(), machine, s.decorateInventory(machine, []proto.Session{row}, false), mark)
 	if err != nil {
 		s.logf("load agent archives: %v", err)
+	}
+	if len(list) == 0 {
+		return proto.Session{}, false // an unreadable deletion ledger hides assistant rows rather than exposing them
 	}
 	return list[0], true
 }

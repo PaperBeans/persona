@@ -297,7 +297,7 @@
   },
   {
     "name": "schedule_followup",
-    "description": "Wake yourself up later: Persona sends `prompt` into this conversation (or a new one) as if the user wrote it, you do the work, and the user gets a push with your answer (with `push: \"asked\"`, only what you send with notify_user). `at` is RFC 3339 or relative (\"30m\", \"2h\", \"1d\"). For a recurring task pass `every` (\"30m\", \"2h\", at least 5m) once: Persona repeats it and the user sees, edits and stops it in the app; never schedule the next run from inside a run. For times an interval can't say, pass `cron` instead of `at` / `every`: a standard 5-field `minute hour day-of-month month day-of-week` in the user's time zone (`*/30 9-18 * * 1-5`, `0 10 1 * *`, or @hourly / @daily / @weekly / @monthly / @yearly; day of week 0 and 7 are Sunday; restricted day fields match either; runs at least 5 minutes apart). A bad expression is refused with the next runs listed. An `every` task can take `until` (RFC 3339 or 30m / 2h / 1d, not a bare clock time): after it Persona turns the task off and records a skipped run. A one-off ignores `until`; omit it to keep an existing end time, null clears it. The task runs on Main chat's launcher, model and effort unless overridden with `launcher`, `model` and `effort`; permission mode stays the user's choice. A follow-up continuing this conversation (`new_conversation` false) runs on that conversation's launcher, so overrides require `new_conversation: true`. `inbox` (the user's Inbox setting): pass it only when requested. With `fresh_each_run: true`, a recurring task starts a new chat on every run and carries its state note.",
+    "description": "Wake yourself up later: Persona sends `prompt` into this conversation (or a new one) as if the user wrote it, you do the work (a new hop chain, at most every 10 minutes), and the user gets a push with your answer (with `push: \"asked\"`, only what you send with notify_user). `at` is RFC 3339 or relative (\"30m\", \"2h\", \"1d\"). For a recurring task pass `every` (\"30m\", \"2h\", at least 5m) once: Persona repeats it; the user edits or stops it in the app; never schedule the next run from inside a run. Otherwise pass `cron` instead of `at` / `every`: a standard 5-field `minute hour day-of-month month day-of-week` in the user's time zone (`*/30 9-18 * * 1-5`, `0 10 1 * *`, or @hourly / @daily / @weekly / @monthly / @yearly; day of week 0 and 7 are Sunday; restricted day fields match either; runs at least 5 minutes apart). A bad expression is refused with the next runs listed. An `every` task can take `until` (RFC 3339 or 30m / 2h / 1d, not a bare clock time): after it the task turns off and records a skipped run. A one-off ignores `until`; omit it to keep an existing end time, null clears it. The task runs on Main chat's launcher, model and effort unless overridden with `launcher`, `model` and `effort`; permission mode stays the user's choice. A follow-up continuing this conversation (`new_conversation` false) runs on that conversation's launcher, so overrides require `new_conversation: true`. Pass `inbox` (the user's Inbox setting) only when requested. With `fresh_each_run: true`, a recurring task starts a new chat on every run and carries its state note.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1952,7 +1952,7 @@
   },
   {
     "name": "repository_add",
-    "description": "Add a saved repository reference to the current assistant when the user asks. Accepts the same GitHub/GitLab URLs and metadata as Settings \u003e Repositories, checks existence through the existing guarded metadata service, and refuses duplicates or concurrent changes. Shows the normalized repository and details in a permission card; only the user's own approval saves it. Returns the saved binding with id and verified_at. This is a reference, not authorization or an allowlist: it does not clone, fetch source, grant permissions, or establish a machine or local checkout. Credentials in URLs are refused. If the response is lost or saving is uncertain, use repositories_list/repository_get before retrying. Remove the reference in Settings \u003e Repositories to reverse the addition.",
+    "description": "Add a saved repository reference to the current assistant when the user asks. Accepts the same URLs and metadata as Settings \u003e Repositories, checks existence through the repository's provider, and refuses duplicates or concurrent changes. Shows the normalized repository and details in a permission card; only the user's own approval saves it. Returns the saved binding with id and verified_at. This is a reference, not authorization or an allowlist: it does not clone, fetch source, grant permissions, or establish a machine or local checkout. Credentials in URLs are refused. If the response is lost or saving is uncertain, use repositories_list/repository_get before retrying. Remove the reference in Settings \u003e Repositories to reverse the addition.",
     "input_schema": {
       "type": "object",
       "additionalProperties": false,
@@ -1964,7 +1964,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2048,
-          "description": "GitHub or GitLab repository URL, repository page, or git SSH remote without credentials."
+          "description": "Repository URL, repository page, or git SSH remote without credentials."
         },
         "provider": {
           "type": "string",
@@ -1972,7 +1972,7 @@
             "github",
             "gitlab"
           ],
-          "description": "Required for a self-hosted instance; public GitHub/GitLab is detected from its host."
+          "description": "Required for a self-hosted GitHub/GitLab; other providers are detected from the host."
         },
         "name": {
           "type": "string",
@@ -2099,18 +2099,21 @@
   },
   {
     "name": "conversation_rename",
-    "description": "Rename a Persona conversation. Titles read 「MMDD | 类型 | 主题」: give `kind` and `topic` and the hub puts the day the conversation started in front. A title the user gave stays: renaming one fails unless the user asked for this rename in so many words (then pass `user_asked`). The main conversation has no title to change.",
+    "description": "Rename: direction name via main-only direction_name (no date/kind); ordinary kind/topic becomes MMDD | kind | topic using its start date. User-chosen names/titles require user_asked. Main has no title.",
     "input_schema": {
       "type": "object",
       "required": [
-        "id",
-        "kind",
-        "topic"
+        "id"
       ],
       "properties": {
         "id": {
           "type": "string",
-          "description": "full id or its first 8 characters; this conversation's own id renames it"
+          "description": "conversation id or first 8 characters"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "direction: plain project-supervisor name"
         },
         "kind": {
           "type": "string",
@@ -2125,15 +2128,16 @@
             "研究",
             "评审",
             "定时"
-          ]
+          ],
+          "description": "ordinary conversation kind"
         },
         "topic": {
           "type": "string",
-          "description": "what it is about, at most 14 characters"
+          "description": "ordinary topic, at most 14 characters"
         },
         "user_asked": {
           "type": "boolean",
-          "description": "the user asked for this rename; needed to replace a title they gave"
+          "description": "explicit user request to replace their title/name"
         }
       }
     }
@@ -2223,7 +2227,7 @@
   },
   {
     "name": "conversation_send",
-    "description": "Send a message to another Persona conversation. It waits for a running turn, or 2 minutes of user quiet; the result says which. Marked as from this one; replies use conversation_send. At most a few requests per user message and a few messages per pair per ten minutes; a first reply to a request adds no hop. Do not reply just to acknowledge. Policy refusals say why: follow them, do not retry. Owner-verbatim words to main stay allowed: start with them. Handing on a user request: set quote.",
+    "description": "Message another conversation. It waits for a running turn or 2 min of user quiet. Marked as from this one; replies use conversation_send. Few hops per user message (main: no cap; a wake-up resets; a first reply adds none); long back-and-forth is cut. Past the rate it queues: the result says when, no resend. Don't reply just to acknowledge. Follow policy refusals; don't retry. Owner-verbatim words to main stay allowed: start with them. Handing on a user request: set quote (free once).",
     "input_schema": {
       "type": "object",
       "required": [

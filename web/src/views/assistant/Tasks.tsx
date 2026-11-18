@@ -27,6 +27,7 @@ import {
   startFailure,
   startInFlight,
   setRoute,
+  askRow,
   startPlan,
   todayFailedRow,
   useFeed,
@@ -921,8 +922,23 @@ function NeedsYouRow({ item, open, onToggle }: { item: NeedsYouItem; open: boole
   const ref = useRef<HTMLDivElement>(null);
   const opened = useRef(open);
   useEffect(() => {
-    if (open && !opened.current) ref.current?.scrollIntoView?.({ block: "nearest" });
+    const row = ref.current;
+    const first = open && !opened.current;
     opened.current = open;
+    if (!first || !row) return;
+    // A card taller than the list shows its top: "nearest" would leave its question and buttons below the fold.
+    const reveal = () => {
+      const list = row.closest("[data-tray-list]");
+      row.scrollIntoView?.({ block: list && row.offsetHeight > list.clientHeight ? "start" : "nearest" });
+    };
+    reveal();
+    // The card's body loads after the row opens (a lazy chunk): align again as the row grows, for a moment, so the
+    // finished card is what ends up in view and not the placeholder.
+    if (typeof ResizeObserver === "undefined") return;
+    const growing = new ResizeObserver(reveal);
+    growing.observe(row);
+    const stop = window.setTimeout(() => growing.disconnect(), 1000);
+    return () => { window.clearTimeout(stop); growing.disconnect(); };
   }, [open]);
   const folded = foldedRow(item);
   // Whether the To-dos page counts this to-do as open (#3331): no attribute on rows that are no to-do. The chip badge
@@ -968,7 +984,7 @@ function NeedsYouRow({ item, open, onToggle }: { item: NeedsYouItem; open: boole
   );
   if (!open) return head;
   return (
-    <div ref={ref} data-needs-row={item.key} data-needs-open {...countsOpenAttr} className="flex flex-col gap-1">
+    <div ref={ref} data-needs-row={item.key} data-needs-open {...countsOpenAttr} className="flex scroll-m-2 flex-col gap-1">
       {head}
       <NeedsYouBody item={item} nested />
     </div>
@@ -1009,7 +1025,7 @@ export function NeedsYouBody({ item, nested = false }: { item: NeedsYouItem; nes
         <NeedsYouPart key={todo.id + (todo.supervision?.reviews?.at(-1)?.at || todo.decision_review?.review_at || ask?.asked_at)} rowKey={rowKey} hideTitle={nested} decision={todo} />
       </Suspense>
     );
-  if (ask) return <div data-needs-row={rowKey} {...taskOpenAttr}><AcceptRow stacked hideTitle={nested} key={todo.id + ask.asked_at} row={{ id: todo.id, title: todo.title, waited_s: Math.max(0, (Date.now() - Date.parse(ask.asked_at)) / 1000), outcome: ask.outcome, verdict: ask.verdict, recommend: ask.recommend, asked_at: ask.asked_at }} /></div>;
+  if (ask) return <div data-needs-row={rowKey} {...taskOpenAttr} className="min-w-0 rounded-control bg-field px-3 py-2.5"><AcceptRow stacked hideTitle={nested} key={todo.id + ask.asked_at} row={askRow(todo, ask)} /></div>;
   if (status === "failed") return <FailedTaskRow rowKey={item.key} todo={todo} countsOpenAttr={taskOpenAttr} />;
   return <WaitingTaskRow rowKey={rowKey} todo={todo} status={status} countsOpenAttr={taskOpenAttr} />;
 }
@@ -1124,6 +1140,8 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
   const [expanded, setExpanded] = useState(false);
   // the Needs you rows opened in place (#5569), by key; every row is folded again when the tray changes
   const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set());
+  const bar = useRef<HTMLDivElement>(null);
+  const lastOwn = useRef<string | null>(null);
   const setTray = (next: AssistantTray | null) => {
     setTrayNow(next);
     setExpanded(false);
@@ -1179,10 +1197,41 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
   const badgeOf = (items: { kind: string; countsOpen?: boolean }[]) =>
     items.reduce((n, item) => n + (item.kind === "task" ? (item.countsOpen ? 1 : 0) : 1), 0);
   const counts: Record<AssistantTray, number> = { needs: ownAsks.length + badgeOf(entries.needsYou), running: badgeOf(entries.running), parked: badgeOf(entries.parked), review: badgeOf(entries.review) };
-  // the card is in the chat already: close the tray onto it and bring it into view
-  const openOwn = (id: string) => {
+  // the card is in the chat already: close the tray onto it and bring it into view. A folded stack shows only its first
+  // card, so use its existing expander before looking for another one (#10347).
+  const scrollOwn = (id: string, keepBar = false) => {
+    const scope = bar.current?.closest("[data-chat-dock]") ?? document;
+    const card = [...scope.querySelectorAll<HTMLElement>("[data-card]")].find((el) => el.dataset.card === id);
+    if (!card) return false;
+    card.firstElementChild?.scrollIntoView?.({ block: "nearest" });
+    // Revealing another card can scroll the capsule row out of the dock's own scroll box; keep Next clickable for the
+    // following card and the wrap to the first (#10347). A Needs you row keeps its existing landing.
+    if (keepBar) bar.current?.scrollIntoView?.({ block: "nearest" });
+    return true;
+  };
+  const openOwn = (id: string, keepBar = false) => {
     setTray(null);
-    requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-card]")].find((el) => el.dataset.card === id)?.firstElementChild?.scrollIntoView?.({ block: "nearest" }));
+    requestAnimationFrame(() => {
+      if (scrollOwn(id, keepBar)) return;
+      const dock = bar.current?.closest("[data-chat-dock]");
+      // On a narrow screen a keyboard or short height first folds the whole stack to one row; that row is the first
+      // expander, then the position chip opens the other cards. Desktop starts at the position-chip step.
+      dock?.querySelector<HTMLButtonElement>("[data-chat-cards-position][aria-expanded='false'], [data-chat-cards-fold]")?.click();
+      requestAnimationFrame(() => {
+        if (scrollOwn(id, keepBar)) return;
+        const queue = dock?.querySelector<HTMLButtonElement>("[data-chat-cards-position][aria-expanded='false']");
+        if (!queue) return;
+        queue.click();
+        requestAnimationFrame(() => scrollOwn(id, keepBar));
+      });
+    });
+  };
+  const openNextOwn = () => {
+    if (!ownAsks.length) return;
+    const previous = ownAsks.findIndex((ix) => ix.id === lastOwn.current);
+    const next = ownAsks[(previous + 1) % ownAsks.length];
+    lastOwn.current = next.id;
+    openOwn(next.id, true);
   };
   useEffect(() => {
     const needs = (event: Event) => { if ((event as CustomEvent).detail === conversation) setTray("needs"); };
@@ -1215,7 +1264,7 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
   return (
     // shrinks with the dock (ChatView's DOCK_MAX): an open tray gives up its height and scrolls inside, instead of
     // standing taller than the dock and leaving its bottom (a card's answer row) and the entries under the composer
-    <div className="flex min-h-0 shrink flex-col gap-2" data-assistant-actionbar onKeyDownCapture={onTrayKey}>
+    <div ref={bar} className={cx("flex min-h-0 flex-col gap-2", ownAsks.length > 0 && !tray ? "shrink-0" : "shrink")} data-assistant-actionbar onKeyDownCapture={onTrayKey}>
       {tray && (
         // its height follows what is visible (styles.css: an open tray lets the dock take most of it); the header stays
         // and the list scrolls under it, so a plan card's Start (sticky to the list's bottom) is never under the header
@@ -1268,6 +1317,12 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
           open tray is the selected capsule. The scroller pads by the focus ring's width and takes it back, as the
           dock's did, so a large font scrolls sideways instead of clipping the ring. */}
       <div className="scrollbar-none -my-1 flex min-w-0 shrink-0 items-center gap-2 overflow-x-auto py-1">
+        {ownAsks.length > 0 && (
+          <button type="button" data-next-own-ask onClick={openNextOwn} className={cx(DOCK_CAPSULE, "gap-2 bg-field font-medium text-ink hover:bg-hover")}>
+            <span className="whitespace-nowrap">{t("assistant-tasks.next_unanswered")}</span>
+            <span className="tabular-nums text-ink-2">{ownAsks.length}</span>
+          </button>
+        )}
         {entryKeys.map((key) => {
           const open = tray === key;
           // An empty entry is drawn quiet (grey), Needs you and In progress alike, and still opens its "nothing here" line.
