@@ -471,20 +471,29 @@ func (msg relayMsg) source() *proto.MessageSource {
 // notice (quiet.go) is its own text, and the work it starts is not a hop of any chain.
 func (s *Service) deliverRelay(ctx context.Context, machine, to string, msg relayMsg) error {
 	text := relayDeliveryText(msg)
-	s.availInput(machine, to, relayKind(msg), time.Now()) // a notice has no message source of its own
-	if msg.Tool == superviseTool {
-		// Register before dispatch: a fast MCP call can arrive before assistant.send returns.
-		s.holdPushes(ctx, to)
-	}
 	params := map[string]any{"session_id": to, "text": text, "message_source": msg.source(), "resume_only": true, holdPushesParam: msg.Tool == superviseTool,
 		"once_id": relayMsgID(to, msg)} // every try of it under one id: the node sends it once (relay_once.go)
 	if msg.Interject {
 		params["interject_background"] = true
 	}
-	if pick, ok := s.modelPickOf(ctx, machine, to); ok {
-		s.relayOnPick(ctx, machine, to, params, pick) // the conversation's own pick, as a message typed to it runs on (model_pick.go)
+	pick, kept, err := s.readModelPick(ctx, machine, to)
+	if err != nil {
+		return err // unknown is not permission to use a process that still has an older ordinary connection
+	}
+	if !kept && proto.IsExternalLauncher(pick.Launcher) {
+		return i18n.Err("external-adapter.scope_required") // a kept choice on another machine is not a fallback on this one
+	}
+	if kept {
+		if err := s.relayOnPick(ctx, machine, to, params, pick); err != nil {
+			return err
+		}
 	} else if s.isBackground(ctx, to) {
 		s.backgroundModel(ctx, params) // its own model purpose, on every message as the main chat's is (supervise_background.go)
+	}
+	s.availInput(machine, to, relayKind(msg), time.Now()) // a notice has no message source of its own
+	if msg.Tool == superviseTool {
+		// Register only after admission, but before dispatch: a fast MCP call may precede assistant.send's answer.
+		s.holdPushes(ctx, to)
 	}
 	// A supervision message rendered as a round starts from the first turn (supervise_round.go): what the text says
 	// and the switch now decide, also for one queued before a restart or a change of the switch, and whatever model runs it.

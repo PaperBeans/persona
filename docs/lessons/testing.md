@@ -453,6 +453,15 @@ listed" did, and its title check (the row takes the old session's title, read of
 transcript was long enough to be listed (`longTurn`). Before asserting a row is absent, assert it is there in the same
 setup.
 
+## A throwaway hub started from an Agent's terminal uses the real state directory (2026-11-17, #10096)
+
+An Agent that Persona started inherits `PERSONA_HOME`, and `identity.DataDir` takes it before `HOME`: a throwaway
+`personad hub run` with only `HOME=<tmp>` reads and writes the machine's real `~/.persona/hub.json` (a first run writes a
+default one), and `personad hub setup` then creates the shared `persona-postgres` container and writes its address into
+that file. Set `PERSONA_HOME=<tmp>/.persona` (and `HOME`), give the throwaway `hub.json` its own `database_url` and
+`listen` instead of running `hub setup`, and list the real state directory and `docker ps -a` afterwards. If it happened,
+remove only what the run created (check creation times first), never a file that was there before.
+
 ## A simulator that ran against the mock hub uploads its recordings to the next hub it pairs with (2026-11-17, #9417)
 
 Recordings a UI test makes against the mock hub stay in the simulator's library, and the app syncs whatever the hub it

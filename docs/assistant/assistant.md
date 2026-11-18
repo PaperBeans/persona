@@ -836,6 +836,10 @@ A long-used main chat accumulates large context; users can replace it: `POST /ap
    with `assistant/main_handoff.md` prepending background as `<persona-context kind="context" title="接上旧主对话">` (`title` means "Continue old main chat"; App context tag), then clearing it;
    `carry: none` still includes the old main-chat id, allowing `conversation_read`.
    Android first creates an empty `prompt`, then sends separately: bind background to the new session id (`for`) and include it with the first `POST …/messages` or Lark / channel message, all through `assistant.send_params`, not as a separate turn.
+   An empty or whitespace-only prompt with no images reserves an idle conversation without fetching a live snapshot or
+   sending model input. Its first real message carries the snapshot and any runtime initialization instructions;
+   those instructions survive a node restart or a refused send until delivery succeeds. An image-only prompt still
+   starts a turn. The same rule applies to Claude Code, Codex and assistant-capable runtimes.
 5. The old main chat's open tasks follow (#4866, `assistant/main_handover.go`). When the new main chat starts, each task's `supervision.supervisor` and `origin` move to it together, as a closed leader's workers are rehomed. The ledger stays as it was: criteria, reviews, round, parking and owner waits.
    A task waiting for review is signalled again, through the current main chat's supervision policy: the background supervisor by default, or the main chat when it supervises its own tasks. The card of each task the new main chat now supervises goes there with an active hand-off badge; the archived chat keeps its history.
    A leader keeps supervising its tasks; only their `origin` moves. Closed tasks, the owner's own to-dos and other conversations' tasks stay where they are.

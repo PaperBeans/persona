@@ -719,8 +719,8 @@ Terminal keys/selection (`TerminalKeysTests`: tap/double-lock/hold ctrl/alt/shif
 (mock `GET /mock/keys` returns recorded keys).
 
 Search results open chats with only one title line, remain after return, and find/open Agents inside collapsed spaces (`SearchOpenTests`, with non-search control and edge-swipe back;
-`-openAgentsFresh YES` avoids old collapse state) against ordinary mock:
-`PORT=18793 python3 scripts/mock/mock_hub.py &`, `TEST_RUNNER_PERSONA_MOCK_HUB=http://127.0.0.1:18793 xcodebuild test … -only-testing:PersonaUITests/SearchOpenTests`.
+`-openAgentsFresh YES` avoids old collapse state) against a mock with one assistant (the default mock's MacBook, where weather runs, is another assistant's and not listed):
+`MOCK_MANAGERS=1 PORT=18793 python3 scripts/mock/mock_hub.py &`, `TEST_RUNNER_PERSONA_MOCK_HUB=http://127.0.0.1:18793 xcodebuild test … -only-testing:PersonaUITests/SearchOpenTests`.
 
 Assistant `ask_user` renders as Question (`AskUserRowTests`, #677): tool row says Question + first question, not raw name; expanded questions/options check user choices (including multi-select),
 unanswered says No answer. `-openAllWork YES -showToolDetails YES` expands work/tool rows (inverted-list taps unreliable):
@@ -884,6 +884,7 @@ Long-scroll uses `XCTOSSignpostMetric`; simulator reports duration, not dropped 
 - `NavigationLink` row accessibility identifiers appear twice (cell/button); count/select nth with `app.buttons.matching(identifier:)`.
 - `SearchOpenTests` formerly omitted `-dev.openChat ""`: previous open chat restored, swipe-back couldn't reach list; both failed on master too.
 - Both `SearchOpenTests` couldn't find weather header/Add weather row on master (#1051): five pending requests filled first screen, lazy list hadn't built rows. `bringAboveTabBar` scroll to them, back to top before search; after return use row to verify list (original scroll position, filter absent from tree).
+- All three `SearchOpenTests` failed against the default mock (#10164): its several assistants give the MacBook to another one, and the Agents list shows only the current assistant's computers (#5587), so no weather row or space was listed and the search found nothing. They run on `MOCK_MANAGERS=1` and fail at launch, naming it, on a hub with several. The folded-space case then cleared the search with the at-rest field's clear button, which that field no longer exposes (it is one element now): it taps the field and ends the search with ✕.
 - `ShellAvatarTests` also omitted `-dev.openChat ""`: prior Agents chat restored, no list header/avatar, also failed on master.
 - Compact-list shots (`CompactListShots`, demo not mock): All (many spaces), Mac Studio (many unread/idle spaces), Unread, Needs you, Mac mini (all idle),
   by-state, card comparison; all three text sizes (`-ui.textSize small|standard|large`; `TEST_RUNNER_PERSONA_TEXT_SIZES=standard` one only).

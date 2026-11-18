@@ -53,6 +53,7 @@ Use synthetic conversations for screenshots, not the user's real main conversati
 - Messages entered while Claude is working (from a computer or phone) are "absorbed mid-turn" and stored in the transcript as `attachment/queued_command` (commandMode=prompt,
   origin.kind=human), not as user messages. The parser must handle them separately, or they will not appear on the phone.
 - Newer Claude Code versions write narration between tool calls into nonempty `thinking` blocks, not `text`. The UI must not hide all thinking indiscriminately.
+  With `thinking.display = "updates"`, a progress-update block carries summary text rather than verbatim narration; `conversation_read` therefore labels it `(agent, progress summary)`. Content the user must read completely belongs in the final response, not only between tool calls.
   A live preview must also survive a cold load: `fold_work` hides those original blocks, so folds carry a bounded `latest_thinking` preview without changing their range or counts (#6319).
 - A new session (a headless assistant or a newly launched herdr Agent) has no transcript until claude writes its first line. The phone requests a backlog as soon as it subscribes to the hub. `session.items`
   must return an empty list rather than not found for these "starting" sessions (`startingSession`). Once watch sees the file appear, it must first replay the lines already written, or the chat page briefly flashes an error.

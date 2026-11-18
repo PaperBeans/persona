@@ -283,6 +283,9 @@ func (n *Node) recoverAssistantResult(p *assistantProc, failed bool, result stri
 // recoverAssistantResultFor optionally requires the recovery that captured a pending result to still own the session.
 // That identity check prevents a result delayed by process replacement from restarting a turn the user has cancelled.
 func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTurnRecovery, failed bool, result string, kinds ...string) bool {
+	if proto.IsExternalLauncher(p.launcher) {
+		return false // an explicit adapter pick never enters automatic model recovery
+	}
 	// A model this chain switched to that the gateway does not have was the recovery's pick, not the user's: it is
 	// spent, remembered for the launcher, and the chain goes on to the next one (#4283, #5234). One the user asked for
 	// stays theirs to fix, unless it answered here within the hour: then the gateway failed for a moment (#5234).
