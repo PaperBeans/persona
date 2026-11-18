@@ -75,17 +75,31 @@ func archiveChat(it issue) kb.SourceChat {
 // errArchiveMoved: GitHub answered with another thread than the one asked (a repository renamed or an issue moved).
 var errArchiveMoved = errors.New("GitHub returned a different archive thread")
 
-// archiveIssue reads one thread by its repository ("owner/name") and number; code is GitHub's status.
-func (c *Connector) archiveIssue(ctx context.Context, repo string, number int) (it issue, code int, err error) {
+// archiveIssue reads one thread by its repository ("owner/name") and number; code is GitHub's status, h its answer's
+// headers.
+func (c *Connector) archiveIssue(ctx context.Context, repo string, number int) (it issue, code int, h http.Header, err error) {
 	owner, name, _ := strings.Cut(repo, "/")
 	path := fmt.Sprintf("/repos/%s/%s/issues/%d", url.PathEscape(owner), url.PathEscape(name), number)
-	if code, _, err = c.request(ctx, http.MethodGet, path, nil, nil, &it); err != nil {
-		return it, code, err
+	if code, h, err = c.request(ctx, http.MethodGet, path, nil, nil, &it); err != nil {
+		return it, code, h, err
 	}
 	if it.Number != number || !strings.EqualFold(it.repo(), repo) || it.UpdatedAt.IsZero() {
-		return it, code, errArchiveMoved
+		return it, code, h, errArchiveMoved
 	}
-	return it, code, nil
+	return it, code, h, nil
+}
+
+// archiveGone says whether a failed read of one thread is for good: GitHub answered with another thread, or refused
+// it (gone, out of reach, a request it can't take) other than for a rate limit, a lapsed sign-in or a timeout, which a
+// later call retries.
+func archiveGone(code int, h http.Header, err error) bool {
+	if errors.Is(err, errArchiveMoved) {
+		return true
+	}
+	if code < 400 || code >= 500 || rateLimited(h, err) {
+		return false
+	}
+	return code != http.StatusUnauthorized && code != http.StatusRequestTimeout && code != http.StatusTooManyRequests
 }
 
 // archiveRecheckQueue queues, once, the threads a cursor from before states were reported knows, so each is read once
@@ -117,15 +131,15 @@ func noteArchiveState(cur *archiveCursor, thread string, it issue) {
 }
 
 // archiveRecheck reads the state of up to limit queued threads, one request each, and returns the chats whose state
-// it sends. It stops while the hour's quota is low, the thread still first in the queue. A thread that can't be read for
-// good (gone, moved, out of reach: a 4xx, or a name the cursor holds wrongly) leaves the queue without a state, so it
-// never holds the archive up; any other failure ends the call, to be tried again.
-func (c *Connector) archiveRecheck(ctx context.Context, cur *archiveCursor, limit int) ([]kb.SourceChat, [][]kb.SourceMessage, int, error) {
-	var chats []kb.SourceChat
-	var lines [][]kb.SourceMessage
-	n := 0
+// it sends; limited: it stopped for a rate limit, the thread still first in the queue, to be read once the limit lifts.
+// A thread that can't be read for good (archiveGone, or a name the cursor holds wrongly) leaves the queue without a
+// state, so it never holds the archive up; any other failure ends the call, to be tried again.
+func (c *Connector) archiveRecheck(ctx context.Context, cur *archiveCursor, limit int) (chats []kb.SourceChat, lines [][]kb.SourceMessage, n int, limited bool, err error) {
 	for len(cur.Recheck) > 0 && n < limit {
-		if c.ratesLow() || ctx.Err() != nil {
+		if c.ratesLow() {
+			return chats, lines, n, true, nil
+		}
+		if ctx.Err() != nil {
 			break
 		}
 		thread := cur.Recheck[0]
@@ -133,9 +147,9 @@ func (c *Connector) archiveRecheck(ctx context.Context, cur *archiveCursor, limi
 		number, _ := strconv.Atoi(num)
 		if validArchiveRepo(repo) && number > 0 {
 			n++
-			it, code, err := c.archiveIssue(ctx, repo, number)
+			it, code, h, readErr := c.archiveIssue(ctx, repo, number)
 			switch {
-			case err == nil:
+			case readErr == nil:
 				var msgs []kb.SourceMessage
 				if line, ok := archiveStateLine(it, cur.States[thread]); ok {
 					msgs = append(msgs, line)
@@ -143,14 +157,14 @@ func (c *Connector) archiveRecheck(ctx context.Context, cur *archiveCursor, limi
 				chats = append(chats, archiveChat(it))
 				lines = append(lines, msgs)
 				noteArchiveState(cur, thread, it)
-			case c.ratesLow():
-				return chats, lines, n, nil
-			case errors.Is(err, errArchiveMoved) || code >= 400 && code < 500:
+			case rateLimited(h, readErr) || c.ratesLow():
+				return chats, lines, n, true, nil
+			case archiveGone(code, h, readErr):
 			default:
-				return chats, lines, n, err
+				return chats, lines, n, false, readErr
 			}
 		}
 		cur.Recheck = cur.Recheck[1:]
 	}
-	return chats, lines, n, nil
+	return chats, lines, n, false, nil
 }

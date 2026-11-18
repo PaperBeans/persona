@@ -527,7 +527,7 @@ func (s *Service) kbArchiveLane(ctx context.Context, e *kb.Engine, r *kbRounds) 
 	// Projects whose chats have all ended at their source (pull requests merged or closed) and stayed quiet are finished,
 	// without a model (#9427, kb/chat_state.go); one with an unfinished to-do filed under it stays.
 	s.kbRun(ctx, func() {
-		if done := e.FinishProjects(time.Now(), s.kbProjectBusy(ctx)); len(done) > 0 {
+		if done := e.FinishProjects(time.Now(), s.kbProjectBusy(ctx, e)); len(done) > 0 {
 			s.logf("kb: finished %d project(s) whose chats have all ended: %s", len(done), strings.Join(done, ", "))
 		}
 	})
@@ -612,19 +612,36 @@ func (s *Service) kbExtraDirs(ctx context.Context) []string {
 	return nil
 }
 
-// kbProjectBusy is FinishProjects' busy: whether an unfinished to-do is filed under a project. While the to-dos can't be
-// read every project counts as busy, so none is finished on a guess.
-func (s *Service) kbProjectBusy(ctx context.Context) func(slug string) bool {
+// kbProjectBusy is FinishProjects' busy: whether an unfinished to-do is filed under a project. A to-do keeps the slug it
+// was filed under when that project is merged into another, so each is resolved as ownProject does (FindProject follows
+// MergedInto) and the live project it lands on is busy; the slug as written stays busy too, and when it resolves to
+// nothing live every project it was merged into along the way is busy, so none is finished on a guess. While the to-dos
+// can't be read every project counts as busy.
+func (s *Service) kbProjectBusy(ctx context.Context, e *kb.Engine) func(slug string) bool {
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		return func(string) bool { return true }
 	}
-	open := map[string]bool{}
+	var filed []string
 	s.todos.mu.RLock()
 	for _, t := range s.todos.todos {
 		if t.DoneAt == nil && t.Project != "" {
-			open[t.Project] = true
+			filed = append(filed, t.Project)
 		}
 	}
 	s.todos.mu.RUnlock()
+	open := map[string]bool{}
+	for _, slug := range filed {
+		open[slug] = true
+		if e == nil {
+			continue
+		}
+		if p := e.FindProject(slug); p != nil {
+			open[p.Slug] = true
+			continue
+		}
+		for p, ok := e.Store.Project(slug); ok && p.MergedInto != "" && !open[p.MergedInto]; p, ok = e.Store.Project(p.MergedInto) {
+			open[p.MergedInto] = true
+		}
+	}
 	return func(slug string) bool { return open[slug] }
 }

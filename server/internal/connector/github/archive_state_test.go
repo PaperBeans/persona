@@ -20,6 +20,14 @@ type stateAPI struct {
 	items  map[int]string // number -> the thread's JSON
 	search []int          // what search finds
 	asked  []string
+	refuse map[int]refusal // number -> how GitHub refuses the thread instead
+}
+
+// refusal is an error answer: its status, headers and message.
+type refusal struct {
+	code    int
+	headers map[string]string
+	message string
 }
 
 func (f *stateAPI) set(n int, state string, pr bool, updated time.Duration, closed, merged string) {
@@ -67,6 +75,14 @@ func newStateAPI(t *testing.T) (*stateAPI, *Connector) {
 		case strings.HasPrefix(r.URL.Path, "/repos/example-org/example-repo/issues/"):
 			var n int
 			_ = json.Unmarshal([]byte(strings.TrimPrefix(r.URL.Path, "/repos/example-org/example-repo/issues/")), &n)
+			if r, ok := f.refuse[n]; ok {
+				for k, v := range r.headers {
+					w.Header().Set(k, v)
+				}
+				w.WriteHeader(r.code)
+				_, _ = w.Write([]byte(`{"message":"` + r.message + `"}`))
+				return
+			}
 			if b, ok := f.items[n]; ok {
 				_, _ = w.Write([]byte(b))
 				return
@@ -207,5 +223,50 @@ func TestChangesRechecksThreadsOfAnOlderCursor(t *testing.T) {
 		if strings.HasPrefix(p, "/repos/example-org/example-repo/issues/") && !strings.HasSuffix(p, "/comments") {
 			t.Fatalf("read a thread again after the recheck: %s", p)
 		}
+	}
+}
+
+// A rate limit while a thread's state is read once keeps it first in the queue, and the call stops without asking for
+// more; once the limit lifts the read is made and the state recorded (#9427 review). Only a refusal for good drops it.
+func TestChangesKeepsARecheckThroughARateLimit(t *testing.T) {
+	for name, r := range map[string]refusal{
+		"429":                   {code: http.StatusTooManyRequests, message: "Too Many Requests"},
+		"secondary limit":       {code: http.StatusForbidden, headers: map[string]string{"Retry-After": "60"}, message: "You have exceeded a secondary rate limit"},
+		"core quota":            {code: http.StatusForbidden, headers: map[string]string{"X-RateLimit-Remaining": "0", "X-RateLimit-Limit": "5000", "X-RateLimit-Resource": "core"}, message: "API rate limit exceeded"},
+		"other quota used up":   {code: http.StatusForbidden, headers: map[string]string{"X-RateLimit-Remaining": "0", "X-RateLimit-Limit": "100", "X-RateLimit-Resource": "integration_manifest"}, message: "Forbidden"},
+		"older abuse detection": {code: http.StatusForbidden, message: "You have triggered an abuse detection mechanism"},
+		"sign-in lapsed":        {code: http.StatusUnauthorized, message: "Bad credentials"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, c := newStateAPI(t)
+			merged := fixtureAt(9 * time.Hour)
+			f.set(7, "closed", true, 9*time.Hour, merged, merged)
+			f.set(8, "open", true, 9*time.Hour, "", "")
+			f.refuse = map[int]refusal{7: r}
+			old := `{"since":"` + fixtureAt(10*time.Hour) + `","threads":{"example-org/example-repo#7":"` + merged + `","example-org/example-repo#8":"` + merged + `"}}`
+
+			batches, next, more, _ := c.Changes(context.Background(), old, 5)
+			var cur archiveCursor
+			_ = json.Unmarshal([]byte(next), &cur)
+			if more || len(batches) != 0 || len(cur.Recheck) == 0 || cur.Recheck[0] != "example-org/example-repo#7" {
+				t.Fatalf("refused: %d batches more=%v cursor %s", len(batches), more, next)
+			}
+
+			f.mu.Lock()
+			f.refuse = nil
+			f.mu.Unlock()
+			c.mu.Lock()
+			c.pausedUntil, c.backoffUntil, c.pauseStep, c.rateLow = time.Time{}, time.Time{}, 0, false
+			c.mu.Unlock()
+			batches, next, _, err := c.Changes(context.Background(), next, 5)
+			if err != nil || len(batches) == 0 || batches[0].Chat.ID != "example-org-example-repo-7" || batches[0].Chat.State != "merged" {
+				t.Fatalf("after the limit: %+v, %v", batches, err)
+			}
+			var after archiveCursor
+			_ = json.Unmarshal([]byte(next), &after)
+			if len(after.Recheck) != 0 || after.States["example-org/example-repo#7"] != "merged" {
+				t.Fatalf("cursor after the limit %s", next)
+			}
+		})
 	}
 }

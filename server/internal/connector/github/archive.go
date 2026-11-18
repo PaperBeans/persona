@@ -79,15 +79,15 @@ func (c *Connector) Changes(ctx context.Context, cursor string, limit int) ([]co
 	// Threads known from before states were reported get theirs first, one read each (archive_state.go).
 	archiveRecheckQueue(&cur)
 	if len(cur.Recheck) > 0 {
-		chats, lines, n, err := c.archiveRecheck(ctx, &cur, limit)
+		chats, lines, n, limited, err := c.archiveRecheck(ctx, &cur, limit)
 		for i, sc := range chats {
 			batches = append(batches, connector.ChatBatch{Chat: sc, Messages: lines[i]})
 		}
 		if err != nil {
 			return batches, encode(cur), false, err
 		}
-		if len(cur.Recheck) > 0 { // the limit reached, or the quota low: the next call goes on, or the next poll
-			return batches, encode(cur), !c.ratesLow(), nil
+		if len(cur.Recheck) > 0 { // the limit reached, or a rate limit: the next call goes on, or the next poll
+			return batches, encode(cur), !limited && !c.ratesLow(), nil
 		}
 		processed = n // the reads count against this call's limit
 	}
