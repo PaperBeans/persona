@@ -334,7 +334,7 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	}
 	// The project background, and the decisions of the todo and its continuation ancestors (a task started again may
 	// have some), go before the prompt (#2820, #1618); the tab is named from the title.
-	prompt = s.withProjectContext(ctx, m.ID, t.Cwd, s.withTodoDecisions(ctx, t.TodoID, prompt))
+	prompt = s.withProjectContext(ctx, m.ID, t.Cwd, t.Supervisor, s.withTodoDecisions(ctx, t.TodoID, prompt))
 	prompt, err = s.withStandingAuthorizations(ctx, m.ID, t.Cwd, prompt)
 	if err != nil {
 		return "", "", err

@@ -308,7 +308,7 @@ func outputFile(result string) string {
 }
 
 func (m *Meta) taskFinished(notification string, ts time.Time) {
-	if n, _ := taskNote(notification); n.Kind == "agent" && !agentTerminal(n.Status) {
+	if n, _ := taskNote(notification); n.Kind == "agent" && !agentTerminal(n.Status) || n.Kind == "monitor" && n.Status == "event" {
 		return
 	}
 	if id := firstTag(notification, "task-id"); id != "" {

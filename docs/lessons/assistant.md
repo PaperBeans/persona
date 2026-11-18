@@ -1,5 +1,10 @@
 # Lessons: assistant (headless Claude / Codex)
 
+- Snapshot display projections must not initialize the knowledge base (#10108). Publication already holds
+  `pubMu`; read an already-open engine and retain the canonical cached project-name fallback rather than calling
+  an accessor that may initialize storage. Let direction synchronization refresh project names asynchronously.
+  Keep a regression proving that building a snapshot leaves an unopened knowledge base unopened.
+
 - A terminal review covers its criteria, not every later scope (#6880). Explicitly replacing criteria on an open, previously accepted or cancelled task must invalidate its terminal supervision state; otherwise unfinished or unjudged follow-up work is silently suppressed. Keep review history and unchanged criteria's evidence. Metadata-only changes and ordinary follow-up conversation do not invalidate the review, and existing stale records still need a real supervisor review rather than an automatic migration.
 
 - Process lifetime is not model-health evidence (#8480). Keep an observed completed answer and its original timestamp independently of the live session row. Otherwise releasing an idle process drops the only recovery evidence while an older failed probe remains, reviving an already repaired authentication error. Capture completed-turn evidence without requiring a client poll, scope it to the model binding, retire superseded probes and let newer failures win. Failed persistence must remain retryable.

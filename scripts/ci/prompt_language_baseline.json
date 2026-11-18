@@ -169,11 +169,10 @@
     ]
   },
   "mcp/agents": {
-    "count": 13,
+    "count": 12,
     "files": [
       "mcp/agents/agent_send.md",
       "mcp/agents/agent_start.md",
-      "mcp/agents/agent_supervise.md",
       "mcp/agents/ask_escalate.md",
       "mcp/agents/direction_name.md",
       "mcp/agents/interaction_answer.md",

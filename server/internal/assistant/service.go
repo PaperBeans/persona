@@ -69,6 +69,12 @@ type Service struct {
 	repositoriesMu   sync.Mutex
 	repositoryConfig string
 	repositoryCheck  func(context.Context, repository.Identity) error // tests only; production uses the guarded checker
+	// repoExt is the extensions' repository providers (SetExtensions; repository_providers.go); nil: none.
+	repoExt repository.Extensions
+	// repoStarted is closed once repoExt lists its providers (its manager has started); nil: it always does.
+	repoStarted <-chan struct{}
+	// reportedLinks are the reported links a provider is asked about off the event loops (todo_repository_providers.go).
+	reportedLinks reportedLinkBook
 	// build is Options.Build.
 	build string
 	// northStarOn: the north star's recording start is saved (north_star.go).
@@ -151,23 +157,25 @@ type Service struct {
 	// interrupts: the interrupted receipts re-sent when their tasks change (interruptions.go).
 	interrupts interruptBook
 
-	titles     titleBook            // titles.go
-	phoneKept  keptPhoneTools       // fleet_tools.go: the phone's tools as the hub last listed them
-	agentNames agentNamingBook      // agent_naming.go
-	prefs      settingsBook         // profile.go
-	main       mainBook             // start.go
-	archived   archiveBook          // conversations.go
-	tags       conversationTagsBook // conversation_tags.go
-	origins    originBook           // origins.go
-	guests     guestBook            // guest.go
-	relays     relayBook            // conversations.go
-	quotes     quoteBook            // relay_quote.go: the owner's messages relays carried, verified
-	avail      availBook            // availability.go
-	quiet      quietBook            // quiet.go
-	supervise  superviseBook        // supervise_signals.go
-	preempt    preemptBook          // owner_preempt.go
-	tbriefs    taskBriefBook        // task_brief.go
-	search     searchIndex          // search_index.go
+	titles      titleBook            // titles.go
+	phoneKept   keptPhoneTools       // fleet_tools.go: the phone's tools as the hub last listed them
+	agentNames  agentNamingBook      // agent_naming.go
+	prefs       settingsBook         // profile.go
+	main        mainBook             // start.go
+	archived    archiveBook          // conversations.go
+	tags        conversationTagsBook // conversation_tags.go
+	origins     originBook           // origins.go
+	guests      guestBook            // guest.go
+	relays      relayBook            // conversations.go
+	undelivered undeliveredBook      // undelivered.go: the owner's messages that could not go in
+	quotes      quoteBook            // relay_quote.go: the owner's messages relays carried, verified
+	avail       availBook            // availability.go
+	quiet       quietBook            // quiet.go
+	supervise   superviseBook        // supervise_signals.go
+	progress    progressBook         // supervise_progress.go
+	preempt     preemptBook          // owner_preempt.go
+	tbriefs     taskBriefBook        // task_brief.go
+	search      searchIndex          // search_index.go
 
 	deletedConversations conversationDeleteBook // conversation_delete.go
 	conversationWrites   sync.RWMutex
@@ -309,6 +317,7 @@ func New(o Options) *Service {
 	s.agentArchiveRoutes()
 	s.agentNamingRoutes() // agent_naming_request.go
 	s.alwaysRoutes()
+	s.undeliveredRoutes()
 	s.standingAuthorizationRoutes()
 	s.ruleSuggestionRoutes()
 	s.northStarRoutes()
@@ -322,6 +331,7 @@ func New(o Options) *Service {
 	s.routeRoutes()
 	s.agentRouteRoutes()
 	s.directionNameRoutes()
+	s.directionNotesRoutes()
 	s.originRoutes()
 	s.profileRoutes()
 	s.skillImportRoutes()
@@ -737,9 +747,19 @@ func (s *Service) snapshot(ctx context.Context) Snapshot {
 	}
 	directions, ok := s.directionViews(ctx)
 	snap.Partial = snap.Partial || !ok
-	leadersAt := s.settings(ctx).MachineID // a leader conversation is on the assistant's machine
+	leadersAt := cfg.MachineID // a leader conversation is on the assistant's machine
 	for id, d := range directions {
 		view(id, leadersAt).Direction = d
+	}
+	if len(cfg.Leaders) > 0 {
+		// The same canonical name as the direction tree is the active conversation's
+		// identity on every client. Keep its stored ordinary title for when it ends.
+		names := s.directionSessionNames(ctx, cfg, titles)
+		for id, name := range names {
+			if name != "" {
+				view(id, leadersAt).Title = name
+			}
+		}
 	}
 	snap.Tasks = s.taskViews(ctx)
 	snap.Partial = snap.Partial || snap.Tasks == nil
@@ -754,6 +774,14 @@ func (s *Service) snapshot(ctx context.Context) Snapshot {
 	snap.Partial = snap.Partial || !ok
 	for id, q := range queued {
 		view(id, here).Queued = q // a conversation sent to is on the assistant's machine
+	}
+	kept, ok := s.undeliveredViews(ctx)
+	snap.Partial = snap.Partial || !ok
+	for id, q := range kept {
+		for _, k := range q {
+			v := view(id, k.Machine)
+			v.Undelivered = append(v.Undelivered, k.wire()) // the owner's messages that could not go in (undelivered.go)
+		}
 	}
 	for _, id := range s.heldConversations() {
 		view(id, here).Supervising = true // a supervision message started its turn: not pushed (supervise_digest.go)
@@ -787,6 +815,7 @@ func (s *Service) userSpokeText(ctx context.Context, r SessionRef, text string) 
 	s.agentDecisionSpoke(ctx, r, time.Now(), text)
 	s.ownerHeard(r.SessionID)
 	s.clearToolLoop([2]string{r.MachineID, r.SessionID}, loopUserInput)
+	s.progressMade(r.MachineID, r.SessionID, time.Now()) // told something: a new stretch (supervise_progress.go)
 	// A meeting's turn under way is the user's from here on (meeting_turns.go).
 	s.meetingTurnUserSpoke(r.MachineID, r.SessionID)
 	s.releasePushes(ctx, r.SessionID) // the user speaks: its turns are pushed as ever (supervise_digest.go)
@@ -885,7 +914,9 @@ func (s *Service) SessionsChanged(ctx context.Context, d DeviceSessions) {
 		f(d)
 	}
 	s.toolLoopsChanged(d)
+	s.progressSessions(d, time.Now()) // what the working agents do, for no_progress (supervise_progress.go)
 	s.drainRelays(d.MachineID, d.Sessions)
+	s.undeliveredSeen(d)                      // kept owner messages go once their conversation runs again (undelivered.go)
 	s.originsChanged(d.MachineID, d.Sessions) // conversations from before origins were noted (origins.go)
 	s.todosSessionsChanged(ctx, d)
 	s.taskStageSessions(ctx, d)

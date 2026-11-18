@@ -1,5 +1,13 @@
 # Lessons: hub / node and networking
 
+## Empty assistant creation must not become a model turn
+
+Android allocates an assistant conversation before sending its queued message. The manager passed an empty prompt
+correctly, but the node appended its live snapshot and delivered a context-only turn. Check for text or images before
+requesting context or submitting model input, and keep the new conversation idle. Preserve deferred runtime instructions
+in the session record until the first successful delivery. A manager test with a fake node cannot catch this: exercise
+the real node against a recording CLI and runtime, including prewarmed sessions, whitespace, images and node restart.
+
 ## Journal recovery before changing live update files (#6921)
 
 A fence saying an update started cannot restore a Web directory renamed before `pending.json`
@@ -1955,6 +1963,9 @@ Error-valued message arguments and structured field errors also need the request
 
 - The session list asks `rolloutPath` once a second for every registered Codex thread; for a thread with no rollout (an app-server thread that never wrote one) that was a glob over every day directory of the whole history, each time. On a hub with 194 rollouts it was 61% of the node's CPU. Profile the live node before guessing: `perf record -p <pid>`, then map the addresses with an unstripped build of the same commit (`go tool addr2line`; the deployed binary is built with `-s -w`, but `.text` is laid out the same).
 - Caching a miss on directory mtimes needs care: a file created or moved into a directory changes its mtime, but the kernel stamps it with a coarse clock, so a second change within the same tick can leave it unchanged. Keep no miss whose directories changed in the last second (`TestRolloutPathMissRacy`).
+- A miss cache emptied on a timer pays the whole cost again each period (2026-11-18). The misses were cleared once a minute, so that a rollout put into an older day directory would still be found. Then Codex compressed most old rollouts to `.jsonl.zst`, which the `rollout-*.jsonl` globs never match: on one Mac, 528 listed threads had none, and each was globbed across 209 day directories once a minute (14 s of CPU in a row), and again whenever a new rollout changed today's directory. What the node already lists answers it: the minute listing of every day directory shows which ids appear in no file name, so only the misses whose id is in a name (and those nobody asked about for two minutes) are dropped, and a changed directory is listed once per list pass and checked by name (`TestRolloutPathMissesOutliveRelisting`). Finding a rollout still uses the per-id glob and the header check unchanged.
+- A per-row lookup that is cached can still pay for its cache check: `loadCodexAppState` globbed the Codex home for the state database before reading its cache, twice per App row per second (1,100 globs a second, about 16% of a core). Take such values once per list pass (`codexListPass.appState`, `TestCodexAppStateReadOncePerList`).
+- On macOS, `sample` cannot attribute a stripped Go binary's syscalls to Go callers (they go through libc on the system stack, and Go leaf functions keep no frame pointer); `go tool addr2line` still names the Go frames it does show. Calling the suspected functions from a throwaway test against the real Codex home, read-only, gave the per-call costs.
 
 ## Localized RPC summaries must not imply successful or absent delivery
 

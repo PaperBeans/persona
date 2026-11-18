@@ -344,6 +344,11 @@ type Session struct {
 	StateSince time.Time `json:"state_since,omitempty"`
 	// Queued is input typed while the agent works, waiting to be taken (shown above the composer, not in the chat).
 	Queued []string `json:"queued,omitempty"`
+	// Undelivered are the owner's messages to an assistant conversation that could not go in (its process did not
+	// start, its computer was away) and that its manager keeps and sends again by itself (#10194, docs/assistant/
+	// assistant.md "Messages that could not go in"); oldest first. Shown in the chat as the owner's own, marked not
+	// delivered, on every client. Behind a pointer: a Session stays in its allocation size class (see QueuedRelayed).
+	Undelivered *[]UndeliveredMessage `json:"undelivered,omitempty"`
 	// Background lists commands / agents Claude started in the background that have not reported back yet
 	// (the TUI's "2 shells still running").
 	Background []BackgroundTask `json:"background,omitempty"`
@@ -640,6 +645,26 @@ type ModelPick struct {
 	Model    string `json:"model,omitempty"`
 	Effort   string `json:"effort,omitempty"`
 }
+
+// UndeliveredMessage is one of Session.Undelivered: an owner's message its manager keeps after it could not go in.
+type UndeliveredMessage struct {
+	// ID is the message's client_msg_id: the bubble the sending app shows for it, and its once-only key when it goes.
+	ID     string    `json:"id"`
+	Text   string    `json:"text"`
+	Images int       `json:"images,omitempty"` // how many pictures it carries (they are kept and sent with it)
+	At     time.Time `json:"at"`               // when the owner sent it
+	// State is UndeliveredWaiting (it is sent again by itself) or UndeliveredFailed (it gave up: Retry or Delete).
+	State    string     `json:"state"`
+	Attempts int        `json:"attempts,omitempty"`
+	NextAt   *time.Time `json:"next_at,omitempty"` // when the next try is due while waiting
+	Error    string     `json:"error,omitempty"`   // why the last try did not go in, in the owner's language
+}
+
+// UndeliveredMessage states.
+const (
+	UndeliveredWaiting = "waiting"
+	UndeliveredFailed  = "failed"
+)
 
 // QueueEdit is the answer to POST /api/v1/sessions/{mid}/{sid}/queue in a Persona conversation (node session.queue.edit,
 // docs/protocol/protocol.md): the messages that were queued before the edit, in order, and their photos for the composer

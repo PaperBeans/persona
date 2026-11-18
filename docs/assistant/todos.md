@@ -129,6 +129,7 @@ Server state is stored in the hub's Postgres database (read/written by the assis
 - `project` (text, NOT NULL, DEFAULT ''): the slug of the knowledge-base project the to-do belongs to, `''` for none. Migration `0461` (manager side, #2581, "Project" below). Not a foreign key: projects live in the knowledge base's files.
 - `kind` (text, NOT NULL, DEFAULT ''): `''` for a to-do or a task, `concern` for one of the owner's concerns (#3561, "Concerns" below). Set when it is made, never changed. Migration `0487` (manager side). `done_by` gains `reported` for a concern closed by its report.
 - `part_of` (text, NOT NULL, DEFAULT '') / `after_ids` (text[], NOT NULL, DEFAULT '{}'): the to-do whose request this one is a piece of, `''` for none, and the pieces of that request it waits for (JSON `part_of`, `after`; "Requests in pieces" below). Migration `0542` (manager side). Not foreign keys: the manager checks them when they are written, and a deleted to-do leaves an id the readers skip.
+- `restored_at` (timestamptz): when the owner last brought the to-do back from Inactive; `someday_until` (timestamptz): when a to-do the owner put off to Someday comes back, `NULL` while it is not put off, `9999-12-31` for Someday with no date. Neither is an edit: `updated_at` stays. Migration `0552` (manager side, #10226, "Restores and Someday" below).
 - (Not in the table) `stage`, `stage_kind`, `pr_url`, `pr_status`, `delivery`: stage strip, task kind, change link, observed PR facts and delivery-card location, stored in settings `assistant.todo_stages`, merged when reading to-dos ("Delivery"). `pr_url` comes from the full PR or merge request link in an Agent's reply; a PR named by number alone ("PR #7350", or "#7350" in a reply that speaks of a PR) becomes a full GitHub URL when its repository is known without guessing: the task's own PRs, the one repository the reply or the to-do's title or notes link, or the repository earlier full links from the same repository root on that computer showed (settings `assistant.repo_roots`, `assistant/pr_number_ref.go`, #7921). Anything ambiguous records nothing.
   Number-only references are recorded only after GitHub confirms a pull request, normally through the issue response's non-null `pull_request` field (#8248). An issue URL alone is not a delivery PR. If acceptance encounters a stale PR record and verification fails, it removes that record only after confirming an ordinary issue or a missing item with readable PR access; remaining PRs still pass the same delivery gate. A 404 from an inaccessible repository, permission failures, rate limits and transient errors do not discard the record. Item-level 404/422 responses do not pause unrelated PR checks.
   A complete final closeout's explicit `artifact: pr` outranks incidental PR numbers or URL artifacts elsewhere in that reply; full PR links, `#N`, `N` and `owner/repo#N` are supported. The reference must be the artifact itself, not a URL embedded in an annotation, quote, fenced example, document or ordinary reference. A closeout without a PR artifact does not fall back to incidental PR prose. Before accepting, the hub reads only the active linked agents' latest full turns, rejects peer, side-conversation, injected and unrelated-request evidence, and applies the normal merge/deployment gate to a recovered explicit PR even when the stored link is a different, valid PR. It never promotes an unproven link from saved reference history. If every active agent's own final record says `status="done"`, `merged="n/a"` and `deployed="n/a"` with a non-PR artifact, the task has no PR delivery: remove the contaminated current/history links and stale delivery hold, then check the original task criteria. Missing or duplicate applicability fields, unreadable or unrelated turns, malformed artifacts, and conflicting explicit deliveries cannot establish that exception. Legacy progress without a closeout keeps its existing link detection; normal polling still never fetches a transcript for a clipped preview. A recognizable full PR URL in `task_review.link` is checked ahead of the stored link and remains subject to the gate; an issue URL or number alone is not a PR override.
@@ -231,7 +232,9 @@ Link/release semantics:
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/api/v1/todos` | All to-dos (`created_at` descending; the apps sort them themselves), each with `due_at` / `due_date`, `remind_at`, `reminded_at`, `priority`, `project` when set, and `spaces` and `agents` lists (removed rows filtered out; active first by `linked_at` descending, previously involved after by `released_at` descending); a to-do waiting for the owner also has `ask` ("Waiting for the owner"), an open one nobody works on `orphaned` ("Nobody is working on this"); the hub's merged answer carries `ETag: W/"t1-<hash of its bytes>"`, and a request whose `If-None-Match` names it gets `304` with no body (#9590: most `{"type":"todos"}` change nothing the list holds, and the list is about 200 KB on a busy hub; the iOS app reads it that way) |
+| GET | `/api/v1/todos` | All to-dos (`created_at` descending; the apps sort them themselves), each with `due_at` / `due_date`, `remind_at`, `reminded_at`, `priority`, `project` when set, and `spaces` and `agents` lists (removed rows filtered out; active first by `linked_at` descending, previously involved after by `released_at` descending); a to-do waiting for the owner also has `ask` ("Waiting for the owner"), an open one nobody works on `orphaned` ("Nobody is working on this"); the hub's merged answer carries `ETag: W/"t1-<hash of its bytes>"`, and a request whose `If-None-Match` names it gets `304` with no body (#9590: most `{"type":"todos"}` change nothing the list holds, and the list is about 200 KB on a busy hub; the iOS app reads it that way); each row also has `view` and the answer `counts`, the To-dos view the manager works out (#10226, `docs/assistant/todo-status-sop.md` "The hub's view"), with the managers' counts added up by the hub before it takes the tag; they cover every manager only while the hub's features list `todo_view`, and clients order a merged section by `rank`, then `manager`, then `id` |
+| GET | `/api/v1/todos/{id}` | One to-do as the list has it, `view` included → `{"todo": row}` (#10226), without the list's `manager` stamp (clients keep the row's and send it as `?manager=`); missing 404 `todo_not_found`; to-dos not loaded yet 503; an older hub or manager answers 405 (`PATCH` / `DELETE` match the path); clients take 405, and a 404 with another `code`, as "not there" |
+| GET | `/api/v1/todos/places` | The To-dos sidebar's places with the list's counts → `{"places", "counts"}` (#10226, `assistantwire.TodoPlaces`): All To-dos, Today and Upcoming, then each project with an open to-do and its part of Needs you; across managers the hub adds All To-dos', Today's and Upcoming's numbers and the counts up and keeps each manager's projects, stamped with `manager`; no manager with the route 404 (a manager that failed otherwise: its answer), an older hub 405 |
 | POST | `/api/v1/todos` | Create `{"title", "notes"?, "due_at"? \| "due_date"?, "remind_at"?, "priority"?, "project"?, "kind"?}` → `{"todo": Todo}`; `kind` `concern` records one of the owner's concerns ("Concerns"; without the hub's database 503), `todo` or none a to-do, anything else 400; nonempty `title` required (400); `due_at` / `remind_at` RFC 3339, `due_date` `YYYY-MM-DD`, `priority` `high` / `normal` / `low` / `""`, `project` a knowledge-base project's slug or name (stored as its slug), anything else (or both due fields, or no such project) 400; read-only role (watch) 403 |
 | PATCH | `/api/v1/todos/{id}` | Edit `{"title"?, "notes"?, "done"?, "due_at"? \| "due_date"?, "remind_at"?, "priority"?, "project"?, "part_of"?, "after"?}` → `{"todo": Todo}`; only supplied fields change; `part_of` / `after` as "Requests in pieces" says (`""` / `null` / `[]` clear them, a link the manager refuses 400); `null` (or `""`) clears a due date or reminder, `""` takes it out of its project; either due field replaces the other; a new `remind_at` is pushed again; user completion-state changes clear `done_by` / `done_reason`, and reopening records `reopened_at`; `"done": true` on a to-do whose agent never started (closed by the hub with `start_error`) is the owner closing it: `start_error` cleared, `done_at` now (#3713); `"done": true` on an open concern 409 (only its report closes it, "Concerns"); missing 404; read-only role 403 |
 | POST | `/api/v1/todos/retitle` | Give short titles to task to-dos previously named from the prompt's first line ("To-do titles") → `{"dry_run", "todos": [{"id", "old_title", "new_title"}]}`; `?dry_run=1` lists without changes; read-only role 403 |
@@ -244,6 +247,8 @@ Link/release semantics:
 | PUT | `/api/v1/todos/{id}/agents/{mid}/{sid}` | Link an existing Agent (no message) → `{"ok": true}`; clears `dismissed_at`; completed to-do cannot be linked (409); missing 404; read-only role 403 |
 | DELETE | `/api/v1/todos/{id}/agents/{mid}/{sid}` | Remove Agent (soft removal: sets `released_at` and `dismissed_at`, excluded from API and never automatically relinked) → `{"ok": true}`; missing 404; read-only role 403 |
 | PUT / DELETE | `/api/v1/todos/{id}/seen` | The owner saw it in Just finished (`PUT`: Got it, or opening it, #5707) or not (`DELETE`: Undo) → `{"todo": Todo}` with `seen_at` set or gone; `updated_at` does not move; `{"type":"todos"}` is broadcast; missing 404; read-only role 403 (`docs/assistant/todo-status-sop.md` "Seen") |
+| PUT | `/api/v1/todos/{id}/restored` | The owner brought an inactive to-do back (Restore, #10226) → `{"todo": Todo}` with `restored_at` now; `updated_at` does not move; `{"type":"todos"}` is broadcast; missing 404 `todo_not_found`; read-only role 403; to-dos not loaded yet 503 ("Restores and Someday") |
+| PUT / DELETE | `/api/v1/todos/{id}/someday` | The owner put an open to-do off to Someday (`PUT {"until"?}`, #10226: until an RFC 3339 time ahead, or with no body or `null` with no date) or took it out (`DELETE`) → `{"todo": Todo}` with `someday_until` set or gone; `updated_at` does not move; `{"type":"todos"}` is broadcast; an `until` not ahead, later than `9999-12-31T00:00:00Z` or unreadable 400 `someday_until`; `PUT` on a closed to-do 409 `todo_closed`; missing 404 `todo_not_found`; read-only role 403; to-dos not loaded yet 503 ("Restores and Someday") |
 | PUT | `/api/v1/todos/{id}/thread` | Bind the to-do to a chat thread `{"channel", "chat_id", "thread_id", "title"?}` (replaces the one it had) → `{"todo": Todo}` with `thread`; the three ids are trimmed, required and at most 256 characters (400), the title is trimmed and clipped to 200; another to-do holds the thread 409; missing 404; read-only role 403 ("Chat thread") |
 | DELETE | `/api/v1/todos/{id}/thread` | Unbind it → `{"todo": Todo}`; a to-do with no thread stays as it is; missing 404; read-only role 403 |
 | GET | `/api/v1/todos/{id}/decisions` | Decision list → `{"decisions": [...]}`, chronological; effective only by default, `?all=1` includes superseded decisions (with `superseded_by`); `[]` when none; missing 404 |
@@ -513,8 +518,8 @@ unaffected. Direct chat messages and `agent_send` still work; a user-completed t
 while a hub-completed task reopens on new work as described below.
 
 After a task dispatched from assistant chat (nonempty `origin`) completes—manually or automatically—its Agent stops running (with Agent tasks on, `docs/assistant/unified-entry.md` "Agent tasks", that includes the Agents started from an app or another chat, whose to-dos have an `origin` too):
-assistant checks every minute (`assistant/tasks_close.go`, reading hub's App-facing session list through `sessions.list`); once task completion and Agent inactivity both reach 3 minutes (`taskCloseIdle`, measured from the later of completion time and last activity), it asks node to stop it (`session.stop` with `retire`, `node/retire.go`):
-the Agent process quits (Ctrl+C twice, up to three rounds, until the engine no longer shows the Agent in its pane) and **its terminal stays**: the tab keeps the shell the Agent ran in, ending with Claude's "Resume this session with: …". Persona never closes an Agent's terminal on its own (#4754, `docs/integrations/engines.md` "Agents run in a terminal"); an Agent that does not quit is reported (`not_stopped`) and left running, never closed to make it go.
+assistant checks every minute (`assistant/tasks_close.go`, reading hub's App-facing session list through `sessions.list`); once task completion and Agent inactivity both reach 3 minutes (`taskCloseIdle`, measured from the latest of completion time, last activity and when the pass first saw the Agent running), it asks node to stop it (`session.stop` with `retire`, `node/retire.go`):
+the Agent process quits (Ctrl+C twice, up to three rounds, until the engine no longer shows the Agent in its pane) and **its terminal stays** (unless the owner turned on `close_ended_terminals`, #10355: then the same idle Agent is closed with `session.retire` and `close_terminal`, recording `task_completed`, as "Archive and close" closes it without archiving): the tab keeps the shell the Agent ran in, ending with Claude's "Resume this session with: …". Stopping never closes it (#4754); the node closes the terminal itself only once it has sat unchanged for the grace period (#10111, `docs/integrations/engines.md` "Agents run in a terminal"); an Agent that does not quit is reported (`not_stopped`) and left running, never closed to make it go.
 
 **What stays**: to-do Agent record (machine, session id, directory) remains, not released; node's launch information (launcher, directory, model, hub `node_sessions`), transcripts and the terminal remain.
 Results still read from transcripts (receipts, `agent_read`, chat page); Unread Agents may also stop.
@@ -526,6 +531,8 @@ Results still read from transcripts (receipts, `agent_read`, chat page); Unread 
 | Claude Code | `<launcher> --resume <id>`, with original permission mode, thinking effort and model |
 | Codex | Launcher arguments (with original model substituted) `resume <id>`, through `personad codex-start` |
 | Compatible Codex forks | `<launcher> resume <id>` |
+
+**A resumed Agent stays** (#10311): an Agent of a completed task that the pass saw stopped (or stopped itself) and that runs again was brought back on purpose, by the owner's **Resume** or a message that resumed it. The finished-task rule leaves it running however old its last step is (a Resume adds none), and the idle rule below stops it once it has been still for `idle_close_hours`. When its task reopens and is completed again, the rule starts over. The pass keeps what it saw in memory, as the idle rule does: after a manager restart a running Agent counts from when it is first seen, so a resumed one is never stopped on the first pass. An Agent still launching when its task was completed (#2954) is not a resume.
 
 **The assistant's resume** (#8099, `assistant/agent_resume.go`): `agent_send` with `resume: true` and `resume_why` resumes a stopped Agent through the node call the user's Resume makes (`session.start` with `resume_session_id` and `resume_automatic: true`, so the node fills in its launcher, directory, model and permission mode, and uses the shell it left), with the text as its first message. It is for follow-up work that depends on that Agent's context (it has just found the cause and should now fix it, rework of its own work, the owner asked for "the one with the context"); unrelated work, a context that is nearly full or an Agent that went off track get a new Agent (`agent_start`, or `task_plan` with `continues`), and when unsure the assistant asks the owner to choose (`prompts/assistant/claude_md.md`). The resumed Agent is never unsupervised: it is on an open task of the calling conversation already, or the call gives `task` (main conversation) and becomes one as any `agent_send` hand-off, its card marked resumed (`wakeResumed`). The owner sees it: the phone's confirmation (when outbound confirmation is on) and a `routed` line on the task's card name the Agent and the reason (`assistant-tasks.resume_note`). It is refused, with nothing started or sent and "start a new Agent" as the suggestion, without a reason, without a task to be on, for another conversation's or the owner's own task, when its computer is offline, when its context is 85% of its window or more (`context_tokens` / `context_window`), and when the node refuses the resume (its error is passed on). Persona's own follow-ups (rework, relayed answers, digests, channel messages) still never start a stopped Agent.
 
@@ -701,7 +708,7 @@ Something the owner raises in the main conversation and wants an answer to is a 
 - **Reply reader limits**: the existing minute source pass attempts up to four bound waits, longest unattempted first, with an eight-second per-wait deadline and thirty-second pass budget; each topic read is bounded to four pages of fifty messages. There is no push subscription or complete-history/latency guarantee. Missing request/reply metadata, source/account mismatch, unreadable history or an unavailable/unconfigured lark-cli reader leaves the task parked. Only explicit bindings opt in; no setting or external message is changed/sent, and the reader does not mark messages read. Unbound/legacy waits, the Lark gateway and other providers are unchanged; generic delivery remains separate (#6206).
 - **Provenance boundary**: the supervisor must inspect the actual source receipt before supplying evidence. The tool validates and persists the supplied source-backed account; admission itself does not contact providers or independently verify a receipt. Automatic observation is limited to the explicit supported bindings described here, not arbitrary wake prose or URLs. It does not forward events or send an Agent instruction. `recorded_by` is server-authored for the current conversation and is output only. Legacy parks with no `evidence` mean evidence was not recorded, not that a contact or wait was verified.
 - **Mechanical waits**: a mechanical wait without source evidence is no longer automatically parked; its signal remains visible to the supervisor for ordinary review. This does not change native future-wake deferral or merged-delivery advancement. Outside the supported typed bindings, the recorded wake condition is descriptive, not an event adapter. No UI, status-only, outbox or supervision-authority behavior is added here.
-- **What parked means**: the to-do stays open with `supervision.state: "parked"` and `supervision.parked: {reason, until, waiting_on, count, evidence?}`. It is not a new owner question: no `ask`, push or conclusion card, and it is not filed under Waiting on you just because it is parked. While parked, its supervisor gets no `stalled`, `idle`, `unjudged`, `orphaned`, `overdue` or `undecidable` signal, and the manager does not send the Agent its own follow-up. At `until`, one `parked_due` message returns the task and its recorded decisions to its supervisor; the task remains parked until the supervisor acts.
+- **What parked means**: the to-do stays open with `supervision.state: "parked"` and `supervision.parked: {reason, until, waiting_on, count, evidence?}`. It is not a new owner question: no `ask`, push or conclusion card, and it is not filed under Waiting on you just because it is parked. While parked, its supervisor gets no `stalled`, `no_progress`, `idle`, `unjudged`, `orphaned`, `overdue` or `undecidable` signal, and the manager does not send the Agent its own follow-up. At `until`, one `parked_due` message returns the task and its recorded decisions to its supervisor; the task remains parked until the supervisor acts.
 - **Leaving**: any Agent turn ends the parking, drops a still-pending `parked_due`, and returns the task to in progress (or `rework` when rounds were used). There is no status-only exception in this change. Any other review ends parking; a closed to-do is not parked.
 - **Owner decision wake** (#8044): an owner's recorded decision ends a park waiting on `someone_else`, and still ends a legacy `owner_priority` park or its reconciled `needs_user` wait, even without an Agent turn. The supervisor receives one `park_decided` with the decision so it can resume, review or close. A decision before a later park does not end that newer park. The decision is stored before the ledger is touched, so a failed ledger write does not fail the decision request; it is logged and the watch recovers within 30 seconds. A later review or re-park does not drop an already queued `park_decided`; only `accepted` or `cancelled` does, and a decision from before a newer park does not end it. The ledger records the decision and whether supervision carried it across restarts. Agent notes, routed-card answers by the supervisor, deadline defaults and outcome records are not the owner's decision; decisions do not end `external_event` or `date` parks.
 - **Not a place to forget things**: `count` is consecutive parks without an Agent turn; three re-parks are allowed, and the next is refused. An Agent turn or an owner's decision that ends the park resets the count.
@@ -821,6 +828,33 @@ Not yet: manual editing/undo of conclusions (currently **Replace** in decisions)
 - It claims the reminder in the store first (`reminded_at` set only while `remind_at` is still that moment, not yet pushed and the to-do not done), then pushes it like `notify_user`: to every device (opening the main conversation) and to the Feishu bot and the channels with pushes on. A claimed push that is lost is not retried; a reminder is never pushed twice, by a restart or a second manager.
 - The push's title is the to-do's, its body the due date (or "was due" once it has passed), the first line of the notes, and when it went out more than two minutes late (the manager was down), the time it was for.
 - A done to-do is not reminded; changing `remind_at` re-arms it; a mesh member on standby leaves it to the center, as with scheduled tasks.
+
+## Restores and Someday
+
+#10226 (`assistant/todo_marks.go`), from stage 1 of the To-dos redesign (`docs/design/proposals/todos-redesign.md`,
+sections 6.1 and 6.3). Two of the owner's marks live on the to-do, on the hub, so every device can agree on them, as
+they already do on seen (`docs/assistant/todo-status-sop.md` "Seen"):
+
+- **Restore** (`PUT /api/v1/todos/{id}/restored`): the owner brought an inactive to-do back. `restored_at` is the moment,
+  meant to count as activity for the to-do's status only (inactive again after another 48 hours without a move), as a
+  device's own restore does today.
+- **Someday** (`PUT` / `DELETE /api/v1/todos/{id}/someday`): the owner's own "not now". Only an open to-do is put off (a
+  failed start counts as open: it waits on the owner to retry or close it); a closed one is refused with 409. Taking it
+  out works on any to-do. `someday_until` is when it comes back, no later than `9999-12-31T00:00:00Z`; Someday with no
+  date is stored as that time, so that "put off until" is the one rule for both. A to-do is in Someday only while
+  `someday_until` is ahead: the field stays after the time passes, and the status the hub works out decides, never a
+  client reading the raw field. Closing the to-do keeps the mark; reopening it, or retrying a failed start, takes it out
+  of Someday, since the owner is on it again.
+- Neither is an edit: `updated_at` stays, as with seen. Both send the settled `{"type":"todos"}`.
+- The manager's `view` on every row of `GET /api/v1/todos` reads both (the redesign's status projection, the
+  proposal's section 6.3, rows 12 and 13; `docs/assistant/todo-status-sop.md` "The hub's view"), but no client reads
+  `view` before stage 2. The hub's triage (`todo_triage.go`) still places every to-do with no restore, and the web,
+  iOS / Mac and Android keep their restores on the device (`docs/assistant/todo-status-sop.md` "Shelving") until they
+  read the view, from stage 2.
+- Clients use both routes only while the hub's features list `todo_view` (a manager capability, listed while every
+  manager has it; the proposal's section 7.3, "Writes"); without it they keep the restore on the device and offer no
+  Someday. An older hub or manager answers 404 `not_found`, which a client can't tell from a to-do that is gone except
+  by the code: these routes answer an unknown to-do with `todo_not_found`.
 
 ## Imported from Reminders
 
@@ -984,7 +1018,13 @@ repositories as rows with their issues and pull requests as links, so the
 associations the agent maintains are visible without opening an editor. Each
 repository row carries its provider's own mark and its project address on one
 line; a link shows its retained full title as the hyperlink, falling back to the
-localized type and number when no title is known. The association store holds no
+localized type and number when no title is known. A provider extension's
+repository has the extension mark and its source's name after the address (the
+`provider_name` saved with it, else "Another source", never the `ext:` id); its
+links open at their stored addresses, numbered `#N`, with the extension's own
+`link_kinds` words for issue and pull request. While its `provider_state` is
+`off` or `missing` the row shows an **Unavailable** pill and a note, and adding a
+link to it is turned off. The association store holds no
 physical workspace path, so a row shows no filesystem path; directory aliases
 are not paths, and physical paths belong to the workspace preparation service.
 Opening the editor holds the draft and the revision it began from: a to-do
@@ -992,9 +1032,19 @@ version change while it is open never replaces them, and the newest store is
 read again when the dialog closes. Source options are disclosed per repository.
 No alias or base branch is required: an empty alias means no directory override
 and a missing ref means the remote default branch. This feature does no Git or
-remote issue lookup.
+remote issue lookup for GitHub and GitLab; a new link of a provider extension's
+repository is asked of that extension (`repo.link`) before the save, never while
+reading or opening a to-do.
 An issue/PR URL must belong to the saved provider, instance and target repository;
 links retain numeric string IDs, including IDs beyond JavaScript's integer range.
+When a provider extension is switched off, not running or uninstalled, its rows
+and links still read and open from what was stored (`provider_state` `off` or
+`missing` on reads), saves keep the links already there without asking it, and
+only a new link for it fails with `task_repositories_provider_off` or
+`task_repositories_no_provider`. Right after a restart, before the extensions
+have listed their providers, a new link on a host no built-in owns waits for
+them within the save's budget and, if they are still starting, fails with
+`task_repositories_providers_starting` (409), never `task_repositories_no_provider`.
 
 | Method | Route | Contract |
 | --- | --- | --- |
@@ -1014,7 +1064,8 @@ never masquerade as an empty set.
 `todo_repository_links_add` expose the same manager-owned store. `todo_get` includes
 its canonical associations. The additive tool accepts `{id, links: [{url, title}]}`
 with full source titles, or legacy `{id, urls}` (one to 50 exact issue/PR URLs in
-total), infers repository groups offline and needs no preconfigured catalog.
+total), infers repository groups offline (an address on a host a provider
+extension claims is read by that extension) and needs no preconfigured catalog.
 Titles are optional plain text, limited to 1,024 UTF-8 bytes after trimming; control
 characters are rejected. The tool schemas describe this byte limit explicitly;
 their `maxLength` is only a character ceiling, not a UTF-8 byte validator.
@@ -1046,8 +1097,16 @@ Imports and interactive edits lock the same Todo and commit atomically; changes
 broadcast the existing `todos` event even when stage and legacy PR stay unchanged.
 Metadata import errors are logged without blocking the legacy progress path; explicit
 tool and HTTP failures remain errors. Link-derived repositories absent from the
-catalog have `catalog_state: "unlisted"`; recording a URL performs no repository
-verification, remote lookup or catalog mutation.
+catalog have `catalog_state: "unlisted"`; recording a GitHub or GitLab URL performs
+no repository verification, remote lookup or catalog mutation. In a report, a
+provider extension's URL that is new is read by that extension in the background,
+and not again on that to-do for 5 minutes once it has answered (an attempt that
+failed or found it unavailable is tried on the next reply). That covers every address on its hosts in
+an Agent's reply, even one that is then not kept (a file page, an issue, another repository),
+so the extension learns the addresses you and your Agents mention in a to-do's work,
+as its install permission says. Reports skip such addresses while the extension is
+unavailable, and the one-time import of older `pr_url` / `prs` references never
+asks an extension.
 
 Shared Go types and validators: `server/internal/assistant/repository/task.go`.
 Web types/helpers: `web/src/lib/task-repositories.ts`. Fixed consumer fixture:
@@ -1062,7 +1121,10 @@ names are independent. A removed or identity-changed catalog entry is reported
 without replacing the saved source. Catalog clients omitting `clone_url` preserve
 its previous value when identity is unchanged; a changed identity gets its own
 canonical fallback. Adopting a new source requires removing and reselecting the
-association in separate saves.
+association in separate saves. A repository row a new link adds clones from the
+catalog entry's `clone_url` when there is one (`transport_origin: "catalog"`),
+else from the clone address a provider extension answered for its repository
+(`"provider"`), else from its canonical URL (`"canonical_default"`).
 
 Preparation consumers use `db.ReadTodoRepositoriesTx` with the expected revision,
 select repository IDs through `repository.Snapshot`, and persist that value with

@@ -121,19 +121,20 @@ describe("Header", () => {
     expect(header({ session: quiet, siblings: [quiet, calm] })).not.toContain("bg-attention");
   });
 
-  it("puts the loop mark before the Agent's mark and a Background tasks button at the right end (#5421)", () => {
+  it("puts the loop mark before the Agent and reports background work on the overview toggle", () => {
     const looping = { ...session, loop: { kind: "interval", interval_seconds: 1800, prompt: "/loop check CI" } } as Session;
-    const html = bare(header({ session: looping }));
+    const overview = { id: "overview", open: false, toggle: () => {} };
+    const html = bare(header({ session: looping, overview }));
     const loop = html.indexOf("data-loop-mark");
     expect(loop).toBeGreaterThan(-1);
     expect(loop).toBeLessThan(html.indexOf("data-agent-device"));
     expect(html).toMatch(/aria-label="循环 · 每 30 分钟"/);
-    expect(html).toMatch(/<button[^>]*aria-label="后台任务"/);
-    expect(bare(header())).not.toContain('aria-label="后台任务');
+    expect(html).toMatch(/<button[^>]*aria-label="会话概览"/);
+    expect(bare(header({ overview }))).toContain('aria-label="会话概览"');
     // a running background task: the button counts it
     const busy = { ...session, background: [{ id: "b1", kind: "bash", command: "npm test" }] } as Session;
-    const counted = bare(header({ session: busy }));
-    expect(counted).toMatch(/aria-label="后台任务，1 个在运行"/);
+    const counted = bare(header({ session: busy, overview }));
+    expect(counted).toMatch(/aria-description="后台任务，1 个在运行"/);
     expect(counted).toMatch(/data-background-count="true"[^>]*>1</);
   });
 

@@ -249,6 +249,14 @@ grew 9 B, but the ja count grew 255 B and `main` failed the build, with no first
 now counts imported names as one fixed string and export lists as empty ones. To check a surprising move, compare the
 number of entries in each first-screen chunk's `export{…}` between the two builds.
 
+## A chunk that can load before App takes first-screen code through App (#10226)
+
+#3962's fix (a small module of its own) does not work for a chunk that may load before App, such as the Developing
+Persona recorder's: a module both it and App import becomes a new chunk on the first screen. The To-dos view's shadow
+reads `lib/todo-triage.ts` through App's re-export instead (`view-shadow.test.ts` fails on a value import there); a direct
+import split the triage out at about 700 B. Under `npm run dev` an edit to the triage then reloads the page rather than
+refreshing it in place.
+
 ## A change's first-screen cost depends on the main it is measured on (#6348)
 
 The paged Agents list's groups measured +1,402 B for ja on one `main`, then +1,510 B, +1,396 B and +1,501 B on the

@@ -261,6 +261,7 @@
     <string name="chat_source_conversation">对话</string>
     <string name="chat_source_patrol">例行巡检</string>
     <string name="chat_source_followup">跟进</string>
+    <string name="chat_source_scheduled_task">由已安排任务发送</string>
     <string name="chat_source_supervision">督办</string>
     <string name="chat_source_unknown">来源</string>
     <string name="chat_source_expand">展开</string>

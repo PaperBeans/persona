@@ -39,9 +39,9 @@ type fakeHub struct {
 	itemReads     int                       // session.items reads since the hooks were set
 	onDevicesList func()                    // runs once, then clears, before the next devices.list; no lock held
 	// beforeSend runs once, then clears, when session.send is called, before it is answered (what happens on the
-	// agent's computer while the send is out); afterList, by machine, once after that machine's next sessions.list was
-	// answered. No lock held. sendHangs: session.send is never answered while the link stays up, and ends with the
-	// call's context, after beforeSend (a request that went out).
+	// agent's computer while the send is out); afterList, by machine, once after that machine's next sessions.list made
+	// with a listHooked context was answered. No lock held. sendHangs: session.send is never answered while the link
+	// stays up, and ends with the call's context, after beforeSend (a request that went out).
 	beforeSend   func()
 	afterList    map[string]func()
 	sendHangs    bool
@@ -230,6 +230,16 @@ func (f *fakeHub) Hello(context.Context) (Hello, error) {
 	return h, nil
 }
 
+// afterListCall marks the context of the call a test arms afterList for (listHooked).
+type afterListCall struct{}
+
+// listHooked is ctx for the call under test: afterList runs only after a sessions.list made with it, never after one
+// a background goroutine makes meanwhile. A change to a task's agents has the todo-token sync list their machine
+// (syncTodoTokens), and on a busy machine that list can still be out when the test arms the hook.
+func listHooked(ctx context.Context) context.Context {
+	return context.WithValue(ctx, afterListCall{}, true)
+}
+
 func (f *fakeHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage, error) {
 	if p.Device == DeviceAll && p.Method == DeviceDevicesList {
 		f.mu.Lock()
@@ -255,7 +265,7 @@ func (f *fakeHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 	}
 	if p.Method != DeviceSessionItems {
 		out, err := f.deviceCall(ctx, p)
-		if p.Method == DeviceSessionsList {
+		if p.Method == DeviceSessionsList && ctx.Value(afterListCall{}) != nil {
 			f.mu.Lock()
 			hook := f.afterList[p.Device]
 			delete(f.afterList, p.Device)
@@ -433,6 +443,19 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		name, _ := a["name"].(string)
 		return json.Marshal(map[string]any{"agent": launcherAgent(name)})
 	case DeviceLaunchersList:
+		if a["source"] == proto.ExternalLauncherSource {
+			list, ok := f.zshrc[p.Device]
+			if !ok {
+				list = f.launcherList
+			}
+			external := []proto.Launcher{}
+			for _, l := range list {
+				if proto.IsExternalLauncher(l.Name) {
+					external = append(external, l)
+				}
+			}
+			return json.Marshal(launcherListing{Source: proto.ExternalLauncherSource, Launchers: external})
+		}
 		if f.launcherGate != nil {
 			gate := f.launcherGate
 			f.mu.Unlock()

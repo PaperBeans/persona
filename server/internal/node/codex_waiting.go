@@ -670,6 +670,7 @@ func (n *Node) attachCodexWait(ctx context.Context, w *codexWait, thread, how st
 	n.mu.Unlock()
 	n.state.setPane(w.id, "")
 	n.logf("codex %s: thread %s attached to row %s (%s)", w.pane, thread, w.id, how)
+	n.namePersonaTab(ctx, w.pane, thread)
 	_ = n.refreshHosts(ctx)
 	n.notifySessions()
 	return true

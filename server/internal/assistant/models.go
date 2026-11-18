@@ -34,6 +34,8 @@ var assistantConfigDirs = []string{assistantConfigDirPrivate, assistantConfigDir
 type modelRecord struct {
 	Revision int64        `json:"revision"`
 	Binding  ModelBinding `json:"binding"`
+	// Candidates: an extension's purpose only, what the user decided about its candidate models (model_candidates.go).
+	Candidates *candidateSetting `json:"candidates,omitempty"`
 }
 
 // ModelProvider is one provider as Settings › Model configuration offers it: never its key.
@@ -80,6 +82,9 @@ type ModelPurpose struct {
 	Fields        []string     `json:"fields"`
 	ProviderIDs   []string     `json:"provider_ids"`
 	ConfigDirs    []string     `json:"config_dirs,omitempty"` // assistant only: the profiles its new conversations can start in
+	// Candidates (an extension's purpose only, #10398): its candidate models as the extension sends them, and as the
+	// user keeps, switches off or replaces them (model_candidates.go).
+	Candidates *ModelCandidates `json:"candidates,omitempty"`
 }
 
 // launch is the purpose's execution form, independent of its provider.
@@ -260,11 +265,15 @@ type modelsState struct {
 	aliases  map[string]map[string]string // machine \x00 launcher → alias id → its resolved id
 	defaults map[string]string            // machine \x00 launcher → its default model's resolved or own id
 
-	customMu sync.Mutex // one change of the remembered typed ids at a time (models_custom.go)
+	customMu    sync.Mutex // one change of the remembered typed ids at a time (models_custom.go)
+	requestedMu sync.Mutex // one change of the extensions' requested candidate lists at a time (model_candidates.go)
 
-	zshrcMu         sync.Mutex
-	zshrc           map[string][]proto.Launcher // machine → its rc-file launchers (nil: not asked since the start)
-	zshrcRefreshing bool                        // one background refresh fills the last-seen snapshot at a time
+	zshrcMu           sync.Mutex
+	zshrcWrite        sync.Mutex // serialize source-scoped snapshot persistence without holding the reader lock
+	externalRefresh   map[string]*externalDirectoryRefresh
+	zshrc             map[string][]proto.Launcher // machine → its rc-file launchers (nil: not asked since the start)
+	zshrcRefreshing   bool                        // one background refresh fills the last-seen snapshot at a time
+	zshrcRefreshAgain bool                        // a node changed its directory during that refresh
 	// zshrcSync: how each machine's list came in the last time they were asked (设置 › 模型供应商's 各台电脑).
 	zshrcSync map[string]LauncherSync
 
@@ -284,11 +293,30 @@ func (s *Service) modelRecord(ctx context.Context, id string) (modelRecord, erro
 // saveModelRecord writes purpose id's record if it is still at revision (the database compares and sets; the test
 // stores without that rely on the caller holding models.mu).
 func (s *Service) saveModelRecord(ctx context.Context, id string, revision int64, b ModelBinding) error {
+	return s.writeModelRecord(ctx, id, revision, b, nil, false)
+}
+
+// writeModelRecord is saveModelRecord that also sets an extension purpose's candidate setting when setCandidates
+// (nil: the extension's own list); otherwise the stored setting is kept.
+func (s *Service) writeModelRecord(ctx context.Context, id string, revision int64, b ModelBinding, candidates *candidateSetting, setCandidates bool) error {
+	if err := checkExternalPurpose(b); err != nil {
+		return err
+	}
 	st := s.store()
 	if st == nil {
 		return i18n.Err("assistant-models.err_no_database")
 	}
-	r := modelRecord{Revision: revision + 1, Binding: b}
+	r := modelRecord{Revision: revision + 1, Binding: b, Candidates: candidates}
+	if !setCandidates && isExtensionPurpose(id) { // a binding change keeps what the user decided about candidates
+		var old modelRecord
+		if _, err := st.Setting(ctx, modelRecordKey(id), &old); err != nil {
+			return err
+		}
+		if old.Revision != revision {
+			return errModelConflict
+		}
+		r.Candidates = old.Candidates
+	}
 	if cas, ok := st.(interface {
 		CompareSetting(context.Context, string, int64, any) (bool, error)
 	}); ok {

@@ -129,6 +129,57 @@ struct TabSwitchLayoutTests {
         #expect(back.at == 0 && back.opacity == 0)
     }
 
+    /// The lens never jumps (#10270): the page a choice brings in is swapped in under the bar in the same frames. Frames
+    /// held up by that before it sets off keep it where it starts, and it sets off on the first frame on time; one held up
+    /// once it moves moves it on by `longestStep` only, not by the time it took. Every bar drawing the same frame gets the
+    /// same lens, and a choice made midway starts from where the lens was drawn.
+    @Test func aHeldUpFrameDoesNotMakeTheLensJump() {
+        let glide = TabBarGlide()
+        glide.begin(from: 0, to: 2)
+        let tap = Date(timeIntervalSinceReferenceDate: 1000)
+        let frame = 1.0 / 60
+        func lens(_ g: TabBarGlide, _ at: Date, is t: TimeInterval) -> Bool {
+            let a = g.frame(at: at), b = TabBarGlide.frame(from: g.from, to: g.to, at: t)
+            return abs(a.at - b.at) < 1e-6 && abs(a.swell - b.swell) < 1e-6 && abs(a.opacity - b.opacity) < 1e-6
+        }
+        #expect(lens(glide, tap, is: 0)) // drawn first where it starts
+        // The tab's page swapped in, then drawn for the first time: frames 140 ms and 40 ms apart. It waits.
+        #expect(lens(glide, tap + 0.14, is: 0))
+        #expect(lens(glide, tap + 0.145, is: 0)) // another bar, the same frame
+        #expect(lens(glide, tap + 0.18, is: 0))
+        // Sets off on time.
+        var at = tap + 0.18 + frame
+        #expect(lens(glide, at, is: frame))
+        // Held up on the way: on by `longestStep`.
+        at += 0.1
+        #expect(lens(glide, at, is: frame + TabBarGlide.longestStep))
+        // On time, frame after frame, it goes on to its end and is gone there.
+        while glide.elapsed < TabBarGlide.length {
+            at += frame
+            _ = glide.frame(at: at)
+        }
+        #expect(glide.frame(at: at) == TabBarGlide.frame(from: 0, to: 2, at: TabBarGlide.length))
+        // Frames slow from the start (a busy phone): it waits `longestWait` at most, then goes on `longestStep` a frame.
+        let slow = TabBarGlide()
+        slow.begin(from: 0, to: 1)
+        _ = slow.frame(at: tap)
+        var late = tap
+        for _ in 0..<20 where slow.elapsed == 0 {
+            late += 0.05
+            _ = slow.frame(at: late)
+        }
+        #expect(abs(slow.elapsed - TabBarGlide.longestStep) < 1e-9)
+        #expect(late.timeIntervalSince(tap) < TabBarGlide.longestWait + 0.1 + 0.001)
+        // Chosen again midway: from where it was drawn, the clock from 0.
+        let other = TabBarGlide()
+        other.begin(from: 0, to: 2)
+        _ = other.frame(at: tap)
+        let midway = other.frame(at: tap + frame).at
+        other.begin(from: 2, to: 1)
+        #expect(other.from == midway && other.to == 1)
+        #expect(lens(other, tap + 2 * frame, is: 0))
+    }
+
     /// The choice is Settings › Appearance › Sidebar's, this device's own: picking Separate is written at once and read
     /// back by a new reader of the same defaults, as the app's root after a relaunch; nothing picked stays Merged on the
     /// open Duo and Separate on its outer display (#4206's default, unchanged).

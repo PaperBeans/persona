@@ -295,6 +295,7 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 	}
 	defer n.unclaimCodexThread(id)
 	n.bindPane(pane, id)
+	n.namePersonaTab(ctx, pane, id) // the tab was marked before the thread was known (personatab.go)
 	st := sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: began.UTC()}
 	if mode == "plan" {
 		st.AppMode = mode

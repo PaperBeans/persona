@@ -6,6 +6,7 @@
   "schedule_fired": "定时任务到点",
   "schedule_fired_what": "定时任务到点：{what}",
   "codex_extension": "Codex 扩展事件：{kind}（完整记录在原会话中）",
+  "codex_heartbeat_quiet": "心跳检查已完成，无新动态",
   "codex_event": "Codex 事件：{type}（完整记录在原会话中）",
   "shell_completed": "后台命令完成",
   "shell_failed": "后台命令失败",

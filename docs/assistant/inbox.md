@@ -274,7 +274,11 @@ a summary up to 40 characters, and a short reason:
     20-second limit; `login_refused` when, after the failed read, mail settings show the account's error (its server refuses the login: a wrong password or authorization code,
     a revoked OAuth grant); `failed` for anything else. `login_refused` gets its own words because it doesn't clear by itself: the line tells the owner that the account needs
     fixing, while the server's exact answer stays in mail settings. An account deleted during the round is not named. A round without mail (a poll) keeps the entries;
-    the next mail round replaces them, and they go with mail itself. Mixed versions: a sender from before this change (an older hub or extension manager) has no
+    transient failures (`timeout`, `rate_limited`, `failed`, including unknown codes) appear only after three consecutive
+    failed mail rounds for that account. Non-mail rounds do not count. A refused login appears immediately; once shown,
+    a notice remains until a successful read or removal. Failure counts are capped at three and reset on recovery or
+    account/source removal. Explicit source diagnostics still report each read immediately.
+    The next mail round replaces the notices, and they go with mail itself. Mixed versions: a sender from before this change (an older hub or extension manager) has no
     `mail.failed`, so the account is left out as before and nothing is named here; an Inbox from before this change ignores the field and reads the round as before.
   Apps use it for the waiting-for-triage banner below, and iOS / iPadOS, Android and web show sources with a `read_error` in a quiet neutral notice under it, one line per source, "name: `read_reason`" (#1849; mock `MOCK_INBOX_UNREAD`). All three use the same fallback words when `read_reason` is absent, and the notice clears with the next good read.
 - **Waiting-for-triage banner** (#1773, consistent on web, iOS / Mac, Android): if `triage.state` is not `ok` and `waiting > 0`, show a non-dismissible caution-colored (orange) banner at the top of the Inbox list, below search / filters and above the first section.
@@ -826,7 +830,7 @@ which users saw as one action: clear this batch they do not need to handle now. 
   With nothing open iOS says "Nothing left to handle" only for the whole Inbox; under filters or a search it names them without a count ("Lark · Group chat"),
   and while nothing is shown because the list is still being read, or its read failed, the item has no line at all (#7551, as the web).
   Mac has one toolbar button (scope on hover) and one Inbox-menu item, ⇧⌘E while Inbox is active. Apple passes `items` (ID + version) for current filtered / searched unhandled items, not `filter`.
-  Section Mark All Seen / Clear All still use `/done`. Watch has only single-item done, no bulk entry, and reply-only devices cannot call `/bulk`; extensions need `inbox.write`.
+  Section Mark All Seen / Clear All (and the same from a group's title, "Group titles") still use `/done`. Watch has only single-item done, no bulk entry, and reply-only devices cannot call `/bulk`; extensions need `inbox.write`.
 - **Old hubs**: without `/bulk` (404 / 405), fall back to `/done`. It lacks dismiss, so Clean up all records done (`done_by=user`), still removing items from the list. Reopen also falls back to `/done`.
 - Tests: `inbox_bulk_test.go` (`TestInboxBulkFilterAsOf`: post-cutoff items / messages unchanged, dismiss, Undo only changed items; IDs, single dismiss, bad requests),
   `hub/devicetokens_test.go` `TestAnswerRoleOnlyWhatTheWatchDoes` (Watch blocked), `hub/testdata/route_scopes.txt` (`inbox.write` required); web `inbox.test.ts`; Android `InboxBulkTest`, `InboxRepositoryTest`, `InboxAssistantTransportTest`;
@@ -929,6 +933,29 @@ The same rules on the web (`web/src/lib/inbox-groups.ts`) and iOS / iPad (`Perso
 - DEBUG (iOS): `-showInboxSection action|working|fyi|done|all` (the section bar on that choice; without it `-showInboxDone` and `-showInboxJump` choose Done and `-showInboxPickGroups` All, and `-showInboxPickedDone` shows Done after marking), `-showInboxPicked <n>`, `-showInboxPickedDone YES`, `-showInboxDone YES` (Done and its newest group open), `-showInboxPickGroups YES`, `-showInboxDue YES` / `-showInboxMerge YES` / `-showInboxTodo YES` (the first two rows picked and the due sheet open / merged / added to to-dos for today, #6480; `MOCK_INBOX_TODO=1|time` puts a to-do suggestion on the mock's design-review mail),
   `-showInboxJump <group>` (Done jumped to that group, `week` or `month`, its first page loaded). Mock hub: `MOCK_INBOX_HISTORY=busy` (36 done a day for two months), `MOCK_INBOX_DAYS=none`.
 - Tests: web `lib/inbox-groups.test.ts`, `views/inbox/Inbox.groups.test.tsx`, `views/inbox/Inbox.select.test.tsx`; Apple `InboxGroupsTests`, `InboxBulkTests`, `InboxFilteredEmptyTests`, and for the section bar `InboxBarFixtureTests` (the three shared files), `InboxBarTests` and `InboxSectionBarUITests`.
+
+## Group titles (2026-11-18, #10422)
+
+A group's title in **FYI** offers **Mark all seen ⌄**, and in **Collapsed** **Clear all ⌄**: a pull-down with two choices, the
+group's items ("Mark all 4 in “Assistant” seen") or the whole section's ("Mark all 6 in “FYI” seen"). Group titles stick to
+the top while their rows scroll by, so once the section's own button has scrolled away this is the one in sight. Who it
+serves: everyone reading the Inbox on the Assistant side; it adds no setting and no request.
+
+- **Where**: only the sections with a section-wide action (FYI, Collapsed). Needs you and In progress get none: their items
+  need the owner (or the AI is on them), and a batch there is how things get missed; Done is already done. A section with one
+  group shows no group titles, so its own button acts at once, as before. Not while selecting.
+- **Scope and counts**: the open list is complete (`GET /api/v1/inbox` lists every open item; only Done pages), so "all" is
+  every item the group or section shows under the current filters, folder and search, the number on its title. With any of
+  them on, each choice says under it what it covers in Clean up all's words ("Lark · @Me", "Search “report”"). The request is
+  the section button's own (Apple `POST /api/v1/inbox/done`; the web `/bulk` with `action: done`, falling back to `/done`):
+  ids and versions, one request per manager. Items that took new messages after the list was read stay open, and the toast
+  says how many.
+- **Undo**: the rows leave at once and the toast's Undo reopens what moved; a failure puts them back ("Mark All as Done").
+- **Look**: the section's own words and a small chevron (iOS `Theme.Icon.pullDown`, the web's `chevron`) at the right of the
+  group's title, its target 44 pt tall on iOS; the words stay whole and a long group title gives way.
+- **Android**: #10425.
+- Tests: Apple `InboxGroupClearTests` and UI `InboxGroupClearUITests` (with the mock's `MOCK_INBOX_EXTRA=<n>` it also shows the
+  mail group's title stuck at the top); web `views/inbox/InboxList.group-clear.test.tsx`.
 
 ## App
 

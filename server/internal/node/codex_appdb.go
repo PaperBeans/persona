@@ -74,9 +74,12 @@ var codexAppDBs = struct {
 	byHome map[string]*codexAppDB
 }{byHome: map[string]*codexAppDB{}}
 
+// codexAppDBGlob is what codexAppDBPath globs with (a test counts the globs).
+var codexAppDBGlob = filepath.Glob
+
 // codexAppDBPath is the newest state database in home (state_5.sqlite in 2026-11): its number goes up with its schema.
 func codexAppDBPath(home string) string {
-	paths, _ := filepath.Glob(filepath.Join(home, "state_*.sqlite"))
+	paths, _ := codexAppDBGlob(filepath.Join(home, "state_*.sqlite"))
 	best, bestN := "", -1
 	for _, p := range paths {
 		n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(filepath.Base(p), "state_"), ".sqlite"))
@@ -294,6 +297,12 @@ func (n *Node) registerCodexAppThreads(home string, pass *codexListPass) {
 		if t.RolloutPath != "" {
 			if _, err := pass.stat(t.RolloutPath); err == nil {
 				path = t.RolloutPath
+				if !pathWithin(path, canonical) {
+					// The App names the rollout as it reached its home, which may be through a link (macOS's /var, a
+					// linked ~/.codex). The rollout scan registers the same file under the resolved home, so register
+					// it resolved too, or the two spellings of one file contend for the chat's path.
+					path = realPath(path)
+				}
 			}
 		}
 		n.registerCanonicalCodex(canonical, t.ID, path)

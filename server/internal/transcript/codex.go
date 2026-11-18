@@ -407,10 +407,25 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 		for _, c := range it.Content {
 			switch {
 			case c.Type == "text" && strings.TrimSpace(c.Text) != "":
-				parts = append(parts, codexUserText(c.Text))
+				parts = append(parts, c.Text)
 			case c.Type == "local_image" && c.Path != "":
 				images = append(images, strings.TrimPrefix(c.Path, "file://"))
 			}
+		}
+		// Match the envelope before removing other kinds of input metadata or clipping long prompts.
+		if len(parts) == 1 && len(images) == 0 {
+			if prompt, ok := codexHeartbeatPrompt(strings.TrimSpace(parts[0])); ok {
+				u := mk(0, it.ID, "user", proto.KindText)
+				u.Source = &proto.MessageSource{Kind: proto.SourceScheduledTask}
+				u.Text = clip(prompt)
+				if meta.codexUserID == "" {
+					meta.codexUserID = u.ID
+				}
+				return []proto.Item{u}
+			}
+		}
+		for i := range parts {
+			parts[i] = codexUserText(parts[i])
 		}
 		text := strings.TrimSpace(strings.Join(parts, "\n"))
 		items, paseo := paseoInput(func(n int, role, kind string) proto.Item { return mk(n, it.ID, role, kind) }, 0, text)
@@ -442,7 +457,12 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 		for _, c := range it.Content {
 			b.WriteString(c.Text)
 		}
-		text := codexThreadLinks(strings.TrimSpace(b.String()))
+		text := strings.TrimSpace(b.String())
+		quiet := false
+		if it.Phase == "final_answer" {
+			text, quiet = codexHeartbeatAnswer(text)
+		}
+		text = codexThreadLinks(text)
 		if text == "" {
 			return nil
 		}
@@ -453,6 +473,7 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 		}
 		a := mk(0, it.ID, "assistant", proto.KindText)
 		a.Narration = it.Phase == "commentary"
+		a.CodexHeartbeatQuiet = quiet
 		a.Text = clip(text)
 		return []proto.Item{a}
 	case "Reasoning":
@@ -690,6 +711,7 @@ func attachImages(items []proto.Item, images []string) bool {
 // codexUserText cleans what Codex records as the user's message: ambient context (and Persona's) goes, and the answer to a question
 // Codex asked (request_user_input, stored as JSON) reads as the answer itself ("question: answer", with a full-width colon, when several).
 func codexUserText(s string) string {
+	s = StripInterject(s)
 	s = legacyLarkAgent(strings.TrimSpace(ContextRe.ReplaceAllString(dropTagged(ViewErrorsRe, "<persona-view-errors", codexAmbientRe.ReplaceAllString(s, "")), "")))
 	return strings.TrimSpace(CodexReplyRe.ReplaceAllStringFunc(s, func(block string) string {
 		var replies []struct {

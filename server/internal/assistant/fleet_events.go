@@ -14,6 +14,10 @@ import (
 // NodeEvent takes a node's event before the hub does (devices.Options.Event); false: the hub does not get it (the
 // manager tells it what follows instead).
 func (s *Service) NodeEvent(machine, event string, params json.RawMessage) bool {
+	if event == "launchers.changed" {
+		s.launchersChanged(machine)
+		return false
+	}
 	if err := s.conversationParamsAvailable(context.Background(), machine, params); err != nil {
 		return false
 	}
@@ -177,7 +181,7 @@ func (s *Service) NodeRequest(ctx context.Context, machine, method string, param
 		// carries no list to mark.
 		if tools, ok := out["tools"].([]proto.Tool); ok {
 			deferring := p.Assistant && !p.Guest && !s.isGuest(ctx, machine, p.SessionID)
-			out["tools"] = s.withToolLoading(ctx, tools, deferring)
+			out["tools"] = s.withToolLoading(ctx, p.SessionID, tools, deferring)
 		}
 		return out, true, nil
 	case "mcp.call":

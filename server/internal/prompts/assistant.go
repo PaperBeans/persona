@@ -438,6 +438,10 @@ type AssistantContext struct {
 	// LeaderName: for a leader, its direction's name.
 	Directions []ContextDirection
 	LeaderName string
+	// LeaderStatus: for a leader whose direction has notes, the one-line status of the knowledge-base project it is
+	// filed under (#10086). Here rather than in its system prompt: a summary rewrite changes it, and a changed system
+	// prompt would restart the leader.
+	LeaderStatus string
 	// Background: this is the background supervisor (#4927), which follows up the tasks no leader supervises.
 	// BackgroundStarted: for the main conversation, once: the background supervisor's id, the first message after it
 	// began to follow up the main conversation's tasks.
@@ -502,6 +506,10 @@ type BriefFacts struct {
 	// InboxWaiting and InboxDue are read-only follow-up facts for the model only; neither is on the card or in the push.
 	InboxWaiting, InboxDue []BriefFollow
 	Leaders                []BriefLeader // one per direction (#3609)
+	// Directions are the deterministic per-direction wait lists, main included. Every direction keeps all owner-wait
+	// rows and folds only its non-owner tail; More says how many rows the direction link holds beyond it.
+	Directions       []BriefDirection
+	DisabledRoutines []BriefDisabledRoutine
 	// Briefs: the open pieces of work that need the owner or changed since the last briefing, in their own words;
 	// BriefsDone: those that ended since, once, with each criterion's result (#3822).
 	Briefs, BriefsDone []BriefTask
@@ -599,6 +607,35 @@ type BriefLeader struct {
 	Name                     string
 	Open, Waiting, Stuck     int
 	Reached, Doing, NeedsYou string
+}
+
+// BriefDirection is one direction's open-work count and deterministic wait rows. Main and leader directions alike keep
+// every owner-wait row; only the non-owner tail is folded into More. Line is ready to read in the owner's language.
+type BriefDirection struct {
+	ID, Name, Link             string
+	Owner                      bool
+	Open, Active, Undispatched int
+	Waits                      []BriefWait
+	More                       int
+}
+
+// BriefWait is one stopped task or unanswered card. Kind is needs_user, review, question, permission, private,
+// parked, capacity, orphaned, overdue or stalled. Since/Until are zero when the ledger did not record them.
+type BriefWait struct {
+	TodoID, InteractionID string
+	Title, Kind           string
+	Since                 time.Time
+	Until                 time.Time
+	WaitingOn, Reason     string
+	Link, Line            string
+}
+
+// BriefDisabledRoutine is a disabled daily report or patrol. DisabledAt is nil for routines saved before the hub
+// recorded the transition; Line says "disable time not recorded" rather than substituting LastRun.
+type BriefDisabledRoutine struct {
+	ID, Title, Direction, Kind string
+	DisabledAt                 *time.Time
+	Link, Line                 string
 }
 
 // BriefFailed is one thing that did not go through: a task whose agent did not start, a scheduled run that failed
@@ -788,7 +825,8 @@ type SuperviseEntry struct {
 	ID, Title, Kind string
 	AgentReply      *DecisionAgentReply // decision_reply: a pending decision's owner message, not an inferred choice
 	Detail          string              // why: the judge's reason, the step it is stuck on, the model service's error, why it did not start
-	Minutes         int                 // how long it has waited (needs_you) or not moved (stalled)
+	Minutes         int                 // how long it has waited (needs_you), not moved (stalled) or not progressed (no_progress)
+	Calls, Waits    int                 // no_progress: the tool calls the hub saw since the last progress, and how many were waits or repeats
 	Ask             string              // needs_you: what it asks
 	Recommend       string              // escalated: the option the leader recommends
 	LeaderGone      bool                // decide: its task leader agent cannot be reached, so the supervisor takes the task over
@@ -1209,3 +1247,31 @@ func RenderRouteInput(in RouteInput) string { return render("assistant/route_inp
 // RenderRouteAgent is the system prompt of assistant.route for a new agent (assistant/route_agent): which leader's
 // direction its work belongs to; it reads RouteInput (the agent's first message as the sentence, no projects).
 func RenderRouteAgent() string { return render("assistant/route_agent", nil) }
+
+// DirectionNotes is what a leader conversation is told of its own direction (#10086): the notes the owner wrote for it
+// and the goal of the knowledge-base project it is filed under. Lang is the owner's language (i18n code; "" or
+// zh-Hans: Chinese).
+type DirectionNotes struct {
+	Lang, Name, Notes, ProjectName, ProjectGoal string
+}
+
+// Empty: nothing the owner wrote and no project goal, so nothing is added to the leader's policy.
+func (d DirectionNotes) Empty() bool { return d.Notes == "" && d.ProjectGoal == "" }
+
+// RenderDirectionNotes is the block appended to a leader's role policy (supervision_instructions); empty when there
+// is nothing to say, so a direction without notes keeps its policy byte for byte.
+func RenderDirectionNotes(d DirectionNotes) string {
+	if d.Empty() {
+		return ""
+	}
+	return render("assistant/direction_notes", d)
+}
+
+// RenderTodoDirection is the block a new Agent working for a direction gets before its first prompt (todo/direction);
+// empty without notes.
+func RenderTodoDirection(d DirectionNotes) string {
+	if d.Notes == "" {
+		return ""
+	}
+	return render("todo/direction", d)
+}

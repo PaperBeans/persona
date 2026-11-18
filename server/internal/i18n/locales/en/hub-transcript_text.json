@@ -6,6 +6,7 @@
   "schedule_fired": "A scheduled run started",
   "schedule_fired_what": "A scheduled run started: {what}",
   "codex_extension": "Codex extension event: {kind} (the full record is in the original session)",
+  "codex_heartbeat_quiet": "Heartbeat check complete. No updates.",
   "codex_event": "Codex event: {type} (the full record is in the original session)",
   "shell_completed": "Background command finished",
   "shell_failed": "Background command failed",
