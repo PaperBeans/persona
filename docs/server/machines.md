@@ -7,7 +7,7 @@ Each computer's OS, current load and curves for the past 24 hours. The node coll
 | Collection (parsing /proc, vm_stat, iostat, sw_vers, Win32 responses, etc.) | `server/internal/sysmon/` (`sysmon.go`, `winparse.go` pure parsing; `linux.go` / `darwin.go` / `windows.go` read the OS) |
 | Node sending | `server/internal/node/metrics.go` |
 | Manager storage, downsampling, cleanup, API (hub forwards `devicewire.MetricsRoutes`) | `server/internal/devices/metrics.go`, `server/internal/db/metrics.go`, migration `0051_machine_metrics.sql` |
-| Token usage: node metering, manager storage, API (see "Token usage" below) | `server/internal/node/usage.go`, `server/internal/devices/usage.go`, `server/internal/db/usage.go`, migration `manager/0421_machine_usage.sql` |
+| Token usage: node metering, manager storage, API (see "Token usage" below) | `server/internal/tokenuse/`, `server/internal/node/usage.go`, `server/internal/node/usage_adapters.go`, `server/internal/devices/usage.go`, `server/internal/db/usage.go`, migration `manager/0421_machine_usage.sql` |
 | App | `apple/Persona/Views/Machines/` (`MachinesView`, `MachineDetailView`, `MetricCharts`, `OSBadge`), model `apple/Packages/PersonaWire/Sources/PersonaWire/MachineMetrics.swift` |
 | Inspect local samples / overhead | `personad sysmon [n]`: prints system info and n+1 samples (one every 10 seconds, n ≤ 8640, one day); final line gives actual sample count, collection duration and personad CPU (Ctrl-C stops immediately) |
 
@@ -220,22 +220,36 @@ Measured row data is 116 bytes (`pg_column_size`), roughly 200 bytes including h
 
 How many tokens each machine runs, for the Machines page's cards and charts (the Dynamic Island's totals come from the same data, `docs/apple/live-activity.md` ("Usage")).
 
-- **Metering** (`node/usage.go`): every 10 seconds the node reads what its transcripts gained (Claude Code main and subagent transcripts in every config directory, and the agents of its workflow runs, `<session>/subagents/workflows/<run>/agent-*.jsonl`, which it missed until #9255; the rollouts of Codex and compatible Codex forks)
-  and sums the replies per minute, model and **launcher**: the launcher Persona started the session with (`sessionState.Launcher`, looked up by the transcript's session or thread id;
+- **Metering** (`node/usage.go`): every 10 seconds the node reads what its agents' records gained. An adapter per agent (`node/usage_adapters.go`, #9923) says which files hold its usage,
+  which session a file belongs to and which parser reads it: Claude Code's main and subagent transcripts in every config directory, and the agents of its workflow runs
+  (`<session>/subagents/workflows/<run>/agent-*.jsonl`, which it missed until #9255); the rollouts of Codex (every Codex home: the default and the registered ones) and of the compatible traex CLI, each segment of a
+  continued thread (the session list follows a thread's newest), and for a backfill reaching further back than two weeks every rollout on disk, archived ones too (#10002); the sessions of pi and omp
+  (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent` and `~/.omp/agent`: `sessions/<cwd>/<time>_<id>.jsonl`, #9992). opencode keeps its steps in a SQLite database (`$PERSONA_OPENCODE_DB`,
+  else `$XDG_DATA_HOME/opencode/opencode.db`, default `~/.local/share/opencode/opencode.db`): its adapter queries it with the system `sqlite3` (`node/usage_opencode.go`), the rows added
+  since the last read and the unfinished ones again, nothing while the database has not changed; without `sqlite3` (a Linux machine often has none) opencode is not metered.
+  Cursor's CLI and Antigravity keep no token counts the node can read and check: they are not metered. A runtime with no record of its own is not metered either. The parsers (`server/internal/tokenuse`)
+  are the same ones the usage on a chat's replies and the subagent summaries read (`docs/protocol/protocol.md`, "Token usage on items"), so a request counts the same everywhere
+  and sums the replies per minute, model, **agent** (its adapter's, `proto.Session.Agent`'s names, #9984) and **launcher**: the launcher Persona started the session with (`sessionState.Launcher`, looked up by the transcript's session or thread id;
   a subagent's or workflow agent's transcript is its session's). A session typed in a terminal has no launcher (`""`, shown as "Other"). The node keeps 26 hours and reports changed minutes as `usage`
   (`"launchers": true` says its buckets name the launcher; an older node's do not, and the apps grey out the launcher filter for it).
 - **Counted once**: a reply is counted once in the window even when it is in several files. A fork (Claude Code's `--fork-session`, Codex's fork) copies the history it starts from,
   timestamps included, into the new file; the meter remembers every reply it counted (Claude Code's message id, Codex's timestamp and running total) for the window.
   Measured on the transcripts of two machines over three days (2026-11-06): no reply was in two files and none repeated out of order in one file, so today's numbers do not change; the rule covers forks.
-- **What a reply counts**: Claude Code's `usage` (input not from the cache, cache creation as cache write, cache read, output); `<synthetic>` replies are skipped. Codex's `last_token_usage`:
-  its input includes the cached part, which is counted as cache read (input minus cached as input); Codex has no cache write (always 0); reasoning tokens are in its output.
+- **What a reply counts**: Claude Code's `usage` (input not from the cache, cache creation as cache write, cache read, output), once a request at the most its lines say (Claude Code up to 2.1.306
+  wrote the output so far on each content block); Claude Code's own replies for a failed request (`<synthetic>`, `isApiErrorMessage`) and usage of all zeros are skipped. Codex's `last_token_usage`:
+  its input includes what was read from the cache and what was written to it (`cached_input_tokens`, `cache_write_input_tokens`), counted as cache read and cache write and taken out of input,
+  as Codex itself does for its fresh input (OpenAI's models write none: 0); reasoning tokens are in its output. pi's and omp's usage is already in the four kinds (an assistant
+  message's `usage` with its `model`; pi's `usage` entries, omp's `model_usage` entries and pi's compaction and branch summaries count too, a summary under the session's latest model;
+  omp's `orchestration` tokens are added to their kinds); a fork copies their entries as they are, so the entry's id and time name a request. An opencode step counts once it finished
+  (`data.time.completed`; a compaction once completed or failed), its `reasoning` added to its output, which leaves it out. Reasoning is output for every agent.
   Cache hit rate = cache read / (input + cache write + cache read).
 - **Storage** (`devices/usage.go`, `db/usage.go`): the manager keeps the last 26 hours in memory (the island, the cards) and writes every notification to `machine_usage` in order, from one goroutine.
   Each node reports on a 10-second tick of its own, so while another machine has written in the last 25 seconds, the notifications that come within 5 seconds of one go in one transaction with it (`db.PutUsages`, in order; if Postgres rejects one, each goes under a savepoint of its own); a single busy machine's are written at once.
   A bucket is its minute's whole total, so a later one replaces it; a node's whole window (`full`, after it connects) first deletes the machine's minute rows of that window, so what the node
   counts now is the record (an older node's rows without a launcher do not stay next to the new ones). Each minute the minute rows older than 27 hours are summed into one row per 10 minutes
   (`step = 600`), the 10-minute rows older than 7 days and an hour into one row per hour (`step = 3600`, `db.RollupUsageHours`), and rows older than 53 weeks and a day are deleted.
-  About 1 to 3 rows a machine and minute (one per model and launcher in use), 10,000 to 30,000 rows a machine for the week, then 24 to 72 a machine and day for the year (about 9,000 to 27,000).
+  About 1 to 3 rows a machine and minute (one per model, launcher and agent in use), 10,000 to 30,000 rows a machine for the week, then 24 to 72 a machine and day for the year (about 9,000 to 27,000).
+  Rows keep their agent through the rollups (`machine_usage.agent`, migration `manager/0551_usage_by_agent.sql`); rows stored before agents were kept apart, and an older node's, have `''`.
 - **Ranges**: 1 hour by minute (60 points), 24 hours by 10 minutes (144), 7 days by hour (168). A point is the step's sums; for "per minute" the apps divide by the step's minutes, the step under way by the part of it that had passed when the report came (at least a minute, `web/src/lib/usage-rate.ts` `stepMinutes`, PersonaWire `MachineUsageSeries.minutes(at:)`; #9205).
   A step with no monitoring sample and nothing counted is a break (`gap`), as in the monitoring charts; a machine that never sent monitoring samples has no breaks.
 - **Card** (`GET /api/v1/metrics`'s `usage` per machine, from memory): today's sums, all tokens per minute now (over the last two to three minutes) and the last 60 minutes by minute.
@@ -247,8 +261,9 @@ so a day's number is the same sum as today's tokens on the Machines page.
 
 - **Days** (`GET /api/v1/usage/days?days=N`, 1 to 371, default 140): each of the last N days in the user's zone (`Options.Location`), midnight to midnight, oldest first; the last is today.
 - **Hours** (`GET /api/v1/usage/hours?days=N`, 1 to 7, default 7): each hour on the clock from the first day's midnight to the hour under way, with its day and hour on the clock
-  (a day the clocks change has 23 or 25; the hour that comes twice is there twice), each machine's share of them, largest first (a machine no longer here has no name), and their total.
-- **Sums** (`db.UsageSpans`): Go works out the day or hour starts in the zone and Postgres sums the rows into them (`width_bucket` over the starts), every machine's together or each apart,
+  (a day the clocks change has 23 or 25; the hour that comes twice is there twice), each machine's share of them, largest first (a machine no longer here has no name), each agent's share
+  (`agents`, #9984; `''` for the rows stored before agents were kept apart: they leave the week a week after the update, and a node's first whole window after it re-sends its last 26 hours by agent), and their total.
+- **Sums** (`db.UsageSpans`): Go works out the day or hour starts in the zone and Postgres sums the rows into them (`width_bucket` over the starts), every machine's together or each machine's or agent's apart,
   through the `machine_usage_ts` index. A row counts in the span its start is in: the minute and 10-minute rows of the last week fall exactly, while the hour rows split a day at the hour
   in a zone whose clock is not a whole hour from UTC.
 - Without Postgres (`stored: false`) both come from the buckets in memory, the last 26 hours.
@@ -277,6 +292,13 @@ The history starts the day the manager began keeping it; the days before are onl
   (as hour rows, `step = 3600`) only when the machine had no row in it before the request, so the live meter's count of an hour always stays; in the same transaction it records
   the last hour sent and, with the last request, when the scan finished. A scan cut off (a restart, a dropped connection) asks again on the next connection and reads from the
   hour after the last stored; a request sent twice adds nothing. Once finished, the node is not asked again.
+- **By agent** (#9984): the node names the agents it reads and the manager keeps a record per agent (`usage_backfill.agent`). Claude Code's is the machine's first
+  record (`''`): done stays done. Every other agent has its own, so an agent whose adapter a node gains later has its history read (only its files) from the history's start,
+  and its hours are stored beside the others: an hour is stored for an agent only when the machine had none of that agent's usage in it, nor, for an agent metered before
+  agents were kept apart (Claude Code, Codex, traex), usage stored then (`''`, which may hold theirs). Codex and traex got records of their own with #10002: the first
+  backfill listed only the rollouts written in the last two weeks, so their older history is read again, and fills the hours that held none of it. A request names the
+  agents it read; only their buckets are stored and only their records move on. An older node names none (the first record, as before); an older manager answers its one
+  range, which the node then reads for every agent.
 
 ## Gaps
 

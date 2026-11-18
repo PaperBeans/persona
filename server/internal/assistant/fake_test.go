@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -188,6 +189,9 @@ type fakeHub struct {
 	onList    func(f *fakeHub, machine string)   // runs (under the fake's lock) before a sessions.list is answered, which then sends the list as it left it
 	// onAssistantSend runs (under the fake's lock) when assistant.send arrives, before it is answered
 	onAssistantSend func(f *fakeHub, p map[string]any)
+	// assistantAnswer adds to assistant.send's answer (under the fake's lock): what a node says of a supervision round
+	// (node/assistant_round.go), for example.
+	assistantAnswer func(p map[string]any) map[string]any
 	// doctor is each machine's node.doctor claude-version detail (none: the report has no such check).
 	doctor      map[string]string
 	doctorState map[string]string // each machine's claude-version state ("unanswered": no version came this time)
@@ -641,7 +645,11 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		if a["resume_only"] == true && !f.known[id] {
 			return nil, fmt.Errorf("conversation %s is gone", id)
 		}
-		return json.Marshal(map[string]any{"session_id": id})
+		out := map[string]any{"session_id": id}
+		if f.assistantAnswer != nil {
+			maps.Copy(out, f.assistantAnswer(a))
+		}
+		return json.Marshal(out)
 	}
 	return json.RawMessage(`{}`), nil
 }

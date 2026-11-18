@@ -118,26 +118,28 @@ fun AssistantSidebarContent(
             finally { leaderBusy = false }
         }
     }
-    val groups = remember(received, query, ended, archived, words, history.titles) {
-        conversationGroups(received.copy(conversations = history.titled(received.conversations.filter { it.key !in archived }.map {
+    val groups = remember(received, query, ended, archived, words, history.titles, history.tagEdits, history.activeTag) {
+        conversationGroups(received.copy(conversations = history.tagged(received.conversations.filter { it.key !in archived }.map {
             if (it.key in ended) it.copy(status = "offline", state = "offline") else it
-        })), query, words)
+        })), query, words, activeTag = history.activeTag)
     }
     val searchOn = management != null && !demo && AssistantSearchFeature in LocalHubFeatures.current
-    val openChats = remember(received.conversations, ended, archived, history.titles) {
-        history.titled(received.conversations.filter { !it.archived && it.key !in archived }.map {
+    val openChats = remember(received.conversations, ended, archived, history.titles, history.tagEdits) {
+        history.tagged(received.conversations.filter { !it.archived && it.key !in archived }.map {
             if (it.key in ended) it.copy(status = "offline", state = "offline") else it
         })
     }
-    val knownChats = remember(received.conversations, ended, archived, history.titles, history.archived) {
-        val listed = history.titled(received.conversations.filter { it.key !in archived }.map {
+    val knownChats = remember(received.conversations, ended, archived, history.titles, history.tagEdits, history.archived, history.restoring) {
+        val listed = received.conversations.filter { it.key !in archived }.map {
             if (it.key in ended) it.copy(status = "offline", state = "offline") else it
-        })
-        (listed + history.shownArchived(openKeys(openChats))).distinctBy { it.sessionId }
+        }
+        history.tagged((listed + history.shownArchived(openKeys(openChats))).distinctBy { it.sessionId })
     }
+    val tagChoices = remember(knownChats) { inUseConversationTags(knownChats) }
     val (foundChats, searchPartial) = rememberFoundChats(
         query, remember(groups) { (groups.directions + groups.others).distinctBy { it.sessionId } },
-        knownChats, searchOn, management, "${choice.hubId.orEmpty()}|${choice.shown}")
+        knownChats.withConversationTag(history.activeTag), searchOn, management, "${choice.hubId.orEmpty()}|${choice.shown}",
+        activeTag = history.activeTag)
     Column(Modifier.fillMaxHeight()) {
         failure?.let { JNotice(it, status = Status.NeedsYou) }
         Box(Modifier.weight(1f)) {
@@ -177,8 +179,10 @@ fun AssistantSidebarContent(
                     leaderConfirm = session
                 }) else null,
                 onRename = if (management != null && !demo) ({ session: Session -> history.renaming = session }) else null,
+                onEditTags = if (management != null && !demo) ({ session: Session -> history.editingTags = session }) else null,
                 onDiagnostics = { copy(conversationDiagnostics(it), resources.getString(R.string.assistant_diagnostics_copied)) },
                 archivedCount = history.shownArchived(openKeys).size, onArchived = { history.archivedOpen = true },
+                tagChoices = tagChoices, activeTag = history.activeTag, onTag = history::selectTag,
                 onTodos = onTodos, todoCount = todoCount, showTodos = showTodos,
                 settingsCount = settingsCount, settingsDot = settingsDot, settingsBadge = settingsBadge,
                 pages = pages, onPage = onPage, onOpenTodo = onOpenTodo, onOpenAgent = onOpenAgent, switcher = switcher,
@@ -201,6 +205,7 @@ fun AssistantSidebarContent(
             words = words,
             names = received.directionNames,
             backgroundId = received.backgroundSupervisor,
+            activeTag = history.activeTag,
             mainName = assistantName,
             mainKey = received.mainSession,
             onOpen = { key ->

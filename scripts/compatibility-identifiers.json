@@ -1130,6 +1130,24 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "server/internal/node/powershell_start_test.go": {
+      "reason": "Goldens captured from main's start command, which still names the retained legacy MCP tools and unsets the legacy environment aliases.",
+      "tokens": [
+        "JARVIS_ASSISTANT",
+        "JARVIS_ASSISTANT_BIN",
+        "JARVIS_GUEST",
+        "JARVIS_SESSION_ID",
+        "JARVIS_SPACE",
+        "mcp__jarvis__report_to_supervisor",
+        "mcp__jarvis__task_plan",
+        "mcp__jarvis__task_review",
+        "mcp__jarvis__todo_bind_thread",
+        "mcp__jarvis__todo_decision_add",
+        "mcp__jarvis__todo_decisions"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "server/internal/node/testdata/session_list_keep.json": {
       "reason": "Baseline regression fixture or generated carrier asserting an exact versioned contract.",
       "tokens": [

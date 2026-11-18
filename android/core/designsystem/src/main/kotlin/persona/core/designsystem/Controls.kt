@@ -59,7 +59,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.node.requireDensity
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.Dp
@@ -140,7 +142,21 @@ fun JButton(
     val shape = RoundedCornerShape(if (style == AppStyle.Board) shapes.button else size.height / 2)
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed && style == AppStyle.Glass && !PersonaTheme.reduceMotion) 0.96f else 1f, label = "press")
+    val reduceMotion = PersonaTheme.reduceMotion
+    // Layout width, not snapshot state. Reading it from composition made every Brief and Board button recompose once
+    // after the first layout. It is read only while a Glass button is pressed; scale does not change the layout width.
+    val widthPx = remember { floatArrayOf(0f) }
+    val growthPx = with(LocalDensity.current) { PageTransitionTokens.pressGrowthDp.dp.toPx() }
+    val glassPress = pressed && style == AppStyle.Glass && !reduceMotion
+    val scale by animateFloatAsState(
+        targetValue = if (glassPress) glassPressTarget(true, true, false, widthPx[0], growthPx) else 1f,
+        animationSpec = if (pressed) {
+            IosSpring(PageTransitionTokens.glassPressDurationMs, PageTransitionTokens.glassPressBounce).spec()
+        } else {
+            IosSpring(PageTransitionTokens.glassReleaseDurationMs, PageTransitionTokens.glassReleaseBounce).spec()
+        },
+        label = "press",
+    )
     val (fill, content) = when (kind) {
         JButtonKind.Primary -> palette.action to palette.onAction
         JButtonKind.Secondary -> (if (style == AppStyle.Board) palette.surface else palette.surfaceStrong) to palette.ink
@@ -155,7 +171,9 @@ fun JButton(
     }
     val busy = loading
     Row(
-        modifier.heightIn(min = size.height).minimumInteractiveComponentSize().scale(scale).then(frame)
+        modifier.heightIn(min = size.height).minimumInteractiveComponentSize().scale(scale)
+            .onSizeChanged { if (style == AppStyle.Glass && !reduceMotion) widthPx[0] = it.width.toFloat() }
+            .then(frame)
             .clickable(interaction, indication = androidx.compose.material3.ripple(), enabled = enabled && !busy, role = Role.Button, onClick = onClick)
             .stableAlpha(if (enabled || busy) 1f else 0.4f)
             .padding(horizontal = if (kind == JButtonKind.Quiet) 8.dp.dense else size.padding),

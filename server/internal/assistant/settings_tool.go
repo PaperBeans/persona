@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	approvalops "github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/prompts"
@@ -36,6 +37,10 @@ type ownChange struct {
 	summary  string                   // for the assistant: the change made nothing to do
 	cardText func(l i18n.Lang) string // what the card says, in the user's language
 	apply    func(ctx context.Context) (string, error)
+	// applyChecksProposal marks an apply that re-reads current state and
+	// atomically checks the exact card revision itself. Rebuilding such an
+	// operation would move its revision baseline forward and hide a conflict.
+	applyChecksProposal bool
 }
 
 // card is what the approval card says in l.
@@ -219,6 +224,19 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.mainSupervisesOwnTasks(ctx)), nil },
 			set: s.setMainSupervisesOwnTasks},
+		{Setting: Setting{Key: "assistant.background_supervisor_keeps_context", Title: "The background supervisor keeps every round in context", Actions: getSet,
+			About: "off (the default): each round of the background supervisor starts from its first turn, in the same conversation: " +
+				"it reads its start brief and that round's supervision message, with only the tools supervision uses; what " +
+				"earlier rounds settled is on the tasks (brief, scope changes, decisions, the last review). on: from the next " +
+				"round, one long conversation again that keeps each later round in context, with all of the assistant's tools, " +
+				"as before (rounds already run from the first " +
+				"turn stay on their own branches, out of that context). Applies from the next round (one already running " +
+				"finishes as it is)",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) {
+				return fmt.Sprint(backgroundKeepsContext(s.settings(ctx))), nil
+			},
+			set: s.setBackgroundSupervisorKeepsContext},
 		{Setting: Setting{Key: "assistant.launcher", Title: "Persona 的启动器", Actions: getSet,
 			About: "which launcher (model) new Persona conversations start with by default",
 			Value: "a launcher name from this setting's get"},
@@ -336,19 +354,41 @@ func (s *Service) ownSettingAction(ctx context.Context, call ToolCall, o ownSett
 	}
 	shown, _ := json.Marshal(map[string]string{"setting": title, "action": action})
 	now := time.Now().UTC()
-	r, err := s.ask(ctx, proto.Interaction{ID: "ix_" + randomHex(6), MachineID: call.MachineID, SessionID: call.SessionID,
-		Kind: proto.IxPermission, ToolName: "persona_settings", Summary: change.card(l), ToolInput: shown, SessionTitle: "Persona",
-		CreatedAt: now, ExpiresAt: now.Add(settingCardWait)})
-	if err != nil {
-		return "", err
-	}
-	switch { // only the user's own answer counts: an expired card, or one answered for them, is no decline (#3722)
-	case r.UserAllowed():
-		return change.apply(ctx)
-	case r.UserDenied():
-		return "The user declined the change: nothing changed.", nil
-	}
-	return prompts.RenderSettingUnanswered(), nil
+	proposal := change.card(l)
+	outcome, err := s.waitPreparedCard(ctx, proto.Interaction{ID: "ix_" + randomHex(6), MachineID: call.MachineID, SessionID: call.SessionID,
+		Kind: proto.IxPermission, ToolName: "persona_settings", Summary: proposal, ToolInput: shown, SessionTitle: "Persona",
+		CreatedAt: now, ExpiresAt: now.Add(settingCardWait)}, approvalops.Operation{
+		Replacement: call.MachineID + "\x00" + call.SessionID + "\x00setting\x00" + o.Key,
+		Denied:      "The user declined the change: nothing changed.",
+		Unanswered:  prompts.RenderSettingUnanswered(),
+		Apply: func(ctx context.Context, _ proto.Resolution) (string, error) {
+			if change.applyChecksProposal {
+				// This apply already re-reads and compares the approved revision
+				// under its state lock; do not rebase it onto a newer revision.
+				return change.apply(ctx)
+			}
+			// Rebuild from current state: only the exact visible proposal the owner
+			// approved may execute, and the freshly validated operation is used.
+			var fresh *ownChange
+			var err error
+			switch {
+			case action == "set" && o.set != nil:
+				fresh, err = o.set(ctx, value)
+			case action != "set" && o.change != nil && slices.Contains(o.Actions, action):
+				fresh, err = o.change(ctx, action, value)
+			default:
+				return "", approvalops.ErrStale
+			}
+			if err != nil {
+				return "", err
+			}
+			if fresh == nil || fresh.apply == nil || fresh.card(l) != proposal {
+				return "", approvalops.ErrStale
+			}
+			return fresh.apply(ctx)
+		},
+	})
+	return outcome.Text, err
 }
 
 func orNone(s string) string {
@@ -365,7 +405,7 @@ var settingTitles = map[string]string{standingAuthorizationsKey: "title_standing
 	"assistant.task_workspace_preference": "title_task_workspace_preference",
 	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher",
 	"assistant.recording_days": "title_recording_days", "assistant.done_needs_delivery": "title_done_needs_delivery",
-	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders",
+	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders", "assistant.background_supervisor_keeps_context": "title_background_supervisor_keeps_context",
 	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "assistant.inbox_signals": "title_inbox_signals", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "model_profiles.tiers": "title_model_tiers",
 	"assistant.load_all_tools":                "title_load_all_tools",
 	"assistant.meeting_transcription_default": "title_meeting_transcription_default",
@@ -652,6 +692,15 @@ func (s *Service) setMainSupervisesOwnTasks(ctx context.Context, v json.RawMessa
 	}, func(v *Settings) **bool { return &v.MainSupervisesOwnTasks },
 		"assistant.main_supervises_own_tasks is %v for the signals raised from now on (open tasks keep running; what the "+
 			"background supervisor was already sent it finishes).")
+}
+
+func (s *Service) setBackgroundSupervisorKeepsContext(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	return s.setBoolSetting(ctx, v, func(ctx context.Context) bool { return backgroundKeepsContext(s.settings(ctx)) },
+		"assistant.background_supervisor_keeps_context is unchanged", func(l i18n.Lang, before, after string) string {
+			return i18n.T(l, "assistant-settings_tool.change_background_supervisor_keeps_context", i18n.Args{"before": before, "after": after})
+		}, func(v *Settings) **bool { return &v.BackgroundSupervisorKeepsContext },
+		"assistant.background_supervisor_keeps_context is %v from the background supervisor's next round (one running now "+
+			"finishes as it is).")
 }
 
 // launchers are the launchers of the assistant's machine, as the apps list them.

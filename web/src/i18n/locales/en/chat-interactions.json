@@ -44,6 +44,7 @@
   "edited_pending": "Edited; Allow sends your version.",
   "always_allow": "Always allow",
   "allow": "Allow",
+  "have_question": "Have a question",
   "field_command": "Command",
   "field_file": "File",
   "field_url": "Address",

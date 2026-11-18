@@ -101,8 +101,9 @@
         "tags": {"type": "array", "items": {"type": "string"}},
         "updated": {"type": "string", "format": "date-time"},
         "extra": {"type": "string", "description": "A project's short / long · status, a chat's dm / group…"},
-        "source": {"type": "string", "description": "A chat's source (lark, mail, wechat, github…)."},
-        "recording_kind": {"type": "string", "description": "A recording's kind: meeting, note or day (#8870); absent on other kinds and from an older hub."}
+        "source": {"type": "string", "description": "A chat's source (lark, mail, wechat, github…); a document's, meeting's or event's connector (#8872)."},
+        "recording_kind": {"type": "string", "description": "A recording's kind: meeting, note or day (#8870); absent on other kinds and from an older hub."},
+        "meeting_id": {"type": "string", "description": "A recording's imported meeting: the id of the meetings item it overlaps, as the meetings list has it (#8872); absent on other kinds, before a match and from an older hub."}
       },
       "required": ["kind", "id", "name", "relevance", "updated"]
     },

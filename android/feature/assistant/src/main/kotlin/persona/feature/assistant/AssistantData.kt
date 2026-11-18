@@ -99,11 +99,15 @@ internal fun conversationGroups(
     snapshot: AssistantSnapshot,
     query: String,
     words: ConversationWords,
+    activeTag: String? = null,
 ): ConversationGroups {
+    // Filter the source snapshot once so main, directions, Recent and All chats all use the same exact tag match.
+    val filtered = if (activeTag.isNullOrEmpty()) snapshot
+        else snapshot.copy(conversations = snapshot.conversations.withConversationTag(activeTag))
     // The background supervisor (#4927) is built in: a conversation with the scheduled tasks' ones under All chats, found
     // by its name too, and never a direction whatever the leaders say.
-    val background = snapshot.backgroundSupervisor?.takeIf(String::isNotBlank)
-    val matches = snapshot.conversations.distinctBy { it.key }.filter {
+    val background = filtered.backgroundSupervisor?.takeIf(String::isNotBlank)
+    val matches = filtered.conversations.distinctBy { it.key }.filter {
         !it.archived && (query.isBlank() || it.conversationTitle(words).contains(query.trim(), ignoreCase = true) ||
                 it.lastText.orEmpty().contains(query.trim(), ignoreCase = true) ||
                 (it.sessionId == background && words.background.contains(query.trim(), ignoreCase = true)))
@@ -112,17 +116,17 @@ internal fun conversationGroups(
     // The leaders are the drawer's 常驻 group, under their names; a search matches the name too. Every other
     // conversation waits under one "All chats" row (there is no all-conversations page on this app): main and the
     // leaders are not listed twice.
-    val names = snapshot.directionNames
-    val directions = snapshot.leaders.filter { it != background }.mapNotNull { id ->
-        snapshot.conversations.firstOrNull { it.sessionId == id && it.key != snapshot.mainSession && !it.archived }
+    val names = filtered.directionNames
+    val directions = filtered.leaders.filter { it != background }.mapNotNull { id ->
+        filtered.conversations.firstOrNull { it.sessionId == id && it.key != filtered.mainSession && !it.archived }
     }.filter { query.isBlank() || it in matches || names[it.sessionId].orEmpty().contains(query.trim(), ignoreCase = true) }
     val listed = directions.mapTo(HashSet()) { it.key }
-    val others = matches.filter { it.key != snapshot.mainSession && it.key !in listed }
+    val others = matches.filter { it.key != filtered.mainSession && it.key !in listed }
     return ConversationGroups(
-        snapshot.conversations.firstOrNull { it.key == snapshot.mainSession && !it.archived },
-        directions, others, names, snapshot.leaderCounts,
-        tree = snapshot.directionTree,
-        recent = if (query.isBlank()) recentConversations(snapshot) else emptyList(),
+        filtered.conversations.firstOrNull { it.key == filtered.mainSession && !it.archived },
+        directions, others, names, filtered.leaderCounts,
+        tree = filtered.directionTree,
+        recent = if (query.isBlank()) recentConversations(filtered) else emptyList(),
         background = background,
     )
 }

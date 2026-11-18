@@ -1,0 +1,394 @@
+package assistant
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
+
+	approvalops "github.com/nwverse/persona/server/internal/approval"
+	"github.com/nwverse/persona/server/internal/channel"
+	"github.com/nwverse/persona/server/internal/proto"
+)
+
+// preparedApproval is the process-local continuation behind one permission
+// card. Its fields are guarded by Service.fleet.mu except op and caller, which
+// are immutable. The public interaction carries only CanClarify, never this
+// operation.
+type preparedApproval struct {
+	op           approvalops.Operation
+	caller       context.Context
+	outcome      approvalops.Outcome
+	result       proto.Resolution
+	err          error
+	finished     bool
+	reportStatus string
+
+	clarified  bool
+	release    chan struct{}
+	attempt    *clarifyAttempt
+	terminal   bool
+	deliveries map[string]clarifyDelivery
+
+	decisionTimer *time.Timer
+	pauseTimer    *time.Timer
+	remaining     time.Duration
+	paused        bool
+	pauseStarted  time.Time
+	pausedTotal   time.Duration
+
+	// A turn covers only questions accepted before it starts. A question
+	// accepted during that turn waits for the next one, as the node queues it.
+	questionSeq uint64
+	acceptedSeq uint64
+	turnSeq     uint64
+	answeredSeq uint64
+	turnActive  bool
+	channelRuns map[string]bool
+}
+
+type clarifyAttempt struct {
+	done        chan struct{}
+	err         error
+	first       bool
+	clientMsgID string
+	text        string
+	originKey   string
+}
+
+type clarifyDelivery struct {
+	text      string
+	originKey string
+}
+
+// clarificationOrigin is the verified card callback's return destination. It
+// contains no form values; only the question text travels with the owner turn.
+type clarificationOrigin struct {
+	Channel   string
+	ChatID    string
+	MessageID string
+}
+
+var (
+	errApprovalClarifying = errors.New("approval is clarifying")
+	errClarifyUnavailable = errors.New("this approval cannot take a question")
+	// clarificationPauseBudget is cumulative per card, not per question.
+	clarificationPauseBudget = 24 * time.Hour
+	clarifyQuestionRunes     = 1000
+)
+
+// waitPreparedCard registers an authoritative prepared approval. The original
+// caller returns either its final tool result or, on the first accepted
+// question, a non-final Clarifying outcome while the card stays pending.
+func (s *Service) waitPreparedCard(ctx context.Context, ix proto.Interaction, op approvalops.Operation) (approvalops.Outcome, error) {
+	if reservedCard(ix) || ix.MachineID == "" || ix.SessionID == "" || ix.Kind != proto.IxPermission || op.Apply == nil {
+		return approvalops.Outcome{}, errClarifyUnavailable
+	}
+	state := &preparedApproval{op: op, caller: ctx, release: make(chan struct{}), deliveries: map[string]clarifyDelivery{}}
+	ix.CanClarify = true
+	_, err := s.waitInteractionPrepared(ctx, s.ownCard(ctx, ix), state)
+	if errors.Is(err, errApprovalClarifying) {
+		return approvalops.Outcome{Clarifying: true, Text: approvalops.ClarifyingText}, nil
+	}
+	if err != nil {
+		return approvalops.Outcome{}, err
+	}
+	if state.err != nil {
+		return approvalops.Outcome{}, state.err
+	}
+	return state.outcome, nil
+}
+
+// awaitPrepared releases only the original tool call on clarification. Final
+// resolution, expiry and replacement still finish the interaction normally.
+func (s *Service) awaitPrepared(ctx context.Context, p *pending) (proto.Resolution, error) {
+	select {
+	case r := <-p.done:
+		s.finishInteraction(p.ix.ID)
+		return r, nil
+	case <-p.prepared.release:
+		return proto.Resolution{}, errApprovalClarifying
+	case <-ctx.Done():
+		s.endPrepared(p, "cancelled", "The approval was cancelled before the owner answered; nothing changed.")
+		return proto.Resolution{}, ctx.Err()
+	}
+}
+
+// startPreparedTimer is called after the card is registered and announced.
+func (s *Service) startPreparedTimer(p *pending) {
+	s.fleet.mu.Lock()
+	defer s.fleet.mu.Unlock()
+	if p.prepared == nil || p.prepared.terminal {
+		return
+	}
+	p.prepared.decisionTimer = time.AfterFunc(max(0, time.Until(p.ix.ExpiresAt)), func() {
+		s.expirePrepared(p)
+	})
+}
+
+func (s *Service) expirePrepared(p *pending) {
+	s.endPreparedIf(p, "expired", "", func(a *preparedApproval) bool { return !a.paused })
+}
+
+// pausePreparedLocked preserves the remaining decision time and starts the one
+// cumulative pause budget. Repeated questions while paused change neither.
+func (s *Service) pausePreparedLocked(p *pending) {
+	a := p.prepared
+	if a.paused || a.terminal {
+		return
+	}
+	a.remaining = max(0, time.Until(p.ix.ExpiresAt.Add(a.pausedTotal)))
+	if a.decisionTimer != nil {
+		a.decisionTimer.Stop()
+	}
+	a.paused = true
+	a.pauseStarted = time.Now()
+	s.armPauseBudgetLocked(p)
+}
+
+func (s *Service) armPauseBudgetLocked(p *pending) {
+	a := p.prepared
+	left := clarificationPauseBudget - a.pausedTotal
+	if a.paused {
+		left -= time.Since(a.pauseStarted)
+	}
+	if a.pauseTimer != nil {
+		a.pauseTimer.Stop()
+	}
+	a.pauseTimer = time.AfterFunc(max(0, left), func() {
+		s.endPreparedIf(p, "expired", "", func(a *preparedApproval) bool {
+			return a.paused && a.pausedTotal+time.Since(a.pauseStarted) >= clarificationPauseBudget
+		})
+	})
+}
+
+// resumePreparedLocked is called when the turn covering every accepted
+// question has committed its answer (and every required channel run has
+// finished). A stale timer callback cannot resume a new pause.
+func (s *Service) resumePreparedLocked(p *pending) {
+	a := p.prepared
+	if !a.paused || a.terminal || a.attempt != nil || a.questionSeq != a.acceptedSeq || a.acceptedSeq != a.answeredSeq || len(a.channelRuns) != 0 {
+		return
+	}
+	a.pausedTotal += time.Since(a.pauseStarted)
+	a.paused = false
+	if a.pauseTimer != nil {
+		a.pauseTimer.Stop()
+		a.pauseTimer = nil
+	}
+	a.decisionTimer = time.AfterFunc(a.remaining, func() { s.expirePrepared(p) })
+}
+
+// clarificationTurnStarted associates the new turn with questions accepted
+// before it started. The original approval turn does not count.
+func (s *Service) clarificationTurnStarted(machine, session string) {
+	s.fleet.mu.Lock()
+	defer s.fleet.mu.Unlock()
+	for _, p := range s.fleet.interactions {
+		a := p.prepared
+		if a == nil || !a.clarified || a.terminal || p.ix.MachineID != machine || p.ix.SessionID != session {
+			continue
+		}
+		a.turnActive = true
+		a.turnSeq = a.acceptedSeq
+	}
+}
+
+func (s *Service) clarificationTurnEnded(machine, session string) {
+	s.fleet.mu.Lock()
+	defer s.fleet.mu.Unlock()
+	for _, p := range s.fleet.interactions {
+		a := p.prepared
+		if a == nil || !a.clarified || a.terminal || p.ix.MachineID != machine || p.ix.SessionID != session || !a.turnActive {
+			continue
+		}
+		a.turnActive = false
+		a.answeredSeq = max(a.answeredSeq, a.turnSeq)
+		s.resumePreparedLocked(p)
+	}
+}
+
+func clarificationOriginKey(origin *clarificationOrigin) string {
+	if origin == nil {
+		return ""
+	}
+	return origin.Channel + "\x00" + origin.ChatID + "\x00" + origin.MessageID
+}
+
+func validateClarifyQuestion(text string) error {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return errors.New("question must not be blank")
+	}
+	if utf8.RuneCountInString(trimmed) > clarifyQuestionRunes {
+		return fmt.Errorf("question is too long (at most %d characters)", clarifyQuestionRunes)
+	}
+	return nil
+}
+
+// clarify delivers verbatim owner text to the exact originating conversation.
+// Validation has no side effects. A final answer racing delivery waits for the
+// attempt, so exactly one of clarification and that answer claims the next
+// state. Different questions submitted concurrently are processed in order;
+// only a replay of the same delivery is deduplicated.
+func (s *Service) clarify(ctx context.Context, id, text, clientMsgID string, origin *clarificationOrigin) error {
+	if err := validateClarifyQuestion(text); err != nil {
+		return err
+	}
+	if clientMsgID == "" {
+		clientMsgID = "approval-question-" + id + "-" + randomHex(6)
+	}
+	originKey := clarificationOriginKey(origin)
+
+	s.fleet.mu.Lock()
+	p := s.fleet.interactions[id]
+	if p == nil || p.prepared == nil || !p.ix.CanClarify {
+		s.fleet.mu.Unlock()
+		return errClarifyUnavailable
+	}
+	a := p.prepared
+	if old, ok := a.deliveries[clientMsgID]; ok {
+		s.fleet.mu.Unlock()
+		if old.text != text || old.originKey != originKey {
+			return errors.New("client_msg_id was already used for a different question")
+		}
+		return nil
+	}
+	if a.terminal || p.claimed {
+		s.fleet.mu.Unlock()
+		return errClarifyUnavailable
+	}
+	if running := a.attempt; running != nil {
+		s.fleet.mu.Unlock()
+		<-running.done
+		if running.clientMsgID == clientMsgID {
+			if running.text != text || running.originKey != originKey {
+				return errors.New("client_msg_id was already used for a different question")
+			}
+			return running.err
+		}
+		return s.clarify(ctx, id, text, clientMsgID, origin)
+	}
+	attempt := &clarifyAttempt{done: make(chan struct{}), first: !a.clarified,
+		clientMsgID: clientMsgID, text: text, originKey: originKey}
+	a.attempt = attempt
+	s.fleet.mu.Unlock()
+
+	if attempt.first {
+		if err := s.approvalJournalStarted(ctx, p.ix); err != nil {
+			s.finishClarifyAttempt(p, attempt, nil, err)
+			return err
+		}
+	}
+
+	// Validate the exact destination before changing expiry or releasing the
+	// tool. SendParams rejects a missing/ended conversation; no main-chat fallback.
+	params, err := s.SendParams(ctx, SendParams{MachineID: p.ix.MachineID, SessionID: p.ix.SessionID,
+		Params: map[string]any{"session_id": p.ix.SessionID, "text": text, "client_msg_id": clientMsgID}})
+	if err != nil {
+		s.finishClarifyAttempt(p, attempt, nil, err)
+		return err
+	}
+	var run *channel.Run
+	if origin != nil && origin.Channel == channel.Feishu {
+		// Base is captured before the owner's message, as for every channel run:
+		// the watcher must read this question's answer, not an older turn.
+		run = &channel.Run{ID: "approval-" + id + "-" + randomHex(4), Channel: channel.Feishu,
+			MachineID: p.ix.MachineID, SessionID: p.ix.SessionID, TargetKind: channel.TargetConversation,
+			ReplyTo: origin.MessageID, Started: time.Now().UTC(), Base: s.lastSeq(ctx, p.ix.MachineID, p.ix.SessionID),
+			MsgIDs: []string{clientMsgID}, Ext: map[string]string{"clarify": id, "chat": origin.ChatID}}
+	}
+	s.UserSpoke(ctx, SessionRef{MachineID: p.ix.MachineID, SessionID: p.ix.SessionID})
+	err = s.sendOnce(ctx, p.ix.MachineID, params)
+	if err != nil && !relayInDoubt(err) {
+		s.finishClarifyAttempt(p, attempt, nil, err)
+		return err
+	}
+	if err != nil {
+		// The request may already have been accepted. Rolling back into a blocked
+		// tool call could strand that owner message behind it, so the card moves
+		// fail-closed into Clarifying and the stable delivery ID deduplicates a
+		// retry instead.
+		s.logf("approval %s: question delivery outcome uncertain; retaining the pending card: %v", id, err)
+		err = nil
+	}
+	s.finishClarifyAttempt(p, attempt, run, nil)
+	return nil
+}
+
+func (s *Service) finishClarifyAttempt(p *pending, attempt *clarifyAttempt, run *channel.Run, err error) {
+	s.fleet.mu.Lock()
+	a := p.prepared
+	attempt.err = err
+	release := false
+	if err == nil && !a.terminal && !p.claimed && s.fleet.interactions[p.ix.ID] == p {
+		release = attempt.first && !a.clarified
+		a.clarified = true
+		a.questionSeq++
+		a.acceptedSeq = a.questionSeq
+		a.deliveries[attempt.clientMsgID] = clarifyDelivery{text: attempt.text, originKey: attempt.originKey}
+		if run != nil {
+			if a.channelRuns == nil {
+				a.channelRuns = map[string]bool{}
+			}
+			a.channelRuns[run.ID] = true
+		}
+		s.pausePreparedLocked(p)
+	} else if err == nil {
+		err = errClarifyUnavailable
+		attempt.err = err
+	}
+	a.attempt = nil
+	if !a.terminal {
+		s.resumePreparedLocked(p)
+	}
+	close(attempt.done)
+	s.fleet.mu.Unlock()
+
+	if err != nil && attempt.first {
+		s.approvalJournalAborted(context.Background(), p.ix.ID)
+	}
+	if run != nil && attempt.err == nil {
+		s.startChannelRun(run)
+	}
+	if release {
+		close(a.release)
+	}
+}
+
+// clarificationChannelEnded resumes expiry after this Lark answer has either
+// been delivered or its failure has been reported. Other overlapping answers
+// keep their own entries and continue to hold the pause.
+func (s *Service) clarificationChannelEnded(id, runID string) {
+	s.fleet.mu.Lock()
+	defer s.fleet.mu.Unlock()
+	p := s.fleet.interactions[id]
+	if p == nil || p.prepared == nil {
+		return
+	}
+	delete(p.prepared.channelRuns, runID)
+	s.resumePreparedLocked(p)
+}
+
+// approvalAnswerTurnStarted/Ended are small indirections used by Service's turn
+// events and tests.
+func (s *Service) approvalAnswerTurnStarted(r SessionRef) {
+	s.clarificationTurnStarted(r.MachineID, r.SessionID)
+}
+func (s *Service) approvalAnswerTurnEnded(r SessionRef) {
+	s.clarificationTurnEnded(r.MachineID, r.SessionID)
+}
+
+// approvalBook is defined here; its durable journal implementation is in
+// approval_journal.go.
+type approvalBook struct {
+	mu         sync.Mutex
+	loaded     bool
+	list       []approvalJournalEntry
+	delivering bool
+	again      bool
+	retry      bool
+}

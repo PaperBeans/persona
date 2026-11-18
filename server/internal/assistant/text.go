@@ -3,11 +3,11 @@ package assistant
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/nwverse/persona/sdk/go/wire"
+	"github.com/nwverse/persona/server/internal/deeplink"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/textfmt"
 )
@@ -97,5 +97,5 @@ func itemLink(link, id string) string {
 	if link == "" || id == "" {
 		return ""
 	}
-	return link + "?at=" + url.QueryEscape(id)
+	return deeplink.At(link, id)
 }

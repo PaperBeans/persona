@@ -26,6 +26,8 @@ vi.mock("../assistant/Persona", () => ({ usePersona: () => ({ name: "Persona" })
 const { ChatView } = await import("./ChatView");
 const { getState, reset, upsertSession } = await import("../../lib/store");
 const { t } = await import("../../i18n");
+const { loadPages } = await import("../../lib/lazy-page");
+await loadPages();
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const bash = {
@@ -62,6 +64,90 @@ afterEach(() => {
   host.remove();
   reset();
   vi.unstubAllGlobals();
+});
+
+describe("an assistant-owned approval question", () => {
+  const prepared = {
+    ...bash,
+    id: "ix_prepared",
+    tool_name: "persona_settings",
+    can_clarify: true,
+    fields: [{ key: "password", label: "Password", secret: true }],
+  } as Interaction;
+  const area = () => host.querySelector<HTMLTextAreaElement>("[data-approval-question] textarea");
+  const type = (text: string) => act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(area(), text);
+    area()!.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const show = async () => {
+    Object.assign(getState(), { interactions: [prepared], answered: {} });
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
+    await flush();
+    await act(async () => {
+      button(t("chat-interactions.have_question"))!.click();
+      await import("./ApprovalQuestion");
+    });
+    await flush();
+  };
+
+  it("sends only verbatim text and a stable message ID, then allows the same card once", async () => {
+    await show();
+    const question = "  Why does this change need my password?\nPlease be specific.  ";
+    await type(question);
+    act(() => button(t("approval-question.send"))!.click());
+    await flush();
+    const calls = fetcher.mock.calls.filter(([url]) => String(url).endsWith(`/interactions/${prepared.id}/clarify`));
+    expect(calls.length).toBe(1);
+    const body = JSON.parse(String((calls[0][1] as RequestInit).body));
+    expect(body.text).toBe(question);
+    expect(body.client_msg_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(Object.keys(body).sort()).toEqual(["client_msg_id", "text"]);
+    expect(fetcher.mock.calls.some(([url]) => String(url).endsWith(`/interactions/${prepared.id}/resolve`))).toBe(false);
+    expect(area()).toBeNull();
+    expect(getState().interactions.some((i) => i.id === prepared.id)).toBe(true);
+    act(() => button(t("chat-interactions.allow"))!.click());
+    await flush();
+    const allows = fetcher.mock.calls.filter(([url]) => String(url).endsWith(`/interactions/${prepared.id}/resolve`));
+    expect(allows.length).toBe(1);
+    expect(JSON.parse(String((allows[0][1] as RequestInit).body))).toMatchObject({ allow: true });
+  });
+
+  it("preserves a failed draft and retries it under the same delivery ID", async () => {
+    await show();
+    await type("  keep every surrounding character  ");
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ error: "offline" }), { status: 400, headers: { "Content-Type": "application/json" } }));
+    act(() => button(t("approval-question.send"))!.click());
+    await flush();
+    expect(area()?.value).toBe("  keep every surrounding character  ");
+    expect(button(t("chat-interactions.allow"))!.disabled).toBe(false);
+    act(() => button(t("approval-question.send"))!.click());
+    await flush();
+    const calls = fetcher.mock.calls.filter(([url]) => String(url).endsWith(`/interactions/${prepared.id}/clarify`));
+    expect(calls.length).toBe(2);
+    const first = JSON.parse(String((calls[0][1] as RequestInit).body));
+    const second = JSON.parse(String((calls[1][1] as RequestInit).body));
+    expect(second).toEqual(first);
+  });
+
+  it("does not turn Enter in the question editor into Allow", async () => {
+    await show();
+    await type("Why this change?");
+    act(() => area()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+    await flush();
+    expect(fetcher.mock.calls.some(([url]) => String(url).endsWith(`/interactions/${prepared.id}/resolve`))).toBe(false);
+    expect(fetcher.mock.calls.some(([url]) => String(url).endsWith(`/interactions/${prepared.id}/clarify`))).toBe(true);
+  });
+
+  it("ships the action in all three languages and leaves old cards unchanged", async () => {
+    expect(en.have_question).toBe("Have a question");
+    expect(zh.have_question).toBe("有疑问");
+    expect(ja.have_question).toBe("質問する");
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
+    await flush();
+    expect(button(t("chat-interactions.have_question"))).toBeUndefined();
+    expect(button(t("chat-interactions.allow"))).toBeDefined();
+    expect(button(t("chat-interactions.deny"))).toBeDefined();
+  });
 });
 
 describe("a Persona conversation's own approval card (#4883)", () => {

@@ -123,6 +123,7 @@ POST /api/v1/hub/update
 POST /api/v1/hub/update/backups/{id}/apply # hub installation administration: shared self-update transaction
 POST /api/v1/hub/update/check
 POST /api/v1/interactions/{id}/choose
+POST /api/v1/interactions/{id}/clarify # owner-only relay to the prepared operation's manager, like resolve
 POST /api/v1/interactions/{id}/reanswer
 POST /api/v1/interactions/{id}/resolve
 POST /api/v1/looks/uploads # the hub keeps the looks: personas/ is its own directory (look_uploads.go)

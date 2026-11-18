@@ -478,6 +478,7 @@ inbox.write          POST /api/v1/inbox/{id}/reply
 inbox.write          POST /api/v1/inbox/{id}/suggestion
 inbox.write          POST /api/v1/inbox/{id}/task-link/recheck
 agents.control       POST /api/v1/interactions/{id}/choose
+-                    POST /api/v1/interactions/{id}/clarify
 agents.control       POST /api/v1/interactions/{id}/reanswer
 agents.control       POST /api/v1/interactions/{id}/resolve
 -                    POST /api/v1/iphone/try
@@ -558,6 +559,7 @@ notify               POST /api/v1/notify
 -                    POST /api/v1/push/web/{device}/test
 -                    POST /api/v1/recordings/{id}/ask
 -                    POST /api/v1/recordings/{id}/followup
+-                    POST /api/v1/recordings/{id}/handoff
 -                    POST /api/v1/recordings/{id}/just-me
 -                    POST /api/v1/recordings/{id}/live
 -                    POST /api/v1/recordings/{id}/minutes
@@ -627,6 +629,7 @@ todos.write          POST /api/v1/todos/{id}/decisions
 -                    PUT /api/v1/agents/triage
 -                    PUT /api/v1/assistant
 -                    PUT /api/v1/assistant/conversations/{id}/model
+-                    PUT /api/v1/assistant/conversations/{id}/tags
 -                    PUT /api/v1/assistant/directions/{id}/name
 assistant.dispatch_policy PUT /api/v1/assistant/dispatch-policy
 -                    PUT /api/v1/assistant/feishu/companions

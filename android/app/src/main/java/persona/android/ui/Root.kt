@@ -872,11 +872,15 @@ internal fun PersonaShell(session: ShellSession, openNavigation: MutableState<((
                             LocalHomeChrome provides if (primary) HomeChrome(items, selected.name,
                                 onSelect = { navigator.selectTab(AppTab.valueOf(it)) }, barHeight = barHeight,
                                 leading = { currentLeading.value(assistantRoot) }) else null) {
-                            if (primary) Box(Modifier.fillMaxSize()) {
+                            // Always the same Box. glassPageChrome() is identity outside Glass and under Reduce Motion, so switching
+                            // style does not replace this node and drop the page's rememberSaveable state.
+                            Box(Modifier.fillMaxSize().glassPageChrome()) {
                                 entry.Content()
-                                // The home bar holds no title to say the link is down: a pill under it does, as on iOS (#4339 C14).
-                                HomeLinkPill(currentConnection.value, barHeight.intValue)
-                            } else entry.Content()
+                                if (primary) {
+                                    // The home bar holds no title to say the link is down: a pill under it does, as on iOS (#4339 C14).
+                                    HomeLinkPill(currentConnection.value, barHeight.intValue)
+                                }
+                            }
                         }
                     }
                     if (tabSplit != null) {

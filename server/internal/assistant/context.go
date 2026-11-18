@@ -28,12 +28,13 @@ func (s *Service) Context(ctx context.Context, p ContextParams) ContextResult {
 		}
 		return ContextResult{}
 	}
+	background := s.isBackground(ctx, p.SessionID)
 	snapshot := ""
 	if !s.cleanRoundSession(p.SessionID) { // a granted schedule's round reads nothing from outside (schedule_grant.go)
-		snapshot = s.contextSnapshot(ctx, s.snapshotScope(ctx, p.SessionID))
+		snapshot = s.contextSnapshot(ctx, s.snapshotScope(ctx, p.SessionID), background)
 	}
 	c := prompts.AssistantContext{Snapshot: snapshot, Owner: s.owner(ctx),
-		Main: s.isMain(ctx, p.SessionID), Leader: s.isLeader(ctx, p.SessionID), Background: s.isBackground(ctx, p.SessionID)}
+		Main: s.isMain(ctx, p.SessionID), Leader: s.isLeader(ctx, p.SessionID), Background: background}
 	switch {
 	case c.Main:
 		cfg := s.settings(ctx)
@@ -71,8 +72,8 @@ type contextState struct {
 // snapshotWait (the last one did), a message does not wait at all: the read it starts would come too late for it
 // anyway, and is there for the next message (#8948). Each source has a short deadline; a slow one is left out. The
 // sources are read once for every conversation: scope ("" for all of them, snapshotScope) picks the tasks this one's
-// lists show.
-func (s *Service) contextSnapshot(ctx context.Context, scope string) string {
+// lists show, and background leaves out what only the main conversation acts on (backgroundSnapshot).
+func (s *Service) contextSnapshot(ctx context.Context, scope string, background bool) string {
 	cs := &s.live
 	cs.mu.Lock()
 	snap, at, took := cs.snap, cs.at, cs.took
@@ -110,7 +111,20 @@ func (s *Service) contextSnapshot(ctx context.Context, scope string) string {
 	out := *snap
 	out.Now = time.Now().In(s.location(ctx))
 	out.ModelProfile = s.modelProfileContext(ctx)
-	return fitSnapshot(scopeSnapshot(out, scope))
+	out = scopeSnapshot(out, scope)
+	if background {
+		out = backgroundSnapshot(out)
+	}
+	return fitSnapshot(out)
+}
+
+// backgroundSnapshot is snap for the background supervisor (#7315): without what only the main conversation acts on,
+// its plan cards waiting for Start (only it withdraws them, toolTaskPlanWithdraw), the owner's unread chats and the
+// iPhone line. Their tools are not among a round's (supervise_round.go roundToolNames), and its supervision needs none
+// of them.
+func backgroundSnapshot(snap prompts.Snapshot) prompts.Snapshot {
+	snap.Plans, snap.PlansTotal, snap.Chats, snap.NoPhone = nil, 0, nil, true
+	return snap
 }
 
 // snapshotScope is whose tasks conversation id's snapshot lists (#8666): "" for every task in the main conversation,

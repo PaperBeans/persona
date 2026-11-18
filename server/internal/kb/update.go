@@ -320,8 +320,7 @@ func (e *Engine) itemEntries(refs []string) []Entry {
 			continue
 		}
 		if it, ok := e.Store.Item(kind, id); ok && it.Title != "" {
-			by[kind] = append(by[kind], Entry{Kind: kind, ID: it.ID, Name: it.Title, OneLine: it.Note, Importance: it.Importance,
-				Relevance: it.Relevance, Tags: it.Tags, Updated: it.At, Extra: it.URL})
+			by[kind] = append(by[kind], itemEntry(kind, it))
 		}
 	}
 	var out []Entry

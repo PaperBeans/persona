@@ -216,6 +216,8 @@ struct InboxPage: View {
                 }
                 // A plugin enabled or set up since: its sources' items open as it draws them.
                 .task { await InboxItemSlots.shared.reload() }
+                // A link to one item (`/inbox/<id>`, #9926, HubPage.inboxItem): it opens once it is listed.
+                .task(id: model.inboxToOpen) { await openLinkedItem() }
                 .task {
                     store.reload()
                     await loadAccounts()
@@ -974,6 +976,20 @@ struct InboxPage: View {
 
     /// Where an item opened from outside the list puts it (docs/assistant/inbox.md "Section bar"): the item's choice, and
     /// for a collapsed one All with Collapsed open.
+    /// Opens the item a link asked for, as a tap on its row does; a link to an item no longer listed leaves the Inbox as is.
+    private func openLinkedItem() async {
+        guard let request = model.inboxToOpen else { return }
+        let key = InboxItem.key(id: request.id, manager: request.manager)
+        for _ in 0..<20 where !store.items.contains(where: { $0.key == key }) {
+            try? await Task.sleep(for: .milliseconds(500))
+            if Task.isCancelled { return }
+        }
+        model.inboxToOpen = nil
+        guard let item = store.items.first(where: { $0.key == key }) else { return }
+        land(on: item)
+        path = NavigationPath([item])
+    }
+
     private func land(on item: InboxItem) {
         let landing = InboxBar.landing(item)
         bar.pick(landing.choice)

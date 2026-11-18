@@ -150,6 +150,12 @@ class HttpAssistantManagement private constructor(
         require(session.sessionId.isNotBlank())
         assistant("POST", "conversations", session.sessionId, "unarchive", body = buildJsonObject { })
     }
+    override suspend fun setConversationTags(session: SessionKey, tags: List<String>) {
+        require(session.sessionId.isNotBlank())
+        assistant("PUT", "conversations", session.sessionId, "tags", body = buildJsonObject {
+            put("tags", JsonArray(tags.map(::JsonPrimitive)))
+        })
+    }
     override suspend fun searchChats(query: String, limit: Int): AssistantSearchAnswer? = try {
         val q = query.trim().take(200)
         if (q.isEmpty()) AssistantSearchAnswer()

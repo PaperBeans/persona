@@ -73,7 +73,8 @@ func (s *Service) toolAgentInterrupt(ctx context.Context, machine, self string, 
 	}
 	if stoppedAgent(c) { // read-only (#4754): nothing runs to stop; a resume is agent_send's (#8099)
 		return "", fmt.Errorf("%s has already stopped: nothing to interrupt, and nothing was sent. To go on with it and its "+
-			"context, use agent_send with resume true and resume_why; for unrelated work start a new agent with agent_start", agentLabel(c))
+			"context, use agent_send with resume true and resume_why; otherwise start a replacement: for its task, task_plan "+
+			"with continues (the task's todo id) and continues_why; for work on no task, agent_start", agentLabel(c))
 	}
 	if err := s.exitAllowed(ctx, self, am, c, then, 0); err != nil { // refused before the turn is stopped or the user asked
 		return "", err

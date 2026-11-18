@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	approvalops "github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
@@ -14,6 +15,9 @@ import (
 )
 
 func (s *Service) toolRepositoryAdd(ctx context.Context, machine, self string, raw json.RawMessage) (string, error) {
+	if machine == "" || self == "" {
+		return "", errors.New("a calling conversation is required")
+	}
 	var in repositoryInput
 	if err := repositoryArguments(raw, &in); err != nil {
 		return "", err
@@ -33,16 +37,34 @@ func (s *Service) toolRepositoryAdd(ctx context.Context, machine, self string, r
 	}
 	shown, _ := json.Marshal(in)
 	summary := i18n.T(s.lang(ctx), "assistant-repository_tools.add", i18n.Args{"url": binding.CanonicalURL})
-	ok, text, err := s.confirmRepositoryAdd(ctx, machine, self, "repository_add", summary, shown, time.Now().Add(settingCardWait))
-	if err != nil || !ok {
-		return text, err
-	}
-	binding, err = s.saveRepository(ctx, "", binding)
-	if err != nil {
-		return "", s.repositoryToolError(ctx, err)
-	}
-	out, err := json.Marshal(binding)
-	return string(out), err
+	now := time.Now().UTC()
+	outcome, err := s.waitPreparedCard(ctx, proto.Interaction{ID: "ix_" + randomHex(6), MachineID: machine, SessionID: self,
+		Kind: proto.IxPermission, ToolName: "repository_add", Summary: summary, ToolInput: shown, SessionTitle: "Persona",
+		CreatedAt: now, ExpiresAt: now.Add(settingCardWait)}, approvalops.Operation{
+		Replacement: machine + "\x00" + self + "\x00repository\x00" + binding.Identity.Provider + "\x00" + binding.Identity.CanonicalURL,
+		Denied:      "The user declined the change: nothing changed.",
+		Unanswered:  prompts.RenderSettingUnanswered(),
+		Apply: func(ctx context.Context, _ proto.Resolution) (string, error) {
+			// A duplicate added while the owner read or discussed the card makes
+			// this proposal stale; saving the old binding is not an approval of it.
+			doc, err := s.repositoryDocument(ctx)
+			if err != nil {
+				return "", s.repositoryToolError(ctx, err)
+			}
+			for _, saved := range doc.Repositories {
+				if saved.Identity == binding.Identity {
+					return "", approvalops.ErrStale
+				}
+			}
+			saved, err := s.saveRepository(ctx, "", binding)
+			if err != nil {
+				return "", s.repositoryToolError(ctx, err)
+			}
+			out, err := json.Marshal(saved)
+			return string(out), err
+		},
+	})
+	return outcome.Text, err
 }
 
 func (s *Service) repositoryToolError(ctx context.Context, err error) error {

@@ -44,6 +44,7 @@
   "edited_pending": "編集済み。許可すると編集後の本文が送信されます。",
   "always_allow": "常に許可",
   "allow": "許可",
+  "have_question": "質問する",
   "field_command": "コマンド",
   "field_file": "ファイル",
   "field_url": "アドレス",

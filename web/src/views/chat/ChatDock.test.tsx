@@ -18,6 +18,9 @@ import { AttachmentTray } from "../../ui/AttachmentTray";
 import { parseAPIError } from "../../lib/api-errors";
 import { ErrorBanner } from "./Lines";
 import { setSideFold } from "../../lib/side-fold";
+import { loadPages } from "../../lib/lazy-page";
+
+await loadPages();
 
 // stores without a server snapshot: renderToStaticMarkup needs one
 vi.mock("../../lib/links", async (orig) => ({ ...(await orig<typeof import("../../lib/links")>()), useContexts: () => [] }));

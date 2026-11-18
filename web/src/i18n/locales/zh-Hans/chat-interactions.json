@@ -44,6 +44,7 @@
   "edited_pending": "已编辑；允许后发送你的版本。",
   "always_allow": "总是允许",
   "allow": "允许",
+  "have_question": "有疑问",
   "field_command": "命令",
   "field_file": "文件",
   "field_url": "网址",

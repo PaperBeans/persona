@@ -703,3 +703,15 @@ answer retryable. Tests must check both the in-memory receipt and stored one, pl
 
 Restore the previous `DueAt` on acceptance-save failure, not an empty time: an owner message in the Agent chat uses
 that marker to pause the default. A later rejected answer must preserve both that pause and the dismissal.
+
+## Reserve a conversation for replacement in the same step as the check that nothing goes in (#7315)
+
+The background supervisor is replaced when its rounds outgrow it, and the first version checked that no queued message
+was going into the old one, released the relay book's lock, and only then started the replacement, which takes seconds.
+A session list pushed in that gap could drain the old one's queue into it (found in review): that round would run in a
+conversation archived moments later and no longer the background supervisor, so its `task_review` of a main-chat task
+would be refused, and a message queued before a manager restart, whose signals were not in memory, would leave the queue
+as delivered instead of moving to the replacement. A check that a resource is free is only good while the lock it was read under is held:
+mark the conversation as being replaced under that same lock (`relayBook.replacing`), have every drain and every direct
+delivery respect the mark (the direct ones queue), and clear it only where what waited has moved or the replacement
+failed, draining it again then (`TestNothingGoesIntoABackgroundSupervisorBeingReplaced`).

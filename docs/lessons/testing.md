@@ -1,5 +1,12 @@
 # Lessons: testing and validation
 
+- A UI test that lands on the wrong page in the wrong language did not get its launch (#10109). xcodebuild installs the
+  app at the start of each run; a Live Activity the previous run left is stopped by that install, and liveactivitiesd
+  wakes the app in the background a few milliseconds before XCTest's launch, which then attaches to that argument-less
+  process. Longer waits never help: read SpringBoard's `OpenApplication … ForRequester(…)` lines around the launch, and
+  end what a test leaves (Debug builds end their Live Activities on SIGTERM). A test that waits for one of two
+  renderings (a folded box shows the caption, not the line) waits on the hub's own count first, then either rendering.
+
 - Fixture teardown is part of a test's elapsed time (#5730). A scripted terminal whose shell is ready immediately
   does not need a fixed startup pause. When a test has finished its assertions, cancel background prompt checks
   owned by that fixture and join them before restoring package settings or closing sockets. Delivery/recovery tests
@@ -256,6 +263,7 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
   Style-specific tests pass `-ui.style` themselves. It launches through `launchPersona()`, which only performs a clean Demo Mode start and never overrides navigation. `UITestStyleTests` scans source (`launch()` and `launchPersona()` both count as omissions).
 - On compact screens, SwiftUI can inherit `assistant-sidebar` onto the drawer footer buttons, replacing their individual identifiers in XCUITest even though they remain visible. Query the actual exported tree: the shared test helpers first try the individual identifier, then the drawer-container identifier plus the exact localized label. Do not weaken the visibility or tap assertions, or use an app-wide Settings label that can match a hidden page.
 - Drawer-close swipes start on the visible pushed-aside page, not a fixed screen fraction: conversation rows deliberately own left swipes for Archive, and sidebar sizing can move a row under that fraction. Intersect the close surface with the window before choosing the start point; its full frame can extend offscreen. Keep the real swipe and the closed-drawer assertion.
+- A shell place root's ☰ is not Back (#8221): a generic `back()` there opens the drawer, while Assistant remains the drawn strip page underneath. Do not use `assistantDrawn()` alone to decide the next action: with the drawer open, choose `sidebar-main` to return to the main conversation, or the requested place directly instead of opening the drawer again (#9603).
 - Runtime CLI `defaults --set` uses the registration domain, not persisted preferences. Upgrade tests must seed a disposable app's real preferences while its simulator is shut down, verify the baseline reads them, then install in place and inspect persistence after startup cleanup. Resolve the app container before shutdown; `simctl get_app_container` cannot look it up in the Shutdown state. CFPreferences writes asynchronously: terminating the app does not make an immediate disk read authoritative. Resolve its preferences path, shut down the owned simulator to let writes finish, then inspect that file; do not add synchronous writes to production startup just to satisfy the test.
 - Tests using `ShellFinger` must launch with `-probes YES`; its page/selection assertions deliberately require the real shell probe. Migrating a test from platform tabs requires adding that probe argument, not weakening the helper to infer state from controls that remain mounted offscreen. An empty Shell composer exposes dictation instead of Send until text is entered; check the initial dictation/interrupt control and still require an enabled Send after typing.
 - Model switching coverage must follow the chosen UI's actual transport: the Shell sends `/model <alias>` to the conversation, while platform mode chips can use the modes endpoint. Assert the destination and command receipt in the mock log rather than applying a retired control's disabled-state or endpoint assumptions to the default UI. UI-test runners can have a separate protected pasteboard; verify copy payloads by pasting back into the owning app, not by reading the runner's clipboard.
@@ -585,6 +593,8 @@ Ordinary `go test` and CI do not include `//go:build herdrlive`, so a node helpe
   Detect real duplication via `client_msg_id` in mock `/mock/sent`: retries share an ID and both server/mock deduplicate it.
 - New test files require `xcodegen` first; otherwise `-only-testing:` selects nothing but xcodebuild still prints `** TEST SUCCEEDED **` (`Executed 0 tests`).
   Grep `Executed N tests` and require nonzero N (2026-11-01, first "passing" port-forwarding UI run executed none).
+- Pending-bubble UI tests need an idle session: since #6220, a message written while the Agent works is drawn in the queue strip
+  in sending, waiting and failed states; only an idle send stays a chat bubble (`PendingBubbleMenuTests`, `QueuePlacement`).
 - Mock resets between sorting cases also restore `updated_at` and `last_text`, or prior live pushes change later ordering.
   Capture original activity snapshots after all scenario fixtures are customized, preventing reset from overwriting intentional data. Read-and-return cases need fixtures with actual replies, not just list metadata with empty history.
 - **Build UI-test apps with simulator signing, without `CODE_SIGNING_ALLOWED=NO`** (2026-11-05, #1929). Unsigned executables lack `__TEXT,__entitlements`

@@ -4567,10 +4567,13 @@ type KBEntry struct {
 	Updated   time.Time `json:"updated"`
 	// A project's short / long · status, a chat's dm / group…
 	Extra string `json:"extra,omitempty"`
-	// A chat's source (lark, mail, wechat, github…).
+	// A chat's source (lark, mail, wechat, github…); a document's, meeting's or event's connector (#8872).
 	Source string `json:"source,omitempty"`
 	// A recording's kind: meeting, note or day (#8870); absent on other kinds and from an older hub.
 	RecordingKind string `json:"recording_kind,omitempty"`
+	// A recording's imported meeting: the id of the meetings item it overlaps, as the meetings list has it (#8872);
+	// absent on other kinds, before a match and from an older hub.
+	MeetingID string `json:"meeting_id,omitempty"`
 }
 
 // KBRecentParams: kb.recent (kb.read): what came in from every source in [since, until), newest first, across kinds:

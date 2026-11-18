@@ -29,7 +29,7 @@ import (
 // toolNames are the tools only assistant conversations get; their descriptions and schemas are in prompts/mcp
 // (docs/assistant/prompts.md).
 var toolNames = []string{"ask_user", "notify_user", "supervision_finish", "schedule_followup", "schedule_routine", "schedule_state_set", "delete_routine", "list_followups",
-	"cancel_followup", "list_places", "save_place", "machines_list", "agents_list", "agent_read", "agent_send", "agent_switch", "agents_switch", "agent_interrupt", "agent_start", "agent_supervise", "agent_archive", "agent_unarchive", "agent_autoname", "agent_autoname_receipt", "interaction_answer", "ask_escalate", "inbox_suggest", "inbox_draft",
+	"cancel_followup", "list_places", "save_place", "machines_list", "agents_list", "agent_read", "agent_send", "agent_switch", "agents_switch", "agent_interrupt", "agent_start", "agent_supervise", "agent_transfer", "agent_archive", "agent_unarchive", "agent_autoname", "agent_autoname_receipt", "interaction_answer", "ask_escalate", "inbox_suggest", "inbox_draft",
 	"inbox_folders", "inbox_move", "inbox_post", "kb_search", "kb_list", "kb_get", "kb_update", "kb_history_plan", "kb_history_status", "kb_history_stop", "kb_history_resume", "persona_settings", "secret_run", "skill_import",
 	"model_profiles_list", "model_profile_get", "model_profile_switch", "model_profile_rollback",
 	"repositories_list", "repository_get", "repository_add", "view_show", "view_update", "view_get",
@@ -64,6 +64,9 @@ func (s *Service) Tool(ctx context.Context, call ToolCall) proto.ToolResult {
 		return proto.TextResult(err.Error(), true)
 	}
 	call.Name = compat.Tool(call.Name)
+	if res, refused := s.inboxModelRefusal(ctx, call.MachineID, call.SessionID, "", call.Name); refused {
+		return res
+	}
 	args := call.Arguments
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
@@ -482,6 +485,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		return s.toolAgentInterrupt(ctx, machine, self, args) // agent_control.go
 	case "agent_supervise":
 		return s.toolAgentSupervise(ctx, self, args)
+	case "agent_transfer":
+		return s.toolAgentTransfer(ctx, self, args) // agent_route.go: the App's Move to path
 	case "agent_archive", "agent_unarchive":
 		return s.toolAgentArchive(ctx, machine, self, args, name == "agent_archive") // agent_archive_tools.go
 	case "agent_autoname":
@@ -1075,11 +1080,20 @@ func (s *Service) withdrawAskUser(session string) {
 func (s *Service) pendingQuestions() []proto.Interaction {
 	s.loadAskLater(context.Background())
 	s.questions.mu.Lock()
-	defer s.questions.mu.Unlock()
 	out := []proto.Interaction{}
 	for _, q := range s.questions.m {
 		out = append(out, q.ix)
 	}
+	s.questions.mu.Unlock()
+	// Prepared assistant approvals use the interaction queue so clarification
+	// can release the original tool without resolving the card.
+	s.fleet.mu.Lock()
+	for _, p := range s.fleet.interactions {
+		if p.prepared != nil {
+			out = append(out, p.ix)
+		}
+	}
+	s.fleet.mu.Unlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out
 }
@@ -1100,6 +1114,17 @@ func (s *Service) Action(ctx context.Context, a Action) (ActionResult, error) {
 		return ActionResult{OK: err == nil}, err
 	}
 	if mine, err := s.workAnswer(ctx, a.InteractionID, r); mine {
+		return ActionResult{OK: err == nil}, err
+	}
+	s.fleet.mu.Lock()
+	prepared := s.fleet.interactions[a.InteractionID]
+	isPrepared := prepared != nil && prepared.prepared != nil
+	s.fleet.mu.Unlock()
+	if isPrepared {
+		if !r.Cancel {
+			s.ownerHeard(prepared.ix.SessionID)
+		}
+		err := s.resolveAnswer(ctx, a.InteractionID, r, true, nil, nil)
 		return ActionResult{OK: err == nil}, err
 	}
 	s.questions.mu.Lock()

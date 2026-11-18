@@ -29,6 +29,8 @@ import UserNotifications
         guard !started else { return }
         started = true
         RecordingActivity.shared.start()
+        // A calendar meeting's reminder a minute before it starts (#8731 G2).
+        MeetingReminders.shared.start()
         MinutesRelay.shared.start()
         capture.onInterruptionNotResumed = { MeetingRecorder.notifyPaused() }
         // However a meeting stops: nothing more is said in it, and its questions go (#2981); its call and Talk end
@@ -108,6 +110,8 @@ import UserNotifications
             RecordingSync.shared.attendanceChanged(id)
         }
         RecordingActivity.shared.refresh()
+        // The meeting on now needs no reminder of itself.
+        MeetingReminders.shared.refresh()
         Haptics.success()
         // Not awaited: an intent must not wait on the user answering the calendar prompt.
         if inForeground, meeting.eventID == nil, MeetingCalendar.canAsk {

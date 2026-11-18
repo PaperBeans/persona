@@ -317,6 +317,13 @@ final class AppModel {
     var latestAnswerFor: SessionKey?
     /// A hub link's message to land on once its chat shows (HubPageRouting, #2696); taken by that chat.
     var messageJump: MessageJump?
+    /// An Inbox item a link asked to open (`HubPage.inboxItem`): the Inbox pushes it and clears this.
+    var inboxToOpen: InboxOpenRequest?
+    /// A to-do, knowledge entry or computer a link opened where no screen handles links itself (`HubLinkSheet`), over
+    /// everything.
+    var linkSheet: HubLinkSheet?
+    /// A pairing link from outside the app waiting for the user's Connect (`PairConfirmation`, #9929).
+    var pairToConfirm: PairConfirmation?
     /// A refused send's Open Terminal (a dialog holds that session's terminal, #3752): its chat opens the terminal
     /// and takes it.
     var terminalAsk: SessionKey?

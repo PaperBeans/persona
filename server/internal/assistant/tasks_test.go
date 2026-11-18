@@ -842,8 +842,8 @@ func TestSnapshotLinks(t *testing.T) {
 		{sessionLink(web, "mac-a", "b00502b8-82a3", false), web + "/s/mac-a/b00502b8-82a3"},
 		{sessionLink(web, "mac a", "x/y", false), web + "/s/mac%20a/x%2Fy"},
 		{sessionLink(web, "mac-a", "c1", true), web + "/persona/c1"},
-		{todoLink(web, "todo_1"), web + "/todos?id=todo_1"},
-		{todoLink(web, "a&b"), web + "/todos?id=a%26b"},
+		{todoLink(web, "todo_1"), web + "/todos/todo_1"},
+		{todoLink(web, "a b"), web + "/todos/a%20b"},
 		{sessionLink("", "mac-a", "c1", false), ""},
 		{todoLink("", "todo_1"), ""},
 	} {

@@ -732,7 +732,11 @@ def usage_history_hours(n):
         if m["id"] in weights:
             machines.append({"id": m["id"], "name": m["name"], **{k: int(v * weights[m["id"]] / all_w) for k, v in total.items()}})
     machines.sort(key=lambda x: -(x["in"] + x["cache_write"] + x["cache_read"] + x["out"]))
-    return {"zone": time.strftime("%Z") or "UTC", "hours": hours, "machines": machines, "total": total, "stored": True}
+    # Each agent's share (#9984), largest first; "" is usage kept before the hub counted agents apart.
+    agents = [{"agent": a, **{k: int(v * f) for k, v in total.items()}}
+              for a, f in (("claude", 0.62), ("codex", 0.21), ("opencode", 0.08), ("pi", 0.05), ("", 0.04))]
+    return {"zone": time.strftime("%Z") or "UTC", "hours": hours, "machines": machines, "agents": agents, "total": total,
+            "stored": True}
 
 
 def sess(mid, sid, title, cwd, status, state, space, sidx, slot, slidx, minutes, last, agent="claude", pending=0, **kw):
@@ -3709,6 +3713,15 @@ KB = {
     "events": [],
 }
 KB_TAGS = {"projects": ["iOS", "前端", "个人"]}
+# A meeting both imported and recorded (#8872, docs/assistant/meeting-minutes.md): MOCK_IMPORTED_MEETING=1 lists a Lark
+# meeting named as the made-up weekly meeting (产品周会, -showMeetingSample) among the imported meetings, and a meeting
+# recording of that name names it as the hub's match does: meeting_id on its list item, imported_meeting and the link
+# resolved for it (its notes' URL, its connector) in its detail.
+IMPORTED_MEETING = os.environ.get("MOCK_IMPORTED_MEETING") == "1"
+IMPORTED_MEETING_ITEM = {"kind": "meetings", "id": "m_weekly", "name": "产品周会", "one_line": "定了 11 月 28 日发布，导出保留 4 MB 上限。",
+                         "importance": "P1", "relevance": 70, "updated": ago(days=2), "extra": "https://meetings.example.com/m_weekly",
+                         "source": "lark"}
+if IMPORTED_MEETING: KB["meetings"].append(IMPORTED_MEETING_ITEM)
 KB_UPDATES = []  # what "Tagging" saved (read back at /mock/kb_updates)
 KB_TRASH = {}  # deleted projects by trash id (DELETE /api/v1/kb/projects/{id}, POST /api/v1/kb-trash/{id}/restore)
 # Recordings synced from the phone (docs/protocol/protocol.md "Recording sync", #3235): uuid → the last body PUT; deleted ids are
@@ -5504,6 +5517,7 @@ def meeting_detail_meta(rid, meta):
     (absent when off or trimmed), never an attending_session."""
     m = MEETING_CONV.get(rid) if meeting_conversation_on() else None
     meta = transcription_fields(rid, dict(meta))
+    if MEETING_HANDOFFS.get(rid): meta["handoffs"] = list(MEETING_HANDOFFS[rid])
     if not m: return meta
     if m["private"] is not None: meta["private"] = m["private"]
     if (v := room_view(m)) is not None:
@@ -5683,6 +5697,78 @@ def meeting_receipt(h, kind, raw, run):
     return h.send_json(out, status) or True
 
 
+# Handing a meeting to an Agent after it (#8852, assistant/meeting_handoff.go): POST /api/v1/recordings/{id}/handoff sends
+# the meeting to an Agent listed here as the owner's own message, after its checks (503, 404 / 410, 400, 409
+# meeting_running, 409 no_material), and keeps each try in MEETING_HANDOFFS (oldest first, the last 20), shown as
+# detail.meta.handoffs. As attending's rules: a Persona conversation is not_agent; Allow All or a machine not listed
+# not_allowed; offline, interrupted, a subagent or a row not listed unavailable. MOCK_HANDOFF_FAIL=<problem>, or POST
+# /mock/meeting_handoff {"fail": "<problem>"} ("" for none), keeps every try that passes them as failed with that problem
+# (send_failed, unavailable…), for the page's failed row.
+MEETING_HANDOFFS = {}
+HANDOFF_FAIL = [os.environ.get("MOCK_HANDOFF_FAIL", "")]
+MEETING_HANDOFFS_KEPT = 20
+
+
+def handoff_problem(mid, sid):
+    """The problem a hand-off to (mid, sid) is kept with, "" when it goes (meeting_handoff.go handoffSend)."""
+    if not any(m["id"] == mid for m in MACHINES): return "not_allowed"
+    if not next((m for m in MACHINES if m["id"] == mid), {}).get("online"): return "unavailable"
+    row = next((x for x in SESSIONS + ASSISTANT if x["machine_id"] == mid and x["session_id"] == sid), None)
+    if row is None: return "unavailable"
+    if row.get("permission_mode") == "bypassPermissions": return "not_allowed"
+    if row.get("assistant"): return "not_agent"
+    if row.get("is_subagent") or row.get("status") in ("offline", "interrupted"): return "unavailable"
+    return HANDOFF_FAIL[0]
+
+
+def meeting_handoff_route(h, method, p):
+    """POST /api/v1/recordings/{id}/handoff (#8852), and /mock/meeting_handoff."""
+    if p == "/mock/meeting_handoff":
+        if method == "POST":
+            body = json.loads(getattr(h, "last_body", b"") or b"{}")
+            if isinstance(body.get("fail"), str): HANDOFF_FAIL[0] = body["fail"]
+        return h.send_json({"fail": HANDOFF_FAIL[0], "meetings": MEETING_HANDOFFS}) or True
+    hit = re.fullmatch(r"/api/v1/recordings/([^/]+)/handoff", p)
+    if not hit: return False
+    rid = hit.group(1).lower()
+    if method != "POST": return h.send_json({"error": "method"}, 405) or True
+    if is_read_only(h): return h.send_json({"error": "only devices with full credentials can do this", "code": "forbidden"}, 403) or True
+    raw = getattr(h, "last_body", b"") or b""
+    if os.environ.get("MOCK_RECORDINGS_DOWN") == "1": return h.send_json({"error": "知识库暂时不可用", "code": "kb_unavailable"}, 503) or True
+    if len(raw) > 64 << 10: return h.send_json({"error": "the body is over 64 KiB", "code": "too_large"}, 413) or True
+    if rid in RECORDINGS_DELETED: return h.send_json({"error": "这条录音已删除", "code": "recording_deleted"}, 410) or True
+    if rid not in RECORDINGS: return h.send_json({"error": "还没有上传这条录音", "code": "recording_not_found"}, 404) or True
+    try: body = json.loads(raw or b"{}")
+    except ValueError: body = None
+    if not isinstance(body, dict): return h.send_json({"error": "参数不对"}, 400) or True
+    mid, sid = str(body.get("machine_id") or "").strip(), str(body.get("session_id") or "").strip()
+    if not mid or not sid: return h.send_json({"error": "session is required"}, 400) or True
+    text = str(body.get("text") or "").strip()
+    rec = RECORDINGS[rid]
+    with_lines = any((x.get("text") or "").strip() for x in rec.get("segments") or [])
+    transcript = bool(body.get("transcript")) and with_lines and rid not in RECORDINGS_TRIMMED
+    minutes = bool((KB_DETAIL.get(("recordings", rid)) or {}).get("minutes"))
+    if meeting_running(rid): return h.send_json({"error": "The meeting is still running.", "code": "meeting_running"}, 409) or True
+    if not minutes and not transcript:
+        return h.send_json({"error": "This meeting has neither minutes nor a transcript.", "code": "no_material"}, 409) or True
+    title = re.sub(r"\s+", " ", str(body.get("title") or "")).strip()[:120]
+    out = {"id": uuid.uuid4().hex[:16], "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "machine_id": mid, "session_id": sid, "state": "sent"}
+    if title: out["title"] = title
+    if transcript: out["transcript"] = True
+    problem = handoff_problem(mid, sid)
+    if problem:
+        out.update(state="failed", problem=problem)
+    else:
+        name = rec.get("title") or "会议"
+        first = f"<persona-context>\n会议：{name}\n</persona-context>\n\n" + (text or "看看这场会里和你手上的事有关的部分。")  # i18n-ignore
+        conv_append(mid, sid, [conv_item("user", first)])
+    kept = MEETING_HANDOFFS.setdefault(rid, [])
+    kept.append(out)
+    del kept[:-MEETING_HANDOFFS_KEPT]
+    return h.send_json({"handoff": out}) or True
+
+
 def meeting_conversation_route(h, method, p):
     """PUT …/private, POST …/just-me, POST …/followup, messages into a room that ended, and /mock/meeting_conversation."""
     global MEETING_CONVERSATION
@@ -5755,7 +5841,7 @@ def meeting_conversation_reset():
             if c.get("session_id"):
                 ASSISTANT[:] = [x for x in ASSISTANT if x["session_id"] != c["session_id"]]
                 ITEMS.pop(c["session_id"], None)
-    MEETING_CONV.clear(); MEETING_RECEIPTS.clear()
+    MEETING_CONV.clear(); MEETING_RECEIPTS.clear(); MEETING_HANDOFFS.clear()
     with MEETING_EVENT_LOCK: MEETING_EVENTS.clear()
     JUST_ME_GENERATION[0] += 1  # a reply still on its timer is not written
     for main, before in JUST_ME_BEFORE.items():
@@ -7050,7 +7136,8 @@ def transcription_control(h, method):
                 sock["fail"](TRANSCRIPTION_MODE["fatal"])
     elif method != "GET": return h.send_json({"code": "method_not_allowed"}, 405) or True
     return h.send_json({"on": meeting_transcription_on(), **TRANSCRIPTION_MODE,
-                        "recordings": {rid: {"frames": t["frames"], "bytes": t["bytes"], "timeline": t["timeline"],
+                        # lines: the hub's final lines so far, what a test waits on before it looks for them (#10109)
+                        "recordings": {rid: {"frames": t["frames"], "bytes": t["bytes"], "lines": len(t["hub"]), "timeline": t["timeline"],
                                               "gaps": transcription_gaps(t), "held": t["held"], "socket": t.get("socket") is not None,
                                               "transcription": transcription_view(rid)}
                                        for rid, t in TRANSCRIPTIONS.items()}}) or True
@@ -7284,6 +7371,7 @@ def recordings_route_locked(h, method, p):
     if re.fullmatch(r"/api/v1/recordings/[^/]+/segments", p) and not RECORDING_DAY["on"]:
         return h.send_json({"error": "404 page not found"}, 404, add_error_code=False) or True
     if meeting_conversation_route(h, method, p): return True
+    if meeting_handoff_route(h, method, p): return True
     if live_view_route(h, method, p): return True
     if highlights_route(h, method, p): return True
     if photos_route(h, method, p): return True
@@ -7438,7 +7526,7 @@ def recordings_route_locked(h, method, p):
     if method == "DELETE":
         if (t := TRANSCRIPTIONS.pop(rid, None)) and t.get("socket"): t["socket"]["fail"]("recording_deleted")
         existed = rid in RECORDINGS
-        RECORDINGS.pop(rid, None); RECORDING_UPLOADED.pop(rid, None); RECORDING_RENAMED.pop(rid, None); RECORDINGS_DELETED.add(rid); RECORDINGS_TRIMMED.pop(rid, None); RECORDING_DAY_TODOS.pop(rid, None)
+        RECORDINGS.pop(rid, None); RECORDING_UPLOADED.pop(rid, None); RECORDING_RENAMED.pop(rid, None); MEETING_HANDOFFS.pop(rid, None); RECORDINGS_DELETED.add(rid); RECORDINGS_TRIMMED.pop(rid, None); RECORDING_DAY_TODOS.pop(rid, None)
         kb[:] = [e for e in kb if e["id"] != rid]; KB_DETAIL.pop(("recordings", rid), None)
         with MEETING_LOCK: MEETING_LIVE.pop(rid, None)  # live lines and asks go with the recording
         with PHOTO_LOCK:  # as at the trim
@@ -7484,13 +7572,17 @@ def recordings_route_locked(h, method, p):
     entry = {"kind": "recordings", "id": rid, "name": name or "录音", "relevance": 0, "tags": [],
              "one_line": (body.get("segments") or [{"text": ""}])[0]["text"], "updated": body["started_at"],
              "recording_kind": kind}  # #8870
-    kb[:] = [e for e in kb if e["id"] != rid] + [entry]
     detail = {"meta": {**{k: body.get(k) for k in ("started_at", "ended_at", "duration", "language", "device", "complete", "calendar")}, "kind": kind,
                        "updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                        "chars": sum(len(x.get("text") or "") for x in body.get("segments", []) if not x.get("echo")),
                        **({"name": name, "name_source": name_source} if name else {}),
                        **({"ai_title": name, "ai_title_from": "summary" if body.get("complete") else "live"} if name_source == "model" else {})},
               "summary": text, "segments": body.get("segments", [])}
+    if IMPORTED_MEETING and kind == "meeting" and name == IMPORTED_MEETING_ITEM["name"]:
+        entry["meeting_id"] = IMPORTED_MEETING_ITEM["id"]
+        detail["meta"]["imported_meeting"] = {k: IMPORTED_MEETING_ITEM[k] for k in ("kind", "id", "name")}
+        detail["links"] = [dict(IMPORTED_MEETING_ITEM)]
+    kb[:] = [e for e in kb if e["id"] != rid] + [entry]
     # A meeting that completes with no text gets no minutes (attending uploads it first with none).
     silent = MEETING_ATTENDANCE and body.get("complete") and not any((x.get("text") or "").strip() for x in body.get("segments", []))
     if kind == "meeting" and not silent:
@@ -9563,6 +9655,49 @@ if os.environ.get("MOCK_ASK_LONG") in ("actions", "swipe", "review"):
         "kind": "question", "created_at": ago(minutes=1), "expires_at": later(minutes=29), "tool_name": "ask_user",
         "questions": questions})
     INTERACTIONS.extend(copy.deepcopy(ASK_LONG_INTERACTIONS))
+# MOCK_ASK_LONG=source|source2 (#9392): the main conversation is longer than a screen and ends with the message a skippable
+# ask_user card is about, then the ask_user call itself (as the transcript has it), so the card can lead back to that
+# message. `source` asks one question with three described options; `source2` asks two.
+if os.environ.get("MOCK_ASK_LONG") in ("source", "source2"):
+    _q1 = {"question": "构建卡在打包这一步，接下来怎么查？", "header": "构建排查", "multi_select": False, "options": [
+        {"label": "拿到任务编号再查 (Recommended)", "description": "把构建任务的编号发给我，我拉全量日志确认卡在哪一步"},
+        {"label": "先按已跑完处理", "description": "不拿编号，先确认日志里有没有依赖覆盖生效的记录"},
+        {"label": "先放一放", "description": "暂停这一项，这一轮不再提醒"}]}
+    _q2 = {"question": "查完把结论发到哪里？", "header": "发送", "multi_select": False, "options": [
+        {"label": "这个对话"}, {"label": "构建群"}]}
+    _asked = [_q1] + ([_q2] if os.environ["MOCK_ASK_LONG"] == "source2" else [])
+    ITEMS[ASK1] = ITEMS[ASK1] + [x for n in range(6) for x in (
+        it("user", "text", 3 - n * 0.3, text=f"第 {n + 1} 个构建任务现在什么情况？"),
+        it("assistant", "text", 2.95 - n * 0.3, text=f"第 {n + 1} 个构建任务已经跑完：编译、单元测试、签名都通过，产物已经上传，"
+           "安装包比上一版小了 3%。日志里没有新的警告，耗时和上周持平。"))] + [
+        it("user", "text", 1.1, text="今天那个一直没出包的构建，帮我看看卡在哪。"),
+        it("assistant", "text", 1.05, text="看了构建记录：编译和测试都过了，卡在打包这一步已经 40 分钟，日志停在依赖覆盖那一行。"
+           "可能是任务其实已经跑完、只是状态没回传，也可能是打包机在等锁。要确认是哪一种，得看这个任务的全量日志。"),
+        it("assistant", "tool_use", 1.0, tool_use_id="toolu_ask_source", tool_name="mcp__persona__ask_user",
+           tool_input={"questions": _asked})]
+    ASK_LONG_INTERACTIONS.append({
+        "id": "ix_ask_long", "machine_id": "server", "session_id": ASK1, "session_title": "Persona",
+        "kind": "question", "created_at": ago(minutes=1), "expires_at": later(minutes=29), "tool_name": "ask_user",
+        "can_cancel": True, "questions": _asked})
+    INTERACTIONS.extend(copy.deepcopy(ASK_LONG_INTERACTIONS))
+# MOCK_CARD_SOURCE=1 (#9392): the network tests' Agent chat is longer than a screen and its question card's call
+# (AskUserQuestion, toolu_q1) is in the transcript after the message it is about. Its card is the oldest one waiting, so
+# with MOCK_TASKS it is the question Persona's conversation shows for its tasks.
+if os.environ.get("MOCK_CARD_SOURCE") == "1":
+    for _ix in INTERACTIONS:
+        if _ix["id"] == "ix_tests":
+            _ix["created_at"] = ago(minutes=90)
+    ITEMS[TESTS] = [x for n in range(6) for x in (
+        it("user", "text", 30 - n, text=f"第 {n + 1} 个接口的错误码对一下文档"),
+        it("assistant", "text", 29.5 - n, text=f"第 {n + 1} 个接口对过了：文档里的错误码都在代码里，超时返回 408，"
+           "重试三次后返回 503，和文档一致。顺手把一个拼错的字段名改了。"))] + ITEMS[TESTS] + [
+        it("assistant", "tool_use", 1.5, tool_use_id="toolu_q1", tool_name="AskUserQuestion",
+           tool_input={"questions": next(ix["questions"] for ix in INTERACTIONS if ix["id"] == "ix_tests")})]
+    # The earlier exchanges were made last: in time order, numbered again from the first seq.
+    ITEMS[TESTS].sort(key=lambda x: x["ts"])
+    _base = min(x["seq"] for x in ITEMS[TESTS])
+    for _i, _x in enumerate(ITEMS[TESTS]):
+        _x["seq"] = _base + _i
 # MOCK_QUESTION_CANCEL=1: the network tests' Agent question and the main ask_user card for
 # MOCK_ASK_LONG=1|actions|swipe|review advertise question-only cancellation; /mock/reset restores both unanswered exactly
 # once and clears their resolved and interaction history entries.
@@ -11673,7 +11808,7 @@ BRIEF_PLAIN = ("早报 · 周一 结论：上午有一节辅导课，下午没�
 
 def assistant_brief(mode):
     base = os.environ.get("MOCK_PUBLIC_URL", "http://127.0.0.1:%d" % PORT).rstrip("/")
-    url = base + "/s/macbook/" + BLOG
+    url = base + "/persona/" + ASK1  # the conversation's page, as the hub writes it (deeplink.Conversation, #9928)
     if mode == "before":
         one = " ".join(BRIEF_MD.split())
         summary, preview, body = one[:200] + "…", one[:120] + "…", None
@@ -13213,6 +13348,15 @@ def _many_item(section, i, n):
 MOCK_INBOX_MANY = _many_counts(os.environ.get("MOCK_INBOX_MANY", "").strip())
 for _section, _n in MOCK_INBOX_MANY.items():
     INBOX.extend(_many_item(_section, _i, _n) for _i in range(_n))
+# The first Needs-you item's Related line names the first done and the first collapsed item: an item opened from inside the
+# Inbox, which moves the section bar only beside the item (docs/assistant/inbox.md "Section bar"). Its one-entry chain
+# makes it an event, whose body (InboxEvent.tsx) is where Related is drawn.
+if MOCK_INBOX_MANY.get("action"):
+    _rel = [_many_item(_s, 0, MOCK_INBOX_MANY[_s]) for _s in ("done", "noise") if MOCK_INBOX_MANY.get(_s)]
+    if _rel:
+        _first = next(x for x in INBOX if x["id"] == "many:action:0")
+        _first["related"] = [{"id": x["id"], "title": x["title"], "source": x["source"]} for x in _rel]
+        _first["chain"] = [{"id": "c1", "at": _first["updated_at"], "kind": "received", "text": "收到 1 条新消息", "count": 1}]  # i18n-ignore: mock data
 
 
 # MOCK_HANDOFF_CARD=1 (with MOCK_TASKS=1): an item handed to the main conversation that wrote back (#5932,
@@ -17834,6 +17978,36 @@ if os.environ.get("MOCK_TABLE_CHIPS") == "1":
 | Tools | Only two: `list_items`, `list_item_details` |
 | Config | Reads `~/.config/weather/mcp-endpoint-settings.json` and falls back to the defaults when it is missing |"""
     ITEMS[TABLE_CHIPS] = [it("user", "text", 5, text="Does the MCP endpoint work?"), it("assistant", "text", 2, text=_chips)]
+
+# A table whose first column wraps in one row and that has empty cells (#10012): the table is as tall as its rows, the
+# paragraph after it starts under its last row. MOCK_TABLE_WRAP=1 adds it as a finished reply in an Agents chat
+# (TableWrapTests); /mock/say?preset=table_wrap&stream=1 streams it into every open conversation.
+TABLE_WRAP_TEXT = """先看总时长，按几种做法分开算：
+
+| 做法 | 拿到第一版 | 全部完成 |
+| --- | --- | --- |
+| 自己做，熟手 | 约 20 天 | |
+| 自己做，一般 | 约 26 天 | 约 35 天 |
+| 自己做，新手 | 约 33 天 | |
+| 请人帮忙，约 $22 | | 约 23 天 |
+| 全部外包，约 $88 | 约 6 天 | 约 15 天 |
+
+这张表放得下，每一格都是一行。
+
+再算上混合的做法：
+
+| 做法 | 拿到第一版 | 全部完成 |
+| --- | --- | --- |
+| 自己做，一般 | 约 26 天 | 约 35 天 |
+| 请人帮忙，约 $22 | | 约 23 天 |
+| 混合做，核心部分自己做，其余外包 | 约 12 天 | |
+
+表格后的这一段从最后一行下面开始。"""
+TABLE_WRAP = "a1f3c2d4-0000-4000-8000-000000010012"
+if os.environ.get("MOCK_TABLE_WRAP") == "1":
+    SESSIONS.append(sess("macbook", TABLE_WRAP, "装修排期", "/Users/me/code/weather", "done", "unread", "weather", 1, "plan", 5, 2,
+                         "表格后的这一段从最后一行下面开始。"))
+    ITEMS[TABLE_WRAP] = [it("user", "text", 5, text="几种做法各要多久？"), it("assistant", "text", 2, text=TABLE_WRAP_TEXT)]
 
 # MOCK_WIDE=1: an Agents chat whose reply has a table that fits, one that does not and a code block with a long line,
 # then a short reply in a turn of its own (SwipeWideContentTests, #5737: a drag to the left scrolls what scrolls sideways, else quotes).
@@ -22628,6 +22802,7 @@ graph TD
 ```
 
 Tell me if you want the upload sped up too.""",
+    "table_wrap": TABLE_WRAP_TEXT,
 }
 
 

@@ -15,7 +15,7 @@ import { answerLines } from "../../lib/answered";
 import { answerBlock, interactionCanAnswer, sessionTitle } from "../../lib/format";
 import { interactionAsk } from "../../lib/inbox";
 import { plainMarkdown } from "../../lib/plain-markdown";
-import { cardToolName, mcpServerLabel } from "../../lib/turns";
+import { mcpServerLabel } from "../../lib/turns";
 import { isSecretHandoff, isSecretRun, optionDisplay, secretHandoffInput, secretRunInput } from "../../lib/tool-detail";
 import { RecommendedTag } from "../../ui/RecommendedTag";
 import { dropAnswered, getSession, useStore, type AnsweredCard as Answered } from "../../lib/store";
@@ -25,7 +25,6 @@ import { Button, Collapse, cx, EASE, Kbd, Menu, SECRET_INPUT, toast, useMenu } f
 import { Icon } from "../../ui/icons";
 import { Markdown } from "../../ui/Markdown";
 import { permissionDetail, permissionReason, summaryExtra } from "../../lib/tool-detail";
-import { usePermissionText } from "./permission-text";
 import { DIFF_TOOLS, DiffBlocks, editDiffs } from "./ActionRow";
 import { ANSWERED_LIST_MAX, cardFold, cardLine, nextWaiting, PLAN_MAX, showsAnswered } from "./dock";
 import { useCardCut } from "./card-cut";
@@ -34,7 +33,6 @@ import { ScrollFold } from "./fold-scroll";
 import { cardState } from "../../lib/card-focus";
 import { href, onLinkClick, type Route } from "../../lib/router";
 import { t } from "../../i18n";
-import { alwaysScope, offersAlways } from "../../lib/always-scope";
 import { StatusMark } from "../../ui/StatusMark";
 import { useVoiceAsking } from "../../lib/voice/calls";
 import { composing } from "../../lib/send-history";
@@ -541,57 +539,9 @@ function PlanCard({ ix }: { ix: Interaction }) {
   );
 }
 
-function PermissionCard({ ix }: { ix: Interaction }) {
-  const [busy, setBusy] = useState(false);
-  const editable = usePermissionText(ix);
-  const go = async (body: Record<string, unknown>) => {
-    setBusy(true);
-    await resolve(ix, body);
-    setBusy(false);
-  };
-  // Enter allows (the Allow button). Deny is never a key away: it stays an explicit press of its button — or Enter
-  // while that button is focused, which is the button's own activation, not the card's main action
-  const keys = useCardKeys({
-    enter: () => {
-      if (busy || editable.composing || !editable.canAllow) return false;
-      void go(editable.allow());
-    },
-  });
-  const tapGuard = useChatCardTapGuard(ix);
-  return (
-    <Card
-      kicker={t("chat-interactions.permission_kicker")}
-      title={t("chat-interactions.permission_title", { tool: cardToolName(ix) })}
-      cardKeys={keys}
-      tapGuard={tapGuard}
-      onDismiss={() => go({ dismiss: true })}
-      busy={busy}
-      footer={
-        <>
-          <Button tone="quiet" disabled={busy} onClick={() => go(editable.deny())}>
-            {t("chat-interactions.deny")}
-          </Button>
-          <span className="flex gap-1.5">
-            {/* Only where an Always is kept (offersAlways): never on the manager's own cards. */}
-            {offersAlways(ix) && !editable.changed && (
-              <Button tone="secondary" disabled={busy} onClick={() => go({ allow: true, always: true })}>
-                {t("chat-interactions.always_allow")}
-              </Button>
-            )}
-            <Button tone="primary" busy={busy} disabled={!editable.canAllow} onClick={() => go(editable.allow())}>
-              {t("chat-interactions.allow")}
-              {keys.focused && <Kbd>Enter</Kbd>}
-            </Button>
-          </span>
-        </>
-      }
-    >
-      <PermissionBody ix={ix} />
-      {editable.editor}
-      {alwaysScope(ix) && <p className="mt-2 text-[12px] leading-relaxed text-ink-3">{alwaysScope(ix)}</p>}
-    </Card>
-  );
-}
+// The complete tool-approval card loads with the first permission interaction, keeping its optional clarification UI
+// and permission editor out of the first screen. Until its chunk is in, the card's slot stays empty, as for other cards.
+const PermissionCard = lazyPage(() => import("./PermissionCard").then((m) => m.PermissionCard));
 
 /** A terminal dialog's words under its question (#6638): at most six lines in view, the rest a scroll inside them. */
 const DETAIL_FOLD = "mb-2 max-h-[6lh] text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink-2";
@@ -615,7 +565,7 @@ export function permissionFrom(ix: Pick<Interaction, "agent_id" | "agent_type" |
   return ix.folded_under && ix.folded_as === "worker" ? t("lib-elicitation.from_worker", { agent }) : t("lib-elicitation.from_subagent", { agent });
 }
 
-function PermissionBody({ ix }: { ix: Interaction }) {
+export function PermissionBody({ ix }: { ix: Interaction }) {
   const input = ix.tool_input ?? {};
   const hasInput = Object.keys(input).length > 0;
   const detail = permissionDetail(ix.tool_name, input);
@@ -1424,7 +1374,7 @@ export function InteractionCard({ ix }: { ix: Interaction }) {
     : ix.kind === "plan" ? <PlanCard ix={ix} />
     : isSecretRun(ix) ? <SecretRunCard key={ix.id} ix={ix} />
     : isSecretHandoff(ix) ? <SecretHandoffCard key={ix.id} ix={ix} />
-    : ix.kind === "permission" ? <PermissionCard ix={ix} />
+    : ix.kind === "permission" ? <Suspense fallback={null}><PermissionCard ix={ix} /></Suspense>
     : ix.kind === "elicitation" ? <ElicitationCard ix={ix} /> : <ScreenCard ix={ix} />;
   const asked = useVoiceAsking(ix);
   // a permission card says it in its body (PermissionBody); a secret run's or hand-off's card has none, so it says it here

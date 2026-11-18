@@ -458,6 +458,7 @@ type usageKey struct {
 	minute   int64
 	model    string
 	launcher string
+	agent    string
 }
 
 type machineUsage struct {
@@ -497,7 +498,7 @@ func (u *usageBook) apply(machine string, params json.RawMessage, now time.Time)
 		u.machines[machine] = m
 	}
 	for _, b := range p.Buckets {
-		m.buckets[usageKey{b.Minute, b.Model, b.Launcher}] = b
+		m.buckets[usageKey{b.Minute, b.Model, b.Launcher, b.Agent}] = b
 	}
 	m.load, m.cpus, m.at, m.launchers = p.Load, p.CPUs, now, p.Launchers
 	cutoff := now.Add(-26*time.Hour).Unix() / 60 * 60

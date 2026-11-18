@@ -233,8 +233,9 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 	}()
 	background := to != here.Main && to == here.BackgroundSupervisor // the leader's message, told that the tasks are not its own (supervise_background.go)
 	leader := background || to != here.Main && s.isLeader(ctx, to)
+	fresh := background && !backgroundKeepsContext(here) // a round that starts from the first turn (supervise_round.go)
 	render := func(list []prompts.SuperviseEntry) string {
-		return prompts.RenderSupervise(prompts.Supervise{Entries: sortEntries(list), Leader: leader, Background: background, Side: to != here.Main && !leader, Escalated: escalatedIn(list),
+		return prompts.RenderSupervise(prompts.Supervise{Entries: sortEntries(list), Leader: leader, Background: background, Fresh: fresh, Side: to != here.Main && !leader, Escalated: escalatedIn(list),
 			BackgroundEscalated: slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigEscalated && e.Background }),
 			LeaderStuck:         slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigLeaderStuck }),
 			Overdue:             slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigOverdue }),
@@ -281,7 +282,7 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 		s.logf("supervise: %d signal(s) to the main conversation", len(entries))
 	}
 	c, ok := s.session(ctx, here.MachineID, to)
-	if !ok || c.Starting || !msg.Interject && (c.Status == proto.StatusWorking || s.relayWaits(to, msg)) {
+	if !ok || c.Starting || s.relayReplacing(to) || !msg.Interject && (c.Status == proto.StatusWorking || s.relayWaits(to, msg)) {
 		if !s.queueDigest(to, msg, kept, now, prev) {
 			return false
 		}
@@ -514,6 +515,9 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 		e.Detail = prompts.RenderDraftPR(prompts.DraftPR{Language: answerLanguage(string(s.botLang(ctx))),
 			URL: draft.URL, Head: draft.HeadOID})
 	}
+	// The last review, shown only in a Fresh message (supervise_round.go): a decision reply's round confirms the decision
+	// that review put to the owner.
+	e.LastReview = s.lastReviewEntry(ctx, v)
 	if g.Kind == sigDecisionReply {
 		e.AgentReply = &prompts.DecisionAgentReply{Language: answerLanguage(string(s.botLang(ctx))),
 			Machine: replyAsk.AgentReply.MachineID, Session: replyAsk.AgentReply.SessionID}
