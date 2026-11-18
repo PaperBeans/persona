@@ -12,9 +12,10 @@ import (
 // mergeTestHub answers the node's side of assistant.memory: the merges it has recorded, and the report's write.
 type mergeTestHub struct {
 	*fakeHub
-	runs   []memoryMergeRun
-	err    error
-	writes []struct{ Cwd, Name, Content string }
+	runs     []memoryMergeRun
+	byDevice map[string][]memoryMergeRun // when set, each computer's own runs
+	err      error
+	writes   []struct{ Device, Cwd, Name, Content string }
 }
 
 func (h *mergeTestHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage, error) {
@@ -30,9 +31,12 @@ func (h *mergeTestHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMe
 		if h.err != nil {
 			return nil, h.err
 		}
+		if h.byDevice != nil {
+			return json.Marshal(map[string]any{"runs": h.byDevice[p.Device]})
+		}
 		return json.Marshal(map[string]any{"runs": h.runs})
 	case "write":
-		h.writes = append(h.writes, struct{ Cwd, Name, Content string }{op.Cwd, op.Name, op.Content})
+		h.writes = append(h.writes, struct{ Device, Cwd, Name, Content string }{p.Device, op.Cwd, op.Name, op.Content})
 		return json.RawMessage(`{"ok":true}`), nil
 	}
 	return nil, errors.New("unexpected memory op " + op.Op)
@@ -124,5 +128,57 @@ func TestMemoryMergeIsToldOnce(t *testing.T) {
 	s.memoryMergeTell(ctx)
 	if len(h.writes) != 2 || len(pushes()) != 2 {
 		t.Fatal("a standby manager told the user")
+	}
+}
+
+// Moving the assistant to another computer and back: each computer's runs are told once, by that computer's own
+// progress. Runs made on the first computer while the assistant was away are told on return, and the ones told before
+// are not told again.
+func TestMemoryMergeIsToldOncePerComputer(t *testing.T) {
+	ctx := context.Background()
+	f := newFakeHub().withMachine()
+	f.devices = []Device{{ID: "server", Online: true, Home: "/home/example"}, {ID: "laptop", Online: true, Home: "/home/example"}}
+	f.hello.Locale = "en"
+	at := time.Date(2026, 11, 17, 9, 30, 0, 0, time.UTC)
+	h := &mergeTestHub{fakeHub: f, byDevice: map[string][]memoryMergeRun{
+		"server": {{ID: "20261117T093000Z", At: at, Added: []string{"a.md"}}},
+		"laptop": {{ID: "20261116T080000Z", At: at.Add(-24 * time.Hour), Added: []string{"b.md", "c.md"}}},
+	}}
+	st := &memStore{}
+	s := withSettings(t, f, New(Options{Hub: h, Store: func() Store { return st }, Logf: testLogf(t)}))
+	on := func(machine string) { // the hub names the assistant's computer
+		f.mu.Lock()
+		f.hello.Assistant.MachineID = machine
+		f.mu.Unlock()
+		setSettings(t, s, func(v *Settings) {
+			v.Main, v.MainMachineID, v.MachineID, v.Timezone = "main", machine, machine, "UTC"
+		})
+	}
+	pushes := func() []Notification {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return append([]Notification(nil), f.pushes...)
+	}
+
+	on("server")
+	s.memoryMergeTell(ctx)
+	on("laptop")
+	s.memoryMergeTell(ctx)
+	// Back on the server, which merged once more meanwhile.
+	h.byDevice["server"] = append(h.byDevice["server"], memoryMergeRun{ID: "20261118T080000Z", At: at.Add(24 * time.Hour), Added: []string{"d.md"}})
+	on("server")
+	s.memoryMergeTell(ctx)
+	s.memoryMergeTell(ctx)
+	on("laptop")
+	s.memoryMergeTell(ctx) // nothing new there
+
+	got := pushes()
+	if len(got) != 3 || len(h.writes) != 3 {
+		t.Fatalf("%d pushes, %d reports, want 3 each: %+v", len(got), len(h.writes), got)
+	}
+	for i, want := range []struct{ device, body string }{{"server", "other copy: 1."}, {"laptop", "other copy: 2."}, {"server", "other copy: 1."}} {
+		if got[i].DeviceID != want.device || !strings.Contains(got[i].Body, want.body) || h.writes[i].Device != want.device {
+			t.Errorf("push %d: %s %q (report on %s), want %s %q", i, got[i].DeviceID, got[i].Body, h.writes[i].Device, want.device, want.body)
+		}
 	}
 }

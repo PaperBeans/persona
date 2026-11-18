@@ -133,7 +133,7 @@ func dropIndexLine(index, name string) error {
 	}
 	var keep []string
 	for _, l := range strings.Split(string(b), "\n") {
-		if strings.Contains(l, "("+name+")") {
+		if memoryIndexLinks(l, name) {
 			continue
 		}
 		keep = append(keep, l)

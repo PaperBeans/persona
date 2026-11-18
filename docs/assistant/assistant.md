@@ -1627,16 +1627,21 @@ above), so without this each profile would keep its own.
   until it restarts. A note only a copy has is copied in with its modification time and its `MEMORY.md` line. The
   same file name with the same bytes is left. The same file name with different content keeps the one modified
   later. Notes with different names about the same matter are both kept: reconciling them is not this merge's job.
-- **Nothing is deleted.** The other copies are never written. Each run first saves the memory as it was (`before/`)
-  and the notes it read (`copies/<n>/`), then every version a copy's note took the place of (`replaced/<n>/`) and a
-  manifest of what it did, in `<data dir>/memory-merge/<encoded directory>/<UTC time>/`.
-  A note whose bytes a run has already read is skipped, so a note deleted on the Memory page does not come back and a
-  second run does nothing. To undo a merge by hand, copy `before/` back over the memory directory.
+- **Nothing is deleted.** The other copies are never written. Each run first saves the memory as it was (`before/`),
+  then for each note the copy's version (`copies/<n>/`) before it is merged and the version it took the place of
+  (`replaced/<n>/`), in `<data dir>/memory-merge/<encoded directory>/<UTC time>/`. The run's manifest records each note
+  as soon as its merge, backups and `MEMORY.md` line are done. A note whose bytes a run has recorded is skipped, so each
+  version is compared once: a note deleted or changed on the Memory page does not come back, a second run does nothing,
+  and undoing a merge by hand (copy `before/` back over the memory directory, older times and all) stays undone.
+- **Failures**: a note that cannot be merged is not recorded and is tried again ten minutes later, by itself; the notes
+  after it and the other copies are merged meanwhile. A run interrupted part way leaves its unrecorded notes to the next.
 - **Concurrent writers**: the model writes memory with its own file tools, outside the node's lock. The merge creates a
-  new note only if the name is still free, replaces a note only if it has not changed since it was compared, and
-  (time, size and bytes, read again just before the rename), and re-reads `MEMORY.md` just before replacing it.
+  new note only if the name is still free, replaces a note only if it has not changed since it was compared (time, size
+  and bytes, read again just before the rename), and re-reads `MEMORY.md` just before replacing it. A `MEMORY.md` line
+  belongs to the note its link points to (the whole file name), not to a note its description mentions.
 - **Telling the user** (`assistant/memory_merge.go`): every ten minutes the manager asks the node for its runs
-  (`assistant.memory`, op `merges`). For a run it has not told about (`persona_settings` key `assistant.memory_merge`) it
+  (`assistant.memory`, op `merges`). For a run it has not told about (`persona_settings` key `assistant.memory_merge`, the
+  last run told for each computer, so moving the assistant to another computer and back tells only what is new) it
   writes `memory-merge.md` into the memory directory in the user's language and sends one P1 push. The report lists
   the notes brought in and, for each conflict, both modification times, which version was kept and the full text of
   the other. It is not in `MEMORY.md`, so no conversation loads it; the Memory page lists it like any note, and the

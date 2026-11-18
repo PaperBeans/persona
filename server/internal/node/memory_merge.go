@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -26,13 +27,14 @@ import (
 //
 // Rules: a note only another copy has is copied in with its index line; the same name with the same bytes is left;
 // the same name with different content keeps the one modified later. Nothing is deleted: the other copies are never
-// written, and each run first saves the memory as it was (before/) and the notes it read (copies/<n>/) below
-// <data dir>/memory-merge/<project>/<run>/, then each version a copy's note replaced (replaced/<n>/) and a manifest
-// of what it did. A note whose bytes a run has already
-// seen is skipped, so a note the user deleted after the merge does not come back.
+// written, and each run first saves the memory as it was (before/) below <data dir>/memory-merge/<project>/<run>/,
+// then for each note the copy's version (copies/<n>/) before it is merged and the version it replaced (replaced/<n>/).
+// The run's manifest records each note as soon as its merge, backups and index line are done. A note whose bytes a
+// run has recorded is skipped, so it is compared once: a note the user deleted or changed after the merge (even back
+// to an older version, with its older time) is left as the user has it.
 //
-// A run interrupted before its manifest is written is done again by the next check, with a new backup; that run
-// reports the notes the first one already brought in as unchanged.
+// A note that fails is not recorded: it is tried again by a later check, by itself, and the notes after it and the
+// other copies are merged meanwhile. A run interrupted part way leaves the notes it had not recorded to the next.
 
 const (
 	memoryIndexName    = "MEMORY.md"
@@ -96,6 +98,9 @@ type memoryMergeRunOut struct {
 	Added     []string                 `json:"added"`
 	Conflicts []memoryMergeConflictOut `json:"conflicts"`
 }
+
+// memoryMergeFault, set by tests, fails the merge of the note it returns an error for.
+var memoryMergeFault func(name string) error
 
 type memoryNote struct {
 	name string
@@ -323,75 +328,93 @@ func (n *Node) mergeMemoryCopies(cwd, dir string) (_ *memoryMergeRun, err error)
 	if err != nil {
 		return nil, err
 	}
-	run := &memoryMergeRun{Version: memoryMergeVersion, ID: id, At: at, MemoryDir: dir}
-	applied := false
+	// run.Copies[i] is todo[i]: a note's backup lives under copies/<i>/ and replaced/<i>/.
+	run := &memoryMergeRun{Version: memoryMergeVersion, ID: id, At: at, MemoryDir: dir, Copies: make([]memoryMergeCopy, len(todo))}
+	for i, p := range todo {
+		run.Copies[i] = memoryMergeCopy{Dir: p.dir, Files: []memoryMergeFile{}}
+	}
+	applied, recorded := false, false
 	defer func() {
-		if err != nil && !applied { // nothing was changed: the backup of a run that did not happen is not kept
+		if !applied && !recorded { // nothing was changed or recorded: the backup of a run that did not happen is not kept
 			os.RemoveAll(runDir)
 		}
 	}()
-	// Nothing is written to the memory before what it holds, and what was read from the copies, is saved.
+	// Nothing is written to the memory before what it holds is saved.
 	if err := copyMemoryTree(dir, filepath.Join(runDir, "before")); err != nil {
 		return nil, err
-	}
-	for i, p := range todo {
-		for _, f := range p.notes {
-			if err := writeMemoryFile(filepath.Join(runDir, "copies", strconv.Itoa(i), f.name), f.data, f.mod); err != nil {
-				return nil, err
-			}
-		}
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	var lines []memoryIndexEntry
+	// Each note is recorded in the manifest, and so seen, only once its merge, its backups and its index line are
+	// done. A note that fails is left for the next check and holds back neither the notes after it nor other copies.
+	var errs []error
 	for i, p := range todo {
-		out := memoryMergeCopy{Dir: p.dir}
 		for _, f := range p.notes {
-			rec := memoryMergeFile{Name: f.name, SHA256: f.sum, Modified: f.mod.UTC()}
-			var replaced []byte
-			rec.Action, rec.Kept, rec.MemoryModified, replaced, err = mergeMemoryNote(dir, f)
+			rec, changed, err := mergeMemoryCopyNote(dir, filepath.Join(runDir, "copies", strconv.Itoa(i)), filepath.Join(runDir, "replaced", strconv.Itoa(i)), p.index, f)
+			applied = applied || changed
 			if err != nil {
-				return nil, err
+				errs = append(errs, fmt.Errorf("%s: %w", f.name, err))
+				continue
 			}
-			applied = applied || rec.Action == memoryMergeAdded || rec.Kept == memoryKeptCopy
-			if replaced != nil {
-				// The version this copy's note took the place of, as it was at that moment. Kept apart from before/,
-				// which stays the memory as the run found it: a later copy may replace the same name again.
-				if err := writeMemoryFile(filepath.Join(runDir, "replaced", strconv.Itoa(i), f.name), replaced, *rec.MemoryModified); err != nil {
-					return nil, err
-				}
+			files := run.Copies[i].Files
+			run.Copies[i].Files = append(files, rec)
+			if err := writeMemoryMergeManifest(runDir, run); err != nil {
+				run.Copies[i].Files = files
+				errs = append(errs, err)
+				continue
 			}
-			switch {
-			case rec.Action == memoryMergeAdded || rec.Kept == memoryKeptCopy:
-				lines = append(lines, memoryIndexEntry{f.name, memoryIndexLine(p.index, f)})
-			case rec.Action == memoryMergeSame:
-				// Both hold the note: the copy's index line comes along if the memory's index has none (also what
-				// finishes a run that was interrupted after it copied the note in).
-				if line, ok := memoryIndexLineOf(p.index, f.name); ok {
-					lines = append(lines, memoryIndexEntry{f.name, line})
-				}
-			}
-			out.Files = append(out.Files, rec)
+			recorded = true
+			seen[rec.Name+"\x00"+rec.SHA256] = true
 		}
-		run.Copies = append(run.Copies, out)
 	}
-	if err := addMemoryIndexLines(dir, lines); err != nil {
-		return nil, err
+	if !recorded {
+		return nil, errors.Join(errs...)
 	}
+	return run, errors.Join(errs...)
+}
+
+// mergeMemoryCopyNote merges one note of the copy whose backups go to copyBackup and replacedBackup into dir, with
+// its index line: the copy's own (from index) or one made from the note. changed says the memory was written.
+func mergeMemoryCopyNote(dir, copyBackup, replacedBackup, index string, f memoryNote) (rec memoryMergeFile, changed bool, err error) {
+	if memoryMergeFault != nil {
+		if err := memoryMergeFault(f.name); err != nil {
+			return rec, false, err
+		}
+	}
+	if err := writeMemoryFile(filepath.Join(copyBackup, f.name), f.data, f.mod); err != nil {
+		return rec, false, err
+	}
+	rec = memoryMergeFile{Name: f.name, SHA256: f.sum, Modified: f.mod.UTC()}
+	var replaced []byte
+	rec.Action, rec.Kept, rec.MemoryModified, replaced, err = mergeMemoryNote(dir, f)
+	if err != nil {
+		return rec, false, err
+	}
+	changed = rec.Action == memoryMergeAdded || rec.Kept == memoryKeptCopy
+	if replaced != nil {
+		// The version this copy's note took the place of, as it was at that moment. Kept apart from before/, which
+		// stays the memory as the run found it: a later copy may replace the same name again.
+		if err := writeMemoryFile(filepath.Join(replacedBackup, f.name), replaced, *rec.MemoryModified); err != nil {
+			return rec, changed, err
+		}
+	}
+	// A note the memory now holds as the copy has it gets an index line if the memory's index has none: also when both
+	// held it already, which is what finishes a note whose line an earlier attempt did not write.
+	if changed || rec.Action == memoryMergeSame {
+		if err := addMemoryIndexLines(dir, []memoryIndexEntry{{f.name, memoryIndexLine(index, f)}}); err != nil {
+			return rec, changed, err
+		}
+	}
+	return rec, changed, nil
+}
+
+func writeMemoryMergeManifest(runDir string, run *memoryMergeRun) error {
 	b, err := json.MarshalIndent(run, "", "  ")
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := writeMemoryFile(filepath.Join(runDir, "manifest.json"), b, time.Time{}); err != nil {
-		return nil, err
-	}
-	for _, c := range run.Copies {
-		for _, f := range c.Files {
-			seen[f.Name+"\x00"+f.SHA256] = true
-		}
-	}
-	return run, nil
+	return writeMemoryFile(filepath.Join(runDir, "manifest.json"), b, time.Time{})
 }
 
 // newMemoryMergeRun makes the run's directory, named for the time so that runs sort in order.
@@ -593,10 +616,39 @@ func copyMemoryTree(src, dst string) error {
 // memoryIndexEntry is a MEMORY.md line and the note it points to.
 type memoryIndexEntry struct{ name, line string }
 
+// memoryIndexLinks says whether a MEMORY.md line points to the note name: a Markdown link whose destination is that
+// file name exactly ("./name" and "<name>" too, a link title after it allowed). The name in a line's description, or
+// as part of another file's name, is not a link to it.
+func memoryIndexLinks(line, name string) bool {
+	for rest := line; ; {
+		i := strings.Index(rest, "](")
+		if i < 0 {
+			return false
+		}
+		rest = rest[i+2:]
+		end := strings.IndexByte(rest, ')')
+		if end < 0 {
+			return false
+		}
+		target, _, _ := strings.Cut(strings.TrimSpace(rest[:end]), " ")
+		target = strings.TrimPrefix(strings.TrimSuffix(strings.TrimPrefix(target, "<"), ">"), "./")
+		if target == name {
+			return true
+		}
+		rest = rest[end+1:]
+	}
+}
+
+// memoryIndexHas says whether some line of index points to the note name.
+func memoryIndexHas(index, name string) bool {
+	_, ok := memoryIndexLineOf(index, name)
+	return ok
+}
+
 // memoryIndexLineOf is index's line for the note name.
 func memoryIndexLineOf(index, name string) (string, bool) {
 	for _, l := range strings.Split(index, "\n") {
-		if strings.Contains(l, "("+name+")") {
+		if memoryIndexLinks(l, name) {
 			return strings.TrimRight(l, "\r"), true
 		}
 	}
@@ -657,7 +709,7 @@ func addMemoryIndexLines(dir string, lines []memoryIndexEntry) error {
 		next := string(cur)
 		added := false
 		for _, l := range lines {
-			if strings.Contains(next, "("+l.name+")") {
+			if memoryIndexHas(next, l.name) {
 				continue
 			}
 			if next != "" && !strings.HasSuffix(next, "\n") {

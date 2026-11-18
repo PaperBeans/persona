@@ -552,3 +552,179 @@ func BenchmarkMemoryMergeCheck(b *testing.B) {
 		n.memoryForUse(cwd)
 	}
 }
+
+// failMemoryMerge makes the merge of the named notes fail until the test ends or the returned func is called.
+func failMemoryMerge(t *testing.T, names ...string) (stop func()) {
+	t.Helper()
+	failing := map[string]bool{}
+	for _, name := range names {
+		failing[name] = true
+	}
+	memoryMergeFault = func(name string) error {
+		if failing[name] {
+			return os.ErrPermission
+		}
+		return nil
+	}
+	stop = func() { memoryMergeFault = nil }
+	t.Cleanup(stop)
+	return stop
+}
+
+// retryMemoryMergeNow lets the next check run at once instead of after memoryMergeRetryAfter.
+func retryMemoryMergeNow(n oneMemoryNode) {
+	n.memoryMergeRetry[memoryKey(n.cwd)] = time.Now().Add(-time.Second)
+}
+
+// A note a run compared is recorded with its run at once, so it is never compared again while its bytes stay the same:
+// not when a later note of the same run fails and the run is tried again, and not when another new note starts a
+// later run. The user undoing a merge with its backup (which keeps the older modification times) is not overridden by
+// the copy's unchanged, newer-dated note.
+func TestMemoryMergeComparesAnUnchangedNoteOnce(t *testing.T) {
+	n := newOneMemoryNode(t)
+	old, mid := time.Now().Add(-72*time.Hour).Truncate(time.Second), time.Now().Add(-48*time.Hour).Truncate(time.Second)
+	writeNote(t, n.shared, "x.md", "the memory's original\n", old)
+	writeNote(t, n.private, "x.md", "the copy's\n", mid)
+	writeNote(t, n.private, "z.md", "z\n", mid)
+
+	failMemoryMerge(t, "z.md")
+	n.memoryForUse(n.cwd)
+	if got := readNote(t, n.shared, "x.md"); got != "the copy's\n" || !noteMissing(n.shared, "z.md") {
+		t.Fatalf("after the first run: x.md = %q", got)
+	}
+	// The user takes the memory's own version back from the run's backup, with its time.
+	runs := mergeRunDirs(t, n)
+	if len(runs) != 1 {
+		t.Fatalf("runs %v", runs)
+	}
+	writeNote(t, n.shared, "x.md", readNote(t, filepath.Join(runs[0], "before"), "x.md"), old)
+
+	memoryMergeFault = nil
+	retryMemoryMergeNow(n)
+	n.memoryForUse(n.cwd)
+	if got := readNote(t, n.shared, "x.md"); got != "the memory's original\n" {
+		t.Fatalf("the retry compared x.md again and replaced the user's version: %q", got)
+	}
+	if got := readNote(t, n.shared, "z.md"); got != "z\n" {
+		t.Fatalf("z.md = %q", got)
+	}
+
+	// Another new note in the copy starts a run; x.md is still left as the user has it, in this process and after a restart.
+	writeNote(t, n.private, "y.md", "y\n", time.Now())
+	n.memoryMerged = nil
+	n.memoryForUse(n.cwd)
+	if got := readNote(t, n.shared, "x.md"); got != "the memory's original\n" || readNote(t, n.shared, "y.md") != "y\n" {
+		t.Fatalf("after a later run: x.md = %q", got)
+	}
+	res, err := n.assistantMemory(memoryOp{Op: "merges", Cwd: n.cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflicts := 0
+	for _, run := range res.(map[string]any)["runs"].([]memoryMergeRunOut) {
+		conflicts += len(run.Conflicts)
+	}
+	if conflicts != 1 {
+		t.Errorf("x.md reported %d times, want once", conflicts)
+	}
+}
+
+// A note whose merge fails holds back neither the notes after it nor another profile's copy: they are merged and
+// recorded, and only the failed note is tried again later, by itself.
+func TestMemoryMergeFailureHoldsNothingElseBack(t *testing.T) {
+	n := newOneMemoryNode(t)
+	mod := time.Now().Add(-time.Hour).Truncate(time.Second)
+	other := filepath.Join(n.dir, "profiles", "other", "projects", memoryKey(n.cwd), "memory")
+	writeNote(t, n.private, "a.md", "a\n", mod)
+	writeNote(t, n.private, "b.md", "b\n", mod)
+	writeNote(t, n.private, "c.md", "c\n", mod)
+	writeNote(t, other, "d.md", "d\n", mod)
+
+	stop := failMemoryMerge(t, "b.md")
+	n.memoryForUse(n.cwd)
+	for _, name := range []string{"a.md", "c.md", "d.md"} {
+		if noteMissing(n.shared, name) {
+			t.Errorf("%s was held back by b.md's failure", name)
+		}
+	}
+	if !noteMissing(n.shared, "b.md") {
+		t.Fatal("b.md was merged")
+	}
+	if len(mergeRunDirs(t, n)) != 1 {
+		t.Fatalf("runs %v", mergeRunDirs(t, n))
+	}
+
+	// A note whose index line could not be written is not recorded: the retry finds it in both and writes the line.
+	writeNote(t, n.private, "e.md", "e\n", mod)
+	writeNote(t, n.shared, "e.md", "e\n", mod) // what a first attempt copied in before its index line failed
+
+	stop()
+	n.memoryForUse(n.cwd) // too soon after the failure
+	if !noteMissing(n.shared, "b.md") {
+		t.Fatal("the failed note was tried again at once")
+	}
+	retryMemoryMergeNow(n)
+	n.memoryForUse(n.cwd)
+	if got := readNote(t, n.shared, "b.md"); got != "b\n" {
+		t.Fatalf("b.md = %q after the retry", got)
+	}
+	index := readNote(t, n.shared, memoryIndexName)
+	for _, name := range []string{"a.md", "b.md", "c.md", "d.md", "e.md"} {
+		if strings.Count(index, "("+name+")") != 1 {
+			t.Errorf("index for %s:\n%s", name, index)
+		}
+	}
+	runs := mergeRunDirs(t, n)
+	if len(runs) != 2 {
+		t.Fatalf("runs %v", runs)
+	}
+	var second memoryMergeRun
+	if err := json.Unmarshal([]byte(readNote(t, runs[1], "manifest.json")), &second); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, c := range second.Copies {
+		for _, f := range c.Files {
+			names = append(names, f.Name+":"+f.Action)
+		}
+	}
+	if strings.Join(names, ",") != "b.md:added,e.md:same" {
+		t.Errorf("the retry compared %v, want only b.md and the new e.md", names)
+	}
+}
+
+// MEMORY.md lines are matched by the file their link points to, not by the name appearing anywhere in the line: a
+// description that mentions another note neither stands in for that note's line nor loses its own when that note goes.
+func TestMemoryIndexMatchesTheLinkTarget(t *testing.T) {
+	index := "- [Tea](tea.md) — goes with (coffee.md)\n- [Notes](./notes.md) — relative\n- [Old](<old.md> \"title\") — angle brackets"
+	if line, ok := memoryIndexLineOf(index, "coffee.md"); ok {
+		t.Errorf("coffee.md matched %q", line)
+	}
+	for name, want := range map[string]string{"tea.md": "- [Tea](tea.md) — goes with (coffee.md)", "notes.md": "- [Notes](./notes.md) — relative", "old.md": "- [Old](<old.md> \"title\") — angle brackets"} {
+		if line, ok := memoryIndexLineOf(index, name); !ok || line != want {
+			t.Errorf("%s: %q %v", name, line, ok)
+		}
+	}
+
+	dir := t.TempDir()
+	writeNote(t, dir, memoryIndexName, index, time.Time{})
+	if err := addMemoryIndexLines(dir, []memoryIndexEntry{{"coffee.md", "- [Coffee](coffee.md) — c"}, {"notes.md", "- [Notes again](notes.md)"}}); err != nil {
+		t.Fatal(err)
+	}
+	want := index + "\n- [Coffee](coffee.md) — c\n"
+	if got := readNote(t, dir, memoryIndexName); got != want {
+		t.Fatalf("index:\n%s\nwant:\n%s", got, want)
+	}
+
+	// Deleting coffee.md on the Memory page drops its own line only.
+	n := newOneMemoryNode(t)
+	writeNote(t, n.shared, "tea.md", "tea\n", time.Time{})
+	writeNote(t, n.shared, "coffee.md", "coffee\n", time.Time{})
+	writeNote(t, n.shared, memoryIndexName, "- [Tea](tea.md) — goes with (coffee.md)\n- [Coffee](coffee.md) — c\n", time.Time{})
+	if _, err := n.assistantMemory(memoryOp{Op: "delete", Cwd: n.cwd, Name: "coffee.md"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readNote(t, n.shared, memoryIndexName); got != "- [Tea](tea.md) — goes with (coffee.md)\n" {
+		t.Errorf("index after deleting coffee.md: %q", got)
+	}
+}

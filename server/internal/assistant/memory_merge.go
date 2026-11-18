@@ -21,10 +21,11 @@ const (
 	memoryMergeEvery      = 10 * time.Minute
 )
 
-// memoryMergeProgress is the last run the user was told about, on which computer.
+// memoryMergeProgress is, for each computer the assistant has run on, the last of its runs the user was told about.
+// Each computer keeps its own: run ids are times on that computer, and moving the assistant to another one and back
+// tells the runs made meanwhile, and only those.
 type memoryMergeProgress struct {
-	Machine string
-	Told    string
+	Told map[string]string `json:"told_by_machine"`
 }
 
 type memoryMergeConflict struct {
@@ -93,17 +94,15 @@ func (s *Service) memoryMergeTell(ctx context.Context) {
 		s.logf("memory merge: read progress: %v", err)
 		return
 	}
-	if progress.Machine != d.ID {
-		progress = memoryMergeProgress{Machine: d.ID}
-	}
-	added, conflicts, last := 0, 0, progress.Told
+	told := progress.Told[d.ID]
+	added, conflicts, last := 0, 0, told
 	for _, run := range res.Runs {
-		if run.ID > progress.Told {
+		if run.ID > told {
 			added, conflicts = added+len(run.Added), conflicts+len(run.Conflicts)
 			last = max(last, run.ID)
 		}
 	}
-	if last == progress.Told {
+	if last == told {
 		return
 	}
 	l := s.lang(ctx)
@@ -112,7 +111,10 @@ func (s *Service) memoryMergeTell(ctx context.Context) {
 		s.logf("memory merge: write the report: %v", err)
 		return
 	}
-	progress.Told = last
+	if progress.Told == nil {
+		progress.Told = map[string]string{}
+	}
+	progress.Told[d.ID] = last
 	if err := st.PutSetting(ctx, memoryMergeKey, progress); err != nil {
 		s.logf("memory merge: record what was told: %v", err)
 		return
