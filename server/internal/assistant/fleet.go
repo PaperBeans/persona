@@ -74,6 +74,8 @@ type fleetBook struct {
 	turns              *turnTracker // "machine/session" -> the turn in progress, for the finished push
 	clients            assistantwire.Clients
 	prev               map[string]map[string]turnPrev // each machine's list setSessions saw last, by session id
+	// prevConn: the node connection (devices' ConnectedAt) each machine's prev list came on.
+	prevConn map[string]time.Time
 
 	// sent: what is kept of each machine's last session list told the hub (fleet.sessions): its length and digest, not
 	// its bytes. sentMu is held while a list is decorated, encoded into enc and told (publishList), so the lists reach

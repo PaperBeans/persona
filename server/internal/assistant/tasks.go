@@ -318,6 +318,8 @@ type tasksState struct {
 	workspaceClaims map[string]string
 	// turns: the turns completion handling took up, kept in the database (task_turns.go).
 	turns turnsState
+	// quiet: the verdicts on task Agents' turns with no output, and the agents Persona's Stop interrupted (silent_turns.go).
+	quiet quietTurns
 }
 
 func newTasksState() tasksState {

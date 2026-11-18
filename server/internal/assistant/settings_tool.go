@@ -76,6 +76,21 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.startRequestedTasks(ctx)), nil },
 			set: s.setStartRequestedTasks},
+		{Setting: Setting{Key: "assistant.idle_auto_compact", Title: "Compact idle conversations", Actions: getSet,
+			About: "on (the default): compact an idle conversation when the idle time and context size thresholds are both reached",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.idleAutoCompact(ctx)), nil },
+			set: s.setIdleAutoCompact},
+		{Setting: Setting{Key: "assistant.idle_auto_compact_minutes", Title: "Idle time before compaction", Actions: getSet,
+			About: "minimum idle time before automatic compaction; 30 minutes by default",
+			Value: "a whole number from 1 to 1440"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.idleAutoCompactMinutes(ctx)), nil },
+			set: s.setIdleAutoCompactMinutes},
+		{Setting: Setting{Key: "assistant.idle_auto_compact_tokens", Title: "Context size before compaction", Actions: getSet,
+			About: "minimum context size before automatic compaction; 300000 tokens by default",
+			Value: "a whole number from 10000 to 10000000"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.idleAutoCompactTokens(ctx)), nil },
+			set: s.setIdleAutoCompactTokens},
 		{Setting: Setting{Key: readonlyModeKey, Title: "Read-only task protection", Actions: getSet,
 			About: "sandbox (the default) keeps current runtime protection: Codex uses a read-only sandbox, while Claude uses " +
 				"bypassPermissions and a first-message read-only instruction. prompt keeps the instruction without forcing plan " +
@@ -399,7 +414,9 @@ func (s *Service) ownSettingAction(ctx context.Context, call ToolCall, o ownSett
 				return "", approvalops.ErrStale
 			}
 			if err != nil {
-				return "", err
+				// The setter only rebuilds and validates a fresh operation here;
+				// fresh.apply below is the first possible side effect.
+				return "", fmt.Errorf("%w: validate the approved operation against current state: %v", approvalops.ErrNotApplied, err)
 			}
 			if fresh == nil || fresh.apply == nil || fresh.card(l) != proposal {
 				return "", approvalops.ErrStale
@@ -420,6 +437,7 @@ func orNone(s string) string {
 // settingTitles are the settings' titles for the card the user approves on, in this file's namespace (Title stays
 // what the assistant reads).
 var settingTitles = map[string]string{standingAuthorizationsKey: "title_standing_authorizations", "assistant.notes": "title_notes", "assistant.main_tasks_quiet": "title_main_tasks_quiet",
+	"assistant.idle_auto_compact": "title_idle_auto_compact", "assistant.idle_auto_compact_minutes": "title_idle_auto_compact_minutes", "assistant.idle_auto_compact_tokens": "title_idle_auto_compact_tokens",
 	readonlyModeKey:                       "title_readonly_mode",
 	"assistant.task_workspace_preference": "title_task_workspace_preference",
 	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher",
@@ -439,6 +457,63 @@ func clipped(l i18n.Lang, s string) string {
 		s = i18n.T(l, "assistant-settings_tool.none")
 	}
 	return clip(oneLine(s), 120)
+}
+
+func (s *Service) setIdleAutoCompact(ctx context.Context, raw json.RawMessage) (*ownChange, error) {
+	var value *bool
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		return nil, i18n.Err("assistant-settings_tool.bad_idle_auto_compact")
+	}
+	return s.setBoolSetting(ctx, raw, s.idleAutoCompact, i18n.T(s.lang(ctx), "assistant-settings_tool.idle_auto_compact_unchanged"), func(l i18n.Lang, before, after string) string {
+		return i18n.T(l, "assistant-settings_tool.change_idle_auto_compact", i18n.Args{"before": before, "after": after})
+	}, func(v *Settings) **bool { return &v.IdleAutoCompact },
+		"Idle compaction setting saved (%v); applies from the next unattended message.")
+}
+
+func (s *Service) setIdleAutoCompactMinutes(ctx context.Context, raw json.RawMessage) (*ownChange, error) {
+	var value int
+	if err := json.Unmarshal(raw, &value); err != nil || value < minIdleAutoCompactMinutes || value > maxIdleAutoCompactMinutes {
+		return nil, i18n.Err("assistant-settings_tool.bad_idle_auto_compact_minutes")
+	}
+	before := s.idleAutoCompactMinutes(ctx)
+	if value == before {
+		return &ownChange{summary: i18n.T(s.lang(ctx), "assistant-settings_tool.idle_auto_compact_unchanged")}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{cardText: func(l i18n.Lang) string {
+		return i18n.T(l, "assistant-settings_tool.change_idle_auto_compact_minutes", i18n.Args{"before": before, "after": value})
+	}, apply: func(ctx context.Context) (string, error) {
+		if _, err := s.updateSettings(ctx, func(v *Settings) error { v.IdleAutoCompactMinutes = &value; return nil }); err != nil {
+			return "", err
+		}
+		s.settingsChanged(ctx)
+		return i18n.T(s.lang(ctx), "assistant-settings_tool.idle_auto_compact_saved"), nil
+	}}, nil
+}
+
+func (s *Service) setIdleAutoCompactTokens(ctx context.Context, raw json.RawMessage) (*ownChange, error) {
+	var value int
+	if err := json.Unmarshal(raw, &value); err != nil || value < minIdleAutoCompactTokens || value > maxIdleAutoCompactTokens {
+		return nil, i18n.Err("assistant-settings_tool.bad_idle_auto_compact_tokens")
+	}
+	before := s.idleAutoCompactTokens(ctx)
+	if value == before {
+		return &ownChange{summary: i18n.T(s.lang(ctx), "assistant-settings_tool.idle_auto_compact_unchanged")}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{cardText: func(l i18n.Lang) string {
+		return i18n.T(l, "assistant-settings_tool.change_idle_auto_compact_tokens", i18n.Args{"before": before, "after": value})
+	}, apply: func(ctx context.Context) (string, error) {
+		if _, err := s.updateSettings(ctx, func(v *Settings) error { v.IdleAutoCompactTokens = &value; return nil }); err != nil {
+			return "", err
+		}
+		s.settingsChanged(ctx)
+		return i18n.T(s.lang(ctx), "assistant-settings_tool.idle_auto_compact_saved"), nil
+	}}, nil
 }
 
 func (s *Service) setNotes(ctx context.Context, v json.RawMessage) (*ownChange, error) {

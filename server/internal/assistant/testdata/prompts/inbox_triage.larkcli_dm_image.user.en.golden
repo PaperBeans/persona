@@ -1,0 +1,9 @@
+类型：通过 lark-cli 收到的 Lark 私聊，另一方是人
+
+本次新消息：[Image: img_example_new_screenshot]
+
+会话上下文（含较早消息）：
+Example peer（@了我）: @Example owner can you check the filter?
+Example owner: Here is the report.
+Example peer: Thanks, I can see it.
+Example peer: [Image: img_example_new_screenshot]

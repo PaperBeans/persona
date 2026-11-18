@@ -5,7 +5,8 @@
 // 600 px the pill takes the width its words need (the name at most 108 px, a bracketed qualifier left out but for a
 // context size, `pillShortName`) and gives way
 // only when the row is short, under 520 px its text and marks are a step smaller, under 420 px it keeps only the
-// provider's tile and the chevron (64 px). An agent that can switch neither its model nor its effort gets the same
+// provider's tile and the chevron (64 px), except an explicit Agent launcher label (#10248).
+// An agent that can switch neither its model nor its effort gets the same
 // words as a label, except Codex: its panel explains why. A Persona chat (and the new-chat page) has `AssistantModelPill`
 // (#5033): the same pill over what the assistant's computer can run Persona chats on, its panel saying whether the chat
 // follows the default.
@@ -17,9 +18,10 @@ import { modelSupportsFast } from "../../lib/launcher-models";
 import { effortTitle } from "../../lib/session-actions";
 import { dropPick, launcherOffered, pickFast, usePickedEffort, usePickedFast, usePickedLauncher, usePickedModel } from "../../lib/assistant-chat";
 import { isBackgroundSupervisor } from "../../lib/background-supervisor";
+import { launcherTitle } from "../../lib/provider-names";
 import { ASSISTANT_MODEL_PICK_FEATURE, ASSISTANT_START_SERVICE_TIER_FEATURE, assistantPickKey, assistantPillView, assistantSetup, type AssistantChat } from "../../lib/assistant-models";
 import {
-  agentCatalogScope, assistantCatalogScope, assistantLaunchers, modelList, pendingView, pillView, readAssistantLaunchers, readForPanel, readModels, readSuperviseDefault, sessionSwitches, superviseDefault, useModelLists, currentModelRow, type PillSetup,
+  agentCatalogScope, assistantCatalogScope, assistantLaunchers, machineLauncherList, modelList, pendingView, pillView, readAgentLauncherNames, readAssistantLaunchers, readForPanel, readModels, readSuperviseDefault, sessionSwitches, superviseDefault, useModelLists, currentModelRow, type PillSetup,
 } from "../../lib/session-models";
 import { turnErrorFix, type TurnFix } from "../../lib/readiness";
 import { getSession, hubHas, useStore } from "../../lib/store";
@@ -85,23 +87,23 @@ export function ModelPill({
   buttonRef?: Ref<HTMLButtonElement>;
 }) {
   const shown = pending ?? current;
+  const launcher = shown.launcherName;
   const unknown = !shown.model;
   const name = shown.model ?? (loading ? t("chat-modelpill.loading") : failed ? t("chat-modelpill.failed") : t("chat-modelpill.default_model"));
   const describe = (x: PillSetup) =>
-    [agentName(x.engine, x.engineLabel), x.model ?? name, x.provider, x.effort && effortTitle(x.effort), x.fast && t("chat-sessiondialogs.speed_fast")].filter(Boolean).join(" · ");
+    [agentName(x.engine, x.engineLabel), x.model ?? name, x.launcherName || x.provider, x.effort && effortTitle(x.effort), x.fast && t("chat-sessiondialogs.speed_fast")].filter(Boolean).join(" · ");
   const title = pending
     ? t("chat-modelpill.current_and_next", { current: describe(current), next: describe(pending) })
     : [describe(current), failed && !unknown ? t("chat-modelpill.failed") : ""].filter(Boolean).join(" · ");
   const short = pillShortName(name);
   const effort = shown.effort ? effortTitle(shown.effort) : "";
-  // what the next message runs on, before its model: the engine when it changes (Cindy's case), else the launcher
-  // (Persona's in-session switch, #5035)
-  const target = pending ? (pending.engine !== current.engine ? agentName(pending.engine, pending.engineLabel) : pending.provider) : "";
+  // An explicit Agent launcher matches the panel even across engines; other pills keep the existing pending label.
+  const target = launcher || (pending ? (pending.engine !== current.engine ? agentName(pending.engine, pending.engineLabel) : pending.provider) : "");
   const label = t(
     pending
       ? (effort ? "chat-modelpill.aria_pending_effort" : "chat-modelpill.aria_pending")
       : (effort ? "chat-modelpill.aria_effort" : "chat-modelpill.aria"),
-    { agent: target, model: name, effort },
+    { agent: target, model: !pending && launcher ? `${launcher} · ${name}` : name, effort },
   );
 
   const body: ReactNode = (
@@ -110,22 +112,22 @@ export function ModelPill({
       {unknown && loading && <Spinner size={13} />}
       {unknown && failed && !loading && <Icon name="warning" stroke={2} className="size-[13px] shrink-0 text-red @max-[520px]/composer:size-[12px]" />}
       <ProviderMark name={shown.provider} className={cx("mr-1.5", failed && !unknown ? "text-red" : "text-ink-2")} />
-      {pending && (
+      {(launcher || pending) && (
         <>
-          <span data-pill-target className="max-w-[96px] shrink-0 truncate text-ink-3 @max-[600px]/composer:hidden">{target}</span>
-          <span aria-hidden className="shrink-0 text-ink-3 @max-[600px]/composer:hidden">·</span>
+          <span data-pill-target title={target} className={cx("max-w-[96px] truncate text-ink-3", launcher ? "min-w-[3ch] shrink" : "shrink-0 @max-[600px]/composer:hidden")}>{target}</span>
+          <span aria-hidden className={cx("shrink-0 text-ink-3", !launcher && "@max-[600px]/composer:hidden")}>·</span>
         </>
       )}
       {/* the name gives way first (a far larger shrink than the effort's): narrow, the effort truncates only once the
           name has no room left */}
-      <span title={name} className={cx("min-w-0 shrink-[1000] truncate text-ink @max-[600px]/composer:max-w-[108px]", short !== name && "@max-[600px]/composer:hidden", ULTRA_HIDDEN)}>{name}</span>
+      <span title={name} className={cx("shrink-[1000] truncate text-ink @max-[600px]/composer:max-w-[108px]", launcher ? "min-w-[3ch]" : "min-w-0", short !== name && "@max-[600px]/composer:hidden", !launcher && ULTRA_HIDDEN)}>{name}</span>
       {/* narrow, the name without its bracketed qualifier, a context size kept short (the tooltip keeps all of it): the
           108 px would cut it there */}
       {short !== name && (
-        <span title={name} data-pill-short className={cx("hidden min-w-0 shrink-[1000] truncate text-ink @max-[600px]/composer:block @max-[600px]/composer:max-w-[108px]", ULTRA_HIDDEN)}>{short}</span>
+        <span title={name} data-pill-short className={cx("hidden shrink-[1000] truncate text-ink @max-[600px]/composer:block @max-[600px]/composer:max-w-[108px]", launcher ? "min-w-[3ch]" : "min-w-0", !launcher && ULTRA_HIDDEN)}>{short}</span>
       )}
       {/* the engine's mark is the separator before the effort: no "·" */}
-      <span aria-hidden data-pill-engine={shown.engine} className={cx("ml-1 flex shrink-0 items-center @max-[520px]/composer:scale-[0.917]", ULTRA_HIDDEN)}>
+      <span aria-hidden data-pill-engine={shown.engine} className={cx("ml-1 flex shrink-0 items-center @max-[520px]/composer:scale-[0.917]", !launcher && ULTRA_HIDDEN)}>
         <AgentMark agent={shown.engine} label={shown.engineLabel} size={12} decorative className="text-ink-2" />
       </span>
       {shown.effort && (
@@ -146,9 +148,8 @@ export function ModelPill({
     // narrow, it still takes the width its words need (a fixed width cut "Opus 5.5" to "Opus …" beside free room) and
     // shrinks, the name first, only when the row is short of room
     "@max-[520px]/composer:text-[12px] @max-[520px]/composer:[--provider-mark:14.2px] @max-[420px]/composer:min-w-[64px]",
-    // under 420 px the tile and the chevron: 64 px, as the pill always was there; only a waiting switch's clock before
-    // them makes it grow to hold it
-    pending ? "@max-[420px]/composer:w-auto" : "@max-[420px]/composer:w-[64px]",
+    // Under 420 px an explicit launcher keeps its model label; other pills retain their compact fallback.
+    (pending || launcher) ? "@max-[420px]/composer:w-auto" : "@max-[420px]/composer:w-[64px]",
   );
   // the clip is inside, so the touch target (touch-hit) can reach past the pill's 30 px
   const inner = "flex min-w-0 flex-1 items-center gap-1 overflow-hidden";
@@ -219,14 +220,20 @@ export const AgentModelPill = memo(function AgentModelPill({ session }: { sessio
   useEffect(() => {
     if (target && target !== own) void readModels(mid, target);
   }, [target, own, mid, scope]);
+  const namesLauncher = Boolean((opens || view.model) && (session.launcher || target));
+  useEffect(() => {
+    if (namesLauncher) void readAgentLauncherNames(mid);
+  }, [namesLauncher, mid, scope]);
 
-  const pending = pendingView(session, (name) => modelList(mid, name));
+  const launchers = machineLauncherList(mid);
+  const waiting = pendingView(session, (name) => modelList(mid, name));
+  const pending = waiting ? { ...waiting, launcherName: launcherTitle(waiting.provider, launchers) } : null;
   if (!opens && !view.model) return null;
   const workflow = ultracodeOn(session) ? {} : view.engine === "codex" && session.effort === CODEX_ULTRA ? { label: t("ultracode.codex_ultra_title"), title: t("ultracode.codex_ultra_title") } : undefined;
   return (
     <>
       <ModelPill
-        current={view}
+        current={{ ...view, launcherName: session.launcher ? launcherTitle(session.launcher, launchers) : undefined }}
         pending={pending}
         loading={view.loading}
         failed={view.failed}

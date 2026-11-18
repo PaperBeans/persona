@@ -77,5 +77,16 @@
   "change_task_trust_add_edit": "今後、「{machine}」の {directory} とそのサブフォルダでファイルを変更するタスクは、計画カードなしですぐに開始します",
   "change_task_trust_add_read": "今後、「{machine}」の {directory} とそのサブフォルダでファイルを読むだけのタスクは、計画カードなしですぐに開始します",
   "change_task_trust_remove_edit": "「{machine}」の {directory} でファイルを変更するタスクは、再び計画カードで開始を待ちます",
-  "change_task_trust_remove_read": "「{machine}」の {directory} の読み取り専用タスクを記憶から外します（読み取り専用タスクは引き続きすぐに開始します）"
+  "change_task_trust_remove_read": "「{machine}」の {directory} の読み取り専用タスクを記憶から外します（読み取り専用タスクは引き続きすぐに開始します）",
+  "title_idle_auto_compact": "離席中にメインチャットを圧縮",
+  "title_idle_auto_compact_minutes": "整理までのアイドル時間",
+  "title_idle_auto_compact_tokens": "整理するコンテキスト量",
+  "change_idle_auto_compact": "離席中にメインチャットを圧縮：{before} → {after}",
+  "bad_idle_auto_compact": "値はtrueまたはfalseにしてください。",
+  "bad_idle_auto_compact_minutes": "1〜1440の整数分で指定してください。",
+  "bad_idle_auto_compact_tokens": "10000〜10000000の整数トークン数で指定してください。",
+  "idle_auto_compact_unchanged": "アイドル会話の自動整理設定は変更されていません。",
+  "idle_auto_compact_saved": "アイドル会話の自動整理設定を保存しました。",
+  "change_idle_auto_compact_minutes": "圧縮までの離席時間：{before} → {after} 分",
+  "change_idle_auto_compact_tokens": "圧縮するコンテキストの大きさ：{before} → {after} トークン"
 }

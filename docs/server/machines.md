@@ -227,11 +227,12 @@ How many tokens each machine runs, for the Machines page's cards and charts (the
   (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent` and `~/.omp/agent`: `sessions/<cwd>/<time>_<id>.jsonl`, #9992). opencode keeps its steps in a SQLite database (`$PERSONA_OPENCODE_DB`,
   else `$XDG_DATA_HOME/opencode/opencode.db`, default `~/.local/share/opencode/opencode.db`): its adapter queries it with the system `sqlite3` (`node/usage_opencode.go`), the rows added
   since the last read and the unfinished ones again, nothing while the database has not changed; without `sqlite3` (a Linux machine often has none) opencode is not metered.
-  Cursor's CLI and Antigravity keep no token counts the node can read and check: they are not metered. A runtime with no record of its own is not metered either. The parsers (`server/internal/tokenuse`)
+  Cursor's CLI and Antigravity keep no token counts the node can read and check: they are not metered. A runtime with no record of its own can report per-request deltas through the runtime SDK (`docs/integrations/runtimes.md`, "Runtime token usage"). The parsers (`server/internal/tokenuse`)
   are the same ones the usage on a chat's replies and the subagent summaries read (`docs/protocol/protocol.md`, "Token usage on items"), so a request counts the same everywhere
   and sums the replies per minute, model, **agent** (its adapter's, `proto.Session.Agent`'s names, #9984) and **launcher**: the launcher Persona started the session with (`sessionState.Launcher`, looked up by the transcript's session or thread id;
   a subagent's or workflow agent's transcript is its session's). A session typed in a terminal has no launcher (`""`, shown as "Other"). The node keeps 26 hours and reports changed minutes as `usage`
   (`"launchers": true` says its buckets name the launcher; an older node's do not, and the apps grey out the launcher filter for it).
+- **Runtime reports** (`node/runtime_usage.go`): `usage.report` becomes a `usage` notification with `add: true`, one request in a minute/model/launcher/agent bucket. Memory and Postgres add all four counts and the request count; `full` file scans preserve runtime-only agents. Reports are not reconstructable and can be lost during reconnects or storage failures; they have no backfill. Reasoning remains part of output.
 - **Counted once**: a reply is counted once in the window even when it is in several files. A fork (Claude Code's `--fork-session`, Codex's fork) copies the history it starts from,
   timestamps included, into the new file; the meter remembers every reply it counted (Claude Code's message id, Codex's timestamp and running total) for the window.
   Measured on the transcripts of two machines over three days (2026-11-06): no reply was in two files and none repeated out of order in one file, so today's numbers do not change; the rule covers forks.
@@ -245,7 +246,7 @@ How many tokens each machine runs, for the Machines page's cards and charts (the
   Cache hit rate = cache read / (input + cache write + cache read).
 - **Storage** (`devices/usage.go`, `db/usage.go`): the manager keeps the last 26 hours in memory (the island, the cards) and writes every notification to `machine_usage` in order, from one goroutine.
   Each node reports on a 10-second tick of its own, so while another machine has written in the last 25 seconds, the notifications that come within 5 seconds of one go in one transaction with it (`db.PutUsages`, in order; if Postgres rejects one, each goes under a savepoint of its own); a single busy machine's are written at once.
-  A bucket is its minute's whole total, so a later one replaces it; a node's whole window (`full`, after it connects) first deletes the machine's minute rows of that window, so what the node
+  A bucket is its minute's whole total, so a later one replaces it; a node's whole window (`full`, after it connects) first deletes only the file-metered agents' minute rows (and legacy unknown-agent rows) of that window, so what the node
   counts now is the record (an older node's rows without a launcher do not stay next to the new ones). Each minute the minute rows older than 27 hours are summed into one row per 10 minutes
   (`step = 600`), the 10-minute rows older than 7 days and an hour into one row per hour (`step = 3600`, `db.RollupUsageHours`), and rows older than 53 weeks and a day are deleted.
   About 1 to 3 rows a machine and minute (one per model, launcher and agent in use), 10,000 to 30,000 rows a machine for the week, then 24 to 72 a machine and day for the year (about 9,000 to 27,000).

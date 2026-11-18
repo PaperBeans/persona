@@ -987,15 +987,11 @@ var continueHold = 30 * time.Second
 // one is on its way, or before the agent took it up, answer the todo as it is, as does a task with no agent cut off.
 // The agent's machine offline is refused.
 func (s *Service) continueTask(ctx context.Context, cur Todo) (json.RawMessage, error) {
-	var cut proto.Session
-	for _, c := range s.taskAgents(ctx, cur) {
-		if c.TurnError != "" && (cut.SessionID == "" || c.UpdatedAt.After(cut.UpdatedAt)) {
-			cut = c
-		}
-	}
+	cut := cutAgent(s.taskAgents(ctx, cur))
 	if cut.SessionID == "" {
 		return s.todoView(ctx, cur.ID)
 	}
+	at := s.cutRow(cut) // the turn picked, by the identity it shows by: every check below goes by it
 	m, ok := s.device(ctx, cut.MachineID)
 	if !ok || !m.Reachable {
 		name := cut.MachineID
@@ -1009,6 +1005,12 @@ func (s *Service) continueTask(ctx context.Context, cur Todo) (json.RawMessage, 
 		return s.todoView(ctx, cur.ID)
 	}
 	release := func() { s.endTaskStart(cur.ID, st, proto.Session{}) }
+	// Still the turn it was picked for, now that this Continue holds the claim: one that went on meanwhile (an
+	// earlier Continue taken up, the owner at the computer) is not continued again.
+	if now := cutAgent(s.taskAgents(ctx, cur)); now.SessionID != cut.SessionID || now.TurnError != cut.TurnError || continueTakenUp(now, cut, at) {
+		release()
+		return s.todoView(ctx, cur.ID)
+	}
 	if stoppedAgent(cut) { // it stopped since (read-only, #4754): a new agent goes on with the task (tasks_successor.go)
 		var started proto.Session
 		defer func() { s.endTaskStart(cur.ID, st, started) }() // a message that waited for it goes to the new agent
@@ -1029,16 +1031,58 @@ func (s *Service) continueTask(ctx context.Context, cur Todo) (json.RawMessage, 
 	go func() {
 		defer release()
 		ctx := context.WithoutCancel(ctx)
+		n := 0
 		for end := time.Now().Add(continueHold); time.Now().Before(end); time.Sleep(200 * time.Millisecond) {
+			if n++; s.continuePolled != nil {
+				s.continuePolled(n)
+			}
 			// Still cut off by the same error: not taken up yet. The session is as the node lists it: Claude Code's error
 			// is its last words, a Codex turn's the node's own TurnError (no words of its answer, #2185).
 			c, ok := s.session(ctx, cut.MachineID, cut.SessionID)
-			if !ok || c.Status == proto.StatusWorking || (strings.TrimSpace(c.LastText) != cut.TurnError && c.TurnError != cut.TurnError) {
-				return // it took it up (or is gone): a later cut may be continued again
+			if !ok {
+				continue // no answer this time: nothing says it took it up, the claim stays (until continueHold)
+			}
+			if c.Status == proto.StatusWorking || continueTakenUp(c, cut, at) {
+				return // it took it up: a later cut may be continued again
 			}
 		}
 	}()
 	return s.todoView(ctx, cur.ID)
+}
+
+// cutAgent is the agent among agents whose turn was cut off (a turn error) latest; none when no turn was.
+func cutAgent(agents []proto.Session) proto.Session {
+	var cut proto.Session
+	for _, c := range agents {
+		if c.TurnError != "" && (cut.SessionID == "" || c.UpdatedAt.After(cut.UpdatedAt)) {
+			cut = c
+		}
+	}
+	return cut
+}
+
+// cutRow is the identity of cut's turn that Continue goes by (continueTakenUp): for the hub's own word on a turn with
+// no output (silent_turns.go), the row its verdict was made at, which is what the verdict holds by; a row read later
+// (a moment late, its time corrected since) is no other turn. Otherwise the row as picked.
+func (s *Service) cutRow(cut proto.Session) rowAt {
+	if proto.SilentTurnKind(cut.TurnErrorKind) {
+		if m, ok := s.quietMarks(cut.MachineID)[cut.SessionID]; ok {
+			return m.rowAt
+		}
+	}
+	return rowOf(cut)
+}
+
+// continueTakenUp: agent c (the node's row, or the lists') is no longer at cut, the turn "Continue" was sent for, at
+// row at (cutRow). The hub's own word on a turn with no output (silent_turns.go) is not on the node's row: that turn
+// is over once the verdict no longer holds for c (rowAt.holds, the very check that shows it), so the guard is never let
+// go while the verdict still shows. Otherwise the error that cut it off is gone: Claude Code's is its last words, a
+// Codex turn's the node's own TurnError (#2185).
+func continueTakenUp(c, cut proto.Session, at rowAt) bool {
+	if proto.SilentTurnKind(cut.TurnErrorKind) {
+		return !at.holds(c)
+	}
+	return strings.TrimSpace(c.LastText) != cut.TurnError && c.TurnError != cut.TurnError
 }
 
 // taskStartRetryDelay is how long a task waits before its one retry after a start the new tab's terminal was not

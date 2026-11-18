@@ -46,6 +46,12 @@
 #   schema/wire/**, spec/fixtures/**, scripts/gen/extension_schema.py, scripts/test/test_extension_schema.py
 #                              also scripts/test/test_wire_schema.py: it holds the fixtures' samples to the wire schemas
 #                              (and imports the extension test's validator); CI's guards step always runs it
+#   spec/fixtures/todo-{detail,layout}/**, spec/fixtures/todo-view/README.md, spec/fixtures/agent-names/**,
+#   schema/wire/todo-view.schema.json, server/internal/assistant/{todos,todo_ask}.go, scripts/test/test_wire_schema.py,
+#   scripts/test/test_extension_schema.py
+#                              also scripts/test/test_todo_fixtures.py: it holds the to-do page and window fixtures to
+#                              their READMEs' rules, the view schema, the todo-view line keys, the agent names and the
+#                              fields the hub writes on a listed to-do (and imports the wire and extension schema tests)
 #   scripts/**                 privacy/PR/extension/refs/bundle/i18n checks picked by path; PR+extension when
 #                              ambiguous (a case "*" matches slashes, so scripts/* covers nested paths too); plus
 #                              each changed scripts/<dir>/test_*.py and the test_<name>.py of each changed script
@@ -815,6 +821,13 @@ else
     case "$f" in
       schema/wire/*|spec/fixtures/*|scripts/gen/extension_schema.py|scripts/test/test_extension_schema.py)
         script_test_add scripts/test/test_wire_schema.py ;;
+    esac
+    # test_todo_fixtures.py holds the to-do page and window fixtures to their READMEs' rules; it also reads the view
+    # schema, the todo-view line keys, the agent names and the row fields of the hub's Todo and listedTodo, and imports
+    # the wire and extension schema tests.
+    case "$f" in
+      spec/fixtures/todo-detail/*|spec/fixtures/todo-layout/*|spec/fixtures/todo-view/README.md|spec/fixtures/agent-names/*|schema/wire/todo-view.schema.json|server/internal/assistant/todos.go|server/internal/assistant/todo_ask.go|scripts/test/test_wire_schema.py|scripts/test/test_extension_schema.py)
+        script_test_add scripts/test/test_todo_fixtures.py ;;
     esac
   done <<< "$CHANGED"
 fi

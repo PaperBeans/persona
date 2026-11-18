@@ -605,7 +605,7 @@ type BriefTask struct {
 type BriefCriterion struct{ Criterion, State, Change string }
 
 // BriefLeader is one direction in the briefing's facts: its name, its open tasks, those waiting for the owner, those
-// stuck over a day, and its leader's latest summary of the day (empty parts: none).
+// past their inactivity thresholds, and its leader's latest summary of the day (empty parts: none).
 type BriefLeader struct {
 	Name                     string
 	Open, Waiting, Stuck     int
@@ -798,7 +798,7 @@ type Supervise struct {
 	BackgroundEscalated bool
 	// Side: it goes to an ordinary side conversation, for the tasks that conversation handed out itself.
 	Side bool
-	// LeaderStuck: an entry is a leader's task stuck over a day (sigLeaderStuck), told the main conversation (#3609).
+	// LeaderStuck: an entry is a leader's task past its inactivity threshold (sigLeaderStuck), told the main conversation (#3609).
 	LeaderStuck bool
 	// Overdue: an entry is a task past its brief's clock (#3822).
 	Overdue bool
@@ -992,8 +992,8 @@ func RenderTaskDoneWhen(criteria []string) string {
 	return render("assistant/task_done_when", struct{ Criteria []string }{criteria})
 }
 
-// RenderTaskGoal is a task's done_when as one checkable condition, for a Claude Code /goal typed before the task's
-// first message (docs/integrations/agent-goal.md "A goal set at the start"): one line, trimmed.
+// RenderTaskGoal is a task's done_when as one checkable condition, for the Claude Code or Codex /goal typed after the
+// task's first message (docs/integrations/agent-goal.md "A goal set at the start"): one line, trimmed.
 func RenderTaskGoal(criteria []string) string {
 	return strings.TrimSpace(render("assistant/task_goal", struct{ Criteria []string }{criteria}))
 }
@@ -1127,13 +1127,9 @@ func RenderTaskAttachments(a TaskAttachments) string {
 	return strings.TrimRight(render("assistant/task_attachments", a), "\n")
 }
 
-// SideConversation preserves the provenance of a non-owner's message to a tasked Agent.
-type SideConversation struct {
-	From, Text string
-}
-
-func RenderSideConversation(in SideConversation) string {
-	return render("assistant/side_conversation", in)
+// RenderSideConversation marks a separate request for an Agent assigned to a task.
+func RenderSideConversation(text string) string {
+	return render("assistant/side_conversation", text)
 }
 
 // TaskDoneInput is the task as it was handed out and what its agents said when they stopped (assistant/task_done_input).

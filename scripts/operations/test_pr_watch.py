@@ -92,31 +92,35 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(after["findings"], [finding])
         self.assertEqual(after["repair_rounds"], 2)
 
-    def test_snapshot_retries_supported_fields_when_gh_rejects_base_oid(self):
-        fields = pr()
-        fields.pop("baseRefOid")
-        with patch.object(pr_watch_common, "run", return_value=subprocess.CompletedProcess([], 1, "", 'Unknown JSON field: "baseRefOid"')) as execute, \
-                patch.object(pr_watch_common, "gh_json", return_value=fields) as fallback, \
-                patch.object(pr_watch_common, "checked", return_value=SHA_BASE + "\n"):
+    def test_snapshot_resolves_live_base_instead_of_recorded_base_oid(self):
+        # GitHub's baseRefOid is the base recorded at the PR's last sync, not
+        # the branch tip that the watcher fetches (#10568).
+        fields = dict(pr(), baseRefOid=SHA_A)
+        with patch.object(pr_watch_common, "run", side_effect=[
+                subprocess.CompletedProcess([], 0, json.dumps(fields), ""),
+                subprocess.CompletedProcess([], 0, SHA_BASE + "\n", "")]) as execute:
             result = pr_watch_common.pr_snapshot("example/one", 7)
         self.assertEqual(result["baseRefOid"], SHA_BASE)
-        self.assertNotIn("baseRefOid", fallback.call_args.args[0][-1])
-        self.assertEqual(execute.call_count, 1)
+        view, base = (call.args[0] for call in execute.call_args_list)
+        self.assertEqual(view[:3], ["gh", "pr", "view"])
+        self.assertNotIn("baseRefOid", view[-1])
+        self.assertEqual(base[:3], ["gh", "api", "repos/example/one/commits/main"])
 
-    def test_snapshot_rejects_other_gh_errors(self):
+    def test_snapshot_rejects_gh_errors(self):
         with patch.object(pr_watch_common, "run", return_value=subprocess.CompletedProcess([], 1, "", "network unavailable")):
             with self.assertRaises(pr_watch_common.WatchError):
                 pr_watch_common.pr_snapshot("example/one", 7)
 
-    def test_snapshot_falls_back_to_current_base_when_gh_omits_base_oid(self):
+    def test_snapshot_rejects_invalid_live_base(self):
         fields = pr()
         fields.pop("baseRefOid")
-        with patch.object(pr_watch_common, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(fields), "")) as snapshot, \
-                patch.object(pr_watch_common, "checked", return_value=SHA_BASE + "\n") as base:
-            result = pr_watch_common.pr_snapshot("example/one", 7)
-        self.assertEqual(result["baseRefOid"], SHA_BASE)
-        self.assertIn("baseRefOid", snapshot.call_args.args[0][-1])
-        self.assertIn("commits/main", base.call_args.args[0][2])
+        for base in ("", "0" * 40, "not-a-sha"):
+            with self.subTest(base=base), \
+                    patch.object(pr_watch_common, "run", side_effect=[
+                        subprocess.CompletedProcess([], 0, json.dumps(fields), ""),
+                        subprocess.CompletedProcess([], 0, base + "\n", "")]):
+                with self.assertRaises(pr_watch_common.WatchError):
+                    pr_watch_common.pr_snapshot("example/one", 7)
 
     def test_stale_failure_does_not_overwrite_terminal_outcome(self):
         self.watcher.state.put("example/one", 7, SHA_A,
@@ -2329,6 +2333,29 @@ class WatcherTests(unittest.TestCase):
             with patch.object(pr_watch_verify, "checked", return_value=names[0] + "\n"):
                 commands = pr_watch_verify.persona_checks(str(root), pr(title="test: refine relevant tests"), 1, {})
         self.assertIn(("Changed Go packages vet", ["go", "-C", "server", "vet", "-ldflags=", "./internal/agents"]), commands)
+
+    def test_semantic_only_skips_full_ci_and_discloses_it(self):
+        with patch.object(pr_watch_verify, "persona_checks") as full, \
+                patch.object(pr_watch_verify, "run_check", return_value={"name": "Exact-head privacy scan", "ok": True, "command": []}) as check:
+            results = pr_watch_verify.verify("nwverse/persona", pr(), ".", {"profile": "semantic_only"})
+        full.assert_not_called()
+        self.assertEqual([result["name"] for result in results], ["Exact-head privacy scan"])
+        self.assertIn("--range", check.call_args.args[1])
+        watcher = pr_watch.Watcher(self.config, verbose=False)
+        watcher.repositories["example/one"]["verify"]["profile"] = "semantic_only"
+        with patch.object(pr_watch, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+            watcher.success_review("example/one", 7, pr(), results)
+        self.assertIn("no full build/vet", run.call_args.args[0][-1])
+        self.assertNotIn("all tests passed", run.call_args.args[0][-1])
+
+    def test_semantic_only_extensions_keep_repository_guards(self):
+        with patch.object(pr_watch_verify, "run_check", return_value={"name": "Privacy and documentation guards", "ok": True}) as check:
+            results = pr_watch_verify.verify("nwverse/persona-extensions", pr(), ".", {"profile": "semantic_only"})
+        self.assertEqual(len(results), 1)
+        self.assertIn("--repository-guards", check.call_args.args[1])
+
+    def test_verification_policy_version_covers_semantic_only(self):
+        self.assertGreaterEqual(pr_watch.VERIFICATION_POLICY_VERSION, 3)
 
     def test_persona_wrapper_owns_lock_and_expects_reviewed_head(self):
         repo = "nwverse/persona"

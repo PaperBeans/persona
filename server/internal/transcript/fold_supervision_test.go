@@ -11,7 +11,7 @@ import (
 )
 
 func TestSideConversationMarkerSurvivesTranscriptParsing(t *testing.T) {
-	text := prompts.RenderSideConversation(prompts.SideConversation{From: "another-conversation", Text: "Can you explain the unrelated change?"})
+	text := prompts.RenderSideConversation("Can you explain the unrelated change?")
 	for _, peer := range []bool{false, true} {
 		line := map[string]any{"type": "user", "uuid": "synthetic-user", "timestamp": "2026-11-01T12:00:00Z", "message": map[string]any{"role": "user", "content": text}}
 		if peer {

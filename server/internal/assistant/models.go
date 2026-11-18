@@ -10,6 +10,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/secretkey"
@@ -85,6 +86,8 @@ type ModelPurpose struct {
 	// Candidates (an extension's purpose only, #10398): its candidate models as the extension sends them, and as the
 	// user keeps, switches off or replaces them (model_candidates.go).
 	Candidates *ModelCandidates `json:"candidates,omitempty"`
+	// Usage is what the purpose's calls of the last 7 days added up to (model_usage.go); the list only, none without calls.
+	Usage *db.ModelUsage `json:"usage,omitempty"`
 }
 
 // launch is the purpose's execution form, independent of its provider.

@@ -37,6 +37,8 @@
   "machine_offline": "「{name}」现在离线，等它连上再重试",
   "silent_turn": "这一轮没有任何输出：Agent 没有回复，也没有调用工具（模型服务可能返回了空内容）",
   "interrupted": "模型服务出错，中断了",
+  "stopped": "随对话一起停下了",
+  "stopped_turn": "随对话一起停下了，这一轮还没有任何输出",
   "check_no_reply": "没读到 Agent 的回复",
   "check_side_turn": "最后的回复没交代这个任务",
   "done": "完成了",
@@ -73,5 +75,5 @@
   "start_link_lost": "和「{machine}」的连接断了，重连后也没看到任务起来：{reason}",
   "start_machine_busy": "「{machine}」一直连着，但在等待时间内没回应（电脑可能太忙）：{reason}",
   "start_link_down": "和「{machine}」的连接断了，等了一阵也没重连上：{reason}",
-  "start_goal_skipped": "没在第一条消息前设目标就启动了：{reason}"
+  "start_goal_skipped": "启动时没能设开始目标：{reason}"
 }

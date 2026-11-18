@@ -200,6 +200,9 @@ func snapshotTask(t Todo, st string, agents []proto.Session, now time.Time) prom
 	if last.SessionID == "" {
 		return task
 	}
+	if st == "interrupted" && last.TurnErrorKind == proto.TurnErrorStopped {
+		task.State = taskStateLabel("stopped") // Persona's Stop, not the model service (silent_turns.go, #10187)
+	}
 	task.Machine, task.Session = last.MachineID, short(last.SessionID)
 	task.Last = clip(oneLine(last.LastText), 80)
 	working := last.State == proto.StateWorking
@@ -344,5 +347,7 @@ func taskStateLabel(st string) string {
 		"followup": "停着", "not_started": "还没开始",
 		// "cancelled" shares the ignored final line: every label here is model-read prompt text, and this keeps the
 		// hardcoded-Chinese baseline count unchanged instead of raising it.
+		// i18n-ignore: the model reads it; "stopped" is "interrupted" when Persona's Stop did it (snapshotTask)
+		"stopped":   "随对话一起被停下了（没做完：用户停了交出它的对话，它还没有任何输出；等用户让它继续）",
 		"cancelled": "已取消", "waiting": "在等（后台命令、子 Agent 或外部条件，hub 会叫醒它，不用管）", "usage_limit": "订阅的用量额度用完了，等额度重置（没做完；重置前发「继续」也会被拒）"}[st] // i18n-ignore: the model reads it
 }

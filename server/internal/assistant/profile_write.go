@@ -96,6 +96,14 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, http.StatusBadRequest, errors.New("recording_days must be 1–365"))
 		return
 	}
+	if m := in.IdleAutoCompactMinutes; m != nil && (*m < minIdleAutoCompactMinutes || *m > maxIdleAutoCompactMinutes) {
+		apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-profile.bad_idle_auto_compact_minutes"))
+		return
+	}
+	if n := in.IdleAutoCompactTokens; n != nil && (*n < minIdleAutoCompactTokens || *n > maxIdleAutoCompactTokens) {
+		apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-profile.bad_idle_auto_compact_tokens"))
+		return
+	}
 	if in.MinutesRetention != nil {
 		if err := json.Unmarshal(in.MinutesRetention, &in.MinutesDays); err != nil || in.MinutesDays == nil ||
 			*in.MinutesDays < minMinutesDays || *in.MinutesDays > maxMinutesDays {
@@ -195,6 +203,15 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.MainTasksQuiet != nil {
 			v.MainTasksQuiet = in.MainTasksQuiet
+		}
+		if in.IdleAutoCompact != nil {
+			v.IdleAutoCompact = in.IdleAutoCompact
+		}
+		if in.IdleAutoCompactMinutes != nil {
+			v.IdleAutoCompactMinutes = in.IdleAutoCompactMinutes
+		}
+		if in.IdleAutoCompactTokens != nil {
+			v.IdleAutoCompactTokens = in.IdleAutoCompactTokens
 		}
 		if in.StartRequestedTasks != nil {
 			v.StartRequestedTasks = in.StartRequestedTasks

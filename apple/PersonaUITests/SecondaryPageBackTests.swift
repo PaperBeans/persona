@@ -209,7 +209,7 @@ final class SecondaryPageBackTests: XCTestCase {
     }
 
     /// The task's page while its Agent starts: its message, which the conversation's card does not have (the card says
-    /// 正在开 Agent too).
+    /// its Agent is starting too).
     @MainActor private var startingPage: XCUIElement { app.staticTexts["开好以后这里就是它的对话。"].firstMatch }
 
     @MainActor private var wide: Bool { app.windows.firstMatch.frame.width >= 600 }

@@ -225,6 +225,10 @@ The script frames what it prints with begin/end markers, and node reads only bet
   and neither is `claude` / `codex` / `omp` itself. The scan stats only regular files and links, reads two bytes before the rest, and gets 3 seconds (a hung
   network mount): past them the last scan's scripts stand.
 - **Codex** (since 2026-11-02): If `codex` is on PATH, add `codex`, plus aliases running only one `codex` command, after the Claude entries, with `agent: "codex"`.
+  On a Mac where the login shell finds no `codex` (and has no alias or function of that name), the ChatGPT app's bundled CLI
+  (`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`) is plain `codex` instead, run by that path (#10437).
+  `codex-app` (the Codex App, `docs/integrations/codex.md`, "New chats in the Codex App") is only ever an explicit pick: a default that
+  gives way to a launcher the computer has never picks it (`launcherInstead`).
   See `docs/integrations/codex.md`, “Starting from the phone” for creating Codex sessions from the phone.
 - Not launchers: an alias named exactly `claude`, aliases running an internal Codex-fork CLI, Codex aliases doing other work (`cd x && codex`),
   or unrelated aliases (`ll`, `gst`…). If none exist, only default `claude` appears.

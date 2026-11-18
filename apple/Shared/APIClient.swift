@@ -317,9 +317,20 @@ nonisolated struct APIClient: Sendable {
     /// it arrives. A repeat it cannot answer yet comes back `202 {"state":"pending" | "unknown"}`: thrown as an
     /// APIError with `OpReceipt.pendingCode` / `unknownCode`, so no caller takes it for done.
     /// `extraHeaders`: what this one request says besides (a hand-off card's approval declares its feature).
+    /// A request about the replayed meeting (`ReplayedMeeting`, #10589) never leaves the phone: it ends here, as an error
+    /// with the code `replayed_meeting`, whatever route it was for.
+    static func refuseReplayed(_ path: String, _ query: [String: String]) throws {
+        guard ReplayedMeeting.refuses(path, query: query) else { return }
+        var error = APIError(status: 409, message: String(localized: "A replayed meeting stays on this iPhone."),
+                             fields: ["code": ReplayedMeeting.refusal])
+        error.requestPath = path
+        throw error
+    }
+
     func request(_ method: String, _ path: String, query: [String: String] = [:], repeated: [URLQueryItem] = [], body: (any Encodable)? = nil,
                  timeout: TimeInterval = 30, opID: UUID? = nil, extraHeaders: [String: String] = [:]) async throws -> Data {
         let query = larkScoped(path, query)
+        try Self.refuseReplayed(path, query)
         let headers = clientMetadata.headers.merging(opID.map(HubNaming.operationHeaders) ?? [:]) { _, operation in operation }
             .merging(routing(path, query)) { _, manager in manager }
             .merging(extraHeaders) { _, extra in extra }
@@ -385,6 +396,7 @@ nonisolated struct APIClient: Sendable {
     /// (`If-None-Match`), else the new bytes and their tag. The fake transport has no headers: the tag rides in the query
     /// as `If-None-Match` and a 304 is an APIError with that status.
     func conditionalGet(_ path: String, query: [String: String], etag: String?) async throws -> (data: Data?, etag: String?) {
+        try Self.refuseReplayed(path, query)
         if transport != nil || config.isDemo {
             var q = query
             if let etag { q["If-None-Match"] = etag }
@@ -409,6 +421,7 @@ nonisolated struct APIClient: Sendable {
     /// Neither the fake transport nor Demo Mode streams: it throws there, and callers do what they do without it.
     func streamed(_ method: String, _ path: String, body: (any Encodable)? = nil,
                   timeout: TimeInterval = 30) async throws -> (HTTPURLResponse, URLSession.AsyncBytes) {
+        try Self.refuseReplayed(path, [:])
         if transport != nil || config.isDemo { throw APIError(status: 501, message: "Streaming isn't available here") }
         var req = URLRequest(url: url(path, query: [:]), timeoutInterval: timeout)
         req.httpMethod = method
@@ -441,6 +454,7 @@ nonisolated struct APIClient: Sendable {
     func putBytes(_ path: String, query: [String: String] = [:], data: Data, timeout: TimeInterval = 120,
                   wifiOnly: Bool = false) async throws -> Data {
         let query = larkScoped(path, query)
+        try Self.refuseReplayed(path, query)
         if config.isDemo { throw APIError(status: 403, message: DemoText.notSent) }
         let headers = clientMetadata.headers.merging(routing(path, query)) { _, manager in manager }
         if let transport {
@@ -469,6 +483,7 @@ nonisolated struct APIClient: Sendable {
     /// A bounded, staged attachment sent from disk. The fake transport reads it only in tests.
     func uploadBytes(file: URL, path: String, query: [String: String], timeout: TimeInterval = 180) async throws -> Data {
         let query = larkScoped(path, query)
+        try Self.refuseReplayed(path, query)
         if config.isDemo { throw APIError(status: 403, message: DemoText.notSent) }
         if let transport {
             return try await transport(LocalRequest(method: "POST", path: path, query: query, body: Data(contentsOf: file),
@@ -523,6 +538,7 @@ nonisolated struct APIClient: Sendable {
     func download(_ path: String, query: [String: String], to destination: URL,
                   progress: @escaping @Sendable (Int64, Int64) -> Void) async throws {
         let query = larkScoped(path, query)
+        try Self.refuseReplayed(path, query)
         if transport != nil || config.isDemo {
             let data = try await request("GET", path, query: query)
             try Task.checkCancellation()

@@ -193,6 +193,14 @@ func (n *Node) launcherCommandQ(name string, q func(string) string) string {
 			return "CLAUDE_CONFIG_DIR=" + shellDirQ(*d, q) + " " + name
 		}
 	}
+	if name == "codex" {
+		launcherCache.Lock()
+		words := launcherCache.codex[name]
+		launcherCache.Unlock()
+		if len(words) == 1 && filepath.IsAbs(words[0]) { // the ChatGPT app's codex, which the shell does not find
+			return q(words[0])
+		}
+	}
 	return name
 }
 
@@ -345,6 +353,12 @@ func agentExecutable(bin string) (string, error) {
 					return line, nil
 				}
 			}
+		}
+	}
+
+	if bin == "codex" {
+		if p := bundledCodexCLI(); p != "" {
+			return p, nil
 		}
 	}
 

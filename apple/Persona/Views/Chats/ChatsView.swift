@@ -1009,7 +1009,7 @@ private struct AgentsList: View {
     /// The agents, the questions and the machines the list shows (`AgentsFeed`): held still while it is scrolled or
     /// out of sight.
     @State private var feed = AgentsFeed()
-    #if DEBUG
+    #if DEBUG && os(iOS)
     @State private var sortShadow = AgentSortShadowObserver()
     #endif
 
@@ -1116,7 +1116,7 @@ private struct AgentsList: View {
 
     @discardableResult
     private func shadowSubmit(active: [SpaceGroup], quiet: [SpaceGroup]) -> Int {
-        #if DEBUG
+        #if DEBUG && os(iOS)
         guard sortShadow.enabled else { return 0 }
         let snapshot = shadowPresentation(active + quiet)
         sortShadow.submit(feed: feed, settings: projectionSettings(), presentation: snapshot)
@@ -1126,7 +1126,7 @@ private struct AgentsList: View {
         #endif
     }
 
-    #if DEBUG
+    #if DEBUG && os(iOS)
     private func shadowPresentation(_ groups: [SpaceGroup]) -> AgentSortPresentation {
         guard sortShadow.enabled else { return .init() }
         var result = AgentSortPresentation(folded: folded, expandedIdle: expandedIdle,
@@ -1629,7 +1629,7 @@ private struct AgentsList: View {
         #endif
         .onChange(of: machineFilter) { _, _ in kept = [] }
         .onAppear {
-            #if DEBUG
+            #if DEBUG && os(iOS)
             sortShadow.enable()
             #endif
             feed.follow(model)

@@ -37,6 +37,8 @@
   "machine_offline": "“{name}” is offline. Try again once it’s connected.",
   "silent_turn": "This turn had no output: the agent didn’t reply or call any tools (the model service may have returned nothing)",
   "interrupted": "Interrupted by a model service error",
+  "stopped": "Stopped along with its conversation",
+  "stopped_turn": "Stopped with its conversation before it had any output",
   "check_no_reply": "Couldn’t read the agent’s reply",
   "check_side_turn": "The last reply didn’t report on this task",
   "done": "Done",

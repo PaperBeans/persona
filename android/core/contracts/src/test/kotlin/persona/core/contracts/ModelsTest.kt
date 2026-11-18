@@ -163,6 +163,15 @@ class ModelsTest {
         assertEquals(false, own.alwaysHonored)
     }
 
+    @Test fun interactionDecodesOptionalPlanThen() {
+        val plan = JsonCodec.decodeFromString<Interaction>(
+            """{"id":"ix_plan_then","kind":"plan","plan":"1. Ship it","plan_then":"default"}""",
+        )
+        val encoded = JsonCodec.encodeToString(plan)
+        assertTrue(encoded, encoded.contains(""""plan_then":"default""""))
+        assertEquals(plan, JsonCodec.decodeFromString<Interaction>(encoded))
+    }
+
     @Test fun interactionDecodesOptionalToolTitles() {
         val titled = JsonCodec.decodeFromString<Interaction>(
             """{"id":"ix_titles","kind":"permission","tool_name":"mcp__persona__report_to_supervisor",""" +

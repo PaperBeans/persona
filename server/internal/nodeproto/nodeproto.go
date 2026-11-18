@@ -80,7 +80,7 @@ const (
 	// Ultracode: session.start takes ultracode and session.ultracode switches it (docs/protocol/protocol.md "Claude Code
 	// ultracode"). A node without it would start a session and drop the field without a word.
 	Ultracode = "ultracode"
-	// StartGoal: session.start takes goal, a Claude Code /goal condition typed after the first message is in
+	// StartGoal: session.start takes goal, a Claude Code or Codex /goal typed after the first message is in
 	// (docs/integrations/agent-goal.md "A goal set at the start"). A node without it would start the session and drop
 	// the goal without a word.
 	StartGoal = "start_goal"

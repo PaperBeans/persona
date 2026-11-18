@@ -570,8 +570,14 @@ struct ChatLinesTests {
                                                           sent(3, at: t0.addingTimeInterval(600)), sent(4, at: t0.addingTimeInterval(660), role: "assistant")]), live: nil)
         let merged = ChatLines.mergeModeChanges(lines, [modeChange(t0.addingTimeInterval(120)), modeChange(t0.addingTimeInterval(900), to: "plan"),
                                                         modeChange(t0.addingTimeInterval(-60), to: "auto")])
-        // before the first message, after the first exchange (never between its message and answer), after the last
-        #expect(modeIDs(merged) == ["mode"] + modeIDs(Array(lines.prefix(2))) + ["mode"] + modeIDs(Array(lines.dropFirst(2))) + ["mode"])
+        // before the first message, after the first exchange (never between its message and answer), after the last.
+        // Built a part at a time: one chained sum of five arrays is more than Xcode 26.3's type checker takes (#10519).
+        var expected: [String] = ["mode"]
+        expected += modeIDs(Array(lines.prefix(2)))
+        expected.append("mode")
+        expected += modeIDs(Array(lines.dropFirst(2)))
+        expected.append("mode")
+        #expect(modeIDs(merged) == expected)
         #expect(Set(merged.map(\.id)).count == merged.count)
         // the last line Retry and the error cards ask about is not a mode change
         #expect(ChatLines.lastOfChat(merged)?.id == lines.last?.id)

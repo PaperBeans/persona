@@ -159,6 +159,7 @@ func (s *Service) modelConfigRoutes() {
 			}
 			purposes = append(purposes, p)
 		}
+		s.addModelUsage(ctx, purposes)
 		apierr.WriteJSON(w, map[string]any{"purposes": purposes, "providers": providers})
 	})
 	detail := func(w http.ResponseWriter, r *http.Request) {

@@ -298,14 +298,19 @@ func (s *Service) endSessionCards(machine, session string) {
 	s.fleet.mu.Lock()
 	var ids []string
 	for id, p := range s.fleet.interactions {
-		if p.ix.SessionID == session && s.sameMachine(p.ix.MachineID, machine) && !p.claimed {
-			p.claimed = true
+		if p.ix.SessionID == session && s.sameMachine(p.ix.MachineID, machine) && (p.prepared != nil || !p.claimed) {
+			if p.prepared == nil {
+				p.claimed = true
+			}
 			ids = append(ids, id)
 		}
 	}
 	s.fleet.mu.Unlock()
 	s.feishuDetach(ids)
 	for _, id := range ids {
+		if s.endPreparedByID(id, "cancelled", "The conversation that owned this approval ended; nothing changed.") {
+			continue
+		}
 		s.recordEnd(id, "cancelled", nil)
 		s.finishInteraction(id)
 	}

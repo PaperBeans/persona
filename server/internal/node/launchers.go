@@ -118,7 +118,7 @@ func (n *Node) launchers(ctx context.Context) ([]proto.Launcher, error) {
 
 // mergeLaunchers is launcherScript's output as the launcher list: the helper's, then the aliases it does not name,
 // then the wrapper scripts on PATH no function or alias shadows (nothing at all: plain claude), then Codex's — plain
-// codex when it is on the PATH, and the aliases that run it (how each runs: codex) — then plain traex and plain omp when
+// codex when it is on the PATH (else the ChatGPT app's bundled one, bundledCodexCLI), and the aliases that run it (how each runs: codex) — then plain traex and plain omp when
 // they are on the PATH, then pi, the Cursor CLI and the Antigravity CLI when their programs are (workagent.go: started in
 // a herdr pane with the model the start names). settings: the claude aliases' and scripts' own --settings, by
 // name (launcher_settings.go); an alias is what the shell runs for its name even when the helper lists the name too.
@@ -164,9 +164,15 @@ func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]strin
 	}
 	codex = map[string][]string{}
 	ls, words := parseCodexAliases(aliases)
-	if strings.TrimSpace(codexPath) != "" && words["codex"] == nil {
+	codexWord := ""
+	if strings.TrimSpace(codexPath) != "" {
+		codexWord = "codex"
+	} else if !taken["codex"] {
+		codexWord = bundledCodexCLI() // the ChatGPT app's own, by its path: the shell would not find it
+	}
+	if codexWord != "" && words["codex"] == nil {
 		list = append(list, proto.Launcher{Name: "codex", Model: "默认", Agent: "codex", Source: "zshrc", PromptOptional: true, RunHere: true})
-		codex["codex"] = []string{"codex"}
+		codex["codex"] = []string{codexWord}
 	}
 	for _, l := range ls {
 		if !seen[l.Name] {

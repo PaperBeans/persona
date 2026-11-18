@@ -125,7 +125,7 @@ import { ViewLayer } from "../session/ViewLayer";
 import { conversationTitle } from "../assistant/conversations";
 import { useDirectionName } from "../../lib/direction-names";
 import { chatPlaceIn, dropChatPlace, firstLineInView, handoffFrom, type ChatPlace, type HandoffFrom } from "../../lib/handoff";
-import { externalOpening } from "../../lib/conversation-origins";
+import { externalOpening, openerOf } from "../../lib/conversation-origins";
 import { usePersona } from "../assistant/Persona";
 import { voiceCalls, useVoiceCall, useVoiceState } from "../../lib/voice/calls";
 import { agentLabel } from "../../lib/mentions";
@@ -1488,6 +1488,9 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
   const openedWith = useMemo(() => (assistant ? externalOpening(session, tr.items, tr.hasMore) : undefined), [assistant, session, tr.items, tr.hasMore]);
   const openingId = openedWith?.id;
   const openingOrigin = openedWith?.origin;
+  // and the extension that opened it, whose own icon its mark is once known (#10358)
+  const openingBy = openerOf(openingOrigin, session);
+  const openingManager = session?.manager;
   // A stopped agent's closeout is a card above the transcript (#3612, CloseoutCard): while it is there, the reply that
   // carried the raw block, the last exchange's, shows without it.
   const closeoutShown = !assistant && Boolean(shownCloseout(session));
@@ -1551,8 +1554,8 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
   // what runs its subagents: its own agent (a Paseo provider's subagent cards say "Grok", #8142)
   const harness = session && !assistant ? sessionAgentName(session) : undefined;
   const ctx = useMemo<ChatContextValue>(
-    () => ({ tasks, subagents: assistant ? NO_SUBAGENTS : (subagents ?? NO_SUBAGENTS), scope: `${mid}/${sid}:`, jumpToCall: jump, workflowCalls: wfCalls, lineStyle, harness, opening: openingId && openingOrigin ? { id: openingId, origin: openingOrigin } : undefined, closeoutSegment: closeoutSegment?.id, children: places, embedded }),
-    [tasks, subagents, assistant, mid, sid, jump, wfCalls, lineStyle, harness, openingId, openingOrigin, closeoutSegment, places, embedded],
+    () => ({ tasks, subagents: assistant ? NO_SUBAGENTS : (subagents ?? NO_SUBAGENTS), scope: `${mid}/${sid}:`, jumpToCall: jump, workflowCalls: wfCalls, lineStyle, harness, opening: openingId && openingOrigin ? { id: openingId, origin: openingOrigin, opened_by: openingBy, manager: openingManager } : undefined, closeoutSegment: closeoutSegment?.id, children: places, embedded }),
+    [tasks, subagents, assistant, mid, sid, jump, wfCalls, lineStyle, harness, openingId, openingOrigin, openingBy, openingManager, closeoutSegment, places, embedded],
   );
   // ── "Search in chat" (ChatSearch.tsx, Android ChatSearchState): where the reader was when it opened, going to a hit (the
   // rows that hold it open, search-reveal.ts), lit for HIT_MS, and "Back to where you were" ──

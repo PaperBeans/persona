@@ -5376,6 +5376,33 @@ struct ChatSkeleton: View {
     }
 }
 
+/// The model request Claude is retrying now, above the composer. Its plain reason leads; the observed error stays as
+/// secondary detail. Ordinary work, a null live event, turn end and subscription cleanup leave no note behind.
+struct SessionLiveRetryNote: View {
+    let key: SessionKey
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let retry = model.liveRetry(key) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                ThemedIcon(Theme.Icon.retry).font(Theme.Font.labelStrong).foregroundStyle(Theme.cautionText)
+                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                    Text(retry.attemptText).font(Theme.Font.secondaryStrong).foregroundStyle(Theme.cautionText)
+                    Text(retry.error.reason).font(Theme.Font.secondary)
+                    Text(retry.error.raw).font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(2)
+                        .textSelection(.enabled)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, Theme.Space.s)
+            .surface(in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("chat.model-retry")
+        }
+    }
+}
+
 /// Claude's suggested next message over the composer: a tap puts it in the box to edit, Send Now (long press) sends it.
 /// A session Persona is still starting (node/starting.go): what is sent now waits and goes in once it is ready. Or why
 /// it did not start.
@@ -6016,6 +6043,7 @@ struct Composer: View, Equatable {
         let call = voiceCall
         let inCall = call.map { !$0.isOver } ?? false
         return VStack(spacing: Theme.Space.s) {
+            SessionLiveRetryNote(key: key)
             if let m = offlineManager {
                 ManagerOfflineNote(manager: m)
                     .transition(.move(edge: .bottom).combined(with: .opacity))

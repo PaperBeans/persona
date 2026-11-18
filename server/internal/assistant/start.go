@@ -1196,6 +1196,12 @@ func (s *Service) sendModel(ctx context.Context, machine, sid string, p map[stri
 	delete(p, "external")
 	cfg := s.settings(ctx)
 	p["is_main"] = cfg.Main != "" && cfg.Main == sid && cfg.mainRouteMachine() == machine
+	delete(p, "idle_compaction")
+	if p["is_main"] == true {
+		p["idle_compaction"] = assistantwire.IdleCompaction{
+			Enabled: s.idleAutoCompact(ctx), IdleMinutes: s.idleAutoCompactMinutes(ctx), ContextTokens: s.idleAutoCompactTokens(ctx),
+		}
+	}
 	putMainCompactWindow(cfg, p)
 	if cfg.InterjectBackground != nil && *cfg.InterjectBackground {
 		p["interject_background"] = true

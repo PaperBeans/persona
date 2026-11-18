@@ -2655,6 +2655,8 @@ nonisolated struct Interaction: Codable, Identifiable, Hashable, Sendable {
     /// Whether this question's runtime can release its waiter without an answer (`cancel` on Resolution).
     var canCancel: Bool?
     var plan: String?
+    /// The permission mode a plan-mode start goes on in after approval (#3784). Older hubs and sessions omit it.
+    var planThen: String?
     var toolInput: JSONValue?
     var summary: String?
     var screen: String?
@@ -2760,6 +2762,7 @@ nonisolated struct Interaction: Codable, Identifiable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, kind, questions, plan, summary, screen, cwd, dialog, secret, fields, agent, reason, delegating, delegate, manager
         case suggestion, canCancel = "can_cancel"
+        case planThen = "plan_then"
         case machineID = "machine_id", sessionID = "session_id", sessionTitle = "session_title", taskTitle = "task_title",
              createdAt = "created_at", expiresAt = "expires_at", toolName = "tool_name", toolUseID = "tool_use_id",
              toolInput = "tool_input", alwaysLabel = "always_label", alwaysKeys = "always_keys", alwaysHonored = "always_honored",

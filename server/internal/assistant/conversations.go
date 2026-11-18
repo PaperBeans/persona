@@ -254,6 +254,9 @@ type relayMsg struct {
 	// (ask_later.go). It is not held for their presence (holdLocked): it is what they are waiting to see taken up. A
 	// version that does not know it drops it on its next save: the answer is then held as any late answer is.
 	Owner bool `json:"owner,omitempty"`
+	// Private renews Just me when the message is actually dispatched, including
+	// a result that waited in the durable queue or across a manager restart.
+	Private bool `json:"private,omitempty"`
 	// Answer: it answers a request the receiver sent (hopLocked, #7391), so it starts no exchange of its own: what
 	// the receiver sends next costs a hop.
 	Answer bool `json:"answer,omitempty"`
@@ -754,6 +757,12 @@ func (s *Service) deliverRelay(ctx context.Context, machine, to string, msg rela
 	round := s.isBackground(ctx, to) && msg.Tool == superviseTool && !backgroundKeepsContext(s.settings(ctx)) && prompts.IsSuperviseRound(msg.Text)
 	if round {
 		params[superviseRoundParam] = true
+	}
+	if msg.Private {
+		// Just me covers the original turn, not a later terminal-result turn.
+		// Renew it at this actual-dispatch boundary so queued and restarted
+		// deliveries retain the same protection as immediate ones.
+		s.justMeSent(machine, to)
 	}
 	var res superviseRoundReply
 	if err := s.call(ctx, machine, DeviceAssistantSend, params, &res); err != nil {
