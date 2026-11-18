@@ -319,6 +319,7 @@ type Snapshot struct {
 	Working         []SnapshotAgent
 	Workflows       []SnapshotWorkflow // background workflow runs still running, newest first
 	PhoneOnline     bool
+	NoPhone         bool               // leaves the iPhone line out: the background supervisor's (assistant/context.go backgroundSnapshot)
 	Apps            []SnapshotApp      // one per kind of device, the user's own before a simulator
 	KB              string             // RenderKBDigest, "" leaves it out
 	Chats           *SnapshotChats     // nil: Feishu did not answer in time
@@ -774,6 +775,11 @@ type Supervise struct {
 	Decisions bool
 	// Inbox: an entry is new Inbox messages from other people about the task (#4293).
 	Inbox bool
+	// Fresh: it goes to the background supervisor as a round that starts from a clean context (#7315): a line on where
+	// what earlier rounds settled is kept, the round marker (SuperviseRoundMarker) and each entry's last review. The
+	// handling rules are in no supervision message (they are the static supervision instructions), so a round carries
+	// only its entries' facts. Not Fresh renders as before, byte for byte.
+	Fresh bool
 }
 
 // SuperviseEntry is one task in it, with what happened (Kind: review, idle, needs_you, stalled, interrupted, failed,
@@ -824,6 +830,15 @@ type SuperviseEntry struct {
 	Dropped                             []string
 	// inbox: the Inbox item the new messages came in, the newest when several did.
 	Inbox *SuperviseInbox
+	// LastReview: the task's last review, shown only in a Fresh message (#7315): a round that does not see the earlier
+	// ones does not ask or send back the same thing again. nil when it was never reviewed.
+	LastReview *SuperviseLastReview
+}
+
+// SuperviseLastReview is a task's last task_review as a Fresh supervision message repeats it: the verdict, when (local
+// "01-02 15:04") and its reason or note, clipped.
+type SuperviseLastReview struct {
+	Verdict, At, Note string
 }
 
 // DecisionAgentReply asks a supervisor to confirm a pending decision after its owner writes in the task's Agent chat.
@@ -943,6 +958,16 @@ type Relay struct {
 	Tool              string // conversation_send | conversation_new
 	Hop, MaxHops      int
 	Text              string
+	// Quote: the owner's own message the sender carried, as the hub verified it (#3822); nil sends none.
+	Quote *RelayQuote
+}
+
+// RelayQuote is the owner's message a relay carries: its id, when and in which conversation they wrote it, the
+// conversations that passed it on after that one (oldest first), and the text verbatim. ParseRelayQuoteID reads the id back.
+type RelayQuote struct {
+	ID, At, Conversation string
+	Via                  []string
+	Text                 string
 }
 
 // RenderRelay is the message the other conversation gets (assistant/relay).

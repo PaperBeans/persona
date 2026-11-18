@@ -90,6 +90,9 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	}
 	analysisCommand := normalizeLarkCommand(command, cwd, cfg.Gates)
 	v := classifyLark(command, cfg.Gates, cwd, n.larkCLIRisk(cfg))
+	if n.assistantOrigin(session) == originInbox && inboxLarkOutbound(cfg, v, analysisCommand) {
+		return "deny", inboxLarkRefusal, nil
+	}
 	if v.deny != "" {
 		return "deny", v.deny, nil
 	}

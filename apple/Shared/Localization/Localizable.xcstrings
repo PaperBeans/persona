@@ -6083,6 +6083,29 @@
       },
       "extractionState" : "manual"
     },
+    "%lld left [Question Card]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld left"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "残り %lld 問"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还有 %lld 题"
+          }
+        }
+      }
+    },
     "%lld More Files" : {
       "localizations" : {
         "en" : {
@@ -14958,6 +14981,28 @@
         }
       }
     },
+    "A minute before a meeting on your calendar starts, a notification asks whether to record it." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A minute before a meeting on your calendar starts, a notification asks whether to record it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カレンダーの会議が始まる1分前に、記録するかどうかを通知でお知らせします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日历里的会议开始前一分钟，发通知问你要不要记。"
+          }
+        }
+      }
+    },
     "A model ID can't contain line breaks or control characters" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21539,6 +21584,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Allow Calendar Access" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow Calendar Access"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カレンダーへのアクセスを許可"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许访问日历"
+          }
+        }
+      }
     },
     "Allow Calendars in Persona to see other days [Home Widgets]" : {
       "extractionState" : "manual",
@@ -31024,6 +31091,30 @@
       },
       "extractionState" : "manual"
     },
+    "By Agent · Last 7 Days" : {
+      "comment" : "Token usage page: each coding agent's tokens over the last week",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "By Agent · Last 7 Days"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent別 · 過去7日間"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按 Agent · 最近 7 天"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "By App" : {
       "localizations" : {
         "en" : {
@@ -31642,6 +31733,52 @@
       },
       "extractionState" : "manual"
     },
+    "Collapse [Question Card]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Collapse"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "折りたたむ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起"
+          }
+        }
+      }
+    },
+    "Connect to %@?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect to %1$@?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@に接続しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接到 %1$@？"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "CPU, memory and network update every 10 seconds. Charts show the last hour." : {
       "localizations" : {
         "en" : {
@@ -31938,6 +32075,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "カレンダー"
+          }
+        }
+      }
+    },
+    "Calendar [Meeting Settings]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Calendar"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カレンダー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日历"
           }
         }
       }
@@ -49204,6 +49363,28 @@
       },
       "extractionState" : "manual"
     },
+    "Couldn't hand to “%@”" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't hand to “%1$@”"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%1$@」に任せられませんでした"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能交给「%1$@」"
+          }
+        }
+      }
+    },
     "Couldn't import: %@" : {
       "localizations" : {
         "en" : {
@@ -65636,6 +65817,29 @@
       },
       "extractionState" : "manual"
     },
+    "Expand [Question Card]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expand"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "展開"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "展开"
+          }
+        }
+      }
+    },
     "Expand All" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -72977,6 +73181,28 @@
       },
       "extractionState" : "manual"
     },
+    "Hand to Agent…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hand to Agent…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェントに任せる…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "交给 Agent…"
+          }
+        }
+      }
+    },
     "Hand to Persona" : {
       "localizations" : {
         "en" : {
@@ -77978,6 +78204,28 @@
         }
       }
     },
+    "Include the Transcript" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Include the Transcript"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字起こしも付ける"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "附上逐字稿"
+          }
+        }
+      }
+    },
     "Includes" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -80265,6 +80513,28 @@
       },
       "extractionState" : "manual"
     },
+    "It gets this meeting's minutes: the summary, decisions, to-dos and open questions." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It gets this meeting's minutes: the summary, decisions, to-dos and open questions."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この会議の議事録（要約、決定事項、ToDo、未決事項）が届きます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它会收到这场会的纪要：总结、结论、待办和没定的事。"
+          }
+        }
+      }
+    },
     "It goes to the computer’s Trash. You can undo right after, or put it back from the Trash there." : {
       "localizations" : {
         "en" : {
@@ -81263,6 +81533,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "它的助手「%@」离线，助手回来后这台电脑会恢复在线。"
+          }
+        }
+      }
+    },
+    "Its computer isn't reachable, or the chat is closed." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Its computer isn't reachable, or the chat is closed."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コンピュータに接続できないか、会話が閉じています。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它的电脑连不上，或者对话已关闭。"
           }
         }
       }
@@ -83579,6 +83871,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Lark Meeting Notes [Imported Meeting]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lark Meeting Notes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lark の議事録"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "飞书会议纪要"
+          }
+        }
+      }
     },
     "Lark Messages" : {
       "localizations" : {
@@ -105371,6 +105685,30 @@
         }
       }
     },
+    "Not Split (Before the Update)" : {
+      "comment" : "Token usage page, By Agent: usage the hub kept before it counted each agent apart",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not Split (Before the Update)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "区別なし（更新前）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未区分（更新前）"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Not Started" : {
       "localizations" : {
         "en" : {
@@ -112471,6 +112809,29 @@
       },
       "extractionState" : "manual"
     },
+    "Only connect to a hub you set up yourself or trust. It will see this device and can send it notifications." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only connect to a hub you set up yourself or trust. It will see this device and can send it notifications."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自分で設定したハブか、信頼できるハブにだけ接続してください。接続すると、このデバイスを認識し、通知を送れるようになります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只连接你自己搭的或信任的 hub。连接后它能看到这台设备，也能给它发通知。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Only Its Alerts" : {
       "localizations" : {
         "en" : {
@@ -116546,6 +116907,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Original Meeting Notes [Imported Meeting]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original Meeting Notes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "元の議事録"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原会议纪要"
+          }
+        }
+      }
     },
     "Original [Image Editor 9a4f22]" : {
       "extractionState" : "manual",
@@ -122752,6 +123135,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Pick an Agent" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick an Agent"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェントを選ぶ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选一个 Agent"
+          }
+        }
+      }
     },
     "Pick an Item" : {
       "localizations" : {
@@ -131523,6 +131928,28 @@
         }
       }
     },
+    "Remind Me Before Meetings" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remind Me Before Meetings"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議の前に通知"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会议开始前提醒"
+          }
+        }
+      }
+    },
     "Reminded %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -131683,6 +132110,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Reminders need access to your calendar." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reminders need access to your calendar."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知にはカレンダーへのアクセスが必要です。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提醒需要访问你的日历。"
+          }
+        }
+      }
     },
     "Remote" : {
       "extractionState" : "manual",
@@ -151897,6 +152346,28 @@
       },
       "extractionState" : "manual"
     },
+    "Start [Meeting Reminder]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開始"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始"
+          }
+        }
+      }
+    },
     "Start [Place Map]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -152947,6 +153418,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在启动…"
+          }
+        }
+      }
+    },
+    "Starts at %@. Record it? [Meeting Reminder]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starts at %@. Record it?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@に始まります。記録しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 开始，要记吗？"
           }
         }
       }
@@ -161256,6 +161749,28 @@
         }
       }
     },
+    "That's a Persona chat, not an Agent." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That's a Persona chat, not an Agent."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "これは Persona の会話で、エージェントではありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这是 Persona 的对话，不是 Agent。"
+          }
+        }
+      }
+    },
     "That's too large to send. Try fewer or smaller photos." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -166661,6 +167176,28 @@
         }
       }
     },
+    "The meeting is still going. Hand it over once it ends." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The meeting is still going. Hand it over once it ends."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会議はまだ続いています。終わってから任せてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会还在开，结束后再交。"
+          }
+        }
+      }
+    },
     "The meeting's material" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -166706,6 +167243,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "The message didn't go through." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The message didn't go through."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メッセージを送れませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "消息没发出去。"
+          }
+        }
+      }
     },
     "The message source can't send encrypted messages right now" : {
       "localizations" : {
@@ -170879,6 +171438,28 @@
       },
       "extractionState" : "manual"
     },
+    "This Agent can't take meetings." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Agent can't take meetings."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このエージェントには会議を任せられません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个 Agent 不能接收会议内容。"
+          }
+        }
+      }
+    },
     "This Agent has stopped. Its conversation and terminal stay; it doesn't take messages." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -171062,6 +171643,29 @@
           }
         }
       }
+    },
+    "This hub is already paired. Connecting again refreshes this device's pairing." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This hub is already paired. Connecting again refreshes this device's pairing."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このハブはペアリング済みです。もう一度接続すると、このデバイスのペアリングが更新されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 hub 已经配对过，再连接一次会刷新这台设备的配对。"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "This Hub Is Disconnected" : {
       "localizations" : {
@@ -175719,6 +176323,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "この会議にはまだ話題にできる文字起こしや議事録がありません。"
+          }
+        }
+      }
+    },
+    "This meeting has nothing to hand over yet: no minutes or transcript." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This meeting has nothing to hand over yet: no minutes or transcript."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この会議にはまだ任せられる内容がありません（議事録も文字起こしもありません）。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这场会还没有可交的内容：没有纪要，也没有逐字稿。"
           }
         }
       }
@@ -188267,6 +188893,29 @@
         }
       }
     },
+    "View in Chat [Question Card]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View in Chat"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "元のメッセージ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "看原文"
+          }
+        }
+      }
+    },
     "VNC" : {
       "shouldTranslate" : true,
       "localizations" : {
@@ -192674,6 +193323,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要怎么改？"
+          }
+        }
+      }
+    },
+    "What should it do? (optional)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What should it do? (optional)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "何をしてほしいか（任意）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要它做什么（可选）"
           }
         }
       }

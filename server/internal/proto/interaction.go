@@ -90,6 +90,9 @@ type Interaction struct {
 	Elicitation     *Elicitation `json:"elicitation,omitempty"`
 	// CanCancel is advertised only by runtimes supporting question-only cancellation.
 	CanCancel bool `json:"can_cancel,omitempty"`
+	// CanClarify advertises an assistant-owned prepared approval whose owner may ask a question without resolving it.
+	// Only the authoritative creation path sets it; older clients ignore it and keep their existing Allow/Deny behavior.
+	CanClarify bool `json:"can_clarify,omitempty"`
 	// Dialog is the screen's dialog read on the hub (screen interactions); answers name an option and are checked
 	// against Dialog.Rev before any key is pressed. Absent when the screen shows no dialog it could read.
 	Dialog *dialogwire.Dialog `json:"dialog,omitempty"`

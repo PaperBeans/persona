@@ -154,9 +154,9 @@ struct SettingsView: View {
                 }
                 #if os(iOS)
                 settingsLink(.knowledgeSelection, "Knowledge Selection", Theme.Icon.knowledge, id: "settings-knowledge-selection")
-                if MeetingAttendees.offered(model) {
-                    settingsLink(.meetings, "Meetings", Theme.Icon.meeting, id: "settings-meetings", value: MeetingAttendees.defaultRole(model).title)
-                }
+                // Every iPhone: the calendar reminder is the phone's (#8731 G2); the role shows where the hub offers one.
+                settingsLink(.meetings, "Meetings", Theme.Icon.meeting, id: "settings-meetings",
+                             value: MeetingAttendees.offered(model) ? MeetingAttendees.defaultRole(model).title : "")
                 #endif
                 settingsLink(.agents, "Agent", Theme.Icon.options, id: "settings-agents")
                 NavigationLink(value: MachineListRoute()) { MachinesSettingsRow() }
@@ -1031,6 +1031,9 @@ struct PairView: View {
     /// The code was refused as expired or used (401 invalid_token): say so, and offer to scan again.
     @State private var expired = false
     @State private var showOther = false
+    /// A scanned pairing link waiting for the user's Connect (#9929): a code read off a screen asks first, as a link
+    /// from outside the app does.
+    @State private var confirming: PairConfirmation?
 
     private var other: Bool { start == .other || showOther }
 
@@ -1074,7 +1077,7 @@ struct PairView: View {
                                 token = cfg.token
                                 passwordMode = false
                                 scanning = false
-                                Task { await connect() }
+                                confirming = PairConfirmation(cfg, paired: model.registry.hubs.map(\.config))
                             }
                         }
                         #if os(iOS) || os(visionOS)
@@ -1105,6 +1108,7 @@ struct PairView: View {
                 if let error { Section { Text(error).foregroundStyle(Theme.danger).font(Theme.Font.caption) } }
             }
             .themedPage()
+            .pairConfirmation($confirming) { _ in Task { await connect() } }
             #if DEBUG
             // `-showPairAccess YES`: Cloudflare Access opened (screenshots), its fields from `-seedCloudflareAccess id:secret`;
             // `-showPairAccess <pairing link>` also pairs with it at once (the Access error, MOCK_CF_ACCESS).

@@ -12,6 +12,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/tokenuse"
 )
 
 // Codex rollouts (~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl) are a different JSONL: every line is
@@ -45,22 +46,11 @@ type codexPayload struct {
 	} `json:"sandbox_policy"`
 	Effort string `json:"effort"`
 	// event_msg
-	Item   *codexItem      `json:"item"`
-	Goal   json.RawMessage `json:"goal"` // thread_goal_updated (goal.go)
-	Reason string          `json:"reason"`
-	Info   *struct {
-		Total struct {
-			OutputTokens int   `json:"output_tokens"`
-			TotalTokens  int64 `json:"total_tokens"`
-		} `json:"total_token_usage"`
-		Last struct {
-			InputTokens       int   `json:"input_tokens"`
-			CachedInputTokens int64 `json:"cached_input_tokens"`
-			OutputTokens      int64 `json:"output_tokens"`
-		} `json:"last_token_usage"`
-		ModelContextWindow int `json:"model_context_window"`
-	} `json:"info"`
-	RateLimits *codexRateLimits `json:"rate_limits"` // token_count: the account's limits as the last response gave them
+	Item       *codexItem          `json:"item"`
+	Goal       json.RawMessage     `json:"goal"` // thread_goal_updated (goal.go)
+	Reason     string              `json:"reason"`
+	Info       *tokenuse.CodexInfo `json:"info"`        // token_count
+	RateLimits *codexRateLimits    `json:"rate_limits"` // token_count: the account's limits as the last response gave them
 }
 
 // codexRateLimits is a token_count's rate_limits (node/usagewindows.go reads the same for the usage windows).
@@ -301,12 +291,11 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 	switch p.Type {
 	case "token_count":
 		if p.Info != nil {
-			meta.ContextTokens, meta.OutputTokens = p.Info.Last.InputTokens, p.Info.Total.OutputTokens
+			meta.ContextTokens, meta.OutputTokens = int(p.Info.Last.Input), int(p.Info.Total.Output)
 			if p.Info.ModelContextWindow > 0 {
 				meta.ContextWindow = p.Info.ModelContextWindow
 			}
-			last := p.Info.Last
-			meta.codexRequest(p.Info.Total.TotalTokens, int64(last.InputTokens), last.CachedInputTokens, last.OutputTokens)
+			meta.codexRequest(p.Info.Total.Total, p.Info.Last)
 		}
 		if p.RateLimits != nil { // none: the provider gave none this time, the last ones stand
 			if until, ok := p.RateLimits.fullUntil(); ok {

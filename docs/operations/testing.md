@@ -93,7 +93,7 @@ setting; the 4 GB Gradle daemon and non-heap allocations are separate.
 | --- | --- | --- | --- | --- |
 | Server / `.github/workflows/server-test.yml` | `scripts/ci/server.sh` | gofmt, vet, complete Go tests against disposable Postgres 18, build, Windows cross-build/vet, the programs and tunnel tests with `server/build-tags.txt`, extension schema/examples/SDK bundle, Go SDK tests; hub route/architecture, prompts and hub i18n guards are Go tests | ubuntu-latest | 8–15 / 15–30 min |
 | Web / `.github/workflows/web-test.yml` | `scripts/ci/web.sh` | npm ci, scoped ESLint, TypeScript, complete Vitest, production build and privacy | ubuntu-latest | 2–4 / 4–7 min |
-| Android / `.github/workflows/android-test.yml` | `scripts/ci/android.sh` | i18n/token checker tests, translations/literals, token ratchet, all-module lint and unit-test variants, debug APK | ubuntu-latest, two lanes | 8–15 / 15–30 min (branch runs with main's caches measured 15–18 min, #3056) |
+| Android / `.github/workflows/android-test.yml` | `scripts/ci/android.sh` | i18n/token/motion checker tests, translations/literals, token and motion ratchets, all-module lint and unit-test variants, debug APK | ubuntu-latest, two lanes | 8–15 / 15–30 min (branch runs with main's caches measured 15–18 min, #3056) |
 | Apple / `.github/workflows/apple-test.yml` | `scripts/ci/apple.sh ios` and `scripts/ci/apple.sh macos` | PersonaKit/iOS/Watch/HTML and Mac build/unit tests, and in the iOS lane the isolation lint with its own tests (`scripts/test/isolation-lint.sh`; `docs/apple/performance.md`, "Isolation lint") and the no-CallKit check of the device and simulator apps (`scripts/release/check_no_callkit.py`; `docs/operations/release.md`, "No CallKit"); synthetic configuration, no distribution signing; real results remain visible | macos-26 runners, Xcode 26.0.1 (Swift 6.2) | queue and execution measured separately |
 | Scripts/docs / `.github/workflows/scripts-tests.yml` | `scripts/ci/scripts.sh` | every Python script test, doc/code paths and index, layout/shell/Python compatibility, privacy-rule regression, catalog/translation/token checks, actionlint, issue-link logic, website worker | ubuntu-latest | 2–4 / 4–7 min |
 | Rust core / `.github/workflows/core-test.yml` | `scripts/ci/core.sh` | rustfmt, clippy, the shared core's unit tests and the fixtures it implements (directly and through its runtime), generated codecs up to date, the HarmonyOS NAPI binding linted for `aarch64-unknown-linux-ohos` with its `ohos` feature (the Rust target only, no SDK and nothing linked) and its notices, the generated ArkTS codec against the real runtime on the host (`harmony/tests/core-host/`, Node.js from the workflow) plus the two existing ArkTS core tests, release library, an independently compiled C11 client and dynamic-export check on Linux (not Swift/Apple ABI); the Android lane also builds it for `:core:rustcore`'s binding tests | ubuntu-latest | measured on the first runs |
@@ -218,7 +218,7 @@ Path mapping:
 | `server/internal/db/migrations/**`, `scripts/ci/migration_freeze.py` | `python3 scripts/ci/migration_freeze.py`: a migration already on the base cannot be edited, deleted or renamed (comment-only and whitespace-only edits pass; a new file may be added). A rename out of the directory counts. `--all` runs it when the script is present |
 | `server/**/*_test.go`, `sdk/go/**/*_test.go`, `scripts/ci/sleep_ratchet.py`, `scripts/ci/sleep_baseline.json` | `python3 scripts/ci/sleep_ratchet.py`: the number of `time.Sleep` calls in each Go test file may stay or fall, never rise (comments, string literals and a `// sleep-ok: <reason>` line do not count; a new file starts at zero). `--update` only lowers the baseline. A rename out of those trees counts. `--all` runs it when the script is present |
 | `spec/fixtures/**`, `schema/extension/**`, `integrations/**`, `docs/<file>`, `scripts/test/server_test_env.py` | In addition to other checks in this table, `go test ./internal/<package>/...` for server packages reading these files (repository inputs covered by `server-test.yml` filters). At runtime, `git grep` finds packages referencing the path in `server/**/*_test.go` (strings or `filepath.Join` components; `//` comment lines excluded), so new readers need no script changes; other `spec/` files remain unmapped |
-| `android/**`, `scripts/app/*android*` (including both `test_android_*` self-tests) | `scripts/app/android_i18n_check.py` and Android checker unittests (i18n, token baseline; no Gradle build) |
+| `android/**`, `scripts/app/*android*` (including both `test_android_*` self-tests) | `scripts/app/android_i18n_check.py` and Android checker unittests (i18n, token and motion baselines; no Gradle build) |
 | `.github/**` | `scripts/test/pr_needs_issue_test.mjs` |
 | `schema/**` | `scripts/test/test_extension_schema.py`, `scripts/test/test_sdk_bundle.py`, plus `go test ./...` in sdk/go (the same three checks as CI's Extension schema job) |
 | `scripts/test/test_external_service_refs.py`, `scripts/{gen,test}/sdk_bundle*` | The scripts' own tests |
@@ -611,6 +611,20 @@ reselection from a detail and three Assistant/Agents round trips. Use
 checks the largest text. Set actual appearance with `xcrun simctl ui <udid> appearance light|dark`.
 Run `PersonaTests/AgentsTabNavigationTests` too: explicit selection cancels restoration, reselection returns to the list,
 notification/link targets are preserved, and a consumed newer target invalidates an older deferred list reset.
+
+### Live Activities a run leaves (#10109)
+
+`xcodebuild test-without-building` installs the app again at the start of every run. A Live Activity the last run left up
+(a meeting still recording when its test ended) is stopped by that install, and liveactivitiesd wakes the app in the
+background to deliver it (`OpenApplication … ForRequester(liveactivitiesd)` in SpringBoard's log), a few milliseconds
+before the test's own launch. The test's launch then lands in that process, started without its arguments: the page
+in the simulator's language, none of `-openShellPage` / `-showMeetingSample` / `-AppleLanguages`. It shows when classes
+run one by one on one simulator (the lanes' scripts), after a class that ended mid-meeting.
+
+A Debug build ends every Live Activity on SIGTERM before it exits (`TerminationActivities`, `apple/Persona/Debug/`):
+the runner's SIGTERM between runs takes them with the app, and a launch that isn't recording ends a recording's
+activity it finds (`RecordingActivity`). If a test lands on a page in English with nothing it asked for, look for that
+`OpenApplication … liveactivitiesd` line before its launch.
 
 ### Simulators: always `scripts/app/sim-boot.sh`, slim by default (simslim, #2287, #2801)
 

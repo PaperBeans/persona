@@ -285,6 +285,7 @@ internal fun AssistantManagement.inGroup(names: GroupNames): AssistantManagement
         override suspend fun compactConversation(session: SessionKey) = source.compactConversation(names.raw(session))
         override suspend fun archiveConversation(session: SessionKey) = source.archiveConversation(names.raw(session))
         override suspend fun unarchiveConversation(session: SessionKey) = source.unarchiveConversation(names.raw(session))
+        override suspend fun setConversationTags(session: SessionKey, tags: List<String>) = source.setConversationTags(names.raw(session), tags)
         override suspend fun archivedConversations() = source.archivedConversations().map(names::session)
         override suspend fun searchChats(query: String, limit: Int) = source.searchChats(query, limit)?.let { answer ->
             answer.copy(results = answer.results.map { result ->

@@ -317,7 +317,8 @@ type Node struct {
 	agentFilters []proto.AgentFilter
 
 	// assistantLife: a conversation's process is taken, compacted or closed by one of assistantSend,
-	// assistantCompact, compactIdle and restoreModel at a time (model_restore.go, #2528)
+	// assistantCompact, compactIdle, restoreModel, a queue edit (assistantEditQueue) and a round's process retiring
+	// (roundSettled) at a time (model_restore.go, #2528)
 	assistantLife typingLocks
 	restores      restoreMarks // "back to the configured model" asked, until newer model evidence (model_restore.go)
 	hookFlights   hookFlights  // hook calls in progress by session: their process waits on them (model_restore.go)
@@ -777,11 +778,15 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		Purpose        string          `json:"purpose"`        // launchers.models/check: assistant runs outside the Agent engine
 		Configured     bool            `json:"configured"`     // launchers.models, .probe, .http, .model.check: hub.json names this launcher
 		Guest          *guestParams    `json:"guest"`          // assistant.send: a new guest conversation (assistant_guest.go)
+		Origin         string          `json:"origin"`         // assistant.send: the manager-recorded source of this conversation
 		NewSessionID   string          `json:"new_session_id"` // assistant.send: start the new conversation under this id
 		Raw            json.RawMessage `json:"-"`
 
 		ConfiguredAgent string `json:"configured_agent"` // strict work-session options: hub.json specifies the harness
 
+		// SuperviseRound: assistant.send of a round of the background supervisor, resumed at the end of its first turn
+		// (assistant_round.go); the answer says whether it was (context, why).
+		SuperviseRound bool `json:"supervise_round"`
 	}
 	// The "runtime" an older hub sends with assistant.send, assistant.warm and session.send is not read: every assistant
 	// conversation runs on Claude Code's CLI.
@@ -1402,11 +1407,15 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			}
 			sctx = withGuestKind(sctx, p.Guest.Tools, p.Guest.Kind)
 		}
+		var round *roundResult
+		if p.SuperviseRound && p.SessionID != "" && p.NewSessionID == "" && p.Guest == nil {
+			sctx, round = withSuperviseRound(sctx)
+		}
 		var opts sendOpts
 		_ = json.Unmarshal(params, &opts)
 		sctx = withClientMsgID(sctx, opts.ClientMsgID) // a runtime's message goes under it (assistant_runtime.go)
 		send := func() (string, error) {
-			return n.assistantSend(sctx, p.SessionID, p.Cwd, p.Launcher, p.Text, p.Images, p.PermissionMode, p.Effort, (modelExecution{PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, ServiceTier: p.ServiceTier, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, IsMain: p.IsMain, MainCompactWindow: p.MainCompact, FollowsSetting: p.FollowsSetting, ConfigDir: p.ConfigDir, Interject: p.Interject}).withSupervision(p.SupervisionInstructions))
+			return n.assistantSend(sctx, p.SessionID, p.Cwd, p.Launcher, p.Text, p.Images, p.PermissionMode, p.Effort, (modelExecution{PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, ServiceTier: p.ServiceTier, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, IsMain: p.IsMain, MainCompactWindow: p.MainCompact, FollowsSetting: p.FollowsSetting, ConfigDir: p.ConfigDir, Origin: p.Origin, Interject: p.Interject}).withSupervision(p.SupervisionInstructions))
 		}
 		if p.NewSessionID == "" && p.SessionID == "" && opts.ClientMsgID != "" {
 			// A new conversation's first message with its client_msg_id (one a person's own app opened, the manager's
@@ -1436,11 +1445,11 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			if err == nil && id == "" {
 				id = p.SessionID // the same message asked again while it went: the conversation it went to
 			}
-			return map[string]any{"session_id": id}, err
+			return round.answer(map[string]any{"session_id": id}), err
 		}
 		if p.NewSessionID == "" || opts.ClientMsgID == "" {
 			id, err := send()
-			return map[string]any{"session_id": id}, err
+			return round.answer(map[string]any{"session_id": id}), err
 		}
 		// A start under a given id with its first message's client_msg_id (a meeting's room, its follow-up, Just me's
 		// new main chat): sent once, and its transcript item carries the id, as a session.send's (echo.go).

@@ -31,7 +31,7 @@ func TestLiveContextSnapshotIncludesOpenTodoRoster(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("takeSnapshot exceeded 10 seconds")
 	}
-	got := s.contextSnapshot(ctx, "")
+	got := s.contextSnapshot(ctx, "", false)
 	if !strings.Contains(got, "开放待办：共 3 件（完整列表用 todo_list）") {
 		t.Fatalf("live context snapshot lacks open count and retrieval hint:\n%s", got)
 	}

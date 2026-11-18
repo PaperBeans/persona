@@ -615,6 +615,15 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 			return nil, err
 		}
 		return s.askHub(ctx, p.Interaction)
+	case assistantwire.MethodFleetAskPrepared:
+		var p struct {
+			Interaction proto.Interaction `json:"interaction"`
+			Replacement string            `json:"replacement"`
+		}
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		return b.askPreparedHub(ctx, p.Interaction, p.Replacement)
 	}
 	if out, ok, err := s.kbRequest(ctx, method, params); ok { // the knowledge base's (kb_bus.go)
 		return out, err

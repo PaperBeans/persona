@@ -14,6 +14,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/extwire"
@@ -79,7 +80,38 @@ func playManager(t *testing.T, h *Hub, answer rpc.Handler) *playedManager {
 	})
 	conn := bus.NewConn(ctx, ws)
 	peer := rpc.New("s", conn)
-	peer.OnRequest = answer
+	peer.OnRequest = func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		if method != assistantwire.MethodFleetAskPrepared {
+			return answer(ctx, method, params)
+		}
+		// Existing played managers still express their answer as fleet.ask's
+		// Resolution. Adapt that answer to the prepared outcome and consume the
+		// retained hub handle exactly as the real coordinator's apply bus call does.
+		raw, err := answer(ctx, assistantwire.MethodFleetAsk, params)
+		if err != nil {
+			return nil, err
+		}
+		encoded, _ := json.Marshal(raw)
+		var r proto.Resolution
+		if err := json.Unmarshal(encoded, &r); err != nil {
+			return nil, err
+		}
+		var in struct {
+			Interaction proto.Interaction `json:"interaction"`
+		}
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, err
+		}
+		switch {
+		case r.UserAllowed():
+			text, err := h.applyPreparedSetting(ctx, assistantwire.AssistantID, in.Interaction.ID, r)
+			return approval.Outcome{Text: text}, err
+		case r.UserDenied():
+			return approval.Outcome{Text: "The user declined the change: nothing changed."}, nil
+		default:
+			return approval.Outcome{Text: prompts.RenderSettingUnanswered()}, nil
+		}
+	}
 	peer.Cancels = map[string]bool{assistantwire.MethodApp: true}
 	go func() { _ = peer.Serve(ctx, conn) }()
 	if err := peer.Call(ctx, busHello, map[string]string{"id": assistantwire.AssistantID}, nil); err != nil {

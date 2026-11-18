@@ -332,7 +332,11 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 			return n.assistantGateTool(ctx, g, p.SessionID, p.Args), nil
 		}
 		var res json.RawMessage
-		err := n.peer.Call(ctx, "mcp.call", map[string]any{"name": p.Name, "args": p.Args, "session_id": p.SessionID, "assistant": assistant, "guest": n.guestOf(p.SessionID) != nil}, &res)
+		params := map[string]any{"name": p.Name, "args": p.Args, "session_id": p.SessionID, "assistant": assistant, "guest": n.guestOf(p.SessionID) != nil}
+		if origin := n.assistantOrigin(p.SessionID); origin != "" {
+			params["origin"] = origin
+		}
+		err := n.peer.Call(ctx, "mcp.call", params, &res)
 		return res, err
 	}
 	return nil, fmt.Errorf("unknown method %s", method)

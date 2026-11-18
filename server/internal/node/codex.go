@@ -48,7 +48,8 @@ type rolloutMeta struct {
 type rolloutCache struct {
 	at       time.Time
 	rollouts []codexRollout
-	older    []rolloutFile // rollouts in day directories before the window and archived ones, listed once a minute
+	segments []codexRollout // every file of rollouts', a continued thread's older segments too (rolloutSegments)
+	older    []rolloutFile  // rollouts in day directories before the window and archived ones, listed once a minute
 	olderAt  time.Time
 	// misses are the ids rolloutPath globbed for and found nowhere, with missStamp then: a thread with no rollout (an
 	// app-server thread that never wrote one) was globbed across all of history every second. A miss holds while the
@@ -211,6 +212,7 @@ func rollouts(home string) []codexRollout {
 	})
 	// A continuation is another physical rollout for the same logical thread. As with resumed
 	// transcript copies, follow its newest file; do not advertise each segment as a new session.
+	c.segments = slices.Clone(out)
 	seen := map[string]bool{}
 	unique := out[:0]
 	for _, r := range out {
@@ -222,6 +224,24 @@ func rollouts(home string) []codexRollout {
 	out = unique
 	c.rollouts, c.at = out, now
 	return out
+}
+
+// rolloutSegments is every rollout file rollouts lists (written in the last two weeks), each segment of a continued
+// thread too, newest first: the token usage meter reads them all (usage_adapters.go), the session list a thread's
+// newest.
+func rolloutSegments(home string) []codexRollout {
+	rollouts(home)
+	rolloutCaches.Lock()
+	defer rolloutCaches.Unlock()
+	return slices.Clone(cacheFor(home).segments)
+}
+
+// allRolloutPaths is every rollout file of a home on disk, whenever it was written, archived ones too: what a token
+// usage backfill reaching further back than rollouts' two weeks reads.
+func allRolloutPaths(home string) []string {
+	paths, _ := filepath.Glob(filepath.Join(home, "sessions", "*", "*", "*", "rollout-*.jsonl"))
+	archived, _ := filepath.Glob(filepath.Join(home, "archived_sessions", "rollout-*.jsonl"))
+	return append(paths, archived...)
 }
 
 // pruneMetas keeps the session_meta of the rollouts just listed (recent and older), so a deleted or moved rollout

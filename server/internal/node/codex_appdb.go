@@ -236,7 +236,7 @@ func readCodexAppProjects(home string) map[string]codexAppProject {
 		Name string `json:"name"`
 		Root string `json:"root"`
 	}
-	if err := queryCodexAppDB(context.Background(), db,
+	if err := querySQLite(context.Background(), db,
 		`SELECT p.id AS id, p.name AS name, r.root AS root FROM projects p LEFT JOIN project_roots r ON r.project_id = p.id`, &rows); err != nil {
 		return nil
 	}
@@ -252,9 +252,10 @@ func readCodexAppProjects(home string) map[string]codexAppProject {
 	return out
 }
 
-// queryCodexAppDB runs q against the App's state database and decodes the json rows into into (read-only, as
-// readCodexThreads).
-func queryCodexAppDB(ctx context.Context, db, q string, into any) error {
+// querySQLite runs q against a SQLite database with the system sqlite3 and decodes the json rows into into
+// (read-only, as readCodexThreads; a WAL database nobody has open is read as it is on disk, codexDBTarget): the Codex
+// App's state database, opencode's (usage_opencode.go).
+func querySQLite(ctx context.Context, db, q string, into any) error {
 	sqlite, err := exec.LookPath("sqlite3")
 	if err != nil {
 		return err

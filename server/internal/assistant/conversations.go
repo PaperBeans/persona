@@ -219,6 +219,10 @@ type relayMsg struct {
 	// Answer: it answers a request the receiver sent (hopLocked, #7391), so it starts no exchange of its own: what
 	// the receiver sends next costs a hop.
 	Answer bool `json:"answer,omitempty"`
+	// Quote: the owner's message the sender carried (conversation_send / conversation_new quote), as the hub verified
+	// it (relay_quote.go, #3822). A version that does not know it drops it on its next save: the message then goes
+	// without the owner's words, as before.
+	Quote *BriefRequest `json:"quote,omitempty"`
 }
 
 type relayHop struct {
@@ -254,6 +258,10 @@ type relayBook struct {
 	// queued message waits, whatever its rank: the owner's own message always goes before the queue. A restart falls
 	// back on the persisted Spoke presence window (relay_presence.go).
 	ownerTurns map[string]ownerTurn
+	// replacing: the background supervisors being replaced (supervise_round.go backgroundOutgrown), in memory: nothing
+	// starts going into one, and what would go in straight queues, until what waits for it moved to its replacement or
+	// the replacement did not start.
+	replacing map[string]bool
 }
 
 // ownerTurn is one conversation's owner-turn gate (#6394).
@@ -284,7 +292,7 @@ func (s *Service) relayLocked(ctx context.Context) bool {
 		rs.Spawned = map[string]spawnedConv{}
 	}
 	b.st, b.loaded = rs, true
-	b.sent, b.draining, b.holds = map[[2]string][]time.Time{}, map[string]bool{}, map[string]*time.Timer{}
+	b.sent, b.draining, b.replacing, b.holds = map[[2]string][]time.Time{}, map[string]bool{}, map[string]bool{}, map[string]*time.Timer{}
 	b.stuck = map[string]relayMsg{}
 	b.ownerTurns = map[string]ownerTurn{}
 	return true
@@ -397,7 +405,7 @@ func (s *Service) relayAllowed(from, to string, now time.Time) (int, bool, error
 // relayText is the message as the receiver gets it (prompts/assistant/relay.md).
 func relayText(msg relayMsg) string {
 	return prompts.RenderRelay(prompts.Relay{FromID: msg.From, FromTitle: msg.FromTitle, Tool: msg.Tool, Hop: msg.Hop,
-		MaxHops: relayMaxHops, Text: msg.Text})
+		MaxHops: relayMaxHops, Text: msg.Text, Quote: relayQuoteOf(msg.Quote)})
 }
 
 // queueRelay keeps a message for a conversation until it may go in: its turn ended and the owner is not talking in it
@@ -478,11 +486,21 @@ func (s *Service) deliverRelay(ctx context.Context, machine, to string, msg rela
 	} else if s.isBackground(ctx, to) {
 		s.backgroundModel(ctx, params) // its own model purpose, on every message as the main chat's is (supervise_background.go)
 	}
-	if err := s.call(ctx, machine, DeviceAssistantSend, params, nil); err != nil {
+	// A supervision message rendered as a round starts from the first turn (supervise_round.go): what the text says
+	// and the switch now decide, also for one queued before a restart or a change of the switch, and whatever model runs it.
+	round := s.isBackground(ctx, to) && msg.Tool == superviseTool && !backgroundKeepsContext(s.settings(ctx)) && prompts.IsSuperviseRound(msg.Text)
+	if round {
+		params[superviseRoundParam] = true
+	}
+	var res superviseRoundReply
+	if err := s.call(ctx, machine, DeviceAssistantSend, params, &res); err != nil {
 		if msg.Tool == superviseTool && !relayInDoubt(err) { // in doubt, drainRelays lets go once it knows it did not go in
 			s.releasePushes(ctx, to)
 		}
 		return err
+	}
+	if round {
+		s.superviseRoundAnswered(to, res)
 	}
 	s.relayDelivered(ctx, to, msg)
 	return nil
@@ -544,7 +562,7 @@ func (s *Service) drainRelays(machine string, list []proto.Session) {
 	held := map[string]time.Duration{}
 	now := time.Now()
 	for _, c := range list {
-		if len(b.st.Queue[c.SessionID]) > 0 && c.Status != proto.StatusWorking && !c.Starting && !b.draining[c.SessionID] {
+		if len(b.st.Queue[c.SessionID]) > 0 && c.Status != proto.StatusWorking && !c.Starting && !b.draining[c.SessionID] && !b.replacing[c.SessionID] {
 			i, wait := b.pickLocked(c.SessionID, now)
 			if i < 0 {
 				held[c.SessionID] = wait
@@ -901,8 +919,9 @@ func (s *Service) toolConversationArchive(ctx context.Context, self string, args
 
 func (s *Service) toolConversationNew(ctx context.Context, self string, args json.RawMessage) (string, error) {
 	var a struct {
-		Text string   `json:"text"`
-		Tags []string `json:"tags"`
+		Text  string   `json:"text"`
+		Tags  []string `json:"tags"`
+		Quote string   `json:"quote"`
 	}
 	_ = json.Unmarshal(args, &a)
 	if strings.TrimSpace(a.Text) == "" {
@@ -921,11 +940,18 @@ func (s *Service) toolConversationNew(ctx context.Context, self string, args jso
 	if err != nil {
 		return "", err
 	}
+	quote, err := s.resolveQuote(ctx, self, a.Quote) // before relayAllowed: a refused quote uses up no rate
+	if err != nil {
+		return "", err
+	}
 	hop, _, err := s.relayAllowed(self, "new", time.Now()) // an opening message is a request, never an answer
 	if err != nil {
 		return "", err
 	}
-	msg := relayMsg{From: self, FromTitle: from, Tool: "conversation_new", Text: a.Text, Hop: hop, At: time.Now().UTC()}
+	msg := relayMsg{From: self, FromTitle: from, Tool: "conversation_new", Text: a.Text, Hop: hop, At: time.Now().UTC(), Quote: quote}
+	if quote != nil {
+		s.keepQuote(ctx, self, *quote) // before it starts: its first turn may hand out work at once
+	}
 	sctx, cancel := context.WithTimeout(ctx, 100*time.Second)
 	defer cancel()
 	space, err := s.knownSpace(ctx, self)
@@ -937,13 +963,13 @@ func (s *Service) toolConversationNew(ctx context.Context, self string, args jso
 		return "", err
 	}
 	s.titleNew(c.MachineID, c.SessionID, time.Now())
-	tagNote := ""
+	tagNote := quoteNote(quote)
 	if len(tags) > 0 {
 		// The conversation already exists: a tag write that fails must not be reported as a failed start.
 		if _, err := s.setConversationTags(sctx, c.MachineID, c.SessionID, tags, titleByAssistant); err != nil {
 			return fmt.Sprintf("Started conversation %s; it is working on the message now and is named after its first turn. It shows up in the app's sidebar. Its tags could not be saved: %v", c.SessionID, err), nil
 		}
-		tagNote = " It is born with tags: " + strings.Join(tags, ", ") + "."
+		tagNote += " It is born with tags: " + strings.Join(tags, ", ") + "."
 	}
 	b := &s.relays
 	b.mu.Lock()
@@ -959,8 +985,9 @@ func (s *Service) toolConversationNew(ctx context.Context, self string, args jso
 
 func (s *Service) toolConversationSend(ctx context.Context, self string, args json.RawMessage) (string, error) {
 	var a struct {
-		ID   string `json:"id"`
-		Text string `json:"text"`
+		ID    string `json:"id"`
+		Text  string `json:"text"`
+		Quote string `json:"quote"`
 	}
 	_ = json.Unmarshal(args, &a)
 	if strings.TrimSpace(a.Text) == "" {
@@ -982,13 +1009,20 @@ func (s *Service) toolConversationSend(ctx context.Context, self string, args js
 	if err != nil {
 		return "", err
 	}
+	quote, err := s.resolveQuote(ctx, self, a.Quote) // before relayAllowed: a refused quote uses up no rate
+	if err != nil {
+		return "", err
+	}
 	hop, answer, err := s.relayAllowed(self, c.SessionID, time.Now())
 	if err != nil {
 		return "", err
 	}
-	msg := relayMsg{From: self, FromTitle: from, Tool: "conversation_send", Text: a.Text, Hop: hop, Answer: answer, At: time.Now().UTC()}
+	msg := relayMsg{From: self, FromTitle: from, Tool: "conversation_send", Text: a.Text, Hop: hop, Answer: answer, At: time.Now().UTC(), Quote: quote}
+	if quote != nil {
+		s.keepQuote(ctx, self, *quote) // before it goes in: the receiver may hand out work in the turn it starts
+	}
 	name := conversationName(c, s.settings(ctx).Main)
-	back := ""
+	back := quoteNote(quote)
 	if s.unarchiveOnSend(c.MachineID, c.SessionID) {
 		back = " It was archived; it is back in the list."
 	}

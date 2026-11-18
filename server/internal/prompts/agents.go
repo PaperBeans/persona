@@ -250,7 +250,14 @@ func RenderTaskLeader() string { return render("agents/task_leader", struct{}{})
 // RenderTaskWorker is what follows the prompt of a worker a task leader handed out (agents/task_worker).
 func RenderTaskWorker() string { return render("agents/task_worker", struct{}{}) }
 
-func RenderTaskHandoff() string { return render("agents/task_handoff", struct{}{}) }
+// TaskHandoff describes the scoped entries the assignment's actual launcher can use.
+type TaskHandoff struct {
+	Language   string // the caller's reply language; empty keeps the existing default
+	MCP        bool   // the selected launcher has the existing scoped Persona MCP tools
+	Executable string // a verified node executable, encoded as a JSON string, never shell code
+}
+
+func RenderTaskHandoff(h TaskHandoff) string { return render("agents/task_handoff", h) }
 
 // RenderWorkerSupervise is the supervision message a task leader's agent gets about its workers (agents/worker_supervise,
 // assistant/task_leader.go): what each task of its own needs, from the same entries a conversation's message lists.

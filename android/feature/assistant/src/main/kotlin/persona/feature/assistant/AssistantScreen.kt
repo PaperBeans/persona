@@ -362,21 +362,23 @@ fun AssistantScreen(
     // conversation, not the centered start page. This page and assistant only; another main conversation forgets it.
     var clearedMain by mainConversation.clearedMain
     val clearedPage = clearedMain != null && active == null && newChat == null && !viewingMainQueue
-    val groups = remember(snapshot, query, ended, archived, words, history.titles) {
-        conversationGroups(snapshot.copy(conversations = history.titled(snapshot.conversations.filter { it.key !in archived }.map {
+    val groups = remember(snapshot, query, ended, archived, words, history.titles, history.tagEdits, history.activeTag) {
+        conversationGroups(snapshot.copy(conversations = history.tagged(snapshot.conversations.filter { it.key !in archived }.map {
             if (it.key in ended) it.copy(status = "offline", state = "offline") else it
-        })), query, words)
+        })), query, words, activeTag = history.activeTag)
     }
     val searchOn = pageManagement != null && !demo && AssistantSearchFeature in LocalHubFeatures.current
-    val knownChats = remember(snapshot.conversations, ended, archived, history.titles, history.archived) {
-        val open = history.titled(snapshot.conversations.filter { it.key !in archived }.map {
+    val knownChats = remember(snapshot.conversations, ended, archived, history.titles, history.tagEdits, history.archived, history.restoring) {
+        val listed = snapshot.conversations.filter { it.key !in archived }.map {
             if (it.key in ended) it.copy(status = "offline", state = "offline") else it
-        })
-        (open + history.shownArchived(openKeys(open))).distinctBy { it.sessionId }
+        }
+        history.tagged((listed + history.shownArchived(openKeys(listed))).distinctBy { it.sessionId })
     }
+    val tagChoices = remember(knownChats) { inUseConversationTags(knownChats) }
     val (foundChats, searchPartial) = rememberFoundChats(
         query, remember(groups) { (groups.directions + groups.others).distinctBy { it.sessionId } },
-        knownChats, searchOn, pageManagement, "${managerChoice.hubId.orEmpty()}|${managerChoice.shown}")
+        knownChats.withConversationTag(history.activeTag), searchOn, pageManagement, "${managerChoice.hubId.orEmpty()}|${managerChoice.shown}",
+        activeTag = history.activeTag)
     // Persona's face (top bar and the conversation list) shows the conversation on screen, as on iOS: none on the
     // new-conversation page.
     val faceState = personaState(active?.let { key -> snapshot.conversations.firstOrNull { it.key == key } }, hubOnline,
@@ -789,8 +791,10 @@ fun AssistantScreen(
                 leaderConfirm = session
             }) else null,
             onRename = if (pageManagement != null && !demo) ({ history.renaming = it }) else null,
+            onEditTags = if (pageManagement != null && !demo) ({ history.editingTags = it }) else null,
             onDiagnostics = ::copyDiagnostics,
             archivedCount = history.shownArchived(openKeys).size, onArchived = { history.archivedOpen = true },
+            tagChoices = tagChoices, activeTag = history.activeTag, onTag = history::selectTag,
             onTodos = onTodos?.let { action -> { scope.launch { drawerOpen = false }; action() } },
             todoCount = todoCount,
             showTodos = showTodos,
@@ -1357,10 +1361,14 @@ internal fun AssistantDrawer(
     onLeader: ((Session) -> Unit)? = null,
     /** Rename… on a chat's menu (not the main one's); null: no Rename. */
     onRename: ((Session) -> Unit)? = null,
+    /** Edit tags… on main, ordinary and archived chats; null in demos and on the built-in supervisor. */
+    onEditTags: ((Session) -> Unit)? = null,
     /** Copy diagnostics on a chat's menu; null: none. */
     onDiagnostics: ((Session) -> Unit)? = null,
     /** "Archived (N)" at the end of the list when there are any (iOS `archivedRow`); [onArchived] opens them. */
     archivedCount: Int = 0, onArchived: (() -> Unit)? = null,
+    /** Every tag in use across open and archived chats; empty draws no filter strip. */
+    tagChoices: List<String> = emptyList(), activeTag: String? = null, onTag: (String) -> Unit = {},
     onTodos: (() -> Unit)? = null, todoCount: Int = 0, showTodos: Boolean = true,
     onInbox: (() -> Unit)? = null, inboxCount: Int = 0,
     settingsCount: Int = 0, settingsDot: Boolean = false, settingsBadge: String? = null,
@@ -1458,9 +1466,9 @@ internal fun AssistantDrawer(
         if (switcher != null) switcher(headPadding, headTrailing, plainHead) else plainHead()
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 12.dp.dense)) {
             // The first row is the main conversation, as "Persona" with the app's mark, then a line (#2004, the same on
-            // every platform): it is listed nowhere else, has no pin of its own, and is on show whatever the search.
-            // Its session keeps its id and title; only the row reads differently.
-            item(key = "persona") {
+            // every platform): it is listed nowhere else, has no pin of its own, and is on show whatever the text search.
+            // An exact tag filter also applies to this row; its session keeps its own id and title, only the label differs.
+            if (activeTag == null || groups.main != null) item(key = "persona") {
                 val mainHit = found?.firstOrNull { it.session.key == groups.main?.key }?.hit
                 PersonaRow(groups.main, selected = shadeConversations && groups.main != null && groups.main.key == active, hasMain = hasMain,
                     name = assistantName,
@@ -1470,6 +1478,7 @@ internal fun AssistantDrawer(
                         onMain()
                     }, onEnd = groups.main?.let { m -> onEnd?.let { action -> { action(m) } } },
                     onCopy = { groups.main?.let(onCopy) },
+                    onEditTags = groups.main?.let { m -> onEditTags?.let { action -> { action(m) } } },
                     onDiagnostics = groups.main?.let { m -> onDiagnostics?.let { action -> { action(m) } } },
                     said = mainHit?.let(::markedSnippet))
                 JDivider(Modifier.padding(vertical = Tokens.Space.s))
@@ -1508,6 +1517,9 @@ internal fun AssistantDrawer(
             if ((!fullWindowSearch && (!drawer || searchVisible)) || query.isNotBlank()) {
                 item { JSearchField(query, onQuery, stringResource(R.string.assistant_search_chats)) }
             }
+            if (tagChoices.isNotEmpty()) item(key = "conversation-tag-filter") {
+                ConversationTagFilter(tagChoices, activeTag, onTag)
+            }
             if (searchPartial) item {
                 Text(stringResource(R.string.assistant_search_partial),
                     Modifier.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
@@ -1526,6 +1538,8 @@ internal fun AssistantDrawer(
                         onCopy = { onCopy(row.session) },
                         onArchive = onArchive?.let { action -> { action(row.session) } },
                         onRename = onRename?.let { action -> { action(row.session) } },
+                        onEditTags = if (row.session.sessionId == groups.background) null
+                            else onEditTags?.let { action -> { action(row.session) } },
                         onDiagnostics = onDiagnostics?.let { action -> { action(row.session) } },
                         onLeader = onLeader?.let { action -> { action(row.session) } },
                         said = row.hit?.let(::markedSnippet))
@@ -1570,6 +1584,7 @@ internal fun AssistantDrawer(
                     onOpen = { onOpen(session.key) }, onEnd = onEnd?.let { action -> { action(session) } },
                     onCopy = { onCopy(session) }, onArchive = onArchive?.let { action -> { action(session) } },
                     onRename = onRename?.let { action -> { action(session) } },
+                    onEditTags = onEditTags?.let { action -> { action(session) } },
                     onDiagnostics = onDiagnostics?.let { action -> { action(session) } },
                     onLeader = onLeader?.let { action -> { action(session) } })
             }
@@ -1592,6 +1607,7 @@ internal fun AssistantDrawer(
                     onOpen = { onOpen(session.key) }, onEnd = onEnd?.takeUnless { builtIn }?.let { action -> { action(session) } },
                     onCopy = { onCopy(session) }, onArchive = onArchive?.takeUnless { builtIn }?.let { action -> { action(session) } },
                     onRename = onRename?.takeUnless { builtIn }?.let { action -> { action(session) } },
+                    onEditTags = onEditTags?.takeUnless { builtIn }?.let { action -> { action(session) } },
                     onDiagnostics = onDiagnostics?.let { action -> { action(session) } },
                     onLeader = onLeader?.takeUnless { builtIn }?.let { action -> { action(session) } },
                     named = if (builtIn) stringResource(R.string.assistant_background_supervisor) else null,
@@ -1637,7 +1653,7 @@ private fun ConversationRow(
     session: Session, selected: Boolean, onOpen: () -> Unit, onEnd: (() -> Unit)?,
     modifier: Modifier = Modifier, position: GroupPosition = GroupPosition.Single,
     leader: Boolean = false, onLeader: (() -> Unit)? = null, onCopy: () -> Unit = {}, onArchive: (() -> Unit)? = null,
-    onRename: (() -> Unit)? = null, onDiagnostics: (() -> Unit)? = null,
+    onRename: (() -> Unit)? = null, onEditTags: (() -> Unit)? = null, onDiagnostics: (() -> Unit)? = null,
     counts: String? = null, named: String? = null, origin: String? = session.origin,
     /** A 常驻 lead's caret that folds its to-dos open (#4352, DirectionRows.kt), before its ⋯; null: none. */
     disclosure: (@Composable () -> Unit)? = null,
@@ -1671,9 +1687,12 @@ private fun ConversationRow(
     val resources = androidx.compose.ui.platform.LocalResources.current
     val swipe = onArchive?.let { SwipeAction(stringResource(R.string.assistant_archive), PersonaIcons.archive, Status.Working, it) }
     if (LocalHomeDrawer.current) JSwipeActions(modifier, end = swipe) {
-        JSidebarHistoryRow(dated?.topic ?: title, ownStatus, selected, onOpen, { menu = true },
-            stringResource(R.string.assistant_conversation_actions), hint = if (said == null) counts else null, hintMark = said,
-            titleAccessory = accessory, titleLead = dated?.head, trailingAccessory = disclosure, working = leadActive)
+        Column {
+            JSidebarHistoryRow(dated?.topic ?: title, ownStatus, selected, onOpen, { menu = true },
+                stringResource(R.string.assistant_conversation_actions), hint = if (said == null) counts else null, hintMark = said,
+                titleAccessory = accessory, titleLead = dated?.head, trailingAccessory = disclosure, working = leadActive)
+            ConversationTagLabels(session, Modifier.padding(horizontal = Tokens.Space.l).padding(bottom = Tokens.Space.xs))
+        }
     } else JSwipeActions(modifier, end = swipe) { JGroupItem(position) {
         // The time goes on the line under the title, with the state: beside the title it left the title two or three
         // characters in the wide window's 300dp list (2026-11-02), and a narrow drawer cut it short too.
@@ -1690,6 +1709,7 @@ private fun ConversationRow(
                 disclosure?.invoke()
                 JIconButton(PhIcons.DotsThree, stringResource(R.string.assistant_conversation_actions), { menu = true })
             }, chevron = false)
+        ConversationTagLabels(session, Modifier.padding(start = rowTitleStart, end = rowPadding, bottom = Tokens.Space.xs))
         // Under the title, not the icon: a fixed 16dp put it under the icon in glass and board and past it in brief.
         Row(Modifier.padding(start = rowTitleStart, end = rowPadding, bottom = 10.dp.dense),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
@@ -1704,7 +1724,7 @@ private fun ConversationRow(
     if (menu) JActionSheet(
         title = title, onDismiss = { menu = false },
         actions = conversationActions(androidx.compose.ui.platform.LocalResources.current, leader, session.isLive, onLeader, onCopy, onEnd,
-            onArchive, onRename = onRename, onDiagnostics = onDiagnostics, glass = PersonaTheme.style == AppStyle.Glass),
+            onArchive, onRename = onRename, onEditTags = onEditTags, onDiagnostics = onDiagnostics, glass = PersonaTheme.style == AppStyle.Glass),
         // The long press's preview (iOS's context menu): what it last said (the row shows only the title) and when.
         preview = session.lastText?.let { persona.core.domain.plainMarkdown(it) }?.takeIf { it.isNotBlank() },
         previewCaption = historyTime(session.updated, resources),
@@ -1738,12 +1758,13 @@ private fun ConversationOriginMark(source: AssistantConversationOrigin) {
  */
 internal fun conversationActions(
     resources: android.content.res.Resources, leader: Boolean, live: Boolean, onLeader: (() -> Unit)?, onCopy: () -> Unit,
-    onEnd: (() -> Unit)?, onArchive: (() -> Unit)? = null, onRename: (() -> Unit)? = null, onDiagnostics: (() -> Unit)? = null,
-    glass: Boolean = false,
+    onEnd: (() -> Unit)?, onArchive: (() -> Unit)? = null, onRename: (() -> Unit)? = null,
+    onEditTags: (() -> Unit)? = null, onDiagnostics: (() -> Unit)? = null, glass: Boolean = false,
 ): List<JAction> =
     buildList {
         onLeader?.let { add(JAction(resources.getString(if (leader) R.string.assistant_end_leader else R.string.assistant_make_leader), PersonaIcons.pin, onClick = it)) }
         onRename?.let { add(JAction(resources.getString(R.string.assistant_rename_menu), PersonaIcons.edit, onClick = it)) }
+        onEditTags?.let { add(JAction(resources.getString(R.string.assistant_edit_tags_menu), PersonaIcons.edit, onClick = it)) }
         onArchive?.let { add(JAction(resources.getString(R.string.assistant_archive), PersonaIcons.archive, onClick = it)) }
         add(JAction(resources.getString(R.string.assistant_copy_session_id), if (glass) PersonaIcons.id else PhIcons.Copy, onClick = onCopy))
         onDiagnostics?.let { add(JAction(resources.getString(R.string.assistant_copy_diagnostics), PersonaIcons.diagnostics, onClick = it)) }
@@ -1759,27 +1780,32 @@ internal fun conversationActions(
  */
 @Composable
 private fun PersonaRow(main: Session?, selected: Boolean, hasMain: Boolean, name: String, onMain: () -> Unit, onEnd: (() -> Unit)?, onCopy: () -> Unit,
-    onDiagnostics: (() -> Unit)? = null, said: AnnotatedString? = null) {
+    onEditTags: (() -> Unit)? = null, onDiagnostics: (() -> Unit)? = null, said: AnnotatedString? = null) {
     var menu by remember { mutableStateOf(false) }
     val status = main?.conversationStatus()
     val pending = main?.pendingInteractions ?: 0
-    JRow(name, onClick = onMain, onLongClick = main?.let { { menu = true } }, selected = selected,
-        // "Main chat" under the name keeps the row readable as a conversation, not a brand heading (#6327, as the web, #6293).
-        // A search that found this chat shows that sentence instead, and only then.
-        subtitle = if (said == null) stringResource(if (main == null && !hasMain) R.string.assistant_start_main else R.string.assistant_main_chat) else null,
-        subtitleMark = said,
-        leading = { JAppMark(Tokens.Space.xl) }, chevron = false,
-        trailing = if (main == null) null else ({
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
-                if (pending > 0) JBadge(pending)
-                else if (status == Status.Working || status == Status.NeedsYou || status == Status.Unread) StatusLabel(status)
-                JIconButton(PhIcons.DotsThree, stringResource(R.string.assistant_conversation_actions), { menu = true })
-            }
-        }))
+    Column {
+        JRow(name, onClick = onMain, onLongClick = main?.let { { menu = true } }, selected = selected,
+            // "Main chat" under the name keeps the row readable as a conversation, not a brand heading (#6327, as the web, #6293).
+            // A search that found this chat shows that sentence instead, and only then.
+            subtitle = if (said == null) stringResource(if (main == null && !hasMain) R.string.assistant_start_main else R.string.assistant_main_chat) else null,
+            subtitleMark = said,
+            leading = { JAppMark(Tokens.Space.xl) }, chevron = false,
+            trailing = if (main == null) null else ({
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
+                    if (pending > 0) JBadge(pending)
+                    else if (status == Status.Working || status == Status.NeedsYou || status == Status.Unread) StatusLabel(status)
+                    JIconButton(PhIcons.DotsThree, stringResource(R.string.assistant_conversation_actions), { menu = true })
+                }
+            }))
+        if (main != null) ConversationTagLabels(main,
+            Modifier.padding(start = rowTitleStart, end = rowPadding, bottom = Tokens.Space.xs))
+    }
     if (menu && main != null) JActionSheet(
         title = name, onDismiss = { menu = false },
         actions = conversationActions(androidx.compose.ui.platform.LocalResources.current, leader = false, live = main.isLive,
-            onLeader = null, onCopy = onCopy, onEnd = onEnd, onDiagnostics = onDiagnostics, glass = PersonaTheme.style == AppStyle.Glass),
+            onLeader = null, onCopy = onCopy, onEnd = onEnd, onEditTags = onEditTags, onDiagnostics = onDiagnostics,
+            glass = PersonaTheme.style == AppStyle.Glass),
     )
 }
 

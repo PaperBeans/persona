@@ -387,6 +387,14 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
 // outbox's unseen rows in lib/seen-outbox.ts) adds 112 B in ja, measured in one environment against main 7f756aa00a (ja
 // 482,373 B to 482,485 B; en 479,275 B to 479,391 B, zh-Hans 480,079 B to 480,221 B). Main had 153 B of room; the
 // budget stays.
+// #9053: the Inbox section bar adds 9 B in each language, measured in one environment against main a2531b0b62 (ja
+// 482,485 B to 482,494 B; en 479,391 B to 479,400 B, zh-Hans 480,221 B to 480,230 B): two of atoms' hard-coded sizes
+// become the named one they equal, which pays the font ratchet for CountBadge's. Everything else is in the Inbox page's
+// chunk: CountBadge (ui/CountBadge.tsx; 131 B in atoms against main 094253763d), its Needs-you tone in the existing
+// --attention utility the sidebar's counts use until #4653 brings the blue (its text token was 29 B in the token table
+// alone, more in the CSS), the grouping button with its mark (IconButton's menu attributes and the icon set's mark took
+// 43 B), the bar's own copies of the edge fade's widths and the arrow keys' step (up to 131 B in the App chunk), and
+// spacing classes the CSS already has (a new one took 44 B). The budget stays.
 // 2026-11-17 (#9847): #9784 landed on a main that had moved since its measurement and added 270 B in ja, not 112 B
 // (main 6fc9e85a00~1: ja 482,373 B; 6fc9e85a00: ja 482,643 B, en 479,549 B, zh-Hans 480,379 B), 117 B over the budget,
 // so main stopped building. The budget is main's ja size plus 40 B; taking those bytes back off the first screen is

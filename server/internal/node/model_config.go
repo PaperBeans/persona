@@ -39,6 +39,9 @@ type modelExecution struct {
 	// It changes the execution fingerprint so a role change resumes in a fresh process.
 	SupervisionInstructions string `json:",omitempty"`
 	SupervisionResolved     bool   `json:"-"`
+	// Origin is the conversation's manager-recorded source. It is authorization metadata, not a model choice, so it
+	// never changes the execution fingerprint; the node carries it into session state and model tool calls.
+	Origin string `json:"-"`
 	// Interject: a message this one carries, sent while the conversation answers, moves its foreground work to the
 	// background (assistant_interject.go). Per message, never part of the fingerprint.
 	Interject bool `json:"-"`

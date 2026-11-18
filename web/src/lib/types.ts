@@ -877,6 +877,8 @@ export interface Interaction {
   /** Session.folded_side of the card's session (#7944): the side session whose chat the card is answered in. */
   folded_side?: string;
   elicitation?: Elicitation;
+  /** Whether this assistant-owned operation can take a non-final owner question. */
+  can_clarify?: boolean;
   /** What a permission card needs filled in before it is approved (a password): such a card is never approved in one tap. */
   fields?: { key: string; label: string; secret?: boolean }[];
   /** The assistant is deciding whether it may answer this question for the user (docs/assistant/assistant.md "Assistant

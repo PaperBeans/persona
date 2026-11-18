@@ -296,8 +296,8 @@ func runHold(present map[string]time.Time, t Task, due, now time.Time) time.Dura
 }
 
 // relayWaits: msg can't go into conversation to right now even though it is not running: others wait in its queue
-// already, or the owner is talking in it. The caller queues it and drains (drainRelays), which delivers what may go
-// and comes back when the hold ends.
+// already, the owner is talking in it, or it is a background supervisor being replaced (replacing). The caller queues
+// it and drains (drainRelays), which delivers what may go and comes back when the hold ends.
 func (s *Service) relayWaits(to string, msg relayMsg) bool {
 	b := &s.relays
 	b.mu.Lock()
@@ -305,7 +305,16 @@ func (s *Service) relayWaits(to string, msg relayMsg) bool {
 	if !s.relayLocked(context.Background()) {
 		return false
 	}
-	return len(b.st.Queue[to]) > 0 || b.holdLocked(to, msg, time.Now()) > 0
+	return b.replacing[to] || len(b.st.Queue[to]) > 0 || b.holdLocked(to, msg, time.Now()) > 0
+}
+
+// relayReplacing: conversation to is a background supervisor reserved for its replacement (supervise_round.go
+// backgroundOutgrown): nothing goes in straight, not even a decision reply that may interject into a running turn.
+func (s *Service) relayReplacing(to string) bool {
+	b := &s.relays
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.replacing[to]
 }
 
 // drainAfter drains conversation id's queue once more in wait, when the hold on what waits there ends. One timer per

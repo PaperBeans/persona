@@ -29,6 +29,8 @@ spec/
     needs-you/        the Agents tab's Needs you: one row per waiting session, what its header, filter and badge count
     triage/           the To-dos page's sections (status SOP), checked by the web app and the hub
     provider-import-link/ provider import links: what the web builds and what the hub reads
+    deep-links/       links to Persona's pages: the hub's paths and what each client opens for a link
+    agent-names/      what every client calls each coding agent (names.json)
     star-prompt/      when the GitHub star prompts show (empty Agents pill, milestone card, onboarding toast)
     stream-chunks/     the completed-block split of a streaming reply, checked against iOS by the pure Rust core
     meeting-echo/     Persona's echo in a meeting: a line is one only when its time and its words match, checked by the hub and iOS
@@ -72,6 +74,7 @@ spec/
 | fold-sources | [README](fixtures/fold-sources/README.md): the web pages a run of work's successful web calls used, read by the hub for a fold and by the web for the same calls unfolded (#9132) |
 | input-clip | [README](fixtures/input-clip/README.md): the hub and runtime SDK's third tool-input pass, bounding encoded objects by dropping array tails and then object fields (#2907) |
 | provider-import-link | [README](fixtures/provider-import-link/README.md): provider import links (cindy v1), the payload and fragment the web builds for a provider and what the hub reads from a link, checked by Go, the mock hub and the web app (#5420) |
+| deep-links | [README](fixtures/deep-links/README.md): the route table of `docs/protocol/deep-links.md` (#9926): the paths the hub's builder writes, and the page each client opens for a web link to a paired hub, an app link (`persona://open<path>`) or an older form, checked by the hub, iOS, the web and the desktop app (Android with #9932) |
 | star-prompt | [README](fixtures/star-prompt/README.md): when the GitHub star prompts show, the empty Agents pill, the milestone card after enough Agents started and the onboarding toast, checked by the web app and Android (#5761; iOS with #5910) |
 | meeting-echo | [README](fixtures/meeting-echo/README.md): which transcript lines of a meeting are Persona's own answer heard by the microphone (they overlap a stretch it spoke in and their words match what it said; a stretch saved without text keeps the time rule), checked by the hub and the iOS app (#5905) |
 | minutes-overview | [README](fixtures/minutes-overview/README.md): the minutes' summary card (#6563), which places of a text are bold (each `strong` entry's first occurrence after the one before), how a client cleans a malformed overview and when it falls back to the minutes as before, and the hub's Markdown of the same minutes, checked by the hub, the mock hub, the iPhone and the web |

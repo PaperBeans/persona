@@ -32,6 +32,8 @@
   "change_inbox_signals": "「收件箱有新消息说到受督办的任务时，告诉它的督办方」：{before} → {after}",
   "title_main_supervises_own_tasks": "主对话自己督办它派出的任务",
   "change_main_supervises_own_tasks": "「主对话自己督办它派出的任务」：{before} → {after}",
+  "title_background_supervisor_keeps_context": "后台督办对话保留之前每一轮",
+  "change_background_supervisor_keeps_context": "「后台督办对话保留之前每一轮」：{before} → {after}",
   "title_model_tiers": "Agent 预设",
   "change_model_tier": "{profile} · {tier}：{before} → {after}",
   "title_review_sample_percent": "抽查验收的比例",

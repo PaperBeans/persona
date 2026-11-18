@@ -315,7 +315,7 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		prompt += "\n\n" + prompts.RenderTaskDoneWhen(t.DoneWhen)
 	}
 	if t.TodoID != "" && !s.isWorkMachine(m.ID) {
-		prompt += "\n\n" + prompts.RenderTaskHandoff()
+		prompt += "\n\n" + s.taskHandoff(ctx, m.ID, fit)
 	}
 	switch {
 	case t.Role == roleLeader: // what it may hand out, and how its workers reach it (task_leader.go)

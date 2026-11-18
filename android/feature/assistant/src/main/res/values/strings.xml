@@ -190,6 +190,16 @@
     <string name="assistant_rename_field">Session name</string>
     <string name="assistant_save">Save</string>
     <string name="assistant_renamed">Renamed</string>
+    <string name="assistant_edit_tags_menu">Edit tags…</string>
+    <string name="assistant_tags_title">Edit tags</string>
+    <string name="assistant_tags_filter">Filter by tag</string>
+    <string name="assistant_tags_add">Add</string>
+    <string name="assistant_tags_placeholder">Add a tag</string>
+    <string name="assistant_tags_remove">Remove %1$s</string>
+    <string name="assistant_tags_hint">Press Enter to add. Up to %1$d tags, each at most %2$d characters.</string>
+    <string name="assistant_tag_too_long">Each tag can be at most %1$d characters.</string>
+    <string name="assistant_tag_count_limit">A chat can have at most %1$d tags.</string>
+    <string name="assistant_tags_saved">Tags saved for %1$s</string>
     <string name="assistant_copy_diagnostics">Copy diagnostics</string>
     <string name="assistant_diagnostics_copied">Diagnostics copied</string>
     <string name="assistant_end_menu">End…</string>

@@ -32,6 +32,8 @@
   "change_inbox_signals": "“Tell a task's supervisor about new Inbox messages on it”: {before} → {after}",
   "title_main_supervises_own_tasks": "The main chat supervises its own tasks",
   "change_main_supervises_own_tasks": "“The main chat supervises its own tasks”: {before} → {after}",
+  "title_background_supervisor_keeps_context": "The background supervisor keeps every round in context",
+  "change_background_supervisor_keeps_context": "“The background supervisor keeps every round in context”: {before} → {after}",
   "title_model_tiers": "Agent presets",
   "change_model_tier": "{profile} · {tier}: {before} → {after}",
   "title_review_sample_percent": "Share of finished tasks to spot-check",

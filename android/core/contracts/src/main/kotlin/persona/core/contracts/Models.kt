@@ -437,6 +437,8 @@ data class Session(
     @SerialName("assistant") val assistant: Boolean = false,
     /** An assistant conversation put away (POST /api/v1/assistant/conversations/{id}/archive): kept, not listed. */
     @SerialName("archived") val archived: Boolean = false,
+    /** User-defined labels; null on an older hub and where the hub omits an empty set. */
+    @SerialName("tags") val tags: List<String>? = null,
     /** The manager it belongs to (docs/assistant/managers.md「Ownership」); null from an older hub: the default manager. */
     @SerialName("manager") val manager: String? = null,
     /**

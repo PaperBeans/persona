@@ -1180,6 +1180,11 @@ Use an invalidation revision as the task key and handle the flag after completio
     anything and `| --: |` drew leading (#3863). The cell aligns itself (`MarkdownTableText.alignments`, passed through the environment like the
     widths; the frame's alignment and `multilineTextAlignment`). Measure in the font the cells draw: tabular digits (`monospacedDigitSystemFont`
     with `FontDigitVariant(.monospaced)`), or a number measured in proportional digits can wrap at its last digit.
+  - A sideways `ScrollView` takes less height when it is offered less, a stack's paragraphs do not: the theme fixes them to their height
+    (`.paragraph`'s `fixedSize(horizontal: false, vertical: true)`), so a reply offered less than it needs gave the whole shortfall to the
+    table, cut under a row with the next paragraph drawn whole right under the cut (#10012). Fix every sideways scroll view in a reply
+    to its content's height the same way (table, code block); `ReplyBlockHeightTests` offers a reply less and compares heights. A
+    widened, narrowed or growing table already resized itself in that test; it did not reproduce on the simulator in the chat itself.
   - 表格尺寸已有共享缓存，不代表布局准备没有重活（2026-11-06，#5730）：先调用 `renderMarkdown()` 再查尺寸缓存，仍会每次序列化整张表。按完整 `MarkdownContent` 保留当前表的源文本和尺寸；字号变化只重测，内容变化同步替换，不能只按宽度或行数判断。
 - 代码高亮缓存超过上限时不能全表清空（2026-11-06，#5730）：用有界 LRU 保留仍在使用的块，键包含代码、语言和字号比例。300 项及 2 MiB 源文本 UTF-8 预算不是整个 `Text` 的内存上限；不把本来就跳过词法分析的 60,000 字节及以上纯文本块放进缓存，避免挤走昂贵的高亮热点。验证字号、内容、语言失效及冷项淘汰，不用帧率中位数代替持续达标。
 - Custom `Layout` `proposal.width` can be `.infinity`; check `isFinite` before `Int(...)` conversion or crash (Lark card columns).
