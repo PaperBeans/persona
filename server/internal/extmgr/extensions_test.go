@@ -137,6 +137,10 @@ func TestMain(m *testing.M) {
 		serveAgentSourceExtensionForTest()
 		return
 	}
+	if os.Getenv("PERSONA_TEST_PLUGIN") == "live" {
+		serveLiveExtensionForTest()
+		return
+	}
 	// The official market (#2351) is added only by the tests about it: the others' markets are their own.
 	extension.Official = extension.OfficialMarket{}
 	os.Exit(dbtest.Main(m))

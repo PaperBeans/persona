@@ -20,10 +20,11 @@ const mergedPlaces = `{"places":[{"id":"all","kind":"all","title":"","needs_you"
 	`"counts":{"open":2,"needs_you":1,"in_progress":0,"sections":{"needs_you":1,"can_wait":0,"working":0,` +
 	`"waiting":0,"todo":1,"just_finished":0,"someday":0,"done":0}}}`
 
-// The views, counts and places the shared to-do cases expect (spec/fixtures/todo-view and todo-counts, #10226) read
-// into the generated types (todo_view_gen.go) and write back as the same JSON: no field lost, renamed or added, and no
-// time written another way. What Go writes also holds to the schema (checkTodoView), so a required list or map is
-// never null, which a nil slice or map would be.
+// The views, counts and places the shared to-do cases expect (spec/fixtures/todo-view and todo-counts, #10226), and
+// the timelines, results and recaps (spec/fixtures/todo-rounds, #10465), read into the generated types
+// (todo_view_gen.go) and write back as the same JSON: no field lost, renamed or added, and no time written another
+// way. What Go writes also holds to the schema (checkTodoView), so a required list or map is never null, which a nil
+// slice or map would be.
 func TestTodoViewSamplesRoundTrip(t *testing.T) {
 	root := todoViewSchema(t)
 	samples := append(todoViewSamples(t),
@@ -55,7 +56,7 @@ func TestTodoViewSamplesRoundTrip(t *testing.T) {
 		}
 		seen[s.def] = true
 	}
-	for _, def := range []string{"TodoSummary", "TodoCounts", "TodoPlaces"} {
+	for _, def := range []string{"TodoSummary", "TodoCounts", "TodoPlaces", "TodoTimeline", "TodoResult", "TodoRecap"} {
 		if !seen[def] {
 			t.Errorf("no %s sample", def)
 		}
@@ -109,11 +110,12 @@ type todoViewSample struct {
 	raw        json.RawMessage
 }
 
-// todoViewSamples are the expected values of every todo-view and todo-counts case, with the definition each holds to.
+// todoViewSamples are the expected values of every todo-view, todo-counts and todo-rounds case, with the definition
+// each holds to.
 func todoViewSamples(t *testing.T) []todoViewSample {
 	t.Helper()
 	var out []todoViewSample
-	for _, domain := range []string{"todo-view", "todo-counts"} {
+	for _, domain := range []string{"todo-view", "todo-counts", "todo-rounds"} {
 		files, err := filepath.Glob(filepath.Join("..", "..", "..", "spec", "fixtures", domain, "*.json"))
 		if err != nil || len(files) == 0 {
 			t.Fatalf("spec/fixtures/%s: %v", domain, err)
@@ -127,9 +129,12 @@ func todoViewSamples(t *testing.T) []todoViewSample {
 				Cases []struct {
 					Name     string
 					Expected struct {
-						View   json.RawMessage `json:"view"`
-						Counts json.RawMessage `json:"counts"`
-						Places json.RawMessage `json:"places"`
+						View     json.RawMessage   `json:"view"`
+						Counts   json.RawMessage   `json:"counts"`
+						Places   json.RawMessage   `json:"places"`
+						Timeline json.RawMessage   `json:"timeline"`
+						Results  []json.RawMessage `json:"results"`
+						Recap    json.RawMessage   `json:"recap"`
 					}
 				}
 			}
@@ -139,10 +144,15 @@ func todoViewSamples(t *testing.T) []todoViewSample {
 			for _, c := range doc.Cases {
 				where := fmt.Sprintf("%s/%s %s", domain, filepath.Base(f), c.Name)
 				for def, raw := range map[string]json.RawMessage{"TodoSummary": c.Expected.View,
-					"TodoCounts": c.Expected.Counts, "TodoPlaces": c.Expected.Places} {
+					"TodoCounts": c.Expected.Counts, "TodoPlaces": c.Expected.Places,
+					"TodoTimeline": c.Expected.Timeline, "TodoRecap": c.Expected.Recap} {
 					if raw != nil {
 						out = append(out, todoViewSample{def: def, where: where + " " + def, raw: raw})
 					}
+				}
+				for i, raw := range c.Expected.Results {
+					out = append(out, todoViewSample{def: "TodoResult", where: fmt.Sprintf("%s TodoResult %d", where, i),
+						raw: raw})
 				}
 			}
 		}

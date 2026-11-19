@@ -59,7 +59,14 @@ What `release.sh` does:
    with the watch App embedded.
 3. `check_bundle_strings.py` checks `Persona.app` and `Persona.app/Watch/Persona.app`: `*UsageDescription` in Info.plist
    must not be empty or equal to the key, and the same for `*.lproj/InfoPlist.strings` (placeholder text gets auto-rejected by App Review).
-4. `strings` checks that the Release binary contains none of the simulator switches that exist only under `#if DEBUG`, such as `pairURL`, `openSession`, `showNewChat`.
+4. `debug_switches.py check` reads the Release binary's `strings` and fails when a line equals one of the simulator switches that exist only under `#if DEBUG`, such as `pairURL`, `openSession`, `showNewChat`,
+   or when a line contains a name of the DEBUG runtime CLI (`runtimeCLI`, `RuntimeCLI`, the accessibility hooks it turns on; `docs/operations/runtime-cli.md`).
+   It reads all of the output: under `set -o pipefail`, `if strings … | grep -q …` passed when the match came early, since `strings` dies of SIGPIPE once grep stops reading (#10654).
+   The switches are listed one per line, sorted and without duplicates, in `scripts/release/debug_switches.txt`: a new switch is one line there, never an edit to `release.sh`.
+   `.gitattributes` merges the file with `merge=union`, so two branches that each add a switch merge cleanly; when both added theirs in the same place the result can be out of order,
+   which `scripts/release/test_debug_switches.py` reports and `python3 scripts/release/debug_switches.py sort` fixes. A union merge can also bring back a name another branch removed, so check union merges that delete names.
+   Comments go in the file's header; the checker refuses a comment or a blank line below the first name. The list is kept by hand rather than read from the Swift sources:
+   switches are read in many shapes (UserDefaults `forKey:` on the standard store or a local alias, arrays of keys, `ProcessInfo` arguments), DEBUG code also reads settings keys that do ship, and the list keeps retired switches.
    `check_bundle_privacy.py` checks that the whole bundle has no personal values (external testing is a public link, see the end).
 5. `xcodebuild -exportArchive`: manual signing + `method=app-store-connect` + the two profile mappings. **This step is the App Store signing**:
    the archive uses automatically signed development profiles (so `aps-environment` in the archive is `development`), and export re-signs with the App Store profiles to

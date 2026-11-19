@@ -341,7 +341,19 @@ def verification_env():
     # step, so it explicitly clears the linker flag. Explicit GOFLAGS wins.
     if "GOFLAGS" not in env:
         env["GOFLAGS"] = "-gcflags=all=-dwarf=false -ldflags=-w"
+    env["GOFLAGS"] = with_trimpath(env["GOFLAGS"])
     return env
+
+
+def with_trimpath(goflags):
+    """GOFLAGS with -trimpath added unless it already sets the flag (-trimpath=false included).
+
+    Without -trimpath Go's build cache key includes each package's absolute directory, so every PR worktree would
+    compile and cache every package again (#10614; scripts/test/go_trimpath.sh is the shell scripts' copy).
+    """
+    if any(flag.lstrip("-").split("=", 1)[0] == "trimpath" for flag in goflags.split()):
+        return goflags
+    return (goflags + " -trimpath").strip()
 
 
 def atomic_json(path, data):

@@ -185,6 +185,36 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                 self.assertEqual(seen[key] & 0o022, 0, f"{key} is {seen[key]:o}")
             self.assertEqual(after, 0o002, "the runner's own umask is restored")
 
+    def test_go_flags_keep_the_effective_value_and_add_trimpath(self):
+        # The temporary HOME hides a `go env -w GOFLAGS`: the launcher resolves it first and passes it on with
+        # -trimpath, so checkouts share compiled packages (#10614).
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "hub.json"
+            config.write_text(json.dumps({"database_url": "postgres://user:synthetic@localhost/persona"}))
+            caches = {key: str(root / key.lower()) for key in ("GOCACHE", "GOMODCACHE", "GOPATH")}
+            for effective, expected in ((None, "-trimpath"), ("", "-trimpath"), ("-mod=mod", "-mod=mod -trimpath"),
+                                        ("-trimpath=false", "-trimpath=false")):
+                seen = {}
+
+                def run(command, **kwargs):
+                    if command[:2] == ["go", "env"]:
+                        seen["query"] = command
+                        values = dict(caches) if effective is None else dict(caches, GOFLAGS=effective)
+                        return subprocess.CompletedProcess(command, 0, json.dumps(values))
+                    seen["GOFLAGS"] = kwargs["env"].get("GOFLAGS")
+                    return subprocess.CompletedProcess(command, 0)
+
+                with self.subTest(effective=effective), mock.patch.object(ISOLATION.subprocess, "run", side_effect=run):
+                    self.assertEqual(ISOLATION.run_tests(config, ["go", "test"], {"PATH": "/usr/bin"}), 0)
+                    self.assertIn("GOFLAGS", seen["query"])
+                    self.assertEqual(seen["GOFLAGS"], expected)
+            result = subprocess.CompletedProcess(["go", "env"], 0, json.dumps(dict(caches, GOFLAGS=["-trimpath"])))
+            with mock.patch.object(ISOLATION.subprocess, "run", return_value=result) as run:
+                with self.assertRaises(ValueError):
+                    ISOLATION.run_tests(config, ["go", "test"], {"PATH": "/usr/bin"})
+                self.assertEqual(run.call_count, 1)
+
     def test_cache_failure_never_starts_the_test_command(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "hub.json"

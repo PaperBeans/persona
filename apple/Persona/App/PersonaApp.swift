@@ -424,6 +424,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         AppModel.shared.start()
         AppIconBadgeWatcher.shared.start(AppModel.shared)
         LiveActivityController.shared.start()
+        // A hub that retired this device's push registration answers its writes 409 (#9612): register again, then retry.
+        APIClient.onPushRegistrationRequired = { group in await PushRegistrar.shared.registrationRequired(group: group).value }
         if !automation { PushRegistrar.shared.registerIfPossible() }
         return true
     }

@@ -24450,6 +24450,29 @@
       },
       "extractionState" : "manual"
     },
+    "Antigravity Settings" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Antigravity Settings"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Antigravity設定"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Antigravity 设置"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Any Computer [Home Widgets]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -176084,6 +176107,29 @@
       },
       "extractionState" : "manual"
     },
+    "This edits ~/.gemini/antigravity-cli/settings.json on that machine and changes only the settings below. New Antigravity (agy) sessions pick them up." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This edits ~/.gemini/antigravity-cli/settings.json on that machine and changes only the settings below. New Antigravity (agy) sessions pick them up."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "そのマシンの~/.gemini/antigravity-cli/settings.jsonのうち、下の項目だけを変更します。新しいAntigravity（agy）セッションに反映されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "改的是那台机器的 ~/.gemini/antigravity-cli/settings.json，只动下面这几项；新开的 Antigravity (agy) 会话生效。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "This email is long, so only the beginning was translated. See the original for the full text." : {
       "localizations" : {
         "en" : {
@@ -205992,19 +206038,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agent Claude Code Codex session triage runtime"
+            "value" : "Agent Claude Code Codex Antigravity agy session triage runtime"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agent Claude Code Codex 会话 分诊 运行时"
+            "value" : "Agent Claude Code Codex Antigravity agy 会话 分诊 运行时"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agent Claude Code Codex セッション トリアージ ランタイム"
+            "value" : "Agent Claude Code Codex Antigravity agy セッション トリアージ ランタイム"
           }
         }
       }

@@ -99,6 +99,12 @@ not screen reading or typing into the terminal. Panes it cannot join retain the 
   - Async questions (`request_user_input_async`) are messages, not requests. Recognize them from rollout as before ("Questions and approvals"); send the answer envelope as an app-server message (`turn/start` / `turn/steer`).
   - Phone messages use `turn/start` when idle or `turn/steer` with the current turn while working (for a turn already running before connection, read it once with `thread/read`).
     No terminal typing: computer input drafts stay untouched, neither swallowed nor mixed into the message.
+  - `/compact` alone (spaces around it allowed, no photos) compacts the thread with `thread/compact/start`, the call the TUI's own `/compact` makes (#10188, `node/codex_remote_compact.go`).
+    The app-server runs no slash commands: sent as a turn, `/compact` reached the model as words. Codex writes the rollout's `compacted` line and its `ContextCompaction` item, so the session shows
+    the same "Context compacted" notice as a terminal compaction and no user message. While a turn runs it is refused with `codex_compact_busy`, nothing sent and nothing steered: Codex's compaction
+    replaces a running turn instead of waiting for it, and the TUI refuses `/compact` mid-turn too. A thread the node last saw resting is read again (`thread/read`) just before, so a turn
+    begun at the computer since is not cut short; an app-server without the method refuses it (`codex_refused`). Anything more (`/compact now`, a photo) is a message as before. Other slash
+    commands still go to the model as text; panes on the terminal route type `/compact` into the TUI as before.
   - The thread's turn on the app-server counts over herdr's state: a pane herdr calls done / idle / unknown is listed Working while the app-server runs a turn in it,
     from the reply to `turn/start` on (#4865, `docs/protocol/agent-states.md`, "Codex").
   - Thinking effort can be changed on the phone (permission mode cannot); see "Thinking effort" below.
@@ -112,7 +118,7 @@ not screen reading or typing into the terminal. Panes it cannot join retain the 
   Persona does not block the TUI: requests also go to it, so users can answer on the computer at any time.
 - **Visible routing**: sessions carry `codex_route` (`app_server` / `terminal`) and `codex_route_note` (why terminal). The App's "Session Info" shows "Connection: app-server (structured)"
   or "Terminal (screen reading)" plus the reason. Node logs record every successful / failed join.
-- **Tests**: `node/codex_daemon_test.go` (auto-join on a synthetic app-server, messages, async answers, approval cards, denial reasons, join retry, socket alias);
+- **Tests**: `node/codex_daemon_test.go` (auto-join on a synthetic app-server, messages, async answers, approval cards, denial reasons, join retry, socket alias), `node/codex_remote_compact_test.go` (`/compact`);
   real Codex: `scripts/test/test-codex.sh` with `PERSONA_CODEX_DAEMON_BINS` (`docs/operations/testing.md`, "Codex integration"), starts a test-only `codex app-server --listen unix://…` in isolated herdr
   (does not touch the active daemon; node discovery is disabled and recognizes only this one), with the TUI connected using `--remote`.
 

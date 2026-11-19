@@ -117,6 +117,10 @@ type channel struct {
 	lostAt        time.Time  // since when no transport carries it; zero while one does
 	progress      time.Time  // when the phone last acknowledged something, or the channel last moved or started sending
 	finished      bool
+	// unread is the active transport when the node moved the channel there by itself off a UDP flow, or on from such a
+	// route, and no use from the phone has come since (#10007). The phone ignores the channel's TCP data while it takes
+	// a flow to carry it, so its next use counts as a move even on this route. Nil otherwise.
+	unread *transport
 
 	// Phone → node, written to local under umu in order; recv is the next offset expected (written under umu, read
 	// anywhere).
@@ -651,15 +655,16 @@ func (s *Session) ageLocked(ch *channel) time.Duration {
 }
 
 // moveLocked has t carry ch from off on (what the phone has). A video backlog older than VideoBacklog is dropped and
-// the stream goes on at a new keyframe; RFB is always sent on exactly from off.
+// the stream goes on at a new keyframe; RFB is always sent on exactly from off. A use on the route the node already
+// moved ch to off a flow is a move too: the phone dropped what came there meanwhile (unread).
 func (s *Session) moveLocked(ch *channel, t *transport, off uint64) bool {
 	if !s.ackedLocked(ch, off) {
 		return false
 	}
-	moved := ch.active != t
-	ch.active, ch.lostAt = t, time.Time{}
+	moved := ch.active != t || ch.unread == t
+	ch.active, ch.lostAt, ch.unread = t, time.Time{}, nil
 	if !moved {
-		return true // the same route: what it has in flight still arrives
+		return true // the same route, which the phone reads: what it has in flight still arrives
 	}
 	ch.sent, ch.progress = ch.base, s.now()
 	ch.resetOut = false // the new route owes an unconfirmed reset itself; the old writer no longer holds one
@@ -917,12 +922,18 @@ func (s *Session) lose(t *transport) {
 		if ch.active != t || ch.finished {
 			continue
 		}
+		// Until the phone itself leaves a flow, it reads none of the channel's TCP data: off a flow, the next route goes
+		// unread until the phone's use, and so does any route the node moves the channel to by itself before that.
+		unread := t.flow != nil || ch.unread == t
 		if p := t.parent; p != nil && !p.dead && !p.pending {
 			s.moveLocked(ch, p, ch.base) // off a UDP flow: onto its own TLS route first
 		} else if alt := s.fallbackLocked(ch); alt != nil {
 			s.moveLocked(ch, alt, ch.base)
 		} else {
 			ch.active, ch.lostAt = nil, now
+		}
+		if unread {
+			ch.unread = ch.active
 		}
 	}
 	if s.noRelaySince.IsZero() && !s.hasRelayLocked() {

@@ -385,5 +385,5 @@ DEBUG launch arguments for screenshots and recordings:
 - `-showPersonaState idle|thinking|working|needs_you|offline`: pin the shell's top-left avatar to one state.
 - `-showAvatarCrop <image path>` (with `-tab settings -openAppearance persona`; `-showAvatarCropName <name>` fills the name): the New from Photo crop sheet with that image. `-showAvatarDelete <id>`: the confirmation before deleting that uploaded avatar, as its corner button opens it. Mock: `MOCK_LOOK_UPLOADS=demo` (one uploaded avatar, `u-demo0001`), `MOCK_LOOK_UPLOADS=off` (a hub without them), `MOCK_LOOK_UPLOAD_FILES=fail` (avatars it makes are listed but their files answer 503: the sheet's Try Again).
 
-Following the CLAUDE.md convention, launch argument names start with `open…` / `show…` and are added to the list in `release.sh`.
+Following the CLAUDE.md convention, launch argument names start with `open…` / `show…` and are added to `scripts/release/debug_switches.txt`.
 - `-tab assistant -openAssistantPage avatars`: every avatar's picture and five states, once in light and once in dark.

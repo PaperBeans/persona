@@ -207,13 +207,14 @@ The full list is in `docs/lessons/`; read the file for the area you touch first.
 
 - **Several Agents share this repository**: work in your own worktree from `origin/main`, stage only your files, and check that
   `git diff origin/main...HEAD --stat` lists only them before pushing. Use your own simulator and mock hub port (check with `lsof`; stop a
-  mock by its port, never `pkill -f mock_hub.py`). Look at every worktree before picking a database migration number (`docs/lessons/workflow.md`).
+  mock by its port, never `pkill -f mock_hub.py`). Name a new database migration by its UTC second, `$(date -u +%Y%m%d%H%M%S)_<name>.sql`,
+  never a hand-picked number (`docs/lessons/workflow.md`).
 - Scripts that wait for background jobs or logs always have a timeout and end with a one-line verdict on success, failure and timeout.
 - **Simulators only through `scripts/app/sim-boot.sh`** (`--profile default|watch|live-activity|stock`, slimmed by default); never
   `simctl create/boot` or `-destination name=…`, and never reboot someone else's. A failure only on a slim simulator gets rerun on
   `--profile stock` first; a "no system prompt appeared" test proves something only on stock. UI tests launch with `app.launchPinned()` (`docs/operations/testing.md`).
 - A DEBUG launch argument's name must not equal any Swift identifier, or `release.sh`'s strings check blocks TestFlight: name switches
-  `open…` / `show…` and add them to the list in `scripts/release/release.sh`.
+  `open…` / `show…` and add each on its own line, in order, to `scripts/release/debug_switches.txt`.
 - Release builds need `SWIFT_REFLECTION_METADATA_LEVEL = all`, or every App Intents / Shortcuts parameter is empty and the app crashes;
   Debug and the simulator never show it (`docs/lessons/ios.md`).
 - A missing keychain group shared with extensions silently falls back on devices but works in the simulator: release ipas must pass

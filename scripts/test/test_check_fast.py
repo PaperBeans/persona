@@ -499,6 +499,37 @@ class CheckFastScriptsTests(unittest.TestCase):
                 self.assertIn("FAIL     scripts/ci/test_changed_ratchets.py", out)
                 self.assertIn("FAIL     scripts/test/test_merge_pr_sh.py", out)
 
+    def test_a_go_trimpath_change_also_runs_the_suites_of_its_callers(self):
+        # server.sh and check-fast.sh compose GOFLAGS with the helper (#10614); test_ci.py and this suite run them.
+        helper = "scripts/test/go_trimpath.sh"
+        self.commit_on_top(helper, "#!/bin/sh\nprintf '%s\\n' -trimpath\n", "base")
+        for suite in ("scripts/test/test_go_trimpath.py", "scripts/ci/test_ci.py", "scripts/test/test_check_fast.py"):
+            self.commit_on_top(suite, FAILING, "base")
+        self.write(helper, "#!/bin/sh\n# changed\nprintf '%s\\n' -trimpath\n")
+        code, out = self.check_fast()
+        self.assertEqual(1, code, out)
+        self.assertIn("FAIL     scripts/test/test_go_trimpath.py", out)
+        self.assertIn("FAIL     scripts/ci/test_ci.py", out)
+        self.assertIn("FAIL     scripts/test/test_check_fast.py", out)
+
+    def test_the_debug_switch_list_and_its_checker_run_the_suites_that_read_them(self):
+        # debug_switches.txt matches no script name, yet a union merge can leave it out of order (#10616) and a new
+        # name can equal one that ships; the checker and release.sh, which runs it, are tested by the same suites.
+        self.commit_on_top("scripts/release/test_debug_switches.py", FAILING, "base")
+        self.commit_on_top("scripts/release/test_release_debug_guard.py", FAILING, "base")
+        self.break_suite("test_apple_release_switch_names.py")
+        for path in ("scripts/release/debug_switches.txt", "scripts/release/debug_switches.py",
+                     "scripts/release/release.sh"):
+            with self.subTest(path=path):
+                self.write(path, "changed\n")
+                code, out = self.check_fast()
+                (self.repo / path).unlink()
+                self.assertEqual(1, code, out)
+                self.assertIn("FAIL     scripts/release/test_debug_switches.py", out)
+                self.assertIn("FAIL     scripts/release/test_release_debug_guard.py", out)
+                self.assertIn("FAIL     scripts/test/test_apple_release_switch_names.py", out)
+                self.assertNotIn("scripts/tools/test_other.py", out)
+
     def test_a_migration_edit_runs_the_freeze_check(self):
         self.write("scripts/ci/migration_freeze.py", "print('freeze-ran')\n")
         self.write("server/internal/db/migrations/hub/0001_init.sql", "CREATE TABLE t (id int);\n")
@@ -762,6 +793,26 @@ class CheckFastServerInputsTests(unittest.TestCase):
         self.assertEqual([], self.guard_calls(), out)
         self.assertNotIn("repo-wide guards", out)
 
+    def test_go_runs_with_trimpath_and_the_callers_flags(self):
+        # Worktrees share compiled packages only under -trimpath (#10614): check-fast adds it with
+        # scripts/test/go_trimpath.sh, which keeps a user-set GOFLAGS.
+        shutil.copy(ROOT / "scripts/test/go_trimpath.sh", self.repo / "scripts/test/go_trimpath.sh")
+        self.git("add", "-A")
+        self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "helper")
+        self.git("tag", "-f", "base")
+        # This go answers go env GOFLAGS as the real one does and records the GOFLAGS of every other call.
+        (self.go_log.parent / "go").write_text(
+            '#!/bin/sh\n[ "$*" = "env GOFLAGS" ] && { printf "%s\\n" "$GOFLAGS"; exit 0; }\n'
+            'printf "%s|%s|%s\\n" "${PWD##*/}" "$GOFLAGS" "$*" >> "$FAKE_GO_LOG"\n')
+        self.env["GOFLAGS"] = "-mod=readonly"
+        self.write("server/internal/foo/x.go", "package foo\n")
+        self.check_fast()
+        calls = [line.split("|", 2) for line in self.go_log.read_text().splitlines()]
+        tests = [call for call in calls if call[0] == "server" and call[2].startswith("test ")]
+        self.assertEqual(3, len(tests), calls)  # the package and the two guard calls
+        for _, goflags, _ in tests:
+            self.assertEqual("-mod=readonly -trimpath", goflags)
+
 
 # A privacy-scan stub that never finishes on its own: it records its own pid, its parent's (the GNU timeout that runs
 # it) and a sleeping child's, then waits.
@@ -870,33 +921,84 @@ class CheckFastSignalTests(unittest.TestCase):
         self.interrupt(signal.SIGHUP, 129, group=True)
 
 
-def web_lane_inputs():
-    """The paths outside web/ that select CI's web lane in scripts/ci/paths.py, minus CI's own runner files.
-
-    scripts/ci/web.sh and the workflow decide how CI runs the web checks, not what typecheck and vitest read, so a change
-    to one of them does not need the local web check.
-    """
-    spec = importlib.util.spec_from_file_location("ci_paths", ROOT / "scripts/ci/paths.py")
-    paths = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(paths)
-    return [p for p in paths.FILTERS["web"] if not p.startswith(("web/", "scripts/ci/", ".github/"))]
+def load_paths(root=ROOT):
+    """scripts/ci/paths.py under root, loaded fresh: its ROOT, and so its scan, is that tree's."""
+    spec = importlib.util.spec_from_file_location(f"ci_paths_{abs(hash(str(root)))}", Path(root) / "scripts/ci/paths.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-# A fake node that reports major version 22 (check-fast.sh's gate) and passes anything else, and a fake npm that
-# records each call ("<cwd basename>|<args>") instead of installing or testing anything.
+# A fake node that reports major version 22 (check-fast.sh's gate) and passes anything else, and a fake npm and npx
+# that record each call ("<cwd basename>|<args>", npx's as "npx <args>") instead of installing or testing anything.
 FAKE_NODE = '#!/bin/sh\nif [ "$1" = -e ]; then echo 22; fi\n'
 FAKE_NPM = '#!/bin/sh\nprintf "%s|%s\\n" "${PWD##*/}" "$*" >> "$FAKE_NPM_LOG"\n'
+FAKE_NPX = '#!/bin/sh\nprintf "%s|npx %s\\n" "${PWD##*/}" "$*" >> "$FAKE_NPM_LOG"\n'
+VITEST_RELATED = "web|npx --no -- vitest related --run --passWithNoTests "
+WEB_FULL = ["web|run check:deps", "web|run typecheck", "web|test"]
+
+# A web tree that reads files outside web/ in each form the scan knows (#10619). reads.test.ts reads through fs and a
+# Vite glob, so it always runs; build.test.mjs builds through a Vite config, whose reads no import of the test shows,
+# so it always runs too; tiers.ts is a module that reads through fs, so its importers always run; stream.ts and
+# frame-host.ts read through Vite query imports, so they join when a file they name changes.
+WEB_TREE = {
+    "web/src/lib/reads.test.ts": (
+        'import { readFileSync } from "node:fs";\n'
+        'import { join } from "node:path";\n'
+        'import cases from "../../../spec/fixtures/forward/cases.json";\n'
+        'const now = readFileSync(join(__dirname, "../../../spec/fixtures/inbox", "now.json"), "utf8");\n'
+        'const events = readFileSync(new URL("../../../scripts/mock/inbox_events.json", import.meta.url), "utf8");\n'
+        'const views = import.meta.glob("../../../schema/extension/examples/assistant/*.json", { eager: true });\n'
+        'const view = (name: string) => readFileSync(new URL(`../../../schema/extension/examples/View.v8-${name}.json`, import.meta.url));\n'
+        'const joined = join(__dirname, "..", "..", "..", "spec", "fixtures", "joined", "x.json");\n'
+        '// Comments name spec/fixtures/other without reading it.\n'),
+    "web/scripts/build.test.mjs": ('import { build } from "vite";\n'
+                                   'await build({ configFile: new URL("../vite.config.ts", import.meta.url).pathname });\n'),
+    "web/src/lib/tiers.ts": ('import { readdirSync } from "node:fs";\n'
+                             'export const root = new URL("../../../spec/fixtures/tiers/", import.meta.url);\n'),
+    "web/src/lib/stream.ts": 'import schema from "../../../schema/extension/stream.schema.json?raw";\nexport default schema;\n',
+    "web/src/lib/frame-host.ts": 'import FRAME from "./frame.js?raw";\nexport default FRAME;\n',
+    "web/src/lib/frame.js": "parent.postMessage('ready');\n",
+    "web/src/views/View.tsx": "export const View = () => null;\n",
+    "web/src/views/View.test.tsx": 'import { View } from "./View";\n',
+    "web/src/lib/store.ts": "export const store = {};\n",
+    "web/src/i18n/index.ts": "export const t = (key: string) => key;\n",
+    "web/src/startup.ts": "export const startup = 1;\n",
+    "web/vite.config.ts": 'import { startup } from "./src/startup";\nexport default { startup };\n',
+    "spec/fixtures/forward/cases.json": "{}\n",
+    "spec/fixtures/inbox/now.json": "{}\n",
+    "spec/fixtures/tiers/a.json": "{}\n",
+    "spec/fixtures/other/x.json": "{}\n",
+    "scripts/mock/inbox_events.json": "{}\n",
+    "schema/extension/examples/assistant/a.json": "{}\n",
+    "schema/extension/stream.schema.json": '{"$ref": "view.schema.json#/$defs/View"}\n',
+    "schema/extension/view.schema.json": '{"$ref": "#/$defs/View"}\n',
+    "schema/extension/connector.schema.json": "{}\n",
+}
+# What paths.py derives from WEB_TREE: every path named relative to the file that leads out of web/; a directory, a
+# glob or a ${…} part as everything under its literal part; a JSON Schema with the files its $refs name.
+WEB_TREE_INPUTS = [
+    "schema/extension/examples/View.v8-*", "schema/extension/examples/assistant/*",
+    "schema/extension/stream.schema.json", "schema/extension/view.schema.json",
+    "scripts/mock/inbox_events.json",
+    "spec/fixtures/forward/cases.json", "spec/fixtures/inbox/**", "spec/fixtures/joined/x.json",
+    "spec/fixtures/tiers/**",
+]
+# The files every related run starts from on top of the changed ones, relative to web/.
+WEB_TREE_READERS = ["scripts/build.test.mjs", "src/lib/reads.test.ts", "src/lib/tiers.ts"]
 
 
 @unittest.skipUnless(shutil.which("timeout") or shutil.which("gtimeout"), "check-fast.sh needs GNU timeout")
 class CheckFastWebInputsTests(unittest.TestCase):
-    """Repository files outside web/ that web/src and its vitest suite read run the web check when they change."""
+    """The web check runs on the files web/src and its tests read, and picks its tests by what changed (#10619)."""
 
     def setUp(self):
         self.repo = Path(tempfile.mkdtemp(prefix="check-fast-test-"))
         self.addCleanup(shutil.rmtree, self.repo)
         (self.repo / "scripts/test").mkdir(parents=True)
+        (self.repo / "scripts/ci").mkdir(parents=True)
         shutil.copy(ROOT / "scripts/test/check-fast.sh", self.repo / "scripts/test/check-fast.sh")
+        shutil.copy(ROOT / "scripts/ci/paths.py", self.repo / "scripts/ci/paths.py")
         self.write("scripts/privacy_check.py", "print('clean')\n")
         self.write("scripts/test/test_extension_schema.py", "")
         self.write("scripts/test/test_sdk_bundle.py", "")
@@ -907,6 +1009,8 @@ class CheckFastWebInputsTests(unittest.TestCase):
         self.write("web/package.json", "{}\n")
         self.write("schema/other.json", "{}\n")
         self.write("docs/guide.md", "guide\n")
+        for path, text in WEB_TREE.items():
+            self.write(path, text)
         self.git("init", "-q")
         self.git("add", "-A")
         self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "base")
@@ -916,7 +1020,7 @@ class CheckFastWebInputsTests(unittest.TestCase):
         self.write(".git/info/exclude", "web/node_modules/\n")
         bin_dir = Path(tempfile.mkdtemp(prefix="check-fast-bin-"))
         self.addCleanup(shutil.rmtree, bin_dir)
-        for name, text in (("node", FAKE_NODE), ("npm", FAKE_NPM), ("go", FAKE_GO)):
+        for name, text in (("node", FAKE_NODE), ("npm", FAKE_NPM), ("npx", FAKE_NPX), ("go", FAKE_GO)):
             (bin_dir / name).write_text(text)
             (bin_dir / name).chmod(0o755)
         self.npm_log = bin_dir / "npm.log"
@@ -931,46 +1035,126 @@ class CheckFastWebInputsTests(unittest.TestCase):
     def git(self, *args):
         subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True)
 
-    def check_fast(self):
+    def restore(self):
+        """Back to the committed tree: tracked files reset, new ones removed (the ignored node_modules stays)."""
+        self.git("reset", "-q", "--hard")
+        self.git("clean", "-fdq")
+
+    def check_fast(self, *args, code=0):
         self.npm_log.unlink(missing_ok=True)
-        run = subprocess.run(["bash", "scripts/test/check-fast.sh", "--base", "base"], cwd=self.repo, env=self.env,
-                             capture_output=True, text=True, timeout=300)
+        run = subprocess.run(["bash", "scripts/test/check-fast.sh", *(args or ("--base", "base"))], cwd=self.repo,
+                             env=self.env, capture_output=True, text=True, timeout=300)
         out = run.stdout + run.stderr
-        self.assertEqual(0, run.returncode, out)
+        if code is not None:
+            self.assertEqual(code, run.returncode, out)
         return out, self.npm_log.read_text().splitlines() if self.npm_log.exists() else []
 
-    def test_every_web_lane_input_runs_web(self):
-        inputs = web_lane_inputs()
-        self.assertIn("scripts/mock/inbox_events.json", inputs)  # paths.py still has the shape this test reads
-        for pattern in inputs:
+    def related(self, changed, *readers):
+        """The npm and npx calls of a related run from a changed file (relative to web/), then WEB_TREE_READERS and
+        the other readers given, in path order."""
+        return ["web|run check:deps", "web|run typecheck",
+                VITEST_RELATED + " ".join([changed, *sorted({*WEB_TREE_READERS, *readers})])]
+
+    def test_the_inputs_are_derived_from_what_web_reads(self):
+        paths = load_paths(self.repo)
+        self.assertEqual(WEB_TREE_INPUTS, paths.web_inputs())
+        # CI's web lane runs on the same inputs, and on nothing else outside web/ but its own runner files.
+        self.assertEqual(["web/**", *WEB_TREE_INPUTS, "scripts/ci/web.sh", ".github/workflows/web-test.yml"],
+                         paths.FILTERS["web"])
+        run = subprocess.run([sys.executable, "scripts/ci/paths.py", "--web-inputs"], cwd=self.repo,
+                             capture_output=True, text=True, timeout=60, check=True)
+        self.assertEqual(WEB_TREE_INPUTS, run.stdout.splitlines())
+
+    def test_every_derived_input_runs_the_related_web_tests(self):
+        paths = load_paths(self.repo)
+        for pattern in WEB_TREE_INPUTS:
             with self.subTest(pattern=pattern):
                 sample = pattern.replace("**", "sample.json").replace("*", "sample")
                 self.assertTrue(fnmatch.fnmatchcase(sample, pattern), sample)
+                self.assertTrue(paths.select([sample])["web"], sample)
                 self.write(sample, '{"changed": true}\n')
                 try:
                     out, npm_calls = self.check_fast()
                 finally:
-                    (self.repo / sample).unlink()
+                    self.restore()
                 self.assertIn("queued: web\n", out)
-                self.assertEqual(["web|run check:deps", "web|run typecheck", "web|test"], npm_calls, out)
+                self.assertIn("check-fast: web tests: vitest related, 1 changed file(s)", out)
+                expected = self.related(f"../{sample}")
+                if pattern.endswith(".schema.json"):
+                    expected = self.related(f"../{sample}", "src/lib/stream.ts")  # stream.ts reads it through ?raw
+                self.assertEqual(expected, npm_calls, out)
                 self.assertNotIn("no fast check maps to", out)
 
+    def test_a_view_change_runs_its_related_tests_and_the_readers(self):
+        self.write("web/src/views/View.tsx", "export const View = () => 'changed';\n")
+        out, npm_calls = self.check_fast()
+        self.assertIn("check-fast: web tests: vitest related, 1 changed file(s) and 3 that read files from disk", out)
+        self.assertEqual(self.related("src/views/View.tsx"), npm_calls, out)
+        self.assertIn("PASS     web", out)
+
+    def test_a_file_a_module_reads_through_vite_brings_that_module(self):
+        # vitest related never follows frame-host.ts's ?raw import to frame.js, so the plan names frame-host.ts itself.
+        self.write("web/src/lib/frame.js", "parent.postMessage('changed');\n")
+        _, npm_calls = self.check_fast()
+        self.assertEqual(self.related("src/lib/frame.js", "src/lib/frame-host.ts"), npm_calls)
+
+    def test_shared_entry_points_and_configs_run_the_whole_suite(self):
+        for path, reason in (("web/src/lib/store.ts", "web/src/lib/store.ts is a shared entry point"),
+                             ("web/src/i18n/index.ts", "web/src/i18n/index.ts is a shared entry point"),
+                             ("web/vite.config.ts", "web/vite.config.ts is outside web/src"),
+                             ("web/src/startup.ts", "web/src/startup.ts is part of the Vite config"),
+                             ("web/tsconfig.json", "web/tsconfig.json is outside web/src")):
+            with self.subTest(path=path):
+                self.write(path, "// changed\n")
+                try:
+                    out, npm_calls = self.check_fast()
+                finally:
+                    self.restore()
+                self.assertIn(f"check-fast: web tests: the whole suite, {reason}", out)
+                self.assertEqual(WEB_FULL, npm_calls, out)
+        # A changed lock file also reinstalls node_modules first.
+        self.write("web/package-lock.json", "{}\n")
+        out, npm_calls = self.check_fast()
+        self.assertIn("check-fast: web tests: the whole suite, web/package-lock.json is outside web/src", out)
+        self.assertEqual(["web|ci", *WEB_FULL], npm_calls, out)
+
+    def test_all_runs_the_whole_web_suite(self):
+        self.write("web/src/views/View.tsx", "export const View = () => 'changed';\n")
+        # --all also runs checks this tree has no files for; only the web check's calls matter here.
+        out, npm_calls = self.check_fast("--all", code=None)
+        self.assertIn("queued: web\n", out)
+        self.assertEqual(WEB_FULL, npm_calls, out)
+
+    def test_without_the_plan_a_web_change_runs_the_whole_suite(self):
+        self.write("scripts/ci/paths.py", "raise SystemExit('broken on purpose')\n")
+        self.write("web/src/views/View.tsx", "export const View = () => 'changed';\n")
+        out, npm_calls = self.check_fast()
+        self.assertIn("INFO  web plan: python3 scripts/ci/paths.py --web-plan failed (broken on purpose)", out)
+        self.assertEqual(WEB_FULL, npm_calls, out)
+
     def test_web_inputs_keep_their_other_checks(self):
-        self.write("schema/extension/examples/x.json", "{}\n")
+        self.write("schema/extension/examples/assistant/a.json", '{"changed": true}\n')
         out, _ = self.check_fast()
         self.assertIn("queued: web\n", out)
         self.assertIn("queued: extension schema", out)  # the schema/ mapping still applies
-        (self.repo / "schema/extension/examples/x.json").unlink()
-        self.write("scripts/mock/inbox_events.json", "{}\n")
+        self.restore()
+        self.write("scripts/mock/inbox_events.json", '{"changed": true}\n')
         out, _ = self.check_fast()
         self.assertIn("queued: web\n", out)
         self.assertIn("queued: pr-needs-issue workflow test", out)  # the scripts/ mapping still applies
 
-    def test_other_schema_files_do_not_run_web(self):
-        self.write("schema/other.json", '{"changed": true}\n')
-        out, npm_calls = self.check_fast()
-        self.assertNotIn("queued: web\n", out)
-        self.assertEqual([], npm_calls, out)
+    def test_files_web_does_not_read_do_not_run_web(self):
+        # Another schema, a fixture only a comment names, a schema no named schema's $refs reach, a doc.
+        for path in ("schema/other.json", "spec/fixtures/other/x.json", "schema/extension/connector.schema.json",
+                     "docs/guide.md"):
+            with self.subTest(path=path):
+                self.write(path, '{"changed": true}\n')
+                try:
+                    out, npm_calls = self.check_fast()
+                finally:
+                    self.restore()
+                self.assertNotIn("queued: web\n", out)
+                self.assertEqual([], npm_calls, out)
 
     def test_rename_out_of_web_still_queues_web(self):
         self.write("web/src/old.ts", "export const old = 1;\n")
@@ -983,13 +1167,65 @@ class CheckFastWebInputsTests(unittest.TestCase):
 
         out, npm_calls = self.check_fast()
         self.assertIn("queued: web\n", out)
-        self.assertEqual(["web|run check:deps", "web|run typecheck", "web|test"], npm_calls, out)
+        self.assertEqual(self.related("src/old.ts"), npm_calls, out)  # vitest related starts from the old path
 
-    def test_a_doc_change_does_not_run_web(self):
-        self.write("docs/guide.md", "guide changed\n")
-        out, npm_calls = self.check_fast()
-        self.assertNotIn("queued: web\n", out)
-        self.assertEqual([], npm_calls, out)
+
+class WebPlanTests(unittest.TestCase):
+    """The scan of the real web/ (scripts/ci/paths.py): the reads it knows, and the plan for a few changes (#10619)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.paths = load_paths()
+
+    def test_the_web_lane_covers_what_web_reads_in_each_form(self):
+        # One real read per form; the web lane in CI and the web check in check-fast both run on each.
+        for sample in ("spec/fixtures/forward/cases.json",          # a JSON import
+                       "spec/fixtures/inbox/now.json",              # readFileSync of a directory joined with a name
+                       "spec/fixtures/sync/x.json",                 # a Vite glob
+                       "spec/fixtures/screen-tiers/x.json",         # a directory a test helper reads through fs
+                       "schema/extension/examples/View.v8-x.json",  # a path with a ${…} part
+                       "schema/extension/stream.schema.json",       # a ?raw import in a module
+                       "schema/extension/manifest.schema.json",     # reached through the $refs of the one above
+                       "scripts/mock/inbox_events.json",            # outside spec/ and schema/
+                       "server/internal/sessionorigin/testdata/pane_sources.json"):
+            with self.subTest(sample=sample):
+                self.assertTrue(self.paths.select([sample])["web"], sample)
+                self.assertEqual("related", self.paths.web_plan([sample])[0], sample)
+        for sample in ("spec/fixtures/continuity/x.json", "spec/tokens/colors.json", "schema/wire/x.schema.json"):
+            with self.subTest(sample=sample):
+                self.assertFalse(self.paths.select([sample])["web"], sample)
+                self.assertEqual("none", self.paths.web_plan([sample])[0], sample)
+
+    def test_each_input_is_outside_web(self):
+        inputs = self.paths.web_inputs()
+        self.assertTrue(inputs)
+        for pattern in inputs:
+            self.assertFalse(pattern.startswith("web/"), pattern)
+            self.assertNotIn(pattern, ("*", "**"))
+
+    def test_a_view_change_runs_its_related_tests_and_the_tests_that_read_files(self):
+        mode, _, files = self.paths.web_plan(["web/src/views/chat/ChatView.tsx"])
+        self.assertEqual("related", mode)
+        self.assertEqual("src/views/chat/ChatView.tsx", files[0])
+        # Tests that read sources and fixtures from disk run on every related run, found by the scan.
+        for reader in ("src/lib/inbox-bar.test.ts", "src/views/chat/sync/sync-scenarios.test.tsx",
+                       "src/lib/extension-ui-stream.test.ts"):
+            self.assertIn(reader, files)
+        self.assertNotIn("src/lib/forward.test.ts", files)  # imports its fixture: the import graph has it
+
+    def test_a_stylesheet_change_runs_the_build_that_reads_it(self):
+        # vite.public.config.ts reads src/styles.css with readFileSync during the public viewer's build, which
+        # scripts/public-share-build.test.mjs runs through Vite's build(): no import of the test reaches the file.
+        mode, _, files = self.paths.web_plan(["web/src/styles.css"])
+        self.assertEqual("related", mode)
+        self.assertIn("scripts/public-share-build.test.mjs", files)
+
+    def test_shared_entry_points_run_the_whole_suite(self):
+        for path in ("web/src/lib/store.ts", "web/src/lib/api.ts", "web/src/ui/atoms.tsx", "web/src/i18n/index.ts",
+                     "web/src/i18n/test-setup.ts", "web/vite.config.ts", "web/tsconfig.json", "web/package.json",
+                     "web/package-lock.json", "web/scripts/installed-deps.mjs"):
+            with self.subTest(path=path):
+                self.assertEqual("full", self.paths.web_plan([path, "web/src/views/chat/ChatView.tsx"])[0])
 
 
 if __name__ == "__main__":

@@ -998,7 +998,7 @@ export interface MachineMetrics {
   machine_id: string;
   online: boolean;
   system?: Machine["system"];
-  latest?: { t: number; cpu?: number; load?: number; mem_used?: number; mem_total?: number; net_rx?: number; net_tx?: number; disk_used?: number; disk_total?: number };
+  latest?: { t: number; cpu?: number; load?: number; mem_used?: number; mem_total?: number; net_rx?: number; net_tx?: number; disk_used?: number; disk_total?: number; battery_percent?: number; battery_charging?: boolean; temp_c?: number };
   points: MetricPoint[];
   /** Its tokens (docs/server/machines.md "Token usage"): absent from an older hub, or when its node never reported usage. */
   usage?: UsageCard;

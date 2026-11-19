@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "todo-view.schema.json",
   "title": "To-do view",
-  "description": "What the manager works out for each to-do and for the To-dos list (#10226, docs/design/proposals/todos-redesign.md 3.3, 3.7, 6.1, 6.3): the row's view and its asks, the places and the counts. The hub only adds counts up and merges places; the cases are in spec/fixtures/todo-view and spec/fixtures/todo-counts.",
+  "description": "What the manager works out for each to-do and for the To-dos list (#10226, docs/design/proposals/todos-redesign.md 3.3, 3.6, 3.7, 6.1, 6.3): the row's view and its asks, the places and the counts, and a to-do's conversation grouped into rounds with its results and what changed since the owner looked (#10465). The hub only adds counts up and merges places; the cases are in spec/fixtures/todo-view, spec/fixtures/todo-counts and spec/fixtures/todo-rounds.",
   "x-out": {
     "ts": "web/src/lib/todo-view-wire.ts",
     "swift": "apple/Packages/PersonaWire/Sources/PersonaWire/TodoViewWire.swift",
@@ -10,7 +10,7 @@
     "kotlin": "android/core/contracts/src/main/kotlin/persona/core/contracts/generated/TodoViewWire.kt"
   },
   "x-guard": ["arkts", "rust"],
-  "x-reserved": ["AssistantNeeds", "TodoTimelineEntry", "TodoRound", "TodoMessageState"],
+  "x-reserved": ["AssistantNeeds"],
   "x-guard-keys": ["next_change_at", "default_at", "can_wait", "finished_seen", "finished_recent", "closed_unseen", "steps_proposed"],
   "$defs": {
     "TodoPhase": {
@@ -330,6 +330,218 @@
         "counts": {
           "$ref": "#/$defs/TodoCounts",
           "description": "The counts of All To-dos, as GET /api/v1/todos answers them."
+        }
+      }
+    },
+    "TodoMessageState": {
+      "description": "Where an owner's message to the to-do stands (proposal 3.6 \"Message states\"): sending, the device has not handed it over yet; processing, the hub has it; delivered, its run or Persona took it; queued, it waits for its run's current step to end; not_delivered, it was refused with nothing typed; unknown, nobody can say whether it arrived. A timeline read from today's stores says only delivered, since a message is kept there only once its run took it. Open: a newer hub may send other values.",
+      "type": "string",
+      "enum": ["sending", "processing", "delivered", "queued", "not_delivered", "unknown"]
+    },
+    "TodoEntryType": {
+      "description": "What an entry of a to-do's conversation records (spec/fixtures/todo-rounds/README.md \"Entries\" says what each is read from): instruction, the owner's words to the to-do; answer, an answer or a decision of the owner's; relay, words Persona or the hub passed on to a run; run, one run's turns in a round, in one line; run_started, run_ended and run_failed, a run put on the to-do, let go of, or not started; interrupted, a run whose latest turn in the round was cut off; ask, a question for the owner; decision, a call Persona, a run or the hub made; result, what the work came to; closed, the to-do was closed; scope, its scope changed; review, parked, report and overdue, supervision nobody asked for. Open: a newer hub may send other values, which clients skip.",
+      "type": "string",
+      "enum": ["instruction", "answer", "relay", "run", "run_started", "run_ended", "run_failed", "interrupted", "ask", "decision", "result", "closed", "scope", "review", "parked", "report", "overdue"]
+    },
+    "TodoActorKind": {
+      "description": "Who an entry is by: owner; persona, Persona (the conversation that supervises the to-do included); lead, a Pinned direction's lead; run, one of the to-do's Agent sessions; hub, the hub itself (its done judge included); extension. Open: a newer hub may send other values.",
+      "type": "string",
+      "enum": ["owner", "persona", "lead", "run", "hub", "extension"]
+    },
+    "TodoActor": {
+      "description": "Who an entry is by; never a runtime, engine, model or folder.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"$ref": "#/$defs/TodoActorKind"},
+        "run": {
+          "$ref": "#/$defs/TodoRunRef",
+          "description": "The run, when kind is run and the hub knows which one."
+        }
+      }
+    },
+    "TodoEntryVia": {
+      "description": "How an owner's answer, or a call made in their place, came in: app, a To-dos screen; card, a card one of its runs put up (a question, a plan, an approval); push, a notification's action; chat, said in a conversation; thread, a reply in the to-do's chat topic; briefing, a briefing's card; default, Persona took the recommendation at its deadline. Open: a newer hub may send other values.",
+      "type": "string",
+      "enum": ["app", "card", "push", "chat", "thread", "briefing", "default"]
+    },
+    "TodoTimelineEntry": {
+      "description": "One thing that happened on a to-do: what someone said or did, or what the hub saw happen (proposal 3.6, 6.1 Activity). Clients draw it; they work out nothing from it.",
+      "type": "object",
+      "required": ["id", "type", "at", "actor"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique within the to-do's timeline, and the same on every read while the hub keeps what it was read from. Opaque to clients (spec/fixtures/todo-rounds/README.md says how the hub forms it)."
+        },
+        "type": {"$ref": "#/$defs/TodoEntryType"},
+        "at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it happened; a run line's latest turn, or since when the run works for a live line that has no turn yet."
+        },
+        "actor": {"$ref": "#/$defs/TodoActor"},
+        "text": {
+          "type": "string",
+          "description": "Words someone wrote, as they wrote them: the owner's instruction or answer, a relay, a run's latest summary or what it does now, a decision's choice, a report, a review's note; absent when nobody wrote any. Today's stores keep a few of the hub's own sentences in the place of such words, in the language they were written in (spec/fixtures/todo-rounds/README.md \"Judgement calls\"): a failed start's that names no error, a turn's that ended without a summary, a permission or plan card's answer."
+        },
+        "choice": {
+          "type": "string",
+          "description": "The option the owner chose, on an answer whose text is what they said in a conversation rather than the option itself; absent otherwise."
+        },
+        "question": {
+          "type": "string",
+          "description": "What an answer or a decision answers, in the words it was asked in; absent when nothing says."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why, in the words of whoever answered or decided; absent when nobody said."
+        },
+        "line": {
+          "$ref": "#/$defs/TodoLine",
+          "description": "What the hub says about it, as a key and its arguments (spec/fixtures/todo-rounds/README.md \"Line keys\"); absent when text says it all."
+        },
+        "run": {
+          "$ref": "#/$defs/TodoRunRef",
+          "description": "The run it is about: the run a message or a relay reached, a run line's run, the run that started, ended or failed; absent when the hub does not know which (a run line without one is \"A run\")."
+        },
+        "ask": {
+          "type": "string",
+          "description": "The id of the to-do's open ask this is (an OwnerAsk id of its view); absent once that ask is no longer open."
+        },
+        "via": {"$ref": "#/$defs/TodoEntryVia"},
+        "state": {
+          "$ref": "#/$defs/TodoMessageState",
+          "description": "Where the owner's instruction stands; only on instructions."
+        },
+        "decision": {
+          "type": "string",
+          "description": "The id of the to-do's decision it was read from (GET /api/v1/todos/{id}/decisions)."
+        },
+        "superseded_by": {
+          "type": "string",
+          "description": "The decision that replaced it, on an entry read from a decision a later one superseded; absent while it holds."
+        },
+        "turns": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many of its run's turns in the round the line stands for; on run and interrupted lines, absent on a live line before its first turn ends."
+        },
+        "live": {
+          "type": "boolean",
+          "description": "The run works now: only on a run line of the latest round. Written only when true."
+        }
+      }
+    },
+    "TodoRoundKind": {
+      "description": "What a round of a to-do's conversation is (proposal 3.6): owner, one instruction or answer of the owner's and what followed it; start, what came before the owner's first, headed by the request that started the work when the owner made it; background, one day's supervision nobody asked for, drawn folded. Open: a newer hub may send other values.",
+      "type": "string",
+      "enum": ["owner", "start", "background"]
+    },
+    "TodoRound": {
+      "description": "One round of a to-do's conversation: a header and what followed it, as the hub groups them (spec/fixtures/todo-rounds/README.md \"Rounds\"); clients only draw it.",
+      "type": "object",
+      "required": ["id", "kind", "at", "entries"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique within the timeline and stable while the hub keeps what it was read from; opaque to clients."
+        },
+        "kind": {"$ref": "#/$defs/TodoRoundKind"},
+        "at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it began: its header's time, else its first entry's."
+        },
+        "header": {
+          "$ref": "#/$defs/TodoTimelineEntry",
+          "description": "The owner's instruction or answer that opened it, or, on a start round, the owner's request that started the work; absent on a start round the owner did not start and on a background round."
+        },
+        "entries": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/TodoTimelineEntry"},
+          "description": "What followed, oldest first; the header is not repeated, and a round may have only its header."
+        }
+      }
+    },
+    "TodoTimeline": {
+      "description": "A to-do's conversation: its rounds, oldest first, the latest at the bottom (proposal 3.6).",
+      "type": "object",
+      "required": ["rounds"],
+      "properties": {
+        "rounds": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/TodoRound"},
+          "description": "The rounds, oldest first."
+        },
+        "more": {
+          "type": "boolean",
+          "description": "Earlier rounds exist than the ones listed. Written only when true."
+        }
+      }
+    },
+    "TodoResultKind": {
+      "description": "What kind of thing a to-do's work produced (proposal 6.1 Deliverable): booking, doc, file, link, change (a code change), deploy (the work went live), report (what the work came to, in words). Today's hub sends change, deploy and report. Open: a newer hub may send other values.",
+      "type": "string",
+      "enum": ["booking", "doc", "file", "link", "change", "deploy", "report"]
+    },
+    "TodoChangeState": {
+      "description": "How a code change stands as the hub last saw it: open, under review; draft, open but not ready for review; merged; closed without merging. Open: a newer hub may send other values.",
+      "type": "string",
+      "enum": ["open", "draft", "merged", "closed"]
+    },
+    "TodoResult": {
+      "description": "Something a to-do's work produced, with how it stands: one chip of the paper's Results (proposal 3.5 row 9).",
+      "type": "object",
+      "required": ["id", "kind", "at"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among the to-do's results and stable while the hub keeps what it was read from; opaque to clients."
+        },
+        "kind": {"$ref": "#/$defs/TodoResultKind"},
+        "at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it was produced."
+        },
+        "text": {
+          "type": "string",
+          "description": "What it came to, as written (a report's first line); absent for a change and a deploy, which clients name themselves."
+        },
+        "url": {
+          "type": "string",
+          "description": "Where it opens (the change, the first link a report named); absent when there is none."
+        },
+        "state": {
+          "$ref": "#/$defs/TodoChangeState",
+          "description": "How a change stands now; absent while the hub has not looked, and for the other kinds."
+        },
+        "run": {
+          "$ref": "#/$defs/TodoRunRef",
+          "description": "The run that produced it; absent when not known."
+        }
+      }
+    },
+    "TodoRecap": {
+      "description": "What changed on a to-do since the owner last looked: the paper's Since you looked (proposal 3.5 row 3).",
+      "type": "object",
+      "required": ["since", "round", "counts"],
+      "properties": {
+        "since": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the owner last looked (the to-do's seen_at)."
+        },
+        "round": {
+          "type": "string",
+          "description": "The round of the first change since then, which a tap scrolls to."
+        },
+        "counts": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/TodoEntryType"},
+          "additionalProperties": {"type": "integer", "minimum": 1},
+          "description": "How many entries of each type came since then, each of a run line's turns counted; only the types that have any. The owner's own acts are left out, and so is what a round folds under one of them (the hub's relay of their answer, the run their message started)."
         }
       }
     }

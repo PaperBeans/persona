@@ -21,8 +21,6 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
     @Environment(AppModel.self) private var model
     /// Across the top bar, or down the side column on iPhone Duo (`ShellSideRail`): there it is the Duo's tab bar.
     var axis: Axis = .horizontal
-    /// iPhone Duo's tab bar along the foot of the inner display upright (#4231, `TabSwitchOverlay`), across.
-    var bottomBar = false
     @ViewBuilder var chatMenu: () -> ChatMenu
     @ViewBuilder var workMenu: () -> WorkMenu
     @Namespace private var pill
@@ -63,9 +61,9 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
         }
     }
 
-    /// The switch is iPhone Duo's tab bar (#4231): down the side column, or along the foot upright. Its items are the
+    /// The switch is iPhone Duo's tab bar on the outer display (#4231), down the side column. Its items are the
     /// page's symbol over its name; across the top it is the iPhone's switch of names.
-    private var tabBar: Bool { axis == .vertical || bottomBar }
+    private var tabBar: Bool { axis == .vertical }
 
     /// The page the switch shows as chosen: the shell's, or `tab` outside it.
     private var chosen: AppTab {
@@ -495,7 +493,7 @@ private struct TabBarBadge: View {
 /// The count iPhone Duo's tab bar draws (#4231), the system's tab bar badge: `Theme.Size.badge` (18 pt) tall, round for one
 /// digit and a capsule for more, its number `Theme.Font.labelHeavy` (12 pt) white on the system's red (`Theme.tabBarBadge`),
 /// ringed `Theme.Shell.tabBarBadgeRing` in the page's color so it stands apart from the chosen item's circle and the
-/// symbol under it. The same view on both displays (`DuoTabBarAlignmentTests`).
+/// symbol under it (`DuoTabBarAlignmentTests`).
 struct TabBarCount: View {
     let count: Int
     /// What VoiceOver says for it ("3 need you"); by default the exact number.

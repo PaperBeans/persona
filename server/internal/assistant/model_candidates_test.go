@@ -319,3 +319,103 @@ func TestModelSingleCandidateFailsWithItsOwnCode(t *testing.T) {
 		t.Fatalf("%+v %v", res, err)
 	}
 }
+
+// servingGateway is a provider named name (a keyed Messages launcher) whose fake API answers "<name> served <model>"
+// for any model but "missing" (400), listing listed (none: no models list) with def as its default. asked has the
+// models it was asked for.
+func servingGateway(t *testing.T, s *Service, name, def string, listed ...string) (storedLauncher, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/messages") { // probes are not calls
+			http.NotFound(w, r)
+			return
+		}
+		var c upstreamCall
+		_ = json.NewDecoder(r.Body).Decode(&c)
+		mu.Lock()
+		asked = append(asked, c.Model)
+		mu.Unlock()
+		if c.Model == "missing" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"synthetic failure"}}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": c.Model, "stop_reason": "end_turn",
+			"content": []any{map[string]any{"type": "text", "text": name + " served " + c.Model}},
+			"usage":   map[string]any{"input_tokens": 10, "output_tokens": 1},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	key, err := s.sealKey("synthetic-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := storedLauncher{KeySealed: key, ManagedLauncher: proto.ManagedLauncher{Name: name, BaseURL: srv.URL, Model: def}}
+	for _, m := range listed {
+		l.Models = append(l.Models, proto.ProviderModel{ID: m})
+	}
+	return l, func() []string { mu.Lock(); defer mu.Unlock(); return slices.Clone(asked) }
+}
+
+// #10657: the purpose's own provider without a models list takes the extension's candidates, after any provider that
+// lists one explicitly; one that fails there moves on like any candidate.
+func TestModelCandidatesOnTheOwnProviderWithoutAList(t *testing.T) {
+	s, _, kbCalls := extensionModelService(t, "unused")
+	own, ownAsked := servingGateway(t, s, "own", "own-default")
+	listed, listedAsked := servingGateway(t, s, "listed", "listed-default", "g-listed")
+	other, otherAsked := servingGateway(t, s, "other", "other-default")
+	putLaunchers(t, s, own, listed, other)
+	if r := modelRequest(s, "PATCH", "extension.kb-curator", `{"revision":0,"provider":"launcher.own"}`); r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	res, err := completeAs(s, "kb-curator", `{"messages":[{"role":"user","content":"hi"}],"models":["missing","g-any","g-listed"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Candidate != "g-any" || res.Text != "own served g-any" || len(res.Attempts) != 1 || res.Attempts[0].Code != "model_failed" {
+		t.Fatalf("result %+v", res)
+	}
+	res, err = completeAs(s, "kb-curator", `{"messages":[{"role":"user","content":"hi"}],"models":["g-listed"]}`)
+	if err != nil || res.Text != "listed served g-listed" {
+		t.Fatalf("an explicit listing goes first: %+v %v", res, err)
+	}
+	if got := ownAsked(); !slices.Equal(got, []string{"missing", "g-any"}) {
+		t.Fatalf("own asked %v", got)
+	}
+	if !slices.Equal(listedAsked(), []string{"g-listed"}) || len(otherAsked()) != 0 || len(kbCalls()) != 0 {
+		t.Fatalf("listed %v, other (no list, not the purpose's) %v, purpose %d", listedAsked(), otherAsked(), len(kbCalls()))
+	}
+	// Settings resolves the same way: the first list (now the older one) has g-any on own and g-listed on listed.
+	p := purposeOf(t, s, "extension.kb-curator")
+	if len(p.Candidates.Requested) != 2 {
+		t.Fatalf("settings view %+v", p.Candidates.Requested)
+	}
+	first := p.Candidates.Requested[1].Models
+	if len(first) != 3 || first[1].Provider != "launcher.own" || !first[1].Available || first[2].Provider != "launcher.listed" {
+		t.Fatalf("settings view %+v", first)
+	}
+}
+
+// #10657: a provider with a list still refuses what it does not list, except the model the purpose is bound to there.
+func TestModelCandidatesTheBoundModelOnAListedProvider(t *testing.T) {
+	s, _, _ := extensionModelService(t, "unused")
+	own, ownAsked := servingGateway(t, s, "own", "own-default", "a")
+	putLaunchers(t, s, own)
+	if r := modelRequest(s, "PATCH", "extension.kb-curator", `{"revision":0,"provider":"launcher.own","model":"bound-m"}`); r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	res, err := completeAs(s, "kb-curator", `{"messages":[{"role":"user","content":"hi"}],"models":["z","bound-m"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Candidate != "bound-m" || len(res.Attempts) != 1 || res.Attempts[0].Code != "model_unavailable" {
+		t.Fatalf("result %+v", res)
+	}
+	if got := ownAsked(); !slices.Equal(got, []string{"bound-m"}) {
+		t.Fatalf("asked %v: an unlisted model went to a provider with a list", got)
+	}
+}

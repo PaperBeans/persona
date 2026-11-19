@@ -244,6 +244,7 @@ var rpcFailureKeys = map[string]string{
 	"codex_first_text":         "rpc-errors.codex_first_text",
 	"codex_first_unconfirmed":  "rpc-errors.codex_first_unconfirmed",
 	"codex_waiting":            "rpc-errors.codex_waiting",
+	"codex_compact_busy":       "rpc-errors.codex_compact_busy", // a /compact while its app-server runs a turn (node/codex_remote_compact.go, #10188)
 	"codex_no_box":             "rpc-errors.codex_no_box",
 	"codex_no_box_here":        "rpc-errors.codex_no_box_here", // the same in a pane the user picked (#5504)
 	"prompt_changed":           "rpc-errors.prompt_changed",

@@ -539,6 +539,9 @@ func (r *Registry) validatePlan(id, previewID, digest string, refs []PreviewRef,
 				if owner := r.reserved[point][cid]; owner != "" {
 					return nil, fmt.Errorf("%s 的 %s 已由 %s 使用", point, cid, owner)
 				}
+				if point == "ui" { // UI identity is the extension plus its local contribution ID, as in preview.
+					continue
+				}
 				for other, p := range combined {
 					if other != m.ID && slices.Contains(p.Full.Items(point), cid) {
 						return nil, fmt.Errorf("%s 的 %s 和扩展 %s 冲突", point, cid, other)

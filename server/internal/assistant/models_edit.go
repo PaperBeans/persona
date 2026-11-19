@@ -140,7 +140,7 @@ func (s *Service) modelLauncherCompatible(p ModelPurpose, l ConfiguredLauncher, 
 	if p.ID == purposeMeetingRoom && runtime {
 		return false // a room runs on Claude Code's CLI only
 	}
-	if p.CategoryID == "assistant" && runtime {
+	if p.CategoryID == "assistant" && (runtime || v.Kind == "launcher" && (v.Agent == "agy" || v.Agent == "omp")) {
 		if !l.Assistant {
 			return false
 		}

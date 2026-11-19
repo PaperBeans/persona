@@ -178,7 +178,8 @@ export function stepsToItems(steps, opts = {}) {
         afterWork = false
         const text = cleanUserText(step.content)
         if (!text) break
-        const item = { id: `${line}#0`, seq, role: 'user', kind: 'text', text, ts }
+        const msgId = (typeof step.client_msg_id === 'string' && step.client_msg_id) || opts.clientMsgIdFor?.(idx, text)
+        const item = { id: `${line}#0`, seq, role: 'user', kind: 'text', text, ts, ...(msgId ? { client_msg_id: msgId } : {}) }
         items.push(opts.full ? item : light(item))
         break
       }

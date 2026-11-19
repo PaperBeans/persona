@@ -299,7 +299,9 @@ With an empty binding it follows "Information processing" (`kb`), including late
 so a change applies from the next call. The extension never chooses the connection and never sees a key. The prefix is not `plugin.`: the apps take `plugin.<id>` for a voice plugin and fetch its own model list for it. No budget and no cap (the user's decision).
 
 **Candidate models (#10398).** A call may name candidate models (`models`, docs/extensions/extensions.md "Model calls"), tried in order. Each candidate runs only on a provider the user configured here that
-the manager calls directly and that lists the model; the extension names models, never providers or keys. The purpose's `candidates` object shows and keeps the user's control:
+the manager calls directly and that offers the model: one that lists it, the purpose's own provider for the model the purpose is bound to, or the purpose's own provider when it declares no model
+list (#10657: a provider set up with only a default model refused every other model, the user's own pick for the purpose included); the extension names models, never providers or keys.
+Listing the models on a provider (Settings › Model providers) makes the choice explicit and lets another provider take a model the purpose's provider does not list. The purpose's `candidates` object shows and keeps the user's control:
 
 - `mode`: `extension` (the default: the lists the extension sends), `off` (ignored: every call runs on the purpose's model, as without candidates) or `custom` (the user's own list, used for every call
   whatever the extension sends).

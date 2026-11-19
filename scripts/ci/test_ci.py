@@ -138,6 +138,8 @@ class PathTests(unittest.TestCase):
 
     def test_shard_implementation_changes_select_their_lane(self):
         self.assertTrue(paths.select(["scripts/ci/server-shards.py"])["server"])
+        # server.sh composes every Go step's GOFLAGS with this helper (#10614).
+        self.assertTrue(paths.select(["scripts/test/go_trimpath.sh"])["server"])
         self.assertTrue(paths.select(["scripts/ci/android-shards.py"])["android"])
 
     def test_the_callkit_guards_select_the_apple_lane(self):
@@ -412,6 +414,7 @@ class PostgresCleanupTests(unittest.TestCase):
                 fixtures = root / "fixtures"
                 fixtures.mkdir()
                 shutil.copyfile(Path(__file__).with_name("server.sh"), root / "server.sh")
+                copy_go_trimpath(root)
                 # Run the real entrypoint and EXIT trap without starting Docker or Go tests.
                 (root / "common.sh").write_text("""ci_run() {
   local label="$1"
@@ -433,7 +436,7 @@ if [ "$1" = run ]; then exit "$FIXTURE_RUN_STATUS"; fi
                 environment = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"],
                                    TMPDIR=str(fixtures), FIXTURE_DOCKER_CALLS=str(log),
                                    FIXTURE_RUN_STATUS=str(run_status), FIXTURE_READY_STATUS=str(ready_status))
-                result = subprocess.run(["bash", str(root / "server.sh"), "managers"],
+                result = subprocess.run(["bash", str(root / "server.sh"), "managers"], cwd=root,
                                         env=environment, capture_output=True, text=True, timeout=10)
                 self.assertEqual(result.returncode, run_status or ready_status, result.stderr)
                 calls = [line.split() for line in log.read_text().splitlines()]
@@ -442,6 +445,38 @@ if [ "$1" = run ]; then exit "$FIXTURE_RUN_STATUS"; fi
                 container = calls[0][calls[0].index("--name") + 1]
                 self.assertEqual(calls[1], ["rm", "-fv", container])
                 self.assertEqual(list(fixtures.iterdir()), [])
+
+
+def copy_go_trimpath(root):
+    """server.sh composes GOFLAGS with scripts/test/go_trimpath.sh, relative to the repository root it runs from."""
+    (root / "scripts/test").mkdir(parents=True)
+    shutil.copyfile(Path(__file__).resolve().parents[1] / "test/go_trimpath.sh", root / "scripts/test/go_trimpath.sh")
+
+
+class ServerGoFlagsTests(unittest.TestCase):
+    def test_every_go_step_gets_trimpath_and_keeps_the_callers_flags(self):
+        # Checkouts share compiled packages only under -trimpath (#10614). No step may replace GOFLAGS: vet clears
+        # -ldflags on its command line instead, so the caller's flags and -trimpath reach it too.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shutil.copyfile(Path(__file__).with_name("server.sh"), root / "server.sh")
+            copy_go_trimpath(root)
+            log = root / "steps"
+            (root / "common.sh").write_text("""ci_run() {
+  printf '%s|%s|%s\\n' "$1" "$GOFLAGS" "$*" >> "$FIXTURE_STEPS"
+}
+""")
+            environment = dict(os.environ, GOFLAGS="-mod=readonly", FIXTURE_STEPS=str(log))
+            result = subprocess.run(["bash", str(root / "server.sh"), "build"], cwd=root, env=environment,
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            steps = [line.split("|", 2) for line in log.read_text().splitlines()]
+            go_steps = [step for step in steps if " go " in step[2]]
+            self.assertTrue(any("go vet -ldflags=" in step[2] for step in go_steps), steps)
+            for label, goflags, command in go_steps:
+                with self.subTest(step=label):
+                    self.assertEqual(goflags, "-mod=readonly -trimpath")
+                    self.assertNotIn("GOFLAGS=", command)
 
 
 class RunnerTests(unittest.TestCase):

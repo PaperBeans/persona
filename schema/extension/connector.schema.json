@@ -1116,7 +1116,8 @@
         "tagged_at": {"type": "string", "format": "date-time"},
         "pinned": {"type": "string"},
         "locked_fields": {"type": "array", "items": {"type": "string"}},
-        "provenance": {"type": "object", "additionalProperties": {"$ref": "#/$defs/ConnectorKBProvenance"}, "description": "The store's: which extension holds a locked field. A connector's is ignored."}
+        "provenance": {"type": "object", "additionalProperties": {"$ref": "#/$defs/ConnectorKBProvenance"}, "description": "The store's: which extension holds a locked field. A connector's is ignored."},
+        "excluded": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}, "description": "The store's: the links the user removed, by list. A connector's is ignored."}
       },
       "required": ["kind", "id", "title"]
     },

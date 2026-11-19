@@ -696,6 +696,9 @@ func (n *Node) sendCodex(ctx context.Context, id, text string, images []proto.Im
 	if err = c.join(ctx, id, true); err != nil {
 		return refusal("codex_read_only", err.Error(), nil)
 	}
+	if codexCompactCommand(text, images) { // Codex's own command, not words for the model (codex_remote_compact.go)
+		return n.compactCodex(ctx, id)
+	}
 	if len(selected) > 0 {
 		selected, err = n.sessionSelectedSkills(ctx, id, text)
 		if err != nil {

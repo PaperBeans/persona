@@ -36,6 +36,7 @@ type quietNotice struct {
 	earlier []string
 	ask     string
 	text    string
+	files   []taskFile // what a done turn handed over (task_files.go)
 }
 
 type quietBook struct {
@@ -47,8 +48,9 @@ type quietBook struct {
 var noticeStates = map[string]string{"done": "做完过一次", "needs": "等过用户", "interrupted": "被打断过", "failed": "没开起来过"}
 
 // quietNotify tells the main conversation about quiet task t (a no-op for any other): state, and what it asks (needs)
-// or what its agent last said (text). machine is where its agent runs (a name).
-func (s *Service) quietNotify(ctx context.Context, t Todo, machine, state, ask, text string) {
+// or what its agent last said (text); files: what a done turn handed over, on the conversation's computer (task_files.go).
+// machine is where its agent runs (a name).
+func (s *Service) quietNotify(ctx context.Context, t Todo, machine, state, ask, text string, files []taskFile) {
 	if !t.Quiet || t.Origin == "" {
 		return
 	}
@@ -64,7 +66,7 @@ func (s *Service) quietNotify(ctx context.Context, t Todo, machine, state, ask, 
 	} else if n.state != state {
 		n.earlier = appendOnce(n.earlier, noticeStates[n.state])
 	}
-	n.todo, n.machine, n.state, n.ask, n.text = t, machine, state, ask, text
+	n.todo, n.machine, n.state, n.ask, n.text, n.files = t, machine, state, ask, text, files
 	b.mu.Unlock()
 	if !waiting {
 		time.AfterFunc(quietNoticeDelay, func() { s.sendQuietNotice(t.ID) })
@@ -167,6 +169,9 @@ func (s *Service) queueNotice(id string, n *quietNotice, to string, msg relayMsg
 			earlier = appendOnce(earlier, e)
 		}
 		cur.earlier = earlier
+		if len(n.files) > 0 { // the newer state may be one that carries no files (a question): keep what came
+			cur.files = n.files
+		}
 	} else {
 		b.pending[id] = n
 	}
@@ -184,7 +189,7 @@ func (s *Service) queueNotice(id string, n *quietNotice, to string, msg relayMsg
 // retryWith: a failed start's launcher its card offers instead.
 func renderNotice(n *quietNotice, reporting bool, retryWith string) string {
 	return prompts.RenderTaskNotice(prompts.TaskNotice{Title: n.todo.Title, Machine: n.machine, State: n.state, Earlier: n.earlier,
-		Ask: n.ask, Text: n.text, Reporting: reporting, RetryWith: retryWith})
+		Ask: n.ask, Text: n.text, Files: taskFileLines(n.files), Reporting: reporting, RetryWith: retryWith})
 }
 
 // replaceQueuedNotice: a notice about the same task still waits in the queue: msg takes its place (true).

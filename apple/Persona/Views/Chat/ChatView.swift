@@ -5327,11 +5327,12 @@ struct ChatView: View {
 
     /// The extension that opened this Persona conversation (#3758), when `item` is the message it opened it with: the
     /// conversation's first user message, once the page has loaded back to its start (with more to load, the first one
-    /// here is not the first). nil for every other message and conversation.
-    private func externalOpening(_ item: Item) -> AutoConversationSource? {
+    /// here is not the first). nil for every other message and conversation. With it, which extension that was, whose
+    /// own icon the line draws when it can (#10358).
+    private func externalOpening(_ item: Item) -> (source: AutoConversationSource, opener: ConversationOpener?)? {
         guard style == .assistant, let source = AutoConversationSource.external(session?.origin), !store.hasMore,
               store.items.first(where: { $0.role == "user" && $0.kind == .text })?.id == item.id else { return nil }
-        return source
+        return (source, session.flatMap(ConversationOpener.of))
     }
 
     /// A user's line: a bubble, or what stands for it (a message from a source, one Persona injected, a loop's tick, a peer's).
@@ -5346,7 +5347,8 @@ struct ChatView: View {
         } else if let from = i.from {
             PeerMessage(item: i, from: from)
         } else {
-            UserBubble(item: i, external: externalOpening(i)).equatable()
+            let opening = externalOpening(i)
+            UserBubble(item: i, external: opening?.source, opener: opening?.opener).equatable()
         }
     }
 

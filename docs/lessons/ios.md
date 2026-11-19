@@ -1503,15 +1503,15 @@ Use an invalidation revision as the task key and handle the flag after completio
   New system reply editors are `TextView`, as is notification body; wait for Send then choose the lowest editor, not a fixed `TextField` query (#1862).
 - Root swapping to a full extension page dismantles `ShellWindowHooks` and closes its toast window; enable `ToastOverlay` in RootView during system extension pages. Writing `AppModel.toast` alone does not prove visibility; foreground-action regression asserts the toast actually appears (#1862).
 - DEBUG argument names must not match Swift identifiers: enum cases enter Release reflection `strings` and trigger `release.sh` false positives
-  (`Tab.workbench` collided with `-workbench`, renamed `-openWorkbench`). Use `open…` / `show…` names unlike type members and register in `release.sh`.
+  (`Tab.workbench` collided with `-workbench`, renamed `-openWorkbench`). Use `open…` / `show…` names unlike type members and add them to `scripts/release/debug_switches.txt`.
   Stored properties also collide (2026-10-31, `AgentsListMenu.Actions`.openMonitor vs `-openMonitor` stopped TestFlight 50). For new properties,
-  first build locally `xcodebuild build -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` and run `release.sh` `strings` checks on `Release-iphoneos/Persona.app/Persona`.
+  first build locally `xcodebuild build -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` and run `python3 scripts/release/debug_switches.py check` on `Release-iphoneos/Persona.app/Persona`.
   It happened again with `WorkspaceSidebarCard.openAgent` vs `-openAgent` (2026-11-09, #1675 stopped TestFlight 214, renamed `selectAgent` in #2179):
   name closure properties `select…` / `on…`, not `open…` / `show…`. `@State` / `@Binding` / `@Environment` properties are stored as `_name` and never collide.
   And again on 2026-11-15 with `openAgent` (two views) and `openMachines` (#8306), so it is now a check:
   `python3 scripts/test/test_apple_release_switch_names.py` reads the app's sources outside `#if DEBUG` (the conditions as a
-  device Release archive sees them) for stored properties, enum cases, `@objc` names and string literals equal to a name on
-  `release.sh`'s list. It runs with the other `scripts/test/test_apple*.py` checks before merge.
+  device Release archive sees them) for stored properties, enum cases, `@objc` names and string literals equal to a name in
+  `scripts/release/debug_switches.txt`. It runs with the other `scripts/test/test_apple*.py` checks before merge.
 - Launch-argument defaults are `strings` (`-dev.compact YES` is "YES"). Read booleans / numbers with `bool(forKey:)` / `integer(forKey:)` / `double(forKey:)` like AppStorage,
   not `object(forKey:) as? Bool`, which silently falls back (#1473 `StoredValue` broke `-dev.compact YES`; `CompactListShots` showed cards instead of compact rows, #2147).
 - Live Activities (`docs/apple/live-activity.md`): ActivityKit uses default JSONDecoder for `content-state`; `Date` values start 2001; pass Unix-second numbers.

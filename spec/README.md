@@ -30,6 +30,7 @@ spec/
     triage/           the To-dos page's sections (status SOP), checked by the web app and the hub
     todo-view/        a to-do's view (phase, section, reason, line, asks) the manager works out, schema/wire/todo-view
     todo-counts/      the To-dos list's counts and places, schema/wire/todo-view
+    todo-rounds/      a to-do's conversation in rounds, its results and what changed since the owner looked, schema/wire/todo-view
     todo-detail/      a to-do's page: which elements it draws, in order, and its one primary action
     todo-layout/      the To-dos window rule: a window and what is wanted → its regions and their widths
     provider-import-link/ provider import links: what the web builds and what the hub reads

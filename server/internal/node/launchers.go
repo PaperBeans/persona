@@ -160,7 +160,7 @@ func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]strin
 	list = append(list, pathList...)
 	maps.Copy(settings, pathSettings)
 	if len(list) == 0 {
-		list = []proto.Launcher{{Name: "claude", Model: "默认"}}
+		list = []proto.Launcher{{Name: "claude"}}
 	}
 	codex = map[string][]string{}
 	ls, words := parseCodexAliases(aliases)
@@ -171,7 +171,7 @@ func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]strin
 		codexWord = bundledCodexCLI() // the ChatGPT app's own, by its path: the shell would not find it
 	}
 	if codexWord != "" && words["codex"] == nil {
-		list = append(list, proto.Launcher{Name: "codex", Model: "默认", Agent: "codex", Source: "zshrc", PromptOptional: true, RunHere: true})
+		list = append(list, proto.Launcher{Name: "codex", Agent: "codex", Source: "zshrc", PromptOptional: true, RunHere: true})
 		codex["codex"] = []string{codexWord}
 	}
 	for _, l := range ls {
@@ -181,10 +181,10 @@ func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]strin
 		}
 	}
 	if strings.TrimSpace(traexPath) != "" && !seen[traexAgent] && codex[traexAgent] == nil {
-		list = append(list, proto.Launcher{Name: traexAgent, Model: "默认", Agent: traexAgent, Source: "zshrc"})
+		list = append(list, proto.Launcher{Name: traexAgent, Agent: traexAgent, Source: "zshrc"})
 	}
 	if strings.TrimSpace(ompPath) != "" && !seen["omp"] && codex["omp"] == nil {
-		list = append(list, proto.Launcher{Name: "omp", Model: "默认", Agent: "omp", Source: "zshrc"})
+		list = append(list, proto.Launcher{Name: "omp", Agent: "omp", Source: "zshrc"})
 	}
 	for _, bin := range []struct{ name, agent, path string }{
 		{"pi", piAgent, piPath},
@@ -192,7 +192,7 @@ func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]strin
 		{"agy", agyAgent, agyPath},
 	} {
 		if strings.TrimSpace(bin.path) != "" && !seen[bin.name] && codex[bin.name] == nil {
-			list = append(list, proto.Launcher{Name: bin.name, Model: "默认", Agent: bin.agent, Source: "zshrc",
+			list = append(list, proto.Launcher{Name: bin.name, Agent: bin.agent, Source: "zshrc",
 				RuntimeFallback: bin.agent == agyAgent && !taken[bin.name]})
 		}
 	}
@@ -228,7 +228,8 @@ func (n *Node) inferLauncher(id string) string {
 
 // matchLauncher picks the launcher that exports this base URL and model. Several launchers can share one endpoint
 // (and a launcher whose model is chosen at run time shows a placeholder such as "(claude-choose)"), so: the one
-// launcher with both equal; else the one launcher with that base URL; else nothing, never a guess between several.
+// launcher with both equal (an empty model is unknown, never evidence of a match); else the one launcher with that base
+// URL; else nothing, never a guess between several.
 func matchLauncher(list []proto.Launcher, baseURL, model string) string {
 	if baseURL == "" {
 		return "" // the default endpoint: nothing to tell launchers apart by
@@ -239,7 +240,7 @@ func matchLauncher(list []proto.Launcher, baseURL, model string) string {
 			continue
 		}
 		byURL = append(byURL, l.Name)
-		if l.Model == model {
+		if model != "" && l.Model == model {
 			byBoth = append(byBoth, l.Name)
 		}
 	}
@@ -295,9 +296,6 @@ func parseCodexAliases(out string) ([]proto.Launcher, map[string][]string) {
 		argv, model, ok := codexAliasArgv(w[1 : len(w)-1])
 		if !ok {
 			continue
-		}
-		if model == "" {
-			model = "默认"
 		}
 		list = append(list, proto.Launcher{Name: w[0], Model: model, Agent: "codex", Source: "zshrc", PromptOptional: true, RunHere: true})
 		words[w[0]] = argv
@@ -446,6 +444,10 @@ func parseLaunchers(out string) []proto.Launcher {
 		}
 		if l.BaseURL == "-" {
 			l.BaseURL = ""
+		}
+		// Older shell helpers used display text for an unspecified model; it is not a model ID.
+		if l.Model == "默认" { // i18n-ignore: legacy wire value, never displayed
+			l.Model = ""
 		}
 		list = append(list, l)
 	}

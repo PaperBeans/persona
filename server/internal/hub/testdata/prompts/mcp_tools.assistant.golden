@@ -297,13 +297,17 @@
   },
   {
     "name": "schedule_followup",
-    "description": "Wake yourself up later: Persona sends `prompt` into this conversation (or a new one) as if the user wrote it, you do the work (a new hop chain, at most every 10 minutes), and the user gets a push with your answer (with `push: \"asked\"`, only what you send with notify_user). `at` is RFC 3339 or relative (\"30m\", \"2h\", \"1d\"). For a recurring task pass `every` (\"30m\", \"2h\", at least 5m) once: Persona repeats it; the user edits or stops it in the app; never schedule the next run from inside a run. Otherwise pass `cron` instead of `at` / `every`: a standard 5-field `minute hour day-of-month month day-of-week` in the user's time zone (`*/30 9-18 * * 1-5`, `0 10 1 * *`, or @hourly / @daily / @weekly / @monthly / @yearly; day of week 0 and 7 are Sunday; restricted day fields match either; runs at least 5 minutes apart). A bad expression is refused with the next runs listed. An `every` task can take `until` (RFC 3339 or 30m / 2h / 1d, not a bare clock time): after it the task turns off and records a skipped run. A one-off ignores `until`; omit it to keep an existing end time, null clears it. The task runs on Main chat's launcher, model and effort unless overridden with `launcher`, `model` and `effort`; permission mode stays the user's choice. A follow-up continuing this conversation (`new_conversation` false) runs on that conversation's launcher, so overrides require `new_conversation: true`. Pass `inbox` (the user's Inbox setting) only when requested. With `fresh_each_run: true`, a recurring task starts a new chat on every run and carries its state note.",
+    "description": "Wake yourself later with `prompt`; `new_conversation: true` uses its own chat. Wakes reset the message hop chain at most once per 10 minutes. `at` accepts RFC3339 or relative 30m/2h/1d. For repeats set `every` (5m-7d) once; never chain runs. Or use `cron` instead of at/every: 5 fields in the user's zone, at least 5m apart; @hourly/@daily/@weekly/@monthly/@yearly work. Day 0/7 is Sunday; restricted day fields match either. Inspect the reply's next runs. `until` cannot be a bare clock time.\n\nRuns inherit Main chat's launcher/model/effort; overrides require an own conversation, and permission mode stays the user's choice. `inbox` is only for requested Inbox results. `fresh_each_run: true` starts a new chat each run with its state note. See field descriptions for push and end-time edit rules.\n\nFor approved recurring work advancing a supervised to-do, pass its explicit `todo_id`; do not guess from a title. Omission keeps an association; \"\" clears it; one-shots refuse it. Progress means new Agent answers, criterion-state changes or changed explicit progress reports. One no-progress run signals the supervisor; two ask Change approach / Keep waiting with the reason, even with `push: asked`. Get owner consent before creating or changing recurring work.",
     "input_schema": {
       "type": "object",
       "required": [
         "prompt"
       ],
       "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "explicit supervised to-do this recurring follow-up advances; empty clears the association"
+        },
         "fresh_each_run": {
           "type": "boolean"
         },
@@ -379,10 +383,14 @@
   },
   {
     "name": "schedule_routine",
-    "description": "Set up a recurring routine: at a time every day (or selected weekdays), Persona starts a new conversation with `prompt`, you do the work, and the user gets a push with your answer (with `push: \"asked\"`, only what you send with notify_user). For times a time of day and weekdays can't say, pass `cron` instead of `time` / `weekdays`: a standard 5-field `minute hour day-of-month month day-of-week` in the user's time zone (`*/30 9-18 * * 1-5`, `0 10 1 * *`, `0 9 * * 1,3,5`), or @hourly / @daily / @weekly / @monthly / @yearly. Day of week 0 and 7 are Sunday; restricted day fields match either. Runs are at least 5 minutes apart; seconds, @every and TZ= are refused. A bad expression is refused; the reply lists the next runs, so check them. Pass `id` (from list_followups) to change an existing routine: only fields given change; `enabled: false` pauses it. A routine can take `until` (RFC 3339 or 30m / 2h / 1d, not a bare clock time): after it Persona turns it off and records a skipped run. Omit `until` to keep an existing end time; null clears it. The routine runs on Main chat's launcher, model and effort unless overridden with `launcher`, `model` / `effort`; an empty `launcher` returns to Main chat. `inbox` (off / worthy / every) is the user's Inbox setting: pass it only when requested. With `fresh_each_run: true`, a recurring task starts a new chat on every run and carries its state note.",
+    "description": "Create a recurring routine, or pass `id` from list_followups to edit only the fields supplied. `enabled: false` pauses it. Use `time` with optional `weekdays`, or `cron` instead. Times use the user's zone; cron has 5 fields, runs at least 5m apart, supports the listed aliases, treats 0/7 as Sunday and restricted day fields as either. Seconds, @every and TZ= are refused; inspect the reply's next runs. `until` cannot be a bare clock time.\n\nRuns inherit Main chat's launcher/model/effort. Omit overrides to keep them; an empty launcher returns to Main chat. Permission mode stays the user's choice. `inbox` is only for requested Inbox results. `fresh_each_run: true` starts a new chat per run with its state note. See field descriptions for push and end-time edit rules.\n\nFor approved work advancing a supervised to-do, pass its explicit `todo_id`; this conversation must supervise it. Omission keeps its association; \"\" clears it. Persona checks Agent answers, criterion-state changes and changed explicit progress reports. One no-progress run signals the supervisor; two ask Change approach / Keep waiting with the reason, even with `push: asked`. Get owner consent before creating or changing recurring work.",
     "input_schema": {
       "type": "object",
       "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "explicit supervised to-do this routine advances; empty clears the association"
+        },
         "fresh_each_run": {
           "type": "boolean"
         },
@@ -1413,7 +1421,7 @@
   },
   {
     "name": "kb_search",
-    "description": "Search the knowledge base: summaries and metadata of chats, people, projects, docs, meetings, events, recordings (with their minutes and any transcript still retained), topics (curated knowledge points: how something works, what was decided and why, the steps and pitfalls), project timelines, the notes directories the user added (hits with an absolute path) and, with messages=true, the full message archive (newest days first). All words must match. Hits come in the order the files are read, not by relevance, so a broad search can fill the limit with chats: give kind to search one kind only, the entries whose name matches first, then as kb_list ranks them. A past meeting (its decisions, what is still open, who does what) is kind=recordings: found by its title, the calendar event's title, its minutes or any transcript still retained; then kb_get it. Transcripts expire before minutes; do not promise the full transcript of a trimmed recording.",
+    "description": "Search the knowledge base: summaries and metadata of chats, people, projects, docs, meetings, events, recordings (with their minutes and any transcript still retained), topics (curated knowledge points: how something works, what was decided and why, the steps and pitfalls), project timelines, the notes directories the user added (hits with an absolute path) and, with messages=true, the full message archive (newest days first). All words must match. Hits come in the order the files are read, not by relevance, so a broad search can fill the limit with chats: give kind to search one kind only, the entries whose name matches first, then as kb_list ranks them. A past meeting (its decisions, what is still open, who does what) is kind=recordings: found by its title, the calendar event's title, its minutes or any transcript still retained; then kb_get it. Transcripts expire before minutes: never promise a trimmed recording's full transcript.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1450,7 +1458,7 @@
   },
   {
     "name": "kb_list",
-    "description": "List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (the user's phone / watch recordings; newest first, saying which have meeting minutes, which are all-day recordings with a day recap and its state, and which transcripts have expired), topics (knowledge points curated by subject out of the timelines and chats: concepts, decisions with their reasons, practices, pitfalls, facts, open questions; the biggest first). Transcripts are kept for recording_days (14 days by default); meetings' minutes and all-day recordings' recaps are kept longer under minutes_days (forever by default). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.",
+    "description": "List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (the user's phone / watch recordings; newest first, saying which have meeting minutes, which are all-day recordings with a day recap and its state, and which transcripts have expired), topics (knowledge points curated by subject out of the timelines and chats: concepts, decisions with their reasons, practices, pitfalls, facts, open questions; the biggest first). Transcripts stay for recording_days (14 days by default), minutes and recaps for minutes_days (forever by default). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1482,7 +1490,7 @@
   },
   {
     "name": "kb_get",
-    "description": "Read one entity: its metadata (links to people / chats / projects, tags), compressed context (summary.md), a project's timeline, a chat's messages of the last 7 days, a recording's meeting minutes, or an all-day recording's day recap (the day's timeline, meetings, suggested to-dos), with each action item's state (suggested, or its to-do's) and its timestamped transcript while still retained (phone/watch recordings, text only), a meeting's / event's recordings, a topic's knowledge points by subtopic (each with its kind, reason and the entries it came from). Transcripts expire after recording_days (default 14 days); then meetings keep only minutes and all-day recordings their recap, per minutes_days (forever by default). id from kb_list / kb_search (a project also by name). A project lists its 20 most relevant people and a count (all: meta.json).",
+    "description": "Read one entity: its metadata (links to people / chats / projects, tags), compressed context (summary.md), a project's timeline, a chat's messages of the last 7 days, a recording's meeting minutes, or an all-day recording's day recap (the day's timeline, meetings, suggested to-dos), with each action item's state (suggested, or its to-do's) and its timestamped transcript while still retained (phone/watch recordings, text only), a meeting's / event's recordings, a topic's knowledge points by subtopic (each with its kind, reason and the entries it came from). Transcripts expire after recording_days (14 days by default); minutes and recaps stay for minutes_days (forever by default). id from kb_list / kb_search (a project also by name). A project lists its 20 most relevant people and a count (all: meta.json).",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1511,7 +1519,7 @@
   },
   {
     "name": "kb_update",
-    "description": "Write to the knowledge base: create or change a project (name, project_kind short|long, status, goal, my_role, aliases, link chats / people, code dirs as \"\u003cmachine\u003e:\u003cpath\u003e\" so Agents there belong to it, append a timeline `log` line, replace its summary), or tag / annotate a chat, person, doc, meeting, event, recording (a recording's content is the phone's: only its tags, pinned and projects; importance P0–P3, relevance 0–100, tags, note, link projects), or a topic (its points are curated: only its name, note, aliases and tags). Tags set here are kept over the automatic ones. Use it whenever a conversation settles something about a project or person. Two projects that are the same work under two names: `merge_into`; two that were merged but are not: `unmerge` on the one merged away.",
+    "description": "Write to the knowledge base: create or change a project (name, project_kind short|long, status, goal, my_role, aliases, link chats / people, code dirs as \"\u003cmachine\u003e:\u003cpath\u003e\" so Agents there belong to it, append a timeline `log` line, replace its summary), or tag / annotate a chat, person, doc, meeting, event, recording (a recording's content is the phone's: only its tags, pinned and projects; importance P0–P3, relevance 0–100, tags, note, link projects), or a topic (its points are curated: only its name, note, aliases and tags). Tags set here are kept over the automatic ones. `remove_*` (ids) unlink for good: Persona won't relink it by itself; the rest still updates. Use it whenever a conversation settles something about a project or person. Two projects that are the same work under two names: `merge_into`; two that were merged but are not: `unmerge` on the one merged away.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1538,11 +1546,11 @@
         },
         "merge_into": {
           "type": "string",
-          "description": "projects only: fold this project into that one (slug or name) when they are the same work; nothing else is changed in the same call"
+          "description": "projects only: fold this project into that one (slug or name); nothing else changes in the same call"
         },
         "unmerge": {
           "type": "boolean",
-          "description": "projects only: undo the merge that folded this project (slug or name) into another: it is listed again and takes back its chats, people, items and aliases; nothing else is changed in the same call"
+          "description": "projects only: undo the merge that folded this project (slug or name) into another; nothing else changes in the same call"
         },
         "name": {
           "type": "string"
@@ -1608,7 +1616,7 @@
           "items": {
             "type": "string"
           },
-          "description": "projects: aliases that are not this project's (another project's name, too generic)"
+          "description": "projects: aliases that are not this project's (another's name, too generic)"
         },
         "chats": {
           "type": "array",
@@ -1616,7 +1624,19 @@
             "type": "string"
           }
         },
+        "remove_chats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "people": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "remove_people": {
           "type": "array",
           "items": {
             "type": "string"

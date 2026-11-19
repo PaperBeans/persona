@@ -25,6 +25,9 @@ type Detail struct {
 	Recent  string          `json:"recent,omitempty"`
 	// Links are the linked projects, chats and people, named and ranked.
 	Links []Entry `json:"links,omitempty"`
+	// Removed: the links the user removed by hand (meta's excluded), named as Links are; automatic organizing leaves
+	// them out until the user links them again or allows them again (allow_people, allow_chats, allow_projects).
+	Removed []Entry `json:"removed,omitempty"`
 	// Moments: a project's Moments posts (LinkMoments), newest first.
 	Moments []MomentRef `json:"moments,omitempty"`
 	// Segments: a recording's transcript (the app shows it; Recent has it as text for the assistant).

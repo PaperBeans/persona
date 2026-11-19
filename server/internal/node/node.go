@@ -247,7 +247,8 @@ type Node struct {
 	runtimeSock string
 	// runtimeHost: the runtime socket this Node lists runtimes from — the resident node's, shared by its Nodes
 	// (attach.go), or its own for the one connection it serves (runtimehost.go).
-	runtimeHost *RuntimeHost
+	runtimeHost    *RuntimeHost
+	autoCompanions bool
 	// keeper: a resident node's conversations between hub connections (assistant_keep.go); nil without one.
 	keeper *assistantKeeper
 	// replayed is closed once what standby took while no manager was connected went to this one (spool_replay.go): new
@@ -438,6 +439,7 @@ func New(version string) (*Node, error) {
 
 // ServeStdio runs the node protocol on stdin/stdout until the hub disconnects.
 func (n *Node) ServeStdio(ctx context.Context) error {
+	n.autoCompanions = true
 	return n.Serve(ctx, os.Stdin, os.Stdout)
 }
 
@@ -501,7 +503,10 @@ func (n *Node) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 	} else if rh, err := n.listenRuntimeSocket(ctx); err != nil { // runtimes (runtimes.go): beside the engine, whichever it is
 		n.logger.Printf("runtime socket: %v", err)
 	} else {
-		defer rh.detach(n)
+		defer func() {
+			rh.setAgyBridge(false)
+			rh.detach(n)
+		}()
 	}
 	ln, err := n.listenHookSocket(ctx)
 	if err != nil {

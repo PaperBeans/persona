@@ -1,4 +1,5 @@
 // One conversation: an agent in herdr on one of your computers, or a Persona assistant conversation.
+import { useAssistantIdentity } from "../../lib/assistant-identity";
 import { useAssistantTitle, useManagerOffline } from "../ManagerParts";
 import { LinkManager, useShownManager } from "../../lib/manager-choice";
 import { alsoOpenText } from "../../lib/engines";
@@ -13,7 +14,7 @@ import { openLink } from "../../lib/links";
 import { getPanel, openPanel, togglePanel, usePanel } from "../../lib/panel";
 import { isWorkflowsCommand, latestWorkflowRun, openBackgroundPanel, provideBackgroundChat, WORKFLOWS_COMMAND } from "../../lib/background-panel";
 import { machineWithHub } from "../../lib/mesh";
-import { useLayout } from "../../lib/layout";
+import { sidebarRail, sidebarShown, useLayout } from "../../lib/layout";
 import { hasModes, isMuted, listedModesOf, toggleMute } from "../../lib/session-actions";
 import { flipPin } from "../../lib/agent-actions";
 import { isPinned } from "../../lib/pins";
@@ -2135,9 +2136,9 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
               ) }))]
               .sort((a, b) => a.at - b.at)
               .map((x) => x.el)}
-            {(shownPending.some((p) => p.waits) || (sendFeedback !== undefined ? Boolean(sendFeedback) : shownPending.length > 0 || outbox.some((e) => e.state === "sending") || (starting && outgoing > 0))) && (
-              <div className="flex items-center gap-2.5" data-message-feedback={sendFeedback || "sending"}>
-                {sendFeedback === "unknown" ? <span role="status" className="text-ink-3">{t("lib-outbox.delivery_unknown")}</span> : <Loading label={shownPending.some((p) => p.waits) ? t("ultracode.send_waits") : sendFeedback === "processing" ? t("chat-segmentview.processing") : starting ? t("chat-chatview.preparing") : online ? t("chat-segmentview.sending") : t("chat-chatview.waiting_for_hub")} />}
+            {(shownPending.some((p) => p.waits) || (sendFeedback !== undefined ? Boolean(sendFeedback) : shownPending.length > 0 || outbox.some((e) => e.state === "sending") || (starting && outgoing > 0) || (opening && !tr.streaming && state === "working"))) && (
+              <div className="flex items-center gap-2.5" data-message-feedback={sendFeedback || (opening && state === "working" ? "processing" : "sending")}>
+                {sendFeedback === "unknown" ? <span role="status" className="text-ink-3">{t("lib-outbox.delivery_unknown")}</span> : <Loading label={shownPending.some((p) => p.waits) ? t("ultracode.send_waits") : sendFeedback === "processing" || (opening && state === "working") ? t("chat-segmentview.processing") : starting ? t("chat-chatview.preparing") : online ? t("chat-segmentview.sending") : t("chat-chatview.waiting_for_hub")} />}
               </div>
             )}
             {voiceState && <VoiceTail owner={voiceOwner} persona={persona.name} />}
@@ -2532,6 +2533,11 @@ export const Header = memo(function Header({
   sides?: { count: number; open: boolean; needs: boolean; onToggle: () => void };
   panel?: PanelChrome;
 }) {
+  const identity = useAssistantIdentity();
+  const layout = useLayout();
+  const narrow = useMedia(NARROW);
+  // A rail and a phone drawer have no assistant head beside the page. Older hubs have a product head instead.
+  const headBesidePage = !narrow && sidebarShown(layout) && !sidebarRail(layout) && identity !== null;
   const menu = useMenu();
   // the ⋯ menu's Rename…, Rename space… and Delete… open dialogs from a chunk of their own: on its way once it opens (#10382)
   useEffect(() => {
@@ -2717,6 +2723,7 @@ export const Header = memo(function Header({
       </span>
     );
   const branch = !assistant ? session?.branch?.trim() : "";
+  const titleClass = "min-w-0 text-[14px] font-medium text-ink";
   const sideLabel = sides ? [t("chat-chatview.side_sessions_count", { count: sides.count }), sides.needs ? t("chat-chatview.side_sessions_needs_you") : ""].filter(Boolean).join(" · ") : "";
 
   return (
@@ -2728,21 +2735,28 @@ export const Header = memo(function Header({
         {pinned && !assistant && <span role="img" aria-label={t("chat-chatview.pinned")} title={t("chat-chatview.pinned")} className="mr-1 flex shrink-0 text-ink-3"><Icon name="pin" size={13} /></span>}
         {session?.loop && !assistant && <LoopMark session={session} now={now} onOpen={() => openBackgroundPanel(session.machine_id, session.session_id)} />}
         {session && !assistant && <AgentDeviceMark session={session} machineName={machineName} />}
-        {assistant && <span className="mr-1.5 flex shrink-0"><AssistantFace session={session} last={last} /></span>}
+        {assistant && !headBesidePage && <span data-chat-face className="mr-1.5 flex shrink-0"><AssistantFace session={session} last={last} /></span>}
         {editing && session ? (
           <TitleEditor session={session} title={title} onDone={() => setEditing(false)} />
+        ) : assistant && main && items.length > 0 ? (
+          <h1 className={titleClass}>
+            <button type="button" data-chat-title data-assistant-name-menu aria-haspopup="menu" aria-expanded={Boolean(menu.anchor)} onClick={menu.open} className="touch-hit relative flex max-w-full items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 hover:bg-hover focus-visible:bg-hover">
+              <span className="truncate">{chrome?.title || title}</span>
+              <Icon name="chevron" size={12} className="shrink-0 text-ink-3" />
+            </button>
+          </h1>
         ) : (
           <h1
             onDoubleClick={canRename && !chrome?.title && !direction ? () => setEditing(true) : undefined}
             title={chrome?.title ? [chrome.title, chrome.sub].filter(Boolean).join(" · ") : title}
             data-chat-title
-            className="min-w-0 cursor-default truncate text-[14px] font-medium text-ink select-none"
+            className={cx(titleClass, "cursor-default truncate select-none")}
           >
             {chrome?.title || title}
           </h1>
         )}
         {!editing && chrome?.beside}
-        {!editing && more("title")}
+        {!editing && !(assistant && main) && more("title")}
         {!editing && branch && (
           <span title={t("chat-chatview.branch_title", { branch })} data-chat-branch className="ml-1.5 flex min-w-0 max-w-44 shrink items-center gap-1 rounded-full px-1.5 py-0.5 text-[12px] text-ink-3 @max-[800px]:hidden">
             <Icon name="branch" size={12} className="shrink-0" />

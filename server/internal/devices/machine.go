@@ -256,6 +256,7 @@ func (m *Machine) snapshot() proto.Machine {
 		icon = "laptop"
 	}
 	blocked := m.canDeployLocked()
+	onlyPackage := blocked == nil && noPackage != nil // the node could take an update; the hub has none for it
 	if blocked == nil {
 		blocked = noPackage
 	}
@@ -284,7 +285,7 @@ func (m *Machine) snapshot() proto.Machine {
 		NodeVersion: m.info.Version, NodeMismatch: m.online && nodeMismatch(version, m.info),
 		NodeProtocol: m.info.Protocol, NodeIncompatible: incompatible,
 		Deploying: m.deploying, DeployError: deployErr,
-		CanDeploy: &canDeploy, DeployReason: deployReason, DeployPhase: m.deployPhase,
+		CanDeploy: &canDeploy, DeployReason: deployReason, DeployNoPackage: onlyPackage, DeployPhase: m.deployPhase,
 		Transport: m.via, TailcatPath: m.path, Tailcat: m.cfg.TailcatAddr != "",
 		Engine: engine, Engines: engines, EngineHosts: choice.Hosts, EngineDefault: choice.Default,
 		EngineSuggested: suggested, EngineSetsUnsupported: setsUnsupported, Link: link, System: d.metrics.system(m.cfg.ID),

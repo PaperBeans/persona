@@ -158,6 +158,63 @@ import PersonaWire
         #expect(AgentSortComparable.differences(native: nativeHeld, core: coreHeld) == [])
     }
 
+    private func selectedHubInput(_ filter: AgentFilter = .all) throws -> AgentListProjection.Input {
+        let sessions = try [("working", "hub-a"), ("unread", "hub-b")].map { state, group in
+            try session(.object([
+                "machine_id": .string("shared"), "session_id": .string("same"), "app_hub_group": .string(group),
+                "title": .string("needle"), "state": .string(state), "status": .string("idle"),
+                "updated_at": .string("2027-01-01T00:00:00Z"),
+            ]))
+        }
+        let machine = try JSON.decoder.decode(Machine.self, from: Data(#"{"id":"shared","name":"Fixture","kind":"local","online":true}"#.utf8))
+        var hubA = machine
+        hubA.group = "hub-a"
+        var hubB = machine
+        hubB.group = "hub-b"
+        var settings = AgentListProjection.Settings(grouping: "state")
+        settings.filter = filter
+        settings.multiHub = true
+        settings.hub = HubFilter.value("hub-a")
+        return AgentListProjection.Input(sessions: sessions, machines: [hubA, hubB], settings: settings)
+    }
+
+    @Test func selectedHubNativeAndCoreOutputMatchThroughTheRealCABI() throws {
+        var input = try selectedHubInput()
+        let encoded = try AgentSortProjectionAdapter.coreInput(input)
+        let object = try #require(JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any])
+        let encodedSettings = try #require(object["settings"] as? [String: Any])
+        #expect(encodedSettings["multi_hub"] as? Bool == true)
+        #expect(encodedSettings["hub_filter"] as? String == "=hub-a")
+        let native = AgentSortComparable(native: input)
+        // Production admits hub-a before counts, grouping, or unread output; hub-b has the same short ID.
+        #expect(native.filtered == ["hub-a|shared/same"])
+        #expect(native.filterCounts == ["needsYou": 0, "unread": 0, "working": 1, "backgroundWaiting": 0])
+        #expect(native.groups.map(\.id) == ["state/working"])
+        #expect(native.groups.first?.rows == ["hub-a|shared/same"])
+        #expect(native.unread == [])
+        let core = try AgentSortComparable(core: JSONDecoder().decode(AgentSortCoreProjection.self, from: Data(PersonaCoreProjections.sort(inputJSON: encoded).utf8)), input: input)
+        #expect(AgentSortComparable.differences(native: native, core: core) == [])
+
+        input.settings.filter = .unread
+        let quickNative = AgentSortComparable(native: input)
+        #expect(quickNative.filtered == [])
+        #expect(quickNative.filterCounts == ["needsYou": 0, "unread": 0, "working": 1, "backgroundWaiting": 0])
+        #expect(quickNative.groups == [])
+        #expect(quickNative.unread == [])
+        let quickOutput = try PersonaCoreProjections.sort(inputJSON: AgentSortProjectionAdapter.coreInput(input))
+        let quickCore = try AgentSortComparable(core: JSONDecoder().decode(AgentSortCoreProjection.self, from: Data(quickOutput.utf8)), input: input)
+        #expect(AgentSortComparable.differences(native: quickNative, core: quickCore) == [])
+    }
+
+    @Test func shadowComparesSelectedHubInputInsteadOfRejectingItAsHubFilter() async throws {
+        let recorder = Recorder()
+        let shadow = AgentSortShadow(report: { value in Task { await recorder.report(value) } })
+        shadow.submit(try selectedHubInput())
+        try await recorder.waitForSummary()
+        let reports = await recorder.reports
+        #expect(reports.map(\.rule) == ["summary-compared-1-mismatches-0"])
+    }
+
     @Test func shadowRunsOffMainCoalescesAndNeverLeaksContent() async throws {
         let recorder = Recorder()
         let gate = Gate()

@@ -359,6 +359,7 @@ func roundPoint(p proto.MetricPoint) proto.MetricPoint {
 	}
 	p.CPU, p.Load = r(p.CPU, 10), r(p.Load, 100)
 	p.Mem, p.Swap, p.Rx, p.Tx, p.Disk = r(p.Mem, 1), r(p.Swap, 1), r(p.Rx, 1), r(p.Tx, 1), r(p.Disk, 1)
+	p.BatteryPercent, p.TempC = r(p.BatteryPercent, 10), r(p.TempC, 10)
 	return p
 }
 

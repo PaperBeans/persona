@@ -45,15 +45,17 @@ func (s *Service) mainChatFit(ctx context.Context, machine, name string) (mainCh
 		return mainChatFits, nil
 	}
 	ctx = withUnhidden(withSettingsMemo(ctx), name)
-	if m, managed := s.managedNamed(ctx, name); managed { // the same on every machine in its scope: no list to ask
-		allowed, err := s.assistantProviders(ctx, machine, nil)
-		switch {
-		case !s.usableOn(ctx, m, machine):
+	if m, managed := s.managedNamed(ctx, name); managed { // the same on every machine in its scope, except managed agy (needs the agy runtime there)
+		if !s.usableOn(ctx, m, machine) {
 			return mainChatGone, nil
-		case err != nil || allowed[name]:
-			return mainChatFits, nil
 		}
-		return mainChatRefused, s.mainChatRefusal(ctx, machine, name, "")
+		if m.Kind == "api" || m.Agent != "agy" {
+			allowed, err := s.assistantProviders(ctx, machine, nil)
+			if err != nil || allowed[name] {
+				return mainChatFits, nil
+			}
+			return mainChatRefused, s.mainChatRefusal(ctx, machine, name, "")
+		}
 	}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

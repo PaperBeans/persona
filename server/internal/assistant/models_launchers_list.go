@@ -249,11 +249,12 @@ func (s *Service) machineLaunchersFrom(ctx context.Context, machine string, res 
 		!slices.ContainsFunc(out, func(l proto.Launcher) bool { return l.Name == "claude" }) {
 		out = append(out, proto.Launcher{Name: "claude", Source: "builtin"})
 	}
+	agyAssistant := slices.ContainsFunc(res.Launchers, func(l proto.LauncherEnvelope) bool { return l.Agent == "agy" && l.Assistant })
 	for _, m := range managed {
 		if m.Kind == "api" {
 			continue
 		}
-		out = append(out, proto.Launcher{Name: m.Name, BaseURL: m.BaseURL, Model: m.Model, Source: "persona", Agent: m.Agent, Assistant: m.Agent == "agy",
+		out = append(out, proto.Launcher{Name: m.Name, BaseURL: m.BaseURL, Model: m.Model, Source: "persona", Agent: m.Agent, Assistant: m.Agent == "agy" && agyAssistant,
 			PromptOptional: m.Agent == "codex" && codexOptional, RunHere: m.Agent == "codex" && codexHere, Pi: m.PiAPI() != ""})
 	}
 	return out, res.HostRuntime
@@ -297,10 +298,12 @@ func (s *Service) assistantProviders(ctx context.Context, machine string, picker
 	p.MachineID = machine
 	stored := s.storedLaunchers(ctx)
 	current := slices.Clone(picker)
+	agyAssistant := picker == nil || slices.ContainsFunc(picker, func(l ConfiguredLauncher) bool { return cmp.Or(l.AgentType, l.Agent) == "agy" && l.Assistant })
 	for _, managed := range stored {
 		if !slices.ContainsFunc(current, func(l ConfiguredLauncher) bool { return l.Name == managed.Name }) {
 			current = append(current, ConfiguredLauncher{Launcher: proto.Launcher{
 				Name: managed.Name, BaseURL: managed.BaseURL, Model: managed.Model, Source: "persona", Agent: managed.Agent,
+				Assistant: managed.Agent == "agy" && agyAssistant,
 			}})
 		}
 	}

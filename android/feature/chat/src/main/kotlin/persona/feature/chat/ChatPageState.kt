@@ -442,10 +442,11 @@ internal class ChatPageSubagents(
 /** ChatPage's reader state: the plan sheet, seen tracking, the newest visible item, the image loader (moved as is). */
 @Composable
 internal fun rememberChatPageReader(key: SessionKey, repository: ChatRepository,
-    snapshot: persona.core.contracts.api.ChatSnapshot, chatList: ChatListState, lines: List<ChatLine>): ChatPageReader {
+    snapshot: persona.core.contracts.api.ChatSnapshot, chatList: ChatListState, lines: List<ChatLine>,
+    liveItems: ChatLiveItems): ChatPageReader {
     val planSheetState = remember { mutableStateOf(false) }
     val sheetPlanState = remember { mutableStateOf<LinePlan?>(null) }
-    val currentItemsState = rememberUpdatedState(snapshot.items)
+    val currentItems = remember(liveItems) { { liveItems.currentItems() } }
     // Rows map to lines by key, never by position: a failed send can sit between lines (#2769).
     val currentLinesByKeyState = rememberUpdatedState(remember(lines) { lines.associateBy { it.contentKey } })
     val currentLinesByKey by currentLinesByKeyState
@@ -466,7 +467,7 @@ internal fun rememberChatPageReader(key: SessionKey, repository: ChatRepository,
         pairingLoader ?: chatImageLoader(context.applicationContext, repository)
     }
     val markdownCache = remember { ChatMarkdownCache() }
-    return ChatPageReader(planSheetState, sheetPlanState, currentItemsState, currentLinesByKeyState, list, reportedSeenState,
+    return ChatPageReader(planSheetState, sheetPlanState, currentItems, currentLinesByKeyState, list, reportedSeenState,
         newestVisibleItemState, readThrough, context, pairingLoader, loader, markdownCache)
 }
 
@@ -474,7 +475,7 @@ internal fun rememberChatPageReader(key: SessionKey, repository: ChatRepository,
 internal class ChatPageReader(
     val planSheet: MutableState<Boolean>,
     val sheetPlan: MutableState<LinePlan?>,
-    val currentItems: State<List<Item>>,
+    val currentItems: () -> List<Item>,
     val currentLinesByKey: State<Map<String, ChatLine>>,
     val list: androidx.compose.foundation.lazy.LazyListState,
     val reportedSeen: MutableState<Item?>,
@@ -664,19 +665,15 @@ internal class ChatPageCloseout(
 @Composable
 internal fun rememberChatPageSources(key: SessionKey, repository: ChatRepository, sender: MessageSender,
     interactions: InteractionCenter, sessions: SessionsRepository, chrome: ChatChromeBindings,
-    textUpdates: Map<String, ChatTextUpdate>, statusBindings: ChatStatusBindings): ChatPageSources {
+    statusBindings: ChatStatusBindings): ChatPageSources {
     val scope = rememberCoroutineScope()
     val haptics = persona.core.designsystem.rememberHaptics()
     val res = LocalResources.current
     val recovery = remember(key, statusBindings.recovery) { ChatStatusRecovery(res, statusBindings.recovery, scope, sessions::refresh) }
-    val source = remember(repository, key) { repository.observe(key) }
+    val source = remember(repository, key) { repository.observeStructure(key) }
     val snapshotState = source.collectAsStateWithLifecycle(ChatSnapshot())
     val snapshot by snapshotState
-    val liveTextUpdates = remember(snapshot.items, snapshot.streamingItemIds, textUpdates) {
-        snapshot.items.filter { it.id in snapshot.streamingItemIds }.associate {
-            it.id to ChatTextUpdate(it.text.orEmpty(), streaming = true)
-        } + textUpdates
-    }
+    val liveItems = rememberChatLiveItems(snapshot.items, snapshot.liveText, snapshot.streamingItemIds)
     val application = LocalContext.current.applicationContext
     val renamer = chrome.renamer ?: remember(application) {
         if (application is GeneratedComponentManager<*>)
@@ -709,7 +706,7 @@ internal fun rememberChatPageSources(key: SessionKey, repository: ChatRepository
     val sendReceipts = allSendReceipts.filter { receipt -> receipt.session == key ||
         (receipt.session == PendingMainConversation && receipt.mainTarget &&
             allMessages.any { it.session == key && it.clientMessageId == receipt.clientMessageId }) }
-    return ChatPageSources(scope, haptics, res, recovery, snapshotState, liveTextUpdates, renamer, sessionListState,
+    return ChatPageSources(scope, haptics, res, recovery, snapshotState, liveItems, renamer, sessionListState,
         managerChoiceState, machinesState, allRequestsState, allMessagesState, adoptedSessionsState, startedThreadsState,
         writtenAtState, sendReceipts)
 }
@@ -721,7 +718,7 @@ internal class ChatPageSources(
     val res: android.content.res.Resources,
     val recovery: ChatStatusRecovery,
     val snapshot: State<persona.core.contracts.api.ChatSnapshot>,
-    val liveTextUpdates: Map<String, ChatTextUpdate>,
+    val liveItems: ChatLiveItems,
     val renamer: persona.core.domain.sort.SessionRenamer?,
     val sessionList: State<List<Session>>,
     val managerChoice: State<AssistantManagerChoice.Choice>,

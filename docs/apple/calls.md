@@ -466,7 +466,7 @@ offered in China otherwise. The source guard and the binary check run in CI and 
 
 ## DEBUG switches
 
-All are listed in `scripts/release/release.sh`, which fails a Release binary that still has them.
+All are listed in `scripts/release/debug_switches.txt`; `release.sh` fails a Release binary that still has them.
 
 - `-showCallSample <state>`: the call screen with no system, audio or hub: `dialing`, `connecting`, `connected`,
   `muted`, `held`, `interrupted`, `resume`, `speaker`, `ended`, `mutedSpeaker`, `reconnecting`, `audioRoute`, `speaking`,

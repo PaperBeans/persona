@@ -4106,6 +4106,8 @@ type ConnectorKBItem struct {
 	LockedFields []string  `json:"locked_fields,omitempty"`
 	// The store's: which extension holds a locked field. A connector's is ignored.
 	Provenance map[string]ConnectorKBProvenance `json:"provenance,omitempty"`
+	// The store's: the links the user removed, by list. A connector's is ignored.
+	Excluded map[string][]string `json:"excluded,omitempty"`
 }
 
 // ConnectorKBProvenance: who holds a locked field of a knowledge-base entity, and from what (kb.schema.json
@@ -4656,11 +4658,14 @@ type KBDetail struct {
 	Path string `json:"path"`
 	// The entity's own fields (meta.json). For people, status is active, ignored or self; absent or empty means active.
 	// Status uses the same locked_fields and provenance as other corrected fields.
-	Meta     json.RawMessage      `json:"meta"`
-	Summary  string               `json:"summary,omitempty"`
-	Log      []string             `json:"log,omitempty"`
-	Recent   string               `json:"recent,omitempty"`
-	Links    []KBEntry            `json:"links,omitempty"`
+	Meta    json.RawMessage `json:"meta"`
+	Summary string          `json:"summary,omitempty"`
+	Log     []string        `json:"log,omitempty"`
+	Recent  string          `json:"recent,omitempty"`
+	Links   []KBEntry       `json:"links,omitempty"`
+	// The links the user removed by hand (meta's excluded), named as links are; automatic organizing and extensions
+	// leave them out until the user links them again (docs/assistant/knowledge.md "Removed links").
+	Removed  []KBEntry            `json:"removed,omitempty"`
 	Moments  []KBMomentRef        `json:"moments,omitempty"`
 	Segments []KBRecordingSegment `json:"segments,omitempty"`
 	// A recording's meeting minutes, once written (docs/assistant/meeting-minutes.md); kept as the hub sends them.
@@ -4872,8 +4877,8 @@ type KBUpdateResult struct {
 	// The previous value of each field written (null when unset; summary is the old text, profile this extension's own
 	// profile before), for the extension's own undo.
 	Before map[string]json.RawMessage `json:"before,omitempty"`
-	// Fields the update carried that its kind does not use (a person's summary and log, for one): not applied, each with
-	// why.
+	// Fields the update carried that its kind does not use (a person's summary and log, for one), and links to make that
+	// the user removed: not applied, each with why.
 	Ignored []KBIgnoredField `json:"ignored,omitempty"`
 }
 

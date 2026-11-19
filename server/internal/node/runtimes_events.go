@@ -21,7 +21,7 @@ import (
 // listenRuntimeSocket gives n a runtime socket of its own, at runtimePath, for the connection it serves itself
 // (`--stdio` with no resident node: runtimehost.go). A resident node's Nodes share one instead.
 func (n *Node) listenRuntimeSocket(ctx context.Context) (*RuntimeHost, error) {
-	rh := &RuntimeHost{reg: n.runtimes, path: n.runtimePath(), version: n.Version, logger: n.logger}
+	rh := &RuntimeHost{reg: n.runtimes, path: n.runtimePath(), version: n.Version, logger: n.logger, autoCompanions: n.autoCompanions}
 	if rh.reg == nil {
 		rh.reg = newRuntimeRegistry()
 	}

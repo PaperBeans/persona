@@ -203,6 +203,14 @@ nonisolated struct APIClient: Sendable {
     var clientMetadata: RequestClientMetadata = .current
     /// Answers the demo config's requests (DemoHub registers it at launch); every endpoint goes through `request`.
     nonisolated(unsafe) static var local: (@Sendable (LocalRequest) async throws -> Data)?
+    /// The app's answer to a hub that retired this device's push registration (#9612): registers with the group again
+    /// and says whether that reached its hub. Set once at launch (`PushRegistrar`); nil in the extensions and the watch.
+    nonisolated(unsafe) static var onPushRegistrationRequired: (@Sendable (_ group: String) async -> Bool)?
+    /// This client's own answer in place of `onPushRegistrationRequired`: a test's.
+    var registerPush: (@Sendable (_ group: String) async -> Bool)?
+    /// A write for this device (`/api/v1/devices/{id}/…`: notification settings, Live Activity tokens) whose push
+    /// registration the hub retired (docs/protocol/protocol.md devices).
+    static let pushRegistrationRequired = "push_registration_required"
 
     /// For bytes the app caches itself (chat images, Feishu media): through `.shared` the system's URLCache kept a
     /// second copy of every one of them.
@@ -329,6 +337,21 @@ nonisolated struct APIClient: Sendable {
 
     func request(_ method: String, _ path: String, query: [String: String] = [:], repeated: [URLQueryItem] = [], body: (any Encodable)? = nil,
                  timeout: TimeInterval = 30, opID: UUID? = nil, extraHeaders: [String: String] = [:]) async throws -> Data {
+        func send() async throws -> Data {
+            try await sendRequest(method, path, query: query, repeated: repeated, body: body, timeout: timeout, opID: opID, extraHeaders: extraHeaders)
+        }
+        do {
+            return try await send()
+        } catch let e as APIError where e.status == 409 && e.code == Self.pushRegistrationRequired && path.hasPrefix("/api/v1/devices/") {
+            // The hub retired this device's push registration (#9611): register again, then this write once more. A
+            // registration that didn't reach the hub (or one the hub just took and refuses again) leaves the 409.
+            guard let register = registerPush ?? Self.onPushRegistrationRequired, await register(group) else { throw e }
+            return try await send()
+        }
+    }
+
+    private func sendRequest(_ method: String, _ path: String, query: [String: String], repeated: [URLQueryItem], body: (any Encodable)?,
+                             timeout: TimeInterval, opID: UUID?, extraHeaders: [String: String]) async throws -> Data {
         let query = larkScoped(path, query)
         try Self.refuseReplayed(path, query)
         let headers = clientMetadata.headers.merging(opID.map(HubNaming.operationHeaders) ?? [:]) { _, operation in operation }
@@ -2048,6 +2071,14 @@ nonisolated struct APIClient: Sendable {
     }
     func setCodexSetting(machine: String, key: String, value: JSONValue) async throws -> [ClaudeSetting] {
         try JSON.decoder.decode(ClaudeSettingsResponse.self, from: try await request("PUT", "/api/v1/machines/\(machine)/codex-settings",
+            body: SetSetting(key: key, value: value))).settings
+    }
+    /// Antigravity's options (~/.gemini/antigravity-cli/settings.json), the same shape as Claude's.
+    func agySettings(machine: String) async throws -> [ClaudeSetting] {
+        try await get("/api/v1/machines/\(machine)/agy-settings", as: ClaudeSettingsResponse.self).settings
+    }
+    func setAgySetting(machine: String, key: String, value: JSONValue) async throws -> [ClaudeSetting] {
+        try JSON.decoder.decode(ClaudeSettingsResponse.self, from: try await request("PUT", "/api/v1/machines/\(machine)/agy-settings",
             body: SetSetting(key: key, value: value))).settings
     }
     struct SetSetting: Encodable { var key: String; var value: JSONValue }

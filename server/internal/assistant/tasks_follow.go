@@ -264,12 +264,15 @@ func (s *Service) closedTurnReopens(t Todo, mid, sid string) closedTurn {
 }
 
 type receiptBody struct {
-	Title   string         `json:"title"`
-	State   string         `json:"state"` // done, failed, interrupted
-	Summary string         `json:"summary,omitempty"`
-	PR      string         `json:"pr,omitempty"`
-	Machine string         `json:"machine,omitempty"`
-	Review  *receiptReview `json:"review,omitempty"`
+	Title   string `json:"title"`
+	State   string `json:"state"` // done, failed, interrupted
+	Summary string `json:"summary,omitempty"`
+	PR      string `json:"pr,omitempty"`
+	Machine string `json:"machine,omitempty"`
+	// Files: what the agent handed over this turn (task_files.go, #10511): name and where it is on the conversation's
+	// computer, or why it could not come. Clients that do not know it ignore it.
+	Files  []taskFile     `json:"files,omitempty"`
+	Review *receiptReview `json:"review,omitempty"`
 	// MachineID and SessionID name the run whose turn this is (#10465), so a reader of the to-do's history can give the
 	// receipt to that run instead of guessing from the computer's name. Absent where no run started (a failed start)
 	// and on older receipts.
@@ -620,12 +623,16 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 	if _, answer := turnExchange(items); answer != "" {
 		text = answer
 	}
+	// A paged reply may have lost its tail (the file lines and the closeout are there): read the whole item.
+	text = s.taskAnswer(cctx, machine, sid, items, text)
 	if current, ok := s.todoNow(t.ID); !ok || current.Cancelled() || current.AgentAborted(machine, sid) {
 		s.logf("task %s: cancelled or agent %s/%s aborted: not issuing done receipt", t.ID, machine, sid)
 		return settleRefused
 	}
 	s.forgetStop(last.MachineID, last.SessionID, stop) // a Stop that came after its output: this turn's
-	body := receiptBody{Title: t.Title, State: "done", Summary: clipMarkdown(text, 600), Machine: name,
+	// The files it handed over (task_files.go, #10511): copied to the computer of the conversation that hears of it.
+	files := s.deliverTaskFiles(cctx, t, machine, s.conversationMachine(cctx, s.taskReceiver(cctx, t), ""), text)
+	body := receiptBody{Title: t.Title, State: "done", Summary: clipMarkdown(text, 600), Machine: name, Files: files,
 		MachineID: last.MachineID, SessionID: last.SessionID, Reroute: s.rerouteOfTask(cctx, t.ID, t.PlanID)}
 	// Persona follows up on a supervised stop through sigReview or sigIdle after judgment; the receipt need not wait.
 	// needs_user waits on the user instead. Read the latest todo in case it changed while reading the reply.
@@ -685,7 +692,7 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 		s.turnAgain(cctx, t, turn, last, text, since, worked)
 		return settleTaken
 	}
-	s.taskNotice(cctx, t, name, "done", "", clipMarkdown(text, 1500))
+	s.taskNoticeOf(cctx, t, name, "done", "", clipMarkdown(text, 1500), 0, files)
 	if s.advanceTaskReply(cctx, t, last.MachineID, last.SessionID, text) {
 		go s.askAcceptance(t, last.MachineID, last.SessionID, text) // verified, by the supervising assistant or the user (acceptance.go)
 	}

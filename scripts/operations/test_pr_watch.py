@@ -2308,6 +2308,7 @@ class WatcherTests(unittest.TestCase):
                 patch.object(pr_watch_verify, "load_paths") as selector, \
                 patch.dict(os.environ, {"GH_TOKEN": "not-for-builds", "HOME": "/maintainer-home",
                                         "PR_WATCH_WEBHOOK_SECRET": "not-for-builds", "GRADLE_USER_HOME": "/trusted-gradle"}):
+            os.environ.pop("GOFLAGS", None)  # the default below; patch.dict restores the caller's value
             selector.return_value.select.return_value = {"scripts": True}
             commands = pr_watch_verify.persona_checks(".", pr(), 1, {})
             env = pr_watch_common.verification_env()
@@ -2316,12 +2317,17 @@ class WatcherTests(unittest.TestCase):
         self.assertNotIn("PR_WATCH_WEBHOOK_SECRET", env)
         self.assertEqual(env["GRADLE_USER_HOME"], "/trusted-gradle")
         self.assertNotEqual(env["HOME"], "/maintainer-home")
-        self.assertEqual(env["GOFLAGS"], "-gcflags=all=-dwarf=false -ldflags=-w")
+        self.assertEqual(env["GOFLAGS"], "-gcflags=all=-dwarf=false -ldflags=-w -trimpath")
 
     def test_verification_keeps_explicit_go_flags(self):
-        with patch.dict(os.environ, {"GOFLAGS": "-mod=readonly"}):
-            env = pr_watch_common.verification_env()
-        self.assertEqual(env["GOFLAGS"], "-mod=readonly")
+        # -trimpath lets PR worktrees share compiled packages (#10614); an explicit setting of it, false too, stays.
+        for explicit, expected in (("-mod=readonly", "-mod=readonly -trimpath"),
+                                   ("-mod=readonly -trimpath", "-mod=readonly -trimpath"),
+                                   ("-trimpath=false", "-trimpath=false"),
+                                   ("--trimpath=true -mod=mod", "--trimpath=true -mod=mod")):
+            with self.subTest(explicit=explicit), patch.dict(os.environ, {"GOFLAGS": explicit}):
+                env = pr_watch_common.verification_env()
+                self.assertEqual(env["GOFLAGS"], expected)
 
     def test_go_vet_clears_unused_linker_flag(self):
         names = ["server/internal/agents/cache_test.go"]

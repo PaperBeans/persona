@@ -101,7 +101,7 @@ Removing `tags` from packages and indexes must wait longer, until the marketplac
 
 ## Extension points
 
-What an extension contributes where is written in the manifest's `contributes`: keys are extension points, values are lists of contributions, and each item has an `id` (globally unique within that extension point; a clash with another extension or with the hub itself means it can't be installed).
+What an extension contributes where is written in the manifest's `contributes`: keys are extension points, values are lists of contributions, and each item has an `id`. IDs must be unique within that extension point across installed extensions, except for `ui`: a UI ID belongs to its extension, so `volc/status` and `example/status` can coexist whether either extension is enabled or disabled. A duplicate UI ID inside one manifest is still refused. Other contribution points and the hub's reserved IDs keep their existing conflict checks, both in preview and when committing an install or upgrade.
 
 | Extension point | Namespace (method prefix) | Fields per item | Requirements | Wired to |
 | --- | --- | --- | --- | --- |
@@ -542,6 +542,7 @@ The locked fields it writes become its own with `evidence` (`[{chat, day, n?, no
 `before` is each written field's previous value (`null` when unset, the old `summary` text), for the extension's undo. Rules and how this sits with the built-in pipeline: [Knowledge base](../assistant/knowledge.md#who-holds-a-field-6100).
 
 The update fields follow the existing knowledge base update API, plus `pinned`, `lock` and `remove_people/remove_chats/remove_aliases/remove_projects`.
+A link the user removed (`excluded` in the entity's meta, `removed` in `kb.get`) is not made again: it is dropped from `people` / `chats` / `projects` and named in `ignored`, and the rest applies ("Removed links" in `docs/assistant/knowledge.md`).
 Each kind takes only the fields it uses ("Fields each kind takes" in `docs/assistant/knowledge.md`); the others are not applied, and the answer names them in `ignored: [{field, reason}]`, so nothing is dropped silently (a person's `summary` and `log`, for one).
 
 **A person's profile** (`profile`, people only): what the extension knows of the person, in four parts kept apart: `facts`, the user's own words about them (`views`), `inferences` (each with its `basis`, shown as only a hint), and `commitments` either way (`owes: user | them`, `due?`, `done?`). Every item needs `sources`.
@@ -592,8 +593,10 @@ The schema is `schema/extension/models.schema.json`; the Go SDK has it as `ext.H
   `json_schema` with its one retry); the next one is tried when a candidate fails (`model_failed`, `model_refused`, `model_paused`), runs past `timeout_seconds` (which then bounds
   each candidate; the whole call stops at 600 seconds), answers with no text (`model_failed`, "the reply was empty") or still does not match `json_schema` (`invalid_output`).
   The extension only names models: each runs on a provider the user configured in Settings › Model providers that the hub calls directly (a direct API provider, or a Persona-managed
-  Messages launcher with an address and a key; not hidden) and that lists it (its default, tier, small, subagent or custom model, or its model list). The purpose's own provider is looked at first,
-  then direct API providers, then launchers, in their order. A model none offers is skipped as `model_unavailable` (data `{model}`) without a request.
+  Messages launcher with an address and a key; not hidden) that offers it (#10657): first the purpose's own provider when it lists the model (its default, tier, small, subagent or custom model,
+  or its model list) or the purpose is bound to that model there, then direct API providers, then launchers that list it, in their order; failing those, the purpose's own provider when it
+  declares no model list (it has not said what it serves, so its gateway is asked; one that does not serve the model fails like any candidate). Other providers without a list are never tried.
+  A model nothing offers is skipped as `model_unavailable` (data `{model}`) without a request.
   The result adds `candidate` (the entry of `models` that answered; `model` stays what the upstream says) and `attempts`, the candidates that failed before it (`{model, code, message, until?, seconds, usage}`);
   `usage` covers every attempt. A single candidate that fails answers with its own code and data, exactly as a call without candidates would, so an extension that sends one model per call and
   counts failures itself keeps its existing error handling. When two or more all fail the error is `model_candidates_failed`, its message naming each candidate and how it failed, its data `{attempts, usage}`.
@@ -1123,6 +1126,9 @@ Besides the whole extension's toggle, **each contribution** (`<extension point>/
 - Ids that are off still belong to this extension: other extensions can't take them by installing; permissions, the permission summary and upgrade comparisons all use the full manifest, so turning off contributions doesn't make the extension "ask for fewer permissions".
 - A **connector**'s toggle is the connector's own toggle (already used by **Settings › Connectors**, the Inbox and the knowledge base); this is just another entry point to the same toggle. **Channels** bound to a connector follow that connector.
   In the list they are `via: "connector"`, `can_disable: false`, and changes go through the connector's toggle (409 `not_running` when the connector hasn't started yet).
+  Whichever entry point is used, a change of that toggle restarts the extension that contributes the connector, once, like the other toggles (#10467): its new `initialize`'s
+  `active.connectors` lists only the connectors that are on, so a program that works for a connector on its own (a live listener, replies) knows to leave a switched-off one alone.
+  A toggle set to what it already was, and the hub's own connectors, restart nothing; an extension that is off has no program to restart and reads the toggle at its next start.
 - Extensions from manager.json can't have individual contributions turned off (change manager.json instead).
 - Stored in `plugins.disabled_contributions` (migration `0363`, `["ui/usage", …]`); kept across upgrades and rollbacks (if the new version no longer has that item, it has no effect).
 - **Off by default** (#2829): the manifest's `off_by_default: ["<extension point>/<id>", …]` lists contributions that start off when installed, e.g. the extension's existing features are on at install while a newly added sidebar page waits for the user to turn it on.
@@ -1993,6 +1999,11 @@ The open-source repo ships no quota extension for any particular gateway.
 > that other thing uses the gateway's own admin key and is a very small built-in source in the hub (`usage.sources[]` in the manager's `manager.json`); for the trade-offs see `docs/server/usage-windows.md` ("Account-pool gateways").
 
 ## Declarative UI
+
+Each UI contribution is identified by its extension ID and its local UI ID together. The API already uses
+`/api/v1/extensions/{id}/-/ui/{ui}`, and discovery returns both `extension` and `id`. Page state, badges,
+contribution switches and `opens` references stay within that extension. Sharing a local ID with another
+extension needs no prefix, rename or migration; existing page links and saved switches keep their identities.
 
 Extensions **do not run code in the app**: they return a View (a few fixed kinds of items), which iOS, Mac, Android and web each draw with their own design system (correct in every interface style and in light and dark),
 and button actions go back to the extension. Views and components are defined in `schema/extension/view.schema.json` (the types on all four clients are generated from it, see [schema/extension/README.md](../../schema/extension/README.md));
@@ -3347,7 +3358,8 @@ events `{"event","params"}`. Hub-started extensions use stdin / stdout, remote o
 ```
 
 `active` lists contributions used in this run, one entry per extension point (disabled connectors and individually disabled contributions omitted; see "Contribution switches"); extensions exporting points also get `contributions_to_me` (see "Dependencies, exports and bundles"). `hub.role` (#1503) is this hub's role in its linked-hub group: `center` (alone or primary hub: serving apps, driving computers), or
-`member` (another hub is primary: group work such as reacting to chat-service events, running /agent and full crawling is handed to the primary). Role changes restart extensions contributing `connectors` or `api`.
+`member` (another hub is primary: group work such as reacting to chat-service events, running /agent and full crawling is handed to the primary). Role changes restart extensions contributing `connectors` or `api`;
+switching one of an extension's connectors on or off restarts that extension, so `active` is never older than the toggles.
 `hub.timezone` is the user's time zone (IANA, as reported by devices), used for displayed times ("today", message timestamps); empty when only the hub's own clock is known, read at each start.
 `hub.locale` is the user's language (`zh-Hans` / `en` / `ja`, `docs/protocol/i18n.md` ("Protocol")); extensions use it for human-facing text (status, sign-in prompts, bot replies), read at each start, defaulting to `zh-Hans` if absent.
 `hub.capabilities` (#1680) lists what this hub can do so extensions can adapt: `inbox_group` (associate batches of new connector messages with Inbox events, `docs/assistant/inbox.md` ("Event grouping")); `inbox_group_state` (a grouping connector may report the events the user read or replied to in the source, and its fallback plan may assign messages to an already handled event, which the hub accepts and reopens; `docs/assistant/inbox.md` ("Following up")); `tool_images` (a connector's `tools.call` answer may carry pictures for the model, `docs/protocol/connector-protocol.md` ("Pictures in a tool's answer"), #8484).

@@ -1081,8 +1081,8 @@ nonisolated enum Theme {
         static let agentsRoom: CGFloat = 34
         /// The optional third segment must leave both side buttons reachable on narrow screens.
         static let compactSwitchLargestTypeSize: DynamicTypeSize = .large
-        /// The switch as iPhone Duo's tab bar (#4231: `ShellSwitch(axis: .vertical)` in the side column of the outer display
-        /// and of the inner one on its side, `ShellSwitch(bottomBar: true)` along the inner one's foot upright): a bar of fixed
+        /// The switch as iPhone Duo's tab bar on the outer display (#4231: `ShellSwitch(axis: .vertical)` in its side
+        /// column; the open Duo shows the system's tab bar): a bar of fixed
         /// items, as the system's tab bar it stands for, so its items keep the default text size (DESIGN_SYSTEM.md 6.2), each
         /// also shown large on a long press (the Large Content Viewer).
         static let switchTypeSize: DynamicTypeSize = .large
@@ -1237,9 +1237,9 @@ nonisolated enum Fmt {
         }
     }
 
-    /// Model names like "deepseek/v4.1-flash-chain" → "v4.1-flash-chain".
+    /// Model names like "deepseek/v4.1-flash-chain" → "v4.1-flash-chain"; no model, including an older node's display placeholder, → nil.
     static func model(_ m: String?) -> String? {
-        guard let m, !m.isEmpty else { return nil }
+        guard let m, !m.isEmpty, m != "默认" else { return nil } // i18n-ignore: legacy wire value, never displayed
         return m.split(separator: "/").last.map(String.init) ?? m
     }
 }

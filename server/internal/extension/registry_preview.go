@@ -477,6 +477,11 @@ func (r *Registry) conflictsCandidates(m *Manifest, candidates []*Manifest) erro
 			if who, ok := r.reserved[point][id]; ok {
 				errs = append(errs, fmt.Errorf("%s 里的 %q 已经是 %s 的", point, id, who))
 			}
+			// UI routes, contribution switches and page state already name the owning extension.
+			// Only IDs inside that manifest must be unique (checked by Manifest.Validate).
+			if point == "ui" {
+				continue
+			}
 			for otherID, other := range owners {
 				if otherID != m.ID && slices.Contains(other.Items(point), id) {
 					errs = append(errs, fmt.Errorf("%s 里的 %q 已经是扩展 %s 的", point, id, otherID))

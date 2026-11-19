@@ -270,7 +270,7 @@ For people with only an API key and no computer (Docker / NAS / work computers t
 
 - Build on hub's existing direct-model client (`server/internal/ai/ai.go:110`, `Complete`, used for information processing / filtering). Select a provider using `fallbackAPIProvider` rules (`assistant/models_resolve.go:122`); support only the Messages protocol.
 - Plain-text chat, with read-only context hub can answer locally (connection status, knowledge base summaries, Inbox counts). No computer tools, phone writes, or tool-call loop.
-- Store chats in a dedicated Postgres table (check all worktrees for migration numbers during implementation), separate from main chat on node. Show a persistent "Chat only for now" notice. After connecting a computer, switch back to normal main chat and include a summary of this segment in the new process's first context message.
+- Store chats in a dedicated Postgres table (its migration named by the UTC second it is written, `docs/server/server.md` "Migrations"), separate from main chat on node. Show a persistent "Chat only for now" notice. After connecting a computer, switch back to normal main chat and include a summary of this segment in the new process's first context message.
 - Put prompts in a new assistant/chat_only directory under `server/internal/prompts/`, with golden tests. When asked to act, answer "I can do that once you connect a computer."
 
 Risks (why a decision is needed): memory, transcript, and permissions split into two systems; the work lies in storage, streaming, and client rendering.
@@ -740,4 +740,4 @@ For every UI PR: a light and dark screenshot for each state above; web also at w
 - Errors change from 502 `internal` to 409 + code: old clients already display non-2xx `error` as text; only the language changes.
 - Old node and Persona Link do not need to understand pending; filtering lives entirely in hub and the assistant service.
 - New endpoints are registered in `features`; new clients fall back to current pages on old hubs.
-- Check all worktrees before choosing migration numbers in Postgres PRs (the trust table needs one; the readiness key needs no new table).
+- Name each new Postgres migration by the UTC second it is written (`docs/server/server.md` "Migrations"; the trust table needs one; the readiness key needs no new table).

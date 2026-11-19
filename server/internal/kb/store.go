@@ -49,7 +49,10 @@ type Tagging struct {
 	LockedFields []string `json:"locked_fields,omitempty"`
 	// Provenance: the extension holding a locked field (attribution.go); without an entry a locked field is the user's.
 	Provenance map[string]Provenance `json:"provenance,omitempty"`
-	persisted  bool
+	// Excluded: links the user removed by hand, by list ("people", "chats", "projects", "items") and the id that list
+	// named: automatic writes leave them out while the rest of the list keeps changing (exclude.go).
+	Excluded  map[string][]string `json:"excluded,omitempty"`
+	persisted bool
 }
 
 // Chat is one conversation: a Feishu chat (lark-<feedId>) or the mail exchanged with one address (mail-<account>-<addr>).
@@ -172,6 +175,17 @@ type ProjectMerge struct {
 	Pinned *string `json:"pinned,omitempty"`
 	// Locks: the kept project's locks before a manual merge added this one's; unset when it did not change them.
 	Locks *MergeLocks `json:"locks,omitempty"`
+	// Excluded: the links the user had removed from this project that the merge kept off the kept project too, by
+	// list (exclude.go); an unmerge lets them back there.
+	Excluded map[string][]string `json:"excluded,omitempty"`
+}
+
+// exclude records that the merge kept id out of the kept project's list.
+func (m *ProjectMerge) exclude(list, id string) {
+	if m.Excluded == nil {
+		m.Excluded = map[string][]string{}
+	}
+	m.Excluded[list] = addUnique(m.Excluded[list], id)
 }
 
 // MergeLocks are a project's locked_fields and legacy locked.

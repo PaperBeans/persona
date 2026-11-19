@@ -160,6 +160,12 @@ pub struct Settings {
     pub query: String,
     #[serde(default)]
     pub machine_filter: String,
+    /// iOS's merged-list hub selection is active only in multi-hub mode. An empty filter selects every group;
+    /// `=<group>` selects one group, with `=` selecting the default empty group.
+    #[serde(default)]
+    pub multi_hub: bool,
+    #[serde(default)]
+    pub hub_filter: String,
     /// Archived history may include offline rows, without making ordinary offline live sessions visible.
     #[serde(default)]
     pub history: bool,
@@ -509,6 +515,12 @@ impl Query {
             if legacy != input.settings.machine_filter {
                 return false;
             }
+        }
+        if input.settings.multi_hub
+            && !input.settings.hub_filter.is_empty()
+            && input.settings.hub_filter.strip_prefix('=') != Some(session.app_hub_group.as_deref().unwrap_or(""))
+        {
+            return false;
         }
         let machine_path = machine_path.to_lowercase();
         if !self

@@ -120,13 +120,13 @@ func (s *Service) modelCandidates(ctx context.Context, purpose string, models []
 	if len(models) == 0 {
 		return nil
 	}
-	first := ""
+	var own ModelBinding
 	if b, err := s.resolveModel(ctx, purpose); err == nil {
-		first = b.Provider
+		own = b
 	}
 	chain := make([]modelCandidate, 0, len(models))
 	for _, m := range models {
-		chain = append(chain, s.offeredCandidate(ctx, first, m))
+		chain = append(chain, s.offeredCandidate(ctx, own, m))
 	}
 	return chain
 }
@@ -165,7 +165,7 @@ func (s *Service) candidateProviders(ctx context.Context, first string) []stored
 // providerOffers says whether l lists model: its default, a tier's, its small, subagent or custom model, or one of
 // its model list.
 func providerOffers(l storedLauncher, model string) bool {
-	for _, m := range []string{l.Model, l.SmallModel, l.SubagentModel, l.CustomModel, l.OpusModel, l.SonnetModel, l.HaikuModel} {
+	for _, m := range []string{l.Model, l.SmallModel, l.SubagentModel, l.CustomModel, l.OpusModel, l.SonnetModel, l.HaikuModel, l.FableModel} {
 		if m == model {
 			return true
 		}
@@ -175,21 +175,41 @@ func providerOffers(l storedLauncher, model string) bool {
 
 func providerLabel(l storedLauncher) string { return cmp.Or(l.DisplayName, l.Name) }
 
-// offeredCandidate finds model on the providers the user configured (candidateProviders' order).
-func (s *Service) offeredCandidate(ctx context.Context, first, model string) modelCandidate {
+// offeredCandidate finds model on the providers the user configured, own being the purpose's binding (#10657):
+//  1. a provider that offers it: the purpose's own when it lists it or the purpose is bound to it there, then the
+//     others that list it (candidateProviders' order);
+//  2. else the purpose's own provider when it declares no models list: it has not said what it serves, so the
+//     gateway is asked, and one that does not serve it fails like any candidate does.
+//
+// Any other provider without a list is not tried: an extension's model never lands on a connection the user did not
+// choose for it.
+func (s *Service) offeredCandidate(ctx context.Context, own ModelBinding, model string) modelCandidate {
 	problem := "no provider in Settings › Model providers offers it"
-	for _, l := range s.candidateProviders(ctx, first) {
-		if !providerOffers(l, model) {
-			continue
-		}
+	providers := s.candidateProviders(ctx, own.Provider)
+	try := func(l storedLauncher) (modelCandidate, bool) {
 		config, err := s.apiConfig(ctx, ModelBinding{Provider: "launcher." + l.Name, Model: model})
 		if err != nil || config.RunLauncher != "" || !config.Configured() {
 			if err != nil {
 				problem = providerLabel(l) + ": " + i18n.Localize(err, s.lang(ctx))
 			}
-			continue
+			return modelCandidate{}, false
 		}
-		return modelCandidate{model: model, provider: providerLabel(l), id: "launcher." + l.Name, config: config}
+		return modelCandidate{model: model, provider: providerLabel(l), id: "launcher." + l.Name, config: config}, true
+	}
+	isOwn := func(l storedLauncher) bool { return own.Provider != "" && "launcher."+l.Name == own.Provider }
+	for _, l := range providers {
+		if providerOffers(l, model) || isOwn(l) && model == own.Model {
+			if c, ok := try(l); ok {
+				return c
+			}
+		}
+	}
+	for _, l := range providers {
+		if isOwn(l) && len(l.Models) == 0 {
+			if c, ok := try(l); ok {
+				return c
+			}
+		}
 	}
 	return modelCandidate{model: model, problem: problem}
 }
@@ -350,7 +370,7 @@ func (s *Service) purposeCandidates(ctx context.Context, purpose string, setting
 			for _, r := range list {
 				chain := RequestedChain{Models: []CandidateView{}, LastUsed: r.LastUsed}
 				for _, m := range r.Models {
-					c := s.offeredCandidate(ctx, effective.Provider, m)
+					c := s.offeredCandidate(ctx, effective, m)
 					chain.Models = append(chain.Models, candidateView(c))
 				}
 				out.Requested = append(out.Requested, chain)

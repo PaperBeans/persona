@@ -415,7 +415,7 @@ enum SettingsPage: Hashable {
     /// Settings › Live Screen (#6396, #6398): the live screen's route and its quality on mobile data.
     case liveScreen
     #endif
-    case persona, themeColor, style, colorScheme, language, assistant, claude, codex, devices, phoneData, mail, feishuBot, notifications, storage, translation, modelConfiguration
+    case persona, themeColor, style, colorScheme, language, assistant, claude, codex, agy, devices, phoneData, mail, feishuBot, notifications, storage, translation, modelConfiguration
     /// Settings › Connectors › This iPhone › iPhone Control: the guided setup (#8199).
     case iphoneSetup
     /// Settings › Connectors › the chat connector; `manager`: whose (Messages' Settings names the default's, whose
@@ -559,6 +559,7 @@ private struct SettingsDestinations: ViewModifier {
         case .assistant: AssistantProfileView()
         case .claude: ClaudeSettingsView()
         case .codex: ClaudeSettingsView(agent: .codex)
+        case .agy: ClaudeSettingsView(agent: .agy)
         case .devices: DevicesView()
         case .phoneData: PhoneDataView()
         case .iphoneSetup:

@@ -687,6 +687,15 @@ When `session.start` never answers, the hub lists the machine and adopts the ses
 
 #3811 gave interval follow-ups in leader conversations a hidden 10-minute cadence while an open supervised todo had an active agent: `nextWithLeaderCadence` derived extra runs from `LastRun` while leaving the stored `At` / `EveryMinutes` on the original rule, and the run copy's `cadenceEvery` made `taskPrompt` print "每 10 分钟". The stored task still showed 30 minutes / 1 hour in `list_followups`, so nothing visible explained why a patrol the user asked for every 30 minutes fired every 10 minutes from its first run, and it became the main chat's biggest token sink. Lesson: a scheduler may have exactly one effective cadence, and it must be the one stored on the task and shown in every view and run prompt; an "accelerate while busy" rule that is invisible to both storage and UI is indistinguishable from a bug. If such a rule is ever wanted again, it must be an explicit, user-visible setting with its own stored field, not a second rule derived inside the scheduler. Keep interval advancement in one place (`runDue` advancing `At` by `EveryMinutes`); tests assert the prompt text states the configured interval even while supervised work is open.
 
+## Scheduled runs need observable to-do progress (#9755)
+
+- A successful scheduled run is not progress on its linked to-do (#9755). Compare transcript output, criterion
+  states and explicit progress-report content, not updated timestamps or the follow-up's own summary. Keep the
+  streak and baseline with the schedule, not only in capped shared history; test restart, history eviction,
+  replayed completions and failed persistence before emitting a supervisor signal or an owner decision. Keep the
+  first escalation attempt's identity across runs: its committed owner review repairs a lost final marker without
+  duplicating that decision or mistaking an unrelated owner question for its own.
+
 ## A stopped leader's own To-do does not list its workers (#8400)
 
 Workers planned by a task leader have separate To-dos: their `todo_agents.source` is `worker` and `via` is the leader's
