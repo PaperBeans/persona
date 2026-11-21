@@ -76,7 +76,13 @@ The confirm call follows the trust boundary of the paired hub; HTTP deploy permi
 
 The update manager belongs to the resident process and is shared by all attach connections. Ending one RPC connection only closes that stream; it cannot stand in for restarting the whole resident node. A normal switch first replies to the commit request, then closes connections and listeners, drains the resident service, and starts the new executable with the original arguments and environment.
 
-Before draining, the resident checks the installed replacement. If preflight fails, the resident keeps serving and
+Before draining, the resident checks the installed replacement by running its `node-update-check`. Endpoint protection
+on some Macs holds a new executable's first start until its scan ends (about 30 s) and then caches the verdict by
+content (#12528), so the first run of a file the process has not seen pass gets up to 60 s; once that file passed, its
+later runs get the short limit again (5 s for this preflight, 20 s for the update's own staging and signing checks,
+which follow the same rule). Each check is one run, so 60 s is the most it waits, and a replacement that never answers
+still fails. A check that ran out of time says `node-update-check timed out after …`, which tells it apart from a
+version, platform or program mismatch. If preflight fails, the resident keeps serving and
 logs the exact error along with the replacement's reported version, OS, architecture, program and listener handover
 support when it could read them. For an RPC deployment, the node sends `node.update.preflight_failed` with the
 transaction `id` and `error`. The hub ends the matching deploy job with that error, and the local watchdog still
