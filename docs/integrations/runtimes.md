@@ -225,7 +225,8 @@ The list carries only recent sessions (`rt.recent`). A caller reading an older p
 
 `integrations/runtime-sdk/examples/echo-runtime.mjs`: sessions in memory; it "thinks" briefly and then echoes back whatever it receives, asking for a permission first if the message contains `ask`.
 About a hundred lines, and it's the skeleton for a new runtime: replace `sessions` with your session storage, `reply` with your Agent, and the item mapping with your own
-(see `integrations/dsh/lib/map.js`).
+(see `integrations/dsh/lib/map.js`). Keep its entry check, which compares real paths: Node loads the entry module by its real path, so
+comparing `process.argv[1]` with `import.meta.url` as given skips the program when the path goes through a symlink (#12848).
 
 ```js
 import { createRuntime, light } from '<Persona>/integrations/runtime-sdk/index.js'

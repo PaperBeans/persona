@@ -1,10 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { EventEmitter } from 'node:events'
+import { EventEmitter, once } from 'node:events'
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { parseCompanionArgs } from '../companion.mjs'
 import { buildAcpEnv, createOpencodeCompanion } from '../lib/companion.js'
@@ -755,6 +758,40 @@ test('companion.mjs with --parent-stdin exits cleanly when parent closes stdin',
   })
   assert.equal(exit.code, 0)
   assert.equal(exit.signal, null)
+})
+
+// #12848: Node loads the entry module by its real path while argv[1] keeps a symlink on the way (a symlinked home is
+// common on Linux, and the node starts the companion from under ~/.persona), so an entry check comparing the two as given
+// skipped main() and the companion exited 0 without a word, once a minute.
+test('companion.mjs runs main() when started through a symlinked directory', async (t) => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'persona-opencode-link-')))
+  const pkg = fileURLToPath(new URL('..', import.meta.url))
+  const link = join(base, 'opencode')
+  symlinkSync(pkg, link, process.platform === 'win32' ? 'junction' : 'dir')
+  const child = spawn(process.execPath, [
+    join(link, 'companion.mjs'),
+    '--socket', join(base, 'missing', 'runtime.sock'),
+    '--bin', '/nonexistent/opencode-test-bin',
+    '--instance', 'builtin-opencode-test-link',
+    '--no-update',
+    '--parent-stdin',
+  ], { stdio: ['pipe', 'pipe', 'pipe'] })
+  const exited = once(child, 'exit')
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+    await exited
+    chmodSync(base, 0o700)
+    rmSync(base, { recursive: true, force: true })
+  })
+  let stderr = ''
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (chunk) => { stderr += chunk })
+
+  await until('companion started or exited', () => stderr.includes('started opencode ACP companion for Persona') || child.exitCode !== null, 5000)
+  assert.equal(child.exitCode, null, `companion exited (${child.exitCode}) instead of starting; stderr=${JSON.stringify(stderr)}`)
+  child.stdin.end()
+  const [code] = await exited
+  assert.equal(code, 0)
 })
 
 test('companion does not spawn opencode acp on startup, stops idle acp child, and reloads on next turn', async (t) => {
