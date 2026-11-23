@@ -900,3 +900,123 @@ func TestSupervisorChoiceBeingSettledEndsWhateverTheOutcome(t *testing.T) {
 		stillWaiting(t, s, f, todo.ID, sent, "the deadline after the owner's own answer failed to reach the Agent")
 	})
 }
+
+// settleClock stands in for the book's clock: advance moves it on, without waiting.
+type settleClock struct{ at time.Time }
+
+func (c *settleClock) now() time.Time { return c.at }
+
+func (c *settleClock) advance(d time.Duration) { c.at = c.at.Add(d) }
+
+// withSettleClock gives s's book of waiting choices a clock the test moves.
+func withSettleClock(s *Service) *settleClock {
+	c := &settleClock{at: time.Now()}
+	s.supervisorSettles.mu.Lock()
+	s.supervisorSettles.clock = c.now
+	s.supervisorSettles.mu.Unlock()
+	return c
+}
+
+// retryDeliveredSettles: the retry of the owner's choice, on its way past the keep grace, holds the default (also
+// past the deadline), and its delivered notice settles the owner's option.
+func retryDeliveredSettles(t *testing.T, s *Service, f *fakeHub, c *settleClock, todo Todo, id, want string, sent int) {
+	t.Helper()
+	if !s.supervisorSettlePending(todo.ID, c.now()) {
+		t.Fatal("the retried choice stopped holding the default on its way")
+	}
+	pastDeadline(t, s, todo.ID)
+	s.sweepDecisionDeadlines(c.now())
+	stillWaiting(t, s, f, todo.ID, sent, "the deadline passing while the retry is on its way")
+	sentNotice(s, supervisorRef(), id, assistantwire.ConversationDelivered)
+	settledTo(t, s, f, todo.ID, want, sent)
+}
+
+// Review on #13189 (P1, kept never reset): a failed send the hub does not keep is forgotten by the hub, and the app
+// retries the same id as a new send, told by session.user_spoke again. The failed notice's kept mark must not stay on
+// the entry of that retry: once the keep grace is over the reap would drop it before the retry's delivered notice,
+// and the default would replace the owner's delivered choice.
+func TestSupervisorChoiceRetriedAfterAnUnkeptFailureSettles(t *testing.T) {
+	for name, retryAfter := range map[string]time.Duration{
+		"within the keep grace": 5 * time.Second,
+		"after the keep grace":  supervisorKeepGrace + 15*time.Second,
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, f, todo := decisionAgentReplyService(t)
+			c := withSettleClock(s)
+			sent := len(workerSends(f))
+			want := askOf(s, todo.ID).Options[1].Label
+			spokeOnBus(t, s, supervisorRef(), want, "msg-retry")
+			sentNotice(s, supervisorRef(), "msg-retry", assistantwire.ConversationFailed) // e.g. 409, not kept
+			c.advance(retryAfter)
+			spokeOnBus(t, s, supervisorRef(), want, "msg-retry") // the hub forgot the id: a new send
+			if p, ok := settleEntry(s, "msg-retry"); !ok || p.kept || p.keptSeen || !p.keepBy.IsZero() {
+				t.Fatalf("the retry kept the failed try's kept mark: %+v, %v", p, ok)
+			}
+			c.advance(supervisorKeepGrace + time.Second) // the retry takes a while (a busy or starting session)
+			retryDeliveredSettles(t, s, f, c, todo, "msg-retry", want, sent)
+		})
+	}
+}
+
+// The same class, the other way round: notices are handled apart from spokes, so the first try's failed notice can
+// be handled after the retry's spoke. It is an earlier try's outcome and must not mark the retry kept; the retry's
+// own failed notice still does, and the entry then goes when the hub does not keep it either.
+func TestSupervisorChoiceRetryIsNotMarkedKeptByAnEarlierTrysNotice(t *testing.T) {
+	t.Run("the retry is delivered", func(t *testing.T) {
+		s, f, todo := decisionAgentReplyService(t)
+		c := withSettleClock(s)
+		sent := len(workerSends(f))
+		want := askOf(s, todo.ID).Options[1].Label
+		spokeOnBus(t, s, supervisorRef(), want, "msg-late-notice")
+		spokeOnBus(t, s, supervisorRef(), want, "msg-late-notice")                          // the retry's spoke
+		sentNotice(s, supervisorRef(), "msg-late-notice", assistantwire.ConversationFailed) // the first try's, late
+		if p, ok := settleEntry(s, "msg-late-notice"); !ok || p.kept {
+			t.Fatalf("the first try's notice marked the retry kept: %+v, %v", p, ok)
+		}
+		c.advance(supervisorKeepGrace + time.Second)
+		retryDeliveredSettles(t, s, f, c, todo, "msg-late-notice", want, sent)
+	})
+	t.Run("the retry fails too", func(t *testing.T) {
+		s, f, todo := decisionAgentReplyService(t)
+		c := withSettleClock(s)
+		sent := len(workerSends(f))
+		want := askOf(s, todo.ID).Options[1].Label
+		spokeOnBus(t, s, supervisorRef(), want, "msg-late-notice")
+		spokeOnBus(t, s, supervisorRef(), want, "msg-late-notice")
+		sentNotice(s, supervisorRef(), "msg-late-notice", assistantwire.ConversationFailed)
+		sentNotice(s, supervisorRef(), "msg-late-notice", assistantwire.ConversationFailed) // the retry's own
+		if p, ok := settleEntry(s, "msg-late-notice"); !ok || !p.kept {
+			t.Fatalf("the retry's own failed notice did not mark it kept: %+v, %v", p, ok)
+		}
+		c.advance(supervisorKeepGrace + time.Second)
+		if s.supervisorSettlePending(todo.ID, c.now()) {
+			t.Fatal("a retry that failed and was never kept still holds the default")
+		}
+		stillWaiting(t, s, f, todo.ID, sent, "a retry that failed too")
+		pastDeadline(t, s, todo.ID)
+		s.sweepDecisionDeadlines(c.now())
+		if got := askOf(s, todo.ID); got == nil || !got.ByDefault {
+			t.Fatalf("the default no longer works after a failed retry: %+v", got)
+		}
+	})
+}
+
+// A kept mark whose kept message is gone (the owner deleted it, or it failed) is stale too: a send of the same id
+// told after that, before the reap ran, starts over on its way instead of being dropped with the gone message.
+func TestSupervisorChoiceRetriedAfterItsKeptMessageWentSettles(t *testing.T) {
+	s, f, todo := decisionAgentReplyService(t)
+	c := withSettleClock(s)
+	sent := len(workerSends(f))
+	want := keptChoice(t, s, todo, "msg-gone")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/v1/assistant/conversations/conv1/undelivered/msg-gone", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
+	}
+	spokeOnBus(t, s, supervisorRef(), want, "msg-gone")
+	if p, ok := settleEntry(s, "msg-gone"); !ok || p.kept || p.keptSeen {
+		t.Fatalf("the new send kept the gone message's kept mark: %+v, %v", p, ok)
+	}
+	c.advance(supervisorKeepGrace + time.Second)
+	retryDeliveredSettles(t, s, f, c, todo, "msg-gone", want, sent)
+}

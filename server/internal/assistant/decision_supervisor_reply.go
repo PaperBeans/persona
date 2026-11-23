@@ -240,6 +240,14 @@ func (s *Service) handBackOneSupervisorReply(ctx context.Context, r SessionRef, 
 // dropped when the kept message fails (given up, the conversation gone, the device signed out, not found after a try
 // in doubt), the owner deletes it, or the hub never keeps it (supervisorKeepGrace after the notice).
 //
+// A kept mark belongs to the try it was made for. A failed send the hub does not keep is forgotten by the hub, so the
+// app retries the same id as a new send: its session.user_spoke comes again, then its own notice. That spoke clears a
+// kept mark no kept message stands behind (deferSupervisorSettle), or the reap would drop the entry before the
+// retry's delivered notice could claim it. Notices are handled apart from spokes (bus.go runs ConversationSent on its
+// own), so an earlier try's failed notice can be handled after the retry's spoke: the entry counts its tries and the
+// notices told, and a failed or unknown notice marks it kept only when it is the latest try's
+// (markSupervisorSettleKept).
+//
 // Locks, outermost first: the card's action lock (s.reviewDismissals.actions), then s.undelivered.mu, then the book's
 // own mutex. The accept ledger's mutex (s.accept.mu) may be taken under the action lock, and this file never holds
 // it together with the other two. A choice is registered under its card's action lock (holdSupervisorChoice), the
@@ -281,6 +289,10 @@ type supervisorSettle struct {
 	kept     bool
 	keptSeen bool
 	keepBy   time.Time
+	// tries: the sends of this message told by session.user_spoke while no kept message stood for it; told: the
+	// failed or unknown notices handled. A notice handled while told < tries is an earlier try's, with a later one on
+	// its way.
+	tries, told int
 	// settling: the message went in and its settler has claimed the entry (claimSupervisorSettle); it stays, holding
 	// the default, until the choice is recorded under the card's action lock, and only its settler removes it.
 	settling bool
@@ -289,6 +301,14 @@ type supervisorSettle struct {
 type supervisorSettleBook struct {
 	mu      sync.Mutex
 	pending map[[3]string]supervisorSettle // machine, session, client_msg_id
+	clock   func() time.Time               // nil: time.Now (tests set it before the first choice)
+}
+
+func (b *supervisorSettleBook) now() time.Time {
+	if b.clock != nil {
+		return b.clock()
+	}
+	return time.Now()
 }
 
 func supervisorSettleKey(r SessionRef, clientMsgID string) [3]string {
@@ -344,9 +364,12 @@ func (s *Service) holdSupervisorChoice(ctx context.Context, r SessionRef, client
 //
 // The hub tells session.user_spoke for every try of a message, also a retry it then answers from its own record of
 // the send (delivered, or kept by the manager), which tells no session.assistant_sent again. So the same message
-// told again changes nothing: the entry keeps what is known of it (kept, and for how long it may wait). A message
-// with no entry that the manager already keeps (the entry was lost, or the choice only matches now) waits on that
-// kept message from the start, not on a notice that will not come.
+// told again while the manager keeps it changes nothing: the entry waits on that kept message as before. Told again
+// while it is still on its way, it keeps its time and counts the try. Told again when the entry is marked kept but no
+// kept message stands behind it (the hub did not keep the failed send and forgot the id, or the kept message is
+// gone), it is a new send: the entry starts over on its way, and the retry's own notice settles it. A message with no
+// entry that the manager already keeps (the entry was lost, or the choice only matches now) waits on that kept
+// message from the start, not on a notice that will not come.
 func (s *Service) deferSupervisorSettle(ctx context.Context, r SessionRef, clientMsgID, todo string, asked, at time.Time, text string) {
 	key := supervisorSettleKey(r, clientMsgID)
 	// s.undelivered.mu stays held over the registration: the kept message cannot go in between the look and the entry
@@ -365,13 +388,30 @@ func (s *Service) deferSupervisorSettle(ctx context.Context, r SessionRef, clien
 	if b.pending == nil {
 		b.pending = map[[3]string]supervisorSettle{}
 	}
-	now := time.Now()
+	now := b.now()
 	b.pruneLocked(now, 0)
-	if _, ok := b.pending[key]; ok {
+	p := supervisorSettle{todo: todo, asked: asked, at: at, text: text, expires: now.Add(supervisorSettleTTL), tries: 1}
+	if old, ok := b.pending[key]; ok {
+		switch {
+		case old.settling: // its message went in; its settler ends it
+		case kept: // a retry the hub answers as kept: the entry waits on the kept message
+			if !old.kept || !old.keptSeen {
+				old.kept, old.keptSeen, old.keepBy = true, true, time.Time{}
+				if e := now.Add(undeliveredGiveUp + supervisorSettleTTL); e.After(old.expires) {
+					old.expires = e
+				}
+				b.pending[key] = old
+			}
+		case old.kept: // no kept message stands behind the mark: this is a new send, on its way like the first
+			p.tries, p.told = old.tries+1, old.told
+			b.pending[key] = p
+		default: // still on its way, or an earlier try's notice is not handled yet
+			old.tries++
+			b.pending[key] = old
+		}
 		return
 	}
 	b.pruneLocked(now, 1)
-	p := supervisorSettle{todo: todo, asked: asked, at: at, text: text, expires: now.Add(supervisorSettleTTL)}
 	if kept {
 		p.kept, p.keptSeen, p.expires = true, true, now.Add(undeliveredGiveUp+supervisorSettleTTL)
 	}
@@ -406,8 +446,9 @@ func (s *Service) supervisorSettlePending(id string, now time.Time) bool {
 }
 
 // markSupervisorSettleKept marks the waiting choice clientMsgID in r as kept for a later send: keepBy is until when
-// its kept message may still be missing (the notice can come before the keep); zero, the keep itself reached this
-// manager. Nothing waits under that id: nothing.
+// its kept message may still be missing (a failed or unknown notice, which can come before the keep); zero, the keep
+// itself reached this manager. A notice of an earlier try than the latest told leaves the entry on its way: the later
+// try's own notice says how it went. Nothing waits under that id: nothing.
 func (s *Service) markSupervisorSettleKept(r SessionRef, clientMsgID string, keepBy time.Time) {
 	if clientMsgID == "" {
 		return
@@ -417,9 +458,15 @@ func (s *Service) markSupervisorSettleKept(r SessionRef, clientMsgID string, kee
 	defer b.mu.Unlock()
 	key := supervisorSettleKey(r, clientMsgID)
 	p, ok := b.pending[key]
-	now := time.Now()
+	now := b.now()
 	if !ok || p.settling || !now.Before(p.expires) {
 		return
+	}
+	if !keepBy.IsZero() {
+		if p.told++; p.told < p.tries {
+			b.pending[key] = p
+			return
+		}
 	}
 	p.kept = true
 	if keepBy.IsZero() {
@@ -497,7 +544,7 @@ func (s *Service) claimSupervisorSettle(key [3]string) (supervisorSettle, bool) 
 	if !ok || p.settling {
 		return supervisorSettle{}, false
 	}
-	if !time.Now().Before(p.expires) {
+	if !b.now().Before(p.expires) {
 		delete(b.pending, key)
 		return supervisorSettle{}, false
 	}
@@ -544,7 +591,7 @@ func (s *Service) supervisorSettleOutcome(ctx context.Context, r ConversationSen
 	}
 	ref := SessionRef{MachineID: r.MachineID, SessionID: r.SessionID}
 	if r.Outcome != assistantwire.ConversationDelivered {
-		s.markSupervisorSettleKept(ref, r.ClientMsgID, time.Now().Add(supervisorKeepGrace))
+		s.markSupervisorSettleKept(ref, r.ClientMsgID, s.supervisorSettles.now().Add(supervisorKeepGrace))
 		return
 	}
 	key := supervisorSettleKey(ref, r.ClientMsgID)
