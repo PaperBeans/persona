@@ -351,6 +351,23 @@ ensure_herdr() { # machine-id
   fi 2>&1 | sed "s/^/$id: /" || true
 }
 
+# bubblewrap on a Linux hub that has none (scripts/deploy/ensure-bwrap.sh; PERSONA_SKIP_BWRAP=1 skips it): an update must
+# not leave extension sandboxes switched off. Never fails the deploy.
+ensure_bwrap() { # machine-id
+  local id=$1 host via vh
+  [ "${PERSONA_SKIP_BWRAP:-}" = 1 ] && return 0
+  host=$(field "$id" ssh); host=${host:-$id}
+  via=$(field "$id" via)
+  if is_here "$id"; then
+    sh ../scripts/deploy/ensure-bwrap.sh
+  elif [ -n "$via" ]; then
+    vh=$(field "$via" ssh); vh=${vh:-$via}
+    ssh -o ConnectTimeout=10 "$vh" "ssh -o BatchMode=yes -o ConnectTimeout=15 $host 'sh -s'" < ../scripts/deploy/ensure-bwrap.sh
+  else
+    ssh -o ConnectTimeout=10 "$host" 'sh -s' < ../scripts/deploy/ensure-bwrap.sh
+  fi 2>&1 | sed "s/^/$id: /" || true
+}
+
 # A resident node (scripts/deploy/node-launchd.sh, Mac or Linux) keeps the old binary until it restarts: it does so
 # once none of the assistant's conversations is busy, which go on across hub restarts (docs/operations/hub-restart.md).
 restart_resident() { ../scripts/deploy/node-launchd.sh restart-idle || true; }
@@ -412,6 +429,7 @@ for t in "${TARGETS[@]}"; do
         echo "hub: deployed-commits.txt not made; its deploy checks ask GitHub" >&2
       fi
       ensure_herdr "$t"
+      ensure_bwrap "$t"
       hub_admin_access
       python3 ../scripts/persona_identity.py --service hub --prepare --prefix ../scripts/deploy/hub-systemd.sh | ssh "$PERSONA_HUB_SSH" 'bash -s'
       echo "$t: hub on the new binary"

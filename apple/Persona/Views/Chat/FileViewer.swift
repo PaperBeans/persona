@@ -372,7 +372,6 @@ struct FileViewer: View {
         } primaryAction: {
             save(FileSaveKind.defaultTarget(name))
         }
-        .arrowlessMenu()
         .disabled(saver.busy)
         .accessibilityLabel("Download")
         .accessibilityHint("Touch and hold for more ways to save")
@@ -459,7 +458,6 @@ struct FileViewer: View {
                 ShareLink(item: local) { Label("Share", systemImage: Theme.Icon.share) }
             }
         } label: { ThemedIcon(Theme.Icon.moreMenu) }
-        .arrowlessMenu()
         .accessibilityLabel("More")
         .accessibilityIdentifier("file-menu")
     }
@@ -879,7 +877,6 @@ final class FileViewerModel {
     }
 }
 
-#if os(iOS) || os(visionOS)
 struct PDFKitView: UIViewRepresentable {
     var document: PDFDocument
     func makeUIView(context: Context) -> PDFView {
@@ -890,18 +887,6 @@ struct PDFKitView: UIViewRepresentable {
     }
     func updateUIView(_ v: PDFView, context: Context) {}
 }
-#else
-struct PDFKitView: NSViewRepresentable {
-    var document: PDFDocument
-    func makeNSView(context: Context) -> PDFView {
-        let v = PDFView()
-        v.autoScales = true
-        v.document = document
-        return v
-    }
-    func updateNSView(_ v: PDFView, context: Context) {}
-}
-#endif
 
 /// Images in a markdown file on a computer: relative paths load from that machine, web URLs as usual.
 struct MachineImageProvider: ImageProvider {

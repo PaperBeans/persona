@@ -14,6 +14,13 @@ const copies = new WeakMap<Session, Session>();
 // The rows foldRows gave out, in their folded state already (their side part from the side rows the list held): drawn
 // again, they keep it, and are not folded a second time from the hub's rollup alone.
 const settled = new WeakSet<Session>();
+// each folded copy's row as the hub sent it, in its own state (ownRow)
+const owners = new WeakMap<Session, Session>();
+
+/** The row a folded copy was made from, in its own state; `s` itself when it is not one. */
+export function ownRow(s: Session): Session {
+  return owners.get(s) ?? s;
+}
 
 /** A row as the lists draw and count it: in its folded state, `s` itself when that is its own state. `sides`: the
  *  rollup of its side rows the caller holds (else the hub's, `children.sides*`). */
@@ -25,6 +32,7 @@ export function foldedRow(s: Session, sides?: SideRollup): Session {
   if (copy?.state !== state) {
     copy = { ...s, state };
     copies.set(s, copy);
+    owners.set(copy, ownRow(s));
   }
   return copy;
 }

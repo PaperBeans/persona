@@ -810,7 +810,7 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 		if !ok || cmp.Or(ix.Manager, assistantwire.AssistantID) != from {
 			return nil, &rpc.Error{Code: devicewire.CodeNoDevice, Message: "an input push is for a pending card the manager reported"}
 		}
-		h.notifyInteractionAt(from, ix, n.Subtitle, n.LinkCovered, n.Level, n.RelatedKey)
+		h.notifyInteractionHinted(from, ix, n.Subtitle, n.LinkCovered, n.Level, n.RelatedKey, n.Depth, n.Track)
 		return nil, nil
 	case assistantwire.NotifyPush, assistantwire.NotifyDone, assistantwire.NotifyReply, assistantwire.NotifyDecide:
 		if !h.ownsRef(from, n.DeviceID, n.SessionID) {
@@ -820,7 +820,8 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 	}
 	switch n.Kind {
 	case assistantwire.NotifyPush: // one with an id shows once, sent again however late (a day recap's push)
-		policy := pushPolicy{level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey, todoID: relatedTodoID(n.RelatedKey, !n.Asked)}
+		policy := pushPolicy{level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey, todoID: relatedTodoID(n.RelatedKey, !n.Asked),
+			depth: n.Depth, track: n.Track}
 		policy.level = h.pushGradingNotifyLevel(n, policy.level)
 		o := h.notifyDoneUnder(from, "assistant", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, pushWants{}, managerPushCollapseID(from, n.ID),
 			pushRecordingID(n.RecordingID), policy)
@@ -828,7 +829,8 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 	case assistantwire.NotifyDone:
 		o := h.notifyDoneUnder(from, "done", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body,
 			pushWants{Kind: "done", Took: time.Duration(n.TookMS) * time.Millisecond, Long: time.Duration(n.LongMS) * time.Millisecond},
-			"", "", pushPolicy{level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey, todoID: relatedTodoID(n.RelatedKey, false)})
+			"", "", pushPolicy{level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey, todoID: relatedTodoID(n.RelatedKey, false),
+				done: true, track: n.Track})
 		out = &o
 	case assistantwire.NotifyReply:
 		h.notifyReplyKeyed(from, n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, n.RelatedKey)
@@ -837,6 +839,8 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 			return nil, errors.New("a decision's push needs its to-do, when it was asked and the option its OK takes")
 		}
 		h.notifyDecide(from, n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, *n.Todo)
+	case assistantwire.NotifyHealthWater:
+		return h.notifyHealthWater(from, n)
 	default:
 		return nil, fmt.Errorf("unknown notification kind %q", n.Kind)
 	}
@@ -849,7 +853,7 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 // "Needs you" list and the briefing instead of alerting. With the switch off the level the caller named stands, so
 // delivery is exactly as before.
 func (h *Hub) pushGradingNotifyLevel(n assistantwire.Notification, derived string) string {
-	if h.push == nil || !h.push.pushGradingOn() {
+	if h.push == nil || !h.push.filtering() { // hub.ln_mode on, or an attention mode in force (push_attention.go)
 		return derived
 	}
 	if n.Level != "" {

@@ -2,7 +2,7 @@
 // terminal is not one: it is the agent page's own view, lib/session-view.ts.)
 // Wide screens (lg+) get a resizable column that pushes the page; narrower ones an overlay over the page.
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { directoryPanelKey, closePanel, panelOpener, usePanel, type Panel } from "../lib/panel";
+import { closePanel, directoryPanelKey, panelOpener, popPanel, SidePanelBackContext, usePanel, usePanelCanGoBack, type Panel } from "../lib/panel";
 import { activeComposer } from "../lib/links";
 import { returnFocus } from "../ui/overlay";
 import { CHAT_MIN, PANEL_MIN, useLayout } from "../lib/layout";
@@ -49,10 +49,29 @@ export function panelWidth(want: number, room: number) {
 
 export function SidePanel() {
   const panel = usePanel();
+  const canGoBack = usePanelCanGoBack();
   // ⌘⇧↵ shows only the middle: the panel stays open (its terminal keeps running) but is not drawn, on a wide screen
   const maximized = useLayout().maximized;
-  // narrow, it covers the page: Back closes it first (and stays on the conversation)
-  useCloseOnBack(Boolean(panel), closePanel, useMedia(NARROW));
+  // narrow, it covers the page: Back closes any open inner menu/dialog without its own Back entry first, then pops
+  // one level in the side-panel stack, and finally closes the panel (staying on the conversation)
+  const [backStep, setBackStep] = useState(0);
+  useCloseOnBack(
+    Boolean(panel),
+    () => {
+      const overlays = [...document.querySelectorAll<HTMLElement>("[data-menu],[role=menu],[role=dialog]")].filter(
+        (el) => !el.closest("[data-closing],[inert]"),
+      );
+      const topOverlay = overlays[overlays.length - 1];
+      if (topOverlay) {
+        topOverlay.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        setBackStep((n) => n + 1);
+        return;
+      }
+      if (popPanel()) setBackStep((n) => n + 1);
+    },
+    useMedia(NARROW),
+    backStep,
+  );
   // the width asked for; what is drawn is `shown`, which also fits the room there is now (the window, the sidebar).
   // Until the room is measured (or with no page beside it), the old cap: 72% of the window.
   const [width, setWidth] = useState(() => Math.max(PANEL_MIN, Number(localStorage.getItem(WIDTH_KEY)) || DEFAULT_WIDTH));
@@ -98,6 +117,7 @@ export function SidePanel() {
     <aside
       ref={aside}
       id={id}
+      data-side-panel=""
       aria-label={panelLabel(panel)}
       onKeyDown={(e) => {
         // Esc closes the panel from inside it, unless something in it (a field, a menu) or a dialog over it took the key
@@ -134,9 +154,11 @@ export function SidePanel() {
       />
       <div className="flex min-h-0 flex-1 flex-col">
         {/* a chunk gone after a hub redeploy reloads once, else shows a retry; never a blank panel */}
-        <PageBoundary page={JSON.stringify(panel)}>
-          <Suspense fallback={<div className="flex flex-1 items-center justify-center"><Loading /></div>}>{body(panel)}</Suspense>
-        </PageBoundary>
+        <SidePanelBackContext.Provider value={canGoBack ? popPanel : undefined}>
+          <PageBoundary page={JSON.stringify(panel)}>
+            <Suspense fallback={<div className="flex flex-1 items-center justify-center"><Loading /></div>}>{body(panel)}</Suspense>
+          </PageBoundary>
+        </SidePanelBackContext.Provider>
       </div>
     </aside>
   );

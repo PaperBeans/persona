@@ -100,6 +100,7 @@ Use synthetic conversations for screenshots, not the user's real main conversati
   ends, it is stopped or it expires. Do not remove every task named by a notification; use its parsed kind/status.
 - The App merges its on-disk chat cache by item id. If the hub changes the contents of a type of item (for example, adding fields to notices), new pages do not overwrite old cached items. When the item structure or the hub's kind / text for an existing item changes,
   bump the `ChatCache` directory version (`ChatCache.folder`) so the old representation is dropped.
+- A completed Codex rollout `image_gen.generation` with `savedPath` maps to a `Read` call and result. Its path appears once in the folded work's viewed-image strip; failed or pathless events remain notices. The parser does not read image bytes. Invalidate Codex `File.History` and the App chat cache when changing this projection so saved notices do not outlive the mapping.
 - Backward pagination has a parsing budget, but must not return an empty page while earlier content remains. An empty page + `has_more: true` leaves the App with no seq to fetch next, making earlier history permanently inaccessible (large Codex rollouts can have tens of MB of lines that produce no entries between two turns).
 - Parsing `<persona-context>` must not assume all attributes are present or in a fixed order (2026-11-03, #876). iOS once recognized it only when all three of `kind`, `title`, and `url` were present. Lark /agent contexts had no `url`, so the tag went unrecognized, leaving the whole prompt and large blank areas in the bubble.
   Truncating user messages for pagination must also avoid cutting through tags: a cut in the middle leaves an unclosed `<persona-context`, which every client displays as body text (`lightContexts` in `transcript/contexts.go` trims only the body of each block).
@@ -112,6 +113,10 @@ Use synthetic conversations for screenshots, not the user's real main conversati
   trace does not automatically open its nested work summary; rule 2 requires manual inspection for both. Keep the pending
   stream hidden after the turn stops too: the store can retain it until its transcript item arrives. Determine its
   newest transcript owner, not only whether the round is still running.
+
+## Removing a silent round is a projection split, not a row filter
+
+Dropping a quiet wrapper alone leaves two leaks: `task`, `routed` and `answered` feed cards merge back by timestamp, and a done session still reads unread. Split the main timeline from Background activity before work or supervision expansion, retain only those three feed kinds inside the round's half-open interval, and leave plans, messages, notices and decisions visible. Keep full transcript and feed APIs unchanged and use the full renderer for inspection. Unread needs its own rule: compare `seen_at` with the latest non-silent round's end, preserve earlier visible unread, and fail open when the history scan cannot prove it. Opening Background activity never calls `markSeen`.
 
 ## Refusal fallback is session state, not a model setting (#2203)
 

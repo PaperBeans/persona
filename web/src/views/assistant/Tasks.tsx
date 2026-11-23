@@ -8,6 +8,7 @@ import { lazy, memo, Suspense, useEffect, useId, useMemo, useRef, useState } fro
 import { taskMeter, type TaskCardMetadata } from "../../lib/task-cards";
 import { agentRowKey, agentRowLabel, agentRowMark, agentRowTone, todoChipLabel, todoChipState } from "../../lib/task-row-status";
 import { assistantEntries, needsYouBySupervisor, type NeedsYouItem } from "../../lib/assistant-entries";
+import { directUserInteraction, directUserWaiting, directWaitingCount, takeDirectWaitingRequest } from "../../lib/direct-waiting";
 import { useRestoredTodos } from "../../lib/todo-restore";
 import {
   answeredItems,
@@ -1153,12 +1154,15 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tick: re-read the clock once a minute
     [conversation, main, manager, todos, sessionRows, interactions, answered, plans, feed, metadata, deferred, lookup, restored, tick],
   );
+  const directWaiting = main === conversation;
+  const waiting = useMemo(() => directWaiting ? directUserWaiting(entries.needsYou, deferred) : entries.needsYou, [directWaiting, entries.needsYou, deferred]);
+  const countedOwnAsks = useMemo(() => directWaiting ? ownAsks.filter(directUserInteraction) : ownAsks, [directWaiting, ownAsks]);
   const isAsking = (item: NeedsYouItem) => (item.kind === "task" || item.kind === "agent") && item.asks.length > 0;
   // While background rounds fold, rows other conversations supervise are grouped under them (#4314); with the
   // switch off, or every row this conversation's, the tray is as it was.
   const foldBackground = useStore((s) => s.assistant?.main_background_folded) !== false;
   const conversations = useStore((s) => s.assistant?.conversations);
-  const groups = foldBackground ? needsYouBySupervisor(entries.needsYou, conversation) : [{ supervisor: conversation, items: entries.needsYou }];
+  const groups = foldBackground ? needsYouBySupervisor(waiting, conversation) : [{ supervisor: conversation, items: waiting }];
   const own = groups[0].items;
   const asking = own.filter(isAsking);
   const rest = own.filter((item) => !asking.includes(item));
@@ -1166,13 +1170,13 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
     const row = conversations?.find((c) => c.session_id === id);
     return row ? conversationTitle(row) : t("assistant-tasks.needs_group_another");
   };
-  // The badges count by the To-dos page's one rule (#3331): a to-do row adds one only while the page counts it open
-  // (lib/todo-triage countsAsOpen via each task row's countsOpen); rows stay visible whatever it says. Things that are
-  // no to-do — hand-opened Agents, plans waiting for Start, draft cards, the chat's own ask cards — still add one.
+  // The badge and the rows it opens share directUserWaiting: current direct questions, owner-only decisions and
+  // explicit acceptance. Unstarted/failed work, Agent permissions, terminal dialogs and generic retries stay out.
+  // Other trays keep the existing To-dos open-work rule (#3331).
   const badgeOf = (items: { kind: string; countsOpen?: boolean }[]) =>
     items.reduce((n, item) => n + (item.kind === "task" ? (item.countsOpen ? 1 : 0) : 1), 0);
   // Finished counts its rows (#10922): finished work, never open work, so no To-dos count to agree with
-  const counts: Record<AssistantTray, number> = { needs: ownAsks.length + badgeOf(entries.needsYou), running: badgeOf(entries.running), parked: badgeOf(entries.parked), review: badgeOf(entries.review), finished: entries.finished.length };
+  const counts: Record<AssistantTray, number> = { needs: directWaiting ? directWaitingCount(waiting, ownAsks) : countedOwnAsks.length + badgeOf(waiting), running: badgeOf(entries.running), parked: badgeOf(entries.parked), review: badgeOf(entries.review), finished: entries.finished.length };
   // the card is in the chat already: close the tray onto it and bring it into view. A folded stack shows only its first
   // card, so use its existing expander before looking for another one (#10347).
   const scrollOwn = (id: string, keepBar = false) => {
@@ -1203,14 +1207,20 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
     });
   };
   const openNextOwn = () => {
-    if (!ownAsks.length) return;
-    const previous = ownAsks.findIndex((ix) => ix.id === lastOwn.current);
-    const next = ownAsks[(previous + 1) % ownAsks.length];
+    if (!countedOwnAsks.length) return;
+    const previous = countedOwnAsks.findIndex((ix) => ix.id === lastOwn.current);
+    const next = countedOwnAsks[(previous + 1) % countedOwnAsks.length];
     lastOwn.current = next.id;
     openOwn(next.id, true);
   };
   useEffect(() => {
-    const needs = (event: Event) => { if ((event as CustomEvent).detail === conversation) setTray("needs"); };
+    const openRequested = () => { if (takeDirectWaitingRequest(conversation)) setTray("needs"); };
+    openRequested();
+    const needs = (event: Event) => {
+      if ((event as CustomEvent).detail !== conversation) return;
+      takeDirectWaitingRequest(conversation);
+      setTray("needs");
+    };
     window.addEventListener("persona:task-pending", needs);
     window.addEventListener("persona:task-start", needs);
     return () => {
@@ -1275,7 +1285,7 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
           </div>}
           {tray === "needs" && <div className="flex flex-col gap-2 p-2">
             {asking.map((item) => <NeedsYouRow key={item.key} item={item} open={openRows.has(openKey(item))} onToggle={() => toggleRow(openKey(item))} />)}
-            {ownAsks.map((ix) => <OwnAskRow key={ix.id} ix={ix} onOpen={() => openOwn(ix.id)} />)}
+            {countedOwnAsks.map((ix) => <OwnAskRow key={ix.id} ix={ix} onOpen={() => openOwn(ix.id)} />)}
             {rest.map((item) => <NeedsYouRow key={item.key} item={item} open={openRows.has(openKey(item))} onToggle={() => toggleRow(openKey(item))} />)}
             {groups.slice(1).map((group) => (
               <section key={group.supervisor} data-needs-supervisor={group.supervisor} aria-label={supervisorTitle(group.supervisor)} className="flex flex-col gap-2">
@@ -1292,10 +1302,10 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
           open tray is the selected capsule. The scroller pads by the focus ring's width and takes it back, as the
           dock's did, so a large font scrolls sideways instead of clipping the ring. */}
       <div className="scrollbar-none -my-1 flex min-w-0 shrink-0 items-center gap-2 overflow-x-auto py-1">
-        {ownAsks.length > 0 && (
+        {countedOwnAsks.length > 0 && (
           <button type="button" data-next-own-ask onClick={openNextOwn} className={cx(DOCK_CAPSULE, "gap-2 bg-field font-medium text-ink hover:bg-hover")}>
             <span className="whitespace-nowrap">{t("assistant-tasks.next_unanswered")}</span>
-            <span className="tabular-nums text-ink-2">{ownAsks.length}</span>
+            <span className="tabular-nums text-ink-2">{countedOwnAsks.length}</span>
           </button>
         )}
         {entryKeys.map((key) => {

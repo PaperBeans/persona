@@ -1,8 +1,6 @@
 #if os(iOS)
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// The Home Screen and Lock Screen widgets (docs/apple/home-widgets.md). The widget extension builds this file but not
 /// `Theme`, as it does `IslandMetrics` and `WatchFaceTokens`: a table of its own. Widget sizes are the system's, so the
@@ -208,14 +206,12 @@ nonisolated enum HomeWidgetTokens {
     }
     #endif
 
-    #if canImport(UIKit)
     private static func dynamic(light: (UInt32, CGFloat), dark: (UInt32, CGFloat)) -> Color {
         Color(uiColor: UIColor { trait in
             let (hex, alpha) = trait.userInterfaceStyle == .dark ? dark : light
             return UIColor(hex: hex).withAlphaComponent(alpha)
         })
     }
-    #endif
 }
 #endif
 import PersonaWire

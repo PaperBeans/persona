@@ -8,8 +8,10 @@ import SwiftUI
 /// the way Mail shows a list and a message side by side; the split view also keeps its columns clear of the fold
 /// when the device is partly folded. Both share `path`, so folding or unfolding keeps the page that was open.
 ///
-/// In the split, the list's own links (`NavigationLink(value:)`) replace what the detail column shows; code in the list
-/// should do the same (`path = NavigationPath([value])`, which in the single stack is the same as appending).
+/// In the split, the list opens a page as the detail column's first page, `path = NavigationPath([value])` (in the single
+/// stack that is the same as appending); on iOS its column has `splitOpen` for that. A `NavigationLink(value:)` in the
+/// list column shows its page by the split's own selection instead, outside `path`: `path` stays empty, and nothing that
+/// page pushes opens (#12035).
 struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: View {
     @Environment(\.horizontalSizeClass) private var widthClass
     /// Whether the list column shows (its button in the toolbar closes it).
@@ -17,6 +19,10 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
     /// What the split hands the pages under it, the same objects for its life (#10303): `SplitShowList`.
     @State private var showList = SplitShowList()
     @State private var pusher = SplitPush()
+    #if os(iOS)
+    /// What the split hands its list column (`splitOpen`), the same object for its life, as `showList`.
+    @State private var opener = SplitOpen()
+    #endif
     @Binding var path: NavigationPath
     /// iOS: whether the list column is shown, remembered under this key (`SplitListMemory`), and slid by a finger
     /// (`SplitColumnControl`); nil: nothing kept, no slide.
@@ -86,6 +92,8 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
         #if os(iOS)
             .environment(\.splitDrawer, nil)
             .environment(\.splitSideBars, false)
+            // Set again on this split's own list column (`layout`); a split inside keeps its own.
+            .environment(\.splitOpen, nil)
         #endif
     }
 
@@ -95,7 +103,17 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
                 // No stack of its own: a value link in the sidebar column replaces the detail column's stack. A sidebar
                 // stack that refused its pushes (a path binding that always read empty) first slid the list away, then
                 // back: the sidebar folded and unfolded on every tap.
-                sidebar.modifier(destinations)
+                sidebar
+                    #if os(iOS)
+                    // The list opens its pages through `path` (#12035). Set on the list only, below where the
+                    // destinations are registered: the pages they build take the environment from there, without it.
+                    .environment(\.splitOpen, opener.set { [path = $path] value in
+                        var opened = NavigationPath()
+                        opened.append(value)
+                        path.wrappedValue = opened
+                    })
+                    #endif
+                    .modifier(destinations)
                     #if os(iOS)
                     // Roots (#8603): the column has its own fold button and each root its own sidebar button
                     // (`ListButtonItem`; an Agent's chat its header's, or under side bars its side column's first item);
@@ -330,6 +348,10 @@ extension EnvironmentValues {
     /// Opens the list column of the split the page is in again (iOS); nil in a single stack.
     @Entry var splitShowList: SplitShowList?
     #if os(iOS)
+    /// Set on the list column of a split at regular width: opens a page as the detail column's first page, through the
+    /// split's path (#12035). nil in a single stack, where the list is the stack's root and its `NavigationLink(value:)`
+    /// pushes.
+    @Entry var splitOpen: SplitOpen?
     /// The drawer the next `SplitNavigation` puts its list in at a phone's width (the Sidebar layout, #6332).
     @Entry var splitDrawer: AssistantDrawer?
     /// The system puts its bars down the side beside the next `SplitNavigation` (the Sidebar layout on the open iPhone Duo
@@ -378,6 +400,21 @@ extension EnvironmentValues {
 
     func set(_ push: @escaping (any Hashable) -> Void) -> SplitPush {
         self.push = push
+        return self
+    }
+}
+
+/// Opens a page from a split's list column as the detail column's first page (`splitOpen`). One for the split's life,
+/// as `SplitShowList`.
+@MainActor final class SplitOpen {
+    private(set) var open: (any Hashable) -> Void
+
+    init(open: @escaping (any Hashable) -> Void = { _ in }) {
+        self.open = open
+    }
+
+    func set(_ open: @escaping (any Hashable) -> Void) -> SplitOpen {
+        self.open = open
         return self
     }
 }

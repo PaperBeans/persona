@@ -101,7 +101,7 @@ function cachedPage(mid: string, sid: string, cache?: TranscriptCache): FeedCach
  *  it has no rev), what the stale-page check compares; the hub's `revs` event moves the rev too.
  *  `assistant`: a Persona conversation, whose live text is the headless assistant's whole reply so far (any reply item
  *  ends it); otherwise it is an agent's message as Claude shows it, which the transcript replaces by its start. */
-export function useTranscript(mid: string, sid: string, opts: { starting?: boolean; updatedAt?: string; rev?: number; cache?: TranscriptCache; assistant?: boolean } = {}): Transcript {
+export function useTranscript(mid: string, sid: string, opts: { starting?: boolean; updatedAt?: string; rev?: number; cache?: TranscriptCache; assistant?: boolean; readOnly?: boolean } = {}): Transcript {
   const [initial] = useState(() => cachedPage(mid, sid, opts.cache));
   const [items, setItems] = useState<Item[]>(initial?.items ?? []);
   const [loading, setLoading] = useState(!initial);
@@ -155,6 +155,8 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
   const deltas = useRef<TextThrottle>(null!);
   deltas.current ??= createTextThrottle(setStreaming);
   const assistant = Boolean(opts.assistant);
+  // Read-only audit views page over HTTP but never subscribe/unsubscribe or otherwise act as the visible chat.
+  const readOnly = opts.readOnly === true;
   // an agent's last delta as it came, and what of it the page shows (lib/live-text.ts)
   const liveRaw = useRef("");
   const liveShown = useRef("");
@@ -220,7 +222,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       setItems([]);
       setStreaming("");
       deltas.current.cancel();
-      send({ type: "unsubscribe", machine_id: mid, session_id: sid });
+      if (!readOnly) send({ type: "unsubscribe", machine_id: mid, session_id: sid });
     });
     disownReads();
     const kept = snapshot.current;
@@ -387,7 +389,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
     };
 
     const subscribe = () => {
-      if (dead || conversationDeleted(mid, sid)) return;
+      if (readOnly || dead || conversationDeleted(mid, sid)) return;
       send({ type: "subscribe", machine_id: mid, session_id: sid, since_seq: covered.current || undefined, lazy_images: true, fold_work: true });
       subscribed = true;
     };
@@ -629,10 +631,10 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pagehide", flushSave);
       clearLive(mid, sid);
-      send({ type: "unsubscribe", machine_id: mid, session_id: sid });
+      if (!readOnly) send({ type: "unsubscribe", machine_id: mid, session_id: sid });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mid, sid, cacheScope, memoryScope, cacheManager, assistant, invalidateHistoryReads, updateHasMore]);
+  }, [mid, sid, cacheScope, memoryScope, cacheManager, assistant, readOnly, invalidateHistoryReads, updateHasMore]);
 
   // After the effect above, which starts each conversation's watch from the rev it has then.
   useEffect(() => {

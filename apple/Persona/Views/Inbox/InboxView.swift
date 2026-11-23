@@ -112,6 +112,7 @@ struct InboxPage: View {
     @State private var showingMutes = false     // Muted
     @State private var showingRules = false     // Rules
     @State private var showingSubscriptions = false  // source subscriptions (#2041)
+    @State private var showingBackgroundActivity = false
     @State private var ruling: InboxPolicyTarget? // a row's Rule for This Chat / Sender / Repository…
     @State private var todoRequest: InboxTodoRequest? // rows waiting for their to-do's due time (#6480)
     @State private var confirming = false // Clear All over many items asks first
@@ -169,6 +170,9 @@ struct InboxPage: View {
                 .sheet(isPresented: $showingMutes) { InboxMutesView() }
                 .sheet(isPresented: $showingRules) { InboxRulesView() }
                 .sheet(isPresented: $showingSubscriptions) { SubscriptionsSheet() }
+                .sheet(isPresented: $showingBackgroundActivity) {
+                    if let key = model.assistantMain { BackgroundActivitySheet(key: key) }
+                }
                 .sheet(item: $ruling) { InboxPolicySheet(target: $0) }
                 .sheet(item: $todoRequest) { InboxDueSheet(request: $0) }
                 .accessibleConfirmationDialog(InboxBulk.confirmTitle, isPresented: $confirming, titleVisibility: .visible, hasCancel: true) {
@@ -192,6 +196,7 @@ struct InboxPage: View {
                     autoLoaded = []
                     showingMutes = false
                     showingRules = false
+                    showingBackgroundActivity = false
                     ruling = nil
                     editingDraft = nil
                     if !embedded, !path.isEmpty { path = NavigationPath() }
@@ -569,6 +574,13 @@ struct InboxPage: View {
                     }
                     .accessibilityIdentifier("hub.switcher")
                 }
+                Divider()
+            }
+            if model.assistantMain != nil {
+                Button { showingBackgroundActivity = true } label: {
+                    Label("Background activity", systemImage: Theme.Icon.recent)
+                }
+                .accessibilityIdentifier("inbox-background-activity")
                 Divider()
             }
             cleanButton
@@ -1423,8 +1435,6 @@ struct InboxRow: View {
                     if let summary = item.lineSummary, !summary.isEmpty {
                         VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                             (Text(Image(systemName: Theme.Icon.ai)).foregroundStyle(Theme.ai) + Text(" " + summary))
-                                // The hierarchical styles, not `Color.primary`: a Mac list's selected row turns that
-                                // white, where the row sets the words' color for these (MacHoverRow).
                                 .font(Theme.Font.secondary)
                                 .foregroundStyle(item.isDone ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary.opacity(0.9))).lineLimit(2)
                             if !item.repeatsSummary { Text(from).font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1) }

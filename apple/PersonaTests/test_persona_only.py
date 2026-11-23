@@ -165,12 +165,18 @@ class PersonaOnlyTests(unittest.TestCase):
         self.assertNotIn(".systemSmall", widget_source_for_platform("watchOS"))
 
     def test_vision_widget_sync_and_invalidation_are_enabled(self):
+        # visionOS syncs and invalidates extension widgets as iOS and watchOS do. Shared/ builds for all three and
+        # Persona/ for iOS and visionOS, so this code takes no platform branch at all (#13399): none may leave visionOS out.
         sync = source("Shared/ExtensionSurfaceSync.swift")
-        self.assertEqual(sync.count("#if os(iOS) || os(watchOS) || os(visionOS)"), 4)
+        self.assertNotRegex(sync, r"#(?:if|elseif)[^\n]*\bos\(")
+        self.assertEqual(sync.count("WidgetCenter.shared.reloadTimelines(ofKind: ExtensionSystemWidget.kind)"), 2)
+        self.assertIn("ExtensionWidgetReconciliation.configurations()", sync)
         app = source("Persona/App/PersonaApp.swift")
-        self.assertRegex(app, r'#if os\(iOS\) \|\| os\(visionOS\)\s+if let widget = info\["extension_widget"\]')
+        self.assertIn('if let widget = info["extension_widget"]', app)
+        self.assertNotRegex(app, r'#if os\(iOS\)\s+if let widget = info\["extension_widget"\]')
         model = source("Persona/App/AppModel.swift")
-        self.assertRegex(model, r"#if os\(iOS\) \|\| os\(visionOS\)\s+ExtensionWidgetReconciliation.invalidate")
+        self.assertIn("ExtensionWidgetReconciliation.invalidate(", model)
+        self.assertNotRegex(model, r"#if os\(iOS\)\s+ExtensionWidgetReconciliation.invalidate")
         vision = widget_source_for_platform("visionOS")
         self.assertIn('Open Persona to sync extension capabilities.', vision)
         self.assertNotIn('Open Persona on iPhone to sync extension capabilities.', vision)
@@ -413,7 +419,8 @@ class PersonaOnlyTests(unittest.TestCase):
             self.assertEqual(len(names), len(set(names)), [name for name, n in collections.Counter(names).items() if n > 1])
         self.assertIn('static let avatar = "person.crop.artframe"', icons)
         self.assertIn('static let persona = "sparkle"', icons)
-        self.assertIn("symbol: Theme.Icon.avatar", source("Persona/Views/Settings/AppearanceSettingsView.swift"))
+        # Settings' Avatar row (its catalog entry, which Settings draws), not a brand or persona symbol.
+        self.assertIn("symbol: Theme.Icon.avatar", source("Persona/Views/Settings/SettingsNavigation.swift"))
         launch = source("PersonaUITests/UITestStyle.swift")
         self.assertEqual(len(re.findall(r"\bfunc launchPersona\(", launch)), 1)
         self.assertNotRegex(launch, r"func launchPersona\([^)]*\)\s*\{\s*launchPersona\(")

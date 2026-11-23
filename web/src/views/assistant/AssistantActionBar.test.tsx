@@ -12,6 +12,7 @@ import type { Todo } from "../../lib/todos";
 import { stateName } from "../../lib/state-labels";
 import { usageLimitLabel } from "../../lib/usage-limit";
 import type { Interaction, Session } from "../../lib/types";
+import { Toasts } from "../../ui/atoms";
 import { AssistantActionBar, DOCK_CAPSULE, FeedLineView, TaskDock } from "./Tasks";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -1135,6 +1136,60 @@ describe("Assistant Needs you / In progress trays", () => {
       expect(host.textContent).toContain(t("assistant-tasks.tray_empty_pending"));
     } finally {
       delete getFeedState().plans[waiting.id];
+    }
+  });
+
+  it("marks an owner-held task in another conversation done from Needs you, with Undo and the count going down (#13541)", async () => {
+    mainChat = conversation;
+    let heldTodo: Todo = {
+      id: "held-elsewhere", title: "Release abroad", origin: "another-chat", created_at: at, updated_at: at,
+      pr_url: "https://github.com/example/demo/pull/7",
+      delivery: { state: "pr", gate: "Approve the release", unblock: "user", at },
+    };
+    moreTodos = [heldTodo];
+    const read = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (init?.method === "PATCH") {
+        writes.push(String(url));
+        const body = JSON.parse(String(init.body));
+        heldTodo = { ...heldTodo, done_at: body.done ? at : undefined };
+        moreTodos = moreTodos.map((x) => (x.id === heldTodo.id ? heldTodo : x));
+        return new Response(JSON.stringify({ todo: heldTodo }), { headers: { "Content-Type": "application/json" } });
+      }
+      return read(url, init);
+    });
+    const toastsHost = document.createElement("div");
+    document.body.append(toastsHost);
+    const toastsRoot = createRoot(toastsHost);
+    act(() => toastsRoot.render(<Toasts />));
+    try {
+      await act(async () => { await refresh(); await refreshTodos(); });
+      act(() => entry("needs").click());
+      expect(entry("needs").textContent).toBe(`${label.needs}1`);
+      const group = host.querySelector('[data-needs-supervisor="another-chat"]')!;
+      expect(group).not.toBeNull();
+      expect(group.getAttribute("aria-label")).toBe(t("assistant-tasks.needs_group_another"));
+      expect(group.querySelector("[data-open-task=held-elsewhere]")).not.toBeNull();
+      const close = group.querySelector<HTMLButtonElement>("[data-close-task=held-elsewhere]")!;
+      expect(close).not.toBeNull();
+      act(() => close.click());
+      expect(close.hasAttribute("data-close-armed")).toBe(true);
+      expect(writes).toHaveLength(0);
+      await act(async () => close.click());
+      expect(writes).toEqual(["/api/v1/todos/held-elsewhere"]);
+      expect(JSON.parse(String(vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "PATCH")![1]?.body))).toEqual({ done: true });
+      // the row leaves Needs you at once and the badge drops with it
+      expect(host.querySelector('[data-needs-row="task:held-elsewhere"]')).toBeNull();
+      expect(entry("needs").textContent).toBe(label.needs);
+      const undo = [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === t("assistant-tasks.undo_close"));
+      expect(undo).toBeDefined();
+      await act(async () => undo!.click());
+      expect(writes).toHaveLength(2);
+      await act(async () => refreshTodos());
+      expect(host.querySelector('[data-needs-row="task:held-elsewhere"]')).not.toBeNull();
+    } finally {
+      act(() => toastsRoot.unmount());
+      toastsHost.remove();
     }
   });
 });

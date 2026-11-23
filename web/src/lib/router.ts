@@ -32,6 +32,12 @@ export type Route =
   // the health space (docs/assistant/health.md): `/health` opens its latest conversation (#4329), `/health/new` its new
   // conversation page (with its past ones), `/health/<id>` one of them
   | { name: "health"; sid?: string; fresh?: boolean }
+  // a domain space (docs/web/web.md "Domain spaces", #13500): `/tracks/<slug>` opens its latest conversation, `/tracks/<slug>/new`
+  // its home (its conversations, SPACE.md, a box to start one), `/tracks/<slug>/<id>` one of them. The health space keeps
+  // its own page: `/tracks/health…` opens /health…
+  | { name: "track"; slug: string; sid?: string; fresh?: boolean }
+  // the new space form (`/tracks/new`)
+  | { name: "track-new" }
   | { name: "profile" }
   // `manager`: whose item it is when that is another manager than the default (`?manager=`, docs/assistant/managers.md
   // "Clients"): two managers may list the same id
@@ -98,6 +104,12 @@ export function parse(path: string, search = ""): Route {
   if (p[0] === "overview") return { name: "home" };
   if (p[0] === "history") return p[1] ? { name: "history", origin: p[1] } : { name: "history" };
   if (p[0] === "health") return p[1] === "new" && !p[2] ? { name: "health", fresh: true } : { name: "health", sid: p[1] || undefined };
+  if (p[0] === "tracks" && p[1] === "new" && !p[2]) return { name: "track-new" };
+  if (p[0] === "tracks" && p[1]) {
+    const fresh = p[2] === "new" && !p[3];
+    if (p[1] === "health") return fresh ? { name: "health", fresh: true } : { name: "health", sid: p[2] || undefined };
+    return fresh ? { name: "track", slug: p[1], fresh: true } : { name: "track", slug: p[1], sid: p[2] || undefined };
+  }
   if (p[0] === "assistant") return { name: "profile" };
   if (p[0] === "inbox") {
     const manager = p[1] ? new URLSearchParams(search).get("manager") : null;
@@ -180,6 +192,12 @@ export function routePath(r: Route): string {
       return r.origin ? `/history/${encodeURIComponent(r.origin)}` : "/history";
     case "health":
       return r.sid ? `/health/${encodeURIComponent(r.sid)}` : r.fresh ? "/health/new" : "/health";
+    case "track-new":
+      return "/tracks/new";
+    case "track": {
+      const base = `/tracks/${encodeURIComponent(r.slug)}`;
+      return r.sid ? `${base}/${encodeURIComponent(r.sid)}` : r.fresh ? `${base}/new` : base;
+    }
     case "profile":
       return "/assistant";
     case "inbox":

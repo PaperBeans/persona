@@ -454,72 +454,8 @@ import Synchronization
     func handOver() {}
     func stop() {}
 }
-#else
-/// A Mac's VNC in a small window that floats over the other windows (#1343): it only shows; a click on it opens the
-/// full window; closing it ends the connection unless that window has it.
-@MainActor final class VNCPiP: NSObject, NSWindowDelegate {
-    static let shared = VNCPiP()
-    nonisolated static let log = Logger(subsystem: "persona", category: "vnc")
-    private(set) var ref: MachineRef?
-    private var from: SessionKey?
-    private var panel: NSPanel?
-
-    static var supported: Bool { true }
-    var active: Bool { panel != nil }
-
-    func start(_ ref: MachineRef, from: SessionKey? = nil) {
-        if self.ref == ref, panel != nil { panel?.orderFront(nil); return }
-        stop()
-        self.from = from
-        let session = VNC.hold(ref)
-        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 480, height: 300),
-                        styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel], backing: .buffered, defer: false)
-        p.title = "VNC · " + (AppModel.shared.machine(ref)?.name ?? ref.id)
-        p.level = .floating
-        p.isFloatingPanel = true
-        p.hidesOnDeactivate = false
-        p.isReleasedWhenClosed = false
-        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        p.contentView = NSHostingView(rootView: VNCScreen(session: session, onClick: { [weak self] in self?.restore() }))
-        p.delegate = self
-        if let screen = NSScreen.main?.visibleFrame {
-            p.setFrameOrigin(NSPoint(x: screen.maxX - p.frame.width - Theme.Space.xl, y: screen.maxY - p.frame.height - Theme.Space.xl))
-        }
-        p.orderFront(nil)
-        self.ref = ref
-        panel = p
-        AppModel.shared.vncPiP = ref
-    }
-
-    /// The full window, then the small one goes.
-    func restore() {
-        guard let ref else { return }
-        AppModel.shared.openScreen(ref, from: from)
-    }
-
-    /// The full window took it.
-    func handOver() { stop() }
-
-    func stop() {
-        let p = panel
-        panel = nil
-        p?.close()
-        if let ref { VNC.release(ref) }
-        ref = nil
-        AppModel.shared.vncPiP = nil
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        guard panel != nil else { return }
-        panel = nil
-        if let ref { VNC.release(ref) }
-        ref = nil
-        AppModel.shared.vncPiP = nil
-    }
-}
 #endif
 
-#if os(iOS) || os(visionOS)
 /// What the small window did, step by step (#1839): the last few dozen lines, for Picture in Picture Diagnostics on the page and the
 /// runtime CLI's state; each also goes to the system log (category vnc). No names or passwords.
 @MainActor enum VNCPiPLog {
@@ -534,4 +470,3 @@ import Synchronization
         VNCPiP.log.notice("pip: \(line, privacy: .public)")
     }
 }
-#endif

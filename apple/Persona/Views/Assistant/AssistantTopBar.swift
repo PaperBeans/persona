@@ -40,6 +40,7 @@ struct AssistantTopBar: View {
     var openKnowledge: () -> Void
     var openProfile: () -> Void
     @State private var showInfo = false
+    @State private var showBackgroundActivity = false
     @State private var showLink = false
     @State private var launchers: [Launcher] = []
     /// Each launcher's /model list, fetched when the bar appears (the menu's model submenus).
@@ -85,7 +86,11 @@ struct AssistantTopBar: View {
                         .presentationDragIndicator(.visible)
                 }
             }
-            .onChange(of: key) { showInfo = false }
+            .onChange(of: key) { showInfo = false; showBackgroundActivity = false }
+            .sheet(isPresented: Binding(get: { showBackgroundActivity && key == model.assistantMain },
+                                        set: { showBackgroundActivity = $0 })) {
+                if let key { BackgroundActivitySheet(key: key) }
+            }
             // "Other Model…" (#1644): an ID typed by hand for the next message; the IDs typed before can be forgotten
             // there, so the submenus are read again when it closes.
             .sheet(isPresented: Binding(get: { typingFor != nil && key != nil }, set: { if !$0 { typingFor = nil } }),
@@ -502,6 +507,12 @@ struct AssistantTopBar: View {
             }
             Button(action: openKnowledge) { Label("Knowledge", systemImage: Theme.Icon.knowledge) }
             Button(action: openProfile) { Label("Details [Assistant Top Bar 1932da]", systemImage: Theme.Icon.person) }
+            if key != nil, key == model.assistantMain {
+                Button { showBackgroundActivity = true } label: {
+                    Label("Background activity", systemImage: Theme.Icon.recent)
+                }
+                .accessibilityIdentifier("background-activity-menu")
+            }
             ScreenMenu() // a Mac's live screen, whether or not the model is operating it (#1343)
             if let main = model.assistantMain, key != main {
                 Button {

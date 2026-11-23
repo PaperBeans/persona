@@ -154,5 +154,14 @@
   "leader_needs_you": "対応待ち {count}",
   "codex_waiting": "最初のメッセージ待ち",
   "direction_tasks_expand": "「{name}」の進行中タスクを開く",
-  "direction_tasks_collapse": "「{name}」の進行中タスクを閉じる"
+  "direction_tasks_collapse": "「{name}」の進行中タスクを閉じる",
+  "spaces": "スペース",
+  "new_space": "新しいスペース",
+  "side_unread": "子セッション「{title}」に新しい返信があります",
+  "side_unread_kicker": "子セッションに新着",
+  "side_unread_more": "+{count}",
+  "side_unread_count_one": "{count}件の子セッションに新しい返信があります",
+  "side_unread_count_other": "{count}件の子セッションに新しい返信があります",
+  "side_unread_open": "子セッション「{title}」を開く",
+  "side_unread_also": "ほかにも新しい返信：{titles}"
 }

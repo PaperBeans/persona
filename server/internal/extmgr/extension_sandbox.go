@@ -394,6 +394,9 @@ func (ps *extensions) confine(ctx context.Context, p *extension.Extension, hp *h
 	}
 	hubURL := "http://" + egress.HubHost
 	s.Env = identity.Environment(s.Env, "PERSONA_HUB_URL="+hubURL)
+	// A permitted loopback address in its settings is LocalHost in the sandbox (`127.0.0.1` there is the sandbox
+	// itself, #13540).
+	s.Env = setEnv(s.Env, "PERSONA_PLUGIN_CONFIG", string(extension.SandboxConfig(p.Manifest, ps.reg.Config(p), ruleNow())))
 	if start := s.StartEnv; start != nil {
 		s.StartEnv = func() []string { return identity.Environment(start(), "PERSONA_HUB_URL="+hubURL) }
 	}
@@ -403,6 +406,7 @@ func (ps *extensions) confine(ctx context.Context, p *extension.Extension, hp *h
 			if params.Hub.URL != "" {
 				params.Hub.URL = hubURL
 			}
+			params.Config = extension.SandboxConfig(p.Manifest, params.Config, ruleNow())
 			return params, err
 		}
 	}

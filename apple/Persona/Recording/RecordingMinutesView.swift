@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import SwiftUI
 import UIKit
 
@@ -531,6 +530,5 @@ struct MinutesPhoto: View {
         .fullScreenCover(item: $viewing) { item in MeetingPhotoViewer(recording: recording, item: item) }
     }
 }
-#endif
 #endif
 import PersonaWire

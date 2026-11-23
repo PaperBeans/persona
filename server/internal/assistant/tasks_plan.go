@@ -92,6 +92,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		t.TodoID, t.Error, t.ErrorCode, t.ErrorArgs, t.RetryWith = "", "", "", nil, nil
 		t.WorkspaceResolved, t.ReservedTodoID, t.WorkspaceInferred = nil, "", false
 		t.OwnerStarted = false // the hub's: only the owner's Start on the card sets it (startPlan)
+		t.MemoryTopic = nil    // the hub's: the plan's own confirmation decision sets it (below)
 		t.RequestGate, t.Queue = "", nil
 		t.CloseTabOnAccept, t.TerminalTarget, t.TerminalCleanup = false, taskTerminalTarget{}, ""
 		t.TerminalAuthorized = false
@@ -272,7 +273,15 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 			out.WriteString(t.Prompt + "\n" + t.Context + "\n\n")
 		}
 		space, _ = s.selfSpace(ctx, sessionID)
-		policy = s.exitPolicy(ctx, out.String(), sessionID, space)
+		u := s.exitUse(ctx, out.String(), sessionID, space)
+		policy = policyOf(u)
+		// The categories that made the plan wait for "Start" are the sensitive memory entries its starts may carry once
+		// the owner tapped it (memory_handoff.go): the text the owner confirms is the one tagged, never another.
+		if policy.ConfirmOutbound && u.Known {
+			for i := range a.Tasks {
+				a.Tasks[i].MemoryTopic = slices.Clone(u.Categories)
+			}
+		}
 	}
 	var round Task
 	var inRound bool

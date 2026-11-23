@@ -372,8 +372,11 @@ nonisolated enum TodosListLayout {
 nonisolated enum TodoRowContentLogic {
     /// `pending`: the owner's write on it still on the device (`TodoOutbox`): a tick is drawn at once, struck through; a
     /// new to-do says it is being saved; one that could not reach the hub says so.
-    static func content(_ filed: TodoFiled, item: TodoItem, view: TodoSummary?, byProject: Bool = false, now: Date,
-                        words: TodoWords = TodoWords(), calendar: Calendar = .current,
+    /// `inProject`: the place shown is the row's project, whose title names it, so line 3 leaves it out.
+    /// `underItsDay`: the row is under a heading that names its due day (Upcoming), so it says only its time, if any;
+    /// an overdue one, under Overdue, keeps its day. VoiceOver still says the day, the row being heard on its own.
+    static func content(_ filed: TodoFiled, item: TodoItem, view: TodoSummary?, byProject: Bool = false, inProject: Bool = false,
+                        underItsDay: Bool = false, now: Date, words: TodoWords = TodoWords(), calendar: Calendar = .current,
                         projectName: (String) -> String = { $0 }, pending: TodoRowWrite? = nil) -> TodoRowContent {
         var c = TodoRowContent(id: filed.id, title: item.title, closed: filed.closed, inactive: filed.inactive)
         c.highPriority = item.priority == "high"
@@ -384,8 +387,12 @@ nonisolated enum TodoRowContentLogic {
         var aged = false
         if let due = TodosLogic.dueBy(item, calendar: calendar), !filed.closed {
             let day = item.dueAt ?? TodosLogic.dueDay(item, calendar: calendar) ?? due
-            c.trailing = TodoTimeWords.due(day, now: now, words: words, calendar: calendar)
             c.overdue = due < now
+            if underItsDay && !c.overdue {
+                c.trailing = item.dueAt.map { TodoTimeWords.dueTime($0, words: words, calendar: calendar) }
+            } else {
+                c.trailing = TodoTimeWords.due(day, now: now, words: words, calendar: calendar)
+            }
             if c.overdue { heard.append(words("Overdue [To-dos Spoken]")) }
             heard.append(TodoTimeWords.spokenDue(day, now: now, words: words, calendar: calendar))
         } else if filed.closed, let done = item.doneAt {
@@ -427,8 +434,9 @@ nonisolated enum TodoRowContentLogic {
         if filed.inactive { facts.append(StateName.todoInactive) }
         if let steps = view?.steps, steps.total > 0 { facts.append(words("Steps \(steps.done)/\(steps.total) [To-dos List]")) }
         // The project only beside another fact: alone it is not worth a line, and Group by Project's heading says it for
-        // the rows filed under it, never Needs you's at the top nor those of the Someday and Done today folds.
-        let underItsProject = byProject && TodosListLayout.underProjects.contains(filed.section)
+        // the rows filed under it, never Needs you's at the top nor those of the Someday and Done today folds; a
+        // project's place says it in its title for every row.
+        let underItsProject = inProject || byProject && TodosListLayout.underProjects.contains(filed.section)
         if !facts.isEmpty, !underItsProject, let project = item.project, !project.isEmpty {
             facts.insert(projectName(project), at: 0)
         }

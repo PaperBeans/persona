@@ -577,3 +577,61 @@ func TestExtensionSandboxConcurrentChoices(t *testing.T) {
 		t.Fatalf("saved %s\nwant %s", got, want)
 	}
 }
+
+// loopbackManifest is p's manifest with a format uri setting that defaults to a loopback address.
+func loopbackManifest(id string) *extension.Manifest {
+	return &extension.Manifest{ID: id, Runtime: &extension.Runtime{},
+		Configuration: json.RawMessage(`{"type":"object","properties":{"base_url":{"type":"string","format":"uri","default":"http://127.0.0.1:8080/v1"}}}`)}
+}
+
+// A permitted loopback address in a sandboxed extension's settings is LocalHost for its program, both in the environment
+// and in what initialize carries (#13540). An address its permissions do not permit stays as it is.
+func TestExtensionSandboxLoopbackRewrite(t *testing.T) {
+	h, _ := extensionTestHub(t)
+	ps := h.extensions
+	old := sandboxProbe
+	sandboxProbe = func() sandbox.Support { return sandbox.Support{OS: "linux", Bwrap: "/usr/bin/bwrap"} }
+	t.Cleanup(func() { sandboxProbe = old })
+	check := func(id, network, config string, want string) {
+		t.Helper()
+		p := &extension.Extension{Record: extension.Record{ID: id, Source: extension.SourceInstalled, Config: json.RawMessage(config),
+			Granted: extension.Permissions{Network: []string{network}}}, Manifest: loopbackManifest(id), Full: loopbackManifest(id)}
+		p.Dir = t.TempDir()
+		if err := os.MkdirAll(ps.reg.DataDir(id), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		ps.sandboxes.mu.Lock()
+		if ps.sandboxes.settings.On == nil {
+			ps.sandboxes.settings.On = map[string]bool{}
+		}
+		ps.sandboxes.settings.On[id] = true
+		ps.sandboxes.mu.Unlock()
+		s := &host.Spec{HTTP: true, Env: []string{"PERSONA_PLUGIN_CONFIG=" + config},
+			Init: func(context.Context) (extension.InitializeParams, error) {
+				return extension.InitializeParams{Config: json.RawMessage(config)}, nil
+			}}
+		if err := ps.confine(t.Context(), p, &hubExtension{id: id}, s); err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		env := ""
+		for _, kv := range s.Env {
+			if v, ok := strings.CutPrefix(kv, "PERSONA_PLUGIN_CONFIG="); ok {
+				env = v
+			}
+		}
+		if !strings.Contains(env, `"base_url":"`+want+`"`) {
+			t.Fatalf("%s: the environment still says %s", id, env)
+		}
+		params, err := s.Init(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := string(params.Config); !strings.Contains(got, `"base_url":"`+want+`"`) {
+			t.Fatalf("%s: initialize still says %s", id, got)
+		}
+	}
+	check("lb", "127.0.0.1", `{"base_url":"http://127.0.0.1:8080/v1"}`, "http://host.persona.internal:8080/v1")
+	check("lb2", "notes.example.com", `{"base_url":"http://127.0.0.1:8080/v1"}`, "http://127.0.0.1:8080/v1")
+	// A schema default is rewritten too when the user set nothing.
+	check("lb3", "127.0.0.1", `{}`, "http://host.persona.internal:8080/v1")
+}

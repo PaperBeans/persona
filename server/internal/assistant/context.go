@@ -41,6 +41,8 @@ func (s *Service) Context(ctx context.Context, p ContextParams) ContextResult {
 			return s.contextResult(ctx, p, s.spaceContext(ctx, track), "", false)
 		}
 		snapshot = s.contextSnapshot(ctx, s.snapshotScope(ctx, p.SessionID), background)
+		// The memory extension's standing entries this conversation may use, a section of its own (memory_extension_source.go).
+		snapshot = s.withStandingMemory(ctx, p.MachineID, p.SessionID, snapshot)
 	}
 	c := prompts.AssistantContext{ScheduledWorkPlan: cleanRound && s.settings(ctx).workGuideOn(), Snapshot: snapshot, Owner: s.owner(ctx),
 		Main: s.isMain(ctx, p.SessionID), Leader: s.isLeader(ctx, p.SessionID), Background: background}

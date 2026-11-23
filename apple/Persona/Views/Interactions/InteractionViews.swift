@@ -2797,9 +2797,7 @@ struct SessionlessCardSheet: View {
             }
             .themedPage()
             .navigationTitle(interaction.sessionlessPlace ?? String(localized: "Script"))
-            #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
-            #endif
             .toolbar {
                 SheetClose { dismiss() }
             }

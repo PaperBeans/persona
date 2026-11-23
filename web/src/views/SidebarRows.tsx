@@ -1,7 +1,7 @@
 // The sidebar's rows: Persona's main conversation, the pinned heading, a page's row, an agent's row and the personal
 // agents. Imports only SidebarParts among the sidebar's files.
 import { memo, useCallback, useMemo, useState, useSyncExternalStore } from "react";
-import { t } from "../i18n";
+import { formatList, t } from "../i18n";
 import { awaitsReply, justFinished, sessionSource, sourceName } from "../lib/agent-groups";
 import { addSection, arrangeSessions, assignSection, GROUP_LABEL, isDefaultView, providerLabel, refreshAgentSessions, removeSection, resetView, setView, SHOW_LABEL, SORT_LABEL, toggleProvider, togglePin, totalUnread, updateAgentPrefs, useAgentList, useAgentPrefs, viewOf, type AgentPrefs, type AgentSession, type GroupBy, type ShowMode, type SortBy } from "../lib/agents";
 import { ago, backgroundWaiting, sessionCan, sessionDisplayTab, sessionPreview, sourceSubtitle, sessionTitle, sessionTitleDetail, stateOf, tabLabel } from "../lib/format";
@@ -39,35 +39,41 @@ import { runtimeIdentity } from "../lib/runtime-list";
 import { heldSeen } from "../lib/seen-outbox";
 import { heldLaunchWorking, launchForSession } from "../lib/launch-handoff";
 import { runningChildren } from "../lib/child-sessions";
-import { childCards, foldedRow } from "../lib/folded-rows";
-import { countSides } from "../lib/side-fold";
-import { useHeldSides } from "../lib/use-child-sessions";
+import { childCards, foldedRow, ownRow } from "../lib/folded-rows";
+import { countSides, foldedStateWith, hubSides, unreadSides } from "../lib/side-fold";
+import { useChildSessions, useHeldSides } from "../lib/use-child-sessions";
+import { askSide } from "../lib/side-panel";
 import { backgroundWork } from "../lib/background-work";
 import { SESSIONS_LIST_FEATURE } from "../lib/session-list";
 import { personalHideDeps, personalOrder, personalSessions, removeAgentSession, useGoingIds } from "../lib/agents";
 import { BADGE_CLASS, CURRENT_ROW, type GoFn, GroupCount, pageIconStyle, type RegFn, ROW_TITLE_MIN, type RowMenuFn, Section } from "./SidebarParts";
+import { requestDirectWaiting } from "../lib/direct-waiting";
 import type { UIColor } from "../lib/extension-ui-v6";
 
 // The main conversation uses the home symbol (Back to main chat's) and one Main conversation line.
 // The assistant's identity belongs to the sidebar head; a left draft keeps its existing second line.
 // Its menu (Copy session ID, End…: iOS's long press on the main row) opens on a right click, the menu key or its ⋯.
 // Memoized like SessionRow: a push that leaves the main conversation as it was does not render it again.
-export const PersonaRow = memo(function PersonaRow({ reg, hover, active, go, main, chord, onMenu: menuOf }: { reg: RegFn; hover: (k: string | null) => void; active: boolean; go: GoFn; main?: Session; /** The "Open Persona" shortcut as bound now ("": none). */ chord?: string; /** The conversation rows' menu, opened on `main`: none without it. */ onMenu?: RowMenuFn }) {
+export const PersonaRow = memo(function PersonaRow({ reg, hover, active, go, main, chord, waiting, onMenu: menuOf }: { reg: RegFn; hover: (k: string | null) => void; active: boolean; go: GoFn; main?: Session; /** The "Open Persona" shortcut as bound now ("": none). */ chord?: string; /** The main conversation's exact direct-user waiting count. */ waiting?: number; /** The conversation rows' menu, opened on `main`: none without it. */ onMenu?: RowMenuFn }) {
   const to: Route = { name: "persona" };
   const st = main ? stateOf(main) : undefined;
-  const pending = main?.pending_interactions ?? 0;
+  const pending = waiting ?? main?.pending_interactions ?? 0;
   const onMenu = main && menuOf ? (anchor: HTMLElement, at?: MenuAt) => menuOf(main, anchor, at) : undefined;
   // one ref for the row's life, so a re-render does not let go of it and register it again (useGlide's reg)
   const ref = useMemo(() => reg("persona"), [reg]);
   const aside = onMenu && !active ? "group-hover/row:invisible" : undefined;
   // words left unsent in the main conversation's box, once you are not in it (#5568)
   const draft = draftLine(useLeftDraft(main ? `${main.machine_id}/${main.session_id}` : null));
+  const open = (e: React.MouseEvent) => {
+    // set to Full page, picked from another place it opens the page the conversation kept over it (#13164)
+    go(to, () => pickMainChat(active))(e);
+    if (e.defaultPrevented && main && pending > 0) requestDirectWaiting(main.session_id);
+  };
   const link = (
     <a
       ref={ref}
       href={href(to)}
-      // set to Full page, picked from another place it opens the page the conversation kept over it (#13164)
-      onClick={go(to, () => pickMainChat(active))}
+      onClick={open}
       {...(onMenu ? contextMenuProps((at, el) => onMenu(el, at)) : {})}
       onMouseEnter={() => hover("persona")}
       onFocus={() => hover("persona")}
@@ -85,7 +91,7 @@ export const PersonaRow = memo(function PersonaRow({ reg, hover, active, go, mai
       </span>
       {chord && <span aria-hidden data-persona-chord className={cx("hidden sm:inline-flex [@media(hover:none)]:hidden", aside)}><Kbd>{formatChord(chord)}</Kbd></span>}
       {pending > 0 ? (
-        <span className={cx("flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-field px-1 text-[10.5px] font-semibold text-attention tabular-nums", aside)}>{pending}</span>
+        <span data-main-waiting={pending} className={cx("flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-field px-1 text-[10.5px] font-semibold text-attention tabular-nums", aside)}>{pending}</span>
       ) : st === "working" || st === "needs_you" || st === "unread" ? (
         <span className={cx("flex", aside)}><StatusMark state={st} /></span>
       ) : null}
@@ -227,6 +233,65 @@ function SecondLine({ line, draft }: { line: { lead?: string; text: string; tone
   );
 }
 
+/** Reads a parent's folded rows while its row names an unread side session (useChildSessions): they are held for the
+ *  row (useHeldSides), each seen by this page's own mark, so the line can name them and a side seen here clears the row
+ *  at once. Draws nothing. */
+function HoldSides({ mid, sid }: { mid: string; sid: string }) {
+  useChildSessions(mid, sid, true);
+  return null;
+}
+
+/** The line under a parent's title while a side session folded into it has a reply nobody has seen (#13299: the row's
+ *  green dot was the side's, and opening the parent never cleared it). It names the most recent such side, "+N" for the
+ *  others, and opens it in the parent's Side sessions panel in one click (the side's own link, lib/side-panel.ts), where
+ *  it is seen as any chat is. Before the side rows are read (`sides` absent) it only says how many there are. */
+function SideUnreadLine({ sides, count, open }: { sides?: readonly Session[]; count: number; open: (side: Session, e: React.MouseEvent) => void }) {
+  const first = sides?.[0];
+  // in the unread tint, as the dot it explains: told apart from the parent's own words under its title
+  const cls = "flex h-4 min-w-0 items-center gap-1 text-submeta leading-4 text-green";
+  const mark = <Icon name="sideSessions" size={10} stroke={2.2} className="shrink-0" />;
+  if (!first) {
+    const words = t("sidebar.side_unread_count", { count });
+    return <span data-side-unread="" title={words} className={cls}>{mark}<span className="truncate">{words}</span></span>;
+  }
+  const name = sessionTitle(first);
+  const words = t("sidebar.side_unread", { title: name });
+  const rest = sides!.slice(1);
+  const hint = [t("sidebar.side_unread_open", { title: name }), rest.length ? t("sidebar.side_unread_also", { titles: formatList(rest.map((w) => sessionTitle(w))) }) : ""].filter(Boolean);
+  const go = (e: React.MouseEvent) => {
+    // a link inside the row's link: the row does not open the parent as well
+    e.stopPropagation();
+    open(first, e);
+  };
+  // the line's own width decides whether the lead fits beside the title (a container, as the row's column can be narrow)
+  return (
+    <span className="@container/side-line block min-w-0">
+      <span
+        data-side-unread={first.session_id}
+        role="link"
+        tabIndex={0}
+        title={hint.join("\n")}
+        aria-label={[words, ...hint].join(". ")}
+        onClick={go}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.currentTarget.click();
+        }}
+        className={cx(cls, "w-fit max-w-full cursor-pointer rounded-[4px] hover:text-ink focus-visible:text-ink")}
+      >
+        {mark}
+        {/* the side's title keeps the room: the lead shows only where both fit (the sentence is in the tooltip and the
+            spoken name either way) */}
+        <span data-side-lead className="hidden shrink-0 font-medium @[10rem]/side-line:inline">{t("todos.kicker_line", { kicker: t("sidebar.side_unread_kicker") }).trimEnd()}</span>
+        <span className="min-w-0 truncate">{name}</span>
+        {rest.length > 0 && <span className="shrink-0 tabular-nums">{t("sidebar.side_unread_more", { count: rest.length })}</span>}
+      </span>
+    </span>
+  );
+}
+
 // `prefix`: a word before the title (a tab's name, a pane's agent), in `prefixClass`
 type SessionRowProps = { menuLabel?: string; /** The mark at the start when the state is not shown (a Persona conversation's; pinned: the pin). */ icon?: IconName; s: Session; k: string; reg: RegFn; hover: (k: string | null) => void; active: boolean; /** null: a targetless external direction, drawn as the same non-link row. */ to: Route | null; go: GoFn; tab?: boolean; label?: string; prefix?: string; prefixClass?: string; hint?: string; /** The hint is whole, never cut (a lead's counts). */ hintFull?: boolean; host?: string; showState?: boolean; showTodoTag?: boolean; onMenu?: RowMenuFn; endRoom?: boolean; /** A lead row whose own conversation is idle while something under it runs (the direction tree's `running`, #6626): draw the working arc anyway (#6230). An own needs-you / unread state still takes precedence. */ workingMark?: boolean;
   /** 常驻 rows (#6214): the "在做 N · 等你 N" counts never fade on hover and the ⋯ sits in a reserved end slot instead
@@ -263,7 +328,12 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
   const seenMark = useStore((st) => st.seen[runtimeIdentity(given)]);
   const launch = useStore((st) => launchForSession(st.launches, given));
   const nowHandoff = Date.now();
-  const s = heldLaunchWorking(heldSeen(answeredSession(given, Boolean(ix), justAnswered, pending), seenMark, nowHandoff), launch, nowHandoff);
+  // the page's own mark on the parent clears its own part only: a side session's unread reply keeps it Unread, and its
+  // line below says which (#13299). `own`: the row in its own state, as the hub sent it.
+  const ownSeen = heldSeen(ownRow(row), seenMark, nowHandoff);
+  const marked = heldSeen(answeredSession(given, Boolean(ix), justAnswered, pending), seenMark, nowHandoff);
+  const keptBySide = marked.state !== given.state && stateOf(given) === "unread" && foldedStateWith(ownSeen, sides && countSides(sides)) === "unread";
+  const s = heldLaunchWorking(keptBySide ? { ...marked, state: "unread" } : marked, launch, nowHandoff);
   const preferTab = useHerdrTabName();
   const title = sessionTitle(s, preferTab);
   const titleDetail = sessionTitleDetail(s, preferTab);
@@ -331,7 +401,25 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
   const regRow = useMemo(() => reg(k), [reg, k]);
   // words left unsent in its box, once you are not in it (#5568): in place of what it asks or did
   const draft = draftLine(useLeftDraft(`${given.machine_id}/${given.session_id}`));
-  const line = draft ?? (showState && !s.assistant ? rowLine(s, ix, awaiting, finished) : undefined);
+  // a side session folded into it with a reply nobody has seen (#13299): named under the title while the row shows
+  // Unread, read for the row while the hub's rollup or the held rows say there is one (HoldSides: kept while the hub still
+  // counts it, so a side seen here does not drop the rows and bring the hub's count back for a moment)
+  const sideWatch = showState && !s.assistant && to !== null;
+  const hubUnread = sideWatch ? hubSides(given)?.unread ?? 0 : 0;
+  const sidesUnread = useMemo(() => (sides ? unreadSides(sides) : undefined), [sides]);
+  const holdSides = sideWatch && (hubUnread > 0 || (sidesUnread?.length ?? 0) > 0);
+  const sideCount = sidesUnread ? sidesUnread.length : hubUnread;
+  const sideLine = holdSides && st === "unread" && sideCount > 0;
+  // only its sides are unread: what it did itself was seen, so its own last words do not stand under the green dot
+  const sideOnly = sideLine && stateOf(ownSeen) !== "unread";
+  const openSide = useCallback((side: Session, e: React.MouseEvent) => {
+    if (!to || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+    rememberSessionRow(row);
+    rememberSessionRow(side);
+    askSide(row.machine_id, row.session_id, side.session_id);
+    go(to)(e);
+  }, [row, go, to]);
+  const line = draft ?? (showState && !s.assistant && !sideOnly ? rowLine(s, ix, awaiting, finished) : undefined);
   // ultracode on (#3428): the workflow mark in the AI colour right after the title; a row without it is drawn as before.
   // Not on an offline row: the node keeps the last value it saw after the process is gone, and a resume starts it off.
   const ultra = showState && ultracodeMarkShown(s);
@@ -366,7 +454,8 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
       {prefix && <span className={prefixClass}>{prefix}</span>}
       {/* with the mark, the title sits in the column whether a second line shows or not: the same element through a
           workflow's start and end, so the mark does not fade in again */}
-      {ultra || detail.length > 0 || workflow || line || childLine || plan ? (
+      {holdSides && <HoldSides mid={row.machine_id} sid={row.session_id} />}
+      {ultra || detail.length > 0 || workflow || line || sideLine || childLine || plan ? (
         <span className={cx("flex min-w-0 flex-1 flex-col", titleMin, titleFirst)}>
           {ultra ? (
             <span className="flex min-w-0 items-center gap-1">
@@ -381,6 +470,7 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
             </span>
           )}
           {line && <SecondLine line={line} draft={!!draft} />}
+          {sideLine && <SideUnreadLine sides={sidesUnread} count={sideCount} open={openSide} />}
           {childLine && (
             <span data-children-line title={childLine} className="flex h-4 min-w-0 items-center gap-1 text-[11px] leading-4 text-ink-3">
               <Icon name="agent" size={10} stroke={2.2} className="shrink-0" />

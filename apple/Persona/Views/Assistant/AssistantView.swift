@@ -185,7 +185,12 @@ struct AssistantView: View {
                                     : column ? nil : { drawer.close(); model.selectedTab = .settings },
                                 drawer: column ? nil : drawer,
                                 openInbox: places ? { show(.inbox) } : nil,
-                                openTodos: places ? { show(.todos) } : { drawer.close(); showTodos = true },
+                                openTodos: places ? { show(.todos) } : {
+                                    // A place picked in the sidebar is taken here too (its list changes in place).
+                                    _ = TodoWorkspace.shared.opening(inFront: showTodos)
+                                    drawer.close()
+                                    showTodos = true
+                                },
                                 onMachines: places ? { show(.machines) } : nil,
                                 onOpenExtension: places ? { show(.extensionPage($0)) } : { r in drawer.close(); openedExtension = r },
                                 openHealth: places ? { show(.health) } : { drawer.close(); enterHealth() },
@@ -312,11 +317,7 @@ struct AssistantView: View {
         .navigationDestination(isPresented: $showProfile) { AssistantProfileView() }
         .navigationDestination(isPresented: $showKnowledge) { KnowledgeView() }
         .navigationDestination(isPresented: $showRecordings) {
-            #if os(iOS) || os(visionOS)
             RecordingsPage()
-            #else
-            KnowledgeView() // the Mac records nothing: its Knowledge lists the hub's recordings
-            #endif
         }
         .navigationDestination(isPresented: $showRoutines) { AssistantRoutinesView() }
         .navigationDestination(isPresented: $showTodos) {
@@ -363,9 +364,7 @@ struct AssistantView: View {
         AnyView(root)
         // No system bar: the top bar floats over the conversation with a fog under it (it scrolls beneath).
         .toolbarVisibility(.hidden, for: .navigationBar)
-        #if os(iOS) || os(visionOS)
         .background { RootBarHidden(atRoot: atRoot, roots: embedded ? unified : nil) }
-        #endif
         .overlay(alignment: .top) {
             AssistantTopBar(key: pending == nil ? current : nil,
                             sidebarIsColumn: widthClass == .regular,
@@ -569,10 +568,13 @@ struct AssistantView: View {
     /// animation, then the drawer closes: one motion, not a push and a slide while the drawer closes (#6599).
     private func show(_ page: ShellPage?) {
         guard let page else { return }
+        // A To-dos place the sidebar picked (#10465): To-dos opens on it at its root, what it kept being the place
+        // before's. Its own row is All To-dos where To-dos is the place in front.
+        let fresh = page == .todos && TodoWorkspace.shared.opening(inFront: todosInFront)
         #if os(iOS)
-        if embedded, let unified { return showRoot(page, in: unified) }
+        if embedded, let unified { return showRoot(page, in: unified, fresh: fresh) }
         #endif
-        let kept = placesByValue ? places.enter(page, from: navPath.wrappedValue) : nil
+        let kept = placesByValue ? places.enter(page, from: navPath.wrappedValue, fresh: fresh) : nil
         #if DEBUG
         ShellTrace.shared.note("place \(page) \(kept == nil ? "root" : "kept") drawer=\(activeDrawer.isOut) path=\(navPath.wrappedValue.count) kept=\(kept?.count ?? 0)")
         #endif
@@ -629,11 +631,21 @@ struct AssistantView: View {
         navPath.wrappedValue = path
     }
 
+    /// Whether To-dos is the place in front, whatever is pushed on it: the Sidebar layout's root, else the place this
+    /// page shows over the conversation (the shell's and the iPad's), else the classic page. `show` asks it on every
+    /// platform, visionOS included.
+    private var todosInFront: Bool {
+        #if os(iOS)
+        if embedded, let unified { return unified.shownPlace == .todos }
+        #endif
+        return placesByValue ? places.current == .todos : showTodos
+    }
+
     #if os(iOS)
     /// The Sidebar layout (#8359): each page the sidebar opens is a root of the page beside it, the conversation one of
     /// them. Picking one replaces the root at once, the one left keeping what was opened on it; picking the one in front
     /// goes back to it (`SidebarPageRoots`). The shaded row follows the root (`UnifiedSidebar.shownPlace`, `atRoot`).
-    private func showRoot(_ page: ShellPage, in unified: UnifiedSidebar) {
+    private func showRoot(_ page: ShellPage, in unified: UnifiedSidebar, fresh: Bool = false) {
         switch page {
         case .newConversation:
             traceRoot(page, unified.select(.conversation, path: navPath, contentChanged: true))
@@ -642,7 +654,7 @@ struct AssistantView: View {
             traceRoot(page, nil)
             enterHealth()
         default:
-            let step = SidebarPageRoot.of(page).map { unified.select($0, path: navPath) }
+            let step = SidebarPageRoot.of(page).map { unified.select($0, path: navPath, fresh: fresh) }
             if page == .inbox, let step { inboxPicked(step) }
             traceRoot(page, step)
         }
@@ -1576,9 +1588,7 @@ struct StarterComposer: View {
     /// The `@word` before the caret, for the @ list (#2319): the shell's composer only, while it has the keyboard.
     private var mentionToken: MentionToken? {
         guard shell != nil, focused, !disabled else { return nil }
-        #if os(iOS) || os(visionOS)
         if TypedText.composingFocused { return nil } // Pinyin still marked: the list waits for the confirmed words
-        #endif
         return MentionToken.at(text, selection: selection)
     }
 
@@ -1630,9 +1640,7 @@ struct StarterComposer: View {
         VStack(spacing: Theme.Space.s) {
             if !files.items.isEmpty { FileAttachmentsBar(files: files) }
             if !videos.items.isEmpty { VideoAttachmentsBar(videos: videos) }
-            #if os(iOS) || os(visionOS)
             PasteImageChip(focused: focused) { add($0) }
-            #endif
             if !images.isEmpty { ComposerImages.editable(draft.held) } // a tap marks it up, as in a conversation
             if let token = mentionToken {
                 ComposerMentionMenu(token: token, text: textBinding, selection: $selection, source: mentionSource) { ref in
@@ -1651,7 +1659,7 @@ struct StarterComposer: View {
                 ShellComposerBar(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)"), text: textBinding, selection: $selection, focused: $focused,
                                  canSend: canSend, hasAttachments: !images.isEmpty || !videos.items.isEmpty || !files.items.isEmpty || !quotes.isEmpty,
                                  modesTitle: StarterModesMenu.title(modes: shell, launchers: starterModels.launchers, mainDefault: starterModels.mainDefault, model: model),
-                                 quotes: quotesBinding, history: "assistant.new", gate: gate, openAttach: attachOpener,
+                                 quotes: quotesBinding, gate: gate, openAttach: attachOpener,
                                  dictationRequest: uploadDest == nil ? model.dictationRequest : nil,
                                  takeDictation: { request in model.takeDictationRequest(request, uploadDest: uploadDest) }, send: submit) {
                     #if os(iOS)
@@ -1681,7 +1689,7 @@ struct StarterComposer: View {
                 }
             } else {
                 ComposerRow(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)…"), text: textBinding, selection: $selection, focused: $focused, canSend: canSend,
-                            send: submit, history: "assistant.new", gate: gate) {
+                            send: submit, gate: gate) {
                     attachments
                 }
             }
@@ -1807,9 +1815,7 @@ struct BeautifulStarterComposer: View {
             if currentLauncher == nil { StarterLauncherStatus() }
             if !files.items.isEmpty { FileAttachmentsBar(files: files) }
             if !videos.items.isEmpty { VideoAttachmentsBar(videos: videos) }
-            #if os(iOS) || os(visionOS)
             PasteImageChip(focused: focused) { add($0) }
-            #endif
             if !images.isEmpty { ComposerImages.editable(draft.held) } // a tap marks it up, as in a conversation
             PromptComposer(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)…"), text: textBinding, selection: $selection, focused: $focused,
                            hasAttachments: !images.isEmpty || !videos.items.isEmpty || !files.items.isEmpty || !quotes.isEmpty, disabled: disabled,
@@ -2257,7 +2263,6 @@ struct StarterModesMenu: View {
     }
 }
 
-#if os(iOS) || os(visionOS)
 /// Hides the stack's navigation bar again once the page is back at its root. Swiped back from a pushed page with its
 /// search still open (Knowledge), UIKit left the bar showing over the root, with the root's title and ~106 pt tall: the top
 /// bar was pushed down under it, and a tap where the switch belongs hit the empty bar (2026-11-01). SwiftUI still has
@@ -2308,7 +2313,6 @@ private struct RootBarHidden: UIViewRepresentable {
         }
     }
 }
-#endif
 
 /// The classic layout has no ShellDestinations, so nothing registers the todo detail route in this stack: a todo row
 /// pushed from the todo list (TodosView) would open nothing. Nor the agent page Full Screen pushes (`SessionKey`). The

@@ -264,11 +264,7 @@ struct DevicesView: View {
         #if DEBUG
         if Self.browserSampleOn { return true }
         #endif
-        #if os(iOS) || os(visionOS)
         return model.hubFeatures.contains(APIClient.browserQRMatchFeature)
-        #else
-        return false
-        #endif
     }
 
     private static let upgradeNote = String(localized: "After the hub updates, this iPhone switches to its own credentials automatically.")

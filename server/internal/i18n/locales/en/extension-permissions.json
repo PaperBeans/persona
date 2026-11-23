@@ -121,6 +121,8 @@
   "repository_provider_title": "Look up repositories and links",
   "repository_provider_more_title": "Look up repositories and links (new)",
   "repository_provider_detail": "When you add a repository on {hosts}, or you or your Agents add or mention an address there in a to-do's work, Persona asks it to read the address, check the repository and look up the link. It learns those addresses, not those on other hosts",
+  "memory_source_title": "Give Persona its memory",
+  "memory_source_detail": "Persona reads what it remembers about you, entry by entry, and decides itself which entries each conversation, task and Inbox reply may use, so sensitive ones stay in their space. What it used to add to your conversations by itself is no longer added",
   "assistant_data_title": "Add what it writes to what your assistant reads",
   "assistant_data_detail": "Text its program writes can go into the assistant's instructions and skills, an Agent's project background or Inbox triage and drafts, within size limits. You can switch each part off in its details"
 }

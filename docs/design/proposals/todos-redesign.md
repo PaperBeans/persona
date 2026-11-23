@@ -159,10 +159,10 @@ selection. The zh-Hans words of every label in this section are in section 3.11.
 
 | Place | Where | Contents | Count on its row | Capture default | Empty state |
 | --- | --- | --- | --- | --- | --- |
-| **All To-dos** | the sidebar's **To-dos** row itself | every open to-do, in sections | blue N (to-dos that need you), hidden at 0 | none | "Nothing to do yet. Write down anything you want done. Persona can help with the rest." + **New To-Do** |
-| **Today** | child row | due, reminding or overdue today, plus what the owner put on Today | none | due today | "Nothing for today." + "3 coming up this week ›" |
-| **Upcoming** | child row | dated to-dos under day headings; ⋯ › Show as Calendar (Day, Week, Month; drag to reschedule) | none | asks for a date; a day heading's **+** fills it | "Nothing scheduled. To-dos with a date show up here." |
-| **Projects** (each knowledge-base project with open to-dos) | child rows after a 12-pt gap, up to 5, then **All Projects…** | that project's open to-dos | the project's needs-you part, blue, hidden at 0 | in that project | "Nothing open in Kyoto trip." + **New To-Do in Kyoto trip** |
+| **All To-dos** | the sidebar's **To-dos** row itself | every open to-do, in sections, with the Filter | blue N (to-dos that need you), hidden at 0 | none | "Nothing to do yet. Write down anything you want done. Persona can help with the rest." + **New To-Do** |
+| **Today** | child row | due, reminding or overdue today, plus what the owner put on Today; no Filter (amended 2026-11-21) | none | due today | "Nothing for today." + "3 coming up this week ›", a link beside the foot's **+** |
+| **Upcoming** | child row | dated to-dos under day headings, no Filter and no sort (amended 2026-11-21); ⋯ › Show as Calendar (Day, Week, Month; drag to reschedule), alone in its ⋯ | none | asks for a date, tomorrow at first; a day heading's **+**, or an hour tapped on its calendar, fills it | "Nothing scheduled. To-dos with a date show up here." |
+| **Projects** (each knowledge-base project with open to-dos) | child rows after a 12-pt gap, up to 5, then **All Projects…** (every project, each with its needs-you part and its open count, neutral, amended 2026-11-21) | that project's open to-dos, with the Filter | the project's needs-you part, blue, hidden at 0 | in that project | "Nothing open in Kyoto trip."; the foot's **+** (New To-Do in Kyoto trip) |
 
 - The sidebar stays at two levels, with no "Projects" heading row. The fold state belongs to the owner
   (`sidebar.fold.todos`, a `@StoredValue` like `sidebar.fold.places`); it starts unfolded and never folds or unfolds by
@@ -182,7 +182,9 @@ remembered. Needs you's blue N stays on its section header and the drawer's row;
 owner, the list's first line says "● 3 more need you · Show All", and on iOS 26 the title's subtitle keeps it once that
 line scrolls away. Nothing sits under the title. Today and Upcoming draw no Filter (amended 2026-11-21; it was "inside
 every place"): they list open to-dos already narrowed by date, so Done would always be empty there and the other choices
-would narrow little. Each client draws the Filter in its own idiom (stage 4); the contract below is the same everywhere.
+would narrow little. Outside All To-dos the same one guard line also counts what needs the owner outside the place ("●
+2 more need you, not in Today · Show All"), what a choice hides in a project's place too, never two lines, and its Show
+All opens All To-dos. Each client draws the Filter in its own idiom (stage 4); the contract below is the same everywhere.
 
 | Choice (the landing choice first) | Shows | Count |
 | --- | --- | --- |

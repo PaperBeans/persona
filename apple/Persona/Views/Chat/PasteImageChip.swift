@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -165,4 +164,3 @@ struct PasteImageChip: View {
         }
     }
 }
-#endif

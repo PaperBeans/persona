@@ -1199,7 +1199,9 @@ def install(hub):
          "updated": c.at(0, 9, 0), "extra": "short · active"}
         for pid, name, line_ in (("kyoto", "Kyoto trip", "Apr 3–9, two of us, a ryokan near Gion"),
                                  ("weather", "Weather App", "1.3 ships Friday with the new forecast view"),
-                                 ("home", "Home", "The house, the car and the school")))
+                                 ("home", "Home", "The house, the car and the school"),
+                                 # no to-dos: a project's place with nothing open (its empty state)
+                                 ("garden", "Garden", "Spring planting and the new beds")))
     by_id = {t["id"]: t for t in rows}
     _state.update(order=[t["id"] for t in rows], legacy=legacy, settles=settles, card=card,
                   owners={t["id"]: t.get("project") for t in rows if not t.get("part_of")},

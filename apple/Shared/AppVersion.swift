@@ -1,5 +1,5 @@
 import Foundation
-#if canImport(UIKit) && !os(watchOS)
+#if !os(watchOS)
 import UIKit
 #endif
 
@@ -38,8 +38,6 @@ nonisolated struct AppVersion: Equatable, Sendable {
         "visionOS"
         #elseif os(iOS)
         UIDevice.current.userInterfaceIdiom == .pad ? "iPadOS" : "iOS"
-        #else
-        "unknown"
         #endif
     }
 

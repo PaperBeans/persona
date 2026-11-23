@@ -86,7 +86,7 @@ struct LiveScreenSettingsRow: View {
 
     var body: some View {
         if LiveScreenSettingsView.isShown(machines: model.machines) {
-            NavigationLink(value: SettingsPage.liveScreen) {
+            SettingsListLink(value: SettingsPage.liveScreen) {
                 SettingsRow(title: String(localized: "Live Screen"), symbol: Theme.Icon.screen, tint: Theme.accent, look: .oneLine)
             }
             .settingsListRow(SettingsPage.liveScreen)

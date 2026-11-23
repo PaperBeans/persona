@@ -812,11 +812,12 @@ public nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
     public var authRelay: [ExtensionAuthRelayItem]?
     public var secretProviders: [ExtensionSecretProviderItem]?
     public var repositoryProviders: [ExtensionRepositoryProviderItem]?
+    public var memorySources: [ExtensionMemorySourceItem]?
     public var messaging: [ExtensionMessagingItem]?
     /// Extra keys stay at this object's level on the wire; declared fields always win.
     public var additionalProperties: [String: JSONValue]
 
-    public init(connectors: [ExtensionConnectorItem]? = nil, voice: [ExtensionNamedItem]? = nil, transcription: [ExtensionNamedItem]? = nil, speech: [ExtensionNamedItem]? = nil, computer: [ExtensionNamedItem]? = nil, browser: [ExtensionNamedItem]? = nil, iphone: [ExtensionNamedItem]? = nil, quota: [ExtensionQuotaItem]? = nil, usage: [ExtensionUsageItem]? = nil, providers: [ExtensionProviderItem]? = nil, api: [ExtensionAPIItem]? = nil, assistant: [ExtensionAssistantItem]? = nil, mcpServers: [ExtensionMCPServerItem]? = nil, ui: [ExtensionUIItem]? = nil, agentSources: [ExtensionAgentSourceItem]? = nil, channel: [ExtensionChannelItem]? = nil, events: [ExtensionEventsItem]? = nil, shortcuts: [ExtensionShortcutItem]? = nil, skills: [ExtensionSkillItem]? = nil, prompts: [ExtensionPromptItem]? = nil, themes: [ExtensionThemeItem]? = nil, looks: [ExtensionLookItem]? = nil, triageTemplates: [ExtensionTriageTemplateItem]? = nil, agentFilters: [ExtensionAgentFilterItem]? = nil, tunnels: [ExtensionTunnelItem]? = nil, errorReports: [ExtensionErrorReportsItem]? = nil, authRelay: [ExtensionAuthRelayItem]? = nil, secretProviders: [ExtensionSecretProviderItem]? = nil, repositoryProviders: [ExtensionRepositoryProviderItem]? = nil, messaging: [ExtensionMessagingItem]? = nil, additionalProperties: [String: JSONValue] = [:]) {
+    public init(connectors: [ExtensionConnectorItem]? = nil, voice: [ExtensionNamedItem]? = nil, transcription: [ExtensionNamedItem]? = nil, speech: [ExtensionNamedItem]? = nil, computer: [ExtensionNamedItem]? = nil, browser: [ExtensionNamedItem]? = nil, iphone: [ExtensionNamedItem]? = nil, quota: [ExtensionQuotaItem]? = nil, usage: [ExtensionUsageItem]? = nil, providers: [ExtensionProviderItem]? = nil, api: [ExtensionAPIItem]? = nil, assistant: [ExtensionAssistantItem]? = nil, mcpServers: [ExtensionMCPServerItem]? = nil, ui: [ExtensionUIItem]? = nil, agentSources: [ExtensionAgentSourceItem]? = nil, channel: [ExtensionChannelItem]? = nil, events: [ExtensionEventsItem]? = nil, shortcuts: [ExtensionShortcutItem]? = nil, skills: [ExtensionSkillItem]? = nil, prompts: [ExtensionPromptItem]? = nil, themes: [ExtensionThemeItem]? = nil, looks: [ExtensionLookItem]? = nil, triageTemplates: [ExtensionTriageTemplateItem]? = nil, agentFilters: [ExtensionAgentFilterItem]? = nil, tunnels: [ExtensionTunnelItem]? = nil, errorReports: [ExtensionErrorReportsItem]? = nil, authRelay: [ExtensionAuthRelayItem]? = nil, secretProviders: [ExtensionSecretProviderItem]? = nil, repositoryProviders: [ExtensionRepositoryProviderItem]? = nil, memorySources: [ExtensionMemorySourceItem]? = nil, messaging: [ExtensionMessagingItem]? = nil, additionalProperties: [String: JSONValue] = [:]) {
         self.connectors = connectors
         self.voice = voice
         self.transcription = transcription
@@ -846,6 +847,7 @@ public nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
         self.authRelay = authRelay
         self.secretProviders = secretProviders
         self.repositoryProviders = repositoryProviders
+        self.memorySources = memorySources
         self.messaging = messaging
         self.additionalProperties = additionalProperties
     }
@@ -880,6 +882,7 @@ public nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
         case authRelay = "auth_relay"
         case secretProviders = "secret_providers"
         case repositoryProviders = "repository_providers"
+        case memorySources = "memory_sources"
         case messaging
     }
 
@@ -914,13 +917,14 @@ public nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
         self.authRelay = ExtensionWireJSON.decode([ExtensionAuthRelayItem].self, from: raw["auth_relay"])
         self.secretProviders = ExtensionWireJSON.decode([ExtensionSecretProviderItem].self, from: raw["secret_providers"])
         self.repositoryProviders = ExtensionWireJSON.decode([ExtensionRepositoryProviderItem].self, from: raw["repository_providers"])
+        self.memorySources = ExtensionWireJSON.decode([ExtensionMemorySourceItem].self, from: raw["memory_sources"])
         self.messaging = ExtensionWireJSON.decode([ExtensionMessagingItem].self, from: raw["messaging"])
-        let known: Set<String> = ["connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "messaging"]
+        let known: Set<String> = ["connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "memory_sources", "messaging"]
         additionalProperties = raw.filter { !known.contains($0.key) }
     }
 
     public func encode(to encoder: Encoder) throws {
-        let known: Set<String> = ["connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "messaging"]
+        let known: Set<String> = ["connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "memory_sources", "messaging"]
         var fields = additionalProperties.filter { !known.contains($0.key) }
         if let value = connectors { fields["connectors"] = try ExtensionWireJSON.encode(value) }
         if let value = voice { fields["voice"] = try ExtensionWireJSON.encode(value) }
@@ -951,6 +955,7 @@ public nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
         if let value = authRelay { fields["auth_relay"] = try ExtensionWireJSON.encode(value) }
         if let value = secretProviders { fields["secret_providers"] = try ExtensionWireJSON.encode(value) }
         if let value = repositoryProviders { fields["repository_providers"] = try ExtensionWireJSON.encode(value) }
+        if let value = memorySources { fields["memory_sources"] = try ExtensionWireJSON.encode(value) }
         if let value = messaging { fields["messaging"] = try ExtensionWireJSON.encode(value) }
         var container = encoder.singleValueContainer()
         try container.encode(fields)
@@ -1525,6 +1530,33 @@ public nonisolated struct ExtensionRepositoryProviderItem: Codable, Hashable, Se
         self.hosts = (try? c.decodeIfPresent([String].self, forKey: .hosts)) ?? []
         self.linkKinds = try? c.decodeIfPresent([ExtensionRepositoryLinkLabel].self, forKey: .linkKinds)
         self.capabilities = try? c.decodeIfPresent([String].self, forKey: .capabilities)
+    }
+}
+
+/// The extension's memory, read by the manager one entry at a time (memory.entries; memory.schema.json) so the hub
+/// decides which entries reach which scene (a conversation's standing context, a recall, a dispatched task, the
+/// Inbox's helper). Needs the program to speak the protocol; one per extension. Once declared, the hub stops
+/// delivering the extension's own text outlets (its assistant instructions, project context, Inbox context and its
+/// connectors' read tools in the assistant's conversations) directly.
+public nonisolated struct ExtensionMemorySourceItem: Codable, Hashable, Sendable {
+    public var id: String
+    /// What settings call the source (My memory). Not only spaces, no control characters.
+    public var name: String
+
+    public init(id: String = "", name: String = "") {
+        self.id = id
+        self.name = name
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
+        self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
     }
 }
 

@@ -100,7 +100,6 @@ struct ScreenOpen: Identifiable, Hashable {
 
 #endif
 
-#if os(iOS) || os(visionOS)
 /// The live screen in a window of its own (#1604): over the shell's window and whatever it presents (a sheet, a page
 /// pushed in one), under the toasts' (`ToastWindow`). SwiftUI presents one thing at a time from the root, so a
 /// fullScreenCover there was swallowed while a machine page was up in a sheet. `AppModel.screenOpen` shows and hides it.
@@ -175,42 +174,6 @@ private struct ScreenWindowRoot: View {
         withAnimation(Theme.Motion.layout) { visible = false } completion: { AppModel.shared.screenOpen = nil }
     }
 }
-#else
-/// The live screen in a window of its own on the Mac (#1604), as `AppModel.screenOpen` says; closing it clears that.
-@MainActor final class ScreenWindow: NSObject, NSWindowDelegate {
-    static let shared = ScreenWindow()
-    private var window: NSWindow?
-
-    func show(_ open: ScreenOpen?) {
-        guard let open else {
-            let w = window
-            window = nil
-            w?.close()
-            return
-        }
-        let host = NSHostingController(rootView: VNCPage(ref: open.machine, unlock: open.unlock, from: open.from) { AppModel.shared.screenOpen = nil }
-            .environment(AppModel.shared))
-        let w = window ?? NSWindow(contentViewController: host)
-        w.contentViewController = host
-        w.title = "VNC · " + (AppModel.shared.machine(open.machine)?.name ?? open.machine.id)
-        w.styleMask.insert([.resizable, .closable, .miniaturizable])
-        w.isReleasedWhenClosed = false
-        w.delegate = self
-        if window == nil {
-            w.setContentSize(NSApp.mainWindow.map { NSSize(width: $0.frame.width * 0.75, height: $0.frame.height * 0.8) } ?? w.frame.size)
-            w.center()
-        }
-        w.makeKeyAndOrderFront(nil)
-        window = w
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        guard window != nil else { return }
-        window = nil
-        AppModel.shared.screenOpen = nil
-    }
-}
-#endif
 
 /// VNC under a tool that operates a Mac: the assistant's computer_state / computer_run (the machine it names), or an
 /// agent's own Cua Driver MCP tools (the agent's machine), while that Mac's live screen can be shown.

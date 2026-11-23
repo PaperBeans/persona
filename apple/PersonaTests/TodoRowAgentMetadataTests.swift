@@ -1,4 +1,3 @@
-#if os(iOS)
 import Foundation
 import SwiftUI
 import Testing
@@ -207,4 +206,3 @@ struct TodoRowAgentMetadataTests {
         unsafeBitCast(set, to: Enable.self)(on ? 1 : 0)
     }
 }
-#endif

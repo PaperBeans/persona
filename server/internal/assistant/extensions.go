@@ -123,6 +123,7 @@ func (s *Service) SetExtensions(e ExtensionTools) {
 		s.repoStarted = started.Started()
 	}
 	s.transcriptionReadinessReset()
+	s.setMemorySources(e) // the memory extensions' entries (memory_extension_source.go)
 }
 
 // AskCard is askHub for the extensions in this process: a card of theirs (a mail send, Cua's apps, persona_settings),

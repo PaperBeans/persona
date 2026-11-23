@@ -564,7 +564,7 @@ class DocWireTests(unittest.TestCase):
         self.assertLessEqual(NOT_ON_THE_WEBSOCKET, to_clients, "an exemption the code no longer has: drop it")
         to_clients -= NOT_ON_THE_WEBSOCKET
         # The parsers still find the lists (a move of the code would otherwise pass with nothing to check).
-        self.assertTrue({"hello", "sessions", "assistant_feed", "inbox"} <= to_clients, sorted(to_clients))
+        self.assertTrue({"hello", "sessions", "assistant_feed", "inbox", "health_intake"} <= to_clients, sorted(to_clients))
         self.assertTrue({"subscribe", "client_hello", "ping", "tool_result"} <= from_clients, sorted(from_clients))
         documented_to_clients, documented_from_clients = documented_websocket_types()
         self.assertEqual({"Server → client": [], "Client → server": []},
@@ -578,7 +578,7 @@ class DocWireTests(unittest.TestCase):
     def test_feature_flags_are_documented(self):
         have = features()
         self.assertTrue({"tls", "client_hello", "persona_contracts_v1", "sessions_list", "assistant_views",
-                         "agent_session_archives", "agent_session_archive_close"} <= have, sorted(have))
+                         "agent_session_archives", "agent_session_archive_close", "health_intake"} <= have, sorted(have))
         self.assertEqual([], missing(have, documented_features()),
                          f"features in the hub's hello and /health not named in {PROTOCOL_DOC} "
                          "\"Health check and feature flags\" or in a \"... feature flags\" section of a doc split "

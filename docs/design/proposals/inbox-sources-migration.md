@@ -156,7 +156,7 @@ Smallest gap first, so each step proves part of the design before the harder sou
 | P4 | P4a `changed` starts runs (#6247); P4b a generic `inbox_things` over `Collect`, a switched source 3 seconds after `changed`, its built-in's abilities in the round (#6381) | 3e |
 | P5 | P5a the default subscription's fixed id and `migrated` mark, delivery under the built-in's id, catch-up as rows, rollback (#6265); P5b the switch on the Inbox Sources pages, with M1 (#6345) | 3a, 3g |
 | M1 | **iMessage**: a `things` recipe over its `inbox_things` tool (#6296, #6317), the `changed` kick, the switch on the pages (P5b) | P4a, P5, things |
-| M2 | **GitHub**: a `things` recipe over the generic `inbox_things` (P4b), so comments as replies, inferred read and repo mutes stay its `Collect`'s; a comparison test; the switch held back from the pages until M1's week is over (#6404) | P4b, P5 |
+| M2 | **GitHub**: a `things` recipe over the generic `inbox_things` (P4b), so comments as replies, inferred read and repo mutes stay its `Collect`'s; a comparison test; the switch held back from the pages until M1's week was over (#6404), offered since (#13599) | P4b, P5 |
 | M3 | **Lark**: JSON read tools for `larkcli` first, then its events through a push source, replies | P1–P5 |
 | M4 | **Mail**, one subscription per account: replies with threading, seen flags and off-page settling, read errors per account, translations | P1–P5 |
 | K1… | Each source's knowledge-base feed, once the subscription path has what it uses (3f) | per source |

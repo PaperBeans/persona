@@ -85,6 +85,11 @@ type PlanTask struct {
 	// OwnerStarted: the owner tapped Start on the plan's card (POST …/start), as against the hub starting it without
 	// asking; the hub's, never what a tool call or an edit says. What a suggested rule counts (rule_suggest.go, #4929).
 	OwnerStarted bool `json:"owner_started,omitempty"`
+	// MemoryTopic: the categories the plan's words were tagged with when they made it wait for the owner's Start
+	// (task_plan's confirmation decision, #13532): a start carries a sensitive memory entry only when it is OwnerStarted
+	// and this carries every one of the entry's categories (memory_handoff.go). The hub's: set when the plan is made,
+	// never what a tool call or an edit says.
+	MemoryTopic []string `json:"memory_topic,omitempty"`
 	// CloseTabOnAccept is set only by the owner's Start request.
 	CloseTabOnAccept   bool               `json:"close_tab_on_accept,omitempty"`
 	TerminalTarget     taskTerminalTarget `json:"terminal_target,omitzero"`

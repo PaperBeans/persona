@@ -93,6 +93,10 @@ func TestMain(m *testing.M) {
 		serveSecretProviderExtensionForTest()
 		return
 	}
+	if os.Getenv("PERSONA_TEST_PLUGIN") == "memory" { // memory_sources_test.go
+		serveMemorySourceExtensionForTest()
+		return
+	}
 	if os.Getenv("PERSONA_TEST_PLUGIN") == "repos" {
 		serveRepositoryProviderExtensionForTest()
 		return
@@ -123,6 +127,10 @@ func TestMain(m *testing.M) {
 	}
 	if os.Getenv("PERSONA_TEST_PLUGIN") == "usage" {
 		serveUsageExtensionForTest()
+		return
+	}
+	if os.Getenv("PERSONA_TEST_PLUGIN") == "lark_images" {
+		serveLarkImageFixture()
 		return
 	}
 	if os.Getenv("PERSONA_TEST_PLUGIN") == "messaging" {

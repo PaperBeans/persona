@@ -14,6 +14,7 @@
 // only says when to try again and when to give up.
 import { stateOf } from "./format";
 import { runtimeIdentity } from "./runtime-list";
+import { countSides, foldedStateWith } from "./side-fold";
 import type { ListCounts } from "./session-list";
 import { timeMs } from "./times";
 import type { Session } from "./types";
@@ -111,14 +112,22 @@ export function settleMarks(rows: Iterable<Session>, marks: SeenMarks, now: numb
 }
 
 /** `counts` as the page shows them, read with `rows` (as the list read them): an agent those rows still have Unread
- *  (or Just finished) that a mark holds seen is no longer counted so; the same object when none is. */
-export function heldCounts(counts: ListCounts, rows: readonly Session[], marks: SeenMarks, now: number): ListCounts {
+ *  (or Just finished) that a mark holds seen is no longer counted so; the same object when none is. A parent is counted
+ *  by its folded state (lib/side-fold.ts): its own mark leaves it Unread while one of its side sessions is, and
+ *  `sidesOf` (the side rows an open chat or the sidebar holds, each seen by its own mark) takes it out of Unread once
+ *  none of them is, before the hub's next read says so. */
+export function heldCounts(counts: ListCounts, rows: readonly Session[], marks: SeenMarks, now: number,
+  sidesOf?: (s: Session) => readonly Session[] | undefined): ListCounts {
   let unread = 0, finished = 0;
   for (const s of rows) {
     const m = marks[runtimeIdentity(s)];
-    if (!m || heldSeen(s, m, now) === s) continue;
-    if (s.state === "unread") unread++;
-    else if (s.work?.just_finished) finished++;
+    const own = m ? heldSeen(s, m, now) : s;
+    const sides = s.children?.sides ? sidesOf?.(s) : undefined;
+    if (own === s && !sides) continue;
+    // what the hub counted it as, and what the page shows
+    const counted = foldedStateWith(s);
+    if (counted === "unread" && foldedStateWith(own, sides && countSides(sides)) !== "unread") unread++;
+    else if (own !== s && counted !== "unread" && s.work?.just_finished) finished++;
   }
   if (!unread && !finished) return counts;
   const state = { ...counts.state };

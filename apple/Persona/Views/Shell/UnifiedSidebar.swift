@@ -52,9 +52,10 @@ import PersonaWire
     /// `root` picked (its row, a route) while the page shows `path` over the root in front: the root replaced at once,
     /// or the root in front back at its root (`SidebarPageRoots.select`). Only the pop of a re-pick animates.
     @discardableResult
-    func select(_ root: SidebarPageRoot, path: Binding<NavigationPath>, contentChanged: Bool = false) -> SidebarPageRoots.Step {
+    func select(_ root: SidebarPageRoot, path: Binding<NavigationPath>, contentChanged: Bool = false,
+                fresh: Bool = false) -> SidebarPageRoots.Step {
         if root != askedFromOutside { askedFromOutside = nil }
-        return apply(path: path) { roots.select(root, path: path.wrappedValue, contentChanged: contentChanged) }
+        return apply(path: path) { roots.select(root, path: path.wrappedValue, contentChanged: contentChanged, fresh: fresh) }
     }
 
     /// An Agent's chat asked for from outside (a notification, `-openSession`) and put in front as the root (#8603):

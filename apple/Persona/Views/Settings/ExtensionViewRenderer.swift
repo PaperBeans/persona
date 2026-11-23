@@ -554,7 +554,6 @@ extension View {
     func extensionPushes(_ models: [ExtensionViewModel]) -> some View { modifier(ExtensionPushes(models: models)) }
 }
 
-#if os(iOS) || os(visionOS)
 private struct ExtensionLinkSheet: ViewModifier {
     @Environment(AppModel.self) private var model
     @Binding var link: LinkTarget?
@@ -563,7 +562,6 @@ private struct ExtensionLinkSheet: ViewModifier {
         content.sheet(item: $link) { t in LinkSheet(target: t, key: model.assistantMain ?? model.assistantCurrent) }
     }
 }
-#endif
 
 /// A page an extension pushes: its extension, which of its interfaces (its `ui`), the state it starts with.
 nonisolated struct ExtensionPushTarget: Hashable, Sendable {

@@ -98,7 +98,8 @@ func downHerdrNode(t *testing.T) (*Node, string) {
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "herdr", "herdr.sock")
 	n, _ := testNode(t)
-	n.hosts = herdrHosts(&herdr.Client{Socket: sock})
+	// Its own state directory: a start writes its task instructions there, not into the package's source (#13393).
+	n.hosts, n.dir = herdrHosts(&herdr.Client{Socket: sock}), t.TempDir()
 	return n, sock
 }
 

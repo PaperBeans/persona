@@ -11,6 +11,7 @@ import { cardSessionRow, getState, onHubEvent, subscribe, useStore } from "./sto
 import { SESSIONS_LIST_FEATURE } from "./session-list";
 import { runtimeAgents, runtimeSessions, supportsPagedAgents } from "./runtime-list";
 import { heldCounts, heldRows } from "./seen-outbox";
+import { heldSidesOf, useHeldVersion } from "./use-child-sessions";
 import type { Interaction, Session } from "./types";
 
 /** #8578: a directory-hidden session's pending cards leave the card lists and counts (Needs you, the sidebar, the Inbox,
@@ -273,10 +274,13 @@ export function useCounts() {
   const agentRows = useSyncExternalStore(runtimeAgents.subscribe, scopedAgentRows, scopedAgentRows);
   const rows = useSyncExternalStore(runtimeSessions.subscribe, listedRows, listedRows);
   const marks = useStore((s) => s.seen);
+  // a parent whose unread side sessions were all seen here is not counted Unread either (heldCounts' sidesOf)
+  const heldAt = useHeldVersion();
   const read = pagedAgents ? scoped : aggregate;
   // only where a page's counts come with its rows (sessions_page_counts): two reads' rows and counts could disagree
   const coupled = (pagedAgents ? runtimeAgents : runtimeSessions).usesPageCounts();
-  const counts = useMemo(() => read && coupled ? heldCounts(read, pagedAgents ? agentRows : rows, marks, Date.now()) : read, [read, coupled, pagedAgents, agentRows, rows, marks]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- heldAt: heldSidesOf reads the held rows, which it versions
+  const counts = useMemo(() => read && coupled ? heldCounts(read, pagedAgents ? agentRows : rows, marks, Date.now(), heldSidesOf) : read, [read, coupled, pagedAgents, agentRows, rows, marks, heldAt]);
   return useMemo(() => {
     if (!bounded || !counts) return { ...stateCounts(all, allInteractions, grading), interactions, quietCounted: false };
     const needs = counts.state.needs_you ?? 0;

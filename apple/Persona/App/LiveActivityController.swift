@@ -5,9 +5,7 @@ import Foundation
 import OSLog
 import Security
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// The app's half of the Fleet Live Activity (docs/apple/live-activity.md). The hub decides what it shows and pushes it while
 /// the app is away; the app

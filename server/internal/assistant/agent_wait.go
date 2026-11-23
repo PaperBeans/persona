@@ -57,6 +57,7 @@ func (s *Service) waitAgentReply(ctx context.Context, receipt, inputID string, w
 	defer cancel()
 	result := agentWaitResult{State: "timeout", InputID: inputID}
 	loggedListErr := false
+	decided := false // the loop ended on an outcome, not on the deadline or cancellation
 	ticker := time.NewTicker(agentWaitPoll)
 	defer ticker.Stop()
 	for {
@@ -65,7 +66,7 @@ func (s *Service) waitAgentReply(ctx context.Context, receipt, inputID string, w
 		}
 		machine, session, failure := target(wctx)
 		if failure != nil {
-			result.State, result.Detail = "failed", failure.Error()
+			result.State, result.Detail, decided = "failed", failure.Error(), wctx.Err() == nil
 			break
 		}
 		if machine != "" && session != "" {
@@ -80,6 +81,7 @@ func (s *Service) waitAgentReply(ctx context.Context, receipt, inputID string, w
 			err := s.call(wctx, machine, DeviceSessionItems, map[string]any{"session_id": session, "turns": 10, "lazy_images": true}, &page)
 			if err != nil {
 				result.State, result.Detail = "unavailable", "The dispatched input was not resent; read the agent before trying again."
+				decided = wctx.Err() == nil
 				break
 			}
 			c, ok := s.session(wctx, machine, session)
@@ -88,7 +90,7 @@ func (s *Service) waitAgentReply(ctx context.Context, receipt, inputID string, w
 				if observed, found := agentWaitObservation(page.Items, inputID, c); found {
 					observed.InputID, observed.Machine, observed.Session, observed.Link = inputID, machine, session, result.Link
 					observed.AgentState = c.Status
-					result = observed
+					result, decided = observed, true
 					break
 				}
 				// Only this input's transcript line can open the question path. A question
@@ -110,6 +112,7 @@ func (s *Service) waitAgentReply(ctx context.Context, receipt, inputID string, w
 							}
 						}
 						if result.State == "question" {
+							decided = true
 							break
 						}
 					} else if !loggedListErr && wctx.Err() == nil {
@@ -124,9 +127,11 @@ func (s *Service) waitAgentReply(ctx context.Context, receipt, inputID string, w
 		case <-ticker.C:
 		}
 	}
-	if ctx.Err() != nil {
+	switch {
+	case decided: // an outcome found before the deadline stands even when the deadline has passed by now
+	case ctx.Err() != nil:
 		result.State = "cancelled"
-	} else if wctx.Err() != nil {
+	case wctx.Err() != nil:
 		result.State = "timeout"
 	}
 	raw, _ := json.Marshal(result)

@@ -1,9 +1,10 @@
-"""No `os(macOS)` branch in the Apple app targets, Shared/ or their tests (#13399).
+"""No macOS branch in the Apple app targets, Shared/ or their tests (#13399).
 
 The native Mac app is retired (#6770, docs/desktop/desktop.md): apple/project.yml has iOS, visionOS and watchOS targets
-only, so an `#if os(macOS)` branch there is never compiled, and new code copying one only adds lines nobody builds or
-tests. A source scan, so it runs before any build: every `#if` / `#elseif` line of the Swift files under apple/ that
-names os(macOS), outside multi-line string literals (a test's fixture source may hold one).
+only, so an `#if os(macOS)` or `canImport(AppKit)` branch there is never compiled (UIKit, never AppKit, on all three),
+and new code copying one only adds lines nobody builds or tests. A source scan, so it runs before any build: every
+`#if` / `#elseif` line of the Swift files under apple/ that names os(macOS) or canImport(AppKit), and every
+`import AppKit`, outside multi-line string literals (a test's fixture source may hold one).
 
 The Swift packages whose Package.swift declares a macOS platform are left out: they are built for macOS (the Persona Link
 helper in apple/PersonaLink builds PersonaScreenCore, CI's package lane tests them with `swift test` on a Mac), so a
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 APPLE = ROOT / "apple"
 # Build output and package checkouts.
 SKIP_DIRS = {".build", "DerivedData", "build", "node_modules", ".swiftpm", "SourcePackages"}
-DIRECTIVE = re.compile(r"^\s*#(?:if|elseif)\b.*\bos\(\s*macOS\s*\)")
+DIRECTIVE = re.compile(r"^\s*(?:#(?:if|elseif)\b.*\b(?:os\(\s*macOS\s*\)|canImport\(\s*AppKit\s*\))|import\s+AppKit\b)")
 MACOS_PLATFORM = re.compile(r"\.macOS\s*\(")
 
 
@@ -40,7 +41,8 @@ def macos_packages(root):
 
 
 def branches(text):
-    """The 1-based line numbers of the `#if` / `#elseif` lines naming os(macOS), skipping multi-line string literals."""
+    """The 1-based line numbers of the `#if` / `#elseif` lines naming os(macOS) or canImport(AppKit), and of the
+    `import AppKit` lines, skipping multi-line string literals."""
     found, in_string = [], False
     for number, line in enumerate(text.split("\n"), 1):
         if not in_string and DIRECTIVE.match(line.split("//", 1)[0]):
@@ -65,8 +67,8 @@ def scan(root):
 class NoMacOSBranchesTests(unittest.TestCase):
     def test_apple_targets_have_no_macos_branches(self):
         hits = scan(APPLE)
-        self.assertEqual(hits, [], "an os(macOS) branch in an Apple app target is never compiled (no macOS target, "
-                         "#13399); drop it and keep what iOS, visionOS and watchOS build:\n" + "\n".join(hits))
+        self.assertEqual(hits, [], "a macOS branch in an Apple app target is never compiled (no macOS target, #13399): "
+                         "drop it and keep what iOS, visionOS and watchOS build:\n" + "\n".join(hits))
 
     def test_the_link_helpers_package_is_left_out(self):
         live = {p.relative_to(APPLE).as_posix() for p in macos_packages(APPLE)}
@@ -88,8 +90,13 @@ class NoMacOSBranchesTests(unittest.TestCase):
             '"""',
             "#if os(watchOS) // not os(macOS)",
             "#endif",
+            "#if canImport(UIKit)",
+            "#elseif canImport(AppKit)",           # 16
+            "import AppKit",                       # 17
+            "#endif",
+            "import UIKit",
         ])
-        self.assertEqual(branches(source), [1, 3, 6])
+        self.assertEqual(branches(source), [1, 3, 6, 16, 17])
 
     def test_scan_skips_packages_built_for_macos(self):
         with tempfile.TemporaryDirectory() as tmp:

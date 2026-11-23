@@ -1571,6 +1571,7 @@ func (s *Service) Run(ctx context.Context) {
 	go s.a2aLoop(ctx)
 	go s.resourceLoop(ctx)
 	go s.transcriptionReadyLoop(ctx)
+	go s.waterReminderLoop(ctx)
 	recoverCtx, cancel := context.WithTimeout(ctx, taskFailTimeout)
 	if err := s.recoverTaskStarts(recoverCtx, s.tasks.recoverBefore); err != nil {
 		s.logf("recover interrupted task starts: %v", err)
@@ -1588,6 +1589,7 @@ func (s *Service) Run(ctx context.Context) {
 	go s.sourceReportLoop(ctx)             // the reports back to where a todo was asked (todo_source.go)
 	go s.remindLoop(ctx)                   // the todos' reminders (todo_plan.go)
 	go s.urgentLoop(ctx)                   // urgent calls' retries and reminders (urgent_call_loop.go)
+	go s.attentionLoop(ctx)                // the attention mode's end (attention.go)
 	go s.channelLoop(ctx)                  // the channels' runs that lost their watcher (channels.go)
 	go s.kbLoop(ctx)                       // the knowledge base (kb.go)
 	go s.kbHistoryLoop(ctx)                // importing chats' older history into it, off by default (kbhistory/history.go)
@@ -1598,12 +1600,13 @@ func (s *Service) Run(ctx context.Context) {
 	go s.admissionQueueLoop(ctx)           // plan tasks the admission gate parked: timed retries until they start or time out (task_queue.go)
 	// The leaders' tasks that got stuck (leader_reports.go).
 	go s.leaderReportsLoop(ctx)
-	go s.healthLoop(ctx)       // each machine's launchers (launcher_health.go)
-	go s.instructionsLoop(ctx) // the CLAUDE.md on the assistant's machine (start.go)
-	go s.searchLoop(ctx)       // the chat search index (search_index.go)
-	go s.historyLoop(ctx)      // durable assistant history, on by default
-	go s.undeliveredLoop(ctx)  // the owner's messages that could not go in (undelivered.go)
-	go s.captureLoop(ctx)      // sorting and filing quick captures (capture_sort.go)
+	go s.healthLoop(ctx)         // each machine's launchers (launcher_health.go)
+	go s.repoMirrorSyncLoop(ctx) // opt-in low-frequency managed bare repository mirrors (repo_mirrors.go)
+	go s.instructionsLoop(ctx)   // the CLAUDE.md on the assistant's machine (start.go)
+	go s.searchLoop(ctx)         // the chat search index (search_index.go)
+	go s.historyLoop(ctx)        // durable assistant history, on by default
+	go s.undeliveredLoop(ctx)    // the owner's messages that could not go in (undelivered.go)
+	go s.captureLoop(ctx)        // sorting and filing quick captures (capture_sort.go)
 	s.scheduleLoop(ctx)
 	s.todoViewsStop() // the To-dos view's timers (todo_view_push.go)
 }

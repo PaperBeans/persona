@@ -144,6 +144,12 @@ type pushPolicy struct {
 	title      string
 	body       string
 	manager    string
+	// What an attention mode reads (push_attention.go): how long the owner needs for it (assistantwire.DepthDeep),
+	// the track it comes from, whether it is a finished turn, and whether it is the hub's own alert.
+	depth  string
+	track  string
+	done   bool
+	system bool
 }
 
 func (p pushPolicy) levelOr(level string) pushPolicy {
@@ -246,8 +252,10 @@ func (p *Pusher) applyPushGrading(policy pushPolicy) (allow bool, reason string)
 		level = assistantwire.LevelP1
 	}
 	now := p.now()
-	if !p.pushGradingOn() {
-		// The switch is off: every push goes out as before, and the delivery counts still remember it.
+	attn := p.attentionNow()
+	if !attn.Active() && !p.pushGradingOn() {
+		// The switch is off and no attention mode is in force: every push goes out as before, and the delivery counts
+		// still remember it.
 		p.recordSent(policy, level, now)
 		return true, ""
 	}
@@ -261,6 +269,12 @@ func (p *Pusher) applyPushGrading(policy pushPolicy) (allow bool, reason string)
 		in.MachineID, in.SessionID = "", ""
 	}
 	p.gradingMu.Lock()
+	if attn.Active() {
+		// An attention mode reinterprets the levels whatever hub.ln_mode says (push_attention.go).
+		allow, reason = p.applyAttentionLocked(attn, policy, level, in)
+		p.gradingMu.Unlock()
+		return allow, reason
+	}
 	if level == assistantwire.LevelP0 {
 		// P0 is what the owner must do or decide themself: it always interrupts, before and whatever the 12-hour check
 		// says, so no earlier push with the same key can swallow it. Its key then keeps lower levels quiet for the window.

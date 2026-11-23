@@ -3,6 +3,11 @@ import XCTest
 final class SettingsNavigationUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
+    override func tearDown() {
+        XCUIDevice.shared.orientation = .portrait
+        super.tearDown()
+    }
+
     @MainActor private func launch(_ extra: [String] = [], hubKey: String = "PERSONA_SETTINGS_HUB") throws -> XCUIApplication {
         guard let hub = ProcessInfo.processInfo.environment[hubKey] else {
             throw XCTSkip("Needs an isolated mock hub in \(hubKey)")
@@ -23,6 +28,78 @@ final class SettingsNavigationUITests: XCTestCase {
         let list = element("settings-list", app)
         for _ in 0..<12 where !target.isHittable { list.swipeUp() }
         return target
+    }
+
+    /// The first element whose identifier starts with `prefix`.
+    @MainActor private func element(prefix: String, _ app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix)).firstMatch
+    }
+
+    /// TEST_RUNNER_PERSONA_UI_TEXT_SIZE=<content size category> launches at that text size (the largest for screenshots).
+    private static var textSize: [String] {
+        guard let size = ProcessInfo.processInfo.environment["PERSONA_UI_TEXT_SIZE"], !size.isEmpty else { return [] }
+        return ["-UIPreferredContentSizeCategoryName", size]
+    }
+
+    /// TEST_RUNNER_PERSONA_SHOTS=<dir> keeps a screenshot, named with TEST_RUNNER_PERSONA_SHOTS_APPEARANCE when set.
+    @MainActor private func shot(_ app: XCUIApplication, _ name: String) {
+        let env = ProcessInfo.processInfo.environment
+        guard let dir = env["PERSONA_SHOTS"] else { return }
+        let device = UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone"
+        let look = env["PERSONA_SHOTS_APPEARANCE"].map { "-" + $0 } ?? ""
+        try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent("settings-\(device)-\(name)\(look).png"))
+    }
+
+    /// Each row of Appearance & Display that leads to a page opens it, and Back comes back (#12035). On an iPad the
+    /// Settings list is a column beside the page; a page the column opened by its own selection, outside Settings' path,
+    /// opened none of its rows. iPad in portrait and landscape; an iPhone in its one stack.
+    @MainActor func testAppearancePagesOpenAndComeBack() throws {
+        let pad = UIDevice.current.userInterfaceIdiom == .pad
+        let turns: [(String, UIDeviceOrientation)] = pad ? [("portrait", .portrait), ("landscape", .landscapeLeft)] : [("portrait", .portrait)]
+        // Each row, and the start of an identifier only its page has.
+        let pages = [("settings-color", "color-"), ("settings-style", "style-"), ("settings-navigation", "navigation-layout-"),
+                     ("settings-layout-page", "layout-agents-"), ("settings-scheme", "scheme-")]
+        for (turn, orientation) in turns {
+            XCUIDevice.shared.orientation = orientation
+            let app = try launch(Self.textSize)
+            XCTAssertTrue(element("settings-list", app).waitForExistence(timeout: 30), "\(turn): no Settings:\n\(app.debugDescription)")
+            let appearance = reveal("settings-appearance", app)
+            XCTAssertTrue(appearance.waitForExistence(timeout: 10), "\(turn): no Appearance & Display:\n\(app.debugDescription)")
+            appearance.tap()
+            XCTAssertTrue(element("settings-color", app).waitForExistence(timeout: 10), "\(turn): Appearance & Display did not open")
+            shot(app, "\(turn)-appearance")
+            for (row, mark) in pages {
+                let link = element(row, app)
+                XCTAssertTrue(link.waitForExistence(timeout: 10), "\(turn): no \(row) on Appearance & Display:\n\(app.debugDescription)")
+                link.tap()
+                let page = element(prefix: mark, app)
+                XCTAssertTrue(page.waitForExistence(timeout: 10), "\(turn): \(row) did not open its page:\n\(app.debugDescription)")
+                if row == "settings-layout-page" { shot(app, "\(turn)-layout") }
+                let back = app.navigationBars.buttons["BackButton"].firstMatch
+                XCTAssertTrue(back.waitForExistence(timeout: 5), "\(turn): no Back on the page \(row) opened:\n\(app.debugDescription)")
+                back.tap()
+                XCTAssertTrue(page.waitForNonExistence(timeout: 10), "\(turn): Back did not leave the page \(row) opened")
+            }
+            app.terminate()
+        }
+    }
+
+    /// A page opened from the search results opens its own pages too (#12035).
+    @MainActor func testSearchResultOpensItsPages() throws {
+        let app = try launch()
+        XCTAssertTrue(element("settings-list", app).waitForExistence(timeout: 30))
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.tap()
+        field.typeText("外观")
+        let result = element("settings-search-appearance", app)
+        XCTAssertTrue(result.waitForExistence(timeout: 10), "no Appearance & Display result:\n\(app.debugDescription)")
+        result.tap()
+        let layout = element("settings-layout-page", app)
+        XCTAssertTrue(layout.waitForExistence(timeout: 10), "the result did not open Appearance & Display")
+        layout.tap()
+        XCTAssertTrue(element(prefix: "layout-agents-", app).waitForExistence(timeout: 10),
+                      "Agents List Layout did not open from the result's page:\n\(app.debugDescription)")
     }
 
     @MainActor func testThreeGroupsAndCommonContainers() throws {

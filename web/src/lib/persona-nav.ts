@@ -25,6 +25,8 @@ export function sidebarActiveKey(route: Route, main?: string, from?: string): st
       return "j:new";
     case "health":
       return "health";
+    case "track":
+      return spaceNavKey(r.slug);
     case "history":
       return r.origin ? `auto:${r.origin}` : "history";
     case "machine":
@@ -37,6 +39,9 @@ export function sidebarActiveKey(route: Route, main?: string, from?: string): st
       return r.name;
   }
 }
+
+/** A domain space's sidebar row (the Spaces section, views/SidebarSpaces.tsx). */
+export const spaceNavKey = (slug: string) => `track:${slug}`;
 
 /** An extension page's sidebar row (docs/extensions/extensions.md "UI slots" nav_page). */
 export const extensionNavKey = (extension: string, ui: string) => `p:${extension}/${ui}`;

@@ -75,12 +75,7 @@ struct PromptComposer: View {
         o.text = $text
         o.selection = $selection
         o.focus = focused
-        #if os(iOS) || os(visionOS)
         o.showsDictation = false // the shared mic and stop, over the bar (`sharedButtons`)
-        #else
-        o.onStop = stop
-        o.onDictation = toggleDictation
-        #endif
         o.onAttachSource = onAttach
         o.onPickSource = onMention
         o.onPickCommand = onCommand
@@ -101,10 +96,8 @@ struct PromptComposer: View {
                     stopDictation(); commitTyped(); send(); text = ""
                 }
                 #endif
-                #if os(iOS) || os(visionOS)
                 .mask { SendCutout(cut: stopping, control: Self.control, inset: Self.barInset).fill(style: FillStyle(eoFill: true)) }
                 .overlay(alignment: .bottomTrailing) { sharedButtons }
-                #endif
         }
             // The glass goes behind the bar, not around it: on iOS 27 a view with a glass effect takes no taps outside
             // its shape, and the bar's menus hang above it (#1005).
@@ -132,7 +125,6 @@ struct PromptComposer: View {
             #endif
     }
 
-    #if os(iOS) || os(visionOS)
     /// The shell composer's mic and stop, where the bar draws its send: the stop's circle in send's corner (the same gap
     /// to the bar's edges; it is a little larger), the mic on the toolbar's middle line, as far before the stop as in
     /// the shell's composer.
@@ -169,16 +161,13 @@ struct PromptComposer: View {
     private static func wellMargin(_ side: CGFloat) -> CGFloat {
         side * (Theme.Size.tapTarget - Theme.Size.wellL) / Theme.Size.tapTarget / 2
     }
-    #endif
 
     /// Ends dictation, and a start still asking for permission with it (#3407).
     private func stopDictation() { dictation.stop() }
 
     /// The keyboard's composition confirmed into the draft before it goes (`TypedText`, #2203).
     private func commitTyped() {
-        #if os(iOS) || os(visionOS)
         if focused.wrappedValue { TypedText.commitFocused(into: $text) }
-        #endif
     }
 
     #if DEBUG
@@ -436,9 +425,7 @@ final class Dictation {
         #else
         let sample: String? = nil
         #endif
-        #if os(iOS) || os(visionOS)
         if sample == nil, RecordingCapture.shared.state != .idle { return String(localized: "A recording is in progress. Stop it before dictating.") }
-        #endif
         var granted = true
         if let permission { granted = await permission() } else if sample == nil { granted = await Self.allowed() }
         guard startTurn == turn else { return nil }
@@ -450,14 +437,11 @@ final class Dictation {
         #if DEBUG
         if let sample { return startSample(sample, update: update) }
         #endif
-        #if os(iOS) || os(visionOS)
         guard RecordingCapture.shared.state == .idle else { return String(localized: "A recording is in progress. Stop it before dictating.") }
-        #endif
         guard let recognizer = Self.recognizer(hints: hints), recognizer.isAvailable else {
             return String(localized: "Speech recognition isn't available right now")
         }
         guard RecordingMicrophone.shared.claim(microphoneOwner) else { return String(localized: "The microphone is in use. Stop the recording or dictation first.") }
-        #if os(iOS) || os(visionOS) // a Mac has no audio session to configure: the engine takes the input as it is
         // On the audio session's queue, after any deactivation a closing bar left there (`stop(settling:)`), and in order
         // with a system call's own category (`LiveCallGate.sessionQueue`): a call that went live before this block runs
         // has the session, and this touches nothing.
@@ -484,7 +468,6 @@ final class Dictation {
             RecordingMicrophone.shared.release(microphoneOwner)
             return String(localized: "Couldn't open the microphone")
         }
-        #endif
         let engine = AVAudioEngine()
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -492,9 +475,7 @@ final class Dictation {
         engine.prepare()
         do { try engine.start() } catch {
             engine.inputNode.removeTap(onBus: 0)
-            #if os(iOS) || os(visionOS)
             if callGate() == nil { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
-            #endif
             RecordingMicrophone.shared.release(microphoneOwner)
             return String(localized: "Couldn't open the microphone")
         }
@@ -518,11 +499,9 @@ final class Dictation {
         return nil
     }
 
-    #if os(iOS) || os(visionOS)
     /// How dictation's session opening went on the audio session's queue: opened, failed, or not tried because a system
     /// call is live.
     private nonisolated enum SessionOpening: Sendable { case opened, failed, call }
-    #endif
 
     #if DEBUG
     private func startSample(_ sample: String, update: @escaping (String) -> Void) -> String? {
@@ -590,7 +569,6 @@ final class Dictation {
         task = nil
         update = nil
         isListening = false
-        #if os(iOS) || os(visionOS)
         // A system call that went live while dictating (an urgent call answered) has the session now: it stays active.
         guard callGate() == nil else { return }
         if settling {
@@ -606,13 +584,10 @@ final class Dictation {
         } else {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
-        #endif
     }
 
-    #if os(iOS) || os(visionOS)
     /// Dictation's audio session calls, in order, off the main thread, on the queue a system call sets its category on.
     private static var audioQueue: DispatchQueue { LiveCallGate.sessionQueue }
-    #endif
 
     private static func allowed() async -> Bool {
         let speech = await withCheckedContinuation { c in
@@ -641,7 +616,6 @@ final class Dictation {
     }
 }
 
-#if os(iOS) || os(visionOS)
 /// What of `PromptBar` shows: all of it but, while the shared stop stands in its place, the bar's own send. The menus
 /// hang above the bar, so the shape reaches far past its edges.
 private nonisolated struct SendCutout: Shape {
@@ -658,4 +632,3 @@ private nonisolated struct SendCutout: Shape {
         return p
     }
 }
-#endif

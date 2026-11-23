@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import SwiftUI
 import UIKit
 
@@ -122,4 +121,3 @@ struct VNCShortcutBar: View {
         .background(.bar)
     }
 }
-#endif

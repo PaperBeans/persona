@@ -1,8 +1,6 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
 import UIKit.UIGestureRecognizerSubclass
-#endif
 
 /// Message actions: long-press a message and it is lifted over the dimmed chat with the bar of Copy / Select Text / Quote /
 /// Forward (and Edit for your own messages) next to it, as Telegram does (#603, `MessageLift`). Tapping outside closes it.
@@ -77,7 +75,6 @@ final class MessageMenu {
                             agent: session?.agentLabel ?? "Claude", showsTerminalMark: session?.isTraex == true,
                             prefersLetterMark: AgentKind.prefersLetterMark(for: session))    }
 
-    #if os(iOS) || os(visionOS)
     func pressChanged(_ state: UIGestureRecognizer.State) {
         switch state {
         case .began: pressing = true
@@ -85,16 +82,6 @@ final class MessageMenu {
         default: break
         }
     }
-    #else
-    /// The watch's secondary click reports the same phases.
-    func pressChanged(_ state: PressPhase) {
-        switch state {
-        case .began: pressing = true
-        case .ended, .cancelled, .failed: pressing = false; pressEnded = .now
-        default: break
-        }
-    }
-    #endif
 
     /// A tap or a scroll on the list: ignored while the press that opened the bar is held or has just lifted.
     func dismiss() {

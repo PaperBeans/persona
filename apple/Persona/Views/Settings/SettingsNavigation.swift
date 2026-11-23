@@ -103,10 +103,8 @@ enum SettingsCatalog {
             .init(id: "style", title: String(localized: "Interface Style"), symbol: Theme.Icon.style, group: .device, page: .style,
                   aliases: String(localized: "settings.search.style"))
         ]
-        #if os(iOS) || os(visionOS)
         rows.append(.init(id: "colorScheme", title: String(localized: "Light & Dark"), symbol: Theme.Icon.colorScheme, group: .device, page: .colorScheme,
                           aliases: String(localized: "settings.search.scheme")))
-        #endif
         #if os(iOS)
         rows += [
             .init(id: "knowledgeSelection", title: String(localized: "Knowledge Selection"), symbol: Theme.Icon.knowledge, group: .assistant, page: .knowledgeSelection,
@@ -140,7 +138,7 @@ enum SettingsCatalog {
 
 struct AppearanceSettingsPage: View {
     var body: some View {
-        SettingsForm { AppearanceSection(settingsHome: false) }
+        SettingsForm { AppearanceSection() }
             .themedGroupedPage()
             .detailTitle(String(localized: "Appearance & Display"))
     }

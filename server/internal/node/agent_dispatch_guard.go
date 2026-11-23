@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -55,6 +56,10 @@ func (n *Node) guardAgentDirectory(ctx context.Context, cwd string) error {
 	}
 	return nil
 }
+
+// agentGOOS is the platform whose Agent rules a new session.start adds: this machine's. The package's tests set a
+// platform without any (TestMain), so a start's task instructions are what the test sent on every platform.
+var agentGOOS = runtime.GOOS
 
 func agentPlatformInstructions(goos, rules string) string {
 	if goos != "darwin" {

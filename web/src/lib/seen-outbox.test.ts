@@ -1,9 +1,10 @@
 // The seen outbox (lib/seen-outbox.ts): a session this page marked seen stays seen until the hub's own rows say it was
 // recorded, a new turn ended, or the agent works or needs you again.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { dueMarks, heldCounts, heldRows, heldSeen, liveMarks, markOver, newMark, nextDue, SEEN_CONFIRM_MS, SEEN_KEEP_MS, SEEN_SETTLE_MS, settleMarks, unansweredMarks, type SeenMark } from "./seen-outbox";
 import type { ListCounts } from "./session-list";
 import { runtimeIdentity } from "./runtime-list";
+import { setSideFold, unreadSides } from "./side-fold";
 import type { Session } from "./types";
 
 const T0 = Date.parse("2026-01-01T00:00:00Z");
@@ -135,5 +136,45 @@ describe("seen outbox: settling and counts", () => {
     expect(heldCounts(c, [b], marks, T0 + 1000)).toBe(c);
     // never below zero
     expect(heldCounts(counts(0, 5), [a], marks, T0 + 1000).state.unread).toBe(0);
+  });
+});
+
+describe("a parent kept Unread by its side sessions (#13299)", () => {
+  afterEach(() => setSideFold(false));
+  const counts = (unread: number, idle: number): ListCounts => ({ total: unread + idle, revision: "r", state: { unread, idle }, machine: {}, project: {}, group: {} });
+  // the hub counts the parent by its folded state: its own reply was seen, one side's was not
+  const parent = row({ session_id: "p", state: "idle", children: { total: 2, sides: 2, sides_unread: 1 } });
+  const side = (session_id: string, patch: Partial<Session> = {}) => row({ session_id, folded_under: "p", folded_as: "side", ...patch });
+  const unread = side("a", { updated_at: "2026-01-01T00:00:05Z" });
+  const later = side("b", { updated_at: "2026-01-01T00:00:09Z" });
+  const sidesOf = (held: Session[]) => (s: Session) => (s.session_id === "p" ? held : undefined);
+
+  it("orders the unread sides the newest first and leaves out the rest", () => {
+    setSideFold(true);
+    expect(unreadSides([unread, side("c", { state: "idle" }), later, row({ session_id: "own" })]).map((s) => s.session_id)).toEqual(["b", "a"]);
+    // without side folding no row is a side
+    setSideFold(false);
+    expect(unreadSides([unread, later])).toEqual([]);
+  });
+
+  it("takes the parent out of Unread once the held sides were all seen here, not before", () => {
+    setSideFold(true);
+    const c = counts(1, 4);
+    // the side rows held for it, still unread: counted as the hub did
+    expect(heldCounts(c, [parent], {}, T0 + 1000, sidesOf([unread]))).toBe(c);
+    // seen here (the held row is the seen copy): Seen at once, before the hub's next read
+    expect(heldCounts(c, [parent], {}, T0 + 1000, sidesOf([{ ...unread, state: "idle" }])).state).toEqual({ unread: 0, idle: 5 });
+    // no side rows held for it (no open chat, nothing read yet): the hub's rollup stands
+    expect(heldCounts(c, [parent], {}, T0 + 1000, () => undefined)).toBe(c);
+  });
+
+  it("keeps a parent seen here Unread while a side of it is", () => {
+    setSideFold(true);
+    const own = row({ session_id: "p", children: { total: 1, sides: 1, sides_unread: 1 } });
+    const marks = { [runtimeIdentity(own)]: newMark(own, T0)! };
+    expect(heldCounts(counts(1, 4), [own], marks, T0 + 1000).state).toEqual({ unread: 1, idle: 4 });
+    expect(heldCounts(counts(1, 4), [own], marks, T0 + 1000, sidesOf([unread])).state).toEqual({ unread: 1, idle: 4 });
+    // its side seen too: Seen
+    expect(heldCounts(counts(1, 4), [own], marks, T0 + 1000, sidesOf([{ ...unread, state: "idle" }])).state).toEqual({ unread: 0, idle: 5 });
   });
 });

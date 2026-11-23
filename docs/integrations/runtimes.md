@@ -448,7 +448,9 @@ assistant status, and verifies the worker is a strict process descendant of the 
 caller's session from the worker's process tree, not from the CLI request. Antigravity runs each active assistant chat
 in its own ACP process, separate from the Agents' shared process. An idle assistant worker exits after five minutes
 without work; the next send or mode change resumes the chat in a fresh worker. A forked assistant chat gets its own
-worker when first used. An active turn or unanswered permission keeps the worker alive.
+worker when first used. An active turn or unanswered permission keeps the worker alive, and so does an Agent turn
+running in the same companion: the assistant that supervises it hears from it when it ends, so the five minutes count
+from the end of the last such turn (#13471).
 
 A runtime that declares `caps.assistant` must:
 

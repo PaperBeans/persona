@@ -117,7 +117,7 @@ export function useShortcuts(ctx: ShortcutContext) {
         if ("close" in to) {
           lastPanel = current;
           closePanel();
-        } else openPanel(to.open);
+        } else openPanel(to.open, { push: false });
       }),
       registerShortcut("focus-input", () => focusInput(at.current.route)),
       // the card then answers on its own keys (lib/card-keys.ts, Interactions.tsx)

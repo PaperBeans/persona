@@ -417,6 +417,7 @@ data class ExtensionContributes(
     @SerialName("auth_relay") val authRelay: List<ExtensionAuthRelayItem>? = null,
     @SerialName("secret_providers") val secretProviders: List<ExtensionSecretProviderItem>? = null,
     @SerialName("repository_providers") val repositoryProviders: List<ExtensionRepositoryProviderItem>? = null,
+    @SerialName("memory_sources") val memorySources: List<ExtensionMemorySourceItem>? = null,
     val messaging: List<ExtensionMessagingItem>? = null,
     /** Extra keys stay at this object's level on the wire; declared fields always win. */
     val additionalProperties: Map<String, JsonElement> = emptyMap(),
@@ -453,12 +454,13 @@ private data class ExtensionContributesKnown(
     @SerialName("auth_relay") val authRelay: List<ExtensionAuthRelayItem>? = null,
     @SerialName("secret_providers") val secretProviders: List<ExtensionSecretProviderItem>? = null,
     @SerialName("repository_providers") val repositoryProviders: List<ExtensionRepositoryProviderItem>? = null,
+    @SerialName("memory_sources") val memorySources: List<ExtensionMemorySourceItem>? = null,
     val messaging: List<ExtensionMessagingItem>? = null,
 )
 
 object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
     private val known = ExtensionContributesKnown.serializer()
-    private val keys = setOf<String>("connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "messaging")
+    private val keys = setOf<String>("connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "memory_sources", "messaging")
     override val descriptor: SerialDescriptor = known.descriptor
 
     override fun deserialize(decoder: Decoder): ExtensionContributes {
@@ -496,6 +498,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             authRelay = fields.authRelay,
             secretProviders = fields.secretProviders,
             repositoryProviders = fields.repositoryProviders,
+            memorySources = fields.memorySources,
             messaging = fields.messaging,
             additionalProperties = obj.filterKeys { it !in keys },
         )
@@ -533,6 +536,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             authRelay = value.authRelay,
             secretProviders = value.secretProviders,
             repositoryProviders = value.repositoryProviders,
+            memorySources = value.memorySources,
             messaging = value.messaging,
         )
         val obj = output.json.encodeToJsonElement(known, fields) as JsonObject
@@ -862,6 +866,22 @@ data class ExtensionRepositoryProviderItem(
      * (repo.pr_status). Without it the manager reads repo.describe's state. Each at most once.
      */
     val capabilities: List<String>? = null,
+)
+
+/**
+ * The extension's memory, read by the manager one entry at a time (memory.entries; memory.schema.json) so the hub
+ * decides which entries reach which scene (a conversation's standing context, a recall, a dispatched task, the
+ * Inbox's helper). Needs the program to speak the protocol; one per extension. Once declared, the hub stops
+ * delivering the extension's own text outlets (its assistant instructions, project context, Inbox context and its
+ * connectors' read tools in the assistant's conversations) directly.
+ */
+@Serializable
+data class ExtensionMemorySourceItem(
+    val id: String = "",
+    /**
+     * What settings call the source (My memory). Not only spaces, no control characters.
+     */
+    val name: String = "",
 )
 
 /**

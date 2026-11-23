@@ -190,9 +190,8 @@ nonisolated enum Theme {
     static let monogramFill = Color(uiColor: .secondarySystemFill)
     #endif
 
-    /// A name's disc without a picture (`Monogram`) and its letter's color: the neutral disc in the label's color, or on
-    /// the Mac in a style with hued monograms (Lark, `StyleSpec.MacChrome.monogramHues`) the hue the name picks, the same
-    /// one on every launch, with a white letter. The iPhone, iPad and watch keep the neutral disc in every style.
+    /// A name's disc without a picture (`Monogram`) and its letter's color: the neutral disc in the label's color, in every
+    /// style.
     static func monogram(_ name: String) -> (fill: Color, ink: Color?) {
         return (monogramFill, nil)
     }

@@ -162,5 +162,14 @@
   "leader_needs_you": "{count} need you",
   "codex_waiting": "Waiting for its first message",
   "direction_tasks_expand": "Expand the open tasks of {name}",
-  "direction_tasks_collapse": "Collapse the open tasks of {name}"
+  "direction_tasks_collapse": "Collapse the open tasks of {name}",
+  "spaces": "Spaces",
+  "new_space": "New space",
+  "side_unread": "Side session “{title}” has a new reply",
+  "side_unread_kicker": "New side reply",
+  "side_unread_more": "+{count}",
+  "side_unread_count_one": "{count} side session has a new reply",
+  "side_unread_count_other": "{count} side sessions have new replies",
+  "side_unread_open": "Open side session “{title}”",
+  "side_unread_also": "Also with new replies: {titles}"
 }

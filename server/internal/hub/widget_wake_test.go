@@ -39,6 +39,9 @@ func TestWidgetWakePace(t *testing.T) {
 		{"working changed, within the gap", widgetCounts{needsYou: 1, working: 3}, widgetGap - time.Second, false},
 		{"working changed, after the gap", widgetCounts{needsYou: 1, working: 3}, widgetGap, true},
 		{"finished changed, after the gap", widgetCounts{needsYou: 1, working: 2, unread: 1}, widgetGap, true},
+		{"intake changed, within the gap", widgetCounts{needsYou: 1, working: 2, intake: 1}, widgetGap - time.Second, false},
+		{"intake changed, at the gap", widgetCounts{needsYou: 1, working: 2, intake: 2}, widgetGap, true},
+		{"needs you with intake, at once", widgetCounts{needsYou: 2, working: 2, intake: 3}, time.Second, true},
 		{"nothing changed, before the heartbeat", c, widgetHeartbeat - time.Second, false},
 		{"nothing changed, the heartbeat", c, widgetHeartbeat, true},
 	}
@@ -111,6 +114,34 @@ func TestWidgetWakePushes(t *testing.T) {
 		if h.live.widgets.due("phone", widgetCountsOf(h.live.shownState), clock) {
 			t.Fatal("the counts written when the phone left were sent again")
 		}
+		// Intake moves only a widget revision, not the fleet. A held revision is picked up
+		// by the regular tick even if there are no more drinks after this one.
+		h.live.intakeChanged()
+		h.live.wakeWidgets(h.live.shownState)
+		checkWakes(3)
+		clock = clock.Add(time.Second)
+		h.live.intakeChanged()
+		h.live.wakeWidgets(h.live.shownState)
+		checkWakes(3)
+		clock = clock.Add(widgetGap - time.Second)
+		h.live.wakeWidgets(h.live.shownState)
+		checkWakes(4)
+		// An open phone gets the live invalidation and does not need a silent wake.
+		phone := &client{phone: true, pushDevice: "phone"}
+		h.mu.Lock()
+		h.clients[phone] = struct{}{}
+		h.mu.Unlock()
+		clock = clock.Add(widgetGap)
+		h.live.intakeChanged()
+		h.live.wakeWidgets(h.live.shownState)
+		checkWakes(4)
+		h.live.phoneLeft("phone", true)
+		if h.live.widgets.due("phone", h.live.widgetCounts(h.live.shownState), clock) {
+			t.Fatal("phone leaving forgot the intake revision it displayed")
+		}
+		h.mu.Lock()
+		delete(h.clients, phone)
+		h.mu.Unlock()
 	})
 }
 

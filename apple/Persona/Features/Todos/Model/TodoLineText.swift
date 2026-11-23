@@ -196,6 +196,12 @@ nonisolated enum TodoTimeWords {
         return words("Due \(date.formatted(style)) [To-dos Due]")
     }
 
+    /// A due moment's time alone, under a heading that names its day (Upcoming): "Due 15:00".
+    static func dueTime(_ date: Date, words: TodoWords, calendar: Calendar) -> String {
+        let style = Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone).locale(words.formatting).hour().minute()
+        return words("Due \(date.formatted(style)) [To-dos Due]")
+    }
+
     /// How long ago, as short as a row's end has room for and never a day's name, which would read as a due day: "now",
     /// "16m ago", "3h ago", "2d ago".
     static func age(_ date: Date, now: Date, words: TodoWords, calendar: Calendar) -> String {

@@ -390,19 +390,25 @@ func TestUnreachableBacksOffAndReportsNothingSent(t *testing.T) {
 	if len(p.ops()) != 0 {
 		t.Fatal("nothing should reach the phone")
 	}
-	n := p.dialCount()
-	if n < 2 {
-		t.Fatalf("dials = %d, want retries", n)
+	// The session keeps retrying after the call gave up; how many attempts fit in the call's 150ms depends on the
+	// machine's load, so wait for the retry itself rather than count what one window held.
+	deadline := time.Now().Add(10 * time.Second)
+	for p.dialCount() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("dials = %d, want retries", p.dialCount())
+		}
+		<-time.After(5 * time.Millisecond)
 	}
 	d := m.Devices(context.Background())
 	if d[0].LastErrorCode != "tunnel_failed" || (d[0].State != StateBackoff && d[0].State != StateConnecting) {
 		t.Fatalf("Devices = %+v", d[0])
 	}
-	// It comes back: the waiting call gets it without waiting out the backoff.
+	// It comes back: the waiting call gets it without waiting out the backoff. The call returns as soon as the link is
+	// up; its deadline only bounds a failure, and must cover a whole reconnect on a loaded machine.
 	p.mu.Lock()
 	p.dialErr = nil
 	p.mu.Unlock()
-	if _, err := call(t, m, "tap", time.Second); err != nil {
+	if _, err := call(t, m, "tap", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }

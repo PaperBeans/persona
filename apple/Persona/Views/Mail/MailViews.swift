@@ -283,7 +283,6 @@ struct NewChatPrefilled: View {
     }
 }
 
-#if os(iOS) || os(visionOS)
 struct HTMLView: UIViewRepresentable {
     var html: String
     @Binding var height: CGFloat
@@ -340,7 +339,6 @@ struct HTMLView: UIViewRepresentable {
         }
     }
 }
-#endif
 
 struct ComposeDraft: Identifiable {
     let id = UUID()

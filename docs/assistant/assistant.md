@@ -1575,6 +1575,16 @@ explicit user-facing actions still follow the usual visibility rules.
   user can open and close at any time to see the full transcript, history included (super rule 2.4). A scheduled task's
   prompt is never shown in the main chat while folding is on: its source block says only which task ran, closed or open.
   A supervisor message shows its text when opened.
+- **Completed silent rounds**: in the main conversation, a completed round with a successful silent finish, no live
+  work and no promotion leaves no timeline row and contributes no unread count or badge. Its inline tool calls and
+  its `task`, `routed` and `answered` feed cards inside the same half-open round interval stay out too; plans,
+  message cards, notices and other decisions always remain visible. **Background activity**, opened from either the
+  conversation menu or Inbox, retains each such round with its input, replies, tool activity, feed cards and finish
+  receipt, using the same paged history and full-record renderer. Opening it marks nothing seen. Full transcript and
+  feed APIs are unchanged. The hub suppresses unread only for the matching latest silent round: earlier genuinely
+  visible unread work remains unread, working and needs-you states win, and a failed transcript read fails open.
+  Existing daily-briefing totals keep their meaning; a separate exact silently-handled daily total is out of scope
+  because round metrics do not record visibility.
 - **Not folded** (the visibility rule supervision rounds use, `supervisionVisible` / `fold.supervision_user` from
   `server/internal/transcript/fold_supervision.go`): a round that used `ask_user` or `notify_user` successfully, a pending
   `ask_user` while it runs, a `task_review` with an `accepted` or `needs_user` verdict card, or a `supervision_finish`

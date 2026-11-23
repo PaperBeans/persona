@@ -113,17 +113,10 @@ extension View {
         foregroundStyle(Color.primary)
     }
 
-    /// The way out of a page that only shows things (#9653): `SheetClose`'s ✕ at the top leading corner on the iPhone
-    /// and iPad, Done in a Mac sheet's bottom row. Nothing when `detailPresentation` pushed the page into a column
-    /// (`detailPushed`): there its ‹ goes back.
+    /// The way out of a page that only shows things (#9653): `SheetClose`'s ✕ at the top leading corner. Nothing when
+    /// `detailPresentation` pushed the page into a column (`detailPushed`): there its ‹ goes back.
     func sheetDone(_ done: @escaping () -> Void) -> some View {
         modifier(SheetDone(done: done))
-    }
-
-    /// Done for a sheet that only shows things, in a Mac sheet's bottom row (Esc too). Nothing on iOS: there the page
-    /// keeps its own Close or the swipe down.
-    func macSheetDone(_ done: @escaping () -> Void) -> some View {
-        self
     }
 }
 

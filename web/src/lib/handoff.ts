@@ -71,7 +71,7 @@ if (typeof addEventListener !== "undefined") {
   // conversation puts it in front, with its page no longer kept.
   addEventListener("popstate", () => {
     const p = panelIn();
-    if (p) openPanel(p);
+    if (p) openPanel(p, { push: false });
     if (pushed && mainChat(routeAt(location.href))) pushed = null;
   });
 }

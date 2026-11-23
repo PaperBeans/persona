@@ -105,16 +105,30 @@ func TestABuiltinSwitchesToItsDefaultSubscription(t *testing.T) {
 	if err := b.SetMigrated(ctx, "lark", true, subscriptions.Actor{}); err == nil {
 		t.Fatal("a source without a default switched")
 	}
-	// GitHub's default is known but withheld until the owner says (#6404): no switch, and switching on is refused.
-	if m := migrations["github"]; m.Recipe.Tool != subscriptions.InboxThingsTool || m.Recipe.Mode != wire.ConnectorSubscriptionModeThings || !withheld["github"] {
+	// GitHub's default is offered since iMessage's week on the owner's hub (#6404, #13599).
+	if m := migrations["github"]; m.Recipe.Tool != subscriptions.InboxThingsTool || m.Recipe.Mode != wire.ConnectorSubscriptionModeThings || withheld["github"] {
 		t.Fatalf("GitHub's default: %+v (withheld %v)", m.Recipe, withheld["github"])
 	}
-	withheld[c.ID()] = true // as GitHub's is: a default known, not offered
+	// A default known but withheld until the owner says (decision 6): no switch, and switching on is refused.
+	withheld[c.ID()] = true
+	defer delete(withheld, c.ID())
 	if v := viaOf(); v != nil {
 		t.Fatalf("a withheld default's switch is offered: %+v", v)
 	}
 	if err := b.SetMigrated(ctx, c.ID(), true, subscriptions.Actor{}); err == nil {
 		t.Fatal("a withheld default switched on")
+	}
+	// One switched on before it was withheld keeps its switch, to switch back.
+	delete(withheld, c.ID())
+	if err := b.SetMigrated(ctx, c.ID(), true, subscriptions.Actor{}); err != nil {
+		t.Fatal(err)
+	}
+	withheld[c.ID()] = true
+	if v := viaOf(); v == nil || !v.On {
+		t.Fatalf("a withheld default switched on lost its switch: %+v", v)
+	}
+	if err := b.SetMigrated(ctx, c.ID(), false, subscriptions.Actor{}); err != nil || viaOf() != nil {
+		t.Fatalf("a withheld default switched back: %v %+v", err, viaOf())
 	}
 	delete(withheld, c.ID())
 	if withheld["imessage"] {

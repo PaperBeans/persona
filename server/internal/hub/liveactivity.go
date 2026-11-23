@@ -209,11 +209,12 @@ type liveActivities struct {
 	deferred map[string]time.Time
 	// The last fleet broadcast to the open apps, and when: what an app that closed its connection cleanly (gone to
 	// the background) left its activity showing (phoneLeft).
-	shownState FleetState
-	shownStats FleetStats
-	shownAt    time.Time
-	repair     bool        // a device's activity shows something unknown: flush without waiting for a change
-	widgets    widgetWaker // which phones' Home Screen widgets to wake, and when (widget_wake.go)
+	shownState    FleetState
+	shownStats    FleetStats
+	shownAt       time.Time
+	repair        bool          // a device's activity shows something unknown: flush without waiting for a change
+	widgets       widgetWaker   // which phones' Home Screen widgets to wake, and when (widget_wake.go)
+	widgetChanges chan struct{} // intake revisions wake widgets without offering Live Activity content
 	// wake: when the run loop's timer goes off next (zero: not set), for a merge or a device's turn after fleetMinGap.
 	wake         time.Time
 	now          func() time.Time
@@ -258,7 +259,7 @@ type phoneAnswer struct {
 }
 
 func newLiveActivities(h *Hub) *liveActivities {
-	return &liveActivities{h: h, signal: make(chan struct{}, 1), rows: map[string]db.LiveActivity{}, started: map[string]int{},
+	return &liveActivities{h: h, signal: make(chan struct{}, 1), widgetChanges: make(chan struct{}, 1), rows: map[string]db.LiveActivity{}, started: map[string]int{},
 		deferred: map[string]time.Time{}, sent: map[string][]byte{}, sentAt: map[string]time.Time{}, now: time.Now, minGap: fleetMinGap, storeTimeout: deviceStoreTimeout}
 }
 
@@ -349,6 +350,8 @@ func (la *liveActivities) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-la.widgetChanges:
+			la.wakeWidgets(la.snapshot())
 		case <-la.signal:
 			la.mu.Lock()
 			resend, repair := la.resend, la.repair
@@ -533,7 +536,7 @@ func (la *liveActivities) phoneLeft(device string, clean bool) {
 	la.mu.Lock()
 	shown := la.shownState
 	la.mu.Unlock()
-	la.widgets.wrote(device, widgetCountsOf(shown), now)
+	la.widgets.wrote(device, la.widgetCounts(shown), now)
 	la.mu.Lock()
 	r := la.rows[device]
 	needsStart := r.PushToStartToken != "" && (r.PushToken == "" || now.Sub(r.StartedAt) >= fleetMaxAge)

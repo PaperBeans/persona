@@ -343,6 +343,7 @@ export interface Contributes {
   auth_relay?: AuthRelayItem[];
   secret_providers?: SecretProviderItem[];
   repository_providers?: RepositoryProviderItem[];
+  memory_sources?: MemorySourceItem[];
   messaging?: MessagingItem[];
   /** Extra keys are opaque JSON; declared properties keep their own types. */
   [key: string]: unknown;
@@ -581,6 +582,19 @@ export interface RepositoryProviderItem {
    * (repo.pr_status). Without it the manager reads repo.describe's state. Each at most once.
    */
   capabilities?: RepositoryCapability[];
+}
+
+/**
+ * The extension's memory, read by the manager one entry at a time (memory.entries; memory.schema.json) so the hub
+ * decides which entries reach which scene (a conversation's standing context, a recall, a dispatched task, the
+ * Inbox's helper). Needs the program to speak the protocol; one per extension. Once declared, the hub stops
+ * delivering the extension's own text outlets (its assistant instructions, project context, Inbox context and its
+ * connectors' read tools in the assistant's conversations) directly.
+ */
+export interface MemorySourceItem {
+  id: string;
+  /** What settings call the source (My memory). Not only spaces, no control characters. */
+  name: string;
 }
 
 /**

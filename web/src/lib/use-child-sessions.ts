@@ -82,6 +82,16 @@ export function heldSides(mid: string, sid: string): Session[] | undefined {
   return sidesByParent.get(rowKey(mid, sid));
 }
 
+/** The side rows of a listed row (`heldSides` by its own key), for what counts many rows at once (heldCounts). */
+export const heldSidesOf = (s: Pick<Session, "machine_id" | "session_id">): Session[] | undefined => heldSides(s.machine_id, s.session_id);
+
+/** Moves on whenever the rows the open chats hold change: what reads `heldSides` outside a row's hook (a count) reads
+ *  again with it. */
+export function useHeldVersion(): number {
+  const read = () => heldVersion;
+  return useSyncExternalStore(subscribeHeld, read, read);
+}
+
 /** `heldSides`, kept up to date; undefined while `enabled` is off (a row with no sides reads nothing). */
 export function useHeldSides(mid: string, sid: string, enabled = true): Session[] | undefined {
   const read = () => (enabled ? heldSides(mid, sid) : undefined);

@@ -132,14 +132,7 @@ extension View {
         #endif
     }
 
-    /// A `Menu` that keeps the button the system draws for it, without the Mac's ⌄ beside the label: a ⋯ among a
-    /// toolbar's bordered buttons (the file viewer's, next to Done). iOS unchanged.
-    @ViewBuilder func arrowlessMenu() -> some View {
-        self
-    }
-
-    /// A button in a settings form (`SettingsForm`): the phone's themed button; on the Mac the system's standard push
-    /// button (prominent: the default-looking one), as System Settings has them, not a tinted capsule (#1221).
+    /// A button in a settings form (`SettingsForm`): the themed button.
     @ViewBuilder func formButton(prominent: Bool = false) -> some View {
         themedButton(prominent: prominent)
     }

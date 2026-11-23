@@ -51,6 +51,7 @@ App 核对 state 并向原 HTTPS 地址兑换 code，禁止重定向。跳转链
 
 - Prefer `Authorization: Bearer <token>`. The current implementation has not locked down URL tokens: when there is no Authorization value, every authenticated API (WebSocket included) still falls back to `?token=`, not only on loopback or for WS. Clients should use the header so credentials stay out of URLs.
 - The workspace board (#1646) adds GET `/api/v1/workspace-board` and `/api/v1/workspaces` to the `answer` read allowlist; changing the board still requires `full`. See "Workspace board".
+- Health intake (#13175) adds only `GET /api/v1/assistant/health/intake` and `POST /api/v1/assistant/health/intake` to the watch's `answer` allowlist. The changes feed and undo require `full`; no extension scope opens any intake route. Other paths under this prefix, including detail-page actions and imports, remain forbidden to `answer` credentials. See "Health intake".
 - The watch's Milk Frog (#4869) adds GET `/api/v1/personas/nwverse/pet/<file>` (a plain `.json` or `.png` name) to the `answer` read allowlist, for its row and watch face ([persona.md](../apple/persona.md) "The Milk Frog on the watch"); no other persona file, package or upload is readable with an `answer` token.
 - The `token` in hub.json is the master token. It is accepted only from trusted sources such as loopback / LAN; from the public internet it returns `403 master_token_local_only` even over TLS. Public clients should use a temporary pairing token or a device token. Plaintext API over the public internet is rejected by default with `403 tls_required`; the only exception is `GET /api/v1/health`.
 - Per-device credentials: `POST /api/v1/auth/tokens {"name":"<device name>","kind":"phone"}` → `{id,token,role,name}`. Device tokens start with `jd_`; the hub stores only a hash. Ordinary pairing yields `answer` for a watch and `full` for phones and browsers. The stored kind is `phone`, `watch`, `web` or `link`; anything else is stored as `other`.
@@ -290,6 +291,7 @@ The authenticated WS `hello.features` always lists server capabilities; trusted 
   - `meeting_transcription` only while the default manager names `meeting_transcription` beside `meeting_live_view` (and so `meeting_conversation` and `meeting_attendance`) in its `manager.hello` capabilities, the same way: the meeting conversation's phase 5, hub transcription (the upload's `transcription` and `timeline`, the audio socket `GET /api/v1/recordings/{id}/audio`, `PUT …/audio`, `transcription` and `interim` on `GET …/live`; see "Meeting conversation (#3862)"). The phone offers **On the hub** and opens the audio socket only when the hub lists it; whether the chosen transcription contribution is ready is the manager's `meeting_transcription_ready`, not this flag.
   - `recording_day` only while the default manager names it in its `manager.hello` capabilities, the same way (an extension's report cannot add it): all-day recordings and their daily recap (#4741): the upload's `kind: "day"` with `day`, `tz`, `part` and `coverage`, `POST …/segments`, `detail.recap`, `recap_state`, `recap_final` and `recap_final_at`; see "All-day recordings (#4741)". The phone uploads a day recording only to a hub that lists it, since an older hub refuses the kind.
   - `assistant_search` only while the default manager names it in its `manager.hello` capabilities, the same way (an extension's report cannot add it): `GET /api/v1/assistant/search`, the assistant's chats found by what was said in them (see "Assistant chat search (#6282)"). Without it the apps filter titles and last messages as before; a non-default manager from before it answers the route 404, which the apps take the same way.
+  - `health_intake` only while the default manager is connected and names it in its `manager.hello` capabilities (an extension's report cannot add it): built-in water and protein records, daily totals, undo markers and the changes feed (see "Health intake"). Clients check this feature before offering intake controls; an older hub may refuse a watch request with 403 rather than 404.
   - `starred_messages` means the hub relays the starred-message routes. Clients load the index only after seeing the feature. A selected assistant from before those routes answers 404.
   - `direction_sessions` only while the default manager is connected and names it in its `manager.hello` capabilities, the same way (an extension's report cannot add it): the owner can file a session under a direction with `PUT /api/v1/assistant/sessions/{mid}/{sid}/direction`, read one current or ended direction with `GET /api/v1/assistant/directions/{id}`, and see the additive active `sessions` on the direction tree (#11391). Without it clients show no filing or single-direction entry and keep the old task-only tree; an older manager answers the new routes 404.
   - `remote_images` only while the default manager names it in its `manager.hello` capabilities, the same way (an extension's report cannot add it): `GET /api/v1/remote-image`, the pictures a reply names by address fetched, checked and scaled by the manager for the apps (see "Remote images (#9473)"). Without it iOS loads such pictures from their host as before and the web keeps its tap-to-load placeholder (#8162).
@@ -1243,7 +1245,8 @@ Provider responses carry only the description and `has_key`, never secrets. Defa
                   "added":["…"],"dropped":["…"],"approval":{"text":"…","at":"...","conversation":"…","message_id":"…"}},   // approval: the owner's message that allowed a risky step
                  {"at":"...","kind":"completion","source":"report_to_supervisor|task_review|judge","todo_id":"todo_…","round_id":"plan_…/todo_…@...","actual_minutes":45},
                  {"at":"...","kind":"estimate_due","todo_id":"todo_…"},   // accepted delivery of the current estimate_due review cue
-                 {"at":"...","kind":"overdue","todo_id":"todo_…"}],
+                 {"at":"...","kind":"overdue","todo_id":"todo_…"},
+                 {"at":"...","kind":"memory","todo_id":"todo_…","entries":["entry_…"],"sensitive_entries":["entry_…"]}],   // the memory entries a start's first message carried (#13532)
           "criteria":["…"],"expect_minutes_now":90,     // done_when and expect_minutes as the scope changes left them
           "estimate_source_now":"override","estimate_clock_at":"...","estimate_due_at":"...","estimate_due_told_at":"...",
           // estimate_evidence_now is present when the current estimate has automatic evidence; an override clears it.
@@ -2153,6 +2156,12 @@ Clients report their errors and crashes only while `features` has `error_reports
 | DELETE | `/api/v1/sessions/{mid}/{sid}` | Delete a chat: only removes it from the session lists everywhere (the hub records the time in settings `sessions.deleted`, and neither the `sessions` push nor `GET /api/v1/sessions` includes it anymore); the transcript on the computer is untouched; this holds for finished sessions still open on their computer (`idle`, `done`, a Codex App thread the App keeps listing) too, whatever their status reads next; if the session is used again later (`updated_at` later than the deletion, it runs again, or it waits on a card for the user), it reappears. The note is kept (it does not expire). Sessions that failed to start (`start_error`) can also be deleted and disappear immediately. → `{"ok":true}`; running or still starting 409, an Agent with messages held for it (`undelivered` with `computer`, #10661) 409 until they are deleted, assistant chats 400 (use archive), no such session 404, read-only device 403 |
 | GET | `/api/v1/assistant` | `{"machine_id","launcher","cwd","timezone","timezone_picked"?,"notes"?,"notes_effective","main"?,"main_tasks_quiet","recording_days","minutes_days","kb_topics","main_background_folded","recent_task_chats","meeting_attendance_default","idle_close_hours","archive_closed_days","interject_background","claude_interactive","agent_tasks","task_lessons","close_ended_terminals","inbox_signals","next_suggestions","owner_reply_approval","persistent_owner_action_cards","owner_reply_approval_phrases","main_supervises_own_tasks","background_supervisor"?,"conversations":[Session]}`: `main_supervises_own_tasks` is the legacy background-supervisor setting retained for wire and settings compatibility; new assistant-dispatched tasks are supervised by main regardless of it (#5732, `docs/assistant/unified-entry.md` "Background supervisor"), and `background_supervisor` is that conversation's session id once it has been made (on the assistant's computer; read-only, with `background_supervisor_machine_id` and `background_supervisor_at`); `next_suggestions` is the effective "suggest the next message" switch for chats without a suggestion of their own (`false` if never changed, #4644, `docs/assistant/assistant.md` "Next-message suggestions"); `owner_reply_approval` enables exact one-shot connector replies and `persistent_owner_action_cards` keeps their unanswered proposals until a decision (both `false` if never changed), and `owner_reply_approval_phrases` is their exact phrase list (default `["发","同意"]`; see "Exact owner replies for connector batches"); `agent_tasks` is the legacy switch for supervising manually linked user to-dos and reporting-Agent compatibility (`false` if never changed; it does not adopt app-opened manual Agents, #5732, `docs/assistant/unified-entry.md` "Agent tasks"); `task_lessons` is the effective "learn from finished tasks" switch (`false` if never changed, #12295, `docs/assistant/todos.md` "Lessons from accepted tasks"); `inbox_signals` is the effective "tell a task's supervisor about new Inbox messages on it" switch (`false` if never changed, #4293, `docs/assistant/unified-entry.md` "Supervision (#3124)"); `claude_interactive` is the effective "run Claude chats in interactive Claude Code" switch (`false` if never changed, #10058, `docs/assistant/assistant.md` "Interactive Claude Code (#10058)"); `interject_background` is the effective "move running work to the background when I interject" switch (`false` if never changed, #3278, `docs/assistant/assistant.md` "Interjecting while it answers"); `notes` is present only if saved in the App; `timezone_picked` is present once a client said whether the user picked `timezone` by hand (#1855, below); `main_tasks_quiet` is the effective value of "notify tasks dispatched by the main chat only in the main chat" (`true` if never changed, #1731); `idle_close_hours` is the effective number of hours an idle Agent Persona started stays open before the hub closes it (default 12, 0 is off, #2784, `docs/assistant/todos.md`); `archive_closed_days` is the effective number of days a closed session stays listed before the manager archives it by itself (default 3, 0 is off, #3618, `docs/assistant/todos.md` "Closed sessions archive themselves"); `recording_days` is the effective number of days recordings stay in the knowledge base (default 14, #3235); `kb_topics` is the effective "organize knowledge points by topic" switch (`true` if never changed, #3783, [knowledge.md](../assistant/knowledge.md) "Topics"); `main_background_folded` is the effective "fold background rounds" switch: the apps fold the main chat's rounds that another chat, a scheduled task or a follow-up started into one line (`true` if never changed, #4314, `docs/assistant/assistant.md` "Background rounds"); `minutes_days` is the effective number of days a meeting's minutes stay after its transcript went (forever by default: unset or `0`; otherwise the larger of it and `recording_days`, #3780 / #3862, [meeting-minutes.md](../assistant/meeting-minutes.md) "Privacy"); `meeting_attendance_default` is the role a meeting recording pre-selects (`off` until changed, `listener`, `participant`; present only with the `meeting_attendance` feature, #2981, [meeting-minutes.md](../assistant/meeting-minutes.md) "Attending a meeting"); `main` is the main chat's session id (on the `machine_id` machine); archived chats are not listed by default, `?archived=1` includes them (`archived: true`). `?tag=<tag>` keeps only chats carrying that exact user tag (a row's `tags`, below; an unknown tag lists none). `?space=health` lists chats in the health space, with `cwd` being the health directory; without `space` only the assistant's own are listed, not the health chats; any other `space` returns 400 (`docs/assistant/health.md`). An extension's token is listed no health chat, in either space (#10941, [extensions.md](../extensions/extensions.md) "Never shown to extensions"). A conversation row carries `tags: string[]` only when it has user-defined labels (omitted otherwise): at most 10 trimmed, de-duplicated tags of at most 32 runes each, stored in the assistant setting `assistant.conversation_tags` and pushed with the same snapshots as titles and archives (`docs/assistant/assistant.md` "Conversation tags") |
 | GET | `/api/v1/assistant/search?q=&limit=` | The assistant's chats found by their title, the user's words or the replies (`assistant_search`); see "Assistant chat search (#6282)" |
+| GET | `/api/v1/assistant/health/intake?days=7&space=health` | `{water:{today,goal,entries},protein:{today,goal,entries},days:[{date,water,protein}],zone}`. Full or answer role; no extension scope. See "Health intake" for types, defaults and limits. Omit manager selection to use the default; `space` does not route. |
+| POST | `/api/v1/assistant/health/intake?space=health` | `{id,kind,amount?,at?,note?}` → `{entry,today:{water,protein},zone}`. The caller's UUID makes retries idempotent, including after undo. Full or answer role; see "Health intake". Omit manager selection to use the default; `space` does not route. |
+| DELETE | `/api/v1/assistant/health/intake/{id}?space=health` | Undo from any date → `{today:{water,protein},zone}`. Repeating an undo succeeds; unknown id 404. Full role only; see "Health intake". Omit manager selection to use the default; `space` does not route. |
+| GET | `/api/v1/assistant/health/intake/changes?after=0&limit=100&space=health` | `{changes:[HealthIntakeEntry],next,has_more}`: current row states after the cursor, ordered by `seq`, including undo markers. Full role only; see "Health intake". Omit manager selection to use the default; `space` does not route. |
+| POST | `/api/v1/assistant/health/intake/ui?space=health` | `{context?,state?,action?,values?}` → an extension-page action result `{view,toast?}`. The manager draws water and protein pages under reserved `-health-intake/pages`. Full role only; see "Intake detail pages". Omit manager selection to use the default; `space` does not route. |
+| POST | `/api/v1/assistant/health/water/reminder?space=health` | `{reminder:string,action:"drink"\|"snooze"\|"log",amount?:string}` → `{toast:string}`. Fixed `HEALTH_WATER` notification buttons; full role only; see "Water reminders". Omit manager selection to use the default; `space` does not route. |
 | GET / PUT | `/api/v1/assistant/history` | Full role only. GET returns `{enabled,stats:{conversations,items,payload_bytes,summary_bytes,incomplete}}`; PUT requires `{enabled:boolean}`. Database-first assistant history defaults to enabled; false rolls reads and collection back to the runtime without deleting data. See `docs/assistant/assistant.md` ("Durable assistant history") |
 | GET | `/api/v1/remote-image?url=&size=` | A picture a reply names by address, fetched, checked and scaled by the manager (`remote_images`); see "Remote images (#9473)" |
 | GET | `/api/v1/avatars/{source}/{value}?size=` | A person's or a conversation's picture the lists name (`avatar_url`), drawn by the extension manager from the source's ref or an https address; see "Avatars (#10923)" |
@@ -2209,6 +2218,8 @@ Clients report their errors and crashes only while `features` has `error_reports
 | GET | `/api/v1/assistant/track-kinds` | Full-access clients only: `{"kinds":[{"slug","title","config","builtin","revision","disabled"?,"warnings"?}]}`, the built-in kinds then the user's; `disabled` is `schema` or `invalid` |
 | POST | `/api/v1/assistant/track-kinds` | Full-access clients only (403 otherwise): `{"slug","title","config"}`; 201 with the kind. A config with a newer schema, an unknown option or a `usage` rule looser than the assistant's own 400; a built-in kind's slug 400, a taken one 409 |
 | PUT | `/api/v1/assistant/track-kinds/{slug}` | Full-access clients only: `{"revision","title"?,"config"?}`; answers the kind. A built-in kind 403, unknown 404, a stale revision or a config that would leave one of its tracks invalid 409. A new config applies to the kind's tracks from then on; rhythms only to tracks created after it |
+| GET | `/api/v1/assistant/attention` | The attention mode in force (#13503): `{"attention":{"mode","until"?,"set_by"?,"set_at"?,"focus"?:{"track"?,"machine_id"?,"session_id"?}},"modes":["normal","fragment","immersive","quiet"],"can_write","max_minutes"}`; a mode whose `until` has passed reads `normal`. Not open to extension tokens (403); a client that may not set the mode (`can_write` false) reads it without `focus`. See `docs/server/server.md` ("Attention modes") |
+| PUT | `/api/v1/assistant/attention` | Full-access clients only (403 for an extension's token, a scoped device or an agent): `{"mode","minutes"?,"focus"?}`. Every mode but `normal` needs `minutes` from 1 to 1440 and ends by itself; `focus` (a track's slug, or a session's `machine_id` and `session_id`) is kept for `immersive` only, an unknown track 400. Answers as GET; an invalid body 400, a store that does not answer 503. The manager reports the mode to the hub in its profile (`assistantwire.Profile.Attention`) |
 | POST | `/api/v1/assistant/captures` | Full-access clients only (403 otherwise): a quick capture, `{"client_id","source","kind","text"?,"url"?,"space_hint"?}`; `source` is `share_ios`, `share_android`, `watch`, `siri`, `web`, `feishu` or `shortcut`, `kind` `text`, `url` or `voice`. One write, answered at once: 202 `{"id","status"}`; the same `client_id` again (a device's retry) 200 `{"id","status","duplicate":true}` with the first capture. A bad client id, source, kind, link or text, or a `space_hint` that is not a track taking captures, 400. No conversation gets a message. See `docs/assistant/health.md` ("Quick capture") |
 | GET | `/api/v1/assistant/captures` | Full-access clients only: `{"captures":[{"id","client_id","created_at","source","kind","text","url"?,"space_hint"?,"status","sort"?,"filed_to"?,"categories","tagged"}]}`, the newest 200; `?status=` one of `new`, `sorted`, `filed`, `dismissed`, `failed` (another 400). `sort` is `{"track"?,"action","title","deep"?,"confidence","model"?,"at","auto_file"?}`, `filed_to` `{"kind":"space_file","track","ref"}` (`ref` the file in the track's directory) |
 | POST | `/api/v1/assistant/conversations/{id}/stop` | Stop a chat opened with `report_tasks` (Lark /agent's `/stop`, #3308) → `{"conversation","tasks":[{"id","title","agents"}],"already"}`: interrupts its running turn (`conversation`) and the running Agents of the unfinished tasks it dispatched (`tasks`, `agents` is how many were interrupted), and drops queued task notifications; after that its task notifications are discarded until the user messages it again. If nothing was running, `already: true`. Not such a chat 404 |
@@ -2505,6 +2516,211 @@ contains no storage error, target, tool name, arguments, policy or credential.
 
 Layer / preview and push-layer integration are follow-up work, not part of this contract.
 
+## Health intake
+
+Built-in water and protein intake belongs to the assistant manager's Health space (#13175).
+It counts only Persona's records. Other apps' Apple Health or Health Connect samples are not added.
+The hub forwards the requests; it neither stores measurements nor calculates totals.
+Health clients omit the selected manager header and the `manager` query to reach the default
+manager, even while another manager is selected in the app. The hub selects a manager from
+that header/query, or the default when both are absent; `space=health` does not select a
+manager. Clients may retain it as a context marker, but must still omit manager selection.
+
+`HealthIntakeEntry` is the stored record returned by POST, today's `entries`, and the changes feed:
+
+| Field | JSON type | Meaning |
+| --- | --- | --- |
+| `id` | string | Caller-generated UUID, returned in lowercase; also the sync identity |
+| `kind` | string | `water` (milliliters) or `protein` (grams) |
+| `amount` | number | Amount at most one decimal place; water 1–3000 ml, protein 0.1–200 g; its rounded stored value must stay positive |
+| `at` | string | RFC 3339 measurement time, returned in UTC |
+| `note` | string | Food or other note, empty by default; at most 4096 UTF-8 bytes, no NUL |
+| `seq` | integer | Positive signed 64-bit change number; renewed once on undo |
+| `created_at` | string | RFC 3339 time the manager first stored the record |
+| `deleted_at` | string, optional | RFC 3339 undo time; absent for an active record |
+
+GET `intake` takes `days` (integer, default 7, range 1–366), including today. `water` and `protein`
+each contain `today` (number), `goal` (integer, ml or g), and `entries` (array, today's active
+records only, newest first, then UUID). `days` contains one `{date,water,protein}` per calendar
+date, oldest first, including dates with zero totals. `date` is `YYYY-MM-DD`; both totals are
+numbers. `zone` is the time-zone name used for the calculation: the phone's last reported
+assistant time zone (`PUT /api/v1/assistant`). Without a valid reported zone, intake resolves
+the manager machine's IANA zone from `TZ`, then the `/etc/localtime` zoneinfo link. An explicitly
+empty `TZ`, or no resolvable IANA name from either source, uses `UTC` for both calculation and
+the returned identifier. The API never returns Go's `Local` label. Clients parse `zone` as a
+time-zone identifier; `UTC` means UTC calendar days, not an instruction to substitute the
+client's local zone. Midnight boundaries use calendar days, including 23- and 25-hour days.
+
+Example GET response for `days=1` with no entries:
+
+```json
+{"water":{"today":0,"goal":2000,"entries":[]},"protein":{"today":0,"goal":60,"entries":[]},"days":[{"date":"2026-01-02","water":0,"protein":0}],"zone":"UTC"}
+```
+
+POST requires `id` and `kind`. Omitted `amount` uses the configured cup size for water;
+protein requires an amount. Omitted `at` uses the manager's current time; explicit old and future
+times are accepted. `note` defaults to an empty string. The request is one JSON object, at most
+64 KiB. A valid retry with the same UUID returns the original entry, even if the submitted
+measurement differs or the original was undone. Measurements and timestamps are never edited.
+`today` in the mutation response always means today's totals, including when recording or
+undoing a different day's entry; `zone` is the same zone GET uses.
+
+```json
+{"id":"00000000-0000-4000-8000-000000000001","kind":"protein","amount":30.5,"at":"2026-01-02T12:00:00Z","note":"Lunch"}
+```
+
+```json
+{"entry":{"id":"00000000-0000-4000-8000-000000000001","kind":"protein","amount":30.5,"at":"2026-01-02T12:00:00Z","note":"Lunch","seq":1,"created_at":"2026-01-02T12:00:01Z"},"today":{"water":0,"protein":30.5},"zone":"UTC"}
+```
+
+DELETE takes no body, marks the row instead of deleting it, and returns only `today` and `zone`.
+An already undone row succeeds without advancing its change number. A valid UUID that was never
+stored returns 404; an invalid UUID returns 400. An undone entry is never revived by POST.
+
+GET `intake/changes` takes `after` (nonnegative signed 64-bit integer, default 0, exclusive) and
+`limit` (integer, default 100, range 1–1000). `changes` is an array of entries in ascending `seq`
+order. `next` (integer) is the last returned `seq`, or the unchanged `after` on an empty page;
+`has_more` is a boolean. Continue from `next`, never from a guessed maximum or a row count.
+Sequence gaps are normal. Writers serialize before allocating a sequence and hold that lock
+through commit, so a committed later change cannot overtake an uncommitted earlier one.
+The sequence is owned by the column and retains its position when manager tables are copied.
+
+This is a feed of current row states, not an append-only event history: an add and undo before
+the client reads may appear as just the tombstone with its newer `seq`. A client that already
+read the add receives the tombstone after its previous cursor. Rows and tombstones are retained
+indefinitely so an offline client can reconcile its own samples.
+
+```json
+{"changes":[{"id":"00000000-0000-4000-8000-000000000001","kind":"protein","amount":30.5,"at":"2026-01-02T12:00:00Z","note":"Lunch","seq":2,"created_at":"2026-01-02T12:00:01Z","deleted_at":"2026-01-02T12:05:00Z"}],"next":2,"has_more":false}
+```
+
+The `health.intake` setting defaults to the following without writing it on a read:
+
+```json
+{"water":{"goal_ml":2000,"cup_ml":250,"remind":false,"start":"09:00","end":"21:00","interval_minutes":60,"weekends":true,"stop_when_done":true},"protein":{"goal_g":60}}
+```
+
+Validation: water goal 500–6000 ml, cup 50–1000 ml, interval 15–240 minutes; protein goal 10–300 g.
+The reminder window uses exact `HH:mm` times with start before end. Reminders default to off.
+The record routes read these settings. The detail page's actions validate and save them;
+the manager schedules water reminders only after the user turns them on. Invalid stored
+settings fall back to these defaults with a log entry, without rewriting the saved setting,
+so recording and the repair form stay available. The page's save still strictly validates
+its values; storage access failures remain errors.
+
+Successful calls return 200. Invalid input is 400, a forbidden role is 403, and unavailable
+storage is 503, all with `{error:string}`. A 503 or a lost response after a mutation may follow
+a committed write: retry with the same UUID, or repeat DELETE, to reconcile safely. Once a
+record is committed, failure to read or write its reminder-state reset is logged and does
+not turn that record acknowledgment into a failure; the route returns 200 and the record.
+
+Each committed add or first undo broadcasts `{"type":"health_intake"}` through the manager bus.
+It contains no measurement, note or entry ID. Open apps reload intake. The hub increments a
+widget-only revision: a closed iPhone with widgets is woken at most once per 15 minutes for
+ordinary changes; a held revision is checked again by the existing widget tick. An open phone
+is not woken. Needs You retains its immediate wake path. Intake does not change fleet state or
+generate a Live Activity update.
+
+### Intake detail pages
+
+`POST /api/v1/assistant/health/intake/ui?space=health` uses the request and action-result
+envelope of an extension page, as the Subscriptions pages do. Clients open reserved extension
+id `-health-intake`, interface `pages`; extension ids cannot start with `-`. Initial `state`
+is the JSON string `{"kind":"water"}` or `{"kind":"protein"}`. Omitted state opens water.
+Send the returned state unchanged on subsequent requests. It retains the kind, 7/30-day range,
+entry-page offset and whether settings are open. No client draws a second native detail page.
+
+```json
+{"context":{"locale":"en","ui_version":4,"size":"full"},"state":"{\"kind\":\"protein\"}"}
+```
+
+`context` is the usual UI context. `locale` selects localized copy; `ui_version` fits the
+response to that renderer's supported components. The stored assistant time zone controls
+both records and reminders; `context.tz` does not change it. A render or action returns
+`{view:View,toast?:string}`. The view refreshes after 30 seconds while open, shows today's
+active entries (40 at a time, with earlier/latest buttons), and a bar chart for 7 or 30
+calendar days. Days meeting the current goal are counted within that selected range.
+Protein entries include their food note. Settings open from a separate Settings button.
+Today's total uses the existing `Tile.gauge` (UI version 9); the gauge and bar-chart series
+use named `Color` values `blue` for water and `amber` for protein, even when the goal is met.
+Version fitting preserves the total, unit and percentage on older renderers. The timezone
+note mentions recording and reminders for water, and recording only for protein.
+
+All `values` are strings. Page actions:
+
+| `action` | `values` | Effect |
+| --- | --- | --- |
+| `drink` | none | Water only: record the configured cup |
+| `log` | `amount`, protein optionally `note` | Record water in integer ml (1–3000, optional `ml` or `毫升` unit), or protein in grams (positive, up to 200, at most one decimal place) |
+| `undo` | `id` | Undo a current entry of this kind from today; absent/stale rows return a toast. Below UI version 4, rows send `undo:<id>` instead |
+| `range` | `days`: `7` or `30` | Change the chart range |
+| `older` / `latest` | none | Page through today's entries |
+| `settings` / `back` | none | Open settings / return to records |
+| `save` | fields below | Validate and save the provided settings for this kind, leaving the other kind unchanged |
+
+Water `save` accepts `goal_ml`, `cup_ml`, `remind`, `start`, `end`, `interval_minutes`,
+`weekends`, `stop_when_done`; the three boolean fields are exactly `"true"` or `"false"`.
+Protein accepts only `goal_g`. Limits and defaults are those of `health.intake` above.
+Unknown fields, invalid clocks, a reversed/equal window or out-of-range numbers return 400
+without writing the setting. A storage failure returns 503. Saving broadcasts `health_intake`
+so other screens reload their goals. Only full-access devices can render or act; answer,
+read-only, scoped and extension credentials receive 403.
+
+### Water reminders
+
+The manager checks every 30 seconds. Reminders default to off; there is no protein reminder.
+Within the inclusive start/end window, the later of the last reminder and last drink starts
+the interval. Weekends can be skipped, reaching the goal can stop the day's reminders, and
+overdue occurrences collapse to one catch-up while the window is open. Calendar boundaries
+use the stored assistant time zone, including daylight-saving changes. Any newly recorded
+water, from any intake entry point, clears snooze and restarts the interval from when it was
+recorded, even for a backdated measurement. Protein does not reset water reminders.
+`health.intake.water_reminder` stores `{last,snooze,reason}` (timestamps and a delivery status).
+The page shows the next reminder or why it is off, plus delivery and low-distraction status.
+
+The default manager sends `notify.request` with `kind:"health_water"`, a unique notification
+`id`, `health:{reminder:<that id>}`, `level:"P1"`, and no `related_key` or conversation reference.
+The hub delivers with fixed category `HEALTH_WATER` and `apns-collapse-id:"health-water"`.
+APNs and WebSocket payloads carry `health:{reminder:string}`. WebSocket notifications use
+`kind:"alert"` and fixed `id:"health-water"`, replacing the previous water alert. Other managers
+cannot send this kind. The user-enabled reminder follows input preferences, muted managers,
+Phone Muted / desktop presence, and the existing low-distraction policy (P1 kept for the
+briefing); quiet hours do not silence it. With no registered buttons a client shows a plain
+notification. The existing manager outbox queues it while the hub is disconnected; queued
+notifications older than 24 hours are not handed over. No extension-style retry loop is added.
+The localized title and today's progress ship in English, Simplified Chinese and Japanese.
+
+Clients register these fixed category actions and map them to the endpoint's action strings:
+
+| Category action identifier | Endpoint `action` | Meaning |
+| --- | --- | --- |
+| `HEALTH_WATER_DRINK` | `drink` | Drank a cup (configured cup size) |
+| `HEALTH_WATER_SNOOZE` | `snooze` | Later (30 minutes; repeating while snoozed does not extend it) |
+| `HEALTH_WATER_LOG` | `log` | Record another amount, using a text-input action |
+
+The full-access device posts to `POST /api/v1/assistant/health/water/reminder?space=health`,
+without a selected manager header or `manager` query, using `health.reminder` from the
+notification. The absence of manager selection routes to the default; `space=health` does not:
+
+```json
+{"reminder":"<reminder id>","action":"log","amount":"300"}
+```
+
+`reminder` is a nonempty string of at most 128 bytes, without leading/trailing whitespace,
+NUL, CR or LF. `amount` is a string (the notification's typed text), required only for `log`;
+it accepts the same integer ml syntax as the water page. `drink` uses the current cup size;
+`snooze` records nothing. The response is 200 `{toast:string}`, localized from the request
+language or the assistant's language, for example `{"toast":"Recorded 300 ml. Today 550 / 2000 ml."}`.
+Invalid input is 400, non-full credentials 403, unavailable storage 503.
+
+For `drink` and `log`, the record UUID is UUIDv5 with fixed URL namespace
+`6ba7b811-9dad-11d1-80b4-00c04fd430c8` and UTF-8 name
+`"water-reminder:" + reminder + ":" + action`. Each action on a reminder records at most once,
+including across restarts and after undo. The two actions are independent. There is no
+24-hour button expiry. A retry returns the existing record's result without reviving it;
+an invalid amount does not consume the action. A failed response can follow a committed
+record: retry the same reminder and action, rather than minting another reminder id.
+
 ## WebSocket `/api/v1/ws`
 
 Envelope `{"type":"…", ...}`.
@@ -2547,6 +2763,7 @@ Server → client:
 | `assistant_schedule` | No payload: the assistant's scheduled tasks changed; clients re-read `GET /api/v1/assistant/tasks`. From another manager it carries `manager`, and only the shown manager's counts ("Messages to the App" below, [managers.md](../assistant/managers.md) "Clients") |
 | `assistant_saved_prompts` | No payload: the user's saved prompts changed (#7329); clients re-read `GET /api/v1/assistant/saved-prompts`. From another manager it carries `manager`, and only the shown manager's counts, as `assistant_schedule` |
 | `assistant_starred` | No snapshot payload. After a star is added or removed, the selected assistant’s clients re-read `GET /api/v1/assistant/starred`. The hub stamps `manager` on another manager’s update. |
+| `health_intake` | No payload: a water or protein record was added or undone. Reload `GET /api/v1/assistant/health/intake`; the default manager's update also advances the hub's widget revision, throttled to 15 minutes without changing the fleet. See "Health intake" |
 | `agents.triage` | `triage` (the switches as `GET /api/v1/agents/triage` returns them: `enabled`, `auto_continue`, `wake`, `decide`, `tool_loop`, `closeout`, `closeout_ask`, `reply_reminder?`, `reply_reminder_minutes?`, `transient_retry?`): the session triage switches were saved, and what they turned off has stopped ([agent-work.md](../assistant/agent-work.md) "Switches") |
 | `launcher_health` | `record` (one record as `GET /api/v1/launchers/health` lists it: `machine`, `launcher`, `state`, `kind`, `error`, `checked_at`, `source`, `fails`, `repair?`, `blocked_reason?`, `resets_at?`, `limit_models?`, `limit_resets?`): a launcher's health state changed; only to connected clients, not a push ([launcher-health.md](../server/launcher-health.md) "API for the board") |
 | `meeting_live` | `recording_id`, `changed` (an open set: `room`, `asks`, `private`, `followup`, from phase 2 `lines` and `topics`, from phase 2b `highlights`, from phase 3 `photos`; later phases add more) and `revs` (each changed part's revision, numbers only; for `lines` the live log's length): a meeting's parts changed, at most one a second per recording, content-free; clients read only the newer parts with `GET /api/v1/recordings/{id}/live?parts=…` ([meeting-minutes.md](../assistant/meeting-minutes.md) "The `meeting_live` event", #3862) |
@@ -4628,7 +4845,7 @@ What computers send belongs to the manager ([machines.md](../server/machines.md)
   - `fleet.archived {machine_id, sessions}` (#6836), to a hub whose handshake answer says `archived_apart`: the machine's archived rows (`archived: true`, not the assistant's), the ones the hub leaves out of everything it sends the App. `fleet.sessions` then carries only the rest: with months of archived sessions on a machine, the whole list was several MB told and taken on every change of one session. Each `fleet.archived` replaces the ones before; it is sent when they change (an archive, a restore, a record written, the node listing or no longer listing an archived session), and once per machine after each handshake, before the machine's `fleet.sessions`, so a session just archived is never in neither. The hub keeps them for everything that read the manager's list besides what the App gets, as when they were in it: lookups by session (sending to one, deleting, pins, `Machine.session`), a port an archived agent listens on (`/ports/{port}/connect`, `/preview/connect`), the manager's `sessions.list`, an update waiting on a busy agent, space names, the node's revs and the unknown state while the manager is away. It drops them when another manager lists the machine; what the App gets is the same bytes either way. A manager leaves archived sessions out of `muted` then too: they are never pushed.
   - `fleet.interaction {interaction}`: a new card, or one shown again; `fleet.interaction_resolved {id, answered_by?}`: it ended; `fleet.interactions {interactions}`: all pending ones, once after each handshake; the hub replaces the whole set (sending `interaction_resolved` to the App for ones that disappeared). A card naming a machine, or a session on one, that is not the reporting manager's is dropped (`docs/assistant/managers.md`, "What the hub keeps of each manager"). The hub still pushes `interaction` / `interaction_resolved` events and answers `GET /api/v1/interactions`.
   - `fleet.live {state, stats}`: the Live Activity content (`FleetState`, without the device fields) and the Dynamic Island numbers, sent only on change (numbers checked every 15 seconds).
-- Manager → hub (calls): `notify.request {notification}`; besides the assistant's `assistant`, `kind` can be `done` (a turn ended: `took_ms`, `long_ms`; devices filter by "only long ones"), `input` (a card: `interaction`, a pending one the manager reported; the hub pushes its own copy; a card of a manager other than the assistant the hub starts goes under the `apns-collapse-id` `card:` and a hash of the manager and the card id, so it replaces no other push (the assistant's uses the card id, or that `card:` form when the id is longer than APNs' 64 bytes), and its `interaction_id` and the withdrawal still name the card id; `link_covered: true` when one of the manager's Persona Link desktops confirmed (`rang`) it handed this card's notification to Notification Center, on its current link, within the push's wait (checked again once the desktops were reported): then "Phone Muted" holds it back while the hub still has a valid record of one of the manager's Persona Link desktops, and pushes the phone when it has none, [link.md](../operations/link.md) "Presence"; older managers leave it out and the phone gets the card) and `decide` (a to-do's decision with a recommended option, #2056: `todo: {id, asked_at, recommend}`, all three required, plus `options` and `responses` and, from #10465, `ask` (the view's ask id) and `lockscreen` (`answer` or `open_only`, the view's rule); the devices that take "needs you" pushes get it with category `TODO_DECIDE` and that `todo`, or with `TODO_DECIDE_OPEN` when `lockscreen` is present and is not `answer`, the options forwarded only with `answer`, [todos.md](../assistant/todos.md) "Waiting for the owner"; an older hub refuses the kind, and one from before #10465 drops `ask` and `lockscreen`, so the lock-screen rule takes effect once the hub is updated: behind an older hub every decision keeps Take Recommendation). A push about another manager's computer, session or card is refused `no_device`; `app.call phone` (`phone.tools`, `phone.call`) (connector, Cua and ego tools, gate command wording, and `assistant.lark` are answered by extensions inside the manager process and don't cross the bus), and `interactions.owner_action` of `app.call interactions` (the hub withdraws the owner action before a channel answers a card).
+- Manager → hub (calls): `notify.request {notification}`; besides the assistant's `assistant`, `kind` can be `done` (a turn ended: `took_ms`, `long_ms`; devices filter by "only long ones"), `input` (a card: `interaction`, a pending one the manager reported; the hub pushes its own copy; a card of a manager other than the assistant the hub starts goes under the `apns-collapse-id` `card:` and a hash of the manager and the card id, so it replaces no other push (the assistant's uses the card id, or that `card:` form when the id is longer than APNs' 64 bytes), and its `interaction_id` and the withdrawal still name the card id; `link_covered: true` when one of the manager's Persona Link desktops confirmed (`rang`) it handed this card's notification to Notification Center, on its current link, within the push's wait (checked again once the desktops were reported): then "Phone Muted" holds it back while the hub still has a valid record of one of the manager's Persona Link desktops, and pushes the phone when it has none, [link.md](../operations/link.md) "Presence"; older managers leave it out and the phone gets the card), `health_water` (a user-enabled water reminder: `health:{reminder}`, `level:"P1"`, no related key or conversation; see "Water reminders") and `decide` (a to-do's decision with a recommended option, #2056: `todo: {id, asked_at, recommend}`, all three required, plus `options` and `responses` and, from #10465, `ask` (the view's ask id) and `lockscreen` (`answer` or `open_only`, the view's rule); the devices that take "needs you" pushes get it with category `TODO_DECIDE` and that `todo`, or with `TODO_DECIDE_OPEN` when `lockscreen` is present and is not `answer`, the options forwarded only with `answer`, [todos.md](../assistant/todos.md) "Waiting for the owner"; an older hub refuses the kind, and one from before #10465 drops `ask` and `lockscreen`, so the lock-screen rule takes effect once the hub is updated: behind an older hub every decision keeps Take Recommendation). A push about another manager's computer, session or card is refused `no_device`; `app.call phone` (`phone.tools`, `phone.call`) (connector, Cua and ego tools, gate command wording, and `assistant.lark` are answered by extensions inside the manager process and don't cross the bus), and `interactions.owner_action` of `app.call interactions` (the hub withdraws the owner action before a channel answers a card).
 - Manager → hub: `call.ring {call:{id, title, conversation_id, attempt, ttl?}}` → `{devices, reason?}` rings the owner's phones for an urgent call (`docs/assistant/urgent-call.md`): a VoIP push sealed to each phone that registered a PushKit token (`voip_token`), carrying `{"urgent_call":{id, title, manager, conversation_id, attempt}, iat, hub_id}`; `devices` is how many APNs or the relay took, and with none `reason` is `no_phone` (no phone registered for calls) or `refused`. The manager decided the call may ring; the hub keeps nothing about it. `assistant.tools_changed` (one way, no params): the manager's MCP tools changed (`urgent_call` comes and goes with the owner's switch), so the hub asks for them again (`assistant.tools`); conversations started after that list them.
   - MCP wait correlation on those calls: `phone.call` is `{name, args, call_id?, machine_id?}` and `app.tool` is `{name, arguments, machine_id, session_id, call_id?}`. The optional `call_id` is the node's opaque per-call correlator. `phone.call`'s optional `machine_id` addresses its wait relay; `app.tool` already carries the tool call's functional `machine_id`, which is never overwritten, and a value different from the reporter's origin omits `call_id` and therefore wait updates. The hub uses these fields only to address the wait event: `mcpWaitReporter` checks the current manager's capability and its ownership of that machine. The `mcp.wait` event itself still carries exactly `{call_id, kind}`, with no tool or machine field added to it.
   - When a primary device is chosen and another device answered a `phone.call`, the hub adds a note naming both (a JSON object answer gets it as its `device_note` field, any other answer as a text block of its own; `docs/apple/phone-tools.md` "Which device takes a call").
@@ -4984,6 +5201,7 @@ in plan order (a task without `todo_id` did not start and has no link); no extra
            "reuse_todo":"todo_…",       // optional (#5279): the to-do the task runs on instead of a new one (task_plan's per-task `todo_id`); the apps neither send it back nor change it
            "todo_id":"todo_…",          // only present after start
            "owner_started":true,        // the hub's (#4929): the owner tapped Start on the card, as against the hub starting it without asking; never read from task_plan arguments or sent back
+           "memory_topic":["finance"],  // the hub's (#13532): the categories the plan's words were tagged with when they made it wait for Start; with owner_started, the sensitive memory entries a start may carry; never read from task_plan arguments or sent back
            "error":"",                   // why the Agent didn't start
            "error_code":"launcher_missing","error_args":{"where":"terminal","launcher":"…","pane_shell":"bash"},
            "retry_with":["claude"]}]}   // the hub's (#10365, feature task_retry_launcher): its launcher could not start on that computer, so the others there a Retry may name, the first suggested

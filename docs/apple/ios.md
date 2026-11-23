@@ -839,8 +839,9 @@ Apps built with older Xcode do not extend under the status bar and camera on Duo
     per hub group (`healthReportUploads`), as #2626 keeps a chat's attachments. The tree on its way out lives on a moment after the swap (about two seconds on an iPad simulator), and its Agents page
     took the chat the new page asked for again, opening it where no one saw it: each tree `RootView` builds has a `BuiltTree` of its own, `ShownTree` holds the shown one, and a page
     of another tree (on its way out) leaves the chats asked for, and the remembered chat, to the shown tree's page (#2836).
-  - Left-column `NavigationLink(value:)` replaces the right column (the left has its own never-pushed stack, forwarding values to the right); programmatically opened list pages must replace it too:
-    `path = NavigationPath([value])` (in single-column mode the list is at the stack bottom, equivalent to append; Agents `openFromList`). Pages opened from details still append.
+  - A list page replaces the right column: `path = NavigationPath([value])` (in single-column mode the list is at the stack bottom, equivalent to append; Agents `openFromList`,
+    the list column's `splitOpen`). A left-column `NavigationLink(value:)` replaces it by the split's own selection instead, outside `path`, and nothing that page pushes opens (#12035):
+    Settings' rows are buttons in the split (`SettingsListLink`), as the Agents list's, and links only in one stack. Pages opened from details still append.
   - The first right-column page has no back button (the list is beside it): add `.splitDetailPage()` to the destination; Agents' custom chat back button hides for `\.splitDetail` (keeping its space so the title stays centered).
     With the list folded, the chat's leading button brings it back (#963): the sidebar's button (`Theme.Icon.sidebar`, "Show Sidebar", with how many Agents need the user), as on the
     main conversation, not a ‹ (#8603). What the button shows follows how the page was reached, not what it is: a chat picked in the list is a root and has the sidebar's button; the
@@ -2056,9 +2057,20 @@ built in stages behind the hub's `todo_view`; this section grows with it.
   runs with `-AppleLanguages "(en)"`. `MOCK_TODO_VIEW=old` is a hub from before the view (405 for the item and places
   routes, as an older hub answers them), `late` one whose hello names the view only after a reconnect, and
   `MOCK_TODO_MANAGERS=2` gives the Weather App's to-dos to a second manager. `MOCK_MANAGERS=1` lists one manager, for
-  the path that reads the hub's counts and places as sent; the default roster lists several.
+  the path that reads the hub's counts as sent (each project's part of N counted from the rows); the default roster
+  lists several. Its knowledge base has the projects Kyoto trip, Weather App, Home and Garden, which has no to-dos (an
+  empty project's place).
   `docs/operations/testing.md` has the details, including `GET /mock/churn?todos=1` for measuring a push on the list
   and where the mock is not a hub.
+- **UI suites** (`TodosV1ListTests`, `TodosV1PlacesTests`): they run against that mock, whose address the runner gets as
+  `TEST_RUNNER_PERSONA_TODOS_HUB=http://127.0.0.1:<port>` (skipped without it), with `-showTodosV1 YES` standing for the
+  switch-on; `TEST_RUNNER_PERSONA_UI_STYLE=beautiful` runs them in BeautifulUI. Their `testFrames` save the V1 frames
+  for review instead of checking: `TEST_RUNNER_PERSONA_TODOS_FRAMES=1` and `TEST_RUNNER_PERSONA_SHOTS=<dir>`, with
+  `…_TODOS_SCHEME` (light or dark), `…_TODOS_LANGUAGE`, `…_TODOS_COLOR`, `…_TODOS_SIZE` (a content size category),
+  `…_TODOS_SUFFIX` and `…_TODOS_FRAMES_ONLY` (frame names, as `~drawer,~kyoto`); on an iPad the places' frames are the
+  Sidebar layout's (`ipad11-landscape-closed~today`, `~kyoto-place`). `testTodayFrames` (`…_TODOS_TODAY=1`) shoots
+  today's To-dos with the gate off, for a before and after against a build of `main`. Reset the mock
+  (`/mock/reset`) before each run.
 - **The data** (`TodoStore`, `apple/Persona/Features/Todos/`): `GET /api/v1/todos` is decoded into its rows and, beside
   them, each row's `view` (by to-do id) and the list's `counts` (`TodosPage`); a view that does not decode is none.
   `TodoItem` gains only facts (`part_of`, `after`, `restored_at`, `someday_until`); the store keeps `views`, `counts` and
@@ -2072,8 +2084,9 @@ built in stages behind the hub's `todo_view`; this section grows with it.
     of whose views is for the kept rows is not used at all;
   - the first V1 launch without it: `viewsRead` stays false until the first read ends, so the list does not file its
     rows twice, but no longer than a second (no connection yet, or a hub that does not answer);
-  - the places, read with the list while the hub lists `todo_places`, again only when the list changed; a hub without
-    the route, or whose hello stopped listing it, has none (All only);
+  - the places, read with the list once the hub has listed `todo_places` in this run, again only when the list changed;
+    a hub without the route (404 or 405), or that has not listed it, has none (All only). A later hello without it (a
+    manager reconnecting) takes nothing away, as the gate keeps the view; another hub starts again;
   - one timer, to the earliest `next_change_at` of any row, reads the list again (coalesced) through the app's hub, only
     while the scene is in front. A read that still shows that moment (the hub's clock behind) is tried again after 5 s
     and 30 s, then left to the next push, and the timer never reads sooner than 5 s after its last read. The timer is
@@ -2088,7 +2101,8 @@ built in stages behind the hub's `todo_view`; this section grows with it.
   app's own rules (`TodoTriageLogic`, frozen) mapped onto the V1 sections (Needs you → Needs you, Working → Working,
   PR to merge → Waiting, Other open → To do, Just finished → Just finished, Shelved → To do with the Inactive mark,
   Done → Done); a section's rows go by `rank`, then `manager`, then `id`. Every To-dos number comes from
-  `TodoStore.countsSource` (`TodoCountsSource`): the hub's `counts` and places with one manager; with several, counted
+  `TodoStore.countsSource` (`TodoCountsSource`): the hub's `counts` and places with one manager (each project's part of
+  N counted from its rows, as its place's Filter and Needs you header count it); with several, counted
   from the current assistant's filed rows (`TodoCountsFallback`, the hub's rules, replayed against
   `spec/fixtures/todo-counts`) with only its own project places; less the answers given on the device that the hub's
   view does not show yet. The rows are filed there once (`countsSource.filed`, the current assistant's in the list's
@@ -2144,10 +2158,10 @@ built in stages behind the hub's `todo_view`; this section grows with it.
     (`themedButton(prominent: true)`); on iOS 18 one `ToolbarItemGroup(placement: .bottomBar)` with the glyph, "Filtered
     by:" and +, the search field the system's drawer, passed as `.navigationBarDrawer(displayMode: .always)`, since
     under an inline title the drawer the system picks starts hidden until a pull. The Filter is not drawn in the calm
-    list or a list with no rows (`TodosListModel.filters`), and, once the places come, not in Today or Upcoming; its
-    choice goes back to All with it, so none comes back unseen. The toolbar, the subtitle and ⋯ read the model's flags
-    (`calm`, `searching`, `hasRows`, kept apart from the layout and set only when they change), never the layout, so a
-    landing does not redraw them. ⋯ (`TodosViewOptions`) is `ToolbarOverflowMenu` on iOS 27 built
+    list or a list with no rows (`TodosListModel.filters`), nor in Today or Upcoming (`TodosPlaces.filters`,
+    "Places" below); its choice goes back to All with it, so none comes back unseen. The toolbar, the subtitle and ⋯
+    read the model's flags (`calm`, `searching`, `hasRows`, kept apart from the layout and set only when they change),
+    never the layout, so a landing does not redraw them. ⋯ (`TodosViewOptions`) is `ToolbarOverflowMenu` on iOS 27 built
     with its SDK (`#if compiler(>=6.4)`), else `TodosViewMenu` as the primary action; both hold `TodosViewMenuItems`:
     Sort By, one `Section` of `Toggle`s
     (Suggested, Recently Changed, Due Date, Priority), then Group by Project, a `Toggle` left out while the list is calm
@@ -2253,6 +2267,59 @@ built in stages behind the hub's `todo_view`; this section grows with it.
   what it draws and whether the gate is on (`probe.todos-page`). The store's one-minute clock for rows filed by the
   app's own rules runs while a counted row is filed so (the drawer's N included, whether or not the list was drawn) and
   follows whatever changes that, another assistant made current included (`TodoCountsSource.byRulesChanged`).
+- **Places** (DESIGN_SYSTEM 3.5 "To-dos places"; `docs/design/sidebar-navigation.md` section 7). `TodosPlacesModel` reads
+  the store's places (`countsSource.places`: the hub's with one manager, the current assistant's projects with several,
+  each project's part of N counted from the rows) and the place picked (`TodoWorkspace.place`, kept for the app's run);
+  the entries it lists are worked out again only when the places or the knowledge base's projects change (a memo, P4).
+  `TodoPlaceRows` is the sidebar's To-dos row with its places folded under it (`sidebar.fold.todos`), each drawn by the
+  sidebar's own row, and reads only the places and the place shown, so their numbers redraw those rows alone; it reads
+  the knowledge base's projects (`TodoProjects`) once the places come and for each assistant made current, so All
+  Projects… is there before To-dos is first opened. The list's title is the system's title menu of the same places
+  (`TodoTitleMenu`, a project picked in All Projects… that it does not list listed ticked too), given by
+  `TodoPlaceFollower` only while there are places, so the page's own body reads none of them. A place a hub does not
+  list (no `todo_places` in this run, a 404 or 405, another assistant's project) is All To-dos
+  (`TodosPlaces.effective`); after a 404 or 405 the route is asked again only once a hello lists it anew, or for another
+  hub or assistant (`TodoStore.readPlaces`). The list filters the one list on the device (`TodosPlaces.holds`; the list
+  route has no place): Today, open and due today, overdue or reminding today; Upcoming, open and dated, laid out by day
+  (`TodoUpcomingLayout`, which takes no choice and no sort), each row under its day saying only its time
+  (`TodoRowContentLogic.content(underItsDay:)`); a project, its rows, line 3 leaving its name out (`inProject:`). On
+  Today and Upcoming a step counts with its parent where the place holds the parent, else it is a row there; a project
+  rolls a step up to its open parent wherever the parent is, as its part of N and the hub count it
+  (`TodosPlaces.rows`). Only All To-dos and a project's place draw the Filter (`TodosPlaces.filters`,
+  `TodosListModel.filters`); Today and Upcoming land on All and stay there, a deviation from proposal 3.3's first
+  "inside every place" that the owner decided on 11-21 (DECISIONS "11-21 The To-dos list"). ⋯ is the list's (Sort By,
+  Group by Project) on All To-dos, Today and a project, Group by Project greyed with why in a project
+  (`TodosPlaces.groupsByProject`); Upcoming's holds Show as Calendar alone. A place's Filter counts and Needs you header
+  count its rows (`TodoCountsSource.counts(of:)`, less the answers given on the device, `placeCounts`), never held. The
+  one guard line also counts what needs the owner outside the place (`hiddenNeeds`: `outsideNeeds`, kept and set only
+  when it changes so other numbers moving redraw nothing, plus what the choice hides of the place's own), names the
+  place when that is all (`hiddenElsewhere`), and opens All To-dos from a place; the title's subtitle says the same once
+  it has scrolled away (`TodosListModel.subtitle(place:)`). A change of the store's numbers alone (an answer given
+  here) counts the place again without laying the list out (`Snapshot.sameRows`). A search sets the place aside: while
+  the field has words the layout is every open row that matches (`makeLayout`). The place's rows are worked out once
+  per change for its numbers, its layout, the rows that come to need the owner while the list is held, and Upcoming's
+  calendar (`upcomingItems`). A project with nothing open, closed to-dos only too, has its own empty state
+  (`placeIsEmpty`); All Projects… counts each project's open to-dos from the filed rows (`TodosPlaces.openCounts`, a
+  step with its parent as above), worked out as the sheet opens and when its inputs change, never in its body. New
+  To-Do starts in the place shown (`TodosListModel.capture`): due today on Today, on Upcoming on the day its sheet asks
+  for (tomorrow, a day heading's, or an empty slot's day and hour on its calendar, `TodoCalendarView`'s `add`), in a
+  project in it. The foot toolbar's +, a day heading's + and the calendar's slot open `TodoNewSheet` with that default
+  (an hour starts with All Day off), which goes in the outbox's one create (`TodoOutbox.Write.create`'s due date or
+  moment and project; an entry kept on disk before these reads as none), so the row the list draws while it is saved is
+  in the place and counted there (`TodoCountsSource.applying` files it with its project, `TodosPlaces.holds` sees its
+  due date). One the hub turns down comes back in the sheet due as it was and in its project (`TodoOutbox.refusal`,
+  `Draft`); one whose project a 400 turned down (the hub takes the title and date as sent; `Sent.refused`'s `project`)
+  comes back without it, the toast saying so, and any other refusal says what the hub said. Today's empty state leads
+  to Upcoming with `EmptyStateView`'s link look, so the foot's + stays the one prominent action. A pick in the sidebar
+  opens To-dos on the place at its root (`TodoWorkspace.open`, taken once by `AssistantView.show` as `fresh`). The
+  To-dos row itself (`TodoWorkspace.pickRow`) is All To-dos where To-dos is the place in front and otherwise reopens it
+  as it was left: the host decides, from its own state (`TodoWorkspace.opening(inFront:)`: the shell's
+  `ShellPlaces.current`, the Sidebar layout's root, the classic page), not from whether the list is on screen. A pick
+  in the title menu, Show All and "3 coming up this week" change the list in place. Upcoming's ⋯ › Show as Calendar
+  (`todos.v1.upcomingCalendar`) draws Upcoming's own to-dos on the to-dos calendar, coloured by each row's view
+  (`TodoCalendarView`'s `state`; today's page keeps its session reader and its own slot sheet), with the guard line
+  above it and no Show Done (`TodosModeBar(options:)`); words in the search field show the list instead. DEBUG
+  `-openTodoPlace all|today|upcoming|project:<slug>` opens To-dos on a place.
 - **Send receipts** (`apple/Shared/SendReceipts.swift`; `docs/protocol/protocol.md` "Message feedback (#5258)" and its
   "To-do writes"). The socket decodes `message_send_state` and `todo_send_state` (`ServerEvent.sendReceipt`) and passes
   one on only while its own authenticated hello carries that kind's top-level version, `message_send_state: 1` or
@@ -2291,6 +2358,14 @@ be expanded separately, including server-folded ranges. Successful Persona `noti
 `task_review`, a successful `supervision_finish` receipt with user visibility, explicit user-level input or retained
 `fold.supervision_user` promotes the whole round. A pending live `ask_user` stays visible before its result arrives.
 Failed calls, arguments without success receipts and silent finishes do not establish or reverse promotion.
+
+In the main conversation, a completed, non-live round with a successful silent finish and no promotion instead leaves
+no timeline row and adds no unread count or badge. The split happens before work or supervision rows unfold, so open
+flags cannot bring its tools back. Its `task`, `routed` and `answered` feed cards inside the same half-open round
+interval move with it; plans, message cards, notices and other decisions remain visible. **Background activity** opens
+from both the conversation menu and Inbox, using the same `ChatStore`, paged `loadOlder` / unfold requests and
+`SupervisionRecordLine` / `lineView` rendering to retain the complete round and those feed cards. It creates no
+InboxItem and calls no `markSeen`. Full-history APIs are unchanged.
 
 The separate streaming answer stays hidden inside a closed quiet record, including text waiting for its transcript
 item after a turn stops. Frozen history uses its captured live turn, not a later turn's activity. Retained promotion survives overlapping

@@ -75,6 +75,8 @@ const (
 	briefEventDispatch    = "dispatch"
 	briefEventCompletion  = "completion"
 	briefEventEstimateDue = "estimate_due"
+	// briefEventMemory: the memory entries a start of the to-do carried in its first message (memory_handoff.go).
+	briefEventMemory = "memory"
 )
 
 // BriefRequest is the owner's message that led to a task: its words as they wrote them (cut at briefRequestMax, then
@@ -115,7 +117,11 @@ type BriefEvent struct {
 	Added         []string      `json:"added,omitempty"`
 	Dropped       []string      `json:"dropped,omitempty"`
 	Approval      *BriefRequest `json:"approval,omitempty"`
-	eventID       string        // process-local continuation rollback identity; never part of the wire or stored schema
+	// Entries are the memory entries a memory event's start carried, SensitiveEntries the sensitive ones among them
+	// (#13532): what the first message took of the user's memory, for the owner to check.
+	Entries          []string `json:"entries,omitempty"`
+	SensitiveEntries []string `json:"sensitive_entries,omitempty"`
+	eventID          string   // process-local continuation rollback identity; never part of the wire or stored schema
 }
 
 // BriefCriterion is one criterion's result when the work ended: met, not_met, unchecked (nobody checked it), or dropped

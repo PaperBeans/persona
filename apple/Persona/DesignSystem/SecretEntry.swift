@@ -1,7 +1,5 @@
 import SwiftUI
-#if os(iOS) || os(visionOS)
 import UIKit
-#endif
 
 extension View {
     /// A hidden field for a credential the app hands to something else (a token, an API key, a plugin's secret), not
@@ -53,22 +51,11 @@ struct SecretField: View {
     }
 
     var body: some View {
-        #if os(iOS) || os(visionOS)
         SecretTextField(placeholder: placeholder, filled: filled, identifier: identifier, text: $text,
                         onSubmit: onSubmitAction, onFocus: onFocusAction)
-        #else
-        // The standard field on a Mac.
-        SecureField(placeholder, text: $text)
-            .secretEntry()
-            .accessibilityIdentifier(identifier ?? "")
-            .onSubmit { onSubmitAction?() }
-            .focused($focused)
-            .onChange(of: focused) { _, now in onFocusAction?(now) }
-        #endif
     }
 }
 
-#if os(iOS) || os(visionOS)
 private struct SecretTextField: UIViewRepresentable {
     var placeholder: String
     var filled: String
@@ -191,4 +178,3 @@ private final class EmptyingSecureTextField: UITextField {
         revealButton?.accessibilityLabel = hidden ? String(localized: "Show contents") : String(localized: "Hide contents")
     }
 }
-#endif

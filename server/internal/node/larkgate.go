@@ -447,6 +447,49 @@ func (n *Node) assistantLark(ctx context.Context) proto.AssistantLark {
 	return cfg
 }
 
+// gateRefreshInterval: how often assistantLarkForGate asks the hub again when a gate's address is missing.
+const gateRefreshInterval = 2 * time.Second
+
+// assistantLarkForGate is assistantLark for a request at a gate's address: when the config has no such gate, or its
+// address is not in its environment yet (a gate added or re-configured on the hub after the process started), the hub is
+// asked again at most every gateRefreshInterval instead of waiting out assistantLark's minute (#13540).
+func (n *Node) assistantLarkForGate(ctx context.Context, command string) proto.AssistantLark {
+	cfg := n.assistantLark(ctx)
+	missing := command == ""
+	for i := range cfg.Gates {
+		g := cfg.Gates[i]
+		if g.Command != command {
+			continue
+		}
+		missing = !g.Relay && g.Env[g.BaseEnv] == ""
+		break
+	}
+	if !missing || n.peer == nil {
+		return cfg
+	}
+	// Both the last success and the last attempt throttle it, so an outage does not call the hub on every gate request.
+	n.mu.Lock()
+	at, tried := n.larkCfgAt, n.larkCfgTryAt
+	if time.Since(tried) < gateRefreshInterval || time.Since(at) < gateRefreshInterval {
+		n.mu.Unlock()
+		return cfg
+	}
+	n.larkCfgTryAt = time.Now()
+	n.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var fresh proto.AssistantLark
+	if err := n.peer.Call(ctx, "assistant.lark", map[string]any{}, &fresh); err != nil {
+		n.logger.Printf("assistant: Feishu gate config from hub: %v", err) // never the config itself
+		return cfg
+	}
+	relayGates(&fresh)
+	n.mu.Lock()
+	n.larkCfg, n.larkCfgAt = fresh, time.Now()
+	n.mu.Unlock()
+	return fresh
+}
+
 // relayGates makes each relayed gate (proto.CommandGate.Relay, #12904) one the gate proxy stands in for: an Auth of
 // its own (no header: the manager puts the credentials on the call), so that everything that holds a gate with Auth to
 // the proxy (larkgate.go, larkgate_env.go, gateproxy.go) holds this one too. Its socket and token stay out of the

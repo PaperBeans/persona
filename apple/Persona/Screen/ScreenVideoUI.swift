@@ -143,8 +143,6 @@ struct ScreenStats: Equatable {
     }
 }
 
-#if os(iOS) || os(visionOS)
-
 // MARK: - Round trips to the hub
 
 /// The recent round trips to the hub (#6558), timed on the app's own hub connection while the stats overlay is shown.
@@ -359,6 +357,4 @@ extension ScreenStats {
 #Preview("Stats overlay · VNC") {
     ZStack { Color.black; ScreenStatsOverlay(stats: .demoVNC) {} }.environment(\.colorScheme, .dark)
 }
-#endif
-
 #endif

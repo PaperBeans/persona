@@ -400,8 +400,9 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 	s.clearSentParentCloseout(moot)
 	s.turnsTold(ctx, moot) // what no longer holds is not told after a restart either (task_turns.go)
 	s.discardFailedStartBatches(ctx, moot, now)
+	ackable := append(slices.Clone(moot), kept...) // retry entries were restored and must survive every ACK path
 	if len(entries) == 0 {
-		s.ackSupervisePending(list) // every signal no longer holds, as the in-memory digest already decided
+		s.ackSupervisePending(ackable)
 		return false
 	}
 	for i := range kept {
@@ -419,7 +420,7 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 	}
 	if len(entries) == 0 {
 		s.automaticParksTold(ctx, holds)
-		s.ackSupervisePending(list) // already covered by the deduplication history
+		s.ackSupervisePending(ackable) // already covered by the deduplication history
 		s.agentDecisionRepliesTold(ctx, holds)
 		s.handoffResultsTold(ctx, holds)
 		s.todoReadyTold(ctx, holds)
@@ -469,7 +470,7 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 			}
 			s.rememberLegacyBackground(to, legacy)
 		}
-		s.ackSupervisePending(list)
+		s.ackSupervisePending(ackable)
 		s.ackSupervisionDedupLocked(ctx, delivered, ackKeys)
 		s.parkedDueTold(ctx, kept) // told for good: not again after a restart (parked.go)
 		s.automaticParksTold(ctx, kept)
@@ -724,6 +725,10 @@ func (s *Service) digestEntryChecked(ctx context.Context, g superviseSignal, web
 		return s.prMergedDigestEntry(ctx, g, web)
 	case sigParentCloseout:
 		return s.parentCloseoutDigestEntry(ctx, g, web)
+	case sigCardlessWait:
+		if valid, retry := s.completeCardlessClaim(ctx, g); !valid {
+			return prompts.SuperviseEntry{}, false, retry
+		}
 	}
 	e, ok := s.digestEntry(ctx, g, web)
 	return e, ok, false
@@ -940,9 +945,9 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 			return prompts.SuperviseEntry{}, false // decided or reviewed again meanwhile
 		}
 	case sigCardlessWait:
-		// The marker (stamped when raised, persisted whole-round) is the hold: Postgres truncates PendingSince to
-		// microseconds, so a full key comparison against it could fail only on a database-backed service.
-		if st != reviewPending || v.CardlessToldAt == nil {
+		// The pending claim is durable before this marker. Compare round identities at Postgres precision so a
+		// restored signal cannot acknowledge a newer review or be rejected merely for losing nanoseconds.
+		if !cardlessClaimMatches(t, g) || v.CardlessToldAt == nil {
 			return prompts.SuperviseEntry{}, false // reviewed, or handed back already, meanwhile
 		}
 		// Re-run the conditions that made the signal valid against current data: a card or active worker can have

@@ -423,6 +423,18 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	if decisions := s.todoHandoffDecisionsContext(ctx, t.TodoID); decisions != "" {
 		background = strings.TrimSpace(background + "\n\n" + decisions)
 	}
+	// The memory entries the task needs (memory_handoff.go, scene 3): general ones its words bear on, sensitive ones
+	// only after the owner confirmed a plan whose words carry their categories. The brief notes which went only once
+	// this start went through: a failure below, or a fallback to another computer, carried nothing from here.
+	if memory, carried := s.handOffMemoryContext(ctx, *t, m.ID); memory != "" {
+		background = strings.TrimSpace(background + "\n\n" + memory)
+		noteCtx, todoID := context.WithoutCancel(ctx), t.TodoID
+		defer func() {
+			if err == nil && sid != "" {
+				s.noteHandOffMemory(noteCtx, todoID, carried)
+			}
+		}()
+	}
 	if background != "" {
 		prompt += "\n\n" + background
 	}

@@ -343,6 +343,7 @@ export interface Contributes {
   auth_relay?: AuthRelayItem[];
   secret_providers?: SecretProviderItem[];
   repository_providers?: RepositoryProviderItem[];
+  memory_sources?: MemorySourceItem[];
   messaging?: MessagingItem[];
   /** Extra keys are opaque JSON; declared properties keep their own types. */
   [key: string]: unknown;
@@ -581,6 +582,19 @@ export interface RepositoryProviderItem {
    * (repo.pr_status). Without it the manager reads repo.describe's state. Each at most once.
    */
   capabilities?: RepositoryCapability[];
+}
+
+/**
+ * The extension's memory, read by the manager one entry at a time (memory.entries; memory.schema.json) so the hub
+ * decides which entries reach which scene (a conversation's standing context, a recall, a dispatched task, the
+ * Inbox's helper). Needs the program to speak the protocol; one per extension. Once declared, the hub stops
+ * delivering the extension's own text outlets (its assistant instructions, project context, Inbox context and its
+ * connectors' read tools in the assistant's conversations) directly.
+ */
+export interface MemorySourceItem {
+  id: string;
+  /** What settings call the source (My memory). Not only spaces, no control characters. */
+  name: string;
 }
 
 /**
@@ -7096,6 +7110,92 @@ export interface RepoPRStatusResult {
   viewer_is_author?: boolean;
 }
 
+/**
+ * error.code a memory source answers besides the base ErrorCode: not_ready (its entries are not loaded yet; the
+ * manager uses none of them this time and asks again at the next assembly), failed (anything else, say why in
+ * message).
+ */
+export type MemoryErrorCode = "not_ready" | "failed" | (string & {});
+export const MEMORY_ERROR_CODES = ["not_ready", "failed"] as const;
+
+/**
+ * memory.entries: one page of the contribution's entries, most important first (standing ones first, then by rank,
+ * then newest). Read-only: answering changes nothing in the program's state.
+ */
+export interface MemoryEntriesParams {
+  /** The memory_sources item's id. */
+  contribution: string;
+  /**
+   * At most this many entries on the page (the manager asks 200). Only a cap: the program ends a page early, with
+   * has_more and after, so the answer stays within 1 MB.
+   */
+  limit: number;
+  /** The previous page's after, to read on; empty for the first page. */
+  after?: string;
+}
+
+/**
+ * One page of entries. tagged is the program's promise for the whole page: it writes origin_space and categories on
+ * every entry and leaves them out only when empty, so a missing origin_space means the main space and missing
+ * categories mean general. A program that cannot promise that answers tagged false, and the manager then takes none
+ * of its entries for its own track (each is in no track, not known, so the strictest rule holds).
+ */
+export interface MemoryEntriesResult {
+  entries: MemoryEntry[];
+  tagged: boolean;
+  /**
+   * Another page follows; ask again with after. When true, after must be set: true with an empty after counts as the
+   * end of the entries.
+   */
+  has_more: boolean;
+  /** Opaque: what to send as after for the next page; required in practice whenever has_more is true. */
+  after?: string;
+}
+
+/**
+ * One entry as the program keeps it. Only an active entry is carried; the others may be answered (so a page's order
+ * stays the program's) and are skipped. An entry that breaks a rule here is dropped alone, never the page.
+ */
+export interface MemoryEntry {
+  /**
+   * Stable across pages and answers: a to-do's brief names the entries it carried by it (prefixed memory-extension:).
+   */
+  id: string;
+  /** What the entry says, as the program would render it, on one or a few lines. */
+  text: string;
+  /**
+   * The program's own grouping (preferences, workflow, people…). Informational: the hub neither filters nor orders by
+   * it.
+   */
+  facet?: string;
+  /**
+   * active: the program would use it today, whatever it calls that state itself (a program with its own stable or
+   * shifting states answers active for both); candidate: not borne out yet; dormant: not seen lately; retired: no
+   * longer true. Only active entries are carried; an entry with any other value is dropped.
+   */
+  status: string;
+  /** The slug of the space the entry was first said in; left out for the main space. */
+  origin_space?: string;
+  /**
+   * Its information categories (health, finance, relationships, emotion, legal_id); left out for a general entry. A
+   * category the hub does not know makes the entry not known.
+   */
+  categories?: string[];
+  /**
+   * The program kept it in every conversation (always in context). Only a standing entry goes to a standing channel
+   * (usage still decides); the others come in only by relevance (their subjects or text) in a recall, a hand-off or
+   * the Inbox.
+   */
+  standing?: boolean;
+  /** The program's order among entries alike in standing: higher first. Left out: 0. */
+  rank?: number;
+  /**
+   * The names whose mention brings the entry in (a person, a project, a place): what a task's or a message's words
+   * are matched with, besides its text.
+   */
+  subjects?: string[];
+}
+
 /** One call or event of an extension point's protocol: who sends it, and the definitions its params and
  * its answer hold to (no result: any JSON; an event has no answer). */
 export interface Call {
@@ -7206,4 +7306,5 @@ export const CALLS: Record<string, Call> = {
   "repo.link": { from: "hub", params: "RepoLinkParams", result: "RepoLinkResult" },
   "repo.describe": { from: "hub", params: "RepoDescribeParams", result: "RepoDescribeResult" },
   "repo.pr_status": { from: "hub", params: "RepoPRStatusParams", result: "RepoPRStatusResult" },
+  "memory.entries": { from: "hub", params: "MemoryEntriesParams", result: "MemoryEntriesResult" },
 };

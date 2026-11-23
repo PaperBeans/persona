@@ -1,7 +1,6 @@
 import BeautifulUI
 import SwiftUI
 
-#if os(iOS) || os(visionOS)
 /// The iPhone's ChatGPT-style shell (docs/apple/ios.md「New shell」): no tab bar. Assistant (the Persona assistant) and Agents (the Agents
 /// list) are two pages under the top switch, both kept alive like tabs (switching keeps each one's place); the drawer
 /// slides both aside; Inbox / Scheduled Tasks / Knowledge / Machines push onto Assistant; Settings is a sheet.
@@ -274,4 +273,3 @@ private struct ShellMovingBar: View {
         .accessibilityHidden(true)
     }
 }
-#endif

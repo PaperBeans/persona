@@ -143,6 +143,59 @@ func TestEffortPickerAndOutcome(t *testing.T) {
 	}
 }
 
+func TestEffortPicker330(t *testing.T) {
+	for _, tt := range []struct {
+		name, screen, key string
+	}{
+		{"offers a session-only key", slider330Save, "s"},
+		{"enter is session-only", slider330Enter, "enter"},
+		{"wrapped footer", strings.Replace(slider330Save, "only · Enter", "\n  only · Enter", 1), "s"},
+		{"ordinary output", "Effort\n  Use the arrows to adjust or save for later.\n❯ ", ""},
+		{"footer in scrollback", slider330Save + "\n❯ ", ""},
+		{"another dialog", strings.Replace(slider330Save, "Effort", "Volume", 1), ""},
+		{"no session binding", slider330Body + "  ←/→ to adjust · Enter to save · Esc to cancel\n", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := effortSliderConfirmKey(tt.screen); got != tt.key {
+				t.Errorf("confirmation key = %q, want %q", got, tt.key)
+			}
+			want := ""
+			switch tt.key {
+			case "s":
+				want = "session-slider"
+			case "enter":
+				want = "slider"
+			}
+			if got := effortPicker(tt.screen); got != want {
+				t.Errorf("picker = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestEffortOutcome330(t *testing.T) {
+	for _, tt := range []struct {
+		screen, effort string
+	}{
+		{"⎿  Set effort level to medium (this session\n  only): Balanced approach", "medium"},
+		{"  ○ low · /effort\n────\n❯ ", "low"},
+		{"  ◐ medium · /effort\n────\n❯ ", "medium"},
+		{"  ● high · /effort\n────\n❯ ", "high"},
+		{"  ◉ xhigh · /effort\n────\n❯ ", "xhigh"},
+		{"  ◈ max · /effort\n────\n❯ ", "max"},
+		{"  ◐ medium · /effort\n────\n❯ ", "auto"},
+	} {
+		if err := effortOutcome(tt.screen, tt.effort); err != nil {
+			t.Errorf("effortOutcome(%q, %q) = %v", tt.screen, tt.effort, err)
+		}
+	}
+	for _, screen := range []string{"  ◐ medium · /effort\n────\n❯ ", "  ◉ xhigh · working"} {
+		if err := effortOutcome(screen, "xhigh"); err == nil {
+			t.Errorf("effortOutcome(%q, xhigh) accepted an unconfirmed change", screen)
+		}
+	}
+}
+
 // effortSlider330 is Claude Code 2.1.330's /effort slider with `footer` as its key hints.
 func effortSlider330(footer string) string {
 	return "❯ /effort\n\n  Effort\n  ──────────▲\n  low     medium     high     xhigh      max     ultracode\n  " + effortPickerDefault +

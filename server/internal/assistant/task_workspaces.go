@@ -149,7 +149,9 @@ func (s *Service) PrepareBackendWorkspace(ctx context.Context, id, op string) (*
 			}
 		}
 	}
-	result, err := s.backendWorkspaceCall(ctx, "prepare", r.Request())
+	req := r.Request()
+	req.MirrorRepos = s.prepareEnabledMirrorsForWorkspace(ctx, r)
+	result, err := s.backendWorkspaceCall(ctx, "prepare", req)
 	if err != nil {
 		result = *r
 		result.Error = err.(*taskworkspace.Problem)

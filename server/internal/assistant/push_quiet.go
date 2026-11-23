@@ -33,7 +33,8 @@ func (s *Service) quietModeOn(ctx context.Context) bool {
 	if force != nil {
 		return *force
 	}
-	return s.hello(ctx).QuietPush
+	// An attention mode other than normal counts as the switch on, whatever the switch says (attention.go).
+	return s.hello(ctx).QuietPush || s.attentionNow(ctx).Active()
 }
 
 // quietHoldsAsk: low-distraction mode keeps ask a off the Feishu bot: a conclusion (task_review accepted, cannot) or a "Please verify"

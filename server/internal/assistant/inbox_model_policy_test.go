@@ -70,7 +70,7 @@ func TestInboxModelOutboundToolsDenied(t *testing.T) {
 	h, _, _ := handledHub(t)
 	ext := &policyExtensions{read: map[string]bool{
 		"mail_send": false, "github_comment": false, "github_review": false,
-		"lark_agent_reply": false, "example_future_write": false, "computer_run": false,
+		"lark_image": false, "lark_agent_reply": false, "example_future_write": false, "computer_run": false,
 	}}
 	h.SetExtensions(ext)
 	h.originSet(t.Context(), "server", "s1", OriginInbox, "lark:f1:100", "")
@@ -85,7 +85,7 @@ func TestInboxModelOutboundToolsDenied(t *testing.T) {
 		})
 	}
 	extensionWrites := []string{
-		"mail_send", "github_comment", "github_review", "lark_agent_reply",
+		"mail_send", "github_comment", "github_review", "lark_agent_reply", "lark_image",
 		"example_future_write", "computer_run", "subscription_run", "future_unknown_tool",
 	}
 	for _, name := range extensionWrites {
@@ -114,11 +114,11 @@ func TestInboxModelOutboundToolsDenied(t *testing.T) {
 // entry point. The suggestion itself is stored; no reply is sent before the owner's action.
 func TestInboxModelReadOnlyInvestigationAndSuggestion(t *testing.T) {
 	h, lark, it := handledHub(t)
-	ext := &policyExtensions{read: map[string]bool{"lark_chats": true, "mail_search": true, "subscription_list": true}}
+	ext := &policyExtensions{read: map[string]bool{"lark_chats": true, "lark_image": true, "mail_search": true, "subscription_list": true}}
 	h.SetExtensions(ext)
 	h.originSet(t.Context(), "server", "s1", OriginInbox, it.ID, "")
 
-	for _, name := range []string{"lark_chats", "mail_search", "subscription_list"} {
+	for _, name := range []string{"lark_chats", "lark_image", "mail_search", "subscription_list"} {
 		res := h.mcpCallWithOrigin(t.Context(), "server", "s1", name, json.RawMessage(`{}`), true, OriginInbox)
 		if res.IsError || toolText(res) != "read "+name {
 			t.Fatalf("read-only %s: %+v", name, res)

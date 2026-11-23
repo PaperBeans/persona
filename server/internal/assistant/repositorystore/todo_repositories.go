@@ -221,25 +221,39 @@ func (d *Store) SetTodoRepositoryLinkRole(ctx context.Context, id, canonicalURL,
 	if perr != "" {
 		return repository.TaskSet{}, perr
 	}
+	// NormalizeLink stores the default delivery role as an empty string.
+	storedRole := ""
+	if normalized == repository.LinkRoleReference {
+		storedRole = normalized
+	}
+	return d.updateTodoRepositoryLink(ctx, id, canonicalURL, func(link *repository.TaskLink) {
+		link.Role = storedRole
+	})
+}
+
+// SetTodoPRLinkTitle updates only an existing PR link. A poll must never recreate a removed link.
+func (d *Store) SetTodoPRLinkTitle(ctx context.Context, id, canonicalURL, title string) error {
+	_, err := d.updateTodoRepositoryLink(ctx, id, canonicalURL, func(link *repository.TaskLink) {
+		if link.Kind == "pull_request" && title != "" {
+			link.Title = title
+		}
+	})
+	return err
+}
+
+func (d *Store) updateTodoRepositoryLink(ctx context.Context, id, canonicalURL string, update func(*repository.TaskLink)) (repository.TaskSet, error) {
 	var out repository.TaskSet
 	err := d.Transaction(ctx, func(tx pgx.Tx) error {
 		cur, err := ReadTodoRepositoriesTx(ctx, tx, id, nil)
 		if err != nil {
 			return err
 		}
-		// Stored delivery links keep the empty value (see NormalizeLink); compare and write that representation so
-		// re-applying delivery to an already-delivery link is a no-op instead of bumping the revision every gate pass.
-		storedRole := ""
-		if normalized == repository.LinkRoleReference {
-			storedRole = normalized
-		}
 		changed := false
-		for ri := range cur.Repositories {
-			for li := range cur.Repositories[ri].Links {
-				if cur.Repositories[ri].Links[li].CanonicalURL == canonicalURL &&
-					cur.Repositories[ri].Links[li].Role != storedRole {
-					cur.Repositories[ri].Links[li].Role = storedRole
-					changed = true
+		for _, row := range cur.Repositories {
+			for i, link := range row.Links {
+				if link.CanonicalURL == canonicalURL {
+					update(&row.Links[i])
+					changed = changed || row.Links[i] != link
 				}
 			}
 		}

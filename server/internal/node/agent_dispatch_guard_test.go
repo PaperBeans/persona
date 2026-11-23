@@ -2,12 +2,16 @@ package node
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/compat"
+	"github.com/nwverse/persona/server/internal/prompts"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 func TestAgentDirectoryGuardResolvesAliases(t *testing.T) {
@@ -69,6 +73,68 @@ func TestMacAgentInstructionsDefaultOn(t *testing.T) {
 	if got := agentPlatformInstructions("linux", "Keep the task scope."); got != "Keep the task scope." {
 		t.Errorf("Linux instructions = %q", got)
 	}
+}
+
+// On a Mac, a new session.start adds the Mac rules once to the task instructions it was sent, and a resume adds none
+// (#13393). The package's other tests run on linux (TestMain); this one sets darwin.
+func TestMacAgentInstructionsOnStartNotResume(t *testing.T) {
+	prev := agentGOOS
+	agentGOOS = "darwin"
+	t.Cleanup(func() { agentGOOS = prev })
+	mac := strings.TrimSpace(prompts.RenderAgentMacRules())
+
+	t.Run("start", func(t *testing.T) {
+		shellHome := fakeCLIHome(t)
+		if err := os.WriteFile(filepath.Join(shellHome, ".zshrc"), []byte("forward() { claude \"$@\"; }\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		n, f, home := herdrNode(t)
+		cwd := mkdir(t, filepath.Join(home, "proj"))
+		f.reply("workspace.list", map[string]any{"workspaces": []any{map[string]any{"workspace_id": "w1", "label": "proj"}}})
+		startHerdr(f, "w1:p2", "idle")
+		f.reply("tab.create", map[string]any{"tab": map[string]any{"tab_id": "w1:t2"}, "root_pane": map[string]any{"pane_id": "w1:p2"}})
+		f.screenSteps("w1:p2", isKeys(), screenFixture(t, "claude-2.1.312-empty-162.txt"))
+		promptLands(t, f, home, cwd)
+		const rules = "Keep this assignment's scope."
+		_, err := request(t, n, "session.start", map[string]any{"session_id": startID, "cwd": cwd, "launcher": "forward", "prompt": "fix the build", "task_instructions": rules})
+		if err != nil {
+			t.Fatal(err)
+		}
+		n.firstWait.Wait()
+		st, _ := n.state.get(startID)
+		if st.TaskInstructions != rules+"\n\n"+mac || strings.Count(st.TaskInstructions, mac) != 1 {
+			t.Fatalf("task instructions=%q", st.TaskInstructions)
+		}
+		if raw, err := os.ReadFile(st.TaskInstructionFile); err != nil || string(raw) != st.TaskInstructions {
+			t.Fatalf("instruction file=%q %v", raw, err)
+		}
+	})
+
+	t.Run("resume", func(t *testing.T) {
+		n, f, home := herdrNode(t)
+		n.starts.add(startID, &startRec{done: make(chan struct{}), session: proto.Session{SessionID: startID, Starting: true}})
+		n.starts.finish(startID, errors.New("claude did not become ready"))
+		cwd := mkdir(t, filepath.Join(home, "fresh"))
+		f.reply("workspace.list", map[string]any{"workspaces": []any{}})
+		f.reply("workspace.create", map[string]any{"workspace": map[string]any{"workspace_id": "w7"},
+			"tab": map[string]any{"tab_id": "w7:t1"}, "root_pane": map[string]any{"pane_id": "w7:p1"}})
+		startHerdr(f, "w7:p1", proto.StatusDone)
+		f.setScreen("w7:p1", screenFixture(t, "claude-2.1.312-empty-162.txt"))
+		if _, err := request(t, n, "session.start", map[string]any{"cwd": cwd, "launcher": "claude", "resume_session_id": startID}); err != nil {
+			t.Fatal(err)
+		}
+		if err := n.starts.wait(t.Context(), startID); err != nil {
+			t.Fatal(err)
+		}
+		if st, _ := n.state.get(startID); st.TaskInstructions != "" || st.TaskInstructionFile != "" {
+			t.Fatalf("resume state=%+v", st)
+		}
+		want := call("pane.send_input", map[string]any{"pane_id": "w7:p1", "keys": []string{"Enter"},
+			"text": startCmd("claude", "--session-id "+startID, personaDir(home))})
+		if trace := f.trace(); !slices.Contains(trace, want) {
+			t.Fatalf("no plain --session-id start in %v", trace)
+		}
+	})
 }
 
 // A track's directory is the assistant's (#13472): an Agent is not dispatched into it under any spelling of its path,

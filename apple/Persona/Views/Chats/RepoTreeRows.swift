@@ -174,7 +174,6 @@ struct WorkspaceSidebarCard<AgentContent: View, Actions: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(.rect)
         } actions: { actions(workspace, session) }
-        .macHoverShade(in: RoundedRectangle(cornerRadius: Theme.Radius.control), outset: 0)
         .accessibilityIdentifier(agentIdentifier)
         .id(session.id)
         .onAppear { appeared(session) }

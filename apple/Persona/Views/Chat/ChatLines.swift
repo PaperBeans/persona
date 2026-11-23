@@ -87,11 +87,99 @@ struct ChatLines {
     /// History has been read back to the start, so a child that started earlier can sit in the first exchange.
     var historyComplete = false
 
+    /// The two read-only views of the main conversation. A completed silent round is removed before `unfold`, so an
+    /// open work/supervision flag cannot put its tool rows back into the default timeline.
+    enum Presentation {
+        case timeline, backgroundActivity
+    }
+
+    /// A feed card written during one silent round. `end` is the next real input (exclusive), or nil while no later
+    /// real input is loaded; the half-open interval keeps a card at the next input in that next exchange.
+    struct ActivityInterval: Equatable {
+        var start: Date
+        /// Nil while no later real input is loaded: the interval remains open on the right.
+        var end: Date?
+        func contains(_ at: Date) -> Bool { start <= at && (end.map { at < $0 } ?? true) }
+    }
+
+    struct Projection {
+        var timeline: [ChatLine]
+        var activity: [ChatLine]
+        var intervals: [ActivityInterval]
+
+        /// Task hand-offs, routed messages and answered cards produced by a silent round move with it. Plans,
+        /// messages, notices and briefs remain ordinary user-facing content and never leave the default timeline.
+        func feed(_ feed: [FeedItem], for presentation: Presentation) -> [FeedItem] {
+            feed.filter { item in
+                let hidden = Self.movesToActivity(item) && intervals.contains { $0.contains(item.at) }
+                switch presentation {
+                case .timeline: return !hidden
+                case .backgroundActivity: return hidden
+                }
+            }
+        }
+
+        private static func movesToActivity(_ item: FeedItem) -> Bool {
+            switch item.kind {
+            case .task, .routed, .answered: true
+            default: false
+            }
+        }
+    }
+
     /// The lines of these blocks with the open work lines unfolded.
-    func build(_ blocks: [ChatBlock], live: String?, streaming: Bool = false) -> [ChatLine] {
+    func build(_ blocks: [ChatBlock], live: String?, streaming: Bool = false,
+               presentation: Presentation = .timeline) -> [ChatLine] {
+        let split = projection(blocks, live: live, streaming: streaming, presentation: presentation)
+        switch presentation {
+        case .timeline: return split.timeline
+        case .backgroundActivity: return split.activity
+        }
+    }
+
+    /// Split only after folded children have been inserted into their rounds, and before either side is unfolded.
+    func projection(_ blocks: [ChatBlock], live: String?, streaming: Bool = false,
+                    presentation: Presentation? = nil) -> Projection {
         let built = lines(blocks, live: live, streaming: streaming)
         let placed = childPlaces.isEmpty ? built : ChildSessionLines.insert(built, places: childPlaces, sessions: childSessions, complete: historyComplete)
-        return unfold(placed)
+        let showTimeline = presentation != .backgroundActivity
+        let showActivity = presentation != .timeline
+        // Agent chats and leader conversations keep their existing renderer; only Main needs a second projection and
+        // the receipt index used to find it. Do not scan another whole transcript for every other chat.
+        guard main else {
+            return Projection(timeline: showTimeline ? unfold(placed) : [], activity: [], intervals: [])
+        }
+        let all = blocks.flatMap(Self.transcriptItems)
+        let results = all.reduce(into: [String: Item]()) { out, item in
+            if item.kind == .toolResult, let id = item.toolUseID { out[id] = item }
+        }
+        var timeline: [ChatLine] = []
+        var activity: [ChatLine] = []
+        var intervals: [ActivityInterval] = []
+        for line in placed {
+            guard main, case .supervision(_, let trace, let running, let source) = line.content,
+                  Supervision.completedSilent(trace.flatMap(Self.lineItems), results: results, live: running,
+                                              routineMainRelay: source?.kind == "conversation") else {
+                timeline.append(line)
+                continue
+            }
+            activity.append(line)
+            if let interval = Self.activityInterval(trace: trace, all: all) { intervals.append(interval) }
+        }
+        return Projection(timeline: showTimeline ? unfold(timeline) : [],
+                          activity: showActivity ? unfold(activity) : [], intervals: intervals)
+    }
+
+    /// The half-open timestamp span of one silent round in the loaded transcript.
+    private static func activityInterval(trace: [ChatLine], all: [Item]) -> ActivityInterval? {
+        let evidence = trace.flatMap(Self.lineItems)
+        guard let start = evidence.first(where: { $0.ts != nil })?.ts else { return nil }
+        var end: Date?
+        if let last = evidence.max(by: { ($0.seq, $0.part) < ($1.seq, $1.part) }),
+           let next = all.first(where: { ($0.seq, $0.part) > (last.seq, last.part) && $0.isUserInput }) {
+            end = next.ts
+        }
+        return ActivityInterval(start: start, end: end)
     }
 
     /// The lines of these blocks, before open work lines are unfolded. `streaming`: the running turn's next words are
@@ -704,6 +792,35 @@ extension ChatLines {
         var next = 0
         for line in lines {
             if let at = inputTime(line) {
+                while next < feed.count, feed[next].at < at {
+                    out.append(.feed(feed[next]))
+                    next += 1
+                }
+            }
+            out.append(line)
+        }
+        while next < feed.count {
+            out.append(.feed(feed[next]))
+            next += 1
+        }
+        return out
+    }
+
+    /// The hidden rounds and their feed cards in transcript order. A quiet header has no top-level user input for
+    /// `mergeFeed` to place against, so Background activity compares the round's own first timestamp instead.
+    static func mergeActivityFeed(_ lines: [ChatLine], _ feed: [FeedItem]) -> [ChatLine] {
+        guard !feed.isEmpty else { return lines }
+        func start(_ line: ChatLine) -> Date? {
+            switch line.content {
+            case .supervision(_, let trace, _, _): return trace.flatMap(Self.lineItems).compactMap(\.ts).min()
+            case .feed(let item): return item.at
+            default: return nil
+            }
+        }
+        var out: [ChatLine] = []
+        var next = 0
+        for line in lines {
+            if let at = start(line) {
                 while next < feed.count, feed[next].at < at {
                     out.append(.feed(feed[next]))
                     next += 1

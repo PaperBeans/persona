@@ -215,6 +215,18 @@ nonisolated enum AssistantEntries {
         return state == "user_check" || state == "needs_user" || (state == "pending_review" && !supervisorReviewing(todo, now: now))
     }
 
+    /// The main conversation names only a current owner question or acceptance, never a supervisor's pending review.
+    /// Other conversations keep the legacy `awaitsDecision` rule above; Agents and To-dos are separate surfaces.
+    static func directUserDecision(_ todo: TodoItem) -> Bool {
+        guard todo.doneAt == nil else { return false }
+        if let ask = openAsk(todo) {
+            let hasQuestions = !(ask.question ?? "").isEmpty || !(ask.options ?? []).isEmpty
+            if hasQuestions || ask.outcome == "decide" || (ask.outcome ?? "").isEmpty || !(ask.whyOwner ?? "").isEmpty { return true }
+        }
+        let state = todo.reviewState
+        return state == .needsUser || state == .userCheck
+    }
+
     /// The task's row among the tasks in progress says its supervisor is reviewing it: nothing of it runs or asks, and
     /// the review is not the owner's (the web's `supervisorReview`).
     static func saysSupervisorReview(_ todo: TodoItem, status: Status, now: Date) -> Bool {
@@ -236,14 +248,16 @@ nonisolated enum AssistantEntries {
                                  interactions: [Interaction], plans: [String: TaskPlan], feed: [FeedItem], now: Date = .now,
                                  restored: [String: Date] = [:], going: [DockAgent]? = nil,
                                  messageWaits: (FeedItem) -> Bool = AssistantEntries.messageWaits,
-                                 decisionHidden: (TodoItem) -> Bool = { _ in false }) -> Result {
+                                 decisionHidden: (TodoItem) -> Bool = { _ in false }, directUserOnly: Bool = false) -> Result {
         let lookup = TodosLogic.makeSessionLookup(sessions)
         let isMain = !(main ?? "").isEmpty && main == conversation
+        let directAttention = directUserOnly && isMain
         // A function, not a closure value: Swift 6.2.4 (Xcode 26.3) rejects capturing a closure value in the `listed`
         // closure below ("sending 'pair' risks causing data races").
         func pair(_ m: String, _ s: String) -> String { m + "/" + s }
         var asksOf: [String: [Interaction]] = [:]
         for ix in interactions.sorted(by: { ($0.createdAt ?? .distantPast, $0.id) < ($1.createdAt ?? .distantPast, $1.id) }) {
+            if directAttention && !Supervision.directUserRequest(ix) { continue }
             asksOf[pair(ix.machineID, ix.sessionID), default: []].append(ix)
         }
 
@@ -302,16 +316,23 @@ nonisolated enum AssistantEntries {
             let triage = TodoTriageLogic.triage(todo, lookup: lookup, now: now, restoredAt: restored[todo.id],
                                                 superseded: superseded.contains(todo.id))
             let bucket = TodoTriageLogic.bucket(todo, triage)
-            // a failed start carries done_at (the hub ends it), yet it is the user's to retry while its bucket says open
-            let waits = status == .failed ? bucket == .open : todo.doneAt == nil && (status == .needsYou || status == .interrupted)
-            let decision = awaitsDecision(todo, now: now)
-            let deliveryApproval = todo.doneAt == nil && todo.delivery?.waitsForOwner == true
-            if !asks.isEmpty { asking.append((row, asks.map { $0.createdAt ?? .distantPast }.min())); listed() }
-            else if waits || decision || deliveryApproval {
-                // Only the review decision is put off or dismissed (Later / Don't handle); a live Agent question keeps its home.
-                if deliveryApproval || !(status != .needsYou && decision && decisionHidden(todo)) {
-                    let needsStatus: Status = deliveryApproval && status != .interrupted ? .needsYou : status
-                    deciding.append((.task(id: todo.id, status: needsStatus, agents: active.count), rank(todo, status), when))
+            // First keep the legacy slot. Direct-user filtering removes rows from Needs You only; it never moves an
+            // excluded permission, retry, failed start or supervisor review into In Progress.
+            let legacyWaits = status == .failed ? bucket == .open : todo.doneAt == nil && (status == .needsYou || status == .interrupted)
+            let legacyDecision = awaitsDecision(todo, now: now)
+            let legacyDelivery = todo.doneAt == nil && todo.delivery?.waitsForOwner == true
+            let waits = !directAttention && legacyWaits
+            let decision = directAttention ? (status != .failed && directUserDecision(todo)) : legacyDecision
+            let deliveryApproval = (!directAttention || status != .failed) && legacyDelivery
+            if !asks.isEmpty, !directAttention || status != .failed { asking.append((row, asks.map { $0.createdAt ?? .distantPast }.min())); listed() }
+            else if legacyWaits || legacyDecision || legacyDelivery {
+                if waits || decision || deliveryApproval {
+                    // Delivery acceptance is its own gate. A dismissed direct decision leaves; a live direct question stays.
+                    let hidden = directAttention ? decisionHidden(todo) : (status != .needsYou && decision && decisionHidden(todo))
+                    if deliveryApproval || !hidden {
+                        let needsStatus: Status = deliveryApproval && status != .interrupted ? .needsYou : status
+                        deciding.append((.task(id: todo.id, status: needsStatus, agents: active.count), rank(todo, status), when))
+                    }
                 }
                 listed()
             }
@@ -340,13 +361,14 @@ nonisolated enum AssistantEntries {
         var running: [Row] = []
         for agent in dock where !folded.contains(pair(agent.key.machineID, agent.key.sessionID)) {
             if agent.isWaiting {
-                asking.append((.agent(agent), asksOf[pair(agent.key.machineID, agent.key.sessionID)]?.first?.createdAt))
+                let first = asksOf[pair(agent.key.machineID, agent.key.sessionID)]?.first?.createdAt
+                if !directAttention || first != nil { asking.append((.agent(agent), first)) }
             } else {
                 running.append(.agent(agent))
             }
         }
 
-        let waitingPlans = plans.values.filter { $0.conversation == conversation && $0.state == .open }
+        let waitingPlans = directAttention ? [] : plans.values.filter { $0.conversation == conversation && $0.state == .open }
             .sorted { ($0.createdAt ?? .distantPast, $0.id) < ($1.createdAt ?? .distantPast, $1.id) }
             .map { Row.plan(id: $0.id) }
         let messages = feed.filter(messageWaits).compactMap { item in item.ref.map { Row.message(feedID: item.id, itemID: $0) } }
@@ -626,6 +648,7 @@ struct AssistantActionBar: View {
     static func content(_ conversation: String, key: SessionKey? = nil) -> ActionTrayContent {
         let store = TasksStore.shared
         let model = AppModel.shared
+        let isMain = !(model.assistantMain?.sessionID ?? "").isEmpty && conversation == model.assistantMain?.sessionID
         let todos = store.todos.values.sorted { ($0.createdAt ?? .distantPast, $0.id) > ($1.createdAt ?? .distantPast, $1.id) }
         // Only the tasks' own agents, which is all a task's status reads, and the agents going on as the dock had them: the
         // bar must not follow every agent's push (AllSessionsReadersTests, #3446).
@@ -639,8 +662,10 @@ struct AssistantActionBar: View {
                 guard item.kind == .message, let id = item.ref, !store.isLater(item) else { return false }
                 return store.messageState(item, itemID: id) == .open
             },
-            decisionHidden: { store.decisionHidden($0) })
-        let asks = (key.map { model.interactions(for: $0) } ?? []).sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
+            decisionHidden: { store.decisionHidden($0) }, directUserOnly: isMain)
+        let asks = (key.map { model.interactions(for: $0) } ?? [])
+            .filter { !isMain || Supervision.directUserRequest($0) }
+            .sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
         var content = ActionTrayContent(entries, asks: asks.map { .init(id: $0.id, title: $0.askLine(includeToolName: false) ?? $0.title) })
         // The main conversation, while it folds background rounds, groups Needs You by supervising conversation.
         content.groupNeedsYou(conversation == model.assistantMain?.sessionID && model.mainBackgroundFolded,

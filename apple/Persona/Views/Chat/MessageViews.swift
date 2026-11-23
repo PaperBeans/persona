@@ -95,7 +95,6 @@ extension View {
     func runFonts() -> some View { modifier(RunFonts()) }
 }
 
-#if os(iOS) || os(visionOS)
 /// Inline code's ink (#9477): `Theme.Reply.codeInk`, a step quieter than the words, where they are in the body's own
 /// ink. Words drawn in an ink of their own (a quote, a quieter heading, an agent's quiet words between its steps) keep it
 /// for their code too, and so does a written link: code in it is the link's. A copy link (`CodeCopyMarkdown`, what
@@ -109,7 +108,6 @@ struct InlineCodeInk: TextStyle {
         }
     }
 }
-#endif
 
 extension MarkdownUI.Theme {
     /// A fenced code block: monospaced, scrolling sideways, on the code background.
@@ -122,9 +120,6 @@ extension MarkdownUI.Theme {
         }
         .clipped() // not past the block into the safe area beside it (`ReplyCodeBlock`, #8212)
         .background(Theme.codeBackground, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
-        .macHoverActions {
-            MacHoverButton(title: String(localized: "Copy Code [Message Views fa2611]"), symbol: Theme.Icon.copy) { MacHover.copy(config.content, said: String(localized: "Code copied")) }
-        }
     }
 
     /// H4–H6 (#3863): MarkdownUI's own were the bare text, so `#### Notes` read as the next paragraph's first line. A step
@@ -1322,9 +1317,7 @@ final class StreamRevealClock {
     /// Bumped when what is shown changed: the view's only dependency.
     private var revision = 0
     @ObservationIgnored private var reveal: StreamReveal?
-    #if os(iOS) || os(visionOS)
     @ObservationIgnored private var link: CADisplayLink?
-    #endif
 
     /// What of `text` to draw. `text` is the newest the view was given; `receive` takes it in right after this redraw,
     /// so until then what was shown stays (or, first time, `StreamReveal`'s start; a text that does not continue it,
@@ -1337,16 +1330,10 @@ final class StreamRevealClock {
     }
 
     func receive(_ text: String) {
-        #if os(iOS) || os(visionOS)
         let now = CACurrentMediaTime()
         if reveal == nil { reveal = StreamReveal(text) } else { reveal?.receive(text, at: now) }
         revision &+= 1
         if reveal?.caughtUp == false { start() }
-        #else
-        reveal = StreamReveal(text)
-        reveal?.finish()
-        revision &+= 1
-        #endif
     }
 
     func finish() {
@@ -1356,20 +1343,15 @@ final class StreamRevealClock {
     }
 
     func stop() {
-        #if os(iOS) || os(visionOS)
         link?.invalidate()
         link = nil
-        #endif
     }
 
     /// Back on screen: what still waits goes on (a stream that paused meanwhile sends nothing to restart it).
     func resume() {
-        #if os(iOS) || os(visionOS)
         if reveal?.caughtUp == false { start() }
-        #endif
     }
 
-    #if os(iOS) || os(visionOS)
     private func start() {
         guard link == nil else { return }
         // The link holds its target strongly: a weak hop, so a view gone without onDisappear frees this.
@@ -1399,7 +1381,6 @@ final class StreamRevealClock {
             }
         }
     }
-    #endif
 }
 
 /// The block of a streaming reply still being written, as it is drawn (#2916): made whole for the moment

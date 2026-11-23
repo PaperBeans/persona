@@ -111,6 +111,11 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 	s.pruneGoneQuiet(machine)        // the verdicts and Stops of task Agents no longer listed (silent_turns.go)
 	s.pruneGoneUpstream(machine, list)
 	s.fleetKeep(machine, list, connected, unsure)
+	cfg := s.settings(context.Background())
+	mainSession, mainMachine := cfg.Main, cfg.mainRouteMachine()
+	for _, sess := range list {
+		s.refreshMainConversationAttention(sess, mainSession, mainMachine)
+	}
 	for _, ref := range inlineUpdates {
 		s.inOrder(func() { go s.registerInlineTurn(context.Background(), ref) })
 	}
@@ -498,15 +503,26 @@ func (s *Service) addHeldRows(machine string, list []proto.Session, held map[str
 // inventory, but must not forget state marks belonging to rows it did not read.
 func (s *Service) decorateInventory(machine string, list []proto.Session, complete bool) []proto.Session {
 	m, _ := s.fleetMachine(machine)
+	r := &s.fleet.rep
+	r.mu.RLock()
+	profile, shown, via := r.profile, r.sessions, r.marks
+	r.mu.RUnlock()
+	var mainSession, mainMachine string
+	if profile != nil {
+		mainSession, mainMachine = profile.Main, cmp.Or(profile.MainMachineID, profile.MachineID)
+	} else {
+		mainSession, mainMachine = s.mainConversationRoute()
+	}
 	s.fleet.mu.Lock()
 	counts := map[string]int{}
 	asking := map[string]proto.Interaction{} // a session's card: its own before the manager's
 	for _, p := range s.fleet.interactions {
-		if p.ix.MachineID == machine {
-			counts[p.ix.SessionID]++
-			if cur, ok := asking[p.ix.SessionID]; !ok || cur.ToolName == assistantwire.WorkCardTool {
-				asking[p.ix.SessionID] = p.ix
-			}
+		if p.ix.MachineID != machine || machine == mainMachine && p.ix.SessionID == mainSession && !directUserInteraction(p.ix) {
+			continue
+		}
+		counts[p.ix.SessionID]++
+		if cur, ok := asking[p.ix.SessionID]; !ok || cur.ToolName == assistantwire.WorkCardTool {
+			asking[p.ix.SessionID] = p.ix
 		}
 	}
 	seen := make(map[string]time.Time, min(len(list), len(s.fleet.seen)))
@@ -516,10 +532,6 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 		}
 	}
 	s.fleet.mu.Unlock()
-	r := &s.fleet.rep
-	r.mu.RLock()
-	shown, via := r.sessions, r.marks
-	r.mu.RUnlock()
 	lang := s.lang(context.Background())
 	// The owner's messages to Agents held while their computer is away (internal/devices held.go, #10661): once for
 	// the whole list, worded as the rows are.
@@ -605,6 +617,9 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 		}
 		s.decorateWork(machine, &list[i], asking, finishedSince)
 		decorateAwaits(&list[i], asks)
+		if list[i].SessionID == mainSession && list[i].MachineID == mainMachine && mainConversationAttentionCandidate(list[i].Assistant, list[i].Status, list[i].State, list[i].Starting, list[i].PendingInteractions) {
+			s.applyMainConversationAttention(&list[i], mainSession, mainMachine)
+		}
 		decorateSuggestion(&list[i], suggested)
 	}
 	s.decorateTodos(machine, list)

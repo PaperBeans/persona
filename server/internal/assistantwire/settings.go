@@ -28,6 +28,9 @@ type Profile struct {
 	// extension): the hub does not hide the tracks' conversations and cards from them. Any other extension is a third
 	// party's, from which the hub hides every track; an older manager names none.
 	ExtensionOwners []string `json:"extension_owners,omitempty"`
+	// Attention is the attention mode the user set (attention.go, #13503), which the hub's push filter reads; nil (an
+	// older manager, or never set) is normal. The hub reads its end itself (Attention.Effective).
+	Attention *Attention `json:"attention,omitempty"`
 }
 
 // MainRouteMachine keeps legacy profiles usable while preferring the confirmed main binding.

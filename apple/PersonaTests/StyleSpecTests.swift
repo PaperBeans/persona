@@ -167,38 +167,6 @@ struct StyleSpecTests {
         #expect(PersonaPalette.contrast(hex.dark, 0x000000) > PersonaPalette.contrast(Theme.Reply.secondaryInkHex.dark, 0x000000))
     }
 
-    /// The Mac window's chrome a style brings (`StyleSpec.MacChrome`, Lark's), in the style's own colors: a selected
-    /// row's icon in the accent ≥ 3:1 on the sections column's raised block and on the selection's wash over the side
-    /// column and over the page, the row's words ≥ 4.5:1 on that wash, and the white letter ≥ 3:1 on every monogram
-    /// hue (a heading-sized letter, so the large-text floor).
-    @Test func theMacChromeReads() {
-        var found: [String] = []
-        for style in AppStyle.allCases {
-            let chrome = style.component.mac
-            let spec = StyleSpec(style.component, style.component.colors)
-            for (look, ui) in Self.appearances {
-                func check(_ what: String, _ a: (Double, Double, Double), _ b: (Double, Double, Double), _ floor: Double) {
-                    let c = Self.contrast(a, b)
-                    if c < floor { found.append("\(style.rawValue) \(look) \(what): \(String(format: "%.2f", c))") }
-                }
-                let accent = Self.rgb(spec.accent, ui)
-                if let raised = chrome.sidebarSelected { check("icon on the raised block", accent, Self.rgb(raised, ui), 3) }
-                if let tint = chrome.selectionTint {
-                    let unders: [(String, Color)] = [("side column", chrome.sideColumn ?? spec.page), ("page", spec.page)]
-                    for (name, under) in unders {
-                        let wash = Self.over(spec.accent.opacity(tint), Self.rgb(under, ui), ui)
-                        check("icon on the selection over the \(name)", accent, wash, 3)
-                        check("words on the selection over the \(name)", Self.rgb(Theme.primaryText, ui), wash, 4.5)
-                    }
-                }
-                for (i, hue) in chrome.monogramHues.enumerated() {
-                    check("white on monogram hue \(i)", Self.rgb(Theme.onSolid, ui), Self.rgb(hue, ui), 3)
-                }
-            }
-        }
-        #expect(found.isEmpty, "the Mac chrome under its floors: \(found)")
-    }
-
     /// The minutes' summary card (#6563), on every style's card and the system's grouped cell, in light and dark: a topic
     /// tint as a mark (a group's dot, a bullet's mark) ≥ 3:1 on the card and as a glyph on its soft tile ≥ 3:1; on the
     /// Core Conclusions box (the AI tint over the card) the AI color as its lightbulb ≥ 3:1, and every word ≥ 4.5:1, a

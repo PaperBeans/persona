@@ -196,11 +196,7 @@ struct NotificationSettingsView: View {
 
     /// Allowed for a while (App Clips): iOS only.
     private static func ephemeral(_ status: UNAuthorizationStatus) -> Bool {
-        #if os(iOS) || os(visionOS)
         status == .ephemeral
-        #else
-        false
-        #endif
     }
 
     /// Notifications are not allowed for the app (the system's switch): the page says so first.

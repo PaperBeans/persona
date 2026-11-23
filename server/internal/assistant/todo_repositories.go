@@ -32,6 +32,12 @@ type todoRepositoryRoleStore interface {
 
 var _ todoRepositoryRoleStore = (*repositorystore.Store)(nil)
 
+type todoPRLinkTitleStore interface {
+	SetTodoPRLinkTitle(ctx context.Context, id, canonicalURL, title string) error
+}
+
+var _ todoPRLinkTitleStore = (*repositorystore.Store)(nil)
+
 func decodeTaskRepositoryInput(raw []byte, out any) error {
 	if len(raw) > 256<<10 {
 		return repository.Problem("limit")

@@ -2192,6 +2192,12 @@ Screenshots miss user-reported instability and probes can report false jumps; fr
 - Sidebar `NavigationLink(value:)` does not populate bound `path` on iOS 26: when `NavigationSplitView` pushes into detail, `NavigationColumnState.ejectAll` clears `path`,
   leaving the opened page absent. `RootView` width-switching between shell and tabs cannot restore from `path`;
   reopen from separately recorded `dev.openChat`. Shared model paths also fail because the incoming split tree clears them too.
+- The page such a link opens cannot push either (#12035): on the iPad's Settings sheet Appearance & Display opened, `settingsPath` stayed empty, and none of its
+  rows opened anything (the iPhone's one stack was fine). A list in a split opens its pages through `path` (`splitOpen`) with buttons, as the Agents list does
+  (`SettingsListLink`). Two ways of keeping the system's highlight on the open row failed: plain rows with a `tag` in a `List(selection:)` were not
+  selectable in the sheet's list column (VoiceOver read them as text); links of `AnyHashable(page)` in a `List(selection: AnyHashable?)` selected natively,
+  but then the split cleared every path a link or a launch switch set, so those pages opened and went at once (`testLegacySettingsPathsStillOpen` on an
+  iPad). Pushed onto the path, a first page inherits the root's title mode: Settings' root asks for large titles.
 
 ## PiP sources must survive their window, be normally sized, and start on user taps (2026-11-05, #1839)
 
@@ -3292,6 +3298,15 @@ The lens then jumped on by 33–50 ms of its 0.65 s glide in one frame, by up to
   is the one that already skipped Mac-only branches (`iPhoneSource`).
 - A mechanical deletion can still leave a compiler warning behind: a `var` that only the removed branch mutated
   (`ExtensionPageView.updateVisibility`). Read the build's warnings for the changed files, not only its errors.
-- `scripts/test/test_apple_no_macos_branches.py` keeps new `os(macOS)` branches out of the app targets, `Shared/` and
-  the tests. Packages whose `Package.swift` declares a macOS platform are left out: the Persona Link helper builds
-  `PersonaScreenCore` for macOS, so a branch there is live.
+- `scripts/test/test_apple_no_macos_branches.py` keeps new `os(macOS)` and `canImport(AppKit)` branches and
+  `import AppKit` out of the app targets, `Shared/` and the tests. Packages whose `Package.swift` declares a macOS
+  platform are left out: the Persona Link helper builds `PersonaScreenCore` for macOS, so a branch there is live.
+- A condition is decided by the platforms its folder builds for, not by the platforms Apple has: `apple/Persona/` builds
+  for iOS and visionOS only (the Vision app compiles it too), `Shared/` for those and watchOS, the tests for iOS. So
+  `#if os(iOS) || os(visionOS)` in `apple/Persona/` is always true and its `#else` never compiles, and
+  `canImport(UIKit)` is true everywhere; write no such branch. Check a folder's platforms in `apple/project.yml`
+  (every target's `sources`) before assuming: `LiveActivity/`, `PersonaShare/` and `PersonaNotify/` build for visionOS
+  too.
+- Members a deletion leaves constant (a `Bool { false }`, a modifier that returns `self`, a parameter only ever passed
+  its default) go with it, or the next reader keeps working around a Mac that is not there (#13399's last PR removed
+  `MacHover`, `MacSelectingList`, `DeferredDefaults`, `StyleSpec.MacChrome` and `kbOpenEntry`, which nothing set).

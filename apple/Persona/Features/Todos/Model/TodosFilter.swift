@@ -81,6 +81,14 @@ nonisolated enum TodosFilter {
         return hidden > 0 ? words("\(choice.title) · \(hidden) need you [To-dos Filter]") : ""
     }
 
+    /// The guard line's words for `hidden` to-dos that need the owner (`TodosGuardLine`), and the title's subtitle in a
+    /// place once the line has scrolled away: naming the place when all of them are outside it (`elsewhere`), the
+    /// choice hiding none of its own (#10465, DESIGN_SYSTEM 3.5 "To-dos places").
+    static func guardWords(_ hidden: Int, elsewhere: Bool, place: String, words: TodoWords = TodoWords()) -> String {
+        elsewhere ? words("\(hidden) more need you, not in \(place) [To-dos Places]")
+            : words("\(hidden) more need you [To-dos Filter]")
+    }
+
     /// Why ⋯'s Group by Project is greyed under a choice that draws one section or the days, or nil where it groups.
     static func groupingNote(_ choice: TodosChoice, words: TodoWords = TodoWords()) -> String? {
         switch choice {

@@ -46,7 +46,7 @@
   "mcp_tools.assistant#conversation_unarchive": 312,
   "mcp_tools.assistant#conversations_list": 710,
   "mcp_tools.assistant#decision_record": 519,
-  "mcp_tools.assistant#decisions_query": 356,
+  "mcp_tools.assistant#decisions_query": 476,
   "mcp_tools.assistant#delete_routine": 260,
   "mcp_tools.assistant#direction_name": 907,
   "mcp_tools.assistant#inbox_draft": 1017,

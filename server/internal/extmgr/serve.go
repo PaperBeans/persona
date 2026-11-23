@@ -19,6 +19,7 @@ import (
 	"github.com/nwverse/persona/sdk/go/wire"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
+	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extension/uistream"
 	"github.com/nwverse/persona/server/internal/extwire"
@@ -711,7 +712,12 @@ func (h *Manager) AgentTools(ctx context.Context, assistant bool) (agents, assis
 		assistantOnly = append(assistantOnly, h.browserTools()...)
 		assistantOnly = append(assistantOnly, h.iphoneTools()...)
 		assistantOnly = append(assistantOnly, h.subscriptionTools()...)
+		if hp, _ := h.larkImageSource(); hp != nil && connector.StatusOf(ctx, h.connectors.Get(connector.Lark)).State == connector.StateOK {
+			assistantOnly = append(assistantOnly, mcpTool(larkImageTool))
+		}
 		assistantOnly = append(assistantOnly, h.connectors.ToolsFor(ctx, false)...)
+		// A memory extension's read tools reach the assistant's conversations around the hub's filter (memory_sources.go).
+		agents, assistantOnly = h.withoutMemoryReads(agents), h.withoutMemoryReads(assistantOnly)
 	}
 	for _, list := range [][]proto.Tool{agents, assistantOnly} {
 		for i, t := range list {
@@ -729,8 +735,12 @@ func (h *Manager) CallTool(ctx context.Context, machine, session, name string, a
 		return proto.ToolResult{}, false
 	}
 	switch {
+	case assistant && h.memoryWithheld(name): // memory_sources.go
+		return memoryWithheldResult(name), true
 	case h.connectors.Offers(name) && (assistant || h.connectors.ForAgents(name)):
 		return h.callConnector(ctx, asker{machine, session}, name, args), true
+	case assistant && name == larkImageTool:
+		return h.callLarkImage(ctx, args), true
 	case assistant && isComputerTool(name):
 		return h.callComputerTool(ctx, session, name, args), true
 	case assistant && isBrowserTool(name):
@@ -756,6 +766,9 @@ func (h *Manager) ToolAccess(name string) (known, readOnly bool) {
 		return true, h.connectors.ReadOnly(name)
 	}
 	switch {
+	case name == larkImageTool:
+		hp, _ := h.larkImageSource()
+		return hp != nil, hp != nil
 	case isComputerTool(name), isBrowserTool(name), isIPhoneTool(name):
 		return true, false
 	case isSubscriptionTool(name):

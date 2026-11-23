@@ -128,7 +128,6 @@ struct QuickLookFileView: View {
     }
 }
 
-#if os(iOS) || os(visionOS)
 /// QuickLook's preview of one local file, embedded (no bars of its own: the page's toolbar has the menu).
 struct QuickLookView: UIViewControllerRepresentable {
     var url: URL
@@ -154,25 +153,6 @@ struct QuickLookView: UIViewControllerRepresentable {
         func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> any QLPreviewItem { url as NSURL }
     }
 }
-#else
-/// QuickLook's preview of one local file, embedded (the Mac's `QLPreviewView`).
-struct QuickLookView: NSViewRepresentable {
-    var url: URL
-
-    func makeNSView(context: Context) -> QLPreviewView {
-        let view = QLPreviewView(frame: .zero, style: .normal) ?? QLPreviewView()
-        view.autostarts = true
-        view.previewItem = url as NSURL
-        return view
-    }
-
-    func updateNSView(_ view: QLPreviewView, context: Context) {
-        if (view.previewItem as? NSURL) as URL? != url { view.previewItem = url as NSURL }
-    }
-
-    static func dismantleNSView(_ view: QLPreviewView, coordinator: ()) { view.close() }
-}
-#endif
 
 /// Thumbnails for the file list (the Files tab) and the chat's file cards, drawn by the machine (`GET …/file/thumb`, hub
 /// feature `file_thumb`, docs/protocol/protocol.md「File preview」), three at a time, kept in memory and on disk:
@@ -289,11 +269,7 @@ final class FileThumbnails {
         guard let data, let src = CGImageSourceCreateWithData(data as CFData, nil),
               let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
         if document, let light = lightness(cg), light < 0.35 { return nil }
-        #if os(iOS) || os(visionOS)
         return UIImage(cgImage: cg)
-        #else
-        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
-        #endif
     }
 
     /// How light a picture is on the whole, 0 (black) to 1 (white): drawn into 8 × 8 gray pixels over white.

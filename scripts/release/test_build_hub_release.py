@@ -162,6 +162,13 @@ class ManagerPackageScopeTests(unittest.TestCase):
         self.assertTrue(any(args[:3] == ['go', 'test', '-count=1'] for args, _ in calls))
         self.assertTrue(any('scripts/release/check_bundle_privacy.py' in args for args, _ in calls))
 
+    def test_runtime_packages_are_generated_before_any_test(self):
+        _, calls, _ = self.build()
+        args = [args for args, _ in calls]
+        generate = args.index(['go', 'generate', './internal/runtimepkg'])
+        self.assertEqual(args.count(['go', 'generate', './internal/runtimepkg']), 1)
+        self.assertLess(generate, next(i for i, a in enumerate(args) if a[:2] == ['go', 'test']))
+
     def test_web_client_is_scanned_as_built_then_precompressed_before_go_build(self):
         out, calls, _ = self.build()
         args = [args for args, _ in calls]

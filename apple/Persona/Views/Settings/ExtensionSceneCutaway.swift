@@ -1,3 +1,4 @@
+#if os(iOS)
 import Foundation
 import PersonaWire
 import simd
@@ -212,3 +213,4 @@ nonisolated enum ExtensionSceneCutaway {
         return (out, faded)
     }
 }
+#endif

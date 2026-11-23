@@ -1749,6 +1749,15 @@ if MOCK_SIDE_SESSIONS:
              30, "缓存没命中，依赖每次都重新装。", **dict(_desktop, parent_agent_id=SIDE_CHAT)),
     ]
 
+# MOCK_SIDE_UNREAD=1 (#13496), with MOCK_SIDE_SESSIONS=1: the /btw question was answered and both it and the side chat
+# finished a reply nobody has seen, while the review itself was seen. Its row is Unread for its sides alone, and the
+# sidebar names the newer one ("+1" for the other) and opens it in one click.
+MOCK_SIDE_UNREAD = MOCK_SIDE_SESSIONS and os.environ.get("MOCK_SIDE_UNREAD") == "1"
+if MOCK_SIDE_UNREAD:
+    for _s in SESSIONS:
+        if _s["session_id"] in (SIDE_BTW, SIDE_CHAT):
+            _s.update(status="idle", state="unread", pending_interactions=0, seen_at=ago(minutes=40))
+
 # MOCK_SESSIONS_MANY=<n> (#4410): n more idle sessions, enough to page an Agents list several pages deep with
 # MOCK_SESSIONS_LIST=1. GET /mock/sessions/touch moves the newest of them to now: the list's revision changes and every
 # cursor of the old one answers 409 cursor_expired, as the hub's do once a frozen view has expired.
@@ -9280,6 +9289,14 @@ if MOCK_TASKS:
             it("user", "text", 4.8, text=_quiet, injected={"kind": "system", "state": "supervise", "level": "triage", "line": "督办：检查示例任务"}),
             it("assistant", "tool_use", 4.7, tool_use_id="mock-supervision-read", tool_name="Bash", tool_input={"command": "printf 'synthetic checks passed'", "description": "Inspect synthetic task checks"}),
             it("user", "tool_result", 4.6, tool_use_id="mock-supervision-read", text="synthetic checks passed"),
+        ]
+        ITEMS[ASK1] += tool("mcp__persona__agent_send", {"machine": "server", "session_id": TESTS, "text": "Continue the synthetic checks.", "task": {"title": "整理发布说明"}},
+                            "It is now your task todo_task_release.", 4.65)
+        ITEMS[ASK1] += tool("mcp__persona__conversation_send", {"id": "example-conversation", "text": "Synthetic checks are complete."},
+                            "Sent to the example conversation.", 4.62)
+        ITEMS[ASK1] += tool("mcp__persona__interaction_answer", {"interaction_id": "mock-supervision-question", "approve": True},
+                            "Answered on behalf of the user.", 4.58)
+        ITEMS[ASK1] += [
             it("assistant", "text", 4.5, text="示例任务的测试通过，无需你处理。"),
             it("assistant", "tool_use", 4.4, tool_use_id="mock-supervision-finish", tool_name="mcp__persona__supervision_finish", tool_input={"visibility": "silent", "summary": "Synthetic checks passed"}),
             it("user", "tool_result", 4.3, tool_use_id="mock-supervision-finish", text='{"visibility":"silent"}'),
@@ -9293,6 +9310,13 @@ if MOCK_TASKS:
         ITEMS[ASK1].sort(key=lambda x: x["ts"])
         for _i, _x in enumerate(ITEMS[ASK1]):
             _x["seq"] = _i + 1
+        TASK_FEED[ASK1] += [
+            _feed("feed_supervision_task", 4.64, "task", "todo_task_release", {"wake": "active"}),
+            _feed("feed_supervision_routed", 4.63, "routed", "todo_task_release", {"text": "Continue the synthetic checks.", "from": "assistant"}),
+            _feed("feed_supervision_answered", 4.57, "answered", "todo_task_release", {
+                "question": "Run the synthetic checks?", "answer": "Approved by the assistant.", "by": "assistant", "reason": "Routine review"}),
+        ]
+        TASK_FEED[ASK1].sort(key=lambda x: x["at"])
     # MOCK_RELAYED=1: a message another Persona conversation sent with conversation_send (prompts/assistant/relay.md),
     # then one you typed: only yours is the pale blue bubble (#2643).
     if os.environ.get("MOCK_RELAYED") == "1":
@@ -17850,14 +17874,15 @@ if os.environ.get("MOCK_TAB_PANES"):
              "summary": "go test ./auth/...", "tool_input": {"command": "go test ./auth/..."}})
 if MOCK_SIDE_SESSIONS:
     # #7944: the /btw question's card (with side folding the hub sends it folded_under the review, folded_as "side"), and
-    # what each side session said
-    INTERACTIONS.append(
-        {"id": "ix_side_btw", "machine_id": "macbook", "session_id": SIDE_BTW, "session_title": "btw: 这个 PR 现在能合吗",
-         "cwd": "/Users/me/code/weather", "kind": "question", "created_at": ago(minutes=4), "expires_at": later(minutes=26),
-         "tool_name": "AskUserQuestion", "tool_use_id": "toolu_side_btw",
-         "questions": [{"question": "两条命名建议要不要等改完再合？", "header": "合并", "multi_select": False, "options": [
-             {"label": "等改完再合", "description": "命名统一以后再合进主分支"},
-             {"label": "现在就合", "description": "命名之后单独提一个改动"}]}]})
+    # what each side session said; MOCK_SIDE_UNREAD answered the card
+    if not MOCK_SIDE_UNREAD:
+        INTERACTIONS.append(
+            {"id": "ix_side_btw", "machine_id": "macbook", "session_id": SIDE_BTW, "session_title": "btw: 这个 PR 现在能合吗",
+             "cwd": "/Users/me/code/weather", "kind": "question", "created_at": ago(minutes=4), "expires_at": later(minutes=26),
+             "tool_name": "AskUserQuestion", "tool_use_id": "toolu_side_btw",
+             "questions": [{"question": "两条命名建议要不要等改完再合？", "header": "合并", "multi_select": False, "options": [
+                 {"label": "等改完再合", "description": "命名统一以后再合进主分支"},
+                 {"label": "现在就合", "description": "命名之后单独提一个改动"}]}]})
     ITEMS[SIDE_BTW] = [it("user", "text", 6, text="btw 这个 PR 现在能合吗"),
                        it("assistant", "text", 4, text="逻辑和测试都没问题。想先确认一下：两条命名建议要不要等改完再合？")]
     ITEMS[SIDE_CHAT] = [it("user", "text", 12, text="命名建议你倾向哪种写法？"),
@@ -25811,6 +25836,7 @@ MOCK_HELP = [
     "MOCK_SESSIONS_LIST=1  Paged Agents, counts, exact lookup and by to-do (todo=, #6662); list-mode sockets send hints instead of full lists (#6362)",
     "MOCK_SESSIONS_MANY=<n>  n more idle sessions to page through; GET /mock/sessions/touch expires the old cursors (#4410)",
     "MOCK_SIDE_SESSIONS=1  Three Claude desktop side sessions of the PR review (parent_agent_id, #5935): one waiting for you with its card, one a stopped side of a side; the hub folds them into the review's chat (sessions_side_fold, #7944) unless MOCK_SIDE_FOLD=0",
+    "MOCK_SIDE_UNREAD=1  With MOCK_SIDE_SESSIONS=1: the side chat and the answered /btw question each have an unread reply, the review itself seen (#13496)",
     "MOCK_SESSIONS_CATALOG=1  With MOCK_SESSIONS_LIST=1: catalog=1, place= and space= on the paged list, a Windows PC, one repository on two computers and a plain notes folder on two",
     "MOCK_MANUAL_HERDR=1  没挂待办的 herdr Agent 算手动开的（started_by_persona 为假），Agents「按待办」里出「手动开的」一段（#2917）",
     "MOCK_ORCA_CHILDREN=1  MacBook 上一个 Orca 工作区带三个子工作区（其中一个还有子项，parent_space_id，#2073）",

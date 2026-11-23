@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import AudioToolbox
 import AVFoundation
 import Foundation
@@ -823,4 +822,3 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         }
     }
 }
-#endif

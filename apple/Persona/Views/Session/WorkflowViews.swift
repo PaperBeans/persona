@@ -696,7 +696,7 @@ struct WorkflowAgentRow: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: Theme.Space.xs)
-            if hovering || MacHover.showAll, open != nil {
+            if hovering, open != nil {
                 Text("Open [Workflow Agent]")
                     .font(Theme.Font.labelStrong)
                     .foregroundStyle(Theme.accent)

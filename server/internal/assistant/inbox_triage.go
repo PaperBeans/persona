@@ -283,6 +283,7 @@ func (s *Service) triageModelIn(ctx context.Context, input, rules string, timeou
 		rules = s.inboxConfig(ctx).Rules
 	}
 	extContext, _ := s.inboxExtensionContext(ctx)
+	extContext = append(extContext, s.inboxMemoryContext(ctx, input)...) // memory_extension_source.go
 	system := prompts.RenderInboxTriage(prompts.InboxTriage{Owner: hello.Owner, Rules: rules, Language: answerLanguage(hello.Locale),
 		Context: extContext})
 	var out struct {
@@ -398,6 +399,7 @@ func (s *Service) draftReply(ctx context.Context, id, instruction string) (strin
 	// About me as the user last edited it in the app, else the config file's (notes), as the main chat has it.
 	d := prompts.InboxDraft{Owner: hello.Owner, Notes: s.notes(ctx), Language: answerLanguage(hello.Locale), Context: extContext}
 	input := prompts.RenderInboxDraftInput(prompts.InboxDraftInput{Language: language, Item: item, Instruction: strings.TrimSpace(instruction)})
+	d.Context = append(d.Context, s.inboxMemoryContext(ctx, input)...) // memory_extension_source.go
 	cctx, cancel := context.WithTimeout(ctx, draftModelWait)
 	defer cancel()
 	// A draft that repeats a sentence an extension marked never to quote (what it keeps about people: evaluations,

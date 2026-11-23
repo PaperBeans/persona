@@ -307,7 +307,7 @@ func (p *gateProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	cfg := n.assistantLark(r.Context())
+	cfg := n.assistantLarkForGate(r.Context(), command)
 	gi := slices.IndexFunc(cfg.Gates, func(g proto.CommandGate) bool { return g.Command == command && g.Auth != nil })
 	if gi < 0 {
 		gateRefuse(w, http.StatusServiceUnavailable, command+" 现在用不了：提供它的扩展停用了，或者 hub 没给它凭据。")
@@ -321,6 +321,15 @@ func (p *gateProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil || up.Host == "" || up.Scheme != "http" && up.Scheme != "https" {
 			gateRefuse(w, http.StatusServiceUnavailable, command+" 没有可用的接口地址（扩展没给，或者给的不对）。")
 			return
+		}
+		// A sandboxed extension names this machine's loopback as host.persona.internal (#13540): the node dials
+		// 127.0.0.1 itself.
+		if strings.EqualFold(up.Hostname(), "host.persona.internal") {
+			if p := up.Port(); p != "" {
+				up.Host = net.JoinHostPort("127.0.0.1", p)
+			} else {
+				up.Host = "127.0.0.1"
+			}
 		}
 	}
 	restPath, err := url.PathUnescape("/" + rest)

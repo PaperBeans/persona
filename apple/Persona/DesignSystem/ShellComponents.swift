@@ -112,11 +112,9 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
                 // The tab bar's counts are on its items' symbols (`TabBarBadge`).
                 if !tabBar { WaitingBadge() }
             }
-            #if os(iOS) || os(visionOS)
             if LarkHomePreference.shared.shows {
                 button(String(localized: "Messages [Quote Views 4da199]"), .feishu, id: "shell-feishu")
             }
-            #endif
         }
         .background(alignment: .leading) {
             // The tab bar marks its chosen item itself (`tabBarSegment`).
@@ -168,9 +166,7 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
 
     /// The page's symbol on the rail, matching its shared tab.
     private static func symbol(_ value: AppTab) -> String {
-        #if os(iOS) || os(visionOS)
-        if value == .feishu { return Theme.Icon.feishuChats } // a phone's tab only (no such tab on the Mac)
-        #endif
+        if value == .feishu { return Theme.Icon.feishuChats }
         return value == .chats ? Theme.Icon.agents : Theme.Icon.ai
     }
 
@@ -274,9 +270,7 @@ private struct PagerPill: View {
 private struct WaitingBadge: View {
     @Environment(AppModel.self) private var model
     private var offset: CGSize {
-        #if os(iOS) || os(visionOS)
         if LarkHomePreference.shared.shows { return CGSize(width: -Theme.Space.s, height: -Theme.Space.l) }
-        #endif
         return CGSize(width: Theme.Space.s, height: -Theme.Space.sm)
     }
 
@@ -450,15 +444,11 @@ private struct TabBarPersonaFace: View {
     var body: some View {
         let persona = model.persona
         Group {
-            #if os(iOS) || os(visionOS)
             if !persona.isBuiltin, let frames = model.personas.frames(persona, .idle) {
                 PersonaFramesView(frames: frames, animating: false, eligible: false)
             } else {
                 AssistantAvatar(size: Theme.Size.well, design: persona.avatarDesign, still: true)
             }
-            #else
-            AssistantAvatar(size: Theme.Size.well, design: persona.avatarDesign, still: true)
-            #endif
         }
         .frame(width: Theme.Size.well, height: Theme.Size.well)
         .clipShape(.circle)
@@ -750,13 +740,10 @@ struct ShellNavigationClearance: View {
     static let line = " "
 
     var body: some View {
-        #if os(iOS) || os(visionOS)
         PromptLine(active: active)
-        #endif
     }
 }
 
-#if os(iOS) || os(visionOS)
 private struct PromptLine: UIViewControllerRepresentable {
     var active: Bool
 
@@ -784,7 +771,6 @@ private struct PromptLine: UIViewControllerRepresentable {
         }
     }
 }
-#endif
 
 /// The text size the app settled on (the system's, moved by Small / Standard / Large), set once at the root. `shellScaled` goes one
 /// step up from this, not from the environment's own size: that one is not always what the page has. The drawer's

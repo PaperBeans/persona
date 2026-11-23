@@ -486,6 +486,11 @@ struct SegmentedChoice<Value: Hashable>: View {
 }
 
 struct EmptyStateView: View {
+    /// How the action is drawn: the page's one action, prominent; or a way to another place that holds what this one
+    /// lacks ("3 coming up this week ›"), the accent's words and ›, where the page already has its prominent action
+    /// (a foot toolbar's +). BeautifulUI draws its own secondary button for either.
+    enum ActionLook { case prominent, link }
+
     var symbol: String
     var title: String
     var message: String
@@ -493,6 +498,7 @@ struct EmptyStateView: View {
     /// The mark's color when it means something (`Theme.caution` for a warning); the accent otherwise. BeautifulUI
     /// keeps its own quiet mark.
     var tint: Color? = nil
+    var actionLook = ActionLook.prominent
 
     var body: some View {
         if AppStyle.current.usesBeautifulUI {
@@ -516,9 +522,26 @@ struct EmptyStateView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             if let action {
-                Button(action: action.run) { Text(action.title).lineLimit(1) }
-                    .themedButton(prominent: true)
-                    .padding(.top, Theme.Space.xs)
+                switch actionLook {
+                case .prominent:
+                    Button(action: action.run) { Text(action.title).lineLimit(1) }
+                        .themedButton(prominent: true)
+                        .padding(.top, Theme.Space.xs)
+                case .link:
+                    Button(action: action.run) {
+                        HStack(spacing: Theme.Space.xs) {
+                            Text(action.title).lineLimit(1)
+                            ThemedIcon(Theme.Icon.disclosure)
+                                .font(Theme.Font.labelHeavy)
+                                .accessibilityHidden(true)
+                        }
+                        .tapTargetHeight()
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityShowsLargeContentViewer()
+                }
             }
         }
         .padding(Theme.Space.xxl)

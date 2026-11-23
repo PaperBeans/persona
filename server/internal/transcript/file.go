@@ -83,7 +83,7 @@ func (f *File) history() string {
 	if f.lines == 0 {
 		return "" // nothing read yet: no identity to compare
 	}
-	version := ""
+	version := ".items1"
 	if !f.meta.Codex {
 		version = ".items3" // Model-only interjection items are removed; reload older client history.
 	}

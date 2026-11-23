@@ -47,6 +47,8 @@ does not admit every chat or watch any document; the connector's `doc` Inbox ite
 | `Kinds` | Inbox item kinds; each needs a description in `prompts/inbox/kinds/<id>.md` (`connector.CheckKinds`, each connector's `TestKindsAreDescribed`); an undeclared kind received is logged |
 | `Proxy` | Answers on behalf of another program (subprocess `proc.Conn`): implements every interface, but only declared ones are real |
 
+A connector contributed by an extension that declares `memory_sources` (a memory extension) has its read tools withheld from the assistant's conversations: not listed, and a call there is refused with a pointer to `decisions_query`, since the hub reads that extension's memory itself and grades it by scene (`server/internal/extmgr/memory_sources.go`, `docs/extensions/extensions.md` "Memory sources"). Its writes, and the read tools coding Agents get through `AgentTools`, are unchanged.
+
 The hub uses only `connector.As[interface](c)` to discover capabilities: it asserts the interface only when declared. `Registry.Add` checks the manifest with `connector.Check`: declared but unimplemented, implemented but undeclared (except `Proxy`),
 unknown capabilities, or kinds without an Inbox capability all fail registration. Capability interfaces:
 

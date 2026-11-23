@@ -552,6 +552,12 @@ Section 6.2 says what the decisions change in the steps, and 6.3 which docs chan
   accepted, since the built-in manager updates with the hub and diagnostics name an external manager's build. A change
   of unit, such as unread against action items, is a new id. Under D5 clients name their ids, so a new id for every
   refinement would cost a client release each time.
+- **D19** The main conversation's waiting count and its exact list (new with the owner's 2026-11-22 scope revision):
+  only current questions the user must answer, authorizations only the user can give and deliveries explicitly
+  requiring user acceptance count. Unstarted or failed-start tasks, agent permission requests, terminal dialogs and
+  superseded questions stay with the supervisor and do not inflate this number. Selecting it opens exactly those
+  counted items on iPhone and the shared web/Mac UI. This surface does not change D1's Agents-list badge, D8's To-dos
+  count or their rows, and it does not settle D11's open routed-terminal case for those other surfaces.
 
 ### 6.2 What the decisions change in the steps
 

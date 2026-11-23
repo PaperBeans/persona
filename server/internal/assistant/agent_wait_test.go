@@ -89,10 +89,12 @@ func TestAgentWaitTimeoutCancellationAndUnavailable(t *testing.T) {
 			if state == "cancelled" {
 				cancel()
 			}
+			wait := time.Millisecond
 			if state == "unavailable" {
-				f.itemsFail = 1
+				// The failed read decides at once; a deadline that could pass before the first read would make it a timeout.
+				f.itemsFail, wait = 1, time.Minute
 			}
-			got := s.waitAgentReply(ctx, "Queued receipt.", "mine", time.Millisecond, fixedWaitTarget("box", "s1"))
+			got := s.waitAgentReply(ctx, "Queued receipt.", "mine", wait, fixedWaitTarget("box", "s1"))
 			if !strings.HasPrefix(got, "Queued receipt.") || !strings.Contains(got, `"state":"`+state+`"`) || strings.Contains(got, "old answer") {
 				t.Fatal(got)
 			}
@@ -100,6 +102,25 @@ func TestAgentWaitTimeoutCancellationAndUnavailable(t *testing.T) {
 				t.Fatal("wait dispatched work")
 			}
 		})
+	}
+}
+
+// A reply read just as the wait's deadline passes is the reply, not a timeout.
+func TestAgentWaitKeepsAReplyReadAtTheDeadline(t *testing.T) {
+	s, f := newTaskService(t)
+	now := time.Now()
+	f.sessions["box"] = []proto.Session{{SessionID: "s1", Status: proto.StatusIdle, UpdatedAt: now.Add(time.Second)}}
+	const wait = 10 * time.Millisecond
+	start := time.Now()
+	f.answerNode(DeviceSessionItems, func(string, json.RawMessage) (any, error) {
+		for time.Since(start) < 2*wait { // answer only once the deadline has passed
+			<-time.After(time.Millisecond)
+		}
+		return map[string]any{"items": inlineItems("mine", now)}, nil
+	})
+	got := s.waitAgentReply(context.Background(), "Sent.", "mine", wait, fixedWaitTarget("box", "s1"))
+	if !strings.Contains(got, "sample checked") || strings.Contains(got, `"state":"timeout"`) {
+		t.Fatal(got)
 	}
 }
 func TestAgentStartInlineReply(t *testing.T) {

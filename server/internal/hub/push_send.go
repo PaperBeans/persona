@@ -34,7 +34,7 @@ func (p *Pusher) sendLocalizedQuiet(build localized, collapseID string, wants fu
 
 // sendLocalizedQuietTo is sendLocalizedQuiet that tells sent each device the push goes to (nil: nobody).
 func (p *Pusher) sendLocalizedQuietTo(build localized, collapseID string, wants func(NotifyPrefs) bool, rule quietRule, sent func(Device)) {
-	p.sendFromPolicy("", pushPolicy{level: assistantwire.LevelP0}, build, collapseID, wants, rule, nil, sent)
+	p.sendFromPolicy("", pushPolicy{level: assistantwire.LevelP0, system: true}, build, collapseID, wants, rule, nil, sent)
 }
 
 // sendFrom is sendLocalizedQuietTo for a push manager asked for (notify.request, its extensions' pushes, a computer's
@@ -72,7 +72,7 @@ func (p *Pusher) sendFromPolicy(manager string, policy pushPolicy, build localiz
 	if p == nil {
 		return 0, 0, ""
 	}
-	if p.pushGradingOn() { // off: nothing below runs and the push goes exactly as before
+	if p.filtering() { // off (and no attention mode): nothing below runs and the push goes exactly as before
 		policy.manager = manager
 		payload := build(i18n.Default)
 		policy = pushPolicyWithSource(policy, payload)
@@ -93,6 +93,7 @@ func (p *Pusher) sendFromPolicy(manager string, policy pushPolicy, build localiz
 			// state lists and held-push briefings keep updating.
 			return 0, 0, reason
 		}
+		rule = p.hushRule(rule) // quiet mode: without a sound on every device (push_attention.go)
 	} else {
 		// The switch is off, so applyPushGrading never runs; the daily delivery counts still record one logical push.
 		policy.manager = manager
@@ -114,8 +115,11 @@ func (p *Pusher) sendFromTo(manager string, build localized, collapseID string, 
 	online := p.desktopOnline != nil && p.desktopOnline()
 	byPrefs := alertWanted(wants, online)
 	var hush func(Device) bool
-	if rule == quietHush {
+	switch rule {
+	case quietHush:
 		hush = func(d Device) bool { return p.inQuiet(devicePrefs(d.Prefs)) }
+	case quietHushAll:
+		hush = func(Device) bool { return true }
 	}
 	return p.sendBuiltWith(build, collapseID, "alert", "10", func(d Device) bool {
 		if only != nil && !only(d) {

@@ -166,6 +166,11 @@ func TestTaskExecutionUndiscoveredCatalogSaveAndDispatch(t *testing.T) {
 						t.Fatal(err)
 					}
 					id = saved.Task.ID
+					// Only the saved task, as the stored case has: runDue below looks half an hour ahead, and the
+					// built-in morning routine (weekdays 09:00, machine time) would run too when this starts at 08:30
+					// (#13630).
+					saved.Task, _ = taskByID(s, id)
+					setTasks(s, saved.Task)
 				}
 				if r := request(s, "POST", "/api/v1/assistant/tasks/"+id+"/run", `{}`); r.Code != http.StatusOK {
 					t.Fatalf("manual undiscovered launcher: %d %s", r.Code, r.Body.String())

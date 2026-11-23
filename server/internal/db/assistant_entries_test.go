@@ -81,6 +81,24 @@ func TestAssistantEntriesPaginationAndFilters(t *testing.T) {
 	if got := page(proto.AssistantEntriesParams{After: third.After}, true); len(got.Entries) != 1 || got.Entries[0].ID != "entry-later" {
 		t.Fatalf("incremental: %+v", got)
 	}
+	// Newest first (the memory assembler, #13532): each page the next older one, active entries only.
+	newest := func(p proto.AssistantEntriesParams) proto.AssistantEntriesResult {
+		t.Helper()
+		out, err := d.NewestAssistantEntries(ctx, p, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	n1 := newest(proto.AssistantEntriesParams{Limit: 2})
+	n2 := newest(proto.AssistantEntriesParams{Limit: 2, After: n1.After})
+	var newestIDs []string
+	for _, e := range append(n1.Entries, n2.Entries...) {
+		newestIDs = append(newestIDs, e.ID)
+	}
+	if !reflect.DeepEqual(newestIDs, []string{"entry-later", "entry-c", "entry-b", "entry-a"}) || !n1.HasMore || n2.HasMore {
+		t.Fatalf("newest first: %v (%+v, %+v)", newestIDs, n1, n2)
+	}
 	yes, no := true, false
 	for _, tc := range []struct {
 		name     string

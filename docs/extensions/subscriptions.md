@@ -341,7 +341,7 @@ A built-in source's Inbox feed can be switched to its default subscription and b
   - The default subscriptions are left out of the list and the relationship view, which reads the built-in as through its subscription, so a source shows once. A default subscription's own page has no Inbox switch, only a line saying it is switched on its built-in's page; its stored switches stay off.
   - A default subscription's recipe is the manager's (origin `persona`, "Comes with Persona"): its page offers a try, not the assistant, another tool or the raw recipe, so its rows stay the built-in's. A things recipe's row reads "Provided by the connector", never its tool's name.
   - The manager keeps each source's default (`migrations` in `server/internal/extmgr/inbox_sources.go`). iMessage's is a `things` recipe over its `inbox_things` tool (#6317), so its rows stay the ones its `Collect` makes. GitHub's (#6404) is a `things` recipe over the generic `inbox_things` (#6381), which answers its `Collect`; a test reads the same notifications both ways and compares the rows field by field.
-  - A default can be held back until the source before it has had its week on the owner's hub (decision 6; `withheld`, now GitHub). Its source then has no How it's read section, and the manager refuses to switch it on; one already switched on keeps the section, so it can be switched back.
+  - A default can be held back until the source before it has had its week on the owner's hub (decision 6; `withheld`, none now: GitHub's is offered since iMessage's week, #13599). Its source then has no How it's read section, and the manager refuses to switch it on; one already switched on keeps the section, so it can be switched back.
 
 ### Push sources
 

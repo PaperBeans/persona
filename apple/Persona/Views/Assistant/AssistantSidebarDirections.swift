@@ -99,7 +99,6 @@ struct AssistantSidebarDirection<Head: View>: View {
                         RoundedRectangle(cornerRadius: Theme.Sidebar.radius, style: .continuous).fill(selectedFill)
                     }
                 }
-                .macHoverShade(in: RoundedRectangle(cornerRadius: Theme.Sidebar.radius, style: .continuous))
         } else {
             head(true)
         }
@@ -166,7 +165,6 @@ struct DirectionTaskRow: View {
             }
         }
         .padding(.trailing, Theme.Space.m)
-        .macHoverShade(in: RoundedRectangle(cornerRadius: Theme.Sidebar.radius, style: .continuous))
     }
 }
 
@@ -210,7 +208,6 @@ struct DirectionAgentRow: View {
             }
         }
         .padding(.trailing, Theme.Space.m)
-        .macHoverShade(in: RoundedRectangle(cornerRadius: Theme.Sidebar.radius, style: .continuous))
     }
 }
 
@@ -328,7 +325,6 @@ struct DirectionFiledRows<Empty: View, Tasks: View>: View {
         }
         .buttonStyle(.plain)
         .padding(.trailing, Theme.Space.m)
-        .macHoverShade(in: RoundedRectangle(cornerRadius: Theme.Sidebar.radius, style: .continuous))
         .accessibilityLabel(String(localized: "Tasks and Chats [Direction Page]"))
         .accessibilityValue(name)
         // Voice Control says what it sees: "Tap All".
@@ -368,6 +364,5 @@ struct DirectionFiledRow: View {
             Color.clear.scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.dot).accessibilityHidden(true)
         }
         .padding(.trailing, Theme.Space.m)
-        .macHoverShade(in: RoundedRectangle(cornerRadius: Theme.Sidebar.radius, style: .continuous))
     }
 }

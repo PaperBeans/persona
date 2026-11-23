@@ -154,5 +154,14 @@
   "leader_needs_you": "等你 {count}",
   "codex_waiting": "等第一条消息",
   "direction_tasks_expand": "展开「{name}」的在办任务",
-  "direction_tasks_collapse": "收起「{name}」的在办任务"
+  "direction_tasks_collapse": "收起「{name}」的在办任务",
+  "spaces": "空间",
+  "new_space": "新建空间",
+  "side_unread": "分支会话「{title}」有新回复",
+  "side_unread_kicker": "分支新回复",
+  "side_unread_more": "+{count}",
+  "side_unread_count_one": "{count} 个分支会话有新回复",
+  "side_unread_count_other": "{count} 个分支会话有新回复",
+  "side_unread_open": "打开分支会话「{title}」",
+  "side_unread_also": "另有新回复：{titles}"
 }

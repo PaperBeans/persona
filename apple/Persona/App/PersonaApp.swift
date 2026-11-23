@@ -1,7 +1,5 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 import UserNotifications
 import PersonaWire
 
@@ -321,11 +319,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                 try? FileManager.default.removeItem(at: URL.applicationSupportDirectory.appending(path: dir))
             }
         }
-        #if os(iOS) || os(visionOS)
         PagePerf.runIfAsked()
         PagePerf.offsetIfAsked()
         FrameProbe.listenIfAsked()
-        #endif
         // Every tab a UI test can ask for. One it asks for and this does not know leaves the tab the last run saved
         // (`app.tab`): after a run with `-tab settings`, the shell opened on the Settings sheet and the
         // Feishu tests that asked for `-tab feishu` never saw the Messages page (#1664).
@@ -475,7 +471,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             completionHandler(.noData)
             return
         }
-        #if os(iOS) || os(visionOS)
         if let widget = info["extension_widget"] as? [String: Any],
            let owner = widget["extension"] as? String, let id = widget["id"] as? String,
            !owner.isEmpty, !id.isEmpty, !AppModel.shared.isDemo {
@@ -489,7 +484,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             }
             return
         }
-        #endif
         if let ids = info["resolved_interaction_ids"] as? [String] {
             // Cards answered elsewhere while suspended (#4349): their notifications leave the lock screen.
             nonisolated(unsafe) let done = completionHandler

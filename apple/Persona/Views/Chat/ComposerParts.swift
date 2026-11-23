@@ -15,8 +15,6 @@ struct ComposerRow<MenuItems: View>: View {
     var send: () -> Void
     /// What goes with the message, quoted over the field inside its box (#986).
     var quotes: Binding<[ContextRef]>? = nil
-    /// The conversation whose sent messages ↑ / ↓ and ⌃R bring back (the Mac, `MacSendHistory`); nil: none.
-    var history: String? = nil
     /// The main conversation cannot answer yet: send says what to do first and goes there, the draft stays.
     var gate: SendGate? = nil
     @ViewBuilder var menu: () -> MenuItems
@@ -91,9 +89,7 @@ struct ComposerRow<MenuItems: View>: View {
 extension ComposerRow {
     /// Sends what the field shows: the keyboard's composition confirmed into the draft first (`TypedText`, #2203).
     fileprivate func sendTyped() {
-        #if os(iOS) || os(visionOS)
         if focused.wrappedValue { TypedText.commitFocused(into: $text) }
-        #endif
         send()
     }
 

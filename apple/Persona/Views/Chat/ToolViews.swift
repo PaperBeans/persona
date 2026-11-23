@@ -1039,9 +1039,6 @@ struct CodeBlock: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.codeBackground, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
-            .macHoverActions {
-                MacHoverButton(title: String(localized: "Copy [Readiness Views d37380]"), symbol: Theme.Icon.copy) { MacHover.copy(text) }
-            }
             if clipped {
                 // In the chat its top stays where it is and the rest opens under it (#3757): animated, the block grew
                 // around the tap and moved what was above it.

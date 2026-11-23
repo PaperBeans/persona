@@ -16,7 +16,6 @@ enum VNCMode: String, CaseIterable {
     static func set(_ mode: VNCMode, for ref: MachineRef) { UserDefaults.standard.set(mode.rawValue, forKey: key(ref)) }
 }
 
-#if os(iOS) || os(visionOS)
 /// The Mac's screen in a layer, aspect-fit and zoomable, its pointer drawn over it, and, when interactive, touches turned
 /// into the Mac's pointer as the mode says:
 /// - Mouse Mode: a tap clicks there; one finger drags; two scroll (or, zoomed in, move the picture); two tapping or one
@@ -607,92 +606,8 @@ struct VNCScreen: UIViewRepresentable {
         #endif
     }
 }
-#else
-/// The Mac's screen on the Mac: its layer, aspect-fit; clicks and keys go to it when interactive (a click there, a
-/// drag drags, the wheel scrolls).
-final class VNCScreenNSView: NSView {
-    let display = AVSampleBufferDisplayLayer()
-    weak var session: RFBSession?
-    var interactive = false
-    var onClick: (() -> Void)?
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
-        display.videoGravity = .resizeAspect
-        layer?.addSublayer(display)
-        setAccessibilityIdentifier("vnc-screen")
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func layout() {
-        super.layout()
-        display.frame = bounds
-    }
-
-    private var screenSize: CGSize { session?.size ?? CGSize(width: 16, height: 10) }
-
-    private func toScreen(_ e: NSEvent) -> CGPoint {
-        let p = convert(e.locationInWindow, from: nil)
-        let r = AVMakeRect(aspectRatio: screenSize, insideRect: bounds)
-        return CGPoint(x: (p.x - r.minX) / r.width * screenSize.width, y: (r.maxY - p.y) / r.height * screenSize.height)
-    }
-
-    override func mouseDown(with e: NSEvent) {
-        guard interactive else { onClick?(); return }
-        session?.move(to: toScreen(e), buttons: 1)
-    }
-    override func mouseDragged(with e: NSEvent) { if interactive { session?.move(to: toScreen(e), buttons: 1) } }
-    override func mouseUp(with e: NSEvent) { if interactive { session?.move(to: toScreen(e), buttons: 0) } }
-    override func mouseMoved(with e: NSEvent) { if interactive { session?.move(to: toScreen(e), buttons: 0) } }
-    override func rightMouseDown(with e: NSEvent) { if interactive { session?.click(at: toScreen(e), button: 4) } }
-    override func scrollWheel(with e: NSEvent) {
-        guard interactive, abs(e.scrollingDeltaY) > 2 else { return }
-        session?.scroll(notches: e.scrollingDeltaY > 0 ? 1 : -1, at: toScreen(e))
-    }
-    override var acceptsFirstResponder: Bool { interactive }
-    override func keyDown(with e: NSEvent) {
-        guard interactive, let s = session else { return }
-        if let special = VNCKeys.keysym(macKeyCode: e.keyCode) { s.press(special, with: VNCKeys.modifiers(e.modifierFlags)) }
-        else if let text = e.charactersIgnoringModifiers, !text.isEmpty {
-            if e.modifierFlags.intersection([.command, .control, .option]).isEmpty { s.type(e.characters ?? text) }
-            else { for ch in text.unicodeScalars { s.press(RFBSession.keysym(ch), with: VNCKeys.modifiers(e.modifierFlags)) } }
-        }
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self))
-    }
-}
-
-struct VNCScreen: NSViewRepresentable {
-    let session: RFBSession
-    var mode: VNCMode = .mouse
-    var interactive = false
-    var onClick: (() -> Void)? = nil
-
-    func makeNSView(context: Context) -> VNCScreenNSView {
-        let v = VNCScreenNSView()
-        v.session = session
-        session.show(in: v.display)
-        return v
-    }
-
-    func updateNSView(_ v: VNCScreenNSView, context: Context) {
-        v.interactive = interactive
-        v.onClick = onClick
-        if interactive { DispatchQueue.main.async { v.window?.makeFirstResponder(v) } }
-    }
-
-    static func dismantleNSView(_ v: VNCScreenNSView, coordinator: ()) { v.session?.hide(from: v.display) }
-}
-#endif
-
-/// Keys by name, for the shortcut row and the Mac's keyboard.
+/// Keys by name, for the shortcut row.
 enum VNCKeys {
     static let escape: UInt32 = 0xff1b, tab: UInt32 = 0xff09, enter: UInt32 = 0xff0d, backspace: UInt32 = 0xff08
     static let left: UInt32 = 0xff51, up: UInt32 = 0xff52, right: UInt32 = 0xff53, down: UInt32 = 0xff54

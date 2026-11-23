@@ -103,6 +103,9 @@ func TestMain(m *testing.M) {
 	// A send looks at the box once after typing and confirms nothing: most fakes never write what was typed into the
 	// transcript, and would wait out the window (#6428). sendconfirm_test.go turns it on (withSubmitWindow).
 	submitWindow = 0
+	// Nor the Mac's Agent rules (#13393): a start's task instructions are what the test sent, on any platform. The test
+	// that wants them sets darwin (agent_dispatch_guard_test.go).
+	agentGOOS = "linux"
 	os.Exit(m.Run())
 }
 

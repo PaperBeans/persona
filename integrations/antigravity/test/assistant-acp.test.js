@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { toAgyId } from '../lib/map.js'
@@ -158,6 +159,19 @@ test('an unexpected Assistant worker exit clears just its PID; the next send res
   await until('closed worker removed', () => !pids()[crashed])
   assert.deepEqual(pids(), { [stable]: stablePID })
   assert.throws(() => process.kill(restarted, 0), { code: 'ESRCH' })
+})
+
+// An Assistant that supervises Agents in this companion hears from them when their turns end: its worker stays warm
+// while one runs, and the idle timeout counts from the end of the last (#13471).
+test('an Agent turn running in this companion keeps idle Assistant workers warm', async (t) => {
+  const { pids, start, call, assistantDir } = await fixture(t, { assistantAcpIdleMs: 350, promptInactivityMs: 0 })
+  const agent = await start({ prompt: 'hold' })
+  const assistant = await start({ cwd: assistantDir })
+  const worker = await until('assistant worker reported', () => pids()[assistant])
+  await delay(1500)
+  assert.equal(pids()[assistant], worker, 'the idle Assistant worker was retired while an Agent turn ran')
+  assert.equal((await call('interrupt', agent)).settled, true)
+  await until('assistant worker retired after the Agent turn', () => !pids()[assistant], 5000)
 })
 
 test('a send during idle retirement waits for the old worker to exit before starting a replacement', async (t) => {

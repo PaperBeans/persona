@@ -2,9 +2,7 @@ import Foundation
 import Observation
 import PersonaKit
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 import UserNotifications
 import PersonaWire
 
@@ -554,14 +552,14 @@ final class AppModel {
     var terminalAsk: SessionKey?
     /// The phone writes waiting for Allow / Deny, one shown at a time (#4456).
     @ObservationIgnored let phoneConfirmations = PhoneConfirmations()
-    /// The one on screen (RootView / MacRootView's alert).
+    /// The one on screen (RootView's alert).
     var pendingConfirmation: PhoneConfirmation? { phoneConfirmations.current }
     /// Phone tool results the socket could not take yet, sent when it connects (#4456).
     @ObservationIgnored let toolResults = ToolResultOutbox()
     /// Remembered across launches together with the open dev chat (restoreChat), so a relaunch lands where you were.
     var selectedTab: AppTab = .assistant {
         didSet {
-            DeferredDefaults.set(selectedTab.rawValue, forKey: "app.tab")
+            UserDefaults.standard.set(selectedTab.rawValue, forKey: "app.tab")
             DevMode.shared.tab(selectedTab) // the screen in front, while Developing Persona records (#9460)
             #if DEBUG
             ShellTrace.shared.note("tab \(oldValue)->\(selectedTab)")
@@ -817,7 +815,6 @@ final class AppModel {
         self.stateFolder = stateFolder
         personas = store ?? PersonaStore()
         RetiredPreferences.clear(from: .standard)
-        TextSize.current.applyToMacFonts() // what `textSize` starts at
         Task.detached(priority: .utility) { LarkAttachment.staging.sweep() }
         connection = ConnectionStatus()
         assistantPicks = AssistantPickStore.load(folder: stateFolder)
@@ -879,11 +876,9 @@ final class AppModel {
         let language = LanguageStore.shared.apply()
         WatchSync.shared.onActivated = { [weak self] in
             WatchSync.shared.push(language: language)
-            #if os(iOS) || os(visionOS)
             // All-day recording: the erases and deletes the watch hasn't confirmed go now that a send reaches it
             // (docs/assistant/day-recap.md「Erasing」「Deleting」), paired with a hub or not.
             RecordingDayReceiver.shared.sessionActivated()
-            #endif
             guard let self, self.isPaired, !self.isDemo else { return }
             WatchSync.shared.push(persona: self.personas.chosenID)
             self.pushWatchConfigs()
@@ -898,11 +893,7 @@ final class AppModel {
         }
         applyPersonaPalette()
         connection.onCaughtUp = { [weak self] in self?.flushOutbox() }
-        #if os(iOS) || os(visionOS)
         let leaving = [UIApplication.didEnterBackgroundNotification, UIApplication.willTerminateNotification]
-        #else
-        let leaving = [NSApplication.willTerminateNotification]
-        #endif
         for name in leaving {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { @Sendable [weak self] _ in
                 MainActor.assumeIsolated {
@@ -920,12 +911,10 @@ final class AppModel {
             MainActor.assumeIsolated { self?.registerPhone() }
         }
         #endif
-        #if os(iOS) || os(visionOS)
         if registryUnreadable {
             NotificationCenter.default.addObserver(forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil,
                                                    queue: .main) { @Sendable _ in MainActor.assumeIsolated { AppModel.shared.retryRegistry() } }
         }
-        #endif
         DemoHub.shared.onNotSent = { [weak self] in self?.toast = Toast(DemoText.notSent) }
         countBadges()
         startHeldRetryRestoration()
@@ -1067,10 +1056,8 @@ final class AppModel {
     func start() {
         guard isPaired else { return }
         for link in links {
-            #if os(iOS) || os(visionOS)
             // Launched in the background (a push, a file from the watch): the socket waits for the app to open.
             link.live.suspended = UIApplication.shared.applicationState == .background
-            #endif
             link.live.connect(link.fallback)
         }
         if isDemo { return } // no watch, no device credentials: nothing to talk to
@@ -2860,9 +2847,7 @@ final class AppModel {
         // Simulator automation (scripts/app/sim.sh) must not take the real iPhone's phone_* tool calls.
         let automation = UserDefaults.standard.string(forKey: "pairURL") != nil
         if automation { tools = [] }
-        #if os(iOS) || os(visionOS)
         tools += RuntimeCLI.hubToolSpecs(features: link.features) // the runtime CLI over the hub, when switched on
-        #endif
         if automation && tools.isEmpty { return }
         #endif
         guard let data = try? JSON.encoder.encode(tools),
@@ -3284,9 +3269,7 @@ final class AppModel {
         case .extensionInvalidate(let ext, let id):
             ExtensionUIRegistry.shared.invalidate(extension: ext, ui: id, group: group)
             if ext == SubscriptionsUI.id { SubscriptionsRefresh.shared.changed() } // the entry rows' counts
-            #if os(iOS) || os(visionOS)
             ExtensionWidgetReconciliation.invalidate(group: group, owner: ext, contribution: id)
-            #endif
         #if os(iOS)
         case .meetingLive(let recordingID, let changed, let revs):
             // Recordings sync with the hub-level group's hub: another group's meetings are none of this phone's.
@@ -4643,18 +4626,14 @@ final class AppModel {
     /// the front (a switch the system cut short, the first launch after the separate App Icon setting went). Nothing
     /// happens when it already is, so no alert.
     func followAppIcon() {
-        #if os(iOS) || os(visionOS)
         let look = isDemo ? AppIconChoice.standard : personas.appIcon // Demo Mode shows only the default Avatar
         Task { await appIcon.follow(look, scheme: colorScheme) }
-        #endif
     }
 
-    /// Small / Standard / Large on top of the system's text size (Settings › Interface Style › Text Size); RootView applies it. On the Mac the
-    /// fonts read it from `Theme.Font.scale` (text styles there do not follow Dynamic Type, #833).
+    /// Small / Standard / Large on top of the system's text size (Settings › Interface Style › Text Size); RootView applies it.
     var textSize: TextSize = TextSize.current {
         didSet {
             UserDefaults.standard.set(textSize.rawValue, forKey: "ui.textSize")
-            textSize.applyToMacFonts()
         }
     }
 
@@ -4664,10 +4643,8 @@ final class AppModel {
     var colorScheme: ColorSchemeChoice = ColorSchemeChoice.current {
         didSet {
             UserDefaults.standard.set(colorScheme.rawValue, forKey: ColorSchemeChoice.key)
-            #if os(iOS) || os(visionOS)
             colorScheme.apply()
             followAppIcon() // Paper on the home screen takes the same look
-            #endif
         }
     }
 
@@ -5319,9 +5296,7 @@ final class AppModel {
 
 enum AppTab: String, Hashable {
     case assistant, chats, mail, settings
-    #if os(iOS) || os(visionOS)
     case feishu
-    #endif
 }
 
 struct Toast: Identifiable, Equatable {

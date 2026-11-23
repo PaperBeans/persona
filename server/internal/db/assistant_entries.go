@@ -95,6 +95,17 @@ func (d *DB) AssistantEntry(ctx context.Context, id string) (proto.AssistantEntr
 // ListAssistantEntries filters in SQL before limiting, including the caller's
 // personal-data boundary. Status is derived; the original bytes stay intact.
 func (d *DB) ListAssistantEntries(ctx context.Context, p proto.AssistantEntriesParams, personal bool) (proto.AssistantEntriesResult, error) {
+	return d.listAssistantEntries(ctx, p, personal, false)
+}
+
+// NewestAssistantEntries is ListAssistantEntries newest first: each page is the
+// next older one, and After continues past its oldest entry. The memory
+// assembler reads it so that a large ledger never hides the newest entries.
+func (d *DB) NewestAssistantEntries(ctx context.Context, p proto.AssistantEntriesParams, personal bool) (proto.AssistantEntriesResult, error) {
+	return d.listAssistantEntries(ctx, p, personal, true)
+}
+
+func (d *DB) listAssistantEntries(ctx context.Context, p proto.AssistantEntriesParams, personal, newest bool) (proto.AssistantEntriesResult, error) {
 	out := proto.AssistantEntriesResult{Entries: []proto.AssistantEntry{}, After: p.After}
 	if err := ValidateAssistantEntriesParams(&p); err != nil {
 		return out, err
@@ -114,6 +125,10 @@ func (d *DB) ListAssistantEntries(ctx context.Context, p proto.AssistantEntriesP
 		projects = []byte(`[]`)
 	}
 	now := time.Now().UTC()
+	after, order := ">", "at,id"
+	if newest {
+		after, order = "<", "at DESC,id DESC"
+	}
 	rows, err := d.pool.Query(ctx, `WITH effective AS (
  SELECT e.*, CASE
  WHEN n.body->>'status'='wrong' THEN 'wrong'
@@ -135,8 +150,8 @@ func (d *DB) ListAssistantEntries(ctx context.Context, p proto.AssistantEntriesP
  AND ($10::jsonb='[]' OR body->'scope'->'project'='[]' OR EXISTS(
  SELECT 1 FROM jsonb_array_elements_text($10::jsonb) v WHERE body->'scope'->'project' @> jsonb_build_array(v.value)))
  AND ($11::boolean IS NULL OR (body->'scope'->>'personal')::boolean=$11)
- AND ($12::timestamptz IS NULL OR (at,id)>($12,$13::text))
- ORDER BY at,id LIMIT $14`, now, personal, p.By, p.Trust, p.Status, p.Tag, p.Type, filter.Executor, machines, projects, filter.Personal, cursorTime(c), c.ID, p.Limit+1)
+ AND ($12::timestamptz IS NULL OR (at,id)`+after+`($12,$13::text))
+ ORDER BY `+order+` LIMIT $14`, now, personal, p.By, p.Trust, p.Status, p.Tag, p.Type, filter.Executor, machines, projects, filter.Personal, cursorTime(c), c.ID, p.Limit+1)
 	if err != nil {
 		return out, err
 	}

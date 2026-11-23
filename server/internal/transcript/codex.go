@@ -3,6 +3,7 @@ package transcript
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -121,9 +122,9 @@ type codexItem struct {
 		} `json:"content"`
 		IsError bool `json:"isError"`
 	} `json:"result"`
-	Error json.RawMessage `json:"error"`
-	// ImageView
-	Path string `json:"path"`
+	Error     json.RawMessage `json:"error"`
+	Path      string          `json:"path"`      // ImageView
+	SavedPath string          `json:"savedPath"` // Extension (image_gen.generation)
 	// Extension (kind web.search): what was searched or opened, and what came back
 	Kind   string `json:"kind"`
 	Query  string `json:"query"`
@@ -149,6 +150,40 @@ type codexItem struct {
 	ReceiverThreadIDs []string        `json:"receiver_thread_ids"`
 	ReceiverAgents    json.RawMessage `json:"receiver_agents"`
 	AgentsStates      json.RawMessage `json:"agents_states"`
+}
+
+type codexChatItem struct {
+	codexItem
+}
+
+func (it *codexChatItem) UnmarshalJSON(data []byte) error {
+	var typed codexItem
+	err := json.Unmarshal(data, &typed)
+	if err == nil {
+		it.codexItem = typed
+		return nil
+	}
+	var mismatch *json.UnmarshalTypeError
+	if !errors.As(err, &mismatch) || mismatch.Value != "string" || mismatch.Field != "result" {
+		return err
+	}
+	var extension struct {
+		codexItem
+		Result json.RawMessage `json:"result"`
+	}
+	if retryErr := json.Unmarshal(data, &extension); retryErr != nil {
+		return retryErr
+	}
+	if extension.Type != "Extension" || extension.Kind != "image_gen.generation" || len(extension.Result) == 0 || extension.Result[0] != '"' {
+		return err
+	}
+	it.codexItem = extension.codexItem
+	return nil
+}
+
+type codexChatPayload struct {
+	codexPayload
+	Item *codexChatItem `json:"item"`
 }
 
 // isCodexLine tells a rollout line from a Claude transcript line: only rollouts wrap everything in "payload" under a
@@ -247,7 +282,7 @@ func skipJSONSpace(line []byte, i int) int {
 type historyMutation struct {
 	TurnID             string `json:"turn_id"`
 	DisplayCompletions []struct {
-		Item *codexItem `json:"item"`
+		Item *codexChatItem `json:"item"`
 	} `json:"display_completions"`
 }
 
@@ -264,13 +299,13 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 		var out []proto.Item
 		for _, c := range h.DisplayCompletions {
 			if c.Item != nil {
-				out = append(out, codexItemLines(seq, l.Timestamp, h.TurnID, c.Item, meta)...)
+				out = append(out, codexItemLines(seq, l.Timestamp, h.TurnID, &c.Item.codexItem, meta)...)
 			}
 		}
 		meta.codexWorked(out)
 		return meta.codexModel(out)
 	}
-	var p codexPayload
+	var p codexChatPayload
 	if json.Unmarshal(l.Payload, &p) != nil {
 		return nil
 	}
@@ -374,7 +409,7 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 	if p.Item == nil {
 		return nil
 	}
-	out := codexItemLines(seq, l.Timestamp, p.TurnID, p.Item, meta)
+	out := codexItemLines(seq, l.Timestamp, p.TurnID, &p.Item.codexItem, meta)
 	meta.codexWorked(out)
 	return meta.codexModel(out)
 }
@@ -605,10 +640,13 @@ func codexItemLines(seq int, ts time.Time, turnID string, it *codexItem, meta *M
 		}
 		return items
 	case "ImageView":
-		input, _ := json.Marshal(map[string]string{"file_path": strings.TrimPrefix(it.Path, "file://")})
-		return codexTool(meta, mk, it.ID, "Read", input, "", false)
+		return codexImageRead(meta, mk, it.ID, it.Path)
 	case "Extension":
 		switch it.Kind {
+		case "image_gen.generation":
+			if it.Status == "completed" && it.SavedPath != "" {
+				return codexImageRead(meta, mk, it.ID, it.SavedPath)
+			}
 		case "web.search":
 			return codexWebSearch(meta, mk, it)
 		case "clock.sleep":
@@ -635,6 +673,11 @@ func codexItemLines(seq int, ts time.Time, turnID string, it *codexItem, meta *M
 	n := mk(0, it.ID, "system", proto.KindNotice)
 	n.Text = "Codex 事件：" + it.Type + "（完整记录在原会话中）"
 	return []proto.Item{n}
+}
+
+func codexImageRead(meta *Meta, mk func(int, string, string, string) proto.Item, id, path string) []proto.Item {
+	input, _ := json.Marshal(map[string]string{"file_path": strings.TrimPrefix(path, "file://")})
+	return codexTool(meta, mk, id, "Read", input, "", false)
 }
 
 // codexPendingKept bounds the backgrounded command ids a Meta keeps: a rollout that starts commands and never records
