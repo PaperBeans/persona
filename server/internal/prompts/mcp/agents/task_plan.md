@@ -55,10 +55,14 @@ Workspace policy: "new" isolates a checkout; {"new":{"branch":"task/my-change"}}
             "type": "string",
             "description": "{{if eq .Lang "en"}}Card title in English, under 20 characters.{{else if eq .Lang "ja"}}カードに表示する日本語のタイトル（20文字未満）。{{else}}Card title in Chinese, under 20 characters.{{end}}"
           },
-          "context": {"type": "string", "description": "facts the manager cannot resolve; omit project background"},
+          "context": {"type": "string", "description": "extra facts; no project background"},
           "prompt": {
             "type": "string",
-            "description": "goal, authorization bounds and new facts; the manager adds project context, criteria and framework rules once"
+            "description": "goal, bounds and facts; manager adds context, criteria and rules"
+          },
+          "skip_project_memory": {
+            "type": "boolean",
+            "description": "default false; true skips project/direction memory; prompt unchanged"
           },
           "machine": {
             "type": "string",

@@ -68,3 +68,18 @@ describe("a parent's sidebar row (#5120)", () => {
     expect(html).not.toContain("Not this one");
   });
 });
+
+describe("a Working row whose background commands look stuck (#13744)", () => {
+  const since = new Date(Date.now() - 3 * 3600_000 - 60_000).toISOString();
+  const bg: Session = { ...parent, status: "done", state: "working", background_working: true, background_stalled_since: since };
+  it("stays Working and says how long they have been quiet", () => {
+    const html = render(bg);
+    expect(mark(html)).toBe("working");
+    expect(html).toContain("data-bg-stalled");
+    expect(html).toContain("后台命令 3 小时没有动静");
+  });
+  it("shows nothing for a row without the stall, or one that is not Working", () => {
+    expect(render({ ...bg, background_stalled_since: undefined })).not.toContain("data-bg-stalled");
+    expect(render({ ...bg, state: "idle", status: "idle" })).not.toContain("data-bg-stalled");
+  });
+});

@@ -435,7 +435,8 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 	// providers' keys are sealed with its own secret.key.
 	assistantStore := repositorystore.New(database)
 	svc = New(Options{Hub: bh, Store: func() Store { return assistantStore }, Logf: logf, Devices: devs,
-		KB: &KBOptions{Dir: o.KBDir, KeyDir: o.HandlesDir}, SecretKey: o.SecretKey,
+		ModulesOff: ReadModuleSwitch(ctx, assistantStore, logf), // the built-in modules switched off (modules.go)
+		KB:         &KBOptions{Dir: o.KBDir, KeyDir: o.HandlesDir}, SecretKey: o.SecretKey,
 		Trust: devs, AgentDirs: devs, ID: o.ID, Build: version, RepositoryConfig: o.ConfigFile,
 		RemoteImageCache: filepath.Join(home, "cache", "remote-images")})
 	svc.SetExtensions(ext) // the connectors', Cua's and ego's tools, in this process (fleet_tools.go)

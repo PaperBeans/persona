@@ -85,13 +85,8 @@ func (s *Service) taskNoticeOfStart(ctx context.Context, t Todo, machine, state,
 		s.quietNotify(ctx, t, machine, state, ask, text, files)
 		return
 	}
-	if state == "failed" && !t.Quiet && t.Origin != "" && !s.isMain(ctx, t.Origin) && !s.isLeader(ctx, t.Origin) &&
-		!s.isLeaderRef(t.Supervision.Supervisor) {
-		// A side conversation's task, whoever supervises it now: the user still gets the failure push they got before
-		// the task had a ledger (#5081), and the supervisor its signal. A leader conversation's own task, and a
-		// worker's, stay their supervisor's business.
-		s.notifyTaskFailed(ctx, t, machine, text)
-	}
+	// A supervised task's failed start is its supervisor's business: the failed signal below carries it there, with
+	// its start remedies, and only the supervisor's needs_user brings it to the owner. No push to the phone.
 	g := superviseSignal{Todo: t.ID, Machine: machine, Detail: text, At: time.Now()}
 	switch state {
 	case "failed":
@@ -187,7 +182,7 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 		if ai.IsNotConfigured(err) {
 			detail = "判定模型未配置" // i18n-ignore: the supervision message is the assistant's prompt
 		}
-		s.signal(superviseSignal{Todo: t.ID, Kind: sigUnjudged, Key: key, Detail: detail})
+		s.signal(superviseSignal{Todo: t.ID, Kind: sigUnjudged, Key: key, Detail: detail, JudgeDown: true})
 		return
 	}
 	detail := verdictWords[c.Verdict]
@@ -375,6 +370,7 @@ func (s *Service) notifyTaskNeedsUser(ctx context.Context, t Todo, work time.Tim
 		Subtitle: "Persona", DeviceID: here, SessionID: conversation, Title: title, Body: body,
 		// Only the owner can take this action: it interrupts low-distraction mode, once per stretch of work (#5732).
 		Level: assistantwire.LevelP0, RelatedKey: "todo:" + t.ID + "@" + work.UTC().Format(time.RFC3339Nano)}
+	s.noteCard(ctx, cardLeaderNeedsUser, n)
 	if _, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
 		s.logf("task %s: needs-user push: %v", t.ID, err)
 		return false
@@ -449,7 +445,7 @@ func (s *Service) notifyTaskFailed(ctx context.Context, t Todo, machine, reason 
 	if sub == "" {
 		sub = "Persona"
 	}
-	s.push(ctx, Notification{
+	s.push(withCard(ctx, cardTaskFailed), Notification{
 		Subtitle:  sub,
 		DeviceID:  here,
 		SessionID: t.Origin,

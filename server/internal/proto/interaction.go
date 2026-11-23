@@ -37,6 +37,16 @@ const DismissedInChat = "replied_in_chat"
 // their Reason dropped (assistant/fleet_routes.go).
 const DismissedExpired = "expired"
 
+// DismissedWithdrawn is the Reason of a Dismiss the manager hands the one waiting on a card that ended because the
+// asker went away before anyone answered it: its call ended, its hook disconnected and did not come back. Nobody
+// answered it: it is no decline (Resolution.Outcome). Only the manager sets it.
+const DismissedWithdrawn = "withdrawn"
+
+// DismissedCleared is the Reason of a Dismiss for a card that ended because it was cleared before anyone answered it:
+// a newer card replaced it, or it was no longer the one pending under its id. Nobody answered it: it is no decline
+// (Resolution.Outcome). Only the manager sets it.
+const DismissedCleared = "cleared"
+
 // AskedWithoutWaiting: ix is the assistant's ask_user raised with wait false (#4928, docs/assistant/assistant.md
 // "Asking without holding the turn"): its turn ended when the card went up, so no turn is held behind it. It is the
 // one ask_user card that is Resumable (a waiting one lives in the manager's memory and is not).

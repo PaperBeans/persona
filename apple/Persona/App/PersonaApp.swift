@@ -48,7 +48,7 @@ struct PersonaApp: App {
                     #if os(iOS)
                     if ShortcutCallbacks.shared.handle(url) { return } // a shortcut Persona ran came back (#2283)
                     #endif
-                    if MetaGlasses.shared.handle(url) { return } // the Meta AI app's callback (docs/apple/meta-glasses.md)
+                    if Modules.registry.handle(url) { return } // a module's own URL, as the Meta AI app's callback (docs/apple/ios.md, "Modules")
                     #if os(iOS)
                     if let link = FleetLink.session(url) { // tapped the Live Activity
                         // "group|machine" for another group's row (FleetMerge); a row the hub pushed names no group.
@@ -179,7 +179,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ = KeyboardState.shared // watches the keyboard from the start: a card may come while it is already up
         UNUserNotificationCenter.current().delegate = self
         Task { await ExtensionNotificationActions.preserveAndRegister { NotificationActions.categories } }
-        MetaGlasses.shared.configure() // a no-op without the Meta Wearables SDK (docs/apple/meta-glasses.md)
+        Modules.registry.launch() // the active modules' launch hooks, as the Meta glasses' set-up (docs/apple/ios.md, "Modules")
         #if os(iOS)
         QuickAction.publish()
         // Here, for HealthKit to wake the app after a workout (#2526); only a build with background delivery reads the

@@ -94,7 +94,22 @@ func TestSubscriptionsRevisionLeaseAndRun(t *testing.T) {
 		[]SubscriptionItemRow{{UID: "n3", Data: []byte(`{"title":"Three"}`)}}, nil, now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.PruneSubscriptionItems(ctx, "sub_a", now.Add(time.Minute)); err != nil {
+	// Picked by uid (a things recipe's latest answer, #13637): only those; none asked, none.
+	if picked, _ := d.SubscriptionItems(ctx, "sub_a", SubscriptionItemsQuery{UIDs: []string{"n3", "n1", "gone"}}); len(picked) != 2 ||
+		picked[0].UID != "n1" || picked[1].UID != "n3" {
+		t.Fatalf("picked by uid: %+v", picked)
+	}
+	if picked, _ := d.SubscriptionItems(ctx, "sub_a", SubscriptionItemsQuery{UIDs: []string{}}); len(picked) != 0 {
+		t.Fatalf("picked by no uid: %+v", picked)
+	}
+	// Pruning keeps the ones asked to stay however old (a things recipe's latest answer), then takes them when not.
+	if err := d.PruneSubscriptionItems(ctx, "sub_a", now.Add(time.Minute), []string{"n2"}); err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := d.SubscriptionItems(ctx, "sub_a", SubscriptionItemsQuery{Limit: 10}); len(left) != 2 || left[0].UID != "n2" || left[1].UID != "n3" {
+		t.Fatalf("after pruning, n2 kept: %+v", left)
+	}
+	if err := d.PruneSubscriptionItems(ctx, "sub_a", now.Add(time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
 	if left, _ := d.SubscriptionItems(ctx, "sub_a", SubscriptionItemsQuery{Limit: 10}); len(left) != 1 || left[0].UID != "n3" {

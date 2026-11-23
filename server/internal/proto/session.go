@@ -245,6 +245,12 @@ type Session struct {
 	// apply to it, and a launcher switch to Launcher itself brings it back there. Beside EffortChangeFailed, in its
 	// padding: a Session stays in its allocation size class.
 	OffLauncher bool `json:"off_launcher,omitempty"`
+	// BackgroundStalledSince (#13744): the time since which this session's background commands have used no CPU and
+	// written no output, set only when a known worker (a build, tests, a download) runs there and that has lasted ten
+	// minutes while the turn is over. State stays working: a running tool is work, this only tells a client the work
+	// looks stuck. Zero (omitted) otherwise. Whole seconds in a uint32, in the padding before Ultracode: a Session
+	// stays in its allocation size class (TestSessionFitsItsSizeClass).
+	BackgroundStalledSince UnixTime32 `json:"background_stalled_since,omitempty"`
 	// Ultracode is Claude Code's independent session-only workflow switch: nil means unknown.
 	// UltracodePending (beside AsksRead) means a requested change waits for an idle input box; LostAt asks the client
 	// to offer reopening after a resumed process reset an enabled switch. Reopening or dismissing the notice clears
@@ -773,4 +779,43 @@ const ContextNearlyFullShare = 0.85
 // ContextNearlyFull: what the model saw in the latest reply fills ContextNearlyFullShare of its window (both known).
 func ContextNearlyFull(tokens, window int) bool {
 	return window > 0 && tokens > 0 && float64(tokens) >= ContextNearlyFullShare*float64(window)
+}
+
+// UnixTime32 is a time in whole seconds since the epoch (zero: not set) that is sent as RFC 3339 like the other times;
+// four bytes, so that it fits the padding in Session.
+type UnixTime32 uint32
+
+// UnixTime32Of is t as a UnixTime32 (zero for the zero time and for times it cannot hold).
+func UnixTime32Of(t time.Time) UnixTime32 {
+	if t.IsZero() || t.Unix() <= 0 || t.Unix() > 1<<32-1 {
+		return 0
+	}
+	return UnixTime32(t.Unix())
+}
+
+// Time is the time it holds (the zero time when not set).
+func (u UnixTime32) Time() time.Time {
+	if u == 0 {
+		return time.Time{}
+	}
+	return time.Unix(int64(u), 0).UTC()
+}
+
+// MarshalJSON writes null for a zero one, so that a Session leaves it out of every encoder's output.
+func (u UnixTime32) MarshalJSON() ([]byte, error) {
+	if u == 0 {
+		return []byte("null"), nil
+	}
+	return u.Time().MarshalJSON()
+}
+
+func (u *UnixTime32) UnmarshalJSON(b []byte) error {
+	var t time.Time
+	if string(b) != "null" {
+		if err := t.UnmarshalJSON(b); err != nil {
+			return err
+		}
+	}
+	*u = UnixTime32Of(t)
+	return nil
 }

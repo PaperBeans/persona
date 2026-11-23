@@ -31,6 +31,11 @@ type AgentsConfig struct {
 	// Review is manager.json agents.review: the independent reviewer of a supervised task's finished change (#2173,
 	// docs/assistant/unified-entry.md "Independent review").
 	Review ReviewConfig `json:"review,omitzero"`
+	// SortByActivity and ShowFilter are manager.json agents.sort_by_activity / agents.show_filter: the initial values of
+	// the Agents list's display settings (GET /api/v1/agents/display-settings) until someone saves their own choice. Nil
+	// is off.
+	SortByActivity *bool `json:"sort_by_activity,omitempty"`
+	ShowFilter     *bool `json:"show_filter,omitempty"`
 }
 
 // A2AConfig defaults to the manager's confirmed personal computers. A supplied

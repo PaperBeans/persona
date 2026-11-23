@@ -132,9 +132,12 @@ nonisolated struct TaskPlan: Codable, Hashable, Identifiable, Sendable {
     /// A standing rule the hub suggests on this open plan (#4929, #5802): the owner started this kind three times. Filled
     /// in where the plan is read, never stored with it; a hub from before sends none.
     var suggestion: RuleSuggestion?
+    /// The space of the conversation that made it ("health", a domain space's slug; nil: the assistant's own). Main's
+    /// Needs You lists every open plan but Health's, which stay in Health. A hub from before sends none.
+    var space: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, conversation, tasks, state, suggestion
+        case id, conversation, tasks, state, suggestion, space
         case createdAt = "created_at", updatedAt = "updated_at"
     }
 

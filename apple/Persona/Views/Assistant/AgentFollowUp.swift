@@ -374,7 +374,7 @@ struct AgentFollowUpView: View {
             } header: {
                 Text("Tidying up [Agent Follow-Up]")
             } footer: {
-                Text("By default an idle Agent stops after 12 hours and keeps its terminal, and a closed session with no open task moves to Archived after 3 idle days.")
+                Text("By default an idle Agent stops after 12 hours and keeps its terminal (Close ended terminals closes it too), and a closed session with no open task moves to Archived after 3 idle days.")
             }
         }
     }

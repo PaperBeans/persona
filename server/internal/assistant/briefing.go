@@ -453,6 +453,9 @@ const briefGrace = 60
 // briefGrace when the morning routine has facts on, is due that day and its card can go out (the Lark bot is on with its
 // pushes), else none; never past the end of the day.
 func (s *Service) briefingGrace(ctx context.Context, local time.Time, start int) int {
+	if !s.briefingOn() { // no briefing lists them: the reminders go one by one
+		return 0
+	}
 	if f, ready := s.feishuFeatures(ctx); !ready || !f.Pushes {
 		return 0
 	}

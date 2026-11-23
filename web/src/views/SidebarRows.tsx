@@ -43,7 +43,7 @@ import { childCards, foldedRow, ownRow } from "../lib/folded-rows";
 import { countSides, foldedStateWith, hubSides, unreadSides } from "../lib/side-fold";
 import { useChildSessions, useHeldSides } from "../lib/use-child-sessions";
 import { askSide } from "../lib/side-panel";
-import { backgroundWork } from "../lib/background-work";
+import { backgroundStall, backgroundWork } from "../lib/background-work";
 import { SESSIONS_LIST_FEATURE } from "../lib/session-list";
 import { personalHideDeps, personalOrder, personalSessions, removeAgentSession, useGoingIds } from "../lib/agents";
 import { BADGE_CLASS, CURRENT_ROW, type GoFn, GroupCount, pageIconStyle, type RegFn, ROW_TITLE_MIN, type RowMenuFn, Section } from "./SidebarParts";
@@ -379,7 +379,9 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
   // does it, and only in a row that shows one of them. The ages read the clock when the row renders: `now` is the
   // mount time until the first tick, and a row may only start showing an age long after it mounted
   const showsAge = ageAtEnd || (withDetail && !!s.updated_at);
-  const now = useNow(60_000, showsAge || runningWorkflows(s).length > 0 || s.turn_error_kind === "usage_limit");
+  const now = useNow(60_000, showsAge || runningWorkflows(s).length > 0 || s.turn_error_kind === "usage_limit" || Boolean(s.background_stalled_since));
+  // background commands that look stuck (#13744): it is still Working, the row says they are quiet
+  const stall = showState && !s.assistant ? backgroundStall(s, now) : null;
   const detail = withDetail ? rowDetail(s, now) : [];
   const workflow = showState && !s.assistant && st !== "offline" ? workflowShortLine(s) : "";
   const workflowTitle = workflow ? workflowLine(s, now) : "";
@@ -455,7 +457,7 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
       {/* with the mark, the title sits in the column whether a second line shows or not: the same element through a
           workflow's start and end, so the mark does not fade in again */}
       {holdSides && <HoldSides mid={row.machine_id} sid={row.session_id} />}
-      {ultra || detail.length > 0 || workflow || line || sideLine || childLine || plan ? (
+      {ultra || detail.length > 0 || workflow || line || sideLine || childLine || plan || stall ? (
         <span className={cx("flex min-w-0 flex-1 flex-col", titleMin, titleFirst)}>
           {ultra ? (
             <span className="flex min-w-0 items-center gap-1">
@@ -475,6 +477,12 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
             <span data-children-line title={childLine} className="flex h-4 min-w-0 items-center gap-1 text-[11px] leading-4 text-ink-3">
               <Icon name="agent" size={10} stroke={2.2} className="shrink-0" />
               <span className="truncate tabular-nums">{childLine}</span>
+            </span>
+          )}
+          {stall && (
+            <span data-bg-stalled title={stall.title} className="flex h-4 min-w-0 items-center gap-1 text-[11px] leading-4 text-ink-3">
+              <Icon name="clock" size={10} stroke={2.2} className="shrink-0" />
+              <span className="truncate">{stall.text}</span>
             </span>
           )}
           {plan && (

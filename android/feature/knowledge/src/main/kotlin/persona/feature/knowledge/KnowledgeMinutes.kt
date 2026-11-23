@@ -20,6 +20,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.doubleOrNull
 import persona.core.contracts.api.KnowledgeDetail
 import persona.core.contracts.api.KnowledgeSegment
 import persona.core.contracts.api.MinutesAction
@@ -52,6 +55,7 @@ import persona.core.designsystem.text
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.util.Locale
+import kotlin.math.roundToInt
 
 // A recording's meeting minutes on its page (#2738, docs/assistant/meeting-minutes.md): the layout of iOS
 // RecordingMinutesSections (above the transcript; when and where, who was there; key points, decisions, action items and
@@ -64,6 +68,8 @@ internal enum class MinutesPhase {
     Ready,
     /** A meeting whose transcript isn't complete yet: minutes come after. */
     Waiting,
+    /** The hub is checking the whole recording before writing them. */
+    Checking,
     /** The hub is writing them, none yet. */
     Writing,
     /** The hub couldn't write them, none yet. */
@@ -83,7 +89,10 @@ internal data class MinutesView(
     val trimmed: Boolean = false,
     /** Make minutes / Regenerate is offered. */
     val canMake: Boolean = false,
+    val progress: MinutesProgress? = null,
 )
+
+internal data class MinutesProgress(val done: Int, val total: Int)
 
 /**
  * The minutes section for [detail], the web's rules: what the hub wrote (`detail.minutes`) and where newer ones stand
@@ -98,11 +107,25 @@ internal fun minutesView(detail: KnowledgeDetail, facts: RecordingFacts): Minute
         trimmed = trimmed, canMake = !trimmed && facts.complete && state != "pending")
     if (trimmed) return null
     return when {
-        state == "pending" -> MinutesView(MinutesPhase.Writing)
+        state == "pending" -> pendingMinutes(detail.meta?.get("transcription") as? JsonObject)
         state == "failed" -> MinutesView(MinutesPhase.Failed, canMake = facts.complete)
         !facts.complete -> if (meeting) MinutesView(MinutesPhase.Waiting) else null
         else -> MinutesView(MinutesPhase.Offer, canMake = true)
     }
+}
+
+private fun pendingMinutes(transcription: JsonObject?): MinutesView {
+    if (transcription.string("mode") != "hub" || transcription.string("state") != "finishing")
+        return MinutesView(MinutesPhase.Writing)
+    fun seconds(key: String) = (transcription?.get(key) as? JsonPrimitive)
+        ?.takeUnless { it.isString }?.doubleOrNull?.takeIf { it.isFinite() }
+    val done = seconds("final_done")
+    val end = seconds("end")
+    val progress = if (done != null && done >= 0 && end != null && end > 0) {
+        val total = (end / 60).roundToInt().coerceAtLeast(1)
+        MinutesProgress((done / 60).toInt().coerceAtMost(total), total)
+    } else null
+    return MinutesView(MinutesPhase.Checking, progress = progress)
 }
 
 /** The transcript line an item's [at] points at: the last line starting at or before it (the first when none does). */
@@ -172,11 +195,19 @@ internal fun LazyListScope.recordingMinutes(view: MinutesView, actions: MinutesA
         view.phase == MinutesPhase.Offer -> R.string.knowledge_minutes_offer
         else -> null
     }
-    if (view.phase == MinutesPhase.Writing || view.updating) item("minutes-writing", contentType = "row") {
+    if (view.phase == MinutesPhase.Checking || view.phase == MinutesPhase.Writing || view.updating) item("minutes-writing", contentType = "row") {
         // Apart from the minutes it is writing again, which follow.
         JGroupItem(GroupPosition.Single, if (view.minutes != null) Modifier.padding(bottom = Tokens.Space.s) else Modifier) {
-            JRow(stringResource(if (view.updating) R.string.knowledge_minutes_updating else R.string.knowledge_minutes_writing),
-                subtitle = stringResource(R.string.knowledge_minutes_writing_note), subtitleLines = 3,
+            val checking = view.phase == MinutesPhase.Checking
+            val progress = view.progress
+            val title = when {
+                view.updating -> stringResource(R.string.knowledge_minutes_updating)
+                checking && progress != null -> stringResource(R.string.knowledge_minutes_checking_progress, progress.done, progress.total)
+                checking -> stringResource(R.string.knowledge_minutes_checking)
+                else -> stringResource(R.string.knowledge_minutes_writing)
+            }
+            JRow(title, titleLines = if (checking) 3 else 1,
+                subtitle = if (checking) null else stringResource(R.string.knowledge_minutes_writing_note), subtitleLines = 3,
                 leading = { JSpinner(Modifier.padding(end = Tokens.Space.xxs)) }, modifier = Modifier.testTag("minutes-writing"))
         }
     }

@@ -22,7 +22,7 @@ type DB interface {
 		seen []db.SubscriptionSeenRow, items []db.SubscriptionItemRow, read []string, now time.Time) error
 	SubscriptionItems(ctx context.Context, id string, q db.SubscriptionItemsQuery) ([]db.SubscriptionItemRow, error)
 	SubscriptionItem(ctx context.Context, id, uid string) (*db.SubscriptionItemRow, error)
-	PruneSubscriptionItems(ctx context.Context, id string, before time.Time) error
+	PruneSubscriptionItems(ctx context.Context, id string, before time.Time, keep []string) error
 }
 
 // DBStore is the Store in the manager's database.
@@ -55,13 +55,16 @@ type keptRun struct {
 	InboxGroup      string        `json:"inbox_group,omitempty"`
 	InboxGroupFrom  *time.Time    `json:"inbox_group_from,omitempty"`
 	Migrated        *time.Time    `json:"migrated,omitempty"`
+	Answer          []string      `json:"answer,omitempty"`
+	AnswerAt        *time.Time    `json:"answer_at,omitempty"`
 }
 
 func encode(s Subscription) ([]byte, error) {
 	return json.Marshal(kept{Subscription: s, Keep: keptRun{Tool: s.Tool, ToolFingerprint: s.ToolFingerprint, SourceMin: s.SourceMin,
 		MaxCallsPerHour: s.MaxCallsPerHour, SinceAt: s.SinceAt, Continuation: s.Continuation, ShapeMisses: s.ShapeMisses, SnapshotHash: s.SnapshotHash,
 		RunState: s.RunState, Runs: s.Runs, InboxFrom: s.InboxFrom, InboxCatchup: s.InboxCatchup, KBFrom: s.KBFrom,
-		CatchupFrom: s.CatchupFrom, Baseline: s.Baseline, InboxGroup: s.InboxGroup, InboxGroupFrom: s.InboxGroupFrom, Migrated: s.Migrated}})
+		CatchupFrom: s.CatchupFrom, Baseline: s.Baseline, InboxGroup: s.InboxGroup, InboxGroupFrom: s.InboxGroupFrom, Migrated: s.Migrated,
+		Answer: s.Answer, AnswerAt: s.AnswerAt}})
 }
 
 func decode(data []byte) (Subscription, error) {
@@ -75,6 +78,10 @@ func decode(data []byte) (Subscription, error) {
 	s.InboxFrom, s.InboxCatchup, s.KBFrom = k.Keep.InboxFrom, k.Keep.InboxCatchup, k.Keep.KBFrom
 	s.CatchupFrom, s.Baseline = k.Keep.CatchupFrom, k.Keep.Baseline
 	s.InboxGroup, s.InboxGroupFrom, s.Migrated = k.Keep.InboxGroup, k.Keep.InboxGroupFrom, k.Keep.Migrated
+	s.Answer, s.AnswerAt = k.Keep.Answer, k.Keep.AnswerAt
+	if s.AnswerAt != nil && s.Answer == nil {
+		s.Answer = []string{} // an answer with no rows, kept as none
+	}
 	return s, nil
 }
 
@@ -182,7 +189,8 @@ func (d *DBStore) CommitRun(ctx context.Context, c RunCommit) (RunCommit, error)
 }
 
 func (d *DBStore) HeldItems(ctx context.Context, id string, q ItemQuery) ([]Held, error) {
-	rows, err := d.db.SubscriptionItems(ctx, id, db.SubscriptionItemsQuery{After: q.After, Since: q.Since, Limit: q.Limit, Newest: q.Newest})
+	rows, err := d.db.SubscriptionItems(ctx, id, db.SubscriptionItemsQuery{After: q.After, Since: q.Since, Limit: q.Limit, Newest: q.Newest,
+		UIDs: q.UIDs})
 	if err != nil {
 		return nil, err
 	}
@@ -211,6 +219,6 @@ func (d *DBStore) HeldItem(ctx context.Context, id, uid string) (*Held, error) {
 	return &Held{Seq: r.Seq, Stored: r.CreatedAt, Item: it}, nil
 }
 
-func (d *DBStore) PruneItems(ctx context.Context, id string, before time.Time) error {
-	return d.db.PruneSubscriptionItems(ctx, id, before)
+func (d *DBStore) PruneItems(ctx context.Context, id string, before time.Time, keep []string) error {
+	return d.db.PruneSubscriptionItems(ctx, id, before, keep)
 }

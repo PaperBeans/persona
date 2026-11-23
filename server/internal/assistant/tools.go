@@ -45,7 +45,7 @@ var toolNames = []string{"resource_status", "ask_user", "notify_user", "supervis
 	"conversation_tags_set",
 	"conversation_new", "conversation_send", "task_plan", "task_plan_withdraw", "task_review", "task_scope", "task_decided", "task_start_screen", "task_start_keys", "task_retry",
 	"todo_workspace", "todo_repositories_get", "todo_repositories_set", "todo_repository_links_set", "todo_repository_links_add", "todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete", "concern_report",
-	"direction_name", "leader_progress", "decision_record", "decisions_query"}
+	"direction_name", "leader_progress", "decision_record", "decisions_query", "health_intake"}
 
 // Tools are the assistant's tools (assistant.tools).
 func (s *Service) Tools(ctx context.Context) []proto.Tool {
@@ -140,6 +140,9 @@ func (s *Service) appTool(ctx context.Context, app string, call ToolCall, args j
 }
 
 func (s *Service) runTool(ctx context.Context, machine, self, name string, args json.RawMessage) (string, error) {
+	if name == "health_intake" && s.agentCallerSpace(ctx, machine, self) != SpaceHealth {
+		return "", errors.New("health_intake is only available in a known Health conversation")
+	}
 	// What is said in a space stays there (docs/assistant/health.md "How directories and memory are isolated"): a space
 	// whose policy says so writes nothing to the knowledge base, nor changes or starts what is imported into it
 	// (kb_history_status only reads).
@@ -156,6 +159,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		return s.toolEntries(ctx, machine, self, name, args)
 	case spaceStateTool: // a space track's conversations only (track_space_md.go)
 		return s.toolSpaceStateUpdate(ctx, machine, self, args)
+	case "health_intake":
+		return s.toolHealthIntake(ctx, args)
 	case "repository_add":
 		return s.toolRepositoryAdd(ctx, machine, self, args)
 	case "repositories_list", "repository_get":
@@ -281,7 +286,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		}
 		// Asked for explicitly: every device, the Feishu bot too, and no separate push when this turn ends. pushResult holds
 		// it to its track's push_cap (track_attention.go), and the track tells immersive mode where it is from.
-		res, err := s.pushResult(ctx, Notification{Subtitle: "Persona", DeviceID: machine, SessionID: self, Title: a.Title, Body: a.Body,
+		res, err := s.pushResult(withCard(ctx, cardNotifyUser), Notification{Subtitle: "Persona", DeviceID: machine, SessionID: self, Title: a.Title, Body: a.Body,
 			Asked: true, Level: a.PushLevel, RelatedKey: clip(strings.TrimSpace(a.RelatedKey), 200), Track: space})
 		if err != nil {
 			return "", err
@@ -456,10 +461,10 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if a.Task != nil {
 			words = strings.Join(append([]string{a.Task.Title, a.Text}, a.Task.DoneWhen...), "\n\n")
 		}
-		if ok, err := s.confirmOutbound(ctx, machine, self, name, words, summary, args); err != nil {
+		if ok, outcome, err := s.confirmOutbound(ctx, machine, self, name, words, summary, args); err != nil {
 			return "", err
 		} else if !ok {
-			return "The user declined on the phone: nothing was sent to that agent.", nil
+			return outboundNotDone(outcome, "The user declined on the phone: nothing was sent to that agent.", "nothing was sent to that agent"), nil
 		}
 		var task *handedTask
 		if a.Task != nil {
@@ -611,16 +616,17 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			return "", waitErr
 		}
 		var a struct {
-			Machine        string `json:"machine"`
-			Cwd            string `json:"cwd"`
-			Prompt         string `json:"prompt"`
-			Launcher       string `json:"launcher"`
-			Model          string `json:"model"`
-			Effort         string `json:"effort"`
-			Speed          string `json:"speed"`
-			PermissionMode string `json:"permission_mode"`
-			Tier           string `json:"tier"`
-			Worktree       struct {
+			Machine           string `json:"machine"`
+			Cwd               string `json:"cwd"`
+			Prompt            string `json:"prompt"`
+			SkipProjectMemory bool   `json:"skip_project_memory"`
+			Launcher          string `json:"launcher"`
+			Model             string `json:"model"`
+			Effort            string `json:"effort"`
+			Speed             string `json:"speed"`
+			PermissionMode    string `json:"permission_mode"`
+			Tier              string `json:"tier"`
+			Worktree          struct {
 				Branch string `json:"branch"`
 			} `json:"worktree"`
 			Ultracode bool `json:"ultracode"`
@@ -749,10 +755,10 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if a.Ultracode {
 			where += " · ultracode"
 		}
-		if ok, err := s.confirmOutbound(ctx, machine, self, name, a.Prompt, where+"\n\n"+a.Prompt, withoutSecretEnv(args)); err != nil {
+		if ok, outcome, err := s.confirmOutbound(ctx, machine, self, name, a.Prompt, where+"\n\n"+a.Prompt, withoutSecretEnv(args)); err != nil {
 			return "", err
 		} else if !ok {
-			return "The user declined on the phone: no agent was started.", nil
+			return outboundNotDone(outcome, "The user declined on the phone: no agent was started.", "no agent was started"), nil
 		}
 		var res struct {
 			Session proto.Session `json:"session"`
@@ -764,10 +770,13 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		// conversation's turn and given agentStartTimeout instead of the old 100s.
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentStartTimeout)
 		defer cancel()
-		// The tab is named from the prompt as written; the agent gets its project's background before it (#2820).
+		// The tab is named from the prompt as written; unless this start opts out, its project's background goes before it (#2820).
 		title := s.tabName(sctx, a.Prompt)
 		params := map[string]any{"cwd": a.Cwd, "launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "speed": a.Speed, "permission_mode": a.PermissionMode, "tab_name": title, "title": title}
-		prompt := s.withProjectContext(sctx, am.ID, a.Cwd, self, a.Prompt)
+		prompt := a.Prompt
+		if !a.SkipProjectMemory {
+			prompt = s.withProjectContext(sctx, am.ID, a.Cwd, self, a.Prompt)
+		}
 		if a.Ultracode {
 			params["ultracode"] = true
 		}
@@ -872,6 +881,9 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			return "", fmt.Errorf("the task could not be recorded; no agent was started")
 		}
 		params["creation_id"], params["incarnation"] = task.ID, "start_"+randomHex(8)
+		// The to-do is there before the start, so the Agent's model requests name it from their first one: the headers are
+		// fixed when the Agent starts, and linking it to the to-do afterwards does not reach them.
+		params["model_source"] = planModelSource(PlanTask{TodoID: task.ID})
 		failBeforeStart := func(reason string) {
 			// The card already exists: every definite no-start exit must close it as a failed start, not leave an
 			// open task with no Agent and no explanation (#5732). Unknown start results are handled below instead.
@@ -1312,6 +1324,8 @@ func (s *Service) ask(ctx context.Context, ix proto.Interaction) (proto.Resoluti
 	resume := pushMCPInteraction(ctx, ix)
 	defer resume()
 	ix = s.ownCard(ctx, ix)
+	s.cardAsks.Store(ix.ID, cmp.Or(cardSourceOf(ctx), ownCardSource(ix))) // what its push is counted as (card_layers.go)
+	defer s.cardAsks.Delete(ix.ID)
 	q := &question{ix: ix, answer: make(chan proto.Resolution, 1)}
 	if ix.ToolName == "ask_user" && ix.Kind == proto.IxQuestion {
 		q.release = make(chan struct{})

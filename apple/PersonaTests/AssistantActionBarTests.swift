@@ -405,8 +405,15 @@ struct AssistantActionBarTests {
     @Test func directWaitingExcludesUnstartedFailedGenericAndSupervisorRowsWithoutMovingThem() {
         let card: FeedItem = decode(["id": "draft", "conversation": "main", "at": iso(2), "kind": "message", "ref": "lark:1",
                                      "body": ["text": "Synthetic draft"]])
-        let draftOnly = split([], plans: [plan("unstarted", .open, tasks: 1, at: 2)], feed: [card], direct: true)
-        #expect(ids(draftOnly.needsYou) == ["message:draft"])
+        // a plan waiting for Start is the owner's own decision: Main lists it, a Health plan stays in Health
+        var health = plan("health", .open, tasks: 1, at: 1)
+        health.conversation = "health-chat"
+        health.space = "health"
+        var spacePlan = plan("space", .open, tasks: 1, at: 3)
+        spacePlan.conversation = "notes-chat"
+        spacePlan.space = "zz-notes"
+        let draftOnly = split([], plans: [plan("unstarted", .open, tasks: 1, at: 2), health, spacePlan], feed: [card], direct: true)
+        #expect(Set(ids(draftOnly.needsYou)) == ["plan:unstarted", "plan:space", "message:draft"])
 
         var failed = todo("failed")
         failed.startError = "Synthetic failed start"

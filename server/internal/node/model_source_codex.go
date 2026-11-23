@@ -24,6 +24,28 @@ func modelSourceEnvironment(source modelhttp.Source, bin string) []string {
 	return []string{modelSourceEnv + "=" + string(raw), modelSourceBinEnv + "=" + bin}
 }
 
+// sourceHostsFor is the node's allowlist for a start that carries source, "" for one that does not.
+func sourceHostsFor(source modelhttp.Source) string {
+	if source.Role == "" {
+		return ""
+	}
+	return strings.TrimSpace(os.Getenv(modelhttp.SourceHostsEnv))
+}
+
+// adoptSourceHosts makes hosts, the node's allowlist handed to a process in a pane (codex-start's file, personad
+// launch's answer), this process's own: the pane's shell has its engine's environment, which need not carry it, and
+// codexModelSource reads it from the process. It answers the NAME=value to pass on to what runs next, "" for none.
+func adoptSourceHosts(hosts string) string {
+	hosts = strings.TrimSpace(hosts)
+	if hosts == "" {
+		return ""
+	}
+	if err := os.Setenv(modelhttp.SourceHostsEnv, hosts); err != nil {
+		return ""
+	}
+	return modelhttp.SourceHostsEnv + "=" + hosts
+}
+
 // ModelSourceLaunch is the final CLI hop, after shell functions set their environment and provider flags.
 // Provider credentials remain in memory/environment; only header-to-environment bindings reach argv.
 func ModelSourceLaunch(args []string) error {

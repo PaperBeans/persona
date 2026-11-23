@@ -6,6 +6,7 @@ import { contrast, extensionThemeTokens, meetContrast, MIN_ROLE_CONTRAST, MIN_TE
 import { ACCENT_PRESETS, accentTokens, PRESET_COLORS } from "./look";
 import { COLORS } from "../lib/extension-ui-v6";
 import { BUILTIN_PAGE_COLORS } from "../lib/sidebar-icons";
+import { MODULES } from "../modules";
 
 // The default palette's text tokens must stay readable as small text (WCAG AA 4.5:1) on every background token
 // (#2804); the same backgrounds extension themes are checked against (extension-theme.ts).
@@ -153,6 +154,13 @@ describe("default palette contrast", () => {
       })).filter(Boolean);
       expect(short).toEqual([]);
       for (const name of Object.values(BUILTIN_PAGE_COLORS)) expect(COLORS, name).toContain(name);
+      // a feature module's sidebar entry names its own color (core/module-host.ts ModuleNavItem.color): the same rules
+      const moduleColors = MODULES.flatMap((m) => (m.navItems ?? []).flatMap((n) => (n.color ? [[`${m.id}/${n.key}`, n.color] as const] : [])));
+      expect(moduleColors.length).toBeGreaterThan(0);
+      for (const [entry, name] of moduleColors) {
+        expect(COLORS, entry).toContain(name);
+        for (const bg of ["canvas", "hover"]) expect(contrast(hueOf(name), t[bg]), `${entry} --hue-${name} on --${bg}`).toBeGreaterThanOrEqual(MIN_ROLE_CONTRAST);
+      }
       expect(contrast(t.ink, t["hover-2"])).toBeGreaterThanOrEqual(4.5);
     });
     it(`${scheme}: no theme color or extension theme moves the named colors or the sidebar's backgrounds`, () => {

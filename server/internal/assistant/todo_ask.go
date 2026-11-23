@@ -199,6 +199,7 @@ func (s *Service) pushDecisionErr(ctx context.Context, id string) (bool, error) 
 		n.Title, n.Body = s.redactedNotice(ctx, l, space)
 		n.Todo.Options, n.Todo.Lockscreen = nil, assistantwire.OwnerAskLockscreenOpenOnly
 	}
+	s.noteCard(ctx, cardDecision, n)
 	if _, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
 		s.logf("task %s: decision push: %v", id, err)
 		return false, err

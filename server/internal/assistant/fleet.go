@@ -475,20 +475,22 @@ func (s *Service) fillStateMarks(machine string, list []proto.Session, now time.
 // backgroundWaiting (Session.BackgroundWaiting, #6045): working only because of background work, and that work only
 // waits: the node found its background commands waiting, and no subagent or workflow runs (those are work).
 func backgroundWaiting(sess proto.Session) bool {
-	if !sess.BackgroundWorking || !sess.BackgroundWaiting {
-		return false
-	}
+	return sess.BackgroundWorking && sess.BackgroundWaiting && !backgroundIsWork(sess)
+}
+
+// backgroundIsWork: a subagent or workflow runs, which is work whatever its background commands do.
+func backgroundIsWork(sess proto.Session) bool {
 	for _, a := range sess.Subagents {
 		if a.Running {
-			return false
+			return true
 		}
 	}
 	for _, w := range sess.Workflows {
 		if w.Running {
-			return false
+			return true
 		}
 	}
-	return !slices.ContainsFunc(sess.Background, func(t proto.BackgroundTask) bool { return t.Kind == "agent" || t.Kind == "workflow" })
+	return slices.ContainsFunc(sess.Background, func(t proto.BackgroundTask) bool { return t.Kind == "agent" || t.Kind == "workflow" })
 }
 
 func backgroundRunning(sess proto.Session) bool {

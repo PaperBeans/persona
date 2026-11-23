@@ -67,6 +67,7 @@
   "push_reason_no_relay": "{route}：hub 没有 apns.json，这台设备也没报中继（构建没配中继，或 App 太旧）",
   "push_reason_no_token": "{route}：没有 APNs token（这台设备没允许通知，或向 APNs 登记失败）",
   "push_reason_relay_failed": "{route}：向推送中继登记失败（{detail}）",
+  "push_relay_next": "请检查该中继的健康状况及其提供服务的 topic",
   "push_route_direct": "直连 APNs",
   "push_route_none": "收不到后台推送",
   "push_route_relay": "经推送中继",

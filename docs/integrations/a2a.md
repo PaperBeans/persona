@@ -48,6 +48,19 @@ Use the tools through Persona MCP, a runtime's existing `callTool` API, or
 For an existing session, send its exact machine and session IDs.
 Each receiving session runs one active A2A task at a time; additional sends to a
 busy session are queued and delivered in FIFO order when the active task ends.
+An active request waiting for delivery is retried when the recipient becomes idle.
+Idle session lists and turn-end events make that request due immediately, rather
+than leaving it behind the delivery worker's previous polling lease.
+If it still cannot be delivered after ten minutes of active waiting, it fails with
+an explanation and the next queued task is released. Time spent behind another
+task in the FIFO does not consume this delivery budget. The deadline survives a
+manager restart and is not reset by a node refusing a busy session.
+The recipient can use `a2a_report` with `failed` or `completed` to clear an
+undelivered request, including one still in the FIFO. Its input is discarded,
+not marked as delivered. Other reports return an error explaining how to clear it.
+Task views expose `waiting_since`, `waiting_seconds`, and `waiting_reason`;
+JSON-RPC metadata uses `personaWaitingSince`, `personaWaitingSeconds`, and
+`personaWaitingReason`. These describe the total wait, including FIFO time.
 
 ```sh
 personad tool a2a_send '{"machine_id":"box","session_id":"runtime.session-1","message_id":"request-001","text":"Run the checks and return the failing cases."}'

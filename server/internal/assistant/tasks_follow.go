@@ -150,10 +150,16 @@ func (s *Service) taskWaits(ctx context.Context, t Todo) bool {
 // again only for what its conversation sent (closedTurnReopens; once the node took that send, the send opened it
 // already, agentSendNote.sent); any other turn leaves it closed, and its end makes nothing of it either (settleTurn
 // follows open tasks only). A turn that starts while such a send is still out waits for its answer (closedTurnHeld).
-func (s *Service) taskWorking(ctx context.Context, mid, sid string) {
+func (s *Service) taskWorking(ctx context.Context, mid, sid string, row startRow) {
 	s.tasks.completionMu.Lock()
 	defer s.tasks.completionMu.Unlock()
 	t, ok := s.taskOf(ctx, mid, sid)
+	if ok && s.startBeforeTakenTurn(t.ID, mid, sid, row) {
+		// Listed before the turn it began ended, and handled after that end was taken up: no new stretch, which would
+		// put the judgment being made for that turn out of date and have it judged again (#13711).
+		s.logf("task %s: its agent %s/%s's start came after the turn it began was taken up: no new stretch", t.ID, mid, short(sid))
+		return
+	}
 	if !ok {
 		closed, found := s.closedTaskOf(ctx, mid, sid)
 		if !found {

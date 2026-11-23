@@ -71,6 +71,21 @@ func (s *Service) a2aSignal() {
 	}
 }
 
+// Idle notifications shorten only the queued request's check lease. The
+// delivery worker still uses the revision fence and the node's idle guard.
+func (s *Service) a2aRecipientIdle(ctx context.Context, ref a2aRef) {
+	st, err := s.a2aStore()
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if err := st.A2AReady(ctx, ref.Machine, ref.Session); err != nil {
+		s.logf("A2A idle delivery: %v", err)
+	}
+	s.a2aSignal()
+}
+
 func a2aDeliveryID(task string, seq int) string {
 	return fmt.Sprintf("%s%s-%d", proto.A2ADeliveryPrefix, task, seq)
 }
@@ -166,6 +181,14 @@ func (s *Service) a2aProcess(ctx context.Context, st a2aStore, cfg assistantwire
 		if !a2aActiveDelivery(e) {
 			continue
 		}
+		// Start the bounded delivery wait only when the task is active, not
+		// while it is behind another task in the recipient's FIFO.
+		if e.Kind == "message" && e.Delivery == a2aQueued && e.WaitingSince.IsZero() {
+			t.Events[i].WaitingSince = time.Now().UTC()
+			if err := s.a2aSave(ctx, st, t); err != nil {
+				return err
+			}
+		}
 		to, from := t.target(), t.source()
 		if offline && e.Kind == "message" {
 			if changed, err := s.a2aExpireDelivery(ctx, st, t, i); changed || err != nil {
@@ -212,11 +235,22 @@ func (s *Service) a2aEndpointClosed(ctx context.Context, cfg assistantwire.A2ACo
 
 func (s *Service) a2aExpireDelivery(ctx context.Context, st a2aStore, t *a2aTask, i int) (bool, error) {
 	e := &t.Events[i]
-	if e.Delivery == a2aQueued || e.Attempted.IsZero() || time.Since(e.Attempted) < a2aConfirmFor {
+	since := e.Attempted
+	if e.Delivery == a2aQueued {
+		if e.Kind != "message" {
+			return false, nil
+		}
+		since = e.WaitingSince
+	}
+	if since.IsZero() || time.Since(since) < a2aConfirmFor {
 		return false, nil
 	}
 	if e.Kind == "message" && !a2aTerminal(t.State) {
-		t.fail("Persona could not confirm delivery of the request.", true)
+		reason := "Persona could not confirm delivery of the request."
+		if e.Delivery == a2aQueued {
+			reason = "The request could not be delivered within ten minutes of becoming active. " + a2aWaitingReason(*e)
+		}
+		t.fail(reason, true)
 	} else {
 		e.Delivery = a2aExpired
 	}
@@ -301,11 +335,11 @@ func (s *Service) a2aDeliver(ctx context.Context, st a2aStore, t *a2aTask, i int
 	}
 	sess, ok, err := s.sessionNow(ctx, to.Machine, to.Session)
 	if err != nil || !ok {
-		return false, nil
+		return s.a2aExpireDelivery(ctx, st, t, i)
 	}
 	resume := e.Kind != "message" && a2aResumeAllowed(sess)
 	if !resume && (!a2aSendable(sess) || !a2aIdle(sess)) {
-		return false, nil
+		return s.a2aExpireDelivery(ctx, st, t, i)
 	}
 	if device, remote := strings.CutPrefix(t.Owner, "device:"); remote && e.Kind == "message" {
 		revoked, err := s.hub.CredentialRevoked(ctx, device)
@@ -362,10 +396,15 @@ func (s *Service) a2aSendNode(ctx context.Context, st a2aStore, taskID string, s
 		Session proto.Session
 	}
 	err := s.call(ctx, to.Machine, method, params, &out)
-	receipt := a2aDelivered
+	receipt, reason := a2aDelivered, ""
 	switch {
 	case err != nil && a2aNoDelivery(err):
 		receipt = a2aQueued
+		reason = "The node could not accept the request; waiting for a live, idle session."
+		var re *rpc.Error
+		if errors.As(err, &re) && re.Code == proto.CodeAgentStopped {
+			reason = "The receiving session was stopped and cannot accept the request."
+		}
 	case err != nil:
 		receipt = a2aUncertain
 	case out.Queued:
@@ -375,7 +414,7 @@ func (s *Service) a2aSendNode(ctx context.Context, st a2aStore, taskID string, s
 	}
 	keep, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	return s.a2aReceipt(keep, st, taskID, seq, receipt)
+	return s.a2aReceipt(keep, st, taskID, seq, receipt, reason)
 }
 
 func a2aMessageSource(from a2aRef) *proto.MessageSource {
@@ -487,7 +526,7 @@ func a2aIdle(sess proto.Session) bool {
 	return !sess.Starting && len(sess.Queued) == 0 && (sess.Status == proto.StatusIdle || sess.Status == proto.StatusDone)
 }
 
-func (s *Service) a2aReceipt(ctx context.Context, st a2aStore, id string, seq int, receipt string) error {
+func (s *Service) a2aReceipt(ctx context.Context, st a2aStore, id string, seq int, receipt string, reasons ...string) error {
 	for range 5 {
 		t, err := decodeA2A(st.A2AGet(ctx, id))
 		if err != nil || t == nil {
@@ -498,6 +537,17 @@ func (s *Service) a2aReceipt(ctx context.Context, st a2aStore, id string, seq in
 			return nil
 		}
 		e.Delivery = receipt
+		if len(reasons) != 0 {
+			e.DeliveryReason = reasons[0]
+		}
+		if receipt == a2aQueued {
+			if changed, err := s.a2aExpireDelivery(ctx, st, t, seq-1); changed || err != nil {
+				if errors.Is(err, errA2AConflict) {
+					continue
+				}
+				return err
+			}
+		}
 		if receipt == a2aDelivered && e.Kind == "message" && t.State == a2aSubmitted {
 			t.append(a2aEvent{ID: randomHex(16), Kind: "status", State: a2aWorking})
 		}
@@ -591,4 +641,11 @@ func a2aStopped(sess proto.Session) bool {
 		return true
 	}
 	return false
+}
+
+func a2aWaitingReason(e a2aEvent) string {
+	if e.DeliveryReason != "" {
+		return e.DeliveryReason
+	}
+	return "Waiting for the receiving session to become live and idle."
 }

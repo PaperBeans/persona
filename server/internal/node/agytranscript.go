@@ -105,6 +105,7 @@ type agyRevision struct {
 	hash                    [32]byte
 	branch, native, rewrite string
 	steps                   []agyStepMemo
+	full                    os.FileInfo // snapshot that supplied restored text
 }
 
 func isAgyStepRunning(status string) bool {

@@ -10,6 +10,7 @@ cd apple && xcodegen generate -q && xcodebuild -project Persona.xcodeproj -schem
 ./scripts/app/sim.sh [--with-watch] [-openSession <machine>/<id>]     # run in simulator, pair automatically to the real hub ("Development builds")
 cd apple/Packages/PersonaKit && swift test                             # PersonaKit unit tests: directly on Mac, no App build or simulator
 cd apple/Packages/PersonaWire && swift test -Xswiftc -warnings-as-errors # PersonaWire unit tests, warnings as errors as CI runs them
+cd apple/Packages/PersonaModuleAPI && swift test -Xswiftc -warnings-as-errors # module contract and registry (#13432, docs/apple/ios.md "Modules")
 python3 -B scripts/test/test_sim_boot.py                               # sim-boot.sh (fake xcrun / simslim, no simulator)
 n=0 failed=""; for f in $(find scripts -name 'test_*.py' -not -path '*/node_modules/*' | sort); do grep -q unittest "$f" || continue; n=$((n + 1)); (cd "$(dirname "$f")" && python3 -B -m unittest -q "$(basename "$f" .py)") || failed="$failed $f"; done; echo "$n suites, failed:${failed:- none}"; [ -z "$failed" ]   # all Python suites in scripts/, like CI (it skips files that never mention unittest); any failure exits nonzero
 ```
@@ -103,6 +104,8 @@ PR watcher's report, still says what failed (`scripts/ci/server-shards.py`). The
 across two independently isolated jobs, scheduled one at a time; each has its own synthetic HOME and mock ports.
 
 The Web suite's default file-worker count is `min(8, max(availableParallelism() - 1, 1))` (`web/test-scheduling.ts`, #12458). Vitest otherwise starts one fork per host CPU; under a CPU quota that can leave dozens of processes initializing isolated module graphs at once. On main `c866b5a377`, Node 24.22.3 under a four-CPU quota and 8 GiB memory limit, the complete suite took 79.06 seconds with two concurrency-sensitive assertion failures at the default 63 workers, 448.08 seconds with three workers, and 175.31 seconds with eight workers. Eight preserved all 1,542 files / 17,295 assertions (one skip in each count) and reduced CPU time from 2,301.7 to 1,660.4 seconds. The cap does not remove or reuse isolated test environments, and explicit project or command-line `maxWorkers` settings still override it for diagnosis. Measure wall time, test counts and failures together when changing it; the 600-second Web test deadline stays unchanged.
+
+`npm test` and check-fast's `vitest related` path run through `web/scripts/process-group.mjs`, which gives the test command a new process group on POSIX (an owned process tree on Windows) and starts an independent watchdog outside that group. The watchdog reaps the group after normal completion, on a deadline, or if the supervising parent disconnects, including after the parent's `SIGKILL`; the session also kills its own group if its watchdog disappears. The default deadline is 600,000 ms, and `PERSONA_WEB_TEST_TIMEOUT_MS` or `--timeout-ms` changes it (zero disables only the deadline, not exit cleanup). Cleanup escalates from `SIGTERM` to `SIGKILL` after 250 ms and reports failure unless the owned group is empty. `web/scripts/process-group.node-test.mjs` creates its own worker and control fixtures for normal exit, timeout and abrupt parent death; it never selects processes by command name or by an existing terminal, bot or Agent session.
 
 **Why tests stay uncached.** check-fast, the CI shards, `scripts/test/test-server.sh` and the bounded runner's
 commands below all pass `-count=1`, so no Go test result comes from Go's test cache; the build cache still serves
@@ -2174,6 +2177,37 @@ How often a client reads `GET /api/v1/sessions`, and what kind of read, while it
   default By Repository grouping, which needs every row), then read the counters around the same two minutes.
 - A real hub's `traffic` journal lines count by route template, not query: there a complete list and a delta are told
   apart only by `body_bytes / count`.
+
+## Slow link soak (`server/internal/slowlinksoak`, #13677)
+
+Whether a computer on Persona Link stays online behind a slow, long link while a chat opens a large session of it:
+a transcript of several MB, mostly screenshots, that grew while nobody looked. For a change to the node connection,
+the session's pushes or the heartbeats, run it on the base and on the change and put both results in the PR.
+
+```sh
+cd server
+go build -o <dir>/personad ./cmd/personad && go build -o <dir>/persona-link ./cmd/persona-link
+go run ./internal/slowlinksoak -bin <dir> -pg <directory with initdb, pg_ctl and postgres> -label after
+go run ./internal/slowlinksoak -bin <base dir> -node-bin <a release's dir> -pg <…> -label before
+```
+
+- Everything is throwaway and local: a hub with its built-in manager under a home directory of its own, a Postgres
+  cluster of its own (`initdb` into the working directory, trust on loopback), a resident node (`personad node
+  --attach`) and `persona-link run` under a second home directory. Ports: `-port-base` (18871) for the hub's HTTP,
+  +1 its TLS, +2 the shaping proxy, +3 Postgres. Every process gets an environment made by the soak; the machine's own
+  installation is neither read nor written.
+- The hub advertises its TLS port only through the proxy, and the link's only candidate is the proxy: every
+  connection Persona Link opens goes through a link of its own shaped by `netshape` each way: `-rate` (100 KB/s),
+  `-rtt` (300 ms) and `-queue` (256 KiB the path buffers before a writer waits, the sockets' share). Loss and
+  retransmits are not played, nor one bottleneck shared by the link's connections.
+- An app connection opens the session while it is small and one more line comes (the hub then knows how far it has
+  read), closes it, the transcript grows to `-session-mb` (5) with `-shots` screenshots (20, random bytes), and the
+  app opens it again and reads `items?after_seq=` every 3 s, as the web app does, for `-watch` (3 minutes).
+- `-node-bin` runs the computer's side from other binaries, such as a release, to play a computer that has not been
+  updated.
+- It prints and writes `report.json` (offline transitions and their reasons, dropped connections, timed-out watches,
+  how long until the app had every item, image bytes it was pushed, the reads' outcomes and the slowest, the bytes the
+  computer sent through the proxy) and keeps the logs in the working directory. It ends with one `RESULT` line.
 
 ## Fleet soak (`server/internal/fleetsoak`, #3197)
 

@@ -120,7 +120,7 @@ func (s *Service) briefFallbackRun(ctx context.Context, scheduled ScheduleRun, t
 
 	// deliver preserves this stable notification ID (push/pushResult would replace it with a random one).
 	s.noteAsked(scheduled.SessionID)
-	s.deliver(Notification{ID: "ntf_brief_fallback_" + id, Kind: assistantwire.NotifyDone, DeviceID: m.ID, Subtitle: m.Name,
+	s.deliverCard(cardBriefFallback, Notification{ID: "ntf_brief_fallback_" + id, Kind: assistantwire.NotifyDone, DeviceID: m.ID, Subtitle: m.Name,
 		SessionID: scheduled.SessionID, Title: run.label, Body: plain})
 	s.briefListed(run.facts)
 }

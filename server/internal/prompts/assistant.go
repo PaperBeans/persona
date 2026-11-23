@@ -905,8 +905,8 @@ type Supervise struct {
 	// they wait here before going up a rung.
 	Asked      bool
 	AskMinutes int
-	// PushGrading: the owner's push grading switch is on: a card is never handed to the user on a timeout, and ask_escalate
-	// pushes only what is the owner's alone (why_owner).
+	// PushGrading: the owner's push grading switch is on: ask_escalate pushes only what is the owner's alone (why_owner).
+	// No card is handed to the user on a timeout either way.
 	PushGrading bool
 	// Decisions: an entry is about a decision the owner cannot answer as it is (recheck, undecidable,
 	// owner_cannot_answer; #3804).
@@ -944,6 +944,9 @@ type SuperviseEntry struct {
 	Orphan          string              // orphaned: why nobody works on it (error, closed, offline)
 	Review          *SuperviseReviewed  // review: what the independent reviewer found (#2173), nil when none ran
 	// report: what its agent reported (progress, question, blocked, done), its words, evidence and step.
+	// Reported: on the entry of a turn's end (review, idle, unjudged, interrupted), the kind of the report its agent
+	// made before it stopped, told in that one entry (assistant.joinTurnReports); Said, Evidence and Step are the report's.
+	Reported    string
 	Report      string
 	Said        string
 	Evidence    []string
@@ -952,7 +955,8 @@ type SuperviseEntry struct {
 	// #10511). The manager copied them here when the agent's turn ended; they are kept out of Last's clip.
 	Files []TaskFile
 	// failed with its tab kept (#2570): until when (local "15:04"), the question its shell waits on, the tab's last
-	// lines, and how many retries are left; KeptUntil "" when the start failed for good.
+	// lines, and how many retries are left; KeptUntil "" when the start failed for good. Screen is also set for an
+	// agent_start_stalled start that failed for good (its screen when it stopped, start_remedy.go remedyEntry).
 	KeptUntil, Question, Screen string
 	RetriesLeft                 int
 	// RetryWith: failed because of its launcher on that computer, the other launchers there task_retry may start it
@@ -975,6 +979,8 @@ type SuperviseEntry struct {
 	// (assistant, leader, routine, hub) and StartedWhy the reason given.
 	Asked, AskedAt, Started, StartedWhy string
 	Dropped                             []string
+	// AskedCut: Asked is only the start of the owner's message; the rest is on the task (todo_get, its Link).
+	AskedCut bool
 	// inbox: the Inbox item the new messages came in, the newest when several did.
 	Inbox *SuperviseInbox
 	// LastReview: the task's last review, shown only in a Fresh message (#7315): a round that does not see the earlier

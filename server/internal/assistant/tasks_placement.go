@@ -405,9 +405,13 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	}
 	// The project background, and the decisions of the todo and its continuation ancestors (a task started again may
 	// have some), follow the assignment; they remain user context, never framework policy. Direction notes are prompt
-	// context, separate from the main supervision ledger (#10623, #5732).
+	// context, separate from the main supervision ledger (#10623, #5732). SkipProjectMemory leaves out the project and
+	// direction context, including extra workspace repositories; the to-do's own decisions still follow.
 	direction := s.taskDirectionOf(ctx, t)
-	background := s.projectHandoffContextForTodo(ctx, m.ID, t.Cwd, direction, s.todoForPlanContext(t))
+	background := ""
+	if !t.SkipProjectMemory {
+		background = s.projectHandoffContextForTodo(ctx, m.ID, t.Cwd, direction, s.todoForPlanContext(t))
+	}
 	var repoPaths []string
 	if t.backendWorkspace() {
 		for _, repo := range t.WorkspaceResolved.Repositories {
@@ -415,8 +419,10 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 				continue
 			}
 			repoPaths = append(repoPaths, repo.AbsolutePath)
-			if info := s.projectHandoffContext(ctx, m.ID, repo.AbsolutePath, direction); info != "" {
-				background = strings.TrimSpace(background + "\n\n" + repo.AbsolutePath + "\n" + info)
+			if !t.SkipProjectMemory {
+				if info := s.projectHandoffContext(ctx, m.ID, repo.AbsolutePath, direction); info != "" {
+					background = strings.TrimSpace(background + "\n\n" + repo.AbsolutePath + "\n" + info)
+				}
 			}
 		}
 	}

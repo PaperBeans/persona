@@ -22,12 +22,16 @@ import (
 	"github.com/nwverse/persona/server/internal/rexcli"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/terncli"
+	"github.com/nwverse/persona/server/internal/testhome"
 )
 
 // Orca as the machine's engine (hostorca.go, engine.go), driven through the node's requests against a fake Orca
 // runtime socket (orcarttest) and a fake process table. No test here talks to a real Orca.
 
 func TestMain(m *testing.M) {
+	// The tests make, commit to and add worktrees to repositories of their own: none of that may reach the repository
+	// this run was started from (`git bisect run` exports GIT_DIR; #13610).
+	testhome.ClearGit()
 	if os.Getenv("NODE_TEST_LAUNCH") == "1" { // the real managed-launch path, before the test harness clears its environment
 		if err := Launch(context.Background(), os.Args[2], os.Args[3:], ""); err != nil {
 			panic(err)

@@ -68,6 +68,10 @@ packages:
   # it with `#if canImport`.
   PersonaInputKit:
     path: Packages/PersonaInputKit
+  # The module contract and registry (#13432, docs/apple/ios.md「Modules」): the iOS and Vision apps, which compile the
+  # module list (Persona/App/Modules.swift). Nothing in Shared/ imports it, so the watch, widgets and extensions never link it.
+  PersonaModuleAPI:
+    path: Packages/PersonaModuleAPI
   # The composer's glow while a reply is generating (Settings › Appearance › Glow While Replying, `ComposerGlow`): the iOS
   # app only. Vision compiles the same sources and skips it with `#if os(iOS) && canImport`.
   MarqueeGlow:
@@ -122,6 +126,7 @@ targets:
       - package: MarqueeGlow
       - package: PersonaScreenKit
       - package: PersonaInputKit
+      - package: PersonaModuleAPI
     # app-entitlements.yml or a later opt-in include selects the file. XcodeGen writes these properties there and derives
     # CODE_SIGN_ENTITLEMENTS from the same path.
     entitlements:
@@ -260,7 +265,7 @@ targets:
         NSLocationWhenInUseUsageDescription: "Persona shares your current location with Claude only when you ask, for example to find what time it is where you are or which office you are in."
         # Always, asked only after the owner taps Allow (#13200, docs/apple/phone-tools.md "Location when Persona isn't open").
         NSLocationAlwaysAndWhenInUseUsageDescription: "Persona reads your location only when the assistant needs it to answer you, for example when you ask “How far am I from home?” while Persona isn't open. When you move a long way, iOS may wake Persona in the background, but it doesn't record where you go."
-        NSHealthShareUsageDescription: "Persona lets Claude read health summaries when you ask, for example how many steps you walked this week or how long you slept last night. With rolling recording on, Persona also checks heart rate, HRV, steps, workouts and the moods you log, on your iPhone only, to keep the minutes around them."
+        NSHealthShareUsageDescription: "Persona lets Claude read health summaries when you ask, for example how many steps you walked this week or how long you slept last night. With rolling recording on, Persona also checks heart rate, HRV, steps, workouts and the moods you log, on your iPhone only, to keep the minutes around them. The Health home and widgets show Activity rings, steps and sleep."
         # Asked when Claude saves a health sample (phone_health_write_sample); App Store processing also wants it with the HealthKit entitlement.
         NSHealthUpdateUsageDescription: "Persona saves health data only after you approve it on your iPhone, one entry at a time, for example a weight or last night's sleep you told Claude about."
         NSPhotoLibraryUsageDescription: "Persona shows your recent photos under the + button so you can attach them to a message, and lets Claude look at recent photos when you ask, for example to read a screenshot you took."
@@ -291,6 +296,7 @@ targets:
       - package: BeautifulUI
       - package: PersonaSSH
       - package: PersonaKit
+      - package: PersonaModuleAPI
     entitlements:
       path: Vision/Resources/PersonaVision.entitlements
       properties:
@@ -693,6 +699,7 @@ targets:
       - path: ../android/refract/about/AboutVersionRow.swift
     dependencies:
       - package: PersonaWire
+      - package: PersonaModuleAPI
       - target: Persona
       # The test bundle directly imports LiveCommunicationKit too; keep its symbols weak on a Mac.
       - sdk: LiveCommunicationKit.framework

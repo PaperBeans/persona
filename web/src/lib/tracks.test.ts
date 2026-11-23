@@ -13,6 +13,7 @@ vi.mock("./api", async (orig) => ({
 }));
 
 import { ApiError } from "./api";
+import "../modules";
 import { sidebarActiveKey } from "./persona-nav";
 import { href, parse } from "./router";
 import {
@@ -124,8 +125,9 @@ describe("addresses", () => {
     expect(parse("/tracks/family/new")).toEqual({ name: "track", slug: "family", fresh: true });
     expect(parse("/tracks/family/c1")).toEqual({ name: "track", slug: "family", sid: "c1" });
     expect(parse("/tracks/new")).toEqual({ name: "track-new" });
-    expect(parse("/tracks/health")).toEqual({ name: "health", sid: undefined });
-    expect(parse("/tracks/health/new")).toEqual({ name: "health", fresh: true });
+    // the health module's page (src/modules/health), registered by the module list
+    expect(parse("/tracks/health")).toEqual({ name: "module", module: "health", base: "health", path: [] });
+    expect(parse("/tracks/health/new")).toEqual({ name: "module", module: "health", base: "health", path: ["new"] });
     expect(href({ name: "track", slug: "family" })).toBe("/tracks/family");
     expect(href({ name: "track", slug: "family", fresh: true })).toBe("/tracks/family/new");
     expect(href({ name: "track", slug: "family", sid: "c 1" })).toBe("/tracks/family/c%201");
@@ -135,7 +137,7 @@ describe("addresses", () => {
   it("lights the space's own row", () => {
     expect(sidebarActiveKey({ name: "track", slug: "family", sid: "c1" })).toBe("track:family");
     expect(sidebarActiveKey({ name: "track-new" })).toBe("track-new");
-    expect(sidebarActiveKey({ name: "health" })).toBe("health");
+    expect(sidebarActiveKey({ name: "module", module: "health", base: "health", path: [] })).toBe("health");
   });
 });
 

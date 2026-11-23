@@ -21,7 +21,7 @@ def five_lanes(source):
     projects = shards.modules(source)
     features = [project + ":test" for project in projects if project.startswith(":feature:")]
     return {
-        "lint-build": ["lint", ":app:assembleDebug"],
+        "lint-build": ["lint", ":app:assembleDebug", ":app:moduleGuard"],
         "test-core": [project + ":test" for project in projects if project.startswith(":core:")],
         "test-feature-0": features[0::2],
         "test-feature-1": features[1::2],
@@ -43,12 +43,14 @@ class ShardTests(unittest.TestCase):
         projects = shards.modules(SETTINGS)
         lanes = {lane: shards.tasks(SETTINGS, lane) for lane in CI_LANES}
         self.assertEqual(len(lanes), 2)
-        for task in [project + ":test" for project in projects] + ["lint", ":app:assembleDebug"]:
+        for task in [project + ":test" for project in projects] + ["lint", ":app:assembleDebug", ":app:moduleGuard"]:
             self.assertEqual(sum(task in selected for selected in lanes.values()), 1, task)
         self.assertTrue(all(lanes.values()))
         self.assertIn(":core:contracts:test", lanes["test-1"])  # JVM test lifecycle stays covered.
         self.assertIn(":app:test", lanes["test-1"])  # Debug and Release, not testDebugUnitTest.
         self.assertIn("lint", lanes["lint-build-test-0"])
+        self.assertIn(":module:voice:test", lanes["lint-build-test-0"])  # The modules' own tests (#13433).
+        self.assertIn(":app:moduleGuard", lanes["lint-build-test-0"])
 
     def test_literals_multiline_comments_duplicates_and_included_builds(self):
         source = '''
@@ -65,14 +67,15 @@ class ShardTests(unittest.TestCase):
         self.assertEqual(shards.modules(source), [":app", ":core:domain", ":feature:new"])
 
     def test_new_modules_and_nested_paths_have_a_fallback(self):
-        source = 'include(":core:new", ":feature:new:deep", ":platform:new", ":new", ":core")'
-        self.assertEqual(shards.tasks(source, "lint-build-test-0"), ["lint", ":app:assembleDebug", ":feature:new:deep:test"])
+        source = 'include(":core:new", ":feature:new:deep", ":platform:new", ":new", ":core", ":module:new")'
+        self.assertEqual(shards.tasks(source, "lint-build-test-0"),
+                         ["lint", ":app:assembleDebug", ":app:moduleGuard", ":feature:new:deep:test", ":module:new:test"])
         self.assertEqual(shards.tasks(source, "test-1"), [":core:new:test", ":core:test", ":new:test", ":platform:new:test"])
 
     def test_full_and_lint_keep_original_all_module_selectors(self):
-        self.assertEqual(shards.tasks(SETTINGS, "full"), ["lint", "test", ":app:assembleDebug"])
-        self.assertEqual(shards.tasks(SETTINGS, "lint-build-test-0")[:2], ["lint", ":app:assembleDebug"])
-        self.assertEqual(shards.tasks('include(":app")', "lint-build-test-0"), ["lint", ":app:assembleDebug"])
+        self.assertEqual(shards.tasks(SETTINGS, "full"), ["lint", "test", ":app:assembleDebug", ":app:moduleGuard"])
+        self.assertEqual(shards.tasks(SETTINGS, "lint-build-test-0")[:3], ["lint", ":app:assembleDebug", ":app:moduleGuard"])
+        self.assertEqual(shards.tasks('include(":app")', "lint-build-test-0"), ["lint", ":app:assembleDebug", ":app:moduleGuard"])
 
     def test_computed_or_malformed_declarations_fail_closed(self):
         for source in ('include(projects)', 'include(":core:$name")', 'include(":core:" + name)',
@@ -153,7 +156,7 @@ class ShellLaneTests(unittest.TestCase):
         java.chmod(0o700)
         shutil.copyfile(java, self.root / "jdk/bin/javac")
         (self.root / "jdk/bin/javac").chmod(0o700)
-        (self.root / "android/gradlew").write_text('#!/usr/bin/env bash\nprintf \'%s\\n\' "$@" > "$MOCK_GRADLE_LOG"\nexit "${MOCK_GRADLE_STATUS:-0}"\n')
+        (self.root / "android/gradlew").write_text('#!/usr/bin/env bash\nprintf \'%s\\n\' "$@" "--end-of-call--" >> "$MOCK_GRADLE_LOG"\nexit "${MOCK_GRADLE_STATUS:-0}"\n')
         self.log = self.root / "gradle-arguments"
         self.env = dict(os.environ, JAVA_HOME=str(self.root / "jdk"),
                         ANDROID_HOME=str(self.root / "sdk"), ANDROID_SDK_ROOT=str(self.root / "sdk"),
@@ -161,7 +164,19 @@ class ShellLaneTests(unittest.TestCase):
                         MOCK_GRADLE_LOG=str(self.log), MOCK_RUSTUP_LOG=str(self.root / "rustup-arguments"),
                         PATH=str(self.root / "bin") + os.pathsep + os.environ.get("PATH", ""))
 
+    def calls(self):
+        """Each Gradle invocation's arguments, in order (the mock appends one record per call)."""
+        out, current = [], []
+        for line in self.log.read_text().splitlines():
+            if line == "--end-of-call--":
+                out.append(current)
+                current = []
+            else:
+                current.append(line)
+        return out
+
     def run_lane(self, *args):
+        self.log.unlink(missing_ok=True)
         return subprocess.run(["bash", str(self.root / "scripts/ci/android.sh"), *args],
                               env=self.env, capture_output=True, text=True, timeout=30)
 
@@ -170,9 +185,18 @@ class ShellLaneTests(unittest.TestCase):
             with self.subTest(lane=lane):
                 result = self.run_lane(*([] if lane == "full" else ["--lane", lane]))
                 self.assertEqual(result.returncode, 0, result.stderr)
-                arguments = self.log.read_text().splitlines()
+                calls = self.calls()
+                arguments = next(call for call in calls if "-Ppersona.releaseUnitTests=true" in call)
                 expected = shards.tasks(SETTINGS, lane)
                 self.assertEqual(arguments[-len(expected):], expected)
+                # Persona Core alone (#13433): the app's unit tests and lint with an empty module list, in the lint lane.
+                alone = [call for call in calls if "-Ppersona.modules=" in call]
+                if lane in ("full", "lint-build-test-0"):
+                    self.assertEqual(len(alone), 1, calls)
+                    self.assertEqual(alone[0][-2:], [":app:testDebugUnitTest", ":app:lintDebug"])
+                    self.assertIn("--max-workers=2", alone[0])
+                else:
+                    self.assertEqual(alone, [])
                 self.assertIn("--max-workers=2", arguments)
                 # Each module's test runs its release unit tests too, which a local build leaves out (#10712).
                 self.assertIn("-Ppersona.releaseUnitTests=true", arguments)

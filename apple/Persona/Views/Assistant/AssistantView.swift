@@ -1437,7 +1437,7 @@ struct StarterComposer: View {
     @State private var showPhotos = false
     @State private var showFiles = false
     @State private var showCamera = false
-    @State private var showGlasses = false // Glasses Photo (Persona/Glasses), only when MetaGlasses.isBuiltIn
+    @State private var moduleSheet: ModuleComposerAction? // a module's composer action whose sheet is up (Glasses Photo)
     @State private var showScan = false // Scan Document (#3720), only where the device can scan
     #if os(iOS)
     /// Add as Context › (#3721): the kind whose picker is open.
@@ -1528,7 +1528,7 @@ struct StarterComposer: View {
     private var moreSections: [AttachMoreSection] {
         var sections = AttachMoreSection.common(camera: CameraPicker.isAvailable ? { showCamera = true } : nil,
                                                 scan: DocumentScanner.isAvailable ? { showScan = true } : nil,
-                                                glasses: MetaGlasses.isBuiltIn ? { showGlasses = true } : nil, mention: { typeMention() },
+                                                modules: Modules.registry.composerActions, open: { moduleSheet = $0 }, mention: { typeMention() },
                                                 context: { contextPick = $0 })
         if let prompts = AttachMoreSection.prompts(declarations.prompts, fill: { prompt in
             text = ExtensionTextContributions.filling(prompt)
@@ -1703,7 +1703,7 @@ struct StarterComposer: View {
         .modifier(attachHost)
         // The Photos library warmed off the main thread, as a conversation's composer does (#4250).
         .task { if attachOpener != nil { AttachLibrary.prewarm() } }
-        .modifier(ComposerCaptureSheets(camera: $showCamera, glasses: $showGlasses, scan: $showScan, pages: { addScan($0) }) { add($0) })
+        .modifier(ComposerCaptureSheets(camera: $showCamera, module: $moduleSheet, scan: $showScan, pages: { addScan($0) }) { add($0) })
         .sheet(item: $contextPick) { kind in
             ContextPickerSheet(kind: kind) { ref in
                 if !quotes.contains(where: { $0.title == ref.title && $0.text == ref.text }) { quotes.append(ref) }

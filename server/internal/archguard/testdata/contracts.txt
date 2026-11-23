@@ -10,6 +10,7 @@ internal/devicewire
 internal/dialogwire
 internal/extwire
 internal/kbwire
+internal/modapi
 internal/nodeproto
 internal/proto
 internal/relayproto

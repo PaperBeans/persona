@@ -493,6 +493,7 @@ job_web() {  # $1 = ci when npm ci must run first; WEB_MODE (full or related) an
     local _files=() _f
     while IFS= read -r _f; do [ -n "$_f" ] && _files+=("$_f"); done < <(tail -n +2 "$WEB_PLAN")
     in_dir web step "$TIMEOUT_WEB_TEST" "web: vitest related ($WEB_REASON)" \
+      node scripts/process-group.mjs --timeout-ms "$((TIMEOUT_WEB_TEST * 1000))" -- \
       npx --no -- vitest related --run --passWithNoTests ${_files[@]+"${_files[@]}"}
   else
     in_dir web step "$TIMEOUT_WEB_TEST" "web: vitest run" npm test

@@ -192,6 +192,7 @@ func TestBriefFallbackDeduplicatesOccurrenceAcrossRetryAndRestart(t *testing.T) 
 }
 
 func TestBriefNotStartedFallbackDeduplicatesRetryAndRestart(t *testing.T) {
+	needsBriefingModule(t)
 	ctx := context.Background()
 	st := &memStore{}
 	f := newFakeHub().withMachine()
@@ -332,6 +333,7 @@ func TestBriefFallbackFeishuRetryUsesStableCardAndFailedTurn(t *testing.T) {
 // normal model answer; otherwise it fails too. The fake Feishu and notification captures prove what the owner would get.
 func briefRetryRun(t *testing.T, succeedRetry bool) (*Service, *fakeHub, *briefFallbackPosts, proto.Session, []ScheduleRun) {
 	t.Helper()
+	needsBriefingModule(t)
 	f := newFakeHub().withMachine()
 	capture := briefFallbackCapture(f)
 	s := newServiceOn(t, f, &memStore{})

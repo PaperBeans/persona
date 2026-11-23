@@ -27,6 +27,9 @@ func phoneSegs(lines ...fakeLine) []map[string]any {
 // segments fill the live log (source device), and a heard ask waits for an upload whose segments reach it.
 func TestFallbackNeverConnected(t *testing.T) {
 	h := newHubFixture(t)
+	// The ask below must wait for upload 3: the give-up after askLiveWait is not what this test is about, and a short one
+	// races the upload on a loaded machine (the ask then answers from line two).
+	askLiveWait = time.Minute
 	h.hubUpload(meetingRec, 1, map[string]any{"segments": phoneSegs(fakeLine{0, 3, "Phone line one."})})
 	waitFor(t, "the fallback", func() bool {
 		tr := h.transcription(meetingRec)

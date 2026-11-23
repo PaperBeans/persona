@@ -667,12 +667,12 @@ def load_paths(root=ROOT):
     return module
 
 
-# A fake node that reports major version 22 (check-fast.sh's gate) and passes anything else, and a fake npm and npx
-# that record each call ("<cwd basename>|<args>", npx's as "npx <args>") instead of installing or testing anything.
-FAKE_NODE = '#!/bin/sh\nif [ "$1" = -e ]; then echo 22; fi\n'
+# A fake node that reports major version 22 (check-fast.sh's gate) and records the supervised Vitest entry, and fake
+# npm/npx commands that record each call ("<cwd basename>|<args>", npx's as "npx <args>") instead of installing/testing.
+FAKE_NODE = '#!/bin/sh\nif [ "$1" = -e ]; then echo 22; elif [ "$1" = scripts/process-group.mjs ]; then printf "%s|node %s\\n" "${PWD##*/}" "$*" >> "$FAKE_NPM_LOG"; fi\n'
 FAKE_NPM = '#!/bin/sh\nprintf "%s|%s\\n" "${PWD##*/}" "$*" >> "$FAKE_NPM_LOG"\n'
 FAKE_NPX = '#!/bin/sh\nprintf "%s|npx %s\\n" "${PWD##*/}" "$*" >> "$FAKE_NPM_LOG"\n'
-VITEST_RELATED = "web|npx --no -- vitest related --run --passWithNoTests "
+VITEST_RELATED = "web|node scripts/process-group.mjs --timeout-ms 300000 -- npx --no -- vitest related --run --passWithNoTests "
 WEB_FULL = ["web|run check:deps", "web|run typecheck", "web|test"]
 
 # A web tree that reads files outside web/ in each form the scan knows (#10619). reads.test.ts reads through fs and a

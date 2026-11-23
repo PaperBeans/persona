@@ -347,8 +347,8 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 		}
 		return "Concern recorded (it stays open until you report its outcome with concern_report): " + todoLine(t, now, loc), nil
 	}
-	if ok, err := s.confirmOutbound(ctx, machine, self, "todo_create", "", title, args); err != nil || !ok {
-		return todoNotAllowed(err)
+	if ok, outcome, err := s.confirmOutbound(ctx, machine, self, "todo_create", "", title, args); err != nil || !ok {
+		return todoNotAllowed(outcome, err)
 	}
 	if s.isLeader(ctx, self) {
 		t, err := s.createDirectionTodo(ctx, self, title, strings.TrimSpace(a.Notes), plan, bindings)
@@ -444,8 +444,8 @@ func (s *Service) toolTodoUpdate(ctx context.Context, machine, self string, args
 	if !changed {
 		return "", errors.New("nothing to change: give title, notes, due, remind, priority, project, part_of or after")
 	}
-	if ok, err := s.confirmOutbound(ctx, machine, self, "todo_update", "", t.Title, args); err != nil || !ok {
-		return todoNotAllowed(err)
+	if ok, outcome, err := s.confirmOutbound(ctx, machine, self, "todo_update", "", t.Title, args); err != nil || !ok {
+		return todoNotAllowed(outcome, err)
 	}
 	out, err := s.editTodo(ctx, t.ID, e)
 	if err != nil {
@@ -479,8 +479,8 @@ func (s *Service) toolTodoDone(ctx context.Context, machine, self, name string, 
 		if err != nil || said != "" {
 			return said, err
 		}
-	} else if ok, err := s.confirmOutbound(ctx, machine, self, name, "", t.Title, args); err != nil || !ok {
-		return todoNotAllowed(err)
+	} else if ok, outcome, err := s.confirmOutbound(ctx, machine, self, name, "", t.Title, args); err != nil || !ok {
+		return todoNotAllowed(outcome, err)
 	}
 	out, err := s.editTodo(ctx, t.ID, db.TodoEdit{Done: &complete})
 	if err != nil {
@@ -528,17 +528,18 @@ func (s *Service) confirmTodoCard(ctx context.Context, machine, self, tool, summ
 		return "", err
 	}
 	if r.Allow == nil || !*r.Allow {
-		return "The user declined on the phone (or did not answer): nothing changed.", nil
+		return outboundNotDone(r.Outcome(), "The user declined on the phone: nothing changed.", "nothing changed"), nil
 	}
 	return "", nil
 }
 
-// todoNotAllowed is what a health conversation is told when the user did not let a change out of the space.
-func todoNotAllowed(err error) (string, error) {
+// todoNotAllowed is what a health conversation is told when a change did not get out of the space (outcome: how the
+// card ended, confirmOutbound): the user's decline only when they declined it themselves, else nobody answered.
+func todoNotAllowed(outcome string, err error) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "The user did not allow it on the phone: nothing changed.", nil
+	return outboundNotDone(outcome, "The user did not allow it on the phone: nothing changed.", "nothing changed"), nil
 }
 
 // ---- helpers ----

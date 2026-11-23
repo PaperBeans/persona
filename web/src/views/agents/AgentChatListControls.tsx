@@ -29,6 +29,7 @@ import { rememberSessionRow, useStore } from "../../lib/store";
 import type { Session } from "../../lib/types";
 import { ultracodeMarkShown } from "../../lib/ultracode";
 import { SessionMark } from "../../ui/AgentMark";
+import { BackgroundStallHint } from "../../ui/BackgroundStallHint";
 import { cx, Menu, useMenu, useNow, type MenuItem } from "../../ui/atoms";
 import { contextMenuProps } from "../../ui/context-menu";
 import { Icon } from "../../ui/icons";
@@ -463,6 +464,8 @@ export const AgentChatListRow = memo(function AgentChatListRow({
               </span>
             )
           )}
+
+          <BackgroundStallHint session={s} className="text-[11px] leading-4" />
 
           {/* Line 3: Compact metadata capsules (Machine · Project · Tab · Harness · Model) */}
           <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[10.5px] leading-4 text-ink-3" data-testid="agent-chatlist-chips">

@@ -91,6 +91,7 @@ direction_name
 leader_progress
 decision_record
 decisions_query
+health_intake
 subscription_list
 subscription_get
 subscription_sources

@@ -70,13 +70,20 @@ func (h *Hub) notifyDoneUnder(owner, kind, machineID, machine, sessionID, title,
 		if recordingID != "" {
 			p["recording_id"] = recordingID
 		}
+		if policy.cardID != "" {
+			p["interaction_id"] = policy.cardID
+		}
 		return p
+	}
+	var sent func(Device)
+	if policy.cardID != "" {
+		sent = func(d Device) { h.push.cardPushedTo(policy.cardID, d.DeviceID) }
 	}
 	if !h.sessionHiddenFromExtensions(machineID, sessionID) { // only of a session the extensions are shown (extension_private.go)
 		h.emitToExtensions(owner, "agent.finished", map[string]any{"machine_id": machineID, "machine": machine, "session_id": sessionID, "title": title})
 	}
 	policy.manager, policy.title, policy.body = owner, title, text
-	pushSelected, pushReachable, heldReason := h.push.sendFromPolicy(owner, policy, build, collapseID, wants.fn(), wants.quiet(), nil, nil)
+	pushSelected, pushReachable, heldReason := h.push.sendFromPolicy(owner, policy, build, collapseID, wants.fn(), wants.quiet(), nil, sent)
 	var ws wsReach
 	if heldReason == "" {
 		ws = h.notifyWSFrom(owner, kind, build, wants.fn(), wants.quiet())

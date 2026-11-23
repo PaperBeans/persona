@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BASELINE = ROOT / 'android/core/designsystem/tools/token-baseline.json'
 CATEGORIES = ('color', 'font', 'dp', 'material3', 'icon')
 # Production Kotlin of every app module; build-logic holds Gradle plugins, not app code.
-MODULE_GROUPS = ('app', 'core', 'feature', 'platform')
+MODULE_GROUPS = ('app', 'core', 'feature', 'module', 'platform')
 DESIGN_SYSTEM = 'android/core/designsystem/'
 # Generated from spec/tokens, which scripts/assets/gen_tokens.py checks: its literals are the tokens themselves.
 GENERATED = {'android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt'}

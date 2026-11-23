@@ -31,7 +31,6 @@
     <string name="assistant_always_not_revoked">取り消せませんでした：%1$s</string>
     <string name="assistant_always_retry">再試行</string>
     <string name="assistant_info_launcher_text">ランチャーの設定はまだ接続されていません。</string>
-    <string name="assistant_voice_chat">音声チャット</string>
     <string name="assistant_compact">コンテキストを圧縮</string>
     <string name="assistant_new_main">新しいメインチャット</string>
     <string name="assistant_clear_context">コンテキストをクリア</string>

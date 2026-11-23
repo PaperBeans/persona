@@ -1,3 +1,6 @@
+// The feature modules (docs/web/web.md "Modules"): registered before any route is read. Their descriptors only; each
+// module's code and strings load when its page first opens.
+import "./modules";
 import { Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, ApiError, errorText, getToken, handleUnauthorized, setToken } from "./lib/api";
 import { pair, takeToken } from "./lib/auth";
@@ -28,7 +31,7 @@ import type { Session } from "./lib/types";
 import { useTabLookup } from "./lib/tab-lookup";
 import { ConnectionPill } from "./views/ConnectionPill";
 import { NARROW, useKeyboardFrame, useMedia } from "./lib/viewport";
-import { connect, disconnect, reset, type State, useHubUnreachable, useStore } from "./lib/store";
+import { connect, disconnect, getState, reset, subscribe, type State, useHubUnreachable, useStore } from "./lib/store";
 import { watchRoster } from "./lib/managers";
 import { t } from "./i18n";
 import { Button, Collapse, cx, EASE, IconButton, Loading, Spinner, Toasts } from "./ui/atoms";
@@ -60,7 +63,13 @@ import { useExtensionPlace } from "./lib/extension-slots";
 import { AttentionSignals } from "./lib/attention-signals";
 import { clearDesktopIsland, DesktopIslandSignals } from "./lib/desktop-island";
 import { openStartPage } from "./lib/start-page";
+import { conversationRoute } from "./lib/conversation-page";
 import { useTrackTitle } from "./lib/tracks";
+import { connectModuleHub, moduleExtensionAt, moduleTitle, useModuleStates } from "./core/module-host";
+import { ModuleExtensionPage, ModulePage } from "./core/ModulePage";
+
+// The feature modules follow the hub's hello (its features say which it serves): docs/web/web.md "Modules".
+connectModuleHub(getState, subscribe);
 
 // The pages a first screen doesn't need load when they are opened (#1996), or as a link to their route is reached
 // (lib/lazy-page.ts); "Chat", Persona and "Overview" stay in the main bundle (the extensions' page too: the sidebar already has
@@ -79,7 +88,6 @@ const SubscriptionsPage = lazyPage(() => import("./views/subscriptions/Subscript
 const MachineDetail = lazyPage(() => import("./views/machines/MachineDetail").then((m) => m.MachineDetail), { routes: ["machine"] });
 const SpacePage = lazyPage(() => import("./views/SpacePage").then((m) => m.SpacePage), { routes: ["space"] });
 const Settings = lazyPage(() => import("./views/Settings").then((m) => m.Settings), { routes: ["settings"] });
-const Health = lazyPage(() => import("./views/health/Health").then((m) => m.Health), { routes: ["health"] });
 const Space = lazyPage(() => import("./views/spaces/Space").then((m) => m.Space), { routes: ["track"] });
 const NewSpace = lazyPage(() => import("./views/spaces/NewSpace").then((m) => m.NewSpace), { routes: ["track-new"] });
 const History = lazyPage(() => import("./views/assistant/History").then((m) => m.History), { routes: ["history"] });
@@ -307,6 +315,9 @@ function pageTarget(s: State, route: Route): PageTarget | undefined {
   if (sub) return route.at ? exact() : { link: undefined, to: routePath({ ...route, sid: sub.parent }), mid: route.mid, sid: undefined };
   const rows = pageRows(s, route.mid);
   const row = rows.find((r) => r.session_id === route.sid);
+  // a Persona conversation's `/s/…` link (a push, a copied address): its own page, which draws its plan cards, questions
+  // and tasks; the agent chat here shows none of them
+  if (row?.assistant && !route.at) return { link: undefined, to: routePath(conversationRoute(route.mid, route.sid, s.sessions, s.assistant, row.manager)), mid: route.mid, sid: undefined };
   // a lead's worker's (#5180): the lead's page, the worker in its Team panel
   const worker = workerTarget(rows, route.mid, row, inWorkView(route));
   if (worker) return worker;
@@ -334,6 +345,8 @@ function pageTarget(s: State, route: Route): PageTarget | undefined {
 }
 
 function Shell() {
+  // a module switched on or off, or the hub's features changing what it serves, routes the address again
+  useModuleStates();
   const route = useRoute();
   // an error report's breadcrumb: the kind of page only (its name), never the ids or the query in its address
   useEffect(() => navigationCrumb(route.name), [route.name]);
@@ -500,7 +513,7 @@ function Shell() {
   const trackTitle = useTrackTitle(route.name === "track" ? route.slug : "");
   const extensionTitle = useExtensionPlace(route.name === "extension" ? route.extension : "", route.name === "extension" ? route.ui : "")?.title;
   const title =
-    inWorkView(route) || route.name === "terminal" ? t("work-entry.title") : pane ? agentTitle || "Agent" : route.name === "persona" ? "Persona" : route.name === "persona-new" ? t("app.title_new_chat") : route.name === "history" ? t("app.title_history") : route.name === "health" ? t("app.title_health") : route.name === "track" ? trackTitle || t("app.title_space") : route.name === "track-new" ? t("app.title_new_space") : route.name === "profile" ? t("app.title_profile") : route.name === "inbox" ? t("app.title_inbox") : route.name === "messages" ? t("app.title_messages") : route.name === "starred" ? t("starred.title")
+    inWorkView(route) || route.name === "terminal" ? t("work-entry.title") : pane ? agentTitle || "Agent" : route.name === "persona" ? "Persona" : route.name === "persona-new" ? t("app.title_new_chat") : route.name === "history" ? t("app.title_history") : route.name === "module" ? moduleTitle(route) ?? t("app.title_home") : route.name === "track" ? trackTitle || t("app.title_space") : route.name === "track-new" ? t("app.title_new_space") : route.name === "profile" ? t("app.title_profile") : route.name === "inbox" ? t("app.title_inbox") : route.name === "messages" ? t("app.title_messages") : route.name === "starred" ? t("starred.title")
       : route.name === "request" ? t("app.title_request") : route.name === "routines" ? t("app.title_routines") : route.name === "kb" ? t("app.title_kb") : route.name === "workspace-board" ? t("app.title_workspace_board") : route.name === "todos" ? t("app.title_todos") : route.name === "machines" || route.name === "machine" ? t("app.title_machines") : route.name === "space" ? route.space : route.name === "settings" ? t("app.title_settings")
       : route.name === "agents" ? t("app.title_agents") : route.name === "agent-list" ? "Agents" : route.name === "agent-archives" ? t("app.title_agent_archives") : route.name === "compare" ? t("app.title_compare_runs") : route.name === "extension" ? extensionTitle || t("app.title_extension") : route.name === "subscriptions" ? t("app.title_subscriptions") : route.name === "not-found" ? t("app.title_not_found") : t("app.title_home");
 
@@ -534,8 +547,8 @@ function Shell() {
     case "history":
       main = <History origin={route.origin} onToggleSidebar={toggle} />;
       break;
-    case "health":
-      main = <Health key={route.sid ?? (route.fresh ? "new" : "")} sid={route.sid} fresh={route.fresh} onToggleSidebar={toggle} />;
+    case "module":
+      main = <ModulePage key={route.module} route={route} onToggleSidebar={toggle} />;
       break;
     case "track":
       main = <Space key={`${route.slug}/${route.sid ?? (route.fresh ? "new" : "")}`} slug={route.slug} sid={route.sid} fresh={route.fresh} onToggleSidebar={toggle} />;
@@ -598,7 +611,10 @@ function Shell() {
       main = <SubscriptionsPage onToggleSidebar={toggle} />;
       break;
     case "extension":
-      main = <ExtensionNavPage key={`${route.extension}/${route.ui}`} extension={route.extension} ui={route.ui} onToggleSidebar={toggle} />;
+      // a reserved extension-page id a feature module draws (the health module's water and protein pages, #13176)
+      main = moduleExtensionAt(route.extension)
+        ? <ModuleExtensionPage key={`${route.extension}/${route.ui}${location.search}`} extension={route.extension} ui={route.ui} onToggleSidebar={toggle} />
+        : <ExtensionNavPage key={`${route.extension}/${route.ui}`} extension={route.extension} ui={route.ui} onToggleSidebar={toggle} />;
       break;
     case "not-found":
       main = <NotFound onToggleSidebar={toggle} />;

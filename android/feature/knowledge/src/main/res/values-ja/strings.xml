@@ -125,6 +125,8 @@
     <string name="knowledge_minutes_regenerate">再生成</string>
     <string name="knowledge_minutes_make">議事録を作成</string>
     <string name="knowledge_minutes_writing">議事録を作成中…</string>
+    <string name="knowledge_minutes_checking">録音全体を確認しています…</string>
+    <string name="knowledge_minutes_checking_progress">録音全体を確認しています（%1$d/%2$d分）…</string>
     <string name="knowledge_minutes_writing_note">ハブが文字起こしを要点、決定事項、アクション項目、未解決の質問にまとめています。</string>
     <string name="knowledge_minutes_updating">更新中…</string>
     <string name="knowledge_minutes_failed">議事録を作成できませんでした。再生成してください。</string>

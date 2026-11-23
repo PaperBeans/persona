@@ -32,7 +32,6 @@
     <string name="assistant_always_not_revoked">Couldn\'t revoke: %1$s</string>
     <string name="assistant_always_retry">Retry</string>
     <string name="assistant_info_launcher_text">Launcher settings aren\'t connected yet.</string>
-    <string name="assistant_voice_chat">Voice chat</string>
     <string name="assistant_compact">Compact context</string>
     <string name="assistant_new_main">New main chat</string>
     <string name="assistant_clear_context">Clear context</string>

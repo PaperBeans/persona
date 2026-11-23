@@ -81,6 +81,7 @@ func (h *Manager) callConnector(ctx context.Context, by asker, name string, args
 	return h.connectors.Call(ctx, name, args, func(ctx context.Context, summary string, input json.RawMessage) bool {
 		r, id := h.approveCard(ctx, by, name, summary, input)
 		trace.card, trace.answeredBy = id, r.AnsweredBy
+		connector.TellAskOutcome(ctx, r.Outcome()) // a card nobody answered is no decline
 		return r.Allow != nil && *r.Allow
 	})
 }

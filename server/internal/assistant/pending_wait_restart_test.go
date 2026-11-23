@@ -182,7 +182,7 @@ func testTaskReceiptRecheckRestoredAfterRestart(t *testing.T, st Store) {
 	first := newServiceOn(t, f, st)
 	startedTask(t, first, f)
 	ctx := context.Background()
-	first.taskWorking(ctx, "box", "s1")
+	first.taskWorking(ctx, "box", "s1", startRow{})
 	f.setItems(turnPage("turn-1", "Delivery verified", true)...)
 	f.setSessions("box", proto.Session{MachineID: "box", SessionID: "s1", Agent: "codex", Status: proto.StatusDone,
 		State: proto.StateIdle, LastText: "Delivery verified", UpdatedAt: time.Now(), Rev: 1})

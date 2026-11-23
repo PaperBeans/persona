@@ -140,29 +140,53 @@ func (s *Service) redactedNotice(ctx context.Context, l i18n.Lang, space string)
 }
 
 // confirmOutbound asks the phone before conversation self hands text (said as summary) to somewhere outside it
-// (tool: another agent, a new one): true when the user allows it, at once when text needs no confirming (exitPolicy:
-// its own categories and its track's default categories).
-func (s *Service) confirmOutbound(ctx context.Context, machine, self, tool, text, summary string, input json.RawMessage) (bool, error) {
+// (tool: another agent, a new one): true when the card is allowed, at once when text needs no confirming (exitPolicy:
+// its own categories and its track's default categories). outcome is how the card ended (proto.Resolution.Outcome; ""
+// when none was asked): a refusal is the user's decline only when it is proto.OutcomeDeclined, and nobody answering
+// otherwise (expired, withdrawn, cleared, answered for the user), which the tool must not report as a decline
+// (outboundNotDone).
+func (s *Service) confirmOutbound(ctx context.Context, machine, self, tool, text, summary string, input json.RawMessage) (allowed bool, outcome string, err error) {
 	space, _ := s.selfSpace(ctx, self)
+	if s.supervises(ctx, self) {
+		// Decision rights (docs/designs/decision-rights-20261123.md): a supervisor (a direction lead or the main
+		// conversation) handing work or words to the owner's own Agents, sessions and to-dos is none of the six kinds
+		// of thing only the owner decides: nothing leaves the owner's computers in their name. The supervisor decides it
+		// itself; no phone card, whatever the track or the words. Speaking for the owner to other people goes through
+		// tools of its own, not this gate.
+		return true, "", nil
+	}
 	if _, ok := ctx.Value(ownerConfirmedKey{}).(bool); ok {
 		text = "" // the owner just confirmed these very words: only the track decides, as before tagging
 	}
 	if !s.exitPolicy(ctx, text, self, space).ConfirmOutbound {
-		return true, nil
+		return true, "", nil
 	}
-	l := s.lang(ctx)
-	now := time.Now().UTC()
-	ix := proto.Interaction{ID: "ix_" + randomHex(6), MachineID: machine, SessionID: self, Kind: proto.IxPermission, ToolName: tool,
-		Summary: s.outboundSummary(ctx, l, space, summary), ToolInput: input, SessionTitle: "Persona",
-		CreatedAt: now, ExpiresAt: now.Add(15 * time.Minute)}
-	if c, ok := s.session(ctx, machine, self); ok {
-		ix.Cwd = c.Cwd
+	return s.outbound.confirm(ctx, outboundKey(self, tool, text, summary), func() (bool, string, error) {
+		l := s.lang(ctx)
+		now := time.Now().UTC()
+		ix := proto.Interaction{ID: "ix_" + randomHex(6), MachineID: machine, SessionID: self, Kind: proto.IxPermission, ToolName: tool,
+			Summary: s.outboundSummary(ctx, l, space, summary), ToolInput: input, SessionTitle: "Persona",
+			CreatedAt: now, ExpiresAt: now.Add(15 * time.Minute)}
+		if c, ok := s.session(ctx, machine, self); ok {
+			ix.Cwd = c.Cwd
+		}
+		r, err := s.ask(withCard(ctx, cardConfirmOutbound), ix)
+		if err != nil {
+			return false, "", err
+		}
+		return r.Allow != nil && *r.Allow, r.Outcome(), nil
+	})
+}
+
+// outboundNotDone is what a tool tells the model when confirmOutbound did not let it go (outcome: how its card ended):
+// declined only when the user themselves declined it on a device; otherwise nobody answered it (it expired, was
+// withdrawn or cleared, or someone else answered for the user), which is never told as the user declining.
+// nothing says what did not happen ("nothing was sent to that agent").
+func outboundNotDone(outcome, declined, nothing string) string {
+	if outcome == proto.OutcomeDeclined {
+		return declined
 	}
-	r, err := s.ask(ctx, ix)
-	if err != nil {
-		return false, err
-	}
-	return r.Allow != nil && *r.Allow, nil
+	return prompts.RenderOutboundUnanswered(prompts.OutboundUnanswered{Outcome: outcome, Nothing: nothing})
 }
 
 // ownerConfirmedKey marks a tool call carrying words the owner confirmed on the phone just before (an Inbox

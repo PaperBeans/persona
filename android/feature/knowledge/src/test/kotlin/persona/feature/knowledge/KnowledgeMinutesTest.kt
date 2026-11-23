@@ -15,9 +15,14 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import java.io.File
 import org.junit.Assert.*
 import org.junit.Test
 import persona.core.contracts.HubScope
@@ -56,6 +61,31 @@ class KnowledgeMinutesTest {
         assertEquals(MinutesView(MinutesPhase.Waiting), view(meta(complete = false, kind = "meeting")))
         assertNull(view(meta(complete = false)))
         assertEquals(MinutesView(MinutesPhase.Offer, canMake = true), view(meta()))
+    }
+
+    @Test fun waitsForTheFinalPassLikeTheOtherClients() {
+        val fixture = File(System.getProperty("persona.repo.root"), "spec/fixtures/minutes-wait/cases.json")
+        val cases = Json.parseToJsonElement(fixture.readText()).jsonObject.getValue("cases").jsonArray
+        for (entry in cases) {
+            val case = entry.jsonObject
+            val name = case.string("name")
+            val meta = buildJsonObject {
+                put("complete", true)
+                put("minutes_state", case.getValue("minutes_state"))
+                put("transcription", case["transcription"] ?: JsonNull)
+            }
+            val shown = RecordingMinutes(version = 2).takeIf { case.string("has_minutes") == "true" }
+            val view = minutesView(detail(meta, shown), RecordingFacts.of(meta))
+            val expected = case.getValue("expected").jsonObject
+            assertEquals(name, expected.string("line"), when (view?.phase) {
+                MinutesPhase.Checking -> "checking"
+                MinutesPhase.Writing -> "writing"
+                else -> "none"
+            })
+            assertEquals(name, expected.string("done_minutes").toIntOrNull(), view?.progress?.done)
+            assertEquals(name, expected.string("total_minutes").toIntOrNull(), view?.progress?.total)
+            if (shown != null) assertEquals(name, shown, view?.minutes)
+        }
     }
 
     @Test fun anItemsTimePointsAtTheLineThatWasSpeaking() {

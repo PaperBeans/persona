@@ -237,7 +237,9 @@ func TestMeetingAskLimits(t *testing.T) {
 // it (live_next), and the question it understood comes back. With nothing said then it fails as nothing_heard, with no
 // model call.
 func TestMeetingAskHeard(t *testing.T) {
-	shortAsks(t, 3*time.Second, 2*time.Second, time.Minute)
+	// The heard ask returns as soon as its line is in and it is answered: the hold and the live wait bound only a
+	// failure, and short ones raced the line on a loaded machine (202 pending, or a question without "Anyone?").
+	shortAsks(t, time.Minute, time.Minute, time.Minute)
 	m := newMeetingFixture(t)
 	m.upload(meetingRec, 1, map[string]any{"attendance": "participant"})
 	m.do("POST", livePath(meetingRec), "", `{"from":0,"segments":[{"start":10,"end":12,"text":"Long before the tap"},`+

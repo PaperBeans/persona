@@ -67,7 +67,7 @@ func longTurn(s *Service, f *fakeHub, status, text string) {
 	ctx := context.Background()
 	longRow(f, status, text)
 	if status == proto.StatusWorking {
-		s.taskWorking(ctx, "box", longAgent)
+		s.taskWorking(ctx, "box", longAgent, startRow{})
 	} else {
 		s.taskTurnEnded(ctx, "box", longAgent)
 	}

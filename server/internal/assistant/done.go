@@ -1283,6 +1283,7 @@ func (s *Service) autoFinishTaskMode(t Todo, work time.Time, worked bool, immedi
 	}
 	s.taskJudging(t.ID, 1) // the sweep leaves a turn alone while it is judged (resumeTurn)
 	defer s.taskJudging(t.ID, -1)
+	defer s.judgingTurn(t.ID)() // another look at the same turn waits for this judgment (turnAgain)
 	if !worked {
 		work = t.CreatedAt
 	}

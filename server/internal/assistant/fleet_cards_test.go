@@ -1448,7 +1448,7 @@ func TestTerminalPermissionWithoutIDClearsBuiltInDenial(t *testing.T) {
 		t.Fatalf("the completed session still needs the owner: %+v", rows)
 	}
 	before := len(ft.toldOf(assistantwire.EventFleetInteraction))
-	s.askTick(at.Add(askOwnerOnlyDeadline))
+	s.askTick(at.Add(askHoldFor))
 	if got := len(ft.toldOf(assistantwire.EventFleetInteraction)); got != before {
 		t.Fatal("the obsolete card escalated after the runtime denied it")
 	}
@@ -1508,7 +1508,7 @@ func TestTerminalPermissionWithoutIDKeepsWaitingCard(t *testing.T) {
 	default:
 	}
 	before := len(ft.toldOf(assistantwire.EventFleetInteraction))
-	ft.s.askTick(at.Add(askOwnerOnlyDeadline))
+	ft.s.askTick(at.Add(askHoldFor))
 	if got := len(ft.toldOf(assistantwire.EventFleetInteraction)); got <= before {
 		t.Fatal("a genuinely waiting permission card did not escalate at its deadline")
 	}

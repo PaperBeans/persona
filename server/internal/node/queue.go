@@ -46,7 +46,7 @@ func (n *Node) editQueue(ctx context.Context, id string, keep []int) ([]string, 
 	_ = n.sendKeys(ctx, pane, "ctrl+u")
 	for _, k := range keep {
 		if k >= 0 && k < len(queue) {
-			if err := n.prompt(ctx, pane, queue[k]); err != nil {
+			if err := n.promptClaude(ctx, pane, queue[k]); err != nil {
 				return queue, fmt.Errorf("re-queue: %w", err)
 			}
 			time.Sleep(150 * time.Millisecond)

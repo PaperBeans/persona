@@ -13,6 +13,7 @@ import PersonaWire
 /// The iPhone system integrations (#2276–#2286): what each tool reads from its arguments, what its approval card says,
 /// and the rules that keep it from acting on a guess (an ambiguous occurrence, an overwritten field, an unallowed shortcut).
 @MainActor
+@Suite(.serialized)
 struct PhoneSystemToolsTests {
     private func json(_ text: String) throws -> JSONValue {
         try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
@@ -422,6 +423,7 @@ struct PhoneSystemToolsTests {
                 decodedPaused = decoded
             }
             #expect(decoded.metadata?.label == "Focus")
+            #expect(decoded.metadata?.isSample == true)
             #expect(decoded.presentation.alert.title.key == "sample.title")
             #expect(decoded.presentation.alert.title.defaultValue == String.LocalizationValue("Focus"))
             #expect(String(localized: decoded.presentation.alert.title) == "Focus")
@@ -461,8 +463,8 @@ struct PhoneSystemToolsTests {
         #expect(pausedContent.state.alarmID == paused.state.alarmID)
         #expect(runningContent.state.alarmID != pausedContent.state.alarmID)
 
-        // AlarmButtons's gates: the decoded sample has Pause or Resume; each button carries this sample's ID. The
-        // sample-only alarmID identifies this visual ActivityKit sample, not an AlarmManager timer (tracked separately).
+        // AlarmButtons's gates: the decoded sample has Pause or Resume; each button carries this sample's ID, which
+        // AlarmIntentRouter intercepts in DEBUG so taps act on the sample activity instead of AlarmManager (#13269).
         if case .countdown = runningContent.state.mode {
             #expect(decodedRunning.presentation.countdown?.pauseButton != nil)
         } else {
@@ -506,11 +508,14 @@ struct PhoneSystemToolsTests {
         let realData = try encoder.encode(real)
         let decodedReal = try decoder.decode(AlarmAttributes<PersonaAlarmData>.self, from: realData)
         #expect(decodedReal.metadata?.label == "Focus")
+        #expect(decodedReal.metadata?.isSample == nil)
         #expect(decodedReal.presentation.countdown?.pauseButton?.systemImageName == Theme.Icon.pause)
         #expect(decodedReal.presentation.paused?.resumeButton.systemImageName == Theme.Icon.run)
         #expect(decodedReal.presentation.countdown?.title.key == "Focus")
         #expect(decodedReal.presentation.paused?.title.key == "Focus")
         let realEncoded = try #require(JSONSerialization.jsonObject(with: realData) as? [String: Any])
+        let realMetadata = try #require(realEncoded["metadata"] as? [String: Any])
+        #expect(realMetadata["isSample"] == nil)
         let realPresentation = try #require(realEncoded["presentation"] as? [String: Any])
         let realAlert = try #require(realPresentation["alert"] as? [String: Any])
         let realTint = try #require(realEncoded["tintColor"] as? String)
@@ -520,6 +525,205 @@ struct PhoneSystemToolsTests {
         #expect(decodedReal.presentation.alert.stopButton.systemImageName.isEmpty == false)
         #expect(decodedReal.presentation.alert.title.defaultValue == real.presentation.alert.title.defaultValue)
         #expect(String(localized: decodedReal.presentation.alert.title) == String(localized: real.presentation.alert.title))
+    }
+
+    /// In-memory ActivityKit stand-in for testing DEBUG sample button handling without the live ActivityKit daemon.
+    @available(iOS 26.0, *)
+    @MainActor
+    private final class FakeSampleActivities {
+        var active: [String: AlarmsTool.SampleActivitySnapshot] = [:]
+        var updated: [(String, ActivityContent<AlarmPresentationState>)] = []
+        var ended: [String] = []
+        var requested: [(String, AlarmAttributes<PersonaAlarmData>, ActivityContent<AlarmPresentationState>)] = []
+        private var nextNumber = 1
+
+        func add(activityID: String, attributes: AlarmAttributes<PersonaAlarmData>, content: ActivityContent<AlarmPresentationState>) {
+            active[activityID] = AlarmsTool.SampleActivitySnapshot(
+                activityID: activityID,
+                state: content.state,
+                label: attributes.metadata?.label ?? "Focus",
+                hasCountdownPauseButton: attributes.presentation.countdown?.pauseButton != nil,
+                isSample: attributes.metadata?.isSample == true
+            )
+        }
+
+        var backend: AlarmsTool.SampleActivityBackend {
+            AlarmsTool.SampleActivityBackend(
+                find: { alarmID in
+                    self.active.values.first { $0.state.alarmID == alarmID }
+                },
+                update: { activityID, content in
+                    self.updated.append((activityID, content))
+                    if var snapshot = self.active[activityID] {
+                        snapshot.state = content.state
+                        self.active[activityID] = snapshot
+                    }
+                },
+                end: { activityID in
+                    self.ended.append(activityID)
+                    self.active.removeValue(forKey: activityID)
+                },
+                request: { attributes, content in
+                    let id = "sample-replacement-\(self.nextNumber)"
+                    self.nextNumber += 1
+                    self.requested.append((id, attributes, content))
+                    self.add(activityID: id, attributes: attributes, content: content)
+                    return id
+                }
+            )
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private final class AlarmManagerSpy: @unchecked Sendable {
+        var calls: [(AlarmIntentAction, UUID)] = []
+        var now: Date
+
+        init(now: Date) {
+            self.now = now
+        }
+
+        func deps(backend: AlarmsTool.SampleActivityBackend) -> AlarmIntentRouter.Deps {
+            AlarmIntentRouter.Deps(
+                pauseAlarm: { self.calls.append((.pause, $0)) },
+                resumeAlarm: { self.calls.append((.resume, $0)) },
+                stopAlarm: { self.calls.append((.stop, $0)) },
+                handleSample: { action, id in
+                    await AlarmsTool.handleSampleAction(action, alarmID: id, now: self.now, backend: backend)
+                }
+            )
+        }
+    }
+
+    /// Tapping Pause, Resume or Stop on the DEBUG ActivityKit-only timer sample updates or ends the sample activity
+    /// directly and never forwards the unscheduled sample UUID to `AlarmManager` (#13269).
+    @Test func theTimerSampleButtonsStayOffAlarmManagerAndUpdateTheSampleActivity() async throws {
+        guard #available(iOS 26.0, *) else { return }
+        defer { AlarmsTool.resetSampleTracking() }
+
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let activities = FakeSampleActivities()
+        let spy = AlarmManagerSpy(now: t0)
+        let deps = spy.deps(backend: activities.backend)
+
+        // 1. Running sample: Pause -> Resume -> Stop -> duplicate Stop.
+        let runningAttrs = AlarmsTool.sampleAttributes(label: "Focus", paused: false)
+        let runningContent = AlarmsTool.sampleContent(paused: false, now: t0)
+        let runningID = runningContent.state.alarmID
+        activities.add(activityID: "sample-running", attributes: runningAttrs, content: runningContent)
+        AlarmsTool.resetSampleTracking(sampleActivityID: "sample-running", sampleAlarmID: runningID)
+
+        try await AlarmIntentRouter.withDeps(deps) {
+            spy.now = t0.addingTimeInterval(301)
+            _ = try await PauseAlarmIntent(alarmID: runningID).perform()
+            #expect(spy.calls.isEmpty, "sample Pause must never call AlarmManager")
+            let pausedState = try #require(activities.active["sample-running"]?.state)
+            #expect(pausedState.alarmID == runningID)
+            guard case .paused(let pausedMode) = pausedState.mode else {
+                Issue.record("sample Pause must switch the sample activity to paused")
+                return
+            }
+            #expect(pausedMode.totalCountdownDuration == 1500 && pausedMode.previouslyElapsedDuration == 301)
+            #expect(activities.requested.isEmpty)
+
+            spy.now = t0.addingTimeInterval(500)
+            _ = try await ResumeAlarmIntent(alarmID: runningID).perform()
+            #expect(spy.calls.isEmpty, "sample Resume must never call AlarmManager")
+            let resumedState = try #require(activities.active["sample-running"]?.state)
+            guard case .countdown(let resumedMode) = resumedState.mode else {
+                Issue.record("sample Resume must switch the sample activity back to countdown")
+                return
+            }
+            #expect(resumedMode.totalCountdownDuration == 1500 && resumedMode.previouslyElapsedDuration == 301)
+            #expect(resumedMode.startDate == spy.now && resumedMode.fireDate == spy.now.addingTimeInterval(1199))
+            #expect(activities.requested.isEmpty, "running sample already has countdown.pauseButton and updates in place")
+
+            _ = try await StopAlarmIntent(alarmID: runningID).perform()
+            #expect(spy.calls.isEmpty, "sample Stop must never call AlarmManager")
+            #expect(activities.ended == ["sample-running"])
+            #expect(activities.active["sample-running"] == nil)
+            #expect(AlarmsTool.sampleActivityID == nil && AlarmsTool.sampleAlarmID == nil)
+
+            // A duplicate tap after Stop still recognizes the sample ID and never falls through to AlarmManager.
+            _ = try await StopAlarmIntent(alarmID: runningID).perform()
+            #expect(spy.calls.isEmpty, "late or duplicate sample Stop must still never call AlarmManager")
+        }
+
+        // 2. Paused-only sample (`-showAlarmSample paused`): Resume replaces the paused-only activity with a running
+        // sample so Pause is available while staying below ActivityKit's 4 KB limit.
+        let pausedAttrs = AlarmsTool.sampleAttributes(label: "Focus", paused: true)
+        let pausedContent = AlarmsTool.sampleContent(paused: true, now: t0)
+        let pausedID = pausedContent.state.alarmID
+        activities.add(activityID: "sample-paused", attributes: pausedAttrs, content: pausedContent)
+        // Clear in-memory tracking to also prove post-relaunch recognition via `PersonaAlarmData.isSample`.
+        AlarmsTool.resetSampleTracking()
+
+        try await AlarmIntentRouter.withDeps(deps) {
+            spy.now = t0.addingTimeInterval(100)
+            _ = try await ResumeAlarmIntent(alarmID: pausedID).perform()
+            #expect(spy.calls.isEmpty, "paused sample Resume must never call AlarmManager even after relaunch")
+            #expect(activities.ended.contains("sample-paused"))
+            let replacement = try #require(activities.requested.last)
+            #expect(replacement.1.presentation.countdown?.pauseButton != nil)
+            #expect(replacement.1.metadata?.isSample == true)
+            let encoded = try JSONEncoder().encode(replacement.1)
+            #expect(encoded.count < 4096)
+            #expect(replacement.2.state.alarmID == pausedID)
+            guard case .countdown(let countdown) = replacement.2.state.mode else {
+                Issue.record("resumed paused-only sample must count down")
+                return
+            }
+            #expect(countdown.startDate == spy.now && countdown.fireDate == spy.now.addingTimeInterval(1199))
+            #expect(AlarmsTool.sampleActivityID == replacement.0 && AlarmsTool.sampleAlarmID == pausedID)
+        }
+    }
+
+    /// Real AlarmKit timer IDs always route directly to `AlarmManager`, even while a DEBUG sample activity exists, and
+    /// stopping the sample never touches a real timer activity (#13269).
+    @Test func realTimerButtonsStillRouteToAlarmManagerAlongsideASample() async throws {
+        guard #available(iOS 26.0, *) else { return }
+        defer { AlarmsTool.resetSampleTracking() }
+
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let activities = FakeSampleActivities()
+        let spy = AlarmManagerSpy(now: t0)
+        let deps = spy.deps(backend: activities.backend)
+
+        let realID = UUID()
+        let realAttrs = AlarmsTool.attributes(label: "Tea", timer: true)
+        let realMode = AlarmPresentationState.Mode.countdown(.init(
+            totalCountdownDuration: 300, previouslyElapsedDuration: 0, startDate: t0, fireDate: t0.addingTimeInterval(300)
+        ))
+        let realContent = ActivityContent(state: AlarmPresentationState(alarmID: realID, mode: realMode), staleDate: nil)
+        activities.add(activityID: "real-activity", attributes: realAttrs, content: realContent)
+
+        let sampleAttrs = AlarmsTool.sampleAttributes(label: "Focus", paused: false)
+        let sampleContent = AlarmsTool.sampleContent(paused: false, now: t0)
+        let sampleID = sampleContent.state.alarmID
+        activities.add(activityID: "sample-activity", attributes: sampleAttrs, content: sampleContent)
+        AlarmsTool.resetSampleTracking(sampleActivityID: "sample-activity", sampleAlarmID: sampleID)
+
+        try await AlarmIntentRouter.withDeps(deps) {
+            _ = try await PauseAlarmIntent(alarmID: realID).perform()
+            _ = try await ResumeAlarmIntent(alarmID: realID).perform()
+            _ = try await StopAlarmIntent(alarmID: realID).perform()
+
+            #expect(spy.calls.count == 3)
+            #expect(spy.calls[0].0 == .pause && spy.calls[0].1 == realID)
+            #expect(spy.calls[1].0 == .resume && spy.calls[1].1 == realID)
+            #expect(spy.calls[2].0 == .stop && spy.calls[2].1 == realID)
+            #expect(activities.updated.isEmpty && activities.ended.isEmpty)
+
+            // Stopping the sample ends only the sample and sends nothing to AlarmManager.
+            _ = try await StopAlarmIntent(alarmID: sampleID).perform()
+            #expect(spy.calls.count == 3)
+            #expect(activities.ended == ["sample-activity"])
+            #expect(activities.active["real-activity"] != nil)
+
+            // A malformed ID triggers neither AlarmManager nor sample handling.
+            try await AlarmIntentRouter.perform(.stop, alarmID: "not-a-uuid")
+            #expect(spy.calls.count == 3)
+        }
     }
     #endif
 

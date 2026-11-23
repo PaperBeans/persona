@@ -261,8 +261,10 @@ func (s *Service) cardDecisions(ctx context.Context, ix proto.Interaction, r pro
 	if st == nil || status != "resolved" || r.Dismiss || ix.Kind != proto.IxQuestion || len(r.Answers) == 0 {
 		return
 	}
-	if r.AnsweredBy == proto.AnsweredByAssistant {
-		return // the assistant's call for the user (delegate.go), not one the user made; "Change answer" is
+	if r.AnsweredBy != "" || r.Late {
+		// Not one the user made on the card: the assistant's call for them (delegate.go; "Change answer" is theirs), a
+		// recommendation taken at a deadline, the terminal's, or an answer that came after the card expired.
+		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { seedAgentsDisplay } from "../lib/agents-display";
 vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
@@ -96,6 +97,8 @@ async function render(paged: boolean, pins = emptyPins, saved?: string, agentsOn
 beforeEach(() => {
   localStorage.clear();
   reset();
+  // Settings › Agents: the Filter is on for these tests (it is off until the hub says so)
+  seedAgentsDisplay({ show_botmux: true, configured: true, show_filter: true });
   FakeSocket.all = [];
   vi.stubGlobal("WebSocket", FakeSocket);
   history.replaceState(null, "", "/");

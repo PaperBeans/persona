@@ -2,7 +2,7 @@
 // own for one part of the user's life, like the health space. `/tracks/<slug>` opens its latest conversation, or its
 // home when it has none; `/tracks/<slug>/new` is its home (what it is, a box to start a conversation, its past
 // conversations, its SPACE.md, its default categories); `/tracks/<slug>/<id>` one of its conversations. The health space
-// keeps its own page (views/health/Health.tsx).
+// keeps its own page (modules/health/Health.tsx).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { errorText } from "../../lib/api";
 import { ago } from "../../lib/format";
@@ -20,7 +20,7 @@ import { ChatView } from "../chat/ChatView";
 import { Composer, type Outgoing } from "../chat/Composer";
 import { conversationTitle } from "../assistant/conversations";
 import { Empty, SectionTitle, Tag } from "../assistant/parts";
-import { healthEntry } from "../health/entry";
+import { spaceEntry } from "./entry";
 import { useSpaceConversations } from "./conversations";
 import { ConversationCategories } from "./ConversationCategories";
 import { categoryLabel } from "./labels";
@@ -46,7 +46,7 @@ function Centered() {
  *  skips it. */
 function SpaceResume({ slug }: { slug: string }) {
   const { list, error } = useSpaceConversations(slug);
-  const entry = healthEntry(list, error);
+  const entry = spaceEntry(list, error);
   const to = entry.kind === "open" ? entry.sid : entry.kind;
   useEffect(() => {
     if (to === "wait") return;

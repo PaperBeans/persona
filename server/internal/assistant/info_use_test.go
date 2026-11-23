@@ -155,7 +155,7 @@ func TestSensitiveTextOutsideHealth(t *testing.T) {
 		t.Fatalf("pushes: %+v", p)
 	}
 	// Words the owner just confirmed on the phone (an Inbox suggestion's instruction) are not asked about again.
-	if ok, err := s.confirmOutbound(ownerConfirmed(context.Background()), "server", "work-0000-0000", "agent_start", "qa invoice total",
+	if ok, _, err := s.confirmOutbound(ownerConfirmed(context.Background()), "server", "work-0000-0000", "agent_start", "qa invoice total",
 		"qa", nil); err != nil || !ok {
 		t.Fatalf("owner-confirmed words: %v %v", ok, err)
 	}

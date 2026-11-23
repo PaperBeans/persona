@@ -3,6 +3,7 @@ package node
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -56,6 +58,8 @@ type agyParentSubagentInfo struct {
 
 var agyEmbeddedUUIDRe = lazyre.New(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
 
+// reportedAgyConversation is the conversation herdr's antigravity-cli integration reports for a pane's row. Persona's own
+// hooks report too (agyhooks.go): agyReportedLocked is the two together.
 func reportedAgyConversation(a host.Agent) string {
 	s := a.AgentSession
 	if a.Agent == agyAgent && s != nil && s.Source == "herdr:antigravity_cli" &&
@@ -65,25 +69,48 @@ func reportedAgyConversation(a host.Agent) string {
 	return ""
 }
 
-// rawAgyConversationLocked checks the latest raw herdr snapshot as well as the pane row.
+// agyReportedLocked is the conversation the pane's agy row has been reported in, by herdr's integration or by
+// Persona's own hook (agyhooks.go). The two must agree: when both speak and differ, nothing is known.
+func (n *Node) agyReportedLocked(a host.Agent) string {
+	if a.Agent != agyAgent {
+		return ""
+	}
+	herdr := reportedAgyConversation(a)
+	hook := n.agyReports[a.PaneID].conversation
+	if herdr != "" && hook != "" && herdr != hook {
+		return ""
+	}
+	return cmp.Or(herdr, hook)
+}
+
+// agyReported is agyReportedLocked for a caller that does not hold n.mu.
+func (n *Node) agyReported(a host.Agent) string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.agyReportedLocked(a)
+}
+
+// rawAgyConversationLocked checks the latest raw snapshots of every engine as well as the pane row.
 // The row ID is pane-derived. Cwd and previously bound session IDs cannot identify
 // a native conversation, and ambiguous reports do not authorize a read or resume.
 func (n *Node) rawAgyConversationLocked(id, pane string) string {
 	a := n.agents[id]
-	conversation := reportedAgyConversation(a)
-	if conversation == "" || a.PaneID != pane || id != otherSession(a) || host.ParsePane(pane).Kind != host.Herdr {
+	conversation := n.agyReportedLocked(a)
+	if conversation == "" || a.PaneID != pane || id != otherSession(a) {
 		return ""
 	}
 	matches := 0
-	for _, raw := range n.hostAgents[host.Herdr] {
-		reported := reportedAgyConversation(raw)
-		if raw.PaneID == pane {
-			if reported != conversation {
+	for _, agents := range n.hostAgents {
+		for _, raw := range agents {
+			reported := n.agyReportedLocked(raw)
+			if raw.PaneID == pane {
+				if reported != conversation {
+					return ""
+				}
+				matches++
+			} else if reported == conversation {
 				return ""
 			}
-			matches++
-		} else if reported == conversation {
-			return ""
 		}
 	}
 	if matches != 1 {
@@ -93,9 +120,11 @@ func (n *Node) rawAgyConversationLocked(id, pane string) string {
 }
 
 func (n *Node) agyConversationClaimedElsewhereLocked(pane, conversation string) bool {
-	for _, raw := range n.hostAgents[host.Herdr] {
-		if raw.PaneID != pane && reportedAgyConversation(raw) == conversation {
-			return true
+	for _, agents := range n.hostAgents {
+		for _, raw := range agents {
+			if raw.PaneID != pane && n.agyReportedLocked(raw) == conversation {
+				return true
+			}
 		}
 	}
 	return false
@@ -459,7 +488,7 @@ type agyWatch struct {
 	stepHashes                  map[int][32]byte
 }
 
-type agyPaneFiles struct{ transcript, receipts os.FileInfo }
+type agyPaneFiles struct{ transcript, full, receipts os.FileInfo }
 
 func sameAgyFile(a, b os.FileInfo) bool {
 	if a == nil || b == nil {
@@ -469,11 +498,11 @@ func sameAgyFile(a, b os.FileInfo) bool {
 }
 
 func agyStepsHistory(conversation string) agyHistory {
-	return agyHistory{token: "agy-pane:" + conversation + ":steps:context-resources-v1:lazy-media:checkpoints:wakes:file-links"}
+	return agyHistory{token: "agy-pane:" + conversation + ":steps:context-resources-v1:lazy-media:checkpoints:wakes:file-links:full-text"}
 }
 
-// agyRead loads the compact export for pages and live updates. The revision memo
-// distinguishes a rewrite of complete records from an append or partial write.
+// agyRead projects the compact export for pages and live updates, filling in
+// verified text from the full export before deciding whether history changed.
 func (n *Node) agyRead(root *os.Root, key, conversation string, previous *agyPaneFiles) (agyHistory, *agyPaneFiles, error) {
 	empty := agyStepsHistory(conversation)
 	info, err := root.Stat(agyTranscriptPath)
@@ -487,8 +516,14 @@ func (n *Node) agyRead(root *os.Root, key, conversation string, previous *agyPan
 	if receiptsFile != nil && !receiptsFile.Mode().IsRegular() {
 		receiptsFile = nil
 	}
-	files := &agyPaneFiles{transcript: info, receipts: receiptsFile}
-	if previous != nil && sameAgyFile(info, previous.transcript) && sameAgyFile(receiptsFile, previous.receipts) && time.Since(info.ModTime()) > time.Second {
+	fullFile, _ := root.Lstat(agyFullTranscriptPath)
+	if fullFile != nil && !fullFile.Mode().IsRegular() {
+		fullFile = nil
+	}
+	fullUnsettled := fullFile != nil && time.Since(fullFile.ModTime()) <= time.Second
+	files := &agyPaneFiles{transcript: info, full: fullFile, receipts: receiptsFile}
+	if previous != nil && sameAgyFile(info, previous.transcript) && sameAgyFile(fullFile, previous.full) &&
+		sameAgyFile(receiptsFile, previous.receipts) && time.Since(info.ModTime()) > time.Second && !fullUnsettled {
 		return agyHistory{}, files, nil
 	}
 	raw, err := root.ReadFile(agyTranscriptPath)
@@ -497,15 +532,24 @@ func (n *Node) agyRead(root *os.Root, key, conversation string, previous *agyPan
 	}
 	raw = raw[:bytes.LastIndexByte(raw, '\n')+1]
 	steps, rev := parseAgySteps(raw, conversation)
+	if fullFile != nil && slices.ContainsFunc(steps, agyNeedsFullText) {
+		full, err := n.agyFullSteps(root, key, conversation, fullFile, fullUnsettled)
+		if err != nil {
+			files.full = nil // Retry the optional source on the next poll.
+		} else if restoreAgyFullText(steps, full, rev.steps) {
+			rev.full = fullFile
+		}
+	}
 	n.mu.Lock()
 	if n.agyRevisions == nil {
 		n.agyRevisions = newLRU[string, agyRevision](256)
 	}
 	if old, ok := n.agyRevisions.get(key); ok && old.branch == rev.branch {
-		if (len(raw) < old.length || sha256.Sum256(raw[:old.length]) != old.hash) && agyStepsRewritten(old.steps, rev.steps) {
-			rev.rewrite = fmt.Sprintf("%x", rev.hash[:10])
-		} else {
-			rev.rewrite = old.rewrite
+		rev.rewrite = old.rewrite
+		compactChanged := len(raw) < old.length || sha256.Sum256(raw[:old.length]) != old.hash
+		fullChanged := !sameAgyFile(old.full, rev.full) || (rev.full != nil && fullUnsettled)
+		if (compactChanged || fullChanged) && agyStepsRewritten(old.steps, rev.steps) {
+			rev.rewrite = agyDigest(fmt.Sprintf("%s:%x", old.rewrite, rev.hash))
 		}
 	}
 	n.agyRevisions.put(key, rev)

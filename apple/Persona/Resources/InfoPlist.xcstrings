@@ -168,19 +168,19 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Persona lets Claude read health summaries when you ask, for example how many steps you walked this week or how long you slept last night. With rolling recording on, Persona also checks heart rate, HRV, steps, workouts and the moods you log, on your iPhone only, to keep the minutes around them."
+            "value": "Persona lets Claude read health summaries when you ask, for example how many steps you walked this week or how long you slept last night. With rolling recording on, Persona also checks heart rate, HRV, steps, workouts and the moods you log, on your iPhone only, to keep the minutes around them. The Health home and widgets show Activity rings, steps and sleep."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "依頼したときにClaudeがヘルスケアの概要を読み取れるようにします。たとえば今週の歩数や昨夜の睡眠時間です。ローリング録音をオンにすると、心拍、HRV、歩数、ワークアウト、記録した気分もiPhone上だけで確認し、その前後の数分を残します。"
+            "value": "依頼したときにClaudeがヘルスケアの概要を読み取れるようにします。たとえば今週の歩数や昨夜の睡眠時間です。ローリング録音をオンにすると、心拍、HRV、歩数、ワークアウト、記録した気分もiPhone上だけで確認し、その前後の数分を残します。健康のホームとウィジェットには、アクティビティリング、歩数、睡眠が表示されます。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "你让 Claude 看健康数据时，Persona 允许它读取健康摘要，比如这周走了多少步、昨晚睡了多久。开启滚动录音后，还会在 iPhone 本机查看心率、HRV、步数、锻炼和你记下的心境，用来保留这些信号前后几分钟。"
+            "value": "你让 Claude 看健康数据时，Persona 允许它读取健康摘要，比如这周走了多少步、昨晚睡了多久。开启滚动录音后，还会在 iPhone 本机查看心率、HRV、步数、锻炼和你记下的心境，用来保留这些信号前后几分钟。健康主页和小组件会显示健身圆环、步数和睡眠。"
           }
         }
       }

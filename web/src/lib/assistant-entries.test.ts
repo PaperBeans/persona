@@ -385,6 +385,34 @@ describe("Persona reviewing in the Assistant's entries", () => {
 });
 
 
+// What a task's supervising conversation handles is not the owner's: a supervised task's failed start (its supervisor
+// retries or remedies it) and an Agent's card its supervisor holds (delegating) are in progress, not Needs you; the
+// same card once passed up to the owner, and an unsupervised failed start, still are.
+describe("what a supervisor holds in the Assistant's entries", () => {
+  const now = Date.parse("2026-11-10T09:00:00Z");
+  const at = "2026-11-10T08:00:00Z";
+  const supervision = { supervisor: "lead", state: "", reviews: [], updated_at: at } as unknown as Todo["supervision"];
+  const asking: Session = { machine_id: "box", session_id: "ask", title: "ask", cwd: "/w", state: "needs_you", status: "blocked", updated_at: at } as Session;
+  const card = (delegating: boolean): Interaction => ({ id: "ix_1", machine_id: "box", session_id: "ask", kind: "question", created_at: at, ...(delegating ? { delegating } : {}) }) as Interaction;
+  const failed = (patch: Partial<Todo> = {}): Todo => ({ id: "failed", title: "failed", origin: "main", created_at: at, updated_at: at, done_at: at, start_error: "Desk Mac is offline", agents: [], ...patch }) as Todo;
+  const withAgent = (patch: Partial<Todo> = {}): Todo => ({ id: "asks", title: "asks", origin: "main", created_at: at, updated_at: at, agents: [{ machine_id: "box", session_id: "ask", linked_at: at }], ...patch }) as Todo;
+  const run = (todos: Todo[], interactions?: Interaction[]) => assistantEntries({ conversation: "main", main: "main", todos, sessions: interactions ? [asking] : [], interactions: interactions ?? [], plans: {}, feed: [], now });
+  const keys = (items: { key: string }[]) => items.map((item) => item.key);
+
+  it("leaves a supervised failed start with its supervisor, and an unsupervised one with the owner", () => {
+    expect(keys(run([failed({ supervision })]).needsYou)).toEqual([]);
+    expect(keys(run([failed({ supervision })]).running)).toEqual(["task:failed"]);
+    expect(keys(run([failed()]).needsYou)).toEqual(["task:failed"]);
+  });
+
+  it("leaves a card the supervisor holds with it, and shows the same card once it reaches the owner", () => {
+    const held = run([withAgent({ supervision })], [card(true)]);
+    expect(keys(held.needsYou)).toEqual([]);
+    expect(keys(held.running)).toEqual(["task:asks"]);
+    expect(keys(run([withAgent({ supervision })], [card(false)]).needsYou)).toEqual(["task:asks"]);
+  });
+});
+
 describe("pending plans across Persona conversations", () => {
   const at = "2026-11-21T01:00:00Z";
   const plan = (id: string, conversation: string, state: TaskPlan["state"] = "open"): TaskPlan => ({

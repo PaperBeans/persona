@@ -1,9 +1,9 @@
-Answer another agent's question for the user, in their place, when they said what to answer or told you to decide. Only a question can be answered this way: a tool permission, a plan and a terminal dialog are theirs to decide in the app, and the assistant's own question is never answered by itself. Every question must be answered by its own wording, with the option labels it offers; free text is not accepted (the user answers that in the app, or you use agent_send). A multi-select takes an array of labels. A card a 督办 message handed you before the user (a task you supervise) is yours to answer when it is the agent's own call: give reason, and the answer is kept as the task's decision; what the user must decide goes to them with ask_escalate.{{template "shared/mcp_language" .}}
+Answer another agent's card for the user, in their place, when they said what to answer or told you to decide. Answer each question by its own wording with an option label it offers; no free text (use agent_send). A multi-select takes an array of labels. A card a 督办 message handed you (a task you supervise) is yours to decide: answer a question, or allow or deny a tool permission or a plan with allow, giving reason; it is kept as the task's decision, never as the user's. Forms, secrets and approvals that send or reply in the user's name, spend money or delete are the user's: ask_escalate them. Never other approvals, terminal dialogs or the assistant's own questions.{{template "shared/mcp_language" .}}
 
 ```json
 {
   "type": "object",
-  "required": ["machine", "session_id", "interaction_id", "answers"],
+  "required": ["machine", "session_id", "interaction_id"],
   "properties": {
     "machine": {
       "type": "string",
@@ -27,9 +27,13 @@ Answer another agent's question for the user, in their place, when they said wha
         ]
       }
     },
+    "allow": {
+      "type": "boolean",
+      "description": "a permission or plan card: true allows (approves), false denies"
+    },
     "reason": {
       "type": "string",
-      "description": "optional: in a sentence, why this answer (kept with the task's decision when a 督办 message handed you the card)"
+      "description": "in a sentence, why this answer (kept with the task's decision)"
     }
   }
 }

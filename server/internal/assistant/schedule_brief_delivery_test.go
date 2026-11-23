@@ -11,6 +11,7 @@ import (
 )
 
 func TestTaskBriefingModelSnapshotFailureKeepsFixedFacts(t *testing.T) {
+	needsBriefingModule(t)
 	for _, report := range []bool{false, true} {
 		name := "facts"
 		if report {

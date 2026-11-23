@@ -323,6 +323,10 @@ type Notification struct {
 	// immersive mode lets through when it is the track in focus. Older hubs drop both.
 	Depth string `json:"depth,omitempty"`
 	Track string `json:"track,omitempty"`
+	// CardID is the card a NotifyPush push stands for (a plan's id) when that card is answered elsewhere: the push
+	// carries it as `interaction_id`, and once the manager says the card is over (EventFleetResolved with it) the hub
+	// takes the push back from the devices it went to, as an interaction's (#4349). Older hubs drop it.
+	CardID string `json:"card_id,omitempty"`
 }
 
 // Push levels a Notification may carry (hub low-distraction mode, docs/server/server.md "Push policy").

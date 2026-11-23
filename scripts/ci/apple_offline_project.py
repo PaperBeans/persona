@@ -30,6 +30,7 @@ PACKAGES = {
     "PersonaCore": {"path": "Packages/PersonaCore"},
     "PersonaScreenKit": {"path": "Packages/PersonaScreenKit"},
     "PersonaInputKit": {"path": "Packages/PersonaInputKit"},
+    "PersonaModuleAPI": {"path": "Packages/PersonaModuleAPI"},
     "MarqueeGlow": {"url": "https://github.com/szupzj18/MarqueeGlow", "exactVersion": "0.1.0"},
 }
 SOURCES = {
@@ -72,11 +73,12 @@ DEPENDENCIES = {
         {"target": "PersonaNotify"},
         *({"package": name} for name in (
             "MarkdownUI", "BeautifulUI", "PersonaSSH", "PersonaKit", "PersonaCore",
-            "MarqueeGlow", "PersonaScreenKit", "PersonaInputKit",
+            "MarqueeGlow", "PersonaScreenKit", "PersonaInputKit", "PersonaModuleAPI",
         )),
     ],
     "PersonaTests": [
         {"package": "PersonaWire"},
+        {"package": "PersonaModuleAPI"},
         {"target": "Persona"},
         {"sdk": "LiveCommunicationKit.framework", "weak": True},
         {"package": "PersonaCore", "product": "PersonaCoreTestSupport"},

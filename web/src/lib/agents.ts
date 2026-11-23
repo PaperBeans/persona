@@ -199,6 +199,7 @@ export async function restoreAgentSession(s: Pick<AgentSession, "id" | "title">,
 
 const PROVIDER_LABEL: Record<string, string> = { grok_bot: "Grok Bot", muse: "Muse", cue: "Cue", dots: "Dots", claude_duet: "Claude Duet" };
 export function providerLabel(p: string): string {
+  if (p === "bot") return t("lib-agents.bot");
   return PROVIDER_LABEL[p] ?? (p || t("lib-agents.other"));
 }
 

@@ -109,10 +109,11 @@ func (s *Service) toolAgentsSwitch(ctx context.Context, machine, self string, ar
 	}
 	// One confirmation for the whole batch (in the health space: one card), never one per agent.
 	summary := fmt.Sprintf("→ %s\n\n%s", t.Launcher, strings.Join(lines, "\n"))
-	if ok, err := s.confirmOutbound(ctx, machine, self, "agents_switch", "", summary, args); err != nil {
+	if ok, outcome, err := s.confirmOutbound(ctx, machine, self, "agents_switch", "", summary, args); err != nil {
 		return "", err
 	} else if !ok {
-		return "The user declined on the phone: no agent was moved and nothing was sent.", nil
+		return outboundNotDone(outcome, "The user declined on the phone: no agent was moved and nothing was sent.",
+			"no agent was moved and nothing was sent"), nil
 	}
 	sem := make(chan struct{}, switchParallel)
 	var wg sync.WaitGroup

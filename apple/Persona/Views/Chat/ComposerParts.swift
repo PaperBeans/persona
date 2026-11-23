@@ -190,11 +190,12 @@ final class StarterDraft {
     }
 }
 
-/// The composer's Take Photo and Glasses Photo, in a conversation and a new one alike: the system camera over the page,
-/// the glasses' viewfinder in a sheet (iOS); each picture taken goes to `add`.
+/// The composer's Take Photo and the modules' composer actions (Glasses Photo), in a conversation and a new one alike: the
+/// system camera over the page, a module's sheet (the glasses' viewfinder); each picture taken goes to `add`.
 struct ComposerCaptureSheets: ViewModifier {
     @Binding var camera: Bool
-    @Binding var glasses: Bool
+    /// The module composer action whose sheet is up (`Modules.registry.composerActions`).
+    @Binding var module: ModuleComposerAction?
     /// Scan Document (#3720) and what to do with its pages (`DocumentScanner.deliver`).
     @Binding var scan: Bool
     var pages: ([UIImage]) -> Void
@@ -209,10 +210,10 @@ struct ComposerCaptureSheets: ViewModifier {
             .fullScreenCover(isPresented: $scan) {
                 DocumentScanner { pages($0) }.ignoresSafeArea()
             }
-            .sheet(isPresented: $glasses) {
-                GlassesCaptureSheet { img in add(img) }
-            }
             #endif
+            .sheet(item: $module) { action in
+                action.sheet { img in add(img) }
+            }
     }
 }
 

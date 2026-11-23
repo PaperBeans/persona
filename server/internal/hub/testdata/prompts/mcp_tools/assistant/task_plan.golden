@@ -74,11 +74,15 @@
             },
             "context": {
               "type": "string",
-              "description": "facts the manager cannot resolve; omit project background"
+              "description": "extra facts; no project background"
             },
             "prompt": {
               "type": "string",
-              "description": "goal, authorization bounds and new facts; the manager adds project context, criteria and framework rules once"
+              "description": "goal, bounds and facts; manager adds context, criteria and rules"
+            },
+            "skip_project_memory": {
+              "type": "boolean",
+              "description": "default false; true skips project/direction memory; prompt unchanged"
             },
             "machine": {
               "type": "string",

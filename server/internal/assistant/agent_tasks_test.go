@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -186,6 +187,39 @@ func TestAgentStartIsATaskFromAnyConversation(t *testing.T) {
 	for _, todo := range s.todosOf(ctx, "*") {
 		if todo.Supervision == nil || todo.Supervision.Supervisor != "conv1" {
 			t.Fatalf("untracked start: %+v", todo)
+		}
+	}
+}
+
+// agent_start names the to-do it made before the start in the node's model_source: the Agent's gateway requests
+// carry it from their first one, whether main or a task leader started it (the link comes only after the start).
+func TestAgentStartCarriesTodoModelSource(t *testing.T) {
+	args := json.RawMessage(`{"machine":"box","cwd":"/code/app","prompt":"看看 CI 为什么挂了"}`)
+	for _, conv := range []string{"conv1", "lead1"} {
+		s, f := newQuietService(t)
+		setSettings(t, s, func(v *Settings) { v.Leaders = []string{"lead1"} })
+		if _, err := s.runTool(context.Background(), "server", conv, "agent_start", args); err != nil {
+			t.Fatal(err)
+		}
+		todo := onlyTodo(s)
+		var starts []modelhttp.Source
+		f.mu.Lock()
+		for _, c := range f.calls {
+			if c.Method != DeviceSessionStart {
+				continue
+			}
+			var p struct {
+				Source modelhttp.Source `json:"model_source"`
+			}
+			if err := json.Unmarshal(c.Params, &p); err != nil {
+				t.Fatal(err)
+			}
+			starts = append(starts, p.Source)
+		}
+		f.mu.Unlock()
+		want := modelhttp.Source{Role: "task_agent", Todo: todo.ID}
+		if len(starts) != 1 || starts[0] != want || todo.ID == "" {
+			t.Fatalf("%s: session.start model_source = %+v, want %+v", conv, starts, want)
 		}
 	}
 }

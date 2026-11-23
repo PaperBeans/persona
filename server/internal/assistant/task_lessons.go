@@ -151,9 +151,15 @@ func lessonReviews(v Supervision) (list []TaskReview, since time.Time) {
 	return list, since
 }
 
+// briefChanged: ev changed what the task was to do or how long it was expected to take. An estimate change has an
+// event kind of its own (applyScope); a lesson still learns from it, since a revised estimate also hides an overrun.
+func briefChanged(ev BriefEvent) bool {
+	return ev.Kind == briefEventScope || ev.Kind == briefEventEstimate
+}
+
 // lessonFriction says, without a model, whether an accepted stretch of work has anything to learn from: a rework or a
-// question for the owner, a criterion a review found not met, an answer the owner gave, a scope change, or taking
-// lessonOverrun times the estimate. A task accepted at once and in time has none.
+// question for the owner, a criterion a review found not met, an answer the owner gave, a scope or estimate change, or
+// taking lessonOverrun times the estimate. A task accepted at once and in time has none.
 func lessonFriction(reviews []TaskReview, brief *TaskBrief, since time.Time, answers int) bool {
 	if answers > 0 {
 		return true
@@ -169,7 +175,7 @@ func lessonFriction(reviews []TaskReview, brief *TaskBrief, since time.Time, ans
 	if brief == nil {
 		return false
 	}
-	if slices.ContainsFunc(brief.Log, func(ev BriefEvent) bool { return ev.Kind == briefEventScope && !ev.At.Before(since) }) {
+	if slices.ContainsFunc(brief.Log, func(ev BriefEvent) bool { return briefChanged(ev) && !ev.At.Before(since) }) {
 		return true
 	}
 	return brief.ExpectNow > 0 && brief.ActualMinutes >= lessonOverrun*brief.ExpectNow
@@ -222,7 +228,7 @@ func lessonsInput(language string, t Todo, brief *TaskBrief, reviews []TaskRevie
 			criteria = brief.Criteria
 		}
 		for _, ev := range brief.Log {
-			if ev.Kind == briefEventScope && !ev.At.Before(since) && len(in.Changes) < lessonsCriteriaMost {
+			if briefChanged(ev) && !ev.At.Before(since) && len(in.Changes) < lessonsCriteriaMost {
 				in.Changes = append(in.Changes, prompts.TodoLessonsChange{Change: clip(oneLine(ev.Change), lessonFieldMax), Why: clip(oneLine(ev.Why), lessonFieldMax)})
 			}
 		}

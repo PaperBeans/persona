@@ -73,10 +73,11 @@ func (s *Service) toolAgentSwitch(ctx context.Context, machine, self string, arg
 	if err := s.switchReachable(ctx, am, t.Launcher, nodeproto.LauncherSwitchNow); err != nil {
 		return "", fmt.Errorf("%w. Nothing was done", err)
 	}
-	if ok, err := s.confirmOutbound(ctx, machine, self, "agent_switch", strings.TrimSpace(a.Text), label+" · "+am.Name+" → "+t.Launcher+"\n\n"+text, args); err != nil {
+	if ok, outcome, err := s.confirmOutbound(ctx, machine, self, "agent_switch", strings.TrimSpace(a.Text), label+" · "+am.Name+" → "+t.Launcher+"\n\n"+text, args); err != nil {
 		return "", err
 	} else if !ok {
-		return "The user declined on the phone: the agent was not moved and nothing was sent.", nil
+		return outboundNotDone(outcome, "The user declined on the phone: the agent was not moved and nothing was sent.",
+			"the agent was not moved and nothing was sent"), nil
 	}
 	// Read after the phone, as agent_send: a task another conversation supervises gets the words as a side conversation.
 	if _, theirs, err := s.supervisedElsewhere(ctx, self, am, c); err != nil {

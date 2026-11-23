@@ -118,10 +118,30 @@ iOS / Android have both entry points (Android Machines is under Agents: **List s
 
 Windows: herdr has native Windows support since 0.9.5; except live terminal, capabilities match above. Orca works too. See [windows.md](../operations/windows.md), "herdr."
 
-Antigravity CLI panes can show chat history after the hook installed by `herdr integration install antigravity-cli`
-reports the pane's conversation ID. Persona reads that conversation's local `transcript.jsonl` from the node's Antigravity data
-directory and uses the reported ID to restore Persona-started panes with `agy --conversation`. Until herdr
-reports a usable ID, the pane remains accessible through the terminal and can still receive prompts.
+Antigravity CLI panes show chat history once the pane's conversation ID is known. Two sources report it, and either is
+enough: Persona's own hooks (below) and the hook installed by `herdr integration install antigravity-cli`. Persona reads
+that conversation's local `transcript.jsonl` from the node's Antigravity data directory and uses the ID to restore
+Persona-started panes with `agy --conversation`. Until an ID is known the pane remains accessible through the terminal and
+can still receive prompts.
+
+Persona's own Antigravity hooks (#13729) work the way Moshi's do, so agy under herdr-core, Orca or Tern, or under herdr
+without its integration, is readable too. The node adds a group `persona` to agy's global hooks file (`hooks.json` in the
+agy config directory next to the data directory, `~/.gemini/config` by default; `ANTIGRAVITY_CLI_CONFIG_DIR` moves both)
+with two entries, `PreInvocation` and `Stop`, running `<personad> hook --agy <Event>`. Groups of other tools (herdr, Moshi,
+Orca) are never touched; the write is additive, atomic and idempotent, and happens when the node starts and agy is
+installed. The hook reads agy's JSON input, finds its pane from the environment the engine gave it (`HERDR_PANE_ID`,
+`HC_TERMINAL_ID`, `ORCA_PANE_KEY`, `TERN_PANE`), reports `conversationId` to the node over its socket and always prints
+`{}` within two seconds; with no node it does nothing. The TUI stays the only writer of the conversation.
+A top-level group was chosen over an agy plugin directory because agy loads the global file for every interactive
+session and one owned key is as easy to remove as a directory.
+
+The node treats the two reports alike: one conversation belongs to one pane, a conversation reported in two panes is
+unreadable in both, and when herdr's report and Persona's differ for one pane nothing is known (never guessed). A
+conversation that opens as a built-in subagent's is ignored as before (#13336). A report is kept in node memory and
+dropped when its pane no longer runs agy. A pane is only readable under an engine that lists agy in its panes at all.
+`personad node doctor` has an `agy-hooks` line (installed / missing / stale when the binary moved; `--fix` rewrites it).
+`personad node agy-hooks [status|install|uninstall]` manages the entries; `uninstall` also tells the node not to put
+them back.
 
 Orca's native Claude chats (structured, no terminal) connect through node's bridge: list, state, send text / images, interrupt, close,
 answer approvals / questions, change permission / thinking (no plan mode); no screen reads, keys, or live terminal. Chats appear only after their first message;

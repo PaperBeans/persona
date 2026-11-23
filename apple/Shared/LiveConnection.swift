@@ -87,6 +87,8 @@ nonisolated enum ServerEvent: Sendable {
     /// The direction tree changed on the hub (#4352): a to-do, an Agent's session, a direction or its name. No payload:
     /// the clients read `GET /api/v1/assistant/directions/tree` again, and on every (re)connect.
     case directions
+    /// Intake changed; values and notes are read through the health route, never broadcast.
+    case healthIntake
     case assistantFeed(FeedItem)
     case assistantView(ExtensionAssistantView)
     case assistantViewAction(conversation: String, action: ExtensionViewAction)
@@ -317,6 +319,8 @@ nonisolated enum ServerEvent: Sendable {
             return .look(id: e.id, effective: e.effective)
         case "managers": return .managers
         case "directions": return .directions
+        // The app refreshes the home totals and any open reserved intake page for this hub.
+        case "health_intake": return .healthIntake
         case "assistant_feed": return e.item.map { .assistantFeed($0) }
         case "assistant_view":
             guard let view = e.view, !view.id.isEmpty, view.version > 0,
@@ -390,7 +394,7 @@ nonisolated extension ServerEvent {
             return .sessionsDelta(machineID: machine, upsert: upsert.map { var s = $0; s.group = group; return s }, remove: remove)
         case .sendReceipt(let receipt): var receipt = receipt; receipt.key.group = group; return .sendReceipt(receipt)
         case .sessionsList, .hello, .interactionResolved, .interactionReanswered, .toolCall, .revs, .lark, .messaging, .agents, .inbox, .fleet, .hubUpdate, .desktops, .todos,
-             .personas, .look, .managers, .directions, .assistantFeed, .assistantView, .assistantViewAction, .assistantViewBlock, .taskPlan, .pluginBadge,
+             .personas, .look, .managers, .directions, .healthIntake, .assistantFeed, .assistantView, .assistantViewAction, .assistantViewBlock, .taskPlan, .pluginBadge,
              .extensionInvalidate, .fsChanged, .extensionOperation, .extensionAuth, .meetingLive, .urgentCall, .savedPrompts, .starredMessages: return self
         }
     }

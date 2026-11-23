@@ -191,5 +191,9 @@
   "herdr_tab_name_saving": "Saving session naming preference…",
   "show_botmux_inventory": "A computer’s “Also show botmux sessions” switch controls which sessions reach the hub.",
   "show_botmux_computers": "Open Computers",
-  "botmux_saving": "Saving…"
+  "botmux_saving": "Saving…",
+  "sort_by_activity": "Sort Agents by recent activity",
+  "sort_by_activity_hint": "Off keeps the stable order. On orders by latest activity, moving only while the pointer is off the sidebar.",
+  "show_agents_filter": "Show the Filter on the Agents list",
+  "show_agents_filter_hint": "Adds a Filter button and chips to the Agents list. Off hides them and clears any filter."
 }

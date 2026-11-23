@@ -53,7 +53,11 @@ func (p *Pusher) routeOf(d Device) pushRoute {
 	case p.relayed(d):
 		r.Route = pushRelay
 	case d.RelayError != "":
-		return pushRoute{Route: pushNone, Reason: pushRelayFailed, Detail: d.RelayError}
+		detail := d.RelayError
+		if d.RelayURL != "" {
+			detail += " (relay " + d.RelayURL + ")"
+		}
+		return pushRoute{Route: pushNone, Reason: pushRelayFailed, Detail: detail}
 	case d.RelayURL != "" && d.RelayGrant != "":
 		return pushRoute{Route: pushNone, Reason: pushRelayFailed, Detail: "no push key"}
 	default:

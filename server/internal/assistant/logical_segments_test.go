@@ -290,6 +290,65 @@ func TestLogicalSummaryWaitsOnPausedFakeModel(t *testing.T) {
 	}
 }
 
+func TestLogicalHandoffSummaryEndsOnUnavailableModel(t *testing.T) {
+	h := mainHandoff{}
+	h.Recent = append(h.Recent, struct {
+		Role string `json:"role"`
+		Text string `json:"text"`
+	}{Role: "user", Text: "fake recent turn"})
+	calls := 0
+	out, fellBack, err := summarizeLogicalHandoff(t.Context(), h, "fake earlier summary", func() (assistantwire.ModelCompleteResult, error) {
+		calls++
+		return assistantwire.ModelCompleteResult{}, &rpc.Error{Code: assistantwire.CodeModelUnavailable, Message: "fake: nothing to call"}
+	})
+	if err != nil || !fellBack || calls != 1 {
+		t.Fatalf("unavailable model must end the wait after one call: calls=%d fellBack=%v err=%v", calls, fellBack, err)
+	}
+	if out.Summary != "fake earlier summary" || !out.Partial || len(out.Recent) != 1 || out.Recent[0].Text != "fake recent turn" {
+		t.Fatalf("fallback handoff lost the recent turns or earlier summary: %+v", out)
+	}
+	if text := renderLogicalHandoff("en", out, "next message"); !strings.Contains(text, "fake recent turn") || !strings.Contains(text, "Some history is unavailable.") {
+		t.Fatalf("fallback handoff renders without the recent turns or the partial note: %q", text)
+	}
+	// Other failures still go back to the sweep for a retry.
+	_, fellBack, err = summarizeLogicalHandoff(t.Context(), h, "", func() (assistantwire.ModelCompleteResult, error) {
+		return assistantwire.ModelCompleteResult{}, &rpc.Error{Code: assistantwire.CodeModelFailed, Message: "fake upstream failure"}
+	})
+	var re *rpc.Error
+	if fellBack || !errors.As(err, &re) || re.Code != assistantwire.CodeModelFailed {
+		t.Fatalf("a failed call must be retried, not skipped: fellBack=%v err=%v", fellBack, err)
+	}
+}
+
+func TestLogicalHandoffSummaryKeepsWaitingOnPausedModel(t *testing.T) {
+	calls := 0
+	out, fellBack, err := summarizeLogicalHandoff(t.Context(), mainHandoff{}, "fake earlier summary", func() (assistantwire.ModelCompleteResult, error) {
+		calls++
+		if calls == 1 {
+			// Paused until now: the wait is the one-second floor, then the call is made again.
+			until := time.Now().UTC().Format(time.RFC3339)
+			return assistantwire.ModelCompleteResult{}, &rpc.Error{Code: assistantwire.CodeModelPaused, Message: "fake quota pause", Data: json.RawMessage(`{"until":"` + until + `"}`)}
+		}
+		return assistantwire.ModelCompleteResult{Text: "fake new summary"}, nil
+	})
+	if err != nil || fellBack || calls != 2 {
+		t.Fatalf("paused model must be waited out and asked again: calls=%d fellBack=%v err=%v", calls, fellBack, err)
+	}
+	if out.Summary != "fake new summary" || out.Partial {
+		t.Fatalf("summary after the pause: %+v", out)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	calls = 0
+	_, fellBack, err = summarizeLogicalHandoff(ctx, mainHandoff{}, "", func() (assistantwire.ModelCompleteResult, error) {
+		calls++
+		cancel()
+		return assistantwire.ModelCompleteResult{}, &rpc.Error{Code: assistantwire.CodeModelPaused, Message: "fake quota pause", Data: json.RawMessage(`{"until":"2099-01-01T00:00:00Z"}`)}
+	})
+	if fellBack || !errors.Is(err, context.Canceled) || calls != 1 {
+		t.Fatalf("paused model must keep the switch waiting, not fall back: calls=%d fellBack=%v err=%v", calls, fellBack, err)
+	}
+}
+
 func TestLogicalRuntimeEngineTransitionsPreserveRoleAndMessageIdentity(t *testing.T) {
 	engines := []string{"claude", "codex", "agy", "pi", "opencode"}
 	for i, source := range engines {

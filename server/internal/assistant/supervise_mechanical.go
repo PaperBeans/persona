@@ -99,7 +99,7 @@ func futureNativeWake(agents []proto.Session, now time.Time) (time.Time, string,
 	conflict := "none"
 	suppress := false
 	for _, c := range agents {
-		if c.Status != proto.StatusDone || c.ReadOnlyReason != "" ||
+		if c.Status != proto.StatusDone || c.ReadOnlyReason != "" || len(c.Queued) > 0 ||
 			c.Loop == nil || c.Loop.Kind != "wakeup" || !c.Loop.NextAt.After(now) {
 			return time.Time{}, "none", false
 		}

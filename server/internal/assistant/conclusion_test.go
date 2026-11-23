@@ -484,7 +484,7 @@ func TestLateTaskDecisionDoesNotSendAfterCompletion(t *testing.T) {
 					t.Fatal("the old decision is still pending")
 				}
 				if !reopen {
-					s.taskWorking(context.Background(), "box", "s1")
+					s.taskWorking(context.Background(), "box", "s1", startRow{})
 					if got := todoNow(s, todo.ID); got.DoneAt == nil || got.DoneBy != "" {
 						t.Fatalf("late supervisor work changed the user's completion: %+v", got)
 					}
@@ -516,7 +516,7 @@ func TestCompletedTaskDirectMessageStillReachesAgent(t *testing.T) {
 		!strings.HasSuffix(prompt, "Check one more case") {
 		t.Fatalf("unknown stop was resumed or lost the user's message: %v", starts)
 	}
-	s.taskWorking(context.Background(), "box", "s1")
+	s.taskWorking(context.Background(), "box", "s1", startRow{})
 	if todoNow(s, todo.ID).DoneAt == nil {
 		t.Fatal("direct user input reopened a user-completed task")
 	}

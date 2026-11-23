@@ -589,7 +589,7 @@ inferred from their prose. A later structured replacement can be rechecked after
 
 The planning direction lead **supervises its own dispatched tasks** (`task_plan`, `agent_start`, and `agent_send` carrying a new `task`); main supervises its own work and other ordinary side-chat dispatches (#13362). The dispatch chat remains the task's `origin`; signals, cards, startup remedies and `task_review` follow the current supervisor. Explicit `agent_transfer` assignments survive restarts (#13344). Main receives a lead's explicit owner-decision escalation rather than directing that lead's Agents. The supervisor owns completion and quality.
 
-- **Supervised by default**: all three dispatch paths create or reuse one to-do and its ledger. An ordinary follow-up without a new `task` creates no second card; a session opened manually on the Agents page is not adopted. Two existing topologies remain: a manually opened Agent explicitly assigned to a leader keeps that leader, and a task leader supervises its own workers. Unmarked legacy side-chat work is migrated to main without overriding current plan/transfer assignments, with queued notices preserved; no new background-supervisor stream is created. `start_paths_test.go` lists every function that starts an Agent or opens a conversation and requires each to make a ledger or be on its opt-out list with a reason, so a new entry point cannot skip supervision silently.
+- **Supervised by default**: all three dispatch paths create or reuse one to-do and its ledger. An ordinary follow-up without a new `task` creates no second card; a session opened manually on the Agents page is not adopted. Two existing topologies remain: a manually opened Agent explicitly assigned to a leader keeps that leader, and a task leader supervises its own workers. Unmarked legacy side-chat work is migrated to main without overriding current plan/transfer assignments, with queued notices preserved; a direction lead's own unmarked work from before assignments recorded their source (a task of a plan that assigned the lead, or an Agent on a task the lead opened) is marked as that lead's plan assignment instead, so an upgrade does not hand it to main (#13619); no new background-supervisor stream is created. `start_paths_test.go` lists every function that starts an Agent or opens a conversation and requires each to make a ledger or be on its opt-out list with a reason, so a new entry point cannot skip supervision silently.
 
 - **Ledger**: each `task_plan` task may include `done_when` (up to 6 acceptance criteria) and `expect_minutes` (estimated minutes). Criteria are appended to the assignment prompt, asking the Agent to provide evidence for each when finished.
   A task may also give `todo_id` (#5279): the to-do it runs on instead of a new one. Only one this chat opened or supervises, that is not done and has no live Agent on it is taken (a stopped, archived or gone Agent is let go when the task starts, #6427) (a Lark topic's to-do, `docs/assistant/todos.md` "Opening a to-do from a topic"); the check is made when the plan is made and again when it starts, and a task that fails it gets the reason as its `error` and starts nothing. The to-do keeps its title, notes and task card; the plan adds no second card, only the task's `done_when` / `expect_minutes` on its supervision.
@@ -1122,51 +1122,50 @@ to its supervising conversation in either configuration (#11195). Code: `server/
   legacy background assignments retain their compatibility route). An unavailable current lead keeps its queue, with the card's `interaction_id`, what it asks and the
   task's decisions in effect. Concurrent cards of one task are one entry. The agent's `needs_you` signal is not sent
   while its card is on its way up.
-- **What the supervisor does**: answers a question that is the agent's own call with `interaction_answer` (with
-  `reason`); the answer is kept as the task's decision (`source: agent`, the supervisor's conversation). What the user
-  must decide — a permission or a plan (no conversation approves them, "No answering approvals on the user's behalf"),
-  a red line, a goal change, a conflict with a decision already made — goes up with `ask_escalate {todo_id, reason,
-  recommend}`: every card of the task the user has not been told of rings at once, as one push (the first card pushes;
-  the others go to the apps and channels without one), each carrying `delegate.reason` / `delegate.recommend`. Only the
-  task's supervisor and the main chat may. A leader's or the background supervisor's escalation adds an `escalated`
-  entry to the main chat with the cards, the reason and the recommendation, so it does not ask again. The main chat may
-  answer a card either of them still holds, and its answer is kept as the task's decision too.
+- **What the supervisor does**: the supervisor owns its agents' cards (the decision rights: the owner decides only the
+  goal and direction, what only they know, what goes out in their name, spending, what cannot be undone and they have
+  not said, and what only they can do). It answers a question that is the agent's own call with `interaction_answer`
+  (with `reason`), and allows or denies a tool permission or a plan the same way (`interaction_answer` with `allow`):
+  the agent gets the answer marked as the assistant's (`answered_by: assistant`, with the reason), never as the user's,
+  and it is kept as the task's decision (`source: agent`, the supervisor's conversation). What stays the user's — a card
+  with a form, a password or a secret, an owner action, a permission or plan that would send, reply or comment in the
+  user's name, spend money or delete (the matching `riskyWords`; pushing, merging and deploying are the supervisor's),
+  a goal change, a conflict with a decision already made — the supervisor cannot answer (`interaction_answer` refuses
+  it and names `ask_escalate`) and hands up with `ask_escalate {todo_id, reason, recommend}`: every card of the task
+  the user has not been told of rings at once, as one push (the first card pushes; the others go to the apps and
+  channels without one), each carrying `delegate.reason` / `delegate.recommend`. Only the task's supervisor and the
+  main chat may. A leader's or the background supervisor's escalation adds an `escalated` entry to the main chat with
+  the cards, the reason and the recommendation, so it does not ask again. The main chat may answer a card either of
+  them still holds, and its answer is kept as the task's decision too.
 - **Answers**: the user's answers go to the agents as any card's; a question's is kept as every card's is
   (`source: card`), and an escalated permission or plan becomes a `card` decision too ("Allow …" → "Allowed"), so a
   later card cannot quietly go the other way.
-- **Nothing hangs**: a card not handled within 5 minutes (`askHoldFor`) goes up a rung: from a leader to the main chat
-  (its entry marked as raised), from the main chat or the background supervisor to the user (all of the task's cards
-  reaching the user then ring as one, without supervisor context; a card the background supervisor held does not pass
-  the main chat). The 5 minutes do not count while the conversation holding the card is on a
-  turn: a supervisor working through a long round is not neglecting it, and its time starts when the turn ends. A
-  conversation still on a turn an hour (`askBusyMax`) after the card came is counted as stuck instead, and the card
-  climbs all the same. These ordinary timing rules are unchanged for questions. A permission or plan also has one
-  absolute 15-minute deadline (`askOwnerOnlyDeadline`) from its first route: moving rungs and busy pauses never reset
-  it, and at the deadline it goes straight to the user even while its current supervisor is busy. If that supervisor
-  itself is `needs_you`, an owner-only card moves to the next rung (or to the user) on the existing 30-second routing
-  tick instead of staying behind another decision. Neither path answers the card for the user. With the hub's push
-  tiering on (the push grading switch, `docs/server/server.md`), a card that runs past its last rung before any
-  absolute deadline goes back to the task's supervisor once (the entry says so; the owner gets a held P1 notice for
-  the briefing), then stays with that supervisor until it is answered or escalated. This quiet hold can keep an
-  ordinary question from ever reaching the user on a timeout, and also applies to a permission or plan before its
-  deadline; it never extends the owner-only deadline or suppresses the `needs_you` release above. With the switch
-  turned off every card climbs on as before, still subject to the owner-only deadline.
+- **Nothing hangs, nothing climbs to the user**: a card not handled within 5 minutes (`askHoldFor`) goes up a rung:
+  from a leader to the main chat (its entry marked as raised). The 5 minutes do not count while the conversation
+  holding the card is on a turn: a supervisor working through a long round is not neglecting it, and its time starts
+  when the turn ends. A conversation still on a turn an hour (`askBusyMax`) after the card came is counted as stuck
+  instead, and the card moves on all the same. If the conversation holding a permission or plan itself is
+  `needs_you`, the card moves to the next rung on the 30-second routing tick instead of staying behind another
+  decision; the last rung needing the user does not hand it to them. No timeout hands a card to the user, with the
+  hub's push tiering on or off: past its last rung a card goes back to the task's supervisor and stays there
+  (parked), the entry saying it came back; the supervisor is reminded each `askHoldFor`, at most `askRemindMax` (3)
+  times, the card stays on the apps marked `delegating`, and only `ask_escalate` hands it to the user. With the push
+  grading switch on (`docs/server/server.md`) the first reminder also leaves the owner a held P1 notice for the Needs
+  you list and the briefing; with it off nothing goes to the owner (a P1 would push).
   `ask_escalate` takes `why_owner` and `p0`: with the switch on only `irreversible`, `visible_to_others`,
   `only_owner_knows` or `p0` push, the rest go to the Needs you list and the briefing without a push, bot card or
   channel message.
 - **Limits**: the route lives on the pending card, not in the store. After a manager restart the card is back on the
   apps without a push (as every card is); its route is made again from the task's supervisor, so the supervisor can
-  still answer it or escalate it. Whether the user was told of the card before the restart is not kept either, so a
-  restored approval (a permission or a plan) starts a fresh absolute 15-minute deadline from restoration; when its time is up it is handed to the user and rings once, as any: no
-  conversation may answer it, so silence would leave the agent blocked with nobody told. A restored question whose
-  time is up only goes back on the apps (it may have rung before), and its supervisor can still answer it. An approval
-  stays the user's: its timeout neither approves it nor becomes a decision. The supervisor may answer a question the
-  user was already asked, and an explicit `ask_escalate` rings — that is the supervisor saying the user must decide
-  now. A Codex card listed again once its node reconnected is on the apps
-  without a push too; the supervisor still hears of it through the task's `needs_you` signal, and `ask_escalate` takes
-  it. A card the assistant is deciding on for the user (agents.delegate) is not escalated: that decision tells the
-  user itself. Without leaders `ask_escalate` can hand the owner a supervised terminal question. Cards raised after an escalation go to the supervisor again
-  rather than joining the escalated push.
+  still answer, allow or escalate it, and its time starts again from restoration. Whether the user was told of the
+  card before the restart is not kept either, so a restored question escalated without context only goes back on the
+  apps (it may have rung before). A timeout neither answers a card nor becomes a decision. The supervisor may answer a
+  question the user was already asked, and an explicit `ask_escalate` rings — that is the supervisor saying the user
+  must decide now. A Codex card listed again once its node reconnected is on the apps without a push too; the
+  supervisor still hears of it through the task's `needs_you` signal, and `ask_escalate` takes it. A card the
+  assistant is deciding on for the user (agents.delegate) is not escalated: that decision tells the user itself.
+  Without leaders a card goes to the owner as it comes, and `ask_escalate` can hand the owner a supervised terminal
+  question. Cards raised after an escalation go to the supervisor again rather than joining the escalated push.
 
 **Directions and reports up (#3484, #3485).** Each leader has a record, `assistant.directions` (`directions.go`): the kb
 project it is filed under, who filed it, since when, and when it ended (it left `assistant.leaders`; nothing is

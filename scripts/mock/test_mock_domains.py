@@ -280,6 +280,8 @@ class RegistryTests(unittest.TestCase):
 # goldens): mock_hub.py then has the domain a second time, the module's routes answer first, the old copy's state goes
 # its own way, and nothing fails. A domain that moves out of mock_hub.py lists its names here.
 MOVED = {
+    "health_intake_mock": ("#13176", ("HEALTH_INTAKE_ENABLED", "HEALTH_INTAKE_LOCK", "HEALTH_INTAKE_ENTRIES",
+                                      "health_intake_seed", "health_intake_snapshot", "health_intake_route")),
     "desktops_mock": ("#11053", ("DESKTOPS", "DESKTOP_LOG", "DESKTOP_LOCK", "desktop_registration", "desktops_state",
                                  "_features_without_desktops")),
     "github_mock": ("#11543", ("GITHUB_DEVICE", "GH_FULL", "GH_MISSING", "GH_NARROW", "GH_MACHINES", "GITHUB_AUTH",
@@ -296,6 +298,8 @@ MOVED = {
                                       "saved_prompts_route")),
     "page_counts_mock": ("#12929", ("PAGE_COUNTS", "_paged_sessions_alone", "_features_without_page_counts")),
     "dock_mock": ("#12831", ("DOCK_INTERACTIONS",)),
+    "side_unread_mock": ("#13496", ("MOCK_SIDE_UNREAD",)),
+    "meeting_finishing_mock": ("#13537", ("MEETING_FINISHING",)),
     "extension_scene_mock": ("#12544", ("SCENE_MODE", "_HOME_DRAWS", "_home_scene_component", "_home_scene_downgrade",
                                         "_home_scene_view", "mock_home_scene")),
 }

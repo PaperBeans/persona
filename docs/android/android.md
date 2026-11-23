@@ -313,6 +313,17 @@ a permission, a question and a versioned Inbox reply draft, with only fictional 
 `?reset=1` restores the fixture. `python3 scripts/mock/test_assistant_trays.py` verifies the stable rows and clear behavior
 without opening sockets. JVM Native-rendered component captures are separate evidence, not emulator or handset captures.
 
+## Domain spaces (#13500)
+
+The Android client of the web's domain spaces (`docs/web/web.md`, "Domain spaces"; `docs/assistant/health.md`). Everything reads the tracks of the default manager; a hub without them shows nothing new.
+
+- **Model**: `core/contracts/.../api/AssistantTracks.kt` (tracks, kinds, `SPACE.md`, conversation categories, extension trust; unknown fields are ignored) and `SpaceMdParts.kt` (the `SPACE.md` split into the user's text and Persona's kept blocks, a port of the web's).
+- **Drawer**: a Spaces section after the pages, in the sidebar group's order, ending with New space (`SpacesSidebar.kt`, `SpacesModel.kt`). A space opens its newest chat, else its home; the health space keeps its own entry and pages unchanged.
+- **Space home** (`SpaceHome.kt`): name, one line, a plain privacy line, its conversations, About this space (the kept blocks and a leading title equal to the name left out, folded at six lines) and where things stand. The composer starts a conversation in the space, never in the main chat or the health space.
+- **Editing and creating**: `SpaceMdEditor.kt` keeps the kept blocks byte for byte and sends the digest the edit started from (changed elsewhere, a kept block changed, offline and missing said in plain words); `NewSpaceSheet.kt` asks for a name, a line, an icon (`SpaceIcons`) and categories (none by default), with the kind reconciled to the kinds the assistant offers. A home's menu archives the space with its revision.
+- **Categories**: a space conversation shows its categories as one chip in the bar; its sheet removes one and puts a removed one back, and the ones the space sets stay.
+- **Extension trust**: an extension's page for the default manager has an information access group (`ExtensionInfoAccess.kt`), read-only when the page is.
+
 ## Pairing pages (#2481)
 
 - **Welcome page** (iOS `WelcomeView`): the main button, **Scan to pair**, opens the scanner at once (asking for the camera first), with the code location and saved-data details in **Help**; a scan that finds nothing leaves the page as it was, and Back from what a scan found returns to Welcome. **Help › No hub yet?** opens the public getting-started page in the app's link card (the root pairing page sits outside the shell, so `PairingScreen` wraps its own page in `ChatLinkHost`, the same host as every other link: full screen, dragged to 0.6 it stops blocking, further down it closes; Settings › Pairing and Add hub are inside the shell and add none; the guide button reads the host's link handler inside the host's content, because outside it the handler is the activity's and opens the system browser); it is shown only when the build has an address and is otherwise left out, so there is never a dead link, and a build with no address wraps no host at all, so the first-run page starts no WebView. **Other ways** opens the connection options with the command line unfolded: password sign-in, paste, manual entry and `personad hub pair`. The demo stays under them (the footer). A phone that already has a hub gets the "Replaces current pairing" notice on Welcome too, and a scan still ends at the confirm page, never at a silent re-pair. The address is the build value `publish.getting_started_url` (`docs/operations/config.md`): `scripts/app/android.sh` passes it as `-PpersonaGettingStartedUrl` (or set `PERSONA_GETTING_STARTED_URL`), the app manifest carries it as `<meta-data android:name="persona.getting_started_url">` (`"unset"` when absent), and `GettingStarted` accepts https only, with a host and no credentials; shot runs use `SHOTS_GETTING_STARTED_URL`, none by default. No Google services are involved.
@@ -767,7 +778,7 @@ Before the change (2026-11-02, integration branch `679b227f`) the App assumed a 
 | `InboxDataOwner` (Inbox, Persona session list), device settings, update check, lock-screen test, sharing, phone data tools, knowledge base | The only hub | The selected group |
 | Machine management in `MachineManagementModule` (reconnect, redeploy, launchers, engine, botmux toggle, Claude Code / Codex settings) | Current pairing | The group named by the machine id's suffix (`mergedMachineManagement` + `MachineManagement.inGroup`, #634): machines from other groups used to be asked about at the selected group's hub, which couldn't find the machine or changed the wrong place; the machine whose engine is picked after pairing also comes from the merged list and routes by suffix the same way |
 | Subscription limits on the machine monitoring overview (`MachineManagement.usageWindows`) | Current pairing | Every open group, each asked on its own hub at once and listed in the groups' order (`GroupUsage`, #1845, as iOS / Mac): the same account in two groups shows once in each; an old hub without the route (404) has none, and a group whose read fails keeps its last answer while the others show theirs |
-| Model configuration (`MachineManagementModule.models`), voice (`VoiceExtensions` in `AppServices`) | Current pairing | The selected group: both are hub-level (one configuration and one voice extension per hub), and like Inbox and Persona they show one group at a time (decided in #634); machines in the model configuration are reported by that hub itself and use its ids as is |
+| Model configuration (`MachineManagementModule.models`), voice (the voice module's `VoiceExtensions`, built per pairing through `ModuleHub` in `AppServices`) | Current pairing | The selected group: both are hub-level (one configuration and one voice extension per hub), and like Inbox and Persona they show one group at a time (decided in #634); machines in the model configuration are reported by that hub itself and use its ids as is |
 | Candidate addresses in connection diagnostics | The only pairing | The selected group's own hub (the first paired hub in the group); candidates of other hubs in the same group also take part in route selection and are listed in diagnostics too |
 | Whether request cards and request details on the Agents page can be answered; whether pin, mute, rename, close, delete, join live and stop loop on sessions and spaces can be sent; whether a computer's herdr is checked and its "herdr isn't running" notice shown and started | The selected group's connection | The connection of the group named by the request's, session's or computer's machine id suffix (`AgentGroups.stateFor`, #4291, #4702, #5726): one group going offline no longer blocks requests, operations and herdr notices in other groups; unchanged with only one group. A request card whose group is offline keeps Allow and Deny greyed out and says why, "Connect to the hub to send your choice", as the request detail does; in the Board style, whose cards are collapsed in the list, the reason (this one, or that the computer must approve it) sits above the quick buttons (`DecisionCard` `note`, #2483) |
 | `Notify.install(connection.events)`, foreground service | Events from one WebSocket | Events from all groups merged into one stream (ids already suffixed, see below); the ongoing notification's state is the selected group's, and Agent counts add up across groups |
@@ -1204,13 +1215,93 @@ python3 scripts/app/test_android_slot_order.py
 
 The script reads the non-private `@Composable fun` components under `android/core/designsystem/src/main`, ignoring comments and strings. Components that already end otherwise are listed in `android/core/designsystem/tools/slot-order-baseline.json` with a count per file and name (overloads counted together). That list may only shrink: `--update-baseline` rewrites it once a component keeps a slot last, and a new entry needs the same review as raising the token baseline. CI runs both beside the token checks (`scripts/ci/android.sh`).
 
+## Modules
+
+Persona Core and modules (#13430; the cross-platform design, its names and the module list are in that issue and the
+architecture doc it adds): a **module** is a feature the owner can go without while the assistant, Agents, to-dos,
+computers and connectors keep working. On Android a module is a `:module:<id>` Gradle project (`android/module/<id>`),
+the core reaches it only through `:core:moduleapi`, and no core project depends on one (#13433). "Module" here means
+this product layer; every Gradle project is listed in "Modules and code" below.
+
+**The contract** (`core/moduleapi`, `PersonaModule`). Field names follow the shared contract of #13430 section 4:
+
+| `PersonaModule` | Contract field | What the Android shell does with it |
+| --- | --- | --- |
+| `id` | `id` | Lower case and hyphenated (`voice`, `knowledge-ui`), the same on every platform; `ModuleRegistry` rejects others and duplicates |
+| `feature` | `feature` | The hub hello feature the module needs. On a hub without it the module is inactive, as if not built in; null: always on |
+| `services(hub)` | `hub_routes` (client half) | Built once per pairing from a `ModuleHub` (identity, hello features, token, pinned client, current address, `isCurrent`); never in demo mode; closed when the pairing ends |
+| `navEntries(entries, context)` | `shell_places` | Registers the module's pages in Root's `entryProvider`. In demo mode `services` is null and a page that needs the hub shows `context.unavailable(message)` |
+| `menuActions(slot, context)` | `composer_actions` and the other action slots | Composable, so an action can follow live state and the language. `MenuSlot.AssistantTitle` (the assistant's title menu, after Details) is served; `ComposerActions`, `SessionActions` and `MessageActions` are declared, not yet served |
+| `settingsPages()` | `settings` | Declared, not yet served: Settings does not list module pages yet, and `ModuleRegistry` logs a warning for a module that declares some |
+| `audioUses` and `AudioFocus` | (module-only) | Declared, not yet served: the broker ranks a call over a voice conversation over a meeting recording over playback (`AudioUse`); the voice module still takes Android's audio focus itself, and `ModuleRegistry` logs a warning for a module that declares audio uses |
+| `debugPages()`, `debugArguments(arguments)` | (debug builds) | `debug.openPage <name>` and the module's own `debug.*` arguments, read by `DebugLaunchAdapter` |
+
+The other fields of #13430 section 4 (`api`, `needs`, `wants`, `chat_card_kinds`, `chat_accessories`, `push_categories`,
+`frame_handlers` and the server-side ones) have no Android counterpart yet; they are added when a module needs them.
+
+**`Modules.kt`** (`app/src/main/java/persona/android/Modules.kt`) is the only list of modules, in the order their entries
+show. `Root.kt`, `AppServices.kt`, the assistant's title menu and `DebugLaunchAdapter` read `Modules.carried` and name no
+module. Root asks the active modules for their pages and title-menu actions; AppServices builds each module's services
+for a pairing and keeps them in `ShellSession.modules` (by id), with the hub's hello features in `ShellSession.features`.
+
+**The switch.** A module is on when both hold:
+
+1. **The build carries it.** Every `:module:*` project by default; `-Ppersona.modules=<id,id…>` carries fewer and
+   `-Ppersona.modules=` (empty) builds Persona Core alone. A module left out is only on the app's compile classpath
+   (`compileOnly`), so `Modules.kt` still compiles, but none of its code, resources or manifest entries ship and its
+   entry is never called (`BuildConfig.PERSONA_MODULES`). Each entry is typed `() -> PersonaModule`, so loading
+   `Modules` never loads a left-out module's class. R8 needs no rule for it: AGP hands R8 the compile classpath,
+   `compileOnly` jars included, as library classes (`-Ppersona.modules= :app:assembleRelease` builds and its APK defines
+   no `persona.module.*` class). An unknown id fails the build.
+2. **The paired hub offers its `feature`**, when it declares one. The switch follows the hub's hello, so the owner has
+   nothing to turn on (principles 1 and 2); there is no per-device module toggle.
+
+A module that is off is absent: no page registered, no menu action, nothing left over. The voice module declares no
+`feature` (the hub has no hello feature for voice yet, #13431), so it is on wherever it is carried, and its "Voice chat"
+item still appears only while the hub runs a voice extension, as before.
+
+```sh
+cd android
+./gradlew -Ppersona.modules= :app:testDebugUnitTest :app:lintDebug :app:assembleDebug   # Persona Core alone
+./gradlew :app:moduleGuard                                                          # the guard below
+./gradlew -p build-logic :convention:test                                           # the guard's own tests
+```
+
+**The guard** (`:app:moduleGuard`, logic in `build-logic/convention/.../ModuleGuard.kt`) reads the real Gradle project
+graph: only `:app` may depend on a `:module:*` project, and in `:app` only `Modules.kt` may name a module's code
+(`persona.module.*`); a `:core:*` project depends on no `:feature:*`, `:platform:*` or `:app` project. Today's violations
+are in `android/module-guard-baseline.txt`, which only shrinks: a new violation fails, and so does a line that no longer
+happens. Its one line is the known inversion `:core:data -> :feature:inbox` (#13433 item 2 moves the shared Inbox types
+into core). `scripts/ci/android.sh` runs the guard with the lint lane's tasks and its tests on their own, and the lint lane also runs
+the app's unit tests and lint with an empty module list (`-Ppersona.modules=`);
+`scripts/ci/android-shards.py` puts the `:module:*` tests in the lint lane.
+
+**Adding a module:**
+
+1. Create `android/module/<id>` with `persona.android.library` (and `persona.compose`), namespace `persona.module.<id>`,
+   depending on `:core:moduleapi` and the core projects it needs, never on a feature or another module.
+2. Implement `PersonaModule` as an `object`; keep its routes, types, strings (en, zh-Hans, ja) and tests in the module.
+3. `include(":module:<id>")` in `settings.gradle.kts` and add `"<id>" to { … }` to `Modules.kt` (`ModulesTest` checks the
+   two lists match). Nothing else in the app changes.
+4. Run the module's tests, `:app:moduleGuard`, and the app's tests with and without the module (`-Ppersona.modules=`).
+
+**Saved stacks and pages that go away.** Navigation 3 (1.2.0) saves a back stack's routes by JVM class name
+(`Class.getName()`) and restores them with `Class.forName`; a route's `@SerialName` plays no part. A saved stack can
+therefore name a class the build lacks: a module left out, or a route that moved (`VoiceRoute` moved from
+`persona.core.navigation` to `persona.module.voice`). The shell's stacks use `rememberRestorableNavBackStack`
+(`core/navigation`, same saved form), which drops such a route with a log line instead of crashing, and starts from the
+root when nothing is left. A module page that is open when the module turns inactive (the hub's hello no longer offers
+its `feature`) has no entry any more: Root's entry provider falls back to the shell's "This page isn't available right
+now" page with a way back, and logs loudly. Two modules registering one route are rejected when the entries are built.
+`ModuleNavigationSafetyTest` covers all three.
+
 ## Modules and code
 
 Modules are defined by `android/settings.gradle.kts`, and direct in-repository dependencies by each module's `build.gradle.kts`. Arrows below point from the consumer to its dependency; only production `project(...)` dependencies are listed, not external libraries or test dependencies.
 
 | Module | Responsibility | Direct dependencies |
 | --- | --- | --- |
-| `:app` | App entry, two primary destinations and shared sidebar, Hilt assembly, pairing lifecycle, scope bridging, system sharing and lock-screen test | `:core:contracts`, `:core:domain`, `:core:terminal`, `:core:navigation`, `:core:hub`, `:core:data`, `:core:chatlist`, `:core:designsystem`, `:core:demo`, `:feature:chat`, `:feature:agents`, `:feature:assistant`, `:feature:inbox`, `:feature:settings`, `:feature:terminal`, `:feature:machines`, `:feature:files`, `:feature:knowledge`, `:feature:voice`, `:platform:notify`, `:platform:phonetools`, `:platform:shortcuts`, `:platform:capsule` |
+| `:app` | App entry, two primary destinations and shared sidebar, Hilt assembly, pairing lifecycle, scope bridging, system sharing and lock-screen test | `:core:contracts`, `:core:domain`, `:core:terminal`, `:core:navigation`, `:core:hub`, `:core:data`, `:core:chatlist`, `:core:designsystem`, `:core:demo`, `:core:moduleapi`, `:feature:chat`, `:feature:agents`, `:feature:assistant`, `:feature:inbox`, `:feature:settings`, `:feature:terminal`, `:feature:machines`, `:feature:files`, `:feature:knowledge`, the `:module:*` projects through `Modules.kt` (see "Modules"), `:platform:notify`, `:platform:phonetools`, `:platform:shortcuts`, `:platform:capsule` |
 | `:core:chatlist` | Inverted chat list, freezing, return to latest, reading anchors and paging effects; currently mainly used by Agent / assistant chats | No in-repository module dependencies |
 | `:core:contracts` | Pure JVM: wire models, event decoding, HubScope, repository and transport interfaces | No in-repository module dependencies |
 | `:core:data` | Room items / outbox / drafts, DataStore / Tink credentials, scopes, caches and real repositories | `:core:contracts`, `:core:domain`, `:feature:inbox` |
@@ -1218,10 +1309,11 @@ Modules are defined by `android/settings.gradle.kts`, and direct in-repository d
 | `:core:designsystem` | Tokens for three styles (palettes, typography, shapes, motion), component skins (page scaffolds, lists, buttons, decisions, chats, Inbox), shell navigation components, glass (Haze); bundled fonts (OFL) and Phosphor icons | `:core:domain`, `:core:hub` |
 | `:core:domain` | Pure JVM: continuity reducer, chatLines (and `ChatLinesMemo`, the same lines keeping the turns before the first change between calls), sorting, Inbox sections, answering policies and pairing parsing | `:core:contracts` |
 | `:core:hub` | Pure JVM: OkHttp HTTP / WS, TLS pinning, routing, heartbeat, pairing and business transports; error reports (see "Error reports") | `:core:contracts` |
+| `:core:moduleapi` | The module contract (`PersonaModule`, `ModuleRegistry`, `ModuleHub`, `MenuSlot`, `AudioFocus`); see "Modules" | `:core:navigation`, `:core:designsystem` |
 | `:core:navigation` | Navigation 3 route types, Navigator, notification and machine page routes | No in-repository module dependencies |
 | `:core:terminal` | Pure JVM: VT grid, Unicode width, wrapping and terminal input encoding | No in-repository module dependencies |
 | `:feature:agents` | Computer → space → session list, request cards, create and close confirmation, space page, a computer's projects page (`MachineSpacesRoute`, opened from the space page's computer), session and space renaming (immediate local effect) | `:core:contracts`, `:feature:chat`, `:core:domain`, `:core:designsystem`, `:core:navigation` |
-| `:feature:assistant` | Home, history drawer, main chat sending, profile and scheduled task pages; management services assembled by the App's `ChatWiringModule`; dedicated chat styling still awaits wiring | `:core:contracts`, `:core:data`, `:core:domain`, `:core:designsystem`, `:core:navigation`, `:feature:chat` |
+| `:feature:assistant` | Home, history drawer, main chat sending, profile and scheduled task pages; management services assembled by the App's `ChatWiringModule`; dedicated chat styling still awaits wiring | `:core:contracts`, `:core:data`, `:core:domain`, `:core:designsystem`, `:core:navigation`, `:core:moduleapi`, `:feature:chat` |
 | `:feature:chat` | Shared chat, Markdown, tools / diffs / to-dos, photo and file tags, long-press menu, error cards, image viewing and markup, interaction panel, attachment components and in-app link reader | `:core:contracts`, `:core:domain`, `:core:designsystem`, `:core:chatlist`, `:core:navigation`, `:feature:inbox` |
 | `:feature:files` | File tree, text / image / Markdown / PDF preview, Git and commit details, path insertion; entered from the Agent chat ⋯ menu and file tags in messages | `:core:contracts`, `:core:hub`, `:core:designsystem`, `:core:navigation` |
 | `:feature:inbox` | Unified Inbox, Lark chats, mail details, AI actions and reply components | `:core:chatlist`, `:core:contracts`, `:core:hub`, `:core:domain`, `:core:designsystem`, `:core:navigation` |
@@ -1229,7 +1321,7 @@ Modules are defined by `android/settings.gradle.kts`, and direct in-repository d
 | `:feature:machines` | Machine dashboard, details and metric charts; entered from the Agents machine menu | `:core:contracts`, `:core:designsystem`, `:core:domain`, `:core:navigation` |
 | `:feature:settings` | Pairing, checklist, diagnostics, devices and notification preferences, About and APK installation, Knowledge Selection | `:core:contracts`, `:core:domain`, `:core:hub`, `:core:designsystem`, `:core:navigation` |
 | `:feature:terminal` | Terminal Canvas, streaming frame consumption, takeover and input; entered from the chat page and the notification terminal fallback | `:core:contracts`, `:core:terminal`, `:core:designsystem`, `:core:navigation` |
-| `:feature:voice` | Full-duplex voice chat with the hub's voice extension; see "Voice chat" | `:core:contracts`, `:core:designsystem`, `:core:navigation` |
+| `:module:voice` | Module (see "Modules"): full-duplex voice chat with the hub's voice extension, its route, transport and types; see "Voice chat" | `:core:moduleapi`, `:core:contracts`, `:core:designsystem`, `:core:navigation`, `:core:hub` |
 | `:platform:notify` | Foreground service, ongoing summary notification (`FleetFeed`), notification policy and buttons, action log, boot receiver and connection keep-alive | `:core:contracts`, `:core:domain`, `:core:designsystem`, `:core:navigation` |
 | `:platform:phonetools` | Phone tool catalog, registration, permissions and write confirmation, contacts / calendar / photos / location implementations; entered from Settings › Phone data | `:core:contracts`, `:core:navigation`, `:core:designsystem` |
 | `:platform:shortcuts` | Home-screen widgets (Glance), Quick Settings tiles, icon long-press shortcuts and "Approve pending" dialog; see "Ongoing notification and home-screen entries" | `:core:contracts`, `:core:domain`, `:core:designsystem`, `:core:navigation`, `:core:hub`, `:platform:notify` |
@@ -2795,9 +2887,9 @@ Same as iOS (`docs/apple/ios.md` ("Translation")) / web (`docs/web/web.md`): Aut
 
 ## Voice chat (hub voice extension)
 
-Full-duplex chat with hub voice extension ([extensions.md](../extensions/extensions.md) ("Voice")); listens while page open, speaking directly interrupts Persona. `feature/voice`, transport `HttpVoiceExtensions` core/hub, contract `VoiceExtensions` core/contracts, `VoiceRoute(extensionId,title)`.
+Full-duplex chat with hub voice extension ([extensions.md](../extensions/extensions.md) ("Voice")); listens while page open, speaking directly interrupts Persona. A module (see "Modules"): `module/voice` holds the page, `VoiceModule`, transport `HttpVoiceExtensions`, contract `VoiceExtensions` and `VoiceRoute(extensionId,title)`; no core project names them.
 
-- Entry: two public APIs. `voiceEntries(navigator, extensions, identity, onModelConfiguration = null)` registers route (purpose-id callback, Root like monitoring; demo no service/explanation). `rememberVoiceExtension(extensions, active)` when active reads first running voice extension, failures404 treated none, re-pair reload; host decides Voice chat menu. `ShellSession.voice` like metrics rebuilds transport per current route/pinned client/token, pairing change cancels.
+- Entry: through `VoiceModule` only. `navEntries` registers the route with `voiceEntries(navigator, extensions, identity, onModelConfiguration)` (in demo mode the shell's unavailable page, "The demo has no voice chat"). `menuActions(AssistantTitle)` offers Voice chat after Details while `rememberVoiceExtension(extensions, active)` finds a running voice extension (read each time the Persona tab shows while connected; failures and 404 count as none; re-pair reloads). `services(hub)` rebuilds the transport per current route, pinned client and token like metrics; a pairing change cancels.
 - Permission RECORD_AUDIO first visit, declares MODIFY_AUDIO_SETTINGS. Missing empty state Voice chat needs microphone / Listens only here, leaving ends, no background recording. Denied says No microphone permission / Enable Persona microphone in system settings. Allow microphone asks again if possible, after two denials opens App system settings, rechecks on return.
 - Model: purpose plugin.id via modelChoice and extension /models. Non-unverified status error shows unavailable/reason; missing configured model says choose again; old404 uses extension default or omits model; other read error only Retry, never treated no config ([model-config.md](../assistant/model-config.md) ("When changes take effect")). Read only start/restart. Host onModelConfiguration(purposeId), `voicePurposeId`, enables menu/error-page Model configuration; absent top-right directly Voice, error page only Retry.
 - Voice picker lists model voices (Female/Male · Chinese, English · Default), check current, tap closes. Failed list notice, chat uses prior voice. Saved per pairing `hub-data/<pairing>/voice.json`, each extension, deleted unpair; absent voice falls back without deleting preference (other models may restore). Voice/model change restarts chat.
@@ -2820,7 +2912,7 @@ adb -s <emulator> shell am start -n <package>/persona.android.debug.DebugEntryAc
 
 Voice debug opens id voice in Persona. Debug catalog Voice chat includes orbs/status/captions/buttons.
 
-Verification 2026-11-02: `VoiceProtocolTest` rewritten old VoiceTest plus rates/missing frames/tools/levels, `VoiceTextTest` states/orbs/voice description/failures/models/routes, `VoiceSessionTest` noaudio-before-ready/start-once/mute-zeros/transcript-tools/clear-interrupt/nonfatal-fatal/1001-drop/prestart/microphone/normalclose/ignore-after-stop, `VoicePageTest` legacy-default/no unavailable fallback/read-error not empty/voice persistence-restart/missing voice omitted/list-failure usable/restart reread/background end, `VoicePrefsTest`, core:hub `HttpVoiceExtensionsTest` list/voices/models/config/pairing cancel/bidirectional WS/single-close/upgrade status. API 35 fake-audio emulator captures styles × light / dark permissions/denied/connecting/listening/user/tool/speaking/end/mute/voice/drop/badmodel, Glass dark extra missing/fatal/off/old. Tested Interrupt received/flush, voice restart+paired file, background-return ended, Restart/Hangup, KEEP_SCREEN_ON set/cleared. Device-only recording/echo cancellation/loudspeaker self-hearing, headset/Bluetooth routing, focus, real extension latency/interrupt feel all untested; latency not measured.
+Verification 2026-11-02: `VoiceProtocolTest` rewritten old VoiceTest plus rates/missing frames/tools/levels, `VoiceTextTest` states/orbs/voice description/failures/models/routes, `VoiceSessionTest` noaudio-before-ready/start-once/mute-zeros/transcript-tools/clear-interrupt/nonfatal-fatal/1001-drop/prestart/microphone/normalclose/ignore-after-stop, `VoicePageTest` legacy-default/no unavailable fallback/read-error not empty/voice persistence-restart/missing voice omitted/list-failure usable/restart reread/background end, `VoicePrefsTest`, module:voice `HttpVoiceExtensionsTest` (formerly core:hub) list/voices/models/config/pairing cancel/bidirectional WS/single-close/upgrade status. API 35 fake-audio emulator captures styles × light / dark permissions/denied/connecting/listening/user/tool/speaking/end/mute/voice/drop/badmodel, Glass dark extra missing/fatal/off/old. Tested Interrupt received/flush, voice restart+paired file, background-return ended, Restart/Hangup, KEEP_SCREEN_ON set/cleared. Device-only recording/echo cancellation/loudspeaker self-hearing, headset/Bluetooth routing, focus, real extension latency/interrupt feel all untested; latency not measured.
 
 ## Persona page (needs-you items, history, handoff titles)
 

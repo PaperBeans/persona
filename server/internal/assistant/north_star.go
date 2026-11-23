@@ -919,9 +919,15 @@ func (b briefNorthStar) body(lines []string) briefBodyNorthStar {
 
 // runFacts are the facts a task's run opens with: a routine with facts on has the briefing's (briefing.go), which open
 // with the north star; a daily report (Task.Report, such as a dot's) has the north star's lines alone; any other task
-// none.
+// none. Without the briefing module (modules.go) a routine with facts on opens with none, and a daily report with the
+// north star's lines alone, keeping no snapshot for a fallback.
 func (s *Service) runFacts(ctx context.Context, t Task, now time.Time) string {
 	switch {
+	case !s.briefingOn():
+		if t.Report {
+			return s.northStarRunFacts(ctx, now)
+		}
+		return ""
 	case t.Facts:
 		return s.briefStart(ctx, t, now)
 	case t.Report:

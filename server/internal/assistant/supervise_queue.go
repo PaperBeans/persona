@@ -41,6 +41,7 @@ func (s *Service) renderQueuedDigest(ctx context.Context, to string, list []prom
 	if len(list) > 0 && !slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind != sigParkedSummary }) {
 		level = supervisionInfo
 	}
+	list = joinTurnReports(list)
 	return prompts.RenderSupervise(prompts.Supervise{Level: level, Entries: sortEntries(list), Leader: leader, Background: background,
 		Fresh: fresh, Side: to != here.Main && !leader, Escalated: escalatedIn(list),
 		BackgroundEscalated: slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigEscalated && e.Background }),
@@ -53,6 +54,78 @@ func (s *Service) renderQueuedDigest(ctx context.Context, to string, list []prom
 		}),
 		Inbox: slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigInbox }),
 		Asked: askedIn(list), AskMinutes: int(askHoldFor.Minutes()), PushGrading: askedIn(list) && s.quietModeOn(ctx)})
+}
+
+// joinTurnReports makes a task's report and the end of the same Agent turn one entry (reportStopHold): the stop entry,
+// which carries how the hub judged the turn and the Agent's last answer, also says what the Agent reported, its words,
+// evidence and step. Only the rendered message changes: each signal keeps its own delivery and deduplication.
+func joinTurnReports(list []prompts.SuperviseEntry) []prompts.SuperviseEntry {
+	stops := map[string]int{}
+	for i, e := range list {
+		if e.Kind == sigReview || e.Kind == sigIdle || e.Kind == sigUnjudged || e.Kind == sigInterrupted {
+			if _, seen := stops[e.ID]; !seen {
+				stops[e.ID] = i
+			}
+		}
+	}
+	if len(stops) == 0 {
+		return list
+	}
+	out := make([]prompts.SuperviseEntry, 0, len(list))
+	joined := map[int]prompts.SuperviseEntry{}
+	taken := map[int]bool{}
+	for i, e := range list {
+		j, ok := stops[e.ID]
+		if e.Kind != sigReport || !ok || e.Session != "" && list[j].Session != "" && e.Session != list[j].Session {
+			continue
+		}
+		stop, had := joined[j]
+		if !had {
+			stop = list[j]
+			stop.Evidence = slices.Clone(stop.Evidence)
+		}
+		if stop.Reported == "" || reportRank(e.Report) < reportRank(stop.Reported) {
+			stop.Reported = e.Report
+		}
+		if stop.Said != "" && e.Said != "" && stop.Said != e.Said {
+			stop.Said += "\n—\n" + e.Said
+		} else if e.Said != "" {
+			stop.Said = e.Said
+		}
+		for _, x := range e.Evidence {
+			if !slices.Contains(stop.Evidence, x) {
+				stop.Evidence = append(stop.Evidence, x)
+			}
+		}
+		if e.Step > 0 {
+			stop.Step, stop.Steps = e.Step, e.Steps
+		}
+		joined[j] = stop
+		taken[i] = true // told in the stop entry; the caller's list is left as it is
+	}
+	for i, e := range list {
+		if taken[i] {
+			continue
+		}
+		if stop, ok := joined[i]; ok {
+			e = stop
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// reportRank orders a report's kinds by what waits on the supervisor most: a question, then blocked, then done.
+func reportRank(kind string) int {
+	switch kind {
+	case upReportQuestion:
+		return 0
+	case upReportBlocked:
+		return 1
+	case upReportDone:
+		return 2
+	}
+	return 3
 }
 
 // recheckDigestTo honors explicit moves through the same policy as immediate dispatch. Otherwise it preserves
@@ -102,7 +175,11 @@ func (s *Service) recheckQueuedDigest(ctx context.Context, to string, msg relayM
 		return msg, false, true
 	}
 	now := time.Now()
-	signals, deferred := s.partitionFinalWakeSignals(ctx, signals, now, "drain")
+	var deferred []superviseSignal
+	if msg.TriedAt.IsZero() {
+		signals, deferred = s.partitionFinalWakeSignals(ctx, signals, now, "drain")
+	}
+	// A tried message cannot change its text or identity; do not let wake partitioning strand it at the queue head.
 	var retry []superviseSignal
 	ctx, signals, retry = s.allStoppedBatch(ctx, signals)
 	if len(retry) > 0 {
@@ -206,6 +283,19 @@ func (s *Service) recheckQueuedDigest(ctx context.Context, to string, msg relayM
 			delete(state.Queue, to)
 		}
 	}
+	// Keep a durable copy of every deferred idle in the queue rewrite itself. If the process stops before the
+	// in-memory restoration below, startup reloads this outbox entry instead of losing the only remaining copy.
+	if len(deferred) > 0 {
+		state.SupervisePending = maps.Clone(state.SupervisePending)
+		if state.SupervisePending == nil {
+			state.SupervisePending = map[string]superviseSignal{}
+		}
+		for _, g := range deferred {
+			if _, newer := state.SupervisePending[g.id()]; !newer {
+				state.SupervisePending[g.id()] = g
+			}
+		}
+	}
 	// Save moves and the corresponding source removal together, before anything can send the new payload.
 	if st := s.store(); st != nil {
 		if err := st.PutSetting(ctx, relayKey, state); err != nil {
@@ -219,9 +309,9 @@ func (s *Service) recheckQueuedDigest(ctx context.Context, to string, msg relayM
 	return next, len(groups[to]) == 0, false
 }
 
-// restoreDrainedWakeSignals runs only after the durable source queue no longer carries deferred idles. Queue
-// admission already reserved their fingerprints and turn receipts; release both before making the signals pending
-// again, or an expired wakeup would be deduplicated and restart replay would skip them as told.
+// restoreDrainedWakeSignals runs only after the durable queue rewrite and outbox restoration have committed together.
+// Queue admission reserved the signals' fingerprints and turn receipts; release those matching reservations before the
+// in-memory retry, while the durable outbox independently covers a restart before this step runs.
 func (s *Service) restoreDrainedWakeSignals(ctx context.Context, deferred []superviseSignal, web string, now time.Time) {
 	if len(deferred) == 0 {
 		return

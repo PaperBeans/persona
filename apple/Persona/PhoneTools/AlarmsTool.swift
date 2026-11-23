@@ -235,6 +235,11 @@ enum AlarmsTool {
     /// The ActivityKit activity `drawSample` started, so `TerminationActivities` ends only the sample on SIGTERM and
     /// never a real AlarmKit timer.
     fileprivate(set) static var sampleActivityID: String?
+    /// The `AlarmPresentationState.alarmID` of the active DEBUG sample activity (never scheduled in `AlarmManager`).
+    fileprivate(set) static var sampleAlarmID: UUID?
+    /// Every sample `alarmID` created in this process, so duplicate or late button taps after Stop still stay off
+    /// `AlarmManager` (#13269).
+    private static var knownSampleAlarmIDs: Set<UUID> = []
     #endif
 }
 
@@ -347,8 +352,11 @@ extension AlarmsTool {
     }
 
     private static func drawSample(paused: Bool) async {
+        let previousID = sampleActivityID
         sampleActivityID = nil
-        for activity in Activity<AlarmAttributes<PersonaAlarmData>>.activities {
+        sampleAlarmID = nil
+        for activity in Activity<AlarmAttributes<PersonaAlarmData>>.activities
+        where activity.attributes.metadata?.isSample == true || activity.id == previousID {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
         let content = sampleContent(paused: paused, now: Date())
@@ -357,7 +365,151 @@ extension AlarmsTool {
         let sample = sampleAttributes(label: "Focus", paused: paused)
         if let activity = try? Activity.request(attributes: sample, content: content) {
             sampleActivityID = activity.id
+            sampleAlarmID = content.state.alarmID
+            knownSampleAlarmIDs.insert(content.state.alarmID)
         }
+    }
+
+    /// The fields of an active `Activity<AlarmAttributes<PersonaAlarmData>>` that DEBUG sample action handling reads.
+    struct SampleActivitySnapshot: Equatable, Sendable {
+        var activityID: String
+        var state: AlarmPresentationState
+        var label: String
+        var hasCountdownPauseButton: Bool
+        var isSample: Bool
+    }
+
+    private nonisolated static func updateLiveActivity(id: String, content: ActivityContent<AlarmPresentationState>) async {
+        guard let activity = Activity<AlarmAttributes<PersonaAlarmData>>.activities.first(where: { $0.id == id }) else { return }
+        await activity.update(content)
+    }
+
+    private nonisolated static func endLiveActivity(id: String) async {
+        guard let activity = Activity<AlarmAttributes<PersonaAlarmData>>.activities.first(where: { $0.id == id }) else { return }
+        await activity.end(nil, dismissalPolicy: .immediate)
+    }
+
+    /// ActivityKit operations used by DEBUG sample action handling, injectable so unit tests can verify Pause, Resume
+    /// and Stop end-to-end without the live ActivityKit daemon.
+    struct SampleActivityBackend: Sendable {
+        var find: @MainActor @Sendable (UUID) -> SampleActivitySnapshot?
+        var update: @MainActor @Sendable (String, ActivityContent<AlarmPresentationState>) async -> Void
+        var end: @MainActor @Sendable (String) async -> Void
+        var request: @MainActor @Sendable (AlarmAttributes<PersonaAlarmData>, ActivityContent<AlarmPresentationState>) -> String?
+
+        static var live: Self {
+            Self(
+                find: { alarmID in
+                    Activity<AlarmAttributes<PersonaAlarmData>>.activities
+                        .first { $0.content.state.alarmID == alarmID }
+                        .map { activity in
+                            SampleActivitySnapshot(
+                                activityID: activity.id,
+                                state: activity.content.state,
+                                label: activity.attributes.metadata?.label ?? "Focus",
+                                hasCountdownPauseButton: activity.attributes.presentation.countdown?.pauseButton != nil,
+                                isSample: activity.attributes.metadata?.isSample == true
+                            )
+                        }
+                },
+                update: { activityID, content in
+                    await updateLiveActivity(id: activityID, content: content)
+                },
+                end: { activityID in
+                    await endLiveActivity(id: activityID)
+                },
+                request: { attributes, content in
+                    (try? Activity.request(attributes: attributes, content: content))?.id
+                }
+            )
+        }
+    }
+
+    /// Next `AlarmPresentationState` for a DEBUG sample button tap, or `nil` when `Stop` ends the sample activity.
+    nonisolated static func sampleState(
+        after action: AlarmIntentAction,
+        from state: AlarmPresentationState,
+        now: Date = Date()
+    ) -> AlarmPresentationState? {
+        switch action {
+        case .stop:
+            return nil
+        case .pause:
+            guard case .countdown(let countdown) = state.mode else { return state }
+            let elapsed = min(
+                countdown.totalCountdownDuration,
+                countdown.previouslyElapsedDuration + max(0, now.timeIntervalSince(countdown.startDate))
+            )
+            let paused = AlarmPresentationState.Mode.paused(.init(
+                totalCountdownDuration: countdown.totalCountdownDuration,
+                previouslyElapsedDuration: elapsed
+            ))
+            return .init(alarmID: state.alarmID, mode: paused)
+        case .resume:
+            guard case .paused(let paused) = state.mode else { return state }
+            let remaining = max(0, paused.totalCountdownDuration - paused.previouslyElapsedDuration)
+            let countdown = AlarmPresentationState.Mode.countdown(.init(
+                totalCountdownDuration: paused.totalCountdownDuration,
+                previouslyElapsedDuration: paused.previouslyElapsedDuration,
+                startDate: now,
+                fireDate: now.addingTimeInterval(remaining)
+            ))
+            return .init(alarmID: state.alarmID, mode: countdown)
+        }
+    }
+
+    /// Handles a Live Activity button tap (`Pause`, `Resume`, `Stop`) when `alarmID` belongs to the DEBUG
+    /// ActivityKit-only timer sample (#13269). Returns `true` when claimed by the sample (so `AlarmManager` is never
+    /// called with an unscheduled UUID), and `false` for any real timer ID.
+    static func handleSampleAction(
+        _ action: AlarmIntentAction,
+        alarmID: UUID,
+        now: Date = Date(),
+        backend: SampleActivityBackend = .live
+    ) async -> Bool {
+        let candidate = backend.find(alarmID)
+        let sample = candidate.flatMap { ($0.isSample || $0.activityID == sampleActivityID) ? $0 : nil }
+        let isKnownSample = sample != nil || sampleAlarmID == alarmID || knownSampleAlarmIDs.contains(alarmID)
+        guard isKnownSample else { return false }
+        knownSampleAlarmIDs.insert(alarmID)
+        guard let sample else {
+            if action == .stop && sampleAlarmID == alarmID {
+                sampleActivityID = nil
+                sampleAlarmID = nil
+            }
+            return true
+        }
+        guard let next = sampleState(after: action, from: sample.state, now: now) else {
+            await backend.end(sample.activityID)
+            if sampleActivityID == sample.activityID { sampleActivityID = nil }
+            if sampleAlarmID == alarmID { sampleAlarmID = nil }
+            return true
+        }
+        let nextContent = ActivityContent(state: next, staleDate: nil)
+        // A sample launched with `-showAlarmSample paused` omits `countdown` to stay under ActivityKit's 4 KB limit
+        // (#12248). When resumed, replace it with a running sample activity carrying the resumed state so `AlarmButtons`
+        // exposes Pause again.
+        if case .countdown = next.mode, !sample.hasCountdownPauseButton {
+            await backend.end(sample.activityID)
+            let running = sampleAttributes(label: sample.label, paused: false)
+            if let replacementID = backend.request(running, nextContent) {
+                sampleActivityID = replacementID
+                sampleAlarmID = next.alarmID
+            } else {
+                if sampleActivityID == sample.activityID { sampleActivityID = nil }
+                if sampleAlarmID == alarmID { sampleAlarmID = nil }
+            }
+            return true
+        }
+        await backend.update(sample.activityID, nextContent)
+        return true
+    }
+
+    /// Resets in-memory DEBUG sample tracking (for unit tests verifying clean state and post-relaunch recognition).
+    static func resetSampleTracking(sampleActivityID: String? = nil, sampleAlarmID: UUID? = nil) {
+        self.sampleActivityID = sampleActivityID
+        self.sampleAlarmID = sampleAlarmID
+        knownSampleAlarmIDs = sampleAlarmID.map { [$0] } ?? []
     }
 
     /// The exact content delivered to the simulator's ActivityKit sample. AlarmKit owns the real timer's ContentState
@@ -386,7 +538,12 @@ extension AlarmsTool {
         let presentation = paused
             ? AlarmPresentation(alert: alert, paused: .init(title: title, resumeButton: button))
             : AlarmPresentation(alert: alert, countdown: .init(title: title, pauseButton: button))
-        return AlarmAttributes(presentation: presentation, metadata: real.metadata, tintColor: real.tintColor)
+        #if DEBUG
+        let metadata = PersonaAlarmData(label: label, isSample: true)
+        #else
+        let metadata = real.metadata
+        #endif
+        return AlarmAttributes(presentation: presentation, metadata: metadata, tintColor: real.tintColor)
     }
 
     /// The label as the resource's fallback, not a localization key, for the custom sample (#12248).

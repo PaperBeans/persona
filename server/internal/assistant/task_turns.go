@@ -146,6 +146,8 @@ type turnSignal struct {
 	Detail  string     `json:"detail,omitempty"`
 	Handoff bool       `json:"handoff,omitempty"`
 	Told    *time.Time `json:"told,omitempty"`
+	// JudgeDown: superviseSignal.JudgeDown, so a replay after a restart is batched as the first telling was.
+	JudgeDown bool `json:"judge_down,omitempty"`
 }
 
 // replayTurnSignal queues only the still-current, untold ledger signal. Recovery can wait on Inbox I/O while
@@ -165,7 +167,8 @@ func (s *Service) replayTurnSignal(todo string, expected taskTurn) {
 	}
 	// Keep the ledger lock until queued, so an obsolete replay cannot replace a newer pending signal.
 	// The digest releases its mutex before consulting or marking the turn ledger.
-	s.queueSignal(superviseSignal{Todo: todo, Kind: sig.Kind, Key: sig.Key, Machine: sig.Machine, Detail: sig.Detail, Handoff: sig.Handoff})
+	s.queueSignal(superviseSignal{Todo: todo, Kind: sig.Kind, Key: sig.Key, Machine: sig.Machine, Detail: sig.Detail, Handoff: sig.Handoff,
+		JudgeDown: sig.JudgeDown})
 }
 
 // settled: nothing is left to do for the turn: it is judged (or has nothing to judge) and what it raised was told.
@@ -288,9 +291,95 @@ type turnsState struct {
 	// the marks is still one moment's.
 	jmu     sync.Mutex
 	judging map[string]int
+	// out: a done judgment of the task is being made (autoFinishTask), under jmu. A look that takes the same turn up
+	// again does not ask the model alongside it: it leaves a follow-up that judges the turn when that judgment ends
+	// without landing (turnAgain, #13711). The mark is gone once the judgment lands, fails or times out, so a turn is
+	// never left marked as being judged, and no look waits on it.
+	out map[string]*judgmentOut
 	// closed: the sessions whose transcript showed their turn closed, at the row it was read at: an unknown status
 	// there is a stopped agent (rowsProven).
 	closed map[SessionRef]turnLook
+}
+
+// judgmentOut counts the done judgments of a task being made, and what runs once the last one has ended.
+type judgmentOut struct {
+	n     int
+	after []func()
+}
+
+// judgingTurn marks a done judgment of todo as being made and answers what ends the mark (autoFinishTask). The
+// follow-ups left meanwhile (afterJudgment) run once the last judgment of todo being made has ended, in a goroutine of
+// their own.
+func (s *Service) judgingTurn(todo string) (end func()) {
+	b := &s.tasks.turns
+	b.jmu.Lock()
+	defer b.jmu.Unlock()
+	if b.out == nil {
+		b.out = map[string]*judgmentOut{}
+	}
+	o := b.out[todo]
+	if o == nil {
+		o = &judgmentOut{}
+		b.out[todo] = o
+	}
+	o.n++
+	return func() {
+		b.jmu.Lock()
+		o.n--
+		var after []func()
+		if o.n == 0 {
+			after, o.after = o.after, nil
+			if b.out[todo] == o {
+				delete(b.out, todo)
+			}
+		}
+		b.jmu.Unlock()
+		if len(after) > 0 {
+			go func() {
+				for _, f := range after {
+					f()
+				}
+			}()
+		}
+	}
+}
+
+// afterJudgment leaves f to run once the done judgments of todo being made now have ended, and says whether one was;
+// false: none is, f is not kept.
+func (s *Service) afterJudgment(todo string, f func()) bool {
+	b := &s.tasks.turns
+	b.jmu.Lock()
+	defer b.jmu.Unlock()
+	o := b.out[todo]
+	if o == nil {
+		return false
+	}
+	o.after = append(o.after, f)
+	return true
+}
+
+// startRow is the row of a session that showed its turn starting: its transcript's size and its time (Rev and
+// UpdatedAt of proto.Session). Zero: not known (the hub's own turn start).
+type startRow struct {
+	Rev int64
+	At  time.Time
+}
+
+// startBeforeTakenTurn: the start row of session machine/session is older than the row the ledger took todo's turn up
+// at, both by its transcript's size and by its time. The list told that start before that turn ended, and the handling
+// of the list came after the end was taken up (a sweep can read a session before its queued list events are handled):
+// it is the start of the turn taken up, not a new one (#13711). Rev is the transcript's size, which only a rewrite of
+// the transcript makes smaller; a newer time then still shows a real new start. Anything not known answers false.
+func (s *Service) startBeforeTakenTurn(todo, machine, session string, row startRow) bool {
+	if row.Rev == 0 || row.At.IsZero() {
+		return false
+	}
+	b := &s.tasks.turns
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	e, ok := b.doc.Turns[todo]
+	return ok && e.State != turnBefore && e.Machine == machine && e.Session == session && e.Rev != 0 && !e.Seen.IsZero() &&
+		row.Rev < e.Rev && !row.At.After(e.Seen)
 }
 
 // settling: the end of a turn of todo is being handled right now (taskJudging). Callable with the task lock or the
@@ -603,7 +692,7 @@ func (s *Service) turnSignalled(g superviseSignal) (told bool) {
 		return true
 	}
 	if sig := e.Signal; sig == nil || sig.Kind != g.Kind || sig.Key != g.Key || sig.Handoff != g.Handoff {
-		e.Signal = &turnSignal{Kind: g.Kind, Key: g.Key, Machine: g.Machine, Detail: g.Detail, Handoff: g.Handoff}
+		e.Signal = &turnSignal{Kind: g.Kind, Key: g.Key, Machine: g.Machine, Detail: g.Detail, Handoff: g.Handoff, JudgeDown: g.JudgeDown}
 		b.doc.Turns[g.Todo] = e
 		s.saveTurnsLocked(ctx)
 	}
@@ -709,11 +798,31 @@ func (s *Service) turnAgain(ctx context.Context, t Todo, e taskTurn, last proto.
 	}
 	j := e.Judged
 	if j == nil {
-		if e.JudgeFailures > 0 {
-			s.autoFinishTaskRetry(t, since, worked)
-		} else {
-			s.autoFinishTask(t, since, worked)
+		judge := func(failures int) {
+			if failures > 0 {
+				s.autoFinishTaskRetry(t, since, worked)
+			} else {
+				s.autoFinishTask(t, since, worked)
+			}
 		}
+		// A judgment of this task is being made already: not a second one alongside it, and no wait on it here. It may
+		// land for this turn; or not (its stretch moved on, the judge failed or ran out of time), and then the turn is
+		// judged once it has ended, so it is never left unjudged (#13711).
+		if s.afterJudgment(t.ID, func() {
+			cur, ok := s.turnOf(context.Background(), t.ID)
+			if ok && cur.Machine == e.Machine && cur.Session == e.Session && cur.Key == e.Key && cur.Judged != nil {
+				return // it landed: the turn has its one judgment
+			}
+			if ok && (cur.Machine != e.Machine || cur.Session != e.Session || cur.Key != e.Key) {
+				return // another turn since: its own end judges it
+			}
+			s.logf("task %s: the judgment being made did not land for turn %s: judged now", t.ID, clip(e.Key, 40))
+			judge(cur.JudgeFailures)
+		}) {
+			s.logf("task %s: its agent's turn %s is being judged: judged after that if it does not land", t.ID, clip(e.Key, 40))
+			return
+		}
+		judge(e.JudgeFailures)
 		return
 	}
 	if !worked || !since.After(j.At) || j.Skip != "" {

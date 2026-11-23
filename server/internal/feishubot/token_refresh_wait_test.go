@@ -145,6 +145,11 @@ func TestTokenWaitFinalAttempt(t *testing.T) {
 					}
 					return
 				}
+				if !strings.HasPrefix(r.URL.Path, "/open-apis/im/v1/messages") {
+					// Not this client's: a loopback port is open to anything on the machine (probes send GET /).
+					http.NotFound(w, r)
+					return
+				}
 				n := hits.Add(1)
 				if mode == "keyed send" {
 					// Every retry must retain the public send's idempotency UUID.

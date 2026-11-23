@@ -2262,7 +2262,7 @@ func (s *Service) oneOffFailed(ctx context.Context, t Task, run ScheduleRun) {
 	if s.exitPolicy(ctx, name+"\n"+body, run.SessionID, t.Space).Redact {
 		name, _ = s.redactedNotice(ctx, l, t.Space)
 	}
-	s.push(ctx, Notification{Title: i18n.T(l, "assistant-schedule.run_failed", i18n.Args{"name": name}), Body: body})
+	s.push(withCard(ctx, cardScheduleFailed), Notification{Title: i18n.T(l, "assistant-schedule.run_failed", i18n.Args{"name": name}), Body: body})
 }
 
 // oneOffNotStarted handles confirmed pre-delivery failures; Facts/Report runs use the fixed-facts fallback first.
@@ -2340,7 +2340,7 @@ func (s *Service) tellWaitingSkip(ctx context.Context, t Task, m Device) {
 	if s.exitPolicy(ctx, name, t.RunSessionID, t.Space).Redact {
 		name, _ = s.redactedNotice(ctx, l, t.Space)
 	}
-	s.push(ctx, Notification{Subtitle: m.Name, DeviceID: m.ID, SessionID: t.RunSessionID,
+	s.push(withCard(ctx, cardScheduleSkipped), Notification{Subtitle: m.Name, DeviceID: m.ID, SessionID: t.RunSessionID,
 		Title: i18n.T(l, "assistant-schedule.waiting_skipped", i18n.Args{"name": name}), Body: i18n.T(l, "assistant-schedule.waiting_skipped_body")})
 }
 
@@ -2454,7 +2454,7 @@ func (s *Service) watchScheduledRun(run ScheduleRun, t Task, m Device) {
 		if s.exitPolicy(ctx, name+"\n"+text, run.SessionID, t.Space).Redact {
 			name, _ = s.redactedNotice(ctx, s.lang(ctx), t.Space)
 		}
-		s.push(ctx, Notification{Subtitle: m.Name, DeviceID: m.ID, SessionID: run.SessionID, Title: i18n.T(s.lang(ctx), "assistant-schedule.run_failed", i18n.Args{"name": name}), Body: text})
+		s.push(withCard(ctx, cardScheduleFailed), Notification{Subtitle: m.Name, DeviceID: m.ID, SessionID: run.SessionID, Title: i18n.T(s.lang(ctx), "assistant-schedule.run_failed", i18n.Args{"name": name}), Body: text})
 	}
 	if run.Retried {
 		return

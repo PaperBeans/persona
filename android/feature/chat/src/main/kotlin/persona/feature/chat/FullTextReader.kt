@@ -29,8 +29,16 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun FullTextReader(text: String, onDismiss: () -> Unit, title: String = stringResource(R.string.chat_reader_full_text), plain: Boolean = false) {
     val frozen = remember { text }
-    val snapshot by produceState<ReaderSnapshot?>(null) {
-        value = withContext(Dispatchers.Default) { ReaderSnapshot(frozen) }
+    // Small handoffs must not depend on an asynchronous Dialog frame merely to show one short paragraph.
+    // Large documents retain background pagination instead of blocking composition.
+    val snapshot by if (frozen.length <= 8192) {
+        remember(frozen) { mutableStateOf(ReaderSnapshot(frozen)) }
+    } else {
+        remember {
+            kotlinx.coroutines.flow.flow {
+                emit(withContext(Dispatchers.Default) { ReaderSnapshot(frozen) })
+            }
+        }.collectAsState(initial = null)
     }
     val copyText = rememberCopy()
     JFullScreen(onDismiss) {

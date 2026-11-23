@@ -38,14 +38,43 @@ func (d *DB) MarkInteractionResumable(ctx context.Context, id string) (bool, err
 	return tag.RowsAffected() == 1, nil
 }
 
-// FinishInteraction records how an interaction ended; only the first outcome counts.
+// Who or what ended an interaction (interactions.ended_by, WithEndedBy). Only EndedByDevice is the user on one of their
+// devices; the rest are nobody answering (expired, withdrawn, cleared) or someone else answering for them.
+const (
+	EndedByDevice    = "device"    // the user answered it on a device (the apps' POST /api/v1/interactions/{id}/resolve)
+	EndedByExtension = "extension" // an extension answered it through the same route
+	EndedByExpired   = "expired"   // its time ran out unanswered
+	EndedByWithdrawn = "withdrawn" // the asker went away first (its call ended, its hook disconnected)
+	EndedByCleared   = "cleared"   // a newer card replaced it, or it was cleared with the others (a restart)
+	// EndedByAssistant, EndedByDefault and EndedByTerminal: answered for the user (proto.Resolution.AnsweredBy).
+	EndedByAssistant  = proto.AnsweredByAssistant
+	EndedByDefault    = proto.AnsweredByDefault
+	EndedByTerminal   = proto.AnsweredByTerminal
+	EndedByRemembered = "remembered" // the manager's kept "Always allow" answered it (proto.Resolution.Remembered)
+)
+
+type endedByKey struct{}
+
+// WithEndedBy is ctx for a FinishInteraction that records by (one of the EndedBy* above) as who or what ended the card.
+func WithEndedBy(ctx context.Context, by string) context.Context {
+	return context.WithValue(ctx, endedByKey{}, by)
+}
+
+// EndedBy is what WithEndedBy put on ctx; "" when nothing did.
+func EndedBy(ctx context.Context) string {
+	by, _ := ctx.Value(endedByKey{}).(string)
+	return by
+}
+
+// FinishInteraction records how an interaction ended, and who or what ended it when ctx says (WithEndedBy); only the
+// first outcome counts.
 func (d *DB) FinishInteraction(ctx context.Context, id, status string, res *proto.Resolution) error {
 	var raw []byte
 	if res != nil {
 		raw, _ = json.Marshal(res)
 	}
-	_, err := d.pool.Exec(ctx, `UPDATE interactions SET status = $2, resolution = $3, resolved_at = now()
-		WHERE id = $1 AND status = 'pending'`, id, status, raw)
+	_, err := d.pool.Exec(ctx, `UPDATE interactions SET status = $2, resolution = $3, resolved_at = now(), ended_by = $4
+		WHERE id = $1 AND status = 'pending'`, id, status, raw, EndedBy(ctx))
 	return err
 }
 
@@ -265,7 +294,7 @@ const (
 		AND (payload->>'resumable')::boolean IS TRUE
 		AND ((payload->>'expires_at')::timestamptz > now()
 			OR ((payload->>'owner_proposal')::boolean IS TRUE AND (payload->>'no_expiry')::boolean IS TRUE))`
-	cancelPendingSQL = `UPDATE interactions SET status = 'cancelled', resolved_at = now()
+	cancelPendingSQL = `UPDATE interactions SET status = 'cancelled', resolved_at = now(), ended_by = 'cleared'
 		WHERE status = 'pending' AND NOT (id = ANY($1))
 		AND id NOT IN (SELECT interaction_id FROM session_work WHERE interaction_id <> '')
 		AND id NOT IN (SELECT protected.id FROM settings,

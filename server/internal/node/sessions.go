@@ -197,7 +197,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 				}
 				// Background shells keep running after the turn ends; background subagents are listed as subagents.
 				n.setBackground(&s, m)
-				s.BackgroundWaiting = n.backgroundWaits(&s) // bgwait.go (#6045)
+				n.setBackgroundWait(&s) // bgwait.go (#6045, #13744)
 				s.Loop, s.Goal, s.Plan = m.loop, m.goal, m.plan
 				s.Subagents = n.subagents(id)
 			}

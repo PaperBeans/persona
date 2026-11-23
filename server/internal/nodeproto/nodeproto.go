@@ -222,6 +222,11 @@ var (
 	ControlLane = []string{"ping", "stream.ack"}
 	// BulkLane: what carries a file's or a package's bytes, and a forwarded port's.
 	BulkLane = []string{"file.chunk", "file.read", "file.upload.chunk", "node.update.chunk", "stream.data"}
+	// NodeCreditReplies: the node's answers that can run to megabytes (a page of a transcript, an item whole, an
+	// image) wait for credit on the interactive lane (rpc.Peer.CreditReplies), ahead of bulk. Its own session.items
+	// pushes go on the bulk lane with credit (rpc.Peer.NotifyBulk); a runtime's, forwarded from that runtime's read
+	// loop, do not (#13677).
+	NodeCreditReplies = []string{"session.items", "session.item", "session.image"}
 )
 
 // Error codes in the manager's answers to a resident node's replayed notifications (a notify with spool_id,

@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 import { takeOverlayEntry } from "./back-close";
 import { BASE, stripBase } from "./base";
 import { decodeURIComponentSafe } from "./uri";
+import { moduleExtensionAt, modulePath, moduleRouteAt } from "../core/module-host";
 
 // Persona's main conversation is the front door (like the app, which opens on the assistant): `/` and `/persona` open it, `/persona/<id>` is
 // one conversation, `/persona/new` starts a one-off one, and "Overview" lives at `/overview`. `/extension/<id>/<ui>` is an extension's page
@@ -29,12 +30,12 @@ export type Route =
   | { name: "persona"; sid?: string; mid?: string; manager?: string; at?: string }
   // "All chats"; `origin` filters it (lib/conversation-origins.ts): the sidebar's "Automatic" rows open it so
   | { name: "history"; origin?: string }
-  // the health space (docs/assistant/health.md): `/health` opens its latest conversation (#4329), `/health/new` its new
-  // conversation page (with its past ones), `/health/<id>` one of them
-  | { name: "health"; sid?: string; fresh?: boolean }
+  // a feature module's page (core/module-host.ts, docs/web/web.md "Modules"): `/<base>/<path…>`, only while the module is
+  // enabled; the module reads `path` itself
+  | { name: "module"; module: string; base: string; path: string[] }
   // a domain space (docs/web/web.md "Domain spaces", #13500): `/tracks/<slug>` opens its latest conversation, `/tracks/<slug>/new`
-  // its home (its conversations, SPACE.md, a box to start one), `/tracks/<slug>/<id>` one of them. The health space keeps
-  // its own page: `/tracks/health…` opens /health…
+  // its home (its conversations, SPACE.md, a box to start one), `/tracks/<slug>/<id>` one of them. A space a module
+  // has its own page for (the health module's `/tracks/health…`) opens that page
   | { name: "track"; slug: string; sid?: string; fresh?: boolean }
   // the new space form (`/tracks/new`)
   | { name: "track-new" }
@@ -103,11 +104,12 @@ export function parse(path: string, search = ""): Route {
   if (p[0] === "requests" && p[1]) return { name: "request", id: p[1] };
   if (p[0] === "overview") return { name: "home" };
   if (p[0] === "history") return p[1] ? { name: "history", origin: p[1] } : { name: "history" };
-  if (p[0] === "health") return p[1] === "new" && !p[2] ? { name: "health", fresh: true } : { name: "health", sid: p[1] || undefined };
+  const module = moduleRouteAt(p);
+  if (module === "absent") return notFound(path, search);
+  if (module) return module;
   if (p[0] === "tracks" && p[1] === "new" && !p[2]) return { name: "track-new" };
   if (p[0] === "tracks" && p[1]) {
     const fresh = p[2] === "new" && !p[3];
-    if (p[1] === "health") return fresh ? { name: "health", fresh: true } : { name: "health", sid: p[2] || undefined };
     return fresh ? { name: "track", slug: p[1], fresh: true } : { name: "track", slug: p[1], sid: p[2] || undefined };
   }
   if (p[0] === "assistant") return { name: "profile" };
@@ -132,7 +134,10 @@ export function parse(path: string, search = ""): Route {
   if (p[0] === "settings") return { name: "settings" };
   if (p[0] === "subscriptions") return { name: "subscriptions" };
   // /plugin/<id>/<ui>: the same page under its name before #1845 (bookmarks)
-  if ((p[0] === "extension" || p[0] === "plugin") && p[1] && p[2]) return { name: "extension", extension: p[1], ui: p[2] };
+  if ((p[0] === "extension" || p[0] === "plugin") && p[1] && p[2]) {
+    // a reserved id a feature module draws is unknown while the module is off (core/module-host.ts)
+    return moduleExtensionAt(p[1]) === "absent" ? notFound(path, search) : { name: "extension", extension: p[1], ui: p[2] };
+  }
   if (p[0] === "todos") {
     // the link's own query (#9930): reading the page's made routeAt() on a /todos?id= link open the to-do on screen
     const q = new URLSearchParams(search);
@@ -149,6 +154,10 @@ export function parse(path: string, search = ""): Route {
     }
     return r;
   }
+  return notFound(path, search);
+}
+
+function notFound(path: string, search: string): Route {
   return { name: "not-found", path: search ? `${path}${search.startsWith("?") ? "" : "?"}${search}` : path };
 }
 
@@ -190,8 +199,8 @@ export function routePath(r: Route): string {
       return "/persona/new";
     case "history":
       return r.origin ? `/history/${encodeURIComponent(r.origin)}` : "/history";
-    case "health":
-      return r.sid ? `/health/${encodeURIComponent(r.sid)}` : r.fresh ? "/health/new" : "/health";
+    case "module":
+      return modulePath(r);
     case "track-new":
       return "/tracks/new";
     case "track": {

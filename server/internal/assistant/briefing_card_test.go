@@ -37,6 +37,15 @@ func newBriefRunEnv(t *testing.T, facts bool) *briefRunEnv { return newBriefRunE
 // newBriefRunEnvWith is newBriefRunEnv with more on the board when the run starts (its facts are worked out then).
 func newBriefRunEnvWith(t *testing.T, facts bool, more func(e *briefRunEnv)) *briefRunEnv {
 	t.Helper()
+	if facts {
+		needsBriefingModule(t)
+	}
+	return briefRunEnvWith(t, facts, more)
+}
+
+// briefRunEnvWith is newBriefRunEnvWith whether or not this build has the briefing module (modules_test.go).
+func briefRunEnvWith(t *testing.T, facts bool, more func(e *briefRunEnv)) *briefRunEnv {
+	t.Helper()
 	f := newFakeHub().withMachine()
 	e := &briefRunEnv{t: t, f: f}
 	f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) {

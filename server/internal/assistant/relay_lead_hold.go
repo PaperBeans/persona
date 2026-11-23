@@ -134,13 +134,24 @@ func (s *Service) handoverKept(id string) bool {
 
 // heldOutsideOwnKinds takes user_requested off the tasks of a plan from held lead lead (handedOver) that neither carry
 // the owner's verified words of a hand-over delivered into it (handedWords) nor are of a kind a started plan of that lead
-// ran (trustKey, or trustFolderKey from before the repository was known): those wait for the owner's Start.
-func (s *Service) heldOutsideOwnKinds(ctx context.Context, lead string, tasks []PlanTask) {
+// ran (trustKey, or trustFolderKey from before the repository was known): those wait for the owner's Start. A continuation
+// keeps its inherited brief, but may instead carry the verified hand-over in the current conversation, as todo_id does.
+func (s *Service) heldOutsideOwnKinds(ctx context.Context, machine, lead string, tasks []PlanTask) {
 	var own map[string]bool
+	var current *briefRecord
 	for i := range tasks {
 		t := tasks[i]
 		if !t.UserRequested || t.Brief != nil && s.handedWords(lead, t.Brief.Request) {
 			continue
+		}
+		if t.Continues != "" {
+			if current == nil {
+				origin := s.briefOrigin(ctx, machine, lead)
+				current = &origin
+			}
+			if s.handedWords(lead, current.Request) {
+				continue
+			}
 		}
 		if own == nil {
 			own = map[string]bool{}

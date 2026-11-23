@@ -122,16 +122,24 @@ func TestDoneTaskBusyAgentIsNeverClosed(t *testing.T) {
 	}
 }
 
-// An agent stopped for being idle is not an ended session: it keeps its terminal with the setting on.
-func TestIdleStopKeepsTheTerminal(t *testing.T) {
-	ctx := context.Background()
-	s, f := newTaskService(t)
-	closeOnEnd(t, s, true)
-	c := idleAgent(time.Now().Add(-48 * time.Hour))
-	f.setSessions("box", c)
-	s.retireAgent(ctx, taskCloseRefused{}, "idle", "box", c, time.Now())
-	if got := retireCalls(f); len(got) != 1 || !strings.HasPrefix(got[0], deviceSessionStop+" ") {
-		t.Fatalf("idle stop asked %v", got)
+// An agent Persona started, stopped for being idle, ends like a done task's: with the setting on its terminal is
+// closed too; off, it is only stopped and keeps it.
+func TestIdleStopClosesTheTerminalWithTheSetting(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		ctx := context.Background()
+		s, f := newTaskService(t)
+		closeOnEnd(t, s, on)
+		c := idleAgent(time.Now().Add(-48 * time.Hour))
+		f.setSessions("box", c)
+		s.retireAgent(ctx, taskCloseRefused{}, "idle", "box", c, time.Now())
+		got := retireCalls(f)
+		want := deviceSessionStop + " "
+		if on {
+			want = deviceSessionRetire + " close_terminal=true,after_exit=true,stop_cause=idle"
+		}
+		if len(got) != 1 || !strings.HasPrefix(got[0], want) {
+			t.Fatalf("on=%v: idle stop asked %v, want %q", on, got, want)
+		}
 	}
 }
 

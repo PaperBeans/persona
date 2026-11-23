@@ -119,6 +119,32 @@ func waitFor(t *testing.T, what string, ok func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// waitForUpdate is waitFor for an update in progress: when it runs out it says where the update stood and where its
+// goroutines were, so a run that stalls on a loaded machine shows what it waited on.
+func waitForUpdate(t *testing.T, u *updater, what string, ok func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); <-time.After(10 * time.Millisecond) {
+		if ok() {
+			return
+		}
+	}
+	v := u.view()
+	t.Fatalf("timed out waiting for %s: update %q %q %q\n%s", what, v.State, v.Progress, v.Error, updateStacks())
+}
+
+// updateStacks are the stacks of the goroutines in an update (the hub's updater, internal/update).
+func updateStacks() string {
+	buf := make([]byte, 1<<22)
+	buf = buf[:runtime.Stack(buf, true)]
+	var out []string
+	for _, g := range strings.Split(string(buf), "\n\n") {
+		if strings.Contains(g, "hub.(*updater)") || strings.Contains(g, "/internal/update.") {
+			out = append(out, g)
+		}
+	}
+	return strings.Join(out, "\n\n")
+}
+
 func setSessions(m *Machine, ss ...proto.Session) {
 	m.mu.Lock()
 	m.sessions = ss

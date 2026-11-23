@@ -43,6 +43,7 @@ func (s *Service) minutesWritten(ctx context.Context, r kb.Recording, m kb.Minut
 	set := s.settings(ctx)
 	n := Notification{ID: "ntf_minutes_" + r.ID + "_" + strconv.Itoa(m.Version), Kind: NotifyPush, Title: title, Body: body,
 		DeviceID: set.MachineID, SessionID: set.Main, RecordingID: r.ID}
+	s.noteCard(ctx, cardMinutesReady, n)
 	if _, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
 		s.logf("assistant: minutes push: %v", err)
 	}

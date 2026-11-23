@@ -167,7 +167,7 @@ func TestCompletedTodoManualTurnPreservesReopeningRules(t *testing.T) {
 			if err := s.sendToSession(ctx, "box", "s1", "Check one more case."); err != nil {
 				t.Fatal(err)
 			}
-			s.taskWorking(ctx, "box", "s1")
+			s.taskWorking(ctx, "box", "s1", startRow{})
 			s.workStarted(ctx, "box", "s1", time.Now())
 			wantReopen := doneBy == db.DoneByAuto
 			if reopened := todoNow(s, "todo_done").DoneAt == nil; reopened != wantReopen {

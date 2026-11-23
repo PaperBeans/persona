@@ -16,6 +16,7 @@ struct PersonaWidgetsBundle: WidgetBundle {
         AskPersonaControl()
         PersonaAgentsControl()
         DictatePersonaControl()
+        CallPersonaControl()
         CompatibleAssistantControl()
         CompatibleAgentsControl()
     }

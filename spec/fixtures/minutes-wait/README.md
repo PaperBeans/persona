@@ -1,7 +1,7 @@
 # What the minutes line says while the minutes wait
 
 A hub-mode meeting's minutes wait for the final pass, which replays the whole recording once it is complete (#13461).
-While they wait, the minutes line on the iPhone and the web says the hub is checking the whole recording, with
+While they wait, the minutes line on the iPhone, Android and the web says the hub is checking the whole recording, with
 minutes done of the total once the pass has started, instead of "Writing the minutes…" for the whole wait. The rules
 are in [docs/assistant/meeting-minutes.md "Gaps and the final pass"](../../../docs/assistant/meeting-minutes.md). These
 cases hold the hub (what it keeps → what it sends) and the clients (what they get → which line, which numbers) to
@@ -41,4 +41,5 @@ the same rule. All data is made up.
 - iPhone: `apple/PersonaTests/MinutesWaitFixtureTests.swift` (the rule in `MinutesWaitLine`,
   `apple/Persona/Recording/MeetingAudioWire.swift`).
 - web: `cd web && npx vitest run src/lib/minutes-wait.test.ts` (the rule in `web/src/lib/minutes-wait.ts`).
-- A new case: work out the expected line and numbers by hand from the rules above, then run all three.
+- Android: KnowledgeMinutesTest in the feature:knowledge module (the rule in KnowledgeMinutes.kt).
+- A new case: work out the expected line and numbers by hand from the rules above, then run the hub and client checks.

@@ -132,6 +132,10 @@ func TestOwnersDecisionEndsAParkingThatWaitsForThem(t *testing.T) {
 // decision ended the park and nobody was told, so the signal is raised again. A park's time that was waiting is moot.
 func TestDecisionThatEndedAParkingIsToldAfterARestart(t *testing.T) {
 	s, _, todo := newSupervisedServiceOn(t, todoTestDB(t))
+	// No supervision message goes out before the restart, as this test's premise has it. parked_due and park_decided
+	// are immediate, so holdDigest alone does not keep them in: a digest taking parked_due could put it back after the
+	// decision retired it (#13838).
+	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
 	ctx := context.Background()
 	parkFor(t, s, todo.ID, "Ada has to say which region goes first", "someone_else", "2h")
 	holdDigest(s)

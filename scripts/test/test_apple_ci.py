@@ -229,6 +229,9 @@ class AppleCIPreparationTests(unittest.TestCase):
         # The packages lane's PersonaWire tests came later (#12734) and are pinned on their own.
         wire = script[script.index('  # The wire layer every app target links,'):script.index("  ci_run 'PersonaKit unit tests'")]
         self.assertIn("ci_run 'PersonaWire unit tests'", wire)
+        # So did the module registry's package tests (#13432), pinned on their own as well.
+        modules = script[script.index('  # The module contract and registry (#13432'):script.index("  ci_run 'Persona Input build'")]
+        self.assertIn("ci_run 'PersonaModuleAPI unit tests'", modules)
         for lane in ('ios', 'ios-focused', 'ios-regressions'):
             current = script.replace('      --output "$watch_log" --stop "$watch_log/stop" --seconds "$seconds" \\\n      --derived-data "$output/ios-tests" &',
                                      '      --output "$watch_log" --stop "$watch_log/stop" --seconds "$seconds" &')
@@ -324,6 +327,7 @@ class AppleCIPreparationTests(unittest.TestCase):
                                       '    -clonedSourcePackagesDirPath "$SPM/SourcePackages"',
                                       '"${XCODE[@]}"')
             current = current.replace(wire, '')
+            current = current.replace(modules, '')
             current = current.replace(' || [ "$LANE" = ios-ipad-diagnostic ]', '').replace('|ios-ipad-diagnostic', '')
             current = current.replace('      checker="$1"; bundle="$2"; log="$3"; watch_log="$4"; udid="$5"; ci_root="$6"; bundle_id="$7"; output="$8"; diagnostics="$9"; lane="${10}"; shift 10',
                                       '      checker="$1"; bundle="$2"; log="$3"; watch_log="$4"; udid="$5"; ci_root="$6"; bundle_id="$7"; output="$8"; shift 8')

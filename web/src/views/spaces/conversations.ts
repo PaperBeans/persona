@@ -1,4 +1,4 @@
-// A domain space's conversations (#13500), read as the health page reads its own (views/health/Health.tsx): the
+// A domain space's conversations (#13500), read as the health page reads its own (modules/health/Health.tsx): the
 // default manager's list for the space, with the live sessions of the space's computer merged in for their titles and
 // last lines, read again on every hello.
 import { useCallback, useEffect, useMemo, useState } from "react";

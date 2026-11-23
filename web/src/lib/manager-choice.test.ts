@@ -283,7 +283,7 @@ describe("api", () => {
       expect(seen).toEqual(["GET /assistant null", "GET /assistant m-1", "POST /assistant/conversations m-1", "GET /machines null"]);
       // the health space stays the default manager's whatever the pick (docs/assistant/health.md): its list and a new conversation
       seen.length = 0;
-      const { startHealthConversation } = await import("../views/health/reports");
+      const { startHealthConversation } = await import("../modules/health/reports");
       await api("/assistant?space=health");
       await startHealthConversation({ prompt: "x" }).catch(() => {});
       expect(seen).toEqual(["GET /assistant?space=health null", "POST /assistant/conversations?space=health null"]);

@@ -288,7 +288,7 @@ const SUMMARY_FLAGS = ["quiet", "awaits_reply", "starting", "awaiting_first_mess
  *  carries (state, last words, markers), and the details it never carries (items' arrays, queued) stay. */
 function listedOver(row: Session, listed: Session): Session {
   if (typeof listed.waiting !== "boolean") return sameValue(listed, row) ? row : listed;
-  const next: Session = { ...row, ...listed, background_working: listed.background_working, background_waiting: listed.background_waiting };
+  const next: Session = { ...row, ...listed, background_working: listed.background_working, background_waiting: listed.background_waiting, background_stalled_since: listed.background_stalled_since };
   for (const key of SUMMARY_FLAGS) if (!(key in listed)) delete next[key];
   return sameValue(next, row) ? row : next;
 }
@@ -1321,6 +1321,7 @@ export function upsertSession(s: Session, opts: { undelivered?: boolean } = {}) 
     else if (!x.assistant) merged.undelivered = opts.undelivered ? s.undelivered : x.undelivered; // an Agent's (#10661)
     merged.background_working = s.background_working;
     merged.background_waiting = s.background_waiting;
+    merged.background_stalled_since = s.background_stalled_since;
     // An optimistic action can start from getSession's summary fallback. A later complete info response must
     // drop its scalar summary markers, or they keep overriding the complete task arrays indefinitely.
     if (typeof s.waiting !== "boolean") {

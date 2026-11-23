@@ -67,6 +67,7 @@
   "push_reason_no_relay": "{route}: the hub has no apns.json and the device reported no relay (the build has no relay configured, or the app is too old)",
   "push_reason_no_token": "{route}: no APNs token (the device didn’t allow notifications, or registering with APNs failed)",
   "push_reason_relay_failed": "{route}: registering with the push relay failed ({detail})",
+  "push_relay_next": "Check the relay's health and the topics it serves",
   "push_route_direct": "Straight to APNs",
   "push_route_none": "Can’t get background pushes",
   "push_route_relay": "Through the push relay",

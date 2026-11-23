@@ -186,6 +186,17 @@ describe("the decided differences: each case, and look-alikes that are not one",
     },
     { why: "inactive", is: { local: local("other", "rest"), view: view("todo", "rest", inactive), facts: facts({ restoredHere: true }) }, not: [] },
     { why: "inactive", is: { local: local("shelved", "stale"), view: view("todo", "rest"), facts: facts({ missing: true }) }, not: [] },
+    // rows 1, 2: a supervised failed start and a card its supervisor holds are Persona's work, not the owner's; any other
+    // Working, or a decision only the owner can make, is not this difference
+    {
+      why: "supervisor_holds",
+      is: { local: local("waiting", "agent_asks"), view: view("working", "persona_working") },
+      not: [
+        { local: local("waiting", "agent_asks"), view: view("working", "agent_running") },
+        { local: local("waiting", "owner_decides"), view: view("working", "persona_working") },
+      ],
+    },
+    { why: "supervisor_holds", is: { local: local("waiting", "failed_start"), view: view("working", "persona_working") }, not: [] },
   ];
 
   for (const c of cases) {

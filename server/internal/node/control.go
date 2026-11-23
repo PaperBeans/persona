@@ -565,7 +565,7 @@ func (n *Node) retypeStart(ctx context.Context, pane string, typed *typedStart) 
 // error: in its data (screen) for a coded one, else after its text.
 func (n *Node) startTabFailed(ctx context.Context, launch host.Launcher, created *host.Created, ws, id string, err error) error {
 	pane := created.Pane.String()
-	shown, _ := n.readPane(ctx, pane, "recent-unwrapped", 30)
+	shown, _ := n.readPane(ctx, pane, "recent-unwrapped", 2*screen.DialogLines)
 	tail := lastLines(shown, 12)
 	keep := func(e error) error {
 		if adoptedPane(ctx) != nil { // the user's own pane ("Run Agent Here"): theirs to keep, never closed later
@@ -579,7 +579,10 @@ func (n *Node) startTabFailed(ctx context.Context, launch host.Launcher, created
 	case rpcCode(err) == proto.CodeShellWaiting:
 		return keep(err)
 	case errors.As(err, &stalled):
-		return keep(refusal(proto.CodeAgentStartStalled, fmt.Sprintf("%v\n%s", err, tail), map[string]any{"screen": tail}))
+		// The whole screen, as a dialog is read (screen.DialogLines): whoever remedies the start reads what stopped it
+		// (an unrecognized dialog's question and every choice), not only its last rows.
+		whole := stalledScreen(shown)
+		return keep(refusal(proto.CodeAgentStartStalled, fmt.Sprintf("%v\n%s", err, whole), map[string]any{"screen": whole}))
 	case errors.As(err, &rejected):
 		n.closeNewTab(ctx, launch, created, ws)
 		return refusal(proto.CodeStartLineRejected, fmt.Sprintf("%v, twice; the tab is closed\n%s", err, tail),
@@ -590,6 +593,19 @@ func (n *Node) startTabFailed(ctx context.Context, launch host.Launcher, created
 		return err
 	}
 	return fmt.Errorf("%w\n%s", err, tail)
+}
+
+// stalledScreen is the last screen.DialogLines rows of a stalled start's pane, the blank rows under what it drew left
+// out (a tall pane's fresh screen is mostly blank rows below a dialog drawn from its top).
+func stalledScreen(shown string) string {
+	lines := strings.Split(strings.TrimRight(shown, "\n"), "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) > screen.DialogLines {
+		lines = lines[len(lines)-screen.DialogLines:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // checkStart validates a start's arguments and returns the directory (~ expanded, home when empty) and launcher.

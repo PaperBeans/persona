@@ -747,7 +747,7 @@
     "android/feature/terminal/src/main/kotlin/persona/feature/terminal/TerminalSelectText.kt": {
       "icon": 1
     },
-    "android/feature/voice/src/main/kotlin/persona/feature/voice/VoiceScreen.kt": {
+    "android/module/voice/src/main/kotlin/persona/module/voice/VoiceScreen.kt": {
       "icon": 14
     },
     "android/platform/capsule/src/main/kotlin/persona/platform/capsule/CapsuleSurface.kt": {

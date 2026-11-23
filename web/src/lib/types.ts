@@ -456,6 +456,9 @@ export interface Session {
   /** Working only because of background commands that only wait (sleep, a check loop, gh … --watch; #6045): shown
    *  as "Waiting in the background", lighter, and not counted as Working. An older hub never sends it. */
   background_waiting?: boolean;
+  /** Working on background commands that have used no CPU and written no output since this time (#13744; a known
+   *  worker, set once that has lasted ten minutes, omitted otherwise). The state is still Working: a hint, not a state. */
+  background_stalled_since?: string;
   rev?: number;
   suggestion?: string;
   /** The suggestion names a command, a path, a link, a secret-looking string or a risky action (#4644): it is filled

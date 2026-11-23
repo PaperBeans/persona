@@ -306,6 +306,19 @@ func uids(items []mapped) []string {
 	return out
 }
 
+// answerOf is a things recipe's answer as kept (Subscription.Answer): its rows' uids in its order, a repeated row once.
+func answerOf(items []mapped) []string {
+	out := make([]string, 0, len(items))
+	had := make(map[string]bool, len(items))
+	for _, m := range items {
+		if !had[m.item.UID] {
+			had[m.item.UID] = true
+			out = append(out, m.item.UID)
+		}
+	}
+	return out
+}
+
 // statusOf maps a problem to the HTTP status the API answers it with.
 func statusOf(code string) int {
 	switch code {

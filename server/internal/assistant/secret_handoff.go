@@ -201,7 +201,7 @@ func (s *Service) handoffApprove(ctx context.Context, convMachine, self string, 
 		Summary:     handoffSummary(l, len(names), agent, h.machineName),
 		AlwaysLabel: i18n.T(l, "assistant-secret_handoff.always", i18n.Args{"launcher": h.launcher, "machine": h.machineName}),
 		CreatedAt:   now, ExpiresAt: expires}
-	r, err := s.ask(ctx, ix)
+	r, err := s.ask(withCard(ctx, cardSecretForm), ix)
 	claim, vouched := s.takeHandoffClaim(ix.ID)
 	if err != nil {
 		return "", "", err

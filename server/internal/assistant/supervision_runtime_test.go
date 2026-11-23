@@ -402,7 +402,7 @@ func TestCapableRuntimeSideChatSurvivesRehome(t *testing.T) {
 	}
 	waitFor(t, "the worker to link before rehome", func() bool { return len(onlyTodo(s).Agents) == 1 })
 	task := onlyTodo(s)
-	s.rehomeSupervisedTodos(ctx)
+	s.backfillPlanSupervisors(ctx)
 	if got := todoNow(s, task.ID).Supervision; got == nil || got.Supervisor != side.SessionID {
 		t.Fatalf("rehome rewrote the explicit capable-runtime topology: %+v", got)
 	}

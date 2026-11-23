@@ -177,9 +177,10 @@ type Settings struct {
 	// Leaders are the side conversations the user made leaders (#3133, supervise_leader.go): a task one hands out with
 	// task_plan is supervised by it instead of the main conversation. Empty (the default): only the main one supervises.
 	Leaders []string `json:"leaders,omitempty"`
-	// BriefingWaits tunes only the deterministic wait rows in morning/evening facts. Nil uses the supervision
-	// thresholds documented by briefingWaitsOf; changes go through persona_settings' ordinary owner approval.
-	BriefingWaits *BriefingWaits `json:"briefing_waits,omitempty"`
+	// BriefingWaits tunes only the deterministic wait rows in morning/evening facts: the briefing module's setting
+	// (internal/modules/briefing, Waits), kept here as stored, also while the module is off. Nil uses the module's
+	// defaults (the supervision thresholds); changes go through persona_settings' ordinary owner approval (modules.go).
+	BriefingWaits moduleValue `json:"briefing_waits,omitempty"`
 	// InterjectBackground: a message the user sends while a Claude conversation is still answering moves what runs in
 	// the foreground (Bash commands, subagents) to the background, so the message is taken up at once instead of after
 	// them (Claude Code 2.1.139 or later, node/assistant_interject.go). nil is off (the default). A round the

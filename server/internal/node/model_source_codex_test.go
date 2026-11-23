@@ -203,3 +203,89 @@ func TestCodexSourceResolvesLauncherHomeAndWorkingDirectory(t *testing.T) {
 		}
 	}
 }
+
+// A pane's shell has its engine's environment, not the node's: the node's allowlist reaches codex-start through its
+// file, and personad launch through launcher.env. Once adopted, codexModelSource injects the source as the node would.
+func TestCodexModelSourceAdoptsTheNodesHosts(t *testing.T) {
+	t.Setenv(modelhttp.SourceHostsEnv, "")
+	home, cwd, env := sourceCodexFixture(t, sourceCodexProvider)
+	if argv, _ := codexModelSource([]string{"codex"}, env, cwd, home); len(argv) != 1 {
+		t.Fatalf("injected without an allowlist: %q", argv)
+	}
+	if got := adoptSourceHosts("  "); got != "" || os.Getenv(modelhttp.SourceHostsEnv) != "" {
+		t.Fatalf("an empty allowlist was adopted: %q", got)
+	}
+	if got := adoptSourceHosts(" *.example.com "); got != modelhttp.SourceHostsEnv+"=*.example.com" {
+		t.Fatalf("adopted %q", got)
+	}
+	argv, outEnv := codexModelSource([]string{"codex"}, env, cwd, home)
+	cfg, err := codexSourceConfig(argv, outEnv, cwd, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindings := cfg["model_providers"].(map[string]any)["custom"].(map[string]any)["env_http_headers"].(map[string]any)
+	for name, value := range map[string]string{modelhttp.RoleHeader: "task_agent", modelhttp.TodoHeader: "todo_123"} {
+		variable, _ := bindings[name].(string)
+		if envValue(outEnv, variable) != value {
+			t.Fatalf("header %s not injected after adopting the allowlist: %v", name, bindings)
+		}
+	}
+}
+
+// The node writes its allowlist into a start that carries a source, and only into one.
+func TestSourceHostsForAStart(t *testing.T) {
+	t.Setenv(modelhttp.SourceHostsEnv, "gw.example.com")
+	if got := sourceHostsFor(modelhttp.Source{Role: "task_agent", Todo: "todo_1"}); got != "gw.example.com" {
+		t.Fatalf("with a source: %q", got)
+	}
+	if got := sourceHostsFor(modelhttp.Source{}); got != "" {
+		t.Fatalf("without a source: %q", got)
+	}
+	t.Setenv(modelhttp.SourceHostsEnv, "")
+	if got := sourceHostsFor(modelhttp.Source{Role: "task_agent"}); got != "" {
+		t.Fatalf("no allowlist on the node: %q", got)
+	}
+}
+
+// codex-start hands the file's allowlist to what it runs, with the source; a pane that had none still gets it.
+func TestCodexStartPassesTheNodesHosts(t *testing.T) {
+	envBin, err := exec.LookPath("env")
+	if err != nil {
+		t.Skip("no env(1)")
+	}
+	for _, tc := range []struct{ name, hosts, want string }{
+		{"from the file", "*.example.com", modelhttp.SourceHostsEnv + "=*.example.com"},
+		{"none", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), "start.json")
+			source := modelhttp.Source{Role: "task_agent", Todo: "todo_1"}
+			b, _ := json.Marshal(codexStartFile{Source: source, SourceHosts: tc.hosts, Argv: []string{envBin}})
+			if err := os.WriteFile(file, b, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			args, _ := json.Marshal([]string{file})
+			cmd := exec.Command(os.Args[0], "-test.run=^TestCodexStartHelper$")
+			cmd.Env = append(withoutEnv(os.Environ(), []string{modelhttp.SourceHostsEnv}), "PERSONA_CODEX_START_HELPER=1", "PERSONA_CODEX_START_ARGS="+string(args))
+			out, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("%v: %s", err, out)
+			}
+			var hosts []string
+			sourced := false
+			for _, kv := range strings.Split(string(out), "\n") {
+				if strings.HasPrefix(kv, modelhttp.SourceHostsEnv+"=") {
+					hosts = append(hosts, kv)
+				}
+				sourced = sourced || strings.HasPrefix(kv, modelSourceEnv+"=")
+			}
+			want := []string{}
+			if tc.want != "" {
+				want = []string{tc.want}
+			}
+			if !reflect.DeepEqual(append([]string{}, hosts...), want) || !sourced {
+				t.Errorf("allowlist %q (source passed: %v), want %q", hosts, sourced, want)
+			}
+		})
+	}
+}

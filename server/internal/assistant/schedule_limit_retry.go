@@ -176,7 +176,7 @@ func (s *Service) recoverScheduledLimitRetry(ctx context.Context, w delayedWait)
 		if s.exitPolicy(ctx, text, run.SessionID, space).Redact {
 			name, _ = s.redactedNotice(ctx, s.lang(ctx), space)
 		}
-		s.push(ctx, Notification{Subtitle: retry.MachineName, DeviceID: run.MachineID, SessionID: run.SessionID,
+		s.push(withCard(ctx, cardScheduleLimitRetry), Notification{Subtitle: retry.MachineName, DeviceID: run.MachineID, SessionID: run.SessionID,
 			Title: i18n.T(s.lang(ctx), "assistant-schedule.run_failed", i18n.Args{"name": name}), Body: body})
 	}
 	if err := s.finishUnknownScheduledRetry(context.Background(), w.ID, w.Claim); err != nil {

@@ -280,7 +280,7 @@ func sessionSpaceKey(machineID string, c proto.Session) string {
 func (s *Service) ensureTodosLoaded(ctx context.Context) error {
 	loaded, err := s.loadTodoInventory(ctx)
 	if loaded {
-		s.rehomeSupervisedTodos(ctx)
+		s.backfillPlanSupervisors(ctx)
 		s.restoreSupervisePending(ctx)
 		s.retryOwnerWaits(ctx) // crash recovery resumes only explicitly undelivered owner pushes
 		// The links as read are the ones the marks go by from now on: one that goes away later syncs its machine

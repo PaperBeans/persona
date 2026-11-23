@@ -51,6 +51,7 @@ import type { Interaction, Item, Session, Subagent } from "../../lib/types";
 import { REVIEW_FEATURE } from "../../lib/types";
 import { anchoredScroll, followsAgain, isScrollbarPress, jumpLabel, leavesOnKey, leavesOnScrollbarDrag, leavesOnTouch, leavesOnWheel, followsAfterUnfold, UNFOLD_PAUSE, type ScrollAnchor } from "../../lib/disclosure";
 import { Button, copyText, cx, Dialog, IconButton, Loading, Menu, toast, useMenu, useNow, type MenuItem } from "../../ui/atoms";
+import { BackgroundStallHint } from "../../ui/BackgroundStallHint";
 import { StatusMark } from "../../ui/StatusMark";
 import { Icon } from "../../ui/icons";
 import { StoppedAgentLine } from "./StoppedAgentLine";
@@ -262,7 +263,7 @@ async function forkAt(mid: string, sid: string, itemId: string, assistant: boole
     await refresh();
     // a health conversation's branch runs in the health space too (docs/assistant/health.md)
     // a Persona conversation's branch is on its computer and its manager's (lib/conversation-page.ts)
-    navigate(!assistant ? { name: "session", mid, sid: r.session_id } : space === "health" ? { name: "health", sid: r.session_id } : conversationPage(r.session_id, mid, manager));
+    navigate(!assistant ? { name: "session", mid, sid: r.session_id } : space === "health" ? `/health/${encodeURIComponent(r.session_id)}` : conversationPage(r.session_id, mid, manager));
     toast(t("chat-chatview.forked"), "ok");
   } catch (e) {
     toast(t("chat-chatview.fork_failed", { error: errorText(e) }), "error");
@@ -3185,6 +3186,7 @@ export const Header = memo(function Header({
             <span className="truncate">{branch}</span>
           </span>
         )}
+        {!editing && session && !assistant && <BackgroundStallHint session={session} className="ml-1.5 max-w-56 shrink rounded-full px-1.5 py-0.5 text-[12px] @max-[800px]:hidden" />}
       </div>
       {topCenter && <div className="flex min-w-0 flex-1 justify-center lg:hidden">{topCenter}</div>}
       <div className={headerSlot(Boolean(topCenter), "end")}>

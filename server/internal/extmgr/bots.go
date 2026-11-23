@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/agents"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -29,6 +30,8 @@ import (
 // BotsConfig is hub.json "bots".
 type BotsConfig struct {
 	Feishu FeishuBotConfig `json:"feishu,omitempty"`
+	// Endpoints are the explicit Agents → Bots registrations; no structured session is inferred to be a bot.
+	Endpoints []agents.BotRegistration `json:"endpoints,omitempty"`
 }
 
 // FeishuBotConfig: the app's credentials, for those who would rather keep them in manager.json (0600) than enter them in

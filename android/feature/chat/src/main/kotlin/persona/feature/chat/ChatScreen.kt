@@ -599,8 +599,7 @@ private fun ChatPage(
         wireText = command ?: linkMessage(composer.message(), linkContexts, context.resources), paneId = session?.paneId,
         conversationLauncher = conversationLauncher, conversationModel = conversationModel, glassAgent = glass && agentChat,
         onFailed = onFailed, onCleared = { refs -> linkContexts = linkContexts.filterNot { ref -> refs.any { it.id == ref.id } } })
-    // Chat content (group A): the message menu, the image viewer, photos and paths in messages, the API error retry.
-    val messageMenu = remember(key) { MessageMenuState() }
+    // Chat content (group A): the message menu, quote and context actions.
     // A swipe to the left quotes (iOS #1058) wherever the long-press menu's "Quote" is offered.
     val quoteTarget: (MessageTarget) -> Unit = { target ->
         // Over the box as a quote that goes with the next message, the draft left as it is (iOS #986).
@@ -614,10 +613,11 @@ private fun ChatPage(
         composer.focusRequest++
     }
     val pickedQuote by rememberUpdatedState(quoteWords)
+    val messageMenuState = remember(key) { MessageMenuState() }
     val menuWrites = messageMenuWrites(readOnly, session)
     LaunchedEffect(menuWrites) {
-        messageMenu.quote = if (menuWrites) ({ target: MessageTarget -> swipeQuote(target) }) else null
-        messageMenu.quoteWords = if (menuWrites) ({ target: MessageTarget, words: String -> pickedQuote(target, words) }) else null
+        messageMenuState.quote = if (menuWrites) ({ target: MessageTarget -> swipeQuote(target) }) else null
+        messageMenuState.quoteWords = if (menuWrites) ({ target: MessageTarget, words: String -> pickedQuote(target, words) }) else null
     }
     // "Branch to new chat" (#2137) from a reply, "Rewind to here" (#2436) on your message: the menu's session-wide extras (web ⋯).
     var forking by remember { mutableStateOf(false) }
@@ -699,46 +699,17 @@ private fun ChatPage(
         chrome.childSessionId?.let { subagentFolds.open(persona.core.domain.lines.ChildSessionCards.call(it)) }
     }
     val workflowCards = pageSubagents.workflowCards
-    val viewerState = remember { mutableStateOf<ViewerRequest?>(null) }
+    val messageActions = rememberChatRowActionPreparation(key, repository, chrome, scope, renderStyle, session,
+        projection, readOnly, canSend, session?.status == "working" || messages.isNotEmpty(), currentItems, messageMenuState) { send(it) }
+    val messageMenu = messageMenuState
+    val viewerState = messageActions.viewer
     var viewer by viewerState
-    val photos = remember(chrome.files, key, session?.cwd) { chrome.files?.let { AttachedPhotos(it, key.machineId, session?.cwd.orEmpty()) } }
-    val localCacheDir = androidx.compose.ui.platform.LocalContext.current.cacheDir
-    val localImages = remember(chrome.files, chrome.hubScope, key.machineId, session?.cwd, localCacheDir) {
-        chrome.files?.let { LocalMarkdownImages(it, chrome.hubScope, key.machineId, session?.cwd.orEmpty(), localCacheDir) }
-    }
-    // A "Continue" already on its way counts as working: the card offers no second one.
-    // A turn that failed on the refusal fallback's missing model (#2528): "Continue" would go to the same model.
-    // Every model of a main or leader conversation's recovery chain failed (#7824): the turn's last error card names
-    // the cause and when the configured model is back, and keeps "Retry" whatever the error says.
     val lastUserId = snapshot.items.lastOrNull { it.role == "user" && it.kind == "text" }?.id
-    // Persona's last turn ended on a model set-up error the hub named: the fix replaces the error line (#4339 C18, iOS
-    // `turnFix`). An older hub has no turn_error_code; as on the web, its raw tool-search 400 still names that one remedy.
-    val rawTurnFix = (projection.lines.lastOrNull() as? ChatLine.ApiError)
-        ?.takeIf { it.info.toolSearchUnsupported }?.let { TurnErrorFix.ToolSearchUnsupported }
-    val turnFix = if (renderStyle == ChatRenderStyle.Assistant) {
-        // An explicit hub code always wins, including a code this client does not map (model_fallback_unavailable).
-        if (session?.turnErrorCode.isNullOrBlank()) rawTurnFix else TurnErrorFix.of(session?.turnErrorCode)
-    } else null
-    val exhausted = exhaustedRecovery(projection.lines, session?.modelFallback)
-    val retryId = retryLine(projection.lines, session?.status == "working" || messages.isNotEmpty(),
-        !readOnly && canSend && session?.turnErrorCode != FALLBACK_UNAVAILABLE, exhausted = exhausted != null, turnFix = turnFix)
-    // Paths in messages link only when there on the machine (PathLinks.kt): asked of the session's directory.
-    val pathPresence = remember(chrome.files, key, session?.cwd, chrome.onOpenPath != null) {
-        val files = chrome.files
-        val cwd = session?.cwd.orEmpty().ifBlank { "~" }
-        if (files == null || key.machineId.isBlank() || chrome.onOpenPath == null) null
-        else PathPresence(scope, { paths -> files.stat(key.machineId, cwd, paths) })
-    }
-    val currentSend by rememberUpdatedState<(String) -> Unit>({ send(it) })
-    // Stays the same object while the conversation streams: rows read it, and a new one would redraw them all.
     val continueText = stringResource(R.string.chat_screen_continue_message)
-    val imageDescription = stringResource(R.string.chat_content_image)
-    val replyImages = remember(key, repository) { (repository as? ChatLocalStorage)?.replyImages(key) }
-        ?.collectAsStateWithLifecycle(initialValue = null)?.value
-    val rowActions = rememberChatRowActions(key, repository, replyImages, localImages, photos, retryId, exhausted,
-        chrome.onOpenPath, pathPresence, chrome.files, session?.cwd, chrome.onOpenPath,
-        { images, index -> viewer = ViewerRequest(images, index) }, currentItems, messageMenu,
-        { currentSend(continueText) }, imageDescription)
+    val rowActions = messageActions.actions
+    val exhausted = messageActions.exhausted
+    val retryId = messageActions.retryId
+    val turnFix = messageActions.turnFix
     val currentMarkdownPaths by rememberUpdatedState(rowActions.paths?.takeIf { rowActions.openPath != null })
     LaunchedEffect(liveItems) {
         liveItems.revisions.collect { revision ->

@@ -449,7 +449,7 @@ func TestAgyPaneConversationIsolation(t *testing.T) {
 			}
 			seedAgents(t, n, f, first, second)
 			got, _ := agyTestItems(t, n, row2, nil)
-			if len(got) != 1 || got[0].Kind != "notice" || got[0].TS.IsZero() || !strings.Contains(got[0].Text, "herdr integration install antigravity-cli") {
+			if len(got) != 1 || got[0].Kind != "notice" || got[0].TS.IsZero() || !strings.Contains(got[0].Text, "personad node doctor") {
 				t.Fatalf("terminal notice: %+v", got)
 			}
 			assertMissingItem(row2, items[0].ID)

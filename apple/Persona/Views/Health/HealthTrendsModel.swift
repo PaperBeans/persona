@@ -26,13 +26,18 @@ import PersonaWire
         case loading
         /// Health was never asked for on this phone.
         case needsAccess
-        /// This device has no Health data (iPad without Health, Mac, Vision).
+        /// HealthKit is unavailable on this device. Vision Pro is excluded by the home at compile time;
+        /// its HealthKit availability alone is not evidence that this app has the required entitlements.
         case unavailable
         /// The cards in metric order; empty when no metric has data (or reading was not allowed).
         case loaded([HealthTrendMetric: ExtensionPersonaCard])
     }
 
     private(set) var state: State = .loading
+    var hasData: Bool {
+        if case .loaded(let cards) = state { return !cards.isEmpty }
+        return false
+    }
     var range: HealthTrendRange = .week
     /// The range the cards on screen are for.
     @ObservationIgnored private var loadedRange: HealthTrendRange?
@@ -41,6 +46,7 @@ import PersonaWire
     init(deps: Deps = .live) { self.deps = deps }
 
     func load() async {
+        guard !Task.isCancelled else { return }
         switch deps.access() {
         case .notNeeded: state = .unavailable; return
         case .notDetermined: state = .needsAccess; return
@@ -52,16 +58,21 @@ import PersonaWire
         let days = HealthTrends.dayKeys(range.rawValue, now: deps.now())
         var cards: [HealthTrendMetric: ExtensionPersonaCard] = [:]
         for metric in HealthTrendMetric.allCases {
-            guard let values = try? await deps.daily(metric, range.rawValue) else { continue }
+            guard !Task.isCancelled else { return }
+            let values = try? await deps.daily(metric, range.rawValue)
+            guard !Task.isCancelled else { return }
+            guard let values else { continue }
             if let card = HealthTrends.card(metric, values: values, days: days, range: range) { cards[metric] = card }
         }
-        guard range == self.range else { return } // the range changed while reading; that load draws
+        guard !Task.isCancelled, range == self.range else { return } // the range changed while reading; that load draws
         state = .loaded(cards)
         loadedRange = range
     }
 
     func requestAccess() async {
+        guard !Task.isCancelled else { return }
         _ = await deps.requestAccess()
+        guard !Task.isCancelled else { return }
         await load()
     }
 }

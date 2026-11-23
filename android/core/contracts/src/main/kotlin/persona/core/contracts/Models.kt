@@ -795,6 +795,8 @@ data class Session(
     val key: SessionKey get() = SessionKey(machineId, sessionId)
     /** A chat of the health space ([space]), which the assistant's own lists leave out. */
     val isHealth: Boolean get() = space == persona.core.contracts.api.AssistantSpace.HEALTH
+    /** A chat of any space ([space]: health or a domain space, #13500), which the assistant's own lists leave out. */
+    val isSpace: Boolean get() = !space.isNullOrEmpty()
     val agentState: AgentState get() = AgentState.of(state, status)
     /**
      * The list state of this session and its folded children; its own wire state stays intact. A side session's result

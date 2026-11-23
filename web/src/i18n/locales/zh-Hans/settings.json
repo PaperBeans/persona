@@ -188,5 +188,9 @@
   "herdr_tab_name_saving": "正在保存会话命名设置…",
   "show_botmux_inventory": "电脑上的“同时显示 botmux 会话”开关决定哪些会话会传到 Hub。",
   "show_botmux_computers": "打开电脑",
-  "botmux_saving": "保存中…"
+  "botmux_saving": "保存中…",
+  "sort_by_activity": "Agents 按最近更新排序",
+  "sort_by_activity_hint": "关闭时保持固定顺序；开启后按最近活动排序，且只在鼠标离开侧栏时才重新排序。",
+  "show_agents_filter": "Agents 列表显示筛选",
+  "show_agents_filter_hint": "在 Agents 列表上显示「筛选」按钮和条件。关闭时隐藏并清除已有筛选。"
 }

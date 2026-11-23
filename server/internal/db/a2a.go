@@ -188,6 +188,17 @@ func (d *DB) A2ACount(ctx context.Context, owner, machine, session, contextID, s
 	return n, err
 }
 
+// A2AReady makes an undelivered active request due at the recipient's idle
+// edge. Merely waking the poller would leave its previous eight-second lease
+// in place. Sending/uncertain inputs and FIFO tails keep their leases/state.
+func (d *DB) A2AReady(ctx context.Context, machine, session string) error {
+	_, err := d.pool.Exec(ctx, `UPDATE a2a_tasks SET next_check=now()
+		WHERE target_machine=$1 AND target_session=$2 AND state='submitted'
+		  AND next_check > now()
+		  AND body->'events' @> '[{"kind":"message","delivery":"queued"}]'::jsonb`, machine, session)
+	return err
+}
+
 func (d *DB) A2AClaim(ctx context.Context, limit int) ([]A2ARow, error) {
 	rows, err := d.pool.Query(ctx, `UPDATE a2a_tasks SET next_check=now()+interval '8 seconds'
 		WHERE id IN (SELECT id FROM a2a_tasks WHERE next_check<=now() ORDER BY next_check LIMIT $1 FOR UPDATE SKIP LOCKED)

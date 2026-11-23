@@ -10,12 +10,12 @@ import { IconButton } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { conversationTitle } from "../assistant/conversations";
 import { t } from "../../i18n";
+import { moduleNavItem } from "../../core/module-host";
 
 /** A page the strip names by its row in the sidebar when it has no title of its own to say (#12055). */
 const PAGE_NAMES: Partial<Record<Route["name"], string>> = {
   home: "sidebar.nav_home",
   inbox: "sidebar.nav_inbox",
-  health: "sidebar.nav_health",
   "workspace-board": "sidebar.nav_board",
   todos: "sidebar.nav_todos",
   routines: "sidebar.nav_routines",
@@ -40,6 +40,8 @@ export function fromTitle(s: Pick<State, "assistant"> & Partial<Pick<State, "tod
   if (todo?.title.trim()) return todo.title.trim();
   const agent = r.name === "session" ? s.sessions?.[r.mid]?.find((x) => x.session_id === r.sid) : undefined;
   if (agent) return sessionTitle(agent);
+  // a feature module's page: its sidebar entry's name (core/module-host.ts)
+  if (r.name === "module") return moduleNavItem(r)?.label();
   const name = PAGE_NAMES[r.name];
   return name ? t(name) : undefined;
 }

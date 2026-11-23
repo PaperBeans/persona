@@ -87,10 +87,10 @@ func (s *Service) toolAgentInterrupt(ctx context.Context, machine, self string, 
 	if then != "" {
 		summary += "\n\n" + then
 	}
-	if ok, err := s.confirmOutbound(ctx, machine, self, "agent_interrupt", then, summary, args); err != nil {
+	if ok, outcome, err := s.confirmOutbound(ctx, machine, self, "agent_interrupt", then, summary, args); err != nil {
 		return "", err
 	} else if !ok {
-		return "The user declined on the phone: the agent goes on as it was.", nil
+		return outboundNotDone(outcome, "The user declined on the phone: the agent goes on as it was.", "the agent goes on as it was"), nil
 	}
 	// Again after the phone: the agent may have become another conversation's task while the user was asked.
 	if err := s.exitAllowed(ctx, self, am, c, then, 0); err != nil {
@@ -1071,6 +1071,9 @@ func (s *Service) reportNow(ctx context.Context, t Todo, machine, session, kind,
 	s.progressReported(machine, session, len(evidence), step, now) // evidence or a later step is progress (supervise_progress.go)
 	g := superviseSignal{Todo: t.ID, Kind: sigReport, Key: now.UTC().Format(time.RFC3339Nano), At: now, Machine: machine,
 		Session: session, Report: kind, Detail: text, Evidence: evidence, Step: step, Steps: steps, SourcePermission: devicewire.SourcePermissionFrom(ctx)}
+	if kind != upReportProgress && s.reportsMidTurn(ctx, machine, session) {
+		g.NotBefore = now.Add(reportStopHold) // it waits for its Agent's stop, to go out with it (releaseReportsLocked)
+	}
 	if !s.deliverReportingReport(ctx, t, g) {
 		s.signal(g)
 	}
@@ -1099,6 +1102,16 @@ func (s *Service) reportNow(ctx context.Context, t Todo, machine, session, kind,
 	}
 	return "Sent to your supervisor: it reads it within minutes and answers you by message. Don't wait idle for it if there is " +
 		"other work in the task; stop when you cannot go on.", nil
+}
+
+// reportsMidTurn: the Agent that reports is in the middle of a turn, so the turn's end signal follows its report
+// (reportStopHold). One that is not working, or not known, has no stop coming: its report goes out as it always did.
+func (s *Service) reportsMidTurn(ctx context.Context, machine, session string) bool {
+	if machine == "" || session == "" || s.noReportHold {
+		return false
+	}
+	c, ok := s.session(ctx, machine, session)
+	return ok && c.State == proto.StateWorking
 }
 
 // deliverReportingReport sends g to an active reporting conversation through the same notice path as its quiet tasks:

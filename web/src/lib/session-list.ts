@@ -187,9 +187,11 @@ export class SessionList<T> {
   usesPageCounts(): boolean { return this.pageCounts(); }
 
   /** Give an already shared root the same stable presentation as its filtered copies, without replacing its baseline. */
-  setPresentation(presentation: SessionListPresentation<T>): void {
+  setPresentation(presentation: SessionListPresentation<T> | undefined): void {
     if (this.presentation === presentation) return;
     this.presentation = presentation;
+    // another order starts from the transport's rows: what the last one retained says nothing of it
+    this.presented = [];
     if (!this.snapshot.loaded) return;
     const rows = this.snapshot.supported === false ? this.complete(this.snapshot.rows) : this.visible();
     this.publish({ rows });

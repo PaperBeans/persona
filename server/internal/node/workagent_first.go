@@ -124,7 +124,7 @@ func (n *Node) workFirstSeen(ctx context.Context, pane, kind string) workFirst {
 		case a.Agent != kind:
 			return workFirstGone
 		case a.AgentStatus == proto.StatusWorking || a.AgentStatus == proto.StatusBlocked ||
-			a.AgentStatus == proto.StatusDone || reportedAgyConversation(*a) != "":
+			a.AgentStatus == proto.StatusDone || n.agyReported(*a) != "":
 			return workFirstTaken
 		default:
 			idle = a.AgentStatus == proto.StatusIdle

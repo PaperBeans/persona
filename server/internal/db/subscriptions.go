@@ -237,12 +237,14 @@ func (d *DB) CommitSubscriptionRun(ctx context.Context, id string, merge func(da
 }
 
 // SubscriptionItemsQuery picks a subscription's held items: those stored at or after Since, after seq After, at most
-// Limit of them (none: all; oldest first, or the newest Limit when Newest), always returned in seq order.
+// Limit of them (none: all; oldest first, or the newest Limit when Newest), always returned in seq order. UIDs, when
+// set, picks only those (a things recipe's latest answer, #13637).
 type SubscriptionItemsQuery struct {
 	After  int64
 	Since  time.Time
 	Limit  int
 	Newest bool
+	UIDs   []string
 }
 
 // SubscriptionItems are the items held for subscription id that q picks, in seq order (#2039: the Inbox reads the
@@ -256,9 +258,14 @@ func (d *DB) SubscriptionItems(ctx context.Context, id string, q SubscriptionIte
 	if q.Limit > 0 {
 		limit = &q.Limit
 	}
+	var uids []string // none: every uid
+	if q.UIDs != nil {
+		uids = append([]string{}, q.UIDs...)
+	}
 	rows, err := d.pool.Query(ctx, `SELECT seq, uid, data, created_at FROM (
 		SELECT seq, uid, data, created_at FROM subscription_items WHERE subscription_id = $1 AND seq > $2 AND created_at >= $3
-		ORDER BY seq `+order+` LIMIT $4::bigint) AS picked ORDER BY seq`, id, q.After, q.Since, limit)
+		AND ($5::text[] IS NULL OR uid = ANY($5::text[]))
+		ORDER BY seq `+order+` LIMIT $4::bigint) AS picked ORDER BY seq`, id, q.After, q.Since, limit, uids)
 	if err != nil {
 		return nil, err
 	}
@@ -289,9 +296,11 @@ func (d *DB) SubscriptionItem(ctx context.Context, id, uid string) (*Subscriptio
 	return &r, nil
 }
 
-// PruneSubscriptionItems removes subscription id's held items stored before before: the destinations are past them.
-// Their dedup keys stay in subscription_seen, so pulling them again keeps nothing.
-func (d *DB) PruneSubscriptionItems(ctx context.Context, id string, before time.Time) error {
-	_, err := d.pool.Exec(ctx, `DELETE FROM subscription_items WHERE subscription_id = $1 AND created_at < $2`, id, before)
+// PruneSubscriptionItems removes subscription id's held items stored before before, except keep's: the destinations
+// are past them. Their dedup keys stay in subscription_seen, so pulling them again keeps nothing. keep are the rows of
+// a things recipe's latest answer, handed to the Inbox while they are in it however old (#13637).
+func (d *DB) PruneSubscriptionItems(ctx context.Context, id string, before time.Time, keep []string) error {
+	_, err := d.pool.Exec(ctx, `DELETE FROM subscription_items WHERE subscription_id = $1 AND created_at < $2
+		AND NOT (uid = ANY($3::text[]))`, id, before, append([]string{}, keep...))
 	return err
 }

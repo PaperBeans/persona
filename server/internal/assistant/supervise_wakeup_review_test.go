@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -48,24 +49,15 @@ func idleWakeSends(f *fakeHub, machine, session, detail string) []string {
 	return out
 }
 
-func ageReplayedIdle(t *testing.T, s *Service, todoID, wantKey string) {
-	t.Helper()
-	s.supervise.mu.Lock()
-	defer s.supervise.mu.Unlock()
-	id := todoID + "|" + sigIdle
-	g, ok := s.supervise.pending[id]
-	if !ok || g.Key != wantKey {
-		t.Fatalf("ledger replay did not restore idle %q: %+v", wantKey, g)
-	}
-	// Replay timestamps the recovered signal now. Age it to represent the wakeup expiring later, without a real sleep.
-	g.At = time.Now().Add(-time.Minute)
-	s.supervise.pending[id] = g
-}
-
 func queuedIdleWakeFixture(t *testing.T) (*Service, *fakeHub, Todo, superviseSignal, proto.Session) {
 	t.Helper()
+	return queuedIdleWakeFixtureOn(t, nil)
+}
+
+func queuedIdleWakeFixtureOn(t *testing.T, st Store) (*Service, *fakeHub, Todo, superviseSignal, proto.Session) {
+	t.Helper()
 	ctx := context.Background()
-	s, f, todo := newSupervisedService(t)
+	s, f, todo := newSupervisedServiceOn(t, st)
 	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
 	sid := todo.Agents[0].SessionID
 	now := time.Now()
@@ -87,6 +79,7 @@ func queuedIdleWakeFixture(t *testing.T) (*Service, *fakeHub, Todo, superviseSig
 	turns.mu.Unlock()
 
 	s.supervise.dedupMu.Lock()
+	s.updateSupervisePending(func(pending map[string]superviseSignal) { pending[idle.id()] = idle })
 	accepted := s.deliverDigest(ctx, s.settings(ctx), "conv1", []superviseSignal{idle}, s.webBase(ctx), now, time.Time{})
 	s.supervise.dedupMu.Unlock()
 	if !accepted || s.queuedFor("conv1") != 1 {
@@ -104,7 +97,8 @@ func queuedIdleWakeFixture(t *testing.T) (*Service, *fakeHub, Todo, superviseSig
 func TestQueuedWakeDrainReleasesDeliveryReservations(t *testing.T) {
 	for _, restart := range []bool{false, true} {
 		t.Run(fmt.Sprintf("restart=%v", restart), func(t *testing.T) {
-			s, f, todo, idle, agent := queuedIdleWakeFixture(t)
+			st := planUpdateStore{&planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}
+			s, f, todo, idle, agent := queuedIdleWakeFixtureOn(t, st)
 			logs := captureWakeLogs(s)
 			drainQueuedDigest(t, s, f)
 			if s.queuedFor("conv1") != 0 {
@@ -122,21 +116,7 @@ func TestQueuedWakeDrainReleasesDeliveryReservations(t *testing.T) {
 			}
 
 			if restart {
-				s.supervise.mu.Lock()
-				if s.supervise.timer != nil {
-					s.supervise.timer.Stop()
-				}
-				s.supervise.timer, s.supervise.timerAt = nil, time.Time{}
-				clear(s.supervise.pending)
-				clear(s.supervise.sent)
-				clear(s.supervise.queued)
-				s.supervise.mu.Unlock()
-				turns := &s.tasks.turns
-				turns.mu.Lock()
-				expected := turns.doc.Turns[todo.ID]
-				turns.mu.Unlock()
-				s.replayTurnSignal(todo.ID, expected)
-				ageReplayedIdle(t, s, todo.ID, expected.Signal.Key)
+				simulateSupervisionRestart(t, s)
 			}
 
 			s.superviseTimes = superviseTimings{}
@@ -158,7 +138,7 @@ func TestQueuedWakeDrainReleasesDeliveryReservations(t *testing.T) {
 	}
 }
 
-func TestQueuedWakeDrainKeepDoesNotRestore(t *testing.T) {
+func TestQueuedWakeDrainKeepOrTriedDoesNotRestore(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		tried bool
@@ -179,8 +159,8 @@ func TestQueuedWakeDrainKeepDoesNotRestore(t *testing.T) {
 			s.relays.mu.Unlock()
 
 			_, _, keep := s.recheckQueuedDigest(context.Background(), "conv1", queued)
-			if !keep {
-				t.Fatal("the original queue was not kept")
+			if wantKeep := !tc.tried; keep != wantKeep {
+				t.Fatalf("queue keep = %v, want %v (tried=%v)", keep, wantKeep, tc.tried)
 			}
 			s.supervise.mu.Lock()
 			_, restored := s.supervise.pending[idle.id()]
@@ -190,6 +170,53 @@ func TestQueuedWakeDrainKeepDoesNotRestore(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestQueuedWakeDrainPersistsDeferredIdleBeforeRestore(t *testing.T) {
+	st := planUpdateStore{&planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}
+	s, _, _, idle, _ := queuedIdleWakeFixtureOn(t, st)
+	queued := queuedRelays(s, "conv1")
+	if len(queued) != 1 {
+		t.Fatalf("queue fixture has %d messages", len(queued))
+	}
+	ctx := context.Background()
+	s.supervise.dedupMu.Lock()
+	locked := true
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.recheckQueuedDigest(ctx, "conv1", queued[0])
+	}()
+	defer func() {
+		if locked {
+			s.supervise.dedupMu.Unlock()
+		}
+		<-done
+	}()
+
+	// Holding dedupMu stops restoreDrainedWakeSignals after the queue checkpoint. The deferred idle must already
+	// have a durable outbox copy in that same checkpoint, before any in-memory restoration can run.
+	waitFor(t, "the source queue rewrite before restoration", func() bool {
+		var state relayState
+		if _, err := st.Setting(ctx, relayKey, &state); err != nil {
+			return false
+		}
+		return len(state.Queue["conv1"]) == 0
+	})
+	persisted := storedSupervisePending(t, s)
+	if got := persisted[idle.id()]; got.Key != idle.Key {
+		t.Fatalf("deferred idle is not durable between queue rewrite and restore: got=%+v all=%+v", got, persisted)
+	}
+	s.supervise.dedupMu.Unlock()
+	locked = false
+	waitFor(t, "the drain to finish", func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	})
 }
 
 func TestUndeliveredDecisionIdleIgnoresFutureWake(t *testing.T) {
@@ -208,6 +235,56 @@ func TestUndeliveredDecisionIdleIgnoresFutureWake(t *testing.T) {
 	})
 	if got := idleDigestSends(f, "conv1"); !strings.Contains(got[0], "use the safe option") {
 		t.Fatalf("the handoff lost the owner's decision: %q", got)
+	}
+}
+
+func TestUndeliveredDecisionIdleSurvivesOrdinaryIdle(t *testing.T) {
+	s, f, todo := newSupervisedService(t)
+	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+	now := time.Now()
+	sid := todo.Agents[0].SessionID
+	f.setSessions("box", proto.Session{SessionID: sid, MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: proto.StatusDone,
+		State: proto.StateUnread, TurnError: "synthetic turn failure", UpdatedAt: now.Add(-time.Minute),
+		Loop: &proto.LoopInfo{Kind: "wakeup", NextAt: now.Add(time.Hour)}})
+	res := s.decisionNotDelivered(context.Background(), todo.ID, now.Add(-time.Minute), "use the safe option", errors.New("synthetic send failure"))
+	if !res.taken || res.undelivered == nil {
+		t.Fatalf("decision failure was not handed off: %+v", res)
+	}
+	s.signal(superviseSignal{Todo: todo.ID, Kind: sigIdle, Key: "wake-turn-2", Machine: "box", Session: sid,
+		Detail: "synthetic ordinary idle", At: now})
+	s.superviseTimes = superviseTimings{gather: 1, every: 1, urgent: 1}
+	wakeRound(s)
+	if got := idleDigestSends(f, "conv1"); len(got) != 1 || !strings.Contains(got[0], "use the safe option") {
+		s.supervise.mu.Lock()
+		merged := s.supervise.pending[todo.ID+"|"+sigIdle]
+		s.supervise.mu.Unlock()
+		t.Fatalf("an ordinary idle replaced the undelivered decision: sends=%q merged=%+v", got, merged)
+	}
+}
+
+func TestMergeSignalsPreservesUndeliveredDecision(t *testing.T) {
+	handoff := superviseSignal{Todo: "todo_1", Kind: sigIdle, Key: "undelivered-1", Handoff: true, Detail: "use the safe option"}
+	ordinary := superviseSignal{Todo: "todo_1", Kind: sigIdle, Key: "wake-turn-2", Detail: "synthetic ordinary idle"}
+	got := mergeSignals([]superviseSignal{handoff}, []superviseSignal{ordinary})
+	if len(got) != 1 || !got[0].Handoff || !strings.Contains(got[0].Detail, handoff.Detail) {
+		t.Fatalf("ordinary idle replaced handoff detail: %+v", got)
+	}
+}
+
+func TestForgetSupervisionKeepsNewerSignalKey(t *testing.T) {
+	s, _, todo := newSupervisedService(t)
+	old := superviseSignal{Todo: todo.ID, Kind: sigIdle, Key: "old-turn", Detail: "synthetic idle"}
+	e, ok := s.digestEntry(context.Background(), old, testWeb)
+	if !ok {
+		t.Fatal("the idle does not render")
+	}
+	fingerprint, _ := digestFingerprint(e, old)
+	s.supervise.dedup = map[string]superviseFingerprint{fingerprint: {Key: "new-turn"}}
+	if err := s.forgetSupervision(context.Background(), []superviseSignal{old}, testWeb); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.supervise.dedup[fingerprint]; got.Key != "new-turn" {
+		t.Fatalf("releasing an old idle deleted a newer signal's fingerprint: %+v", got)
 	}
 }
 
@@ -245,9 +322,10 @@ func TestUndeliveredDecisionQueuedDrainIgnoresFutureWake(t *testing.T) {
 	}
 }
 
-func TestUndeliveredDecisionIdleReplayIgnoresFutureWake(t *testing.T) {
+func TestUndeliveredDecisionIdleRestartIgnoresFutureWake(t *testing.T) {
 	ctx := context.Background()
-	s, f, todo := newSupervisedService(t)
+	st := planUpdateStore{&planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}
+	s, f, todo := newSupervisedServiceOn(t, st)
 	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
 	now := time.Now()
 	sid := todo.Agents[0].SessionID
@@ -264,27 +342,30 @@ func TestUndeliveredDecisionIdleReplayIgnoresFutureWake(t *testing.T) {
 	turns.mu.Unlock()
 	askedAt := now.Add(-time.Minute)
 	s.decisionNotDelivered(ctx, todo.ID, askedAt, "use the safe option", errors.New("synthetic send failure"))
+	id := todo.ID + "|" + sigIdle
 	s.supervise.mu.Lock()
-	if s.supervise.timer != nil {
-		s.supervise.timer.Stop()
-	}
-	s.supervise.timer, s.supervise.timerAt = nil, time.Time{}
-	clear(s.supervise.pending)
-	clear(s.supervise.sent)
-	clear(s.supervise.queued)
+	handoff := s.supervise.pending[id]
 	s.supervise.mu.Unlock()
-	turns.mu.Lock()
-	expected := turns.doc.Turns[todo.ID]
-	turns.mu.Unlock()
-	if expected.Signal == nil || expected.Signal.Told != nil {
-		t.Fatalf("the undelivered decision was not recoverable before replay: %+v", expected.Signal)
+	if handoff.Key == "" || storedSupervisePending(t, s)[id].Key != handoff.Key {
+		t.Fatalf("the handoff was not durable before restart: memory=%+v stored=%+v", handoff, storedSupervisePending(t, s))
 	}
-	s.replayTurnSignal(todo.ID, expected)
-	ageReplayedIdle(t, s, todo.ID, expected.Signal.Key)
-	s.superviseTimes = superviseTimings{}
+	simulateSupervisionRestart(t, s)
+	s.restoreSupervisePending(ctx)
+	s.supervise.mu.Lock()
+	restored := s.supervise.pending[id]
+	s.supervise.mu.Unlock()
+	if restored.Key != handoff.Key || !restored.Handoff {
+		t.Fatalf("the real outbox reload lost the handoff: restored=%+v stored=%+v", restored, storedSupervisePending(t, s))
+	}
+	s.superviseTimes = superviseTimings{gather: 1, every: 1, urgent: 1}
+	logs := captureWakeLogs(s)
 	wakeRound(s)
 	if got := idleDigestSends(f, "conv1"); len(got) != 1 || !strings.Contains(got[0], "use the safe option") {
-		t.Fatalf("replayed handoff was suppressed by the future wakeup: %q", got)
+		s.supervise.mu.Lock()
+		pending := s.supervise.pending[id]
+		last := s.supervise.last
+		s.supervise.mu.Unlock()
+		t.Fatalf("restarted handoff was not delivered: sends=%q restored=%+v pending=%+v last=%v stored=%+v logs=%q", got, restored, pending, last, storedSupervisePending(t, s), logs())
 	}
 }
 
@@ -332,6 +413,17 @@ func TestFutureNativeWakeFailOpenBoundaries(t *testing.T) {
 		}},
 		{name: "queued input", setup: func(_ *Todo, c, _ *proto.Session, now time.Time) {
 			c.Queued = []string{"synthetic queued input"}
+			c.Loop = &proto.LoopInfo{Kind: "wakeup", NextAt: now.Add(time.Hour)}
+		}},
+		{name: "queued input and turn error", setup: func(_ *Todo, c, _ *proto.Session, now time.Time) {
+			c.Queued = []string{"synthetic queued input"}
+			c.TurnError = "synthetic turn failure"
+			c.Loop = &proto.LoopInfo{Kind: "wakeup", NextAt: now.Add(time.Hour)}
+		}},
+		{name: "queued input and needs you", setup: func(_ *Todo, c, _ *proto.Session, now time.Time) {
+			c.Queued = []string{"synthetic queued input"}
+			c.State = proto.StateNeedsYou
+			c.PendingInteractions = 1
 			c.Loop = &proto.LoopInfo{Kind: "wakeup", NextAt: now.Add(time.Hour)}
 		}},
 	} {

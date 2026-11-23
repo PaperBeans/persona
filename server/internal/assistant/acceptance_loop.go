@@ -38,6 +38,7 @@ func (s *Service) acceptLoop(ctx context.Context) {
 			s.verifySupervisedAsks(ctx)
 			s.retryAcceptance(now)
 			s.remindAcceptance(now)
+			s.reportCardLedger(ctx, now) // yesterday's pushes to the owner, told to the main conversation once (card_layers.go)
 		}
 	}
 }

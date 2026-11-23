@@ -201,8 +201,8 @@ class RealAssistantRepository(
                     val choice = AssistantManagerChoice.current.value
                     val request = Request(transport, choice)
                     if (restoredScope != request.key || current.value.managerId != request.owner) return@withLock null
-                    // A health chat is the health space's (docs/assistant/health.md): never on the assistant's own list.
-                    val owned = updates.filter { choice.owns(it.manager) && !it.isHealth }
+                    // A space's chat (health or a domain space, docs/assistant/health.md): never on the assistant's own list.
+                    val owned = updates.filter { choice.owns(it.manager) && !it.isSpace }
                     val byKey = owned.associateBy { it.key }
                     val before = current.value
                     // A summary row (paged lists) leaves the launcher, the permission mode, the compaction and the

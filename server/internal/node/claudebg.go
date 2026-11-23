@@ -246,8 +246,8 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 			s.Queued = m.queue
 		}
 		s.WokeByTask = m.wake
-		n.setBackground(&s, m) // as for a pane's session
-		s.BackgroundWaiting = n.backgroundWaits(&s)
+		n.setBackground(&s, m)  // as for a pane's session
+		n.setBackgroundWait(&s) // bgwait.go (#6045, #13744)
 		s.Loop, s.Goal, s.Plan = m.loop, m.goal, m.plan
 		s.Subagents = n.subagents(id)
 		if source == proto.SourceClaudeDesktop {

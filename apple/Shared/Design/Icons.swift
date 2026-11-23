@@ -734,6 +734,10 @@ extension Theme {
         /// Health: the health space (docs/assistant/health.md), its entry and its conversations' mark.
         static let health = "heart"
         static let healthFilled = "heart.fill"
+        /// Health intake and the iPhone's Activity summary.
+        static let water = pluginDroplet
+        static let protein = "fork.knife"
+        static let fitness = "figure.run"
         /// What stays private (Health's note on where its conversations and memory are kept).
         static let privacy = "checkmark.shield"
         /// A tool the app has no symbol for.

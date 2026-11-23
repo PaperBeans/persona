@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,7 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/sessionlist"
+	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
 // nodeOutdated recognizes the prefix also returned by an old manager that lacks
@@ -347,9 +349,18 @@ type statusWriter struct {
 	status          int
 	securityFailure bool
 	lang            i18n.Lang
+	errBody         []byte // the start of a server error's body, for its request line (loggedError)
 }
 
 func (s *statusWriter) WriteHeader(code int) { s.status = code; s.ResponseWriter.WriteHeader(code) }
+
+// Write keeps the start of a server error's body for the request log (loggedError) and writes b.
+func (s *statusWriter) Write(b []byte) (int, error) {
+	if s.status >= 500 && len(s.errBody) < loggedErrorBody {
+		s.errBody = append(s.errBody, b[:min(len(b), loggedErrorBody-len(s.errBody))]...)
+	}
+	return s.ResponseWriter.Write(b)
+}
 
 // authRefusal is a request's mark that the hub's own auth layer refused it (authMarks puts it in the context).
 type authRefusal struct{ refused atomic.Bool }
@@ -373,7 +384,8 @@ func (s *statusWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 // logRequests logs failed and slow requests (method, path, status, time; never the query, body or token) under
 // a request id: the app's X-Client-Request-Id when it sent one, which it shows next to a server error, else a new
-// one. Every response carries it as X-Request-Id.
+// one. Every response carries it as X-Request-Id. A server error's line also says the code and the error the hub
+// answered with (loggedError): without them a 502 left nothing to go on (#13468).
 func logRequests(h *Hub, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -392,13 +404,62 @@ func logRequests(h *Hub, next http.Handler) http.Handler {
 		// Auth and ingress refusals are logged by securityError (masked, rate limited), WebSocket ones included.
 		if !sw.securityFailure && (sw.status >= 400 || (!longLived(r) && time.Since(start) > 2*time.Second)) {
 			path := loggedPath(r.URL.Path)
+			why := ""
+			if sw.status >= 500 {
+				why = loggedError(sw.errBody)
+			}
 			if client.Platform != "" {
-				h.logf("[%s] %s %s -> %d (%s) client=%q", id, r.Method, path, sw.status, time.Since(start).Round(time.Millisecond), client.Platform+"/"+client.Version)
+				h.logf("[%s] %s %s -> %d (%s) client=%q%s", id, r.Method, path, sw.status, time.Since(start).Round(time.Millisecond), client.Platform+"/"+client.Version, why)
 			} else {
-				h.logf("[%s] %s %s -> %d (%s)", id, r.Method, path, sw.status, time.Since(start).Round(time.Millisecond))
+				h.logf("[%s] %s %s -> %d (%s)%s", id, r.Method, path, sw.status, time.Since(start).Round(time.Millisecond), why)
 			}
 		}
 	})
+}
+
+// loggedErrorBody bounds what a server error's body keeps for the log; loggedErrorText, the text it shows.
+const loggedErrorBody, loggedErrorText = 4096, 300
+
+// loggedError is what a server error's request line adds, from the hub's JSON error body (apierr): ` code=<code>`,
+// then ` detail="<detail>"`, the technical words a localized failure keeps apart from its generic error
+// (rpc-errors.failed), else ` error="<error>"`; one line, quoted, clipped. "" for any other body: nothing else of a
+// response is logged.
+func loggedError(body []byte) string {
+	var e struct {
+		Code   string `json:"code"`
+		Error  string `json:"error"`
+		Detail any    `json:"detail"`
+	}
+	if json.Unmarshal(body, &e) != nil || e.Code == "" && e.Error == "" {
+		return ""
+	}
+	var b strings.Builder
+	if e.Code != "" {
+		b.WriteString(" code=")
+		if strings.Trim(e.Code, "abcdefghijklmnopqrstuvwxyz0123456789_.-") == "" {
+			b.WriteString(e.Code)
+		} else {
+			b.WriteString(strconv.Quote(textfmt.Clip(e.Code, 40)))
+		}
+	}
+	quoted := func(s string) string { return strconv.Quote(textfmt.Clip(textfmt.OneLine(s), loggedErrorText)) }
+	switch d := e.Detail.(type) {
+	case string:
+		if d != "" {
+			b.WriteString(" detail=" + quoted(d))
+			return b.String()
+		}
+	case nil:
+	default: // a structured detail (a refusal's fields): as compact JSON
+		if raw, err := json.Marshal(d); err == nil {
+			b.WriteString(" detail=" + quoted(string(raw)))
+			return b.String()
+		}
+	}
+	if e.Error != "" {
+		b.WriteString(" error=" + quoted(e.Error))
+	}
+	return b.String()
 }
 
 // loggedPath is a request's path as the log may show it: an install code in /i/<code> (a credential) is masked.

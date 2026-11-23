@@ -774,7 +774,7 @@ func (s *Service) logicalSwitchHandoff(ctx context.Context, st logicalSwitchStor
 	if err != nil {
 		return h, err
 	}
-	result, err := waitLogicalSummary(ctx, func() (assistantwire.ModelCompleteResult, error) {
+	h, fellBack, err := summarizeLogicalHandoff(ctx, h, previousSummary, func() (assistantwire.ModelCompleteResult, error) {
 		out, err := s.runModelCall(ctx, "kb", "conversation handoff", "conversation handoff", call)
 		if err != nil {
 			return assistantwire.ModelCompleteResult{}, err
@@ -788,8 +788,30 @@ func (s *Service) logicalSwitchHandoff(ctx context.Context, st logicalSwitchStor
 	if err != nil {
 		return h, err
 	}
-	h.Summary = result.Text
+	if fellBack {
+		s.logf("assistant: conversation handoff for %s/%s continues without a new summary: the knowledge-processing model is unavailable", c.MachineID, c.SessionID)
+	}
 	return h, nil
+}
+
+// summarizeLogicalHandoff asks run for the handoff's summary. A paused model is waited out (waitLogicalSummary).
+// A model that is not set up (model_unavailable) does not recover by retrying: the sweep would retry the switch
+// every few seconds and leave it preparing until someone changed Settings. The switch goes ahead with the recent
+// turns already in h, the earlier summary if there was one, and Partial set so the new session is told some
+// history is missing; fellBack reports that. Any other failure is returned for the sweep to retry.
+func summarizeLogicalHandoff(ctx context.Context, h mainHandoff, previousSummary string, run func() (assistantwire.ModelCompleteResult, error)) (mainHandoff, bool, error) {
+	result, err := waitLogicalSummary(ctx, run)
+	if err != nil {
+		var re *rpc.Error
+		if errors.As(err, &re) && re.Code == assistantwire.CodeModelUnavailable {
+			h.Summary = previousSummary
+			h.Partial = true
+			return h, true, nil
+		}
+		return h, false, err
+	}
+	h.Summary = result.Text
+	return h, false, nil
 }
 
 func waitLogicalSummary(ctx context.Context, run func() (assistantwire.ModelCompleteResult, error)) (assistantwire.ModelCompleteResult, error) {

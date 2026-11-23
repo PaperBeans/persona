@@ -78,7 +78,7 @@ func agentTurn(s *Service, f *fakeHub, status, text string, pending int) {
 	f.setSessions("box", proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: status, State: st,
 		LastText: text, PendingInteractions: pending, UpdatedAt: time.Now()})
 	if status == proto.StatusWorking {
-		s.taskWorking(ctx, "box", "s1")
+		s.taskWorking(ctx, "box", "s1", startRow{})
 	} else {
 		s.taskTurnEnded(ctx, "box", "s1")
 	}

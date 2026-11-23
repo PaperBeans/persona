@@ -38,6 +38,8 @@ final class PushRegistrar {
         var hubs: @MainActor () async -> [Hub]? = { [] }
         /// The relay's grants for the APNs token (hex), in this environment and topic.
         var grants: @MainActor (_ token: String, _ env: String, _ topic: String?) async -> Grants = { _, _, _ in Grants() }
+        /// The relay this build can attempt, from its Info.plist; nil: no relay is configured.
+        var relayURL: @MainActor () -> URL? = { PushRelay.url }
         var now: @MainActor () -> Date = { Date() }
         /// Waits before a retry that is due while the app stays open; false: cancelled.
         var sleep: @MainActor (Duration) async -> Bool = { d in (try? await Task.sleep(for: d)) != nil }
@@ -259,14 +261,17 @@ final class PushRegistrar {
         // A hub without the app's APNs key pushes through the relay, sealed to this group's key (docs/operations/push-relay.md);
         // the notification service extension opens it. The hub decides: with its own key it ignores these.
         let grants = await system.grants(hex, env, base.topic)
+        let relay = system.relayURL()
         let relayError = PushHealth(relay: grants.relay).relayError
         health.update { $0.apnsError = nil; $0.relay = grants.relay }
         var done = Set<String>()
         for hub in hubs {
             var body = base
-            if let grant = grants.grant, let relay = PushRelay.url, let key = PushCrypto.ensureKey(group: hub.group) {
-                body.relayGrant = grant
+            if let relay, grants.relay != .notConfigured {
                 body.relayURL = relay.absoluteString
+            }
+            if let grant = grants.grant, relay != nil, let key = PushCrypto.ensureKey(group: hub.group) {
+                body.relayGrant = grant
                 body.pushKey = PushCrypto.publicKey(key)
             } else {
                 body.relayError = relayError

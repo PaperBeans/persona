@@ -13,7 +13,7 @@ nonisolated enum HealthTrendMetric: String, CaseIterable, Identifiable, Sendable
         switch self {
         case .steps: String(localized: "Steps")
         case .sleep: String(localized: "Sleep [Health Tool 01324e]")
-        case .weight: String(localized: "Sleep [Health Tool 38f7c7]")
+        case .weight: String(localized: "Weight [Health Home]")
         }
     }
 

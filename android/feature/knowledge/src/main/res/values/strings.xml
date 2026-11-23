@@ -126,6 +126,8 @@
     <string name="knowledge_minutes_regenerate">Regenerate</string>
     <string name="knowledge_minutes_make">Make minutes</string>
     <string name="knowledge_minutes_writing">Writing the minutes…</string>
+    <string name="knowledge_minutes_checking">Checking the whole recording…</string>
+    <string name="knowledge_minutes_checking_progress">Checking the whole recording (%1$d of %2$d min)…</string>
     <string name="knowledge_minutes_writing_note">The hub is turning the transcript into key points, decisions, action items and open questions.</string>
     <string name="knowledge_minutes_updating">Updating…</string>
     <string name="knowledge_minutes_failed">Couldn\u2019t write the minutes. Try regenerating them.</string>

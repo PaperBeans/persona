@@ -125,8 +125,13 @@ func healthReportRules(cwd string) []string {
 	if cwd == "" || identity.SpaceOf(cwd) != identity.SpaceHealth || strings.Contains(cwd, ",") {
 		return nil
 	}
-	// Edit(path) covers Write too: Claude Code matches path rules on Read and Edit only.
-	return []string{"Edit(/" + filepath.Join(cwd, "reports") + "/**)"}
+	// Edit(path) covers Write too: Claude Code matches path rules on Read and Edit only. Claude Code names a file by
+	// the directory as it resolved it (~/.jarvis/health/... for a ~/.persona that links there): both spellings.
+	rules := []string{"Edit(/" + filepath.Join(cwd, "reports") + "/**)"}
+	if real := realPath(filepath.Clean(cwd)); real != filepath.Clean(cwd) && !strings.Contains(real, ",") {
+		rules = append(rules, "Edit(/"+filepath.Join(real, "reports")+"/**)")
+	}
+	return rules
 }
 
 // sameDir: a and b are the same directory (as they resolve), or the same path when either cannot be read.

@@ -240,7 +240,7 @@ func TestTaskStagePendingPlan(t *testing.T) {
 		t.Fatalf("pending plan rolled back the stored stage: %s", stored)
 	}
 	// Starting another turn is not proof that the plan was approved.
-	s.taskWorking(ctx, "box", "s1")
+	s.taskWorking(ctx, "box", "s1", startRow{})
 	if todoNow(s, todo.ID).Stage != "plan" {
 		t.Fatal("working status cleared pending plan")
 	}

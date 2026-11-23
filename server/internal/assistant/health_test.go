@@ -123,6 +123,17 @@ func TestGoldenHealthClaudeMD(t *testing.T) {
 	golden(t, "health_claude_md", s.healthClaudeMD(context.Background(), "server"))
 }
 
+func TestGoldenHealthClaudeMDLanguage(t *testing.T) {
+	for _, lang := range []string{"en", "ja"} {
+		t.Run(lang, func(t *testing.T) {
+			f := healthHub()
+			f.hello.Owner, f.hello.OwnerNotes, f.hello.Locale = "Example user", "Example health notes.", lang
+			s := newTestService(t, f)
+			golden(t, "health_claude_md."+lang, s.healthClaudeMD(context.Background(), "server"))
+		})
+	}
+}
+
 // A health conversation's follow-up and routine keep the health space, so a run that starts a conversation starts it
 // there; kb_update is refused; and a conversation the machine doesn't list can't be taken for the assistant's own.
 func TestHealthSpaceTasksAndRefusals(t *testing.T) {

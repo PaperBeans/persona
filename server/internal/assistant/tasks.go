@@ -149,6 +149,9 @@ type PlanTask struct {
 	// Project: the knowledge-base project the task's todo goes in (#2581, todo_project.go), checked and kept as its slug
 	// when the plan is made; "" for none.
 	Project string `json:"project,omitempty"`
+	// SkipProjectMemory omits the automatic project/direction handoff for this start only. It is persisted so queued
+	// starts, retries and reloads keep the caller's choice; the assignment and to-do decisions are unaffected (#13538).
+	SkipProjectMemory bool `json:"skip_project_memory,omitempty"`
 	// Attachments: pictures and files the user gave the assistant for this task, by their paths on AttachFrom, the
 	// assistant's computer (#2437, attachments.go); Mentioned: those of them the prompt names by path without listing
 	// them. Checked when the plan is made; copied to the task's computer when it starts. AttachFrom and Mentioned are
@@ -447,7 +450,15 @@ func planFromRow(row db.TaskPlanRow) *TaskPlan {
 }
 
 // movePlan moves p from state from to its State with its Tasks; false when someone else moved it first.
-func (s *Service) movePlan(ctx context.Context, p *TaskPlan, from string) (bool, error) {
+func (s *Service) movePlan(ctx context.Context, p *TaskPlan, from string) (moved bool, err error) {
+	if from == planOpen && p.State != planOpen {
+		// the card is decided (started, not started, withdrawn): its push leaves the phones it went to (planPushOver)
+		defer func() {
+			if moved && err == nil {
+				s.planPushOver(p.ID)
+			}
+		}()
+	}
 	p.UpdatedAt = time.Now().UTC()
 	st := s.store()
 	if st == nil {

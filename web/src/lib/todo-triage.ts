@@ -4,6 +4,7 @@
 
 import { acceptanceStands, decisionDismissed, latestReview, reviewState } from "./supervision";
 import { heldDelivery, isCancelled, openAsk, todoDueBy, todoStatus, waitsForOwner, type PRFacts, type SessionLookup, type Todo, type TodoStatus } from "./todos";
+import { TODO_LIST_SECTIONS, TODO_REASONS } from "./todo-view-wire";
 
 /** Where a to-do shows: merge waits join explicit holds on the web (#9325); cancelled stays apart from Done (#5732). */
 export type TriageSection = "waiting" | "working" | "parked" | "just_done" | "other" | "shelved" | "done" | "cancelled";
@@ -275,21 +276,78 @@ export function agentOnIt(t: Triage): boolean {
 }
 
 /** Why the sidebar's To-dos badge counts a to-do (ownerNeeds): what it waits on the owner for (rule 1, OwnerWait), or
- *  `unattended`, no Agent is on it and none of its pieces carries it (rule 4). The To-dos page says it on the row's mark
- *  (#11838); a later reason is one more member here, decided in ownerNeeds, so the badge and the mark keep one rule. */
+ *  `unattended`, a to-do of the owner's own that no Agent is on and none of its pieces carries (rule 4). The To-dos page
+ *  says it on the row's mark (#11838); a later reason is one more member here, decided in ownerNeeds, so the badge and
+ *  the mark keep one rule. */
 export type OwnerNeed = OwnerWait | "unattended";
+
+const VIEW_SECTIONS: ReadonlySet<string> = new Set(TODO_LIST_SECTIONS);
+const VIEW_REASONS: ReadonlySet<string> = new Set(TODO_REASONS);
+
+/**
+ * What a to-do waits on its owner for by the hub's view of it (`view`, #10226), when the hub sent one this web knows:
+ * Needs you only, and Can wait's own decisions. The view already leaves with their supervisor what a supervising
+ * conversation handles (a supervised task's failed start, a card its supervisor holds): those wait on Persona, not on
+ * the owner. undefined: no view this web can read, so the web's own triage decides (waitsOnOwner).
+ */
+export function viewWaitsOnOwner(todo: Todo): OwnerWait | null | undefined {
+  const v = todo.view;
+  if (!v || !VIEW_SECTIONS.has(v.section) || !VIEW_REASONS.has(v.reason)) return undefined;
+  if (heldDelivery(todo)?.unblock === "user" && v.phase === "needs_you") return "delivery_ok";
+  if (v.section === "can_wait") return v.reason === "can_wait" ? "owner_decides" : null;
+  if (v.section !== "needs_you") return null;
+  switch (v.reason) {
+    case "failed_start":
+      return "failed_start";
+    case "agent_asks":
+    case "interrupted":
+    case "stopped_unfinished":
+      return "agent_asks";
+    default:
+      return "owner_decides";
+  }
+}
+
+/**
+ * Whether the hub counts this to-do in its `needs_you` (projection Counts, `GET todos` counts.needs_you): its view's
+ * section is Needs you, it is not quiet, and it is not a step an open parent carries (a step is counted with its
+ * parent; a to-do the owner answers on its own, `todo_od_…`, never is). undefined: no view this web can read.
+ * `open` says whether a to-do of this list is still open by its view, for the parent test.
+ */
+export function hubNeedsYou(todo: Todo, open: (id: string) => boolean): boolean | undefined {
+  const v = todo.view;
+  if (!v || !VIEW_SECTIONS.has(v.section) || !VIEW_REASONS.has(v.reason)) return undefined;
+  if (v.section !== "needs_you" || todo.quiet) return false;
+  return !(todo.part_of && todo.part_of !== todo.id && !todo.id.startsWith("todo_od_") && open(todo.part_of));
+}
+
+/** The open test hubNeedsYou takes, over a list: a to-do's view is not Done (one with no view: not done_at). */
+export function openByView(todos: readonly Todo[]): (id: string) => boolean {
+  const byId = new Map(todos.map((td) => [td.id, td]));
+  return (id) => {
+    const td = byId.get(id);
+    if (!td) return false;
+    return td.view ? td.view.phase !== "done" : !td.done_at;
+  };
+}
 
 /**
  * The to-dos the sidebar's To-dos badge counts (#11085), by id, each with why (OwnerNeed): the open ones (countsAsOpen)
  * that need the owner, not those Agents are on. Quiet tasks (#1731) are left out, as before. Among the rest, the first
  * rule that holds wins:
  *
- *  1. it waits on the owner (waitsOnOwner)                                          → counts, for what it waits on
+ *  1. it waits on the owner (the hub's view, viewWaitsOnOwner; without one, waitsOnOwner) → counts, for what it waits on
  *  2. one of its own Agents is on it (agentOnIt)                                    → does not count
  *  3. its pieces carry it: a to-do under it (`part_of`, at any depth) has an Agent on it or waits on the owner,
  *     and a piece that waits counts by itself, so the request is not counted twice   → does not count
- *  4. anything else: a personal to-do no Agent was ever on, and whatever has no sign of an Agent on it (its Agents
- *     stopped, finished work nobody has looked at, a PR waiting on others)           → counts, `unattended`
+ *  4. a to-do of the owner's own (no conversation handed it out: no `origin`) with no sign of an Agent on it (none
+ *     was ever on it, its Agents stopped, finished work nobody has looked at)        → counts, `unattended`
+ *  5. anything else: a conversation's task with nothing running is its supervising conversation's to pick up or close,
+ *     not the owner's, until that conversation asks them                             → does not count
+ *
+ * A to-do the hub sent a view of is counted by the hub's own rule instead (hubNeedsYou), so the badge, the main
+ * conversation's tray and the hub's needs_you are one number; the rules above decide only for to-dos without one (an
+ * older hub).
  *
  * The page's "Not done" stays countsAsOpen, so the badge is never more than it. A `part_of` loop is walked once. Its
  * size is the badge's number, and the To-dos page marks exactly these rows (lib/todo-owner-needs.ts reads it for both).
@@ -298,6 +356,10 @@ export function ownerNeeds(todos: Todo[], lookup: SessionLookup | undefined, now
   // decided on every to-do, as the page decides it (quiet ones too: their Agents and asks still carry a request)
   const superseded = supersededFailedStarts(todos);
   const placed = new Map(todos.map((td) => [td.id, triage(td, lookup, now, restored.get(td.id) ?? 0, superseded.has(td.id))]));
+  const waits = (td: Todo, t: Triage): OwnerWait | null => {
+    const v = viewWaitsOnOwner(td);
+    return v === undefined ? waitsOnOwner(td, t) : v;
+  };
   const pieces = new Map<string, Todo[]>();
   for (const td of todos) {
     if (!td.part_of) continue;
@@ -313,18 +375,24 @@ export function ownerNeeds(todos: Todo[], lookup: SessionLookup | undefined, now
       if (seen.has(td.id)) continue;
       seen.add(td.id);
       const t = placed.get(td.id)!;
-      if (agentOnIt(t) || waitsOnOwner(td, t)) return true;
+      if (agentOnIt(t) || waits(td, t)) return true;
       stack.push(...(pieces.get(td.id) ?? []));
     }
     return false;
   };
   const counted = new Map<string, OwnerNeed>();
+  const open = openByView(todos);
   for (const td of todos) {
+    const hub = hubNeedsYou(td, open);
+    if (hub !== undefined) {
+      if (hub) counted.set(td.id, viewWaitsOnOwner(td) || "owner_decides");
+      continue;
+    }
     const t = placed.get(td.id)!;
     if (td.quiet || !countsAsOpen(td, t)) continue;
-    const wait = waitsOnOwner(td, t);
+    const wait = waits(td, t);
     if (wait) counted.set(td.id, wait);
-    else if (!agentOnIt(t) && !carried(td.id)) counted.set(td.id, "unattended");
+    else if (!td.origin && !agentOnIt(t) && !carried(td.id)) counted.set(td.id, "unattended");
   }
   return counted;
 }

@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -165,7 +166,7 @@ func TestRiskyTakeOverScopeAbortsAdoption(t *testing.T) {
 	)
 	res, err := runJSON(t, s, "conv1", "agent_supervise", map[string]any{
 		"machine": "box", "session_id": "agent-old-1",
-		"done_when": []string{"PR merged to main", "deployed to production and checked"}, "expect_minutes": 5,
+		"done_when": []string{"PR merged to main", "send the release note to the customers"}, "expect_minutes": 5,
 	})
 	if err == nil || !strings.Contains(err.Error(), "only the owner may allow") {
 		t.Fatalf("risky takeover was not refused: %s (%v)", res, err)
@@ -422,22 +423,28 @@ func TestTaskScopeIsLogged(t *testing.T) {
 	if v := onlyTodo(s).Supervision; strings.Join(v.DoneWhen, "|") != "PR merged to main" || v.ExpectMinutes != 90 {
 		t.Fatalf("ledger = %+v", v)
 	}
-	// Adding a deploy: not the supervisor's to add after a supervision message.
-	risky := map[string]any{"todo_id": todo.ID, "change": "also deploy it to production", "why": "it is ready",
+	// Adding a deploy of work the owner ordered: the supervisor's own to add (decision rights), logged without asking.
+	deploy := map[string]any{"todo_id": todo.ID, "change": "also deploy it to production", "why": "it is ready",
 		"done_when": []string{"PR merged to main", "deployed to production and checked"}}
+	if got, isErr := tool(t, s, "task_scope", deploy); isErr || !strings.Contains(got, "Logged") {
+		t.Fatalf("a deploy added by the supervisor was refused: %s", got)
+	}
+	// Speaking for the owner to other people: only the owner's, refused after a supervision message.
+	risky := map[string]any{"todo_id": todo.ID, "change": "also send the release note to the customers", "why": "it is ready",
+		"done_when": []string{"PR merged to main", "deployed to production and checked", "send the release note to the customers"}}
 	if got, isErr := tool(t, s, "task_scope", risky); !isErr || !strings.Contains(got, "only the owner may allow") || !strings.Contains(got, "ask_user") {
 		t.Fatalf("a risky change after a supervision message: %s", got)
 	}
-	if b, _ := s.briefOfTodo(todo.ID); len(b.Log) != 2 || len(b.Criteria) != 1 {
+	if b, _ := s.briefOfTodo(todo.ID); len(b.Log) != 3 || len(b.Criteria) != 2 {
 		t.Fatalf("the refused change was applied: %+v", b)
 	}
 	// The owner says yes: the turn their message starts may add the step, and the message stays on the entry.
-	f.setItems(supervision, proto.Item{ID: "m3", Seq: 3, TS: asked.Add(2 * time.Hour), Role: "user", Kind: proto.KindText, Text: "yes, deploy it to production too"})
+	f.setItems(supervision, proto.Item{ID: "m3", Seq: 3, TS: asked.Add(2 * time.Hour), Role: "user", Kind: proto.KindText, Text: "yes, send the release note to the customers too"})
 	if got, isErr := tool(t, s, "task_scope", risky); isErr {
 		t.Fatalf("the approved change: %s", got)
 	}
 	b, _ = s.briefOfTodo(todo.ID)
-	if e := b.Log[len(b.Log)-1]; e.Approval == nil || e.Approval.Text != "yes, deploy it to production too" || e.Approval.MessageID != "m3" {
+	if e := b.Log[len(b.Log)-1]; e.Approval == nil || e.Approval.Text != "yes, send the release note to the customers too" || e.Approval.MessageID != "m3" {
 		t.Fatalf("approval = %+v", e)
 	}
 	// Another conversation is not its supervisor.
@@ -450,7 +457,7 @@ func TestTaskScopeIsLogged(t *testing.T) {
 	now := time.Now()
 	open, done := s.briefDigest(context.Background(), now, s.briefDigestSince(context.Background(), now), time.UTC)
 	if len(done) != 0 || len(open) != 1 || open[0].Words != "please fix the login crash before Friday" || open[0].Date != "2026-11-03" ||
-		len(open[0].Scope) != 2 || open[0].Scope[0] != "the landscape test is no longer required" {
+		len(open[0].Scope) != 3 || open[0].Scope[0] != "the landscape test is no longer required" {
 		t.Fatalf("digest = %+v / %+v", open, done)
 	}
 	s.briefDigestTold(context.Background(), now)
@@ -478,7 +485,7 @@ func TestAgentSuperviseRescopesThroughTheLog(t *testing.T) {
 	// A turn the owner did not start: a risky criterion is refused, a plain one is logged.
 	f.setItems(proto.Item{ID: "m2", Role: "user", Kind: proto.KindText, TS: time.Now(),
 		Text: prompts.RenderSupervise(prompts.Supervise{Entries: []prompts.SuperviseEntry{{ID: todo.ID, Title: todo.Title, Kind: sigStalled}}})})
-	if got, isErr := tool(t, s, "agent_supervise", args("the table link is posted", "released to TestFlight")); !isErr || !strings.Contains(got, "only the owner may allow") {
+	if got, isErr := tool(t, s, "agent_supervise", args("the table link is posted", "send the table to the whole team")); !isErr || !strings.Contains(got, "only the owner may allow") {
 		t.Fatalf("agent_supervise with a risky criterion: %s", got)
 	}
 	if got, isErr := tool(t, s, "agent_supervise", args("the table link is posted", "last week's column is there")); isErr {
@@ -716,7 +723,73 @@ func TestContinuationSurvivesEstimateUpdate(t *testing.T) {
 	if failed || !strings.Contains(got, "scope_revision: "+rev.Format(time.RFC3339Nano)) {
 		t.Fatalf("todo_get: %s", got)
 	}
-	if _, err = s.applyScope(t.Context(), todo, scopeChange{By: "conv1", Change: "Merge the release", DoneWhen: []string{"Merge the release"}, Expect: 42}); err == nil {
-		t.Fatal("adding a risky criterion needs owner approval")
+	if _, err = s.applyScope(t.Context(), todo, scopeChange{By: "conv1", Change: "Send the release note to the customers", DoneWhen: []string{"Send the release note to the customers"}, Expect: 42}); err == nil {
+		t.Fatal("adding an owner-only criterion needs owner approval")
+	}
+}
+
+// Decision rights (docs/designs/decision-rights-20261123.md): merging and deploying work the owner ordered is the
+// supervisor's, so a scope may add it without asking, unless the owner's words on record hold it off. Speaking for the
+// owner to others is theirs, unless their words on record already say it. A lead hands an owner's step to the main
+// conversation; only the main conversation asks the owner.
+func TestScopeRiskFollowsDecisionRights(t *testing.T) {
+	for _, c := range []struct {
+		text, known string
+		want        string
+	}{
+		{"deploy it to production", "", ""},
+		{"merge the PR and release it", "fix the crash", ""},
+		{"send the release note to the customers", "", "send"},
+		{"send the release note to the customers", "the owner: send the release note to the customers when it ships", ""},
+		{"merge the PR", "do not merge; stop at a PR", "merge"},
+		{"delete the old exports", "", "delete"},
+	} {
+		if got := strings.Join(scopeRisk(c.text, c.known), ","); got != c.want {
+			t.Errorf("scopeRisk(%q, %q) = %q, want %q", c.text, c.known, got, c.want)
+		}
+	}
+	s, _ := newQuietService(t)
+	setSettings(t, s, func(v *Settings) { v.Main, v.Leaders = "conv1", []string{"lead1"} })
+	ctx := context.Background()
+	if got := s.ownerStepRoute(ctx, "conv1"); !strings.Contains(got, "ask_user") {
+		t.Errorf("the main conversation's route: %s", got)
+	}
+	if got := s.ownerStepRoute(ctx, "lead1"); !strings.Contains(got, "main conversation") || strings.Contains(got, "ask_user") {
+		t.Errorf("a lead's route: %s", got)
+	}
+}
+
+// An estimate change is logged as an estimate, which authorizes nothing new, and still reaches the owner in the next
+// digest, as task_scope's reply says (review of #13130). An estimate set through agent_send carries no sentence for
+// the owner and adds no empty line; a lesson learns from either, as a revised estimate also hides an overrun.
+func TestEstimateChangeReachesTheDigestAndLessons(t *testing.T) {
+	s, _, _ := briefService(t, "please fix the login crash before Friday")
+	if got, isErr := tool(t, s, "task_plan", briefTask(nil)); isErr {
+		t.Fatal(got)
+	}
+	waitFor(t, "the agent", func() bool { return len(onlyTodo(s).Agents) == 1 })
+	todo := onlyTodo(s)
+	got, isErr := tool(t, s, "task_scope", map[string]any{"todo_id": todo.ID, "change": "the migration needs another hour",
+		"why": "the backfill is slower than measured", "expect_minutes": 90})
+	if isErr || !strings.Contains(got, "the owner sees it in the next digest") {
+		t.Fatalf("task_scope: %s", got)
+	}
+	b, _ := s.briefOfTodo(todo.ID)
+	if last := b.Log[len(b.Log)-1]; last.Kind != briefEventEstimate || b.ExpectNow != 90 {
+		t.Fatalf("not logged as an estimate: %+v", b)
+	}
+	if _, err := s.rescope(context.Background(), todoNow(s, todo.ID), "conv1", "conv1", "agent_send", nil, 120); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ = s.briefOfTodo(todo.ID); b.ExpectNow != 120 || b.Log[len(b.Log)-1].Kind != briefEventEstimate || b.Log[len(b.Log)-1].Change != "" {
+		t.Fatalf("agent_send's estimate: %+v", b)
+	}
+	now := time.Now()
+	open, _ := s.briefDigest(context.Background(), now, s.briefDigestSince(context.Background(), now), time.UTC)
+	if len(open) != 1 || !slices.Equal(open[0].Scope, []string{"the migration needs another hour"}) {
+		t.Fatalf("digest = %+v", open)
+	}
+	if !lessonFriction(nil, &b, time.Time{}, 0) {
+		t.Fatal("a revised estimate gave a lesson nothing to learn from")
 	}
 }

@@ -1613,13 +1613,18 @@ extension AttachMoreSection {
     /// `scan`: Scan Document (#3720), next to Take Photo. `meeting`: Persona's main conversation's Meeting Recording
     /// (#3723), the sidebar's row by its words: with a recording under way it says so and opens it. `context`: Add as
     /// Context › Knowledge Note… / To-do… / Inbox Item… (#3721), folded under Mention.
+    /// `modules`: the active modules' composer actions (`Modules.registry.composerActions`, Glasses Photo), after Scan
+    /// Document, each row `attach-<id>`; `open` presents one's sheet.
     static func common(camera: (() -> Void)?, scan: (() -> Void)? = nil,
-                       glasses: (() -> Void)?, meeting: (() -> Void)? = nil, mention: @escaping () -> Void,
+                       modules: [ModuleComposerAction] = [], open: @escaping (ModuleComposerAction) -> Void = { _ in },
+                       meeting: (() -> Void)? = nil, mention: @escaping () -> Void,
                        context: ((ContextPickKind) -> Void)? = nil) -> [AttachMoreSection] {
         var capture: [AttachMoreRow] = []
         if let camera { capture.append(AttachMoreRow(id: "composer-menu-camera", title: String(localized: "Take Photo [Chat View 6e3a10]"), symbol: Theme.Icon.camera, action: camera)) }
         if let scan { capture.append(AttachMoreRow(id: "composer-menu-scan", title: String(localized: "Scan Document"), symbol: Theme.Icon.scanDocument, action: scan)) }
-        if let glasses { capture.append(AttachMoreRow(id: "attach-glasses", title: String(localized: "Glasses Photo"), symbol: Theme.Icon.glasses, action: glasses)) }
+        capture += modules.map { action in
+            AttachMoreRow(id: "attach-" + action.id, title: String(localized: action.title), symbol: action.symbol) { open(action) }
+        }
         if let meeting {
             capture.append(AttachMoreRow(id: "composer-menu-meeting", title: MeetingWords.running ?? MeetingWords.start,
                                          symbol: Theme.Icon.recording, action: meeting))

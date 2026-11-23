@@ -16,6 +16,7 @@ it reads `Keychain.serverConfig` afresh each time (the hub address + device toke
 | `OpenPersonalAgentIntent` | Open Personal Agent | Tapping a personal Agent session in Spotlight opens that conversation directly (Agents › Personal Agents › session; back goes to the personal Agents list; an open settings sheet is closed first). `AppModel.openPersonalAgent` is handed to `ChatsView`, which, as with `openChat`, pushes it once the list has appeared and the navigation stack is still. | Foreground |
 | `OpenPersonaAssistantIntent` / `OpenPersonaAgentsIntent` | Open Persona Assistant / Agents | Intents behind the controls for Control Center, the Lock Screen, and the Action Button. | Foreground |
 | `OpenPersonaDictationIntent` | Dictate to Persona | Opens a new assistant conversation and leaves its visible starter a one-shot request to start the composer's existing dictation. Permission or availability failure keeps the new conversation, focuses the field and shows the mic's usual message; nothing is sent automatically. | Foreground |
+| `OpenPersonaCallIntent` | Call Persona | Behind the Call Persona control (#13241): `CallPersonaIntent.place()`, the same call as Call Persona's. Not discoverable, so Shortcuts lists Call Persona once (the App Shortcut). | Foreground |
 | `StartMeetingRecordingIntent` | Record (Record a Meeting until #5243; the type keeps its name, so shortcuts made with it keep working) | Starts a meeting recording on the phone, named after the calendar event happening now, with its Live Activity (Stop, Bookmark); does nothing while something already records. An `AudioRecordingIntent`: no hub needed, the transcript syncs later (`docs/apple/recording.md`, "Meeting recordings"). | Background (foreground once, to ask for the microphone) |
 
 `PersonalAgentEntity` is an `IndexedEntity`: whenever the Agents page finishes loading, it calls `CSSearchableIndex.default().indexAppEntities(...)`
@@ -36,7 +37,7 @@ and `PersonaShortcuts.updateAppShortcutParameters()`, so Spotlight can find sess
 
 ## Calling Persona (#9290)
 
-A call to Persona from Siri is the same call as the chat's Call: `PersonaCalls.shared.callPersona(origin: .siri)` on the selected hub's main conversation, with the same refusals (an urgent call, a recording, no hub, no voice extension, the microphone) and the same call page. There are three ways in.
+A call to Persona from Siri is the same call as the chat's Call: `PersonaCalls.shared.callPersona(origin: .siri)` on the selected hub's main conversation, with the same refusals (an urgent call, a recording, no hub, no voice extension, the microphone) and the same call page. There are three ways in from Siri, and the Call Persona control places the same call (Control Center below).
 
 Whatever page or sheet the app was left on (Settings' sheet included), the call page comes up over it in the call's own window (`CallWindow`; `docs/design/DESIGN_SYSTEM.md`, "Call screen"), closing nothing, and a refusal says why in the voice alert there. Minimize goes back to that page, with the bar at the top that returns to the call over it.
 
@@ -51,6 +52,7 @@ On a locked phone every way asks for Face ID or the passcode first: the call nee
 - Action Button: **Settings › Action Button › Shortcut**; select "Ask Persona", "Give an Agent a Task", "New To-Do", "Start Meeting" or "Call Persona" directly (App Shortcuts appear automatically), or **Controls** › Record.
 - Control Center / Lock Screen: the `PersonaWidgets` extension adds `ControlWidget`s: `AskPersonaControl`, `PersonaAgentsControl` open the App's assistant page / Agents page;
   `DictatePersonaControl` (kind `persona.control.dictate`) opens a new assistant conversation with dictation running once its composer is visible;
+  `CallPersonaControl` (kind `persona.control.call`, Call Persona's glyph) calls Persona on the main chat, as Call Persona does (#13241);
   `MeetingRecordingControl` (kind `persona.control.meeting-recording`) starts a meeting recording without opening the App.
   Their intents live in `LiveActivity/PersonaControlIntents.swift` and `LiveActivity/RecordingIntents.swift` (compiled into both App and extension; `perform` runs only in the App).
 
@@ -69,7 +71,7 @@ On a locked phone every way asks for Face ID or the passcode first: the call nee
 3. Say "Have Persona agent do something", choose a session, and describe the task: it should reply "Sent to '…'"; that session in the Lark gateway should receive the message. The same task must not be duplicated (clientId).
 4. Say "Check Persona agents".
 5. Say "Add a to-do in Persona", then give a title: it should reply "To-do saved: '…'", and the App's To-dos page should contain the new entry.
-6. These actions should appear under **Shortcuts App › Persona** and be selectable for the Action Button; **Control Center › Add a Control › Persona** should contain three controls: Ask Persona, Persona Agents and Dictate to Persona. Dictate opens a new conversation with its dictation bar up; after stopping, the recognized words stay as an unsent draft.
+6. These actions should appear under **Shortcuts App › Persona** and be selectable for the Action Button; **Control Center › Add a Control › Persona** should contain Ask Persona, Persona Agents, Dictate to Persona and Call Persona. Dictate opens a new conversation with its dictation bar up; after stopping, the recognized words stay as an unsent draft. Call Persona, pressed from Control Center and from the Lock Screen with the phone locked (Face ID first), opens the app and starts the same call as saying "Call Persona".
 7. Searching for a personal Agent's session name in Spotlight should find it; tapping it opens that conversation directly, and back in the top-left returns to the personal Agents list. Try once each with the settings sheet open, with the App in the background, and with it not running.
 
 8. Calling Persona: with the phone unlocked and Persona in the background, say "Call Persona" (then each other phrase, in each language): the call page appears in "Calling…" and the call connects (note any phrase Siri takes as a phone call of its own); switch apps and lock the phone, and it goes on. Say "Talk to Persona" with no car connected: the same call. With the phone locked, both ask to unlock first (with AirPods too). In a build with `app.siri_calls`, allow Siri once when Persona asks, then say "Call Persona using Persona" (and "用 Persona 打给 Persona", "PersonaでPersonaに電話して" in those languages): Siri hands it to Persona and the same call starts.

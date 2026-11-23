@@ -321,8 +321,10 @@ type fleetMem struct {
 	status map[string]string
 	res    map[string]*proto.Resolution
 	recs   []db.InteractionRecord
-	always map[string]map[string]bool // session → keys
-	seen   map[[2]string]time.Time
+	// endedBy is who or what ended each interaction, as the history's ended_by keeps it (db.WithEndedBy).
+	endedBy map[string]string
+	always  map[string]map[string]bool // session → keys
+	seen    map[[2]string]time.Time
 	// insertGate, when set before the cards come, holds each interaction write until it is closed (a slow database).
 	insertGate chan struct{}
 }
@@ -363,11 +365,15 @@ func (m *fleetMem) MarkInteractionResumable(_ context.Context, id string) (bool,
 	return true, nil
 }
 
-func (m *fleetMem) FinishInteraction(_ context.Context, id, status string, res *proto.Resolution) error {
+func (m *fleetMem) FinishInteraction(ctx context.Context, id, status string, res *proto.Resolution) error {
 	m.fmu.Lock()
 	defer m.fmu.Unlock()
 	if m.status[id] == "pending" {
 		m.status[id], m.res[id] = status, res
+		if m.endedBy == nil {
+			m.endedBy = map[string]string{}
+		}
+		m.endedBy[id] = db.EndedBy(ctx)
 		for i := range m.recs {
 			if m.recs[i].Interaction.ID == id {
 				m.recs[i].Status = status
@@ -375,6 +381,13 @@ func (m *fleetMem) FinishInteraction(_ context.Context, id, status string, res *
 		}
 	}
 	return nil
+}
+
+// endedAs is who or what ended interaction id, as the history keeps it.
+func (m *fleetMem) endedAs(id string) string {
+	m.fmu.Lock()
+	defer m.fmu.Unlock()
+	return m.endedBy[id]
 }
 
 func (m *fleetMem) InteractionOutcome(_ context.Context, id string) (string, *proto.Resolution, error) {

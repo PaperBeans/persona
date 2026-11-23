@@ -205,6 +205,9 @@ func (s *Service) dayRecapWritten(ctx context.Context, e *kb.Engine, r kb.Record
 				s.logf("assistant: day recap push: the hub refused it: %v", err)
 				err = nil
 			}
+			if err == nil {
+				s.noteCard(ctx, cardDayRecap, n) // once: a push kept for later is tried again until taken
+			}
 			sent(dayPushPhone, err)
 		})
 	}

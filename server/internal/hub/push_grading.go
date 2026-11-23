@@ -150,6 +150,9 @@ type pushPolicy struct {
 	track  string
 	done   bool
 	system bool
+	// cardID: the card the push stands for (assistantwire.Notification.CardID): put in the payload as interaction_id
+	// and remembered per device, so the card's end withdraws the push.
+	cardID string
 }
 
 func (p pushPolicy) levelOr(level string) pushPolicy {

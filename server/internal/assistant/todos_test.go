@@ -535,7 +535,7 @@ func TestUserCompletionWinsLateSupervisorAcceptance(t *testing.T) {
 		t.Fatalf("PATCH %d, review closed %v: %v", status, closed, reviewErr)
 	}
 	reloadTodos(t, e.s)
-	e.s.taskWorking(ctx, "box", "s1")
+	e.s.taskWorking(ctx, "box", "s1", startRow{})
 	stored, err := g.GetTodo(ctx, todo.ID)
 	got := todoNow(e.s, todo.ID)
 	if err != nil || stored.DoneAt == nil || stored.DoneBy != "" || got.DoneAt == nil || got.DoneBy != "" {

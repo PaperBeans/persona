@@ -107,6 +107,6 @@ func (s *Service) pushStreak(t Task, count int, last ScheduleRun) bool {
 			n.Subtitle = m.Name
 		}
 	}
-	s.push(ctx, n)
+	s.push(withCard(ctx, cardScheduleStreak), n)
 	return true
 }

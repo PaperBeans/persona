@@ -667,6 +667,7 @@ func mergeSignals(a, b []superviseSignal) []superviseSignal {
 			if g.Kind == sigInbox && out[i].Key != g.Key {
 				g = joinInbox(out[i], g)
 			}
+			g = preserveIdleHandoff(out[i], g)
 			out[i] = g
 		} else {
 			out = append(out, g)

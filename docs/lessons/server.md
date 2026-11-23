@@ -2128,6 +2128,40 @@ A connection that outlives its transport (protocol.md "Resuming") changes what s
   Callbacks that outlive a route (a planned switch, an RTT ping or a tailcat probe) carry its generation and check it
   before acting. Path failure and SSH flap timing use the current route's own start, not the whole connection's.
 
+## A large session over a slow link (2026-11-23, #13677)
+
+A computer on Persona Link at about 100 KB/s with a 300 ms round trip went offline (`node exited`) every few minutes
+while a chat had one of its sessions open: 4.9 MB of transcript, most of it screenshots. Lanes were on, and still:
+
+- **What a pong waits behind is what was written without credit.** The node's `session.items` pushes were events and
+  its answers to `session.items` answers: neither waits for credit, so a catch-up of megabytes went to the transport at
+  once, and Persona Link's WebSocket ping on the stream (10 s / 5 s, the hub's end) timed out behind it. The hub closed
+  the stream, the manager read the end of the connection as the node exiting, and a link computer gets no grace. The
+  pushes now go on the bulk lane with credit and those answers wait for credit on the interactive lane, ahead of bulk:
+  a person's page read is not held behind a background catch-up. Only the node's own pushes: a runtime's are forwarded
+  from that runtime's read loop, which must not wait for credit.
+- **A watch that answers after its catch-up looks like a dead node.** The hub gives `session.watch` 10 s; a catch-up
+  of 5 MB at 100 KB/s is 50 s. The node now reads the file, answers, and then pushes. A page read used to wait for the
+  push lock the catch-up holds, which was the whole catch-up again (29.5 s and a 502, as in the hub's log); it reads
+  the file as it is now, since what the catch-up read is on its way.
+- **Putting the data back for subscribers that want none.** The catch-up put every image's data back
+  (`File.WithImages`, "the hub sends them to every subscriber, lazy or not"), and every app subscribes with
+  `lazy_images`, whose data the hub strips again. Catch-ups carry placeholders now; a batch of new lines carries images
+  whole only up to 128 KiB each and 256 KiB together, the newest first; a push is cut at about 256 KiB at line
+  boundaries. The 5 MB session's catch-up went from 6.4 MB
+  over the link (55 s) to 0.3 MB (1 s) in the slow link soak (testing.md "Slow link soak").
+- **A reproduction has to know how far the hub has read.** A catch-up only happens with `since_seq`, which the hub
+  learns from a push: an app that opened the session, saw no new line and closed it leaves nothing to catch up on,
+  and a soak that does so passes on the broken code. The soak shows a line while the session is open, then grows it.
+- **Resuming hides the drop, not the cause.** On a node that resumes (#10663) the same stream drops three times and
+  comes back within a second each; a 0.9.1 node, without resuming, goes offline and the catch-up never arrives. Count
+  the drops (`connection over link lost`), not only the offline transitions.
+- **The web app multiplied it.** Its stale-page pull asked again every 10 s however often it failed (and at once
+  when an ask took longer than that), the user-input index retried forever, two views of one session asked side by
+  side, and none of it looked at archiving. One gate per session and read in the tab now (`web/src/lib/pull-gate.ts`):
+  one ask out at a time, the next after a failure waiting 3 s doubling to 5 minutes, and no stale pull for an archived
+  session. Archiving does not end the hub's watch while a view has the session open: the watch follows open views.
+
 ## A new value for an existing RPC parameter may be silently ignored by an old node (2026-11-06, #4858)
 
 Uploads already had a `dest` parameter (`terminal`, `health`), but older nodes never read it: given `dest=dir&dir=~/proj`, they still put the file in the system temp directory and returned a successful path.

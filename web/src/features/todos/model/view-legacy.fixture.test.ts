@@ -37,6 +37,8 @@ const DECIDED: Record<string, ByDesign> = {
   run_waits_on_agent: "run_waits",
   run_waits_on_external: "run_waits",
   transient_retry_stays_background: "run_waits",
+  failed_start_supervised: "supervisor_holds",
+  agent_asks_held_by_supervisor: "supervisor_holds",
 };
 
 const zone = process.env.TZ;

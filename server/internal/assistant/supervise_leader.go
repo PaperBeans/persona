@@ -99,145 +99,89 @@ func (s *Service) planTaskSupervisor(ctx context.Context, conversation string, t
 	return "", planInvalid{i18n.Err("assistant-conversations.supervision_reviewer_required")}
 }
 
-// legacyLeaderPlanSupervision reports whether t's saved pre-#5732 plan explicitly assigned its current leader.
-// That topology is not the manual-Agent exception and rehomes to main. An unavailable or non-matching plan proves
-// nothing, so an explicit leader assignment is left alone rather than guessed away.
-func (s *Service) legacyLeaderPlanSupervision(ctx context.Context, t Todo) bool {
-	if t.PlanID == "" || t.Supervision == nil || t.Supervision.assigned() || !s.isLeader(ctx, t.Supervision.Supervisor) {
-		return false
-	}
-	p, err := s.loadPlan(ctx, t.PlanID)
-	if err != nil {
-		return false
-	}
-	for _, task := range p.Tasks {
-		if task.TodoID == t.ID && (task.Supervisor == t.Supervision.Supervisor || p.Conversation == t.Supervision.Supervisor) {
-			return true
-		}
-	}
-	return false
-}
-
-// effectiveSupervisor resolves current plan/transfer ownership before legacy migration policy, including needs_user.
+// effectiveSupervisor is the conversation that owns t: its recorded supervisor, main when it has none. Whoever handed a
+// task out keeps it; tasks planned before the supervisor source existed get theirs once, on load
+// (backfillPlanSupervisors), instead of a read-time legacy guess.
 func (s *Service) effectiveSupervisor(ctx context.Context, cfg Settings, t Todo) string {
 	if t.Supervision == nil || t.Supervision.Supervisor == "" {
-		return cfg.Main
-	}
-	if t.Supervision.assigned() {
-		return t.Supervision.Supervisor
-	}
-	if s.legacyLeaderPlanSupervision(ctx, t) {
 		return cfg.Main
 	}
 	return t.Supervision.Supervisor
 }
 
-// rehomeSupervisedTodos brings open legacy side-supervised tasks under main without rewriting their review state or
-// criteria. Explicit leader assignments and task-leader workers are the two specialized topologies to keep (#5732).
-// A legacy background ledger also stays: that conversation may still accept the old task it already supervised.
-func (s *Service) rehomeSupervisedTodos(ctx context.Context) {
-	main := s.settings(ctx).Main
-	if main == "" {
-		return
+// plannedLead is the direction lead that handed out t with task_plan before the supervisor source was recorded: the
+// lead its saved plan task named, else the lead conversation it came from ("a task from conversation X", Origin).
+// "" when neither is a lead now.
+func (s *Service) plannedLead(ctx context.Context, t Todo) string {
+	if p, err := s.loadPlan(ctx, t.PlanID); err == nil {
+		for _, task := range p.Tasks {
+			if task.TodoID == t.ID && s.isLeader(ctx, task.Supervisor) {
+				return task.Supervisor
+			}
+		}
 	}
+	if s.isLeader(ctx, t.Origin) {
+		return t.Origin
+	}
+	return ""
+}
+
+// backfillPlanSupervisors gives the tasks a direction lead handed out before #13346 back to that lead, once: the ones
+// it planned and the ones whose origin is the lead (handed out without a plan: agent_start, todo_create), open or done
+// (a done one keeps the right supervisor on record for a reopen and the history). The ledger records the lead with
+// source plan, so routing, remedies and task_review read the lead from then on and a later load skips them. A lead's
+// unmarked no-plan task with an Agent needs that source even when its supervisor is already the lead: without it,
+// needs_user keeps the legacy main route (#13619). A direction to-do with no Agent yet stays unmarked. Signals already
+// queued for the former supervisor (main, as the removed rehome left them) are gathered again for the lead. Task
+// leaders' workers, explicit transfers and tasks other conversations planned keep their recorded supervisor.
+func (s *Service) backfillPlanSupervisors(ctx context.Context) {
+	cfg := s.settings(ctx)
 	todos := s.todosOf(ctx, "*")
-	web := s.webBase(ctx)
-	// A crash may have persisted Supervisor=main without reaching the queue reconciliation below. Recover those
-	// orphaned queued signals first; the candidate loop alone would now skip the task as already rehomed.
-	s.rehomeMainQueuedSignals(ctx, main, todos, web)
-	rehomed := map[string]map[string]bool{} // old conversation → the tasks taken from its queued supervision
+	moved := map[string]map[string]bool{} // former supervisor → the tasks the lead took back
 	for _, t := range todos {
-		if t.DoneAt != nil || t.Supervision == nil {
+		if t.Supervision == nil || t.Supervision.assigned() || t.PlanID == "" && t.Origin == "" {
 			continue
 		}
-		sup := t.Supervision.Supervisor
-		if t.Supervision.assigned() {
+		old := t.Supervision.Supervisor
+		if _, _, worker := parseLeaderRef(old); worker {
 			continue
 		}
-		_, _, worker := parseLeaderRef(sup)
-		manualLeader := s.isLeader(ctx, sup) && s.effectiveSupervisor(ctx, s.settings(ctx), t) == sup
-		capableRuntime := sup != "" && t.Origin == sup && s.runtimeWithSupervisionPolicy(ctx, s.settings(ctx).MachineID, sup)
-		if sup == main || worker || manualLeader || capableRuntime || s.isBackground(ctx, sup) {
+		lead := s.plannedLead(ctx, t)
+		if lead == "" || t.PlanID == "" && old == lead && len(t.Agents) == 0 {
+			continue // a direction to-do with no Agent yet stays unmarked; no-plan Agent work still needs its source
+		}
+		if s.runtimeWithoutSupervisionPolicy(ctx, cfg.MachineID, lead) {
+			s.logf("task %s: backfill supervision: lead %s cannot receive supervision; left with %s", t.ID, short(lead), short(old))
 			continue
 		}
 		if _, _, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
-			if v.Supervisor == main {
+			if v.SupervisorSource != "" {
 				return false
 			}
-			v.Supervisor = main
+			v.Supervisor, v.SupervisorSource = lead, "plan"
 			return true
 		}); err != nil {
-			s.logf("task %s: rehome supervision: %v", t.ID, err)
+			s.logf("task %s: backfill supervision: %v", t.ID, err)
 			continue
 		}
-		if rehomed[sup] == nil {
-			rehomed[sup] = map[string]bool{}
-		}
-		rehomed[sup][t.ID] = true
-		if t.Origin != main {
-			s.taskCard(ctx, main, t.ID, "")
-		}
-	}
-	if len(rehomed) > 0 {
-		for sup, ids := range rehomed {
-			s.rehomeQueuedSupervision(ctx, sup, ids, todos, web)
-		}
-	}
-}
-
-// rehomeMainQueuedSignals recovers queue entries left behind when a previous process stopped after the supervisor write.
-// Structured signals name their tasks directly; a pre-structured message uses the same text-id fallback as normal rehome.
-func (s *Service) rehomeMainQueuedSignals(ctx context.Context, main string, todos []Todo, web string) {
-	mainTasks := map[string]bool{}
-	for _, t := range todos {
-		if t.DoneAt == nil && t.Supervision != nil && t.Supervision.Supervisor == main {
-			mainTasks[t.ID] = true
-		}
-	}
-	if len(mainTasks) == 0 {
-		return
-	}
-	r := &s.relays
-	r.mu.Lock()
-	if !s.relayLocked(ctx) {
-		r.mu.Unlock()
-		return
-	}
-	byConversation := map[string]map[string]bool{}
-	for conversation, queue := range r.st.Queue {
-		if conversation == main || s.isBackground(ctx, conversation) {
-			// An entry explicitly queued for the configured legacy background is intentional compatibility delivery,
-			// not an orphaned side signal left by the supervisor write.
+		if old == lead || old == "" {
 			continue
 		}
-		for _, msg := range queue {
-			if msg.Tool != superviseTool {
-				continue
-			}
-			if signals, structured := decodeDigestSignals(msg.Signals); structured {
-				for _, g := range signals {
-					if mainTasks[g.Todo] {
-						if byConversation[conversation] == nil {
-							byConversation[conversation] = map[string]bool{}
-						}
-						byConversation[conversation][g.Todo] = true
-					}
-				}
-				continue
-			}
-			for id := range mainTasks {
-				if strings.Contains(msg.Text, id) {
-					if byConversation[conversation] == nil {
-						byConversation[conversation] = map[string]bool{}
-					}
-					byConversation[conversation][id] = true
-				}
-			}
+		s.logf("task %s: supervision backfilled from %s to its planning lead %s", t.ID, short(old), short(lead))
+		if t.DoneAt != nil {
+			continue // done: nothing queued to move, no card to show
 		}
+		if moved[old] == nil {
+			moved[old] = map[string]bool{}
+		}
+		moved[old][t.ID] = true
+		s.taskCard(ctx, lead, t.ID, "")
 	}
-	r.mu.Unlock()
-	for old, ids := range byConversation {
-		s.rehomeQueuedSupervision(ctx, old, ids, todos, web)
+	if len(moved) > 0 {
+		web := s.webBase(ctx)
+		for old, ids := range moved {
+			s.rehomeQueuedSupervision(ctx, old, ids, todos, web)
+		}
 	}
 }
 

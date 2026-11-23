@@ -12,6 +12,7 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/channel"
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -48,7 +49,14 @@ func (s *Service) fleetHandler(next http.Handler) http.Handler {
 		if a, ok := assistantwire.HandoffApproverOf(r.Context()); ok {
 			approver = &a
 		}
-		if err := s.resolveApproved(r.Context(), id, res, approver); err != nil {
+		// An answer through this route is a device's, the user's own on one of theirs (an extension's when the hub says
+		// so): the history keeps it as such (interactions.ended_by), so it is told from a card that expired or was
+		// withdrawn, or that someone answered for the user.
+		by := db.EndedByDevice
+		if r.Header.Get(RoleHeader) == roleExtension {
+			by = db.EndedByExtension
+		}
+		if err := s.resolveApproved(db.WithEndedBy(r.Context(), by), id, res, approver); err != nil {
 			switch {
 			case errors.Is(err, errHandoffElsewhere):
 				apierr.WriteCode(w, http.StatusForbidden, proto.CodeSecretHandoffElsewhere, err)

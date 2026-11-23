@@ -20,6 +20,7 @@ vi.mock("../lib/extension-slots", async (original) => ({
   ...(await original<typeof import("../lib/extension-slots")>()),
   useExtensionSlot: (placement: string) => (placement === "nav_page" ? PLACES : []),
 }));
+import "../modules";
 import { setSidebarCollapsed } from "../lib/layout";
 import { setPageShown } from "../lib/sidebar-pages";
 import { BUILTIN_PAGE_COLORS, setSidebarIconMode } from "../lib/sidebar-icons";
@@ -36,6 +37,8 @@ const flush = async () => {
 const link = (label: string) => [...host.querySelectorAll<HTMLAnchorElement>("a")].find((a) => (a.getAttribute("aria-label") ?? a.textContent?.trim()) === label || a.title === label)!;
 /** A page row's (or a grid tile's) icon box: the span around its svg. */
 const iconBox = (label: string) => link(label).querySelector("svg")!.parentElement as HTMLElement;
+// the built-in pages' colors and the health module's own (src/modules/health/module.ts)
+const PAGE_COLORS = { ...BUILTIN_PAGE_COLORS, health: "pink" } as const;
 const BUILT_IN = { 总览: "home", 收件箱: "inbox", 健康: "health", 待办: "todos", 定时任务: "routines", 知识库: "kb", 机器: "machines", 设置: "settings" } as const;
 const hues = () => [...host.querySelectorAll<HTMLElement>("[style]")].map((el) => el.style.color).filter((c) => c.includes("--hue-"));
 
@@ -129,7 +132,7 @@ describe("Colored", () => {
         expect(box.hasAttribute("style")).toBe(false);
       } else {
         expect(box.className, label).toBe("text-ink-3");
-        expect(box.style.color, label).toBe(`var(--hue-${BUILTIN_PAGE_COLORS[key]})`);
+        expect(box.style.color, label).toBe(`var(--hue-${PAGE_COLORS[key]})`);
       }
     }
     expect(iconBox("Garden").style.color).toBe("var(--hue-green)");

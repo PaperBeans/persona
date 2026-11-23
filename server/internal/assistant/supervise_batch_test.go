@@ -179,7 +179,7 @@ func TestSupervisionBatchImmediateRescreensReleasedIdleWake(t *testing.T) {
 			s.queueSignal(immediate)
 			waitFor(t, "the immediate digest", func() bool { return len(assistantSendsTo(f, "conv1")) == 1 })
 			text, _ := lastSendTo(f, "conv1")["text"].(string)
-			if !strings.Contains(text, "signal="+immediate.Kind) {
+			if !strings.Contains(text, "signal="+immediate.Kind) && !strings.Contains(text, "+"+immediate.Kind) { // a report joins its turn's stop (joinTurnReports)
 				t.Fatalf("immediate signal was not delivered: %s", text)
 			}
 			if got := strings.Contains(text, "signal="+sigIdle); got != tc.wantIdle {

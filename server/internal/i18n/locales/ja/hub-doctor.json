@@ -67,6 +67,7 @@
   "push_reason_no_relay": "{route}：ハブに apns.json がなく、このデバイスもリレーを報告していません（ビルドにリレーが設定されていないか、アプリが古い可能性があります）",
   "push_reason_no_token": "{route}：APNs トークンがありません（このデバイスで通知が許可されていないか、APNs への登録に失敗しました）",
   "push_reason_relay_failed": "{route}：プッシュリレーへの登録に失敗しました（{detail}）",
+  "push_relay_next": "リレーの稼働状況と対応しているトピックを確認してください",
   "push_route_direct": "APNs に直接",
   "push_route_none": "バックグラウンドのプッシュ通知を受け取れません",
   "push_route_relay": "プッシュリレー経由",

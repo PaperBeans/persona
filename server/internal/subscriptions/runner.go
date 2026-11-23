@@ -404,10 +404,14 @@ func (s *Service) execute(ctx context.Context, sub Subscription, asked bool, sta
 			next.SinceAt, next.Continuation = newest, nil
 		}
 		next.WeakDedup = pl.weak || sub.Continuation != nil && sub.WeakDedup
+		if sub.Recipe.Mode == wire.ConnectorSubscriptionModeThings {
+			next.Answer, next.AnswerAt = answerOf(pl.items), &start // the Inbox gets these rows as they are (#13637)
+		}
 	}
 	var baselineCommit *time.Time
 	if baseline != nil {
 		run.Baseline, items = len(items), nil
+		next.Answer, next.AnswerAt = nil, nil // its new rows are not kept: each thread's newest stored, as before
 		if pl.continuation == nil {
 			next.Baseline, baselineCommit = nil, baseline
 		}
@@ -460,13 +464,14 @@ const (
 	kbKeep    = 30 * 24 * time.Hour
 )
 
-// prune drops sub's held items its destinations are past.
+// prune drops sub's held items its destinations are past, but for its things recipe's latest answer's rows, which the
+// Inbox gets while they are in it however old they are (#13637).
 func (s *Service) prune(ctx context.Context, sub Subscription, now time.Time) {
 	keep := inboxKeep
 	if sub.ToKB {
 		keep = kbKeep
 	}
-	if err := s.o.Store.PruneItems(ctx, sub.ID, now.Add(-keep)); err != nil {
+	if err := s.o.Store.PruneItems(ctx, sub.ID, now.Add(-keep), sub.Answer); err != nil {
 		s.o.Logf("subscription %s: prune its items: %v", sub.ID, err)
 	}
 }

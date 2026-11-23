@@ -138,6 +138,11 @@ nonisolated enum ExtensionSettingsLink {
     }
 }
 
+/// Manager-owned pages use HTTP rather than negotiating an extension stream.
+nonisolated enum ReservedExtensionUI {
+    static let paths = [SubscriptionsUI.id: SubscriptionsUI.path, HealthIntakeUI.id: HealthIntakeUI.path]
+}
+
 extension APIClient {
     /// What enabled extensions draw at a placement (a launcher's section: only the extensions whose gateway it is).
     /// No placement: every slot's but launchers' sections (docs/extensions/extensions.md「UI slots」). Placements this app does not
@@ -153,11 +158,13 @@ extension APIClient {
                   values: [String: String]? = nil, manager: String? = nil, assistant: String? = nil) async throws -> ExtensionActionResult {
         let body = ExtensionUIRequest(context: context, state: state, action: action, values: values)
         let query = manager.map { ["manager": $0] } ?? [:]
-        // The source subscription pages (#2041) are the manager's own, drawn and pressed as an extension page; only they are
-        // told the assistant's name (#5278).
-        if ext == SubscriptionsUI.id {
-            let sent = SubscriptionsUI.Request(request: body, assistant: assistant)
-            return try JSON.decoder.decode(ExtensionActionResult.self, from: try await request("POST", SubscriptionsUI.path, query: query, body: sent))
+        if let path = ReservedExtensionUI.paths[ext] {
+            // Health belongs to the default manager even when the client explicitly names another one.
+            let client = ext == HealthIntakeUI.id ? self.manager(nil) : self
+            let scope = ext == HealthIntakeUI.id ? ["space": Session.healthSpace] : query
+            // Only subscriptions receive the assistant's name and their app-owned link capabilities.
+            let sent: any Encodable = ext == SubscriptionsUI.id ? SubscriptionsUI.Request(request: body, assistant: assistant) : body
+            return try JSON.decoder.decode(ExtensionActionResult.self, from: try await client.request("POST", path, query: scope, body: sent))
         }
         let path = extensionPath("/\(ext)/-/ui/\(ui)")
         return try JSON.decoder.decode(ExtensionActionResult.self, from: try await request("POST", path, query: query, body: body))
@@ -343,8 +350,8 @@ extension APIClient {
         self.deps = deps
         ExtensionUIRegistry.shared.add(self)
         #if os(iOS)
-        // The source subscription pages (#2041) are the manager's, drawn over HTTP only.
-        if isPage, plugin != SubscriptionsUI.id, let connection = deps.connection() {
+        // Reserved pages belong to the manager and are drawn over HTTP only.
+        if isPage, ReservedExtensionUI.paths[plugin] == nil, let connection = deps.connection() {
             let stream = ExtensionPageStream(connection: connection, owner: plugin, contribution: ui,
                                              context: context, state: state ?? "", manager: manager)
             self.stream = stream

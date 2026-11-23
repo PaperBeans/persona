@@ -30,7 +30,7 @@ func TestHubOnlyUpdateNeverFetchesOrInstallsNodePackages(t *testing.T) {
 	if err := h.upd.begin(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "Hub-only restart", func() bool { return len(execs()) == 1 })
+	waitForUpdate(t, h.upd, "Hub-only restart", func() bool { return len(execs()) == 1 })
 	var pending update.Pending
 	if ok, err := update.Load(update.PendingPath(h.upd.dir), &pending); !ok || err != nil {
 		t.Fatalf("pending %v %v", ok, err)

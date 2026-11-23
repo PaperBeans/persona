@@ -137,6 +137,9 @@ func TestScheduledProviderOverrideKeepsItsOwnDefaults(t *testing.T) {
 func TestScheduledConfigurationFailureIsNotRetried(t *testing.T) {
 	for _, kind := range []string{"one-off", "workout", "facts", "report"} {
 		t.Run(kind, func(t *testing.T) {
+			if kind == "facts" || kind == "report" { // the fallback notice is the briefing's
+				needsBriefingModule(t)
+			}
 			synctest.Test(t, func(t *testing.T) {
 				s, f := scheduledCatalogFixture(t, []string{"low"})
 				initBriefFallbackState(s)

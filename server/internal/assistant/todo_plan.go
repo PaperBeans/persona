@@ -455,7 +455,7 @@ func (s *Service) remind(ctx context.Context, id string, at, now time.Time) {
 	channelTitle, channelBody := s.reminderCopyText(ctx, private, space, title, body)
 	// A reminder the owner set for themself: theirs to act on, so P0 even in the hub's low-distraction mode, keyed by
 	// to-do and due time (each due time rings once).
-	s.push(ctx, Notification{Subtitle: i18n.T(s.lang(ctx), "assistant-todos.remind_subtitle"), DeviceID: set.MachineID,
+	s.push(withCard(ctx, cardTodoRemind), Notification{Subtitle: i18n.T(s.lang(ctx), "assistant-todos.remind_subtitle"), DeviceID: set.MachineID,
 		SessionID: set.Main, Title: channelTitle, Body: channelBody, Level: assistantwire.LevelP0,
 		RelatedKey: "todo-remind:" + id + "@" + at.UTC().Format(time.RFC3339)})
 	// Only the Feishu copy gets the full notes, to-do deep link and reply context. Ordinary phone and other-channel

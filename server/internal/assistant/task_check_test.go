@@ -16,7 +16,7 @@ import (
 func judgedTask(t *testing.T, s *Service, f *fakeHub, text, judge string) (Todo, time.Time) {
 	t.Helper()
 	todo := startedTask(t, s, f)
-	s.taskWorking(context.Background(), "box", "s1")
+	s.taskWorking(context.Background(), "box", "s1", startRow{})
 	s.tasks.mu.Lock()
 	work := s.tasks.working[todo.ID]
 	s.tasks.mu.Unlock()
@@ -99,7 +99,7 @@ func TestAutoFinishKeepsNoStaleCheck(t *testing.T) {
 	f.hookReads(receiptHooks{before: func(int) {
 		if !turned {
 			turned = true
-			s.taskWorking(context.Background(), "box", "s1")
+			s.taskWorking(context.Background(), "box", "s1", startRow{})
 		}
 	}})
 	s.autoFinishTask(todo, work, true)
@@ -120,7 +120,7 @@ func TestTaskCheckClearedByANewTurnAndAReopen(t *testing.T) {
 	if todoNow(s, todo.ID).Check == nil {
 		t.Fatal("no check")
 	}
-	s.taskWorking(ctx, "box", "s1")
+	s.taskWorking(ctx, "box", "s1", startRow{})
 	if got := todoNow(s, todo.ID); got.Check != nil || keptCheck(s, todo.ID) != nil || got.Stage != "develop" {
 		t.Fatalf("after a new turn: %+v %+v", got.Check, keptCheck(s, todo.ID))
 	}

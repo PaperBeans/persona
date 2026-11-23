@@ -534,6 +534,11 @@ with `--desktop-dir` or the Persona runtime socket with `--socket`. The desktop 
 
 ### Antigravity CLI
 
+Panes (agy in a terminal) are not read by the companion: the node learns a pane's conversation from Persona's own hooks
+in agy's global `hooks.json` (group `persona`, `PreInvocation` and `Stop`, #13729) or from herdr's integration, under any
+engine, and reads its transcript itself; see `docs/integrations/engines.md`. The ACP companion is for sessions without a
+terminal.
+
 Assistant context remains an ACP embedded text resource followed by the user's separate text block (#12435).
 Antigravity exports that resource as a leading `Content of persona-context:///snapshot.txt:` line and context XML
 inside `USER_INPUT.content`. Both the companion and pane history readers remove the complete leading Persona resource
@@ -584,6 +589,27 @@ as it is (a picture in the history it cannot decode, an invalid argument): a Con
 as `turn_error_kind: "user"` (#11742). New input and rewinds invalidate
 that result. Rejected ACP prompts also publish their failure through the session's error state.
 The history token includes the error format so connected clients refresh items cached before this representation.
+
+**Gemini API key provider** (#13762). agy can run on a Gemini API key (`"modelProvider": "gemini"` in agy's `settings.json`, with
+`GEMINI_API_KEY` and, for a self-hosted gateway, `GOOGLE_GEMINI_BASE_URL`) instead of a Google sign-in. The companion is in this mode when
+`PERSONA_AGY_MODEL_PROVIDER=gemini` is in its environment, or, when that is unset, when `<agy config>/settings.json` says `modelProvider: gemini`
+(`PERSONA_AGY_MODEL_PROVIDER=oauth` forces the sign-in). The key and address come from the companion's environment, which
+the node fills from a Persona-managed Antigravity launcher that carries a key (`docs/integrations/launchers.md`; the first such launcher by name
+when there are several, because one companion serves every agy session on the computer): the node starts the companion with that launcher's
+`GOOGLE_GEMINI_BASE_URL` / `GEMINI_API_KEY` plus `PERSONA_AGY_MODEL_PROVIDER=gemini` and restarts it when the launcher's provider changes.
+In this mode:
+
+- Every `agy acp` process is authenticated with the ACP method `gemini-api-key` right after `initialize` (when agy offers it), which reads the key from
+  its environment. `--settings` is not needed for `agy acp`; without that `authenticate`, `session/new` answers `Authentication required`.
+- The model list is agy's ids that the provider serves. `agy --settings '{"modelProvider":"gemini"}' models` lists agy's whole built-in catalog
+  without a sign-in, and `session/set_model` refuses ids that catalog does not have, so the companion keeps an id when `GET {base}/v1beta/models`
+  (header `x-goog-api-key`; the Google endpoint when no base is set) has a model of that name or of that name without agy's effort suffix
+  (`-low`, `-medium`, `-high`, `-xhigh`, `-max`). The models agy's own sessions report are not published in this mode. A provider that cannot be
+  reached or has none of agy's ids is an error in the model list, never the built-in catalog.
+- There are no account quota windows: the native quota read is skipped, and one line (`agy usage windows: not available with a Gemini API key provider`)
+  is logged.
+- The key is passed in the environment of the agy child only; log lines (the companion's own and agy's stderr) have it replaced by `***`, and
+  provider errors carry neither the key nor the address. It is in no item, in no `runtime.hello` and in no file the companion writes.
 
 The CLI companion runs the **Antigravity CLI (`agy`)**. When `personad node`
 runs (`--attach` or `--stdio`), `agy` is installed, Node.js 22.5+ (`node:sqlite`) is available, and no external `agy`

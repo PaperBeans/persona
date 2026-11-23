@@ -468,6 +468,13 @@ A manager's own sections of the configuration are in its `manager.json`, not in 
 - `agents.a2a` defaults to the manager's confirmed personal computers. `machines` limits participation in A2A and new dispatches. An empty list disables both.
   Set `public_url` to expose Agent Cards and A2A JSON-RPC endpoints with Persona credentials. [Agent-to-Agent communication](../integrations/a2a.md)
 
+- `agents.sort_by_activity` and `agents.show_filter` (#13727): the initial values of the web Agents list's two display switches (Settings › Agents: **Sort Agents by recent activity**, **Show the Filter on the Agents list**), used until someone saves their own choice in Settings (the saved choice, on or off, always wins; both are off when absent). They sit directly in `agents`, next to its sub-sections:
+
+  ```json
+  "agents": { "sort_by_activity": true, "show_filter": true }
+  ```
+
+  The manager reads them (see **Edits** above for when a hand edit takes effect); `GET /api/v1/agents/display-settings` reports the effective values ([protocol.md](../protocol/protocol.md) "Agents display settings").
 - `agents.review` (#2173): the independent review of a supervised task's finished change ([unified-entry.md](../assistant/unified-entry.md) ("Independent review")). **Off by default**, on once `launcher` names a launcher on the working agent's computer (pick one on another model than your agents'; there is no default reviewer).
   `model` and `effort` (optional) override the launcher's own; `permission` is the reviewer's permission mode (default `plan`); `timeout_minutes` bounds one review (default 30). The reviewer works in a disposable copy of the change, so its permission mode is a second guard, not the only one. Example:
 
@@ -541,6 +548,7 @@ A manager's own sections of the configuration are in its `manager.json`, not in 
   and existing data on the hub can be deleted separately. Logs contain neither numbers nor bodies (`docs/plans/plan-connectors.md` ("V")).
 - `bots.feishu` (optional): application credentials for the bot used to chat with Persona in Lark: `app_id`, `app_secret`, `domain` (`feishu` / `lark` / open-platform address),
   for people who do not want to enter them in the App. Values saved in the App (**Settings › Connectors › Lark Bot**) win; switches, pairing, and all features are in the App (`docs/extensions/bots.md`).
+- `bots.endpoints` (optional): explicit bot endpoint registrations for **Agents → Bots**. Phase 1 accepts `provider: "orca"` only; each entry needs a stable lowercase `id`, display `title`, and exact `machine_id` + `session_id` binding. For example: `{"id":"research","provider":"orca","title":"Research bot","machine_id":"<machine id>","session_id":"<explicitly allowlisted Orca session id>"}`. Only these entries appear from the Orca source; arbitrary structured sessions are never inferred to be bots. This is the phase-1 manager-owned registration flow (there is no browser link/add form and no `/api/v1/bots` chat API). Extensions granted `agents.control` can send to a registered endpoint, so register only a session you would let them instruct. Keep this file 0600, restart the manager after an edit, and remove an entry to remove that endpoint. See `docs/plans/plan-orca-support.md` ("Registered bot endpoints").
 - `extensions` (old `plugins` key still read): extensions hand-written in manager.json, started by the manager and forwarded to the App (voice chat, etc.): `id`, `name`, `kind`, `command` + `args` (or only `socket` for an extension running elsewhere),
   `dir` (working directory), `env` (extra environment variables), `disabled` (`true` disables while keeping the config), `config` (the extension's own settings), see `docs/extensions/extensions.md` ("Extensions in manager.json");
   extensions installed with `personad extension install` are registered in the database, not here. For personad's built-in voice extension (GPT-Live), use `"command": "personad", "args": ["voice"]`,

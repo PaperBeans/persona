@@ -19,7 +19,7 @@ func TestTaskDoneSourceSurvivesTranscriptParsing(t *testing.T) {
 			todo := startedTask(t, s, f)
 			ctx := context.Background()
 			s.superviseTodo(ctx, todo.ID, "conv1", []string{"Login test passes"}, 0)
-			s.taskWorking(ctx, "box", "s1")
+			s.taskWorking(ctx, "box", "s1", startRow{})
 			text := prompts.RenderSideConversation("Did you handle a separate parser problem?")
 			if !wrapped {
 				text = "<persona-context>Source: another conversation.</persona-context>\n<persona-side-conversation />\nDid you handle a separate parser problem?"

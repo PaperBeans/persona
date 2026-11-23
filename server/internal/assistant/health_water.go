@@ -160,6 +160,7 @@ func (s *Service) waterReminderTick(ctx context.Context, now time.Time) error {
 	if err != nil || attempt == nil {
 		return err
 	}
+	s.noteCard(ctx, cardHealthWater, attempt.Notification)
 	res, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: attempt.Notification})
 	reason := ""
 	switch {

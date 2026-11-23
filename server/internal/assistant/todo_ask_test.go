@@ -206,7 +206,7 @@ func TestDirectCompletionEndsDecisionWithoutSending(t *testing.T) {
 					}
 				}
 				// A later working report must not undo the user's choice, even with a needs_user ledger.
-				e.s.taskWorking(ctx, "box", "s1")
+				e.s.taskWorking(ctx, "box", "s1", startRow{})
 				if todoNow(e.s, todo.ID).DoneAt == nil {
 					t.Fatal("agent activity reopened the user-completed task")
 				}

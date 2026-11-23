@@ -53,7 +53,8 @@ func TestHealthReportRules(t *testing.T) {
 	t.Setenv("HOME", home)
 	health := filepath.Join(home, ".persona", "health")
 	reports := "/" + filepath.Join(health, "reports") + "/**"
-	if got := healthReportRules(health); !slices.Equal(got, []string{"Edit(" + reports + ")"}) {
+	// The resolved spelling follows when the directory resolves elsewhere (macOS's /var for a temporary directory).
+	if got := healthReportRules(health); len(got) == 0 || len(got) > 2 || got[0] != "Edit("+reports+")" {
 		t.Fatalf("rules %q", got)
 	}
 	if got := healthReportRules(filepath.Join(home, ".persona", "assistant")); got != nil {

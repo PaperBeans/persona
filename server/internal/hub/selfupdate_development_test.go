@@ -116,7 +116,7 @@ func TestDevelopmentAppliesOlderProgramBackupThroughSharedInstaller(t *testing.T
 					t.Fatal("duplicate application accepted")
 				}
 				setSessions(machine)
-				waitFor(t, "shared restart", func() bool { return len(execs()) == 1 })
+				waitForUpdate(t, u, "shared restart", func() bool { return len(execs()) == 1 })
 				var pending update.Pending
 				if ok, err := update.Load(update.PendingPath(u.dir), &pending); !ok || err != nil {
 					t.Fatal(err)

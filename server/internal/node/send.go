@@ -280,7 +280,7 @@ func (n *Node) sendLocked(ctx context.Context, id, text string, images []proto.I
 	text = inertControls(text) // as the host pastes it (hostPrompt): the box and the transcript are matched against it
 	var watch *promptWatch
 	if kind == "claude" {
-		text = keepImagePaths(text)
+		text = claudeMessageText(keepImagePaths(text))
 		watch = n.watchPrompt(id, text) // where the transcript ends before the typing: what comes after may be this (sendsafe_submit.go)
 	}
 	typedAt := time.Now()
@@ -318,6 +318,13 @@ func (n *Node) sendLocked(ctx context.Context, id, text string, images []proto.I
 		}
 	}
 	return uncertain(err)
+}
+
+// promptClaude is the Claude-only entry for queue re-entry and delivery retries.
+// Ordinary sends normalize before starting their transcript watch; this also keeps
+// those later host and paste deliveries in the same model-input mode.
+func (n *Node) promptClaude(ctx context.Context, pane, text string) error {
+	return n.prompt(ctx, pane, claudeMessageText(text))
 }
 
 // prompt submits text to the agent in a pane. A host only prompts agents it detects (herdr); for the others (a compatible CLI)

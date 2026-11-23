@@ -11,7 +11,7 @@ import { ApiError, credentialOwner, errorText, getToken, onCredentialChange } fr
 import { extIdOf } from "../../lib/extension-api";
 import { openLink } from "../../lib/links";
 import {
-  actUI, fieldValues, isUnsupported, numberProblem, outcome, pushPage, refreshDelay, renderUI, submitValues, uiPlaces, UI_VERSION,
+  actUI, fieldValues, isReservedUI, isUnsupported, numberProblem, outcome, pushPage, refreshDelay, renderUI, submitValues, uiPlaces, UI_VERSION,
   type UIAction, type UIContext, type UIFilter, type UIItem, type UIMore, type UIPage, type UIPlace, type UIPush, type UISearch, type UITabs, type UIView,
 } from "../../lib/extension-ui";
 import { navigate } from "../../lib/router";
@@ -32,6 +32,7 @@ import { defaultKnown, defaultManager, otherManager, useKnownDefault, useLinkMan
 import { keepView, NATIVE_UI_VERSION, readKeptView } from "../../lib/extension-view-cache";
 import type { UIRowControl } from "../../lib/extension-ui-v6";
 import { currentLanguage, t } from "../../i18n";
+import { HEALTH_INTAKE_UI } from "../../lib/health-intake-ui";
 import { SUBSCRIPTIONS_UI } from "../../lib/subscriptions-ui";
 import { ExtensionOwnerScope } from "../../lib/extension-owner";
 
@@ -101,6 +102,8 @@ function useInvalidate(extension: string, ui: string, draw: () => void, skipHell
     });
     // the subscription pages (#2041): a subscription saved, run or deleted anywhere draws them again
     const offSubscription = extension === SUBSCRIPTIONS_UI ? onHubEvent("subscription", () => now()) : () => {};
+    // the health pages (#13176): a record logged or undone anywhere, or a goal saved, draws them again
+    const offIntake = extension === HEALTH_INTAKE_UI ? onHubEvent("health_intake", () => now()) : () => {};
     // a reconnect the hub could not resume: an invalidate missed meanwhile is not replayed (#4954)
     const offHello = onHubEvent("hello", (msg) => !isResumed(msg) && !skipHelloRef.current?.() && now());
     const shown = () => {
@@ -110,6 +113,7 @@ function useInvalidate(extension: string, ui: string, draw: () => void, skipHell
     return () => {
       off();
       offSubscription();
+      offIntake();
       offHello();
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", shown);
@@ -177,7 +181,7 @@ export function ExtensionUI({ remember, ...props }: Parameters<typeof LegacyExte
   // System/embedded slots remain full fitted snapshots. Old hubs keep the exact existing component.
   // Another manager's extension draws over HTTP, which names its manager on each request (docs/assistant/managers.md "Clients").
   // The subscription pages (#2041) are the manager's, drawn over HTTP only.
-  const baseHttp = legacyNegotiation || !supported || props.embedded || props.compact || otherManager(props.manager) || props.extension === SUBSCRIPTIONS_UI;
+  const baseHttp = legacyNegotiation || !supported || props.embedded || props.compact || otherManager(props.manager) || isReservedUI(props.extension);
   // The page's last view, until it is drawn again: one drawn with a UI version it may be drawn with now (before the hello
   // either; over the socket also HTTP's, which a page the socket cannot draw falls back to) by the default's extension
   // (before the roster, the last one drawn).

@@ -74,6 +74,27 @@ struct StyleSpecTests {
         #expect(found.isEmpty, "white on the accent under 3.5:1: \(found)")
     }
 
+    @Test func healthRingsHaveDistinctHuesAndReadableActivityLabels() {
+        func hue(_ hex: UInt32) -> Double {
+            let color = UIColor(hex: hex)
+            var h: CGFloat = 0
+            color.getHue(&h, saturation: nil, brightness: nil, alpha: nil)
+            return Double(h) * 360
+        }
+        for hex in [Theme.Health.waterHex.light, Theme.Health.waterHex.dark,
+                    Theme.Health.proteinHex.light, Theme.Health.proteinHex.dark] {
+            for activity: UInt32 in [0xFA114F, 0xA6FF00, 0x00FFF6] {
+                let distance = abs(hue(hex) - hue(activity))
+                #expect(min(distance, 360 - distance) >= 25, "intake hues must stay apart from Activity rings")
+            }
+        }
+        for ui in [UIUserInterfaceStyle.light, .dark] {
+            for color in [Theme.Health.move, Theme.Health.exercise, Theme.Health.stand] {
+                #expect(Self.contrast(color, Theme.Health.activityBackground, ui) >= 4.5)
+            }
+        }
+    }
+
     /// Someday's swipe on a To-dos row (#10465): white words on `Theme.somedayTint` at 4.5:1 or better, light and dark
     /// (DESIGN_SYSTEM 2.1).
     @Test func whiteOnSomeday() {

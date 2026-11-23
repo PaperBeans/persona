@@ -475,7 +475,21 @@ func (d *doctorReport) pushRoutes(ctx context.Context, get func(context.Context,
 			name = i18n.T(l, "hub-doctor.device_kind", i18n.Args{"name": name, "kind": dev.Kind})
 		}
 		d.note(i18n.T(l, "hub-doctor.item_detail", i18n.Args{"item": name, "detail": pushRouteLine(l, dev.Push)}))
+		if dev.Push.Reason == pushRelayFailed && relayRefusalDetail(dev.Push.Detail) {
+			d.next = append(d.next, i18n.T(l, "hub-doctor.push_relay_next"))
+		}
 	}
+}
+
+// relayRefusalDetail is true for a named relay's HTTP refusal. A redirect starts with 3xx, a network error has no
+// status, and an older app's error-only detail has no relay marker: none gets the refusal-specific next step.
+func relayRefusalDetail(detail string) bool {
+	if !strings.Contains(detail, " (relay ") {
+		return false
+	}
+	status, _, _ := strings.Cut(detail, " ")
+	code, err := strconv.Atoi(status)
+	return err == nil && code >= 400 && code < 600
 }
 
 // webPushRoutes reports the browsers with Web Push (#7459), when there are any: through which push service, and

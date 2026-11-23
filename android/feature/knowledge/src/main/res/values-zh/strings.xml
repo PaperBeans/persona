@@ -125,6 +125,8 @@
     <string name="knowledge_minutes_regenerate">重新生成</string>
     <string name="knowledge_minutes_make">生成纪要</string>
     <string name="knowledge_minutes_writing">正在整理纪要…</string>
+    <string name="knowledge_minutes_checking">正在复核整场录音…</string>
+    <string name="knowledge_minutes_checking_progress">正在复核整场录音（%1$d/%2$d 分钟）…</string>
     <string name="knowledge_minutes_writing_note">hub 正在把转写整理成讨论要点、结论与决定、待办和未决问题。</string>
     <string name="knowledge_minutes_updating">正在更新…</string>
     <string name="knowledge_minutes_failed">纪要没整理成功，可以重新生成。</string>

@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -142,6 +143,50 @@ class KnowledgeMinutesShotsTest {
             rule.waitForIdle()
             rule.onAllNodesWithTag("minutes-writing").fetchSemanticsNodes().size.let { assertEquals(2, it) }
             shot("knowledge-minutes-states-$language-${s.name.lowercase()}-${if (d) "dark" else "light"}.png")
+        }
+    }
+
+    @Config(sdk = [35], qualifiers = "en-w360dp-h650dp-xhdpi")
+    @Test fun finalPassProgress() = finalPass("default")
+
+    @Config(sdk = [35], qualifiers = "en-w360dp-h650dp-xhdpi", fontScale = 2f)
+    @Test fun finalPassProgressAtLargeText() = finalPass("large")
+
+    private fun finalPass(size: String) {
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        val actions = MinutesActions(busy = false, message = null, make = {}, add = {}, copy = {}, jump = {})
+        fun view(state: String, numbered: Boolean): MinutesView {
+            val meta = buildJsonObject {
+                put("minutes_state", "pending")
+                putJsonObject("transcription") {
+                    put("mode", "hub")
+                    put("state", state)
+                    if (numbered) { put("final_done", 2400); put("end", 6312.5) }
+                }
+            }
+            return requireNotNull(minutesView(KnowledgeDetail("recordings", "r1", "data/recordings/r1", meta = meta), RecordingFacts.of(meta)))
+        }
+        val checking = view("finishing", false)
+        val progress = view("finishing", true)
+        val writing = view("final", false)
+        rule.setContent {
+            PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                Column(Modifier.testTag("shot").width(360.dp).background(PersonaTheme.palette.background)
+                    .padding(Tokens.Space.l)) {
+                    for (scene in listOf(checking, progress, writing)) LazyColumn(Modifier.fillMaxWidth()) {
+                        recordingMinutes(scene, actions) { null }
+                    }
+                }
+            }
+        }
+        for ((s, d) in looks) {
+            style = s; dark = d
+            rule.waitForIdle()
+            rule.onNodeWithText("Checking the whole recording…").assertIsDisplayed()
+            rule.onNodeWithText("Checking the whole recording (40 of 105 min)…").assertIsDisplayed()
+            rule.onNodeWithText("Writing the minutes…").assertIsDisplayed()
+            shot("knowledge-minutes-final-pass-$size-${s.name.lowercase()}-${if (d) "dark" else "light"}.png")
         }
     }
 

@@ -101,21 +101,78 @@ func TestPlanSupervisorDefaults(t *testing.T) {
 	}
 }
 
-// Open tasks written before universal main supervision are rehomed without losing their criteria. Explicit leader
-// assignments and task-leader workers keep their specialized supervisor (#5732).
-func TestOpenLegacySideTaskRehomesToMain(t *testing.T) {
-	s, _, todo := newSupervisedService(t)
+// Open tasks a direction lead planned before the supervisor source existed go back to that lead once, on load, without
+// losing their criteria. Tasks main planned itself, explicit leader assignments, task-leader workers and closed tasks
+// keep their recorded supervisor, and a later move is not undone by another load.
+func TestBackfillReturnsLegacyLeadPlansToTheirLead(t *testing.T) {
+	s, _, todo := newSupervisedService(t) // conv1 (main) planned it itself
 	ctx := context.Background()
 	setSettings(t, s, func(v *Settings) { v.Leaders = []string{"lead1"} })
-	if _, _, err := s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool {
-		v.Supervisor = "side1"
+	putTodo(s, Todo{ID: "explicit-leader", Origin: "lead1", Supervision: &Supervision{Supervisor: "lead1"}})
+	putTodo(s, Todo{ID: "leader-worker", Origin: "conv1", PlanID: "worker-plan", Supervision: &Supervision{Supervisor: "box/leader-agent"}})
+	// main's plan that named lead1, which the removed rehome had moved to main
+	if err := s.savePlan(ctx, &TaskPlan{ID: "old-leader-plan", Conversation: "conv1", Tasks: []PlanTask{{TodoID: "legacy-leader-plan", Supervisor: "lead1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	putTodo(s, Todo{ID: "legacy-leader-plan", Origin: "conv1", PlanID: "old-leader-plan", Supervision: &Supervision{Supervisor: "conv1"}})
+	// lead1's own plan ("a task from conversation lead1"), moved to main the same way
+	if err := s.savePlan(ctx, &TaskPlan{ID: "old-default-leader-plan", Conversation: "lead1", Tasks: []PlanTask{{TodoID: "legacy-default-leader-plan"}}}); err != nil {
+		t.Fatal(err)
+	}
+	putTodo(s, Todo{ID: "legacy-default-leader-plan", Origin: "lead1", PlanID: "old-default-leader-plan", Supervision: &Supervision{Supervisor: "conv1"}})
+	// its saved plan is gone: the origin still names the lead
+	putTodo(s, Todo{ID: "legacy-no-plan", Origin: "lead1", PlanID: "gone-plan", Supervision: &Supervision{Supervisor: "conv1"}})
+	done := time.Now()
+	putTodo(s, Todo{ID: "closed-lead-plan", Origin: "lead1", PlanID: "gone-plan", DoneAt: &done, Supervision: &Supervision{Supervisor: "conv1"}})
+	// handed out by the lead without a plan (agent_start, todo_create): the origin names the lead
+	putTodo(s, Todo{ID: "lead-no-plan", Origin: "lead1", Supervision: &Supervision{Supervisor: "conv1"}})
+	// another conversation's, without a plan: kept
+	putTodo(s, Todo{ID: "side-no-plan", Origin: "side1", Supervision: &Supervision{Supervisor: "conv1"}})
+
+	s.backfillPlanSupervisors(ctx)
+	if got := todoNow(s, todo.ID).Supervision; got.Supervisor != "conv1" || got.SupervisorSource != "" || len(got.DoneWhen) != 2 || got.ExpectMinutes != 30 {
+		t.Fatalf("main's own task changed: %+v", got)
+	}
+	for id, want := range map[string]string{"explicit-leader": "lead1", "leader-worker": "box/leader-agent", "side-no-plan": "conv1"} {
+		if got := todoNow(s, id).Supervision; got.Supervisor != want || got.SupervisorSource != "" {
+			t.Fatalf("%s changed to %+v, want %q kept", id, got, want)
+		}
+	}
+	for _, id := range []string{"legacy-leader-plan", "legacy-default-leader-plan", "legacy-no-plan", "closed-lead-plan", "lead-no-plan"} {
+		if got := todoNow(s, id).Supervision; got.Supervisor != "lead1" || got.SupervisorSource != "plan" {
+			t.Fatalf("%s was not backfilled to its planning lead: %+v", id, got)
+		}
+	}
+	cfg := s.settings(ctx)
+	if got := s.digestTo(ctx, cfg, superviseSignal{Todo: "legacy-default-leader-plan", Kind: sigReview}); got != "lead1" {
+		t.Fatalf("the backfilled task's review routes to %q, want lead1", got)
+	}
+	if got := s.effectiveSupervisor(ctx, cfg, todoNow(s, "explicit-leader")); got != "lead1" {
+		t.Fatalf("the explicit leader resolves to %q", got)
+	}
+
+	// Once: a later explicit move stays put through another load.
+	if _, _, err := s.updateSupervision(ctx, "legacy-no-plan", func(v *Supervision) bool {
+		v.Supervisor, v.SupervisorSource = "conv1", "explicit"
 		return true
 	}); err != nil {
 		t.Fatal(err)
 	}
+	s.backfillPlanSupervisors(ctx)
+	if got := todoNow(s, "legacy-no-plan").Supervision; got.Supervisor != "conv1" || got.SupervisorSource != "explicit" {
+		t.Fatalf("a second backfill undid the explicit move: %+v", got)
+	}
+}
+
+// The original open-legacy regression now exercises the load-time backfill. Explicit leader assignments and
+// task-leader workers keep their specialized supervisor; a leader's unmarked planning stays with that leader (#13619).
+func TestOpenLegacySideTaskRehomesToMain(t *testing.T) {
+	s, _, todo := newSupervisedService(t)
+	ctx := context.Background()
+	setSettings(t, s, func(v *Settings) { v.Leaders = []string{"lead1"} })
 	putTodo(s, Todo{ID: "explicit-leader", Origin: "lead1", Supervision: &Supervision{Supervisor: "lead1"}})
 	putTodo(s, Todo{ID: "leader-worker", Origin: "conv1", Supervision: &Supervision{Supervisor: "box/leader-agent"}})
-	// A pre-#5732 task_plan(supervisor=leader) is not the manual-Agent exception: its saved plan says so.
+	// A pre-#5732 task_plan(supervisor=leader): task_plan records the same assignment as the leader's plan now.
 	if err := s.savePlan(ctx, &TaskPlan{ID: "old-leader-plan", Tasks: []PlanTask{{TodoID: "legacy-leader-plan", Supervisor: "lead1"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -126,74 +183,132 @@ func TestOpenLegacySideTaskRehomesToMain(t *testing.T) {
 	}
 	putTodo(s, Todo{ID: "legacy-default-leader-plan", Origin: "lead1", PlanID: "old-default-leader-plan", Supervision: &Supervision{Supervisor: "lead1"}})
 	cfg := s.settings(ctx)
-	if got := s.digestTo(ctx, cfg, superviseSignal{Todo: "legacy-leader-plan", Kind: sigReview}); got != "conv1" {
-		t.Fatalf("legacy leader-plan still routes to %q", got)
+	for _, id := range []string{"legacy-leader-plan", "explicit-leader", "legacy-default-leader-plan"} {
+		if got := s.digestTo(ctx, cfg, superviseSignal{Todo: id, Kind: sigReview}); got != "lead1" {
+			t.Fatalf("%s routes to %q before the load-time pass, want its leader", id, got)
+		}
 	}
-	if got := s.digestTo(ctx, cfg, superviseSignal{Todo: "explicit-leader", Kind: sigReview}); got != "lead1" {
-		t.Fatalf("the explicit manual leader route changed to %q", got)
+	s.backfillPlanSupervisors(ctx)
+	if got := todoNow(s, todo.ID).Supervision; got.Supervisor != "conv1" || got.SupervisorSource != "" || len(got.DoneWhen) != 2 || got.ExpectMinutes != 30 {
+		t.Fatalf("main's own task changed: %+v", got)
 	}
-	if got := s.digestTo(ctx, cfg, superviseSignal{Todo: "legacy-default-leader-plan", Kind: sigReview}); got != "conv1" {
-		t.Fatalf("legacy default leader-plan still routes to %q", got)
-	}
-	s.rehomeSupervisedTodos(ctx)
-	if got := todoNow(s, todo.ID).Supervision; got.Supervisor != "conv1" || len(got.DoneWhen) != 2 || got.ExpectMinutes != 30 {
-		t.Fatalf("rehomed ledger = %+v", got)
-	}
-	if got := todoNow(s, "explicit-leader").Supervision.Supervisor; got != "lead1" {
-		t.Fatalf("explicit leader changed to %q", got)
+	if got := todoNow(s, "explicit-leader").Supervision; got.Supervisor != "lead1" || got.SupervisorSource != "" {
+		t.Fatalf("explicit leader changed to %+v", got)
 	}
 	if got := todoNow(s, "leader-worker").Supervision.Supervisor; got != "box/leader-agent" {
 		t.Fatalf("task-leader worker changed to %q", got)
 	}
-	if got := todoNow(s, "legacy-leader-plan").Supervision.Supervisor; got != "conv1" {
-		t.Fatalf("legacy leader-plan did not rehome to main: %q", got)
-	}
-	if got := todoNow(s, "legacy-default-leader-plan").Supervision.Supervisor; got != "conv1" {
-		t.Fatalf("legacy default leader-plan did not rehome to main: %q", got)
+	for _, id := range []string{"legacy-leader-plan", "legacy-default-leader-plan"} {
+		if got := todoNow(s, id).Supervision; got.Supervisor != "lead1" || got.SupervisorSource != "plan" {
+			t.Fatalf("%s is not its leader's plan assignment: %+v", id, got)
+		}
 	}
 }
 
-// A legacy side's queued review was already acknowledged from the durable outbox. Rehoming its task must replay that
-// exact signal for main, not leave an unusable review prompt behind in the old conversation (#5732).
-func TestLegacySideQueuedReviewRehomesToMain(t *testing.T) {
-	st := planUpdateStore{&planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}
-	s, f, todo := newSupervisedServiceOn(t, st)
-	s.superviseTimes = superviseTimings{gather: 1, every: 1, urgent: time.Millisecond}
+// A hub upgraded across #6206 and #13346 in one step reads open ledgers that name a direction lead but no source: the
+// column arrived empty. Work the lead planned or handed out must keep reaching that lead after the restart, in
+// needs_user as well, as it did before the upgrade; only main-side manual assignments keep the compatibility route
+// (#13619).
+func TestLegacyLeaderWorkKeepsItsLeaderAfterUpgrade(t *testing.T) {
+	s, _ := newQuietService(t)
 	ctx := context.Background()
-	if _, _, err := s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool {
-		v.Supervisor, v.State = "side1", reviewPending
+	setSettings(t, s, func(v *Settings) { v.Leaders = []string{"lead1"} })
+	agent := func(session string) []TodoAgent {
+		return []TodoAgent{{MachineID: "box", SessionID: session, LinkedAt: time.Now(), Agent: "claude", Source: "plan"}}
+	}
+	if err := s.savePlan(ctx, &TaskPlan{ID: "lead-plan", Conversation: "lead1", Tasks: []PlanTask{{TodoID: "planned"}}}); err != nil {
+		t.Fatal(err)
+	}
+	// A task of the lead's own task_plan, and a task the lead opened without a plan id that its later plans continued,
+	// now waiting on the owner.
+	putTodo(s, Todo{ID: "planned", Origin: "lead1", PlanID: "lead-plan", Agents: agent("planned-agent"), Supervision: &Supervision{Supervisor: "lead1"}})
+	putTodo(s, Todo{ID: "handed-out", Origin: "lead1", Agents: agent("handed-agent"), Supervision: &Supervision{Supervisor: "lead1", State: reviewNeedsUser}})
+	// Not the lead's own Agent work: a direction to-do nothing runs on yet, and an Agent main assigned to the lead.
+	putTodo(s, Todo{ID: "direction", Origin: "lead1", Supervision: &Supervision{Supervisor: "lead1"}})
+	putTodo(s, Todo{ID: "manual", Origin: "conv1", Agents: agent("manual-agent"), Supervision: &Supervision{Supervisor: "lead1", State: reviewNeedsUser}})
+	s.backfillPlanSupervisors(ctx)
+	for _, id := range []string{"planned", "handed-out"} {
+		if got := todoNow(s, id).Supervision; got.Supervisor != "lead1" || got.SupervisorSource != "plan" {
+			t.Errorf("%s after the restart = %+v, want lead1's plan assignment", id, got)
+			continue
+		}
+		for _, state := range []string{"", reviewNeedsUser} {
+			if _, _, err := s.updateSupervision(ctx, id, func(v *Supervision) bool { v.State = state; return true }); err != nil {
+				t.Fatal(err)
+			}
+			cfg := s.settings(ctx)
+			for _, kind := range []string{sigReview, sigIdle, sigUndecidable, sigCardlessWait, sigAllStopped} {
+				g := superviseSignal{Todo: id, Kind: kind}
+				if got := s.digestTo(ctx, cfg, g); got != "lead1" {
+					t.Errorf("%s %q/%s went to %q, want lead1", id, state, kind, got)
+				}
+				if got := s.recheckDigestTo(ctx, cfg, g); got != "lead1" {
+					t.Errorf("queued %s %q/%s went to %q, want lead1", id, state, kind, got)
+				}
+			}
+			if got := s.digestTo(ctx, cfg, superviseSignal{Todo: id, Kind: sigEscalated}); got != "conv1" {
+				t.Errorf("%s escalation went to %q, want main", id, got)
+			}
+		}
+	}
+	for _, id := range []string{"direction", "manual"} {
+		if got := todoNow(s, id).Supervision; got.Supervisor != "lead1" || got.SupervisorSource != "" {
+			t.Fatalf("%s changed to %+v", id, got)
+		}
+	}
+	if got := s.digestTo(ctx, s.settings(ctx), superviseSignal{Todo: "manual", Kind: sigIdle}); got != "conv1" {
+		t.Fatalf("a manual leader Agent waiting on the owner went to %q, want main", got)
+	}
+}
+
+// legacyLeadTask makes the lead-planned task todo one written before the supervisor source existed and left with
+// former (as the removed rehome left such tasks with main), so backfillPlanSupervisors takes it back to lead1.
+func legacyLeadTask(t *testing.T, s *Service, todo Todo, former string) {
+	t.Helper()
+	if _, _, err := s.updateSupervision(context.Background(), todo.ID, func(v *Supervision) bool {
+		v.Supervisor, v.SupervisorSource, v.State = former, "", reviewPending
 		return true
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// The former supervisor's queued review was already acknowledged from the durable outbox. Backfilling its task must
+// replay that exact signal for the lead, not leave an unusable review prompt behind in the old conversation.
+func TestBackfilledLeadPlanReplaysQueuedReviewToLead(t *testing.T) {
+	st := planUpdateStore{&planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}
+	s, f, todo := newLeaderServiceOn(t, st)
+	s.superviseTimes = superviseTimings{gather: 1, every: 1, urgent: time.Millisecond}
+	ctx := context.Background()
+	legacyLeadTask(t, s, todo, "side1")
 	g := superviseSignal{Todo: todo.ID, Kind: sigReview, Key: "legacy-side-review", Detail: "legacy-review-marker-5732", At: time.Now()}
 	s.signal(g)
 	reserveUndelivered(t, s, g) // the old digest reserved dedup and took the signal out of memory before queue admission
 	if !s.queueDigest("side1", relayMsg{From: superviseTool, Tool: superviseTool, Text: "queued legacy review for " + todo.ID, At: g.At},
 		[]superviseSignal{g}, g.At, time.Time{}) {
-		t.Fatal("the legacy side did not accept its queued review")
+		t.Fatal("the former supervisor did not accept its queued review")
 	}
 	if got := storedSupervisePending(t, s); len(got) != 0 {
 		t.Fatalf("queue admission did not acknowledge the old side's outbox signal: %+v", got)
 	}
 
-	s.rehomeSupervisedTodos(ctx)
+	s.backfillPlanSupervisors(ctx)
 	s.sendDigest(ctx)
-	waitFor(t, "the rehomed review in the main conversation", func() bool {
-		got := strings.Join(f.noticesTo("conv1"), "\n")
+	waitFor(t, "the backfilled review in the lead", func() bool {
+		got := strings.Join(f.noticesTo("lead1"), "\n")
 		return strings.Contains(got, todo.ID) && strings.Contains(got, "legacy-review-marker-5732")
 	})
 	if got := s.queuedFor("side1"); got != 0 {
-		t.Fatalf("the old side still holds %d queued message(s)", got)
+		t.Fatalf("the former supervisor still holds %d queued message(s)", got)
 	}
 	if got := strings.Join(f.noticesTo("side1"), "\n"); strings.Contains(got, "legacy-review-marker-5732") {
-		t.Fatalf("the old side received the rehomed review:\n%s", got)
+		t.Fatalf("the former supervisor received the backfilled review:\n%s", got)
 	}
-	if _, err := runJSON(t, s, "conv1", "task_review", map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "验收通过", "checks": completeReviewChecks(todoNow(s, todo.ID))}); err != nil {
-		t.Fatalf("main could not accept the rehomed review: %v", err)
+	if _, err := runJSON(t, s, "lead1", "task_review", map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "验收通过", "checks": completeReviewChecks(todoNow(s, todo.ID))}); err != nil {
+		t.Fatalf("the lead could not accept its backfilled task: %v", err)
 	}
 	if got := todoNow(s, todo.ID); got.DoneAt == nil {
-		t.Fatal("main's acceptance did not close the rehomed task")
+		t.Fatal("the lead's acceptance did not close the backfilled task")
 	}
 }
 
@@ -221,7 +336,7 @@ func TestAmbiguousPreUpgradeBackgroundQueueDefersToMain(t *testing.T) {
 		t.Fatal("the configured legacy background did not accept its intentional queue entry")
 	}
 
-	s.rehomeSupervisedTodos(context.Background())
+	s.backfillPlanSupervisors(context.Background())
 	if got := s.queuedFor("bg1"); got != 1 {
 		t.Fatalf("crash recovery removed the intentional legacy-background entry: queue=%d", got)
 	}
@@ -352,38 +467,6 @@ func TestDropMixedDigestKeepsNewerDurableSignal(t *testing.T) {
 	}
 }
 
-// A crash after the supervisor write but before queue reconciliation must still be recoverable on the next load.
-func TestRehomeAfterSupervisorWriteRecoversQueuedReview(t *testing.T) {
-	st := planUpdateStore{&planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}
-	s, f, todo := newSupervisedServiceOn(t, st)
-	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
-	ctx := context.Background()
-	if _, _, err := s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool {
-		v.Supervisor, v.State = "side1", reviewPending
-		return true
-	}); err != nil {
-		t.Fatal(err)
-	}
-	g := superviseSignal{Todo: todo.ID, Kind: sigReview, Key: "crash-after-supervisor", Detail: "crash-after-supervisor-marker", At: time.Now()}
-	s.signal(g)
-	reserveUndelivered(t, s, g)
-	if !s.queueDigest("side1", relayMsg{From: superviseTool, Tool: superviseTool, Text: "queued", At: g.At},
-		[]superviseSignal{g}, g.At, time.Time{}) {
-		t.Fatal("the review did not enter the old side's queue")
-	}
-	if _, _, err := s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool { v.Supervisor = "conv1"; return true }); err != nil {
-		t.Fatal(err)
-	}
-	simulateSupervisionRestart(t, s) // the process stopped before rehomeQueuedSupervision ran
-
-	s.rehomeSupervisedTodos(ctx)
-	s.superviseTimes = superviseTimings{gather: 1, every: 1, urgent: time.Hour}
-	s.sendDigest(ctx)
-	waitFor(t, "the queued review recovered after the supervisor-write crash", func() bool {
-		return strings.Contains(strings.Join(f.noticesTo("conv1"), "\n"), g.Detail)
-	})
-}
-
 // relayWriteWatch records each durable relay state so a test can stop at any write and check that the review survives.
 type relayWriteWatch struct {
 	Store
@@ -425,15 +508,10 @@ func relayHasSignal(state relayState, g superviseSignal) bool {
 // Queue removal/detach and the replay outbox entry must be one durable write: a stop between them loses the only copy.
 func TestRehomeQueueAndReplayShareOneDurableWrite(t *testing.T) {
 	st := &relayWriteWatch{Store: planUpdateStore{&planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}}
-	s, _, todo := newSupervisedServiceOn(t, st)
+	s, _, todo := newLeaderServiceOn(t, st)
 	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
 	ctx := context.Background()
-	if _, _, err := s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool {
-		v.Supervisor, v.State = "side1", reviewPending
-		return true
-	}); err != nil {
-		t.Fatal(err)
-	}
+	legacyLeadTask(t, s, todo, "side1")
 	g := superviseSignal{Todo: todo.ID, Kind: sigReview, Key: "atomic-rehome", Detail: "atomic rehome", At: time.Now()}
 	s.signal(g)
 	reserveUndelivered(t, s, g)
@@ -443,9 +521,9 @@ func TestRehomeQueueAndReplayShareOneDurableWrite(t *testing.T) {
 	}
 	st.writes = nil
 
-	s.rehomeSupervisedTodos(ctx)
+	s.backfillPlanSupervisors(ctx)
 	if len(st.writes) == 0 {
-		t.Fatal("rehome wrote no relay state")
+		t.Fatal("the backfill wrote no relay state")
 	}
 	for i, state := range st.writes {
 		_, pending := state.SupervisePending[g.id()]
@@ -533,18 +611,14 @@ func setSuperviseTimingsForTest(s *Service, timings superviseTimings) {
 }
 
 // A restart drops supervise.queued while the persisted relay queue survives. Even when the old side has already started
-// draining its head, rehoming must replay that head's structured review for main rather than waiting for another restart.
+// draining its head, the backfill must replay that head's structured review for the lead rather than waiting for another
+// restart.
 func TestLegacySideDrainingReviewRehomesAfterRestart(t *testing.T) {
 	st := planUpdateStore{&planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}
-	s, f, todo := newSupervisedServiceOn(t, st)
+	s, f, todo := newLeaderServiceOn(t, st)
 	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
 	ctx := context.Background()
-	if _, _, err := s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool {
-		v.Supervisor, v.State = "side1", reviewPending
-		return true
-	}); err != nil {
-		t.Fatal(err)
-	}
+	legacyLeadTask(t, s, todo, "side1")
 	g := superviseSignal{Todo: todo.ID, Kind: sigReview, Key: "legacy-draining-review", Detail: "legacy-draining-marker-5732", At: time.Now()}
 	s.signal(g)
 	reserveUndelivered(t, s, g)
@@ -563,8 +637,9 @@ func TestLegacySideDrainingReviewRehomesAfterRestart(t *testing.T) {
 	unblock := func() { releaseOnce.Do(func() { close(h.release) }) }
 	defer unblock()
 	main := proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle}
+	lead := proto.Session{SessionID: "lead1", MachineID: "server", Assistant: true, Status: proto.StatusIdle}
 	side := proto.Session{SessionID: "side1", MachineID: "server", Assistant: true, Status: proto.StatusIdle}
-	f.setSessions("server", main, side)
+	f.setSessions("server", main, lead, side)
 	s.drainRelays("server", []proto.Session{side})
 	select {
 	case <-h.started:
@@ -572,53 +647,48 @@ func TestLegacySideDrainingReviewRehomesAfterRestart(t *testing.T) {
 		t.Fatal("the old side did not start draining its queued review")
 	}
 
-	s.rehomeSupervisedTodos(ctx)
+	s.backfillPlanSupervisors(ctx)
 	// A second restart before main's send must not let the old draining head acknowledge the replayed outbox signal.
 	simulateSupervisionRestart(t, s)
 	s.restoreSupervisePending(ctx)
 	if got := storedSupervisePending(t, s)[g.id()]; got.Key != g.Key {
-		t.Fatalf("the old draining head acknowledged main's replay before delivery: %+v", got)
+		t.Fatalf("the old draining head acknowledged the lead's replay before delivery: %+v", got)
 	}
 	setSuperviseTimingsForTest(s, superviseTimings{gather: 1, every: 1, urgent: time.Hour})
 	s.sendDigest(ctx)
-	waitFor(t, "the draining side's review replayed to main", func() bool {
-		got := h.text("conv1")
+	waitFor(t, "the draining side's review replayed to the lead", func() bool {
+		got := h.text("lead1")
 		return strings.Contains(got, todo.ID) && strings.Contains(got, "legacy-draining-marker-5732")
 	})
-	if got := strings.Count(h.text("conv1"), "legacy-draining-marker-5732"); got != 1 {
-		t.Fatalf("main received the replayed marker %d times, want exactly one", got)
+	if got := strings.Count(h.text("lead1"), "legacy-draining-marker-5732"); got != 1 {
+		t.Fatalf("the lead received the replayed marker %d times, want exactly one", got)
 	}
 	// The detached head stays behind a failed old-side send. Another restart must not reinterpret it as legacy text.
-	before := h.count("conv1")
+	before := h.count("lead1")
 	setSuperviseTimingsForTest(s, superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour})
 	simulateSupervisionRestart(t, s)
-	s.rehomeSupervisedTodos(ctx)
+	s.backfillPlanSupervisors(ctx)
 	setSuperviseTimingsForTest(s, superviseTimings{gather: 1, every: 1, urgent: time.Hour})
 	s.sendDigest(ctx)
-	if got := h.count("conv1"); got != before {
-		t.Fatalf("the detached head generated another main turn after restart: before %d, after %d", before, got)
+	if got := h.count("lead1"); got != before {
+		t.Fatalf("the detached head generated another lead turn after restart: before %d, after %d", before, got)
 	}
-	if _, err := runJSON(t, s, "conv1", "task_review", map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "验收通过", "checks": completeReviewChecks(todoNow(s, todo.ID))}); err != nil {
-		t.Fatalf("main could not accept the review replayed during the old side's drain: %v", err)
+	if _, err := runJSON(t, s, "lead1", "task_review", map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "验收通过", "checks": completeReviewChecks(todoNow(s, todo.ID))}); err != nil {
+		t.Fatalf("the lead could not accept the review replayed during the old side's drain: %v", err)
 	}
 	if got := todoNow(s, todo.ID); got.DoneAt == nil {
-		t.Fatal("main's acceptance did not close the rehomed task")
+		t.Fatal("the lead's acceptance did not close the rehomed task")
 	}
 }
 
 // A pre-structured queue head has no Signals after restart. Its text's todo id is the compatible fallback even while
-// that head is draining, so the rehomed task still reaches main instead of being stranded in the old conversation.
+// that head is draining, so the backfilled task still reaches its lead instead of being stranded in the old conversation.
 func TestLegacySideDrainingTextNoticeRehomesAfterRestart(t *testing.T) {
 	st := planUpdateStore{&planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}
-	s, f, todo := newSupervisedServiceOn(t, st)
+	s, f, todo := newLeaderServiceOn(t, st)
 	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
 	ctx := context.Background()
-	if _, _, err := s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool {
-		v.Supervisor, v.State = "side1", reviewPending
-		return true
-	}); err != nil {
-		t.Fatal(err)
-	}
+	legacyLeadTask(t, s, todo, "side1")
 	g := superviseSignal{Todo: todo.ID, Kind: sigReview, Key: "legacy-text-review", Detail: "legacy text", At: time.Now()}
 	s.signal(g)
 	reserveUndelivered(t, s, g)
@@ -632,8 +702,9 @@ func TestLegacySideDrainingTextNoticeRehomesAfterRestart(t *testing.T) {
 	unblock := func() { releaseOnce.Do(func() { close(h.release) }) }
 	defer unblock()
 	main := proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle}
+	lead := proto.Session{SessionID: "lead1", MachineID: "server", Assistant: true, Status: proto.StatusIdle}
 	side := proto.Session{SessionID: "side1", MachineID: "server", Assistant: true, Status: proto.StatusIdle}
-	f.setSessions("server", main, side)
+	f.setSessions("server", main, lead, side)
 	s.drainRelays("server", []proto.Session{side})
 	select {
 	case <-h.started:
@@ -641,23 +712,23 @@ func TestLegacySideDrainingTextNoticeRehomesAfterRestart(t *testing.T) {
 		t.Fatal("the old side did not start draining its pre-structured notice")
 	}
 
-	s.rehomeSupervisedTodos(ctx)
+	s.backfillPlanSupervisors(ctx)
 	setSuperviseTimingsForTest(s, superviseTimings{gather: 1, every: 1, urgent: time.Hour})
 	s.sendDigest(ctx)
-	waitFor(t, "the pre-structured draining notice replayed to main", func() bool {
-		return strings.Contains(h.text("conv1"), todo.ID)
+	waitFor(t, "the pre-structured draining notice replayed to the lead", func() bool {
+		return strings.Contains(h.text("lead1"), todo.ID)
 	})
-	before := h.count("conv1")
+	before := h.count("lead1")
 	setSuperviseTimingsForTest(s, superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour})
 	simulateSupervisionRestart(t, s)
-	s.rehomeSupervisedTodos(ctx)
+	s.backfillPlanSupervisors(ctx)
 	setSuperviseTimingsForTest(s, superviseTimings{gather: 1, every: 1, urgent: time.Hour})
 	s.sendDigest(ctx)
-	if got := h.count("conv1"); got != before {
+	if got := h.count("lead1"); got != before {
 		t.Fatalf("the text fallback repeated after its head was detached: before %d, after %d", before, got)
 	}
-	if _, err := runJSON(t, s, "conv1", "task_review", map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "验收通过", "checks": completeReviewChecks(todoNow(s, todo.ID))}); err != nil {
-		t.Fatalf("main could not accept the pre-structured notice's task: %v", err)
+	if _, err := runJSON(t, s, "lead1", "task_review", map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "验收通过", "checks": completeReviewChecks(todoNow(s, todo.ID))}); err != nil {
+		t.Fatalf("the lead could not accept the pre-structured notice's task: %v", err)
 	}
 }
 

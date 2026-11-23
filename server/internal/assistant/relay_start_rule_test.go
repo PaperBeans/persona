@@ -325,3 +325,43 @@ func TestALeadStartsTheOwnersRelayedWordsAtOnce(t *testing.T) {
 		t.Fatalf("the started task: %+v", started.Tasks[0])
 	}
 }
+
+// A continuation keeps the original brief, but the request that authorizes this dispatch is the verified hand-over in
+// the current conversation. The earlier plan uses another folder so its started kind cannot mask the request hold.
+func TestAContinuationStartsTheCurrentRelayedWordsAtOnce(t *testing.T) {
+	d := newStartRuleHarness(t, nil)
+	stopHolds(t, d.s)
+	d.f.setItems(ownerItem("m-earlier", "Fix the earlier export"))
+	if !d.planIn(t, d.leaderID, map[string]any{"cwd": "/code/earlier"}) {
+		t.Fatal("the original plan on the owner's direct words waits for Start")
+	}
+	todo := onlyTodo(d.s)
+	before, ok := d.s.briefOfTodo(todo.ID)
+	if !ok || before.Request == nil || before.Request.MessageID != "m-earlier" {
+		t.Fatalf("original brief = %+v", before)
+	}
+
+	d.handOver(t)
+	if !d.planIn(t, d.leaderID, map[string]any{
+		"continues": todo.ID, "continues_why": "Replace the earlier Agent", "cwd": "/code/app",
+	}) {
+		t.Fatal("a continuation on the current relayed words waits for Start")
+	}
+	plans, err := d.s.conversationPlans(context.Background(), d.leaderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var continued *TaskPlan
+	for _, p := range plans {
+		if len(p.Tasks) == 1 && p.Tasks[0].Continues == todo.ID {
+			continued = p
+		}
+	}
+	if continued == nil || !continued.Tasks[0].UserRequested {
+		t.Fatalf("continuation = %+v", continued)
+	}
+	after, ok := d.s.briefOfTodo(todo.ID)
+	if !ok || after.ID != before.ID || after.Request == nil || after.Request.MessageID != before.Request.MessageID {
+		t.Fatalf("continuation replaced the original brief: before %+v, after %+v", before, after)
+	}
+}

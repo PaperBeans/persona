@@ -43,7 +43,7 @@ describe("main conversation direct-user waiting", () => {
     expect(directUserWaiting([row]).map((item) => item.key)).toEqual(["task:delivery"]);
   });
 
-  it("excludes unstarted/failed work, generic supervisor states, deferred and superseded decisions", () => {
+  it("keeps a plan waiting for Start, excludes failed work, generic supervisor states, deferred and superseded decisions", () => {
     const dismissed = todo("dismissed", {
       ask: { verdict: "An old question", outcome: "decide", asked_at: at },
       decision_review: { review_at: at, dismissal_id: "dismissed" },
@@ -60,7 +60,8 @@ describe("main conversation direct-user waiting", () => {
       task("deferred", "needs_you", [], deferred),
       agent([card("agent-permission", "permission"), card("terminal", "screen")]),
     ];
-    expect(directUserWaiting(rows, { [decisionLaterKey(deferred)]: true })).toEqual([]);
+    // only the plan waiting for Start: the owner's own decision
+    expect(directUserWaiting(rows, { [decisionLaterKey(deferred)]: true })).toEqual([plan]);
   });
 
   it("filters mixed Agent rows and counts exactly the rows and own cards that open", () => {
@@ -70,8 +71,15 @@ describe("main conversation direct-user waiting", () => {
       plan,
     ]);
     const own = [card("own-question", "question"), card("own-permission", "permission")];
-    expect(rows.map((item) => item.key)).toEqual(["agent:hub/agent", "task:open"]);
+    expect(rows.map((item) => item.key)).toEqual(["agent:hub/agent", "task:open", "plan:unstarted"]);
     expect(rows[0].kind === "agent" && rows[0].asks.map((ix) => ix.id)).toEqual(["question"]);
-    expect(directWaitingCount(rows, own)).toBe(3);
+    expect(directWaitingCount(rows, own)).toBe(4);
+  });
+
+  it("follows the hub's view of a to-do when there is one, as the To-dos badge does", () => {
+    const view = (section: string) => ({ phase: section, section, reason: section === "needs_you" ? "failed_start" : "persona_working", rank: 0 });
+    // a failed start the hub files under Needs you is the owner's; one its supervisor handles (working) is not
+    expect(directUserWaiting([task("failed", "failed", [], { view: view("needs_you") })]).map((i) => i.key)).toEqual(["task:failed"]);
+    expect(directUserWaiting([task("held", "needs_you", [card("q", "question", { delegating: true })], { view: view("working") })])).toEqual([]);
   });
 });

@@ -923,7 +923,8 @@ func (s *Service) linkTaskBrief(ctx context.Context, id, todoID, continues, reas
 	return nil
 }
 
-// unlinkTaskBrief takes back a continuation whose adoption failed, including only its uniquely marked scope event.
+// unlinkTaskBrief takes back a continuation whose adoption failed, including only its uniquely marked scope or estimate
+// event (an estimate-only takeover logs an estimate event, applyScope).
 // Durable writes go first: a failure leaves memory matching what a restart would read rather than hiding stale lineage
 // or criteria only until then. Scope and link removal are separate steps; the caller restores ledgers from the brief
 // that actually remains after both attempts.
@@ -937,7 +938,7 @@ func (s *Service) unlinkTaskBrief(ctx context.Context, todoID, eventID string) e
 			kept := make([]BriefEvent, 0, len(tb.st.Log))
 			removed := false
 			for _, ev := range tb.st.Log {
-				if ev.Kind == briefEventScope && ev.Todo == todoID && ev.eventID == eventID {
+				if (ev.Kind == briefEventScope || ev.Kind == briefEventEstimate) && ev.Todo == todoID && ev.eventID == eventID {
 					removed = true
 					continue
 				}

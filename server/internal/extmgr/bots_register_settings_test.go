@@ -202,8 +202,10 @@ func TestBotRegistrationSettingsPUTValidationOrdersOldBind(t *testing.T) {
 	t.Cleanup(func() { close(stop) })
 	var calls atomic.Int32
 	w.api.mu.Lock()
-	w.api.beforeBotInfo = func() {
-		if calls.Add(1) == 1 {
+	// Only the PUT's validation asks as cli_new (the new app runs only once validated). The bot's own start-up asks
+	// as cli_old in the background and, on a loaded machine, can reach the fake after this is set (#13688).
+	w.api.beforeBotInfo = func(app string) {
+		if app == "cli_new" && calls.Add(1) == 1 {
 			close(entered)
 			select {
 			case <-release:

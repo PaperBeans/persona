@@ -818,3 +818,41 @@ func TestScopeLedgerPropagationFollowsBriefCommitOrder(t *testing.T) {
 		t.Fatalf("brief and ledger diverged after ordered propagation: brief %+v, ledger %+v", brief, got)
 	}
 }
+
+// A takeover that changes only the estimate logs an estimate event, not a scope event: when its Agent link fails, the
+// rollback takes that event back too, so the brief, its clock and the sibling ledgers keep the estimate they had
+// (review of #13130).
+func TestFailedEstimateOnlyTakeoverRollsBack(t *testing.T) {
+	for _, store := range []struct {
+		name string
+		open func(t *testing.T) Store
+	}{
+		{"memory", func(*testing.T) Store { return nil }},
+		{"store", func(t *testing.T) Store { return &failingTakeoverAgentStore{DB: todoTestDB(t)} }},
+	} {
+		t.Run(store.name, func(t *testing.T) {
+			s, old, failed, sibling, brief := continuationRollbackSetup(t, store.open(t))
+			want, logged := brief.ExpectNow, len(mustBriefOfTodo(t, s, sibling.ID).Log)
+			_, rollback, err := s.continueBriefFor(context.Background(), "conv1", "conv1", old, failed, "test rollback", nil, want+37)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if b := mustBriefOfTodo(t, s, sibling.ID); b.ExpectNow != want+37 || b.Log[len(b.Log)-1].Kind != briefEventEstimate {
+				t.Fatalf("the takeover's estimate was not logged as an estimate: %+v", b)
+			}
+			s.dropContinuation(context.Background(), failed.ID, rollback, errors.New("injected Agent link failure"))
+			after := mustBriefOfTodo(t, s, sibling.ID)
+			for _, ev := range after.Log {
+				if ev.eventID == rollback.eventID {
+					t.Errorf("the aborted takeover's %q event survived the rollback: %+v", ev.Kind, ev)
+				}
+			}
+			if after.ExpectNow != want || len(after.Log) != logged {
+				t.Errorf("brief after the rollback: expect %d with %d events, want %d with %d", after.ExpectNow, len(after.Log), want, logged)
+			}
+			if got := todoNow(s, sibling.ID).Supervision; got == nil || got.ExpectMinutes != want {
+				t.Errorf("sibling ledger after the rollback: %+v, want %d minutes", got, want)
+			}
+		})
+	}
+}

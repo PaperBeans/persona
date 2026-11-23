@@ -102,7 +102,7 @@ type fakeOpenAPI struct {
 	readCode          map[string]int   // message id -> business code GET /messages/:id answers instead of its items
 	readFail          map[string]int   // message id -> how many more GETs answer HTTP 500 (the client reads again)
 	botInfoFail       bool             // GET /bot/v3/info answers a business error
-	beforeBotInfo     func()           // optional response barrier, called outside mu
+	beforeBotInfo     func(app string) // optional response barrier, called outside mu with the asking app (token t-<app>)
 	pins              []map[string]any // what GET /pins answers (its items)
 }
 
@@ -124,12 +124,16 @@ func newFakeOpenAPI(t *testing.T) *fakeOpenAPI {
 		f.mu.Unlock()
 		p := r.URL.Path
 		if p == "/open-apis/bot/v3/info" && beforeBotInfo != nil {
-			beforeBotInfo()
+			beforeBotInfo(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer t-"))
 		}
 		reply := func(v any) { _ = json.NewEncoder(w).Encode(v) }
 		switch {
 		case p == "/open-apis/auth/v3/tenant_access_token/internal":
-			reply(map[string]any{"code": 0, "tenant_access_token": "t-1", "expire": 7200})
+			var app struct {
+				ID string `json:"app_id"`
+			}
+			_ = json.Unmarshal(body, &app)
+			reply(map[string]any{"code": 0, "tenant_access_token": "t-" + app.ID, "expire": 7200})
 		case p == "/open-apis/bot/v3/info" && f.failsBotInfo():
 			reply(map[string]any{"code": 99991, "msg": "bot info is down"})
 		case p == "/open-apis/bot/v3/info":

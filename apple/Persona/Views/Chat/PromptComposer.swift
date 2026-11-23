@@ -187,10 +187,12 @@ struct PromptComposer: View {
 
 /// What the composer's menus offer.
 enum PromptItems {
-    static func attachments(camera: Bool, glasses: Bool = false) -> [PromptSource] {
+    /// `modules`: the active modules' composer actions (`Modules.registry.composerActions`), after the camera; a source's
+    /// id is the action's id.
+    static func attachments(camera: Bool, modules: [ModuleComposerAction] = []) -> [PromptSource] {
         var out = [PromptSource(id: "photo", name: String(localized: "Photos"), detail: String(localized: "Photos or videos"), icon: .symbol(Theme.Icon.photos), kind: .attach)]
         if camera { out.append(PromptSource(id: "camera", name: String(localized: "Take Photo [Chat View 6e3a10]"), detail: String(localized: "Take one with the camera"), icon: .symbol("camera"), kind: .attach)) }
-        if glasses { out.append(PromptSource(id: "glasses", name: String(localized: "Glasses Photo"), detail: String(localized: "Take one with the Meta glasses"), icon: .symbol(Theme.Icon.glasses), kind: .attach)) }
+        out += modules.map { PromptSource(id: $0.id, name: String(localized: $0.title), detail: String(localized: $0.detail), icon: .symbol($0.symbol), kind: .attach) }
         out.append(PromptSource(id: "file", name: String(localized: "Files"), detail: String(localized: "Uploads to that computer and inserts the path"), icon: .symbol("doc"), kind: .attach))
         return out
     }

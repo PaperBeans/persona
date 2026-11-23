@@ -464,8 +464,26 @@ func endedText(l i18n.Lang, status, fallback string) string {
 	return i18n.T(l, fallback)
 }
 
-// resolutionText says in l how an interaction was answered, for its closed card.
+// resolutionText says in l how an interaction was answered, for its closed card. An answer someone other than the user
+// gave (AnsweredBy: the assistant or a supervisor, the recommendation taken at a deadline, the terminal) says who gave
+// it, so it never reads as the user's own "Allowed" or "Denied".
 func resolutionText(l i18n.Lang, ix proto.Interaction, r proto.Resolution) string {
+	how := answerText(l, ix, r)
+	switch r.AnsweredBy {
+	case "":
+		return how
+	case proto.AnsweredByAssistant:
+		return i18n.T(l, "assistant-feishu_cards.by_assistant", i18n.Args{"how": how})
+	case proto.AnsweredByDefault:
+		return i18n.T(l, "assistant-feishu_cards.by_default", i18n.Args{"how": how})
+	case proto.AnsweredByTerminal:
+		return i18n.T(l, "assistant-feishu_cards.by_terminal", i18n.Args{"how": how})
+	}
+	return i18n.T(l, "assistant-feishu_cards.by_other", i18n.Args{"how": how})
+}
+
+// answerText is resolutionText without who answered.
+func answerText(l i18n.Lang, ix proto.Interaction, r proto.Resolution) string {
 	switch {
 	case r.Dismiss && r.Reason == proto.DismissedInChat && r.AnsweredBy == "":
 		return i18n.T(l, "assistant-feishu_cards.replied_in_chat")

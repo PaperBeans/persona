@@ -643,6 +643,7 @@ final class AppModel {
     /// Counts the current hub's hellos (its socket connecting again): a page that reads on reconnect follows it, so it
     /// reads on that alone and not on every push (#11516's page).
     private(set) var hubHellos = 0
+    private(set) var healthIntakeRevision = 0
     /// Numbers the tree reads in the order they were asked; `directionTreeLanded` is the newest one whose answer was
     /// taken. An answer older than that is dropped; a read that fails moves neither, so it never makes an earlier
     /// good answer count as stale.
@@ -3239,6 +3240,9 @@ final class AppModel {
             // The direction tree changed (#4352): read it again. Its answer is the default manager's alone, so another
             // manager's page keeps what GET leaders gave it (docs/assistant/managers.md "Clients").
             if isHub, let hubAPI = api, assistantShows(nil) { Task { await refreshDirectionTree(hubAPI) } }
+        case .healthIntake:
+            if isHub { healthIntakeRevision += 1 }
+            ExtensionUIRegistry.shared.invalidate(extension: HealthIntakeUI.id, ui: nil, group: group)
         case .assistantFeed(let item):
             if isHub { TasksStore.shared.received(item, group: group) }
         case .assistantView(let view):
@@ -3391,6 +3395,7 @@ final class AppModel {
         case .look: "look"
         case .managers: "managers"
         case .directions: "directions"
+        case .healthIntake: "health_intake"
         case .assistantFeed: "assistant_feed"
         case .assistantView: "assistant_view"
         case .assistantViewAction: "assistant_view_action"

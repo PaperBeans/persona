@@ -188,5 +188,9 @@
   "herdr_tab_name_saving": "セッション名の設定を保存中…",
   "show_botmux_inventory": "コンピュータの「botmux セッションも表示」スイッチで、ハブに届くセッションを設定します。",
   "show_botmux_computers": "コンピュータを開く",
-  "botmux_saving": "保存中…"
+  "botmux_saving": "保存中…",
+  "sort_by_activity": "Agents を最近の更新順に並べる",
+  "sort_by_activity_hint": "オフでは固定の順序。オンでは最新のアクティビティ順で、ポインターがサイドバーの外にあるときだけ並べ替えます。",
+  "show_agents_filter": "Agents リストにフィルターを表示",
+  "show_agents_filter_hint": "Agents リストに「フィルター」ボタンと条件を表示します。オフにすると非表示になり、適用中のフィルターも解除されます。"
 }

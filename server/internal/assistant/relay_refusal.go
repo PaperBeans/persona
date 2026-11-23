@@ -267,7 +267,7 @@ func (s *Service) reportRelayRefused(ctx context.Context, machine, to, tool, cod
 	if supervisionRefusalCode(code) {
 		args = s.supervisionLauncherArgs(ctx, machine, lang)
 	}
-	s.push(ctx, Notification{DeviceID: machine, SessionID: to,
+	s.push(withCard(ctx, cardRelayRefusal), Notification{DeviceID: machine, SessionID: to,
 		Title: i18n.T(lang, "assistant-conversations.relay_delivery_failed"), Body: i18n.T(lang, relayRefusedBody(tool, code), args)})
 }
 

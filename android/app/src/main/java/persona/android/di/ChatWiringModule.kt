@@ -76,7 +76,7 @@ object ChatWiringModule {
                 allMachines.filter { persona.core.contracts.GroupKeys.namespaceOf(it.id) == selectedNamespace }
             }
             val host = AssistantHostBindings(active.scope.path, active.assistantManagement, active.drafts,
-                active.coroutineScope, available, machines, conversations, active.mainSender) { key, options ->
+                active.coroutineScope, available, machines, conversations, active.mainSender, hello = active.connection.currentHello, chatContent = { key, options ->
                 ChatDestination(ChatRoute(key.machineId, key.sessionId,
                     kind = if (options.assistant) ConversationKind.Assistant else ConversationKind.Agent), navigator,
                     renderStyle = if (options.assistant) ChatRenderStyle.Assistant else ChatRenderStyle.Agent,
@@ -85,7 +85,7 @@ object ChatWiringModule {
                     historyReadOnly = options.readOnlyNote != null,
                     healthChat = options.healthChat,
                     historyFooter = options.readOnlyNote?.let { note -> { persona.core.designsystem.JNotice(note, status = persona.core.designsystem.Status.Offline) } })
-            }
+            })
             CompositionLocalProvider(LocalAssistantHost provides host, LocalAssistantManagers provides managers) { key(active.scope.path) { content() } }
         }
     }
@@ -192,4 +192,15 @@ private class RoutedAssistantManagement(
     override suspend fun revokeAlwaysGrant(session: SessionKey, keyHash: String) = api().revokeAlwaysGrant(session, keyHash)
     override suspend fun standingAuthorizations() = api().standingAuthorizations()
     override suspend fun revokeStandingAuthorization(id: String) = api().revokeStandingAuthorization(id)
+    override suspend fun tracks() = api().tracks()
+    override suspend fun trackKinds() = api().trackKinds()
+    override suspend fun createTrack(track: TrackCreate) = api().createTrack(track)
+    override suspend fun changeTrack(slug: String, change: TrackChange) = api().changeTrack(slug, change)
+    override suspend fun spaceMd(slug: String) = api().spaceMd(slug)
+    override suspend fun writeSpaceMd(slug: String, content: String, baseDigest: String) = api().writeSpaceMd(slug, content, baseDigest)
+    override suspend fun conversationCategories(session: SessionKey) = api().conversationCategories(session)
+    override suspend fun changeConversationCategories(session: SessionKey, add: List<String>, remove: List<String>) =
+        api().changeConversationCategories(session, add, remove)
+    override suspend fun extensionTrust() = api().extensionTrust()
+    override suspend fun setExtensionTrust(id: String, trust: ExtensionTrust) = api().setExtensionTrust(id, trust)
 }

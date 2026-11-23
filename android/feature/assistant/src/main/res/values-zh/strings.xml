@@ -31,7 +31,6 @@
     <string name="assistant_always_not_revoked">没有撤销：%1$s</string>
     <string name="assistant_always_retry">重试</string>
     <string name="assistant_info_launcher_text">启动器配置尚未接入。</string>
-    <string name="assistant_voice_chat">语音对话</string>
     <string name="assistant_compact">压缩上下文</string>
     <string name="assistant_new_main">新建主对话</string>
     <string name="assistant_clear_context">清理上下文</string>

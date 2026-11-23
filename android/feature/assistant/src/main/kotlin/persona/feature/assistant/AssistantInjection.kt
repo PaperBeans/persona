@@ -37,6 +37,8 @@ data class AssistantHostBindings(
     val conversations: persona.core.contracts.api.AssistantRepository,
     val mainSender: MainConversationSender,
     val chatContent: @Composable (SessionKey, AssistantChatOptions) -> Unit,
+    /** The selected hub's hello: pages that read on their own (the spaces, #13500) read again on each one. */
+    val hello: kotlinx.coroutines.flow.StateFlow<persona.core.contracts.api.SocketHello?>? = null,
 )
 
 val LocalAssistantHost = staticCompositionLocalOf<AssistantHostBindings?> { null }

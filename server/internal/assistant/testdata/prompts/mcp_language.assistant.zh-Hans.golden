@@ -759,7 +759,7 @@
   },
   {
     "name": "agent_start",
-    "description": "Start a new agent in the terminal engine (herdr or Orca) of one of the user's computers, in a project directory, with a first prompt. Use for real development work instead of doing it here. Check machines_list before choosing a machine. Returns the new session id. When the launcher failed its last health check on that machine, the agent starts on a machine where it works (a directory under the home moves to that home) and the answer says so. Claude-family launchers and Paseo providers with Auto Accept always start in bypassPermissions. TRAE CLI and omp take no effort setting.\n\nThe launcher decides the agent. A Claude Code launcher starts Claude Code. A launcher named pi, cursor or agy (or one the machine lists as that agent) starts that agent in a herdr pane with the model you give: pi, the Cursor CLI (cursor-agent) or the Antigravity CLI (agy). pi's first message goes through its Persona extension; cursor's and agy's go through herdr once it recognises the agent. Those three take no permission mode and no ultracode, and their effort is their own.\n\nWhen the work needs a branch and checkout of its own (work in parallel with what is already open in that repository), give `worktree.branch`: Persona makes the worktree through the machine's engine first (herdr's or Orca's own, so it is listed there and in the app, under the workspace `cwd` is in) and starts the agent in it. Do not tell the agent to run `git worktree add` itself: a worktree made that way is invisible to Orca and to the app. An existing local branch is checked out; a new one starts at the HEAD of the workspace `cwd` is in. A branch already checked out elsewhere is refused.\n\nWhen the agent needs credentials the user keeps in a secret provider (a token in 1Password, say), give `secret_env`: each environment variable it should have, with the reference its value comes from (such as `op://vault/item/field`), never the secret itself. The user approves the hand-off on a card on iPhone or the web before anything starts, and the values reach only that agent's environment, for this run: you never see them, and the answer lists each variable as granted, declined, expired or failed. Only Claude Code agents on a computer this manager connects take them. Tell the agent the variables exist; never ask it to print them.\n\nGive `ultracode: true` for a large task: one that spans many files or needs checking from several angles (design, tests, review). Claude Code then runs every substantial step as a multi-agent workflow: slower and costlier: off for small work. Do not write the word \"ultracode\" into the prompt instead. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it, and the answer says so. Once Claude Code confirms it, agents_list shows `ultracode=on`. An organization policy may keep some conversations read-only: a call from such a conversation is refused with the policy's reason. Do not retry; follow the refusal.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply.",
+    "description": "Start a new agent in the terminal engine (herdr or Orca) of one of the user's computers, in a project directory, with a first prompt. Use for real development work instead of doing it here. Check machines_list before choosing a machine. Returns the new session id. When the launcher failed its last health check on that machine, the agent starts on a machine where it works (a directory under the home moves to that home) and the answer says so. Claude-family launchers and Paseo providers with Auto Accept always start in bypassPermissions. TRAE CLI and omp take no effort setting.\n\nThe launcher decides the agent. A Claude Code launcher starts Claude Code. A launcher named pi, cursor or agy (or one the machine lists as that agent) starts that agent in a herdr pane with the model you give: pi, the Cursor CLI (cursor-agent) or the Antigravity CLI (agy). pi's first message goes through its Persona extension; cursor's and agy's go through herdr once it recognises the agent. Those three take no permission mode and no ultracode, and their effort is their own.\n\nFor parallel work needing its own checkout, give `worktree.branch`: Persona uses the machine's engine (herdr or Orca) to create and list it under the workspace containing `cwd`, then starts the agent there. Never tell the agent to run `git worktree add`: that hides it from Orca and the app. Existing branches are checked out; new ones start at that workspace's HEAD. A branch checked out elsewhere is refused.\n\nWhen the agent needs credentials the user keeps in a secret provider (a token in 1Password, say), give `secret_env`: each environment variable it should have, with the reference its value comes from (such as `op://vault/item/field`), never the secret itself. The user approves the hand-off on a card on iPhone or the web before anything starts, and the values reach only that agent's environment, for this run: you never see them, and the answer lists each variable as granted, declined, expired or failed. Only Claude Code agents on a computer this manager connects take them. Tell the agent the variables exist; never ask it to print them.\n\nGive `ultracode: true` for a large task: one that spans many files or needs checking from several angles (design, tests, review). Claude Code then runs every substantial step as a multi-agent workflow: slower and costlier: off for small work. Do not write the word \"ultracode\" into the prompt instead. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it, and the answer says so. Once Claude Code confirms it, agents_list shows `ultracode=on`. An organization policy may keep some conversations read-only: a call from such a conversation is refused with the policy's reason. Do not retry; follow the refusal.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -783,6 +783,10 @@
         "prompt": {
           "type": "string"
         },
+        "skip_project_memory": {
+          "type": "boolean",
+          "description": "default false; true skips project/direction memory; prompt unchanged"
+        },
         "attachments": {
           "type": "array",
           "maxItems": 8,
@@ -805,7 +809,7 @@
         },
         "ultracode": {
           "type": "boolean",
-          "description": "Claude Code multi-agent workflows for substantial steps; default false"
+          "description": "multi-agent workflows; default false"
         },
         "worktree": {
           "type": "object",
@@ -1023,14 +1027,13 @@
   },
   {
     "name": "interaction_answer",
-    "description": "Answer another agent's question for the user, in their place, when they said what to answer or told you to decide. Only a question can be answered this way: a tool permission, a plan and a terminal dialog are theirs to decide in the app, and the assistant's own question is never answered by itself. Every question must be answered by its own wording, with the option labels it offers; free text is not accepted (the user answers that in the app, or you use agent_send). A multi-select takes an array of labels. A card a 督办 message handed you before the user (a task you supervise) is yours to answer when it is the agent's own call: give reason, and the answer is kept as the task's decision; what the user must decide goes to them with ask_escalate.",
+    "description": "Answer another agent's card for the user, in their place, when they said what to answer or told you to decide. Answer each question by its own wording with an option label it offers; no free text (use agent_send). A multi-select takes an array of labels. A card a 督办 message handed you (a task you supervise) is yours to decide: answer a question, or allow or deny a tool permission or a plan with allow, giving reason; it is kept as the task's decision, never as the user's. Forms, secrets and approvals that send or reply in the user's name, spend money or delete are the user's: ask_escalate them. Never other approvals, terminal dialogs or the assistant's own questions.",
     "input_schema": {
       "type": "object",
       "required": [
         "machine",
         "session_id",
-        "interaction_id",
-        "answers"
+        "interaction_id"
       ],
       "properties": {
         "machine": {
@@ -1062,16 +1065,20 @@
             ]
           }
         },
+        "allow": {
+          "type": "boolean",
+          "description": "a permission or plan card: true allows (approves), false denies"
+        },
         "reason": {
           "type": "string",
-          "description": "optional: in a sentence, why this answer (kept with the task's decision when a 督办 message handed you the card)"
+          "description": "in a sentence, why this answer (kept with the task's decision)"
         }
       }
     }
   },
   {
     "name": "ask_escalate",
-    "description": "Hand the cards a task's agents wait on to the user, when a 督办 message gave them to you first and the user must decide: a tool permission or a plan (no conversation approves those), or a question that is irreversible, seen by other people, changes the goal or goes against a decision already made on the task. Every card of the task the user has not been told of goes to them at once, as one reminder (in the user's push grading it pushes only when why_owner or p0 says it is theirs alone), with your reason and recommendation on it; their answers go straight to the agents and are kept as the task's decisions. Only the task's supervisor and the main conversation can. A leader's escalation is told to the main conversation too, so don't ask the user the same thing again yourself.",
+    "description": "Hand the cards a task's agents wait on to the user, when a 督办 message gave them to you first and only the user can decide: a form or secret; an approval that sends or replies in their name, spends money or deletes; a question that is irreversible, seen by others, changes the goal or contradicts a decision made on the task. Other permissions and plans are yours (interaction_answer); no card reaches the user on a timeout. Every card of the task the user has not been told of goes to them at once, as one reminder (with push grading on it pushes only for why_owner or p0), with your reason and recommendation; their answers go to the agents and are kept as the task's decisions. Only the task's supervisor and main can; main is told of a leader's escalation, so don't ask the user again.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2335,11 +2342,15 @@
               },
               "context": {
                 "type": "string",
-                "description": "facts the manager cannot resolve; omit project background"
+                "description": "extra facts; no project background"
               },
               "prompt": {
                 "type": "string",
-                "description": "goal, authorization bounds and new facts; the manager adds project context, criteria and framework rules once"
+                "description": "goal, bounds and facts; manager adds context, criteria and rules"
+              },
+              "skip_project_memory": {
+                "type": "boolean",
+                "description": "default false; true skips project/direction memory; prompt unchanged"
               },
               "machine": {
                 "type": "string",
@@ -3966,6 +3977,55 @@
         },
         "scope": {
           "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "health_intake",
+    "description": "Health chats only. log kind/amount (water ml, protein g); list entries/IDs, daily totals/goals (default 7 days incl. today); delete record UUID, repeatable. Estimates need ask_user; new ID per log; list before retrying.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "log",
+            "list",
+            "delete"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "water",
+            "protein"
+          ]
+        },
+        "amount": {
+          "type": "number",
+          "description": "ml 1-3000; g \u003e0-200; max one decimal."
+        },
+        "at": {
+          "type": "string",
+          "description": "RFC3339; default now."
+        },
+        "note": {
+          "type": "string",
+          "description": "Food/portion; max 4096 UTF-8 bytes; no NUL."
+        },
+        "days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 366
+        },
+        "id": {
+          "type": "string"
         }
       },
       "additionalProperties": false

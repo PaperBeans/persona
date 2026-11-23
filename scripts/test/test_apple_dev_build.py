@@ -17,7 +17,8 @@ APPLE = ROOT / 'apple'
 SWITCH = 'PERSONA_LEAN_DEV_BUILD'
 # What the iPhone app depends on in every build, in project.yml's order, and what only the whole build adds.
 ALWAYS = ['LiveCommunicationKit.framework', 'PersonaWire', 'PersonaWidgets', 'PersonaNotify', 'MarkdownUI', 'BeautifulUI',
-          'PersonaSSH', 'PersonaKit', 'PersonaCore', 'MarqueeGlow', 'PersonaScreenKit', 'PersonaInputKit']
+          'PersonaSSH', 'PersonaKit', 'PersonaCore', 'MarqueeGlow', 'PersonaScreenKit', 'PersonaInputKit',
+          'PersonaModuleAPI']
 WHOLE_ONLY = ['PersonaWatch', 'PersonaShare']
 # Scripts that run `xcodegen generate` on a spec other than apple/project.yml, which the switch does not touch.
 OTHER_PROJECTS = {

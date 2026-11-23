@@ -3720,7 +3720,7 @@ export interface ConnectorCatalogCallParams {
 
 /**
  * items: new items, each kept once; snapshot: the answer as one state, kept when it changes; things: the answer lists
- * Inbox rows ready-made (ConnectorInboxThing), kept and handed to the Inbox as they are.
+ * Inbox rows ready-made (ConnectorInboxThing), and the Inbox gets the latest answer's rows as they are, in its order.
  */
 export type ConnectorSubscriptionMode = "items" | "snapshot" | "things" | (string & {});
 export const CONNECTOR_SUBSCRIPTION_MODES = ["items", "snapshot", "things"] as const;

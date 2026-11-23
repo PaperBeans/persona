@@ -45,13 +45,16 @@ const (
 	exitUnavailable = 3 // the node, the hub or the connector cannot be reached or is not signed in
 	exitRateLimited = 4 // the connector waits out a rate limit (retry_after seconds)
 	exitDeclined    = 5 // the user (or connector_gate) did not allow the write
+	// exitUnanswered: the write's card ended without the user's own answer (it expired, was withdrawn): nothing was
+	// written, and the user did not decline it.
+	exitUnanswered = 6
 	// exitInterrupted: Ctrl-C / SIGTERM (as personad ask): the node hung up and the card came off the phone; nothing
 	// is wrong with the node or the hub.
 	exitInterrupted = 130
 )
 
 var kinds = map[int]string{exitFailed: "failed", exitUsage: "usage", exitUnavailable: "unavailable", exitRateLimited: "rate_limited",
-	exitDeclined: "declined", exitInterrupted: "interrupted"}
+	exitDeclined: "declined", exitUnanswered: proto.ToolErrorUnanswered, exitInterrupted: "interrupted"}
 
 // callTimeout covers a write waiting for the user on the phone (the card lasts 15 minutes).
 const callTimeout = 30 * time.Minute
@@ -331,7 +334,7 @@ func firstText(res proto.ToolResult) string {
 
 // byKind is the exit code of each kind of failure the hub, the node and the connectors name (proto.ToolError*).
 var byKind = map[string]int{proto.ToolErrorDeclined: exitDeclined, proto.ToolErrorUnavailable: exitUnavailable,
-	proto.ToolErrorRateLimited: exitRateLimited}
+	proto.ToolErrorRateLimited: exitRateLimited, proto.ToolErrorUnanswered: exitUnanswered}
 
 // waitFor is how the hub and the connectors say how long a rate limit lasts, for those that do not say it in
 // retry_after (an older hub, a connector's status).

@@ -226,7 +226,7 @@ func projectionFacts(t listedTodo, sessions map[[2]string]proto.Session, loc *ti
 		}
 	}
 	if v := t.Supervision; v != nil {
-		f.Supervision = &projection.Supervision{State: v.State, PendingSince: v.PendingSince, UpdatedAt: v.UpdatedAt}
+		f.Supervision = &projection.Supervision{State: v.State, Supervisor: v.Supervisor, PendingSince: v.PendingSince, UpdatedAt: v.UpdatedAt}
 		if p := v.Parked; p != nil {
 			parked := &projection.Parked{Reason: p.Reason, Until: p.Until, WaitingOn: p.WaitingOn}
 			if p.Evidence != nil && p.Evidence.InteractionID != "" {

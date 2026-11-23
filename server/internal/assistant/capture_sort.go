@@ -388,7 +388,7 @@ func captureFileContent(c db.Capture, sorted assistantwire.CaptureSort, cats []s
 // only "1 capture".
 func (s *Service) pushCaptureFiled(ctx context.Context, c db.Capture, sorted assistantwire.CaptureSort, e trackEntry, cats captureCats) {
 	l := s.lang(ctx)
-	s.push(ctx, Notification{Subtitle: "Persona", Title: i18n.T(l, "assistant-captures.push_title"),
+	s.push(withCard(ctx, cardCaptureSorted), Notification{Subtitle: "Persona", Title: i18n.T(l, "assistant-captures.push_title"),
 		Body: captureLine(l, c, sorted, e, cats), Level: assistantwire.LevelP2, RelatedKey: "capture:" + c.ID})
 }
 

@@ -40,8 +40,8 @@ type Store interface {
 	HeldItems(ctx context.Context, id string, q ItemQuery) ([]Held, error)
 	// HeldItem is the subscription's held item uid (the newest stored, if several); nil when it holds none (#6198).
 	HeldItem(ctx context.Context, id, uid string) (*Held, error)
-	// PruneItems removes the subscription's held items stored before before (their dedup keys stay).
-	PruneItems(ctx context.Context, id string, before time.Time) error
+	// PruneItems removes the subscription's held items stored before before, except keep's (their dedup keys stay).
+	PruneItems(ctx context.Context, id string, before time.Time, keep []string) error
 }
 
 // ItemQuery picks held items: those stored at or after Since, after the stored order After, at most Limit (the
@@ -51,6 +51,8 @@ type ItemQuery struct {
 	Since  time.Time
 	Limit  int
 	Newest bool
+	// UIDs, when not nil, picks only those (a things recipe's latest answer, #13637); none when empty.
+	UIDs []string
 }
 
 // Held is an item as it waits for the destinations: its place in the stored order and when its run stored it.
@@ -283,7 +285,7 @@ func (m *MemStore) HeldItems(_ context.Context, id string, q ItemQuery) ([]Held,
 	defer m.mu.Unlock()
 	var out []Held
 	for _, it := range m.items {
-		if it.SubscriptionID == id && it.Seq > q.After && !it.Stored.Before(q.Since) {
+		if it.SubscriptionID == id && it.Seq > q.After && !it.Stored.Before(q.Since) && (q.UIDs == nil || slices.Contains(q.UIDs, it.UID)) {
 			out = append(out, it)
 		}
 	}
@@ -308,10 +310,12 @@ func (m *MemStore) HeldItem(_ context.Context, id, uid string) (*Held, error) {
 	return nil, nil
 }
 
-func (m *MemStore) PruneItems(_ context.Context, id string, before time.Time) error {
+func (m *MemStore) PruneItems(_ context.Context, id string, before time.Time, keep []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.items = slices.DeleteFunc(m.items, func(it Held) bool { return it.SubscriptionID == id && it.Stored.Before(before) })
+	m.items = slices.DeleteFunc(m.items, func(it Held) bool {
+		return it.SubscriptionID == id && it.Stored.Before(before) && !slices.Contains(keep, it.UID)
+	})
 	return nil
 }
 
@@ -341,6 +345,7 @@ func applyRun(cur *Subscription, c RunCommit, withState bool) {
 	}
 	cur.SnapshotHash, cur.Runs = out.SnapshotHash, out.Runs
 	if SameRecipe(cur.Recipe, out.Recipe) {
+		cur.Answer, cur.AnswerAt = slices.Clone(out.Answer), out.AnswerAt // a things recipe's latest answer (#13637)
 		cur.SinceAt, cur.Continuation = out.SinceAt, cloneContinuation(out.Continuation)
 		if !on(*cur) && cur.Continuation != nil && !cur.Continuation.Manual {
 			cur.Continuation = nil // turned off while this page ran: the position went with it (#6310)

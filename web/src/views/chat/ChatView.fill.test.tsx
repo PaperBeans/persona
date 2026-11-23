@@ -35,6 +35,7 @@ vi.mock("../../lib/panel", async (importOriginal) => ({ ...await importOriginal<
 vi.mock("../assistant/Persona", () => ({ usePersona: () => ({ name: "Persona" }) }));
 
 import { applyCompleteSessions, reset } from "../../lib/store";
+import { resetPullGatesForTests } from "../../lib/pull-gate";
 const { ChatView } = await import("./ChatView");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -61,6 +62,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   reset();
+  resetPullGatesForTests(); // a case's failed index read must not hold the next case's back
   vi.restoreAllMocks();
   vi.clearAllTimers();
   vi.useRealTimers();

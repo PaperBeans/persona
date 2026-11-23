@@ -1,0 +1,5 @@
+# The composition roots of the built-in modules (docs/architecture/core-and-modules.md "Guards"): the packages that may
+# import internal/modules/all, the one list of built-in modules, so the manager they run loads them. Nothing else
+# outside internal/modules imports a module (TestCoreImportsNoModule).
+internal/manager
+internal/managercli

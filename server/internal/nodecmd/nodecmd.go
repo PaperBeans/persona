@@ -170,6 +170,8 @@ func runNode(ctx context.Context, args []string, b Build) error {
 				os.Exit(1)
 			}
 			return err
+		case "agy-hooks": // Persona's entries in the Antigravity CLI's hooks file (node/agyhooks.go)
+			return node.AgyHooksCommand(args[1:], os.Stdout)
 		case "reset-uid":
 			if err := noExtraArgs("reset-uid", args[1:]); err != nil {
 				exitNodeUsage(err)

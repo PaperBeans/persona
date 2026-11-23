@@ -4,6 +4,8 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// the feature modules (the health page is one: docs/web/web.md "Modules")
+import "../modules";
 // jsdom has no matchMedia (the sidebar's modules read it when they load) and no ResizeObserver (its highlight)
 vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
@@ -300,7 +302,7 @@ describe("folding a block of the sidebar", () => {
 });
 
 describe("ordering the Agents list (#11801)", () => {
-  it("offers no activity sort, including to a browser that used one before", async () => {
+  it("ignores the old per-browser activity sort key: the choice is the hub's now (Settings › Agents)", async () => {
     localStorage.setItem("persona.agentSort", "updated");
     await withAgent();
     act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));

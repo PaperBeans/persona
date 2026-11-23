@@ -293,15 +293,18 @@ func prefix(p, s string) string {
 
 // ---- interaction_answer (prompts/mcp/agents) ----
 
-// toolInteractionAnswer answers another agent's question for the user (docs/assistant/assistant.md). Only a question may be
-// answered here: a permission, a plan and a terminal dialog are the user's to decide, and an assistant conversation
-// (this one among them) is never answered by the assistant.
+// toolInteractionAnswer answers another agent's question for the user (docs/assistant/assistant.md). A permission or
+// a plan is answered here only by the supervisor it was handed to (ask_route.go): it is the supervisor's call, kept
+// as the assistant's (AnsweredBy), never the user's, and one that is the user's alone (userApproval) is refused for
+// ask_escalate. Any other permission or plan, and a terminal dialog, are the user's to decide, and an assistant
+// conversation (this one among them) is never answered by the assistant.
 func (s *Service) toolInteractionAnswer(ctx context.Context, self string, args json.RawMessage) (string, error) {
 	var a struct {
 		Machine       string          `json:"machine"`
 		SessionID     string          `json:"session_id"`
 		InteractionID string          `json:"interaction_id"`
 		Answers       json.RawMessage `json:"answers"`
+		Allow         *bool           `json:"allow"`
 		Reason        string          `json:"reason"`
 	}
 	_ = json.Unmarshal(args, &a)
@@ -330,14 +333,18 @@ func (s *Service) toolInteractionAnswer(ctx context.Context, self string, args j
 		// choices; it is never answered for them.
 		return "", fmt.Errorf("interaction %s is a screen (a terminal dialog), only the user can answer it in the app, where its card offers its choices", ix.ID)
 	}
-	if ix.Kind != proto.IxQuestion {
-		return "", fmt.Errorf("interaction %s is a %s (approval), only the user can answer it in the app", ix.ID, ix.Kind)
+	approval := ix.Kind == proto.IxPermission || ix.Kind == proto.IxPlan
+	if ix.Kind != proto.IxQuestion && !approval {
+		return "", fmt.Errorf("interaction %s is a %s, only the user can answer it in the app", ix.ID, ix.Kind)
 	}
 	if ix.MachineID != am.ID || ix.SessionID != c.SessionID {
 		return "", fmt.Errorf("interaction %s belongs to another agent: machine=%s session_id=%s", ix.ID, ix.MachineID, ix.SessionID)
 	}
 	if time.Now().After(ix.ExpiresAt) {
 		return "", fmt.Errorf("interaction %s expired", ix.ID)
+	}
+	if approval {
+		return s.answerApprovalCard(ctx, self, ix, a.Allow, a.Reason)
 	}
 	answers, err := interactionAnswers(ix, a.Answers)
 	if err != nil {
@@ -365,6 +372,38 @@ func (s *Service) toolInteractionAnswer(ctx context.Context, self string, args j
 		fmt.Fprintf(&b, "- %s → %s\n", q.Question, answers[q.Question])
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+// answerApprovalCard is interaction_answer on permission or plan card ix: only the conversation supervising its task
+// that it was handed to (or the main conversation) may allow or deny it, and not one that is the user's alone.
+func (s *Service) answerApprovalCard(ctx context.Context, self string, ix proto.Interaction, allow *bool, reason string) (string, error) {
+	todo, routed := s.routedTo(ix.ID, self, s.isMain(ctx, self))
+	if !routed {
+		return "", fmt.Errorf("interaction %s is a %s (approval) that was not handed to you as its task's supervisor: only the user can answer it in the app", ix.ID, ix.Kind)
+	}
+	if why := userApproval(ix); why != "" {
+		return "", fmt.Errorf("interaction %s %s: only the user decides it; hand it to them with ask_escalate (todo_id %s), with your recommendation", ix.ID, why, todo)
+	}
+	if allow == nil {
+		return "", errors.New("allow is required for a permission or plan card: true allows the tool (approves the plan), false denies it")
+	}
+	reason = clip(oneLine(reason), 120)
+	if err := s.answeredApproval(ctx, todo, self, ix, *allow, reason); err != nil {
+		if errors.Is(err, errNotPending) {
+			return "", interactionEnded(ix.ID, s.endedStatus(ctx, ix.ID, err))
+		}
+		return "", err
+	}
+	verb := "Allowed"
+	switch {
+	case ix.Kind == proto.IxPlan && *allow:
+		verb = "Approved the plan"
+	case ix.Kind == proto.IxPlan:
+		verb = "Rejected the plan"
+	case !*allow:
+		verb = "Denied"
+	}
+	return fmt.Sprintf("%s for the agent, as its supervisor: kept as task %s's decision (yours, not the user's), and the agent sees it was not the user's answer.", verb, todo), nil
 }
 
 // interactionEnded says how an interaction that is no longer pending ended (status, from the hub's history), or that

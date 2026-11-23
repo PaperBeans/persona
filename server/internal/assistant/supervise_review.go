@@ -503,8 +503,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 			reversible = *a.Reversible
 		case !neverDefault(decision.WhyOwner):
 			// A default and a date (#3804): one that can be undone takes its recommendation after a day unless the review
-			// set its own deadline.
-			deadline, reversible = time.Now().Add(decisionDefaultAfter).UTC(), true
+			// set its own deadline. An explicit reversible=false keeps the date as a reminder only.
+			deadline = time.Now().Add(decisionDefaultAfter).UTC()
+			reversible = a.Reversible == nil || *a.Reversible
 		}
 		if !deadline.IsZero() {
 			conclusion.Deadline, conclusion.Reversible = deadline, reversible
