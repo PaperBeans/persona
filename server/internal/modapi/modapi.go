@@ -1,12 +1,14 @@
 // Package modapi is the module contract of Persona Core (docs/architecture/core-and-modules.md): what a built-in
 // feature module declares about itself (Info, the manifest of schema/module.schema.json), what it is (Module), and the
-// one way it reaches the core (Host). It holds types and constants only, imports nothing but the standard library,
+// one way it reaches the core (Host). It holds types, constants and the list of client-only module ids, imports nothing but the standard library,
 // and is a contract package (internal/archguard/testdata/contracts.txt): the core (internal/assistant/kernel serves
 // Host) and the modules (internal/modules/<id>) both import it, never each other.
 package modapi
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
 	"time"
 )
 
@@ -40,7 +42,8 @@ type Info struct {
 	// when they are, through the kernel only: a wanted module may be left out of the build.
 	Needs []string `json:"needs,omitempty"`
 	Wants []string `json:"wants,omitempty"`
-	// Feature is the wire feature flag announced while the module is loaded ("" for none).
+	// Feature is the wire feature flag module.<id> announced while the module is loaded ("" for none). A publishing
+	// manager also announces the reserved modules marker, including when every module is absent.
 	Feature string `json:"feature,omitempty"`
 
 	HubRoutes       []string `json:"hub_routes,omitempty"`       // "METHOD /api/v1/…" patterns
@@ -84,6 +87,26 @@ type Host interface {
 	AddSetting(Setting) error
 	// AddScheduleFacts serves Info.Schedules' ScheduleFactsName entry.
 	AddScheduleFacts(ScheduleFacts) error
+	// AddHubRoute serves one declared "METHOD /api/v1/…" route while the module is loaded.
+	AddHubRoute(pattern string, handler http.HandlerFunc) error
+	// AddMCPTool serves one declared assistant tool while the module is loaded.
+	AddMCPTool(name, description string, schema json.RawMessage, run func(context.Context, string, string, json.RawMessage) (string, error)) error
+	// AddBackgroundJob runs one declared loop under the Service Run context while the module is loaded.
+	AddBackgroundJob(name string, run func(context.Context) error) error
+}
+
+// BackgroundJob is a module-owned loop. Run inherits Service.Run's cancellation; an off module never starts it.
+type BackgroundJob struct {
+	Name string
+	Run  func(context.Context) error
+}
+
+// MCPTool is a module's assistant tool definition and handler. Run receives the calling machine, conversation and JSON arguments.
+type MCPTool struct {
+	Name        string
+	Description string
+	InputSchema json.RawMessage
+	Run         func(context.Context, string, string, json.RawMessage) (string, error)
 }
 
 // Setting is a module's value in persona_settings. The core keeps the stored value (also while the module is off,
@@ -131,4 +154,14 @@ type WaitRow struct {
 	Kind  string
 	Since time.Time
 	Key   string
+}
+
+// ClientModules are the ids of the feature modules that live only in the clients (web, iOS, Android): the server has
+// no module of that id, so no manifest announces their flag. The manager announces module.<id> for each of them beside
+// the built-in modules' flags unless the modules setting switches it off, so a client that gates one on the hello
+// (docs/architecture/core-and-modules.md "Hub flags") keeps it on by default and the owner can turn it off from the
+// hub. An id leaves this list in the PR that gives the module a server half with its own feature
+// (internal/modules/all checks that no built-in module is listed).
+func ClientModules() []string {
+	return []string{"glasses", "health", "knowledge-ui"}
 }

@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // the feature modules (the health page is one: docs/web/web.md "Modules")
-import "../modules";
+import { MODULES } from "../modules";
 // jsdom has no matchMedia (the sidebar's modules read it when they load) and no ResizeObserver (its highlight)
 vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
@@ -132,12 +132,16 @@ describe("the focus across a fold (web usability audit item 23)", () => {
 });
 
 describe("localized page names in the drawer and desktop sidebar (#3579)", { timeout: 30_000 }, () => {
+// the health module, when this run has it (the core-only lane, #13932, runs with no module)
+  const HEALTH = MODULES.some((m) => m.id === "health");
+  // without it the same pages less Health
+  const withHealth = <T,>(xs: readonly T[]) => (HEALTH ? [...xs] : xs.filter((_, i) => i !== 2));
   const locales = [
     { lang: "en", full: ["Overview", "Inbox", "Health", "Scheduled tasks", "Knowledge", "Machines"], short: ["Home", "Inbox", "Health", "Tasks", "KB", "Hosts"] },
     { lang: "ja", full: ["概要", "受信トレイ", "ヘルスケア", "定期タスク", "ナレッジ", "マシン"], short: ["概要", "受信", "健康", "定期", "ナレッジ", "マシン"] },
     { lang: "zh-Hans", full: ["总览", "收件箱", "健康", "定时任务", "知识库", "机器"], short: ["总览", "收件箱", "健康", "定时任务", "知识库", "机器"] },
-  ] as const;
-  const paths = ["/overview", "/inbox", "/health", "/routines", "/kb", "/machines"];
+  ].map((l) => ({ ...l, full: withHealth(l.full), short: withHealth(l.short) }));
+  const paths = withHealth(["/overview", "/inbox", "/health", "/routines", "/kb", "/machines"]);
   const pageLink = (path: string) => host.querySelector<HTMLAnchorElement>(`a[href="${path}"]`)!;
   function DrawerPages() {
     const { pages } = useNavPages();

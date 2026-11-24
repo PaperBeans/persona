@@ -12,7 +12,6 @@
     <string name="app_unavailable_phone_tools">No phone tools in this mode</string>
     <string name="app_demo_no_terminal">The demo has no terminal data</string>
     <string name="app_demo_no_machines">The demo has no machine monitoring data</string>
-    <string name="app_demo_no_knowledge">The demo has no knowledge base data</string>
     <string name="app_page_unavailable">This page isn\'t available right now</string>
     <string name="app_pane_agents_title">Pick a session</string>
     <string name="app_pane_agents_detail">Sessions and terminals on the left open here.</string>

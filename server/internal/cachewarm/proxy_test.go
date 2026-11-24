@@ -2,6 +2,7 @@ package cachewarm
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -299,5 +301,55 @@ func TestUncachedNormalRequestDoesNotSpendOnRefresh(t *testing.T) {
 	p.Tick(context.Background(), time.Now().Add(55*time.Minute), policy(), true)
 	if u.count() != 1 {
 		t.Fatal("warmed a prefix the provider never cached")
+	}
+}
+
+// Claude Code asks for gzip, br and zstd. A provider that compresses its event stream would hand the response tap
+// bytes it cannot read, and no request would ever be retained. The proxy asks the provider for identity instead.
+func TestCompressionIsNotRequestedFromTheProvider(t *testing.T) {
+	up := &warmUpstream{read: 12345}
+	var asked atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked.Store(r.Header.Get("Accept-Encoding"))
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			up.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		z := gzip.NewWriter(w)
+		rec := httptest.NewRecorder()
+		up.ServeHTTP(rec, r)
+		w.Header().Set("Content-Type", rec.Header().Get("Content-Type"))
+		_, _ = z.Write(rec.Body.Bytes())
+		_ = z.Close()
+	}))
+	t.Cleanup(srv.Close)
+	p, err := New("session-example", srv.URL+"/provider", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(p.Close)
+	r, err := http.NewRequest(http.MethodPost, p.BaseURL()+"/v1/messages", strings.NewReader(warmBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
+	// A raw transport, as the CLI's: it neither adds its own encoding nor decodes for us.
+	resp, err := (&http.Transport{DisableCompression: true}).RoundTrip(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if got, _ := asked.Load().(string); got != "" {
+		t.Fatalf("provider was asked for %q", got)
+	}
+	if !bytes.Contains(out, []byte(`"id":"msg_1"`)) {
+		t.Fatalf("stream not readable: %q", out)
+	}
+	p.Confirm("msg_1")
+	p.Tick(context.Background(), lastAt(p).Add(55*time.Minute), policy(), true)
+	if up.count() != 2 {
+		t.Fatalf("requests %d: the compressed stream never armed a refresh", up.count())
 	}
 }

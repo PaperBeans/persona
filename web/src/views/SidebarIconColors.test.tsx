@@ -20,12 +20,14 @@ vi.mock("../lib/extension-slots", async (original) => ({
   ...(await original<typeof import("../lib/extension-slots")>()),
   useExtensionSlot: (placement: string) => (placement === "nav_page" ? PLACES : []),
 }));
-import "../modules";
+import { MODULES } from "../modules";
 import { setSidebarCollapsed } from "../lib/layout";
 import { setPageShown } from "../lib/sidebar-pages";
 import { BUILTIN_PAGE_COLORS, setSidebarIconMode } from "../lib/sidebar-icons";
 import { reset } from "../lib/store";
 import { NavGrid, Sidebar, SidebarRail, useNavPages } from "./Sidebar";
+// the health module, when this run has it (the core-only lane, #13932, runs with no module)
+const HEALTH = MODULES.some((m) => m.id === "health");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -39,7 +41,8 @@ const link = (label: string) => [...host.querySelectorAll<HTMLAnchorElement>("a"
 const iconBox = (label: string) => link(label).querySelector("svg")!.parentElement as HTMLElement;
 // the built-in pages' colors and the health module's own (src/modules/health/module.ts)
 const PAGE_COLORS = { ...BUILTIN_PAGE_COLORS, health: "pink" } as const;
-const BUILT_IN = { 总览: "home", 收件箱: "inbox", 健康: "health", 待办: "todos", 定时任务: "routines", 知识库: "kb", 机器: "machines", 设置: "settings" } as const;
+const ALL_PAGES = { 总览: "home", 收件箱: "inbox", 健康: "health", 待办: "todos", 定时任务: "routines", 知识库: "kb", 机器: "machines", 设置: "settings" } as const;
+const BUILT_IN: Partial<typeof ALL_PAGES> = HEALTH ? ALL_PAGES : Object.fromEntries(Object.entries(ALL_PAGES).filter(([, key]) => key !== "health"));
 const hues = () => [...host.querySelectorAll<HTMLElement>("[style]")].map((el) => el.style.color).filter((c) => c.includes("--hue-"));
 
 function DrawerPages({ active = "home" }: { active?: string }) {
@@ -155,9 +158,11 @@ describe("Colored", () => {
     // the open page under More keeps the open row's ink; another put away takes its color
     expect(iconBox("知识库").className).toBe("text-ink");
     expect(iconBox("知识库").hasAttribute("style")).toBe(false);
-    act(() => setPageShown("health", false));
-    await flush();
-    expect(iconBox("健康").style.color).toBe("var(--hue-pink)");
+    if (HEALTH) {
+      act(() => setPageShown("health", false));
+      await flush();
+      expect(iconBox("健康").style.color).toBe("var(--hue-pink)");
+    }
   });
 
   it("colors the icon rail, kept under the pointer, and the open page keeps its ink", async () => {

@@ -125,6 +125,7 @@ func (w *botLoadWorld) status() (assistantwire.FeishuStatus, error) {
 }
 
 func TestBotInitialReadRecovery(t *testing.T) {
+	needsLarkModule(t)
 	for _, entry := range []string{"status", "settings", "transport"} {
 		t.Run(entry, func(t *testing.T) {
 			w := newBotLoadWorld(t, true, true)
@@ -183,6 +184,7 @@ func TestBotInitialReadRecovery(t *testing.T) {
 }
 
 func TestBotInitialReadFailureBlocksWrite(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotLoadWorld(t, true, true)
 	before := w.store.raw()
 	for _, r := range []struct{ method, path, body string }{
@@ -251,6 +253,7 @@ func TestBotInitialReadFailureBlocksWrite(t *testing.T) {
 }
 
 func TestBotInitialReadDecodeFailureAndRepair(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotLoadWorld(t, true, true)
 	good := w.store.raw()
 	bad := []byte(`{"enabled":true,"app_id":"cli_partial","owner":{"open_id":"ou_wrong"},"features":{"agents":"invalid"}}`)
@@ -291,6 +294,7 @@ func TestBotInitialReadDecodeFailureAndRepair(t *testing.T) {
 }
 
 func TestBotInitialReadConcurrentRetry(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotLoadWorld(t, true, true)
 	w.advance()
 	var wg sync.WaitGroup
@@ -323,6 +327,7 @@ func TestBotInitialReadConcurrentRetry(t *testing.T) {
 }
 
 func TestBotInitialReadFreshAndDisabled(t *testing.T) {
+	needsLarkModule(t)
 	for _, saved := range []bool{false, true} {
 		w := newBotLoadWorld(t, false, saved)
 		if saved {
@@ -361,6 +366,7 @@ func TestBotInitialReadFreshAndDisabled(t *testing.T) {
 }
 
 func TestBotInitialReadRecoveryAfterShutdownOrOnMember(t *testing.T) {
+	needsLarkModule(t)
 	for _, member := range []bool{false, true} {
 		w := newBotLoadWorld(t, true, true)
 		if member {
@@ -377,6 +383,7 @@ func TestBotInitialReadRecoveryAfterShutdownOrOnMember(t *testing.T) {
 }
 
 func TestBotInitialReadMissingAfterOutage(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotLoadWorld(t, true, false)
 	w.store.recover()
 	w.advance()
@@ -397,6 +404,7 @@ func TestBotInitialReadMissingAfterOutage(t *testing.T) {
 }
 
 func TestBotInitialReadExistingDecodeDefaults(t *testing.T) {
+	needsLarkModule(t)
 	// The existing storage contract accepts both JSON null and an empty object without a decode error.
 	for _, raw := range []string{"null", "{}"} {
 		t.Run(raw, func(t *testing.T) {
@@ -427,6 +435,7 @@ func TestBotInitialReadExistingDecodeDefaults(t *testing.T) {
 }
 
 func TestBotInitialReadAuthorizationAndConfigFallback(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotLoadWorld(t, true, false)
 	api := newFakeOpenAPI(t)
 	w.h.cfg.Bots.Feishu = FeishuBotConfig{AppID: "cli_fallback", AppSecret: "synthetic-secret", Domain: api.srv.URL}

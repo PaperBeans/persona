@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -12,8 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/cliport"
+
 	"github.com/nwverse/persona/server/internal/connector"
-	larkconnector "github.com/nwverse/persona/server/internal/connector/larkcli"
 	"github.com/nwverse/persona/server/internal/lark"
 )
 
@@ -43,6 +45,7 @@ func (s *botBlockedReadStore) Setting(ctx context.Context, key string, out any) 
 }
 
 func TestBotLoadTransportReadIsBounded(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotLoadWorld(t, true, true)
 	st := &botBlockedReadStore{Store: w.store, entered: make(chan bool, 1), release: make(chan struct{})}
 	w.h.store = st
@@ -104,6 +107,7 @@ func TestBotLoadTransportReadIsBounded(t *testing.T) {
 }
 
 func TestBotLoadReadKeepsEarlierCallerDeadline(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotLoadWorld(t, true, true)
 	st := &botBlockedReadStore{Store: w.store, entered: make(chan bool, 1), release: make(chan struct{})}
 	w.h.store = st
@@ -128,13 +132,53 @@ func TestBotLoadReadKeepsEarlierCallerDeadline(t *testing.T) {
 	}
 }
 
+// fakeCLIRunsRecorded has every run of the fake lark CLI record its process id in a directory of the test's
+// (LARKCLI_FAKE_PIDS, larkcli/testdata/fake-lark-cli.sh) and returns that directory, for waitFakeCLIRunsExited.
+func fakeCLIRunsRecorded(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("LARKCLI_FAKE_PIDS", dir)
+	return dir
+}
+
+// fakeCLIRunning lists the recorded runs still going: a recorded process id counts only while its process runs
+// fake-lark-cli.sh, so an id the system gave to another process since is not waited for.
+func fakeCLIRunning(dir string) []string {
+	entries, _ := os.ReadDir(dir)
+	var running []string
+	for _, e := range entries {
+		out, err := exec.Command("ps", "-p", e.Name(), "-o", "command=").Output()
+		if err == nil && strings.Contains(string(out), "fake-lark-cli.sh") {
+			running = append(running, e.Name())
+		}
+	}
+	return running
+}
+
+// waitFakeCLIRunsExited waits, five seconds at most, until no recorded run of the fake CLI is still going.
+func waitFakeCLIRunsExited(t *testing.T, dir string) {
+	t.Helper()
+	eventually(t, 5*time.Second, "every fake lark CLI run to exit", func() bool { return len(fakeCLIRunning(dir)) == 0 })
+}
+
 func TestBotLoadLiveCLIProfileRecovery(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotLoadWorld(t, true, false)
-	bin, err := filepath.Abs(filepath.Join("..", "larkcli", "testdata", "fake-lark-cli.sh"))
+	bin, err := filepath.Abs(filepath.Join("..", "modules", "lark", "larkcli", "testdata", "fake-lark-cli.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	log := filepath.Join(t.TempDir(), "calls.log")
+	runs := fakeCLIRunsRecorded(t)
+	// The live connector and the CLI recovery run the CLI in the background too, and every run appends to calls.log.
+	// Cancelling the world only has those runs killed, from os/exec's own goroutine; one still going could write
+	// calls.log back while the temporary directories are removed. Cleanups run last added, first called, and the
+	// directories' removal was added by the world's first t.TempDir: this one stops the world and waits for every run
+	// to exit before that (#14235).
+	t.Cleanup(func() {
+		w.cancel()
+		waitFakeCLIRunsExited(t, runs)
+	})
 	t.Setenv("LARKCLI_FAKE_SCENARIO", "success")
 	t.Setenv("LARKCLI_FAKE_LOG", log)
 	w.h.cfg.Lark = lark.Config{CLI: &lark.CLIConfig{Bin: bin}}
@@ -143,7 +187,7 @@ func TestBotLoadLiveCLIProfileRecovery(t *testing.T) {
 	}
 	w.h.connectors = w.h.newConnectors(nil)
 	w.h.startConnectors(w.ctx)
-	c := w.h.connectors.Get("larkcli").(*larkconnector.Connector)
+	c := w.h.connectors.Get("larkcli").(cliport.Connector)
 	if _, err := c.Call(w.ctx, "larkcli_chats", json.RawMessage(`{}`)); err == nil {
 		t.Error("live connector executed CLI while saved identity was unread")
 	}
@@ -182,6 +226,7 @@ func TestBotLoadLiveCLIProfileRecovery(t *testing.T) {
 }
 
 func TestBotLoadCLIRecoveryPreservesConnectorSettings(t *testing.T) {
+	needsLarkModule(t)
 	for _, tc := range []struct {
 		name, override, chosen, want string
 		off, feedOff, missing        bool
@@ -193,7 +238,7 @@ func TestBotLoadCLIRecoveryPreservesConnectorSettings(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newBotLoadWorld(t, true, false)
-			bin, err := filepath.Abs(filepath.Join("..", "larkcli", "testdata", "fake-lark-cli.sh"))
+			bin, err := filepath.Abs(filepath.Join("..", "modules", "lark", "larkcli", "testdata", "fake-lark-cli.sh"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -213,7 +258,7 @@ func TestBotLoadCLIRecoveryPreservesConnectorSettings(t *testing.T) {
 			}
 			w.h.connectors = w.h.newConnectors(nil)
 			w.h.startConnectors(w.ctx)
-			old := w.h.connectors.Get("larkcli").(*larkconnector.Connector)
+			old := w.h.connectors.Get("larkcli").(cliport.Connector)
 			before := string(old.Options())
 			if tc.override != "" {
 				if _, err := old.Call(w.ctx, "larkcli_chats", json.RawMessage(`{}`)); err != nil {
@@ -231,7 +276,7 @@ func TestBotLoadCLIRecoveryPreservesConnectorSettings(t *testing.T) {
 			w.advance()
 			w.h.botAPI()
 			eventually(t, time.Second, "recovered connector profile", func() bool { c := currentRecoveryCLI(w.h); return c != nil && c.Profile() == tc.want })
-			current := w.h.connectors.Get("larkcli").(*larkconnector.Connector)
+			current := w.h.connectors.Get("larkcli").(cliport.Connector)
 			if string(current.Options()) != before {
 				t.Fatalf("options lost: before=%s after=%s", before, current.Options())
 			}
@@ -252,7 +297,9 @@ func TestBotLoadCLIRecoveryPreservesConnectorSettings(t *testing.T) {
 			if _, err := current.Call(w.ctx, "larkcli_chats", json.RawMessage(`{}`)); err != nil {
 				t.Fatal(err)
 			}
-			_, _ = current.Poll(w.ctx)
+			_, _ = current.(interface {
+				Poll(context.Context) (bool, error)
+			}).Poll(w.ctx) // the connector's Inbox poll (connector/larkcli)
 			raw, _ := os.ReadFile(log)
 			if len(raw) == 0 {
 				t.Fatal("fake CLI was not invoked")
@@ -271,8 +318,9 @@ func TestBotLoadCLIRecoveryPreservesConnectorSettings(t *testing.T) {
 }
 
 func TestBotLoadManagedCLIRecoverySynchronizes(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotLoadWorld(t, true, false)
-	bin, err := filepath.Abs(filepath.Join("..", "larkcli", "testdata", "fake-lark-cli.sh"))
+	bin, err := filepath.Abs(filepath.Join("..", "modules", "lark", "larkcli", "testdata", "fake-lark-cli.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}

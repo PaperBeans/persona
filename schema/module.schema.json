@@ -20,7 +20,7 @@
         "title": {"description": "A short English label for logs and settings; clients localize by id.", "type": "string", "maxLength": 80},
         "needs": {"description": "Module ids that must be loaded for this one to load.", "type": "array", "items": {"$ref": "#/$defs/ID"}, "uniqueItems": true},
         "wants": {"description": "Module ids this one uses when they are loaded.", "type": "array", "items": {"$ref": "#/$defs/ID"}, "uniqueItems": true},
-        "feature": {"description": "The wire feature flag announced while the module is loaded.", "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 80},
+        "feature": {"description": "The wire feature flag announced while the module is loaded: module.<id>. The reserved modules marker lets clients distinguish an older hub from one with every module off.", "type": "string", "pattern": "^module\\.[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 47},
         "hub_routes": {"description": "HTTP routes, as \"METHOD /api/v1/...\" patterns.", "$ref": "#/$defs/Names"},
         "mcp_tools": {"description": "Assistant tool names.", "$ref": "#/$defs/Names"},
         "prompt_sections": {"description": "Prompt template names.", "$ref": "#/$defs/Names"},

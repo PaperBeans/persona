@@ -800,6 +800,13 @@ struct AssistantSidebar: View {
     var onOpenExtension: ((ExtensionNavRoute) -> Void)? = nil
     /// Health: the health space's page (docs/assistant/health.md); nil leaves the row out.
     var openHealth: (() -> Void)? = nil
+    /// The `health` module provides Health's page (#14278); while it is off the row is left out. Observed: a hello that
+    /// turns it on or off draws the sidebar again.
+    private var hasHealth: Bool { Modules.registry.shellPage(id: SidebarRoute.healthPage) != nil }
+    /// A domain space (#13500, docs/apple/ios.md "Domain spaces"): its latest conversation, else its home; and New
+    /// space. nil leaves the Spaces section out.
+    var openSpace: ((String) -> Void)? = nil
+    var openNewSpace: (() -> Void)? = nil
     /// Recordings (docs/apple/recording.md「Meeting recordings」): opens the Recordings page, whose Record starts one, or
     /// the recording running. nil leaves the row out (the Mac records nothing).
     var openRecordingsPage: (() -> Void)? = nil
@@ -822,6 +829,7 @@ struct AssistantSidebar: View {
     /// The Sidebar layout's folds (the rows part): the places and Persona's chats, remembered on this device.
     @StoredValue("sidebar.fold.places") private var placesFolded = false
     @StoredValue("sidebar.fold.chats") private var chatsFolded = false
+    @StoredValue("sidebar.fold.spaces") private var spacesFolded = false
     /// The To-dos places under the To-dos row (#10465), folded by the owner only: open at first, never by itself.
     @StoredValue("sidebar.fold.todos") private var todosFolded = false
     @State private var own = AssistantSidebarUI()
@@ -877,6 +885,7 @@ struct AssistantSidebar: View {
                         mainItem(all)
                         VStack { Divider() }.padding(.horizontal, Theme.Space.m).padding(.vertical, Theme.Space.s) // a row lays a bare Divider out upright
                         actions(all)
+                        spacesSection
                         VStack { Divider() }.padding(.horizontal, Theme.Space.m).padding(.vertical, Theme.Space.s) // a row lays a bare Divider out upright
                         conversations(all, archived: archived)
                     } else {
@@ -962,6 +971,12 @@ struct AssistantSidebar: View {
                 ui.placeRows(at: x)
             }
             if !placesFolded { actions(all) }
+            if showsSpaces {
+                foldHeading(String(localized: "Spaces [Sidebar Layout]"), folded: $spacesFolded, id: "sidebar-fold-spaces") {
+                    EmptyView()
+                } tally: { EmptyView() }
+                if !spacesFolded { spaceRows }
+            }
             // No New Chat on the heading: the column has one, its foot's (#4206, the owner).
             foldHeading(String(localized: "Persona Chats [Sidebar Layout]"), folded: $chatsFolded, id: "sidebar-fold-chats") {
                 EmptyView()
@@ -1327,6 +1342,36 @@ extension AssistantSidebar {
         }
     }
 
+    // MARK: Spaces (#13500)
+
+    /// The assistant has tracks and this sidebar opens spaces.
+    private var showsSpaces: Bool { openSpace != nil && SpaceStore.shared.supported == true }
+
+    /// The whole sidebar's Spaces: a heading over the spaces' rows and New space, under the places.
+    @ViewBuilder private var spacesSection: some View {
+        if showsSpaces {
+            heading(String(localized: "Spaces [Assistant Sidebar]")) { EmptyView() }
+            spaceRows
+        }
+    }
+
+    /// One row per space (`SpaceStore.sidebar`, worked out when the tracks change), then New space. Health keeps its own
+    /// row among the places.
+    @ViewBuilder private var spaceRows: some View {
+        if let openSpace {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(SpaceStore.shared.sidebar) { track in
+                    action(track.name, SpaceIcon.symbol(of: track), id: "sidebar-space-\(track.slug)", place: .space(track.slug)) {
+                        openSpace(track.slug)
+                    }
+                }
+                if let openNewSpace {
+                    action(String(localized: "New space"), Theme.Icon.add, id: "sidebar-new-space", place: .newSpace, run: openNewSpace)
+                }
+            }
+        }
+    }
+
     // MARK: What to start
 
     @ViewBuilder private func actions(_ all: [Session]) -> some View {
@@ -1341,7 +1386,7 @@ extension AssistantSidebar {
                 }
                 action(String(localized: "Scheduled Tasks"), Theme.Icon.schedule, place: .routines, run: openRoutines)
                 action(String(localized: "Knowledge"), Theme.Icon.knowledge, place: .knowledge, run: openKnowledge)
-                if let openHealth { action(String(localized: "Health"), Theme.Icon.health, id: "sidebar-health", place: .health, run: openHealth) }
+                if let openHealth, hasHealth { action(String(localized: "Health"), Theme.Icon.health, id: "sidebar-health", place: .health, run: openHealth) }
                 action(String(localized: "Machines"), Theme.Icon.machines, id: "sidebar-machines", place: .machines, run: onMachines)
                 if let openMessages {
                     action(String(localized: "Messages [Quote Views 4da199]"), Theme.Icon.feishuChats, id: "sidebar-messages", place: .messages, run: openMessages)
@@ -1360,7 +1405,7 @@ extension AssistantSidebar {
             starredRow
             action(String(localized: "Scheduled Tasks"), Theme.Icon.schedule, run: openRoutines)
             action(String(localized: "Knowledge"), Theme.Icon.knowledge, run: openKnowledge)
-            if let openHealth { action(String(localized: "Health"), Theme.Icon.health, id: "sidebar-health", run: openHealth) }
+            if let openHealth, hasHealth { action(String(localized: "Health"), Theme.Icon.health, id: "sidebar-health", run: openHealth) }
             extensionRows
         }
     }

@@ -164,5 +164,7 @@
   "side_unread_count_one": "{count} 个分支会话有新回复",
   "side_unread_count_other": "{count} 个分支会话有新回复",
   "side_unread_open": "打开分支会话「{title}」",
-  "side_unread_also": "另有新回复：{titles}"
+  "side_unread_also": "另有新回复：{titles}",
+  "module_recording": "会议录音",
+  "module_recording_hint": "在知识库的录音条目里查看纪要、全天回顾、转写和照片。"
 }

@@ -153,6 +153,8 @@ enum ShellPage: Hashable, Sendable {
     /// The Sidebar layout (#6332): the conversation itself, nothing over it (its row picked, or a route to Persona), and
     /// Messages (the Lark chats, the Separate layout's third page or tab) beside the sidebar.
     case conversation, messages
+    /// A domain space (#13500): its latest conversation, else its home; and the new space form.
+    case space(String), newSpace
 }
 
 /// What the Assistant page pushes by value for the shell (the inbox and the machines push values of their own on top).

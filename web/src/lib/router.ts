@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 import { takeOverlayEntry } from "./back-close";
 import { BASE, stripBase } from "./base";
 import { decodeURIComponentSafe } from "./uri";
-import { moduleExtensionAt, modulePath, moduleRouteAt } from "../core/module-host";
+import { moduleExtensionAt, moduleKBKindAt, modulePath, moduleRouteAt } from "../core/module-host";
 
 // Persona's main conversation is the front door (like the app, which opens on the assistant): `/` and `/persona` open it, `/persona/<id>` is
 // one conversation, `/persona/new` starts a one-off one, and "Overview" lives at `/overview`. `/extension/<id>/<ui>` is an extension's page
@@ -120,7 +120,8 @@ export function parse(path: string, search = ""): Route {
   if (p[0] === "messages") return { name: "messages", id: p[1] };
   if (p[0] === "starred" && p.length === 1) return { name: "starred" };
   if (p[0] === "routines") return { name: "routines" };
-  if (p[0] === "kb") return { name: "kb", kind: p[1], id: p[2] };
+  // an entry of a kind a feature module draws (a recording) is unknown while the module is off (core/module-host.ts)
+  if (p[0] === "kb") return p[1] && p[2] && moduleKBKindAt(p[1]) === "absent" ? notFound(path, search) : { name: "kb", kind: p[1], id: p[2] };
   if (p[0] === "space" && p[1] && p[2]) return { name: "space", mid: p[1], space: p[2] };
   if (p[0] === "machines") return p[1] ? { name: "machine", mid: p[1] } : { name: "machines" };
   if (p[0] === "terminal") {

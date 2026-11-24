@@ -422,7 +422,9 @@ const (
 	SourceConversation  = "conversation"
 	SourcePatrol        = "patrol"
 	SourceFollowup      = "followup"
+	SourceAutoContinue  = "auto-continue" // a hub-generated continuation after a transient error or usage-limit reset
 	SourceSupervision   = "supervision"
+	SourceNotice        = "notice"         // a notice relayed by Persona
 	SourceScheduledTask = "scheduled_task" // a scheduler outside Persona, e.g. a Codex heartbeat
 	// SourceMeeting is a batch of a recorded meeting the session attends (docs/assistant/meeting-minutes.md "Feeding
 	// the attending session"): other people's words, never the user's; Title is the meeting's name.

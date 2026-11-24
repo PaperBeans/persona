@@ -57,6 +57,7 @@ import java.io.IOException
 import java.lang.reflect.Proxy
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
+import persona.core.inbox.*
 
 /** A connector row uses the same immediate initial, fixed layout and loaded-picture cache as a Lark row. */
 @OptIn(DelicateCoilApi::class)

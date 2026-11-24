@@ -479,6 +479,7 @@ func TestGoldenDecisionDeadline(t *testing.T) {
 // The owner answering the decision's card with a choice of their own ends its deadline, even when that answer did not
 // reach the agent: the recommendation they turned down is never taken by default afterwards.
 func TestOwnersOwnAnswerEndsTheDeadline(t *testing.T) {
+	needsLarkLayer(t)
 	for _, fail := range []bool{false, true} {
 		t.Run(fmt.Sprintf("send fails %v", fail), func(t *testing.T) {
 			s, f, todo, _, _ := conclusionService(t, false)

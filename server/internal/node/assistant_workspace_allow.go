@@ -13,8 +13,8 @@ import (
 // track's). Claude Code asks for every write in the default mode, even inside its working directory, and Persona gives
 // it no rule for the directory (assistant_start.go claudeAssistantMCPAndToolsFor), so each Write went to the phone
 // (ix_2d0efa1b033728ef). The directory is compared as it resolves on both sides: the node starts the conversation in
-// ~/.persona/assistant, which may be a link (~/.persona -> .jarvis), while Claude Code resolves its working directory and
-// names the files it writes by the resolved path (~/.jarvis/assistant/...).
+// ~/.persona/assistant, and ~/.persona may be a link to the state directory of an older install, while Claude Code
+// resolves its working directory and names the files it writes by the resolved path (<that directory>/assistant/...).
 
 // workspaceConfigNames are the entries at the top of the directory that change what the conversation's own agent may do
 // (its settings and hooks, its MCP servers, the repository's history): writing them still asks.

@@ -444,8 +444,12 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 			mode = cmp.Or(s.settings(ctx).DefaultPermissionMode, proto.ModeBypass)
 			params["permission_mode"] = mode
 		}
-		if explicitPermission == "" && !s.startPermissionModeSupported(ctx, machine, used, mode) {
+		if explicitPermission != "" {
+			params[assistantwire.PermissionModeExplicitParam] = true
+		} else if !s.startPermissionModeSupported(ctx, machine, used, mode) {
 			delete(params, "permission_mode")
+		} else {
+			params[assistantwire.DefaultPermissionModeParam] = mode
 		}
 	}
 	// A profile is Claude Code's: the node refuses a config_dir for any other agent before starting it (#6467). Judged
@@ -1252,6 +1256,8 @@ func (s *Service) messageParams(ctx context.Context, p SendParams, owner bool) (
 	if p.Params == nil {
 		p.Params = map[string]any{}
 	}
+	delete(p.Params, assistantwire.DefaultPermissionModeParam)
+	delete(p.Params, assistantwire.PermissionModeExplicitParam)
 	delete(p.Params, "source") // app input cannot claim an automated author
 	delete(p.Params, "message_source")
 	approvalTarget, _ := p.Params["approval_reply_to"].(string)
@@ -1370,12 +1376,59 @@ func (s *Service) sendParamsOwn(ctx context.Context, p SendParams) (map[string]a
 	}
 	cfg := s.settings(ctx)
 	main := cfg.Main != "" && cfg.Main == p.SessionID && cfg.mainRouteMachine() == p.MachineID
+	current, currentKnown := proto.Session{}, false
 	if !main {
-		if _, known := s.session(ctx, p.MachineID, p.SessionID); !known {
+		current, currentKnown = s.session(ctx, p.MachineID, p.SessionID)
+		if !currentKnown {
 			return params, own, nil
 		}
 	}
+	// sendModel has successful early returns for native and external picks. Attach mode provenance at their common
+	// exit too; on an error the params are not sent. Inbox keeps its dedicated policy, and guests returned above.
+	inputMode, _ := params["permission_mode"].(string)
+	inputMode = strings.TrimSpace(inputMode)
+	sendModelFailed := false
+	defer func() {
+		if sendModelFailed || origin == OriginInbox {
+			return
+		}
+		if inputMode != "" {
+			if mode, _ := params["permission_mode"].(string); strings.TrimSpace(mode) != "" {
+				params[assistantwire.PermissionModeExplicitParam] = true
+			}
+			return
+		}
+		used, _ := params["launcher"].(string)
+		if used == "" {
+			if currentKnown {
+				used = current.Launcher
+			} else if current, known := s.session(ctx, p.MachineID, p.SessionID); known {
+				used = current.Launcher
+			}
+		}
+		if proto.IsExternalLauncher(used) {
+			return
+		}
+		executionMachine := s.logicalExecutionMachine(ctx, p.MachineID, p.SessionID)
+		// The manager default is a Claude Code resume policy. Other agents keep their saved AppMode even when their
+		// declared mode list contains the default; an unknown launcher keeps the node's existing validation path.
+		if used != "" && used != "claude" {
+			if agent := s.launcherAgent(withUnhidden(ctx, used), executionMachine, used); agent != "" && agent != "claude" {
+				return
+			}
+		}
+		if mode, _ := params["permission_mode"].(string); strings.TrimSpace(mode) != "" {
+			// logicalSendModel inherited this generic mode from the active segment; it is not a new explicit choice.
+			// Let Claude's current default take its place. Non-Claude returned above with its legacy generic mode intact.
+			delete(params, "permission_mode")
+		}
+		mode := cmp.Or(cfg.DefaultPermissionMode, proto.ModeBypass)
+		if s.startPermissionModeSupported(ctx, executionMachine, used, mode) {
+			params[assistantwire.DefaultPermissionModeParam] = mode
+		}
+	}()
 	if err := s.sendModel(ctx, p.MachineID, p.SessionID, params, s.appLang(ctx, p.Lang)); err != nil {
+		sendModelFailed = true
 		var other *launcherOtherKind
 		if errors.As(err, &other) {
 			return nil, false, other.rpcError(s.appLang(ctx, p.Lang)) // 409 launcher_other_kind, with the kinds for the app

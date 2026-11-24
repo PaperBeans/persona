@@ -235,7 +235,7 @@ Scheduled-task and finished-task Agent-closing loops belong to the assistant (`S
 
 **Assistant settings** (settings `assistant`, exclusively read / written by the assistant since 2026-11-04, `assistant/profile.go`): chat machine, launcher, user timezone (phone `PUT /api/v1/assistant`; `timezone_picked` when a client says the user picked it by hand, which devices then leave alone, #1855), About Me, main chat, replaced old main chats, `main_tasks_quiet`, `agent_tasks` (off by default, `docs/assistant/unified-entry.md` "Agent tasks"), `inbox_signals` (off by default: new Inbox messages on a supervised task reach its supervisor, `docs/assistant/unified-entry.md` "Supervision (#3124)"), `main_supervises_own_tasks` (a compatibility switch, off by default: new tasks belong to the planning lead or main, and `background_supervisor` names only a legacy conversation finishing older work, `docs/assistant/unified-entry.md` "Background supervisor"), `background_supervisor_keeps_context` (off by default: each of the background supervisor's rounds starts from its first turn with only that round's facts and tools; on, it is one long conversation as before #7315; `persona_settings` only for now, `docs/assistant/unified-entry.md` "Each round starts clean").
 `assistant.owner` / `notes` / `machine` / `launcher` in the manager's `manager.json` supply the defaults (laid over the hub's handshake answer); JSON matches the old hub-written form without migration. `assistant.supervision_batch_minutes` is an administrator pin instead: when present, including explicit `0`, it overrides the saved supervision interval; when omitted, the saved setting is unchanged. Reads are cached for 5 seconds (only it writes; `manager.updated` triggers immediate reread).
-`GET/PUT /api/v1/assistant` also reads and saves `default_permission_mode` in this manager’s settings. Reads identify the answering manager with `manager`. New non-guest conversations without an explicit `permission_mode` inherit it, including new main chats, scheduled new conversations and side chats. An explicit session mode, including `default`, wins. Existing conversations retain their own mode; changing the manager default never edits their settings or history. An unset preference preserves earlier behavior. Web Settings › Persona and Android's native Assistant settings expose the control; on the web, Direction notes links to the same control and Settings search finds it by either the permission or direction name.
+`GET/PUT /api/v1/assistant` also reads and saves `default_permission_mode` in this manager’s settings. Reads identify the answering manager with `manager`. New non-guest conversations without an explicit `permission_mode` inherit it, including new main chats, scheduled new conversations and side chats. A stopped Claude Code process resumes with the current default unless the conversation has an explicit mode; a live process keeps its current mode. An explicit session mode, including `default`, always wins over the manager default. Legacy Claude state and transcript modes without that explicit marker are inherited values, not a pin. Non-Claude launchers keep their legacy `AppMode` / in-memory / transcript precedence and do not receive the manager's resume default, even when their declared modes include it. An unset preference selects the built-in `bypassPermissions` default. Web Settings › Persona and Android's native Assistant settings expose the control; on the web, Direction notes links to the same control and Settings search finds it by either the permission or direction name.
 
 The same endpoint exposes `readonly_mode` (`sandbox` by default, or the opt-in `prompt`), also available in Web Settings
 and `persona_settings` as `assistant.readonly_mode`. It controls new read-only task starts and retries, not ordinary
@@ -433,7 +433,7 @@ named denied tools are never callable; others request phone permission according
 
 ## Its own directory without a card (2026-11-23)
 
-An assistant conversation (the main one, a space's, a track's) reads and writes files in the directory it started in without a permission card, whatever its permission mode except plan: the node's `PermissionRequest` hook answers allow for Read, Edit, Write, MultiEdit, NotebookEdit, Glob and Grep on a path inside it (`node/assistant_workspace_allow.go`). Both sides are compared as they resolve (the longest existing ancestor, so a file not written yet compares too): the node starts the conversation in `~/.persona/assistant`, which may be a link (`~/.persona -> .jarvis`), and Claude Code names the files it writes by the resolved path. Still asked: the directory's own agent configuration (`.claude`, `.codex`, `.agents`, `.git`, `.mcp.json`), a link inside it that leads out, another space's files, a guest's conversation and the Inbox's. Deny rules (`node/healthdeny.go`) are Claude Code's and hold before the hook is asked. The health space's `reports/` allow rule names both spellings of the directory for the same reason.
+An assistant conversation (the main one, a space's, a track's) reads and writes files in the directory it started in without a permission card, whatever its permission mode except plan: the node's `PermissionRequest` hook answers allow for Read, Edit, Write, MultiEdit, NotebookEdit, Glob and Grep on a path inside it (`node/assistant_workspace_allow.go`). Both sides are compared as they resolve (the longest existing ancestor, so a file not written yet compares too): the node starts the conversation in `~/.persona/assistant`, where `~/.persona` may be a link to an older install's state directory, and Claude Code names the files it writes by the resolved path. Still asked: the directory's own agent configuration (`.claude`, `.codex`, `.agents`, `.git`, `.mcp.json`), a link inside it that leads out, another space's files, a guest's conversation and the Inbox's. Deny rules (`node/healthdeny.go`) are Claude Code's and hold before the hook is asked. The health space's `reports/` allow rule names both spellings of the directory for the same reason.
 
 ## Always allow in this session (2026-11-06, #2202, #5867)
 
@@ -1570,7 +1570,8 @@ explicit user-facing actions still follow the usual visibility rules.
 
 - **Which rounds**: in the main conversation, a round whose first input has the message source (`Item.source.kind`, else
   the `persona-context kind="message-source"` metadata or the hub's `injected` mark, read by each client's `sourceOf`)
-  `conversation`, `followup` or `patrol`. A `followup` counts only as a scheduled follow-up (the hub gives those the
+  `conversation`, `followup` or `patrol`. Web also folds `notice` rounds such as delivery PR follow-ups under the same
+  setting. A `followup` counts only as a scheduled follow-up (the hub gives those the
   task's title): Persona continuing the user's own work after a usage limit reset (`injected.state: limit_continue`),
   waking the chat for what it waits on (`wake`) or an untitled follow-up is not a background round, so the answer to
   the user's question never folds away. Like a supervision round it lasts until the next genuine input; a queued user
@@ -1588,11 +1589,17 @@ explicit user-facing actions still follow the usual visibility rules.
   receipt, using the same paged history and full-record renderer. Opening it marks nothing seen. Full transcript and
   feed APIs are unchanged. The hub suppresses unread only for the matching latest silent round: earlier genuinely
   visible unread work remains unread, working and needs-you states win, and a failed transcript read fails open.
+  An accepted review is internal only when the hub resolves the task's current plan with `user_requested=false` and
+  finds at least one source: a current-round completed (`clean` or `blocking`) `auto_review`, `round>0` after rework,
+  or a nonempty `parent` for a leader's internal subtask. Its successful `task_review` receipt carries
+  `background=true`; the receipt, tool call and reply stay in Background activity. `user_check`, `needs_user`, an
+  unmarked legacy review, or missing/ambiguous source metadata stays visible. The attention-cache version changes
+  with this classification so an older visible verdict is recomputed.
   Existing daily-briefing totals keep their meaning; a separate exact silently-handled daily total is out of scope
   because round metrics do not record visibility.
 - **Not folded** (the visibility rule supervision rounds use, `supervisionVisible` / `fold.supervision_user` from
   `server/internal/transcript/fold_supervision.go`): a round that used `ask_user` or `notify_user` successfully, a pending
-  `ask_user` while it runs, a `task_review` with an `accepted` or `needs_user` verdict card, or a `supervision_finish`
+  `ask_user` while it runs, a `task_review` with an unmarked `accepted` or any `needs_user` verdict card, or a `supervision_finish`
   with user visibility. A completed round with a nonblank final reply also stays open, even if delivery tools were
   unavailable, unless it settled with silent visibility. The full reply uses the ordinary reply bubble so its
   formatting and links remain available. Its work keeps the usual collapsed summary. Intermediate narration,
@@ -1776,18 +1783,24 @@ operation then read as accepted and the bubble waited for the transcript and wen
 - **Device signed out** (#10708). The hub gives the manager the sending device's credential ID when it keeps a
   message. Signing out that device fails its kept messages. Their rows say why and offer Delete. Messages kept
   before the hub recorded the sending credential have no device to match.
-- **Messages that need no reply** (#11614, `server/internal/assistant/relay_later.go`). `conversation_send` with
+- **Messages that need no reply** (#11614, #12867, `server/internal/assistant/relay_later.go`). `conversation_send` with
   `wake: false` is for acknowledgements and information the receiver does not have to act on. The message is kept
   for the receiver (`relayState.Later`, kept across a restart, at most 20 per conversation and 7 days) and goes in,
-  as a context block in front (`prompts/assistant/relay_later.md`), with the next message the manager delivers to
-  that conversation for anything else: a supervision message, another conversation's message, a scheduled follow-up,
-  a notice. It starts no turn of its own, costs no hop and no place in the relay rate, and is dropped only once the
-  message carrying it went in. Before a send with a `once_id`, its quiet-message context (including an empty one) is
-  saved and reused on retries, including after restart. A retry clears only that original context; later arrivals wait
-  for a new send ID. These reservations expire after seven days, beyond the node's ten-minute send-ID memory.
-  Nothing is guessed from the words: only the explicit argument decides. A `quote` (the
-  owner's request) always wakes, so the two together are refused. A turn the owner starts from an app does not carry
-  it; it shows above the composer meanwhile.
+  as a context block in front (`prompts/assistant/relay_later.md`), with the next message delivered to that
+  conversation for anything else: a supervision message, another conversation's message, a scheduled follow-up,
+  a notice, or an owner message sent from an app or web client (`assistant.send_params` and `session.assistant_sent`,
+  or kept undelivered retries). It starts no turn of its own, costs no hop and no place in the relay rate, and is
+  dropped (publishing the refreshed queue state immediately) only once the message carrying it went in. Before a manager
+  send with a `once_id`, its quiet-message context (including an empty one) is saved in `relayState.LaterSends` for
+  seven days and reused on retries, including after restart. For an owner send (`client_msg_id`), a reservation is saved
+  only when quiet messages are actually waiting to be carried (empty queues do zero relay writes), is deleted in the
+  same save once delivery is confirmed (or when a kept undelivered message is deleted), and expires after 24 hours
+  (`ownerLaterKeep`, matching `undeliveredGiveUp`) if never settled; an owner Retry of an earlier in-doubt kept send
+  only reuses an existing reservation without picking up later arrivals. If the relay state cannot be read on an owner
+  send, the send degrades and delivers the owner's own message without quiet context (leaving `Later` untouched), while
+  saving a carry reservation for waiting quiet messages stays fail-closed. Nothing is guessed from
+  the words: only the explicit argument decides. A `quote` (the owner's request) always wakes, so the two together are
+  refused. While kept, the message shows above the composer (`queuedRelays`) and disappears once consumed.
 - **Between conversations.** `conversation_send` to a conversation that cannot take the message now no longer fails:
   the message goes into its relay queue and is tried again under the same `once_id`. A conversation that failed to
   take a relayed message is tried again after `relayRetryGap` (30 s), not on every session list.
@@ -2694,7 +2707,7 @@ or plan. It preserves the transcript and refuses other busy states. Normal archi
 
 ### Assistant permission defaults
 
-Non-guest assistant conversations start in `bypassPermissions` when the manager has no configured default. Main chats, leader conversations and the assistant's own scheduled-task chats use this default; ordinary Agents dispatched with `task_plan` keep their existing task permission selection. `default_permission_mode` in the manager settings still overrides it for new conversations. A conversation or task with an explicit mode keeps that choice; guest tool restrictions remain unchanged. Resumed turns with no persisted selection also use bypass, including `schedule_routine` and `schedule_followup` turns.
+Non-guest assistant conversations start in `bypassPermissions` when the manager has no configured default. Main chats, leader conversations and the assistant's own scheduled-task chats use this default; ordinary Agents dispatched with `task_plan` keep their existing task permission selection. `default_permission_mode` in the manager settings overrides it for new conversations and stopped Claude Code resumes without an explicit conversation choice. A conversation or task with an explicit mode keeps that choice, a live process is not interrupted by a default change, non-Claude launchers retain their legacy resume precedence, and guest tool restrictions remain unchanged. Resumed turns with no persisted selection also use bypass, including `schedule_routine` and `schedule_followup` turns.
 
 The command gate honors bypass for classified reads and ordinary writes without creating a tool permission card or persisting an Always grant. It still confirms outbound sends as the user (messages, replies, comments and mail), deletion and writes it cannot classify. It extracts individual calls from compound commands when possible; all must be classified as reads or ordinary writes to bypass confirmation. Proxy-authenticated writes must be standalone, parseable calls so credentials remain isolated. The sent-as-user ledger records `let_through.kind: "permission_mode"` for a proxied call allowed by bypass. Credential guards, explicit deny rules and the health space's separate confirmation rules still apply. Ordinary Agent sessions retain their existing permission behavior.
 
@@ -2816,6 +2829,24 @@ activation; the node's retirement latch prevents recovery and idle-compaction wo
 when offline nodes reconnect. Deleting a conversation cascades through segment history and queue content, retaining
 only deletion markers and minimal offline closure identities.
 
+`conversations_switch` and `POST /api/v1/assistant/conversation-switches` coordinate an explicit set of these logical
+switches without adding another engine protocol. The settings-backed batch stores each conversation's before-image,
+target, expected epoch and operation ID before starting anything. Busy items wait for their current turn and pending
+work; no interrupt or synthetic message completes a batch. When an activated batch item has no durable input pending,
+the coordinator accepts the completed switch immediately. If real input is pending, the first-turn acceptance/refusal
+rules above remain unchanged. A late preparation failure cannot return an activated operation to `in_doubt`;
+reconciliation continues from the activated state. The existing history loop and session-list changes wake queued items
+after a restart.
+
+The batch response distinguishes queued, switching, switched and refused items; one refusal does not cancel independent
+items. `restore_batch_id` creates a new, itself-restorable batch toward the original per-conversation settings rather
+than a global default. It only includes completed items whose current epoch and execution still match that batch's
+target. A conversation changed independently is reported and left alone. Empty requested model/effort retain launcher-
+default behavior, while a saved empty permission mode restores explicit `default` instead of inheriting the fallback.
+Preview creates neither state nor a phone confirmation; MCP execution uses one existing whole-batch outbound
+confirmation and the caller's space-scoped conversation lookup. Full-role HTTP routes and batch status are documented in
+[../protocol/protocol.md](../protocol/protocol.md).
+
 `GET/PUT /api/v1/assistant/segments` controls **new switches**, enabled by default. Disabling it keeps segment routing,
 reads and recovery running. A manager binary from before segment routing is **not a safe downgrade after a switch**:
 it could resume the retired first segment and fork the conversation. Roll back with a segment-aware manager and the
@@ -2856,12 +2887,20 @@ starts it. The manager attests it on every send it makes into an existing conver
 messages, relays, a leader's supervision digests and Inbox continuations alike. Any
 value a caller put there is replaced. A cold compaction restart reads the current role
 from `assistant.model`. A process started without the role (by an older manager)
-runs unproxied until its next start. Ordinary API requests and streamed replies
+runs unproxied until its next start. The manager reads a node's retained inventory to
+revoke ids that are no longer root assistant conversations; a node never sets
+`Session.Assistant` in its own rows (only the hub's decorated list does), so the row is
+judged by its directory, as agent naming does (#13879). Ordinary API requests and streamed replies
 are forwarded without changing payload bytes. Provider errors are returned as-is;
 transport failures return a generic 502 without logging upstream error text.
 
 Only a successful request with a reported cache read/write and exclusively one-hour
-cache declarations can be retained. Mixed TTL requests
+cache declarations can be retained. Claude Code declares a one-hour cache only for a
+subscriber or with `ENABLE_PROMPT_CACHING_1H`; on an API key or a gateway it sends a
+bare five-minute `{"type":"ephemeral"}`. A start that mounts the proxy therefore also
+sets `ENABLE_PROMPT_CACHING_1H=1` in its settings env; other starts keep the CLI's
+default. The proxy asks the provider for identity encoding on `/messages`, since a
+compressed event stream would hide `message_start` from the response tap. Mixed TTL requests
 are skipped to avoid rewriting an expired five-minute history behind a cache hit on
 the system prefix.
 The provider response's message id must also appear on the CLI's root `message_start`;

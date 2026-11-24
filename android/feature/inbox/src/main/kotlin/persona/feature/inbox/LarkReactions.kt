@@ -34,6 +34,7 @@ import persona.core.contracts.LarkReaction
 import persona.core.designsystem.*
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PhIcons
+import persona.core.inbox.*
 
 val DEFAULT_QUICK_REACTIONS = listOf(
     "THUMBSUP", "OK", "DONE", "HEART", "SMILE", "LAUGH", "SURPRISED"

@@ -12,8 +12,11 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/cliport"
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/github"
+	"github.com/nwverse/persona/server/internal/extmgr/githubport"
+	"github.com/nwverse/persona/server/internal/githubwire"
+	"github.com/nwverse/persona/server/internal/netproxy"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -681,32 +684,34 @@ func (h *Manager) registerConnectors() {
 			h.logf("mail connector: %v", err)
 		}
 	}
-	// GitHub on every hub: hub.json's github.auth.from_machine reads that computer's gh login; without it (or
-	// before it) the user signs in from the app with the device flow (connector/github/login.go).
-	gh := github.Config{}
-	if h.cfg.GitHub != nil {
-		gh = *h.cfg.GitHub
-	}
-	if _, err := gh.HTTPClient(0); err != nil {
-		h.logf("github: %v (every GitHub request fails until it is fixed)", err)
-	}
-	var ghc *github.Connector
-	if gh.Configured() {
-		name := gh.Auth.FromMachine
-		if m := h.localMachine(name); m != nil {
-			name = m.name()
+	// GitHub on every hub that has its module (githubport): hub.json's github.auth.from_machine reads that computer's
+	// gh login; without it (or before it) the user signs in from the app with the device flow.
+	if newGitHub := githubport.Factory(); newGitHub != nil {
+		gh := githubwire.Config{}
+		if h.cfg.GitHub != nil {
+			gh = *h.cfg.GitHub
 		}
-		ghc = github.New(gh, name, h.ghToken(gh.Auth.FromMachine))
-	} else {
-		ghc = github.New(gh, "", nil)
-	}
-	ghc.UseSecrets(h.secretsFor("github"))
-	if err := h.addConnector(ghc); err != nil {
-		h.logf("github connector: %v", err)
+		if _, err := netproxy.Parse(gh.Proxy); err != nil {
+			h.logf("github: %v (every GitHub request fails until it is fixed)", err)
+		}
+		var ghc githubwire.Connector
+		if gh.Configured() {
+			name := gh.Auth.FromMachine
+			if m := h.localMachine(name); m != nil {
+				name = m.name()
+			}
+			ghc = newGitHub(gh, name, h.ghToken(gh.Auth.FromMachine))
+		} else {
+			ghc = newGitHub(gh, "", nil)
+		}
+		ghc.UseSecrets(h.secretsFor("github"))
+		if err := h.addConnector(ghc); err != nil {
+			h.logf("github connector: %v", err)
+		}
 	}
 	// lark-cli is a separate source from the optional Lark gateway extension. It
 	// is deliberately absent when lark.cli is unset, preserving existing hubs.
-	if h.cfg.Lark.CLI != nil {
+	if h.cfg.Lark.CLI != nil && cliport.Available() {
 		if err := h.syncLarkCLIProfile(context.Background()); err != nil {
 			if !errors.Is(err, errBotSettingsUnread) {
 				h.deferLarkCLIRecovery()
@@ -723,11 +728,11 @@ func (h *Manager) registerConnectors() {
 }
 
 // ghToken reads the token of machine's gh login (credential.gh_token); it never goes to a log.
-func (h *Manager) ghToken(machine string) github.TokenSource {
+func (h *Manager) ghToken(machine string) githubwire.TokenSource {
 	return func(ctx context.Context, host string) (string, error) {
 		m := h.localMachine(machine)
 		if m == nil {
-			return "", github.ErrNoMachine
+			return "", githubwire.ErrNoMachine
 		}
 		var out struct {
 			Token string `json:"token"`
@@ -736,17 +741,17 @@ func (h *Manager) ghToken(machine string) github.TokenSource {
 		var re *rpc.Error
 		switch {
 		case errors.Is(err, errOffline):
-			return "", github.ErrOffline
+			return "", githubwire.ErrOffline
 		case errors.As(err, &re) && strings.HasPrefix(re.Message, "unknown method"):
-			return "", github.ErrNodeTooOld
+			return "", githubwire.ErrNodeTooOld
 		case errors.As(err, &re) && re.Code == proto.CodeNoGh:
-			return "", github.ErrNoGh
+			return "", githubwire.ErrNoGh
 		case errors.As(err, &re) && re.Code == proto.CodeNotSignedIn:
-			return "", github.ErrNotSignedIn
+			return "", githubwire.ErrNotSignedIn
 		case err != nil:
-			return "", fmt.Errorf("%s: %s", m.name(), github.Scrub(err.Error()))
+			return "", fmt.Errorf("%s: %s", m.name(), githubwire.Scrub(err.Error()))
 		case out.Token == "":
-			return "", github.ErrNotSignedIn
+			return "", githubwire.ErrNotSignedIn
 		}
 		return out.Token, nil
 	}

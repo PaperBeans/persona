@@ -438,6 +438,9 @@ func TestBackgroundRoundAsksTheOwnerWithNeedsUser(t *testing.T) {
 			name = "the bot on"
 		}
 		t.Run(name, func(t *testing.T) {
+			if bot {
+				needsLarkLayer(t)
+			}
 			var s *Service
 			var f *fakeHub
 			var todo Todo

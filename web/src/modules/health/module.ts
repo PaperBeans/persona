@@ -1,14 +1,16 @@
 // The health module's descriptor (#13434, the web pilot of #13430; docs/web/web.md "Modules", docs/assistant/health.md):
 // what it adds to the shell, small enough to load at start. Its page and its strings (health.json) load on first use.
 //
-// No hub feature flag: every hub this web app talks to has served the health space, and before this module the page
-// was always there. So it names none and stays on by default; Settings › Labs › Features turns it off in a browser.
+// Its hub flag is module.health (core/module-host.ts, the hub flag rule): a hub that publishes module flags turns it off
+// by leaving the flag out; every older hub, which publishes none, keeps it on, as the page always was. Settings › Labs ›
+// Features turns it off in a browser.
 import { byLanguage, t, type CatalogModule } from "../../i18n";
-import type { ModuleDescriptor } from "../../core/module-host";
+import { moduleFeature, type ModuleDescriptor } from "../../core/module-host";
 import { HEALTH_INTAKE_UI } from "../../lib/health-intake-ui";
 
 export const health: ModuleDescriptor = {
   id: "health",
+  feature: moduleFeature("health"),
   title: () => t("sidebar.nav_health"),
   description: () => t("sidebar.nav_health_hint"),
   routes: [{ base: "health", aliases: [["tracks", "health"]], title: () => t("app.title_health") }],

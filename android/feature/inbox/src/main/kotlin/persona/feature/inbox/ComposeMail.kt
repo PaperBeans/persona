@@ -23,6 +23,7 @@ import persona.core.contracts.api.MailAccount
 import persona.core.contracts.api.MailTransport
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
+import persona.core.inbox.*
 
 /**
  * Full-screen mail compose dialog (Compose / Reply / Reply all / Forward / mailto:).

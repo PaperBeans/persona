@@ -115,7 +115,11 @@ At step 4 both lanes report all 14 cases on both surfaces: iOS agrees on every o
 `a_directory_hidden_card_counts_nowhere`, its known difference (D1), so the two lanes differ on that one case. With
 D6 and D11 recorded (#12888) the fixture has 16 cases, and both lanes carry the same marks on three of them: D6 on the
 header of `muted_and_quiet_agents_are_rows_but_not_on_the_badge` and `a_quiet_tasks_card_is_a_row_but_not_on_the_badge`,
-D11 on `a_held_card_is_listed_but_counts_nowhere`. The two lanes still differ on the hidden case alone.
+D11 on `a_held_card_is_listed_but_counts_nowhere`. The two lanes still differ on the hidden case alone. Since the owner
+confirmed D11 for routed terminal questions (2026-11-23) the fixture has 17 cases: iOS leaves a card its task's
+supervisor holds out of every row (`a_routed_terminal_question_is_held`,
+`a_supervisor_held_card_beside_an_open_one_leaves_the_row`), Android carries D11 marks on both, so the lanes differ on
+those two cases as well.
 `scripts/test/test_counts_agreement.py` holds the differ to these rules, and reads the real fixture's marks as known
 differences.
 

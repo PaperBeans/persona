@@ -162,14 +162,43 @@ type externalAdapterFixture struct {
 func newExternalAdapterFixture(t *testing.T) *externalAdapterFixture {
 	t.Helper()
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Keep the helper below the same owned root as its configuration. A hard link
+	// avoids copying the test binary; the copy fallback covers separate filesystems.
+	helper := filepath.Join(dir, "adapter-helper")
+	if err := os.Link(self, helper); err != nil {
+		source, openErr := os.Open(self)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		destination, createErr := os.OpenFile(helper, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+		if createErr != nil {
+			_ = source.Close()
+			t.Fatal(createErr)
+		}
+		_, copyErr := io.Copy(destination, source)
+		closeErr := destination.Close()
+		_ = source.Close()
+		if copyErr != nil || closeErr != nil {
+			t.Fatalf("copy helper: %v %v", copyErr, closeErr)
+		}
+	}
+	if err := os.Chmod(helper, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previousRoot := externalAdapterTrustRoot
+	externalAdapterTrustRoot = dir
+	t.Cleanup(func() { externalAdapterTrustRoot = previousRoot })
 	f := &externalAdapterFixture{dir: dir, configPath: filepath.Join(dir, "registry.json"),
 		statePath: filepath.Join(dir, "fixture.json"), callsPath: filepath.Join(dir, "calls.jsonl")}
 	f.config = externalAdapterConfig{Version: 1, ID: "local",
-		Command: []string{self, externalAdapterHelperFlag, f.statePath}, NativeProgram: self}
+		Command: []string{helper, externalAdapterHelperFlag, f.statePath}, NativeProgram: helper}
 	f.state = externalAdapterHelperState{Payload: externalAdapterTestJSON(t, externalAdapterTestInventory()), Calls: f.callsPath}
 	f.saveState(t)
 	f.saveConfig(t)
@@ -360,6 +389,14 @@ func TestExternalAdapterRejectsInvalidLocalConfig(t *testing.T) {
 		"missing registry": func(t *testing.T, f *externalAdapterFixture) {
 			t.Setenv(externalAdapterConfigEnv, filepath.Join(f.dir, "missing.json"))
 		},
+		"registry outside fixture root": func(t *testing.T, f *externalAdapterFixture) {
+			outside := filepath.Join(filepath.Dir(f.dir), "outside-registry.json")
+			if err := os.WriteFile(outside, externalAdapterTestJSON(t, f.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(externalAdapterConfigEnv, outside)
+			t.Cleanup(func() { _ = os.Remove(outside) })
+		},
 		"directory registry": func(t *testing.T, f *externalAdapterFixture) { t.Setenv(externalAdapterConfigEnv, f.dir) },
 		"FIFO registry": func(t *testing.T, f *externalAdapterFixture) {
 			fifo := filepath.Join(f.dir, "registry.fifo")
@@ -492,6 +529,50 @@ func TestExternalAdapterTrustedLinksAndDirectories(t *testing.T) {
 	}
 	if got := r.launchers(context.Background(), true); len(got) != 1 {
 		t.Fatal("trusted linked registration did not run")
+	}
+}
+
+func TestExternalAdapterFixtureRootMayUseHostAliases(t *testing.T) {
+	f := newExternalAdapterFixture(t)
+	alias := filepath.Join(filepath.Dir(f.dir), "fixture-root-alias")
+	if err := os.Symlink(f.dir, alias); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(alias) })
+	externalAdapterTrustRoot = alias
+	// Keep every configured path behind the alias too. On macOS t.TempDir is
+	// commonly under /var, whose canonical path is /private/var.
+	helper := filepath.Join(alias, "adapter-helper")
+	f.config.Command = []string{helper, externalAdapterHelperFlag, filepath.Join(alias, filepath.Base(f.statePath))}
+	f.config.NativeProgram = helper
+	f.saveConfig(t)
+	t.Setenv(externalAdapterConfigEnv, filepath.Join(alias, filepath.Base(f.configPath)))
+	r := f.load(t)
+	if got := r.launchers(context.Background(), true); len(got) != 1 {
+		t.Fatal("a fixture root behind a host alias was not trusted")
+	}
+}
+
+func TestExternalAdapterFixtureRejectsExecutableEscape(t *testing.T) {
+	f := newExternalAdapterFixture(t)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(f.dir, "outside-helper")
+	if err := os.Symlink(self, link); err != nil {
+		t.Fatal(err)
+	}
+	f.config.Command[0], f.config.NativeProgram = link, link
+	f.saveConfig(t)
+	r, err := loadExternalAdapterRegistry()
+	if r != nil {
+		r.Close()
+		t.Fatal("an executable link escaped the fixture root")
+	}
+	externalAdapterTestCode(t, err, "adapter_config_conflict")
+	if len(f.calls(t)) != 0 {
+		t.Fatal("an escaped executable ran")
 	}
 }
 

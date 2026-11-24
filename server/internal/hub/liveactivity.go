@@ -212,6 +212,7 @@ type liveActivities struct {
 	shownState    FleetState
 	shownStats    FleetStats
 	shownAt       time.Time
+	shownIntake   uint64        // the last intake revision the open apps were sent (intakeSent)
 	repair        bool          // a device's activity shows something unknown: flush without waiting for a change
 	widgets       widgetWaker   // which phones' Home Screen widgets to wake, and when (widget_wake.go)
 	widgetChanges chan struct{} // intake revisions wake widgets without offering Live Activity content
@@ -532,11 +533,13 @@ func (la *liveActivities) phoneLeft(device string, clean bool) {
 	}
 	d, ok := la.h.push.device(device)
 	now := la.now()
-	// The app wrote its widgets as it went: they show what it showed (widget_wake.go).
+	// The app wrote its widgets as it went: they show what it showed (widget_wake.go), the intake revision it was
+	// last sent included, not one that moved after.
 	la.mu.Lock()
-	shown := la.shownState
+	shown := widgetCountsOf(la.shownState)
+	shown.intake = la.shownIntake
 	la.mu.Unlock()
-	la.widgets.wrote(device, la.widgetCounts(shown), now)
+	la.widgets.wrote(device, shown, now)
 	la.mu.Lock()
 	r := la.rows[device]
 	needsStart := r.PushToStartToken != "" && (r.PushToken == "" || now.Sub(r.StartedAt) >= fleetMaxAge)

@@ -319,7 +319,15 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
     // the tray closes once its last thing is handled; tapped while empty it still opens "All caught up"
     LaunchedEffect(needsCount) { if (needsCount == 0 && state.expanded == AssistantTray.NeedsYou) state.expanded = null }
     BackHandler(state.expanded != null) { state.expanded = null }
-    Column(Modifier.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+    // The entry pills already sit inside a 48dp touch box, so only an expanded tray card adds top breathing room.
+    Column(
+        Modifier.padding(
+            start = Tokens.Space.m,
+            end = Tokens.Space.m,
+            top = if (state.expanded != null) Tokens.Space.xs else Tokens.Space.flush,
+        ),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
+    ) {
         state.expanded?.let { tray ->
             JCard(Modifier.fillMaxWidth().testTag("assistant-tray-${tray.tag}"), padding = Tokens.Space.xs) {
                 // The room is read while measuring: it follows the keyboard frame by frame without composing the tray again.

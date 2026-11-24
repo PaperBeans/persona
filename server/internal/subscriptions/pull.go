@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -96,7 +97,7 @@ func recipePaths(r Recipe) []string {
 		}
 	}
 	if f := r.Fields; f != nil {
-		for _, p := range []string{f.ID, f.Thread, f.Title, f.Sender, f.Time, f.Body, f.Link, f.DueDate} {
+		for _, p := range []string{f.ID, f.Thread, f.Title, f.Sender, f.SenderID, f.Chat, f.ChatName, f.Seen, f.ReplyTo, f.Time, f.Body, f.Link, f.DueDate} {
 			if p != "" {
 				ps = append(ps, p)
 			}
@@ -267,9 +268,18 @@ func callProblem(err error) (*Problem, time.Duration, bool) {
 				RetryAfter float64 `json:"retry_after"`
 			}
 			_ = json.Unmarshal(re.Data, &d)
-			wait := time.Duration(d.RetryAfter * float64(time.Second))
-			if wait <= 0 {
+			const maxRetryAfter = 24 * time.Hour
+			var wait time.Duration
+			switch {
+			case math.IsNaN(d.RetryAfter) || d.RetryAfter <= 0:
 				wait = time.Minute
+			case math.IsInf(d.RetryAfter, 1) || d.RetryAfter >= float64(maxRetryAfter/time.Second):
+				wait = maxRetryAfter
+			default:
+				wait = time.Duration(d.RetryAfter * float64(time.Second))
+				if wait <= 0 {
+					wait = time.Minute
+				}
 			}
 			return &Problem{CodeRateLimited, "The connector asked to wait before the next call."}, wait, false
 		case wire.ConnectorErrorCodeNotReadOnly:

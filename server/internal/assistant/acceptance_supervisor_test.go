@@ -53,6 +53,7 @@ func waitingForOwner(s *Service) int {
 // The supervisor's accepted, having checked the evidence, passes the deployed task's "Please verify": the task is
 // verified, the card says the supervisor passed it, and nothing waits for the owner's "Pass" (#3240).
 func TestSupervisorAcceptedPassesPleaseVerify(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, posts, _ := conclusionService(t, false)
 	updated := updatedCards(f)
 	deployedForReview(t, s, f, todo.ID)
@@ -87,6 +88,7 @@ func TestSupervisorAcceptedPassesPleaseVerify(t *testing.T) {
 	s.accept.mu.Lock()
 	s.accept.asks[todo.ID].AskedAt = time.Now().Add(-30 * time.Hour)
 	s.accept.mu.Unlock()
+	waitReportQueue(t, s) // report cards go out on their own timer: count only after them (#14138)
 	n := len(posts())
 	ctx := context.Background()
 	now := time.Now().In(s.location(ctx))
@@ -99,6 +101,7 @@ func TestSupervisorAcceptedPassesPleaseVerify(t *testing.T) {
 // An ask left waiting by a hub from before #3240 (the supervisor accepted, the owner was still asked) is passed by the
 // sweep; so is one whose card went out after the review.
 func TestSupervisedBacklogIsPassedBySweep(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, _, _ := conclusionService(t, false)
 	deployedForReview(t, s, f, todo.ID)
 	reviewTask(t, s, todo.ID, map[string]any{"verdict": "accepted", "note": "上线了", "checks": completeReviewChecks(todoNow(s, todo.ID))})
@@ -120,6 +123,7 @@ func TestSupervisedBacklogIsPassedBySweep(t *testing.T) {
 // user_check: the supervisor accepted, but the owner is to look themselves: the "Please verify" keeps waiting for them;
 // with none up yet, one is asked.
 func TestSupervisorUserCheckStillAsksTheOwner(t *testing.T) {
+	needsLarkLayer(t)
 	t.Run("deployed", func(t *testing.T) {
 		s, f, todo, posts, _ := conclusionService(t, false)
 		deployedForReview(t, s, f, todo.ID)
@@ -194,6 +198,7 @@ func TestSupervisorUserCheckStillAsksTheOwner(t *testing.T) {
 // A big feature (high priority) is the owner's to try (#3205): its "Please verify" waits for them after the supervisor
 // accepted too; its conclusion would not, but it has none (the card is that).
 func TestSupervisorAcceptedLeavesABigFeatureToTheOwner(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, _, _ := conclusionService(t, false)
 	s.todos.mu.Lock()
 	s.todos.todos[todo.ID].Priority = "high"
@@ -221,6 +226,7 @@ func TestSupervisorAcceptedLeavesABigFeatureToTheOwner(t *testing.T) {
 
 // A task with no supervisor keeps asking the owner: closed by the auto judge, its "Please verify" waits for their "Pass".
 func TestUnsupervisedTaskStillAsksTheOwner(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, posts := acceptService(t) // its deployed work asks the owner (ownerVerifiesAll), as a big feature's does
 	todo := startedTask(t, s, f)
 	if todo.Supervision != nil && todo.Supervision.Supervisor != "" {

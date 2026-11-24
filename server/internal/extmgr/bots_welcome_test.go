@@ -10,6 +10,7 @@ import (
 
 // This synthetic schema-2.0 event follows the Open Platform's bot_p2p_chat_entered example.
 func TestBotEnteredChatOffersPairing(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	payload := []byte(`{
 		"schema":"2.0",

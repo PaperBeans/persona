@@ -30,6 +30,7 @@ import kotlinx.coroutines.delay
 import persona.core.designsystem.*
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PhIcons
+import persona.core.inbox.*
 
 /** Merge-forward card shown in message flow. */
 @Composable

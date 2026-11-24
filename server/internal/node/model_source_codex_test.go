@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/modelhttp"
+	"github.com/pelletier/go-toml/v2"
 )
 
 func sourceCodexFixture(t *testing.T, config string) (string, string, []string) {
@@ -287,5 +288,98 @@ func TestCodexStartPassesTheNodesHosts(t *testing.T) {
 				t.Errorf("allowlist %q (source passed: %v), want %q", hosts, sourced, want)
 			}
 		})
+	}
+}
+
+// codexReadsOverrides is the providers Codex makes of argv's -c overrides: it splits a key at every "." and takes each
+// part as written, quotes and all, and parses the value as TOML.
+func codexReadsOverrides(t *testing.T, argv []string) map[string]any {
+	t.Helper()
+	config := map[string]any{}
+	for i := 1; i < len(argv); i++ {
+		if argv[i] == "--" {
+			break
+		}
+		if argv[i] != "-c" || i+1 == len(argv) {
+			continue
+		}
+		i++
+		key, value, _ := strings.Cut(argv[i], "=")
+		var wrapped struct{ Value any }
+		if err := toml.Unmarshal([]byte("Value="+value), &wrapped); err != nil {
+			t.Fatalf("codex could not read %q: %v", argv[i], err)
+		}
+		parts := strings.Split(key, ".")
+		current := config
+		for _, part := range parts[:len(parts)-1] {
+			next, _ := current[part].(map[string]any)
+			if next == nil {
+				next = map[string]any{}
+				current[part] = next
+			}
+			current = next
+		}
+		current[parts[len(parts)-1]] = wrapped.Value
+	}
+	providers, _ := config["model_providers"].(map[string]any)
+	return providers
+}
+
+// A managed Codex launcher's agent_start: the source headers go onto Persona's own provider, which keeps its name.
+// They used to name it `model_providers."persona-launcher"`, which Codex reads as another provider with no name, and
+// Codex 0.171 would not start: `provider name must not be empty`.
+func TestCodexModelSourceKeepsTheLaunchersProviderNamed(t *testing.T) {
+	t.Setenv(modelhttp.SourceHostsEnv, "*.example.com")
+	home, cwd, env := sourceCodexFixture(t, "")
+	launcher := []string{"OPENAI_BASE_URL=https://gw.example.com/v1", "OPENAI_API_KEY=example"}
+	input := append([]string{"codex"}, codexProviderArgs(nil, launcher, "")...)
+	input = append(input, "-m", "example-model", "--", "prompt")
+	argv, outEnv := codexModelSource(input, append(env, launcher...), cwd, home)
+	if reflect.DeepEqual(argv, input) {
+		t.Fatal("no source headers for the launcher's provider")
+	}
+	for _, arg := range argv {
+		if strings.HasPrefix(arg, `model_providers."`) {
+			t.Fatalf("a quoted provider key Codex would read as another provider: %q", argv)
+		}
+	}
+	providers := codexReadsOverrides(t, argv)
+	if len(providers) != 1 {
+		t.Fatalf("codex reads providers %v, want persona-launcher alone", providers)
+	}
+	provider, _ := providers["persona-launcher"].(map[string]any)
+	if name, _ := provider["name"].(string); strings.TrimSpace(name) == "" {
+		t.Fatalf("persona-launcher has no name: %v", provider)
+	}
+	bindings, _ := provider["env_http_headers"].(map[string]any)
+	variable, _ := bindings[modelhttp.RoleHeader].(string)
+	if envValue(outEnv, variable) != "task_agent" {
+		t.Fatalf("the role header is not on persona-launcher: %v", bindings)
+	}
+	if argv[len(argv)-2] != "--" || argv[len(argv)-1] != "prompt" {
+		t.Fatalf("prompt moved: %q", argv)
+	}
+}
+
+// A provider whose id is no bare key cannot be named in a -c key Codex reads: it gets no source headers rather than a
+// provider of its own that has no name.
+func TestCodexModelSourceSkipsAProviderCodexCannotName(t *testing.T) {
+	t.Setenv(modelhttp.SourceHostsEnv, "*.example.com")
+	config := strings.ReplaceAll(strings.ReplaceAll(sourceCodexProvider, `model_provider = "custom"`, `model_provider = "gw.custom"`),
+		"[model_providers.custom]", `[model_providers."gw.custom"]`)
+	home, cwd, env := sourceCodexFixture(t, config)
+	input := []string{"codex", "app-server"}
+	if got, gotEnv := codexModelSource(input, env, cwd, home); !reflect.DeepEqual(got, input) || !reflect.DeepEqual(gotEnv, env) {
+		t.Fatalf("injected for a provider Codex cannot name: %q", got)
+	}
+	for _, key := range []string{"custom", "persona-launcher", "a_b-9"} {
+		if !codexBareKey(key) {
+			t.Fatalf("%q is a bare key", key)
+		}
+	}
+	for _, key := range []string{"", "gw.custom", `"custom"`, "a b"} {
+		if codexBareKey(key) {
+			t.Fatalf("%q is no bare key", key)
+		}
 	}
 }

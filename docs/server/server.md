@@ -189,7 +189,7 @@ Publishing and approving are separate actions. A reader may retrieve a published
 | `internal/bus` | Service-to-hub bus client: dialing, handshake, reconnect, keepalive; `docs/protocol/protocol.md`, “Bus” |
 | `internal/netaddr` | Local addresses, Linux netlink flags and address-change notifications; not proof of public reachability |
 | `internal/db` | Postgres connection pool, embedded SQL migrations in two sets (`migrations/hub/`, `migrations/manager/`; “Migrations” below), table access |
-| `internal/mail` | IMAP/SMTP, encrypted account storage, mail HTTP APIs and MCP tools (`docs/extensions/mail.md`) |
+| `internal/modules/mail` | IMAP/SMTP, encrypted account storage, mail HTTP APIs and MCP tools (`docs/extensions/mail.md`) |
 | `internal/mcpserver` | personad mcp: stdio MCP server for Claude |
 | `internal/nodecmd` | The device's command line (`personad` and `persona-node` both dispatch it) |
 | `internal/nodeclient` | The client side of `node.sock` for hook / mcp / ask / notify / tool |

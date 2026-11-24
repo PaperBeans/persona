@@ -237,6 +237,14 @@ func (d *doctorReport) config(dir string) *Config {
 	default:
 		d.ok("security.plaintext_loopback_only", i18n.T(l, "hub-doctor.loopback_only_off"))
 	}
+	switch err := cfg.checkPrivateNetworkOnly(); {
+	case err != nil:
+		d.problem("security.private_network_only", i18n.T(l, "hub-doctor.private_network_conflicts", i18n.Args{"error": err.Error()}))
+	case cfg.Security.PrivateNetworkOnly:
+		d.ok("security.private_network_only", i18n.T(l, "hub-doctor.private_network_on"))
+	default:
+		d.ok("security.private_network_only", i18n.T(l, "hub-doctor.private_network_off"))
+	}
 	if pp := cfg.Security.ProxyProtocol; pp != nil {
 		switch p, err := pp.policy(); {
 		case err != nil:

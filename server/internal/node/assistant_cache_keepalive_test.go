@@ -268,6 +268,9 @@ func TestAssistantCacheProxyMountsForHTTPSManagedLauncher(t *testing.T) {
 				if base != p.cacheProxy.BaseURL() || !strings.HasPrefix(base, "http://127.0.0.1:") {
 					t.Fatalf("settings base %q, want the proxy", base)
 				}
+				if s.Env[promptCaching1hEnv] != "1" {
+					t.Fatalf("settings %s = %v: Claude Code would declare only a five-minute cache, which Replay refuses", promptCaching1hEnv, s.Env[promptCaching1hEnv])
+				}
 				b := f.n.cacheWarmPool()
 				b.mu.Lock()
 				_, pooled := b.entries[id]
@@ -277,6 +280,8 @@ func TestAssistantCacheProxyMountsForHTTPSManagedLauncher(t *testing.T) {
 				}
 			} else if strings.HasPrefix(base, "http://127.0.0.1:") {
 				t.Fatalf("unattested start points at a proxy: %q", base)
+			} else if _, set := s.Env[promptCaching1hEnv]; set {
+				t.Fatalf("unattested start asks for one-hour cache writes")
 			}
 		})
 	}

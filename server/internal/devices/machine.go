@@ -122,6 +122,8 @@ type Machine struct {
 	deploying       bool
 	deployErr       string
 	deployPhase     string
+	deploySource    string
+	deployVersion   string
 	deployRun       *deployRun
 	deployPreflight *nodeDeployPreflight
 	updateHandoff   bool // grace expired while waiting for idle: no new headless turns until the update settles
@@ -297,6 +299,10 @@ func (m *Machine) snapshot() proto.Machine {
 	if m.link != nil {
 		link = m.link.info()
 	}
+	source := m.deploySource
+	if m.deployVersion != version || !m.deploying && m.info.Version != m.deployVersion && deployErr == "" {
+		source = ""
+	}
 	return proto.Machine{
 		ID: m.cfg.ID, Name: m.name(), Kind: m.cfg.Kind, Icon: icon, SSHHost: m.cfg.SSHHost, Online: m.online || warm, Error: m.err,
 		Hostname: m.info.Hostname, OS: m.info.OS, Arch: m.info.Arch, Home: m.info.Home,
@@ -304,7 +310,7 @@ func (m *Machine) snapshot() proto.Machine {
 		NodeVersion: m.info.Version, NodeMismatch: m.online && nodeMismatch(version, m.info),
 		NodeProtocol: m.info.Protocol, NodeIncompatible: incompatible,
 		Deploying: m.deploying, DeployError: deployErr,
-		CanDeploy: &canDeploy, DeployReason: deployReason, DeployNoPackage: onlyPackage, DeployPhase: m.deployPhase,
+		DeploySource: source, CanDeploy: &canDeploy, DeployReason: deployReason, DeployNoPackage: onlyPackage, DeployPhase: m.deployPhase,
 		Transport: m.via, TailcatPath: m.path, Tailcat: m.cfg.TailcatAddr != "",
 		Engine: engine, Engines: engines, EngineHosts: choice.Hosts, EngineDefault: choice.Default,
 		EngineSuggested: suggested, EngineSetsUnsupported: setsUnsupported, Link: link, System: d.metrics.system(m.cfg.ID),

@@ -65,9 +65,9 @@ describe("useUsageWindows", () => {
     expect(calls).toHaveLength(2);
   });
 
-  it("passes on the providers the owner hid (#13179), lowercase, and none from an old hub", async () => {
-    await settle(() => calls[0].resolve({ accounts: [], hidden_providers: ["Claude", "codex"] }));
-    expect(host.querySelector("p")?.getAttribute("data-hidden")).toBe("claude,codex");
+  it("passes on canonical hidden providers (#13179), and none from a hub without the field", async () => {
+    await settle(() => calls[0].resolve({ accounts: [], hidden_providers: ["Claude", "codex", "agy"] }));
+    expect(host.querySelector("p")?.getAttribute("data-hidden")).toBe("claude,codex,antigravity");
     backToFront();
     await settle(() => calls[1].resolve({ accounts: [] }));
     expect(host.querySelector("p")?.getAttribute("data-hidden")).toBe("");

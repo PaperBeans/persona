@@ -11,7 +11,7 @@ import persona.android.navigation.terminalLink
 import persona.core.navigation.MachinesRoute
 import persona.core.navigation.TerminalPanesRoute
 import persona.core.navigation.RouteInput
-import persona.feature.knowledge.KnowledgeRoute
+import persona.core.navigation.KnowledgeRoute
 import persona.core.contracts.api.PairingRequest
 import persona.core.navigation.AppTab
 import persona.core.navigation.ResolvedRoute

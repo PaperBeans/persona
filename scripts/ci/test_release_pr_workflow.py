@@ -144,6 +144,17 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("Android test evidence belongs to another commit", release)
         self.assertEqual(self.pr["jobs"]["android"]["needs"], ["plan", "android-tests"])
 
+    def test_apple_export_keychain_is_visible_to_xcode(self):
+        steps = self.pr["jobs"]["apple"]["steps"]
+        install = next(step for step in steps if step.get("name") == "Install the Apple Distribution identity and provisioning profiles")
+        script = install["run"]
+        # Importing into a temporary file and finding the identity there is not enough: xcodebuild searches the
+        # default keychain domain. Add the temporary keychain without discarding the user's existing search list.
+        self.assertIn('subprocess.check_output(["security", "list-keychains", "-d", "user"], text=True).splitlines()', script)
+        self.assertIn('subprocess.run(["security", "list-keychains", "-d", "user", "-s", sys.argv[1], *paths], check=True)', script)
+        self.assertIn('security list-keychains -d user | grep -F "$PERSONA_SIGNING_KEYCHAIN"', script)
+        self.assertNotIn('security list-keychains -d user -s "$PERSONA_SIGNING_KEYCHAIN" $existing', script)
+
     def test_apple_archive_stages_exact_source_and_resolved_input(self):
         text = PR.read_text()
         for required in ('scripts/ci/apple_release_source.py', '--source "$GITHUB_WORKSPACE"',

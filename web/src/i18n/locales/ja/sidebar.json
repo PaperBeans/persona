@@ -164,5 +164,7 @@
   "side_unread_count_one": "{count}件の子セッションに新しい返信があります",
   "side_unread_count_other": "{count}件の子セッションに新しい返信があります",
   "side_unread_open": "子セッション「{title}」を開く",
-  "side_unread_also": "ほかにも新しい返信：{titles}"
+  "side_unread_also": "ほかにも新しい返信：{titles}",
+  "module_recording": "会議の録音",
+  "module_recording_hint": "Persona で録音した内容の議事録、一日のまとめ、文字起こし、写真をナレッジの項目で表示します。"
 }

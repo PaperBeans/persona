@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -28,7 +28,7 @@ import (
 // both went under the earlier message. A message right after "/new …" could also read the target before the new
 // conversation was set, and start one more.
 func (s *Service) FeishuMessage(ctx context.Context, p FeishuMessage) error {
-	var ev feishubot.MessageEvent
+	var ev botcard.MessageEvent
 	if err := json.Unmarshal(p.Event, &ev); err != nil {
 		return badRequest(err)
 	}
@@ -81,7 +81,7 @@ func (s *Service) FeishuMessage(ctx context.Context, p FeishuMessage) error {
 	return nil
 }
 
-func (s *Service) feishuMessage(ev feishubot.MessageEvent, st FeishuStatus, action string) {
+func (s *Service) feishuMessage(ev botcard.MessageEvent, st FeishuStatus, action string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	msg := ev.Message
@@ -89,7 +89,7 @@ func (s *Service) feishuMessage(ev feishubot.MessageEvent, st FeishuStatus, acti
 		s.logf("bots: a message recalled before its turn: not sent")
 		return
 	}
-	content := feishubot.ParseContent(msg.MessageType, msg.Content, msg.Mentions)
+	content := botcard.ParseContent(msg.MessageType, msg.Content, msg.Mentions)
 	if content.Sticker {
 		// A sticker carries no request: do not react, do not start an Agent turn.
 		s.logf("bots: a sticker was accepted silently: no turn")
@@ -226,14 +226,14 @@ const (
 )
 
 // botSend passes a message on to its target and starts the run that answers it.
-func (s *Service) botSend(ctx context.Context, ev *feishubot.MessageEvent, content feishubot.Content, t botTarget) error {
+func (s *Service) botSend(ctx context.Context, ev *botcard.MessageEvent, content botcard.Content, t botTarget) error {
 	return s.botSendIn(ctx, ev, content, t, nil)
 }
 
 // botSendIn is botSend for a message said in a topic (topic given: the chat and thread of the todo it is bound to,
 // feishu_thread.go): the message quotes and forwards nothing in (what others said there is not the owner's words),
 // and the run's progress, answer and notes go back into that thread (runTo).
-func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, content feishubot.Content, t botTarget, topic *feishuTopic) error {
+func (s *Service) botSendIn(ctx context.Context, ev *botcard.MessageEvent, content botcard.Content, t botTarget, topic *feishuTopic) error {
 	rt, err := s.resolveBotTarget(ctx, t)
 	if err != nil {
 		return err
@@ -266,14 +266,14 @@ func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, con
 	type botMedia struct {
 		of     string // the message it is in
 		quoted bool   // not to be had is no reason to hold the message back
-		feishubot.Media
+		botcard.Media
 	}
 	var media []botMedia
 	for _, md := range content.Media {
 		media = append(media, botMedia{of: msg.MessageID, Media: md})
 	}
 	if msg.ParentID != "" && topic == nil {
-		var quoted []feishubot.Media
+		var quoted []botcard.Media
 		in.Quote, quoted = s.botQuote(ctx, msg.ParentID, lang)
 		for _, md := range quoted {
 			media = append(media, botMedia{of: msg.ParentID, quoted: true, Media: md})
@@ -432,7 +432,7 @@ func botProbe(text string, in prompts.BotMessage) string {
 }
 
 // botQuote is the message a message replies to, and the pictures and files in it.
-func (s *Service) botQuote(ctx context.Context, id string, lang i18n.Lang) (*prompts.BotQuote, []feishubot.Media) {
+func (s *Service) botQuote(ctx context.Context, id string, lang i18n.Lang) (*prompts.BotQuote, []botcard.Media) {
 	items, err := s.botMessages(ctx, id)
 	if err != nil || len(items) == 0 {
 		return nil, nil
@@ -441,7 +441,7 @@ func (s *Service) botQuote(ctx context.Context, id string, lang i18n.Lang) (*pro
 	if it.Deleted {
 		return nil, nil
 	}
-	c := feishubot.ParseContent(it.MsgType, it.Body.Content, it.MentionList())
+	c := botcard.ParseContent(it.MsgType, it.Body.Content, it.MentionList())
 	who := "Persona"
 	if it.Sender.SenderType == "user" {
 		who = s.botName(ctx, it.Sender.ID, lang)
@@ -465,7 +465,7 @@ func (s *Service) botForward(ctx context.Context, id string, lang i18n.Lang) str
 		if it.UpperMessageID != id {
 			continue
 		}
-		c := feishubot.ParseContent(it.MsgType, it.Body.Content, it.MentionList())
+		c := botcard.ParseContent(it.MsgType, it.Body.Content, it.MentionList())
 		text := c.Text
 		if text == "" {
 			text = "[" + it.MsgType + "]"

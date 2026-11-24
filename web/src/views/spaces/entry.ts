@@ -1,6 +1,5 @@
-// Where entering a space lands (#4329, docs/assistant/health.md "Entering Health"; the health module and domain spaces):
-// like Codex, back in the latest conversation with its context; a space with none opens the new conversation page.
-// Pure, so it is tested without a DOM.
+// Shared resume selection for domain spaces: the latest conversation, else the new conversation page.
+// Health opens its home directly (#13273); other spaces still use this helper.
 import type { Session } from "../../lib/types";
 import { newestFirst } from "../assistant/conversations";
 

@@ -110,6 +110,20 @@ class Repository:
         out = self.run(["diff", "--name-only", "--no-renames", "-z", old, new, "--"])
         return [name for name in out.decode("utf-8", "surrogateescape").split("\0") if name]
 
+    def renames(self, old, new):
+        """{new path: old path} for the files git's rename detection sees as moved between two commits."""
+        out = self.run(["diff", "--name-status", "-M", "-z", old, new, "--"])
+        fields = out.decode("utf-8", "surrogateescape").split("\0")
+        moved, at = {}, 0
+        while at < len(fields) and fields[at]:
+            if fields[at].startswith(("R", "C")):
+                if fields[at].startswith("R"):
+                    moved[fields[at + 2]] = fields[at + 1]
+                at += 3
+            else:
+                at += 2
+        return moved
+
     def blobs(self, rev, paths):
         """{path: bytes} for the paths that are files at rev; a path that is absent or not a file is missing."""
         wanted = [path for path in paths if (rev, path) not in self.cache]
@@ -248,7 +262,10 @@ def ratchet_failures(change, ratchet):
             failures.extend(ratchet.violations({path: got}, {path: allowed}))
     if ratchet.raised:
         current = {path: merged_counts[path] for path in sorted(edited) if path in merged_counts}
-        failures.extend(ratchet.raised(current, base_counts, change.base[:12]))
+        # A file the change only moved keeps the entry it had (sleep_ratchet.carry_renames): moving is no raise.
+        moved = {new: old for new, old in change.repo.renames(change.base, change.head).items()
+                 if ratchet.covers(new) and ratchet.covers(old)}
+        failures.extend(ratchet.raised(current, sleep_ratchet.carry_renames(base_counts, moved), change.base[:12]))
     return failures, notes
 
 

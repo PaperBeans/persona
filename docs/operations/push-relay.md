@@ -11,6 +11,8 @@ hub ──(HPKE ciphertext + grant)──▶ relay ──(APNs key)──▶ APN
  └──────────── phone public key, relay grant (via the paired hub API) ◀┘
 ```
 
+A hub in [office network mode](network.md#office-network-mode) never uses the relay: it pushes with its own APNs key only, content-free, with the payload sealed as described here when the phone registered a push key.
+
 ## Who knows what
 
 | | Phone | hub | Relay |

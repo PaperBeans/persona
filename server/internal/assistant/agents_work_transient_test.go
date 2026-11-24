@@ -118,7 +118,7 @@ func TestTransientContinuedWithTriageOff(t *testing.T) {
 		t.Fatal("sent before the backoff")
 	}
 	s.workTick(ctx, time.Now().Add(16*time.Second))
-	if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: 继续" {
+	if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: "+autoContinueTextForTest(continueText) {
 		t.Fatalf("sent %v", got)
 	}
 	if len(s.workCards()) != 0 {
@@ -152,7 +152,7 @@ func TestTransientContinueAllowsHerdrIdleOnlyForOpenTaskAgents(t *testing.T) {
 
 			got := f.sentToAgents()
 			if tc.openTask {
-				if len(got) != 1 || got[0] != "s1: 继续" {
+				if len(got) != 1 || got[0] != "s1: "+autoContinueTextForTest(continueText) {
 					t.Fatalf("open task Agent lost its transient retry: sent %v", got)
 				}
 			} else if len(got) != 0 {

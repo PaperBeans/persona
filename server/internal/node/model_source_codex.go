@@ -84,6 +84,13 @@ func codexModelSource(argv, env []string, cwd, home string) ([]string, []string)
 		// Codex ignores ordinary header overrides for its built-in provider. Keep its authentication/routing intact.
 		return argv, env
 	}
+	// Codex splits a -c key at every "." and takes each part as written, quotes and all: `model_providers."custom"`
+	// is another provider, named `"custom"` with its quotes, that has no name, and Codex 0.171 will not start
+	// (`provider name must not be empty`). So the headers' flags name the provider bare, and one whose id is no bare
+	// key gets none.
+	if !codexBareKey(provider) {
+		return argv, env
+	}
 	providers, _ := config["model_providers"].(map[string]any)
 	selected, _ := providers[provider].(map[string]any)
 	base, _ := selected["base_url"].(string)
@@ -143,7 +150,7 @@ func codexModelSource(argv, env []string, cwd, home string) ([]string, []string)
 	for _, name := range names {
 		entries = append(entries, tomlString(name)+"="+tomlString(bindings[name]))
 	}
-	prefix := "model_providers." + tomlString(provider)
+	prefix := "model_providers." + provider
 	flags := []string{"-c", prefix + ".http_headers={}", "-c", prefix + ".env_http_headers={" + strings.Join(entries, ",") + "}"}
 	// These global options also force a local CLI off a shared daemon, keeping attribution process-specific.
 	at := len(argv)
@@ -155,6 +162,20 @@ func codexModelSource(argv, env []string, cwd, home string) ([]string, []string)
 	}
 	out := append(slices.Clone(argv[:at]), flags...)
 	return append(out, argv[at:]...), env
+}
+
+// codexBareKey: key is a TOML bare key (letters, digits, "_" and "-"), the only kind of part Codex's -c key reads as
+// TOML would.
+func codexBareKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for _, r := range key {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // codexSourceConfig resolves only local configuration layers. It never logs their contents or writes user files.

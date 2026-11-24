@@ -322,7 +322,7 @@ test('an assistant start pi-web has not written yet is refused as delivered noth
 })
 
 test('approvals of configured tools go to the phone when it drives the session; pi\'s dialog otherwise; no answer blocks', async (t) => {
-  const { n, host } = await setup(t, { approve: ['bash'], answerFirst: 'phone' })
+  const { n, host } = await setup(t, { approve: ['bash', 'edit'], answerFirst: 'phone' })
   const a = piSession('s-x')
   host.register(a.pi)
   await a.fire('session_start')
@@ -331,6 +331,13 @@ test('approvals of configured tools go to the phone when it drives the session; 
   n.resolve = () => ({ allow: true })
   assert.equal(await a.fire('tool_call', { toolName: 'bash', toolCallId: 'c1', input: { command: 'rm -rf build' } }), undefined)
   assert.deepEqual([n.asked[0].tool_name, n.asked[0].summary, n.asked[0].tool_input.command], ['Bash', 'rm -rf build', 'rm -rf build'])
+  assert.equal(await a.fire('tool_call', {
+    toolName: 'edit',
+    toolCallId: 'c1m',
+    input: { path: 'a.go', edits: [{ oldText: 'a', newText: 'b' }, { oldText: 'c', newText: 'd' }] },
+  }), undefined)
+  assert.equal(n.asked[1].tool_name, 'MultiEdit')
+  assert.equal(n.asked[1].always_label, '本会话不再问 Edit')
   n.resolve = () => ({ allow: false, message: 'not now' })
   assert.deepEqual(await a.fire('tool_call', { toolName: 'bash', toolCallId: 'c2', input: { command: 'ls' } }), { block: true, reason: 'not now' })
   assert.equal(await a.fire('tool_call', { toolName: 'read', toolCallId: 'c3', input: { path: 'x' } }), undefined, 'tools not listed run as pi runs them')

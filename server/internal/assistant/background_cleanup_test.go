@@ -79,7 +79,7 @@ func drainFleetBackground(t *testing.T, s *Service, cancel context.CancelFunc) {
 	waitFleetBackground(t, "direction tree", &tree.runs)
 	waitFleetBackground(t, "to-do views", &s.tview.runs)
 	waitFleetBackground(t, "screen upgrades", &s.fleet.upgrades)
-	waitFleetBackground(t, "hub transcription", &s.hubTr.wg)
+	recWait(t, s) // the recording module's (hub transcription, questions)
 	waitFleetBackground(t, "work events", &s.work.eventWrites)
 }
 

@@ -192,6 +192,7 @@ func TestBriefFallbackDeduplicatesOccurrenceAcrossRetryAndRestart(t *testing.T) 
 }
 
 func TestBriefNotStartedFallbackDeduplicatesRetryAndRestart(t *testing.T) {
+	needsLarkLayer(t)
 	needsBriefingModule(t)
 	ctx := context.Background()
 	st := &memStore{}
@@ -304,6 +305,7 @@ func TestBriefReportFactsAreFallbackOnly(t *testing.T) {
 // A transient Feishu failure retries the same card with the same UUID while the failed scheduled turn is still last.
 // The fallback itself has no assistant answer, so its retry guard follows that failed turn rather than a synthetic one.
 func TestBriefFallbackFeishuRetryUsesStableCardAndFailedTurn(t *testing.T) {
+	needsLarkLayer(t)
 	oldDelay, oldRetries := feishuMirrorRetry, feishuMirrorRetries
 	feishuMirrorRetry, feishuMirrorRetries = 10*time.Millisecond, 1
 	t.Cleanup(func() { feishuMirrorRetry, feishuMirrorRetries = oldDelay, oldRetries })
@@ -449,6 +451,7 @@ func briefRetryRun(t *testing.T, succeedRetry bool) (*Service, *fakeHub, *briefF
 }
 
 func TestBriefingFailureFallbackIsNotRepeatedByAutomaticRetry(t *testing.T) {
+	needsLarkLayer(t)
 	_, f, capture, _, runs := briefRetryRun(t, false)
 	if got := len(capture.list()); got != 1 {
 		t.Fatalf("failed first turn plus failed retry posted %d fallbacks, want one", got)
@@ -481,6 +484,7 @@ func TestBriefingFailureFallbackIsNotRepeatedByAutomaticRetry(t *testing.T) {
 }
 
 func TestBriefingRetrySuccessSendsNormalCardWithoutRetractingFallback(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, capture, sess, runs := briefRetryRun(t, true)
 	if got := len(f.pushed()); got != 1 {
 		t.Fatalf("the one fallback notification was duplicated or retracted: %+v", f.pushed())

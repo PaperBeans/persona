@@ -60,7 +60,7 @@ import persona.core.contracts.api.MessageTransport
 import persona.core.contracts.api.MessageTransportResult
 import persona.core.contracts.api.OutboxMessage
 import persona.core.contracts.api.SessionsRepository
-import persona.feature.inbox.InboxHandOffRequest
+import persona.core.inbox.InboxHandOffRequest
 
 /** Independent counterexamples for the four recovery boundaries; each uses a different path from its diagnostic test. */
 @OptIn(ExperimentalCoroutinesApi::class)

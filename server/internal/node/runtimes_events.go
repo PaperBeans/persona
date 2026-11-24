@@ -174,6 +174,7 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 		// node's (below), from what a daemon's own node named (daemons.go) when the row names no other.
 		asking := s.AskingParentSessionID()
 		s.SetFold("", "", "", nil)
+		s.SetSubagentProvenance("", "", "")
 		s.SetAskingParentSessionID("")
 		if s.Agent == "" {
 			s.Agent = agent

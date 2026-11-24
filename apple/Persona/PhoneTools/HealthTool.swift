@@ -4,7 +4,7 @@ import PersonaWire
 
 /// `phone_health_summary`: per-day aggregates, one HealthKit collection query
 /// per metric. `phone_health_write_sample`: one sample the user approved on the
-/// phone; nothing is imported in bulk or deleted.
+/// phone; that AI tool never imports in bulk or deletes. Opt-in intake sync has its own HealthKit writer.
 enum HealthTool {
     /// What the summary reads.
     static var readTypes: Set<HKObjectType> {

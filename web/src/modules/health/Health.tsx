@@ -1,5 +1,5 @@
 // "Health" (docs/assistant/health.md, #2691): the health space, apart from Persona's other conversations like ChatGPT's Health. `/health`
-// opens its latest conversation (#4329), or its home when it has none; `/health/new` is its home, the new conversation page
+// opens its home immediately (#13273); `/health/new` is an alias for it, the new conversation page
 // (what it is, where its data comes from, suggested questions, its past conversations, its memory); `/health/<id>` one of its conversations. Its conversations run in a directory of their own on the assistant's machine,
 // so the assistant's other conversations don't see them and its memory is its own (`?space=health`).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -22,7 +22,6 @@ import { conversationTitle, newestFirst } from "../../views/assistant/conversati
 import { HealthReports } from "./HealthReports";
 import { HealthToday } from "./HealthToday";
 import { REPORT_FILES, startHealthConversation, uploadReports } from "./reports";
-import { spaceEntry } from "../../views/spaces/entry";
 import { Empty, SectionTitle } from "../../views/assistant/parts";
 import { t } from "../../i18n";
 
@@ -82,26 +81,12 @@ export function HealthPage({ path, onToggleSidebar }: ModulePageProps) {
   return <Health key={sid ?? (fresh ? "new" : "")} sid={sid} fresh={fresh} onToggleSidebar={onToggleSidebar ?? (() => {})} />;
 }
 
-export function Health({ sid, fresh, onToggleSidebar }: { sid?: string; fresh?: boolean; onToggleSidebar: () => void }) {
+export function Health({ sid, onToggleSidebar }: { sid?: string; fresh?: boolean; onToggleSidebar: () => void }) {
   if (sid) return <HealthConversation sid={sid} onToggleSidebar={onToggleSidebar} />;
-  if (fresh) return <HealthHome onToggleSidebar={onToggleSidebar} />;
-  return <HealthResume />;
+  return <HealthHome onToggleSidebar={onToggleSidebar} />;
 }
 
-/** `/health`, the sidebar's Health (#4329): back to the latest conversation, as Codex does, else the new conversation
- *  page. Either replaces this address, so Back skips it. */
-function HealthResume() {
-  const { list, error } = useHealthConversations();
-  const entry = spaceEntry(list, error);
-  const to = entry.kind === "open" ? entry.sid : entry.kind;
-  useEffect(() => {
-    if (to === "wait") return;
-    navigate(to === "new" ? healthRoute({ fresh: true }) : healthRoute({ sid: to }), true);
-  }, [to]);
-  return <div className="flex h-full items-center justify-center"><Loading /></div>;
-}
-
-/** A health conversation's header (#4329): New opens the new conversation page, the clock the space's past conversations. */
+/** A health conversation's header (#13273): New returns to the home, the clock lists the space's past conversations. */
 function HealthChatActions({ sid, list }: { sid: string; list: Session[] | null }) {
   const menu = useMenu();
   const items = (list ?? []).map((s) => ({
@@ -114,7 +99,7 @@ function HealthChatActions({ sid, list }: { sid: string; list: Session[] | null 
   return (
     <>
       {items.length > 0 && <IconButton icon="clock" label={t("health.history")} onClick={menu.open} active={Boolean(menu.anchor)} />}
-      <IconButton icon="compose" label={t("health.new_chat")} onClick={() => navigate(healthRoute({ fresh: true }))} />
+      <IconButton icon="compose" label={t("health.new_chat")} onClick={() => navigate(healthRoute())} />
       {menu.anchor && <Menu anchor={menu.anchor} onClose={menu.close} align="right" width={320} header={t("health.recent")} items={items} />}
     </>
   );

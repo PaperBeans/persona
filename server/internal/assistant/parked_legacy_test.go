@@ -80,6 +80,9 @@ func legacyPastQuestion(t *testing.T, s *Service, id string, reversible bool) ac
 func TestLegacyOwnerPriorityMovesToNeedsYouAndRestates(t *testing.T) {
 	database := taskRecoveryDatabase(t)
 	s, f, task := newSupervisedServiceOn(t, database)
+	// The restatement is immediate, so holdDigest alone does not keep it in: quiet while the test reads what is
+	// pending, short again for releaseDigest to send it (#14125).
+	quietDigest(s)
 	holdDigest(s)
 	ctx := context.Background()
 	before := legacyOwnerPark(t, s, task.ID)
@@ -115,9 +118,11 @@ func TestLegacyOwnerPriorityMovesToNeedsYouAndRestates(t *testing.T) {
 		t.Fatalf("not handed to the supervisor for a real question: %v", got)
 	}
 	n := len(f.notices())
+	setSuperviseTimings(s, shortSuperviseTimings)
 	releaseDigest(s)
 	waitFor(t, "the legacy question restatement", func() bool { return len(f.notices()) > n })
 	again, _ := restartedOn(t, database)
+	quietDigest(again) // a reissued restatement stays pending, where the check below sees it
 	holdDigest(again)
 	if err := again.ensureTodosLoaded(ctx); err != nil {
 		t.Fatal(err)
@@ -250,6 +255,9 @@ func TestLegacyOwnerPriorityPreservesOwnerDecisions(t *testing.T) {
 		t.Run(when, func(t *testing.T) {
 			database := &ledgerDown{DB: taskRecoveryDatabase(t)}
 			s, _, task := newSupervisedServiceOn(t, database)
+			// Nothing is told before the restart: the settle loop below counts only the restarted manager's messages.
+			// park_decided is immediate, so holdDigest alone does not keep it in (#13987).
+			quietDigest(s)
 			holdDigest(s)
 			ctx := context.Background()
 			legacyOwnerPark(t, s, task.ID)

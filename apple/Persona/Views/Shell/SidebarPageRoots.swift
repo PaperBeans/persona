@@ -37,6 +37,8 @@ enum SidebarPageRoot: Hashable {
             switch route {
             case .health: .health
             case .messages: .messages
+            case .space(let slug): .space(slug)
+            case .newSpace: .newSpace
             }
         default: nil
         }
@@ -142,7 +144,8 @@ extension SidebarPageRoot {
         case .recordings: .page(ShellRoute.recordings)
         case .extensionPage(let r): .page(ShellRoute.extensionPage(r))
         case .messages: .page(SidebarRoute.messages)
-        case .newConversation, .health: nil
+        case .newSpace: .page(SidebarRoute.newSpace)
+        case .newConversation, .health, .space: nil
         }
     }
 }

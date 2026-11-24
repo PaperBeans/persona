@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/larkhost"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
@@ -71,7 +72,7 @@ func (s *Service) retryAcceptance(now time.Time) {
 		return // nothing waits: the bot's status is not even asked for
 	}
 	slices.Sort(due)
-	st, stErr := s.feishuStatus(ctx)
+	st, stErr := s.chat().Status(ctx)
 	quiet := s.quietModeOn(ctx)
 	quietHolds := func(a *acceptAsk) bool { return quiet && !decideAsk(a) } // as quietHoldsAsk, read once for the sweep
 	for _, id := range due {
@@ -122,7 +123,7 @@ func (s *Service) retryAcceptance(now time.Time) {
 		}
 		cp := *a
 		b.mu.Unlock()
-		mid, err := s.botPostKeyed(ctx, "", s.acceptCard(ctx, t, cp, false), askSummary(s.botLang(ctx), &cp), acceptCardKey(id, cp.AskedAt))
+		mid, err := s.chat().Post(ctx, larkhost.Target{}, "", s.acceptCard(ctx, t, cp, false), askSummary(s.botLang(ctx), &cp), acceptCardKey(id, cp.AskedAt))
 		if err != nil {
 			s.logf("task %s: acceptance: %v (tried again on the next tick)", id, err)
 			continue
@@ -142,7 +143,7 @@ func (s *Service) retryAcceptance(now time.Time) {
 		s.saveAcceptLocked(ctx)
 		b.mu.Unlock()
 		if done != nil {
-			if err := s.botUpdateCard(ctx, mid, s.acceptCard(ctx, t, *done, false)); err != nil {
+			if err := s.chat().UpdateCard(ctx, mid, s.acceptCard(ctx, t, *done, false)); err != nil {
 				s.logf("task %s: acceptance card: %v", id, err)
 			}
 		}
@@ -179,7 +180,7 @@ func (s *Service) remindAcceptance(now time.Time) {
 	if len(due) == 0 {
 		return
 	}
-	if f, ready := s.feishuFeatures(ctx); !ready || !f.Reports {
+	if f, ready := s.chat().Features(ctx); !ready || !f.Reports {
 		return
 	}
 	if s.quietModeOn(ctx) {
@@ -211,7 +212,7 @@ func (s *Service) remindAcceptance(now time.Time) {
 		}
 		cp := *a
 		b.mu.Unlock()
-		mid, err := s.botPost(ctx, "", s.acceptCard(ctx, t, cp, true), cp.Changed)
+		mid, err := s.chat().Post(ctx, larkhost.Target{}, "", s.acceptCard(ctx, t, cp, true), cp.Changed, "")
 		if err != nil {
 			s.logf("task %s: acceptance reminder: %v", id, err)
 			return
@@ -229,7 +230,7 @@ func (s *Service) remindAcceptance(now time.Time) {
 		s.saveAcceptLocked(ctx)
 		b.mu.Unlock()
 		if done != nil {
-			if err := s.botUpdateCard(ctx, mid, s.acceptCard(ctx, t, *done, false)); err != nil {
+			if err := s.chat().UpdateCard(ctx, mid, s.acceptCard(ctx, t, *done, false)); err != nil {
 				s.logf("task %s: acceptance card: %v", id, err)
 			}
 		}

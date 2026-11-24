@@ -20,6 +20,31 @@ func (s *Service) promoteSupervision(self string) {
 	}
 }
 
+// quietInternalAcceptedReview uses only the current plan binding and supervision
+// ledger. Unknown provenance fails open as user-visible; titles never participate.
+func (s *Service) quietInternalAcceptedReview(ctx context.Context, todoID string, userCheck bool) bool {
+	if userCheck {
+		return false
+	}
+	t, ok := s.todoNow(todoID)
+	if !ok || t.Supervision == nil {
+		return false
+	}
+	plan, index, err := s.currentPlanAssignment(ctx, t)
+	if err != nil || plan == nil || index < 0 || index >= len(plan.Tasks) {
+		return false
+	}
+	task := plan.Tasks[index]
+	if task.UserRequested {
+		return false
+	}
+	if task.Parent != "" || t.Supervision.Round > 0 {
+		return true
+	}
+	review := t.Supervision.AutoReview
+	return review != nil && review.Round == t.Supervision.Round && (review.State == autoClean || review.State == autoBlocking)
+}
+
 // toolSupervisionFinish records the caller's disposition in its persisted MCP result.
 // The transcript remains intact; clients fold the entire triage turn, not just its input.
 func (s *Service) toolSupervisionFinish(ctx context.Context, self string, args json.RawMessage) (string, error) {

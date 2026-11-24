@@ -203,6 +203,16 @@ struct AssistantModelChoiceTests {
         #expect(AssistantModelChoice.followsDefault(isMain: false, supervisor: false, leader: true, origin: nil))
         #expect(AssistantModelChoice.followsDefault(isMain: false, supervisor: false, leader: false, origin: "task"))
         #expect(!AssistantModelChoice.followsDefault(isMain: false, supervisor: false, leader: false, origin: "manual"))
+        #expect(AssistantModelChoice.defaultRule(isMain: true, supervisor: false, leader: false, origin: nil) == .main)
+        #expect(AssistantModelChoice.defaultRule(isMain: false, supervisor: false, leader: true, origin: nil) == .main)
+        #expect(AssistantModelChoice.defaultRule(isMain: false, supervisor: true, leader: false, origin: nil) == .supervise)
+        #expect(AssistantModelChoice.defaultRule(isMain: false, supervisor: false, leader: false, origin: "manual") == .own)
+    }
+
+    @Test func everyAssistantConversationCanPickWithoutChangingTheOlderHubGate() {
+        #expect(AssistantModelChoice.pickerAvailable(assistant: true, keepsPick: true))
+        #expect(!AssistantModelChoice.pickerAvailable(assistant: false, keepsPick: true))
+        #expect(!AssistantModelChoice.pickerAvailable(assistant: true, keepsPick: false))
     }
 
     @Test func foldedAliasesTickTheConcreteRowAndMakeItANoOp() {
@@ -281,6 +291,38 @@ struct AssistantModelChoiceTests {
         #expect(AssistantModelChoice.sessionEngine(session) == "codex")
         #expect(AssistantModelChoice.isOtherEngine(sessionAgent: AssistantModelChoice.sessionEngine(session),
                                                    launcherAgent: "claude"))
+    }
+
+    @Test func explicitSwitchRecognizesOtherEnginesAndRuntimeConnectionIdentity() throws {
+        let claude = try JSON.decoder.decode(Session.self, from: Data(
+            #"{"machine_id":"box","session_id":"s1","launcher":"claude","agent":"claude"}"#.utf8))
+        let agy = Launcher(name: "agy", model: nil, agent: "antigravity", source: "path")
+        #expect(AssistantModelChoice.switchNeeded(session: claude, target: agy))
+        #expect(!AssistantModelChoice.switchNeeded(
+            session: claude, target: Launcher(name: "other-claude", model: nil, agent: "claude", source: "zshrc")))
+
+        let hosted = Launcher(name: "hosted-claude", model: nil, agent: "claude", source: "runtime-one")
+        #expect(AssistantModelChoice.switchNeeded(session: claude, target: hosted))
+        let runtime = try JSON.decoder.decode(Session.self, from: Data(
+            #"{"machine_id":"box","session_id":"s2","launcher":"old","agent":"claude","source_kind":"runtime","source_instance_id":"runtime-one"}"#.utf8))
+        #expect(!AssistantModelChoice.switchNeeded(session: runtime, target: hosted))
+        #expect(AssistantModelChoice.switchNeeded(
+            session: runtime, target: Launcher(name: "hosted-elsewhere", model: nil, agent: "claude", source: "runtime-two")))
+    }
+
+    @Test func explicitSwitchUsesPaseoProvidersAndExtensionConnectionIDs() throws {
+        let paseo = try JSON.decoder.decode(Session.self, from: Data(
+            #"{"machine_id":"box","session_id":"s3","launcher":"grok","agent":"paseo"}"#.utf8))
+        let cursor = Launcher(name: "cursor", model: nil, agent: "paseo", source: "runtime-one")
+        #expect(AssistantModelChoice.sessionEngine(paseo) == "grok")
+        #expect(AssistantModelChoice.switchNeeded(session: paseo, target: cursor))
+        #expect(!AssistantModelChoice.switchNeeded(
+            session: paseo, target: Launcher(name: "grok", model: nil, agent: "paseo", source: "runtime-one")))
+
+        let extensionSession = try JSON.decoder.decode(Session.self, from: Data(
+            #"{"machine_id":"box","session_id":"s4","launcher":"persona_ext_first","agent":"claude"}"#.utf8))
+        #expect(AssistantModelChoice.switchNeeded(
+            session: extensionSession, target: Launcher(name: "persona_ext_second", model: nil, agent: "claude", source: "persona")))
     }
 
     // MARK: Display name
@@ -425,6 +467,24 @@ struct AssistantModelChoiceTests {
         #expect(try await model.launchers(machine).first?.model == "runtime-model")
         #expect(try await model.assistantLaunchers(machine).launchers.first?.model == "shell-model")
         #expect(hub.sent("GET", path).map(\.query) == [[:], ["purpose": "assistant"]])
+    }
+
+    @Test func supervisorLauncherPurposeHasItsOwnCacheEntry() async throws {
+        let hub = FakeHub()
+        let path = "/api/v1/machines/box/launchers"
+        hub.on("GET", path) { request in
+            let name = request.query["purpose"] == "assistant.supervise" ? "supervisor-model" : "main-model"
+            return Data("{\"launchers\":[{\"name\":\"team\",\"model\":\"\(name)\"}]}".utf8)
+        }
+        let model = AppModel()
+        model.apiForTests = hub.client
+        let machine = MachineRef(id: "box")
+
+        #expect(try await model.assistantLaunchers(machine).launchers.first?.model == "main-model")
+        #expect(try await model.assistantLaunchers(machine, purpose: "assistant.supervise").launchers.first?.model == "supervisor-model")
+        #expect(try await model.assistantLaunchers(machine).launchers.first?.model == "main-model")
+        #expect(model.cachedAssistantLaunchers(machine, purpose: "assistant.supervise")?.launchers.first?.model == "supervisor-model")
+        #expect(hub.sent("GET", path).map(\.query) == [["purpose": "assistant"], ["purpose": "assistant.supervise"]])
     }
 
     @Test func anExplicitAssistantCapabilityWinsOverAgentKind() {

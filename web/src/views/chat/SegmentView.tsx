@@ -1,4 +1,5 @@
 import { type CSSProperties, Fragment, lazy, memo, type ReactNode, Suspense, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { clock } from "../../lib/format";
 import type { stripCloseout as stripCloseoutText } from "../../lib/closeout-text";
 import { useCloseoutReader } from "./closeout-chunks";
@@ -7,7 +8,7 @@ import { withChildSessions } from "../../lib/child-cards";
 import { agentStatus, isNestedSubagentStep, nestedSubagentStatus, nestingKey, subagentFor, withNestedSubagents } from "../../lib/tasks";
 import { turnImages } from "../../lib/turn-images";
 import { TurnImages } from "./TurnImages";
-import { exchangeSteps, segmentIdentity, isLoopTick, isOwnMessage, type Context, type Segment, type UserMessage } from "../../lib/turns";
+import { exchangeSteps, segmentIdentity, isLoopTick, isOwnMessage, toolChip, type Context, type Segment, type UserMessage } from "../../lib/turns";
 import { usageKey } from "../../lib/turn-usage";
 import type { Item } from "../../lib/types";
 import { ENGINE_SWITCH_KIND } from "../../lib/engine-switch";
@@ -48,6 +49,8 @@ import type { Step } from "../../lib/turns";
 import { useCallSeeker } from "./jump";
 import { t } from "../../i18n";
 import { useMessageFeedback } from "../../lib/message-send";
+import { segmentItemIds } from "../../lib/chat-search";
+import { useReveal } from "./search-reveal";
 
 // a finished reply's Sources row (#9132): its chunk loads only for a turn that looked something up on the web
 const TurnSources = lazy(() => import("./TurnSources").then((m) => ({ default: m.TurnSources })));
@@ -340,8 +343,17 @@ export const SegmentView = memo(function SegmentView({
   /** The dock owns the live turn's elapsed clock; finished exchanges never receive this state. */
   dockTurnClock?: boolean;
 }) {
-  const { subagents, tasks, scope, workflowCalls = NO_WORKFLOW_CALLS, lineStyle, closeoutSegment, children } = useChatContext();
+  const { subagents, tasks, scope, workflowCalls = NO_WORKFLOW_CALLS, lineStyle, closeoutSegment, children, windowHistory, windowDrawn } = useChatContext();
   const own = useMemo(() => exchangeSteps(seg), [seg]);
+  // A long chat creates every section and its estimate up front, but not every rich body. Once drawn (including while it
+  // was live or among the final two) an exchange stays mounted: scrolling cannot throw away a menu, focus or selection.
+  const defer = offscreen && windowHistory && typeof IntersectionObserver !== "undefined";
+  const revealIds = useMemo(() => segmentItemIds(seg), [seg]);
+  const revealed = useReveal(scope, revealIds, () => {});
+  const [near, setNear] = useState(false);
+  const kept = useRef(!defer);
+  if (!defer || revealed) kept.current = true;
+  const mounted = kept.current || near;
   // the subagents its subagents launched, each a card of its own by when it started (#5030); a trace shows the calls only.
   // Keyed by what places them, not the list: that changes with every subagent's tokens and steps.
   const nesting = trace ? "" : nestingKey(subagents);
@@ -387,6 +399,20 @@ export const SegmentView = memo(function SegmentView({
   const box = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     const el = box.current;
+    if (!defer || mounted || !el) return;
+    const nearView = new IntersectionObserver((entries) => {
+      if (!entries[0]?.isIntersecting) return;
+      const was = el.getBoundingClientRect().height;
+      // Commit and compensate with the observer's frame: a deferred update would move the rows below first and let
+      // ResizeObserver correct them a frame later. ChatView advances its baseline, so this is not applied twice.
+      flushSync(() => setNear(true));
+      windowDrawn?.(el, was);
+    }, { root: el.closest<HTMLElement>("[data-chat-scroll]"), rootMargin: "100% 0px" });
+    nearView.observe(el);
+    return () => nearView.disconnect();
+  }, [defer, mounted, windowDrawn]);
+  useLayoutEffect(() => {
+    const el = box.current;
     return offscreen && el ? offscreen(el) : undefined;
   }, [offscreen]);
   const divided = Boolean(seg.modelChange);
@@ -405,8 +431,18 @@ export const SegmentView = memo(function SegmentView({
   const usageMs = groups.length === 1 ? groups[0].durationMs : undefined;
   const switched = Boolean(seg.engineSwitch);
   const guess = useMemo(() => (offscreen ? ({ "--seg-est": `${segmentHeight(seg.user, nodes, divided, switched) + (changes ? 12 + turnChangesHeight(changes) : 0) + (sourced ? 14 + SOURCES_HEIGHT : 0)}px` } as CSSProperties) : undefined), [offscreen, seg.user, nodes, divided, switched, changes, sourced]);
+  // Native browser find can still land on the raw words (content-visibility keeps them searchable); the observer then
+  // mounts their rich representation. In-chat search uses `revealed` above and goes straight to the exact item instead.
+  // The placeholder holds the section's estimate too: otherwise Chrome caches its shorter raw-text height in
+  // `contain-intrinsic-block-size: auto`, and the later rich mount starts from a different height than the old body did.
+  const placeholder = useMemo(() => {
+    if (mounted) return "";
+    const user = trace && seg.user?.rawInput ? seg.user.rawInput.map((i) => i.text) : [seg.user?.text, ...(seg.user?.contexts.map((c) => c.text) ?? [])];
+    return [...user, ...own.flatMap((s) => s.kind === "tool" ? [toolChip(s.use), s.result?.text] : [s.item.text])].filter(Boolean).join("\n");
+  }, [mounted, own, seg.user, trace]);
   return (
     <section ref={box} className={offscreen ? "seg-cv flex flex-col gap-3.5" : "flex flex-col gap-3.5"} style={guess} data-segment>
+      {mounted ? <Fragment>
       {/* the first message the conversation's new engine got (#5054): the switch divider above it, the user's words below */}
       {seg.engineSwitch && <EngineSwitchDivider sw={seg.engineSwitch} id={seg.id} item={switchItem(seg)} mid={mid} sid={sid} />}
       {trace && seg.user?.rawInput && !seg.user.promptHidden && !seg.user.sourceInTrace ? <RawInjectedInput items={seg.user.rawInput} mid={mid} sid={sid} /> : seg.user && (seg.user.source ? <SourceMessage msg={seg.user} mid={mid} sid={sid} /> : seg.user.injected ? <InjectedHint msg={seg.user} sid={sid} /> : seg.user.parts ? <MergedBubble msg={seg.user} mid={mid} sid={sid} /> : seg.user.from ? <PeerMessage msg={seg.user} /> : isLoopTick(seg.user) ? <LoopTick msg={seg.user} /> : <UserBubble msg={seg.user} mid={mid} sid={sid} />)}
@@ -421,6 +457,7 @@ export const SegmentView = memo(function SegmentView({
       {(latestItem || streaming !== undefined) && <Suspense key="latest-text" fallback={null}><LatestAnswer item={streaming === undefined ? latestItem : undefined} streaming={streaming} mid={mid} sid={sid} noCloseout={noCloseout || undefined} done={(!live && !busy) || undefined} cut={(!live && seg.cut) || undefined} usage={usage} usageMs={usageMs} ttftMs={!live && !trace ? seg.ttftMs : undefined} /></Suspense>}
       {sourced && <Suspense key="turn-sources" fallback={null}><TurnSources steps={own} /></Suspense>}
       {changes && <TurnChanges key="turn-changes" changes={changes} mid={mid} sid={sid} cwd={cwd} />}
+      </Fragment> : <div className="whitespace-pre-wrap" style={{ blockSize: "var(--seg-est)" }} data-segment-placeholder>{placeholder}</div>}
     </section>
   );
 });

@@ -40,10 +40,16 @@ type AgentsConfig struct {
 
 // A2AConfig defaults to the manager's confirmed personal computers. A supplied
 // list narrows that scope. PublicURL enables the authenticated HTTP interface.
+// Launch defaults to enabled (nil or true) within the allowed machine scope;
+// set Launch to false to keep A2A messaging while disabling new session launches.
 type A2AConfig struct {
 	Machines  []string `json:"machines,omitzero"`
 	PublicURL string   `json:"public_url,omitempty"`
+	Launch    *bool    `json:"launch,omitempty"`
 }
+
+// LaunchAllowed reports whether A2A may start new subagent sessions in scope (default true).
+func (c A2AConfig) LaunchAllowed() bool { return c.Launch == nil || *c.Launch }
 
 const ScopeA2A = "agents.a2a"
 

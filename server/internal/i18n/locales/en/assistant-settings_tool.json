@@ -1,4 +1,8 @@
 {
+  "title_modules": "Built-in modules",
+  "change_modules": "Built-in modules: {before} → {after}. Applies at the next manager start; the running process is unchanged.",
+  "modules_unchanged": "The built-in module switch is unchanged.",
+  "modules_saved": "Built-in module switch saved as {after}. It applies at the next manager start; the running process is unchanged.",
   "title_readonly_mode": "Read-only task protection",
   "change_readonly_mode": "Read-only task protection: {before} -> {after}. sandbox keeps existing runtime protection (Codex uses a read-only sandbox; Claude uses instructions). prompt uses instructions only, not a security boundary; normal runtime permissions still apply. Applies to new task starts and retries, not running agents. Switch back to sandbox to restore the default.",
   "title_task_workspace_preference": "Task workspace preference",

@@ -40,9 +40,25 @@ describe("SPACE.md parts", () => {
     expect(assembleSpaceMd(parts, { 0: "Family notes" })).toBe(`Family notes\n\n${STATE}`);
   });
 
+  it("keeps a block's end marker on a line of its own before an edited field right after it", () => {
+    const { parts } = editableParts(splitSpaceMd(`${STATE}\n\nAfter notes.\n`));
+    expect(assembleSpaceMd(parts, { 1: "Updated notes" })).toBe(`${STATE}\n\nUpdated notes`);
+  });
+
+  it("treats blocks with uppercase or dotted names as managed just like the node validator", () => {
+    const ext = "<!-- persona:managed:ext.Notes_1:begin -->\nSynced summary.\n<!-- persona:managed:ext.Notes_1:end -->";
+    const file = `Intro\n\n${ext}\n`;
+    const parts = splitSpaceMd(file);
+    expect(parts.map((p) => p.kind)).toEqual(["human", "managed", "human"]);
+    expect(parts[1]).toMatchObject({ kind: "managed", name: "ext.Notes_1", body: "\nSynced summary.\n" });
+    expect(humanSpaceMd(file)).toBe("Intro");
+  });
+
   it("notices a block changed or a marker typed into a field", () => {
     expect(sameManagedBlocks(FILE, FILE.replace("refund", "check"))).toBe(false);
     expect(sameManagedBlocks(FILE, `<!-- persona:managed:state:begin -->x<!-- persona:managed:state:end -->${FILE}`)).toBe(false);
+    expect(sameManagedBlocks(FILE, `${FILE}\n<!-- persona:managed:state:end -->\n`)).toBe(false);
+    expect(sameManagedBlocks(FILE, `<!-- persona:managed:state:end -->\n${FILE}`)).toBe(false);
     expect(sameManagedBlocks(FILE, FILE.replace(STATE, ""))).toBe(false);
   });
 });

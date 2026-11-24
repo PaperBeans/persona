@@ -1530,3 +1530,14 @@ keeps the old way-back strip, so read the current entry when the revision change
 a replace, not a push, so it cannot add a duplicate history entry.
 
 - A standalone Vite component screenshot fixture still needs the production language-catalog and page-token plugins, plus the text-scale PostCSS transform. Loading the raw locale metadata as a catalog fails before React renders. Initialize localization before importing the component and capture browser page errors so a missing table reports its initialization error instead of only a selector timeout.
+
+## Two projections of one tree need one flat rule (#13454)
+
+By repo builds a repository's rows two ways: from the hosts' workspace catalog, and from sessions alone where no host
+lists the place. The session-only projection drew a lone main checkout flat (`showsWorktreeLevel`), but a catalog
+workspace always kept its level, so a folder with a herdr workspace read `notes › notes › Agents` while the same folder
+without one read `notes › Agents`; every Agent row under it then ended with `<repository> › <tree>`, a third copy of
+the headings' names. Give both projections the same rule: a level that only repeats its heading's name is left out, and
+the heading takes the row's marks and menu. A host that does not say which workspace is the main checkout (herdr has no
+`is_main`) leaves it to the folder, the workspace at the repository's own folder, and that guess may only mark and
+order the tree: actions keep reading what the host said.

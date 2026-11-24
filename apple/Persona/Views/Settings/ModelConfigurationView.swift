@@ -157,6 +157,10 @@ struct ModelPurposeEditorView: View {
                             .accessibilityIdentifier("model-config-inheritance")
                     }
                     LabeledContent("Model [Assistant View c98e11]", value: page.modelSummary(purpose))
+                    if let mode = page.permissionModeInEffect {
+                        LabeledContent("Permissions", value: SessionModes.mode(mode)?.title ?? SessionModes.listedOption(mode).title)
+                            .accessibilityIdentifier("model-config-permission-in-effect")
+                    }
                     if let limit = purpose.limit {
                         ModelLimitLine(limit: limit, font: Theme.Font.label)
                     } else if let status = purpose.status, !status.isEmpty {
@@ -203,11 +207,28 @@ struct ModelPurposeEditorView: View {
                         .lineLimit(1)
                         .accessibilityIdentifier("model-config-effort")
                     }
+                    if !page.permissionModes.isEmpty {
+                        Picker(page.isInboxAgent ? String(localized: "Inbox Permissions") : String(localized: "Permissions"),
+                               selection: optional(\.permissionMode)) {
+                            Text(page.permissionModeDefaultLabel).tag("")
+                            ForEach(page.permissionModes) { Text($0.title).tag($0.id) }
+                            if let mode = page.draft.permissionMode, !page.permissionModes.contains(where: { $0.id == mode }) {
+                                Text(SessionModes.listedOption(mode).title).tag(mode)
+                            }
+                        }
+                        .lineLimit(1)
+                        .accessibilityIdentifier("model-config-permission")
+                    }
                 } header: {
                     Text("Model Settings [Model Configuration View 082a73]")
                 } footer: {
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
                         Text("Changes take effect from the next run. Current tasks aren't interrupted and past data isn't reprocessed. Permission settings don't change with the model.")
+                        if let hint = page.permissionModeHint {
+                            Text(hint)
+                                .foregroundStyle(page.draft.permissionMode == "bypassPermissions" ? Theme.danger : .secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         if let note = Self.defaultAssistantNote(owner: owner, model: model) {
                             Text(note)
                         }

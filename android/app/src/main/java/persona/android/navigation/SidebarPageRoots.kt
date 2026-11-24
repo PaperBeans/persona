@@ -20,8 +20,8 @@ import persona.core.navigation.TerminalRoute
 import persona.core.navigation.TodoDetailRoute
 import persona.core.navigation.TodosRoute
 import persona.feature.assistant.AssistantSidebarShade
-import persona.feature.knowledge.KnowledgeKindRoute
-import persona.feature.knowledge.KnowledgeRoute
+import persona.core.navigation.KnowledgeKindRoute
+import persona.core.navigation.KnowledgeRoute
 
 /**
  * The roots of the Assistant page beside the sidebar column, and the drill-down each was left with (#9667, iOS #8359).

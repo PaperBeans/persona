@@ -1294,8 +1294,8 @@
       ]
     },
     {
-      "name": "a_routed_terminal_question_still_counts",
-      "description": "A parsed terminal question that went to its task's supervisor (delegating, kind screen) still counts, and so does the terminal dialog behind it: D11's case for routed terminal questions waits for the owner's confirmation (docs/plans/plan-derived-counts.md, 6.1).",
+      "name": "a_routed_terminal_question_is_held",
+      "description": "A parsed terminal question that went to its task's supervisor (delegating, kind screen) is the supervisor's until it passes it up with ask_escalate: the card is in no row and its session, whose needs_you comes only from the terminal dialog behind it, is no row either, so nothing lists or counts it. The owner confirmed D11's case for routed terminal questions on 2026-11-23 (docs/plans/plan-derived-counts.md, 6.1).",
       "input": {
         "sessions": [
           {
@@ -1347,29 +1347,163 @@
         "quiet": []
       },
       "expected": {
+        "rows": [],
+        "badge_rows": [],
+        "badge": 0,
+        "header": 0
+      },
+      "known_differences": {
+        "android": {
+          "decision": "D11",
+          "why": "Android reads no delegating: a card its task's supervisor holds is listed under its session and the session counts, so the badge, the header and the filter count it.",
+          "source": [
+            "android/core/domain/src/main/kotlin/persona/core/domain/sort/AgentsNeedsYou.kt needsYouRows",
+            "android/core/domain/src/main/kotlin/persona/core/domain/sort/AgentsNeedsYou.kt needsYouBadgeRows",
+            "android/app/src/main/java/persona/android/ui/ShellCounts.kt agentRows",
+            "android/feature/agents/src/main/kotlin/persona/feature/agents/AgentsListInfo.kt agentNeedsYouRows",
+            "docs/plans/plan-derived-counts.md 6.1, D11"
+          ],
+          "replace": {
+            "rows": [
+              {
+                "id": "agent:studio/t",
+                "cards": [
+                  "ix-terminal"
+                ]
+              }
+            ],
+            "badge_rows": [
+              {
+                "id": "agent:studio/t",
+                "cards": [
+                  "ix-terminal"
+                ]
+              }
+            ],
+            "badge": 1,
+            "header": 1
+          }
+        }
+      },
+      "source": [
+        "server/internal/assistant/ask_route.go routeAsk, askLadder, askTick",
+        "apple/Shared/Models.swift Interaction.supervisorHeld",
+        "apple/Persona/Views/Chats/AgentsNeedsYouRows.swift AgentsNeedsYou.rows",
+        "android/core/domain/src/main/kotlin/persona/core/domain/sort/AgentsNeedsYou.kt needsYouRows",
+        "docs/plans/plan-derived-counts.md 6.1, D11"
+      ]
+    },
+    {
+      "name": "a_supervisor_held_card_beside_an_open_one_leaves_the_row",
+      "description": "A permission its task's supervisor holds (delegating, kind permission) is in no row, while a question already handed to the user in the same session still makes it wait: the session is one row with the question alone, and it counts once.",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "p",
+            "title": "Clean the build folder",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-held-permission",
+            "machine_id": "studio",
+            "session_id": "p",
+            "kind": "permission",
+            "created_at": "2026-11-10T08:00:00Z",
+            "tool_name": "Bash",
+            "summary": "rmdir build",
+            "delegating": true
+          },
+          {
+            "id": "ix-asked",
+            "machine_id": "studio",
+            "session_id": "p",
+            "kind": "question",
+            "created_at": "2026-11-10T08:01:00Z",
+            "questions": [
+              {
+                "question": "Which port should the demo use?",
+                "options": [
+                  {
+                    "label": "8080"
+                  },
+                  {
+                    "label": "9090"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
         "rows": [
           {
-            "id": "agent:studio/t",
+            "id": "agent:studio/p",
             "cards": [
-              "ix-terminal"
+              "ix-asked"
             ]
           }
         ],
         "badge_rows": [
           {
-            "id": "agent:studio/t",
+            "id": "agent:studio/p",
             "cards": [
-              "ix-terminal"
+              "ix-asked"
             ]
           }
         ],
         "badge": 1,
         "header": 1
       },
+      "known_differences": {
+        "android": {
+          "decision": "D11",
+          "why": "Android reads no delegating: the permission its task's supervisor holds sits in the session's row beside the question.",
+          "source": [
+            "android/core/domain/src/main/kotlin/persona/core/domain/sort/AgentsNeedsYou.kt needsYouRows",
+            "android/core/domain/src/main/kotlin/persona/core/domain/sort/AgentsNeedsYou.kt needsYouBadgeRows",
+            "android/app/src/main/java/persona/android/ui/ShellCounts.kt agentRows",
+            "android/feature/agents/src/main/kotlin/persona/feature/agents/AgentsListInfo.kt agentNeedsYouRows",
+            "docs/plans/plan-derived-counts.md 6.1, D11"
+          ],
+          "replace": {
+            "rows": [
+              {
+                "id": "agent:studio/p",
+                "cards": [
+                  "ix-held-permission",
+                  "ix-asked"
+                ]
+              }
+            ],
+            "badge_rows": [
+              {
+                "id": "agent:studio/p",
+                "cards": [
+                  "ix-held-permission",
+                  "ix-asked"
+                ]
+              }
+            ]
+          }
+        }
+      },
       "source": [
-        "server/internal/assistant/ask_route.go askLadder, askTick",
+        "server/internal/assistant/ask_route.go routeAsk",
+        "apple/Shared/Models.swift Interaction.supervisorHeld",
         "apple/Persona/Views/Chats/AgentsNeedsYouRows.swift AgentsNeedsYou.rows",
-        "android/core/domain/src/main/kotlin/persona/core/domain/sort/AgentsNeedsYou.kt needsYouBadgeRows",
         "docs/plans/plan-derived-counts.md 6.1, D11"
       ]
     },

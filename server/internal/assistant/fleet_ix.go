@@ -1468,6 +1468,9 @@ func (s *Service) NodeDetached(machine string) {
 		return
 	}
 	s.cancelMachineInteractions(machine)
+	if s.devs != nil && !s.devs.Has(machine) {
+		s.pruneRemovedFoldMachines()
+	}
 	s.sessionsChanged(machine)
 	s.directionTreeSessions(DeviceSessions{MachineID: machine}) // a direction's session there now has its computer offline
 }

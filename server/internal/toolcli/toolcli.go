@@ -226,7 +226,7 @@ func commandLine(ctx context.Context, args []string, stdin io.Reader, stdout, st
 			if *p.Exit == exitOK {
 				fmt.Fprintln(stderr, strings.TrimRight(p.Stderr, "\n"))
 			} else {
-				return out.fail(*p.Exit, p.Stderr, 0)
+				return out.fail(*p.Exit, strings.TrimRight(p.Stderr, "\n"), 0)
 			}
 		}
 		return *p.Exit
@@ -304,7 +304,11 @@ func (f failer) fail(code int, msg string, retry int) int {
 		fmt.Fprintln(f.stderr, f.name+": "+msg)
 		return code
 	}
-	out := map[string]any{"error": msg, "kind": kinds[code]}
+	kind := kinds[code]
+	if kind == "" {
+		kind = "failed"
+	}
+	out := map[string]any{"error": msg, "kind": kind}
 	if retry > 0 {
 		out["retry_after"] = retry
 	}

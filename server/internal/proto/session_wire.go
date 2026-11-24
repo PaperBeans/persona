@@ -41,7 +41,7 @@ const (
 
 // hierarchyWireLayout is the layout hash of SessionHierarchy and SessionChildren, whose members appendSession writes
 // on the row: while either differs, appendSession leaves every session to the reflect encoder, as for sessionWireLayout.
-const hierarchyWireLayout = 0xec57eb10ec16d2c2
+const hierarchyWireLayout = 0xcbafbe8c1840ae26
 
 // hierarchyLayout hashes SessionHierarchy's fields, then SessionChildren's.
 func hierarchyLayout() uint64 {
@@ -296,8 +296,12 @@ func appendSession(b []byte, s *Session) ([]byte, bool) {
 		w.str(`"creation_id":`, h.CreationID, true)
 		w.str(`"asking_parent_session_id":`, h.AskingParentSessionID, true)
 		w.str(`"folded_under":`, h.FoldedUnder, true)
+		w.str(`"folded_under_machine_id":`, h.FoldedUnderMachineID, true)
 		w.str(`"folded_as":`, h.FoldedAs, true)
 		w.str(`"folded_side":`, h.FoldedSide, true)
+		w.str(`"parent_machine_id":`, h.ParentMachineID, true)
+		w.str(`"a2a_task_id":`, h.A2ATaskID, true)
+		w.str(`"subagent_origin":`, h.SubagentOrigin, true)
 		if c := h.Children; c != nil {
 			w.key(`"children":`)
 			w.open()

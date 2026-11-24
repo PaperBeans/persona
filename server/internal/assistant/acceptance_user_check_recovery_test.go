@@ -147,6 +147,7 @@ func TestUserCheckAlreadyReopenedKeepsWorkingAfterRestart(t *testing.T) {
 }
 
 func TestUserCheckPassWaitsForItsOwnRound(t *testing.T) {
+	needsLarkLayer(t)
 	for _, source := range []string{"web button", "card reply", "recovery sweep"} {
 		t.Run(source, func(t *testing.T) {
 			ctx := t.Context()

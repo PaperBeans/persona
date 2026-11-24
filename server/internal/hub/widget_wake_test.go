@@ -13,6 +13,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/pushcrypto"
 	"github.com/nwverse/persona/server/internal/relayproto"
 )
@@ -126,13 +127,16 @@ func TestWidgetWakePushes(t *testing.T) {
 		clock = clock.Add(widgetGap - time.Second)
 		h.live.wakeWidgets(h.live.shownState)
 		checkWakes(4)
-		// An open phone gets the live invalidation and does not need a silent wake.
-		phone := &client{phone: true, pushDevice: "phone"}
+		// An open phone gets the live invalidation and does not need a silent wake. The change comes the way the hub
+		// gets one (relayBroadcastFrom): the app is sent the event, so it is what the app shows when it leaves.
+		phone := &client{phone: true, pushDevice: "phone", out: make(chan []byte, 8)}
 		h.mu.Lock()
 		h.clients[phone] = struct{}{}
 		h.mu.Unlock()
 		clock = clock.Add(widgetGap)
-		h.live.intakeChanged()
+		if err := h.relayBroadcastFrom(assistantwire.AssistantID, json.RawMessage(`{"type":"health_intake"}`)); err != nil {
+			t.Fatal(err)
+		}
 		h.live.wakeWidgets(h.live.shownState)
 		checkWakes(4)
 		h.live.phoneLeft("phone", true)
@@ -190,4 +194,68 @@ func (s *widgetWakeSink) count(device string) int {
 		}
 	}
 	return n
+}
+
+// An open phone writes its widgets from the health_intake events it is sent. When an intake change from elsewhere
+// has moved the revision but the relay has not sent the phone the event yet, and the app goes to the background in
+// that moment, its widgets still show the older revision: the next wake after widgetGap must not be held back (#13275).
+func TestWidgetWakeIntakeNotSentBeforePhoneLeft(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newTestHub(t)
+		key, err := ecdh.P256().GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sink := &widgetWakeSink{key: key}
+		h.push.relay = &http.Client{Transport: sink}
+		if err := h.push.register(Device{DeviceID: "phone", Name: "phone", APNSToken: "phone-token", Topic: "app.example",
+			PushKey: base64.StdEncoding.EncodeToString(key.PublicKey().Bytes()), RelayURL: "https://relay.example",
+			RelayGrant: "grant-phone"}); err != nil {
+			t.Fatal(err)
+		}
+		prefs := devicePrefs(nil)
+		prefs.Widgets = true
+		if err := h.push.setPrefsBy("phone", "", prefs); err != nil {
+			t.Fatal(err)
+		}
+		clock := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
+		h.live.now = func() time.Time { return clock }
+		open := func() *client {
+			c := &client{phone: true, pushDevice: "phone", out: make(chan []byte, 8)}
+			h.mu.Lock()
+			h.clients[c] = struct{}{}
+			h.mu.Unlock()
+			return c
+		}
+		leave := func(c *client) {
+			h.mu.Lock()
+			delete(h.clients, c)
+			h.mu.Unlock()
+			h.live.phoneLeft("phone", true)
+		}
+
+		// Sent the event while open: the revision it wrote as it left needs no wake.
+		phone := open()
+		if err := h.relayBroadcastFrom(assistantwire.AssistantID, json.RawMessage(`{"type":"health_intake"}`)); err != nil {
+			t.Fatal(err)
+		}
+		leave(phone)
+		clock = clock.Add(widgetGap)
+		h.live.wakeWidgets(h.live.shownState)
+		synctest.Wait()
+		if got := sink.count("phone"); got != 0 {
+			t.Fatalf("woken %d times for the revision the app was sent", got)
+		}
+
+		// The revision moved (intakeChanged runs before the relay sends the event) and the app left before it was sent.
+		phone = open()
+		h.live.intakeChanged()
+		leave(phone)
+		clock = clock.Add(widgetGap)
+		h.live.wakeWidgets(h.live.shownState)
+		synctest.Wait()
+		if got := sink.count("phone"); got != 1 {
+			t.Fatalf("widgets woken %d times after the app left before the revision was sent, want 1", got)
+		}
+	})
 }

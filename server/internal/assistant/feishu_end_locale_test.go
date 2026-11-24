@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -24,7 +24,7 @@ func TestFeishuEndCardLocales(t *testing.T) {
 			t.Run(string(lang)+"/"+name, func(t *testing.T) {
 				want := i18n.T(lang, "assistant-feishu.end_"+name)
 				foot := endFoot(lang, "Persona", time.Second, 1, true, end)
-				c := feishubot.NewCard("", "", foot).Note(foot)
+				c := botcard.NewCard("", "", foot).Note(foot)
 				endHeader(lang, c, end)
 				if strings.Contains(c.JSON(), "assistant-feishu.") || !strings.HasPrefix(foot, want+" · ") {
 					t.Fatalf("unlocalized ending: %s", c.JSON())
@@ -70,7 +70,7 @@ func TestFeishuUnrelatedEndUpdatesLocalizedProgress(t *testing.T) {
 				t.Fatalf("ending sent a new answer instead of updating the existing card: %v", post)
 			}
 			card, _ := post["card"].(string)
-			var got feishubot.Card
+			var got botcard.Card
 			if err := json.Unmarshal([]byte(card), &got); err != nil {
 				t.Fatal(err)
 			}

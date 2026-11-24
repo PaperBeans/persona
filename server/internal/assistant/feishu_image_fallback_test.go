@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -160,9 +160,9 @@ func TestFeishuImageFailureMessages(t *testing.T) {
 				}
 				return nil, errors.New("synthetic failure")
 			})
-			ev := &feishubot.MessageEvent{}
+			ev := &botcard.MessageEvent{}
 			ev.Message.MessageID, ev.Message.ChatType = "om_image", "p2p"
-			content := feishubot.ParseContent("image", `{"image_key":"img_failure"}`, nil)
+			content := botcard.ParseContent("image", `{"image_key":"img_failure"}`, nil)
 			err := s.botSend(context.Background(), ev, content, botTarget{Kind: targetMain})
 			rt, resolveErr := s.resolveBotTarget(context.Background(), botTarget{Kind: targetMain})
 			if resolveErr != nil {
@@ -200,7 +200,7 @@ func TestFeishuQuotedImageFileFallback(t *testing.T) {
 		return map[string]any{"path": "/tmp/img_q.webp", "name": "img_q.webp", "mime": "image/webp"}, nil
 	})
 	ev := quoteReply()
-	content := feishubot.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
+	content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
 	if err := s.botSend(context.Background(), ev, content, botTarget{Kind: targetMain}); err != nil {
 		t.Fatal(err)
 	}

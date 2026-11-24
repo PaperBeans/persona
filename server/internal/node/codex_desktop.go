@@ -543,12 +543,23 @@ type codexOrigin struct {
 	sub  bool
 	// guardian: an approval review, a subagent of source {"subagent": {"other": "guardian"}} that Codex runs on a tool
 	// call before the call runs. Its rollout holds only the review's request and assessment: not listed (#5486).
-	guardian bool
-	root     string // session_id identifies the shared root on newer Codex versions
-	parent   string // the thread that spawned this subagent
+	guardian   bool
+	originator string // session_meta.payload.originator
+	source     string // string form of session_meta.payload.source ("" when an object)
+	root       string // session_id identifies the shared root on newer Codex versions
+	parent     string // the thread that spawned this subagent
 	// started holds when the thread began, the session_meta line's time (Session.StartedAt), made once for every row
 	// of the thread: a hierarchy is never written once set, so the rows share it. Nil when the line has no time.
 	started *proto.SessionHierarchy
+}
+
+// interactive reports whether a rollout represents a user-facing interactive thread rather than an automated
+// one-shot run (exec/SDK), subagent, guardian review, or unattributed non-interactive record.
+func (o codexOrigin) interactive() bool {
+	if o.exec || o.sub || o.guardian || o.parent != "" {
+		return false
+	}
+	return o.cli || o.desktop || o.originator != "" || o.source == "cli" || o.source == "vscode"
 }
 
 var codexOrigins sync.Map // path → codexOrigin (the first line never changes)
@@ -581,7 +592,8 @@ func readCodexOrigin(path string) codexOrigin {
 		return codexOrigin{} // not written yet: read again next time
 	}
 	o := codexOrigin{desktop: m.Payload.Originator == "Codex Desktop" || m.Payload.Originator == "codex_work_desktop" || m.Payload.Originator == codexAppClient,
-		persona: m.Payload.Originator == codexAppClient, cli: m.Payload.Originator == "codex-tui" || m.Payload.Originator == "codex_cli_rs"}
+		persona: m.Payload.Originator == codexAppClient, cli: m.Payload.Originator == "codex-tui" || m.Payload.Originator == "codex_cli_rs",
+		originator: m.Payload.Originator}
 	if at, err := time.Parse(time.RFC3339Nano, m.Timestamp); err == nil && !at.IsZero() {
 		o.started = &proto.SessionHierarchy{StartedAt: at.UTC()}
 	}
@@ -589,6 +601,7 @@ func readCodexOrigin(path string) codexOrigin {
 	if json.Unmarshal(m.Payload.Source, &source) != nil {
 		source = "" // an object: a subagent
 	}
+	o.source = source
 	o.exec = source == "exec" || m.Payload.Originator == "codex_exec" || strings.HasPrefix(m.Payload.Originator, "codex_sdk")
 	var spawned string
 	spawned, o.guardian, o.sub = codexSourceObject(m.Payload.Source)

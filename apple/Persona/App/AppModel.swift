@@ -482,8 +482,6 @@ final class AppModel {
     var toast: Toast?
     /// The extension page opened from a notification, widget or shortcut; not written to UserDefaults.
     var extensionOpen: ExtensionSystemOpen?
-    /// The live screen asked for (VNC); a window of its own shows it, over whatever is presented (#1604).
-    var screenOpen: ScreenOpen? { didSet { if screenOpen != oldValue { ScreenWindow.shared.show(screenOpen) } } }
     /// What a chat's model last did on each Mac (`ComputerActivity`), kept by the open chat: the live screen shows it
     /// over the picture.
     var computerActivities: [MachineRef: ComputerActivity] = [:]
@@ -778,6 +776,7 @@ final class AppModel {
         var machine: MachineRef
         var manager: String?
         var main: Bool = false
+        var purpose: String = "assistant"
     }
     /// Only the assistant settings that decide whose launcher catalog and effective default the picker shows. Volatile
     /// conversation and preference fields are deliberately not part of this signature.
@@ -1422,76 +1421,6 @@ final class AppModel {
         _ = machineChoices
         return machinesNow
     }
-    /// Macs whose live screen can be shown: the plugin cua or ego is on for them and Screen Sharing answers
-    /// (docs/extensions/computer-use.md; ego's first-run setup is done over it, #1507).
-    var screenMachines: [Machine] { machines.filter(Self.showsScreen) }
-    func canShowScreen(_ ref: MachineRef) -> Bool { machine(ref).map(Self.showsScreen) ?? false }
-    /// The Mac's displays as its node last read them, from whichever extension shows its screen (#80).
-    func screenDisplays(_ ref: MachineRef) -> [MachineDisplay] {
-        guard let m = machine(ref) else { return [] }
-        if let c = m.computer, c.enabled, c.screenSharing, !c.displays.isEmpty { return c.displays }
-        if let b = m.browser, b.enabled, b.screenSharing { return b.displays }
-        return []
-    }
-    /// Whether this Mac's node advertises the live-screen hardware video channel (#3954), from whichever extension shows
-    /// its screen. The Picture / Quality switcher appears only then, so no Mac shows a control it cannot use.
-    func screenVideoAdvertised(_ ref: MachineRef) -> Bool { machine(ref).map(Self.advertisesVideo) ?? false }
-    /// The video channel as the extension showing this Mac's screen reports it (#3954): its version, codecs and whether
-    /// Screen Recording is granted for it; nil when no shown extension advertises it.
-    func screenVideo(_ ref: MachineRef) -> MachineScreenVideo? {
-        guard let m = machine(ref) else { return nil }
-        if let c = m.computer, c.enabled, c.screenSharing, let v = c.screenVideo, v.advertised { return v }
-        if let b = m.browser, b.enabled, b.screenSharing, let v = b.screenVideo, v.advertised { return v }
-        return nil
-    }
-    /// Pixel scrolling as the extension showing this Mac's screen reports it (#7775): whether its node reads scroll records
-    /// and Persona Input may post them; nil when no shown extension's node reads them.
-    func screenInput(_ ref: MachineRef) -> MachineScreenInput? {
-        guard let m = machine(ref) else { return nil }
-        if let c = m.computer, c.enabled, c.screenSharing, let i = c.screenInput, i.reads { return i }
-        if let b = m.browser, b.enabled, b.screenSharing, let i = b.screenInput, i.reads { return i }
-        return nil
-    }
-    /// Phone Screen as the extension showing this Mac's screen reports it (#9314); nil when no shown extension's node has it.
-    func phoneScreen(_ ref: MachineRef) -> MachinePhoneScreen? {
-        guard let m = machine(ref) else { return nil }
-        if let c = m.computer, c.enabled, c.screenSharing, let p = c.phoneScreen, p.offered { return p }
-        if let b = m.browser, b.enabled, b.screenSharing, let p = b.phoneScreen, p.offered { return p }
-        return nil
-    }
-    nonisolated static func advertisesVideo(_ m: Machine) -> Bool {
-        (m.computer.map { $0.enabled && $0.screenSharing && ($0.screenVideo?.advertised ?? false) } ?? false)
-            || (m.browser.map { $0.enabled && $0.screenSharing && ($0.screenVideo?.advertised ?? false) } ?? false)
-    }
-    nonisolated static func showsScreen(_ m: Machine) -> Bool {
-        (m.computer.map { $0.enabled && $0.screenSharing } ?? false) || (m.browser.map { $0.enabled && $0.screenSharing } ?? false)
-    }
-    /// Brings up ref's VNC on the whole screen; `unlock`: and types its kept password on the lock screen (One-Tap Unlock,
-    /// #1507 a-2); `from`: the chat it came from (I'm Done hands back to its agent).
-    func openScreen(_ ref: MachineRef, unlock: Bool = false, from: SessionKey? = nil) {
-        guard api(ref.group) != nil else { toast = Toast(String(localized: "Not connected to the hub [App Model 93d955]"), style: .error); return }
-        if VNCPiP.shared.ref == ref { VNCPiP.shared.handOver() }
-        screenOpen = ScreenOpen(machine: ref, unlock: unlock, from: from)
-    }
-
-    /// The Mac whose VNC is in the small window now (picture in picture, #1343).
-    var vncPiP: MachineRef?
-
-    /// VNC for ref, from an entry (a machine's page, a tool, the running work, a chat's ··· menu): straight into the
-    /// small window when this device keeps the Mac's sign-in, else the whole screen, where it is signed in to.
-    func openVNC(_ ref: MachineRef, from: SessionKey? = nil) {
-        guard api(ref.group) != nil else { toast = Toast(String(localized: "Not connected to the hub [App Model 93d955]"), style: .error); return }
-        let kept = ScreenCredentials.load(ref) != nil
-        #if os(iOS)
-        VNCPiPLog.add("点了 VNC：支持画中画 \(VNCPiPLog.yes(VNCPiP.supported))，整页开着 \(VNCPiPLog.yes(screenOpen != nil))，记住了登录 \(VNCPiPLog.yes(kept))" // i18n-ignore
-                      + (kept ? "" : "（先进整页登录）")) // i18n-ignore
-        #endif
-        if VNCPiP.supported, screenOpen == nil, kept {
-            VNCPiP.shared.start(ref, from: from)
-        } else {
-            openScreen(ref, from: from)
-        }
-    }
     /// A machine of the hub-level group (the assistant's, a hub setting's).
     func hubRef(_ id: String) -> MachineRef { MachineRef(group: hub?.group ?? "", id: id) }
     /// The hub-level group's machines (pages about the hub: Persona, its settings).
@@ -1511,6 +1440,9 @@ final class AppModel {
 
     /// The health space's open conversations the hub has pushed, newest first (Health; `HealthModel` adds the hub's list).
     var healthConversations: [Session] { assistantLists(for: hub?.group ?? "").health }
+
+    /// The domain spaces' open conversations the hub has pushed, newest first (`SpaceHomeModel` adds each space's list).
+    var spaceConversations: [Session] { assistantLists(for: hub?.group ?? "").spaces }
 
     /// The two lists as of the last push, set only when they changed: a push about the agents (most of them) leaves
     /// the Persona page's conversations alone (`AssistantSidebar` was drawn again twice for each one, #390). For a group
@@ -3099,6 +3031,11 @@ final class AppModel {
         case .hello(let hello):
             let previousSurfaceCapabilities = extensionSurfaceCapabilities
             link(group)?.received(hello)
+            // The hub may turn modules off, or on again (#13849, docs/apple/ios.md "Modules"); kept per hub.
+            ModuleState.shared.heard(Set(hello.features), from: group, isHub: isHub)
+            #if os(iOS)
+            if isHub { Task { await HealthIntakeSync.shared.refresh(model: self) } }
+            #endif
             refoldSides() // this hub may fold side sessions now, or no longer (#7944)
             if let page = sessionLists.lists[group], page.loaded, !page.query.legacy, page.paged != hello.features.contains("sessions_list"), let link = link(group) {
                 page.cancel()
@@ -3114,6 +3051,7 @@ final class AppModel {
             DirectionFilings.shared.hello(group)
             if isHub { hubHellos += 1 }
             #if os(iOS)
+            if isHub { HomeWidgetData.shared.intakeChanged() }
             // `meeting_live` events sent while the socket was down are gone: the meetings on screen are read again (#3862).
             if isHub { MeetingConversation.shared.reconnected() }
             // The meeting flags a start without the app in front reads follow every hello, not only the Recordings page.
@@ -3242,6 +3180,10 @@ final class AppModel {
             if isHub, let hubAPI = api, assistantShows(nil) { Task { await refreshDirectionTree(hubAPI) } }
         case .healthIntake:
             if isHub { healthIntakeRevision += 1 }
+            #if os(iOS)
+            if isHub { HomeWidgetData.shared.intakeChanged() }
+            if isHub { Task { await HealthIntakeSync.shared.refresh(model: self) } }
+            #endif
             ExtensionUIRegistry.shared.invalidate(extension: HealthIntakeUI.id, ui: nil, group: group)
         case .assistantFeed(let item):
             if isHub { TasksStore.shared.received(item, group: group) }
@@ -4445,18 +4387,19 @@ final class AppModel {
     /// The main chat's picker data (`GET …/launchers?purpose=assistant`, #5033): the launchers that can run the
     /// assistant on this machine, the effective Main chat default (`default`, what the next message runs with no pick),
     /// and the ones that can't with why. Cached until Model Settings change or a `refresh`.
-    func assistantLaunchers(_ machine: MachineRef, refresh: Bool = false, using catalogAPI: APIClient? = nil, main: Bool = false) async throws -> APIClient.LaunchersResponse {
+    func assistantLaunchers(_ machine: MachineRef, refresh: Bool = false, using catalogAPI: APIClient? = nil, main: Bool = false,
+                            purpose: String = "assistant") async throws -> APIClient.LaunchersResponse {
         guard let client = (catalogAPI ?? api(machine.group))?.currentAssistantSettings() else {
             return APIClient.LaunchersResponse(launchers: [], default: nil, unavailable: nil)
         }
-        let scope = AssistantLauncherScope(machine: machine, manager: client.managerID, main: main)
+        let scope = AssistantLauncherScope(machine: machine, manager: client.managerID, main: main, purpose: purpose)
         if !refresh, let cached = assistantLauncherCache[scope] { return cached }
         let revision = assistantLauncherRequestRevision
         assistantLauncherReadID += 1
         let read = assistantLauncherReadID
         if assistantLauncherReads[scope] == nil && assistantLauncherReads.count >= 64 { assistantLauncherReads.removeAll() }
         assistantLauncherReads[scope] = read
-        var r = try await client.launcherList(machine: machine.id, purpose: "assistant")
+        var r = try await client.launcherList(machine: machine.id, purpose: purpose)
         if main {
             do {
                 let own = try await client.mainAssistantLaunchers(machine: machine.id)
@@ -4525,9 +4468,10 @@ final class AppModel {
 
     /// The main chat picker data already read for `machine` (nil: nothing cached yet; `assistantLaunchers(_:)` reads it).
     /// The composer title reads this so it shows the effective Main chat model, not only the running process's last one.
-    func cachedAssistantLaunchers(_ machine: MachineRef, main: Bool = false) -> APIClient.LaunchersResponse? {
+    func cachedAssistantLaunchers(_ machine: MachineRef, main: Bool = false,
+                                  purpose: String = "assistant") -> APIClient.LaunchersResponse? {
         let manager = api(machine.group)?.currentAssistantSettings().managerID
-        return assistantLauncherCache[AssistantLauncherScope(machine: machine, manager: manager, main: main)]
+        return assistantLauncherCache[AssistantLauncherScope(machine: machine, manager: manager, main: main, purpose: purpose)]
     }
 
 
@@ -4797,6 +4741,7 @@ final class AppModel {
 
     /// Another group was picked for the hub-level pages: their data starts over from that group's.
     func hubChanged() {
+        ModuleState.shared.follow(hub?.group ?? "", features: hub?.features ?? []) // the modules this hub allows (#13849)
         if let g = hub?.group {
             assistantConfig = heldAssistant(g)
         }
@@ -4859,7 +4804,7 @@ final class AppModel {
         refreshStarred(reset: switched)
         #endif
         if switched {
-            if let a = assistantCurrent, let s = session(a), s.assistant, !s.isHealth, !assistantShows(s.manager) { assistantCurrent = assistantMain }
+            if let a = assistantCurrent, let s = session(a), s.assistant, !s.inSpace, !assistantShows(s.manager) { assistantCurrent = assistantMain }
             assistantSwitches += 1
             // the "/" list offers the new assistant's saved prompts, never the one before's (#9436)
             SavedPromptStore.shared.forget()
@@ -4927,7 +4872,8 @@ final class AppModel {
         }
         // A directory-hidden session's cards count nowhere, as the pages leave them out (`directoryVisibleInteractions`).
         let session = cardSessionResolver()
-        for ix in interactions.values where session(ix.sessionKey)?.hiddenByDirectory != true {
+        // A card its task's supervisor holds is the supervisor's until it passes it up (`Interaction.supervisorHeld`).
+        for ix in interactions.values where session(ix.sessionKey)?.hiddenByDirectory != true && !ix.supervisorHeld {
             guard scope.has(ix.manager ?? session(ix.sessionKey)?.manager, group: ix.group) else { continue }
             // A quiet task's agent asking is the main conversation's to tell (#1731): its count goes there, not on Agents.
             switch place(ix.sessionKey) {
@@ -5480,13 +5426,16 @@ nonisolated struct TabBadges: Equatable, Sendable {
 }
 
 /// The Persona conversations of one group, newest first: open and archived (`AppModel.assistantConversations`), and
-/// apart from them the health space's open ones (Health, docs/assistant/health.md), which the sidebar never lists.
+/// apart from them the health space's open ones (Health, docs/assistant/health.md) and the other spaces' (#13500), which
+/// the sidebar never lists.
 nonisolated struct AssistantLists: Equatable {
     let group: String
     let shown: Shown?
     let open: [Session]
     let archived: [Session]
     let health: [Session]
+    /// The open conversations of the domain spaces (every space but health's), the default manager's.
+    let spaces: [Session]
 
     /// The manager the Persona page shows on a hub with several, and the roster that says whose a conversation is
     /// (sessions carry their computer's `manager`): the lists are that manager's, and the health space the default's.
@@ -5502,9 +5451,10 @@ nonisolated struct AssistantLists: Equatable {
         let all = sessions.filter { $0.assistant && $0.group == group }
             .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
         func owned(_ s: Session, by manager: (Shown) -> String) -> Bool { shown.map { $0.roster.owner(s.manager) == manager($0) } ?? true }
-        let mine = all.filter { !$0.isHealth && owned($0, by: \.manager) }
+        let mine = all.filter { !$0.inSpace && owned($0, by: \.manager) }
         open = mine.filter { $0.archived != true }
         archived = mine.filter { $0.archived == true }
         health = all.filter { $0.isHealth && $0.archived != true && owned($0, by: \.roster.defaultID) }
+        spaces = all.filter { $0.isDomainSpace && $0.archived != true && owned($0, by: \.roster.defaultID) }
     }
 }

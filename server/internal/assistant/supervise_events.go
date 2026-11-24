@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/ai"
-	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -224,24 +223,31 @@ func reviewClosedSince(v *Supervision, work time.Time) bool {
 var verdictWords = map[string]string{verdictNotDone: "没做完", verdictWaiting: "在等别人或别的事", verdictNeedsUser: "要用户决定",
 	verdictUnsure: "看不出做没做完", verdictUndelivered: "做完了但还没上线"}
 
-// ownerPushTimeout bounds one delivery and its receipt, so a stalled hub cannot hold up every other task's owner push.
-var ownerPushTimeout = 10 * time.Second
-
-// noteOwnerWait makes the owner's action the task's visible state and tells the supervisor at once. A stretch pushes
-// once after delivery; an undelivered push may retry when its conversation route recovers (#5732).
+// noteOwnerWait records that the judge found a supervised task's stretch of work stopped on a decision its agent says
+// is the owner's, and hands it to the task's supervisor at once. The owner is never pushed from here: an agent asking
+// for the user is the supervisor's to weigh (decision rights: only goals, what only the user knows, speaking as them,
+// spending, an irreversible step not already agreed, or an action only they can do are the user's). The supervisor
+// passes a real one on with task_review needs_user, which makes the card and its one push; anything else it decides
+// and sends to the agent. Until then the task is not the user's: no Needs you, no badge, and it cannot be accepted
+// while the wait holds (ownerWaitError). The wait ends when the agent goes on (supervisedWorking).
 func (s *Service) noteOwnerWait(ctx context.Context, t Todo, work time.Time, reason string) bool {
 	closed := false
-	v, changed, err := s.updateSupervisionGuarded(ctx, t.ID, func(current Todo) bool {
+	_, changed, err := s.updateSupervisionGuarded(ctx, t.ID, func(current Todo) bool {
 		// task_review writes its terminal ledger before closing the todo. Check both at this single write boundary:
 		// otherwise a late judgment can recreate Waits after acceptance and then be closed with that wait still live.
 		closed = current.DoneAt != nil || reviewClosedSince(current.Supervision, work)
 		return !closed
 	}, func(v *Supervision) bool {
-		if v.Waits != nil && v.Waits.Work.Equal(work) && v.State == reviewNeedsUser {
+		if v.Waits != nil && v.Waits.Work.Equal(work) {
 			return false
 		}
-		v.Waits = &OwnerWait{Work: work.UTC(), At: time.Now().UTC(), Reason: clip(oneLine(reason), 200), PushPending: true}
-		v.State = reviewNeedsUser
+		v.Waits = &OwnerWait{Work: work.UTC(), At: time.Now().UTC(), Reason: clip(oneLine(reason), 200)}
+		if v.State != reviewNeedsUser { // a decision the supervisor already passed to the owner stays theirs
+			v.State = ""
+			if v.Round > 0 {
+				v.State = reviewRework
+			}
+		}
 		return true
 	})
 	if err != nil {
@@ -252,130 +258,17 @@ func (s *Service) noteOwnerWait(ctx context.Context, t Todo, work time.Time, rea
 		s.logf("task %s: owner wait dropped: its work was reviewed or closed", t.ID)
 		return false
 	}
-	s.signal(superviseSignal{Todo: t.ID, Kind: sigIdle, Key: work.UTC().Format(time.RFC3339Nano), Detail: "要用户决定：" + reason}) // i18n-ignore: the supervision message is the assistant's prompt
-	if changed || (v.Waits != nil && v.Waits.PushPending) {
-		// Quiet suppresses routine notices, not an action only the owner can take. An undelivered wait (for example,
-		// its conversation was not configured yet) may retry; a delivered one has PushPending cleared.
-		s.startOwnerWaitDelivery(ctx, t, work, reason)
+	if changed {
+		s.signal(superviseSignal{Todo: t.ID, Kind: sigIdle, Key: work.UTC().Format(time.RFC3339Nano), Detail: ownerWaitDetail(reason)})
 	}
 	return true
 }
 
-// startOwnerWaitDelivery gives one push and its durable receipt an independent deadline even when its caller is a
-// fire-and-forget settings or judgment path. WithoutCancel only detaches cancellation; it must not remove the bound.
-func (s *Service) startOwnerWaitDelivery(ctx context.Context, t Todo, work time.Time, reason string) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ownerPushTimeout)
-	go func() {
-		defer cancel()
-		s.deliverOwnerWait(ctx, t, work, reason)
-	}()
-}
-
-// retryOwnerWaits reconciles explicitly undelivered pushes when a conversation route is restored or todos finish
-// loading. Legacy waits have no PushPending and are never replayed on upgrade; delivered waits have it cleared.
-func (s *Service) retryOwnerWaits(ctx context.Context) {
-	if !s.todosLoaded() {
-		return
-	}
-	for _, t := range s.todosOf(ctx, "*") {
-		if t.DoneAt != nil || t.Supervision == nil || t.Supervision.State != reviewNeedsUser {
-			continue
-		}
-		w := t.Supervision.Waits
-		if w != nil && w.PushPending && w.NotifiedAt == nil {
-			s.startOwnerWaitDelivery(ctx, t, w.Work, w.Reason)
-		}
-	}
-}
-
-// deliverOwnerWait claims one todo/work push while it and its durable receipt are in flight. The claim lock covers
-// only the map: an uninterruptible hub writer or a receipt waiting on the ledger cannot block another task (#5732).
-func (s *Service) deliverOwnerWait(ctx context.Context, t Todo, work time.Time, reason string) {
-	b := &s.supervise
-	key := t.ID + "\x00" + work.UTC().Format(time.RFC3339Nano)
-	b.ownerPushMu.Lock()
-	if b.ownerPushes == nil {
-		b.ownerPushes = map[string]struct{}{}
-	}
-	if _, flying := b.ownerPushes[key]; flying {
-		b.ownerPushMu.Unlock()
-		return
-	}
-	b.ownerPushes[key] = struct{}{}
-	b.ownerPushMu.Unlock()
-	defer func() {
-		b.ownerPushMu.Lock()
-		delete(b.ownerPushes, key)
-		b.ownerPushMu.Unlock()
-	}()
-	current, ok := s.todoNow(t.ID)
-	if !ok || current.DoneAt != nil || current.Supervision == nil || current.Supervision.Waits == nil || current.Supervision.State != reviewNeedsUser ||
-		!current.Supervision.Waits.Work.Equal(work) || !current.Supervision.Waits.PushPending || current.Supervision.Waits.NotifiedAt != nil {
-		return
-	}
-	if !s.notifyTaskNeedsUser(ctx, current, work, reason) {
-		return
-	}
-	current, ok = s.todoNow(t.ID)
-	if !ok || current.DoneAt != nil {
-		return // the push was already in flight when the task closed; its receipt is obsolete too (#5732)
-	}
-	if _, _, err := s.updateSupervisionGuarded(ctx, t.ID, func(current Todo) bool {
-		return current.DoneAt == nil
-	}, func(v *Supervision) bool {
-		if v.Waits == nil || v.State != reviewNeedsUser || !v.Waits.Work.Equal(work) || !v.Waits.PushPending || v.Waits.NotifiedAt != nil {
-			return false
-		}
-		at := time.Now().UTC()
-		v.Waits.NotifiedAt = &at
-		v.Waits.PushPending = false
-		return true
-	}); err != nil {
-		// The stable notification id still deduplicates a later retry at the real hub if this receipt cannot be saved.
-		s.logf("task %s: owner-wait push receipt: %v", t.ID, err)
-	}
-}
-
-// notifyTaskNeedsUser pushes an action only the owner can take. Its stable id deduplicates delivery retries, and its
-// body names the reason and the task's web link. Quiet tasks receive this push too; their routine notices stay quiet.
-func (s *Service) notifyTaskNeedsUser(ctx context.Context, t Todo, work time.Time, reason string) bool {
-	cfg := s.settings(ctx)
-	here := cfg.MachineID
-	conversation := t.Origin
-	if t.Supervision != nil {
-		if cfg.Main != "" {
-			// Owner decisions escalate to main from a manual leader, a task-leader Agent and the legacy background too.
-			conversation = cfg.Main
-		} else if supervisor := t.Supervision.Supervisor; supervisor != "" {
-			if _, _, worker := parseLeaderRef(supervisor); !worker {
-				conversation = supervisor
-			}
-		}
-	}
-	_, _, worker := parseLeaderRef(conversation)
-	if conversation == "" || worker || s.muted(here, conversation) {
-		return false // a machine/session worker reference is never an assistant conversation id
-	}
-	l := s.lang(ctx)
-	title := i18n.T(l, "assistant-tasks.task_needs_user_title", i18n.Args{"name": t.Title})
-	// the lock screen does not name a task whose push says something sensitive (usage.go, scene 4)
-	if space, _ := s.selfSpace(ctx, t.Origin); s.exitPolicy(ctx, t.Title+"\n"+reason, t.Origin, space).Redact {
-		title = i18n.T(l, "assistant-tasks.task_needs_user_title_health")
-	}
-	body := clip(strings.TrimSpace(reason), 500)
-	if link := todoLink(s.webBase(ctx), t.ID); link != "" {
-		body = strings.TrimSpace(body + "\n" + link)
-	}
-	n := Notification{ID: "ntf_task_needs_" + t.ID + "_" + work.UTC().Format(time.RFC3339Nano), Kind: NotifyPush,
-		Subtitle: "Persona", DeviceID: here, SessionID: conversation, Title: title, Body: body,
-		// Only the owner can take this action: it interrupts low-distraction mode, once per stretch of work (#5732).
-		Level: assistantwire.LevelP0, RelatedKey: "todo:" + t.ID + "@" + work.UTC().Format(time.RFC3339Nano)}
-	s.noteCard(ctx, cardLeaderNeedsUser, n)
-	if _, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
-		s.logf("task %s: needs-user push: %v", t.ID, err)
-		return false
-	}
-	return true
+// ownerWaitDetail is the supervisor's message for an agent that stopped to ask for the user: the user has not been
+// told, and the supervisor decides whether they should be.
+func ownerWaitDetail(reason string) string {
+	return "要用户决定：" + reason + "；用户还没收到。先查用户说过的话：只有方向目标、只有用户知道的事、以用户名义对外、花钱、" + // i18n-ignore: the supervision message is the assistant's prompt
+		"没说过的不可逆操作、只有用户本人能做的事才交用户（task_review needs_user，写明 why_owner）；其余你来定，用 agent_send 告诉它" // i18n-ignore: the supervision message is the assistant's prompt
 }
 
 // supervisedWorking: one of supervised task t's agents started a turn: a review waiting is moot (the work goes on),
@@ -399,10 +292,12 @@ func (s *Service) supervisedWorking(ctx context.Context, t Todo) {
 	if st := t.Supervision.state(t); st != reviewPending && st != reviewParked && st != reviewTimedOut && st != reviewClosing && (t.Supervision == nil || t.Supervision.Waits == nil) {
 		return
 	}
+	ownerWaitEnded := false
 	if _, _, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
 		if v.State != reviewPending && v.State != reviewParked && v.State != reviewTimedOut && v.State != reviewClosing && v.Waits == nil {
 			return false
 		}
+		ownerWaitEnded = v.Waits != nil
 		v.Waits = nil // its agent goes on: the owner's answer reached it, or the work changed (#1277)
 		if v.State != reviewPending && v.State != reviewParked && v.State != reviewTimedOut && v.State != reviewClosing && v.State != reviewNeedsUser {
 			return true
@@ -416,6 +311,8 @@ func (s *Service) supervisedWorking(ctx context.Context, t Todo) {
 		return true
 	}); err != nil {
 		s.logf("task %s: supervision: %v", t.ID, err)
+	} else if ownerWaitEnded {
+		s.todoPushOver(t.ID) // the owner wait is over: the next one may ring
 	}
 }
 

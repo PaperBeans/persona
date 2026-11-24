@@ -308,6 +308,9 @@ func (s *Service) spaceRecordingsSweep(ctx context.Context) {
 	}
 }
 
+// codeRecordingDeleted: the recording was deleted here; the phone drops it instead of uploading it again.
+const codeRecordingDeleted = "recording_deleted"
+
 // writeSpaceRecordingError answers an error of putSpaceRecording or deleteSpaceRecording.
 func writeSpaceRecordingError(w http.ResponseWriter, err error) {
 	switch {

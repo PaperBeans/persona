@@ -121,7 +121,7 @@
       "main" : 1
     }
   },
-  "apple/Persona/Views/Machines/ScreenCredentials.swift" : {
+  "apple/Modules/ScreenShare/ScreenCredentials.swift" : {
     "keychain-read" : {
       "main" : 1
     }

@@ -39,6 +39,7 @@ import persona.core.designsystem.currentLocale
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcon
 import persona.core.domain.inbox.InboxInteraction
+import persona.core.inbox.*
 
 internal data class InboxSourceOption(
     val id: String,

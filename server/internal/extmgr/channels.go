@@ -10,11 +10,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
+
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extension/host"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -478,7 +479,7 @@ func (h *Manager) bindFeishuStep(ctx context.Context, step string, values map[st
 	}
 	credentials := func(errText string) connector.Prompt {
 		p := connector.Prompt{Step: "credentials", Fields: fields, Hint: i18n.T(l, "hub-channels.credentials_hint")}
-		if u := feishubot.ConsoleURL(strings.TrimSpace(values["domain"])); u != "" {
+		if u := botcard.ConsoleURL(strings.TrimSpace(values["domain"])); u != "" {
 			p.Link, p.LinkText = u, i18n.T(l, "hub-channels.console_link")
 		}
 		p.Error = errText
@@ -505,7 +506,7 @@ func (h *Manager) bindFeishuStep(ctx context.Context, step string, values map[st
 		on := true
 		receipt, err := h.applyBotUpdateWithReceipt(ctx, &on, &id, &secret, &domain, nil, false)
 		if err != nil {
-			if feishubot.CredentialRejected(err) {
+			if botcard.CredentialRejected(err) {
 				h.logf("bots: credentials rejected by the platform: %v", err)
 				return credentials(i18n.T(l, "hub-channels.credentials_rejected")), nil
 			}
@@ -524,7 +525,7 @@ func (h *Manager) bindFeishuStep(ctx context.Context, step string, values map[st
 		// No app yet: create one in a single authorization (bots_register.go); typing the credentials is the way
 		// when the accounts site cannot be reached, and on the Lark bot's settings page.
 		// A private deployment has no accounts site of ours to ask.
-		if feishubot.ConsoleURL(h.cfg.Bots.Feishu.Domain) != "" {
+		if botcard.ConsoleURL(h.cfg.Bots.Feishu.Domain) != "" {
 			p, ok := h.beginFeishuRegistration(ctx, "")
 			if err := ctx.Err(); err != nil {
 				return connector.Prompt{}, err
@@ -571,7 +572,7 @@ func (h *Manager) bindFeishuStep(ctx context.Context, step string, values map[st
 	}
 	code := p.Code
 	if c := b.set.Configure; c != nil {
-		configNote = feishuConfigureNote(l, feishubot.ConfigureReport{Issue: c.Issue, Configured: c.Configured}, b.set.Domain, b.set.AppID)
+		configNote = feishuConfigureNote(l, botcard.ConfigureReport{Issue: c.Issue, Configured: c.Configured}, b.set.Domain, b.set.AppID)
 	}
 	b.mu.Unlock()
 	if issued {
@@ -587,27 +588,27 @@ func (h *Manager) bindFeishuStep(ctx context.Context, step string, values map[st
 // feishuConfigureNote turns the auto-configure report into one sentence for the pair step; "" when nothing
 // was tried or there is nothing worth saying. The manual fallback names the one thing to do by hand, with a
 // link to the app's console page.
-func feishuConfigureNote(l i18n.Lang, rep feishubot.ConfigureReport, domain, appID string) string {
+func feishuConfigureNote(l i18n.Lang, rep botcard.ConfigureReport, domain, appID string) string {
 	if rep.Skipped {
 		return ""
 	}
-	if rep.Issue == feishubot.IssueNone && rep.Configured {
+	if rep.Issue == botcard.IssueNone && rep.Configured {
 		return i18n.T(l, "hub-channels.auto_configured")
 	}
 	what := ""
 	switch rep.Issue {
-	case feishubot.IssueBotCapability:
+	case botcard.IssueBotCapability:
 		what = i18n.T(l, "hub-channels.auto_config_bot_capability")
-	case feishubot.IssuePatchScope:
+	case botcard.IssuePatchScope:
 		what = i18n.T(l, "hub-channels.auto_config_patch_scope")
-	case feishubot.IssueNotSelfBuilt:
+	case botcard.IssueNotSelfBuilt:
 		what = i18n.T(l, "hub-channels.auto_config_not_self_built")
 	default:
 		what = i18n.T(l, "hub-channels.auto_config_unreachable")
 	}
 	note := i18n.T(l, "hub-channels.auto_config_manual", i18n.Args{"what": what})
-	if rep.Issue != feishubot.IssueUnreachable {
-		if u := feishubot.AppConsoleURL(domain, appID); u != "" {
+	if rep.Issue != botcard.IssueUnreachable {
+		if u := botcard.AppConsoleURL(domain, appID); u != "" {
 			note += " " + u // the app's console page, where that one switch is
 		}
 	}

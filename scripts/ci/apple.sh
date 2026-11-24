@@ -233,6 +233,14 @@ if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = ios-build ] || [ "$LANE
   # device build fail here (#6735; MainPagesStackTests measures the run-time part in the simulator).
   ci_run 'Debug view stack frames (device build)' 300 python3 "$CI_ROOT/scripts/ci/apple_stack_frames.py" \
     "$OUTPUT/ios-device/Build/Products/Debug-iphoneos/Persona.app"
+  # The app without its moved feature modules (apple/modules-core-only.yml, #14017; docs/apple/ios.md "Modules"): the
+  # core must build with every apple/Modules/<Name> left out. Generated into the same project, built, then the whole
+  # project generated again for the steps below. Only the app scheme: the watch and extensions compile no module.
+  ci_run 'Generate core-only Apple project' 120 env PERSONA_CORE_ONLY=YES xcodegen generate --spec "$SOURCE/apple/project.yml" --project "$SOURCE/apple"
+  ci_run 'Core-only iOS build' 1800 "${XCODE[@]}" -scheme Persona \
+    -destination 'generic/platform=iOS' -derivedDataPath "$OUTPUT/ios-core-only" \
+    -disableAutomaticPackageResolution "${UNSIGNED[@]}" build
+  ci_run 'Generate Apple project again (whole)' 120 xcodegen generate --spec "$SOURCE/apple/project.yml" --project "$SOURCE/apple"
 fi
 if [ "$LANE" = ios18 ]; then
   runtimes="$OUTPUT/runtimes-iOS-before.json"

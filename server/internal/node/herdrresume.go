@@ -206,6 +206,7 @@ func (n *Node) holdResume(ctx context.Context, launch host.Launcher, pane, id st
 	spec.ID = id
 	var agyConv string
 	if spec.Agent == agyAgent {
+		n.ensureAgyHooksForLaunch() // agyhooks.go (#13950): ensure hooks exist for resumed agy panes
 		agyConv = n.agyConversation(id, pane)
 	}
 	n.mu.Lock()

@@ -140,7 +140,7 @@ func TestCompletedTodoOnlyStopsStillLinkedAgents(t *testing.T) {
 				t.Fatalf("unrelated completed todo blocked continuation: %+v", e)
 			}
 			s.workWake(ctx, s.newWorkView(ctx), [2]string{"box", "s1"}, e.WakeAt.Add(time.Second))
-			if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: "+continueText {
+			if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: "+autoContinueTextForTest(continueText) {
 				t.Fatalf("continuation = %v", got)
 			}
 		})
@@ -264,7 +264,7 @@ func TestCompletedTodoReadFailureRetriesTriageAndWake(t *testing.T) {
 				t.Fatalf("recovered read did not allow a wake: %+v", e)
 			}
 			s.workWake(ctx, s.newWorkView(ctx), key, e.WakeAt.Add(time.Second))
-			if got := f.sentToAgents(); len(got) != 1 || got[0] != "ci: "+continueText {
+			if got := f.sentToAgents(); len(got) != 1 || got[0] != "ci: "+autoContinueTextForTest(continueText) {
 				t.Fatalf("continuation after recovery = %v", got)
 			}
 			s.waitWorkEvents()

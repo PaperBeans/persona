@@ -9,12 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
+	"github.com/nwverse/persona/server/internal/botport"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 func TestBotQueuedRecallSurvivesRecentEviction(t *testing.T) {
+	needsLarkModule(t)
 	for _, chat := range []string{topicChat, "oc_p2p"} {
 		t.Run(chat, func(t *testing.T) {
 			w := newBotWorld(t)
@@ -43,6 +46,7 @@ func TestBotQueuedRecallSurvivesRecentEviction(t *testing.T) {
 }
 
 func TestBotQueuedRecallStaysRecentAfterCleanup(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -75,6 +79,7 @@ func TestBotQueuedRecallStaysRecentAfterCleanup(t *testing.T) {
 }
 
 func TestBotCanceledSourceSurvivesQueueCleanup(t *testing.T) {
+	needsLarkModule(t)
 	for _, refresh := range []bool{false, true} {
 		t.Run(fmt.Sprintf("credential_refresh_%t", refresh), func(t *testing.T) {
 			w := newBotWorld(t)
@@ -129,6 +134,7 @@ func TestBotCanceledSourceSurvivesQueueCleanup(t *testing.T) {
 }
 
 func TestBotCanceledSourceHistoryIsBounded(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -157,6 +163,7 @@ func TestBotCanceledSourceHistoryIsBounded(t *testing.T) {
 }
 
 func TestBotHandedSourceSurvivesCanceledRedelivery(t *testing.T) {
+	needsLarkModule(t)
 	for _, chat := range []string{topicChat, "oc_p2p"} {
 		t.Run(chat, func(t *testing.T) {
 			w := newBotWorld(t)
@@ -200,6 +207,7 @@ func TestBotHandedSourceSurvivesCanceledRedelivery(t *testing.T) {
 }
 
 func TestBotPendingDedupAndReleaseAfterRecentEviction(t *testing.T) {
+	needsLarkModule(t)
 	for _, refused := range []bool{false, true} {
 		t.Run(fmt.Sprintf("refused_%t", refused), func(t *testing.T) {
 			w := newBotWorld(t)
@@ -242,6 +250,7 @@ func withBotEnvelopeAppID(payload []byte, appID string) []byte {
 }
 
 func TestBotConnectionCallbackRejectsReplacedSource(t *testing.T) {
+	needsLarkModule(t)
 	for _, sameApp := range []bool{false, true} {
 		t.Run(fmt.Sprintf("same_app_%t", sameApp), func(t *testing.T) {
 			w := newBotWorld(t)
@@ -268,7 +277,7 @@ func TestBotConnectionCallbackRejectsReplacedSource(t *testing.T) {
 				t.Fatal("credential update did not replace the production client")
 			}
 			currentCallback := w.h.botEventHandler(api)
-			call := func(callback feishubot.Handler, payload []byte) {
+			call := func(callback botcard.Handler, payload []byte) {
 				t.Helper()
 				if _, err := callback(w.ctx, payload); err != nil {
 					t.Fatal(err)
@@ -297,6 +306,7 @@ func TestBotConnectionCallbackRejectsReplacedSource(t *testing.T) {
 }
 
 func TestBotPendingRecallSurvivesProductionCredentialRefresh(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -337,6 +347,7 @@ func botRecallEvent(chat, id, kind string) []byte {
 // Exercise the real inbound queue: the assistant is busy taking the first
 // message when the owner sends and recalls the second one.
 func TestTopicQueuedRecallDoesNotStartMessage(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -409,6 +420,7 @@ func finishBotQueue(t *testing.T, w *botWorld) {
 }
 
 func TestBotQueuedRecallScope(t *testing.T) {
+	needsLarkModule(t)
 	for _, tc := range []struct {
 		name, chat, id, kind string
 		wantSecond           bool
@@ -451,6 +463,7 @@ func TestBotQueuedRecallScope(t *testing.T) {
 }
 
 func TestBotQueuedRecallKeepsReceivePolicy(t *testing.T) {
+	needsLarkModule(t)
 	for _, tc := range []struct {
 		name, sender, chat, thread string
 		app, strict                bool
@@ -492,6 +505,7 @@ func TestBotQueuedRecallKeepsReceivePolicy(t *testing.T) {
 }
 
 func TestBotQueuedRecallPrivateChat(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -506,6 +520,7 @@ func TestBotQueuedRecallPrivateChat(t *testing.T) {
 }
 
 func TestBotQueuedRecallIdentityBinding(t *testing.T) {
+	needsLarkModule(t)
 	for _, identity := range []string{"bot", "owner"} {
 		t.Run(identity, func(t *testing.T) {
 			w := newBotWorld(t)
@@ -517,7 +532,7 @@ func TestBotQueuedRecallIdentityBinding(t *testing.T) {
 			b.mu.Lock()
 			api, owner := b.api, b.set.Owner
 			if identity == "bot" {
-				b.api = feishubot.New("cli_other", "example-secret", w.api.srv.URL)
+				b.api = botport.New("cli_other", "example-secret", w.api.srv.URL)
 			} else {
 				b.set.Owner = &BotOwner{OpenID: "ou_other_owner", ChatID: "oc_p2p"}
 			}
@@ -545,6 +560,7 @@ func TestBotQueuedRecallIdentityBinding(t *testing.T) {
 }
 
 func TestBotRecallDuringAndAfterHandoff(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat, topicOther)
@@ -575,6 +591,7 @@ func TestBotRecallDuringAndAfterHandoff(t *testing.T) {
 }
 
 func TestBotQueuedMessageDoesNotMoveToReplacementIdentity(t *testing.T) {
+	needsLarkModule(t)
 	for _, identity := range []string{"bot", "owner"} {
 		t.Run(identity, func(t *testing.T) {
 			w := newBotWorld(t)
@@ -586,7 +603,7 @@ func TestBotQueuedMessageDoesNotMoveToReplacementIdentity(t *testing.T) {
 			b.mu.Lock()
 			api, owner, done := b.api, b.set.Owner, b.line
 			if identity == "bot" {
-				b.api = feishubot.New("cli_other", "example-secret", w.api.srv.URL)
+				b.api = botport.New("cli_other", "example-secret", w.api.srv.URL)
 			} else {
 				b.set.Owner = &BotOwner{OpenID: "ou_other_owner", ChatID: "oc_p2p"}
 			}
@@ -609,6 +626,7 @@ func TestBotQueuedMessageDoesNotMoveToReplacementIdentity(t *testing.T) {
 }
 
 func TestBotQueuedMessageKeepsSameBotReconnect(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -617,7 +635,7 @@ func TestBotQueuedMessageKeepsSameBotReconnect(t *testing.T) {
 	w.send(t, groupEvent("om_second", "ou_me", "ordinary request", topicChat, "omt_example"))
 	b := &w.h.bots
 	b.mu.Lock()
-	b.api = feishubot.New("cli_test", "refreshed-secret", w.api.srv.URL)
+	b.api = botport.New("cli_test", "refreshed-secret", w.api.srv.URL)
 	b.mu.Unlock()
 	w.send(t, botRecallEvent(topicChat, "om_recalled", "message_owner"))
 	unblock()
@@ -628,6 +646,7 @@ func TestBotQueuedMessageKeepsSameBotReconnect(t *testing.T) {
 }
 
 func TestBotHandedDMRecallIdentityBinding(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -636,7 +655,7 @@ func TestBotHandedDMRecallIdentityBinding(t *testing.T) {
 	b := &w.h.bots
 	b.mu.Lock()
 	api := b.api
-	b.api = feishubot.New("cli_other", "example-secret", w.api.srv.URL)
+	b.api = botport.New("cli_other", "example-secret", w.api.srv.URL)
 	b.mu.Unlock()
 	w.send(t, botRecallEvent("oc_p2p", "om_dm", "message_owner"))
 	if w.a.wasTold(assistantwire.EventFeishuRecalled) {

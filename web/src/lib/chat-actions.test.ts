@@ -3,7 +3,8 @@ import { applyDraft, onDraftEvent, parseQuote, replaceNeedsConfirm, sendDraft, s
 import { browseTarget, byPrefix, chatFiles, displayTitle, mentionAt, nameMatches, otherSessions, pageSessions, relPath, replaceToken, sessionDetail, sessionQuote, workspaceContext, workspaceMatches, workspaceTitle } from "./mentions";
 import { contextXML } from "./links";
 import type { Workspace } from "./workspace-board";
-import { keepAllBut, moved, movedTo, sameMessage } from "./queue";
+import { keepAllBut, moved, movedTo } from "./queue";
+import { sameMessage } from "./echo";
 import { boxRect, fitRect, keepMark } from "./image-edit";
 import type { Item, Session } from "./types";
 

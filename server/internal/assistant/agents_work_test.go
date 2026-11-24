@@ -225,7 +225,7 @@ func TestCodexTurnErrorIsContinued(t *testing.T) {
 		t.Fatalf("entry %+v", e)
 	}
 	s.workTick(context.Background(), time.Now().Add(31*time.Second))
-	if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: 继续" {
+	if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: "+autoContinueTextForTest(continueText) {
 		t.Fatalf("sent %v", got)
 	}
 }
@@ -264,7 +264,7 @@ func TestTransientErrorIsContinued(t *testing.T) {
 	}
 	s.workTick(ctx, time.Now().Add(16*time.Second))
 	s.workTick(ctx, time.Now().Add(17*time.Second))
-	if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: 继续" {
+	if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: "+autoContinueTextForTest(continueText) {
 		t.Fatalf("sent %v", got)
 	}
 

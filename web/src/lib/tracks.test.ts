@@ -13,7 +13,7 @@ vi.mock("./api", async (orig) => ({
 }));
 
 import { ApiError } from "./api";
-import "../modules";
+import { MODULES } from "../modules";
 import { sidebarActiveKey } from "./persona-nav";
 import { href, parse } from "./router";
 import {
@@ -34,6 +34,8 @@ import {
   writeSpaceMd,
   type Track,
 } from "./tracks";
+// the health module, when this run has it (the core-only lane, #13932, runs with no module)
+const HEALTH = MODULES.some((m) => m.id === "health");
 
 const track = (slug: string, over: Partial<Track> = {}): Track => ({
   slug,
@@ -125,9 +127,11 @@ describe("addresses", () => {
     expect(parse("/tracks/family/new")).toEqual({ name: "track", slug: "family", fresh: true });
     expect(parse("/tracks/family/c1")).toEqual({ name: "track", slug: "family", sid: "c1" });
     expect(parse("/tracks/new")).toEqual({ name: "track-new" });
-    // the health module's page (src/modules/health), registered by the module list
-    expect(parse("/tracks/health")).toEqual({ name: "module", module: "health", base: "health", path: [] });
-    expect(parse("/tracks/health/new")).toEqual({ name: "module", module: "health", base: "health", path: ["new"] });
+    // the health module's page (src/modules/health), registered by the module list; a space's page without it
+    if (HEALTH) {
+      expect(parse("/tracks/health")).toEqual({ name: "module", module: "health", base: "health", path: [] });
+      expect(parse("/tracks/health/new")).toEqual({ name: "module", module: "health", base: "health", path: ["new"] });
+    }
     expect(href({ name: "track", slug: "family" })).toBe("/tracks/family");
     expect(href({ name: "track", slug: "family", fresh: true })).toBe("/tracks/family/new");
     expect(href({ name: "track", slug: "family", sid: "c 1" })).toBe("/tracks/family/c%201");
@@ -137,7 +141,7 @@ describe("addresses", () => {
   it("lights the space's own row", () => {
     expect(sidebarActiveKey({ name: "track", slug: "family", sid: "c1" })).toBe("track:family");
     expect(sidebarActiveKey({ name: "track-new" })).toBe("track-new");
-    expect(sidebarActiveKey({ name: "module", module: "health", base: "health", path: [] })).toBe("health");
+    if (HEALTH) expect(sidebarActiveKey({ name: "module", module: "health", base: "health", path: [] })).toBe("health");
   });
 });
 

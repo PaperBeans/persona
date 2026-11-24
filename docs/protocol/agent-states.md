@@ -33,8 +33,10 @@ marks.
 - **What the count leaves out**: the Agents count (the tab's badge, and the Needs you section's header and filter)
   leaves out a muted agent, a quiet task's agent and a session whose only pending cards are held. A held card is a
   `delegating` one: the assistant is still deciding whether it may answer it, or it waits with its task's supervisor,
-  until it is first handed to the owner. A parsed terminal question routed to a supervisor (kind `screen`) still
-  counts, and so does the terminal dialog behind it, until the owner confirms that case of D11.
+  until it is first handed to the owner. A card its task's supervisor holds (a permission, a plan, or a parsed terminal
+  question routed to it, kind `screen`) is not even listed, and the clients offer no way to answer it; a session whose
+  pending cards are all so held is no row, the terminal dialog behind a held screen card included (the owner confirmed
+  this case of D11 on 2026-11-23).
 - **The state does not change**: a session whose only cards are held stays `needs_you` (`agentState` in
   `server/internal/assistant/fleet.go` marks a session with any pending card so). The counts leave it out; the state
   does not.

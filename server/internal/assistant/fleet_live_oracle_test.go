@@ -39,18 +39,29 @@ func oracleNeedsYou(agents []oracleInput, ixs []proto.Interaction, counts func(o
 			byKey[a.Session.MachineID+"/"+a.Session.SessionID] = a
 		}
 	}
+	// An agent every pending card of which its task's supervisor holds (delegating, not a question) is not the user's.
+	held := map[string]bool{}
+	for _, ix := range ixs {
+		key := ix.MachineID + "/" + ix.SessionID
+		if _, seen := held[key]; !seen {
+			held[key] = true
+		}
+		if !ix.Delegating || ix.Kind == proto.IxQuestion {
+			held[key] = false
+		}
+	}
 	var out []oracleNeeder
 	asked := map[string]bool{}
 	for _, ix := range ixs {
 		key := ix.MachineID + "/" + ix.SessionID
-		if a, ok := byKey[key]; ok && !asked[key] && stands(ix) {
+		if a, ok := byKey[key]; ok && !asked[key] && !held[key] && stands(ix) {
 			asked[key] = true
 			out = append(out, oracleNeeder{agent: a, card: &ix})
 		}
 	}
 	for _, a := range agents {
 		key := a.Session.MachineID + "/" + a.Session.SessionID
-		if counts(a) && !asked[key] && a.Session.State == proto.StateNeedsYou && !a.Session.Assistant {
+		if counts(a) && !asked[key] && !held[key] && a.Session.State == proto.StateNeedsYou && !a.Session.Assistant {
 			out = append(out, oracleNeeder{agent: a})
 		}
 	}

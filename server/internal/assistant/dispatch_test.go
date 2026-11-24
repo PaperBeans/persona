@@ -385,3 +385,37 @@ func TestDispatchWithoutMainConversationMakesNoTodo(t *testing.T) {
 		t.Fatalf("%d todos without a main conversation", n)
 	}
 }
+
+// A dispatched Agent is a supervised task's: on a Claude-family launcher it starts in Allow all, as agent_start's and a
+// planned task's do (dispatchAllowAll); Codex keeps its computer's default, and so does a launcher the computer does
+// not list (nothing is guessed or swapped).
+func TestDispatchClaudeBypassesPermissions(t *testing.T) {
+	for _, tc := range []struct {
+		name, launcher, listed, agent, want string
+	}{
+		{"default Claude", "", "claude", "claude", "bypassPermissions"},
+		{"aliased Claude", "cc-relay", "cc-relay", "claude", "bypassPermissions"},
+		{"Codex", "codex", "codex", "codex", ""},
+		{"not listed", "elsewhere", "claude", "claude", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f, _ := newDispatchService(t, true)
+			f.launcherList = []proto.Launcher{{Name: tc.listed, Agent: tc.agent}}
+			input := map[string]any{"machine": "box", "cwd": "/code/app", "prompt": "run the Linux tests"}
+			if tc.launcher != "" {
+				input["launcher"] = tc.launcher
+			}
+			args, err := json.Marshal(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := dispatchCall(s, "mac", "caller-0001", "dispatch_start", string(args))
+			if len(f.starts) != 1 {
+				t.Fatalf("start: %q; starts %v", resultText(r), f.starts)
+			}
+			if got, _ := f.starts[0]["permission_mode"].(string); got != tc.want {
+				t.Fatalf("permission_mode = %q, want %q; start = %v", got, tc.want, f.starts[0])
+			}
+		})
+	}
+}

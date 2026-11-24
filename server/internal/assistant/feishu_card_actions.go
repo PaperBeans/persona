@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -19,14 +19,14 @@ import (
 
 // FeishuAction is feishu.card_action: the owner pressed one of the bot's cards (the hub checked it is the owner);
 // the answer is the toast and the card to show instead. Feishu waits 3 seconds for it.
-func (s *Service) FeishuAction(ctx context.Context, p FeishuAction) (*feishubot.CardResponse, error) {
-	var a feishubot.CardAction
+func (s *Service) FeishuAction(ctx context.Context, p FeishuAction) (*botcard.CardResponse, error) {
+	var a botcard.CardAction
 	if err := json.Unmarshal(p.Event, &a); err != nil {
 		return nil, badRequest(err)
 	}
 	resp := s.botCardAction(ctx, &a, p.Action)
 	if resp != nil && resp.Card != nil {
-		if c, ok := resp.Card.Data.(*feishubot.Card); ok {
+		if c, ok := resp.Card.Data.(*botcard.Card); ok {
 			s.workbenchStamp(ctx, c) // the card drawn in its place keeps its way back to the workbench
 		}
 	}
@@ -34,7 +34,7 @@ func (s *Service) FeishuAction(ctx context.Context, p FeishuAction) (*feishubot.
 }
 
 // botCardAction answers a press; action is the owner's action for the card it presses (what answers it).
-func (s *Service) botCardAction(ctx context.Context, a *feishubot.CardAction, action string) *feishubot.CardResponse {
+func (s *Service) botCardAction(ctx context.Context, a *botcard.CardAction, action string) *botcard.CardResponse {
 	l := s.botLang(ctx)
 	switch a.Str("a") {
 	case "nop": // a link of a "more" menu was opened: nothing to do
@@ -179,8 +179,8 @@ func (s *Service) botCardAction(ctx context.Context, a *feishubot.CardAction, ac
 	return toast("info", i18n.T(l, "assistant-feishu_cards.card_expired"))
 }
 
-func toast(kind, text string) *feishubot.CardResponse {
-	return &feishubot.CardResponse{Toast: &feishubot.Toast{Type: kind, Content: text}}
+func toast(kind, text string) *botcard.CardResponse {
+	return &botcard.CardResponse{Toast: &botcard.Toast{Type: kind, Content: text}}
 }
 
 // cardAnswerWait is how long a press waits for its answer to go through before it says "Processing…": the hub has
@@ -188,7 +188,7 @@ func toast(kind, text string) *feishubot.CardResponse {
 var cardAnswerWait = 1500 * time.Millisecond
 
 // answerFromCard turns a press on an interaction card into the same answer the app would give, and resolves it.
-func (s *Service) answerFromCard(ctx context.Context, a *feishubot.CardAction, action string) *feishubot.CardResponse {
+func (s *Service) answerFromCard(ctx context.Context, a *botcard.CardAction, action string) *botcard.CardResponse {
 	l := s.botLang(ctx)
 	id := a.Str("id")
 	var got struct {
@@ -218,7 +218,7 @@ func (s *Service) answerFromCard(ctx context.Context, a *feishubot.CardAction, a
 			ix = card.Ix
 		}
 		ended := endedText(l, got.Status, "assistant-channels.ended")
-		return &feishubot.CardResponse{Toast: &feishubot.Toast{Type: "info", Content: endedText(l, got.Status, "assistant-feishu_cards.already_handled")},
+		return &botcard.CardResponse{Toast: &botcard.Toast{Type: "info", Content: endedText(l, got.Status, "assistant-feishu_cards.already_handled")},
 			Card: s.answeredCard(ctx, ix, ended).Raw()}
 	}
 	ix := got.Interaction
@@ -368,7 +368,7 @@ func (s *Service) answerFromCard(ctx context.Context, a *feishubot.CardAction, a
 		case !o.ok:
 			return toast("info", i18n.T(l, "assistant-feishu_cards.already_handled"))
 		}
-		return &feishubot.CardResponse{Toast: &feishubot.Toast{Type: "success", Content: how}, Card: s.answeredCard(ctx, ix, how).Raw()}
+		return &botcard.CardResponse{Toast: &botcard.Toast{Type: "success", Content: how}, Card: s.answeredCard(ctx, ix, how).Raw()}
 	case <-time.After(cardAnswerWait):
 		msg := a.Context.MessageID
 		go func() {
@@ -528,8 +528,8 @@ func (s *Service) botStartAgent(machine, cwd, prompt, mode string) error {
 	}
 	label += " · " + d.Name
 	s.setBotCurrent(t)
-	c := feishubot.NewCard(i18n.T(l, "assistant-feishu_cards.started"), feishubot.Blue, i18n.T(l, "assistant-feishu_cards.started")).Subtitle(dotJoin(label, secondary)).
-		Markdown(i18n.T(l, "assistant-feishu_cards.started_body", i18n.Args{"machine": feishubot.EscapeMarkdown(d.Name), "dir": feishubot.Code(cwd)}))
+	c := botcard.NewCard(i18n.T(l, "assistant-feishu_cards.started"), botcard.Blue, i18n.T(l, "assistant-feishu_cards.started")).Subtitle(dotJoin(label, secondary)).
+		Markdown(i18n.T(l, "assistant-feishu_cards.started_body", i18n.Args{"machine": botcard.EscapeMarkdown(d.Name), "dir": botcard.Code(cwd)}))
 	if prompt != "" {
 		c.Note(i18n.T(l, "assistant-feishu_cards.started_working"))
 	}

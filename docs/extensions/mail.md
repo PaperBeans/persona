@@ -1,6 +1,6 @@
 # Mail
 
-`server/internal/mail`: lets both Claude and the App send and receive the user's email. It uses standard IMAP + SMTP with no third-party relay service.
+`server/internal/modules/mail` (a feature module: `persona_without_mail` builds the manager without it; `docs/architecture/core-and-modules.md` "Provider seams"): lets both Claude and the App send and receive the user's email. It uses standard IMAP + SMTP with no third-party relay service.
 Gmail uses "Sign In with Google" (OAuth2 + XOAUTH2) and additionally supports searching with Gmail search syntax (`X-GM-RAW`). Credentials are encrypted and stored in the hub's `dataDir` (default `~/.persona`).
 
 ## Capabilities
@@ -133,7 +133,7 @@ the system browser opens Microsoft sign-in and authorization → back to the App
   "Sent" itself, so the hub doesn't append another copy.
 - **Refresh tokens rotate**: Microsoft issues a new one on every refresh (and the old one becomes invalid), so the hub encrypts and stores it back into `oauth_enc` right away (Google doesn't rotate).
 - Credentials: `{provider: "microsoft", client_id, refresh_token}` encrypted in `mail_accounts.oauth_enc`, same as Gmail.
-- Code: `server/internal/mail/microsoft.go`; App: `apple/Persona/Views/Mail/MailOutlookViews.swift`.
+- Code: `server/internal/modules/mail/microsoft.go`; App: `apple/Persona/Views/Mail/MailOutlookViews.swift`.
 - API: `GET` / `PUT /api/v1/mail/oauth/microsoft/config` (`{configured, client_id, source: app|config, redirect_uri}`; PUT `{client_id}`, an empty string clears it),
   `POST …/microsoft/start` (`{login_hint?}` → `{auth_url, callback_scheme, state}`), `POST …/microsoft/finish` (the callback's `{state, code}` or
   `{state, error, error_description}` → `{account}`). A callback carrying an error is still passed to the hub: it turns Microsoft's error code into what to do (see below).

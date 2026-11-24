@@ -28,12 +28,51 @@ class ModuleRegistryTest {
         override fun isCurrent() = true
     }
 
-    @Test fun aModuleWithoutAFeatureIsAlwaysOnAndAFeatureGatedOneOnlyWhereTheHubOffersIt() {
-        val plain = Example("voice")
-        val gated = Example("knowledge-ui", feature = "kb_pages")
-        val registry = ModuleRegistry(listOf(plain, gated))
-        assertEquals(listOf(plain), registry.active(emptySet()))
-        assertEquals(listOf(plain, gated), registry.active(setOf("kb_pages", "other")))
+    private val plain = Example("plain")
+    private val gated = Example("knowledge-ui", feature = ModuleRegistry.moduleFeature("knowledge-ui"))
+    private val registry = ModuleRegistry(listOf(plain, gated))
+
+    @Test fun theFlagNamesAreTheOnesEveryClientUses() {
+        assertEquals("modules", ModuleRegistry.MODULES_MARKER)
+        assertEquals("module.knowledge-ui", ModuleRegistry.moduleFeature("knowledge-ui"))
+    }
+
+    @Test fun beforeAHelloAndInDemoModeEveryModuleIsOn() {
+        // No hello yet and demo mode both read an empty feature set.
+        assertEquals(listOf(plain, gated), registry.active(emptySet()))
+    }
+
+    @Test fun anOlderHubWithoutTheMarkerLeavesEveryModuleOn() {
+        assertEquals(listOf(plain, gated), registry.active(setOf("extensions", "inbox_sources")))
+    }
+
+    @Test fun aHubThatPublishesModuleFlagsTurnsAModuleOnWithItsFlag() {
+        assertEquals(listOf(plain, gated), registry.active(setOf("modules", "module.knowledge-ui", "extensions")))
+    }
+
+    @Test fun aHubThatPublishesModuleFlagsTurnsAModuleOffWithoutItsFlag() {
+        assertEquals(listOf(plain), registry.active(setOf("modules", "module.voice")))
+        assertFalse(ModuleRegistry.isActive(gated, setOf("modules")))
+        // A module that needs no feature stays on wherever it is carried.
+        assertTrue(ModuleRegistry.isActive(plain, setOf("modules")))
+    }
+
+    @Test fun aFlagWithoutTheMarkerChangesNothing() {
+        assertEquals(listOf(plain, gated), registry.active(setOf("module.voice")))
+    }
+
+    @Test fun settingsPagesComeOnlyFromActiveModules() {
+        val page = ModuleSettingsPage("knowledge-ui.settings", 0, persona.core.designsystem.icons.PersonaIcons.options, Page)
+        val withPage = object : PersonaModule {
+            override val id = "knowledge-ui"
+            override val feature = ModuleRegistry.moduleFeature(id)
+            override fun settingsPages() = listOf(page)
+        }
+        val registry = ModuleRegistry(listOf(plain, withPage))
+        assertEquals(listOf(page), registry.settingsPages(emptySet()))
+        assertEquals(listOf(page), registry.settingsPages(setOf("modules", "module.knowledge-ui")))
+        assertTrue(registry.settingsPages(setOf("modules")).isEmpty())
+        assertTrue(ModuleRegistry.Empty.settingsPages(emptySet()).isEmpty())
     }
 
     @Test fun anEmptyListIsPersonaCoreAlone() {

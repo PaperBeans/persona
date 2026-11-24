@@ -51,6 +51,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * The real Inbox (#9600), Glass, phone and foldable. One bulk Mark as done, start / mid / end.
@@ -112,6 +113,9 @@ class ListTapScreenShotsTest {
                 // The title appears first and shifts the list at once. The removal spring is the move after that.
                 if (afterTitle == null && abs(y - start) > 4f) afterTitle = y
                 val removal = afterTitle?.let { abs(y - it) > 4f } == true
+                // Idle rows hold no GraphicsLayer until armed; mirror Choreographer's per-frame draw on the armed
+                // frame before removal so Robolectric populates the newly allocated fadeOut GraphicsLayer.
+                if (afterTitle != null && !removal) rule.onNodeWithTag("shot").captureToImage()
                 if (!savedMid && removal) {
                     save("$stem-mid")
                     savedMid = true

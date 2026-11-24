@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -46,7 +47,9 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.offset
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
 
@@ -519,24 +522,30 @@ fun ComposerFrame(
             } else Modifier.floatingSurface(shape)
             val fieldHeight = if (home || useShellSurface) Tokens.MinTouch.android else Tokens.MinTouch.ios
             val accessoryPadding = if (home || useShellSurface) Tokens.Space.flush else Tokens.Space.xs
+            val outerPadding = if (useShellSurface) {
+                Modifier.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s)
+            } else {
+                Modifier.padding(start = Tokens.Space.m, end = Tokens.Space.m, top = Tokens.Space.xs, bottom = Tokens.Space.sm)
+            }
             val bodyInsets = when {
-                !useShellSurface -> Modifier.padding(Tokens.Space.s)
+                !useShellSurface -> Modifier.padding(horizontal = Tokens.Space.sm, vertical = Tokens.Space.xs)
                 expanded -> Modifier.padding(start = Tokens.Space.sm, end = Tokens.Space.sm, bottom = Tokens.Space.xs)
                 else -> Modifier.padding(horizontal = Tokens.Space.xxs)
             }
             val fieldTop = when {
                 useShellSurface && expanded -> Tokens.Space.s
                 useShellSurface -> Tokens.Space.xs
-                else -> Tokens.Space.m
+                else -> Tokens.Space.s
             }
             val fieldBottom = when {
                 useShellSurface && expanded -> Tokens.Space.flush
                 useShellSurface -> Tokens.Space.xs
-                else -> Tokens.Space.m
+                expanded -> Tokens.Space.xs
+                else -> Tokens.Space.s
             }
-            Column(modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s)
+            Column(modifier.fillMaxWidth().then(outerPadding)
                 .then(surface).then(keepsKeyboard).then(bodyInsets)) {
-                accessory?.let { Column(Modifier.padding(horizontal = Tokens.Space.s, vertical = accessoryPadding), content = it) }
+                accessory?.let { ComposerAccessorySlot(horizontal = Tokens.Space.s, top = accessoryPadding, bottom = accessoryPadding, content = it) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (!expanded) leading?.invoke(this)
                     Box(Modifier.weight(1f).heightIn(min = fieldHeight)
@@ -551,8 +560,16 @@ fun ComposerFrame(
                 }
             }
         }
-        AppStyle.Brief -> Column(modifier.fillMaxWidth().background(palette.background).then(keepsKeyboard).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s)) {
-            accessory?.let { Column(Modifier.padding(start = Tokens.Space.xs, end = Tokens.Space.xs, bottom = Tokens.Space.xs), content = it) }
+        AppStyle.Brief -> Column(
+            modifier.fillMaxWidth().background(palette.background).then(keepsKeyboard)
+                .padding(
+                    start = Tokens.Space.m,
+                    end = Tokens.Space.m,
+                    top = Tokens.Space.xs,
+                    bottom = if (expanded && leading != null) Tokens.Space.xxs else Tokens.Space.sm,
+                ),
+        ) {
+            accessory?.let { ComposerAccessorySlot(horizontal = Tokens.Space.xs, bottom = Tokens.Space.xs, content = it) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (!expanded) leading?.let { it(); Spacer(Modifier.width(Tokens.Space.xs)) }
                 Row(
@@ -560,31 +577,69 @@ fun ComposerFrame(
                         .background(palette.surface).padding(start = Tokens.Space.l, end = Tokens.Space.xs),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.weight(1f).padding(vertical = Tokens.Space.m), contentAlignment = Alignment.CenterStart, content = field)
-                    trailing?.let { Row(Modifier.padding(vertical = Tokens.Space.xs)) { it() } }
+                    Box(Modifier.weight(1f).padding(vertical = Tokens.Space.s), contentAlignment = Alignment.CenterStart, content = field)
+                    trailing?.let { Row { it() } }
                 }
             }
-            if (expanded && leading != null) Row(Modifier.padding(top = Tokens.Space.xs), verticalAlignment = Alignment.CenterVertically) {
+            if (expanded && leading != null) Row(verticalAlignment = Alignment.CenterVertically) {
                 leading?.invoke(this)
                 Spacer(Modifier.weight(1f))
             }
         }
         // The board's grey under a rule, the field a white ticket on it: no white plate across the bottom.
-        AppStyle.Board -> Column(modifier.fillMaxWidth().background(palette.background)
-            .drawBehind { drawLine(palette.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }.then(keepsKeyboard).padding(Tokens.Space.s)) {
-            accessory?.let { Column(Modifier.padding(bottom = Tokens.Space.s), content = it) }
+        AppStyle.Board -> Column(
+            modifier.fillMaxWidth().background(palette.background)
+                .drawBehind { drawLine(palette.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }
+                .then(keepsKeyboard)
+                .padding(
+                    start = Tokens.Space.s,
+                    end = Tokens.Space.s,
+                    top = Tokens.Space.xs,
+                    bottom = if (expanded && leading != null) Tokens.Space.xxs else Tokens.Space.sm,
+                ),
+        ) {
+            accessory?.let { ComposerAccessorySlot(bottom = Tokens.Space.xs, content = it) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (!expanded) leading?.invoke(this)
                 Box(
                     Modifier.weight(1f).heightIn(min = Tokens.MinTouch.ios).clip(RoundedCornerShape(Tokens.Radius.control)).background(palette.surface)
-                        .border(1.dp, palette.line, RoundedCornerShape(Tokens.Radius.control)).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
+                        .border(1.dp, palette.line, RoundedCornerShape(Tokens.Radius.control)).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
                     contentAlignment = Alignment.CenterStart, content = field,
                 )
                 trailing?.let { Spacer(Modifier.width(Tokens.Space.s)); it() }
             }
-            if (expanded && leading != null) Row(Modifier.padding(top = Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
+            if (expanded && leading != null) Row(verticalAlignment = Alignment.CenterVertically) {
                 leading?.invoke(this)
                 Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** Wraps [ComposerFrame]'s optional accessory slot so an empty lambda adds zero vertical padding above the input row. */
+@Composable
+private fun ComposerAccessorySlot(
+    horizontal: Dp = Tokens.Space.flush,
+    top: Dp = Tokens.Space.flush,
+    bottom: Dp = Tokens.Space.flush,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Layout(
+        content = { Column(content = content) },
+    ) { measurables, constraints ->
+        val hPx = horizontal.roundToPx()
+        val topPx = top.roundToPx()
+        val bottomPx = bottom.roundToPx()
+        val inner = constraints.offset(horizontal = -(hPx * 2), vertical = -(topPx + bottomPx))
+        val placeable = measurables.single().measure(inner.copy(minWidth = 0, minHeight = 0))
+        if (placeable.height == 0) {
+            layout(0, 0) {}
+        } else {
+            layout(
+                (placeable.width + hPx * 2).coerceIn(constraints.minWidth, constraints.maxWidth),
+                (placeable.height + topPx + bottomPx).coerceIn(constraints.minHeight, constraints.maxHeight),
+            ) {
+                placeable.placeRelative(hPx, topPx)
             }
         }
     }

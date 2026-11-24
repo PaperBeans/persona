@@ -9,9 +9,9 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/compat"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -67,14 +67,14 @@ func (s *Service) botCommand(ctx context.Context, f FeishuFeatures, messageID, t
 	}
 	// fallback goes as a rich-text list when Feishu refuses the card (the list cards carry their own; other command
 	// replies have none).
-	reply := func(c *feishubot.Card, fallback string) {
+	reply := func(c *botcard.Card, fallback string) {
 		if _, err := s.botPost(ctx, messageID, c, fallback); err != nil {
 			s.logf("bots: command reply: %v", err)
 		}
 	}
 	switch compat.LegacyBotCommand(cmd) {
 	case "/help", "/帮助":
-		reply(feishubot.NewCard(i18n.T(l, "assistant-feishu_cards.help_title"), feishubot.Blue, i18n.T(l, "assistant-feishu_cards.help_title")).Markdown(botHelp(l, f)), "")
+		reply(botcard.NewCard(i18n.T(l, "assistant-feishu_cards.help_title"), botcard.Blue, i18n.T(l, "assistant-feishu_cards.help_title")).Markdown(botHelp(l, f)), "")
 	case "/main", "/persona", "/主对话":
 		if !f.Main {
 			s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.main_off"))
@@ -177,9 +177,9 @@ func pendingQuestion(ix proto.Interaction) string {
 // statusCard is /status plus the same content as plain text (the fallback when Feishu refuses the card): the
 // target's work state (offline / unknown never reads as idle), last activity, goal and pending questions. With the
 // fleet online both sources are local; the web button is built once and is nil without a public_url.
-func (s *Service) statusCard(ctx context.Context, t botTarget) (*feishubot.Card, string) {
+func (s *Service) statusCard(ctx context.Context, t botTarget) (*botcard.Card, string) {
 	l := s.botLang(ctx)
-	card := feishubot.NewCard("", "", i18n.T(l, "assistant-feishu_cards.status_title"))
+	card := botcard.NewCard("", "", i18n.T(l, "assistant-feishu_cards.status_title"))
 	rt, err := s.resolveBotTarget(ctx, t) // one resolve: the target line reuses its label, not targetLabel's
 	label := i18n.T(l, "assistant-feishu.not_found")
 	switch {
@@ -189,11 +189,11 @@ func (s *Service) statusCard(ctx context.Context, t botTarget) (*feishubot.Card,
 		label = rt.label
 	}
 	var head, fb strings.Builder
-	to := i18n.T(l, "assistant-feishu_cards.status_to", i18n.Args{"target": feishubot.EscapeMarkdown(label)})
+	to := i18n.T(l, "assistant-feishu_cards.status_to", i18n.Args{"target": botcard.EscapeMarkdown(label)})
 	head.WriteString(to)
 	fb.WriteString(fallbackText.Replace(i18n.T(l, "assistant-feishu_cards.status_to", i18n.Args{"target": label}))) // ends its own line
 	if rt.secondary != "" {
-		head.WriteString(feishubot.EscapeMarkdown(rt.secondary) + "\n")
+		head.WriteString(botcard.EscapeMarkdown(rt.secondary) + "\n")
 		fb.WriteString(fallbackText.Replace(rt.secondary) + "\n")
 	}
 	if running := len(s.channelRuns(channel.Feishu)); running > 0 {
@@ -215,25 +215,25 @@ func (s *Service) statusCard(ctx context.Context, t botTarget) (*feishubot.Card,
 			}
 		}
 	}
-	stateKey, color := "assistant-feishu_cards.status_state_offline", feishubot.Neutral // offline, unknown or unset: never an idle machine
+	stateKey, color := "assistant-feishu_cards.status_state_offline", botcard.Neutral // offline, unknown or unset: never an idle machine
 	switch sess.State {
 	case proto.StateNeedsYou:
-		stateKey, color = "assistant-feishu_cards.status_state_waiting", feishubot.Orange
+		stateKey, color = "assistant-feishu_cards.status_state_waiting", botcard.Orange
 	case proto.StateWorking:
-		stateKey, color = "assistant-feishu_cards.status_state_working", feishubot.Blue
+		stateKey, color = "assistant-feishu_cards.status_state_working", botcard.Blue
 	case proto.StateUnread, proto.StateIdle:
 		stateKey = "assistant-feishu_cards.status_state_idle"
 	}
 	state := i18n.T(l, stateKey)
-	line := feishubot.InlineTag(state, color)
+	line := botcard.InlineTag(state, color)
 	fmt.Fprintf(&fb, "%s\n", fallbackText.Replace(state))
 	if sess.LastText != "" {
 		last := clip(oneLine(sess.LastText), 90)
-		line += "\n" + feishubot.EscapeMarkdown(last)
+		line += "\n" + botcard.EscapeMarkdown(last)
 		fb.WriteString(fallbackText.Replace(last) + "\n")
 	}
 	if g := sess.Goal; g != nil && g.Objective != "" && (g.Status == "" || g.Status == proto.GoalActive) {
-		goal := i18n.T(l, "assistant-feishu_cards.status_goal", i18n.Args{"objective": feishubot.EscapeMarkdown(clip(oneLine(g.Objective), 90))})
+		goal := i18n.T(l, "assistant-feishu_cards.status_goal", i18n.Args{"objective": botcard.EscapeMarkdown(clip(oneLine(g.Objective), 90))})
 		line += "\n" + goal
 		fb.WriteString(fallbackText.Replace(goal) + "\n")
 	}
@@ -265,9 +265,9 @@ func (s *Service) statusCard(ctx context.Context, t botTarget) (*feishubot.Card,
 		if key := ixKindTags[ix.Kind]; key != "" {
 			kind = i18n.T(l, key)
 		}
-		md := "**" + feishubot.EscapeMarkdown(q) + "**"
+		md := "**" + botcard.EscapeMarkdown(q) + "**"
 		if kind != "" {
-			md = feishubot.InlineTag(kind, feishubot.Orange) + " " + md
+			md = botcard.InlineTag(kind, botcard.Orange) + " " + md
 		}
 		card.Markdown(md)
 		fmt.Fprintf(&fb, "- %s\n", strings.TrimSpace(kind+" "+fallbackText.Replace(q)))
@@ -395,12 +395,12 @@ var fallbackText = strings.NewReplacer("`", "", "*", "", "_", "", "[", "", "]", 
 
 // conversationsCard lists recent Persona conversations with a button to switch to each. It also returns the same
 // list as plain text: the card goes with it as fallback, so a refused card still shows every conversation.
-func (s *Service) conversationsCard(ctx context.Context) (*feishubot.Card, string) {
+func (s *Service) conversationsCard(ctx context.Context) (*botcard.Card, string) {
 	list, main := s.conversations(ctx, false, "")
 	sort.SliceStable(list, func(i, j int) bool { return list[i].UpdatedAt.After(list[j].UpdatedAt) })
 	l := s.botLang(ctx)
 	title := i18n.T(l, "assistant-feishu_cards.recent_chats")
-	c := feishubot.NewCard(title, feishubot.Blue, title)
+	c := botcard.NewCard(title, botcard.Blue, title)
 	if len(list) == 0 {
 		empty := i18n.T(l, "assistant-feishu_cards.no_chats")
 		return c.Markdown(empty), title + "\n\n" + empty
@@ -414,18 +414,18 @@ func (s *Service) conversationsCard(ctx context.Context) (*feishubot.Card, strin
 			break
 		}
 		name := clip(oneLine(conversationName(sess, main)), botListNameMost)
-		line := "**" + feishubot.EscapeMarkdown(name) + "**"
+		line := "**" + botcard.EscapeMarkdown(name) + "**"
 		if !sess.UpdatedAt.IsZero() {
 			line += " · " + botAgo(l, sess.UpdatedAt)
 		}
 		if sess.LastText != "" {
-			line += "\n<font color='grey'>" + feishubot.EscapeMarkdown(clip(oneLine(sess.LastText), 80)) + "</font>"
+			line += "\n<font color='grey'>" + botcard.EscapeMarkdown(clip(oneLine(sess.LastText), 80)) + "</font>"
 		}
 		kind := targetPersona
 		if sess.SessionID == main {
 			kind = targetMain
 		}
-		switchBtn := feishubot.Btn(i18n.T(l, "assistant-feishu_cards.chat_here"), feishubot.Default, map[string]any{"a": "switch", "k": kind, "m": sess.MachineID, "s": sess.SessionID, "t": name})
+		switchBtn := botcard.Btn(i18n.T(l, "assistant-feishu_cards.chat_here"), botcard.Default, map[string]any{"a": "switch", "k": kind, "m": sess.MachineID, "s": sess.SessionID, "t": name})
 		// The rows are Persona conversations (conversations lists Assistant sessions), so the link is /persona/<id>.
 		openBtn := s.openLinkButton(ctx, sessionLink(web, sess.MachineID, sess.SessionID, sess.Assistant))
 		c.Markdown(line).Buttons(switchBtn, openBtn)
@@ -450,7 +450,7 @@ func botAgo(l i18n.Lang, t time.Time) string {
 
 // agentsCard lists the agents worth talking to: needing you, working, finished unseen, then the ones idle lately.
 // It also returns the same list as plain text, used as the card's fallback when Feishu refuses the card.
-func (s *Service) agentsCard(ctx context.Context, query string) (*feishubot.Card, string) {
+func (s *Service) agentsCard(ctx context.Context, query string) (*botcard.Card, string) {
 	type row struct {
 		d    Device
 		sess proto.Session
@@ -482,8 +482,8 @@ func (s *Service) agentsCard(ctx context.Context, query string) (*feishubot.Card
 	})
 	l := s.botLang(ctx)
 	title := i18n.T(l, "assistant-feishu_cards.agents_title")
-	c := feishubot.NewCard(title, feishubot.Blue, i18n.T(l, "assistant-feishu_cards.agents_summary"))
-	startNew := feishubot.Btn(i18n.T(l, "assistant-feishu_cards.start_new"), feishubot.Primary, map[string]any{"a": "start_form"})
+	c := botcard.NewCard(title, botcard.Blue, i18n.T(l, "assistant-feishu_cards.agents_summary"))
+	startNew := botcard.Btn(i18n.T(l, "assistant-feishu_cards.start_new"), botcard.Primary, map[string]any{"a": "start_form"})
 	if len(rows) == 0 {
 		empty := i18n.T(l, "assistant-feishu_cards.no_agents")
 		return c.Markdown(empty).Buttons(startNew), title + "\n\n" + empty
@@ -510,22 +510,22 @@ func (s *Service) agentsCard(ctx context.Context, query string) (*feishubot.Card
 }
 
 // startAgentCard is a form to start a coding agent on a machine.
-func (s *Service) startAgentCard(ctx context.Context, prompt string) *feishubot.Card {
-	var opts []feishubot.Option
+func (s *Service) startAgentCard(ctx context.Context, prompt string) *botcard.Card {
+	var opts []botcard.Option
 	for _, d := range s.devices(ctx) {
 		if d.Online {
-			opts = append(opts, feishubot.Option{Label: d.Name, Value: d.ID})
+			opts = append(opts, botcard.Option{Label: d.Name, Value: d.ID})
 		}
 	}
 	l := s.botLang(ctx)
-	c := feishubot.NewCard(i18n.T(l, "assistant-feishu_cards.start_title"), feishubot.Blue, i18n.T(l, "assistant-feishu_cards.start_title"))
+	c := botcard.NewCard(i18n.T(l, "assistant-feishu_cards.start_title"), botcard.Blue, i18n.T(l, "assistant-feishu_cards.start_title"))
 	if len(opts) == 0 {
 		return c.Markdown(i18n.T(l, "assistant-feishu_cards.no_machines"))
 	}
 	fields := []any{
-		feishubot.Select("machine", i18n.T(l, "assistant-feishu_cards.which_machine"), opts, false),
-		feishubot.Input("cwd", i18n.T(l, "assistant-feishu_cards.directory"), i18n.T(l, "assistant-feishu_cards.directory_placeholder"), false),
-		feishubot.Input("prompt", i18n.T(l, "assistant-feishu_cards.what_to_do"), i18n.T(l, "assistant-feishu_cards.what_to_do_placeholder"), true),
+		botcard.Select("machine", i18n.T(l, "assistant-feishu_cards.which_machine"), opts, false),
+		botcard.Input("cwd", i18n.T(l, "assistant-feishu_cards.directory"), i18n.T(l, "assistant-feishu_cards.directory_placeholder"), false),
+		botcard.Input("prompt", i18n.T(l, "assistant-feishu_cards.what_to_do"), i18n.T(l, "assistant-feishu_cards.what_to_do_placeholder"), true),
 	}
 	if prompt != "" {
 		fields[2].(map[string]any)["default_value"] = prompt
@@ -533,5 +533,5 @@ func (s *Service) startAgentCard(ctx context.Context, prompt string) *feishubot.
 	if s.workbench.on.Load() { // the workbench's permission field, before what to do (feishu_workbench.go)
 		fields = append(fields[:2], wbModeSelect(l), fields[2])
 	}
-	return c.Form("start", fields, feishubot.Submit(i18n.T(l, "assistant-feishu_cards.start"), feishubot.Primary, "start_submit", map[string]any{"a": "start"}))
+	return c.Form("start", fields, botcard.Submit(i18n.T(l, "assistant-feishu_cards.start"), botcard.Primary, "start_submit", map[string]any{"a": "start"}))
 }

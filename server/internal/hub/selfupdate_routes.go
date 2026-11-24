@@ -262,7 +262,7 @@ func (u *updater) routes(api *http.ServeMux) {
 		} else if u.settings.Source != prev.Source {
 			u.release, u.blocked, u.lastCheck = nil, nil, time.Time{}
 			u.releaseRead, u.refreshTried = time.Time{}, time.Time{}
-			u.state, u.progress, u.errText = "idle", "", ""
+			u.setLocked("idle", "", "")
 			u.androidNote, u.behindNote = "", ""
 		}
 		u.mu.Unlock()

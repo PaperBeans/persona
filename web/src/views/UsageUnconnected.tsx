@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { assistantLaunchers, readAssistantLaunchers, useModelLists } from "../lib/session-models";
 import { useStore } from "../lib/store";
-import { liveAccounts, useHiddenUsageProviders, useUsageWindowsReady, type UnconnectedProvider, type UsageAccount } from "../lib/usage-windows";
+import { canonicalUsageProvider, liveAccounts, useHiddenUsageProviders, useUsageWindowsReady, type UnconnectedProvider, type UsageAccount } from "../lib/usage-windows";
 
 export interface UsageProviderCandidate {
   name: string;
@@ -16,37 +16,28 @@ export interface UsageProviderCandidate {
 const BUILTIN_TITLES: Readonly<Record<string, string>> = {
   claude: "Claude Code",
   codex: "Codex",
-  agy: "Antigravity",
+  antigravity: "Antigravity",
 };
 
-/** Whether the owner hid this launcher's provider from the usage bars (`usage.hidden_providers`, #13179): by its own name or
- *  title, or, for one that is the agent's own subscription (no relay address), by the agent's provider name. */
-function hiddenLauncher(l: UsageProviderCandidate, title: string, hidden: readonly string[]): boolean {
-  if (!hidden.length) return false;
-  if (hidden.includes(l.name.toLowerCase()) || hidden.includes(title.toLowerCase())) return true;
-  if (l.base_url) return false;
-  const agent = (l.agent_type || l.agent || "claude").toLowerCase();
-  return hidden.includes(agent === "antigravity" ? "agy" : agent);
-}
-
 /** Providers offered in the model switcher that do not yet have a live subscription account in `live`, leaving out the
- *  ones the owner hid from the bars (`hidden`, lowercase). */
+ *  ones the owner hid from the bars. A relay launcher matches by name or source. */
 export function unconnectedUsageProviders(launchers: readonly UsageProviderCandidate[], live: readonly UsageAccount[], hidden: readonly string[] = []): UnconnectedProvider[] {
   const out: UnconnectedProvider[] = [];
   const seen = new Set<string>();
+  const hiddenProviders = new Set(hidden.map(canonicalUsageProvider));
+  const connectedProviders = new Set(live.map((a) => canonicalUsageProvider(a.provider)));
   for (const l of launchers) {
     if (!l.name || seen.has(l.name)) continue;
     seen.add(l.name);
-    const title = l.display_name?.trim() || BUILTIN_TITLES[l.name] || l.name;
-    if (hiddenLauncher(l, title, hidden)) continue;
+    const launcherProvider = canonicalUsageProvider(l.name);
+    const title = l.display_name?.trim() || BUILTIN_TITLES[launcherProvider] || l.name;
     const agent = (l.agent_type || l.agent || "claude").toLowerCase();
+    const provider = canonicalUsageProvider(agent);
+    if (hiddenProviders.has(launcherProvider) || hiddenProviders.has(canonicalUsageProvider(title)) ||
+        (!l.base_url && hiddenProviders.has(provider))) continue;
     const idLower = l.name.toLowerCase();
     const titleLower = title.toLowerCase();
-    const matchedByProvider =
-      !l.base_url &&
-      ((agent === "codex" && live.some((a) => a.provider === "codex")) ||
-        (agent === "claude" && live.some((a) => a.provider === "claude")) ||
-        ((agent === "agy" || agent === "antigravity") && live.some((a) => a.provider === "agy" || a.provider === "antigravity")));
+    const matchedByProvider = !l.base_url && Object.hasOwn(BUILTIN_TITLES, provider) && connectedProviders.has(provider);
     const matchedByName = live.some(
       (a) =>
         a.name.toLowerCase() === titleLower ||

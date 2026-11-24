@@ -260,17 +260,20 @@ fun JDialog(
     dismiss: Pair<String, () -> Unit>? = stringResource(R.string.designsystem_cancel) to onDismiss,
     destructive: Boolean = false,
     confirmEnabled: Boolean = true,
+    confirmLoading: Boolean = false,
+    dismissEnabled: Boolean = !confirmLoading,
     content: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
     val palette = PersonaTheme.palette
     val shortcutHelpOwner = androidx.compose.runtime.remember { Any() }
     val densities = currentTextDensities()
+    val dismissRequest: () -> Unit = if (!dismissEnabled) ({}) else onDismiss
     androidx.compose.runtime.CompositionLocalProvider(
         LocalReadingInset provides 0.dp,
         LocalHardwareShortcutHelpOwner provides shortcutHelpOwner,
     ) {
     AlertDialog(
-        onDismissRequest = onDismiss, modifier = Modifier.hardwareShortcutDismiss(onDismiss, shortcutHelpOwner),
+        onDismissRequest = dismissRequest, modifier = Modifier.hardwareShortcutDismiss(dismissRequest, shortcutHelpOwner),
         containerColor = palette.surfaceOpaque, shape = PersonaTheme.shapes.panelShape, tonalElevation = 0.dp,
         title = { RetainedTextDensity(densities) { InterfaceContent { Text(title, style = PersonaTheme.type.title, color = palette.ink) } } },
         text = if (text == null && content == null) null else ({
@@ -287,13 +290,14 @@ fun JDialog(
             RetainedTextDensity(densities) {
                 InterfaceContent {
                     confirm?.let { (label, action) ->
-                        JButton(label, action, kind = if (destructive) JButtonKind.Destructive else JButtonKind.Primary, size = JButtonSize.Medium, enabled = confirmEnabled)
+                        JButton(label, action, kind = if (destructive) JButtonKind.Destructive else JButtonKind.Primary,
+                            size = JButtonSize.Medium, enabled = confirmEnabled, loading = confirmLoading)
                     }
                 }
             }
         },
         dismissButton = dismiss?.let { (label, action) -> {
-            RetainedTextDensity(densities) { InterfaceContent { JButton(label, action, kind = JButtonKind.Quiet, size = JButtonSize.Medium) } }
+            RetainedTextDensity(densities) { InterfaceContent { JButton(label, action, kind = JButtonKind.Quiet, size = JButtonSize.Medium, enabled = dismissEnabled) } }
         } },
     )
     HardwareShortcutHelp(shortcutHelpOwner)

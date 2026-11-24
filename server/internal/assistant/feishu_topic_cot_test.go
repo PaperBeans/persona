@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -82,10 +82,10 @@ func TestFeishuTopicAgentMessageStreamsNativeEvents(t *testing.T) {
 	topicCotProgress(t, s, r, time.Second, []string{"运行 `ls`"}, "")
 	finishTopicCot(t, s, r, &channel.Result{Answer: "结论在这里"})
 
-	var events []feishubot.CotEvent
+	var events []botcard.CotEvent
 	for _, p := range s.hub.(*fakeHub).appParams(AppFeishu, FeishuCotAppend) {
 		raw, _ := json.Marshal(p["events"])
-		var batch []feishubot.CotEvent
+		var batch []botcard.CotEvent
 		_ = json.Unmarshal(raw, &batch)
 		events = append(events, batch...)
 	}

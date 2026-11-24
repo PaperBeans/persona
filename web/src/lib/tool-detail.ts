@@ -95,13 +95,15 @@ export function toolQuestions(input: Record<string, unknown> | undefined): ToolQ
   });
 }
 
-/** Each question's answer in the hub's ask_user result (`The user answered:\n- <question> → <answer>`); empty when
- *  nobody answered or the text is not the hub's (iOS AskUserAnswers.parse). */
+/** Each question's answer in the hub's ask_user result (`The user answered:\n- <question> → <answer>`) or Claude
+ *  Code's AskUserQuestion result (`User has answered your questions: "<q>"="<a>", …`, #5937); empty when nobody
+ *  answered or the text is neither (iOS AskUserAnswers.parse). */
 export function askUserAnswers(result: string, questions: ToolQuestion[]): Record<string, string> {
-  if (!result.startsWith("The user answered:")) return {};
+  const claude = result.startsWith("User has answered your questions:");
+  if (!claude && !result.startsWith("The user answered:")) return {};
   const marks = questions
     .map((q) => {
-      const mark = `\n- ${q.question} → `;
+      const mark = claude ? `"${q.question}"="` : `\n- ${q.question} → `;
       const at = result.indexOf(mark);
       return at >= 0 ? { q: q.question, at, end: at + mark.length } : null;
     })
@@ -109,7 +111,12 @@ export function askUserAnswers(result: string, questions: ToolQuestion[]): Recor
     .sort((a, b) => a.at - b.at);
   const out: Record<string, string> = {};
   marks.forEach((m, n) => {
-    const answer = result.slice(m.end, n + 1 < marks.length ? marks[n + 1].at : undefined).trim();
+    let answer = result.slice(m.end, n + 1 < marks.length ? marks[n + 1].at : undefined);
+    if (claude) {
+      const close = answer.lastIndexOf('"');
+      answer = close >= 0 ? answer.slice(0, close) : "";
+    }
+    answer = answer.trim();
     if (answer) out[m.q] = answer;
   });
   return out;

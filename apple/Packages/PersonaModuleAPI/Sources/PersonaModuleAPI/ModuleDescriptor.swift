@@ -34,15 +34,16 @@ public enum ModuleSlot: String, CaseIterable, Sendable {
     /// it opens and the attachment that sheet hands back (#13400 `composer_source`). Served.
     case composerActions = "composer_actions"
 
-    /// Pages in the shell: sidebar / drawer rows and their routes (`ShellPage`, `ShellRoute`). Declared, not served.
+    /// Pages in the shell: a page the core routes to by id and lists a row for only while a module provides it
+    /// (`ModuleRegistrar.shellPage`). Served.
     case shellPlaces = "shell_places"
-    /// Entries in Settings (#13400 `settings_section`, #13395's settings registry). Declared, not served.
+    /// Entries in Settings (#13400 `settings_section`, #13395's settings registry), each with its page. Served.
     case settings = "settings"
-    /// Renderers for chat cards of a kind. Declared, not served.
+    /// What a chat draws for an item of a kind: views at the host's tool-call places. Served (`view(at:)`).
     case chatCardKinds = "chat_card_kinds"
-    /// Views next to a conversation (bars, banners above the composer). Declared, not served.
+    /// Views next to a conversation (bars, banners above the composer, the task dock). Served (`view(at:)`).
     case chatAccessories = "chat_accessories"
-    /// Items in a page's toolbar. Declared, not served.
+    /// Items in a page's toolbar and menus (a chat's ··· menu). Served (`view(at:)`).
     case toolbarItems = "toolbar_items"
     /// Fields a module adds to, or reads from, the hub's hello. Declared, not served.
     case helloHooks = "hello_hooks"
@@ -57,6 +58,9 @@ public enum ModuleSlot: String, CaseIterable, Sendable {
     case intents = "intents"
     /// Notification categories and their actions. Declared, not served.
     case pushCategories = "push_categories"
+    /// Interfaces the core declares and asks for, which a module implements (`ModuleRegistrar.provide`): the core does
+    /// without one when no active module provides it. A client-side slot, as `launch_hooks`. Served.
+    case capabilities = "capabilities"
     /// Leases on the shared audio session through the core's `AudioSessionBroker` (#13432's remaining work). Declared,
     /// not served.
     case audioLeases = "audio_leases"
@@ -64,7 +68,8 @@ public enum ModuleSlot: String, CaseIterable, Sendable {
     /// True when the core reads this slot today.
     public var isServed: Bool {
         switch self {
-        case .launchHooks, .deepLinks, .composerActions: true
+        case .launchHooks, .deepLinks, .composerActions, .shellPlaces, .settings, .chatCardKinds, .chatAccessories,
+             .toolbarItems, .capabilities: true
         default: false
         }
     }
@@ -73,8 +78,8 @@ public enum ModuleSlot: String, CaseIterable, Sendable {
 /// What a module is: its id, the hub feature flag it depends on, and the slots it uses.
 public struct ModuleDescriptor: Hashable, Sendable {
     public let id: ModuleID
-    /// The wire feature flag (`hello.features`) the module needs from the hub; nil for a module that works without the
-    /// hub's help (glasses). Declared for the contract; the registry does not gate on it yet.
+    /// The wire feature flag (`hello.features`) through which the hub can turn the module off: `module.<id>`
+    /// (`hubFeature(for:)`), or nil for a module the hub never gates. `ModuleRegistry` enforces it with `HubModules`.
     public let feature: String?
     /// The slots the module registers into. Registering into a slot that is not listed here is refused.
     public let slots: Set<ModuleSlot>
@@ -84,4 +89,12 @@ public struct ModuleDescriptor: Hashable, Sendable {
         self.feature = feature
         self.slots = slots
     }
+
+    /// A module the hub can turn off: its feature is `module.<id>` (`HubModules`).
+    public init(id: ModuleID, hubGated: Bool, slots: Set<ModuleSlot>) {
+        self.init(id: id, feature: hubGated ? Self.hubFeature(for: id) : nil, slots: slots)
+    }
+
+    /// The hub feature flag of module `id`: `module.<id>`.
+    public static func hubFeature(for id: ModuleID) -> String { HubModules.prefix + id.rawValue }
 }

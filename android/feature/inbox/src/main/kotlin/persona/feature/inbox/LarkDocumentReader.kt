@@ -40,6 +40,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import persona.core.inbox.*
 
 internal val LocalLarkLinkOpener = staticCompositionLocalOf<((String, LarkContentSource?) -> Unit)?> { null }
 private data class LarkLink(val url: String, val source: LarkContentSource?)

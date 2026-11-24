@@ -9,6 +9,9 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
+// promptCaching1hEnv makes Claude Code mark its cache breakpoints {"type":"ephemeral","ttl":"1h"}.
+const promptCaching1hEnv = "ENABLE_PROMPT_CACHING_1H"
+
 type assistantCacheEntry struct {
 	proxy     *cachewarm.Proxy
 	launcher  string

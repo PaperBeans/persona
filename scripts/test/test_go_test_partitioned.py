@@ -16,9 +16,11 @@ import go_test_partitioned as gtp
 MODULE = ["example/server/cmd/personad", "example/server/internal/assistant", "example/server/internal/assistantwire",
           "example/server/internal/node", "example/server/internal/node/sub"]
 NODE, ASSISTANT = "./internal/node", "./internal/assistant"
-# The fixture module has no internal/hub, internal/devices or internal/extmgr: they split the way internal/assistant does.
+# The fixture module has no internal/hub, internal/devices, internal/extmgr or internal/modules/voice: they split the way
+# internal/assistant does.
 PATTERNS = {NODE: ["^(TestA|TestC)$", "^(TestB)$"], ASSISTANT: ["^(TestX|TestZ)$", "^(TestY)$"],
-            "./internal/hub": ["^(TestH)$"], "./internal/devices": ["^(TestD)$"], "./internal/extmgr": ["^(TestM)$"]}
+            "./internal/hub": ["^(TestH)$"], "./internal/devices": ["^(TestD)$"], "./internal/extmgr": ["^(TestM)$"],
+            "./internal/modules/voice": ["^(TestV)$"]}
 PREFIX = "example/server/"
 # MODULE with subpackages of internal/assistant, for the ./<dir>/... arguments check-fast passes (#12765).
 TREE = MODULE + [PREFIX + "internal/assistant/inbox", PREFIX + "internal/assistant/inbox/item"]

@@ -490,7 +490,8 @@ func (s *Service) prEventSignalStillHolds(t Todo, g superviseSignal) bool {
 //   - alive & idle -> direct DeviceSessionSend
 //   - alive & working -> DeviceSessionSend (queued cleanly behind the current turn)
 //   - stopped (non-user stop) -> guarded resumeAllowed + resumeAndSend with original session context
-//   - no usable Agent / machine offline / user or unknown stop / resume refused -> error (caller falls back to supervisor)
+//   - no usable Agent / machine offline / user or unknown stop / resume refused -> error (caller falls back to supervisor,
+//     which may resume an unknown stop itself with agent_send)
 func (s *Service) deliverPREventToAgent(ctx context.Context, t Todo, ev prRoutedEvent, dedupeKey string) (string, error) {
 	cur, ok := s.todoNow(t.ID)
 	if !ok || !taskOpen(cur) {
@@ -576,6 +577,9 @@ func (s *Service) deliverPREventToAgent(ctx context.Context, t Todo, ev prRouted
 	self := cur.Origin
 	if self == "" && cur.Supervision != nil {
 		self = cur.Supervision.Supervisor
+	}
+	if err := eventMayResume(lastStopped); err != nil {
+		return "", err
 	}
 	why := cleanWhy(fmt.Sprintf("PR %s on %s@%s", ev.Kind, ev.PRURL, shortSHA(ev.HeadSHA)))
 	if err := s.resumeAllowed(ctx, self, am, lastStopped, why, nil); err != nil {

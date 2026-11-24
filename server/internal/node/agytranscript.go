@@ -36,6 +36,11 @@ type agyStepUsage struct {
 	ModelContextWindow       int   `json:"model_context_window"`
 }
 
+type agyToolCall struct {
+	Name string          `json:"name"`
+	Args json.RawMessage `json:"args"`
+}
+
 type agyStep struct {
 	Index                    *int            `json:"step_index"`
 	Type                     string          `json:"type"`
@@ -59,15 +64,12 @@ type agyStep struct {
 	Usage                    *agyStepUsage   `json:"usage"`
 	TruncatedFields          []string        `json:"truncated_fields"`
 	Media                    json.RawMessage `json:"media"`
-	ToolCalls                []*struct {
-		Name string          `json:"name"`
-		Args json.RawMessage `json:"args"`
-	} `json:"tool_calls"`
-	seq      int
-	key      string
-	branch   string
-	record   [32]byte
-	rendered [32]byte
+	ToolCalls                []*agyToolCall  `json:"tool_calls"`
+	seq                      int
+	key                      string
+	branch                   string
+	record                   [32]byte
+	rendered                 [32]byte
 }
 
 type agyStepMemo struct {
@@ -86,6 +88,7 @@ type agyTranscriptUsage struct {
 	turns         int
 	compacted     bool
 	hasUsage      bool
+	first         string // the first message the user typed, as shown (agyUserText): an untitled pane's title (agytitle.go)
 }
 
 type agyHistory struct {
@@ -724,11 +727,12 @@ func mapAgySteps(steps []agyStep, fallback time.Time, receipts map[string]bool) 
 					it.Model = stepModel
 				}
 			}
+			truncatedCalls := slices.Contains(step.TruncatedFields, "tool_calls")
 			for k, call := range step.ToolCalls {
 				if call == nil {
 					continue
 				}
-				name, input := agyTool(call.Name, call.Args)
+				name, input := agyToolInput(call.Name, call.Args, truncatedCalls)
 				callID := fmt.Sprintf("call_%s_%d", step.key, k)
 				it := add("tool"+strconv.Itoa(k), "assistant", proto.KindToolUse, "")
 				it.Model = stepModel
@@ -810,7 +814,99 @@ var agyToolNames = map[string]string{
 	"web_fetch": "WebFetch", "web_search": "WebSearch", "todo_write": "TodoWrite",
 }
 
+// agyArgPreview splits a clipped argument at the exporter's marker. A zero
+// omitted count means the value has no valid marker.
+func agyArgPreview(value string) (head, tail string, omitted int) {
+	match := agyTailTruncation.FindStringSubmatchIndex(value)
+	if match == nil {
+		match = agyTruncation.FindStringSubmatchIndex(value)
+	}
+	if match != nil {
+		if n, err := strconv.Atoi(value[match[2]:match[3]]); err == nil && n > 0 {
+			return value[:match[0]], value[match[1]:], n
+		}
+	}
+	return value, "", 0
+}
+
+// agyDecodeArgString decodes one JSON string, closing a clipped prefix after
+// dropping any escape the exporter cut in half.
+func agyDecodeArgString(value string, clipped bool) (string, bool) {
+	if !strings.HasPrefix(value, `"`) {
+		return "", false
+	}
+	if clipped {
+		if slash := strings.LastIndexByte(value, '\\'); slash >= 0 {
+			escape := value[slash+1:]
+			if escape == "" || strings.HasPrefix(escape, "u") && len(escape) < 5 {
+				start := slash
+				for start > 0 && value[start-1] == '\\' {
+					start--
+				}
+				if (slash-start)%2 == 0 {
+					value = value[:slash]
+				}
+			}
+		}
+		value += `"`
+	}
+	var decoded string
+	err := json.Unmarshal([]byte(value), &decoded)
+	return decoded, err == nil
+}
+
+// agyNormalizeArgValue copies the arguments so a failed decode leaves the original
+// call available. Older exports can contain literal quotes in plain arguments.
+func agyNormalizeArgValue(v any, truncated, encoded bool) (any, bool) {
+	switch v := v.(type) {
+	case string:
+		head, tail, omitted := v, "", 0
+		if truncated {
+			head, tail, omitted = agyArgPreview(v)
+		}
+		if encoded {
+			decoded, ok := agyDecodeArgString(head, omitted > 0)
+			if !ok {
+				return nil, false
+			}
+			if omitted > 0 {
+				// The missing text and any retained suffix are counted in encoded bytes.
+				return decoded + transcript.ApproximateClipNote(len(decoded)+omitted+len(tail)), true
+			}
+			return decoded, true
+		}
+		if omitted > 0 {
+			return head + transcript.ClipNote(len(head)+omitted+len(tail)), true
+		}
+	case []any:
+		out := make([]any, len(v))
+		for i, elem := range v {
+			normalized, ok := agyNormalizeArgValue(elem, truncated, encoded)
+			if !ok {
+				return nil, false
+			}
+			out[i] = normalized
+		}
+		return out, true
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, elem := range v {
+			normalized, ok := agyNormalizeArgValue(elem, truncated, encoded)
+			if !ok {
+				return nil, false
+			}
+			out[k] = normalized
+		}
+		return out, true
+	}
+	return v, true
+}
+
 func agyTool(name string, raw json.RawMessage) (string, json.RawMessage) {
+	return agyToolInput(name, raw, false)
+}
+
+func agyToolInput(name string, raw json.RawMessage, truncated bool) (string, json.RawMessage) {
 	if name == "" {
 		name = "tool"
 	}
@@ -826,11 +922,17 @@ func agyTool(name string, raw json.RawMessage) (string, json.RawMessage) {
 		}
 		return appName, raw
 	}
-	var args map[string]any
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	if dec.Decode(&args) != nil || args == nil {
+	args, ok := agyDecodeToolArgs(raw)
+	if !ok {
 		return appName, json.RawMessage("{}")
+	}
+	// The compact export wraps every string argument in a JSON string literal.
+	// Decode only when the whole call fits that format.
+	if decoded, ok := agyNormalizeArgValue(args, truncated, true); ok {
+		args = decoded.(map[string]any)
+	} else if truncated {
+		preview, _ := agyNormalizeArgValue(args, true, false)
+		args = preview.(map[string]any)
 	}
 	first := func(keys ...string) any {
 		for _, key := range keys {

@@ -2,6 +2,7 @@ package devices
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -78,7 +79,7 @@ func (n *updatingNode) handle(_ context.Context, method string, params json.RawM
 			return nil, err
 		}
 		sum := sha256.Sum256(n.expected)
-		if p.Size != int64(len(n.expected)) || p.SHA256 != hex.EncodeToString(sum[:]) || p.Version != "new-build" {
+		if p.Size != int64(len(n.expected)) || p.SHA256 != hex.EncodeToString(sum[:]) || p.Version != cmp.Or(n.target, "new-build") {
 			return nil, errors.New("wrong update metadata")
 		}
 		n.begin++
@@ -122,7 +123,7 @@ func (n *updatingNode) handle(_ context.Context, method string, params json.RawM
 		}
 		if !n.stayOld {
 			n.machine.mu.Lock()
-			n.machine.info.Version = "new-build"
+			n.machine.info.Version = cmp.Or(n.target, "new-build")
 			n.machine.mu.Unlock()
 		}
 		if n.committed != nil {

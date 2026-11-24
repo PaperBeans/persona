@@ -7,7 +7,7 @@ trusted-computer channel the phone already offers to a computer it trusts. This 
 RemotePairing: screenshots, accessibility tree, input; its wire contract is #3451's), the node capability `iphone`
 with its hub RPC (#3450), and the assistant's tools are separate pieces (epic #3452).
 
-Code: `server/internal/iphone` (records, Bonjour, sessions, the `personad iphone` command).
+Code: `server/internal/modules/phone-extra/iphone` (records, Bonjour, sessions, the `personad iphone` command).
 
 > **Not verified on a real device yet**: the pairing prompts, the contents of the phone's Bonjour TXT record, and how
 > a sleeping phone's Wi-Fi behaves were tested only against a fake bridge and a Bonjour service registered on a Mac.
@@ -161,7 +161,7 @@ which is what makes a broken write safe to send again.
 
 ## Node-side interface
 
-What the node capability calls (`server/internal/iphone/manager.go`):
+What the node capability calls (`server/internal/modules/phone-extra/iphone/manager.go`):
 
 | Call | Does |
 | --- | --- |
@@ -178,10 +178,10 @@ Errors are `*iphone.Error{Code, Message}`: the bridge's codes, plus `not_paired`
 
 ## The node program `iphone` (#3450)
 
-The manager reaches the paired phones through the node's built-in program `iphone` (`server/internal/node/iphone/iphone.go`,
+The manager reaches the paired phones through the node's built-in program `iphone` (`server/internal/modules/phone-extra/nodeiphone/iphone.go`,
 listed in `node.info`'s `builtin_programs`), over `plugin.node.call {id: "iphone", method, params}` only: it has no old
 method names, and a node without it answers the manager's `iphone.*` with "unknown method". It reads the phones through
-the sessions above (`node/iphone/iphone_host.go`) and hands looks and steps to the phone control core (`node/iphone/iphone_core.go`:
+the sessions above (`internal/modules/phone-extra/nodeiphone/iphone_host.go`) and hands looks and steps to the phone control core (`internal/modules/phone-extra/nodeiphone/iphone_core.go`:
 one `iphonectl.Controller` for the node process, [iphone-control.md](iphone-control.md)); types are in `proto/iphone.go`.
 
 | Method | Params → result | What it does |
@@ -240,7 +240,7 @@ The bridge is found at `$PERSONA_IPHONE_BRIDGE`, else in `PATH`, else `<PERSONA_
 
 ## Tests
 
-`server/internal/iphone`: the store's permissions and ids, Bonjour responses assembled into services and matched, every row of the
+`server/internal/modules/phone-extra/iphone`: the store's permissions and ids, Bonjour responses assembled into services and matched, every row of the
 replay table against an in-memory bridge, re-resolution after an address change, the health check, record changes
 from another process, backoff, and the real process path against a shell-script bridge. Locally checked once against
 two `_remotepairing._tcp` services registered with `dns-sd -R` on a Mac (both found, the one whose tag the record

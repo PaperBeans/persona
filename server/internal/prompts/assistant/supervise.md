@@ -23,7 +23,7 @@
    - 选项「{{.Label}}」：{{.LeadsTo}}{{end}}{{with .Recommend}}
    - 推荐：{{.}}{{end}}{{with .Cost}}
    - 等待的代价：{{.}}{{end}}{{end}}{{range $e.Asks}}
-   - 卡片 interaction_id={{.ID}}（machine={{.Machine}}，{{if eq .Kind "permission"}}权限{{else if eq .Kind "plan"}}计划{{else if eq .Kind "screen"}}终端选项，仅用户能操作；需要用户选择时用 ask_escalate{{else}}问题{{end}}，session_id={{.Session}}{{if .Reminded}}，到时间没人处理；不会自动发给用户，再交给你处理{{else if .Raised}}，下一层没有及时处理，上交到你这里{{end}}）：
+   - 卡片 interaction_id={{.ID}}（machine={{.Machine}}，{{if eq .Kind "permission"}}权限{{else if eq .Kind "plan"}}计划{{else if eq .Kind "screen"}}终端对话框，由你来选：interaction_answer 的 answers 填它的问题→选项名或序号，Yes/No 也可用 allow；信任文件夹、Bypass Permissions、可能删文件或以用户名义对外的归用户，用 ask_escalate{{else}}问题{{end}}，session_id={{.Session}}{{if .Reminded}}，到时间没人处理；不会自动发给用户，再交给你处理{{else if .Raised}}，下一层没有及时处理，上交到你这里{{end}}）：
 {{chomp (indent "     " .Text)}}{{end}}{{with $e.Decisions}}
    这个任务已经定下的事：
 {{chomp (indent "   " .)}}{{end}}{{with $e.Ask}}

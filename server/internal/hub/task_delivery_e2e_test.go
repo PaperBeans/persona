@@ -188,42 +188,36 @@ func TestTaskDeliveryTrackingOverTheBus(t *testing.T) {
 	t.Logf("delivery: todo=%s done_at=%v state=%s main_digests=%d side_digests=%d snapshot_awaiting_review=true", first.ID, first.DoneAt,
 		first.Supervision.State, len(digests("main-1")), len(digests("side-2")))
 
-	// A new stretch that only the owner can move waits on them and sends one visible push to main's conversation.
+	// A new stretch its agent says only the owner can move goes to main, the supervisor, not to the owner: no push,
+	// no needs_user state (decision rights), and the wait holds so the work cannot be accepted meanwhile.
 	drainApp()
 	verdict.Store(`{"verdict":"needs_user","reason":"需要你本人操作确认发布"}`)
 	agent(first, proto.StatusWorking, "")
 	agent(first, proto.StatusDone, "下一步由你发起发布")
-	eventually(t, 10*time.Second, "the visible owner wait", func() bool {
+	eventually(t, 10*time.Second, "the owner wait the supervisor holds", func() bool {
 		cur := todoNow(h, first.ID)
-		return cur.Supervision != nil && cur.Supervision.State == "needs_user" && cur.Supervision.Waits != nil && cur.DoneAt == nil
+		return cur.Supervision != nil && cur.Supervision.Waits != nil && cur.Supervision.State != "needs_user" && cur.DoneAt == nil
 	})
-	push := app.wait(t, "the needs-user push", func(m map[string]any) bool {
-		return m["type"] == "notify" && m["kind"] == "assistant" && m["session_id"] == "main-1" &&
-			strings.Contains(m["raw"].(string), "需要你本人操作确认发布")
-	})
-	if !strings.Contains(push["raw"].(string), first.ID) {
-		t.Fatalf("push has no task link: %v", push)
-	}
 	deadline := time.After(500 * time.Millisecond)
-	for duplicate := false; ; {
+	for pushed := false; ; {
 		select {
 		case m := <-app.msgs:
 			if m["type"] == "notify" && strings.Contains(m["raw"].(string), "需要你本人操作确认发布") {
-				duplicate = true
+				pushed = true
 			}
 		case <-deadline:
-			if duplicate {
-				t.Fatal("the same owner wait pushed twice")
+			if pushed {
+				t.Fatal("an agent's owner wait was pushed to the user")
 			}
 			goto pushChecked
 		}
 	}
 
 pushChecked:
-	if text := snapshot(); !strings.Contains(text, "等你处理") || !strings.Contains(text, first.ID) {
+	if text := snapshot(); !strings.Contains(text, "先判断是不是用户的事") || !strings.Contains(text, first.ID) {
 		t.Fatalf("snapshot owner wait:\n%s", text)
 	}
-	t.Logf("owner wait: todo=%s done_at=%v state=needs_user waits=present push=1 duplicate_push=0 snapshot_waiting_for_you=true", first.ID, todoNow(h, first.ID).DoneAt)
+	t.Logf("owner wait: todo=%s done_at=%v waits=present state=%s push=0", first.ID, todoNow(h, first.ID).DoneAt, todoNow(h, first.ID).Supervision.State)
 	// Cancellation is its own outcome in the API and in main's live snapshot.
 	mcp("main-1", "task_review", map[string]any{"todo_id": first.ID, "verdict": "cancelled", "note": "用户调整方案，不再按原计划发布"})
 	eventually(t, 10*time.Second, "the cancellation projection", func() bool {

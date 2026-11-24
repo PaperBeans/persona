@@ -11,6 +11,7 @@ import (
 
 // The event content follows the documented received post shape, not the language-keyed send shape.
 func TestPostAdjacentMentionCommandHandoff(t *testing.T) {
+	needsLarkModule(t)
 	for _, command := range []string{"/read", "/ai"} {
 		t.Run(command, func(t *testing.T) {
 			w := newBotWorld(t)
@@ -44,6 +45,7 @@ func containsFrom(raw json.RawMessage, want string) bool {
 }
 
 func TestPostCommandAdmissionPolicies(t *testing.T) {
+	needsLarkModule(t)
 	otherAt := []map[string]any{{"key": "@_user_10", "name": "Persona", "id": map[string]any{"open_id": "ou_other"}}}
 	bothAt := append(append([]map[string]any{}, otherAt...), atBot...)
 	for _, command := range []string{"/read", "/ai"} {
@@ -103,6 +105,9 @@ func TestPostCommandAdmissionPolicies(t *testing.T) {
 					envelope["event"].(map[string]any)["sender"].(map[string]any)["sender_type"] = tc.senderType
 					event, _ = json.Marshal(envelope)
 				}
+				// Count only what this message makes the bot do: the bot's start-up read of its own identity (after the
+				// pairing and each settings change above) is in the background and may come after the count (#14219).
+				w.botInfoRead(t)
 				total := w.api.total()
 				w.send(t, event)
 				// The accepted /read is handed without an API send; ordinary topic and /ai paths likewise.
@@ -156,24 +161,43 @@ func TestPostCommandAdmissionPolicies(t *testing.T) {
 func textJSON(s string) string { raw, _ := json.Marshal(s); return string(raw) }
 
 func TestPostCommandUnknownBotIdentityIsDenied(t *testing.T) {
+	needsLarkModule(t)
 	for _, command := range []string{"/read", "/ai"} {
 		t.Run(command, func(t *testing.T) {
 			w := newBotWorld(t)
 			w.pair(t)
 			w.topicsOn(t, topicChat)
 			w.readOn(t)
+			const within = 30 * time.Second
+			// Wait for restartBotLocked's lookup to fill the cache. Clearing
+			// it earlier lets the in-flight response restore the identity.
+			eventually(t, within, "the startup bot identity", func() bool {
+				w.h.bots.mu.Lock()
+				defer w.h.bots.mu.Unlock()
+				return w.h.bots.info.OpenID == "ou_bot"
+			})
 			w.api.mu.Lock()
 			w.api.botInfoFail = true
 			w.api.mu.Unlock()
 			w.h.bots.mu.Lock()
 			w.h.bots.info.OpenID = ""
+			previous := w.h.bots.line
 			w.h.bots.mu.Unlock()
 			before := w.api.total()
 			content := `{"content":[[{"tag":"at","user_id":"@_user_1"},{"tag":"text","text":"` + command + ` summarize"}]]}`
 			w.send(t, botMessageEvent("om_unknown_post", "ou_me", "post", content, map[string]any{"chat_type": "group", "chat_id": askChat, "mentions": atBot}))
-			w.send(t, groupEvent("om_unknown_barrier", "ou_me", "marker", topicChat, "omt_marker"))
-			eventually(t, 5*time.Second, "barrier handed", func() bool { got := w.handed(); return len(got) > 0 && got[len(got)-1] == "om_unknown_barrier" })
-			if got := w.handed(); len(got) != 1 || len(w.settings().AISources) != 0 {
+			w.h.bots.mu.Lock()
+			done := w.h.bots.line
+			w.h.bots.mu.Unlock()
+			if done == previous {
+				t.Fatal("post was not queued for processing")
+			}
+			select {
+			case <-done:
+			case <-time.After(within):
+				t.Fatal("post processing did not finish")
+			}
+			if got := w.handed(); len(got) != 0 || len(w.settings().AISources) != 0 {
 				t.Fatalf("unknown identity acted: %v", got)
 			}
 			calls := w.api.since(before)

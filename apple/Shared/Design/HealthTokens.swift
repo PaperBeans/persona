@@ -1,12 +1,12 @@
 import SwiftUI
 
 nonisolated extension Theme {
-    /// Intake colors are shared by the app and future widgets. Their hues stay apart from Apple's Activity rings.
+    /// Intake colors are shared by the app and widgets. Their hues stay apart from Apple's Activity rings.
     enum Health {
-        static let waterHex: (light: UInt32, dark: UInt32) = (0x2457D6, 0x719BFF)
-        static let proteinHex: (light: UInt32, dark: UInt32) = (0x9A5900, 0xF6B650)
-        static let water = Color(light: waterHex.light, dark: waterHex.dark)
-        static let protein = Color(light: proteinHex.light, dark: proteinHex.dark)
+        static let waterHex = HealthIntakePalette.waterHex
+        static let proteinHex = HealthIntakePalette.proteinHex
+        static let water = HealthIntakePalette.water
+        static let protein = HealthIntakePalette.protein
         // Apple HIG Activity ring label colors, always on black, never themed or dimmed.
         static let activityBackground = Color.black
         static let move = Color(hex: 0xFA114F)

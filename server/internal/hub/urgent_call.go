@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -71,8 +72,10 @@ func (p *Pusher) callRouteOf(d Device) pushRoute {
 	switch {
 	case d.VoIPToken == "":
 		return pushRoute{Route: pushNone, Reason: pushNoToken}
-	case p.direct != nil:
+	case p.direct != nil && p.callable(d):
 		return pushRoute{Route: pushDirect}
+	case p.direct != nil:
+		return pushRoute{Route: pushNone, Reason: pushNoKey} // office network mode: a phone without a push key is not rung
 	case p.callable(d):
 		return pushRoute{Route: pushRelay}
 	case d.VoIPError != "":
@@ -100,7 +103,7 @@ func (p *Pusher) callable(d Device) bool {
 		return false
 	}
 	if p.direct != nil {
-		return true
+		return !p.privateOnly || d.PushKey != "" // office network mode rings only sealed
 	}
 	return p.relayed(d) && d.VoIPGrant != ""
 }
@@ -201,6 +204,9 @@ func (p *Pusher) ringOne(d Device, payload map[string]any, call assistantwire.Ca
 		}
 		sealed = s
 	}
+	if p.privateOnly && sealed == "" {
+		return errors.New("office network mode rings only a phone with a push key")
+	}
 	if p.direct == nil {
 		return p.ringRelay(d, relayproto.PushRequest{Type: pushTypeVoIP, CollapseID: relayCollapseID("call:" + call.ID), Sealed: sealed, TTL: call.TTL})
 	}
@@ -260,6 +266,9 @@ func (p *Pusher) ringRelay(d Device, req relayproto.PushRequest) error {
 
 // renewVoIPGrant registers d's PushKit token with its relay again and keeps the new grant.
 func (p *Pusher) renewVoIPGrant(d Device) (string, error) {
+	if p.privateOnly {
+		return "", errRelayOff
+	}
 	if d.VoIPToken == "" || d.Topic == "" {
 		return "", fmt.Errorf("device has no call token to register")
 	}

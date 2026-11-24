@@ -12,7 +12,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -71,13 +71,13 @@ func TestFeishuTodoReminderRecovery(t *testing.T) {
 	}{
 		{name: "normal", wantPosts: 1, wantAccepted: 1},
 		{name: "temporary post", postErr: errors.New("HTTP 503"), wantPosts: 2, wantAccepted: 1},
-		{name: "rate limited", postErr: &feishubot.APIError{Code: 230429}, wantPosts: 2, wantAccepted: 1},
+		{name: "rate limited", postErr: &botcard.APIError{Code: 230429}, wantPosts: 2, wantAccepted: 1},
 		{name: "accepted receipt lost", postErr: context.DeadlineExceeded, accepted: true, wantPosts: 2, wantAccepted: 1},
 		{name: "initial status unknown", initialStatus: true, wantPosts: 1, wantAccepted: 1},
 		{name: "retry status unknown", postErr: errors.New("HTTP 503"), retryStatus: true, wantPosts: 2, wantAccepted: 1},
 		{name: "status budget", initialStatus: true, always: true},
 		{name: "post budget", postErr: errors.New("HTTP 503"), always: true, wantPosts: 1 + feishuMirrorRetries},
-		{name: "permanent refusal", postErr: &feishubot.APIError{Code: 230002}, always: true, wantPosts: 1},
+		{name: "permanent refusal", postErr: &botcard.APIError{Code: 230002}, always: true, wantPosts: 1},
 		{name: "pushes disabled", postErr: errors.New("HTTP 503"), disabled: true, wantPosts: 1},
 		{name: "unpaired", postErr: errors.New("HTTP 503"), unpaired: true, wantPosts: 1},
 		{name: "health recovery", postErr: context.DeadlineExceeded, accepted: true, health: true, wantPosts: 2, wantAccepted: 1},

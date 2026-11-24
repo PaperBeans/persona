@@ -28,6 +28,7 @@ type TodoPRStatus struct {
 	Conflicts          bool       `json:"conflicts"`
 	CheckedAt          time.Time  `json:"checked_at"`
 
+	terminalAt       time.Time          // forge time for a merge or close, when known
 	submittedReview  prSubmittedReview  // consumed by the park in the same pass, separate from the stage's review summary
 	actionableReview prActionableReview // current-head changes_requested / actionable review for opt-in Agent routing
 	failingCheck     prFailingCheck     // current-head failing CI summary for opt-in Agent routing
@@ -64,12 +65,14 @@ type prStatusForge interface {
 func (g githubForge) PRStatus(ctx context.Context, repo string, number int) (TodoPRStatus, error) {
 	path := fmt.Sprintf("/repos/%s/pulls/%d", repo, number)
 	var pr struct {
-		Title          string `json:"title"`
-		State          string `json:"state"`
-		Draft          bool   `json:"draft"`
-		Merged         bool   `json:"merged"`
-		Mergeable      *bool  `json:"mergeable"`
-		MergeableState string `json:"mergeable_state"`
+		Title          string    `json:"title"`
+		State          string    `json:"state"`
+		Draft          bool      `json:"draft"`
+		Merged         bool      `json:"merged"`
+		MergedAt       time.Time `json:"merged_at"`
+		ClosedAt       time.Time `json:"closed_at"`
+		Mergeable      *bool     `json:"mergeable"`
+		MergeableState string    `json:"mergeable_state"`
 		Head           struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
@@ -86,6 +89,9 @@ func (g githubForge) PRStatus(ctx context.Context, repo string, number int) (Tod
 		Conflicts: pr.MergeableState == "dirty" || pr.Mergeable != nil && !*pr.Mergeable}
 	if pr.Merged {
 		out.State = "merged"
+		out.terminalAt = pr.MergedAt
+	} else if pr.State == "closed" {
+		out.terminalAt = pr.ClosedAt
 	}
 	if out.State != "open" {
 		return out, nil
@@ -801,5 +807,5 @@ func otherPRStatus(ctx context.Context, h codeHost, url string) (TodoPRStatus, e
 	if err != nil {
 		return TodoPRStatus{}, fmt.Errorf("%s: %w", h.Name(), err)
 	}
-	return TodoPRStatus{State: st.State, Review: "pending", Checks: "none"}, nil
+	return TodoPRStatus{State: st.State, Review: "pending", Checks: "none", terminalAt: st.TerminalAt}, nil
 }

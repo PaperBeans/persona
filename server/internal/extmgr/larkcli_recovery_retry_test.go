@@ -11,20 +11,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/cliport"
+
 	"github.com/nwverse/persona/server/internal/connector"
-	cliconnector "github.com/nwverse/persona/server/internal/connector/larkcli"
 	"github.com/nwverse/persona/server/internal/lark"
 )
 
 // Registry.Remove/Add is an asynchronous replacement; polling may observe the gap.
-func currentRecoveryCLI(h *Manager) *cliconnector.Connector {
-	c, _ := h.connectors.Get("larkcli").(*cliconnector.Connector)
+func currentRecoveryCLI(h *Manager) cliport.Connector {
+	c, _ := h.connectors.Get("larkcli").(cliport.Connector)
 	return c
 }
 
 func recoveryCLI(t *testing.T, w *botLoadWorld) string {
 	t.Helper()
-	bin, err := filepath.Abs(filepath.Join("..", "larkcli", "testdata", "fake-lark-cli.sh"))
+	bin, err := filepath.Abs(filepath.Join("..", "modules", "lark", "larkcli", "testdata", "fake-lark-cli.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +38,7 @@ func recoveryCLI(t *testing.T, w *botLoadWorld) string {
 }
 
 func TestLarkCLIManagedRecoveryRetriesTransientSyncFailure(t *testing.T) {
+	needsLarkCLI(t)
 	w := newBotLoadWorld(t, true, false)
 	recoveryCLI(t, w)
 	real := w.h.cfg.Lark.CLI.Bin
@@ -137,6 +139,7 @@ func (s *dualLarkReadStore) Setting(ctx context.Context, key string, out any) (b
 }
 
 func TestLarkCLIDualSettingsOutageRestoresDurableSwitches(t *testing.T) {
+	needsLarkCLI(t)
 	for _, tc := range []struct {
 		name, override, chosen               string
 		enabled, missing, missingPreferences bool
@@ -171,7 +174,7 @@ func TestLarkCLIDualSettingsOutageRestoresDurableSwitches(t *testing.T) {
 			if w.h.connectors.Enabled("larkcli") || w.h.connectors.Feeds("larkcli", connector.FeedInbox) {
 				t.Error("unread connector preferences started as enabled/feed-on")
 			}
-			current := w.h.connectors.Get("larkcli").(*cliconnector.Connector)
+			current := w.h.connectors.Get("larkcli").(cliport.Connector)
 			if _, err := current.Call(w.ctx, "larkcli_chats", json.RawMessage(`{}`)); !errors.Is(err, errBotSettingsUnread) {
 				t.Fatalf("unknown preferences ran CLI: %v", err)
 			}

@@ -46,6 +46,10 @@ Each call goes to one of them (`callPhoneWithWait` in `server/internal/hub/hub.g
 - Revoking the primary device's credential ends the choice: Settings › Devices shows Automatic again, and calls follow
   the automatic order.
 
+The health AI write tool's per-sample confirmation and no-deletion rule apply to `phone_health_write_sample` only.
+It never writes water or protein. Separately, explicit opt-in intake sync in Settings › Health writes and removes
+Persona's own water and protein samples; see `docs/assistant/health.md` ("Syncing to Apple Health").
+
 ## Registration and toggles
 
 | Entry | Purpose |
@@ -71,7 +75,7 @@ The table above is for iOS (Mac uses the same code). **Android** uses `PhoneTool
     while Persona is not the active app, with the "open Persona and try again" answer of the other tools that need it on screen
     (`Foreground`), and answers a write ok only once the pasteboard shows it landed (`changeCount` moved and `hasStrings` is true,
     or the text was empty). iOS keeps both registered, since a suspended app cannot withdraw them, so the hub sends no silent push
-    for them (`phoneOnScreenTools` in `hub.go`): with no connected phone offering one it answers "open Persona" at once, as it ends
+    for them (`phoneOnScreenTools` in `hub.go`, which also holds `phone_health_request_access`): with no connected phone offering one it answers "open Persona" at once, as it ends
     up doing for an Android phone that stopped offering them. A phone still connected in the background gets the call and refuses it.
 - **Hub registration** is handled by `PhoneToolsRuntime.kt`: send `register_phone` after connecting. When toggles, foreground/background state, or the persistent service change (permissions are also rechecked on every return to the foreground), recalculate `enabledSpecs()` and resend only if it changed. Send an empty list on disconnect or unpairing. Tools are offered only while the app is in the foreground or the persistent service is enabled; with neither, none are offered.
 - Before execution, check toggles, permissions, foreground state, and online status in order; writes requiring confirmation (calendar and contact changes, and calls) recheck after the user taps Allow. Duplicate delivery of the same `call_id` returns the previous result without executing again.
@@ -103,6 +107,11 @@ See `docs/android/android.md` ("App shell and direct page navigation," the Setti
 | `phone_health_write_sample {metric, value?, start, end?}` | Health (write) | **Yes** | Writes one sample: steps (integer) / distance (meters) / active_energy (kilocalories) / weight (kilograms, one instant) / sleep (an asleep interval, no value); intervals at most 24 hours, not in the future; one sample at a time, no bulk import or deletion |
 | `phone_workouts_recent {days?, activity?, limit?}` | Health (read) | No | iPhone (and Vision Pro). Recent workouts from Apple Health, newest first (default 30 days, max 365; default 20, max 50), of one activity if given. Each row has the id, activity, source app, start and end, duration, distance, active energy, elevation gain, average and maximum heart rate, and pace for runs, walks, hikes and rides. See "Workouts" below |
 | `phone_workout_detail {id}` | Health (read) | No | One workout by id: the same row plus per-kilometre splits (pauses left out) and minute-average heart rate |
+| `phone_health_types {kind?}` | Health (read) | No | Every health type the phone can read (#13740): type name, store identifier, kind, unit and access. See "Every health type, sample by sample" below |
+| `phone_health_samples {type, start?, end?, limit?, anchor?}` | Health (read) | No | Individual samples of one type with source, device and metadata; paged and incremental through `anchor`, deleted ids in `deleted` |
+| `phone_health_sources {type?, days?}` | Health (read) | No | The apps (bundle id / package) and, for one type, the devices that saved health data |
+| `phone_health_request_access {types}` | Health (asks) | No (system sheet) | Asks read access for the types not asked yet; needs Persona on screen, else `status: needs_foreground` |
+| `phone_health_watch {types, stop?}` | Health (read) | No | iPhone only. Keeps an on-device snapshot of these types current (observer queries, background delivery), so locked-phone calls still answer |
 | `phone_photos_recent {limit?, days?, screenshots_only?}` | Photos (read) | No | Recent photo/video metadata: local id, time, type, dimensions, screenshot/favorite flags, duration, latitude/longitude |
 | `phone_photo_get {id, max_size?}` | Photos (read) | No | Returns the JPEG image itself (default longest edge 1280, quality 0.7) + metadata |
 | `phone_device_info {}` | None | No | Model identifier, iOS version, battery and charging state, Low Power Mode, storage, network type, time zone, language, thermal state, the app's `app_version`, `app_build` and `app_channel` (`debug` / `release`); on iOS also `build` (`commit`, `dirty`, `branch`, `built_at`, `builder`, `xcode`, `swift`, `configuration`, `bundle_id`: a Debug build has them all, a Release build the commit) and `runtime` (`hub_host`, `hub_version`, `hub_connection`, `launched_at`). `build` and `runtime` are `AppDebugInfo` (`apple/Persona/App/BuildInfo.swift`), the same value Settings › About › Debug Info shows and copies (#12926); any field may be missing (older apps, Android), and the hub relays the result as it is |
@@ -179,6 +188,53 @@ reports share.
 
 For the iPhone acceptance steps using 薄荷健康, see `docs/assistant/health.md` ("How to verify").
 
+### Every health type, sample by sample (#13740)
+
+`phone_health_summary` stays for daily totals of twelve metrics. Five more tools reach every type the phone's health store has:
+
+- **Types** (`phone_health_types`): iOS lists `HealthCatalog.entries`, about 190 types by raw identifier (HealthKit has no API that
+  enumerates them): quantities, categories (symptoms included), the blood pressure and food correlations, workouts, ECGs, audiograms,
+  heartbeat series, state of mind, activity summaries, workout routes and Health Records. The tools take the snake-case name
+  (`heart_rate`, `vo2_max`) or HealthKit's identifier. A type the running iOS lacks is `unsupported`; Health Records are
+  `unavailable` (they need the clinical-records entitlement, which this build does not have, and asking for them without it raises an
+  exception), and so are workout routes (locations, never read). Android lists the 38 Health Connect record types of `HealthRecords.types`.
+- **Access**: HealthKit tells an app only whether asking would still show the sheet (`statusForAuthorizationRequest`): that is
+  `not_requested` against `requested`, and whether the user allowed reading stays hidden. Health Connect says `granted` or
+  `not_granted`; a type the build's manifest does not declare is `unavailable`. A type Persona may not read answers with its status,
+  never an error. `phone_health_request_access` asks for exactly the types given (`["all"]` for every type); a type asked about before
+  never brings the sheet up again, so the user decides once. Correlations are asked through their parts (systolic and diastolic, the
+  dietary quantities): HealthKit raises an exception for a correlation type in an authorization request. On Android a tool call has no
+  activity result to run Health Connect's request contract, so it opens Persona's page in Health Connect instead
+  (`MANAGE_HEALTH_PERMISSIONS` on 14 and later, Health Connect's settings before). The hub never wakes a phone for this tool
+  (`phoneOnScreenTools`): the sheet can show only over the app on screen.
+- **Samples** (`phone_health_samples`): one type in a window (default the last 7 days, no end), at most `limit` (default 100, max 500).
+  Each sample has `id`, `start`, `end`, `source` (name and bundle id; on Android name and package), `device` (name, manufacturer,
+  model, versions; never the local identifier or UDI), `metadata` (strings cut at 500 characters) and the kind's own fields: `value`
+  and `unit` (metric: kg, m, °C, kcal, ms for HRV, mg/dL, percent as a 0–1 fraction), a category's `value_label` where the values are
+  an enumeration (sleep stages, stand hours, symptom severity, menstrual flow), a workout's activity and totals, a correlation's
+  `objects`, an ECG's classification, average heart rate and sampling frequency (not the voltages), an audiogram's hearing levels per
+  frequency, a state of mind's valence and labels. Activity summaries answer one row per day without an anchor.
+- **Anchors**: iOS uses `HKAnchoredObjectQuery`; its archived anchor goes out as `a1.<base64url>`. The same anchor returns the next
+  page while `more` is true and, later, only what was added since, with `deleted` ids. Android's anchor is `p1.<page token>.<changes
+  token>` while pages remain and `c1.<changes token>` after: the changes token is taken before the first page, so nothing saved during
+  paging is lost; an expired changes token answers `status: anchor_expired`. Callers keep the same type and window with an anchor.
+- **Sources** (`phone_health_sources`): `HKSourceQuery` per type asked about (Android: the newest 1000 records per granted type), with
+  the devices of the newest 1000 samples when one type is given.
+- **Locked iPhone, background** (`phone_health_watch`): HealthKit cannot be read while the iPhone is locked, not even by an app woken
+  in the background. Watched types (at most 40) get an `HKObserverQuery` registered at every launch in
+  `application(_:didFinishLaunchingWithOptions:)` and, in a build with HealthKit background delivery (`app.health_background_delivery`),
+  `enableBackgroundDelivery(.immediate)`. A wake reads what is new since the snapshot's own anchor and merges it into
+  `Application Support/health-snapshot/samples/<type>.json` (`HealthSampleWatcher`, `HealthSampleSnapshot.merged`: deleted ids leave,
+  newer copies replace older ones, the last 7 days and at most 2000 samples stay), protected `untilFirstUserAuthentication` and
+  excluded from backups like the summary snapshot. Foreground returns catch up too (every 5 minutes at most). A locked call for a
+  watched type answers from the snapshot with `source: snapshot`, `as_of` and `s1.<offset>` anchors for its pages; a live anchor
+  passed meanwhile comes back unchanged so the incremental read resumes after the unlock, and the hub prepends the snapshot note.
+  An unwatched type answers `status: device_locked`. What a wearable saves while the phone stays locked is read after the next unlock.
+  Android has no such tool: the hub never wakes an Android phone and calls it only while Persona is on screen.
+- **Privacy**: results go only in the tool result to the hub that asked; neither app writes health values to a log (the observer logs
+  only HealthKit's own error text). The tools sit in the Health source, which the owner can switch off, and the inbox treats the three
+  reads as read-only (`inboxReadOnlyPhoneTools`).
+
 ### Reminders by place (#6564)
 
 "Remind me to buy milk on the way home": the assistant writes a reminder with a location alarm (`EKAlarm.structuredLocation` and `proximity`), and iOS watches the circle itself, like a reminder made in the Reminders app. Persona needs no background location and no "Always" permission; the alarm goes off on the phone and the watch even when Persona is closed. A location alarm goes off once.
@@ -208,7 +264,7 @@ Tools by platform:
 - **iOS**: everything above except `phone_notifications_list`. The Home tools only in a build with the HomeKit capability ("iPhone system integrations" below).
 - **Mac** (`PersonaMac`): no health tools (Mac has no health data, `PhoneToolRegistry.healthTools`) and none of the iPhone system integrations
   (alarms, messages, calls, shortcuts, media, home, Maps' nearby search and navigation); otherwise the same as iOS. Vision Pro: the same as the Mac plus health.
-- **Android**: adds `phone_notifications_list`; supports the calendar / contact write tools and `phone_call_start`, but no reminder tools, `phone_health_write_sample`, `phone_location_search`, alarms, messages, maps, shortcuts, media or home tools. Calls accept only `kind: phone`, use a foreground `ACTION_DIAL` handoff and return `handed_to_android`; FaceTime kinds fail as unsupported.
+- **Android**: adds `phone_notifications_list`; supports the calendar / contact write tools and `phone_call_start`, but no reminder tools, `phone_health_write_sample`, `phone_health_watch`, `phone_location_search`, alarms, messages, maps, shortcuts, media or home tools. Calls accept only `kind: phone`, use a foreground `ACTION_DIAL` handoff and return `handed_to_android`; FaceTime kinds fail as unsupported.
   `phone_location_current` is available only while the app is in the foreground. `scripts/assets/export_ios_phone_tools.py` leaves the unsupported tools out of the Android fixture
   (`IOS_ONLY`, `IOS_ONLY_TOOLS`).
 
@@ -482,8 +538,8 @@ push-woken read usually fails. With Always it works (#13200, `apple/Persona/Phon
   If waking fails, return an error asking the model to have the user open Persona and retry. The clipboard tools are never woken for: they answer that at once ("Foreground restrictions"). A call waits at most 2 minutes for the phone (a confirmed write 30 minutes, see "Confirmation flow"); timeout also returns an error.
 - **Location outside the foreground needs Always**: with While Using, a push-woken `phone_location_current` usually gets no fix. Always is asked only after the owner agrees ("Location when Persona isn't open").
 - **Clipboard reads trigger a system prompt**: when reading content copied in another app, iOS asks "Allow Paste?" and the user must allow it.
-- **Health data is aggregated by day only**: no individual-record queries; steps/energy are totals, heart rate is daily average/minimum/maximum, and sleep is daily time asleep
-  (the `asleep` types, excluding "In Bed").
+- **`phone_health_summary` aggregates by day**: steps/energy are totals, heart rate is daily average/minimum/maximum, and sleep is daily time asleep
+  (the `asleep` types, excluding "In Bed"). Individual samples come from `phone_health_samples` (#13740).
 - **Photos access may be limited**: if the user grants only selected photos, `phone_photos_recent` returns only those.
 - **Notifications can be sent only when the app has execution time**: delayed notifications are scheduled by the system and arrive on time, but the call itself must succeed, meaning the app is connected to the hub or can be woken.
 - Returned content (including mail/photo metadata) enters Claude's context and is therefore given to the model for processing.

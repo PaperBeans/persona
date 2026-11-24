@@ -416,6 +416,16 @@ jobs:
           umask 077
           printf '%s' "$PERSONA_APPLE_DISTRIBUTION_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/apple-distribution.p12"
           security create-keychain -p "$PERSONA_SIGNING_KEYCHAIN_PASSWORD" "$PERSONA_SIGNING_KEYCHAIN"
+          # Xcode searches the default keychain domain, not only the path passed to security import. Add the
+          # temporary signing keychain while retaining the runner's existing list; never replace that list.
+          # Read each printed path as one argument so paths containing spaces cannot be split into other identities.
+          python3 - "$PERSONA_SIGNING_KEYCHAIN" <<'PY'
+          import subprocess, sys
+          existing = subprocess.check_output(["security", "list-keychains", "-d", "user"], text=True).splitlines()
+          paths = [path.strip().strip('"') for path in existing if path.strip()]
+          subprocess.run(["security", "list-keychains", "-d", "user", "-s", sys.argv[1], *paths], check=True)
+          PY
+          security list-keychains -d user | grep -F "$PERSONA_SIGNING_KEYCHAIN"
           security set-keychain-settings -lut 21600 "$PERSONA_SIGNING_KEYCHAIN"
           security unlock-keychain -p "$PERSONA_SIGNING_KEYCHAIN_PASSWORD" "$PERSONA_SIGNING_KEYCHAIN"
           security import "$RUNNER_TEMP/apple-distribution.p12" -k "$PERSONA_SIGNING_KEYCHAIN" -P "$PERSONA_APPLE_DISTRIBUTION_P12_PASSWORD" -T /usr/bin/codesign

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 func TestAgyPaneRefreshesWhenFullExportArrives(t *testing.T) {
@@ -75,6 +76,51 @@ func TestAgyPaneRejectsStaleFullText(t *testing.T) {
 			full, _ := parseAgySteps([]byte(fmt.Sprintf(`{"step_index":0,"type":"PLANNER_RESPONSE","created_at":%q,"content":%q}`, tc.created, tc.text)), agyTestID)
 			if restoreAgyFullText(steps, full, rev.steps) || steps[0].Content != preview {
 				t.Fatal("the full record replaced the compact preview without a match")
+			}
+		})
+	}
+}
+
+func TestAgyPaneRestoresMatchingFullToolCalls(t *testing.T) {
+	const record = `{"step_index":0,"type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-01-01T00:00:00Z","tool_calls":[{"name":"write_to_file","args":{"TargetFile":%q,"CodeContent":%q}}]%s}`
+	const path = "/example/file.go"
+	const content = "line1\nline2\nline3\n"
+	const prefix = `"line1\nline2\nli`
+	omitted := len(fmt.Sprintf("%q", content)) - len(prefix)
+	preview := fmt.Sprintf("%s\n<truncated %d bytes>", prefix, omitted)
+	compact := fmt.Sprintf(record, fmt.Sprintf("%q", path), preview, `,"truncated_fields":["tool_calls"]`) + "\n"
+	for _, tc := range []struct {
+		name, fullPath, fullContent string
+		restored                    bool
+	}{
+		{"matching full call", path, content, true},
+		{"mismatched argument", "/example/other.go", content, false},
+		{"mismatched prefix", path, "wrong\nline2\nline3\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			key := agyTestFile(t, root, agyTestID, compact)
+			full := fmt.Sprintf(record, tc.fullPath, tc.fullContent, "") + "\n"
+			agyTestWrite(t, filepath.Join(root, "brain", agyTestID, agyFullTranscriptPath), full)
+			brain, err := agyBrain(root, agyTestID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer brain.Close()
+			var n Node
+			history, _, err := n.agyRead(brain, key, agyTestID, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantContent := content
+			if !tc.restored {
+				const head = "line1\nline2\nli"
+				wantContent = head + transcript.ApproximateClipNote(len(head)+omitted)
+			}
+			want := fmt.Sprintf(`{"content":%q,"file_path":%q}`, wantContent, path)
+			if len(history.items) != 1 || history.items[0].Kind != proto.KindToolUse ||
+				history.items[0].ToolName != "Write" || string(history.items[0].ToolInput) != want {
+				t.Fatalf("history items = %+v, want one Write with input %s", history.items, want)
 			}
 		})
 	}

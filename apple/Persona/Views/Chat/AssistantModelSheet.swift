@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Pure decisions behind the main chat's model sheet (#6542; the hub's per-conversation pick is #5033): what the next
+/// Pure decisions behind an Assistant conversation's model sheet (#6542; the hub's per-conversation pick is #5033): what the next
 /// message runs on, where that comes from, and the pick a row keeps. No UI types, so the logic is unit-tested on its own.
 nonisolated enum AssistantModelChoice {
     /// Where the setup the next message runs on comes from.
@@ -77,6 +77,14 @@ nonisolated enum AssistantModelChoice {
         isMain || supervisor || leader || origin == "task"
     }
 
+    static func defaultRule(isMain: Bool, supervisor: Bool, leader: Bool, origin: String?) -> DefaultRule {
+        if supervisor { return .supervise }
+        return followsDefault(isMain: isMain, supervisor: false, leader: leader, origin: origin) ? .main : .own
+    }
+
+    /// Every Assistant conversation may choose its own model on a hub that keeps picks; main-chat identity is irrelevant.
+    static func pickerAvailable(assistant: Bool, keepsPick: Bool) -> Bool { assistant && keepsPick }
+
     /// The shared catalog owns eligibility; only the main-purpose default is overlaid.
     static func mainCatalog(shared: APIClient.LaunchersResponse, own: APIClient.LaunchersResponse) -> APIClient.LaunchersResponse {
         var result = shared
@@ -121,7 +129,39 @@ nonisolated enum AssistantModelChoice {
 
     /// The engine the existing conversation actually runs on, including Codex threads identified by their source.
     static func sessionEngine(_ session: Session?) -> String? {
-        session?.isCodex == true ? "codex" : session?.agent
+        guard let session else { return nil }
+        if session.isCodex { return "codex" }
+        return providerAgent(session.agent, provider: session.launcher ?? "")
+    }
+
+    /// Matches Web's explicit-switch rule: another runtime, another runtime instance, or a different connection
+    /// identity needs staging even when both sides happen to run the same engine kind.
+    static func switchNeeded(session: Session, target: Launcher) -> Bool {
+        if session.launcher == target.name { return false }
+        if agentID(sessionEngine(session)) != agentID(providerAgent(target.runtimeAgent, provider: target.name)) { return true }
+        let extensionPrefix = "persona_ext_"
+        if session.launcher?.hasPrefix(extensionPrefix) == true || target.name.hasPrefix(extensionPrefix) { return true }
+        let runtimeTarget = !["persona", LegacyNames.product].contains(target.source ?? "")
+            && !["", "zshrc", "path", "builtin"].contains(target.source ?? "")
+        if session.sourceKind == "runtime" {
+            return !runtimeTarget || session.sourceInstanceID != target.source
+        }
+        return runtimeTarget
+    }
+
+    private static func providerAgent(_ raw: String?, provider: String) -> String? {
+        raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "paseo" && !provider.isEmpty ? provider : raw
+    }
+
+    /// The same runtime aliases Web folds before comparing two engines. Unknown runtime IDs remain distinct values.
+    private static func agentID(_ raw: String?) -> String {
+        let id = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        let key = id.filter { !$0.isWhitespace && $0 != "." && $0 != "_" && $0 != "-" }
+        let aliases = [
+            "claudecode": "claude", "codexcli": "codex", "geminicli": "gemini",
+            "cursoragent": "cursor", "piweb": "pi", "traecli": "trae",
+        ]
+        return aliases[key] ?? (id.isEmpty ? "claude" : id)
     }
 
     /// An existing Claude/Codex conversation keeps its engine, matching the hub and web. Unknown runtimes stay
@@ -198,7 +238,7 @@ private extension String {
     nonisolated var emptyAsNil: String? { isEmpty ? nil : self }
 }
 
-/// The main chat's model sheet model (#6542): the assistant computer's picker (`?purpose=assistant`), each launcher's
+/// An Assistant conversation's model sheet model (#6542): the assistant computer's picker (`?purpose=assistant`), each launcher's
 /// `/model` list, and the picks kept on the hub (#5033).
 @Observable
 final class AssistantModelPanelModel {
@@ -210,19 +250,35 @@ final class AssistantModelPanelModel {
         var models: (_ machine: MachineRef, _ launcher: String, _ refresh: Bool) async throws -> LauncherModels
         var keep: (_ key: SessionKey, _ pick: ModelPick) async -> Bool
         var drop: (_ key: SessionKey) async -> Bool
+        var canSwitch: (_ key: SessionKey) -> Bool = { _ in false }
+        var segments: (_ key: SessionKey) async throws -> APIClient.ConversationSwitchState = { _ in
+            throw APIError(status: 409, message: String(localized: "Switching connections is unavailable. Refresh the conversation and try again."))
+        }
+        var switchConversation: (_ key: SessionKey, _ request: APIClient.ConversationSwitchRequest) async throws -> Void = { _, _ in
+            throw APIError(status: 409, message: String(localized: "Switching connections is unavailable. Refresh the conversation and try again."))
+        }
         static var live: Deps {
             Deps(
                 launchers: { try await AppModel.shared.assistantLaunchers($0, refresh: $1, main: true) },
-                supervise: { machine, _ in
-                    guard let client = AppModel.shared.api(machine.group)?.currentAssistantSettings() else {
-                        return APIClient.LaunchersResponse(launchers: [], default: nil, unavailable: nil)
-                    }
-                    return try await client.launcherList(machine: machine.id, purpose: "assistant.supervise")
-                },
+                supervise: { try await AppModel.shared.assistantLaunchers($0, refresh: $1, purpose: "assistant.supervise") },
                 models: { try await AppModel.shared.api($0.group)?.launcherModels(machine: $0.id, launcher: $1, refresh: $2, purpose: "assistant")
                     ?? LauncherModels(agent: "", models: [], locked: nil, machine: nil) },
                 keep: { await AppModel.shared.keepConversationModel($0, pick: $1) },
-                drop: { await AppModel.shared.dropConversationModel($0) })
+                drop: { await AppModel.shared.dropConversationModel($0) },
+                canSwitch: { AppModel.shared.features($0.group).contains("assistant_segments") },
+                segments: { key in
+                    guard let client = AppModel.shared.api(key.group) else {
+                        throw APIError(status: 503, message: String(localized: "Can't reach the hub"))
+                    }
+                    return try await client.conversationSwitchState(machine: key.machineID, conversation: key.sessionID)
+                },
+                switchConversation: { key, request in
+                    guard let client = AppModel.shared.api(key.group) else {
+                        throw APIError(status: 503, message: String(localized: "Can't reach the hub"))
+                    }
+                    try await client.switchConversation(machine: key.machineID, conversation: key.sessionID, request: request)
+                    await AppModel.shared.refreshAssistant()
+                })
         }
     }
 
@@ -244,6 +300,13 @@ final class AssistantModelPanelModel {
     private(set) var loadError: String?
     /// The launcher a pick is in flight for, so its rows can dim; nil when idle.
     private(set) var busyLauncher: String?
+    private(set) var canSwitch = false
+    private(set) var switchPick: ModelPick?
+    private(set) var switchDestination = ""
+    private(set) var switchError: String?
+    private(set) var switchUncertain = false
+    private(set) var switching = false
+    @ObservationIgnored private var preparedSwitch: APIClient.ConversationSwitchRequest?
     @ObservationIgnored private let deps: Deps
 
     init(key: SessionKey, machine: MachineRef, defaultRule: AssistantModelChoice.DefaultRule = .main, deps: Deps = .live) {
@@ -251,6 +314,7 @@ final class AssistantModelPanelModel {
         self.machine = machine
         self.defaultRule = defaultRule
         self.deps = deps
+        canSwitch = deps.canSwitch(key)
     }
 
     func list(_ launcher: String) -> LauncherModels? { lists[launcher] }
@@ -267,6 +331,7 @@ final class AssistantModelPanelModel {
     /// stays quick); each answer lands as it arrives.
     func load(refresh: Bool = false) async {
         guard !loading else { return }
+        canSwitch = deps.canSwitch(key)
         loading = true
         loadError = nil
         defer { loading = false }
@@ -323,9 +388,69 @@ final class AssistantModelPanelModel {
         guard let pick = AssistantModelChoice.pick(launcher: launcher, model: model, effort: current.effort, current: current,
                                                    aliases: selectionAliases(launcher), configuredModel: fallback?.id,
                                                    configuredIsDefault: fallback?.sendsDefault == true) else { return true }
+        if let session, canSwitch, let launcherInfo, AssistantModelChoice.switchNeeded(session: session, target: launcherInfo) {
+            switchPick = pick
+            switchDestination = launcherInfo.title
+            preparedSwitch = nil
+            switchError = nil
+            switchUncertain = false
+            return false // Confirmation, not a model pick, owns the explicit operation.
+        }
         busyLauncher = launcher
         defer { busyLauncher = nil }
         return await deps.keep(key, pick)
+    }
+
+    func cancelSwitch() {
+        guard !switching else { return }
+        switchPick = nil
+        switchDestination = ""
+        preparedSwitch = nil
+        switchError = nil
+        switchUncertain = false
+    }
+
+    /// Prepares without sending input, then submits one explicit operation. An uncertain retry reuses its exact body.
+    func confirmSwitch(session: Session?) async -> Bool {
+        guard let session, let pick = switchPick, !switching else { return false }
+        switching = true
+        busyLauncher = pick.launcher
+        switchError = nil
+        var submitted = false
+        defer {
+            switching = false
+            busyLauncher = nil
+        }
+        do {
+            if preparedSwitch == nil {
+                let state = try await deps.segments(key)
+                guard state.enabled, state.epoch >= 1 else {
+                    throw APIError(status: 409, message: String(localized: "Switching connections is unavailable. Refresh the conversation and try again."))
+                }
+                preparedSwitch = APIClient.ConversationSwitchRequest(
+                    operationID: UUID().uuidString.lowercased(), expectedEpoch: state.epoch,
+                    sourceMachineID: session.machineID, machineID: session.machineID,
+                    launcher: pick.launcher, model: pick.model, effort: pick.effort,
+                    permissionMode: session.permissionMode)
+            }
+            guard let request = preparedSwitch else { return false }
+            submitted = true
+            try await deps.switchConversation(key, request)
+            switchPick = nil
+            switchDestination = ""
+            preparedSwitch = nil
+            switchUncertain = false
+            Haptics.success()
+            return true
+        } catch {
+            let uncertain = submitted && (error as? APIError)?.fields["delivered"] != "none"
+            let problem = error.shown ?? error.localizedDescription
+            switchUncertain = uncertain
+            switchError = uncertain
+                ? String(localized: "The switch result is unconfirmed. Retrying uses the same request; it will not start another switch. \(problem)")
+                : problem
+            return false
+        }
     }
 
     /// The conversation follows Model configuration › Main chat again.
@@ -336,7 +461,7 @@ final class AssistantModelPanelModel {
     }
 }
 
-/// The sheet opened from the main chat composer's model button (#6542): every launcher the assistant can use on its
+/// The sheet opened from an Assistant composer's model button (#6542): every launcher the assistant can use on its
 /// machine, each one's models, the ones that can't run here with the hub's reason, and the way back to the default.
 /// A pick is kept for this conversation only (#5033) and holds from the next message.
 struct AssistantModelSheet: View {
@@ -451,6 +576,39 @@ struct AssistantModelSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .accessibleConfirmationDialog("Switch this conversation?", isPresented: Binding(
+            get: { panel.switchPick != nil },
+            set: { if !$0 { panel.cancelSwitch() } }
+        ), titleVisibility: .visible, hasCancel: true) {
+            Button {
+                Task {
+                    if await panel.confirmSwitch(session: session) { dismiss() }
+                }
+            } label: {
+                HStack(spacing: Theme.Space.s) {
+                    if panel.switching { ProgressView().controlSize(.small) }
+                    Text("Switch connection").lineLimit(1)
+                }
+            }
+            .disabled(panel.switching)
+            .accessibilityIdentifier("assistantModel.switch.confirm")
+            Button(panel.switchUncertain ? String(localized: "Close") : String(localized: "Cancel"), role: .cancel) {
+                panel.cancelSwitch()
+            }
+            .lineLimit(1)
+            .disabled(panel.switching)
+            .accessibilityIdentifier("assistantModel.switch.cancel")
+        } message: {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text("Continue with \(panel.switchDestination) using recent messages and a summary. The conversation and its tasks stay here. Some details may be summarized. The new connection will take over with your next message.")
+                    .accessibilityIdentifier("assistantModel.switch.message")
+                if let problem = panel.switchError {
+                    Text(problem)
+                        .foregroundStyle(Theme.danger)
+                        .accessibilityIdentifier("assistantModel.switch.error")
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -461,7 +619,7 @@ struct AssistantModelSheet: View {
         let configured = AssistantModelChoice.configuredFallback(launcher, models: models, locked: locked)
         let selected = AssistantModelChoice.selectedModel(
             effective, launcher: launcher.name, aliases: panel.selectionAliases(launcher.name), configuredModel: configured?.id)
-        let otherEngine = effective.launcher != launcher.name && AssistantModelChoice.isOtherEngine(
+        let otherEngine = !panel.canSwitch && effective.launcher != launcher.name && AssistantModelChoice.isOtherEngine(
             sessionAgent: AssistantModelChoice.sessionEngine(session), launcherAgent: launcher.runtimeAgent)
         Section {
             if otherEngine {

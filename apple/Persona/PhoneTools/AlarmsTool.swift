@@ -379,13 +379,17 @@ extension AlarmsTool {
         var isSample: Bool
     }
 
+    @concurrent
     private nonisolated static func updateLiveActivity(id: String, content: ActivityContent<AlarmPresentationState>) async {
-        guard let activity = Activity<AlarmAttributes<PersonaAlarmData>>.activities.first(where: { $0.id == id }) else { return }
+        guard let activity: Activity<AlarmAttributes<PersonaAlarmData>> =
+            Activity<AlarmAttributes<PersonaAlarmData>>.activities.first(where: { $0.id == id }) else { return }
         await activity.update(content)
     }
 
+    @concurrent
     private nonisolated static func endLiveActivity(id: String) async {
-        guard let activity = Activity<AlarmAttributes<PersonaAlarmData>>.activities.first(where: { $0.id == id }) else { return }
+        guard let activity: Activity<AlarmAttributes<PersonaAlarmData>> =
+            Activity<AlarmAttributes<PersonaAlarmData>>.activities.first(where: { $0.id == id }) else { return }
         await activity.end(nil, dismissalPolicy: .immediate)
     }
 

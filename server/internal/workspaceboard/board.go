@@ -129,7 +129,7 @@ func Validate(s State) error {
 		if !columns[c.ColumnID] {
 			return invalid("unknown card column")
 		}
-		key := binding{c.MachineID, canonical}
+		key := binding{c.MachineID, CwdKey(canonical)}
 		if bindings[key] {
 			return invalid("workspace already bound; restore its existing card")
 		}

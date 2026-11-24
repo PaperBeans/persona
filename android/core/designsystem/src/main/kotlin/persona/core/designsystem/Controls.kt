@@ -198,8 +198,14 @@ fun JButton(
 }
 
 @Composable
-fun JTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, icon: PhIcon? = null) =
-    JButton(text, onClick, modifier, kind = JButtonKind.Quiet, size = JButtonSize.Medium, icon = icon, enabled = enabled)
+fun JTextButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    icon: PhIcon? = null,
+    loading: Boolean = false,
+) = JButton(text, onClick, modifier, kind = JButtonKind.Quiet, size = JButtonSize.Medium, icon = icon, enabled = enabled, loading = loading)
 
 /**
  * Plain icons sit in bars; [raised] ones are standalone controls (a glass circle, a wash disc, a bordered square).

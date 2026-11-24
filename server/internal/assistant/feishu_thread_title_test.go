@@ -6,29 +6,29 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/db"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 func TestTopicOpeningUsesReadableTitle(t *testing.T) {
 	const link = "https://docs.example.com/wiki/garden-notes-2026"
-	post := func(body string) feishubot.MessageEvent {
+	post := func(body string) botcard.MessageEvent {
 		ev := rootEvent("om_first", "")
 		ev.Message.MessageType, ev.Message.Content = "post", body
 		return ev
 	}
-	withBot := func(ev feishubot.MessageEvent) feishubot.MessageEvent {
-		ev.Message.Mentions = []feishubot.Mention{{Key: "@_user_1", Name: "Garden Bot"}}
+	withBot := func(ev botcard.MessageEvent) botcard.MessageEvent {
+		ev.Message.Mentions = []botcard.Mention{{Key: "@_user_1", Name: "Garden Bot"}}
 		return ev
 	}
-	withBotOpenID := func(ev feishubot.MessageEvent) feishubot.MessageEvent {
-		ev.Message.Mentions = []feishubot.Mention{{Key: "@_user_1", Name: "Garden Bot", ID: feishubot.UserID{OpenID: "ou_bot"}}}
+	withBotOpenID := func(ev botcard.MessageEvent) botcard.MessageEvent {
+		ev.Message.Mentions = []botcard.Mention{{Key: "@_user_1", Name: "Garden Bot", ID: botcard.UserID{OpenID: "ou_bot"}}}
 		return ev
 	}
 	cases := []struct {
 		name, locale string
-		event        feishubot.MessageEvent
+		event        botcard.MessageEvent
 		title, notes string
 	}{
 		{"ordinary words", "en", rootEvent("om_first", "Review the seed order today"), "Review the seed order today", "Review the seed order today"},

@@ -35,6 +35,10 @@ TIME_FRACTION = re.compile(r"^(.{10}[T ][0-9]{2}:[0-9]{2}:[0-9]{2})[.,]([0-9]+)"
 LEAD_CONTEXT = re.compile(r"(?s)^\s*<persona-context\b([^>]*)>(.*?)</persona-context>\s*")
 SOURCE_KIND = re.compile(r'\bkind="message-source"')
 SOURCE_KINDS = {"conversation", "patrol", "followup", "supervision", "meeting", "wake", "ask_later", "task_notice", "inbox", "system"}
+# A source kind the hub writes under another name than the report's round kind: an automatic continuation after a
+# transient error or a usage-limit reset (proto.SourceAutoContinue, #14112) is the same round as the older
+# transcripts' localized limit-continue marker below, so both count as a follow-up.
+SOURCE_ALIASES = {"auto-continue": "followup"}
 # Codex records runtime updates as role=user messages, but they are not new user inputs.
 CODEX_CONTEXT = re.compile(r"(?s)^\s*<(environment_context|codex_internal_context|turn_aborted)(?:\s[^>]*)?>.*</\1>\s*$")
 
@@ -150,6 +154,7 @@ def classify(text):
             if meta.get("author") == "user" or not meta.get("kind"):
                 return "owner", rest
             kind = meta["kind"]
+            kind = SOURCE_ALIASES.get(kind, kind) if isinstance(kind, str) else kind
             return kind if isinstance(kind, str) and kind in SOURCE_KINDS else "other", rest
         if 'kind="context"' in m.group(1) and RELAY_TITLE.search(m.group(1)):
             body = RELAY_BODY.match(m.group(2).strip())

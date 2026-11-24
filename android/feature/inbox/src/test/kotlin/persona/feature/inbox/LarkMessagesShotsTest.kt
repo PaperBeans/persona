@@ -41,6 +41,7 @@ import persona.core.contracts.api.ConnectionState
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.UiText
+import persona.core.inbox.*
 
 /** Empty, populated, loading and failed Messages pages in every style/theme and at 100%/200% text. */
 @RunWith(AndroidJUnit4::class)

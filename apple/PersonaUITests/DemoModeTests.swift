@@ -325,6 +325,7 @@ final class DemoModeTests: XCTestCase {
         see(text(Self.firstAgent), "the demo's initial Agents page", timeout: 15)
         tab("Persona")
         see(app.descendants(matching: .any)["health-today"], "today's intake in demo mode", timeout: 20)
+        XCTAssertFalse(app.buttons["health-intake-sync-link"].exists, "fictional demo records never offer HealthKit sync")
         XCTAssertTrue(app.buttons["health-water-ring"].exists)
         XCTAssertTrue(app.buttons["health-log-water"].exists)
         XCTAssertFalse(app.staticTexts["health-update-hub"].exists)

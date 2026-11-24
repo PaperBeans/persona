@@ -46,7 +46,7 @@ server/internal/assistant/inbox_connectors.go	docs/plans/plan-connectors.md	1 ·
 server/internal/extension/registry.go	docs/extensions/extensions.md	Contribution switches
 server/internal/extmgr/extension_routes.go	docs/extensions/extensions.md	Contribution switches
 server/internal/extmgr/extension_routes.go	docs/extensions/extensions.md	Programs that run on computers
-server/internal/mail/microsoft.go	docs/extensions/mail.md	Outlook 接入方式
+server/internal/modules/mail/microsoft.go	docs/extensions/mail.md	Outlook 接入方式
 server/internal/proto/proto.go	docs/assistant/assistant.md	Push when done
 server/internal/proto/proto.go	docs/protocol/protocol.md	Origin of assistant conversations
 server/internal/proto/usagewindows.go	docs/server/usage-windows.md	Account pool gateways

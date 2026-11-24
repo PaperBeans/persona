@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -72,14 +72,14 @@ func TestFeishuStaleStopAfterRefusedFinalEdit(t *testing.T) {
 }
 
 // Keep callbacks in the same old wire shape: no new run identifier is required.
-func staleStopAction(target botTarget, mid string) *feishubot.CardAction {
+func staleStopAction(target botTarget, mid string) *botcard.CardAction {
 	a := stopCardAction(target)
 	a.Context.MessageID = mid
 	return a
 }
 
 // currentStopCard registers the watched ownership that a normal progress send keeps.
-func currentStopCard(s *Service, target botTarget) *feishubot.CardAction {
+func currentStopCard(s *Service, target botTarget) *botcard.CardAction {
 	r := &channel.Run{ID: "fb_stop", Channel: channel.Feishu, MachineID: target.MachineID, SessionID: target.SessionID, TargetKind: target.Kind, Ext: map[string]string{"card": "om_stop"}}
 	p := &chanLive{mu: newChanMutex(), checking: newChanMutex(), done: make(chan struct{})}
 	s.chans.mu.Lock()

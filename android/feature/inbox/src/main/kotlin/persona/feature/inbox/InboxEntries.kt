@@ -16,6 +16,7 @@ import persona.core.navigation.Navigator
 import persona.core.contracts.api.ManagerPins
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import persona.core.inbox.*
 
 /** The shell supplies the chat Markdown renderer and its existing image viewer for external thread pictures. */
 typealias InboxPictureMarkdown = @Composable (String, ReplyImageSource, Modifier) -> Unit

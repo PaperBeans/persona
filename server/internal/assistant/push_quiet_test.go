@@ -526,6 +526,7 @@ func TestHeldEscalationIsNotReEscalatable(t *testing.T) {
 
 // With the switch off the same turn still posts its progress card (as before).
 func TestQuietOffTaskReportStillPosts(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, posts := reportService(t, true)
 	pushQuietFor(t, s, false)
 	startedTask(t, s, f)

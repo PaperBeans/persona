@@ -75,6 +75,10 @@ struct AssistantView: View {
     @State private var openedExtension: ExtensionNavRoute?
     /// Health: the health space's page (docs/assistant/health.md).
     @State private var showHealth = false
+    /// A domain space's home or the new space form (#13500), presented as Health's page is.
+    @State private var openedSpace: DomainSpacePage?
+    /// What a space conversation's category chips take under the top bar (#13500): the conversation leaves it free.
+    @State private var categoriesHeight: CGFloat = 0
     @State private var showRecordings = false
     /// The sidebar (Chat History, or a drag to the right anywhere on the page): docs/apple/ios.md「Persona top bar and sidebar」.
     @State private var drawer = AssistantDrawer()
@@ -194,6 +198,8 @@ struct AssistantView: View {
                                 onMachines: places ? { show(.machines) } : nil,
                                 onOpenExtension: places ? { show(.extensionPage($0)) } : { r in drawer.close(); openedExtension = r },
                                 openHealth: places ? { show(.health) } : { drawer.close(); enterHealth() },
+                                openSpace: places ? { show(.space($0)) } : { slug in drawer.close(); enterSpace(slug) },
+                                openNewSpace: places ? { show(.newSpace) } : { drawer.close(); backToRoot(); present(.newSpace) },
                                 openRecordingsPage: Self.recordingsPage(places ? { show(.recordings) } : { drawer.close(); showRecordings = true }),
                                 openStarred: sidebarStars)
     }
@@ -254,6 +260,7 @@ struct AssistantView: View {
     /// Nothing pushed on the page: the sidebar's drag only works here (pushed pages have their own back swipe).
     private var atRoot: Bool {
         var pushed = showProfile || showKnowledge || showRoutines || showTodos || openedExtension != nil || showHealth || showRecordings
+            || openedSpace != nil
             || !navPath.wrappedValue.isEmpty
         #if DEBUG
         pushed = pushed || showAvatars
@@ -334,11 +341,8 @@ struct AssistantView: View {
             DirectionPage(id: $0.id)
                 .modifier(InboxDestinationEnvironment(chat: inboxChatPush, openFeishu: { navPath.wrappedValue.append($0) }))
         }
-        .navigationDestination(isPresented: $showHealth) {
-            HealthView(disabled: shownStart != nil, launcher: healthLauncherPick, launcherModel: healthModelPick, mode: $starterMode, effort: $starterEffort) { text, images in
-                Task { await start(text, images, space: Session.healthSpace) }
-            }
-        }
+        .navigationDestination(isPresented: $showHealth) { healthPage }
+        .navigationDestination(item: $openedSpace) { spacePage($0) }
         .modifier(ShellDestinations(path: $path, enabled: placesByValue && !embedded, inboxChat: inboxChatPush))
         .modifier(ClassicDestinations(path: $path, enabled: shell == nil && !padPlaces && !embedded))
         #if os(iOS)
@@ -375,13 +379,16 @@ struct AssistantView: View {
                             openSidebar: toggleSidebar,
                             // In a health conversation New opens Health's new conversation page, whose list has the
                             // space's past ones (#4329); elsewhere the assistant's.
-                            newConversation: currentIsHealth ? { backToRoot(); present(.health) } : newConversation,
+                            newConversation: newFromTopBar,
                             openKnowledge: { if placesByValue { show(.knowledge) } else { showKnowledge = true } },
                             openProfile: { if placesByValue { show(.profile) } else { showProfile = true } })
             #if os(iOS)
             .liftBlur(host: liftHost)
             #endif
         }
+        // A space conversation's categories under the bar (#13500); the conversation leaves their height free.
+        .overlay(alignment: .top) { spaceCategories }
+        .environment(\.assistantTopExtra, currentSpace == nil ? 0 : categoriesHeight)
         #if os(iOS)
         // A message pressed in the conversation, over the bar too: the whole page dims (#3188).
         .overlay { MessageLiftHostLayer(host: liftHost) }
@@ -488,7 +495,10 @@ struct AssistantView: View {
                 case "avatars": showAvatars = true
                 case "knowledge": showKnowledge = true
                 case "todos": showTodos = true
-                case "health": showHealth = true
+                case "health": showHealth = healthShellPage != nil
+                // `-openAssistantPage space:<slug>`: that space's home; `space-new`: the new space form (screenshots).
+                case .some(let p) where p.hasPrefix("space:"): present(.space(String(p.dropFirst("space:".count))))
+                case "space-new": present(.newSpace)
                 case .some(let p) where p != "assistant": showProfile = true
                 default: break
                 }
@@ -501,7 +511,7 @@ struct AssistantView: View {
                 case "routines": show(.routines)
                 case "knowledge": show(.knowledge)
                 case "profile": show(.profile)
-                case "health": backToRoot(); showHealth = true // the page itself, for its screenshots
+                case "health": backToRoot(); showHealth = healthShellPage != nil // the page itself, for its screenshots
                 case "recordings": show(.recordings)
                 default: break
                 }
@@ -602,6 +612,8 @@ struct AssistantView: View {
             case .machines: navPath.wrappedValue.append(ShellRoute.machines)
             case .extensionPage(let r): navPath.wrappedValue.append(ShellRoute.extensionPage(r))
             case .health: enterHealth()
+            case .space(let slug): enterSpace(slug)
+            case .newSpace: present(.newSpace)
             case .recordings: if placesByValue { navPath.wrappedValue.append(ShellRoute.recordings) } else { showRecordings = true }
             case .conversation: break // back at the conversation (`backToRoot`), the place's path kept (`ShellPlaces`)
             case .messages: navPath.wrappedValue.append(SidebarRoute.messages)
@@ -653,6 +665,9 @@ struct AssistantView: View {
         case .health:
             traceRoot(page, nil)
             enterHealth()
+        case .space(let slug):
+            traceRoot(page, nil)
+            enterSpace(slug)
         default:
             let step = SidebarPageRoot.of(page).map { unified.select($0, path: navPath, fresh: fresh) }
             if page == .inbox, let step { inboxPicked(step) }
@@ -762,13 +777,48 @@ struct AssistantView: View {
     }
 
     /// The open conversation is the health space's.
-    private var currentIsHealth: Bool { HealthModel.newOpensHealth(current.flatMap { model.session($0) }) }
+    private var currentIsHealth: Bool { current.flatMap { model.session($0) }?.isHealth == true }
 
-    /// Health from the sidebar or the shell (#4329): back in the latest health conversation, as Codex does; the Health
-    /// page, its new conversation page, when it has none. `-openAssistantPage health` still shows the page.
+    /// Health's page, from the `health` module (`ModuleSlot.shellPlaces`, #14278); nil while it is off.
+    private var healthShellPage: ModuleShellPlace? { Modules.registry.shellPage(id: SidebarRoute.healthPage) }
+
+    /// Health's home with what it shares with Persona's new conversation: the launcher, model, mode and effort picked in
+    /// the shell composer, and a start in the health space.
+    @ViewBuilder private var healthPage: some View {
+        if let page = healthShellPage {
+            page.page(PersonaHostApp.ShellContext(disabled: shownStart != nil, launcher: healthLauncherPick, launcherModel: healthModelPick,
+                                                  mode: $starterMode, effort: $starterEffort) { text, images in
+                Task { await start(text, images, space: Session.healthSpace) }
+            })
+        }
+    }
+
+    /// Health from the sidebar or the shell opens its home, with the space's conversations listed (#13273); nothing
+    /// while the health module is off.
     private func enterHealth() {
+        backToRoot()
+        guard healthShellPage != nil else { return }
+        present(.health)
+    }
+
+    /// The open conversation's domain space (#13500), when it is one other than health's.
+    private var currentSpace: String? {
+        guard let s = current.flatMap({ model.session($0) }), s.isDomainSpace else { return nil }
+        return s.assistantSpace
+    }
+
+    /// The top bar's New: in a health conversation Health's new conversation page, whose list has the space's past ones
+    /// (#4329); in a domain space's, that space's home (#13500); elsewhere the assistant's.
+    private var newFromTopBar: () -> Void {
+        if let slug = currentSpace { return { backToRoot(); present(.space(slug)) } }
+        if currentIsHealth, healthShellPage != nil { return { backToRoot(); present(.health) } }
+        return newConversation
+    }
+
+    /// A domain space from the sidebar (#13500), as Health: back in its latest conversation, else its home.
+    private func enterSpace(_ slug: String) {
         Task {
-            switch await HealthModel.entry(deps: .live, live: model.healthConversations) {
+            switch await SpaceHomeModel.entry(slug: slug, deps: .live, live: model.spaceConversations) {
             case .open(let key):
                 #if os(iOS)
                 if embedded, let unified { unified.select(.conversation, path: navPath, contentChanged: true) }
@@ -777,7 +827,33 @@ struct AssistantView: View {
                 model.openAssistantConversation(key)
             case .new:
                 backToRoot()
-                present(.health)
+                present(.space(slug))
+            }
+        }
+    }
+
+    /// The chips of the open space conversation's categories, under the top bar, measured for the room they take.
+    @ViewBuilder private var spaceCategories: some View {
+        if let key = current, pending == nil, currentSpace != nil {
+            SpaceConversationCategories(sessionID: key.sessionID)
+                .id(key)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { categoriesHeight = $0 }
+                .padding(.top, AssistantTopBar.room(railEdge))
+        }
+    }
+
+    /// A domain space's page: its home, or the new space form, which opens the space it makes.
+    @ViewBuilder private func spacePage(_ page: DomainSpacePage) -> some View {
+        switch page {
+        case .home(let slug):
+            SpaceHomeView(slug: slug, disabled: shownStart != nil, launcher: healthLauncherPick, launcherModel: healthModelPick,
+                          mode: $starterMode, effort: $starterEffort,
+                          send: { text, images in Task { await start(text, images, space: slug) } },
+                          leave: { leavePlace() })
+        case .new:
+            NewSpaceView { track in
+                backToRoot()
+                present(.space(track.slug))
             }
         }
     }
@@ -791,6 +867,8 @@ struct AssistantView: View {
         if embedded { navPath.wrappedValue.append(route); return }
         switch route {
         case .health: showHealth = true
+        case .space(let slug): openedSpace = .home(slug)
+        case .newSpace: openedSpace = .new
         case .messages: break // the Sidebar layout's only
         }
     }
@@ -802,10 +880,12 @@ struct AssistantView: View {
         case .messages:
             LarkConversationsView().modifier(InboxDestinationEnvironment(chat: inboxChatPush, openFeishu: { navPath.wrappedValue.append($0) }))
         case .health:
-            HealthView(disabled: shownStart != nil, launcher: healthLauncherPick, launcherModel: healthModelPick, mode: $starterMode, effort: $starterEffort) { text, images in
-                Task { await start(text, images, space: Session.healthSpace) }
-            }
+            healthPage
             .modifier(InboxDestinationEnvironment(chat: inboxChatPush, openFeishu: { navPath.wrappedValue.append($0) }))
+        case .space(let slug):
+            spacePage(.home(slug))
+        case .newSpace:
+            spacePage(.new)
         }
     }
     #endif
@@ -818,6 +898,7 @@ struct AssistantView: View {
         showTodos = false
         openedExtension = nil
         showHealth = false
+        openedSpace = nil
         showRecordings = false
         #if os(iOS)
         // A task pushed beside the sidebar (regular width, `detailPresentation`) is a page of this stack too: going
@@ -877,7 +958,8 @@ struct AssistantView: View {
         failedStart.messages.last { $0.space != nil || model.assistantShows($0.manager) }
     }
 
-    /// Health's launcher pick: home's with one manager.
+    /// Health's launcher pick: home's with one manager. A space's home shares it on purpose (#13500): every space runs
+    /// on the default manager as Health does, with Health's launcher setting as the fallback, so one pick serves them.
     private var healthLauncherPick: Binding<String?> { model.managerRoster?.isMulti == true ? $healthLauncher : $starterLauncher }
     private var healthModelPick: Binding<String?> { model.managerRoster?.isMulti == true ? $healthModel : $starterModel }
 
@@ -926,9 +1008,10 @@ struct AssistantView: View {
                                                       model: space == nil ? starterModel : healthModelPick.wrappedValue)
             // Suggestions and Resend share the cached check. Discovery never delays sending or clears an unknown choice.
             if !starterEffort.isEmpty {
-                let machine = model.hubRef(space == Session.healthSpace ? model.healthMachineID : model.assistantConfig?.machineID ?? model.hubMachineID)
-                let fallback = space == Session.healthSpace ? model.healthLauncherSetting : model.starterLauncherSetting
-                let manager = space == Session.healthSpace ? nil : api.currentAssistantSettings().managerID
+                // Every space is the default manager's, Health's included (#13500).
+                let machine = model.hubRef(space != nil ? model.healthMachineID : model.assistantConfig?.machineID ?? model.hubMachineID)
+                let fallback = space != nil ? model.healthLauncherSetting : model.starterLauncherSetting
+                let manager = space != nil ? nil : api.currentAssistantSettings().managerID
                 let source = AssistantStarterModels.source(machine, launcher: pick.launcher, model: pick.model, fallback: fallback,
                                                            manager: manager, revision: model.assistantLauncherRequestRevision)
                 starterEffort = model.assistantStarterCache.retained(starterEffort, source: source)
@@ -1416,6 +1499,9 @@ struct StarterComposer: View {
     var placeholder: String? = nil
     /// Where picked files land on the assistant's machine: "health" for Health's reports/ (docs/assistant/health.md「Checkup reports」).
     var uploadDest: String? = nil
+    /// A domain space's new conversation (#13500): its own draft, and the default manager's machine and launcher, as
+    /// Health's. nil: the assistant's own.
+    var space: String? = nil
     /// The main conversation cannot answer yet (docs/assistant/onboarding.md 4.4): send goes to what is missing, the draft stays.
     var gate: SendGate? = nil
     /// The cleared main conversation (#5100): `/clear` is listed and does nothing. It never starts the new chat.
@@ -1454,7 +1540,9 @@ struct StarterComposer: View {
     /// What it holds for the next message, kept by the app for the new conversation as a chat's draft is (#2626): the
     /// composer is built again with the whole tree when iOS snapshots the app in another width on its way to the
     /// background (iPhone Duo open), and its text and photos were gone on the way back.
-    private var draft: StarterDraft { model.starterDraft(uploadDest ?? "") }
+    private var draft: StarterDraft { model.starterDraft(space.map { "space:" + $0 } ?? uploadDest ?? "") }
+    /// Health's and every space's new conversation are the default manager's, whichever the Persona page shows.
+    private var defaultManager: Bool { uploadDest == Session.healthSpace || space != nil }
     private var text: String {
         get { draft.text }
         nonmutating set { draft.text = newValue }
@@ -1598,7 +1686,7 @@ struct StarterComposer: View {
 
     private var offersWorkspaceMentions: Bool {
         #if os(iOS)
-        return uploadDest == nil
+        return uploadDest == nil && space == nil
         #else
         return false
         #endif
@@ -1615,11 +1703,11 @@ struct StarterComposer: View {
     /// The assistant's machine (the hub's unless set otherwise): files and videos go to its temp directory. Health's is
     /// the default manager's.
     private var machine: MachineRef {
-        model.hubRef(uploadDest == Session.healthSpace ? model.healthMachineID : model.assistantConfig?.machineID ?? model.hubMachineID)
+        model.hubRef(defaultManager ? model.healthMachineID : model.assistantConfig?.machineID ?? model.hubMachineID)
     }
 
     private var starterManager: String? {
-        uploadDest == Session.healthSpace ? nil : model.api(machine.group)?.currentAssistantSettings().managerID
+        defaultManager ? nil : model.api(machine.group)?.currentAssistantSettings().managerID
     }
     private var effortSource: String {
         AssistantStarterModels.source(machine, launcher: shell?.launcher, model: shell?.launcherModel, fallback: shell.flatMap { model.launcherSetting($0) },
@@ -1660,7 +1748,7 @@ struct StarterComposer: View {
                                  canSend: canSend, hasAttachments: !images.isEmpty || !videos.items.isEmpty || !files.items.isEmpty || !quotes.isEmpty,
                                  modesTitle: StarterModesMenu.title(modes: shell, launchers: starterModels.launchers, mainDefault: starterModels.mainDefault, model: model),
                                  quotes: quotesBinding, gate: gate, openAttach: attachOpener,
-                                 dictationRequest: uploadDest == nil ? model.dictationRequest : nil,
+                                 dictationRequest: uploadDest == nil && space == nil ? model.dictationRequest : nil,
                                  takeDictation: { request in model.takeDictationRequest(request, uploadDest: uploadDest) }, send: submit) {
                     #if os(iOS)
                     // As a conversation's + (#3225): the iPhone's touch and hold, the iPad's tap with Photos and Files first.
@@ -1749,6 +1837,9 @@ struct BeautifulStarterComposer: View {
     var placeholder: String? = nil
     /// Where picked files land on the assistant's machine: "health" for Health's reports/ (docs/assistant/health.md「Checkup reports」).
     var uploadDest: String? = nil
+    /// A domain space's new conversation (#13500): its own draft, and the default manager's machine and launcher, as
+    /// Health's. nil: the assistant's own.
+    var space: String? = nil
     /// The main conversation cannot answer yet: send goes to what is missing, the draft stays (the card says what).
     var gate: SendGate? = nil
     /// The cleared main conversation (#5100): `/clear` is listed and does nothing.
@@ -1763,7 +1854,9 @@ struct BeautifulStarterComposer: View {
     /// What it holds for the next message, kept by the app for the new conversation as a chat's draft is (#2626): the
     /// composer is built again with the whole tree when iOS snapshots the app in another width on its way to the
     /// background (iPhone Duo open), and its text and photos were gone on the way back.
-    private var draft: StarterDraft { model.starterDraft(uploadDest ?? "") }
+    private var draft: StarterDraft { model.starterDraft(space.map { "space:" + $0 } ?? uploadDest ?? "") }
+    /// Health's and every space's new conversation are the default manager's, whichever the Persona page shows.
+    private var defaultManager: Bool { uploadDest == Session.healthSpace || space != nil }
     private var text: String {
         get { draft.text }
         nonmutating set { draft.text = newValue }
@@ -1795,10 +1888,10 @@ struct BeautifulStarterComposer: View {
                           spill: MessagePhotos.spill(into: files, machine: machine, model: model, dest: uploadDest))
     }
 
-    private var launcherMachine: String { uploadDest == Session.healthSpace ? model.healthMachineID : model.assistantConfig?.machineID ?? model.hubMachineID }
+    private var launcherMachine: String { defaultManager ? model.healthMachineID : model.assistantConfig?.machineID ?? model.hubMachineID }
     /// The launcher a new conversation starts with (the user's pick, else the one in Persona settings), or nil while
     /// settings are not known (#4200): no name is made up, and requests omit the field so the hub picks its default.
-    private var currentLauncher: String? { launcher ?? (uploadDest == Session.healthSpace ? model.healthLauncherSetting : model.starterLauncherSetting) }
+    private var currentLauncher: String? { launcher ?? (defaultManager ? model.healthLauncherSetting : model.starterLauncherSetting) }
     /// Where files and videos go: the assistant's machine.
     private var machine: MachineRef { model.hubRef(launcherMachine) }
 
@@ -1845,7 +1938,7 @@ struct BeautifulStarterComposer: View {
                                return true
                            },
                            quotes: quotesBinding,
-                           dictationRequest: uploadDest == nil ? model.dictationRequest : nil,
+                           dictationRequest: uploadDest == nil && space == nil ? model.dictationRequest : nil,
                            takeDictation: { request in model.takeDictationRequest(request, uploadDest: uploadDest) },
                            send: {
                                let typed = text
@@ -1872,7 +1965,7 @@ struct BeautifulStarterComposer: View {
         // Again once the hub is paired: on a fresh launch the first try runs before there is one.
         .task(id: "\(machine.path)|\(model.assistantLauncherRequestRevision)") {
             let api = model.api(machine.group)
-            let scoped = uploadDest == Session.healthSpace ? api?.manager(nil) : api
+            let scoped = defaultManager ? api?.manager(nil) : api
             if let answer = try? await model.assistantLaunchers(machine, using: scoped), !Task.isCancelled {
                 launchers = answer.launchers.filter(\.runsAssistant)
             }

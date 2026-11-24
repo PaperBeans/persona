@@ -61,7 +61,7 @@ Manifest fields:
 | `catalog.call` | `{source, tool, args?}` → `{text}` | Current catalog only; non-read-only or missing tools answer `not_read_only`; args is an object, default `{}` |
 | `tools.list` | `{}` → `{tools: [{name, description, input_schema}]}` | Read-only tools, names prefixed `<id>_` |
 | `tools.call` | `{name, args}` → `{text, images?}` | `images` (optional, #8484): pictures for the model after the text, `[{mime, data, caption?}]`; only on a hub whose `initialize` lists `tool_images`. See "Pictures in a tool's answer" below |
-| `thread.page` | `{thread, before?, limit}` → `{chat, messages, before?}` | One Inbox thread page, oldest first; empty before means latest, earlier pages use returned cursor; limit max 50. Fields `connector/threads.go`: `ThreadChat` / `ThreadMessage` / `ThreadMedia`… `chat.reply` is reply action with `{chat, text, reply_to}` |
+| `thread.page` | `{thread, before?, limit}` → `{chat, messages, before?}` | One Inbox thread page, oldest first; empty before means latest, earlier pages use returned cursor; limit max 50. Fields `connectorwire/threads.go`: `ThreadChat` / `ThreadMessage` / `ThreadMedia`… `chat.reply` is reply action with `{chat, text, reply_to}` |
 | `thread.media` | `{ref}` → `{mime, data}` | Base64 avatar / media bytes, max 4 MB. Ref immutable; hub persists, app caches forever. Changing avatars include version in ref |
 | `actions.list` | `{}` → `{tools: [{name, description, input_schema}]}` | Writes, `<id>_` prefix |
 | `actions.describe` | `{name, args}` → `{action: {name, visible}, summary}` | Phone card action / full content; visible = audience. No network. Error means invalid args, returned to caller without card |

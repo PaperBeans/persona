@@ -584,9 +584,10 @@ func TestWorkerReportWithNobodyAboveCancelsReadably(t *testing.T) {
 // A worker that does not start is told to its leader as a supervision signal, not to a conversation, and no start remedy
 // (a main-chat tool) is begun for it.
 func TestFailedWorkerStartIsTheLeadersToHear(t *testing.T) {
-	// An unanswered start now reconciles with the machine before it fails (#6540); keep that window to milliseconds
-	// here, this test is about who hears the failure, not how long reconciliation is allowed to take.
-	shortTaskStartReconcile(t)
+	// An unanswered start now reconciles with the machine before it fails (#6540); keep that window short here, this
+	// test is about who hears the failure, not how long reconciliation is allowed to take. The fake fails the start at
+	// once, so the start keeps its budget (#14158).
+	shortTaskStartAdopt(t)
 	s, f := newQuietService(t)
 	startTaskLeader(t, s, f)
 	f.mu.Lock()

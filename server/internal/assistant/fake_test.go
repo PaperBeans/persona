@@ -846,7 +846,9 @@ func (f *fakeHub) AppCall(ctx context.Context, p AppCall) (json.RawMessage, erro
 		return json.Marshal(map[string]any{"settings": []Setting{{Key: "inbox.rules", Title: "收件箱分拣规则", About: "the rules",
 			Value: "a string", Actions: []string{"get", "set"}}}})
 	case AppSettings + " " + AppTool:
-		return json.Marshal(proto.TextResult("the hub's: "+string(p.Params), false))
+		if f.apps[p.AppID+" "+p.Method] == nil { // else the test's answer (answerApp), below
+			return json.Marshal(proto.TextResult("the hub's: "+string(p.Params), false))
+		}
 	case AppPlugins + " " + assistantwire.PluginsPresets:
 		return json.Marshal(map[string]any{"presets": f.presets})
 	case AppPlugins + " " + assistantwire.PluginsVoice:
@@ -1373,6 +1375,9 @@ func withSettings(t testing.TB, f *fakeHub, s *Service) *Service {
 	// These tests are about what a plan does once it exists; what task_plan requires of a brief is task_brief_test.go's,
 	// which turns this off.
 	s.briefsOptional = true
+	// And they start the main conversation's plans from their cards: that a supervisor's plan starts at once is
+	// plan_owner_step_test.go's, which turns this off.
+	s.mainPlansWait = true
 	// And about what a supervisor does with its tasks, told to the main conversation: the background supervisor that
 	// takes them by default is supervise_background_test.go's, which turns this off.
 	s.noBackground = true

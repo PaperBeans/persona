@@ -19,6 +19,11 @@ import (
 // everything that is no such hand-over (an unquoted message, an answer, a hand-over still queued and never tried, a
 // conversation that is no lead, the main conversation). Read-only tasks and kinds the owner trusts start as before.
 //
+// Decision rights (2026-11-23) took the Start card off a lead's own plans: words handed to the wrong lead start work in
+// the wrong place, which is reversible and the supervisor's to set right, none of the six kinds only the owner decides.
+// A lead's plan starts at once whatever the mark says (task_plan's orchestrates), and a scheduled round drops
+// user_requested before the hold is read: the mark is still kept, but no longer holds a plan back.
+//
 // What the hold keeps from #12953 on, so a lead starts and closes its own work without the owner or the main conversation
 // starting it (heldOutsideOwnKinds):
 //

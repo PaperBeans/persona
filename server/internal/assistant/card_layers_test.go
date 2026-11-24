@@ -84,7 +84,8 @@ func TestCardCategoriesCoverEverySource(t *testing.T) {
 func TestCardCategoriesOfTheSixKinds(t *testing.T) {
 	for src, want := range map[string]int{
 		cardSecretForm: cardCatInPerson, cardAgentSecretForm: cardCatInPerson,
-		cardOutboundWrite:   cardCatOutward,
+		cardOutboundWrite: cardCatOutward,
+		cardPlanMoney:     cardCatMoney, cardPlanOutward: cardCatOutward, cardPlanIrreversible: cardCatIrreversible,
 		cardLeaderNeedsUser: cardCatDirection, cardDecision: cardCatDirection, cardAskEscalated: cardCatDirection,
 		cardTodoRemind: cardCatDirection, cardHealthWater: cardCatDirection, cardMinutesReady: cardCatDirection,
 		cardDayRecap: cardCatDirection, cardBriefFallback: cardCatDirection, cardAgentDone: cardCatDirection,

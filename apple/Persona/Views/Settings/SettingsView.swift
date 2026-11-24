@@ -16,22 +16,11 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmUnpair = false
     @State private var showPair = false
-    @State private var storage: Int64?
     @State private var search = ""
     @State private var searchResults: [SettingsEntry] = []
     @State private var plugins: [HubExtension]?
     /// Where links in the plugins' cards open (docs/extensions/extensions.md「UI slots」).
     @State private var pluginLink: LinkTarget?
-    @StoredValue(TranslationPrefs.enabledKey) private var translating = false
-    @StoredValue(TranslationPrefs.targetKey) private var translateTarget = TranslationPrefs.defaultTarget
-
-    /// The hub row's value: an update out or under way, else its version.
-    private var hubSummary: String {
-        guard let s = model.hubUpdate else { return "" }
-        if s.working { return s.stateTitle }
-        if s.latest?.newer == true { return s.channel == "docker" ? String(localized: "New Image") : String(localized: "Update Available") }
-        return s.version
-    }
 
     /// What the Extensions row's count and the slots are read again for; the current assistant too, as a switch from
     /// Settings' own heading leaves the path as it is.
@@ -41,9 +30,6 @@ struct SettingsView: View {
         var revision: Int
         var manager: String?
     }
-
-    /// Translation's row value: off, or the target language.
-    private var translationSummary: String { translating ? TranslationPrefs.name(of: translateTarget) : String(localized: "state.off", defaultValue: "Off") }
 
     var body: some View {
         #if DEBUG || PERF_SIGNPOST
@@ -57,6 +43,7 @@ struct SettingsView: View {
                     assistantSection
                     deviceSection
                     hubSection
+                    advancedSection
                 } else {
                     Section {
                         ForEach(searchResults) { entry in
@@ -93,10 +80,6 @@ struct SettingsView: View {
                 }
                 .navigationTitle("Settings")
             .task { await model.refreshAssistant() }
-            // Measured each time the page shows and whenever a page closes (back from Storage after clearing; in the
-            // split the list never leaves the screen).
-            .onAppear(perform: measureStorage)
-            .onChange(of: model.settingsPath) { measureStorage() }
             #if DEBUG
             // With `-tab settings`: `-openAssistantPage assistant|routines|routine|newRoutine|followups|memory|memoryFile|
             // memoryEdit|about`, `-openStorage YES` (Storage), `-openNotificationSettings YES` (Notifications), `-openMachines YES` (Machines;
@@ -124,33 +107,14 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: Settings home's rows: the registry's core entries only (#13395, `SettingsRegistryTests`)
+
     private var assistantSection: some View {
         Section {
             Group {
                 if !model.isDemo { ChecklistSettingsRow(inSection: false) }
-                settingsLink(.models, "Models", Theme.Icon.model, id: "settings-models")
-                settingsLink(.assistant, "Assistant Profile", Theme.Icon.ai, id: "settings-assistant")
-                settingsLink(.channels, "Channels", Theme.Icon.channels, id: "settings-channels")
-                settingsLink(.connectors, "Connectors", Theme.Icon.connectors, id: "settings.connectors")
-                #if os(iOS)
-                // Every source of the Inbox, built-in ones and subscriptions, on the manager's pages (#5278).
-                if model.hubFeatures.contains(SubscriptionsUI.sourcesFeature) {
-                    settingsLink(.inboxSources, "Inbox Sources", Theme.Icon.subscriptions, id: "settings-inbox-sources")
-                }
-                #endif
-                if model.hubFeatures.hasExtensionFeature("manager") {
-                    settingsLink(.plugins, "Extensions", Theme.Icon.plugins, id: "settings-plugins", value: ExtensionText.listSummary(plugins))
-                }
-                #if os(iOS)
-                settingsLink(.knowledgeSelection, "Knowledge Selection", Theme.Icon.knowledge, id: "settings-knowledge-selection")
-                // Every iPhone: the calendar reminder is the phone's (#8731 G2); the role shows where the hub offers one.
-                settingsLink(.meetings, "Meetings", Theme.Icon.meeting, id: "settings-meetings",
-                             value: MeetingAttendees.offered(model) ? MeetingAttendees.defaultRole(model).title : "")
-                #endif
-                settingsLink(.agents, "Agent", Theme.Icon.options, id: "settings-agents")
-                SettingsListLink(value: MachineListRoute()) { MachinesSettingsRow() }
-                    .settingsListRow(MachineListRoute())
-                    .accessibilityIdentifier("settings-machines")
+                let extensions = ExtensionText.listSummary(plugins)
+                ForEach(SettingsCatalog.rows(.core, in: .assistant, model)) { SettingsEntryRow(entry: $0, extensions: extensions) }
             }
             .bareListRow()
         } header: { SettingsAssistantHeading() } footer: {
@@ -174,27 +138,7 @@ struct SettingsView: View {
     private var deviceSection: some View {
         Section {
             Group {
-                settingsLink(.appearance, "Appearance & Display", Theme.Icon.style, id: "settings-appearance")
-                settingsLink(.language, "Language & Dictation", Theme.Icon.language, id: "settings-language", value: AppLanguage.settingsSummary)
-                settingsLink(.notifications, "Notifications", Theme.Icon.notifications, id: "settings-notifications")
-                #if os(iOS)
-                LiveScreenSettingsRow()
-                #endif
-                settingsLink(.translation, "Translation", Theme.Icon.translate, id: "settings-translation", value: translationSummary)
-                settingsLink(.storage, "Storage", Theme.Icon.storage, id: "settings-storage", value: storage?.storageText ?? "")
-                #if os(iOS)
-                settingsLink(.health, "Health", Theme.Icon.health, id: "settings-health")
-                // The alarms and timers Persona set (#12805): AlarmKit's, iOS 26 and later, as the alarm tools.
-                if AlarmsAccess.isSupported {
-                    settingsLink(.alarms, "Alarms and Timers", Theme.Icon.alarmClock, id: "settings-alarms")
-                }
-                SettingsListLink(value: SettingsPage.phoneData) {
-                    SettingsRow(title: ConnectorText.device, symbol: Theme.Icon.thisDevice, tint: Theme.accent)
-                }
-                .settingsListRow(SettingsPage.phoneData)
-                .accessibilityIdentifier("settings-phone-data")
-                #endif
-                settingsLink(.about, "About", Theme.Icon.info, id: "settings-about")
+                ForEach(SettingsCatalog.rows(.core, in: .device, model)) { SettingsEntryRow(entry: $0) }
             }
             .bareListRow()
         } header: {
@@ -216,13 +160,8 @@ struct SettingsView: View {
                     }
                     .modifier(SettingsButtonLook())
                     .accessibilityIdentifier("settings.leaveDemo")
-                } else {
-                    settingsLink(.hubs, "Hub Connection", Theme.Icon.hubGroup, id: "settings.hubs", value: linkState)
-                    settingsLink(.hub, "Hub Version", Theme.Icon.server, id: "settings.hub", value: hubSummary)
-                    settingsLink(.managers, "Assistants", Theme.Icon.managers, id: "settings.managers")
                 }
-                settingsLink(.persona, "Avatar", Theme.Icon.avatar, id: "settings-persona", value: model.persona.cardTitle)
-                settingsLink(.pairing, "Devices & Pairing", Theme.Icon.credentials, id: "settings-pairing")
+                ForEach(SettingsCatalog.rows(.core, in: .hub, model)) { SettingsEntryRow(entry: $0) }
             }
             .bareListRow()
         } header: {
@@ -233,31 +172,21 @@ struct SettingsView: View {
         }
     }
 
-    private func settingsLink(_ page: SettingsPage, _ title: LocalizedStringResource, _ symbol: String, id: String, value: String = "") -> some View {
-        SettingsListLink(value: page) {
-            SettingsRow(title: String(localized: title), symbol: symbol, tint: Theme.accent, value: value, look: .oneLine)
-        }
-        .settingsListRow(page)
-        .accessibilityIdentifier(id)
-    }
+    // MARK: End of Settings home's rows
 
-    private func measureStorage() {
-        Task { storage = await Task.detached(priority: .utility) { StorageUsage.scan().values.reduce(0, +) }.value }
-    }
-
-    /// The header's line about the link: connected (and how, when it goes through the hub's SSH tunnel), or why not.
-    private var linkState: String {
-        // While the hub restarts into a new version, the same words as the connection title (Hub updating…).
-        guard model.live.looksConnected else {
-            let phase = model.connection.phase
-            return phase == .online ? String(localized: "Not Connected") : ConnectionLabel.text(phase, hubRestarting: model.hubUpdate?.restarting == true)
+    /// Settings › Advanced (#13395): the rest of Settings, under the same scopes. A hub update waiting there says so here.
+    private var advancedSection: some View {
+        Section {
+            SettingsListLink(value: SettingsPage.advanced) {
+                SettingsRow(title: String(localized: "Advanced"), symbol: Theme.Icon.options, tint: Theme.accent,
+                            value: SettingsHubVersion.update(model.hubUpdate), look: .oneLine)
+            }
+            .settingsListRow(SettingsPage.advanced)
+            .accessibilityIdentifier("settings-advanced")
+            .bareListRow()
+        } footer: {
+            Text("Appearance, language, storage, devices and more.")
         }
-        let tunneled = model.hub.flatMap { model.tunnel($0.group) }?.routed == true
-        if let t = model.hub.flatMap({ model.inAppTunnelState($0.group) }), t.routed { return String(localized: "Connected to hub · via \(t.route.title)") }
-        if model.hub.flatMap({ model.localProxyState($0.group) })?.routed == true {
-            return String(localized: "Connected to hub · via \(String(localized: "Local Proxy"))")
-        }
-        return tunneled ? String(localized: "Connected to hub · via SSH tunnel") : String(localized: "Connected to hub")
     }
 
     #if DEBUG
@@ -282,6 +211,7 @@ struct SettingsView: View {
             p.append(MachineListRoute())
             if let id = d.string(forKey: "openMachineDetail") { p.append(MachineDetailRoute(id: id)) }
         }
+        else if d.bool(forKey: "openAdvancedSettings") { p.append(SettingsPage.advanced) } // Settings › Advanced (#13395)
         else if d.bool(forKey: "openStorage") { p.append(SettingsPage.storage) }
         else if d.bool(forKey: "openNotificationSettings") { p.append(SettingsPage.notifications) }
         else if d.string(forKey: "openAssistantPage") != nil { p.append(SettingsPage.assistant) }
@@ -349,10 +279,8 @@ struct SettingsView: View {
         else if d.bool(forKey: "openConnectorDevice") { p.append(SettingsPage.phoneData) }
         else if d.bool(forKey: "openIPhoneSetup") { p = SettingsPage.iphoneSetupPath } // the guided setup (#8199)
         else if d.bool(forKey: "openTranslationSettings") { p.append(SettingsPage.translation) }
-        else if d.bool(forKey: "openLiveScreenSettings") { // Settings › Live Screen (#6396)
-            #if os(iOS)
-            p.append(SettingsPage.liveScreen)
-            #endif
+        else if d.bool(forKey: "openLiveScreenSettings") { // Settings › Live Screen (#6396), the screen-share module's
+            if Modules.registry.settingsEntry(id: "live-screen") != nil { p.append(SettingsPage.module("live-screen")) }
         }
         else if d.string(forKey: "openAlarms") != nil { // Settings › Alarms and Timers on made-up data (#12805)
             #if os(iOS)
@@ -408,8 +336,6 @@ enum SettingsPage: Hashable {
     case health
     /// Settings › Meetings (#2981): Persona's default role in a recorded meeting.
     case meetings
-    /// Settings › Live Screen (#6396, #6398): the live screen's route and its quality on mobile data.
-    case liveScreen
     /// Settings › Alarms and Timers (#12805): the alarms and timers Persona set through AlarmKit.
     case alarms
     #endif
@@ -420,6 +346,10 @@ enum SettingsPage: Hashable {
     /// account its chats follow; nil: the current assistant's).
     case feishu(manager: String? = nil)
     case models, agents, appearance, about, pairing, computers
+    /// Settings › Advanced (#13395): the rows Settings home leaves out (`SettingsCatalog.advanced`).
+    case advanced
+    /// A module's page, by its settings entry's id (`ModuleSlot.settings`): Live Screen is the screen-share module's.
+    case module(String)
     /// Settings › About › Export Diagnostics (Developing Persona, #9460).
     case devExport
     /// Settings › About › Replay a Meeting Tape (Developing Persona, #10589).
@@ -524,6 +454,7 @@ private struct SettingsDestinations: ViewModifier {
     @ViewBuilder private func page(for page: SettingsPage) -> some View {
         switch page {
         case .models: ModelConfigurationView()
+        case .advanced: SettingsAdvancedPage()
         case .agents: SettingsAgentView()
         case .appearance: AppearanceSettingsPage()
         case .about: SettingsAboutPage()
@@ -570,9 +501,9 @@ private struct SettingsDestinations: ViewModifier {
         #if os(iOS)
         case .health: WorkoutReportSettingsView()
         case .meetings: MeetingSettingsView()
-        case .liveScreen: LiveScreenSettingsView()
         case .alarms: AlarmsPage()
         #endif
+        case .module(let id): Modules.registry.settingsEntry(id: id)?.page()
         case .notifications: NotificationSettingsView()
         case .storage: StorageView()
         case .translation: TranslationSettingsView()
@@ -1390,7 +1321,7 @@ struct QRScanner: UIViewControllerRepresentable {
 
 /// Settings' Machines row: N / M online. Its own view: the page read `model.machines` for it, and a machine's heartbeat (on every
 /// push of a busy hub) drew the whole page and its list again (#1495); now only this row.
-private struct MachinesSettingsRow: View {
+struct MachinesSettingsRow: View {
     @Environment(AppModel.self) private var model
     @State private var summary = ""
 

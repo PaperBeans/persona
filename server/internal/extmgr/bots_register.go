@@ -4,9 +4,11 @@ import (
 	"context"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botport"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -63,13 +65,13 @@ func (h *Manager) acquireFeishuBind(ctx context.Context) (func(), error) {
 	}
 }
 
-// registrar is the accounts site's client (replaced in tests).
-func (h *Manager) registrar() *feishubot.Registrar {
+// registrar is the accounts site's client (replaced in tests); nil in a build without the lark module.
+func (h *Manager) registrar() botport.Registrar {
 	b := &h.bots
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.registrar == nil {
-		b.registrar = feishubot.NewRegistrar()
+	if b.registrar == nil && botport.Available() {
+		b.registrar = botport.NewRegistrar("")
 	}
 	return b.registrar
 }
@@ -101,7 +103,12 @@ func (h *Manager) beginFeishuRegistration(ctx context.Context, errText string) (
 		errText = i18n.T(h.botLang(ctx), reg.Failure)
 	}
 	region := "feishu"
-	ch, err := h.registrar().Begin(ctx, region, botRegisterName)
+	r := h.registrar()
+	if r == nil { // a build without the lark module
+		h.logf("bots: registration: %v", botport.ErrUnavailable)
+		return connector.Prompt{Error: errText}, false
+	}
+	ch, err := r.Begin(ctx, region, botRegisterName)
 	if err != nil {
 		h.logf("bots: registration: %v", err)
 		return connector.Prompt{Error: errText}, false
@@ -209,7 +216,11 @@ func (h *Manager) pollFeishuRegistration(ctx context.Context, credentials func(s
 		if err != nil {
 			return failed("hub-channels.register_failed")
 		}
-		t, err := h.registrar().Poll(ctx, reg.Region, code)
+		r := h.registrar()
+		if r == nil { // a build without the lark module
+			return failed("hub-channels.register_failed")
+		}
+		t, err := r.Poll(ctx, reg.Region, code)
 		if ctx.Err() != nil {
 			return connector.Prompt{}, ctx.Err()
 		}
@@ -218,7 +229,7 @@ func (h *Manager) pollFeishuRegistration(ctx context.Context, credentials func(s
 			return h.registerPrompt(ctx, reg, ""), nil
 		}
 		switch t.Status {
-		case feishubot.RegisterDone:
+		case botcard.RegisterDone:
 			sealed, err := h.sealKey(t.AppSecret)
 			if err != nil {
 				return connector.Prompt{}, err
@@ -228,25 +239,25 @@ func (h *Manager) pollFeishuRegistration(ctx context.Context, credentials func(s
 				reg.Region = t.Brand // the app lives on the tenant's cloud
 			}
 			h.putRegistration(&reg)
-		case feishubot.RegisterPending, feishubot.RegisterSlowDown, feishubot.RegisterFailed:
+		case botcard.RegisterPending, botcard.RegisterSlowDown, botcard.RegisterFailed:
 			// A tenant on the other cloud is answered there: ask that one from now on.
 			if other := t.Brand; (other == "lark" || other == "feishu") && other != reg.Region {
 				reg.Region = other
 				h.putRegistration(&reg)
 				return h.registerPrompt(ctx, reg, ""), nil
 			}
-			if t.Status == feishubot.RegisterFailed {
+			if t.Status == botcard.RegisterFailed {
 				h.logf("bots: registration: %s", t.ErrorText)
 				return failed("hub-channels.register_failed")
 			}
-			if t.Status == feishubot.RegisterSlowDown {
+			if t.Status == botcard.RegisterSlowDown {
 				reg.Interval += 5
 				h.putRegistration(&reg)
 			}
 			return h.registerPrompt(ctx, reg, ""), nil
-		case feishubot.RegisterExpired:
+		case botcard.RegisterExpired:
 			return failed("hub-channels.register_expired")
-		case feishubot.RegisterDenied:
+		case botcard.RegisterDenied:
 			return failed("hub-channels.register_denied")
 		}
 	}
@@ -274,7 +285,10 @@ func (h *Manager) finishFeishuRegistration(ctx context.Context, reg botRegistrat
 	}
 	// Best-effort, as after typed credentials: the template opened the scopes and the callback; this subscribes the
 	// events over the long connection and submits the publish.
-	if rep := feishubot.New(reg.AppID, secret, domain).AutoConfigure(ctx); rep.Detail != "" {
+	if !botport.Available() {
+		return "", botport.ErrUnavailable
+	}
+	if rep := botport.New(reg.AppID, secret, domain).AutoConfigure(ctx); rep.Detail != "" {
 		h.logf("bots: auto-configure: %s", rep.Detail)
 	}
 	b := &h.bots
@@ -286,11 +300,11 @@ func (h *Manager) finishFeishuRegistration(ctx context.Context, reg botRegistrat
 	}
 	l := h.userLang()
 	body := i18n.T(l, "hub-bots_chat.paired_body")
-	card := feishubot.NewCard(i18n.T(l, "hub-bots_chat.paired"), feishubot.Green, i18n.T(l, "hub-bots_chat.paired")).Markdown(body)
+	card := botcard.NewCard(i18n.T(l, "hub-bots_chat.paired"), botcard.Green, i18n.T(l, "hub-bots_chat.paired")).Markdown(body)
 	key := "registered-" + reg.AppID // the greeting lands once however often a failed finish is tried again
 	msgID, chatID, err := api.SendUser(ctx, reg.OpenID, "interactive", card.JSON(), cutUTF8(key+":c", feishuMaxUUID))
-	if feishubot.CardRejected(err) {
-		msgID, chatID, err = api.SendUser(ctx, reg.OpenID, "text", feishubot.TextContent(body), cutUTF8(key+":t", feishuMaxUUID))
+	if botcard.CardRejected(err) {
+		msgID, chatID, err = api.SendUser(ctx, reg.OpenID, "text", botcard.TextContent(body), cutUTF8(key+":t", feishuMaxUUID))
 	}
 	if err != nil {
 		return "", err

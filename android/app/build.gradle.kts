@@ -163,7 +163,6 @@ dependencies {
     implementation(project(":feature:terminal"))
     implementation(project(":feature:machines"))
     implementation(project(":feature:files"))
-    implementation(project(":feature:knowledge"))
     implementation(project(":platform:phonetools"))
     implementation(project(":core:demo"))
     implementation(libs.room.runtime)

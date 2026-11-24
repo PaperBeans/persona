@@ -22,6 +22,8 @@ func TestAccountExhausted(t *testing.T) {
 	for _, text := range []string{
 		"API Error: 503 no other eligible account",
 		"API Error: 503 no eligible upstream account is currently available",
+		"API Error: 503 the upstream request failed and no other eligible upstream account",
+		"the upstream request failed and no other eligible upstream account",
 		"API Error: 503 NO ELIGIBLE UPSTREAM",
 		"unexpected status 503: upstream attempt budget is exhausted",
 		"503 upstream attempt budget exhausted",

@@ -204,6 +204,19 @@ func (s *Service) logicalRoleRequired(ctx context.Context, machine, id string) (
 	return policy != "" || slices.Contains(cfg.Leaders, id) || id == cfg.BackgroundSupervisor || id == cfg.Main && cfg.MainSupervisesOwnTasks != nil && *cfg.MainSupervisesOwnTasks, nil
 }
 
+func (s *Service) conversationSwitchBusy(machine, id string, row proto.Session) bool {
+	if row.Starting || row.Status == proto.StatusWorking || row.Status == proto.StatusBlocked || row.PendingInteractions > 0 ||
+		backgroundRunning(row) || len(row.Queued) > 0 || (row.Compaction != nil && row.Compaction.State == proto.CompactionRunning) {
+		return true
+	}
+	for _, ix := range s.pendingInteractions() {
+		if ix.SessionID == id && ix.MachineID == machine {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) beginLogicalSwitch(ctx context.Context, machine, id string, p logicalSwitchRequest) (any, error) {
 	st, ok := s.store().(logicalSwitchStore)
 	if !ok {
@@ -238,13 +251,8 @@ func (s *Service) beginLogicalSwitch(ctx context.Context, machine, id string, p 
 	if !known || !row.Assistant || row.PaneID != "" || s.isWorkMachine(p.MachineID) {
 		return nil, logicalRefusal(ctx, "unavailable")
 	}
-	if row.Starting || row.Status == proto.StatusWorking || row.Status == proto.StatusBlocked || row.PendingInteractions > 0 || backgroundRunning(row) || len(row.Queued) > 0 || (row.Compaction != nil && row.Compaction.State == proto.CompactionRunning) {
+	if s.conversationSwitchBusy(machine, id, row) {
 		return nil, logicalRefusal(ctx, "busy")
-	}
-	for _, ix := range s.pendingInteractions() {
-		if ix.SessionID == id && ix.MachineID == machine {
-			return nil, logicalRefusal(ctx, "busy")
-		}
 	}
 	target, err := s.logicalTarget(ctx, p.MachineID, p.Launcher)
 	if err != nil {
@@ -642,6 +650,20 @@ func (s *Service) drainLogicalInput(ctx context.Context, st logicalSwitchStore, 
 			delete(queued.Params, key)
 		}
 		queued.Params["launcher"], queued.Params["model"], queued.Params["effort"], queued.Params["permission_mode"] = a.Launcher, a.Model, a.Effort, a.PermissionMode
+		// The active segment's mode is inherited state, not the queued caller's explicit choice. A Claude segment uses
+		// the current default; non-Claude and external segments keep their legacy generic mode without a resume default.
+		delete(queued.Params, assistantwire.PermissionModeExplicitParam)
+		defaultMode, _ := queued.Params[assistantwire.DefaultPermissionModeParam].(string)
+		useDefault := defaultMode != "" && !proto.IsExternalLauncher(a.Launcher) && s.startPermissionModeSupported(ctx, a.MachineID, a.Launcher, defaultMode)
+		if useDefault && a.Launcher != "" && a.Launcher != "claude" {
+			agent := s.launcherAgent(withUnhidden(ctx, a.Launcher), a.MachineID, a.Launcher)
+			useDefault = agent == "" || agent == "claude"
+		}
+		if useDefault {
+			delete(queued.Params, "permission_mode")
+		} else {
+			delete(queued.Params, assistantwire.DefaultPermissionModeParam)
+		}
 	}
 	if c.Switch != nil {
 		raw, _, err := st.ConversationPreparation(ctx, c.MachineID, c.SessionID, c.Switch.OperationID)

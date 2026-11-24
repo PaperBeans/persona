@@ -31,6 +31,25 @@ of the app on its main thread: 55–70 ms each with the `assistant` perf suite's
 app switching on a cue (`FrameProbe.switchPages`, `testTabSwitchAssistantAgentsByCue`) and the test only sleeping; keep
 the tapping test for the tap's own path.
 
+## An inactive scene opens no hub socket, so no hello arrives (2026-11-24, #13849)
+
+A simulator app driven by `personactl` with a system prompt up (Photos, notifications) or no visible Simulator window
+stays `inactive` (`personactl state` shows `appState`). It reads the hub over HTTP, so pages fill in and the runtime CLI
+says `online`, but it never opens its WebSocket, so no hello arrives and nothing gated on hello features changes:
+the mock's log has no `GET /api/v1/ws` from the app. Answer the prompts (or grant them with `simctl privacy` before the
+launch) and check `appState` is `active` before taking a screenshot of hello-gated UI, such as a module the hub turns
+off (`MOCK_HUB_MODULES`).
+
+## CI's temporary distribution keychain must be in Xcode's search domain (#14263)
+
+`security find-identity <temporary-keychain>` proves only that the protected identity imported into that file. It does
+not make it visible to `xcodebuild -exportArchive`, which searches the default keychain domain. A candidate reached
+`** ARCHIVE SUCCEEDED **` and then failed export with `No signing certificate "iOS Distribution" found` even though the
+export options correctly selected `Apple Distribution`. Add the temporary keychain with `security list-keychains -s`
+while retaining every existing path; pass each printed path as one argument, not a whitespace-split list, so paths with
+spaces cannot select another identity. Never fall back to an ad-hoc, Debug or alternate certificate. Verify the formal
+archive **and** export, then entitlements, and keep TestFlight processing as a separate result.
+
 ## What a development build redid with nothing changed (2026-11-19, #10713)
 
 `scripts/app/sim.sh` rebuilt more than the change it was run for (`docs/operations/testing.md`, "Development builds"):
@@ -2825,7 +2844,7 @@ The watch only prunes by age. Segments the phone has not confirmed stay up to `u
   `setDeactivatedKeyboard … reason: setDisableBecomeFirstResponder`). The page got taller, the rail's `ViewThatFits` picked a roomier
   child, and since each child is its own subtree, the `Menu`'s button was replaced while the menu morphed out of it.
 - Anything that picks views by the space the keyboard leaves (`ViewThatFits` by height, `if` on a measured height, a size class) must not
-  hold a `Menu`, or must keep it the same view. The VNC rails (`fittingRail` in `apple/Persona/Screen/VNCPage.swift`) measure hidden copies
+  hold a `Menu`, or must keep it the same view. The VNC rails (`fittingRail` in `apple/Modules/ScreenShare/VNCPage.swift`) measure hidden copies
   of their ways in a `ViewThatFits`. The copy shown says which one it is (`onAppear`), and the visible rail is one set of views that only
   changes its spacing, which buttons it shows and whether it scrolls (a `ScrollView` always there, `scrollDisabled` when it fits).
 - The crash needs the menu's morph (iOS 26 and later) and a layout that changes when the keyboard goes. Upright, the VNC top row's

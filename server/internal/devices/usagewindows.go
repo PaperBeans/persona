@@ -70,7 +70,7 @@ func (u *usageWindowsHub) providers() []string {
 	defer u.mu.Unlock()
 	var out []string
 	for _, a := range u.merged {
-		out = append(out, strings.ToLower(a.Provider))
+		out = append(out, canonicalUsageProvider(a.Provider))
 	}
 	return out
 }
@@ -211,6 +211,7 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 				a.Windows = []proto.UsageWindow{}
 			}
 			a.ID = usageRowID(a.Provider, "extension|"+a.Origin)
+			a.Provider = canonicalUsageProvider(a.Provider)
 			staleAt := a.SampledAt.Add(usageGatewayStaleAfter)
 			a.StaleAt = &staleAt
 			a.Stale = a.Stale || now.After(staleAt)
@@ -249,8 +250,10 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 	}
 	type key struct {
 		provider string
+		scope    string
 		minutes  int
 		resets   int64
+		local    bool
 	}
 	seen := map[key]int{}
 	codexAccounts := map[string]int{}
@@ -285,11 +288,16 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 			}
 			continue
 		}
+		provider := canonicalUsageProvider(a.Provider)
 		for _, w := range a.Windows {
 			if w.ResetsAt == nil || w.Model != "" {
 				continue
 			}
-			k := key{a.Provider, w.WindowMinutes, w.ResetsAt.Unix()}
+			k := key{provider: provider, minutes: w.WindowMinutes, resets: w.ResetsAt.Unix()}
+			if provider == antigravityUsageProvider {
+				// Reconcile local and external Antigravity windows individually in the display response.
+				k.scope, k.local = antigravityQuotaScope(a, w), a.Local
+			}
 			j, ok := seen[k]
 			if !ok {
 				seen[k] = i
@@ -401,7 +409,9 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 		}
 		acct.Sources, acct.Machines = uniqueSorted(sources), uniqueSorted(machines)
 		acct.Ref, acct.Origin = firstOf(members, func(m proto.UsageAccount) string { return m.Ref }), firstOf(members, func(m proto.UsageAccount) string { return m.Origin })
+		// Row IDs predate provider aliases and are stored by clients that pin accounts.
 		acct.ID = usageAccountID(acct)
+		acct.Provider = canonicalUsageProvider(acct.Provider)
 		gateway := len(newest.Sources) > 0 && !newest.Local
 		after := usageHubStaleAfter
 		if gateway {
@@ -448,16 +458,24 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 			a.Name = fmt.Sprintf("%s %d", a.Name, n)
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Stale != out[j].Stale {
-			return !out[i].Stale
+	sortUsageAccounts(out)
+	return append(out, passed...) // an extension's rows last, in the order it gave them
+}
+
+func sortUsageAccounts(accounts []proto.UsageAccount) {
+	sort.SliceStable(accounts, func(i, j int) bool {
+		a, b := accounts[i], accounts[j]
+		if a.Pass || b.Pass {
+			return !a.Pass // keep extension rows last and in their original order
 		}
-		if a, b := mostUsed(out[i]), mostUsed(out[j]); a != b {
+		if a.Stale != b.Stale {
+			return !a.Stale
+		}
+		if a, b := mostUsed(a), mostUsed(b); a != b {
 			return a > b
 		}
-		return out[i].ID < out[j].ID
+		return a.ID < b.ID
 	})
-	return append(out, passed...) // an extension's rows last, in the order it gave them
 }
 
 // isBalanceSample: a sample of a provider that reports a prepaid balance instead of rate-limit windows (#11825). The
@@ -560,7 +578,7 @@ func usageWindowsAnswer(accounts []proto.UsageAccount, hidden []string, now time
 	if accounts == nil {
 		accounts = []proto.UsageAccount{}
 	}
-	out := map[string]any{"accounts": accounts, "checked_at": now.UTC()}
+	out := map[string]any{"accounts": reconcileAntigravityUsage(accounts, now), "checked_at": now.UTC()}
 	if len(hidden) > 0 {
 		out["hidden_providers"] = hidden
 	}
@@ -575,7 +593,8 @@ func hideUsageProviders(in []proto.UsageAccount, hidden []string) []proto.UsageA
 	}
 	out := make([]proto.UsageAccount, 0, len(in))
 	for _, a := range in {
-		if !slices.Contains(hidden, strings.ToLower(a.Provider)) {
+		provider := canonicalUsageProvider(a.Provider)
+		if !slices.ContainsFunc(hidden, func(p string) bool { return canonicalUsageProvider(p) == provider }) {
 			out = append(out, a)
 		}
 	}

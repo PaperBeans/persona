@@ -1,4 +1,5 @@
 """Synthetic Health intake records and detail pages for clients and bundled demos (#13176)."""
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
 import math
@@ -10,6 +11,24 @@ HUB = None
 
 HEALTH_INTAKE_ENABLED = True
 HEALTH_INTAKE_LOCK = threading.RLock()
+HEALTH_WATER_EXTENSION_MODE = "pending"
+HEALTH_WATER_EXTENSION_PENDING = True
+HEALTH_INTAKE_SETTINGS = {}
+
+
+def health_intake_reset():
+    """Restore the seeded records, settings and initial migration state together."""
+    global HEALTH_WATER_EXTENSION_PENDING
+    with HEALTH_INTAKE_LOCK:
+        HEALTH_INTAKE_ENTRIES.clear()
+        HEALTH_INTAKE_ENTRIES.update(health_intake_seed())
+        HEALTH_WATER_EXTENSION_PENDING = HEALTH_WATER_EXTENSION_MODE == "pending"
+        HEALTH_INTAKE_SETTINGS.clear()
+        HEALTH_INTAKE_SETTINGS.update({
+            "water": {"goal_ml": 2000, "cup_ml": 250, "remind": False, "start": "09:00", "end": "21:00",
+                      "interval_minutes": 60, "weekends": True, "stop_when_done": True},
+            "protein": {"goal_g": 60},
+        })
 
 
 def health_intake_seed():
@@ -20,7 +39,8 @@ def health_intake_seed():
             for i, (kind, amount) in enumerate([("water", 500), ("water", 250), ("protein", 36)], 1)}
 
 
-HEALTH_INTAKE_ENTRIES = health_intake_seed()
+HEALTH_INTAKE_ENTRIES = {}
+health_intake_reset()
 
 
 def health_intake_snapshot(days=7):
@@ -35,20 +55,23 @@ def health_intake_snapshot(days=7):
             entries = [dict(e) for e in active if e["kind"] == kind and day(e) == today]
             entries.sort(key=lambda e: (-datetime.fromisoformat(e["at"].replace("Z", "+00:00")).timestamp(), e["id"]))
             return {"today": total(kind, today), "goal": goal, "entries": entries}
-        return {"water": portion("water", 2000), "protein": portion("protein", 60), "zone": "UTC",
-                "days": [{"date": str(d), "water": total("water", d), "protein": total("protein", d)}
-                         for d in [today - timedelta(days=i) for i in reversed(range(days))]]}
+        result = {"water": portion("water", HEALTH_INTAKE_SETTINGS["water"]["goal_ml"]),
+                  "protein": portion("protein", HEALTH_INTAKE_SETTINGS["protein"]["goal_g"]), "zone": "UTC",
+                  "days": [{"date": str(d), "water": total("water", d), "protein": total("protein", d)}
+                           for d in [today - timedelta(days=i) for i in reversed(range(days))]]}
+        if HEALTH_WATER_EXTENSION_PENDING:
+            result["water_extension"] = "pending"
+        return result
 
 
 def health_intake_route(h, method, path, query, body=b""):
-    global HEALTH_INTAKE_ENABLED
+    global HEALTH_INTAKE_ENABLED, HEALTH_WATER_EXTENSION_PENDING
     base = "/api/v1/assistant/health/intake"
     if path == "/mock/health-intake":
         with HEALTH_INTAKE_LOCK:
             if "enabled" in query: HEALTH_INTAKE_ENABLED = query["enabled"][0] != "0"
             if query.get("reset") == ["1"]:
-                HEALTH_INTAKE_ENTRIES.clear()
-                HEALTH_INTAKE_ENTRIES.update(health_intake_seed())
+                health_intake_reset()
         h.send_json({"enabled": HEALTH_INTAKE_ENABLED})
         return True
     if path != base and not path.startswith(base + "/"): return False
@@ -60,6 +83,36 @@ def health_intake_route(h, method, path, query, body=b""):
         return True
     try:
         with HEALTH_INTAKE_LOCK:
+            if method == "POST" and path == base + "/import":
+                if HEALTH_WATER_EXTENSION_MODE == "none":
+                    h.send_json({"error": "Water extension is not installed", "code": "water_import_failed"}, 404)
+                    return True
+                imported = 0
+                if HEALTH_WATER_EXTENSION_PENDING:
+                    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    for index, amount in enumerate((200, 250), 1):
+                        identity = "00000000-0000-5000-8000-%012d" % index
+                        if identity not in HEALTH_INTAKE_ENTRIES:
+                            HEALTH_INTAKE_ENTRIES[identity] = {
+                                "id": identity, "kind": "water", "amount": amount, "at": now, "note": "",
+                                "seq": max((e["seq"] for e in HEALTH_INTAKE_ENTRIES.values()), default=0) + 1,
+                                "created_at": now,
+                            }
+                            imported += 1
+                    HEALTH_WATER_EXTENSION_PENDING = False
+                    HEALTH_INTAKE_SETTINGS["water"].update(goal_ml=2400, interval_minutes=90, remind=True)
+                    HUB.broadcast({"type": "health_intake"})
+                h.send_json({"imported": imported, "extension_disabled": True,
+                             "settings": deepcopy(HEALTH_INTAKE_SETTINGS)})
+                return True
+            if method == "GET" and path == base + "/changes":
+                after = int(query.get("after", ["0"])[0])
+                limit = int(query.get("limit", ["100"])[0])
+                if after < 0 or not 1 <= limit <= 1000: raise ValueError("Invalid changes cursor or limit")
+                changes = sorted((dict(e) for e in HEALTH_INTAKE_ENTRIES.values() if e["seq"] > after), key=lambda e: e["seq"])
+                page = changes[:limit]
+                h.send_json({"changes": page, "next": page[-1]["seq"] if page else after, "has_more": len(changes) > limit})
+                return True
             if method == "GET" and path == base:
                 days = int(query.get("days", ["7"])[0])
                 if not 1 <= days <= 366: raise ValueError("days must be 1–366")
@@ -113,10 +166,14 @@ def route(h, req):
 
 
 def register(d):
-    global HUB, HEALTH_INTAKE_ENABLED
+    global HUB, HEALTH_INTAKE_ENABLED, HEALTH_WATER_EXTENSION_MODE
     HUB = d.hub
     HEALTH_INTAKE_ENABLED = os.environ.get("MOCK_HEALTH_INTAKE") != "off"
+    HEALTH_WATER_EXTENSION_MODE = os.environ.get("MOCK_WATER_EXTENSION", "pending")
+    health_intake_reset()
     d.help("MOCK_HEALTH_INTAKE=off  omit Health intake and refuse its routes (#13176)")
+    d.help("MOCK_WATER_EXTENSION=none|migrated  omit the water migration card; default pending (#13636)")
+    d.on_reset(health_intake_reset)
     d.feature("health_intake", when=lambda: HEALTH_INTAKE_ENABLED)
     for method in ("GET", "POST", "DELETE"):
         d.route(method, r"/api/v1/assistant/health/intake(?:/.*)?", route)

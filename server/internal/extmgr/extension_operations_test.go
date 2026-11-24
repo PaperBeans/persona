@@ -13,9 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/github"
 	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/githubwire"
 )
 
 // waitOp waits until operation id is in one of states, and returns it.
@@ -229,7 +228,7 @@ func opCall(t *testing.T, h http.Handler, method, path, token, body string) stri
 // environment says (#3277: a package from GitHub stalled for minutes without it).
 func TestMarketClientGitHubProxy(t *testing.T) {
 	h, _, _ := marketHub(t)
-	h.cfg.GitHub = &github.Config{Egress: connector.Egress{Proxy: "http://127.0.0.1:3128"}}
+	h.cfg.GitHub = &githubwire.Config{Proxy: "http://127.0.0.1:3128"}
 	h.extensions.markets.client = nil
 	client, err := h.marketClient()
 	if err != nil {
@@ -269,7 +268,7 @@ func TestMarketClientHTTPAndSOCKS5Proxy(t *testing.T) {
 	for _, raw := range []string{"http://proxy.example:3128", "socks5://proxy.example:1080"} {
 		t.Run(raw, func(t *testing.T) {
 			h, _, _ := marketHub(t)
-			h.cfg.GitHub = &github.Config{Egress: connector.Egress{Proxy: "http://127.0.0.1:3128"}}
+			h.cfg.GitHub = &githubwire.Config{Proxy: "http://127.0.0.1:3128"}
 			h.cfg.ExtensionMarket.Proxy = raw
 			h.extensions.markets.client = nil
 			prev := envProxy

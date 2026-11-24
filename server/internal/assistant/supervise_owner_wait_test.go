@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/ai"
-	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -33,9 +32,26 @@ func stopOnOwner(t *testing.T, s *Service, f *fakeHub, todoID string) {
 	waitFor(t, "the owner wait on the ledger", func() bool { return todoNow(s, todoID).Supervision.Waits != nil })
 }
 
-// A needs_user judgment is itself the visible waiting state, not only a note for a later supervisor round. The push
-// carries the reason and task link, and judging the same stretch again does not push it twice (#5732).
-func TestNeedsUserJudgmentWaitsAndPushesOnce(t *testing.T) {
+// ownerWaitHeldBySupervisor: the judge's needs_user is a wait the supervisor holds, not the user's: no push, no
+// needs_user state (no Needs you, no badge), the wait kept so the work cannot be accepted (decision rights).
+func ownerWaitHeldBySupervisor(t *testing.T, s *Service, f *fakeHub, todoID string) {
+	t.Helper()
+	cur := todoNow(s, todoID)
+	if cur.DoneAt != nil || cur.Supervision.Waits == nil || cur.Supervision.State == reviewNeedsUser {
+		t.Fatalf("owner wait = done %v %+v, want a wait the supervisor holds", cur.DoneAt, cur.Supervision)
+	}
+	if w := cur.Supervision.Waits; w.PushPending || w.NotifiedAt != nil {
+		t.Fatalf("owner wait marked for a push: %+v", w)
+	}
+	if got := f.pushed(); len(got) != 0 {
+		t.Fatalf("an agent's owner wait went to the user: %+v", got)
+	}
+}
+
+// An agent that stops for the user goes to its supervisor, which decides whether it is the user's to answer
+// (decision rights). The user is not pushed, and the task is not in Needs you; judging the same stretch again does
+// not tell the supervisor twice.
+func TestNeedsUserJudgmentGoesToTheSupervisorNotTheUser(t *testing.T) {
 	s, f := newQuietService(t)
 	withWebBot(f, testWeb)
 	f.known["side1"] = true
@@ -50,33 +66,22 @@ func TestNeedsUserJudgmentWaitsAndPushesOnce(t *testing.T) {
 	f.judge = `{"verdict":"needs_user","reason":"需要你本人操作"}`
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "Spec 已完成，下一步由你发起实现。", 0)
-	waitFor(t, "the visible owner wait", func() bool {
-		return todoNow(s, todo.ID).Supervision.State == reviewNeedsUser
-	})
+	waitFor(t, "the owner wait", func() bool { return todoNow(s, todo.ID).Supervision.Waits != nil })
+	ownerWaitHeldBySupervisor(t, s, f, todo.ID)
+	if health, _ := taskHealth(todoNow(s, todo.ID), nil, time.Now()); !strings.Contains(health, "先判断是不是用户的事") {
+		t.Fatalf("snapshot health = %q", health)
+	}
+	if !strings.Contains(ownerWaitDetail("需要你本人操作"), "用户还没收到") || !strings.Contains(ownerWaitDetail("x"), "why_owner") {
+		t.Fatalf("the supervisor is not told to weigh it: %q", ownerWaitDetail("需要你本人操作"))
+	}
 	cur := todoNow(s, todo.ID)
-	if cur.DoneAt != nil || cur.Supervision.Waits == nil {
-		t.Fatalf("waiting task = %+v", cur)
-	}
-	waitFor(t, "the needs-user push", func() bool { return len(f.pushed()) == 1 })
-	pushes := f.pushed()
-	if len(pushes) != 1 || pushes[0].Kind != NotifyPush || pushes[0].SessionID != "conv1" ||
-		!strings.Contains(pushes[0].Body, "需要你本人操作") || !strings.Contains(pushes[0].Body, testWeb+"/todos/"+todo.ID) {
-		t.Fatalf("needs-user pushes = %+v", pushes)
-	}
-	wantRelated := "todo:" + todo.ID + "@" + cur.Supervision.Waits.Work.UTC().Format(time.RFC3339Nano)
-	if pushes[0].Level != assistantwire.LevelP0 || pushes[0].RelatedKey != wantRelated {
-		t.Fatalf("an owner action must interrupt low-distraction mode once per work stretch: level=%q related=%q, want P0 %q",
-			pushes[0].Level, pushes[0].RelatedKey, wantRelated)
-	}
-	s.superviseJudged(context.Background(), cur, cur.Supervision.Waits.Work, taskDoneCheck{Verdict: verdictNeedsUser, Reason: "需要你本人操作"}, nil)
-	if got := len(f.pushed()); got != 1 {
-		t.Fatalf("same wait pushed %d times", got)
+	if s.noteOwnerWait(context.Background(), cur, cur.Supervision.Waits.Work, "需要你本人操作"); len(f.pushed()) != 0 {
+		t.Fatal("the same wait pushed the user")
 	}
 }
 
-// Reopening accepted or cancelled work does not make a later explicit owner action moot. The old terminal verdict
-// suppresses only an ordinary stopped-short/unjudged signal; needs_user still becomes visible and pushes once (#5732).
-func TestReopenedTerminalNeedsUserWaitsAndPushesOnce(t *testing.T) {
+// Reopened accepted or cancelled work: a later owner wait is the supervisor's again, not a push (#5732).
+func TestReopenedTerminalNeedsUserGoesToTheSupervisor(t *testing.T) {
 	for _, terminal := range []string{reviewAccepted, reviewCancelled} {
 		t.Run(terminal, func(t *testing.T) {
 			s, f, todo := newSupervisedService(t)
@@ -88,16 +93,27 @@ func TestReopenedTerminalNeedsUserWaitsAndPushesOnce(t *testing.T) {
 			putTodo(s, reopened)
 			work := time.Now().UTC()
 			s.superviseJudged(context.Background(), reopened, work, taskDoneCheck{Verdict: verdictNeedsUser, Reason: "需要你本人操作"}, nil)
-			cur := todoNow(s, todo.ID)
-			if cur.Supervision.State != reviewNeedsUser || cur.Supervision.Waits == nil {
-				t.Fatalf("reopened %s judgment = %+v, want a visible owner wait", terminal, cur.Supervision)
-			}
-			waitFor(t, "the reopened task's needs-user push", func() bool { return len(f.pushed()) == 1 })
-			s.superviseJudged(context.Background(), cur, work, taskDoneCheck{Verdict: verdictNeedsUser, Reason: "需要你本人操作"}, nil)
-			if got := len(f.pushed()); got != 1 {
-				t.Fatalf("same reopened wait pushed %d times", got)
+			ownerWaitHeldBySupervisor(t, s, f, todo.ID)
+			if st := todoNow(s, todo.ID).Supervision.State; st == terminal {
+				t.Fatalf("reopened %s work kept its terminal state %q", terminal, st)
 			}
 		})
+	}
+}
+
+// Waits recorded by an earlier version as still to be pushed are never pushed now: not when the to-dos load, not
+// when the settings change (main restored).
+func TestLegacyPendingOwnerPushIsNeverSent(t *testing.T) {
+	s, f := newQuietService(t)
+	work := time.Now().UTC()
+	putTodo(s, Todo{ID: "legacy-pending", Title: "旧版待推送", Origin: "box/s1",
+		Supervision: &Supervision{Supervisor: "box/s1", State: reviewNeedsUser, Waits: &OwnerWait{Work: work, At: work, Reason: "需要用户本人处理", PushPending: true}}})
+	setSettings(t, s, func(v *Settings) { v.Main = "" })
+	s.settingsChanged(context.Background())
+	setSettings(t, s, func(v *Settings) { v.Main = "conv1" })
+	s.settingsChanged(context.Background())
+	if got := f.pushed(); len(got) != 0 {
+		t.Fatalf("a legacy pending owner push was sent: %+v", got)
 	}
 }
 
@@ -153,16 +169,11 @@ func TestOwnerWaitWriteFailureLeavesTurnRecoverable(t *testing.T) {
 	last := proto.Session{SessionID: "s1", MachineID: "box", Status: proto.StatusDone, State: proto.StateUnread,
 		LastText: "Spec 已完成，下一步由你发起实现。", UpdatedAt: time.Now()}
 	s.turnAgain(context.Background(), todoNow(s, todo.ID), turn, last, last.LastText, work, true)
-	cur := todoNow(s, todo.ID)
-	if cur.Supervision.State != reviewNeedsUser || cur.Supervision.Waits == nil {
-		t.Fatalf("recovered turn = %+v, want a visible owner wait", cur.Supervision)
-	}
-	waitFor(t, "the recovered owner-action push", func() bool { return len(f.pushed()) == 1 })
+	ownerWaitHeldBySupervisor(t, s, f, todo.ID)
 }
 
-// Main-dispatched tasks are quiet by default, but an owner-only action still gets its one push. Quiet suppresses
-// routine task notices, never the request the owner must answer (#5732).
-func TestMainQuietNeedsUserJudgmentPushesOnce(t *testing.T) {
+// A main-dispatched (quiet) task's owner wait goes to main like any other: quiet or not, the user is not pushed.
+func TestMainQuietNeedsUserJudgmentGoesToMain(t *testing.T) {
 	s, f := newQuietService(t)
 	withWebBot(f, testWeb)
 	if _, err := s.toolTaskPlan(context.Background(), "conv1", planArgs(true)); err != nil {
@@ -176,342 +187,8 @@ func TestMainQuietNeedsUserJudgmentPushesOnce(t *testing.T) {
 	f.judge = `{"verdict":"needs_user","reason":"需要你本人操作"}`
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "Spec 已完成，下一步由你发起实现。", 0)
-	waitFor(t, "the main quiet task's visible owner wait", func() bool {
-		return todoNow(s, todo.ID).Supervision.State == reviewNeedsUser
-	})
-	waitFor(t, "the main quiet task's owner-action push", func() bool { return len(f.pushed()) == 1 })
-	cur := todoNow(s, todo.ID)
-	s.superviseJudged(context.Background(), cur, cur.Supervision.Waits.Work, taskDoneCheck{Verdict: verdictNeedsUser, Reason: "需要你本人操作"}, nil)
-	if got := len(f.pushed()); got != 1 {
-		t.Fatalf("same main quiet wait pushed %d times", got)
-	}
-}
-
-// Needs-user pushes follow the conversation supervision route, not a task leader's machine/session reference.
-// Manual leaders and the legacy background escalate this owner decision to main as well (#5732).
-func TestNeedsUserPushGoesToMainForEverySupervisedTopology(t *testing.T) {
-	s, f := newQuietService(t)
-	setSettings(t, s, func(v *Settings) {
-		v.Leaders = []string{"lead1"}
-		v.BackgroundSupervisor, v.BackgroundSupervisorMachineID = "bg1", "server"
-	})
-	for _, todo := range []Todo{
-		{ID: "manual-leader", Title: "手动 leader", Origin: "lead1", Supervision: &Supervision{Supervisor: "lead1"}},
-		{ID: "leader-worker", Title: "leader worker", Origin: "box/s1", Supervision: &Supervision{Supervisor: "box/s1"}},
-		{ID: "legacy-background", Title: "旧后台", Origin: "conv1", Supervision: &Supervision{Supervisor: "bg1"}},
-	} {
-		s.notifyTaskNeedsUser(context.Background(), todo, time.Now().UTC(), "需要用户本人处理")
-	}
-	pushes := f.pushed()
-	if len(pushes) != 3 {
-		t.Fatalf("needs-user pushes = %+v", pushes)
-	}
-	for _, push := range pushes {
-		if push.SessionID != "conv1" {
-			t.Errorf("push for %s went to %q instead of main", push.ID, push.SessionID)
-		}
-	}
-}
-
-// With no main configured, a task leader's machine/session reference is not an addressable conversation. Once main is
-// restored, the same owner wait can retry its still-undelivered push; a later duplicate judgment does not send it again.
-func TestNeedsUserPushRecoversAfterMainIsConfigured(t *testing.T) {
-	s, f := newQuietService(t)
-	work := time.Now().UTC()
-	todo := Todo{ID: "leader-worker-no-main", Title: "等待 owner", Origin: "box/s1",
-		Supervision: &Supervision{Supervisor: "box/s1", State: reviewNeedsUser, Waits: &OwnerWait{Work: work, At: work, Reason: "需要用户本人处理", PushPending: true}}}
-	putTodo(s, todo)
-	setSettings(t, s, func(v *Settings) { v.Main = "" })
-	s.notifyTaskNeedsUser(context.Background(), todo, work, "需要用户本人处理")
-	if got := f.pushed(); len(got) != 0 {
-		t.Errorf("a worker reference was used as a push conversation: %+v", got)
-	}
-	f.mu.Lock()
-	f.pushes = nil // keep the route-restoration half independent after recording the bad-address assertion above
-	f.mu.Unlock()
-
-	before := todoNow(s, todo.ID).Supervision.UpdatedAt
-	setSettings(t, s, func(v *Settings) { v.Main = "conv1" })
-	s.noteOwnerWait(context.Background(), todoNow(s, todo.ID), work, "需要用户本人处理")
-	waitFor(t, "the pending push after main is restored", func() bool { return len(f.pushed()) == 1 })
-	pushes := f.pushed()
-	if len(pushes) != 1 || pushes[0].SessionID != "conv1" {
-		t.Fatalf("restored needs-user push = %+v", pushes)
-	}
-	waitFor(t, "the delivered receipt on the same owner wait", func() bool {
-		return todoNow(s, todo.ID).Supervision.UpdatedAt.After(before)
-	})
-	s.noteOwnerWait(context.Background(), todoNow(s, todo.ID), work, "需要用户本人处理")
-	if got := len(f.pushed()); got != 1 {
-		t.Fatalf("the delivered owner wait pushed %d times", got)
-	}
-}
-
-// Settings recovery itself retries an explicitly undelivered wait. A pre-NotifiedAt legacy wait is not replayed on
-// upgrade, and a delivered pending wait is not repeated by the next settings sweep (#5732).
-func TestNeedsUserPushRetriesWhenSettingsRecover(t *testing.T) {
-	s, f := newQuietService(t)
-	work := time.Now().UTC()
-	pending := Todo{ID: "pending-route-recovery", Title: "等待路由恢复", Origin: "box/s1",
-		Supervision: &Supervision{Supervisor: "box/s1", State: reviewNeedsUser,
-			Waits: &OwnerWait{Work: work, At: work, Reason: "需要用户本人处理", PushPending: true}}}
-	legacy := Todo{ID: "legacy-already-told", Title: "升级前已通知", Origin: "conv1",
-		Supervision: &Supervision{Supervisor: "conv1", State: reviewNeedsUser, Waits: &OwnerWait{Work: work, At: work, Reason: "旧通知"}}}
-	putTodo(s, pending)
-	putTodo(s, legacy)
-	setSettings(t, s, func(v *Settings) { v.Main = "" })
-	s.settingsChanged(context.Background())
-	if got := f.pushed(); len(got) != 0 {
-		t.Fatalf("an unset main routed a push to a worker: %+v", got)
-	}
-
-	before := todoNow(s, pending.ID).Supervision.UpdatedAt
-	setSettings(t, s, func(v *Settings) { v.Main = "conv1" }) // the real settingsChanged hook retries the pending push
-	waitFor(t, "the pending push on settings recovery", func() bool { return len(f.pushed()) == 1 })
-	pushes := f.pushed()
-	if len(pushes) != 1 || pushes[0].SessionID != "conv1" || !strings.Contains(pushes[0].ID, pending.ID) {
-		t.Fatalf("settings recovery pushes = %+v", pushes)
-	}
-	waitFor(t, "the delivery receipt", func() bool { return todoNow(s, pending.ID).Supervision.UpdatedAt.After(before) })
-	s.settingsChanged(context.Background())
-	if got := f.pushed(); len(got) != 1 {
-		t.Fatalf("settings recovery repeated a delivered push: %+v", got)
-	}
-}
-
-type stalledOwnerPushHub struct {
-	*fakeHub
-	entered chan string
-	release chan struct{}
-}
-
-// gatedSupervisionStore pauses the receipt after its current-todo guard. It uses the same isolated Postgres as the
-// other todo tests, so the close below exercises the real row write rather than a memory-only approximation.
-type gatedSupervisionStore struct {
-	*db.DB
-	arm     chan struct{}
-	entered chan struct{}
-	release chan struct{}
-}
-
-func (s *gatedSupervisionStore) PutTodoSupervision(ctx context.Context, row db.TodoSupervisionRow) error {
-	select {
-	case <-s.arm:
-		select {
-		case s.entered <- struct{}{}:
-		default:
-		}
-		<-s.release
-	default:
-	}
-	return s.DB.PutTodoSupervision(ctx, row)
-}
-
-func (h *stalledOwnerPushHub) NotifyRequest(ctx context.Context, p NotifyRequest) (NotifyResult, error) {
-	h.entered <- p.Notification.ID
-	<-h.release // like rpc.Peer.writeContext's ongoing Write, this cannot be interrupted by ctx
-	return NotifyResult{}, nil
-}
-
-// One hub writer that cannot be interrupted must not hold every later task's push behind global dedup state (#5732).
-func TestOwnerPushStalledWriterDoesNotBlockOtherTasks(t *testing.T) {
-	s, f := newQuietService(t)
-	hub := &stalledOwnerPushHub{fakeHub: f, entered: make(chan string, 2), release: make(chan struct{})}
-	setHub(s, hub)
-	released := false
-	defer func() {
-		if !released {
-			close(hub.release)
-		}
-	}()
-	for _, id := range []string{"first-stalled", "second-waiting"} {
-		putTodo(s, Todo{ID: id, Title: id, Origin: "conv1", Supervision: &Supervision{Supervisor: "conv1"}})
-	}
-	work := time.Now().UTC()
-	s.noteOwnerWait(context.Background(), todoNow(s, "first-stalled"), work, "first")
-	select {
-	case id := <-hub.entered:
-		if !strings.Contains(id, "first-stalled") {
-			t.Fatalf("first stalled push = %q", id)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("the first push did not reach the stalled writer")
-	}
-	s.noteOwnerWait(context.Background(), todoNow(s, "second-waiting"), work.Add(time.Second), "second")
-	select {
-	case id := <-hub.entered:
-		if !strings.Contains(id, "second-waiting") {
-			t.Fatalf("second push = %q", id)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("the second task stayed blocked behind the uninterruptible writer")
-	}
-	close(hub.release)
-	released = true
-	waitFor(t, "both owner-push receipts after the writer resumes", func() bool {
-		for _, id := range []string{"first-stalled", "second-waiting"} {
-			w := todoNow(s, id).Supervision.Waits
-			if w == nil || w.PushPending || w.NotifiedAt == nil {
-				return false
-			}
-		}
-		return true
-	})
-}
-
-// Closing a task withdraws its obsolete owner action. A notification already inside the hub cannot be unsent, but its
-// durable delivery receipt must not be written after the close (#5732).
-func TestOwnerPushStopsWhenTaskCloses(t *testing.T) {
-	t.Run("before delivery", func(t *testing.T) {
-		s, f := newQuietService(t)
-		work := time.Now().UTC()
-		todo := Todo{ID: "closed-before-owner-push", Title: "已关闭", Origin: "conv1", Supervision: &Supervision{Supervisor: "conv1",
-			State: reviewNeedsUser, Waits: &OwnerWait{Work: work, At: work, Reason: "obsolete", PushPending: true}}}
-		putTodo(s, todo)
-		done := true
-		if _, err := s.editTodo(context.Background(), todo.ID, db.TodoEdit{Done: &done}); err != nil {
-			t.Fatal(err)
-		}
-		s.deliverOwnerWait(context.Background(), todoNow(s, todo.ID), work, "obsolete")
-		if got := f.pushed(); len(got) != 0 {
-			t.Fatalf("a closed task emitted its obsolete owner-action push: %+v", got)
-		}
-		if w := todoNow(s, todo.ID).Supervision.Waits; w == nil || w.NotifiedAt != nil || !w.PushPending {
-			t.Fatalf("a closed task received an owner-push receipt: %+v", w)
-		}
-	})
-
-	t.Run("while notification is in flight", func(t *testing.T) {
-		s, f := newQuietService(t)
-		hub := &stalledOwnerPushHub{fakeHub: f, entered: make(chan string, 1), release: make(chan struct{})}
-		setHub(s, hub)
-		released := false
-		defer func() {
-			if !released {
-				close(hub.release)
-			}
-		}()
-		work := time.Now().UTC()
-		todo := Todo{ID: "closed-during-owner-push", Title: "发送途中关闭", Origin: "conv1", Supervision: &Supervision{Supervisor: "conv1",
-			State: reviewNeedsUser, Waits: &OwnerWait{Work: work, At: work, Reason: "obsolete", PushPending: true}}}
-		putTodo(s, todo)
-		finished := make(chan struct{})
-		go func() {
-			s.deliverOwnerWait(context.Background(), todo, work, "obsolete")
-			close(finished)
-		}()
-		select {
-		case <-hub.entered:
-		case <-time.After(time.Second):
-			t.Fatal("the owner push did not reach the stalled writer")
-		}
-		done := true
-		if _, err := s.editTodo(context.Background(), todo.ID, db.TodoEdit{Done: &done}); err != nil {
-			t.Fatal(err)
-		}
-		close(hub.release)
-		released = true
-		select {
-		case <-finished:
-		case <-time.After(time.Second):
-			t.Fatal("the released owner push did not finish")
-		}
-		if w := todoNow(s, todo.ID).Supervision.Waits; w == nil || w.NotifiedAt != nil || !w.PushPending {
-			t.Fatalf("a push released after the task closed wrote its receipt: %+v", w)
-		}
-	})
-
-	t.Run("after the guard but before the stored receipt", func(t *testing.T) {
-		st := &gatedSupervisionStore{DB: todoTestDB(t), arm: make(chan struct{}), entered: make(chan struct{}, 1), release: make(chan struct{})}
-		s, _ := newQuietServiceOn(t, st)
-		todo, err := s.createTodo(context.Background(), "Close during the stored receipt", "", "conv1", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		s.superviseTodo(context.Background(), todo.ID, "conv1", nil, 0)
-		work := time.Now().UTC()
-		if _, _, err := s.updateSupervision(context.Background(), todo.ID, func(v *Supervision) bool {
-			v.State = reviewNeedsUser
-			v.Waits = &OwnerWait{Work: work, At: work, Reason: "obsolete", PushPending: true}
-			return true
-		}); err != nil {
-			t.Fatal(err)
-		}
-		close(st.arm)
-		finished := make(chan struct{})
-		go func() {
-			s.deliverOwnerWait(context.Background(), todoNow(s, todo.ID), work, "obsolete")
-			close(finished)
-		}()
-		select {
-		case <-st.entered:
-		case <-time.After(time.Second):
-			t.Fatal("the receipt did not reach the gated supervision write")
-		}
-		closed := make(chan error, 1)
-		go func() {
-			done := true
-			_, err := s.editTodo(context.Background(), todo.ID, db.TodoEdit{Done: &done})
-			closed <- err
-		}()
-		released := false
-		defer func() {
-			if !released {
-				close(st.release)
-			}
-		}()
-		select {
-		case err := <-closed:
-			t.Fatalf("the close completed while the guarded receipt was still stored: %v", err)
-		case <-time.After(100 * time.Millisecond):
-		}
-		close(st.release)
-		released = true
-		select {
-		case <-finished:
-		case <-time.After(time.Second):
-			t.Fatal("the receipt did not finish after its store was released")
-		}
-		if err := <-closed; err != nil {
-			t.Fatal(err)
-		}
-		cur := todoNow(s, todo.ID)
-		if cur.DoneAt == nil || cur.Supervision.Waits.NotifiedAt == nil || cur.Supervision.Waits.NotifiedAt.After(*cur.DoneAt) {
-			t.Fatalf("close and receipt committed out of order: done=%v wait=%+v", cur.DoneAt, cur.Supervision.Waits)
-		}
-	})
-}
-
-// A delivered push whose receipt waits behind another supervision write must not stop a different task's push (#5732).
-func TestOwnerPushReceiptWriteDoesNotBlockOtherTasks(t *testing.T) {
-	s, f := newQuietService(t)
-	work := time.Now().UTC()
-	for _, id := range []string{"first-receipt-stalled", "second-receipt-independent"} {
-		putTodo(s, Todo{ID: id, Title: id, Origin: "conv1", Supervision: &Supervision{Supervisor: "conv1", State: reviewNeedsUser,
-			Waits: &OwnerWait{Work: work, At: work, Reason: id, PushPending: true}}})
-	}
-	s.supervise.writeMu.Lock()
-	locked := true
-	defer func() {
-		if locked {
-			s.supervise.writeMu.Unlock()
-		}
-	}()
-	s.startOwnerWaitDelivery(context.Background(), todoNow(s, "first-receipt-stalled"), work, "first")
-	waitFor(t, "the first push before its stalled receipt", func() bool { return len(f.pushed()) == 1 })
-	s.startOwnerWaitDelivery(context.Background(), todoNow(s, "second-receipt-independent"), work, "second")
-	waitFor(t, "the second push while the first receipt is stalled", func() bool { return len(f.pushed()) == 2 })
-	s.supervise.writeMu.Unlock()
-	locked = false
-	waitFor(t, "both receipts after the supervision write resumes", func() bool {
-		for _, id := range []string{"first-receipt-stalled", "second-receipt-independent"} {
-			w := todoNow(s, id).Supervision.Waits
-			if w == nil || w.PushPending || w.NotifiedAt == nil {
-				return false
-			}
-		}
-		return true
-	})
+	waitFor(t, "the main quiet task's owner wait", func() bool { return todoNow(s, todo.ID).Supervision.Waits != nil })
+	ownerWaitHeldBySupervisor(t, s, f, todo.ID)
 }
 
 // The explicit owner-action safety net still becomes the visible wait and one push when the model itself failed.
@@ -526,13 +203,8 @@ func TestOwnerWaitSurvivesJudgeFailure(t *testing.T) {
 	work := time.Now().UTC()
 	s.applyTaskDone(context.Background(), todo, work, true,
 		taskDoneCheck{Verdict: verdictNeedsUser, Reason: "Should I proceed with the implementation?"}, errors.New("model unavailable"))
-	waitFor(t, "the visible wait despite the judge failure", func() bool {
-		return todoNow(s, todo.ID).Supervision.State == reviewNeedsUser
-	})
-	if cur := todoNow(s, todo.ID); cur.DoneAt != nil || cur.Supervision.Waits == nil {
-		t.Fatalf("waiting task = %+v", cur)
-	}
-	waitFor(t, "the owner-action push", func() bool { return len(f.pushed()) == 1 })
+	waitFor(t, "the wait despite the judge failure", func() bool { return todoNow(s, todo.ID).Supervision.Waits != nil })
+	ownerWaitHeldBySupervisor(t, s, f, todo.ID)
 }
 
 // A missing judge model does not erase the deterministic owner-action verdict before it reaches the visible wait.
@@ -556,11 +228,7 @@ func TestOwnerWaitSurvivesAnUnconfiguredJudge(t *testing.T) {
 	}
 	work := time.Now().UTC()
 	s.applyTaskDone(ctx, todo, work, true, check, judgeErr)
-	cur := todoNow(s, todo.ID)
-	if cur.DoneAt != nil || cur.Supervision.State != reviewNeedsUser || cur.Supervision.Waits == nil {
-		t.Fatalf("an unconfigured judge erased the owner wait: %+v", cur)
-	}
-	waitFor(t, "the owner-action push without a judge", func() bool { return len(f.pushed()) == 1 })
+	ownerWaitHeldBySupervisor(t, s, f, todo.ID)
 }
 
 // pick from) was accepted as done, and the decision was lost with it. The judge's needs_user is kept on the ledger, and
@@ -573,13 +241,13 @@ func TestAcceptedIsRefusedWhileTheWorkWaitsOnTheOwner(t *testing.T) {
 	if w.Reason != "两版草稿等用户挑一版再发" || w.At.IsZero() || w.Work.IsZero() {
 		t.Fatalf("waits = %+v", w)
 	}
-	if health, _ := taskHealth(todoNow(s, todo.ID), nil, time.Now()); health != "等你处理" {
+	if health, _ := taskHealth(todoNow(s, todo.ID), nil, time.Now()); !strings.Contains(health, "先判断是不是用户的事") {
 		t.Fatalf("snapshot health = %q", health)
 	}
 
 	raw, _ := json.Marshal(map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "草稿写好了"})
 	_, err := s.runTool(ctx, "server", "conv1", "task_review", raw)
-	if err == nil || !strings.Contains(err.Error(), "decision only the owner can make") || !strings.Contains(err.Error(), "needs_user") ||
+	if err == nil || !strings.Contains(err.Error(), "only the owner can make") || !strings.Contains(err.Error(), "needs_user") ||
 		!strings.Contains(err.Error(), "两版草稿等用户挑一版再发") {
 		t.Fatalf("accepted while the work waits on the owner: %v", err)
 	}
@@ -659,8 +327,8 @@ func TestOwnerWaitAfterReopenedWorkIsNotSuppressedByAnOlderReview(t *testing.T) 
 	if !s.noteOwnerWait(context.Background(), todoNow(s, todo.ID), work, "new work needs the owner") {
 		t.Fatal("an older review suppressed a new work stretch's owner wait")
 	}
-	if got := todoNow(s, todo.ID).Supervision; got.State != reviewNeedsUser || got.Waits == nil {
-		t.Fatalf("the new work stretch did not become visible: %+v", got)
+	if got := todoNow(s, todo.ID).Supervision; got.State == reviewNeedsUser || got.State == reviewAccepted || got.Waits == nil {
+		t.Fatalf("the new work stretch's wait is not the supervisor's: %+v", got)
 	}
 }
 

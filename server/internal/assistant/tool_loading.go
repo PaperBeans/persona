@@ -42,7 +42,7 @@ var workGuideTools = []string{
 	"agent_supervise", "agent_transfer", "task_plan", "task_plan_withdraw", "task_scope", "task_retry",
 	"task_start_screen", "task_start_keys", "task_review", "task_decided", "leader_progress", "direction_name",
 	"todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete", "concern_report",
-	"conversations_list", "conversation_read", "conversation_rename", "conversation_tags_set", "conversation_new",
+	"conversations_list", "conversations_switch", "conversation_read", "conversation_rename", "conversation_tags_set", "conversation_new",
 	"conversation_send", "conversation_archive", "conversation_unarchive", "repositories_list", "repository_get",
 	"repository_add", "todo_repositories_get", "todo_repositories_set", "todo_repository_links_add", "todo_repository_links_set",
 }

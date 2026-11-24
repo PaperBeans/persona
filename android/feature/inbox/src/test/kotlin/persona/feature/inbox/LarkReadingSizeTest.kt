@@ -23,6 +23,7 @@ import org.robolectric.annotation.GraphicsMode
 import persona.core.designsystem.InterfaceFontScaleCap
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.ReadingContent
+import persona.core.inbox.*
 
 /** Forwarded bodies read at the system scale while sender and code-header chrome stops at the interface cap. */
 @RunWith(AndroidJUnit4::class)

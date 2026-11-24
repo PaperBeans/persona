@@ -137,6 +137,10 @@ func (n *Node) outsideSource(c claudeProc) string {
 // claudeSessions lists the live claudes outside Persona's panes that are not in seen and have a transcript: the
 // background ones, the desktop app's, the ones in other terminals.
 func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePanes map[string]bool) []proto.Session {
+	if len(procs) == 0 {
+		n.setOutsideListed(nil)
+		return nil
+	}
 	var out []proto.Session
 	listed := map[string]bool{}
 	var desktop *claudeDesktopIndex // read once, when a desktop session is listed
@@ -189,6 +193,10 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 		if s.Capabilities != nil && c.Status == "busy" && n.ccPlugins.interruptCapable(id, c.pid) {
 			s.Capabilities.Interrupt = true
 		}
+		pluginPerms := n.ccPluginPermissionsCapable(id, c.pid)
+		if s.Capabilities != nil && pluginPerms {
+			s.Capabilities.Approve = true
+		}
 		// A claude in a tmux pane says where it runs ("tmux":"orc:@11.%11") and no hooks of Persona's run there: the
 		// pane's screen is what its approval shows on, so it gets that screen and the keys into it (#2562).
 		if pane := outsidePane(c); pane != "" {
@@ -198,6 +206,8 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 			}
 			s.Capabilities.Terminal = true
 			s.Capabilities.Send = true         // the owner's message can be typed here even with no inbox (#5965)
+			s.Capabilities.Approve = true      // its pane's screen carries dialogs and takes approval keys (#2562)
+			s.Capabilities.Interrupt = true    // Esc goes straight to its pane even with no inbox (session.interrupt)
 			s.Capabilities.PluginInput = false // this pane, not the plugin, carries the owner's input
 			s.Capabilities.Model = proto.Bool(true)
 			s.Capabilities.Modes = proto.CanModes(true)
@@ -216,9 +226,21 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 				s.AttentionReason = n.dialogOn(id, pane)
 			}
 		}
-		if status == proto.StatusBlocked && s.AttentionReason == "" {
-			s.AttentionReason = proto.AttentionClaudeComputer // no dialog read from a pane (yet)
-			if s.Capabilities != nil && s.Capabilities.Send && s.PaneID == "" && asking(c, m) {
+		hasActiveCard := n.activeAsks.active(id) || n.ccPlugins.hasActivePermission(id)
+		hasPublishedAsk := s.Capabilities != nil && s.Capabilities.Send && s.PaneID == "" && n.cx.hasOutsideAsk(id)
+		if hasActiveCard || hasPublishedAsk {
+			if s.Capabilities == nil {
+				s.Capabilities = &proto.SessionCapabilities{Read: true}
+			}
+			s.Capabilities.Approve = true
+		}
+		if status == proto.StatusBlocked && s.AttentionReason == "" && !hasActiveCard {
+			if source == proto.SourceClaudeDesktop && pluginPerms {
+				s.AttentionReason = proto.AttentionClaudeDesktopComputer
+			} else {
+				s.AttentionReason = proto.AttentionClaudeComputer // no dialog read from a pane (yet)
+			}
+			if s.Capabilities != nil && s.Capabilities.Send && s.PaneID == "" && (hasPublishedAsk || n.askingOutside(c)) {
 				s.AttentionReason = proto.AttentionClaudeAnswer // a message answers it (sendOutside)
 				// Its question is a card the apps answer (claudeoutside_ask.go): the answer goes as that message.
 				s.Capabilities.Approve = true
@@ -256,6 +278,7 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 		n.decorate(&s)
 		out = append(out, s)
 	}
+	n.setOutsideListed(listed)
 	return out
 }
 
@@ -371,7 +394,7 @@ func (n *Node) sendOutsidePriority(ctx context.Context, id, text string, images 
 	if path := n.transcriptPath(id); path != "" {
 		if st, err := os.Stat(path); err == nil {
 			offset = st.Size()
-			if forced == "" && asking(c, n.metaNow(path, st)) {
+			if forced == "" && n.pendingOutsideAsk(c) != nil {
 				priority = peerNow
 			}
 		}
@@ -518,10 +541,57 @@ func withComputerWait(ctx context.Context) (context.Context, *bool) {
 // askTool is Claude Code's question tool.
 const askTool = "AskUserQuestion"
 
-// asking: claude c waits on a question it asked (its status file says waiting, and its transcript's latest call, m,
-// is the question), not on a permission prompt, a plan to approve or another dialog only the computer answers.
-func asking(c claudeProc, m quickMeta) bool {
-	return c.Status == "waiting" && m.tool == askTool
+// askingOutside reports whether outside claude c waits on an open AskUserQuestion in its current turn
+// (claudeoutside_ask.go), not on a permission prompt, a plan to approve, or another dialog only the computer answers.
+func (n *Node) askingOutside(c claudeProc) bool {
+	return n.pendingOutsideAsk(c) != nil
+}
+
+func (n *Node) setOutsideListed(listed map[string]bool) {
+	n.mu.Lock()
+	if len(listed) == 0 {
+		n.outsideListed = nil
+	} else {
+		n.outsideListed = listed
+	}
+	n.mu.Unlock()
+}
+
+func (n *Node) isOutsideListed(id string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.outsideListed[id]
+}
+
+// pokeOutsideSessionsAsync wakes the session watcher and schedules a serialized sessions.changed flush without waiting.
+func (n *Node) pokeOutsideSessionsAsync() <-chan struct{} {
+	if n.events != nil {
+		n.events.poke(true)
+	}
+	if n.peer == nil || n.botmuxPending() {
+		done := make(chan struct{})
+		close(done)
+		return done
+	}
+	// notifySessionsSoon runs notifySessions → sendSessions under n.sent.mu (never skipped by a stale or in-flight
+	// n.lastList update from pollAgents), guaranteeing the updated list is actually written to the wire.
+	return n.notifySessionsSoon()
+}
+
+// flushOutsideSessions pokes the watcher and waits until sessions.changed reflecting the latest outside approval state
+// has been written to the wire (bounded by ctx and listPushWait).
+func (n *Node) flushOutsideSessions(ctx context.Context) {
+	n.awaitOutsideSessionPush(ctx, n.pokeOutsideSessionsAsync())
+}
+
+func (n *Node) awaitOutsideSessionPush(ctx context.Context, done <-chan struct{}) {
+	t := time.NewTimer(listPushWait)
+	defer t.Stop()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	case <-t.C:
+	}
 }
 
 // interruptOutside stops the turn a claude outside Persona's panes runs, through its inbox: a message at priority now

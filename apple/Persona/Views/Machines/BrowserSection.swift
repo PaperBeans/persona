@@ -112,8 +112,8 @@ struct BrowserSection: View {
             .accessibilityIdentifier("browser-status")
             stepList(steps)
             HStack(spacing: Theme.Space.s) {
-                action(String(localized: "Open ego lite"), "open", prominent: !b.screenSharing, identifier: "browser-open")
-                if b.screenSharing { look(prominent: true) }
+                action(String(localized: "Open ego lite"), "open", prominent: !vnc(b), identifier: "browser-open")
+                if vnc(b) { look(prominent: true) }
                 recheckButton
             }
         }
@@ -175,10 +175,13 @@ struct BrowserSection: View {
         .accessibilityIdentifier("browser-recheck")
     }
 
+    /// VNC can be offered: the screen-share module is active (`LiveScreen`) and the Mac's Screen Sharing answers.
+    private func vnc(_ b: MachineBrowser) -> Bool { b.screenSharing && model.liveScreen != nil }
+
     /// VNC: the Mac's live screen, where ego's setup is done from the phone.
     private func look(prominent: Bool) -> some View {
         Button {
-            model.openVNC(ref)
+            model.liveScreen?.openVNC(ref, from: nil)
         } label: {
             Label("VNC", systemImage: Theme.Icon.screen).font(Theme.Font.labelStrong).lineLimit(1)
         }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,6 +33,11 @@ func TestMain(m *testing.M) {
 	// The tests make, commit to and add worktrees to repositories of their own: none of that may reach the repository
 	// this run was started from (`git bisect run` exports GIT_DIR; #13610).
 	testhome.ClearGit()
+	if os.Getenv("NODE_TEST_TASK_TERMINAL_IDLE") == "1" {
+		fmt.Println("ready")
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		os.Exit(0)
+	}
 	if os.Getenv("NODE_TEST_LAUNCH") == "1" { // the real managed-launch path, before the test harness clears its environment
 		if err := Launch(context.Background(), os.Args[2], os.Args[3:], ""); err != nil {
 			panic(err)
@@ -107,9 +113,6 @@ func TestMain(m *testing.M) {
 	// A send looks at the box once after typing and confirms nothing: most fakes never write what was typed into the
 	// transcript, and would wait out the window (#6428). sendconfirm_test.go turns it on (withSubmitWindow).
 	submitWindow = 0
-	// Nor the Mac's Agent rules (#13393): a start's task instructions are what the test sent, on any platform. The test
-	// that wants them sets darwin (agent_dispatch_guard_test.go).
-	agentGOOS = "linux"
 	os.Exit(m.Run())
 }
 

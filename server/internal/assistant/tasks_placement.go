@@ -196,6 +196,7 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		return "", "", err
 	}
 	t.normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
+	settledPermission := t.Permission
 	if err := t.normalizeMachinePolicy(); err != nil {
 		return "", "", err
 	}
@@ -203,15 +204,29 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	// tier, Model configuration › Agents or a start-defaults policy filled in (storedLaunch, #12618), so a task read
 	// back from the store (task_retry, a remedy, a queued start, a retry from the card, a manager restart) names only
 	// its own and is resolved again against the current defaults.
+	firstTry := t.callerPick == nil
 	if t.callerPick == nil {
 		own := t.launchPick()
+		if t.CallerPermission != nil && !t.preservePermission {
+			own.permission = *t.CallerPermission // settled Permission is not the caller's choice on a read-back task
+		}
 		t.callerPick = &own
 	}
 	caller := *t.callerPick
-	// Every try starts from what the task named: what a policy filled in on an earlier try goes back first, whichever
-	// rule fits now (start_defaults.go), so a rule that changed or no longer fits leaves nothing of the earlier one.
-	if t.startFilled.any() {
-		t.Launcher, t.Model, t.Effort, t.Speed, t.Tier = caller.launcher, caller.model, caller.effort, caller.speed, caller.tier
+	// Every later try starts from what the task named: what a policy filled in on an earlier try goes back first,
+	// whichever rule fits now (start_defaults.go), so a rule that changed or no longer fits leaves nothing of the earlier one.
+	// The first try keeps the raw input for validation.
+	if !firstTry {
+		if t.startFilled.any() || !t.startNamed.launcher {
+			t.Launcher, t.Tier = caller.launcher, caller.tier
+		}
+		if t.startFilled.any() || !t.startNamed.noModel {
+			t.Model = caller.model
+		}
+		if t.startFilled.any() || !t.startNamed.effort {
+			t.Effort = caller.effort
+		}
+		t.Speed = caller.speed
 		t.Permission, t.Ultracode = caller.permission, copyBool(caller.ultracode)
 	}
 	t.startFilled, t.startNamed = startFill{}, startNamed{}
@@ -225,7 +240,7 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	if withDefaults {
 		presetNote = s.applyStartPreset(ctx, t, caller, defaults, params)
 	}
-	own, err := s.resolveStart(ctx, params, t.launcherDefaultModel)
+	own, err := s.resolveStart(ctx, params, t.LauncherDefaultModel)
 	if err != nil {
 		return "", "", err
 	}
@@ -290,6 +305,19 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	if err != nil {
 		return "", "", err
 	}
+	if t.CallerPermission != nil && !t.preservePermission {
+		keepSettled := false
+		if retry && settledPermission != "" && *t.CallerPermission == "" && t.RetryFromAgent != "" {
+			// The failed agent kind is durable evidence; launcher names can change meaning across queued reroutes.
+			keepSettled = t.RetryFromAgent == fit.agent && !t.RetryFromAllowAll
+		}
+		if keepSettled {
+			t.Permission = settledPermission
+		} else {
+			t.Permission = *t.CallerPermission // a different runtime settles from the caller's value, not an earlier try's mode
+			t.normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
+		}
+	}
 	t.Model, _ = params["model"].(string)
 	if err := checkStartSpeed(params, fit, ""); err != nil {
 		return "", "", err
@@ -311,6 +339,9 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		}
 	}
 	modes := startTakesModes(fit.agent)
+	if !t.preservePermission && t.CallerPermission != nil && t.Permission == "" && modes {
+		t.Permission = s.taskPermission(ctx, t.Machine, nil)
+	}
 	if !modes { // traex, omp…: no mode and no effort, whatever a default or a tier filled in (launcher_modes.go)
 		delete(params, "effort")
 		t.Effort = ""
@@ -753,7 +784,9 @@ func (s *Service) updatePlanTask(ctx context.Context, planID string, i int, t Pl
 		pt.Workspace, pt.WorkspaceResolved, pt.MachinePolicy = t.Workspace, t.WorkspaceResolved, t.MachinePolicy
 		pt.WorkspaceInferred, pt.ReservedTodoID = t.WorkspaceInferred, t.ReservedTodoID
 		pt.Launcher, pt.Model, pt.Effort, pt.Speed, pt.Tier = launch.launcher, launch.model, launch.effort, launch.speed, launch.tier
+		pt.LauncherDefaultModel = t.LauncherDefaultModel
 		pt.Permission = launch.permission
+		pt.StartPermission = t.Permission
 	}); err != nil {
 		s.logf("plan %s: %v", planID, err)
 	}

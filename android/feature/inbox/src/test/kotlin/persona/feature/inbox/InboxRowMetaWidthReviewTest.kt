@@ -35,6 +35,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.lang.reflect.Proxy
+import persona.core.inbox.*
 
 /**
  * The row with `where` and a shared state word: the state sits at the third line's trailing side, so a long one must not

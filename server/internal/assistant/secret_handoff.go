@@ -362,6 +362,23 @@ func (h *humanSends) noteForReply(session, id, text string) {
 	h.record(session, id, text, true)
 }
 
+// markReplyOnly downgrades a recorded vouched send so it remains usable for missing-reply recovery without letting
+// secret hand-off Always rules bypass approval when another conversation's quiet context rode along (#3962).
+func (h *humanSends) markReplyOnly(session, id string) {
+	if session == "" || id == "" {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	ids := h.m[session]
+	sent, ok := ids[id]
+	if !ok || sent.void {
+		return
+	}
+	sent.replyOnly = true
+	ids[id] = sent
+}
+
 func (h *humanSends) record(session, id, text string, replyOnly bool) {
 	if session == "" || id == "" {
 		return

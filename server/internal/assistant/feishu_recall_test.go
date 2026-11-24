@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -22,7 +22,7 @@ func TestFeishuRecalledMessageIsNotSent(t *testing.T) {
 	f.answerApp(AppFeishu, FeishuReact, func(json.RawMessage) (any, error) { return map[string]any{"reaction_id": "r1"}, nil })
 	f.answerApp(AppFeishu, FeishuUnreact, func(json.RawMessage) (any, error) { unreacted++; return map[string]any{}, nil })
 	s := newTestService(t, f)
-	var ev feishubot.MessageEvent
+	var ev botcard.MessageEvent
 	ev.Message.MessageID, ev.Message.ChatType, ev.Message.MessageType, ev.Message.Content = "om_x", "p2p", "text", `{"text":"发错了"}`
 
 	s.FeishuRecalled(FeishuRecalled{MessageID: "om_x"})
@@ -32,7 +32,7 @@ func TestFeishuRecalledMessageIsNotSent(t *testing.T) {
 	}
 	// Recalled while it was being read (its downloads): botSend stops before it goes in.
 	ev.Message.MessageID = "om_y"
-	content := feishubot.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
+	content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
 	s.FeishuRecalled(FeishuRecalled{MessageID: "om_y"})
 	if err := s.botSend(context.Background(), &ev, content, botTarget{Kind: targetMain}); err != nil {
 		t.Fatal(err)

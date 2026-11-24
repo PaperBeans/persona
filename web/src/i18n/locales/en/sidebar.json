@@ -172,5 +172,7 @@
   "side_unread_count_one": "{count} side session has a new reply",
   "side_unread_count_other": "{count} side sessions have new replies",
   "side_unread_open": "Open side session “{title}”",
-  "side_unread_also": "Also with new replies: {titles}"
+  "side_unread_also": "Also with new replies: {titles}",
+  "module_recording": "Meeting recording",
+  "module_recording_hint": "Minutes, all-day recaps, transcripts and photos of what you record with Persona, on its entries in Knowledge."
 }

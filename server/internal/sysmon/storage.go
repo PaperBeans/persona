@@ -178,7 +178,7 @@ func darwinIncludeMount(mount, device, fstype string, readOnly, dontBrowse bool)
 	if dontBrowse {
 		return false
 	}
-	if strings.HasPrefix(mount, "/dev") || strings.HasPrefix(mount, "/private/var/vm") {
+	if mount == "/dev" || strings.HasPrefix(mount, "/dev/") || mount == "/private/var/vm" || strings.HasPrefix(mount, "/private/var/vm/") {
 		return false
 	}
 	switch fstype {

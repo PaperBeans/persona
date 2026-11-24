@@ -14,6 +14,13 @@ const receipt = item(3, "user", "tool_result", { tool_use_id: "finish", text: '{
 const answer = item(4, "assistant", "text", { text: "The fictional checks are complete." });
 const next = item(8, "user", "text", { text: "A separate real request" });
 const feed = (id: string, kind: FeedItem["kind"], seconds: number): FeedItem => ({ id, kind, conversation: "main", at: at(seconds) });
+const ordered = (items: Item[]) => items.map((entry, index) => ({ ...entry, id: `i${index + 1}#0`, seq: index + 1, ts: at(index + 1) }));
+const reviewRound = (verdict: string, receiptText: string, userCheck = false) => ordered([
+  input,
+  item(0, "assistant", "tool_use", { tool_name: "mcp__persona__task_review", tool_use_id: "review", tool_input: { verdict, ...(userCheck ? { user_check: true } : {}) } }),
+  item(0, "user", "tool_result", { tool_use_id: "review", text: receiptText }),
+  finish, receipt, answer, next,
+]);
 
 describe("Background activity projection", () => {
   const lines = chatLines([input, finish, receipt, answer, next], { main: true });
@@ -34,13 +41,56 @@ describe("Background activity projection", () => {
       { name: "task_review", input: { verdict: "needs_user" }, receipt: "{}" },
       { name: "supervision_finish", input: { visibility: "user" }, receipt: '{"visibility":"user"}' },
     ];
-    const ordered = (items: Item[]) => items.map((entry, index) => ({ ...entry, id: `i${index + 1}#0`, seq: index + 1, ts: at(index + 1) }));
     for (const test of cases) for (const promotionFirst of [true, false]) {
       const use = item(0, "assistant", "tool_use", { tool_name: `mcp__persona__${test.name}`, tool_use_id: "promotion", tool_input: test.input });
       const result = item(0, "user", "tool_result", { tool_use_id: "promotion", text: test.receipt });
       const items = ordered(promotionFirst ? [input, use, result, finish, receipt, answer, next] : [input, finish, receipt, use, result, answer, next]);
       const lines = chatLines(items, { main: true });
       expect(splitBackgroundActivity(lines, []).activity, `${test.name}, promotionFirst=${promotionFirst}`).toEqual([]);
+    }
+  });
+
+  it("moves an internal accepted conclusion and its full tool trace into Background activity", () => {
+    for (const source of ["independent review", "rework", "internal subtask"]) {
+      const lines = chatLines(reviewRound("accepted", '{"background":true,"message":"accepted"}'), { main: true });
+      const taskCard = feed("task", "task", 3);
+      const split = splitBackgroundActivity(lines, [taskCard]);
+      expect(split.timeline, source).toEqual([lines[lines.length - 1]]);
+      expect(split.timelineFeed, source).toEqual([]);
+      expect(split.activity, source).toHaveLength(1);
+      expect(split.activity[0].feed, source).toEqual([taskCard]);
+      const retained: Item[] = [];
+      for (const line of split.activity[0].line.lines) {
+        if (line.kind !== "segment") continue;
+        for (const step of line.seg.steps) {
+          if (step.kind !== "tool") continue;
+          retained.push(step.use);
+          if (step.result) retained.push(step.result);
+        }
+        if (line.seg.answer) retained.push(line.seg.answer);
+      }
+      expect(retained.map((entry) => entry.id), source).toEqual(expect.arrayContaining(["i2#0", "i3#0", "i6#0"]));
+      expect(retained.find((entry) => entry.id === "i2#0")?.tool_name, source).toBe("mcp__persona__task_review");
+      expect(retained.find((entry) => entry.id === "i3#0")?.text, source).toContain('"background":true');
+      expect(retained.find((entry) => entry.id === "i6#0")?.text, source).toBe(answer.text);
+    }
+  });
+
+  it("keeps user-requested acceptance, owner verification, and needs_user visible", () => {
+    const cases = [
+      { name: "user_requested accepted", verdict: "accepted", receipt: '{"background":false,"message":"accepted"}', userCheck: false },
+      { name: "malformed accepted receipt", verdict: "accepted", receipt: "not JSON", userCheck: false },
+      { name: "non-boolean marker", verdict: "accepted", receipt: '{"background":"true"}', userCheck: false },
+      { name: "user_check accepted", verdict: "accepted", receipt: '{"background":true,"message":"accepted"}', userCheck: true },
+      { name: "needs_user", verdict: "needs_user", receipt: '{"background":true,"message":"decision card sent"}', userCheck: false },
+    ];
+    for (const test of cases) {
+      const lines = chatLines(reviewRound(test.verdict, test.receipt, test.userCheck), { main: true });
+      const taskCard = feed("visible", "task", 3);
+      const split = splitBackgroundActivity(lines, [taskCard]);
+      expect(split.timeline, test.name).toEqual(lines);
+      expect(split.timelineFeed, test.name).toEqual([taskCard]);
+      expect(split.activity, test.name).toEqual([]);
     }
   });
 

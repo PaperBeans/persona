@@ -324,12 +324,17 @@ func TestAgyPaneSessionList(t *testing.T) {
 			} else {
 				want[agyTestRow] = model
 			}
+			// A pane whose conversation is known is titled after it (agytitle.go), else after its terminal.
+			title := "agy"
+			if tc.conversation != "" && !tc.ambiguous {
+				title = "ACP conversation"
+			}
 			herdr.reply("session.snapshot", snapshot(nil, nil, agents, nil))
 			rows := listSessions(t, n)
 			got := make(map[string]string, len(rows))
 			for _, row := range rows {
 				got[row.SessionID] = row.Model
-				if row.SessionID == agyTestRow && (row.PaneID != agyTestPane || row.Host != host.Herdr || row.Status != tc.status || row.Title != "agy") {
+				if row.SessionID == agyTestRow && (row.PaneID != agyTestPane || row.Host != host.Herdr || row.Status != tc.status || row.Title != title) {
 					t.Errorf("pane metadata changed: %+v", row)
 				}
 			}

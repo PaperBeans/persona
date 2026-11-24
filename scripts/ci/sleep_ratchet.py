@@ -417,6 +417,36 @@ def _merge_base(root, ref):
     return base.stdout.decode().strip()
 
 
+def _renames(root, commit):
+    """{new path: old path} for the Go test files git sees as moved between commit and the worktree (its rename
+    detection, the files' contents alike), under ROOTS on both sides."""
+    out = _git(root, ["diff", "-M", "--name-status", "-z", commit, "--", *ROOTS])
+    if out.returncode != 0:
+        raise SleepError("sleep ratchet: git diff {0} failed{1}".format(commit[:12], _detail(out)))
+    fields = out.stdout.decode("utf-8", "replace").split("\0")
+    moved, at = {}, 0
+    while at < len(fields) and fields[at]:
+        status = fields[at]
+        if status.startswith(("R", "C")):
+            old, new = fields[at + 1], fields[at + 2]
+            if status.startswith("R") and covers(old) and covers(new):
+                moved[new] = old
+            at += 3
+        else:
+            at += 2
+    return moved
+
+
+def carry_renames(previous, renames):
+    """previous with each moved file's entry under its new path as well: a file that only moved keeps the count it
+    was allowed, so moving it is no raise. A path that already has an entry keeps its own."""
+    carried = dict(previous)
+    for new, old in renames.items():
+        if old in previous and new not in previous:
+            carried[new] = previous[old]
+    return carried
+
+
 def ancestor_baselines(root, base=None, env=None):
     """(label, counts) for HEAD and for the base commit, when each already has the baseline.
 
@@ -433,7 +463,7 @@ def ancestor_baselines(root, base=None, env=None):
     head = head.stdout.decode().strip() if head.returncode == 0 else ""
     head_text = _blob(root, "HEAD", BASELINE_REL) if head else None
     if head_text is not None:
-        found.append(("HEAD", parse_baseline(head_text, "HEAD:" + BASELINE_REL)))
+        found.append(("HEAD", carry_renames(parse_baseline(head_text, "HEAD:" + BASELINE_REL), _renames(root, "HEAD"))))
     explicit = base or env.get("CI_BASE_SHA")
     ref = explicit or _default_ref(root)
     if not ref:
@@ -449,7 +479,9 @@ def ancestor_baselines(root, base=None, env=None):
     text = _blob(root, commit, BASELINE_REL)
     if text is None:
         return found
-    found.append((commit[:12], parse_baseline(text, commit[:12] + ":" + BASELINE_REL)))
+    # A file moved since the base (a package moved into a module, #13431) keeps its entry under its new path.
+    entries = carry_renames(parse_baseline(text, commit[:12] + ":" + BASELINE_REL), _renames(root, commit))
+    found.append((commit[:12], entries))
     return found
 
 

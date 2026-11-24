@@ -18,16 +18,11 @@ import (
 // ---- acting ----
 
 // accountExhaustionRetryAllowed applies the separate, opt-in budget for an
-// exhausted upstream account pool to coding Agents, including task-leader
-// Agents. Every Assistant conversation keeps its existing mechanical recovery:
-// main chat, leader and background-supervision conversations, side chats,
-// scheduled-task and health chats, and meeting rooms. Only the first three
-// re-resolve their launcher and model on protected continuations. retries
-// counts continuations already sent in the transient run.
+// exhausted upstream account pool to every conversation. Selecting another
+// launcher cannot help when no account is eligible, whether the stopped turn is
+// a coding Agent's or an Assistant conversation's. retries counts continuations
+// already sent in the transient run.
 func accountExhaustionRetryAllowed(c proto.Session, retries, limit int) bool {
-	if c.Assistant {
-		return true
-	}
 	return !modelretry.AccountExhausted(c.TurnError) || retries < max(limit, 0)
 }
 
@@ -465,6 +460,12 @@ func (s *Service) sendToSession(ctx context.Context, machine, sid, text string) 
 	return s.sendWorkText(ctx, machine, sid, text, false)
 }
 
+// autoContinueSource distinguishes a hub-generated recovery message from the
+// owner's manual Retry or Continue, including after transcript restoration.
+func autoContinueSource() *proto.MessageSource {
+	return &proto.MessageSource{Kind: proto.SourceAutoContinue}
+}
+
 // sendWorkText resolves a model only for a quota continuation; ordinary manager messages retain their send path.
 func (s *Service) sendWorkText(ctx context.Context, machine, sid, text string, quotaContinuation bool) error {
 	s.work.mu.Lock()
@@ -475,6 +476,7 @@ func (s *Service) sendWorkText(ctx context.Context, machine, sid, text string, q
 	defer cancel()
 	params := map[string]any{"session_id": sid, "text": text}
 	if quotaContinuation {
+		params["message_source"] = autoContinueSource()
 		if err := s.protectedContinuationModel(ctx, machine, sid, params); err != nil {
 			return err
 		}
@@ -494,7 +496,7 @@ func (s *Service) sendModelRetry(ctx context.Context, e db.SessionWork, text str
 	// PostgreSQL timestamps retain microseconds. Use that same precision before
 	// and after loading a due row so a crash cannot change its once-only send ID.
 	id := fmt.Sprintf("model-retry:%s:%d:%d", e.SessionID, e.TurnAt.Truncate(time.Microsecond).UnixNano(), e.Retries)
-	params := map[string]any{"session_id": e.SessionID, "text": text, "client_msg_id": id}
+	params := map[string]any{"session_id": e.SessionID, "text": text, "client_msg_id": id, "message_source": autoContinueSource()}
 	if err := s.protectedContinuationModel(ctx, e.MachineID, e.SessionID, params); err != nil {
 		return err
 	}

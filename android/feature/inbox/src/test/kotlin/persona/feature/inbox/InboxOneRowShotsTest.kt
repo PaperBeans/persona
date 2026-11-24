@@ -48,6 +48,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /** The item-based list with a real conversation controller, in every style, both themes and at 200% text. */
 @RunWith(AndroidJUnit4::class)

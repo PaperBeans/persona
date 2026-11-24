@@ -666,18 +666,30 @@ func lastUsed(m quickMeta, st os.FileInfo) time.Time {
 	return st.ModTime().UTC()
 }
 
-// untitled gives sessions without an AI title (headless ones) their first message as title: what the user wrote,
-// not the context blocks it starts with (the main conversation's, a Feishu /agent request's), or the title of the
-// block it is made of only ("continue the old main chat"). Stripped first, clipped after.
+// untitled gives sessions without an AI title (headless ones) their first message as title (promptTitle).
 func untitled(s *proto.Session, m quickMeta) {
-	if first := transcript.Title(m.first); s.Title == "" && first != "" {
-		r := []rune(snippet(first))
-		if len(r) > 40 {
-			r = append(r[:40], '…')
-		}
-		s.Title = string(r)
+	if s.Title != "" {
+		return
+	}
+	if title := promptTitle(m.first); title != "" {
+		s.Title = title
 		if m.titleSource == "prompt" {
 			s.TitleSource = proto.TitleSourcePrompt
 		}
 	}
+}
+
+// promptTitle is a first message as a row's title: what the user wrote, not the context blocks it starts with (the
+// main conversation's, a Feishu /agent request's), or the title of the block it is made of only ("continue the old main
+// chat"). Stripped first, clipped after. An agy pane's row falls back to it too (agytitle.go).
+func promptTitle(first string) string {
+	first = transcript.Title(first)
+	if first == "" {
+		return ""
+	}
+	r := []rune(snippet(first))
+	if len(r) > 40 {
+		r = append(r[:40], '…')
+	}
+	return string(r)
 }

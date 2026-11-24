@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -29,8 +29,8 @@ func stopCardHub(t *testing.T, features FeishuFeatures) (*Service, *fakeHub) {
 	return s, f
 }
 
-func stopCardAction(t botTarget) *feishubot.CardAction {
-	var a feishubot.CardAction
+func stopCardAction(t botTarget) *botcard.CardAction {
+	var a botcard.CardAction
 	a.Action.Value = map[string]any{"a": "stop", "k": t.Kind, "m": t.MachineID, "s": t.SessionID}
 	return &a
 }

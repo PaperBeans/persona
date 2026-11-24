@@ -423,7 +423,7 @@ func (s *Service) snapshotAgents(ctx context.Context, devices []Device, web stri
 	for _, m := range devices {
 		list, off, _ := s.sessionsMuted(ctx, m.ID)
 		for _, c := range list {
-			if c.Assistant || c.HiddenByDirectory() || c.FoldedUnder() != "" {
+			if c.Assistant || c.HiddenByDirectory() || c.FoldedUnder() != "" || c.IsSubagent || c.IsCodexSubagent() {
 				continue
 			}
 			c.State = c.FoldedState()

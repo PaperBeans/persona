@@ -13,6 +13,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/larkhost"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -229,15 +230,15 @@ func (s *Service) remindOverdue(ctx context.Context, id string, a acceptAsk) {
 	if !a.RecheckAt.IsZero() {
 		return
 	}
-	s.pushDecision(ctx, id)
+	_, _ = s.pushDecisionAbout(ctx, id, assistantwire.TodoPushDecideOverdue)
 	t, ok := s.todoNow(id)
 	if !ok || a.MessageID == "" {
 		return
 	}
-	if f, ready := s.feishuFeatures(ctx); !ready || !f.Reports {
+	if f, ready := s.chat().Features(ctx); !ready || !f.Reports {
 		return
 	}
-	mid, err := s.botPost(ctx, "", s.acceptCard(ctx, t, a, true), askSummary(s.botLang(ctx), &a))
+	mid, err := s.chat().Post(ctx, larkhost.Target{}, "", s.acceptCard(ctx, t, a, true), askSummary(s.botLang(ctx), &a), "")
 	if err != nil {
 		s.logf("task %s: deadline reminder: %v", id, err)
 		return

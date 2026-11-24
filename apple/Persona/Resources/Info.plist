@@ -62,7 +62,7 @@
 	<key>NSHealthShareUsageDescription</key>
 	<string>Persona lets Claude read health summaries when you ask, for example how many steps you walked this week or how long you slept last night. With rolling recording on, Persona also checks heart rate, HRV, steps, workouts and the moods you log, on your iPhone only, to keep the minutes around them. The Health home and widgets show Activity rings, steps and sleep.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>Persona saves health data only after you approve it on your iPhone, one entry at a time, for example a weight or last night's sleep you told Claude about.</string>
+	<string>Persona saves individual health samples after you confirm them on your iPhone. When you turn on sync, Persona also automatically writes your water and protein records to Apple Health on this iPhone.</string>
 	<key>NSHomeKitUsageDescription</key>
 	<string>Persona controls your Home accessories and scenes only when you ask and approve each change on your iPhone, for example to turn off the living room light.</string>
 	<key>NSLocalNetworkUsageDescription</key>

@@ -41,6 +41,7 @@ import persona.core.designsystem.text
 import persona.core.domain.sort.AgentPreferences
 import persona.core.domain.sort.AgentSession
 import persona.core.domain.sort.stateWord
+import persona.core.inbox.*
 
 /** The shared icon meaning checked by spec/fixtures/inbox/timeline.json, independent of the platform glyph. */
 internal fun chainIconMeaning(entry: InboxChainEntry): String {

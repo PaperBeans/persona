@@ -69,7 +69,7 @@ import {
 } from "../lib/todos";
 import { todoLook, waitOf, type WaitReason } from "../lib/todo-wait-reason";
 import type { AgentState, Interaction, Launcher, Machine } from "../lib/types";
-import { Button, cx, Dialog, IconButton, Loading, Menu, toast, useMenu } from "../ui/atoms";
+import { Button, cx, Dialog, IconButton, Loading, Menu, Spinner, toast, useMenu } from "../ui/atoms";
 import { contextMenuProps } from "../ui/context-menu";
 import { SHEET_QUERY } from "../ui/overlay";
 import type { MenuAt } from "../ui/menu-model";
@@ -2213,8 +2213,10 @@ function AutoReviewResult({ sup }: { sup: Supervision }) {
 }
 
 const TODO_IMAGE_LIMIT = 50;
-const TODO_IMAGE_MAX_BYTES = 1024 * 1024;
 const TODO_IMAGE_PARALLEL = 3;
+
+/** A picture picked for a new to-do and still being made ready to go with it (NewTodoDialog). */
+type PreparingImage = { id: string; name: string; file: File };
 
 type TodoImageEntry = {
   id: string;
@@ -3366,6 +3368,11 @@ function NewTodoDialog({
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const imagesSupported = useStore((s) => s.features.includes("todo_images"));
   const keptAttachments = useRef<LocalAttachment[]>([]);
+  // pictures picked and still being made ready (lib/todo-image.ts, #13797), in the order picked; the tray shows them by
+  // name until they are
+  const [preparing, setPreparing] = useState<PreparingImage[]>([]);
+  const queued = useRef<PreparingImage[]>([]);
+  const pumping = useRef(false);
   const operationId = useRef(uuid());
   const operationKey = useRef("");
   const imageInput = useRef<HTMLInputElement>(null);
@@ -3377,12 +3384,17 @@ function NewTodoDialog({
   const duplicateLinks = repositoryBindings ? repositoryDuplicateLink(cleanBindings, repositoryIdentities) : false;
   const bindingsValid = !repositoryBindings || validRepositoryDraft(cleanBindings, repositoryIdentities);
 
-  useEffect(() => () => releaseAttachments(keptAttachments.current), []);
+  useEffect(() => () => {
+    queued.current = [];
+    releaseAttachments(keptAttachments.current);
+  }, []);
   useEffect(() => {
     if (!open) return;
     operationId.current = uuid();
     operationKey.current = "";
     setFailure("");
+    queued.current = [];
+    setPreparing([]);
     releaseAttachments(keptAttachments.current);
     keptAttachments.current = [];
     setAttachments([]);
@@ -3401,6 +3413,8 @@ function NewTodoDialog({
   }, [open, slot]);
 
   const discardImages = () => {
+    queued.current = [];
+    setPreparing([]);
     releaseAttachments(keptAttachments.current);
     keptAttachments.current = [];
     setAttachments([]);
@@ -3412,10 +3426,10 @@ function NewTodoDialog({
   };
   const addImages = (files: FileList | File[]) => {
     if (creating.current) return;
-    const picked: LocalAttachment[] = [];
+    const picked: PreparingImage[] = [];
     let problem = "";
     for (const file of Array.from(files)) {
-      if (keptAttachments.current.length + picked.length >= TODO_IMAGE_LIMIT) {
+      if (keptAttachments.current.length + queued.current.length + picked.length >= TODO_IMAGE_LIMIT) {
         problem = t("todos.images_limit", { max: TODO_IMAGE_LIMIT });
         break;
       }
@@ -3423,25 +3437,48 @@ function NewTodoDialog({
         problem = t("todos.image_type", { name: file.name });
         continue;
       }
-      if (file.size > TODO_IMAGE_MAX_BYTES) {
-        problem = t("todos.image_too_big", { name: file.name });
-        continue;
-      }
-      try {
-        picked.push(pickAttachment(file));
-      } catch (error) {
-        problem = errorText(error);
-      }
-    }
-    if (picked.length) {
-      const next = [...keptAttachments.current, ...picked];
-      keptAttachments.current = next;
-      setAttachments(next);
+      picked.push({ id: uuid(), name: file.name || "image.png", file });
     }
     setFailure(problem);
+    if (!picked.length) return;
+    queued.current = [...queued.current, ...picked];
+    setPreparing(queued.current);
+    void prepareQueued();
+  };
+  /** Makes the queued pictures ready one at a time (a large one is decoded whole, so never several at once). One removed
+   *  meanwhile, or picked before the dialog closed, is dropped when it is done; one that cannot be made ready says so
+   *  under the others, which stay, as does the draft. */
+  const prepareQueued = async () => {
+    if (pumping.current) return;
+    pumping.current = true;
+    try {
+      for (let next = queued.current[0]; next; next = queued.current[0]) {
+        let done: { file: File } | { error: string };
+        try {
+          const { prepareTodoImage } = await import("../lib/todo-image");
+          done = await prepareTodoImage(next.file);
+        } catch (error) {
+          done = { error: errorText(error) };
+        }
+        if (queued.current[0] !== next) continue;
+        queued.current = queued.current.slice(1);
+        setPreparing(queued.current);
+        if ("error" in done) {
+          const error = done.error;
+          setFailure((shown) => (shown ? `${shown}\n${error}` : error));
+          continue;
+        }
+        keptAttachments.current = [...keptAttachments.current, pickAttachment(done.file)];
+        setAttachments(keptAttachments.current);
+      }
+    } finally {
+      pumping.current = false;
+    }
   };
   const removeImage = (id: string) => {
     if (creating.current) return;
+    queued.current = queued.current.filter((image) => image.id !== id);
+    setPreparing(queued.current);
     releaseAttachments(keptAttachments.current.filter((image) => image.id === id));
     const next = keptAttachments.current.filter((image) => image.id !== id);
     keptAttachments.current = next;
@@ -3461,7 +3498,7 @@ function NewTodoDialog({
 
   const submit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!title.trim() || creating.current || !bindingsValid || !repositoryContext.isCurrent()) return;
+    if (!title.trim() || creating.current || queued.current.length || !bindingsValid || !repositoryContext.isCurrent()) return;
     if (keptAttachments.current.length > 0 && !imagesSupported) {
       setFailure(t("lib-todos.images_unsupported"));
       return;
@@ -3580,13 +3617,19 @@ function NewTodoDialog({
               e.currentTarget.value = "";
             }}
           />
-          <Button tone="quiet" icon="plus" className="touch-hit whitespace-nowrap" disabled={busy || attachments.length >= TODO_IMAGE_LIMIT} onClick={() => imageInput.current?.click()}>
+          <Button tone="quiet" icon="plus" className="touch-hit whitespace-nowrap" disabled={busy || attachments.length + preparing.length >= TODO_IMAGE_LIMIT} onClick={() => imageInput.current?.click()}>
             {t("todos.add_images")}
           </Button>
           <p className="mt-1 text-submeta text-ink-3">{t("todos.images_hint", { max: TODO_IMAGE_LIMIT })}</p>
-          {attachments.length > 0 && (
+          {attachments.length + preparing.length > 0 && (
             <div className="mt-2">
-              <AttachmentTray attachments={attachments} onRemove={busy ? undefined : removeImage} />
+              <AttachmentTray attachments={[...attachments, ...preparing]} onRemove={busy ? undefined : removeImage} />
+              {preparing.length > 0 && (
+                <p role="status" data-testid="todo-images-preparing" className="mt-1.5 flex items-center gap-1.5 text-submeta text-ink-3">
+                  <Spinner />
+                  {t("todos.images_preparing", { count: preparing.length })}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -3594,13 +3637,13 @@ function NewTodoDialog({
 
         <NewTodoRepositoryBindings context={repositoryContext} value={repositoryBindings} onChange={setRepositoryBindings} pending={busy} onCatalog={setRepositoryCatalog} />
         {!bindingsValid && <p role="alert" className="text-submeta text-red">{t(duplicateLinks ? "task-repositories.duplicate_link" : "task-repositories.draft_invalid")}</p>}
-        {failure && <p role="alert" className="text-meta text-red">{failure}</p>}
+        {failure && <p role="alert" className="whitespace-pre-line text-meta text-red">{failure}</p>}
 
         <div className="mt-2 flex justify-end gap-2">
           <Button tone="secondary" disabled={busy} onClick={cancel}>
             {t("common.cancel")}
           </Button>
-          <Button tone="accent" type="submit" disabled={!title.trim() || busy || !bindingsValid} busy={busy}>
+          <Button tone="accent" type="submit" disabled={!title.trim() || busy || preparing.length > 0 || !bindingsValid} busy={busy}>
             {busy && attachments.length > 0 ? t("todos.images_uploading") : t("todos.create")}
           </Button>
         </div>

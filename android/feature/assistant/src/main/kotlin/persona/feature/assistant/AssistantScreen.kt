@@ -1,5 +1,6 @@
 package persona.feature.assistant
 
+import persona.core.moduleapi.serves
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -320,8 +321,6 @@ fun AssistantScreen(
     var healthChats by healthChatsState
     val healthKeysState = remember(managerChoice.hubId) { mutableStateOf(emptySet<SessionKey>()) }
     var healthKeys by healthKeysState
-    val healthBusyState = remember { mutableStateOf(false) }
-    var healthBusy by healthBusyState
     val healthPage = active == null && newChat?.space == persona.core.contracts.api.AssistantSpace.HEALTH
     // The domain spaces (#13500, docs/android/android.md "Domain spaces"): the tracks as last read (shared with the
     // sidebar), each space's chats as last read, and every chat known to be one's, so New on it opens its home.
@@ -355,37 +354,20 @@ fun AssistantScreen(
     // Track the main conversation's turn for readiness even while the user is reading another chat.
     val onMain = active != null && active == snapshot.mainSession
     val mainSession = snapshot.mainSession?.let { key -> snapshot.conversations.firstOrNull { it.key == key } }
-    val readinessOn = pageManagement != null && !demo && AssistantReadinessFeature in LocalHubFeatures.current
-    val mainReadiness = remember(pageManagement) { MainReadiness { probe -> requireNotNull(pageManagement).readiness(probe) } }
     var readinessHelp by remember { mutableStateOf<persona.core.designsystem.ReadinessHelp?>(null) }
-    val machinesSeen = machines.joinToString(",") { "${it.id}:${it.online}" }
-    // Reopening main also checks for setup changes that arrive without a turn update.
-    LaunchedEffect(mainReadiness, readinessOn, machinesSeen, onMain,
-        snapshot.mainSession, mainSession?.state, mainSession?.turnErrorCode, mainSession?.modelPick) {
-        if (readinessOn) mainReadiness.refresh()
-    }
-    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-        if (readinessOn) scope.launch { mainReadiness.refresh() }
+    val readinessPreparation = rememberAssistantReadinessPreparation(pageManagement, demo, snapshot, active, machines,
+        scope, navigator, mainSession, mainMessages, managers.offline != null, managerChoice.shown, readinessHelp,
+        { readinessHelp = it }) {
         if (!settingsOpen) scope.launch { assistantAttempt { repository.refresh() } }
     }
-    val refusedMain = mainMessages.filter { it.setupRefusal() != null }.map { it.clientMessageId }
-    LaunchedEffect(mainReadiness, readinessOn, refusedMain) { if (readinessOn && refusedMain.isNotEmpty()) mainReadiness.refresh() }
-    val readiness = mainReadiness.readiness.takeIf { readinessOn }
-    val blocking = mainReadiness.blocking.takeIf { readinessOn }
+    val readinessOn = readinessPreparation.enabled
+    val mainReadiness = readinessPreparation.controller
+    val readiness = readinessPreparation.readiness
+    val blocking = readinessPreparation.blocking
+    val mainChatGuidance = readinessPreparation.guidance
+    val currentReadinessAction by rememberUpdatedState(readinessPreparation.onAction)
     fun runReadinessAction(action: ReadinessActionId, launcher: String? = blocking?.launcher ?: readiness?.launcher) =
-        runAssistantReadinessAction(action, launcher, readiness, managerChoice.shown,
-            scope, mainReadiness, navigator, onHelp = { readinessHelp = it })
-    // The hub checks the assistant's default model and computer. An existing chat can use a different one.
-    val modelProblem = blocking?.takeIf {
-        onMain && it.id == ReadinessStep.MODEL && managers.offline == null && mainSession?.modelPick == null &&
-            readiness?.machine?.id?.takeIf(String::isNotBlank)?.let { id -> id == active?.machineId } == true
-    }
-    val mainChatGuidance: (@Composable () -> Unit)? = modelProblem?.let { step ->
-        {
-            val machine = readiness?.machine?.name?.takeIf(String::isNotBlank)
-            AssistantModelGuidanceCard(step = step, machine = machine, onAction = ::runReadinessAction)
-        }
-    }
+        currentReadinessAction(action, launcher)
     val shownCompaction = active?.let { key -> snapshot.conversations.firstOrNull { it.key == key }?.compaction }
     val mainConversation = rememberMainConversationController(pageManagement, repository, mainConversationSender, resources,
         feedback, toast, managerChoice.shown, shownCompaction, rememberUpdatedState(active), rememberUpdatedState(snapshot.mainSession))
@@ -394,58 +376,14 @@ fun AssistantScreen(
     // conversation, not the centered start page. This page and assistant only; another main conversation forgets it.
     val clearedMain = mainConversation.clearedMain.value
     val clearedPage = clearedMain != null && active == null && newChat == null && !viewingMainQueue
-    val orderedSnapshot = if (conversationArrangeUi.arranging || conversationArrangeUi.pending > 0) {
-        snapshot.copy(conversationOrder = conversationArrangeUi.order)
-    } else snapshot
-    val groups = remember(orderedSnapshot, query, ended, archived, words, history.titles, history.tagEdits, history.activeTag) {
-        conversationGroups(orderedSnapshot.copy(conversations = history.tagged(orderedSnapshot.conversations.filter { it.key !in archived }.map {
-            if (it.key in ended) it.copy(status = "offline", state = "offline") else it
-        })), query, words, activeTag = history.activeTag)
-    }
-    val latestArrangeActivityIds = rememberUpdatedState(groups.others.map { it.sessionId })
-    val beginArrange: (() -> Unit)? = conversationArranger?.let { controller ->
-        {
-            query = ""
-            history.activeTag?.let(history::selectTag)
-            conversationWriteScope.launch {
-                controller.start(if (conversationArrangeUi.pending > 0) conversationArrangeUi.order else snapshot.conversationOrder)
-            }
-        }
-    }
-    LaunchedEffect(conversationArranger, resources, feedback) {
-        val controller = conversationArranger ?: return@LaunchedEffect
-        controller.events.collect { event ->
-            when (event) {
-                is ConversationArrangeEvent.Failed -> {
-                    if (feedback?.failure(event.error) != true) toast.show(persona.core.designsystem.FeedbackNotice(
-                        resources.getString(R.string.assistant_arrange_save_failed),
-                        style = persona.core.designsystem.FeedbackStyle.Error,
-                    ))
-                }
-                is ConversationArrangeEvent.Reset -> {
-                    val message = resources.getString(R.string.assistant_arrange_reset_done)
-                    val undo = persona.core.designsystem.FeedbackAction(resources.getString(R.string.assistant_arrange_undo)) {
-                        conversationWriteScope.launch { controller.undoReset(event.revision, latestArrangeActivityIds.value) }
-                    }
-                    if (feedback?.notice(message, undo) != true) {
-                        toast.show(persona.core.designsystem.FeedbackNotice(message, undo))
-                    }
-                }
-            }
-        }
-    }
-    val searchOn = pageManagement != null && !demo && AssistantSearchFeature in LocalHubFeatures.current
-    val knownChats = remember(snapshot.conversations, ended, archived, history.titles, history.tagEdits, history.archived, history.restoring) {
-        val listed = snapshot.conversations.filter { it.key !in archived }.map {
-            if (it.key in ended) it.copy(status = "offline", state = "offline") else it
-        }
-        history.tagged((listed + history.shownArchived(openKeys(listed))).distinctBy { it.sessionId })
-    }
-    val tagChoices = remember(knownChats) { inUseConversationTags(knownChats) }
-    val (foundChats, searchPartial) = rememberFoundChats(
-        query, remember(groups) { (groups.directions + groups.others).distinctBy { it.sessionId } },
-        knownChats.withConversationTag(history.activeTag), searchOn, pageManagement, "${managerChoice.hubId.orEmpty()}|${managerChoice.shown}",
-        activeTag = history.activeTag)
+    val conversationPreparation = rememberAssistantConversationPreparation(snapshot, pageManagement, demo, repository,
+        conversationArranger, conversationArrangeUi, conversationWriteScope, history, ended, archived, query, { query = it },
+        words, resources, feedback, toast, "${managerChoice.hubId.orEmpty()}|${managerChoice.shown}")
+    val groups = conversationPreparation.groups
+    val beginArrange = conversationPreparation.beginArrange
+    val knownChats = conversationPreparation.knownChats
+    val tagChoices = conversationPreparation.tagChoices
+    val (foundChats, searchPartial) = conversationPreparation.foundChats to conversationPreparation.searchPartial
     // Persona's face (top bar and the conversation list) shows the conversation on screen, as on iOS: none on the
     // new-conversation page.
     val faceState = personaState(active?.let { key -> snapshot.conversations.firstOrNull { it.key == key } }, hubOnline,
@@ -518,25 +456,8 @@ fun AssistantScreen(
         healthKeys = healthKeys + chats.map { it.key }
         return chats
     }
-    // The sidebar's Health: the newest health chat, else the health space's new-chat page.
-    fun openHealth() {
-        if (sending || healthBusy || conversationsOf == null) return
-        healthBusy = true
-        scope.launch {
-            try {
-                when (val target = HealthEntry.resolve(loadHealth())) {
-                    is HealthEntry.Target.Open -> openConversation(target.key)
-                    HealthEntry.Target.New -> startHealthConversation()
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                assistantFailure(error, feedback, toast, resources)
-            } finally {
-                healthBusy = false
-            }
-        }
-    }
+    // The sidebar's Health opens its home immediately; the page loads its past chats in the background (#13273).
+    fun openHealth() = startHealthConversation()
     // A domain space's home (#13500): its first message starts a conversation in the space, never the main one.
     fun startSpaceConversation(slug: String) {
         if (sending) return
@@ -556,17 +477,15 @@ fun AssistantScreen(
         spaceKeys = spaceKeys + chats.associate { it.key to slug }
         return chats
     }
-    // A Spaces row: the space's newest chat, else its home, as Health opens (the same rule, HealthEntry); New space: the form.
+    // A Spaces row opens its newest chat, else its home; New space opens the form. Health opens its home directly.
     fun openSpacePlace(slug: String) {
         if (slug == SpacesModel.NEW) { if (spacesApi != null) newSpaceOpen = true; return }
         if (sending || spaceBusy || conversationsOf == null) return
         spaceBusy = true
         scope.launch {
             try {
-                when (val target = HealthEntry.resolve(loadSpace(slug))) {
-                    is HealthEntry.Target.Open -> openConversation(target.key)
-                    HealthEntry.Target.New -> startSpaceConversation(slug)
-                }
+                val latest = HealthEntry.history(loadSpace(slug)).firstOrNull()
+                if (latest != null) openConversation(latest.key) else startSpaceConversation(slug)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -1207,7 +1126,8 @@ fun AssistantScreen(
         val sections = assistantMenu(offline = connection != null && connection != persona.core.contracts.api.ConnectionState.Online,
             modules = moduleActions, main = snapshot.mainSession, active = active, compact = active != null && mainActions.compact,
             newMain = onMain && mainActions.newMain, working = interrupt != null && persona.core.domain.lines.isLiveStatus(shown?.status),
-            clear = onMain && mainActions.clear)
+            clear = onMain && mainActions.clear,
+            knowledge = persona.core.moduleapi.LocalModulePlaces.current.serves(persona.core.navigation.KnowledgeRoute::class))
         fun rawAction(item: AssistantMenuItem, separator: Boolean): JAction = when (item) {
             AssistantMenuItem.ConnectionDetails -> JAction(resources.getString(item.label), separatorBefore = separator,
                 onClick = openConnectionDetails)

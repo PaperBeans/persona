@@ -331,8 +331,11 @@ describe("catalog-backed By repo projection", () => {
     const tree = buildRepoMachineTree([herdr, desktop, linked], machines, options([terminal]));
     expect(tree[0].repos.map((r) => [r.name, r.count])).toEqual([["app", 3]]);
     const worktrees = tree[0].repos[0].worktrees;
-    expect(worktrees.map((w) => w.sessions.map((s) => s.session_id))).toEqual([["desktop"], ["herdr"], ["linked"]]);
-    expect(worktrees[1].workspace).toBe(terminal);
+    // herdr does not say which workspace is the main checkout; the one at the repository's own folder is (#13454), so it
+    // comes first with the session-only main checkout, ahead of the linked tree.
+    expect(worktrees.map((w) => w.sessions.map((s) => s.session_id))).toEqual([["herdr"], ["desktop"], ["linked"]]);
+    expect(worktrees[0].workspace).toBe(terminal);
+    expect(worktrees.map((w) => w.main)).toEqual([true, true, false]);
     expect(showsWorktreeLevel(tree[0].repos[0])).toBe(true);
     // An empty workspace joins the repository its own folder is; one whose Agents span repositories keeps its own section.
     expect(buildRepoMachineTree([desktop], machines, options([terminal]))[0].repos.map((r) => [r.name, r.count])).toEqual([["app", 1]]);

@@ -39,7 +39,7 @@ class ModuleNavigationSafetyTest {
     @Serializable data class KeptRoute(val id: String) : NavKey
 
     private class Gated(override val id: String = "gated") : PersonaModule {
-        override val feature = "gated_feature"
+        override val feature = ModuleRegistry.moduleFeature(id)
         override fun navEntries(entries: EntryProviderScope<NavKey>, context: ModuleNavContext) {
             entries.entry<GatedRoute> {}
         }
@@ -59,10 +59,10 @@ class ModuleNavigationSafetyTest {
 
     @Test fun aModulePageLeftOpenWhenItsFeatureGoesAwayShowsTheUnavailablePage() {
         val registry = ModuleRegistry(listOf(Gated()))
-        val _ = provider(registry, setOf("gated_feature"))(GatedRoute)
+        val _ = provider(registry, setOf(ModuleRegistry.MODULES_MARKER, ModuleRegistry.moduleFeature("gated")))(GatedRoute)
         assertTrue("registered while the hub offers the feature", logged.isEmpty())
         // The hub's hello drops the feature while the page is on the stack: no crash, the shell's page, a loud log.
-        val _ = provider(registry, emptySet())(GatedRoute)
+        val _ = provider(registry, setOf(ModuleRegistry.MODULES_MARKER))(GatedRoute)
         assertEquals(1, logged.size)
         assertTrue(logged.single(), "GatedRoute" in logged.single())
         // What that page draws: ModuleFallbackPageTest (debug unit tests, which have a test activity).
@@ -71,7 +71,7 @@ class ModuleNavigationSafetyTest {
     @Test fun twoModulesRegisteringOneRouteAreRejected() {
         val registry = ModuleRegistry(listOf(Gated("first"), Gated("second")))
         try {
-            val _ = provider(registry, setOf("gated_feature"))
+            val _ = provider(registry, emptySet())
             fail("A route registered twice was accepted")
         } catch (_: IllegalArgumentException) {
         }
@@ -82,9 +82,10 @@ class ModuleNavigationSafetyTest {
         ModuleRegistry(listOf(object : PersonaModule {
             override val id = "unserved"
             override val audioUses = setOf(AudioUse.Playback)
-            override fun settingsPages() = listOf(ModuleSettingsPage("unserved.page", 0, GatedRoute))
+            // Settings pages are served (#13847): declaring some is not a warning.
+            override fun settingsPages() = listOf(ModuleSettingsPage("unserved.page", 0, persona.core.designsystem.icons.PersonaIcons.options, GatedRoute))
         }), warnings::add)
-        assertEquals(2, warnings.size)
+        assertEquals(1, warnings.size)
         assertTrue(warnings.all { "unserved" in it })
     }
 

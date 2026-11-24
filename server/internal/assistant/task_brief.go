@@ -992,6 +992,7 @@ func (s *Service) changeBriefLocked(ctx context.Context, id string, change func(
 		return v, false, nil
 	}
 	tb.revision++
+	s.trevision.changed() // briefs and lineage are in the full to-do list too
 	tb.pending++
 	raw, err := json.Marshal(tb.st)
 	v := tb.view()

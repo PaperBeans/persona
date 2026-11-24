@@ -17,7 +17,7 @@ import { basename } from 'node:path'
 import { readFileSync, statSync } from 'node:fs'
 import { createRuntime, installCurrent, interactionId, light, page, RpcError, snippet, summaryOf, verifyPackage } from '../../runtime-sdk/index.js'
 import { a2aTools } from '../../runtime-sdk/lib/a2a.js'
-import { ALLOW_ENTRY, alwaysAllowed, branchItems, branchKey, entryItems, firstText, HOST_ENTRY, imageOf, lastHost, lastText, partialText, toolInput, toolName } from './map.js'
+import { ALLOW_ENTRY, alwaysAllowed, branchItems, branchKey, callName, entryItems, firstText, HOST_ENTRY, imageOf, lastHost, lastText, partialText, toolInput, toolName } from './map.js'
 
 export const RUNTIME_VERSION = '0.4.0'
 const DISK_EVERY = 30_000 // ms: list the sessions on disk at most this often (pi-web)
@@ -606,7 +606,7 @@ export function createPiHost(deps, options = {}) {
     const askPhone = async () => {
       const res = await rt.ask({
         id: interactionId(interactionPrefix, s.id, 'permission', e.toolCallId), kind: 'permission', session_id: s.id,
-        tool_name: toolName(name), tool_use_id: e.toolCallId, tool_input: toolInput(name, input), summary,
+        tool_name: callName(name, input), tool_use_id: e.toolCallId, tool_input: toolInput(name, input), summary,
         // Offered only where it can be kept: the grant is written into the session (ALLOW_ENTRY).
         ...(typeof s.pi.appendEntry === 'function' ? { always_label: `本会话不再问 ${toolName(name)}` } : {}),
       }, { signal: ctx.signal })

@@ -1,4 +1,5 @@
 {
+  "reporting_direction_supervisor": "此方向用于汇报进展。请选择一个 Persona 对话来督办此任务。",
   "archive_main": "主对话不能归档",
   "archive_background_supervisor": "后台督办对话不能归档",
   "supervision_source": "督办",

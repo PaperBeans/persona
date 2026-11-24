@@ -1,6 +1,6 @@
 {
   "name": "interaction_answer",
-  "description": "Answer another agent's card for the user, in their place, when they said what to answer or told you to decide. Answer each question by its own wording with an option label it offers; no free text (use agent_send). A multi-select takes an array of labels. A card a 督办 message handed you (a task you supervise) is yours to decide: answer a question, or allow or deny a tool permission or a plan with allow, giving reason; it is kept as the task's decision, never as the user's. Forms, secrets and approvals that send or reply in the user's name, spend money or delete are the user's: ask_escalate them. Never other approvals, terminal dialogs or the assistant's own questions.",
+  "description": "Answer another agent's card for the user when they said what to answer or told you to decide: each question by its own wording with an option label it offers (multi-select: an array); no free text (use agent_send). A card a 督办 message handed you is yours: answer a question or terminal dialog (an option's label or number), or allow/deny a permission, plan or dialog's Yes/No with allow, giving reason; kept as the task's decision, not the user's. Forms, secrets, approvals that send or reply in the user's name, spend money or delete, and folder-trust or Bypass Permissions dialogs are the user's: ask_escalate them. Never other approvals or the assistant's own questions.",
   "input_schema": {
     "type": "object",
     "required": [

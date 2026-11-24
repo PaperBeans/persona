@@ -92,12 +92,10 @@ func (d *dispatchPolicyHarness) planIn(t *testing.T, id string, over map[string]
 	return true
 }
 
-// A direction's lead that a hand-over of the owner's quoted words went into (#11699) waits for the owner's Start before
-// writable work it marks user_requested, whatever opens the turn, until the owner writes there. Read-only tasks and
-// kinds the owner trusts start as before; so does everything that is no such hand-over: an unquoted message to a lead,
-// quoted words to a conversation that is no lead, a hand-over still queued or past its 14 days, and the main
-// conversation.
-func TestALeadAHandoverWentIntoWaitsForStart(t *testing.T) {
+// A direction's lead that a hand-over of the owner's quoted words went into (#11699) used to wait for the owner's Start
+// before writable work it planned outside its own kinds. Since decision rights a lead's own plan is its release and
+// starts at once in every turn, a place new to it included; so does everything that is no such hand-over.
+func TestALeadAHandoverWentIntoStartsItsPlans(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		in     string // the planning conversation: lead, side or main
@@ -120,7 +118,11 @@ func TestALeadAHandoverWentIntoWaitsForStart(t *testing.T) {
 				State: "done", Text: "🔔 task done: the export audit", At: time.Now().UTC()})
 			waitFor(t, "the task's report to go in", func() bool { return d.f.sentTo(d.leaderID) == sent+1 })
 			d.f.setItems(taskReport())
-		}, nil, false, false},
+		}, nil, false, true},
+		{"a later turn, not asked for in so many words", "lead", func(d *dispatchPolicyHarness, t *testing.T) {
+			d.handOver(t)
+			d.f.setItems(taskReport())
+		}, map[string]any{"user_requested": false}, false, true},
 		{"after the owner writes there", "lead", func(d *dispatchPolicyHarness, t *testing.T) {
 			d.handOver(t)
 			d.s.UserSpoke(context.Background(), SessionRef{MachineID: "server", SessionID: d.leaderID})
@@ -141,7 +143,7 @@ func TestALeadAHandoverWentIntoWaitsForStart(t *testing.T) {
 			d.startedPlanOf(t, d.mainID, "/code/app") // another conversation's ground is not the lead's
 			d.handOver(t)
 			d.f.setItems(taskReport())
-		}, nil, false, false},
+		}, nil, false, true},
 		{"an unquoted message to a lead", "lead", func(d *dispatchPolicyHarness, t *testing.T) {
 			d.send(t, d.mainID, d.leaderID, `"text":"please fix the export"`)
 			d.f.setItems(received(t, d.f, d.mainID))
@@ -194,8 +196,8 @@ func TestALeadAHandoverWentIntoWaitsForStart(t *testing.T) {
 	}
 }
 
-// A direct send of a hand-over into a lead that ends in doubt has opened the lead's turn: a writable plan in that turn
-// waits, although nothing said yet that the message went in.
+// A direct send of a hand-over into a lead that ends in doubt has opened the lead's turn: the lead is marked, although
+// nothing said yet that the message went in (a writable plan there starts all the same: decision rights).
 func TestAHandoverInDoubtHoldsTheTurnItOpened(t *testing.T) {
 	d := newStartRuleHarness(t, nil)
 	stopHolds(t, d.s)
@@ -216,13 +218,16 @@ func TestAHandoverInDoubtHoldsTheTurnItOpened(t *testing.T) {
 	d.f.setItems(proto.Item{ID: "r1", Seq: 2, Role: "user", Kind: proto.KindText, Text: sent,
 		Source: &proto.MessageSource{Kind: proto.SourceConversation, ConversationID: d.mainID}})
 	refuseSendsTo(d.f, d.leaderID, nil)
-	if d.planIn(t, d.leaderID, nil) {
-		t.Fatal("a writable plan in the turn a hand-over in doubt opened started without the owner")
+	if !d.s.handedOver(d.leaderID) {
+		t.Fatal("a hand-over in doubt left no mark on the lead")
+	}
+	if !d.planIn(t, d.leaderID, nil) {
+		t.Fatal("a writable plan in the lead waits for Start")
 	}
 }
 
-// A try the lead definitely did not take leaves no mark when the lead had none: its plans start as before. One that had
-// a mark from an earlier hand-over keeps it.
+// A try the lead definitely did not take leaves no mark when the lead had none. One that had a mark from an earlier
+// hand-over keeps it.
 func TestARefusedHandoverLeavesNoMark(t *testing.T) {
 	for _, before := range []bool{false, true} {
 		name := "no mark before"
@@ -241,16 +246,14 @@ func TestARefusedHandoverLeavesNoMark(t *testing.T) {
 				t.Fatalf("the refused send went: %s", res.Content[0].Text)
 			}
 			refuseSendsTo(d.f, d.leaderID, nil)
-			d.f.setItems(taskReport())
-			if got := d.planIn(t, d.leaderID, nil); got == before {
-				t.Fatalf("started %v after a refused try (%s)", got, name)
+			if got := d.s.handedOver(d.leaderID); got != before {
+				t.Fatalf("marked %v after a refused try (%s)", got, name)
 			}
 		})
 	}
 }
 
-// The mark is saved before the send leaves: a manager that restarts while the send is on its way finds it, and a
-// writable plan in the lead waits.
+// The mark is saved before the send leaves: a manager that restarts while the send is on its way finds it.
 func TestTheLeadsMarkSurvivesARestartDuringTheSend(t *testing.T) {
 	st := planUpdateStore{&planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}
 	d := newStartRuleHarness(t, st)
@@ -277,23 +280,21 @@ func TestTheLeadsMarkSurvivesARestartDuringTheSend(t *testing.T) {
 	}
 	restarted := newStartRuleHarness(t, planUpdateStore{&planMemStore{memStore: &memStore{vals: during}, plans: map[string]db.TaskPlanRow{}}})
 	stopHolds(t, restarted.s)
-	restarted.f.setItems(taskReport())
-	if restarted.planIn(t, restarted.leaderID, nil) {
-		t.Fatal("after a restart during the send a writable plan in the lead started without the owner")
+	if !restarted.s.handedOver(restarted.leaderID) {
+		t.Fatal("after a restart during the send the lead's mark was gone")
 	}
 }
 
-// The lead's wait is kept with the relay state: after a manager restart a writable plan there still waits.
-func TestALeadsWaitAfterAHandoverSurvivesARestart(t *testing.T) {
+// The lead's mark is kept with the relay state: a manager restart finds it.
+func TestALeadsMarkAfterAHandoverSurvivesARestart(t *testing.T) {
 	st := planUpdateStore{&planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}
 	d := newStartRuleHarness(t, st)
 	stopHolds(t, d.s)
 	d.handOver(t)
 	restarted := newStartRuleHarness(t, st)
 	stopHolds(t, restarted.s)
-	restarted.f.setItems(taskReport())
-	if restarted.planIn(t, restarted.leaderID, nil) {
-		t.Fatal("after a restart a writable plan in the lead started without the owner")
+	if !restarted.s.handedOver(restarted.leaderID) {
+		t.Fatal("after a restart the lead's mark was gone")
 	}
 }
 
@@ -363,5 +364,61 @@ func TestAContinuationStartsTheCurrentRelayedWordsAtOnce(t *testing.T) {
 	after, ok := d.s.briefOfTodo(todo.ID)
 	if !ok || after.ID != before.ID || after.Request == nil || after.Request.MessageID != before.Request.MessageID {
 		t.Fatalf("continuation replaced the original brief: before %+v, after %+v", before, after)
+	}
+}
+
+// The live case of decision rights (plan_8e309c4bf9d2): a lead marked by an earlier hand-over of the owner's words
+// plans one writable task, not asked for in so many words, in a place new to it. It starts at once: no card, no push.
+func TestAMarkedLeadsOwnWritablePlanStartsWithoutAPush(t *testing.T) {
+	d := newStartRuleHarness(t, nil)
+	stopHolds(t, d.s)
+	d.handOver(t)
+	d.f.setItems(taskReport())
+	if !d.s.handedOver(d.leaderID) {
+		t.Fatal("the hand-over left no mark on the lead")
+	}
+	pushed := len(d.f.pushed())
+	if !d.planIn(t, d.leaderID, map[string]any{"user_requested": false, "cwd": "/code/new-place"}) {
+		t.Fatal("the marked lead's writable plan waits for Start")
+	}
+	if got := d.f.pushed(); len(got) != pushed {
+		t.Fatalf("the lead's plan was pushed: %+v", got[pushed:])
+	}
+}
+
+// markHandedOver puts the hand-over mark of #11699 on conversation id directly, as a hand-over sent into it would.
+func (d *dispatchPolicyHarness) markHandedOver(t *testing.T, id string) {
+	t.Helper()
+	b := &d.s.relays
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !d.s.relayLocked(context.Background()) {
+		t.Fatal("the relay state did not load")
+	}
+	if b.st.Handed == nil {
+		b.st.Handed = map[string]time.Time{}
+	}
+	b.st.Handed[id] = time.Now().UTC()
+}
+
+// What still waits for the owner's Start with the hand-over mark on: an ordinary conversation's writable plan (it is not
+// its supervisor's release), and a marked lead's task that spends money, speaks outward as the owner or takes an
+// irreversible step they have not agreed to (owner_step).
+func TestWhatStillWaitsWithTheHandOverMark(t *testing.T) {
+	d := newStartRuleHarness(t, nil)
+	stopHolds(t, d.s)
+	d.markHandedOver(t, d.sideID)
+	d.f.setItems(taskReport())
+	if d.planIn(t, d.sideID, map[string]any{"user_requested": false}) {
+		t.Fatal("an ordinary conversation's writable plan started without the owner's Start")
+	}
+	for _, step := range []string{ownerStepMoney, ownerStepOutward, ownerStepIrreversible} {
+		d := newStartRuleHarness(t, nil)
+		stopHolds(t, d.s)
+		d.handOver(t)
+		d.f.setItems(taskReport())
+		if d.planIn(t, d.leaderID, map[string]any{"user_requested": false, "owner_step": step}) {
+			t.Fatalf("a marked lead's %s task started without the owner's Start", step)
+		}
 	}
 }

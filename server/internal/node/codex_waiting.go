@@ -696,7 +696,7 @@ func (n *Node) attachCodexWait(ctx context.Context, w *codexWait, thread, how st
 	if !w.manual {
 		st, _ := n.state.get(w.id)
 		n.state.put(thread, sessionState{Pane: w.pane, Launcher: st.Launcher, Cwd: st.Cwd, Model: st.Model, ModelEffort: st.ModelEffort,
-			StartedAt: st.StartedAt, AppMode: st.AppMode, CreationID: st.CreationID, Incarnation: st.Incarnation})
+			StartedAt: st.StartedAt, AppMode: st.AppMode, AppModeExplicit: st.AppModeExplicit, CreationID: st.CreationID, Incarnation: st.Incarnation})
 	}
 	n.mu.Lock()
 	occupied := n.agents[thread].PaneID

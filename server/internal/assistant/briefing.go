@@ -104,7 +104,7 @@ type briefFacts struct {
 func (s *Service) briefFactsAt(ctx context.Context, now time.Time, self string) *briefFacts {
 	l, web, loc := s.botLang(ctx), s.webBase(ctx), s.location(ctx)
 	f := &briefFacts{At: now, l: l, web: web, loc: loc, WaitingUnknown: !s.fleetReady(), Changed: map[string]string{}, Asks: map[string]acceptAsk{}}
-	if feat, ready := s.feishuFeatures(ctx); ready && feat.Pushes {
+	if feat, ready := s.chat().Features(ctx); ready && feat.Pushes {
 		f.Card = true
 	}
 	waiting := map[string]bool{}
@@ -456,7 +456,7 @@ func (s *Service) briefingGrace(ctx context.Context, local time.Time, start int)
 	if !s.briefingOn() { // no briefing lists them: the reminders go one by one
 		return 0
 	}
-	if f, ready := s.feishuFeatures(ctx); !ready || !f.Pushes {
+	if f, ready := s.chat().Features(ctx); !ready || !f.Pushes {
 		return 0
 	}
 	sc, err := s.lockedSchedule(ctx)

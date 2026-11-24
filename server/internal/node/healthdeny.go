@@ -126,7 +126,7 @@ func healthReportRules(cwd string) []string {
 		return nil
 	}
 	// Edit(path) covers Write too: Claude Code matches path rules on Read and Edit only. Claude Code names a file by
-	// the directory as it resolved it (~/.jarvis/health/... for a ~/.persona that links there): both spellings.
+	// the directory as it resolved it (<target>/health/... for a ~/.persona that is a link): both spellings.
 	rules := []string{"Edit(/" + filepath.Join(cwd, "reports") + "/**)"}
 	if real := realPath(filepath.Clean(cwd)); real != filepath.Clean(cwd) && !strings.Contains(real, ",") {
 		rules = append(rules, "Edit(/"+filepath.Join(real, "reports")+"/**)")

@@ -7,6 +7,7 @@ import { useMemo } from "react";
 import type { AgentMutes } from "./agent-groups";
 import { stateOf } from "./format";
 import { requestHome } from "./child-sessions";
+import { supervisorHeld, supervisorHeldOnly } from "./supervisor-held";
 import { useShownManager } from "./manager-choice";
 import { installedManagers, multiManager, ownerIn, useRoster, type ManagerList } from "./managers";
 import { isMuted } from "./session-actions";
@@ -31,8 +32,11 @@ export function waitingAgents(list: ManagerList, sessions: readonly Session[], i
   const keyOf = (mid: string, sid: string) => `${mid}/${sid}`;
   const byKey = new Map(sessions.map((s) => [keyOf(s.machine_id, s.session_id), s]));
   const counted = (s: Session) => !s.quiet && !isMuted(s, mutes);
-  for (const s of sessions) if (!s.assistant && counted(s) && stateOf(s) === "needs_you") add(s.manager, keyOf(s.machine_id, s.session_id));
+  // an agent waiting only on cards its task's supervisor holds, and those cards, are not the user's yet (lib/supervisor-held.ts)
+  const held = supervisorHeldOnly(interactions);
+  for (const s of sessions) if (!s.assistant && counted(s) && stateOf(s) === "needs_you" && !held.has(keyOf(s.machine_id, s.session_id))) add(s.manager, keyOf(s.machine_id, s.session_id));
   for (const ix of interactions) {
+    if (supervisorHeld(ix)) continue;
     if (!ix.session_id) {
       add(ix.manager, `card:${ix.id}`);
       continue;

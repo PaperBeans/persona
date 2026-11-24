@@ -725,6 +725,46 @@ struct PhoneSystemToolsTests {
             #expect(spy.calls.count == 3)
         }
     }
+
+    /// `updateLiveActivity` and `endLiveActivity` run `@concurrent` off the main actor and explicitly type `activity`
+    /// as `Activity<AlarmAttributes<PersonaAlarmData>>` so `activity.update(_:)` neither runs ActivityKit work on the
+    /// main actor nor creates an untyped `.update(_:)` edge to `HomeCalendarStore.update(_:)` (#13770).
+    @Test func theTimerSampleActivityHelpersRunConcurrentlyWithTypedActivity() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Persona/PhoneTools/AlarmsTool.swift")
+        let lines = try String(contentsOf: sourceURL, encoding: .utf8).components(separatedBy: "\n")
+
+        func declarationAndBody(_ marker: String) throws -> String {
+            let index = try #require(lines.firstIndex { $0.contains(marker) }, "missing \(marker)")
+            var start = index
+            while start > 0 {
+                let previous = lines[start - 1].trimmingCharacters(in: .whitespaces)
+                if previous.hasPrefix("@") { start -= 1 } else { break }
+            }
+            var depth = 0, opened = false, out: [String] = []
+            for line in lines[start...] {
+                out.append(line)
+                for ch in line {
+                    if ch == "{" { depth += 1; opened = true }
+                    if ch == "}" { depth -= 1 }
+                }
+                if opened, depth == 0 { break }
+            }
+            return out.joined(separator: "\n")
+        }
+
+        let updateHelper = try declarationAndBody("static func updateLiveActivity(")
+        #expect(updateHelper.contains("@concurrent"), "updateLiveActivity must run off the main actor")
+        #expect(updateHelper.contains("activity: Activity<AlarmAttributes<PersonaAlarmData>>"),
+                "activity must be explicitly typed so activity.update(_:) cannot match HomeCalendarStore.update(_:)")
+
+        let endHelper = try declarationAndBody("static func endLiveActivity(")
+        #expect(endHelper.contains("@concurrent"), "endLiveActivity must run off the main actor")
+        #expect(endHelper.contains("activity: Activity<AlarmAttributes<PersonaAlarmData>>"),
+                "activity must be explicitly typed")
+    }
     #endif
 
     // MARK: - Home (#2285)

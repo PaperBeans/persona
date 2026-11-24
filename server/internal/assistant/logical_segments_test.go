@@ -398,6 +398,55 @@ func TestLogicalOperationReceiptIsScopedToConversation(t *testing.T) {
 	}
 }
 
+func TestLogicalQueuedInputKeepsModeProvenance(t *testing.T) {
+	for _, tc := range []struct {
+		engine      string
+		wantMode    any
+		wantDefault any
+	}{
+		{engine: "claude", wantDefault: proto.ModePlan},
+		{engine: "codex", wantMode: proto.ModeBypass},
+	} {
+		t.Run(tc.engine, func(t *testing.T) {
+			s, f, d, _ := logicalPair(t, tc.engine)
+			ctx := t.Context()
+			c := activatePair(t, d)
+			if err := d.ResolveConversationSwitch(ctx, "server", "side-chat", "operation", "accepted", ""); err != nil {
+				t.Fatal(err)
+			}
+			f.setSessions("server",
+				proto.Session{SessionID: "side-chat", Assistant: true, Agent: "claude", Status: proto.StatusIdle},
+				proto.Session{SessionID: "target-chat", Assistant: true, Agent: tc.engine, Status: proto.StatusIdle})
+			f.answerNode("session.modes", func(string, json.RawMessage) (any, error) { return map[string]bool{"ok": true}, nil })
+			_, handled, err := s.logicalCall(ctx, "server", "session.modes", json.RawMessage(`{"session_id":"side-chat","permission_mode":"bypassPermissions"}`))
+			if err != nil || !handled {
+				t.Fatalf("seed the inherited segment mode: handled=%v err=%v", handled, err)
+			}
+			c, err = d.LogicalConversation(ctx, "server", "side-chat")
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.answerNode(DeviceAssistantSend, func(_ string, raw json.RawMessage) (any, error) {
+				var got map[string]any
+				_ = json.Unmarshal(raw, &got)
+				if got["permission_mode"] != tc.wantMode || got["default_permission_mode"] != tc.wantDefault || got["permission_mode_explicit"] != nil {
+					t.Fatalf("queued mode provenance changed: %v", got)
+				}
+				return map[string]bool{"ok": true}, nil
+			})
+			payload, _ := json.Marshal(logicalInput{Method: DeviceAssistantSend, Params: map[string]any{
+				"text": "continue", "client_msg_id": "queued", "default_permission_mode": proto.ModePlan,
+			}})
+			if err := d.EnqueueConversationInput(ctx, c.MachineID, c.SessionID, "queued", c.Epoch, payload); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.drainLogicalInput(ctx, d, c); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestLogicalQueuedInputsKeepTheTargetConfigAfterFirstAcceptance(t *testing.T) {
 	s, f, d, _ := logicalPair(t, "codex")
 	ctx := t.Context()

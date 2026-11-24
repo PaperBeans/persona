@@ -19,7 +19,13 @@ const startup = import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { q
 const rest = import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=client-rest" });
 // the feature modules' namespaces (src/modules, docs/web/web.md "Modules"): their own catalogs, in neither part
 const modules = import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=modules" });
-const healthModule = import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=module-health" });
+// each module's own catalog, by its id (a module added to src/modules/index.ts gets a line here: the test below fails
+// until it does)
+const moduleCatalogs: Record<string, Record<string, () => Promise<Catalog>>> = {
+  health: import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=module-health" }),
+  voice: import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=module-voice" }),
+  recording: import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=module-recording" }),
+};
 /** flatten() over a language's namespace files of one kind, keyed like the import form's entries. The files are read
  *  from disk, not through an eager import.meta.glob: that made ~900 JSON modules, the slowest import of the suite. */
 function expected(lang: string, kind: "client" | "admin"): Record<string, string> {
@@ -71,7 +77,7 @@ describe("i18n catalogs under Vitest", () => {
       const listed = startupMatcher(startupNamespaces);
       expect(Object.keys(first.default).every(listed)).toBe(true);
       expect(Object.keys(second.default).some(listed)).toBe(false);
-      const ofModule = (k: string) => k.startsWith("health.");
+      const ofModule = (k: string) => Object.keys(moduleCatalogs).some((id) => k.startsWith(`${id}.`) || k.startsWith(`${id}-`));
       expect(Object.keys(third.default).length).toBeGreaterThan(0);
       expect(Object.keys(third.default).every(ofModule)).toBe(true);
       expect(Object.keys({ ...first.default, ...second.default }).some(ofModule)).toBe(false);
@@ -81,10 +87,19 @@ describe("i18n catalogs under Vitest", () => {
       expect(fallbacks).toEqual(whole.fallbacks);
     });
 
-    it(`${lang}: a module's catalog holds its namespaces only`, async () => {
-      const [all, own] = await Promise.all([modules[key](), healthModule[key]()]);
-      expect(Object.keys(own.default).length).toBeGreaterThan(0);
-      expect(own.default).toEqual(all.default);
+    // The core-only lane (web/core-only.ts, #13932) has an empty module list, while the modules' catalogs stay on disk.
+    it.skipIf(process.env.PERSONA_WEB_MODULES === "none")(`${lang}: each module's catalog holds its namespaces only, and together they are all the modules' strings`, async () => {
+      const { MODULES } = await import("./src/modules");
+      expect(Object.keys(moduleCatalogs).sort()).toEqual(MODULES.map((m) => m.id).sort());
+      const all = await modules[key]();
+      const together: Catalog["default"] = {};
+      for (const [id, catalog] of Object.entries(moduleCatalogs)) {
+        const own = (await catalog[key]()).default;
+        expect(Object.keys(own).length, id).toBeGreaterThan(0);
+        expect(Object.keys(own).every((k) => k.startsWith(`${id}.`) || k.startsWith(`${id}-`)), id).toBe(true);
+        Object.assign(together, own);
+      }
+      expect(together).toEqual(all.default);
     });
   }
 });

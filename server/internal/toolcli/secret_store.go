@@ -103,6 +103,9 @@ func secretStore(ctx context.Context, args []string, stdin io.Reader, stdout, st
 	}
 	res, err := call(ctx, "secret_store", map[string]any{"phase": "prepare", "target": target})
 	if err != nil {
+		if ctx.Err() != nil && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fail.unreachable(ctx, err)
+		}
 		return fail.fail(exitUnavailable, "secret storage approval could not be reached", 0)
 	}
 	if res.IsError {
@@ -140,6 +143,9 @@ func secretStore(ctx context.Context, args []string, stdin io.Reader, stdout, st
 	defer clear(sealed)
 	res, err = call(ctx, "secret_store", map[string]any{"phase": "commit", "target": key.Target, "key_id": key.KeyID, "sealed": base64.StdEncoding.EncodeToString(sealed)})
 	if err != nil {
+		if ctx.Err() != nil && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fail.fail(exitInterrupted, "interrupted: secret storage result unavailable; check metadata before retrying", 0)
+		}
 		return fail.fail(exitUnavailable, "secret storage result unavailable; check metadata before retrying", 0)
 	}
 	if res.IsError {

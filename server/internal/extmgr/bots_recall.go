@@ -1,6 +1,9 @@
 package extmgr
 
-import "github.com/nwverse/persona/server/internal/feishubot"
+import (
+	"github.com/nwverse/persona/server/internal/botcard"
+	"github.com/nwverse/persona/server/internal/botport"
+)
 
 // A message belongs to the bot and owner that received it, in one chat.
 // The same id in another chat or after replacing the bot cannot recall it.
@@ -12,13 +15,13 @@ type botMessageRef struct {
 // The client pointer identifies the active connection generation. Header AppID
 // is optional in older events, but when supplied must agree with that source.
 // Message references themselves remain stable across same-app refreshes.
-func (b *botHub) acceptBotEventLocked(api *feishubot.Client, appID string) bool {
+func (b *botHub) acceptBotEventLocked(api botport.Client, appID string) bool {
 	return api != nil && b.set.Enabled && b.api == api && (appID == "" || appID == api.AppID())
 }
 
 // Credentials may be refreshed without changing the bot. Keep the identity
 // stable across those reconnects, while separating apps and API domains.
-func botMessageReference(api *feishubot.Client, owner, chat, id string) botMessageRef {
+func botMessageReference(api botport.Client, owner, chat, id string) botMessageRef {
 	if api == nil {
 		return botMessageRef{}
 	}
@@ -51,7 +54,7 @@ func (b *botHub) messageInOtherContextLocked(ref botMessageRef) bool {
 // queueMessageLocked records ownership before the goroutine waits in line.
 // This is recall evidence only: botMessage still applies the current receive
 // policy after the wait, including topic commands and required mentions.
-func (b *botHub) queueMessageLocked(ev feishubot.MessageEvent) *botQueuedMessage {
+func (b *botHub) queueMessageLocked(ev botcard.MessageEvent) *botQueuedMessage {
 	msg := ev.Message
 	if b.api == nil || b.set.Owner == nil || ev.Sender.SenderType != "user" ||
 		ev.Sender.SenderID.OpenID != b.set.Owner.OpenID ||
@@ -69,7 +72,7 @@ func (b *botHub) queueMessageLocked(ev feishubot.MessageEvent) *botQueuedMessage
 
 // beginBotHandoff and botRecalled share the lock: a recall either cancels a
 // pending handoff or is forwarded to the assistant's existing recall handling.
-func (h *Manager) beginBotHandoff(api *feishubot.Client, ev feishubot.MessageEvent, inThread bool) bool {
+func (h *Manager) beginBotHandoff(api botport.Client, ev botcard.MessageEvent, inThread bool) bool {
 	b := &h.bots
 	b.mu.Lock()
 	defer b.mu.Unlock()

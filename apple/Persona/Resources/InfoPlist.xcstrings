@@ -191,19 +191,19 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Persona saves health data only after you approve it on your iPhone, one entry at a time, for example a weight or last night's sleep you told Claude about."
+            "value": "Persona saves individual health samples after you confirm them on your iPhone. When you turn on sync, Persona also automatically writes your water and protein records to Apple Health on this iPhone."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "Personaがヘルスケアにデータを保存するのは、iPhoneで1件ずつ承認したときだけです。たとえばClaudeに伝えた体重や昨夜の睡眠です。"
+            "value": "PersonaはiPhoneで確認した健康データを1件ずつ保存します。同期をオンにすると、水分とたんぱく質の記録もこのiPhoneのAppleヘルスケアに自動で書き込みます。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Persona 只在你在 iPhone 上逐条批准后才写入健康数据，比如你告诉 Claude 的体重或昨晚的睡眠。"
+            "value": "Persona 会在你在 iPhone 上确认后保存单条健康数据。打开同步后，Persona 还会自动将饮水和蛋白质记录写入这台 iPhone 的 Apple 健康。"
           }
         }
       }

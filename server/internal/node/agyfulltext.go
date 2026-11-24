@@ -3,6 +3,7 @@ package node
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"os"
 	"slices"
 	"strconv"
@@ -20,7 +21,10 @@ type agyFullExport struct {
 	steps []agyStep
 }
 
-var agyTruncation = lazyre.New(`\n<truncated (\d+) bytes>\n`)
+var (
+	agyTruncation     = lazyre.New(`\n<truncated (\d+) bytes>\n`)
+	agyTailTruncation = lazyre.New(`\n<truncated (\d+) bytes>$`)
+)
 
 func (s *agyStep) truncatedText(field string) *string {
 	switch field {
@@ -42,6 +46,9 @@ func agyNeedsFullText(step agyStep) bool {
 		return false
 	}
 	for _, field := range step.TruncatedFields {
+		if field == "tool_calls" && len(step.ToolCalls) > 0 {
+			return true
+		}
 		if text := step.truncatedText(field); text != nil && agyTruncation.MatchString(*text) {
 			return true
 		}
@@ -59,6 +66,91 @@ func agyMatchingFullText(preview, full string) bool {
 		}
 	}
 	return false
+}
+
+func agyMatchingTailTruncation(preview, full string) bool {
+	m := agyTailTruncation.FindStringSubmatchIndex(preview)
+	if m == nil {
+		return false
+	}
+	omitted, err := strconv.Atoi(preview[m[2]:m[3]])
+	prefix := preview[:m[0]]
+	return err == nil && omitted > 0 && len(full)-len(prefix) == omitted && strings.HasPrefix(full, prefix)
+}
+
+func agyMarshalArg(v any) (string, bool) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return "", false
+	}
+	return strings.TrimSuffix(buf.String(), "\n"), true
+}
+
+func agyMatchingFullArg(compactVal, fullVal any) bool {
+	if compactStr, ok := compactVal.(string); ok {
+		if fullStr, ok := fullVal.(string); ok {
+			if compactStr == fullStr || agyMatchingFullText(compactStr, fullStr) || agyMatchingTailTruncation(compactStr, fullStr) {
+				return true
+			}
+		}
+		if fullJSON, ok := agyMarshalArg(fullVal); ok {
+			if compactStr == fullJSON || agyMatchingFullText(compactStr, fullJSON) || agyMatchingTailTruncation(compactStr, fullJSON) {
+				return true
+			}
+		}
+		return false
+	}
+	compactJSON, ok1 := agyMarshalArg(compactVal)
+	fullJSON, ok2 := agyMarshalArg(fullVal)
+	return ok1 && ok2 && compactJSON == fullJSON
+}
+
+func agyDecodeToolArgs(raw json.RawMessage) (map[string]any, bool) {
+	var args map[string]any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if dec.Decode(&args) != nil || args == nil {
+		return nil, false
+	}
+	return args, true
+}
+
+func agyMatchingFullToolCalls(compact, full []*agyToolCall) bool {
+	if len(compact) == 0 || len(compact) != len(full) {
+		return false
+	}
+	for i := range compact {
+		c, f := compact[i], full[i]
+		if c == nil || f == nil {
+			if c != f {
+				return false
+			}
+			continue
+		}
+		if c.Name != f.Name {
+			return false
+		}
+		cArgs, cOK := agyDecodeToolArgs(c.Args)
+		fArgs, fOK := agyDecodeToolArgs(f.Args)
+		if !cOK || !fOK {
+			if !bytes.Equal(bytes.TrimSpace(c.Args), bytes.TrimSpace(f.Args)) {
+				return false
+			}
+			continue
+		}
+		if len(cArgs) != len(fArgs) {
+			return false
+		}
+		for k, cv := range cArgs {
+			fv, ok := fArgs[k]
+			if !ok || !agyMatchingFullArg(cv, fv) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (n *Node) agyFullSteps(root *os.Root, key, conversation string, file os.FileInfo, unsettled bool) ([]agyStep, error) {
@@ -121,8 +213,18 @@ func restoreAgyFullText(steps, full []agyStep, memos []agyStepMemo) bool {
 		}
 		count := len(step.TruncatedFields)
 		step.TruncatedFields = slices.DeleteFunc(step.TruncatedFields, func(field string) bool {
+			if slices.Contains(record.TruncatedFields, field) {
+				return false
+			}
+			if field == "tool_calls" {
+				if !agyMatchingFullToolCalls(step.ToolCalls, record.ToolCalls) {
+					return false
+				}
+				step.ToolCalls = slices.Clone(record.ToolCalls)
+				return true
+			}
 			preview, text := step.truncatedText(field), record.truncatedText(field)
-			if preview == nil || slices.Contains(record.TruncatedFields, field) || !agyMatchingFullText(*preview, *text) {
+			if preview == nil || !agyMatchingFullText(*preview, *text) {
 				return false
 			}
 			*preview = *text

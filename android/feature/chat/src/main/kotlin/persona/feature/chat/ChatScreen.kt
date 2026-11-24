@@ -50,6 +50,7 @@ import persona.core.domain.sort.READ_ONLY
 import persona.core.domain.sort.canApprove
 import persona.core.domain.sort.canChangeEffortOnly
 import persona.core.domain.sort.canChangeModes
+import persona.core.domain.sort.canContinueCodex
 import persona.core.domain.sort.canSwitchListedModes
 import persona.core.domain.sort.canInterrupt
 import persona.core.domain.sort.canSend
@@ -321,6 +322,17 @@ private fun ChatPage(
         rememberUpdatedState(readOnly), statusSheetState,
         deliveryActions, clearingPaneState, pageCloseout.drawnSwitch, switchSession, tasks, timelineFollow, submittedContextState)
     var notice by interactionController.notice
+    val takeoverClient = remember(chrome.takeoverActions, chrome.hubScope) {
+        chrome.takeoverActions?.let { CodexTakeoverClient.of(it, chrome.hubScope) }
+    }
+    val takeoverCoordinator = rememberCodexTakeoverCoordinator(
+        client = takeoverClient,
+        sessions = sessions,
+        onOpenSession = if (historyOnly) null else chrome.onOpenSession,
+        onFallbackNotice = { notice = it },
+        onCompleted = if (historyOnly) ({ _, adopted -> chrome.onOpenSession?.invoke(adopted.key) }) else null,
+    )
+    val pageTakeover = takeoverCoordinator.takeIf { takeoverClient != null && renderStyle != ChatRenderStyle.Assistant && child == null && workflowAgent == null }
     var submittedDraft by interactionController.submittedDraft
     var submittedContexts by submittedContextState
     var sending by interactionController.sending
@@ -1014,6 +1026,7 @@ private fun ChatPage(
                                         sides = childCards.sides, sideRollup = childCards.sideRollup, onOpenSide = chrome.onOpenSide,
                                         onForkSession = if (onFork != null && session?.canFork == true) ({ onFork("") }) else null,
                                         forking = forking,
+                                        takeover = pageTakeover,
                                         menuOpen = headerMenuOpen)
                                     // The space's other tabs under the title (iOS SiblingTabs); not for the assistant's conversation.
                                     if (tabs && session != null && onOpenSibling != null) {
@@ -1094,9 +1107,25 @@ private fun ChatPage(
                             if (!historyOnly && !readOnly && session != null) ModelFallbackCard(session, chrome.actions)
                             if (historyOnly) footer?.invoke()
                             else if (readOnly) Text(stringResource(R.string.chat_screen_subagent_read_only), Modifier.padding(Tokens.Space.m), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
-                            else if (session?.isStoppedAgent == true && machine?.online != false) ChatStoppedNote(agentTerminal,
-                                resumeInTerminal?.takeIf { terminalResume(session, machine) == TerminalResume.Available })
-                            else {
+                            else if (session?.isStoppedAgent == true && machine?.online != false) {
+                                if (session.canContinueCodex && pageTakeover != null) {
+                                    ChatSourceNote(
+                                        session = session,
+                                        takeover = pageTakeover,
+                                        takeoverEnabled = (connection == null || connection == ConnectionState.Online) && machine?.online != false,
+                                    )
+                                }
+                                ChatStoppedNote(agentTerminal,
+                                    resumeInTerminal?.takeIf { terminalResume(session, machine) == TerminalResume.Available })
+                            }
+                            else if (!canSend && session != null && session.canContinueCodex && pageTakeover != null) {
+                                // Replace the disabled read-only composer with a single actionable bar (no duplicate notice).
+                                ChatSourceNote(
+                                    session = session,
+                                    takeover = pageTakeover,
+                                    takeoverEnabled = (connection == null || connection == ConnectionState.Online) && machine?.online != false,
+                                )
+                            } else {
                                 // What waits in the agent's queue sits right above the composer, while the composer shows (Persona's further down).
                                 // Not while a "/" quick message is being picked: the list opens above the field, and with the
                                 // keyboard up the queue, the list and the status line together climbed over the top bar.
@@ -1292,6 +1321,7 @@ private fun ChatPage(
                     deliveryAction(message, if (message.state.allows(DeliveryAction.Cancel)) DeliveryAction.Cancel else DeliveryAction.Delete)
                 } }, viewerState, chatList, backgroundActions = chrome.actions,
                 backgroundConnection = chrome.connection, backgroundFiles = chrome.files)
+            pageTakeover?.let { CodexTakeoverDialogs(it) }
         }
     }
 }

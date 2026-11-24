@@ -534,6 +534,9 @@ func (n *Node) setAgentsAt(agents []host.Agent, epoch uint64, heard map[string]b
 				continue
 			}
 			id = bound
+			if src, ok := n.codexSource(bound); ok && src.home != "" {
+				home = src.home
+			}
 		}
 		if named, claimed := n.codexByTitle(a, id, m); named != "" {
 			id = named

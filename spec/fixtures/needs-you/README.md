@@ -6,7 +6,8 @@ badge. These cases pin what that number counts, so the places and the clients ag
 ("Counts") gives an assistant's waiting agents. The section lists every waiting row; the three places count the rows
 the badge counts (D6 of `docs/plans/plan-derived-counts.md`, "6. Decisions"). The rows the count leaves out stay listed
 in the section, in uncounted groups named for why: Muted, and Assistant is looking for quiet tasks' agents and held
-cards (`docs/protocol/agent-states.md`, "Needs you that is not counted", says how such a row reads).
+questions (`docs/protocol/agent-states.md`, "Needs you that is not counted", says how such a row reads). A card its
+task's supervisor holds is the supervisor's, not the user's: it is neither listed nor counted (D11, below).
 
 | Rule | Cases |
 | --- | --- |
@@ -19,8 +20,8 @@ cards (`docs/protocol/agent-states.md`, "Needs you that is not counted", says ho
 | A child the hub folds under its parent (`folded_under`) and a side session (`folded_as: "side"`) are no rows of their own: their cards sit under the parent's row, which waits through the children rollup or the sides it holds. One row, counted once. | `a_childs_card_counts_under_its_parent`, `a_side_counts_under_its_parent` |
 | A session an Agent-folder hide rule matches (`hidden_by_directory`, `docs/protocol/protocol.md` ("Agent directory visibility")) is no row, and its cards count nowhere. | `a_directory_hidden_card_counts_nowhere` |
 | A card of any kind makes its session wait: an MCP server's form (`elicitation`) does too. | `an_elicitation_makes_its_session_wait` |
-| A held card (D11) is listed and answerable but counts nowhere until it is first handed to the user: a `delegating` card, which the assistant is still deciding whether it may answer for the user, or which waits with the supervisor of the card's task. A session whose only pending cards are held is a row with them, but no count includes it, though its state says `needs_you`: the manager's `agentState` marks a session with any pending card so, and that stays as it is. A session with a held card and one already handed to the user counts. A card escalated to the user is handed, whatever its push level. | `a_held_card_is_listed_but_counts_nowhere`, `a_handed_card_beside_a_held_one_counts` |
-| A parsed terminal question routed to a task's supervisor (a `delegating` card of kind `screen`) still counts, and so does the terminal dialog behind it: D11 left this case to the owner's confirmation, since such a question stays with its supervisor until `ask_escalate`, with no time limit (the plan's 6.1). When it is confirmed or the hold is bounded, the case changes to held. | `a_routed_terminal_question_still_counts` |
+| A held question (D11) is listed and answerable but counts nowhere until it is first handed to the user: a `delegating` question, which the assistant is still deciding whether it may answer for the user. A session whose only pending cards are held is a row with them, but no count includes it, though its state says `needs_you`: the manager's `agentState` marks a session with any pending card so, and that stays as it is. A session with a held card and one already handed to the user counts. A card escalated to the user is handed, whatever its push level. | `a_held_card_is_listed_but_counts_nowhere`, `a_handed_card_beside_a_held_one_counts` |
+| A card its task's supervisor holds (a `delegating` card of any kind but `question`: a permission, a plan, or a parsed terminal question, kind `screen`) is the supervisor's until it passes it up with `ask_escalate`: it is in no row and counts nowhere, and the clients offer no way to answer it. A session whose pending cards are all so held is no row, though its state says `needs_you` (for a `screen` card, from the terminal dialog behind it); with a card not held it is a row with that card alone. The owner confirmed this for routed terminal questions on 2026-11-23 (D11, the plan's 6.1). | `a_routed_terminal_question_is_held`, `a_supervisor_held_card_beside_an_open_one_leaves_the_row` |
 
 A copy of a card mirrored to the owner (`mirror_of`) counts nowhere (D1). That rule comes with #12645, which adds the
 field. While #12645 is open no case pins it: its case lands with #12645, or with the first change after it merges.
@@ -31,7 +32,8 @@ field. While #12645 is open no case pins it: its case lands with #12645, or with
 - `expected.rows` lists the section's rows in order, each with its `id` (`agent:<machine id>/<session id>`, or
   `card:<interaction id>` for a card with no session) and its `cards` (interaction ids, oldest first);
   `expected.badge_rows` lists the rows the tab's badge counts, in the same shape and order (the rows less muted agents,
-  quiet tasks' agents and sessions whose only cards are held), and `expected.badge` is their number.
+  quiet tasks' agents and sessions whose only cards are held), and `expected.badge` is their number. A card its task's
+  supervisor holds is in no row at all.
   `expected.header` is the number the section's header and its Needs you filter show: the badge's rows (D6).
 - Sessions carry the hub's fields for folding (`folded_under`, `folded_as`, `children`) and hiding
   (`hidden_by_directory`), as a hub that folds sides (`sessions_side_fold`) sends them. Every case holds the whole
@@ -87,3 +89,5 @@ removes the mark. A decision that changes the count's own rule also goes into `a
 | `a_quiet_tasks_card_is_a_row_but_not_on_the_badge` | iOS, Android | D6 | The header and the filter count the quiet task's agent's row (2, not 1) |
 | `a_directory_hidden_card_counts_nowhere` | Android | D1 | Android reads no `hidden_by_directory`: the hidden session and its card are a row, and the badge and the header count it (2, not 1) |
 | `a_held_card_is_listed_but_counts_nowhere` | iOS, Android | D11 | Every pending card's session counts, held or not: the badge, the header and the filter count it (1, not 0) |
+| `a_routed_terminal_question_is_held` | Android | D11 | Android reads no `delegating`: the supervisor's terminal question is listed under its session, and the badge, the header and the filter count it (1, not 0) |
+| `a_supervisor_held_card_beside_an_open_one_leaves_the_row` | Android | D11 | Android reads no `delegating`: the supervisor's permission is listed in the session's row beside the question (the count is 1 either way) |

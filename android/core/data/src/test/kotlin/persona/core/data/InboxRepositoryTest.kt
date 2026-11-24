@@ -2,7 +2,6 @@ package persona.core.data
 
 import persona.core.contracts.*
 import persona.core.contracts.api.*
-import persona.feature.inbox.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.TestScope
@@ -15,6 +14,7 @@ import org.junit.Test
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
+import persona.core.inbox.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class InboxRepositoryTest {
@@ -849,8 +849,8 @@ class InboxRepositoryTest {
             }
             val repository = repository(transport, directory, owner, FakeHub())
             val zone = java.time.ZoneId.of("Asia/Shanghai")
-            assertEquals(listOf(persona.feature.inbox.InboxDoneDay(java.time.LocalDate.of(2026, 11, 10), 120),
-                persona.feature.inbox.InboxDoneDay(java.time.LocalDate.of(2026, 11, 3), 4)), repository.doneDays("m-3fa21c", zone))
+            assertEquals(listOf(persona.core.inbox.InboxDoneDay(java.time.LocalDate.of(2026, 11, 10), 120),
+                persona.core.inbox.InboxDoneDay(java.time.LocalDate.of(2026, 11, 3), 4)), repository.doneDays("m-3fa21c", zone))
             assertEquals(listOf<Pair<String?, String>>("m-3fa21c" to "Asia/Shanghai"), asked)
             fun refused(code: Int) = object : IOException("hub $code"), persona.core.contracts.api.HubCodedFailure {
                 override val status: Int = code
@@ -1338,8 +1338,8 @@ class InboxRepositoryTest {
             assertEquals(listOf("received", "something_new"), listed.event.chain.map { it.kind })
             assertEquals(1L, listed.event.chain.first().link?.positionValue)
 
-            val request = persona.feature.inbox.SuggestionRequest("lark:c:1", 2, persona.feature.inbox.SuggestionAction.Confirm, "好的，改过")
-            assertEquals(persona.feature.inbox.SuggestionOutcome.Done, repository.actOnSuggestion(request))
+            val request = persona.core.inbox.SuggestionRequest("lark:c:1", 2, persona.core.inbox.SuggestionAction.Confirm, "好的，改过")
+            assertEquals(persona.core.inbox.SuggestionOutcome.Done, repository.actOnSuggestion(request))
             assertEquals(listOf("lark:c:1", 2L, "confirm", "好的，改过", request.clientId), transport.seen.single())
             repository.snapshot.value.records.single().let {
                 assertEquals("working", it.item.status)
@@ -1348,8 +1348,8 @@ class InboxRepositoryTest {
             }
 
             transport.answer = { throw InboxSuggestionStale(item(3, "action", "done")) }
-            val stale = persona.feature.inbox.SuggestionRequest("lark:c:1", 2, persona.feature.inbox.SuggestionAction.Reject)
-            assertEquals(persona.feature.inbox.SuggestionOutcome.Stale, repository.actOnSuggestion(stale))
+            val stale = persona.core.inbox.SuggestionRequest("lark:c:1", 2, persona.core.inbox.SuggestionAction.Reject)
+            assertEquals(persona.core.inbox.SuggestionOutcome.Stale, repository.actOnSuggestion(stale))
             assertEquals(3L, repository.snapshot.value.records.single().event.suggestion?.version)
         } finally {
             owner.coroutineContext[Job]!!.cancelAndJoin()

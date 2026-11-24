@@ -15,9 +15,10 @@ import (
 )
 
 // GET /api/v1/interactions/history (docs/protocol/protocol.md, docs/extensions/extensions.md "Question history"): the
-// cards that were raised and how each ended, newest first. Without since, before or kind it is the newest ≤500 as
-// before; with any of them it pages back by time: a full page carries next_before / next_before_id, the cursor of the
-// next older page (pass them as before and before_id).
+// cards that were raised and how each ended, plus decisions recorded directly as resolved (reversible-setting
+// auto-approval), newest first. Without since, before or kind it is the newest ≤500 as before; with any of them it pages
+// back by time: a full page carries next_before / next_before_id, the cursor of the next older page (pass them as before
+// and before_id).
 //
 // An extension's token (agents.read) is never shown a private card (a Just me turn's), a card of a space hidden from
 // extensions, or one whose space cannot be told; the values filled into a card's fields (a password a permission asked for) are left

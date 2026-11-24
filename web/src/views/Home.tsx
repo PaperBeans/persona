@@ -15,6 +15,7 @@ import { optionDisplay, permissionDetail } from "../lib/tool-detail";
 import { cardToolName } from "../lib/turns";
 import { plainMarkdown } from "../lib/plain-markdown";
 import { homeOverview, paneRoute, type TabGroup } from "../lib/herdr-tree";
+import { heldAsWorking, userCards } from "../lib/supervisor-held";
 import { agentLabel } from "../lib/mentions";
 import { hubLabel, machineWithHub } from "../lib/mesh";
 import { isPending, machineErrorText } from "../lib/add-computer";
@@ -61,11 +62,14 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
   useTapGuardView(overviewTapSurface, currentViewId());
   // with several assistants, the current one's computers, cards, agents and tasks (docs/assistant/managers.md "Clients")
   const machines = useScopedMachines();
-  const interactions = useScopedInteractions();
+  const scopedCards = useScopedInteractions();
+  // the cards that are the user's: one a task's supervisor holds is its until it passes it up (lib/supervisor-held.ts),
+  // so Needs you neither lists nor counts it, and its agent, waiting on nothing else, is listed Working (as the counts say)
+  const interactions = useMemo(() => userCards(scopedCards), [scopedCards]);
   const answered = useStore((s) => s.answered);
   // a card answered here moves its agent out of "Stuck" at once, not at the hub's next push (#4286)
   const agentSessions = useScopedAgentSessions();
-  const sessions = useMemo(() => answeredSessions(agentSessions, interactions, answered), [agentSessions, interactions, answered]);
+  const sessions = useMemo(() => heldAsWorking(answeredSessions(agentSessions, interactions, answered), scopedCards), [agentSessions, interactions, scopedCards, answered]);
   const outbox = useStore((s) => s.outbox);
   const roster = useRoster();
   const actionable = useMemo(() => overviewActions({ outbox, sessions: agentSessions, machines, roster }), [outbox, agentSessions, machines, roster]);
@@ -104,7 +108,7 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
   const todos = useScopedTodos();
   const taskRows = useStore((s) => s.taskRows);
   // read as the Tasks page reads them: a card answered here moves its task at once too
-  const tasks = useMemo(() => homeTasks(todos, answeredLookup(withTaskRows(makeSessionLookup(agentSessions), taskRows), interactions, answered)), [todos, agentSessions, taskRows, interactions, answered]);
+  const tasks = useMemo(() => homeTasks(todos, answeredLookup(withTaskRows(makeSessionLookup(agentSessions), taskRows), scopedCards, answered)), [todos, agentSessions, taskRows, scopedCards, answered]);
   const name = (mid: string) => machineWithHub(mid, machines);
   const [confirmSeen, setConfirmSeen] = useState<Session[] | null>(null);
   const markAll = <MarkAllSeen count={unread.length} onClick={() => setConfirmSeen(unread)} />;

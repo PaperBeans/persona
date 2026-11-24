@@ -21,13 +21,15 @@ it.skipIf(process.platform !== "linux")("shows the versioned queue in three lang
   const resources = [{ id: "ci.example", capacity: 3, mirror: { machine: "computer-a", target: "runner.example.com" }, mirror_state: { unknown: true, observed_at: new Date(Date.now() - 60000).toISOString(), queue }, leases: [] }];
   await writeFile(join(dir, "index.html"), `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body class="bg-inset text-ink"><main id="root" class="p-6"></main><script type="module" src="./main.tsx"></script></body></html>`);
   await writeFile(join(dir, "main.tsx"), `import React from 'react';import{createRoot}from'react-dom/client';import{initI18n}from'/src/i18n';import'/src/styles.css';await initI18n(new URLSearchParams(location.search).get('lang')||'en');const{ResourcesPanel}=await import('/src/views/machines/ResourcesPanel');document.documentElement.classList.toggle('dark',new URLSearchParams(location.search).get('scheme')==='dark');createRoot(document.getElementById('root')).render(<ResourcesPanel/>);`);
-  const server = await createServer({ root, configFile: false, plugins: [i18nCatalogs, pageTokensPlugin, react(), tailwindcss()], css: { postcss: { plugins: [textScale()] } }, server: { host: "127.0.0.1", port: 0 }, logLevel: "error" });
+  // One generated page, served once: no file watcher (watching web/ takes thousands of inotify watches, and where the user's
+  // limit is low every one of them fails with ENOSPC) and no HMR.
+  const server = await createServer({ root, configFile: false, plugins: [i18nCatalogs, pageTokensPlugin, react(), tailwindcss()], css: { postcss: { plugins: [textScale()] } }, server: { host: "127.0.0.1", port: 0, watch: null, hmr: false }, logLevel: "error" });
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
   try {
     await server.listen();
     const address = server.httpServer?.address();
     if (!address || typeof address === "string") throw new Error("missing isolated browser fixture port");
-    const candidates = [process.env.CHROME_BIN, "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium"].filter((path): path is string => !!path);
+    const candidates = [process.env.CHROME_BIN, "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", chromium.executablePath()].filter((path): path is string => !!path);
     let executablePath: string | undefined;
     for (const path of candidates) { try { await access(path); executablePath = path; break; } catch { /* try the next installed browser */ } }
     if (!executablePath) throw new Error("remote runner requires its installed Chrome for resource UI verification");

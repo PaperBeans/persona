@@ -118,9 +118,20 @@ func supervisionUserAction(run []proto.Item, uses map[string]proto.Item) bool {
 			}
 		case "task_review":
 			var input struct {
-				Verdict string `json:"verdict"`
+				Verdict   string `json:"verdict"`
+				UserCheck bool   `json:"user_check"`
 			}
-			if json.Unmarshal(use.ToolInput, &input) == nil && (input.Verdict == "accepted" || input.Verdict == "needs_user") {
+			if json.Unmarshal(use.ToolInput, &input) != nil {
+				continue
+			}
+			internalAccepted := false
+			if input.Verdict == "accepted" && !input.UserCheck {
+				var disposition struct {
+					Background bool `json:"background"`
+				}
+				internalAccepted = json.Unmarshal([]byte(result.Text), &disposition) == nil && disposition.Background
+			}
+			if (input.Verdict == "accepted" || input.Verdict == "needs_user") && !internalAccepted {
 				return true
 			}
 		}

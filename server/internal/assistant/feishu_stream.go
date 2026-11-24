@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 )
 
 // The progress card as a CardKit entity (feishubot/cardkit.go): made and sent by its id on the run's first tick, so what
@@ -66,11 +66,11 @@ func progressLive(live string) string {
 	if r := []rune(live); len(r) > progressLiveMost {
 		live = "…" + string(r[len(r)-progressLiveMost:])
 	}
-	return feishubot.EscapeMarkdown(live)
+	return botcard.EscapeMarkdown(live)
 }
 
 // liveElement is the card's element the words go in, nil when it has none.
-func liveElement(c *feishubot.Card) map[string]any {
+func liveElement(c *botcard.Card) map[string]any {
 	for _, el := range c.Body.Elements {
 		if m, ok := el.(map[string]any); ok && m["element_id"] == progressLiveID {
 			return m
@@ -80,7 +80,7 @@ func liveElement(c *feishubot.Card) map[string]any {
 }
 
 // kitShape is what the card shows besides its words: when it changes, the card is written whole.
-func kitShape(c *feishubot.Card) [32]byte {
+func kitShape(c *botcard.Card) [32]byte {
 	el := liveElement(c)
 	if el == nil {
 		return sha256.Sum256([]byte(c.JSON()))
@@ -108,7 +108,7 @@ func (s *Service) kitOf(r *channel.Run, prog *chanLive) *cardKit {
 
 // kitPost makes the run's first progress card an entity streaming its words and sends it by its id. ok is false when
 // CardKit did not make one: the caller sends the card as a message.
-func (f feishuSink) kitPost(ctx context.Context, r *channel.Run, prog *chanLive, c *feishubot.Card, to feishuTarget) (mid string, err error, ok bool) {
+func (f feishuSink) kitPost(ctx context.Context, r *channel.Run, prog *chanLive, c *botcard.Card, to feishuTarget) (mid string, err error, ok bool) {
 	s := f.s
 	now := s.chansNow()
 	s.chans.mu.Lock()
@@ -128,7 +128,7 @@ func (f feishuSink) kitPost(ctx context.Context, r *channel.Run, prog *chanLive,
 		s.chans.mu.Unlock()
 		return "", nil, false
 	}
-	mid, err = s.botPostContent(ctx, to, r.ReplyTo, feishubot.CardEntityContent(made.CardID), "", "")
+	mid, err = s.botPostContent(ctx, to, r.ReplyTo, botcard.CardEntityContent(made.CardID), "", "")
 	if err != nil {
 		return "", err, true
 	}
@@ -144,7 +144,7 @@ func (f feishuSink) kitPost(ctx context.Context, r *channel.Run, prog *chanLive,
 // kitProgress writes the progress card into its entity: whole when more than its words changed (with the words it
 // has), then its words streamed. false when the card is not an entity, or CardKit failed now: the caller updates it
 // as a message.
-func (f feishuSink) kitProgress(ctx context.Context, r *channel.Run, prog *chanLive, c *feishubot.Card) bool {
+func (f feishuSink) kitProgress(ctx context.Context, r *channel.Run, prog *chanLive, c *botcard.Card) bool {
 	s := f.s
 	k := s.kitOf(r, prog)
 	if k == nil {
@@ -190,7 +190,7 @@ func (f feishuSink) kitGone(ctx context.Context, k *cardKit, messageID string) b
 	k.checked = now
 	items, err := s.botMessages(ctx, messageID)
 	if err != nil {
-		return feishubot.MessageGone(err)
+		return botcard.MessageGone(err)
 	}
 	for _, it := range items {
 		if it.MessageID == messageID {

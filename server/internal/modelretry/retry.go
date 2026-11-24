@@ -61,7 +61,7 @@ func Temporary(text string) bool {
 		return true
 	}
 	for _, word := range []string{
-		"rate limit", "rate_limit", "too many requests", "overloaded", "at capacity", "no eligible upstream",
+		"rate limit", "rate_limit", "too many requests", "overloaded", "at capacity", "no eligible upstream", "no other eligible upstream",
 		"timed out", "timeout", "deadline exceeded", "socket hang up", "econnreset", "econnrefused", "eai_again",
 		"connection reset", "connection refused", "connection closed", "connection error", "connection lost", "network error",
 		"upstream connect error", "upstream request timeout", "network is unreachable", "fetch failed", "stream disconnected", "stream error",
@@ -78,6 +78,7 @@ func Temporary(text string) bool {
 var accountExhaustedWords = []string{
 	"no other eligible account",
 	"no eligible upstream",
+	"no other eligible upstream",
 	"upstream attempt budget is exhausted",
 	"upstream attempt budget exhausted",
 }

@@ -248,6 +248,59 @@ func TestEnsureAgyHooksOnlyWhenAgyIsHere(t *testing.T) {
 	}
 }
 
+// Starting an agy work agent installs Persona's agy-hooks even if agy was not present when the node started,
+// while honoring an explicit opt-out (#13950).
+func TestAgyStartEnsuresAgyHooksBeforeLaunch(t *testing.T) {
+	n, f, home := herdrNode(t)
+	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", filepath.Join(home, ".gemini", "antigravity-cli"))
+	t.Setenv("PATH", t.TempDir()) // agy not on daemon PATH, data dir absent
+	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
+	f.reply("tab.create", map[string]any{"tab": map[string]any{"tab_id": "w1:t2"}, "root_pane": map[string]any{"pane_id": "w1:p2"}})
+
+	file := n.agyHooksFile()
+	if _, err := os.Stat(file); err == nil {
+		t.Fatal("hooks already existed before start")
+	}
+	var hooksAtLaunch string
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.after(func(c herdrCall) {
+		if c.Method == "pane.send_input" && strings.Contains(c.String(), "HERDR_AGENT=agy") {
+			hooksAtLaunch, _ = agyHooksState(file, mustWanted(t, n))
+			cancel()
+		}
+	})
+	_, _ = n.startWorkAgent(ctx, n.hosts.Get(host.Herdr).(*herdrHost), home, agyAgent, agyAgent, "", "", "", "do it", "w1", "")
+	if hooksAtLaunch != "installed" {
+		t.Fatalf("agy-hooks state when agy launched = %q, want installed", hooksAtLaunch)
+	}
+
+	// Opt-out file prevents re-installing hooks on subsequent launches.
+	if _, err := uninstallAgyHooks(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(n.dir, agyHooksOffFile), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	n.ensureAgyHooksForLaunch()
+	if st, _ := agyHooksState(file, mustWanted(t, n)); st != "missing" {
+		t.Errorf("opted-out node rewrote hooks on launch: %q", st)
+	}
+}
+
+// Recording an agy pane's resume command also ensures Persona's agy-hooks are installed (#13950).
+func TestAgyHoldResumeEnsuresAgyHooks(t *testing.T) {
+	n, f, home := herdrNode(t)
+	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", filepath.Join(home, ".gemini", "antigravity-cli"))
+	t.Setenv("PATH", t.TempDir())
+	f.reply("pane.report_agent", map[string]any{})
+	file := n.agyHooksFile()
+	n.holdResume(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), "w1:p2", "agy-w1-p2", claudeLaunch{Agent: agyAgent, Launcher: agyAgent})
+	if st, _ := agyHooksState(file, mustWanted(t, n)); st != "installed" {
+		t.Fatalf("agy-hooks state after holdResume = %q, want installed", st)
+	}
+}
+
 func mustWanted(t *testing.T, n *Node) json.RawMessage {
 	t.Helper()
 	w, err := agyHooksWanted(n.bin, n.dir, n.home)

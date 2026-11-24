@@ -140,7 +140,7 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
                     },
                     onOpenAssistant = { navigator.navigate(persona.feature.chat.conversationRoute(it, assistant = true)) },
                     onConnectionDetails = { navigator.navigate(SettingsPageRoute(SettingsPage.Diagnostics)) },
-                    files = session.files, hubScope = session.identity, ports = wiring?.ports,
+                    files = session.files, hubScope = wiring?.scope?.path ?: session.identity, ports = wiring?.ports,
                     onOpenPath = if (canOpenFilePath) ({ path, line -> open(FilesPane.Files, path, line) }) else null,
                     onOpenTodo = { todoId -> navigator.navigate(persona.core.navigation.TodoDetailRoute(todoId)) },
                     // A model error the hub named on Persona's turn: Fix It opens what the home's readiness card would (MainReadiness.kt).

@@ -3,28 +3,32 @@ package extmgr
 import (
 	"context"
 	"encoding/json"
-	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"testing"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/botport"
+
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/botcard"
 )
 
 // Obtain status, then change the actual routing snapshot before AppCall: the assistant-side status check alone
 // cannot authorize a send to the new recipient. No real provider or account is contacted.
 func TestFeishuReminderBindingAtActualRoute(t *testing.T) {
+	needsLarkModule(t)
 	for _, change := range []string{"none", "owner", "generation", "pushes off", "explicit chat"} {
 		t.Run(change, func(t *testing.T) {
 			api := newFakeOpenAPI(t)
 			h := newTestManager(t)
 			h.bots.loaded = true
-			h.bots.api = feishubot.New("cli_test", "synthetic", api.srv.URL)
+			h.bots.api = botport.New("cli_test", "synthetic", api.srv.URL)
 			h.bots.set = FeishuBotSettings{Enabled: true, Owner: &BotOwner{OpenID: "ou_a", ChatID: "oc_a", At: time.Unix(100, 0)}, Features: BotFeatures{Pushes: true}}
 			status, err := h.feishuCall(context.Background(), assistantwire.FeishuStatusGet, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			st := status.(assistantwire.FeishuStatus)
-			params := map[string]any{"card": feishubot.NewCard("", "", "Reminder").Markdown("Synthetic notes").JSON(), "uuid": "todo-bound-card0", "todo_reminder_pairing": map[string]any{"owner": st.Owner, "paired_at": st.PairedAt}}
+			params := map[string]any{"card": botcard.NewCard("", "", "Reminder").Markdown("Synthetic notes").JSON(), "uuid": "todo-bound-card0", "todo_reminder_pairing": map[string]any{"owner": st.Owner, "paired_at": st.PairedAt}}
 			h.bots.mu.Lock()
 			switch change {
 			case "owner":

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/compat"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 func TestAgyPaneTranscriptMapping(t *testing.T) {
@@ -176,6 +177,61 @@ func TestAgyToolArrayArgsAreClipped(t *testing.T) {
 	}
 	if _, small := agyTool("view_file", json.RawMessage(`[1,2]`)); string(small) != `[1,2]` {
 		t.Fatalf("small array changed: %s", small)
+	}
+}
+
+func TestAgyToolInput(t *testing.T) {
+	const path = "/example/file.go"
+	const content = "line1\nline2\nline3\n"
+	encode := func(value string) string {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	written := func(path, content string) map[string]string {
+		return map[string]string{"TargetFile": path, "CodeContent": content}
+	}
+	wantWrite := func(path, content string) map[string]string {
+		return map[string]string{"file_path": path, "content": content}
+	}
+	for _, tc := range []struct {
+		name, tool, wantTool string
+		args, want           map[string]string
+		truncated            bool
+	}{
+		{"encoded write", "write_to_file", "Write", written(encode(path), encode(content)), wantWrite(path, content), false},
+		{"plain quoted query", "grep_search", "Grep", map[string]string{"Query": `"exact phrase"`, "SearchPath": "/example"},
+			map[string]string{"pattern": `"exact phrase"`, "path": "/example"}, false},
+		{"plain JSON file", "write_to_file", "Write", written("/example/file.json", `"hello"`), wantWrite("/example/file.json", `"hello"`), false},
+		{"encoded tail cut", "write_to_file", "Write", written(encode(path), "\"line1\\nline2\\nli\n<truncated 41 bytes>"),
+			wantWrite(path, "line1\nline2\nli"+transcript.ApproximateClipNote(55)), true},
+		{"middle cut", "write_to_file", "Write", written(path, "HEAD-PART\n<truncated 40 bytes>\nTAIL-PART"),
+			wantWrite(path, "HEAD-PART"+transcript.ClipNote(58)), true},
+		{"encoded middle cut", "write_to_file", "Write", written(encode(path), "\"head\\n\n<truncated 10 bytes>\ntail\""),
+			wantWrite(path, "head\n"+transcript.ApproximateClipNote(20)), true},
+		{"tail cut after dangling backslash", "write_to_file", "Write", written(encode(path), "\"line1\\n\\\n<truncated 8 bytes>"),
+			wantWrite(path, "line1\n"+transcript.ApproximateClipNote(14)), true},
+		{"tail cut inside Unicode escape", "write_to_file", "Write", written(encode(path), "\"line1\\n\\u00\n<truncated 8 bytes>"),
+			wantWrite(path, "line1\n"+transcript.ApproximateClipNote(14)), true},
+		{"tail cut after escaped backslash", "write_to_file", "Write", written(encode(path), "\"line1\\n\\\\\n<truncated 8 bytes>"),
+			wantWrite(path, "line1\n\\"+transcript.ApproximateClipNote(15)), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := json.Marshal(tc.want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tool, input := agyToolInput(tc.tool, raw, tc.truncated)
+			if tool != tc.wantTool || string(input) != string(want) {
+				t.Fatalf("tool input = %s %s, want %s %s", tool, input, tc.wantTool, want)
+			}
+		})
 	}
 }
 

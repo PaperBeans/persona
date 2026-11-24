@@ -4,7 +4,7 @@ package node
 // the assistant capability runs the conversation, driven with the runtime protocol's own session calls. What is the
 // assistant's stays here, as for Claude and Codex: the conversation's state (launcher, directory), the live snapshot
 // each message starts with, the permission mode, the shared memory, and the gated skill commands Feishu goes through
-// (larkgate.go; their credentials never leave the node). Nothing in this file is any one runtime's.
+// (larkgate.go; Auth-held credentials never leave the node). Nothing in this file is any one runtime's.
 
 import (
 	"context"
@@ -95,13 +95,28 @@ func (n *Node) runtimeAssistantCwd(id, cwd string, st sessionState) string {
 	return identity.AssistantDir(n.home)
 }
 
+// assistantEnvForRuntime returns nil unless the local runtime explicitly accepts dedicated-worker environments.
+func (n *Node) assistantEnvForRuntime(h *runtimeConn, cwd string) map[string]string {
+	if h == nil || !h.assistantEnvironment() {
+		return nil
+	}
+	entries := n.assistantRuntimeEnv(cwd)
+	env := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if name, value, ok := strings.Cut(entry, "="); ok {
+			env[name] = value
+		}
+	}
+	return env
+}
+
 // assistantSendRuntime is assistantSend on a runtime (h, nil when it is not connected): a new conversation is started
 // there (session.start with assistant), then the message goes with the snapshot as its context unless public is true,
 // the conversation's permission mode and its memory directory; a new conversation's first message also carries the
 // instructions only a runtime needs (memory, Feishu). Runtimes that advertise caps.supervision_policy receive manager-owned
 // supervision_instructions as an explicit protocol field on session.start and session.send; non-capable runtimes keep
 // the runtimePolicyDropped boundary (refusing supervision deliveries, dropping policy for owner messages).
-func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd, launcher, text string, images []proto.Image, mode string, public, strict bool, selected []assistantskills.Entry, modelEffortPolicy ...string) (string, error) {
+func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd, launcher, text string, images []proto.Image, mode string, public, strict, modeExplicit bool, selected []assistantskills.Entry, modelEffortPolicy ...string) (string, error) {
 	hasInput := strings.TrimSpace(text) != "" || len(images) != 0
 	if id != "" && hasInput && n.runtimes.compacting(id) {
 		return "", runtimeCompactingRefusal(ctx)
@@ -152,7 +167,11 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		n.assistantRuntimeSkills(cwd)
 	}
 	memDir := n.memoryForUse(cwd)
+	environment := n.assistantEnvForRuntime(h, cwd)
 	turn := map[string]any{"assistant": true, "memory_dir": memDir}
+	if environment != nil {
+		turn["env"] = environment
+	}
 	if pickedModel != "" {
 		turn["model"] = pickedModel
 	}
@@ -162,6 +181,9 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 	startedNew := id == ""
 	if startedNew {
 		startParams := map[string]any{"cwd": cwd, "assistant": true}
+		if environment != nil {
+			startParams["env"] = environment
+		}
 		if pickedModel != "" {
 			startParams["model"] = pickedModel
 		}
@@ -198,7 +220,7 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		}
 		n.state.put(id, st)
 	}
-	n.persistModes(id, mode, pickedEffort)
+	n.persistModes(id, mode, pickedEffort, modeExplicit)
 	if !hasInput {
 		awaitList(n.notifySessionsSoon())
 		return id, nil

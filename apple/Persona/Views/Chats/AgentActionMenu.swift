@@ -64,13 +64,13 @@ nonisolated struct AgentActionFacts: Equatable, Sendable {
                   paneBadges: AgentMenuFacts.paneBadges(AgentMenuRouting.shared.gitStatus(session)),
                   currentPane: currentPane, review: model.features(session.group).contains("git_review") && !session.cwd.isEmpty,
                   preview: !model.isDemo && model.features(session.group).contains(PreviewLogic.feature) && !session.cwd.isEmpty,
-                  screen: model.canShowScreen(session.key.machineRef),
+                  screen: model.liveScreen?.canShow(session.key.machineRef) ?? false,
                   todoHub: TodoStore.shared.isSupported && TodosLogic.isOnTodosHub(sessionGroup: session.group, hubGroup: model.hub?.group),
                   sideCount: (sides ?? (hosted ? SideSessions() : model.sides(of: session.key))).rows.count,
                   hosted: hosted, showsSpace: showsSpace,
                   terminalResume: session.status == .offline || session.status == .unknown
                     ? session.terminalResume(on: model.machine(session.key.machineRef)) : .hidden,
-                  phone: AgentMenuFacts.isPhone, moveChoices: moveChoices)
+                  phone: AgentMenuFacts.supportsTakeover, moveChoices: moveChoices)
     }
 
     /// Test and preview construction needs no live hub. Production uses the model initializer above.
@@ -175,9 +175,10 @@ nonisolated struct AgentActionFacts: Equatable, Sendable {
 }
 
 enum AgentMenuFacts {
-    @MainActor static var isPhone: Bool {
+    /// Takeover and continuation are available on iOS (iPhone and iPad); retired native Mac stays excluded.
+    nonisolated static var supportsTakeover: Bool {
         #if os(iOS)
-        UIDevice.current.userInterfaceIdiom == .phone
+        true
         #else
         false
         #endif
@@ -209,9 +210,44 @@ nonisolated struct AgentActionItem: Equatable, Identifiable, Sendable {
         case copyDirectory, terminal, copyResume, resume
         case splitPane, splitRight, splitDown, nodeGit, gitPull, gitPush, gitFetch, closeTab, close, delete
     }
-    enum Group: String, Sendable { case navigation, session, utilities, node, destructive }
+    enum Group: String, CaseIterable, Sendable { case navigation, session, utilities, node, destructive }
     let id: ID
     let group: Group
+}
+
+/// Where the Agent menu draws each item of its inventory (#13396): at most seven on the top level, More counted. Interrupt,
+/// Mark as Seen, Rename and Pin, with Back to Chat while the chat shows another pane, stay there, then More, then one
+/// destructive item last: Close Agent…, else Delete Chat…. Everything else is in More, in the inventory's order.
+nonisolated struct AgentActionLayout: Equatable, Sendable {
+    /// The most items the top level holds, More and the last item counted.
+    static let topLimit = 7
+    /// What stays on the top level when offered, before More.
+    static let topIDs: Set<AgentActionItem.ID> = [.backToChat, .interrupt, .markSeen, .rename, .pin]
+
+    var top: [AgentActionItem]
+    var more: [AgentActionItem]
+    var last: AgentActionItem?
+
+    init(_ items: [AgentActionItem]) {
+        let last = items.first { $0.id == .close } ?? items.first { $0.id == .delete }
+        top = items.filter { Self.topIDs.contains($0.id) }
+        more = items.filter { !Self.topIDs.contains($0.id) && $0.id != last?.id }
+        self.last = last
+    }
+
+    /// The items the top level shows, More and the last one counted.
+    var topLevelCount: Int { top.count + (more.isEmpty ? 0 : 1) + (last == nil ? 0 : 1) }
+}
+
+extension AgentActionFacts {
+    nonisolated var layout: AgentActionLayout { AgentActionLayout(items) }
+
+    /// What More's items are and say: a change builds its nested menu again (`AgentActionMenu.more`).
+    nonisolated var moreIdentity: [String] {
+        layout.more.map(\.id.rawValue) + [muted ? "muted" : "", paneBadges[.git] ?? "", "\(sideCount)",
+                                          "\(session.subagents?.count ?? 0)", session.todo?.title ?? "", "\(terminalResume)"]
+            + moveChoices.map(\.id)
+    }
 }
 
 /// A row or detail page supplies its own alerts and navigation. `update` keeps the same callback
@@ -284,14 +320,29 @@ struct AgentActionMenu: View, Equatable {
             let _ = PerfTrace.body("RowMenu.content")
             #endif
             let now = { model.latest(facts.key) }
-            let items = facts.items
+            let layout = facts.layout
             // Type-erased boundaries keep the many conditional actions out of the chat page's large Debug stack frames.
-            // The sequence and contents are unchanged: every group still comes from the shared `facts.items` inventory.
-            AnyView(section(.navigation, in: items, now: now))
-            AnyView(section(.session, in: items, now: now))
-            AnyView(section(.utilities, in: items, now: now))
-            AnyView(section(.node, in: items, now: now))
-            AnyView(section(.destructive, in: items, now: now))
+            // Every item still comes from the shared `facts.items` inventory: a few on the top level, the rest in More (#13396).
+            AnyView(Section {
+                ForEach(layout.top) { item in AnyView(row(item, now: now)) }
+                AnyView(more(layout.more, now: now))
+            })
+            if let last = layout.last {
+                AnyView(Section { AnyView(row(last, now: now)) })
+            }
+        }
+    }
+
+    /// More: the items the top level leaves out, in the inventory's order and sections. A nested menu keeps the items
+    /// it was first built with (the assistant's launcher menu found it, `AssistantTopBar`), so it is built again when
+    /// what they say changes (`moreIdentity`: Unmute for Mute, Git's count).
+    @ViewBuilder private func more(_ items: [AgentActionItem], now: @escaping () -> Session?) -> some View {
+        if !items.isEmpty {
+            Menu {
+                ForEach(AgentActionItem.Group.allCases, id: \.self) { group in AnyView(section(group, in: items, now: now)) }
+            } label: { Label("More", systemImage: Theme.Icon.more) }
+            .id(facts.moreIdentity)
+            .accessibilityIdentifier("agent-menu-more")
         }
     }
 
@@ -383,7 +434,7 @@ struct AgentActionMenu: View, Equatable {
                 Task { await model.askPersona(AgentHandoff.prompt(s, machine: model.machine(s.machineRef)?.name)) }
             } label: { Label("Hand to Persona", systemImage: Theme.Icon.ai) }
         case .screen:
-            ScreenMenu(machine: facts.key.machineRef, from: facts.key)
+            ModuleViews(place: .chatMenu, context: .init(machine: facts.key.machineRef, from: facts.key))
         case .copyDirectory:
             Button { UIPasteboard.general.string = now()?.cwd } label: { Label("Copy Directory", systemImage: Theme.Icon.folder) }
         case .terminal:

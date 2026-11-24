@@ -1,5 +1,6 @@
 package persona.feature.assistant
 
+import persona.core.moduleapi.serves
 import android.content.res.Resources
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Composable
@@ -58,8 +59,8 @@ internal enum class AssistantMenuItem(val icon: PhIcon, @StringRes val label: In
  * list is one section; a rule goes above every section after the first.
  */
 internal fun assistantMenu(offline: Boolean, modules: List<ModuleMenuAction>, main: SessionKey?, active: SessionKey?, compact: Boolean,
-                           newMain: Boolean, working: Boolean, clear: Boolean = false): List<List<AssistantMenuEntry>> = listOf(
-    listOfNotNull(AssistantMenuItem.ConnectionDetails.takeIf { offline }, AssistantMenuItem.Knowledge, AssistantMenuItem.Details) +
+                           newMain: Boolean, working: Boolean, clear: Boolean = false, knowledge: Boolean = true): List<List<AssistantMenuEntry>> = listOf(
+    listOfNotNull(AssistantMenuItem.ConnectionDetails.takeIf { offline }, AssistantMenuItem.Knowledge.takeIf { knowledge }, AssistantMenuItem.Details) +
         modules.map(::ModuleItem) + listOfNotNull(AssistantMenuItem.BackToMain.takeIf { main != null && main != active }),
     listOfNotNull(AssistantMenuItem.CopyDirectory, AssistantMenuItem.CopyInfo,
         AssistantMenuItem.CopySessionId.takeIf { active != null }, AssistantMenuItem.CopyDiagnostics.takeIf { active != null }),
@@ -203,7 +204,9 @@ internal fun AssistantTitleMenu(
     val sections = assistantMenu(offline = connection != null && connection != ConnectionState.Online,
         modules = moduleActions, main = snapshot.mainSession, active = active, compact = active != null && mainActions.compact,
         newMain = onMain && mainActions.newMain, working = interrupt != null && persona.core.domain.lines.isLiveStatus(shown?.status),
-        clear = onMain && mainActions.clear)
+        clear = onMain && mainActions.clear,
+        // Knowledge only while a module serves its pages (#13934, :module:knowledge-ui).
+        knowledge = persona.core.moduleapi.LocalModulePlaces.current.serves(persona.core.navigation.KnowledgeRoute::class))
         fun rawAction(item: AssistantMenuItem, separator: Boolean): JAction = when (item) {
             AssistantMenuItem.ConnectionDetails -> JAction(resources.getString(item.label), separatorBefore = separator,
                 onClick = onConnectionDetails)

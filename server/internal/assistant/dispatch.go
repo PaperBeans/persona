@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -247,6 +248,7 @@ func (s *Service) dispatchStart(ctx context.Context, machine, session string, ar
 		params["cwd"], params["workspace_id"] = wt.Path, wt.WorkspaceID
 		note = fmt.Sprintf(" It runs in a new worktree on branch %s.", wt.Branch)
 	}
+	dispatchAllowAll(sctx, s, am, a.Launcher, params)
 	s.setPlanThen(ctx, am.ID, params)
 	attempted = true
 	if startErr = s.call(sctx, am.ID, DeviceSessionStart, params, &res); startErr != nil {
@@ -269,6 +271,7 @@ func (s *Service) dispatchStart(ctx context.Context, machine, session string, ar
 	if tracker == nil {
 		s.addDispatched(ctx, dispatchTask{FromMachine: machine, FromSession: session, Machine: s.canonical(am.ID),
 			Session: res.Session.SessionID, Cwd: a.Cwd, Title: title, At: now})
+		s.recordSubagentLink(s.canonical(am.ID), res.Session.SessionID, machine, session, proto.SubagentOriginDispatch)
 	}
 	s.logf("dispatch %s/%s -> %s/%s in %s", machine, short(session), am.ID, short(res.Session.SessionID), a.Cwd)
 	child := res.Session
@@ -465,4 +468,22 @@ func (s *Service) superviseDispatched(ctx context.Context, am Device, c proto.Se
 	if made {
 		s.taskCard(ctx, main, todo.ID, "")
 	}
+}
+
+// dispatchAllowAll starts a dispatched Agent, a supervised task's (superviseDispatched), in Allow all as agent_start
+// and a planned task start theirs (launcher_fit.go allowAll; docs/assistant/unified-entry.md "Permissions": Claude-family
+// launchers always start in bypassPermissions): without it a Claude Code child took its computer's default mode and
+// stopped at its first tool approval. A mode Model configuration's agent.new binding names stays. The launcher is only
+// looked up here: the start keeps the one it was given, and a launcher fitLauncher would refuse or replace, or one it
+// cannot tell, keeps the computer's default.
+func dispatchAllowAll(ctx context.Context, s *Service, am Device, launcher string, params map[string]any) {
+	if mode, _ := params["permission_mode"].(string); mode != "" {
+		return
+	}
+	probe := maps.Clone(params)
+	_, fit, err := s.fitLauncher(ctx, am, startPick{launcher: strings.TrimSpace(launcher)}, probe)
+	if err != nil || probe["launcher"] != params["launcher"] || !startTakesModes(fit.agent) || !fit.allowAll() {
+		return
+	}
+	params["permission_mode"] = "bypassPermissions"
 }

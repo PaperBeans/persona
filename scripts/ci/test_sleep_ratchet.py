@@ -283,6 +283,37 @@ class GitTests(GitCase):
         self.assertIn("baseline raises", err)
         self.assertIn("baselines are never raised", err)
 
+    def test_a_moved_file_keeps_its_entry_but_may_not_rise(self):
+        moved = "server/internal/modules/demo/demo_test.go"
+        self.git("checkout", "-q", "-b", "move")
+        (self.repo / moved).parent.mkdir(parents=True)
+        self.git("mv", SERVER, moved)
+        self.write(sleep_ratchet.BASELINE_REL, sleep_ratchet.render({moved: 1}))
+        code, out = self._capture([])
+        self.assertEqual(0, code, out)  # uncommitted: against HEAD and the base
+        self.git("commit", "-q", "-am", "move")
+        code, out = self._capture([])
+        self.assertEqual(0, code, out)
+        # Moved and raised: still a raise.
+        self.write(moved, source(2))
+        self.write(sleep_ratchet.BASELINE_REL, sleep_ratchet.render({moved: 2}))
+        code, err = self._capture([])
+        self.assertEqual(1, code)
+        self.assertIn("baseline raises " + moved + " from 1 to 2", err)
+
+    def test_a_copy_is_no_move(self):
+        copy = "server/internal/other/demo_test.go"
+        self.write(copy, source(1))
+        self.git("add", copy)
+        self.write(sleep_ratchet.BASELINE_REL, sleep_ratchet.render({SERVER: 1, copy: 1}))
+        code, err = self._capture([])
+        self.assertEqual(1, code)
+        self.assertIn("baseline adds " + copy, err)
+
+    def test_carry_renames_keeps_an_existing_entry(self):
+        self.assertEqual({"a": 1, "b": 3}, sleep_ratchet.carry_renames({"a": 1, "b": 3}, {"b": "a"}))
+        self.assertEqual({"a": 1, "c": 1}, sleep_ratchet.carry_renames({"a": 1}, {"c": "a", "d": "x"}))
+
     def test_the_first_snapshot_is_allowed_when_the_base_has_no_baseline(self):
         # An older commit has the test and no baseline. The matching baseline on top of that
         # commit is the first snapshot, so there is no ancestor to raise against.

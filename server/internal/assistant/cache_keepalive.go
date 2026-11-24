@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 func cacheKeepaliveOf(v Settings) assistantwire.CacheKeepalive {
@@ -38,11 +39,22 @@ func (s *Service) putCacheKeepalive(ctx context.Context, machine, id string, mai
 		}
 		// Eligibility must not add an RPC to every send or background read. The
 		// registry attests the role; retained inventory can additionally revoke it.
-		if c, ok := s.nodeSession(machine, id); ok && (!c.Assistant || c.IsSubagent || c.ParentSessionID != "" || c.ParentThreadID != "" || c.Archived || c.IsDeleted()) {
+		if c, ok := s.nodeSession(machine, id); ok && (!s.inventoryAssistant(machine, c) || c.IsSubagent || c.ParentSessionID != "" || c.ParentThreadID != "" || c.Archived || c.IsDeleted()) {
 			return
 		}
 	}
 	p["cache_keepalive"] = cacheKeepaliveOf(v)
+}
+
+// inventoryAssistant reads the assistant mark the way the apps get it. A node never sets Session.Assistant in its
+// own list (only the hub's decorated rows carry it), so the raw inventory row is judged by its directory as
+// tryAgentName does. Reading the bare flag revoked every main and lead, and no start mounted the refresh proxy.
+func (s *Service) inventoryAssistant(machine string, c proto.Session) bool {
+	if c.Assistant {
+		return true
+	}
+	m, ok := s.fleetMachine(machine)
+	return ok && m.isAssistant(c)
 }
 
 func (s *Service) cacheKeepaliveRefs(ctx context.Context, v Settings) []SessionRef {

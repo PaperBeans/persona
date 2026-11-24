@@ -45,6 +45,7 @@ import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /** Geometry of the real Inbox page header, especially Board's compact title at accessibility text sizes. */
 @RunWith(AndroidJUnit4::class)

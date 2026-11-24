@@ -89,6 +89,11 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		if t.Readonly {
 			asked = ""
 		}
+		callerPermission := asked
+		t.CallerPermission = &callerPermission
+		t.LauncherDefaultModel = false // the hub's: a tool call cannot import another start's native-default choice
+		t.StartPermission = ""
+		t.RetryFromAgent, t.RetryFromAllowAll = "", false // a new plan cannot import another retry's provenance
 		t.normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
 		t.TodoID, t.Error, t.ErrorCode, t.ErrorArgs, t.RetryWith = "", "", "", nil, nil
 		t.WorkspaceResolved, t.ReservedTodoID, t.WorkspaceInferred = nil, "", false
@@ -106,6 +111,9 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		t.Model = strings.TrimSpace(t.Model)
 		t.Speed = strings.TrimSpace(t.Speed)
 		t.Permission = strings.TrimSpace(t.Permission)
+		if t.OwnerStep = strings.TrimSpace(t.OwnerStep); !validOwnerStep(t.OwnerStep) {
+			return "", fmt.Errorf("task %d: owner_step must be empty, %q, %q or %q", i+1, ownerStepMoney, ownerStepOutward, ownerStepIrreversible)
+		}
 		if err := t.checkRole(scope != nil); err != nil {
 			return "", fmt.Errorf("task %d: %w", i+1, err)
 		}
@@ -256,14 +264,22 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 	}
 	// A direction's lead that a hand-over of the owner's quoted words went into (#11699): the words may have reached the
 	// wrong lead, so until the owner writes there, "the user asked for this" is no Start for writable work it plans
-	// outside the kinds the owner already let this lead start (heldOutsideOwnKinds, #12953).
+	// outside the kinds the owner already let this lead start (heldOutsideOwnKinds, #12953). Since decision rights a
+	// lead's own plan starts at once whatever it says (orchestrates below), and a scheduled round has dropped user_requested
+	// above: kept, it no longer holds a plan back.
 	if scope == nil && slices.ContainsFunc(a.Tasks, func(t PlanTask) bool { return t.UserRequested }) && s.handedOver(sessionID) {
 		s.heldOutsideOwnKinds(ctx, machine, sessionID, a.Tasks)
 	}
-	// Direction leads orchestrate on the owner's behalf: their plans start at once unless a
-	// task needs the owner (a request gate, a track that confirms every hand-off). Not while a lead's hand-over is unconfirmed
-	// (#11699) or in a scheduled round, where "the user asked for this" is only the model's word.
-	orchestrates := scope == nil && s.isLeader(ctx, sessionID) && !s.handedOver(sessionID) &&
+	// Supervisors orchestrate on the owner's behalf (decision rights, 2026-11-23): a plan from the main conversation or
+	// a direction lead is the supervisor's own release, so it starts at once, read-only or writable, whether or not the
+	// owner asked for it in so many words (user_requested only records where the work came from). It waits for the
+	// owner's Start only when a task needs them: a request gate, a track that confirms every hand-off (health), or a
+	// task that spends money, speaks outward as the owner or takes an irreversible step they have not agreed to
+	// (owner_step). Also in a lead a hand-over of the owner's quoted words went into (#11699): words handed to the wrong
+	// lead start work in the wrong place, which is reversible and its supervisor's to set right, none of the six. Not in a
+	// scheduled round, where "the user asked for this" is only the model's word. An ordinary conversation's plan is not
+	// its supervisor's release: as before.
+	orchestrates := scope == nil && (s.isLeader(ctx, sessionID) || (s.isMainOn(ctx, machine, sessionID) && !s.mainPlansWait)) &&
 		!s.inScheduledTurn(ctx, machine, sessionID)
 	// A plan from a conversation hands its prompts to agents outside it (scene 3): what it says, titles first (they are
 	// what its push shows), decides once whether it waits for "Start" and what its push says (health.go). A leader's
@@ -351,7 +367,9 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 	}
 	// Only what the owner really has to approve waits on a card: confirmed words, a request gate, and an ordinary
 	// conversation's writable work where the owner has not let such work start by itself.
-	needsOwner := policy.ConfirmOutbound || slices.ContainsFunc(p.Tasks, func(task PlanTask) bool { return task.RequestGate != "" })
+	step := planOwnerStep(p.Tasks)
+	needsOwner := policy.ConfirmOutbound || step != "" ||
+		slices.ContainsFunc(p.Tasks, func(task PlanTask) bool { return task.RequestGate != "" })
 	if needsOwner || (!orchestrates && !s.planStartsAtOnceUnder(ctx, p.Tasks, granted)) {
 		s.event(ctx, map[string]any{"type": "task_plan", "plan": s.planWithSpace(ctx, s.planWithSuggestion(ctx, p, s.lang(ctx)))})
 		if _, talking := s.ownersPresent(time.Now())[sessionID]; talking {
@@ -378,7 +396,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		if policy.Redact {
 			title, body = s.redactedNotice(ctx, l, space)
 		}
-		s.push(withCard(ctx, cardPlanWaiting), Notification{CardID: p.ID, Subtitle: machineName, DeviceID: here, SessionID: sessionID, Title: title, Body: body})
+		s.push(withCard(ctx, planCardSource(step)), Notification{CardID: p.ID, Subtitle: machineName, DeviceID: here, SessionID: sessionID, Title: title, Body: body})
 		if lead != "" || s.isLeader(ctx, sessionID) {
 			s.lreports.plansDue.Store(true)
 			s.directionsSoon() // a leader's plan waiting for Start is a decision for the owner (leader_reports.go)
@@ -392,8 +410,8 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 	}
 	var b strings.Builder
 	supervisor := ""
-	fmt.Fprintf(&b, "Queued %d task(s) for dispatch without asking (read-only, asked for by the user, a kind the user trusts, or one "+
-		"the user lets this scheduled task start):\n", len(started.Tasks))
+	fmt.Fprintf(&b, "Queued %d task(s) for dispatch without asking (released by you as their supervisor, read-only, asked for "+
+		"by the user, a kind the user trusts, or one the user lets this scheduled task start):\n", len(started.Tasks))
 	for _, t := range started.Tasks {
 		if t.Error != "" {
 			fmt.Fprintf(&b, "- %s on %s: dispatch failed: %s\n", t.Title, t.Machine, t.Error)
@@ -450,8 +468,9 @@ func (s *Service) planSupervisor(ctx context.Context, self, lead string) (string
 		return "", nil
 	case !s.isMain(ctx, self):
 		return "", errors.New("supervisor: only the main conversation may name another leader; omit it to keep this direction lead as supervisor")
-	case !s.isLeader(ctx, lead):
-		return "", fmt.Errorf("supervisor: %s is not a leader conversation (assistant.leaders lists them); omit it to use the default supervisor", lead)
+	}
+	if err := s.validateSupervisorLead(ctx, lead); err != nil {
+		return "", fmt.Errorf("supervisor: %w", err)
 	}
 	return lead, nil
 }
@@ -497,8 +516,9 @@ func applyPlanEdit(t *PlanTask, e PlanTask) {
 	if s := strings.TrimSpace(e.Speed); s != "" {
 		t.Speed = s
 	}
-	if s := strings.TrimSpace(e.Permission); s != "" {
+	if s := strings.TrimSpace(e.Permission); s != "" && s != strings.TrimSpace(t.Permission) {
 		t.Permission = s
+		t.CallerPermission = &s
 	}
 	if e.Ultracode != nil {
 		t.Ultracode = e.Ultracode

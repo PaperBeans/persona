@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/compat"
-	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -63,55 +62,87 @@ func TestSessionStartRefusesAssistantAliasBeforeLaunching(t *testing.T) {
 	}
 }
 
-func TestMacAgentInstructionsDefaultOn(t *testing.T) {
-	rules := agentPlatformInstructions("darwin", "Keep the task scope.")
-	for _, want := range []string{"Keep the task scope.", "do not compile or run tests", "dedicated CI runner", "rebuild.sh", "make release-artifacts", "exempt"} {
-		if !strings.Contains(rules, want) {
-			t.Errorf("Mac rules missing %q: %s", want, rules)
-		}
+func TestAgentStartRules(t *testing.T) {
+	const sent = "Keep the task scope."
+	n := &Node{dir: t.TempDir()}
+	// Persona adds nothing of its own (#13642): no file, an empty one, a node without a data directory.
+	if got := n.agentStartRules(sent); got != sent {
+		t.Errorf("without agent-rules.md: %q", got)
 	}
-	if got := agentPlatformInstructions("linux", "Keep the task scope."); got != "Keep the task scope." {
-		t.Errorf("Linux instructions = %q", got)
+	if got := (&Node{}).agentStartRules(sent); got != sent {
+		t.Errorf("without a data directory: %q", got)
+	}
+	path := filepath.Join(n.dir, agentRulesFile)
+	if err := os.WriteFile(path, []byte(" \n\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := n.agentStartRules(sent); got != sent {
+		t.Errorf("empty agent-rules.md: %q", got)
+	}
+	if err := os.WriteFile(path, []byte("\nRun the tests before you report.\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := n.agentStartRules(sent); got != sent+"\n\nRun the tests before you report." {
+		t.Errorf("with agent-rules.md: %q", got)
+	}
+	if got := n.agentStartRules(""); got != "Run the tests before you report." {
+		t.Errorf("nothing sent, with agent-rules.md: %q", got)
 	}
 }
 
-// On a Mac, a new session.start adds the Mac rules once to the task instructions it was sent, and a resume adds none
-// (#13393). The package's other tests run on linux (TestMain); this one sets darwin.
-func TestMacAgentInstructionsOnStartNotResume(t *testing.T) {
-	prev := agentGOOS
-	agentGOOS = "darwin"
-	t.Cleanup(func() { agentGOOS = prev })
-	mac := strings.TrimSpace(prompts.RenderAgentMacRules())
-
-	t.Run("start", func(t *testing.T) {
+// A new session.start carries what its caller sent and nothing else unless the computer has agent-rules.md, whose text
+// it adds once; a resume adds none (#13393, #13642). On every platform: no rule is built in for any.
+func TestAgentRulesOnStartNotResume(t *testing.T) {
+	const own = "Run builds on the build machine."
+	start := func(t *testing.T, rules bool) sessionState {
 		shellHome := fakeCLIHome(t)
 		if err := os.WriteFile(filepath.Join(shellHome, ".zshrc"), []byte("forward() { claude \"$@\"; }\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
 		n, f, home := herdrNode(t)
+		if rules {
+			if err := os.WriteFile(filepath.Join(n.dir, agentRulesFile), []byte(own+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
 		cwd := mkdir(t, filepath.Join(home, "proj"))
 		f.reply("workspace.list", map[string]any{"workspaces": []any{map[string]any{"workspace_id": "w1", "label": "proj"}}})
 		startHerdr(f, "w1:p2", "idle")
 		f.reply("tab.create", map[string]any{"tab": map[string]any{"tab_id": "w1:t2"}, "root_pane": map[string]any{"pane_id": "w1:p2"}})
 		f.screenSteps("w1:p2", isKeys(), screenFixture(t, "claude-2.1.312-empty-162.txt"))
 		promptLands(t, f, home, cwd)
-		const rules = "Keep this assignment's scope."
-		_, err := request(t, n, "session.start", map[string]any{"session_id": startID, "cwd": cwd, "launcher": "forward", "prompt": "fix the build", "task_instructions": rules})
+		_, err := request(t, n, "session.start", map[string]any{"session_id": startID, "cwd": cwd, "launcher": "forward", "prompt": "fix the build", "task_instructions": "Keep this assignment's scope."})
 		if err != nil {
 			t.Fatal(err)
 		}
 		n.firstWait.Wait()
 		st, _ := n.state.get(startID)
-		if st.TaskInstructions != rules+"\n\n"+mac || strings.Count(st.TaskInstructions, mac) != 1 {
+		// The Claude channel's file, where this start took it, carries the same text (the channel's own tests cover it).
+		if st.TaskInstructionFile != "" {
+			if raw, err := os.ReadFile(st.TaskInstructionFile); err != nil || string(raw) != st.TaskInstructions {
+				t.Fatalf("instruction file=%q %v", raw, err)
+			}
+		}
+		return st
+	}
+
+	t.Run("start", func(t *testing.T) {
+		if st := start(t, false); st.TaskInstructions != "Keep this assignment's scope." {
 			t.Fatalf("task instructions=%q", st.TaskInstructions)
 		}
-		if raw, err := os.ReadFile(st.TaskInstructionFile); err != nil || string(raw) != st.TaskInstructions {
-			t.Fatalf("instruction file=%q %v", raw, err)
+	})
+
+	t.Run("start with agent-rules.md", func(t *testing.T) {
+		if st := start(t, true); st.TaskInstructions != "Keep this assignment's scope.\n\n"+own || strings.Count(st.TaskInstructions, own) != 1 {
+			t.Fatalf("task instructions=%q", st.TaskInstructions)
 		}
 	})
 
 	t.Run("resume", func(t *testing.T) {
 		n, f, home := herdrNode(t)
+		if err := os.WriteFile(filepath.Join(n.dir, agentRulesFile), []byte(own), 0600); err != nil {
+			t.Fatal(err)
+		}
 		n.starts.add(startID, &startRec{done: make(chan struct{}), session: proto.Session{SessionID: startID, Starting: true}})
 		n.starts.finish(startID, errors.New("claude did not become ready"))
 		cwd := mkdir(t, filepath.Join(home, "fresh"))

@@ -232,7 +232,7 @@ nonisolated enum ForwardTargets {
     /// Whether `s` can take a forward from the chat `from`: another chat on the same hub that takes messages; an Agent
     /// on an online computer, live or (`ended`) one the send resumes; never Health's conversations.
     static func takes(_ s: Session, from: SessionKey, ended: Bool, online: (MachineRef) -> Bool) -> Bool {
-        guard s.key != from, s.key.group == from.group, s.canSend, !s.isHealth, s.archived != true else { return false }
+        guard s.key != from, s.key.group == from.group, s.canSend, !s.inSpace, s.archived != true else { return false }
         if s.assistant { return true }
         return online(s.machineRef) && (ended || s.state.isLive)
     }

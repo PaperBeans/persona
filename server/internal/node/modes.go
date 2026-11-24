@@ -20,7 +20,8 @@ import (
 //
 // Shown: the transcript records the mode on every prompt and the effort on every reply; a value set from the app
 // wins until the transcript shows a newer one (a TUI only writes the mode down with the next prompt). An assistant
-// conversation's are persisted with its session state and always win (persistModes, #2416).
+// conversation's explicit choice is persisted with its session state and wins over transcript/default history;
+// an inherited or legacy value follows the manager's current default on the next stopped-process resume.
 // Set: at start as --permission-mode / --effort; later, headless conversations take control requests on stdin and
 // TUI sessions are driven like a person would: shift+tab cycles the mode, and the /effort picker advertises the
 // confirmation key (`/effort <level>` would also save the level as the default for new sessions).
@@ -185,18 +186,22 @@ func (n *Node) noteModes(id, mode, effort string) {
 	n.modes[id] = m
 }
 
-// persistModes keeps an assistant conversation's mode / effort set from the app in its session state (the hub's
-// Postgres), so they outlive the node and win over the transcript ("" leaves one as it is).
-func (n *Node) persistModes(id, mode, effort string) {
+// persistModes keeps an assistant conversation's mode / effort in its session state (the hub's Postgres), so they
+// outlive the node. The optional explicit flag marks a deliberate mode choice without a second state write.
+func (n *Node) persistModes(id, mode, effort string, explicit ...bool) {
 	if n.state == nil || id == "" || (mode == "" && effort == "") {
 		return
 	}
+	markExplicit := len(explicit) > 0 && explicit[0] && mode != ""
 	st, _ := n.state.get(id)
-	if (mode == "" || st.AppMode == mode) && (effort == "" || st.AppEffort == effort) {
+	if (mode == "" || st.AppMode == mode) && (effort == "" || st.AppEffort == effort) && (!markExplicit || st.AppModeExplicit) {
 		return
 	}
 	if mode != "" {
 		st.AppMode = mode
+	}
+	if markExplicit {
+		st.AppModeExplicit = true
 	}
 	if effort != "" {
 		st.AppEffort = effort
@@ -314,7 +319,7 @@ func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending
 			p.mu.Unlock()
 			if effortRestart && !p.needsRestartFor(mode) {
 				n.noteModes(id, mode, effort)
-				n.persistModes(id, mode, effort)
+				n.persistModes(id, mode, effort, true)
 				p.mu.Lock()
 				active := p.busy || len(p.tasks) > 0
 				p.mu.Unlock()
@@ -328,7 +333,7 @@ func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending
 				// bypassPermissions requires a new process, as does any mode for interactive Claude Code. Record the
 				// choice while holding the same lock as ordinary changes, so an older ACK cannot overwrite it.
 				n.noteModes(id, mode, "")
-				n.persistModes(id, mode, "")
+				n.persistModes(id, mode, "", true)
 				p.mu.Lock()
 				active := p.busy || len(p.tasks) > 0
 				tui := p.tui && p.tuiNote == ""
@@ -351,11 +356,16 @@ func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending
 			return n.applyAssistantModes(ctx, p, mode, effort)
 		}
 		n.noteModes(id, mode, effort)
-		n.persistModes(id, mode, effort)
+		n.persistModes(id, mode, effort, true)
 		if n.runtimeAssistant(id) {
 			if h, _, _ := n.runtimes.belongs(id); h != nil {
+				st, _ := n.state.get(id)
+				params := map[string]any{"session_id": id, "permission_mode": mode, "effort": effort, "assistant": true}
+				if env := n.assistantEnvForRuntime(h, n.runtimeAssistantCwd(id, "", st)); env != nil {
+					params["env"] = env
+				}
 				cctx, cancel := context.WithTimeout(ctx, runtimeCallTimeout)
-				_ = h.peer.Call(cctx, "session.modes", map[string]any{"session_id": id, "permission_mode": mode, "effort": effort, "assistant": true}, nil)
+				_ = h.peer.Call(cctx, "session.modes", params, nil)
 				cancel()
 			}
 		}
@@ -778,14 +788,14 @@ func (n *Node) syncAssistantModes(ctx context.Context, p *assistantProc) error {
 // applyAssistantModes is setAssistantModes for a change made in the app: the list goes out with it at once.
 func (n *Node) applyAssistantModes(ctx context.Context, p *assistantProc, mode, effort string) error {
 	defer func() { p.ownerOr(n).notifySessions() }()
-	return n.setAssistantModes(ctx, p, mode, effort)
+	return n.setAssistantModes(ctx, p, mode, effort, true)
 }
 
 // setAssistantModes commits each field only after Claude acknowledges it. A refused startup setting also
 // restores the previously recorded choice, so the next message does not silently retry it. settingsMu is held.
 // It pushes no list: the message it runs for (syncAssistantModes) has one pushed once its line is written, and
 // building one here held every send up for as long as a list takes on a busy computer.
-func (n *Node) setAssistantModes(ctx context.Context, p *assistantProc, mode, effort string) error {
+func (n *Node) setAssistantModes(ctx context.Context, p *assistantProc, mode, effort string, explicit ...bool) error {
 	for _, field := range []string{"mode", "effort"} {
 		p.mu.Lock()
 		want, previous := mode, p.mode
@@ -837,12 +847,12 @@ func (n *Node) setAssistantModes(ctx context.Context, p *assistantProc, mode, ef
 			}
 			return err
 		}
-		n.recordAssistantMode(p, field, want)
+		n.recordAssistantMode(p, field, want, field == "mode" && len(explicit) > 0 && explicit[0])
 	}
 	return nil
 }
 
-func (n *Node) recordAssistantMode(p *assistantProc, field, value string) {
+func (n *Node) recordAssistantMode(p *assistantProc, field, value string, explicit ...bool) {
 	if value == "" {
 		value = "default"
 		if field == "effort" {
@@ -859,7 +869,7 @@ func (n *Node) recordAssistantMode(p *assistantProc, field, value string) {
 	p.mu.Unlock()
 	if field == "mode" {
 		n.noteModes(p.id, value, "")
-		n.persistModes(p.id, value, "")
+		n.persistModes(p.id, value, "", explicit...)
 	} else {
 		n.noteModes(p.id, "", value)
 		n.persistModes(p.id, "", value)

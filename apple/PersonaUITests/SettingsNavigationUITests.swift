@@ -8,13 +8,15 @@ final class SettingsNavigationUITests: XCTestCase {
         super.tearDown()
     }
 
-    @MainActor private func launch(_ extra: [String] = [], hubKey: String = "PERSONA_SETTINGS_HUB") throws -> XCUIApplication {
+    @MainActor private func launch(_ extra: [String] = [], hubKey: String = "PERSONA_SETTINGS_HUB",
+                                   language: (String, String) = ("zh-Hans", "zh_CN")) throws -> XCUIApplication {
         guard let hub = ProcessInfo.processInfo.environment[hubKey] else {
             throw XCTSkip("Needs an isolated mock hub in \(hubKey)")
         }
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         let app = XCUIApplication()
-        app.launchArguments = ["-pairURL", pair, "-tab", "settings", "-dev.openChat", "", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"] + extra
+        app.launchArguments = ["-pairURL", pair, "-tab", "settings", "-dev.openChat", "",
+                               "-AppleLanguages", "(\(language.0))", "-AppleLocale", language.1] + extra
         app.launchPinned()
         return app
     }
@@ -63,7 +65,9 @@ final class SettingsNavigationUITests: XCTestCase {
             XCUIDevice.shared.orientation = orientation
             let app = try launch(Self.textSize)
             XCTAssertTrue(element("settings-list", app).waitForExistence(timeout: 30), "\(turn): no Settings:\n\(app.debugDescription)")
-            let appearance = reveal("settings-appearance", app)
+            // Appearance & Display is under Settings › Advanced (#13395).
+            XCTAssertTrue(app.openSettingsAdvancedPage(), "\(turn): no Settings › Advanced:\n\(app.debugDescription)")
+            let appearance = app.settingsAdvancedRow("settings-appearance")
             XCTAssertTrue(appearance.waitForExistence(timeout: 10), "\(turn): no Appearance & Display:\n\(app.debugDescription)")
             appearance.tap()
             XCTAssertTrue(element("settings-color", app).waitForExistence(timeout: 10), "\(turn): Appearance & Display did not open")
@@ -102,18 +106,54 @@ final class SettingsNavigationUITests: XCTestCase {
                       "Agents List Layout did not open from the result's page:\n\(app.debugDescription)")
     }
 
+    /// Settings home: the core rows under the three scopes, then Advanced (#13395); Advanced has the rest under the same
+    /// scopes.
     @MainActor func testThreeGroupsAndCommonContainers() throws {
         let app = try launch()
         XCTAssertTrue(element("settings-list", app).waitForExistence(timeout: 30))
         XCTAssertTrue(element("settings-models", app).exists)
         XCTAssertTrue(element("settings-assistant", app).exists)
         XCTAssertTrue(element("settings-assistant-switch", app).exists)
-        XCTAssertTrue(reveal("settings-appearance", app).exists)
+        XCTAssertTrue(reveal("settings-notifications", app).exists)
         XCTAssertTrue(element("settings-group-device", app).exists)
-        XCTAssertTrue(reveal("settings-pairing", app).exists)
+        XCTAssertTrue(reveal("settings.hubs", app).exists)
         XCTAssertTrue(element("settings-group-hub", app).exists)
+        XCTAssertTrue(reveal("settings-advanced", app).exists)
+        for moved in ["settings-appearance", "settings-pairing", "settings-persona", "settings-agents"] {
+            XCTAssertFalse(element(moved, app).exists, "\(moved) is under Advanced, not on Settings home")
+        }
+        XCTAssertTrue(app.openSettingsAdvancedPage(), "no Settings › Advanced:\n\(app.debugDescription)")
+        XCTAssertTrue(app.settingsAdvancedRow("settings-appearance").exists)
+        XCTAssertTrue(app.settingsAdvancedRow("settings-pairing").exists)
         XCTAssertTrue(element("settings-persona", app).exists)
         XCTAssertFalse(element("settings-new-chat-check", app).exists)
+    }
+
+    /// Screenshots for review (#13395): Settings home at its top and its foot, and Settings › Advanced at its top and its
+    /// foot, light and dark, in English and Chinese. Only with TEST_RUNNER_PERSONA_SHOTS:
+    /// `settings-<home|advanced>-<top|foot>-<light|dark>-<language>.png`.
+    @MainActor func testAdvancedShots() throws {
+        guard let dir = ProcessInfo.processInfo.environment["PERSONA_SHOTS"] else { throw XCTSkip("screenshots only") }
+        func shot(_ app: XCUIApplication, _ name: String) {
+            sleep(1) // a scroll settles
+            try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir).appending(path: name + ".png"))
+        }
+        for language in [("en", "en_US"), ("zh-Hans", "zh_CN")] {
+            for scheme in ["light", "dark"] {
+                let app = try launch(["-ui.scheme", scheme], language: language)
+                let tag = "\(scheme)-\(language.0)"
+                XCTAssertTrue(element("settings-list", app).waitForExistence(timeout: 30))
+                sleep(2) // the hub's roster and machines arrive
+                shot(app, "settings-home-top-\(tag)")
+                XCTAssertTrue(reveal("settings-advanced", app).exists)
+                shot(app, "settings-home-foot-\(tag)")
+                XCTAssertTrue(app.openSettingsAdvancedPage(), "no Settings › Advanced:\n\(app.debugDescription)")
+                shot(app, "settings-advanced-top-\(tag)")
+                XCTAssertTrue(app.settingsAdvancedRow("settings-pairing").exists)
+                shot(app, "settings-advanced-foot-\(tag)")
+                app.terminate()
+            }
+        }
     }
 
     @MainActor func testSearchAliasesOpenADevicePage() throws {

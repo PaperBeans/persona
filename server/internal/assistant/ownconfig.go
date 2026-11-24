@@ -27,6 +27,7 @@ type ownConfig struct {
 		Launcher                      *string `json:"launcher"`
 		MemoryDreaming                bool    `json:"memory_dreaming"`
 		CompleteAgentlessTodos        bool    `json:"complete_agentless_todos"`
+		AutoApproveReversibleSettings bool    `json:"auto_approve_reversible_settings"`
 		SupervisionBatchMinutes       *int    `json:"supervision_batch_minutes"`
 		TaskExecutionWaitSeconds      *int    `json:"task_execution_wait_seconds"`
 		TaskExecutionLegacyFallback   *bool   `json:"task_execution_legacy_fallback"`
@@ -102,6 +103,9 @@ func (c ownConfig) validatePlacement(h Hello) error {
 
 // over is h with c's sections in place of the hello's.
 func (c ownConfig) over(h Hello) Hello {
+	// This approval bypass is manager-file-only: unlike legacy hello sections, a missing assistant section must not
+	// preserve a value supplied by the hub.
+	h.Assistant.AutoApproveReversibleSettings = c.Assistant != nil && c.Assistant.AutoApproveReversibleSettings
 	if a := c.Assistant; a != nil {
 		h.Assistant.MemoryDreaming = a.MemoryDreaming
 		h.Assistant.CompleteAgentlessTodos = a.CompleteAgentlessTodos

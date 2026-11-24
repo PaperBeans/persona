@@ -17,6 +17,7 @@ import (
 // Exercise the manager's real upload/detail/search routes and index callback;
 // all storage and HTTP traffic belong to this synthetic fixture.
 func TestRecordingFailedUploadHTTPRetainsAcceptedRevision(t *testing.T) {
+	needsRecordingModule(t) // a path of the recording module's
 	index := newKBStore()
 	service := kbServiceOn(t, newFakeHub(), index, t.TempDir(), nil)
 	engine := kbEng(t, service)
@@ -141,6 +142,7 @@ func TestKBSearchKind(t *testing.T) {
 // A recording the knowledge base holds stays there (#13501): a later upload naming a track is refused with
 // recording_in_kb instead of writing a second copy into the track.
 func TestRecordingInKBRefusesSpace(t *testing.T) {
+	needsRecordingModule(t) // a path of the recording module's
 	service := kbServiceOn(t, newFakeHub(), newKBStore(), t.TempDir(), nil)
 	engine := kbEng(t, service)
 	server := httptest.NewServer(service)

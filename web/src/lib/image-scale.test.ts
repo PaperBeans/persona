@@ -48,6 +48,24 @@ describe("fitPicture", () => {
     expect(await fitPicture(new Blob([new Uint8Array(9_000_000)], { type: "image/png" }), DEFAULT_IMAGE_LIMITS)).toBeNull();
   });
 
+  it("tries the steps it is given, a PNG one without the white (#13797)", async () => {
+    globalThis.createImageBitmap = bitmap(6000, 3000) as unknown as typeof createImageBitmap;
+    const types: string[] = [];
+    const fills = vi.fn();
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockImplementation(() => ({ fillRect: fills, drawImage() {} }) as unknown as CanvasRenderingContext2D);
+    vi.mocked(HTMLCanvasElement.prototype.toBlob).mockImplementation(function (this: HTMLCanvasElement, done: BlobCallback, type?: string, quality?: number) {
+      types.push(type ?? "");
+      drawn.push({ width: this.width, height: this.height, quality: quality ?? 0 });
+      done(new Blob([new Uint8Array(type === "image/png" ? 2_000_000 : 900_000)], { type: type ?? "image/png" }));
+    });
+    const limits = { image_bytes: 1024 * 1024, max_side: 4096 };
+    const fit = await fitPicture(new Blob([new Uint8Array(3_000_000)], { type: "image/png" }), limits, [{ side: 4096, png: true }, { side: 2560, quality: 0.8 }]);
+    expect(fit).toEqual({ mime: "image/jpeg", data: "900000" });
+    expect(types).toEqual(["image/png", "image/jpeg"]);
+    expect(drawn).toEqual([{ width: 4096, height: 2048, quality: 0 }, { width: 2560, height: 1280, quality: 0.8 }]);
+    expect(fills).toHaveBeenCalledTimes(1);
+  });
+
   it("gives up on a picture the page cannot read", async () => {
     globalThis.createImageBitmap = vi.fn(async () => Promise.reject(new Error("unsupported"))) as unknown as typeof createImageBitmap;
     expect(await fitPicture(new Blob([new Uint8Array(10)], { type: "image/heic" }), DEFAULT_IMAGE_LIMITS)).toBeNull();

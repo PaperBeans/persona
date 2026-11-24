@@ -104,6 +104,7 @@ GET /api/v1/sessions/{mid}/{sid}/screen
 GET /api/v1/skills
 GET /api/v1/ws
 GET {bus.Path}
+GET {devicewire.DevelopmentPackagesPath}/{commit}/{version}/{file}
 GET {devicewire.RelayPath}
 GET {link.Path}
 GET {link.StreamPath}

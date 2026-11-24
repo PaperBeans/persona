@@ -229,6 +229,8 @@ func (s *Service) ConversationSent(ctx context.Context, r ConversationSent) {
 	}
 	// A direction's notes block counts as given only once the node took the send (direction_notes.go).
 	s.notesOwnerOutcome(ctx, r.SessionID, r.ClientMsgID, outcome != outcomeFailed)
+	// Quiet messages kept for this conversation leave only once the node accepted the send (relay_later.go).
+	s.relayLaterOwnerOutcome(ctx, r.SessionID, r.ClientMsgID, outcome == outcomeOK)
 	// An exact decision choice typed in a supervisor conversation settles only once delivered (#13041).
 	s.supervisorSettleOutcome(ctx, r)
 	s.recordSend(r.MachineID, r.SessionID, "resume", originApp, false, outcome, r.Code, r.Error)

@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // the feature modules (the health page is one: docs/web/web.md "Modules")
-import "../modules";
+import { MODULES } from "../modules";
 vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
@@ -15,6 +15,8 @@ import { getSidebarPrefs, setPageShown } from "../lib/sidebar-pages";
 import { reset } from "../lib/store";
 import { SidebarPagesGroup } from "./settings/SidebarPages";
 import { NavGrid, Sidebar, SidebarRail } from "./Sidebar";
+// the health module, when this run has it (the core-only lane, #13932, runs with no module)
+const HEALTH = MODULES.some((m) => m.id === "health");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -50,7 +52,7 @@ describe("更多 in the sidebar", () => {
     expect(moreButton()).toBeUndefined();
   });
 
-  it("holds the pages put away, folded, and opens to them", async () => {
+  it.skipIf(!HEALTH)("holds the pages put away, folded, and opens to them", async () => {
     setPageShown("kb", false);
     setPageShown("health", false);
     act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));

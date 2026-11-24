@@ -348,6 +348,3 @@ type AgentCloseoutBrief struct {
 func RenderAgentCloseoutBrief(c AgentCloseoutBrief) string {
 	return render("agents/closeout_brief", c)
 }
-
-// RenderAgentMacRules is the default build-capacity guard for every new Mac agent.
-func RenderAgentMacRules() string { return render("agents/mac_rules", struct{}{}) }

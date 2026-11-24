@@ -112,7 +112,7 @@ Trade-offs taken in step 1:
 
 - *No per-dispatch approval card.* The switch is the consent, as with `agent_start`, which does not ask either (outside the health space). Step 4 adds an optional card.
 - *Polling, not waking.* The caller reads the result with `dispatch_read`. This needs no new kind of message that Persona sends to Agents on its own (`docs/assistant/agent-work.md`, "Safety boundary"). Step 2 adds waking.
-- *The child's permission mode is the target's default*, not derived from the caller's. Persona has no cross-launcher mode ceiling yet; the child's first message carries the same "ask before pushing or deploying" rule the wakeups use.
+- *The child's permission mode is the target's default*, not derived from the caller's. Persona has no cross-launcher mode ceiling yet; the child's first message carries the same "ask before pushing or deploying" rule the wakeups use. Since the child is a supervised task's (its questions and approvals go to its supervisor first), a Claude-family launcher (or an Auto Accept provider) starts it in Allow all, `bypassPermissions`, as `agent_start` and planned tasks do (`dispatchAllowAll`, `docs/assistant/unified-entry.md` "Permissions"); a mode Model configuration names stays, and any other launcher keeps the target's default.
 - *Settings, not a table.* The record is small and bounded; a table is worth it once step 2 needs per-task state.
 
 ### Step 2: results come back by themselves

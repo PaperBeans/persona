@@ -401,6 +401,7 @@ final class DirectionRowsUITests: XCTestCase {
         XCTAssertTrue(more.waitForExistence(timeout: 20))
         sleep(2)
         more.tap()
+        app.openAgentMenuMore() // Move To… is More's (#13396)
         let move = app.buttons["移到…"].firstMatch
         XCTAssertTrue(move.waitForExistence(timeout: 5), "no Move To… in the Agent's menu:\n\(app.debugDescription)")
         move.tap()

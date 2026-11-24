@@ -29,6 +29,7 @@ INVALID = {
     "repeated setting": {"id": "briefing", "api": 1, "origin": "builtin", "settings": ["a", "a"]},
     "empty name": {"id": "briefing", "api": 1, "origin": "builtin", "mcp_tools": [""]},
     "bad need": {"id": "briefing", "api": 1, "origin": "builtin", "needs": ["Voice"]},
+    "feature without module prefix": {"id": "briefing", "api": 1, "origin": "builtin", "feature": "briefing"},
 }
 
 

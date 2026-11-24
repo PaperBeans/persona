@@ -166,8 +166,10 @@ type busPresence struct {
 	Deploy  string `json:"deploy,omitempty"`
 	Version string `json:"version,omitempty"`
 	// Capabilities are what its manager.hello names (assistantwire.Capability*).
-	Capabilities []string  `json:"capabilities,omitempty"`
-	Since        time.Time `json:"since"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	// Features are the loaded built-in modules' flags to expose through the hub hello.
+	Features []string  `json:"features,omitempty"`
+	Since    time.Time `json:"since"`
 }
 
 // close sends the close frame saying why; the read loop then ends the connection.
@@ -202,6 +204,7 @@ func (e *everyMinute) Allow(now time.Time) bool {
 // it on to its center (memberForward).
 func (h *Hub) busRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+bus.Path, h.serveBus)
+	mux.HandleFunc("GET "+devicewire.DevelopmentPackagesPath+"/{commit}/{version}/{file}", h.serveDevelopmentPackage)
 	h.relayRoutes(mux) // the manager's second channel: the connections relayed to it (devices_relay.go)
 }
 
@@ -381,6 +384,7 @@ type busManagerHello struct {
 	Deploy       string   `json:"deploy"`
 	Version      string   `json:"version"`
 	Capabilities []string `json:"capabilities"`
+	Features     []string `json:"features"`
 }
 
 // busHelloReply is manager.hello's answer: who the hub knows the service as, the managers, and the assistant's hello
@@ -410,7 +414,7 @@ func (h *Hub) managerHello(ctx context.Context, c *busConn, params json.RawMessa
 		return c.refuse(h, fmt.Errorf("manager.hello says %q but the token is %q's", clip(p.ID, 64), c.ident.ID))
 	}
 	if err := h.busAccept(ctx, c, busPresence{Host: clip(p.Host, 200), OS: clip(p.OS, 40), Arch: clip(p.Arch, 40),
-		Deploy: clip(p.Deploy, 40), Version: clip(p.Version, 80), Capabilities: capabilityList(p.Capabilities)}); err != nil {
+		Deploy: clip(p.Deploy, 40), Version: clip(p.Version, 80), Capabilities: capabilityList(p.Capabilities), Features: capabilityList(p.Features)}); err != nil {
 		return nil, err
 	}
 	if c.ident.Role == bus.RoleManager && !slices.Contains(p.Capabilities, assistantwire.CapabilityConfigOwn) {

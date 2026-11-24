@@ -7,6 +7,7 @@ import { useSyncExternalStore } from "react";
 import { t } from "../i18n";
 import { api, credentialOwner, enc, onCredentialChange } from "./api";
 import { isDelegating } from "./delegate";
+import { supervisorHeld } from "./supervisor-held";
 import { deviceId } from "./device-id";
 import { sessionTitle } from "./format";
 import { interactionAsk } from "./inbox";
@@ -493,10 +494,11 @@ export interface Waiting {
 }
 
 /** The session's card the notification is about: the oldest one pending for it (the one the overview lists first), not
- *  one the assistant is still looking at (nothing is pushed for those). A child session's card is its parent's (#5120). */
+ *  one the assistant is still looking at nor one a task's supervisor holds (nothing is pushed for those). A child
+ *  session's card is its parent's (#5120). */
 export function waitingCard(interactions: readonly Interaction[], s: Pick<Session, "machine_id" | "session_id">): Interaction | undefined {
   return interactions
-    .filter((ix) => ix.machine_id === s.machine_id && requestHome(ix) === s.session_id && !isDelegating(ix))
+    .filter((ix) => ix.machine_id === s.machine_id && requestHome(ix) === s.session_id && !isDelegating(ix) && !supervisorHeld(ix))
     .sort((a, b) => byTime(a.created_at, b.created_at) || a.id.localeCompare(b.id))[0];
 }
 

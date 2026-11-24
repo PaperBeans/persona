@@ -46,14 +46,24 @@ func (la *liveActivities) widgetCounts(st FleetState) widgetCounts {
 	return c
 }
 
-// intakeChanged wakes only the widget loop. Its existing tick retries a revision held by widgetGap;
-// Needs You retains its immediate path and an open phone needs no background wake.
-func (la *liveActivities) intakeChanged() {
-	la.widgets.intake.Add(1)
+// intakeChanged moves the intake revision and wakes only the widget loop, and returns the new revision. Its existing
+// tick retries a revision held by widgetGap; Needs You retains its immediate path and an open phone needs no
+// background wake.
+func (la *liveActivities) intakeChanged() uint64 {
+	rev := la.widgets.intake.Add(1)
 	select {
 	case la.widgetChanges <- struct{}{}:
 	default:
 	}
+	return rev
+}
+
+// intakeSent: the open apps were sent the health_intake event for revision rev. Only from then can an app that leaves
+// have written its widgets with it (phoneLeft); the revision moves before the event goes out.
+func (la *liveActivities) intakeSent(rev uint64) {
+	la.mu.Lock()
+	la.shownIntake = max(la.shownIntake, rev)
+	la.mu.Unlock()
 }
 
 // due: whether the device's widgets need a wake now for counts c (and, when not, nothing to remember).

@@ -30,6 +30,21 @@ func (s *Service) isLeader(ctx context.Context, id string) bool {
 	return id != cfg.Main && slices.Contains(cfg.Leaders, id)
 }
 
+// validateSupervisorLead checks a chosen direction against its stored identity. A real leader can be offline.
+func (s *Service) validateSupervisorLead(ctx context.Context, id string) error {
+	if !s.isLeader(ctx, id) {
+		return fmt.Errorf("%s is not a leader conversation (GET /api/v1/assistant/leaders lists them)", id)
+	}
+	d, _, loaded := s.directionSnapshot(ctx, id)
+	if !loaded {
+		return errDirectionUnavailable
+	}
+	if d.Outside != nil {
+		return i18n.Err("assistant-conversations.reporting_direction_supervisor")
+	}
+	return nil
+}
+
 // supervises: conversation id may hand out tasks rather than being a worker: the main conversation or a leader.
 // Planning direction leads own their tasks from dispatch through review and cancellation.
 func (s *Service) supervises(ctx context.Context, id string) bool {
@@ -313,12 +328,20 @@ func (s *Service) runtimeSupervisorFallback(ctx context.Context, cfg Settings) s
 	return cfg.Main
 }
 
-// digestRuntimeTarget applies the runtime policy boundary to a target chosen by digestTo or recheckDigestTo. A main
-// target moves to the compatibility route only for a task handed out by an incompatible runtime; ordinary main work
-// never inherits the legacy background route.
-func (s *Service) digestRuntimeTarget(ctx context.Context, cfg Settings, g superviseSignal, to string) string {
+// digestConversation resolves the notification recipient for immediate delivery and queue drains.
+// Outside directions have no conversation. Main receives their signals without taking ownership of the task.
+func (s *Service) digestConversation(ctx context.Context, cfg Settings, g superviseSignal, to string) string {
 	if to == "" || to == cfg.BackgroundSupervisor {
 		return to
+	}
+	if to != cfg.Main {
+		d, _, loaded := s.directionSnapshot(ctx, to)
+		if !loaded {
+			return ""
+		}
+		if d.Outside != nil {
+			return cfg.Main
+		}
 	}
 	if t, ok := s.todoNow(g.Todo); ok && t.Supervision.assigned() && to == t.Supervision.Supervisor && to != cfg.Main && s.runtimeWithoutSupervisionPolicy(ctx, cfg.MachineID, to) {
 		return "" // retain the assigned lead's work until it can receive policy; never route it to main
@@ -341,9 +364,9 @@ func (s *Service) digestRuntimeTarget(ctx context.Context, cfg Settings, g super
 	return own
 }
 
-// digestTarget is digestTo with the runtime policy boundary applied at delivery time.
+// digestTarget resolves the delivery conversation for a new signal.
 func (s *Service) digestTarget(ctx context.Context, cfg Settings, g superviseSignal) string {
-	return s.digestRuntimeTarget(ctx, cfg, g, s.digestTo(ctx, cfg, g))
+	return s.digestConversation(ctx, cfg, g, s.digestTo(ctx, cfg, g))
 }
 
 // escalatedIn: one of the entries is a leader's needs_user.

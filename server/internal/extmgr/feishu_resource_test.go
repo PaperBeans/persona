@@ -11,8 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botport"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -57,7 +58,7 @@ func feishuResourceManager(t *testing.T, size int, length int64, mime string) (*
 	t.Helper()
 	h := newTestManager(t)
 	st := &feishuResourceStats{}
-	api := feishubot.New("cli_test", "synthetic-secret", "https://feishu.example").WithHTTP(&http.Client{Transport: feishuResourceTransport(func(r *http.Request) (*http.Response, error) {
+	api := botport.NewWithHTTP("cli_test", "synthetic-secret", "https://feishu.example", &http.Client{Transport: feishuResourceTransport(func(r *http.Request) (*http.Response, error) {
 		if strings.Contains(r.URL.Path, "tenant_access_token") {
 			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"code":0,"tenant_access_token":"synthetic-token","expire":7200}`))}, nil
 		}
@@ -135,6 +136,7 @@ func feishuResourceCall(h *Manager, method, kind, machine string, asFile bool) (
 }
 
 func TestFeishuResourceSingleDownload(t *testing.T) {
+	needsLarkModule(t)
 	for _, tc := range []struct {
 		name            string
 		size            int
@@ -202,6 +204,7 @@ func keysOfResource(out map[string]any) []string {
 }
 
 func TestFeishuResourceSaveFailure(t *testing.T) {
+	needsLarkModule(t)
 	for _, machine := range []string{"missing", "mac"} {
 		t.Run(machine, func(t *testing.T) {
 			h, st := feishuResourceManager(t, 4<<20, 4<<20, "image/jpeg")
@@ -220,6 +223,7 @@ func TestFeishuResourceSaveFailure(t *testing.T) {
 
 // The ordinary save route retains its original limit; it cannot bypass the inline route's file ceiling.
 func TestFeishuSaveKeepsFileLimit(t *testing.T) {
+	needsLarkModule(t)
 	for _, unknown := range []bool{false, true} {
 		length := int64(botFileMax + 2)
 		if unknown {
@@ -234,6 +238,7 @@ func TestFeishuSaveKeepsFileLimit(t *testing.T) {
 }
 
 func TestFeishuSaveNormalAttachment(t *testing.T) {
+	needsLarkModule(t)
 	h, st := feishuResourceManager(t, 1024, 1024, "application/pdf")
 	out, err := feishuResourceCall(h, assistantwire.FeishuSave, "file", "mac", false)
 	if err != nil || out["path"] != "/tmp/attachment.dat" || st.requests != 1 || st.uploads != 1 || st.uploaded != 1024 || st.name != "attachment.dat" {
@@ -242,6 +247,7 @@ func TestFeishuSaveNormalAttachment(t *testing.T) {
 }
 
 func TestFeishuResourceRequiresPairedBot(t *testing.T) {
+	needsLarkModule(t)
 	for _, unpaired := range []bool{false, true} {
 		h, st := feishuResourceManager(t, 4<<20, 4<<20, "image/jpeg")
 		if unpaired {
@@ -261,6 +267,7 @@ func TestFeishuResourceRequiresPairedBot(t *testing.T) {
 }
 
 func TestFeishuResourceRechecksPairingBeforeSave(t *testing.T) {
+	needsLarkModule(t)
 	for _, tc := range []struct {
 		name   string
 		change func(*Manager)
@@ -271,7 +278,7 @@ func TestFeishuResourceRechecksPairingBeforeSave(t *testing.T) {
 		{"chat changed", func(h *Manager) { h.bots.set.Owner.ChatID = "oc_other" }},
 		{"paired anew", func(h *Manager) { h.bots.set.Owner.At = h.bots.set.Owner.At.Add(time.Second) }},
 		{"client changed", func(h *Manager) {
-			h.bots.api = feishubot.New("cli_other", "synthetic-secret", "https://feishu.example")
+			h.bots.api = botport.New("cli_other", "synthetic-secret", "https://feishu.example")
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

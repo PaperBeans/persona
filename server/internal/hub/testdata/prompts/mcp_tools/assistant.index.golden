@@ -59,6 +59,7 @@ view_show
 view_update
 view_get
 conversations_list
+conversations_switch
 conversation_read
 conversation_rename
 conversation_archive

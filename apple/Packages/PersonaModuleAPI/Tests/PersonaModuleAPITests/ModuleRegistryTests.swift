@@ -23,8 +23,8 @@ private struct Sample: PersonaModule {
     var claims: String?
 
     init(_ id: ModuleID, slots: Set<ModuleSlot> = [.launchHooks, .deepLinks, .composerActions], available: Bool = true,
-         log: Log, action: String? = nil, claims: String? = nil) {
-        descriptor = ModuleDescriptor(id: id, slots: slots)
+         hubGated: Bool = false, log: Log, action: String? = nil, claims: String? = nil) {
+        descriptor = ModuleDescriptor(id: id, hubGated: hubGated, slots: slots)
         isAvailable = available
         self.log = log
         actionID = action ?? id.rawValue
@@ -156,8 +156,9 @@ struct ModuleRegistryTests {
     }
 
     @Test func servedSlots() {
-        #expect(ModuleSlot.allCases.filter(\.isServed) == [.launchHooks, .deepLinks, .composerActions])
-        #expect(ModuleSlot.allCases.count == 15)
+        #expect(ModuleSlot.allCases.filter(\.isServed) == [.launchHooks, .deepLinks, .composerActions, .shellPlaces, .settings, .chatCardKinds,
+                                                           .chatAccessories, .toolbarItems, .capabilities])
+        #expect(ModuleSlot.allCases.count == 16)
         // The contract's names (#13430 section 4) where it has one.
         for name in ["shell_places", "settings", "chat_card_kinds", "composer_actions", "chat_accessories", "frame_handlers", "push_categories"] {
             #expect(ModuleSlot(rawValue: name) != nil, "\(name)")

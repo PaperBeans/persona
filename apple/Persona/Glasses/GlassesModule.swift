@@ -6,7 +6,7 @@ import SwiftUI
 struct GlassesModule: PersonaModule {
     typealias Host = PersonaHostApp
 
-    let descriptor = ModuleDescriptor(id: "glasses", slots: [.launchHooks, .deepLinks, .composerActions])
+    let descriptor = ModuleDescriptor(id: "glasses", hubGated: true, slots: [.launchHooks, .deepLinks, .composerActions])
 
     /// Only a build with the Meta Wearables SDK (PERSONA_META_WEARABLES=YES, apple/meta-wearables.yml) has the glasses.
     var isAvailable: Bool { MetaGlasses.isBuiltIn }

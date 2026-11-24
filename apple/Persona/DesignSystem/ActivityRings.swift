@@ -3,18 +3,16 @@ import SwiftUI
 import HealthKit
 import HealthKitUI
 
-/// Apple's unmodified ring view and its values share a black surface, including at accessibility text sizes.
+/// Apple's unmodified ring view and its values share a black surface. The values sit beside the rings and move under
+/// them only when the row is too narrow for both, measured rather than read from the text size: the values are
+/// interface text, capped at xxxLarge like the rest of the interface (DESIGN_SYSTEM.md, "Dynamic Type").
 struct ActivityRings: View {
     var reading: HealthActivityReading
-    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        Group {
-            if typeSize.isAccessibilitySize || WindowTextSize.system.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: Theme.Space.m) { rings; values }
-            } else {
-                HStack(spacing: Theme.Space.m) { rings; values.frame(maxWidth: .infinity, alignment: .leading) }
-            }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.m) { rings; values.frame(maxWidth: .infinity, alignment: .leading) }
+            VStack(alignment: .leading, spacing: Theme.Space.m) { rings; values }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Space.m)
@@ -44,7 +42,6 @@ struct ActivityRings: View {
                 Text("Activity Rings Paused").font(Theme.Font.secondary).foregroundStyle(Theme.onSolid)
             }
         }
-        .readingContent()
     }
 
     private func value(_ title: String, _ value: String, color: Color) -> some View {

@@ -80,6 +80,11 @@ func TestDarwinIncludeMount(t *testing.T) {
 		{"/System/Volumes/Preboot", "/dev/disk3s2", "apfs", false, true, false},
 		{"/Volumes/WorkSSD", "/dev/disk4s1", "apfs", false, false, true},
 		{"/dev", "devfs", "devfs", false, true, false},
+		{"/dev/fd", "fdesc", "apfs", false, false, false},
+		{"/developer", "/dev/disk5s1", "apfs", false, false, true},
+		{"/private/var/vm", "/dev/disk3s6", "apfs", false, false, false},
+		{"/private/var/vm/swapfile", "/dev/disk3s6", "apfs", false, false, false},
+		{"/private/var/vms", "/dev/disk5s2", "apfs", false, false, true},
 		{"/System/Volumes/Data/home", "map auto_home", "autofs", false, true, false},
 	}
 	for _, tc := range cases {

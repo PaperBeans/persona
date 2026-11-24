@@ -80,6 +80,12 @@ func New(session, upstream string, logf func(string, ...any)) (*Proxy, error) {
 			r.Out.URL.RawPath = strings.TrimPrefix(r.Out.URL.RawPath, p.prefix)
 			r.SetURL(u)
 			r.Out.Host = u.Host
+			// The response tap reads message_start from the stream. Claude Code asks for gzip, br and zstd, which
+			// the transport would hand back undecoded; a compressed stream never armed a refresh. Loopback to the
+			// CLI needs no compression, so ask the provider for identity (the transport adds no encoding of its own).
+			if r.Out.Method == http.MethodPost && strings.HasSuffix(r.Out.URL.Path, "/messages") {
+				r.Out.Header.Del("Accept-Encoding")
+			}
 		},
 		Transport: roundTripper{p, transport},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {

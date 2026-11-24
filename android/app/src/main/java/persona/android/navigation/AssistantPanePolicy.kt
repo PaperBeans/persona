@@ -13,9 +13,9 @@ import persona.core.navigation.MachinesRoute
 import persona.core.navigation.StarredMessagesRoute
 import persona.core.navigation.TodoDetailRoute
 import persona.core.navigation.TodosRoute
-import persona.feature.knowledge.KnowledgeDetailRoute
-import persona.feature.knowledge.KnowledgeKindRoute
-import persona.feature.knowledge.KnowledgeRoute
+import persona.core.navigation.KnowledgeDetailRoute
+import persona.core.navigation.KnowledgeKindRoute
+import persona.core.navigation.KnowledgeRoute
 
 /** How the Assistant stack shares the window, without measuring a device or owning another back stack. */
 internal data class AssistantPanePolicy(

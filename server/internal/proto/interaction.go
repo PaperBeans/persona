@@ -212,6 +212,9 @@ type Interaction struct {
 	// FoldedUnder is its session's Session.FoldedUnder: the listed session whose chat shows the card when the asking
 	// session is a child folded under it (docs/protocol/protocol.md "Session hierarchy"). Set when sent to clients.
 	FoldedUnder string `json:"folded_under,omitempty"`
+	// FoldedUnderMachineID is its session's Session.FoldedUnderMachineID: the machine of FoldedUnder when the parent
+	// lives on another computer; empty when on the same machine. Set beside FoldedUnder when sent to clients.
+	FoldedUnderMachineID string `json:"folded_under_machine_id,omitempty"`
 	// FoldedAs is its session's Session.FoldedAs: "worker" when the asking session is a tab's worker folded under its
 	// lead (#5180), "side" when it is a side session (#7944). Set beside FoldedUnder when sent to clients.
 	FoldedAs string `json:"folded_as,omitempty"`

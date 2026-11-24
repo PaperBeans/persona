@@ -139,6 +139,7 @@ func askRisk(a *acceptAsk) string {
 // askChanged: a to-do's ask came up, was taken or ended: the apps read the to-dos again ({"type":"todos"}) and the board
 // follows.
 func (s *Service) askChanged(context.Context) {
+	s.trevision.changed()
 	s.todosPushSoon() // with the rest of the write that changed it
 	s.boardChanged()
 }
@@ -156,6 +157,13 @@ func (s *Service) pushDecision(ctx context.Context, id string) bool {
 // pushDecisionErr is pushDecision that tells a push the hub did not take (the error: it may take it later) from one
 // that is not due (false, nil).
 func (s *Service) pushDecisionErr(ctx context.Context, id string) (bool, error) {
+	return s.pushDecisionAbout(ctx, id, assistantwire.TodoPushDecide)
+}
+
+// pushDecisionAbout is pushDecisionErr about reason (assistantwire.TodoPushDecide, or TodoPushDecideOverdue for the
+// reminder past its deadline): the hub rings one push per to-do and reason while the decision waits (TodoPushKey), and
+// takes it back once the decision is over (todoPushOver).
+func (s *Service) pushDecisionAbout(ctx context.Context, id, reason string) (bool, error) {
 	a, ok := s.askCopy(id)
 	t, found := s.todoNow(id)
 	if !ok || !found || !decideAsk(&a) || a.Recommend == "" || !a.AcceptedAt.IsZero() ||
@@ -174,13 +182,17 @@ func (s *Service) pushDecisionErr(ctx context.Context, id string) (bool, error) 
 	n := Notification{ID: "ntf_" + randomHex(8), Kind: assistantwire.NotifyDecide, Subtitle: "Persona", DeviceID: here, SessionID: sessionID,
 		Title: i18n.T(l, "assistant-reports.verdict_title", i18n.Args{"task": clip(oneLine(t.Title), 30)}),
 		Body:  verdictText(l, &a) + "\n" + recommendText(l, &a),
-		// A decision the owner must take now: P0 interrupts even with the hub's push tiering on, every time it is
-		// pushed (its reminders too); the hub keys it by to-do and round.
-		Level: assistantwire.LevelP0,
+		// The level goes by why it is the owner's (decisionPushLevel): one that cannot wait interrupts even with the
+		// hub's push tiering on, every time it is pushed (its reminders too); the hub keys it by to-do and round.
+		Level: decisionPushLevel(a.WhyOwner),
 		// The ask and how its push may answer it: the view's (projection), so a notification never offers what the
 		// to-do's row would not answer in place.
 		Todo: &assistantwire.NotifyTodo{ID: id, AskedAt: a.AskedAt, Recommend: a.Recommend, Responses: ownerResponses,
-			Ask: projection.DecisionAskID(a.AskedAt), Lockscreen: projection.Lockscreen(askRisk(&a))}}
+			Ask: projection.DecisionAskID(a.AskedAt), Lockscreen: projection.Lockscreen(askRisk(&a))},
+		// One push a to-do and reason while it waits, not one a round (todoPushOver lets the next one ring). It carries
+		// no card id: the iOS app clears a delivered push whose interaction_id is not in its card list as stale, and a
+		// decision is never in that list, so a card id would take an unanswered decision off the lock screen.
+		RelatedKey: assistantwire.TodoPushKey(id, reason)}
 	for _, o := range a.Options {
 		n.Todo.Options = append(n.Todo.Options, o.Label)
 	}
@@ -205,4 +217,17 @@ func (s *Service) pushDecisionErr(ctx context.Context, id string) (bool, error) 
 		return false, err
 	}
 	return true, nil
+}
+
+// todoPushOver: to-do id no longer waits on the owner (its decision answered, superseded or withdrawn by its
+// supervisor, its owner wait over, the to-do closed). The hub lets the next push about it ring
+// (assistantwire.TodoPushKey). Nothing is pushed. Pushes already on the phones stay there: they carry no card id
+// (pushDecisionAbout says why), so there is nothing to take back by.
+func (s *Service) todoPushOver(id string) {
+	if s.hub == nil || id == "" {
+		return
+	}
+	if err := s.hub.Tell(assistantwire.EventFleetResolved, assistantwire.FleetResolved{ID: assistantwire.TodoAskCardID(id)}); err != nil {
+		s.logf("task %s: owner push over: %v", id, err)
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -238,6 +239,143 @@ func TestOutsideDirectionSupervisionFallsBackToMain(t *testing.T) {
 	}
 	if got := e.f.noticesTo(created.ID); len(got) != 0 {
 		t.Fatalf("the conversationless direction received a chat message: %q", got)
+	}
+}
+
+func reportingDirection(t *testing.T, e *todoEventEnv) string {
+	t.Helper()
+	d, err := e.s.createOutsideDirection(t.Context(), directionCreateInput{Name: "Release watch", Project: "release"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d.ID
+}
+
+func TestReportingOnlyDirectionSupervisorAssignment(t *testing.T) {
+	e := outsideDirectionEnv(t, &memStore{})
+	direction := reportingDirection(t, e)
+	if candidates := e.s.routeLeaders(t.Context()); len(candidates) != 0 {
+		t.Errorf("new Agent supervisor suggestions include a reporting-only direction: %+v", candidates)
+	}
+	e.f.setSessions("box", boxAgent("worker01"))
+	task := onBoxTask(t, e.s, "worker01", "conv1", false, "Evidence checked")
+	before := todoNow(e.s, task.ID)
+
+	w := outsideRequest(t, e, "", http.MethodPost, "/api/v1/assistant/agents/box/worker01/supervisor",
+		`{"supervisor":"`+direction+`"}`)
+	if w.Code != http.StatusConflict {
+		t.Errorf("assigning the outside direction returned HTTP %d, want 409", w.Code)
+	}
+	if _, err := e.s.toolAgentTransfer(t.Context(), "conv1", transferArgs("box", "worker01", direction)); err == nil {
+		t.Error("agent_transfer accepted the outside direction")
+	}
+	if _, err := e.s.planSupervisor(t.Context(), "conv1", direction); err == nil {
+		t.Error("task_plan accepted the outside direction as an initial supervisor")
+	}
+	if got := todoNow(e.s, task.ID); got.Origin != before.Origin || !reflect.DeepEqual(got.Supervision, before.Supervision) {
+		t.Errorf("rejected assignment changed task %s: %+v", task.ID, got.Supervision)
+	}
+}
+
+func TestAssignedOutsideDirectionReviewFallsBackToMain(t *testing.T) {
+	for _, mode := range []string{"idle_main", "busy_main", "already_queued"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := t.Context()
+			e := outsideDirectionEnv(t, &memStore{})
+			direction := reportingDirection(t, e)
+			task := onBoxTask(t, e.s, "worker01", "conv1", false, "Evidence checked")
+			// This ledger predates assignment validation. The worker has finished and is waiting for review.
+			v, _, err := e.s.updateSupervision(ctx, task.ID, func(v *Supervision) bool {
+				v.Supervisor, v.SupervisorSource, v.State = direction, "explicit", reviewPending
+				return true
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			main := proto.Session{MachineID: "server", SessionID: "conv1", Assistant: true, Status: proto.StatusIdle}
+			switch mode {
+			case "busy_main":
+				main.Status = proto.StatusWorking
+				e.f.setSessions("server", main)
+			case "already_queued":
+				g := superviseSignal{Todo: task.ID, To: direction, Kind: sigReview, Key: reviewKey(&v), At: v.UpdatedAt}
+				// Old dispatch selected the direction. Queue admission also acknowledged this signal's fingerprint.
+				e.s.updateSupervisePending(func(pending map[string]superviseSignal) { pending[g.id()] = g })
+				e.s.supervise.dedupMu.Lock()
+				queued := e.s.deliverDigest(ctx, e.s.settings(ctx), direction, []superviseSignal{g}, "", time.Now(), time.Time{})
+				e.s.supervise.dedupMu.Unlock()
+				if !queued || e.s.queuedFor(direction) != 1 {
+					t.Fatal("the legacy review did not reach the durable queue")
+				}
+				simulateSupervisionRestart(t, e.s)
+			}
+			e.s.superviseWatch(ctx, time.Now())
+			e.s.sendDigest(ctx)
+			if n := e.s.queuedFor(direction); n != 0 {
+				t.Fatalf("%d messages stranded on the outside direction", n)
+			}
+			if mode == "busy_main" {
+				if n := e.s.queuedFor("conv1"); n != 1 {
+					t.Fatalf("busy main has %d queued messages, want one review", n)
+				}
+				main.Status = proto.StatusIdle
+				e.f.setSessions("server", main)
+				e.s.drainRelays("server", []proto.Session{main})
+			}
+			if mode != "idle_main" {
+				waitFor(t, "main's review queue to drain", func() bool { return e.s.queuedFor("conv1") == 0 })
+			}
+			if got := e.f.noticesTo("conv1"); len(got) != 1 || !strings.Contains(got[0], task.ID) || !strings.Contains(got[0], "signal=review") {
+				t.Fatalf("main's review reminders: %q", got)
+			}
+			task = todoNow(e.s, task.ID)
+			review := map[string]any{"todo_id": task.ID, "verdict": "accepted", "checks": completeReviewChecks(task)}
+			if _, err := runJSON(t, e.s, "unrelated", "task_review", review); err == nil {
+				t.Fatal("an unrelated conversation could review the task")
+			}
+			if _, err := runJSON(t, e.s, "conv1", "task_review", review); err != nil {
+				t.Fatalf("main could not review the task: %v", err)
+			}
+			if got := todoNow(e.s, task.ID); got.DoneAt == nil || got.Supervision.Supervisor != direction || got.Supervision.SupervisorSource != "explicit" {
+				t.Fatalf("main's review changed the recorded assignment: %+v", got.Supervision)
+			}
+		})
+	}
+}
+
+func TestOfflineAssignedSupervisorKeepsReview(t *testing.T) {
+	e := outsideDirectionEnv(t, &memStore{})
+	main := proto.Session{MachineID: "server", SessionID: "conv1", Assistant: true, Status: proto.StatusIdle}
+	lead := proto.Session{MachineID: "server", SessionID: "lead1", Assistant: true, Status: proto.StatusIdle}
+	e.f.mu.Lock()
+	e.f.known[lead.SessionID] = true
+	e.f.mu.Unlock()
+	e.f.setSessions("server", main, lead)
+	setSettings(t, e.s, func(v *Settings) { v.Leaders = []string{lead.SessionID} })
+	e.syncLeaders()
+	e.f.setSessions("box", boxAgent("worker01"))
+	task := onBoxTask(t, e.s, "worker01", "conv1", false, "Evidence checked")
+	e.f.setSessions("server", main) // the pinned conversation is temporarily absent from the node's session list
+	w := outsideRequest(t, e, "", http.MethodPost, "/api/v1/assistant/agents/box/worker01/supervisor", `{"supervisor":"lead1"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("assigning the offline conversation: %d %s", w.Code, w.Body)
+	}
+	if _, _, err := e.s.updateSupervision(t.Context(), task.ID, func(v *Supervision) bool { v.State = reviewPending; return true }); err != nil {
+		t.Fatal(err)
+	}
+	e.s.superviseWatch(t.Context(), time.Now())
+	e.s.sendDigest(t.Context())
+	if got := e.s.queuedDigestSignals(lead.SessionID); len(got) != 1 || got[0].Kind != sigReview || got[0].Todo != task.ID {
+		t.Fatalf("offline lead's queued review: %+v", got)
+	}
+	if got := e.f.noticesTo("conv1"); len(got) != 0 || e.s.queuedFor("conv1") != 0 {
+		t.Fatalf("main got the offline lead's review: %q", got)
+	}
+	e.f.setSessions("server", main, lead)
+	e.s.drainRelays("server", []proto.Session{lead})
+	waitFor(t, "the returning lead's queue to drain", func() bool { return e.s.queuedFor(lead.SessionID) == 0 })
+	if got := e.f.noticesTo(lead.SessionID); len(got) != 1 || !strings.Contains(got[0], "signal=review") {
+		t.Fatalf("returning lead's review reminders: %q", got)
 	}
 }
 

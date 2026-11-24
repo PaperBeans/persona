@@ -49,6 +49,15 @@ nonisolated struct HealthIntake: Decodable, Sendable, Equatable {
         var today: Totals
         var zone: String
     }
+    nonisolated struct Changes: Decodable, Sendable {
+        var changes: [Entry]
+        var next: Int64
+        var hasMore: Bool
+        private enum CodingKeys: String, CodingKey {
+            case changes, next
+            case hasMore = "has_more"
+        }
+    }
     /// Made once per user action. Repeating this exact request keeps the UUID and timestamp.
     nonisolated struct Draft: Encodable, Sendable {
         var id = UUID().uuidString.lowercased()
@@ -60,6 +69,17 @@ nonisolated struct HealthIntake: Decodable, Sendable, Equatable {
     var protein: Portion
     var days: [Day]
     var zone: String
+    var waterExtension: String?
+
+    private nonisolated enum CodingKeys: String, CodingKey {
+        case water, protein, days, zone
+        case waterExtension = "water_extension"
+    }
+
+    /// Only the import count is needed here; settings are read back with today's authoritative totals.
+    nonisolated struct WaterImport: Decodable, Sendable {
+        var imported: Int
+    }
 
     mutating func align(_ change: Change) {
         water.today = change.today.water
@@ -69,8 +89,19 @@ nonisolated struct HealthIntake: Decodable, Sendable, Equatable {
 }
 
 extension APIClient {
+    func healthIntakeChanges(after: Int64, limit: Int = 100) async throws -> HealthIntake.Changes {
+        try await manager(nil).get("/api/v1/assistant/health/intake/changes",
+                                   query: ["space": Session.healthSpace, "after": String(after), "limit": String(limit)])
+    }
+
     func healthIntake() async throws -> HealthIntake {
         try await manager(nil).get("/api/v1/assistant/health/intake", query: ["space": Session.healthSpace])
+    }
+
+    func importWaterExtension() async throws -> HealthIntake.WaterImport {
+        let data = try await manager(nil).request("POST", "/api/v1/assistant/health/intake/import",
+                                                query: ["space": Session.healthSpace])
+        return try JSON.decoder.decode(HealthIntake.WaterImport.self, from: data)
     }
 
     func recordHealthIntake(_ draft: HealthIntake.Draft) async throws -> HealthIntake.Change {

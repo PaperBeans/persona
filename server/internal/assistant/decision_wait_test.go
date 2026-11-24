@@ -68,9 +68,10 @@ func TestDecisionThatCanWaitIsNotPushed(t *testing.T) {
 }
 
 // can_wait is ignored, and the answer says why, for a decision that is never taken by default, one whose deadline is
-// near, without a daily briefing with facts, and when none is due while the owner would still have 12 hours to
-// answer; without can_wait nothing changes.
+// near, and when the daily briefing on is not due while the owner would still have 12 hours to answer; without
+// can_wait nothing changes. (With no briefing on at all it is held: TestDecisionThatCanWaitWithoutABriefingIsNeverPushed.)
 func TestDecisionThatCannotWaitIsPushedAsBefore(t *testing.T) {
+	needsLarkLayer(t)
 	on := func(s *Service) { briefingOn(s, true) }
 	for _, c := range []struct {
 		name     string
@@ -90,7 +91,6 @@ func TestDecisionThatCannotWaitIsPushedAsBefore(t *testing.T) {
 			a["deadline"], a["reversible"] = "11h", true
 			return a
 		}, on, waitNoDeadline},
-		{"the briefing is off", waitingDecision, func(s *Service) { briefingOn(s, false) }, waitNoBriefing},
 		// The default is taken 24 hours after it is raised: a briefing 14 hours from now leaves the owner 10.
 		{"the briefing comes too late for its default", waitingDecision, func(s *Service) { briefingIn(s, 14*time.Hour, true) }, waitNoBriefingTime},
 		{"the briefing comes too late for its own deadline", func() map[string]any {
@@ -225,15 +225,37 @@ func TestBriefingListsADecisionThatWaited(t *testing.T) {
 	}
 }
 
-// A held decision no briefing will list is pushed after all, once, with its card: the routine was switched off, or
-// none ran within 24 hours.
+// A held decision whose briefing is switched off stays held and is not pushed (11-23): Needs you is where the owner
+// answers it then, as with no briefing from the start.
+func TestHeldDecisionStaysHeldWhenItsBriefingIsSwitchedOff(t *testing.T) {
+	s, f, todo, posts, _ := conclusionService(t, false)
+	briefingOn(s, true)
+	waitsForReview(t, s, f, todo.ID, "两种走法。")
+	reviewTask(t, s, todo.ID, waitingDecision())
+	s.accept.mu.Lock()
+	s.accept.asks[todo.ID].Deadline = time.Time{}
+	s.accept.mu.Unlock()
+	briefingOn(s, false)
+	for _, later := range []time.Duration{time.Minute, 25 * time.Hour} {
+		s.sweepWaitingDecisions(time.Now().Add(later))
+	}
+	if a := askOf(s, todo.ID); a == nil || !a.ForBriefing || deadlinePushes(f, todo.ID) != 0 {
+		t.Fatalf("pushed or no longer held: %+v", a)
+	}
+	if cards := cardsWith(posts(), rolloutReason); len(cards) != 0 {
+		t.Fatalf("a card went out: %q", cards)
+	}
+}
+
+// A held decision the briefing that is on did not list is pushed after all, once, with its card: none ran within 24
+// hours.
 func TestHeldDecisionIsPushedWhenNoBriefingListsIt(t *testing.T) {
+	needsLarkLayer(t)
 	for _, c := range []struct {
 		name  string
 		off   bool
 		after time.Duration
 	}{
-		{"the routine was switched off", true, time.Minute},
 		{"no briefing ran within 24 hours", false, 24 * time.Hour},
 	} {
 		s, f, todo, posts, _ := conclusionService(t, false)
@@ -282,6 +304,7 @@ func TestHeldDecisionIsPushedWhenNoBriefingListsIt(t *testing.T) {
 // A card that cannot go out when the held decision is pushed is tried again for acceptPostWindow from the push, not
 // from when the decision was raised a day before.
 func TestHeldDecisionsCardIsRetriedFromThePush(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, posts, _ := conclusionService(t, false)
 	briefingOn(s, true)
 	waitsForReview(t, s, f, todo.ID, "两种走法。")
@@ -361,6 +384,51 @@ func TestHeldDecisionIsPushedBeforeItsDefaultIsTaken(t *testing.T) {
 	}
 }
 
+// With no daily briefing with facts on, a decision that can wait is never pushed (11-23: the owner chose no
+// briefings, not more pushes): it is in Needs you at once, no card goes out, and no sweep pushes it later, a day on or
+// near its deadline. The answer says it stays in Needs you. One that cannot be undone is pushed as before.
+func TestDecisionThatCanWaitWithoutABriefingIsNeverPushed(t *testing.T) {
+	s, f, todo, posts, _ := conclusionService(t, false)
+	briefingOn(s, false)
+	waitsForReview(t, s, f, todo.ID, "两种走法：A 先灰度，B 直接全量。")
+	res := reviewTask(t, s, todo.ID, waitingDecision())
+	if !strings.Contains(res, "can wait (can_wait)") || !strings.Contains(res, "no daily briefing is on") || strings.Contains(res, "was ignored") {
+		t.Fatalf("task_review's answer: %s", res)
+	}
+	a := askOf(s, todo.ID)
+	if a == nil || !a.ForBriefing || !a.NoCard || a.MessageID != "" {
+		t.Fatalf("ask %+v", a)
+	}
+	if ask, ok := s.todoAsks(context.Background())[todo.ID]; !ok || !ask.ForBriefing {
+		t.Fatalf("not in Needs you: %+v", ask)
+	}
+	for _, later := range []time.Duration{time.Hour, 25 * time.Hour, a.Deadline.Sub(time.Now()) - time.Hour} {
+		s.sweepWaitingDecisions(time.Now().Add(later))
+	}
+	if n := deadlinePushes(f, todo.ID); n != 0 {
+		t.Fatalf("%d pushes, want none", n)
+	}
+	if cards := cardsWith(posts(), rolloutReason); len(cards) != 0 {
+		t.Fatalf("a card went out: %q", cards)
+	}
+}
+
+// With no briefing on, a decision that cannot be undone is still pushed as before.
+func TestIrreversibleDecisionWithoutABriefingIsPushed(t *testing.T) {
+	s, f, todo, _, _ := conclusionService(t, false)
+	briefingOn(s, false)
+	waitsForReview(t, s, f, todo.ID, "两种走法。")
+	a := dropTableDecision()
+	a["can_wait"] = true
+	res := reviewTask(t, s, todo.ID, a)
+	if !strings.Contains(res, "can_wait was ignored ("+waitNoNeverDefault+")") {
+		t.Fatalf("task_review's answer: %s", res)
+	}
+	if n := deadlinePushes(f, todo.ID); n != 1 {
+		t.Fatalf("%d pushes, want 1", n)
+	}
+}
+
 // Answered from Needs you while it waits, a held decision is taken as any other and never pushed.
 func TestHeldDecisionAnsweredInNeedsYouIsNotPushed(t *testing.T) {
 	s, f, todo, _, _ := conclusionService(t, false)
@@ -389,7 +457,8 @@ func TestWaitOver(t *testing.T) {
 		over    bool
 	}{
 		{"just raised", acceptAsk{AskedAt: now.Add(-time.Hour), Deadline: now.Add(23 * time.Hour)}, true, false},
-		{"the briefing is off", acceptAsk{AskedAt: now.Add(-time.Hour)}, false, true},
+		{"the briefing is off", acceptAsk{AskedAt: now.Add(-time.Hour)}, false, false},
+		{"the briefing is off, a day old and near its deadline", acceptAsk{AskedAt: now.Add(-decisionWaitFor), Deadline: now.Add(time.Hour)}, false, false},
 		{"a day old", acceptAsk{AskedAt: now.Add(-decisionWaitFor)}, true, true},
 		{"12 hours to its deadline", acceptAsk{AskedAt: now.Add(-2 * time.Hour), Deadline: now.Add(12 * time.Hour)}, true, false},
 		{"11 hours to its deadline", acceptAsk{AskedAt: now.Add(-2 * time.Hour), Deadline: now.Add(decisionWaitNotice)}, true, true},

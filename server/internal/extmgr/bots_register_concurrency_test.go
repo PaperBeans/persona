@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botport"
 )
 
 // observeBindWait signals when a request evaluates the admission select's cancellation case.
@@ -94,11 +94,12 @@ func controlledRegistration(t *testing.T, w *botWorld, reply func(action, code s
 		_, _ = rw.Write([]byte(body))
 	}))
 	t.Cleanup(func() { close(stop); srv.Close() })
-	w.h.bots.registrar = feishubot.NewRegistrar().WithHost(srv.URL)
+	w.h.bots.registrar = botport.NewRegistrar(srv.URL)
 	return &begins, &polls
 }
 
 func TestBotRegistrationConcurrentBindsShareSession(t *testing.T) {
+	needsLarkModule(t)
 	w, _, _ := registerWorld(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	begins, _ := controlledRegistration(t, w, func(action, code string, n int, stop <-chan struct{}) string {
@@ -128,6 +129,7 @@ func TestBotRegistrationConcurrentBindsShareSession(t *testing.T) {
 }
 
 func TestBotRegistrationCanceledWaitDoesNotAffectActiveBind(t *testing.T) {
+	needsLarkModule(t)
 	w, _, _ := registerWorld(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	begins, _ := controlledRegistration(t, w, func(action, code string, n int, stop <-chan struct{}) string {
@@ -159,6 +161,7 @@ func TestBotRegistrationCanceledWaitDoesNotAffectActiveBind(t *testing.T) {
 }
 
 func TestBotRegistrationCanceledBeginCannotReplaceNextSession(t *testing.T) {
+	needsLarkModule(t)
 	w, _, _ := registerWorld(t)
 	entered, release, replied := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	begins, _ := controlledRegistration(t, w, func(action, code string, n int, stop <-chan struct{}) string {
@@ -189,6 +192,7 @@ func TestBotRegistrationCanceledBeginCannotReplaceNextSession(t *testing.T) {
 }
 
 func TestBotRegistrationCanceledPollCannotChangeNextSession(t *testing.T) {
+	needsLarkModule(t)
 	for name, body := range map[string]string{
 		"expired":   `{"error":"expired_token"}`,
 		"denied":    `{"error":"access_denied"}`,
@@ -251,6 +255,7 @@ func TestBotRegistrationCanceledPollCannotChangeNextSession(t *testing.T) {
 }
 
 func TestBotRegistrationTerminalPollWaitsForExplicitBind(t *testing.T) {
+	needsLarkModule(t)
 	for name, body := range map[string]string{
 		"expired": `{"error":"expired_token"}`,
 		"denied":  `{"error":"access_denied"}`,
@@ -282,6 +287,7 @@ func TestBotRegistrationTerminalPollWaitsForExplicitBind(t *testing.T) {
 }
 
 func TestBotRegistrationExpiredLocallyWaitsForExplicitBind(t *testing.T) {
+	needsLarkModule(t)
 	w, acc, _ := registerWorld(t, `{"error":"authorization_pending"}`)
 	first := w.bind(t, "")
 	w.h.bots.mu.Lock()
@@ -299,6 +305,7 @@ func TestBotRegistrationExpiredLocallyWaitsForExplicitBind(t *testing.T) {
 }
 
 func TestBotRegistrationConfirmedSessionSurvivesExpiry(t *testing.T) {
+	needsLarkModule(t)
 	w, acc, _ := registerWorld(t)
 	first := w.bind(t, "")
 	w.h.bots.mu.Lock()
@@ -322,6 +329,7 @@ func TestBotRegistrationConfirmedSessionSurvivesExpiry(t *testing.T) {
 }
 
 func TestBotRegistrationConcurrentPollsFinishOnce(t *testing.T) {
+	needsLarkModule(t)
 	w, _, _ := registerWorld(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	_, polls := controlledRegistration(t, w, func(action, code string, n int, stop <-chan struct{}) string {
@@ -354,6 +362,7 @@ func TestBotRegistrationConcurrentPollsFinishOnce(t *testing.T) {
 }
 
 func TestBotRegistrationBeginFailurePreservesCredentialFallback(t *testing.T) {
+	needsLarkModule(t)
 	w, _, _ := registerWorld(t)
 	controlledRegistration(t, w, func(action, code string, n int, stop <-chan struct{}) string {
 		if action == "poll" {
@@ -375,6 +384,7 @@ func TestBotRegistrationBeginFailurePreservesCredentialFallback(t *testing.T) {
 }
 
 func TestBotRegistrationTypedCredentialsEndTheRegistration(t *testing.T) {
+	needsLarkModule(t)
 	w, acc, _ := registerWorld(t, `{"error":"authorization_pending"}`)
 	w.bind(t, "")
 	body := fmt.Sprintf(`{"step":"credentials","values":{"app_id":"cli_typed","app_secret":"fake-secret","domain":%q}}`, w.api.srv.URL)

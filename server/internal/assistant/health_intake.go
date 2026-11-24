@@ -67,10 +67,11 @@ type healthIntakeDay struct {
 }
 
 type healthIntakeView struct {
-	Water   healthIntakeKind  `json:"water"`
-	Protein healthIntakeKind  `json:"protein"`
-	Days    []healthIntakeDay `json:"days"`
-	Zone    string            `json:"zone"`
+	WaterExtension string            `json:"water_extension,omitempty"`
+	Water          healthIntakeKind  `json:"water"`
+	Protein        healthIntakeKind  `json:"protein"`
+	Days           []healthIntakeDay `json:"days"`
+	Zone           string            `json:"zone"`
 }
 
 type healthIntakeTotals struct {
@@ -179,6 +180,7 @@ func (s *Service) intakeRoutes() {
 	s.handle("DELETE /api/v1/assistant/health/intake/{id}", s.undoHealthIntake)
 	s.handle("GET /api/v1/assistant/health/intake/changes", s.healthIntakeChanges)
 	s.handle("POST /api/v1/assistant/health/intake/ui", s.healthIntakeUI)
+	s.handle("POST /api/v1/assistant/health/intake/import", s.importHealthWater)
 	s.handle("POST /api/v1/assistant/health/water/reminder", s.waterReminderAction)
 }
 
@@ -201,6 +203,11 @@ func (s *Service) getHealthIntake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := s.healthIntakeView(r.Context(), st, settings, int(days))
+	if err != nil {
+		intakeUnavailable(w)
+		return
+	}
+	v.WaterExtension, err = s.pendingWaterExtension(r.Context())
 	if err != nil {
 		intakeUnavailable(w)
 		return

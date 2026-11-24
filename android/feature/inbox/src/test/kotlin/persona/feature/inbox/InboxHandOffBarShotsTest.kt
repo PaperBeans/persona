@@ -39,6 +39,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
+import persona.core.inbox.*
 
 /** Native JVM component evidence only; IME, real windows and device glass still need the adaptive scene and integration shots. */
 @RunWith(AndroidJUnit4::class)

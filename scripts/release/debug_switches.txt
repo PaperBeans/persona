@@ -22,6 +22,7 @@ larkTop
 loadAll
 newAssistant
 openAbout
+openAdvancedSettings
 openAgent
 openAgentsFresh
 openAlarms
@@ -313,6 +314,7 @@ showInboxSuggestionEdit
 showInboxSuggestionStale
 showInboxTodo
 showInfo
+showIntakeSyncStatus
 showJumpPerf
 showKeyMods
 showKnowledgeDay

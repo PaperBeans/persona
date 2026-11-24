@@ -23,6 +23,7 @@ import type { Interaction, Session } from "./types";
 import { toast } from "../ui/atoms";
 import { byTime } from "./times";
 import { homeKey } from "./folded-rows";
+import { supervisorHeld } from "./supervisor-held";
 import { inFolderFilter } from "./inbox-folders";
 import { actedText, actOnSuggestion, statusOf, type ChainEntry, type InboxHandling, type InboxRelated, type InboxStatus, type InboxSuggestion, type InboxSuggestionAttempt, type SuggestionAction } from "./inbox-events";
 import type { MailAccount } from "./mail";
@@ -526,8 +527,9 @@ export function interactionAsk(ix: Interaction): string {
 
 export function waitingAgents(interactions: Interaction[], sessions: Record<string, Session[]>, mutes: AgentMutes, f: InboxFilter): Interaction[] {
   if (f.source || f.folder || (f.kind && f.kind !== "agent")) return [];
+  // a card a task's supervisor holds is not the user's yet (lib/supervisor-held.ts)
   const shown = interactions
-    .filter((ix) => !interactionMuted(ix, sessions, mutes) && hasText([ix.session_title, ix.summary, interactionTitle(ix), interactionAsk(ix)], f.query))
+    .filter((ix) => !supervisorHeld(ix) && !interactionMuted(ix, sessions, mutes) && hasText([ix.session_title, ix.summary, interactionTitle(ix), interactionAsk(ix)], f.query))
     .sort((a, b) => byTime(a.created_at, b.created_at) || a.id.localeCompare(b.id));
   return withChildCardsUnderParents(shown);
 }

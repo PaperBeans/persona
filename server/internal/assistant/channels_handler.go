@@ -170,7 +170,7 @@ func (s *Service) channelsReconnected(ctx context.Context) {
 	}
 	s.forgetChannelList()
 	s.feishuForgetStatus()
-	if _, err := s.feishuStatus(ctx); err != nil { // the pairing as it is now (feishuReconcile)
+	if _, err := s.chat().Status(ctx); err != nil { // the pairing as it is now (feishuReconcile)
 		s.logf("channels: the Feishu bot's status: %v", err)
 	}
 	go s.sweepChannelRuns()

@@ -16,7 +16,7 @@ struct ShellPlaces {
     /// the conversation (#6332) are the conversation.
     static func isPlace(_ page: ShellPage) -> Bool {
         switch page {
-        case .newConversation, .health, .conversation: false
+        case .newConversation, .health, .space, .newSpace, .conversation: false
         default: true
         }
     }

@@ -579,7 +579,17 @@ struct MeetingPage: View {
         .animation(reduceMotion ? nil : Theme.Motion.state, value: writing)
         // In the sheet its ✕ at the leading corner (#9653, `SheetClose`); pushed, the back button there. The ⋯ trailing.
         .toolbar {
-            if let close { SheetClose(id: "recording-wrapup-done") { close() } }
+            if let close {
+                SheetClose(id: "recording-wrapup-done") { close() }
+            } else {
+                ToolbarItem(placement: .principal) {
+                    Text("Meeting")
+                        .font(Theme.Font.heading)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .accessibilityAddTraits(.isHeader)
+                }
+            }
             if MeetingRoomOffers.of(entry.id).handOff { ToolbarItem(placement: .topBarTrailing) { afterMenu(entry) } }
         }
         .toolbar(.visible, for: .navigationBar)

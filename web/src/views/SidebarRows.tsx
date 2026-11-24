@@ -192,7 +192,7 @@ export const NavRow = memo(function NavRow({ k, reg, hover, active, to, go, icon
 }, sameProps);
 
 // The list's one-line notes (loading, no match), as each writes it.
-const NOTE = "px-2 py-1 text-[12px] text-ink-3";
+const NOTE = "px-2 py-1 text-label text-ink-3";
 
 // two shapes as well as two colors, so they tell apart without color: a bare prompt (no frame) and a window with a title bar
 const SOURCE_ICON = { terminal: { name: "run", tone: "text-source-terminal" }, desktop: { name: "appWindow", tone: "text-source-desktop" } } as const;
@@ -480,7 +480,7 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
             </span>
           )}
           {stall && (
-            <span data-bg-stalled title={stall.title} className="flex h-4 min-w-0 items-center gap-1 text-[11px] leading-4 text-ink-3">
+            <span data-bg-stalled title={stall.title} className="flex h-4 min-w-0 items-center gap-1 text-submeta leading-4 text-ink-3">
               <Icon name="clock" size={10} stroke={2.2} className="shrink-0" />
               <span className="truncate">{stall.text}</span>
             </span>

@@ -263,6 +263,7 @@ fun ChatDestination(
                 chrome = ChatChromeBindings(covered = openedPath != null,
                     actions = wiring?.actions.takeUnless { historyReadOnly },
                     forkActions = wiring?.actions,
+                    takeoverActions = wiring?.actions,
                     connection = wiring?.connection,
                     childSessionId = home.childSessionId.takeIf { landedSide == null },
                     lookupRows = home.rows,

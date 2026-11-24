@@ -4,13 +4,13 @@
 import { t } from "../i18n";
 import { checkUpdate, CONFIGURATION_VERSION, ConfigurationError, type ConfigurationDocument, type ConfigurationField, type ConfigurationSource, type ConfigurationUpdate } from "../lib/configuration/contract";
 import { getState } from "../lib/store";
-import { moduleState, registeredModules, subscribeModules } from "./module-host";
+import { hubServes, moduleState, registeredModules, subscribeModules } from "./module-host";
 import { MODULE_SWITCH_KEY, moduleSwitchedOff, setModuleSwitchedOff } from "./module-switch";
 
 export const MODULES_LABS_ID = "features";
 
-/** Whether the hub offers the module: it names no flag, or the hello's features have it. */
-const offered = (feature: string | undefined) => !feature || getState().features.includes(feature);
+/** Whether the hub offers the module (core/module-host.ts, the hub flag rule). */
+const offered = (feature: string | undefined) => hubServes(feature, getState());
 
 function revision(): string {
   let raw: string | null = null;

@@ -138,6 +138,60 @@ func TestMainConversationSilentRoundWithoutEarlierWork(t *testing.T) {
 	}
 }
 
+func TestMainConversationInternalAcceptedRoundUnread(t *testing.T) {
+	t0 := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name    string
+		verdict string
+		receipt string
+		want    string
+	}{
+		{name: "internal accepted", verdict: reviewAccepted, receipt: `{"background":true,"message":"accepted"}`, want: proto.StateIdle},
+		{name: "user requested accepted", verdict: reviewAccepted, receipt: `{"background":false,"message":"accepted"}`, want: proto.StateUnread},
+		{name: "needs user", verdict: reviewNeedsUser, receipt: `{"background":true,"message":"card sent"}`, want: proto.StateUnread},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f := newQuietService(t)
+			round := attentionTranscript(t0, false, false)[2:]
+			items := append([]proto.Item{
+				round[0],
+				{Seq: 4, Role: "assistant", Kind: proto.KindToolUse, ToolUseID: "review", ToolName: "mcp__persona__task_review", ToolInput: json.RawMessage(`{"verdict":"` + tc.verdict + `"}`), TS: t0.Add(3 * time.Minute)},
+				{Seq: 5, Role: "user", Kind: proto.KindToolResult, ToolUseID: "review", Text: tc.receipt, TS: t0.Add(3 * time.Minute)},
+			}, round[1:]...)
+			f.setItems(items...)
+			row := proto.Session{MachineID: "server", SessionID: "conv1", Assistant: true, Status: proto.StatusDone, State: proto.StateUnread, Rev: 9, UpdatedAt: t0.Add(5 * time.Minute)}
+			s.decorateMainConversationAttention(&row, s.settings(context.Background()))
+			if row.State != tc.want {
+				t.Fatalf("state=%s, want %s", row.State, tc.want)
+			}
+		})
+	}
+}
+
+func TestMainConversationInternalAcceptedInvalidatesV1Cache(t *testing.T) {
+	ctx := context.Background()
+	st := newFleetMem()
+	s, f := newQuietServiceOn(t, st)
+	t0 := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
+	round := attentionTranscript(t0, false, false)[2:]
+	items := append([]proto.Item{
+		round[0],
+		{Seq: 4, Role: "assistant", Kind: proto.KindToolUse, ToolUseID: "review", ToolName: "mcp__persona__task_review", ToolInput: json.RawMessage(`{"verdict":"accepted"}`), TS: t0.Add(3 * time.Minute)},
+		{Seq: 5, Role: "user", Kind: proto.KindToolResult, ToolUseID: "review", Text: `{"background":true,"message":"accepted"}`, TS: t0.Add(3 * time.Minute)},
+	}, round[1:]...)
+	f.setItems(items...)
+	if err := st.PutSetting(ctx, "assistant.conversation_attention.v1", map[string]conversationAttentionEntry{
+		conversationAttentionCacheKey("server", "conv1"): {Rev: 9, HasVisible: true, VisibleAt: t0.Add(3 * time.Minute)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	row := proto.Session{MachineID: "server", SessionID: "conv1", Assistant: true, Status: proto.StatusDone, State: proto.StateUnread, Rev: 9, UpdatedAt: t0.Add(5 * time.Minute)}
+	s.decorateMainConversationAttention(&row, s.settings(ctx))
+	if row.State != proto.StateIdle || attentionReads(f) != 1 {
+		t.Fatalf("old visible cache survived the policy change: state=%s reads=%d", row.State, attentionReads(f))
+	}
+}
+
 func TestMainConversationAttentionPagesForEarlierVisible(t *testing.T) {
 	s, f := newQuietService(t)
 	t0 := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)

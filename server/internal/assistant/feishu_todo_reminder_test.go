@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -132,10 +132,10 @@ func TestFeishuTodoReminderReplyCarriesTodoContext(t *testing.T) {
 	s.todos.loaded = true
 	s.todos.mu.Unlock()
 
-	ev := &feishubot.MessageEvent{}
+	ev := &botcard.MessageEvent{}
 	ev.Message.MessageID, ev.Message.ParentID, ev.Message.RootID = "om_answer", "om_1", "om_1"
 	ev.Message.ChatType, ev.Message.MessageType, ev.Message.Content = "p2p", "text", `{"text":"这件事继续办"}`
-	content := feishubot.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
+	content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
 	if err := s.botSend(context.Background(), ev, content, target); err != nil {
 		t.Fatal(err)
 	}

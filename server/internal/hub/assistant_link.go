@@ -70,6 +70,10 @@ func (h *Hub) assistantRoutesRelayed(api *http.ServeMux) {
 			api.HandleFunc(pattern, h.forwardAgentAutoname)
 			continue
 		}
+		if pattern == todoRevisionRoute { // the pushed read's cheap validator, merged over every manager
+			api.HandleFunc(pattern, h.mergeTodoRevision)
+			continue
+		}
 		if key, ok := mergedLists[pattern]; ok { // the todos: every manager's
 			api.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) { h.mergeList(w, r, key, h.forwardHTTP) })
 			continue

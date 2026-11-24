@@ -250,13 +250,15 @@ func (s *Service) switchNowOrQueue(ctx context.Context, it *switchItem, t switch
 		return
 	}
 	text := ""
+	var source *proto.MessageSource
 	if it.plan == switchContinued {
 		text = prompts.RenderAgentLimitContinue(answerLanguage(s.hello(ctx).Locale))
+		source = autoContinueSource()
 		if _, theirs, err := s.supervisedElsewhere(ctx, self, it.m, it.c); err == nil && theirs {
 			text = prompts.RenderSideConversation(text)
 		}
 	}
-	err := s.moveAgent(ctx, it.m, it.c, t, text)
+	err := s.moveAgent(ctx, it.m, it.c, t, text, source)
 	switch {
 	case err == nil:
 		it.outcome = it.plan
@@ -505,14 +507,16 @@ func (s *Service) runQueuedSwitch(ctx context.Context, w queuedSwitch, c proto.S
 	}
 	t := switchTarget{Launcher: w.Launcher, Model: w.Model, Effort: w.Effort}
 	text := ""
+	var source *proto.MessageSource
 	var err error
 	if switchStopped(c) {
 		err = s.retargetStopped(ctx, m, c, t)
 	} else {
 		if limitStopped(c) {
 			text = prompts.RenderAgentLimitContinue(answerLanguage(s.hello(ctx).Locale))
+			source = autoContinueSource()
 		}
-		err = s.moveAgent(ctx, m, c, t, text)
+		err = s.moveAgent(ctx, m, c, t, text, source)
 	}
 	q.mu.Lock()
 	delete(q.running, k)

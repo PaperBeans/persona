@@ -76,6 +76,8 @@ data class ChatChromeBindings(
     val lookupRows: List<persona.core.contracts.Session> = emptyList(),
     /** Fork copies into a new session without mutating the source, so a stopped history preview may still provide it. */
     val forkActions: ChatActions? = actions,
+    /** Explicit Codex takeover / continuation actions, also available when previewing an offline codex_history session. */
+    val takeoverActions: ChatActions? = actions,
 )
 
 /** Where a branch made by "Branch to new chat" opens: an assistant's branch is an assistant conversation, an agent's an agent chat. */

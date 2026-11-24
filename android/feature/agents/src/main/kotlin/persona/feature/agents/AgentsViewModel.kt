@@ -112,6 +112,8 @@ internal class AgentsViewModel(
         repository.refresh()
     } }
     private val operations = bindings?.operations?.let { AgentOperationsState(it, preferences.hubCache) }
+    internal val sessions: SessionsRepository get() = repository
+    internal val operationsApi: AgentOperations? get() = bindings?.operations
     val hasOperations: Boolean get() = operations != null
     val operationState = operations?.state ?: MutableStateFlow(AgentOperationsSnapshot())
     /**

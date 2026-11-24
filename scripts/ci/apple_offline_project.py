@@ -53,7 +53,8 @@ SOURCES = {
             "Shared/RequestClientMetadata.swift", "Shared/ExtensionSurfaceEntities.swift",
             "Shared/ExtensionSurfaceView.swift", "Shared/ExtensionSystemWidget.swift",
             "Shared/Design/ExtensionSurfaceTokens.swift", "Shared/Design/PersonaFace.swift", "Shared/HomeWidgets",
-            "Shared/Design/HomeWidgetTokens.swift", "Shared/Localization",
+            "Shared/Design/HomeWidgetTokens.swift", "Shared/Design/HealthIntakePalette.swift",
+            "Shared/Localization",
         )),
     ],
     "PersonaNotify": [

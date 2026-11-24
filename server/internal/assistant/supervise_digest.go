@@ -727,12 +727,33 @@ func (s *Service) digestEntryChecked(ctx context.Context, g superviseSignal, web
 	case sigParentCloseout:
 		return s.parentCloseoutDigestEntry(ctx, g, web)
 	case sigCardlessWait:
+		// P1-1: an unreadable acceptance book is not evidence of no card — restore and retry before any claim logic.
+		if s.cardlessDigestShouldRetry(g) {
+			return prompts.SuperviseEntry{}, false, true // acceptance book unreadable: restore and retry, never render on an unknown ledger
+		}
 		if valid, retry := s.completeCardlessClaim(ctx, g); !valid {
 			return prompts.SuperviseEntry{}, false, retry
 		}
 	}
 	e, ok := s.digestEntry(ctx, g, web)
 	return e, ok, false
+}
+
+// cardlessDigestShouldRetry reports that a cardless entry's delivery-time revalidation could not run because the
+// acceptance book could not be read. The signal is then restored for a later digest instead of being dropped or
+// rendered against an unknown ledger. Every other outcome (a card/worker now answers, or the claim still holds) is
+// left to the two-state digestEntry, which re-runs the same checks against a readable book.
+func (s *Service) cardlessDigestShouldRetry(g superviseSignal) bool {
+	t, ok := s.todoNow(g.Todo)
+	if !ok || t.Supervision == nil {
+		return false
+	}
+	v := t.Supervision
+	if v.state(t) != reviewPending || v.CardlessToldAt == nil {
+		return false // reviewed or handed back meanwhile: moot, not a transient retry
+	}
+	_, readable, _ := s.askCopyReadable(t.ID)
+	return !readable
 }
 
 // todoReadyDigestEntry builds the supervision entry for a sigTodoReady signal, returning retry=true on transient

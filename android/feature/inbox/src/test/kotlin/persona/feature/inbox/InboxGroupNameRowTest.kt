@@ -34,6 +34,7 @@ import persona.core.navigation.*
 import java.io.File
 import java.lang.reflect.Proxy
 import java.util.Locale
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)

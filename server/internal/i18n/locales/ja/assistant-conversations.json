@@ -1,4 +1,5 @@
 {
+  "reporting_direction_supervisor": "この方向は進捗報告用です。タスクを監督する Persona のチャットを選んでください。",
   "archive_main": "メインチャットはアーカイブできません",
   "archive_background_supervisor": "バックグラウンド監督のチャットはアーカイブできません",
   "supervision_source": "監督",

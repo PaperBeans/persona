@@ -7,6 +7,8 @@
 
 - Claude Code's permission modes do not come from a runtime's optional capability list (#13233). `proto.Launcher.PermissionModes` is defined for non-Claude agents; applying a partial list to a Claude-compatible custom launcher drops an inherited bypass choice and silently returns the conversation to the profile's settings. Resolve the backend first: Claude accepts `proto.PermissionModes`, while a non-Claude runtime's declared list stays authoritative. Cover the manager's start params and a non-Claude control. Existing nonempty assistant profiles are not reseeded, so their `permissions.defaultMode` and unrelated settings survive node upgrades; pin that boundary with a real temporary profile rather than rewriting it to make a test pass.
 
+- Persist permission-mode provenance, not just the effective value (#13653). The same saved `auto` can be an inherited default or a deliberate choice, and those cannot be distinguished later from `AppMode` or a transcript. Carry the manager default separately from `permission_mode`, mark explicit choices, and test legacy resume, current-default resume, a live process and an explicit choice. Apply the manager default only to Claude Code resumes: another runtime declaring the same mode does not make its saved mode an inherited Claude value. Older peers omit the provenance fields and keep the old behavior.
+
 - A command that returns text to the message pipeline must keep its explicit destination (#12700). In the official bot DM, resetting `current` for `/new <first message>` was insufficient: pending-card handlers could consume the text, and parent/root bindings could restore an old target. Carry the fresh Persona target past those handlers while retaining reply metadata for quoted context. Test through `FeishuMessage` with old Persona/Agent bindings, an answerable card and duplicate delivery; keep bare `/new` and ordinary replies as controls.
 
 - A launcher name does not identify an execution backend (#12791). Scheduled Assistant conversations must pass
@@ -387,7 +389,7 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
 
 - **A table row is split at every unescaped `|`, inside a code span too** (#3852). GFM cuts a cell at a pipe the row did
   not escape, so `| `a || b` | 或 |` really is a row with four cells while its header has two; GFM draws only the
-  header-width cells and ignores the excess, and `answerTables` (`feishubot/answer.go`) built a row the same way, by
+  header-width cells and ignores the excess, and `answerTables` (`botcard/answer.go`) built a row the same way, by
   looping over the header's columns alone, so everything past the header's width — here "b`" and "或" — never reached
   the card, with nothing said. The rich-text fallback kept those words, so the same answer read differently as a card
   and as a refused card's text. Those words are still the row's: keep the surplus cells in the last column, joined with
@@ -431,7 +433,7 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
   so a model writing an answer — indents a sub-item by its parent marker's width: two spaces under "- ", three under
   "1. ". The answer's Markdown was passed through unchanged, so every nested list arrived as a flat list of siblings and
   the hierarchy the answer was written with was gone. `CardMarkdown` now maps each item's observed indentation to a level
-  and writes four spaces per level (`listIndent` in `feishubot/card.go`) in one pass over the whole answer, so the levels
+  and writes four spaces per level (`listIndent` in `botcard/card.go`) in one pass over the whole answer, so the levels
   carry across a fenced code block and a list goes on around it; a list item's continuation lines, a list inside a
   blockquote, and four-or-more-space indented code at the left margin stay as written, and a paragraph at the left margin
   ends the list. Test the conversion through `CardMarkdown` and through the answer builder (`answerCards`).
@@ -980,3 +982,12 @@ conversation shared with other work, two runs due in the same minute both read t
 to-do's no-progress decision quoted another task. Find the run's own prompt by its run key (`runKeyIn`) and take the
 reply after it, up to the next message that opened a turn. Refuse turns that a queued message mixed. Test with real
 transcript pages (`runChat`), not bare item lists.
+
+## A node's own session rows never carry the assistant mark (#13879)
+
+`Session.Assistant` is set only when the hub decorates a list for the apps (`hub/assistant_link.go`). The manager's
+`Devices.Session` returns the node's raw row, so a check like `!c.Assistant` there is true for every main and lead.
+Cache keepalive revoked every role this way and never mounted a proxy, while its tests passed because they built the
+inventory with `Assistant: true`. Judge a raw row with `fleetMachine.isAssistant` (its directory), and build test
+inventories the way a node sends them. The same feature also needed Claude Code's `ENABLE_PROMPT_CACHING_1H`: without
+it the CLI declares only five-minute markers on an API key or a gateway, whatever TTL the gateway applies later.

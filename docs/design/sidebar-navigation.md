@@ -32,7 +32,7 @@ request (`ShellState.show`, `ShellState.swift:91-93`) and starts the drawer's cl
 | New Chat | `go(.newConversation)` | Assistant's root, new conversation | dropped, as above |
 | Inbox, To-dos, Machines, extension pages | `go` → `show` → `path.append(ShellRoute…)` (`apple/Persona/Views/Shell/ShellHome.swift:429-442`) | `NavigationStack` push on Assistant | the place in front and its sub-pages are dropped first; back returns to the conversation, also when it was opened from Agents |
 | Scheduled Tasks, Knowledge, Profile, Recordings | `go` → `show` → `show… = true` (`AssistantView.swift:247-257`) | push by `navigationDestination(isPresented:)` | dropped first, as above; these pushes are not in `path` at all |
-| Health | `go(.health)` → `enterHealth()` (`AssistantView.swift:397-410`) | the latest health conversation, or a push of Health | dropped first |
+| Health | `go(.health)` → `enterHealth()` → `backToRoot(); present(.health)` in `AssistantView.swift` | the Health home (#13273), with its conversation list; a page root in the embedded Sidebar layout | returned to the root before presentation |
 | Settings | `ShellView.swift:105-108` | `.sheet` on the shell (`ShellView.swift:30-36`) | the drawer closes under the rising sheet; closing Settings lands on the page, not the drawer it came from |
 | Archived, Auto conversations | `AssistantSidebar.swift:904-915`, presented from the drawer's own hosting view | sheet over the drawer | picking a row dismisses the sheet, closes the drawer and resets the stack in the same turn |
 | Search (iPhone Duo open) | `AssistantSidebar.swift:917-923` | `fullScreenCover` | as Archived |

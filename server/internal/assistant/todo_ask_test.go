@@ -443,6 +443,7 @@ func TestDecisionWithoutTheBotIsPushedAndTheSupervisorStillAsks(t *testing.T) {
 
 // With the bot on, the card and the push both go, once each, and the supervisor hears of both.
 func TestDecisionWithTheBotIsCardedAndPushedOnce(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, posts, _ := conclusionService(t, false)
 	waitsForReview(t, s, f, todo.ID, "两种走法：A 先灰度，B 直接全量。")
 	res := reviewTask(t, s, todo.ID, map[string]any{"verdict": "needs_user", "reason": "先灰度还是直接全量", "recommend": "先灰度 10%"})

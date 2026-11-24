@@ -30,10 +30,13 @@ type NodeSession struct {
 	StartedAt        time.Time       `json:"started_at"`
 	StopCause        proto.StopCause `json:"stop_cause,omitempty"`
 	StopCauseAt      int64           `json:"stop_cause_at,omitempty"`
-	Tasks            []string        `json:"tasks,omitempty"` // an assistant conversation's running background tasks
-	// The permission mode / effort the app set on an assistant conversation (node/modes.go); kept with the model.
-	AppMode   string `json:"app_mode,omitempty"`
-	AppEffort string `json:"app_effort,omitempty"`
+	RanAt            int64           `json:"ran_at,omitempty"` // the node's last sighting of it running (node interrupted.go)
+	Tasks            []string        `json:"tasks,omitempty"`  // an assistant conversation's running background tasks
+	// The permission mode / effort on an assistant conversation (node/modes.go); kept with the model.
+	// AppModeExplicit says the mode was a deliberate conversation choice rather than a legacy/default value.
+	AppMode         string `json:"app_mode,omitempty"`
+	AppModeExplicit bool   `json:"app_mode_explicit,omitempty"`
+	AppEffort       string `json:"app_effort,omitempty"`
 	// Requested initial Codex App settings still awaiting desktop readback before first-message delivery.
 	DesktopPendingModel  string `json:"desktop_pending_model,omitempty"`
 	DesktopPendingEffort string `json:"desktop_pending_effort,omitempty"`
@@ -105,18 +108,22 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 			'stop_cause', $25::text, 'stop_cause_at', $26::bigint,
 			'awaiting_first_message', $27::boolean, 'idle_compaction', $28::jsonb, 'origin', $29::text,
 			'origin_known', $30::boolean, 'engine_runtime', $31::text, 'model_source', $32::jsonb,
-			'desktop_pending_model', $33::text, 'desktop_pending_effort', $34::text), now() FROM saved
-		ON CONFLICT (key) DO UPDATE SET value = CASE
+			'desktop_pending_model', $33::text, 'desktop_pending_effort', $34::text,
+			'app_mode_explicit', $35::boolean, 'ran_at', $36::bigint), now() FROM saved
+		ON CONFLICT (key) DO UPDATE SET value = (CASE
 			WHEN COALESCE((settings.value->>'stop_cause_at')::bigint, 0) > $26
 				OR (COALESCE((settings.value->>'stop_cause_at')::bigint, 0) = $26
 					AND settings.value->>'stop_cause' = 'user' AND $25 <> 'user')
 			THEN EXCLUDED.value || jsonb_build_object('stop_cause', settings.value->'stop_cause',
 				'stop_cause_at', settings.value->'stop_cause_at')
-			ELSE EXCLUDED.value END, updated_at = now()`,
+			ELSE EXCLUDED.value END)
+			-- ran_at only moves forward: a put that carries none (or an older one) keeps the last sighting.
+			|| jsonb_build_object('ran_at', GREATEST(COALESCE((settings.value->>'ran_at')::bigint, 0), $36::bigint)),
+			updated_at = now()`,
 		machine, id, s.Pane, s.Launcher, s.Cwd, s.StartedAt, tasks, s.Model, s.ModelFingerprint, s.ModelEffort, s.AppMode, s.AppEffort,
 		s.UltracodeProcess, unknownStart, s.CreationID, s.Incarnation, guest, s.GuestKind, s.ConfigDir, pendingSwitch, engineHistory, pendingHandoff,
 		modelRecovery, s.FollowsSetting, string(s.StopCause), s.StopCauseAt, s.AwaitingFirstMessage, jsonOrNil(s.IdleCompaction), s.Origin, s.OriginKnown,
-		s.EngineRuntime, jsonOrNil(s.ModelSource), s.DesktopPendingModel, s.DesktopPendingEffort)
+		s.EngineRuntime, jsonOrNil(s.ModelSource), s.DesktopPendingModel, s.DesktopPendingEffort, s.AppModeExplicit, s.RanAt)
 	return err
 }
 
@@ -138,6 +145,7 @@ type nodeModel struct {
 	Origin               string          `json:"origin"`
 	OriginKnown          bool            `json:"origin_known"`
 	AppMode              string          `json:"app_mode"`
+	AppModeExplicit      bool            `json:"app_mode_explicit"`
 	AppEffort            string          `json:"app_effort"`
 	DesktopPendingModel  string          `json:"desktop_pending_model"`
 	DesktopPendingEffort string          `json:"desktop_pending_effort"`
@@ -157,6 +165,7 @@ type nodeModel struct {
 	FollowsSetting   bool            `json:"follows_setting"`
 	StopCause        proto.StopCause `json:"stop_cause"`
 	StopCauseAt      int64           `json:"stop_cause_at"`
+	RanAt            int64           `json:"ran_at"`
 
 	// Kept until the node confirms its first actual message was delivered.
 	AwaitingFirstMessage bool `json:"awaiting_first_message"`
@@ -189,6 +198,7 @@ func (d *DB) NodeSessions(ctx context.Context, machine string) (map[string]NodeS
 			return nil, err
 		}
 		s.Model, s.ModelFingerprint, s.ModelEffort, s.AppMode, s.AppEffort = m.Model, m.ModelFingerprint, m.ModelEffort, m.AppMode, m.AppEffort
+		s.AppModeExplicit = m.AppModeExplicit
 		s.DesktopPendingModel, s.DesktopPendingEffort = m.DesktopPendingModel, m.DesktopPendingEffort
 		s.Origin = m.Origin
 		s.OriginKnown = m.OriginKnown
@@ -203,6 +213,7 @@ func (d *DB) NodeSessions(ctx context.Context, machine string) (map[string]NodeS
 		s.AwaitingFirstMessage = m.AwaitingFirstMessage
 		s.EngineRuntime = m.EngineRuntime
 		s.StopCause, s.StopCauseAt = m.StopCause, m.StopCauseAt
+		s.RanAt = m.RanAt
 		if m.StartedAtUnknown {
 			s.StartedAt = time.Time{}
 		}

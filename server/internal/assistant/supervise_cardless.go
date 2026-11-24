@@ -130,7 +130,11 @@ func (s *Service) signalCardlessWait(ctx context.Context, t Todo, agents []proto
 	// something to answer. acceptAskStale covers asks of an earlier round (a reopened or re-reviewed task); the ended
 	// test (acceptAskEnded) is deliberately not used: a decision ask written while the task still waits for review is
 	// a live card even though its ledger is not needs_user yet.
-	if a, ok := s.askCopy(t.ID); ok && !acceptAskStale(&a, t) && a.AcceptedAt.IsZero() {
+	if a, readable, ok := s.askCopyReadable(t.ID); !readable {
+		// The book could not be read: "no card found" is not "no card exists". Hold off without stamping, so a later
+		// pass retries once the ledger recovers instead of spending the round's one hand-back on an unknown state.
+		return
+	} else if ok && !acceptAskStale(&a, t) && a.AcceptedAt.IsZero() {
 		return
 	}
 	// An unreadable worker is not a stopped worker: hold the hand-back until its machine answers, rather than stamp

@@ -136,7 +136,8 @@ func (u *agyTranscriptUsage) observePlanner(step agyStep) (proto.TokenUsage, boo
 	return usage, true
 }
 
-// extractAgyUsage summarizes session-level and per-step token usage from parsed agy steps without building items.
+// extractAgyUsage summarizes session-level and per-step token usage from parsed agy steps without building items, and
+// keeps the first message the user typed.
 func extractAgyUsage(steps []agyStep) agyTranscriptUsage {
 	var u agyTranscriptUsage
 	for _, step := range steps {
@@ -144,6 +145,9 @@ func extractAgyUsage(steps []agyStep) agyTranscriptUsage {
 		case "USER_INPUT":
 			if step.Source == "" || step.Source == "USER_EXPLICIT" {
 				u.turns++
+				if u.first == "" {
+					u.first = agyUserText(step.Content)
+				}
 			}
 		case "CHECKPOINT":
 			u.observeCheckpoint()

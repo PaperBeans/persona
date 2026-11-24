@@ -7,7 +7,7 @@ import { parse } from "../lib/router";
 import { getState, reset, subscribe } from "../lib/store";
 
 const setState = (patch: Partial<ReturnType<typeof getState>>) => Object.assign(getState(), patch);
-import { connectModuleHub, MODULE_API, enabledNavItems, moduleExtensionAt, loadModule, moduleNavKey, moduleRouteAt, moduleState, moduleTitle, registeredModules, registerModule, resetModulesForTest, subscribeModules, type ModuleDescriptor } from "./module-host";
+import { cardRendererOf, CHAT_SLOTS, chatSlotFillers, connectModuleHub, CORE_CARD_KINDS, enabledSettingsTabs, hubServes, loadedModule, MODULE_API, MODULES_FEATURE, moduleFeature, enabledNavItems, moduleExtensionAt, moduleKBKindAt, loadModule, moduleNavKey, moduleRouteAt, moduleState, moduleTitle, registeredModules, registerModule, resetModulesForTest, subscribeModules, type ModuleDescriptor } from "./module-host";
 import { forgetModuleSwitches, moduleSwitchedOff, setModuleSwitchedOff } from "./module-switch";
 
 const code = vi.fn(async () => ({ Page: () => null }));
@@ -16,7 +16,7 @@ const strings = vi.fn(async () => ({ default: { "garden.title": "Garden" }, fall
 function garden(over: Partial<ModuleDescriptor> = {}): ModuleDescriptor {
   return {
     id: "garden",
-    feature: "garden_feature",
+    feature: "module.garden",
     title: () => "Garden",
     description: () => "A synthetic module",
     routes: [{ base: "garden", aliases: [["old", "garden"]], title: () => "Garden page" }],
@@ -72,10 +72,7 @@ describe("registering", () => {
   });
 
   it("refuses what the shell does not serve yet, and another module API, rather than dropping it", () => {
-    expect(() => registerModule(garden({ chatSlots: ["chat.tail"] }))).toThrow(/chatSlots.*does not serve yet/);
-    expect(() => registerModule(garden({ settingsTabs: [{ key: "garden", label: () => "Garden" }] }))).toThrow(/settingsTabs/);
-    expect(() => registerModule(garden({ cardRenderers: ["garden-card"] }))).toThrow(/cardRenderers/);
-    expect(() => registerModule(garden({ wants: ["yard"] }))).toThrow(/wants/);
+    expect(() => registerModule(garden({ wants: ["yard"] }))).toThrow(/wants.*does not serve yet/);
     expect(() => registerModule(garden({ api: 2 }))).toThrow(/module API 2/);
     expect(registeredModules()).toEqual([]);
     // empty lists and the current API are fine
@@ -96,6 +93,20 @@ describe("registering", () => {
     expect(parse("/extension/weather/pages")).toEqual({ name: "extension", extension: "weather", ui: "pages" });
   });
 
+  it("adds parts to a knowledge kind's page while on, answers its entries as unknown while off, and refuses a taken kind", () => {
+    registerModule(garden({ feature: undefined, kbKinds: ["plants"] }));
+    expect(() => registerModule(garden({ id: "yard", routes: [], kbKinds: ["plants"] }))).toThrow(/knowledge kind "plants", which "garden" has/);
+    expect(moduleKBKindAt("plants")).toMatchObject({ id: "garden" });
+    expect(moduleKBKindAt("projects")).toBeNull();
+    expect(parse("/kb/plants/rose")).toEqual({ name: "kb", kind: "plants", id: "rose" });
+    setModuleSwitchedOff("garden", true);
+    expect(moduleKBKindAt("plants")).toBe("absent");
+    expect(parse("/kb/plants/rose")).toEqual({ name: "not-found", path: "/kb/plants/rose" });
+    // the list of a kind stays the Knowledge page's own
+    expect(parse("/kb/plants")).toEqual({ name: "kb", kind: "plants", id: undefined });
+    expect(parse("/kb/projects/persona")).toEqual({ name: "kb", kind: "projects", id: "persona" });
+  });
+
   it("tells subscribers about a registration", () => {
     const seen = vi.fn();
     const stop = subscribeModules(seen);
@@ -105,13 +116,53 @@ describe("registering", () => {
   });
 });
 
-describe("whether a module is there", () => {
-  it("needs its flag in the hello's features; before the hello it is pending", () => {
+describe("whether a module is there (the hub flag rule, #13844)", () => {
+  it("names its flag module.<id>, and the marker of a hub that publishes them is modules", () => {
+    expect(moduleFeature("garden")).toBe("module.garden");
+    expect(MODULES_FEATURE).toBe("modules");
+  });
+
+  it("is on before the hello: nothing waits on the hub to draw", () => {
+    expect(moduleState(garden(), { features: [], loaded: false })).toBe("on");
+  });
+
+  it("is on with an older hub, one whose hello has no modules marker", () => {
     const d = garden();
-    expect(moduleState(d, { features: [], loaded: false })).toBe("pending");
-    expect(moduleState(d, { features: [], loaded: true })).toBe("off");
-    expect(moduleState(d, { features: ["other"], loaded: true })).toBe("off");
-    expect(moduleState(d, { features: ["garden_feature"], loaded: true })).toBe("on");
+    expect(moduleState(d, { features: [], loaded: true })).toBe("on");
+    expect(moduleState(d, { features: ["terminal_stream", "other"], loaded: true })).toBe("on");
+  });
+
+  it("follows a hub that publishes module flags: on with its flag, off without it", () => {
+    const d = garden();
+    expect(moduleState(d, { features: [MODULES_FEATURE, "module.garden"], loaded: true })).toBe("on");
+    expect(moduleState(d, { features: [MODULES_FEATURE], loaded: true })).toBe("off");
+    expect(moduleState(d, { features: [MODULES_FEATURE, "module.yard"], loaded: true })).toBe("off");
+    expect(hubServes(undefined, { features: [MODULES_FEATURE] })).toBe(true);
+  });
+
+  it("flips off and back on as later hellos change what the hub publishes", () => {
+    let hub = { features: [] as string[], loaded: false };
+    const subs = new Set<() => void>();
+    connectModuleHub(() => hub, (l) => (subs.add(l), () => subs.delete(l)));
+    const hello = (features: string[]) => {
+      hub = { features, loaded: true };
+      subs.forEach((l) => l());
+    };
+    registerModule(garden());
+    const seen = vi.fn();
+    const stop = subscribeModules(seen);
+    expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]); // no hello yet
+    hello([MODULES_FEATURE]);
+    expect(enabledNavItems()).toEqual([]);
+    expect(seen).toHaveBeenCalledTimes(1);
+    hello([MODULES_FEATURE, "module.garden"]);
+    expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
+    expect(seen).toHaveBeenCalledTimes(2);
+    // a hub rolled back to one that publishes no module flags: still on, nothing to tell
+    hello(["terminal_stream"]);
+    expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
+    expect(seen).toHaveBeenCalledTimes(2);
+    stop();
   });
 
   it("is on without a flag, whatever the hub says", () => {
@@ -124,7 +175,7 @@ describe("whether a module is there", () => {
     const d = garden({ feature: undefined });
     expect(setModuleSwitchedOff("garden", true)).toBe(true);
     expect(moduleSwitchedOff("garden")).toBe(true);
-    expect(moduleState(d, { features: ["garden_feature"], loaded: true })).toBe("off");
+    expect(moduleState(d, { features: [MODULES_FEATURE, "module.garden"], loaded: true })).toBe("off");
     expect(setModuleSwitchedOff("garden", false)).toBe(true);
     expect(localStorage.getItem("persona.modules.off")).toBeNull();
     expect(moduleState(d)).toBe("on");
@@ -159,13 +210,14 @@ describe("routes and sidebar entries", () => {
     expect(parse("/inbox")).toEqual({ name: "inbox", id: undefined });
   });
 
-  it("follows the hub's features: no entry without the flag, the entry once the hello has it", () => {
+  it("follows the hub's features: no entry on a publishing hub without the flag, the entry once it has it", () => {
     registerModule(garden());
-    expect(parse("/garden")).toMatchObject({ name: "module" }); // pending: the page waits for the hello
-    expect(enabledNavItems()).toEqual([]);
-    setState({ loaded: true, features: ["x"] });
+    expect(parse("/garden")).toMatchObject({ name: "module" }); // before the hello
+    expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
+    setState({ loaded: true, features: [MODULES_FEATURE, "x"] });
     expect(parse("/garden")).toEqual({ name: "not-found", path: "/garden" });
-    setState({ features: ["garden_feature"] });
+    expect(enabledNavItems()).toEqual([]);
+    setState({ features: [MODULES_FEATURE, "module.garden"] });
     expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
   });
 });
@@ -173,7 +225,7 @@ describe("routes and sidebar entries", () => {
 describe("loading", () => {
   it("never asks for an absent module's strings or code", async () => {
     registerModule(garden());
-    setState({ loaded: true, features: [] });
+    setState({ loaded: true, features: [MODULES_FEATURE] });
     await expect(loadModule("garden")).rejects.toThrow(/not enabled/);
     await expect(loadModule("nothing")).rejects.toThrow(/no module/);
     expect(strings).not.toHaveBeenCalled();
@@ -198,5 +250,62 @@ describe("loading", () => {
     await expect(loadModule("garden")).rejects.toThrow("offline");
     await expect(loadModule("garden")).resolves.toHaveProperty("Page");
     expect(code).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("chat slots, Settings categories and card renderers", () => {
+  const Part = () => null;
+  const fills = { chat: { "composer.trailingAction": Part, "chat.tail": Part, "chat.bar": Part, "interaction.asked": Part } };
+
+  it("refuses, by name, a slot the shell does not have, a core or foreign Settings category, and a core or taken card kind", () => {
+    expect(() => registerModule(garden({ chatSlots: ["chat.footer" as never] }))).toThrow(/chat slot "chat.footer"/);
+    const tab = { key: "garden", label: () => "Garden", hint: () => "Its plots", icon: "heart" as const, group: "device" as const };
+    expect(() => registerModule(garden({ settingsTabs: [{ ...tab, key: "yard" }] }))).toThrow(/Settings category "yard", which is not its id/);
+    for (const kind of CORE_CARD_KINDS) expect(() => registerModule(garden({ cardRenderers: [kind] }))).toThrow(new RegExp(`card kind "${kind}", which the core draws`));
+    registerModule(garden({ feature: undefined, cardRenderers: ["garden-card"], settingsTabs: [tab, { ...tab, key: "garden-plots" }] }));
+    expect(() => registerModule(garden({ id: "yard", routes: [], cardRenderers: ["garden-card"] }))).toThrow(/"garden-card", which "garden" has/);
+  });
+
+  it("serves each chat slot from the module's code once it is in, and only while the module is on", async () => {
+    code.mockImplementationOnce(async () => ({ Page: () => null, ...fills }) as never);
+    registerModule(garden({ feature: undefined, chatSlots: [...CHAT_SLOTS] }));
+    for (const slot of CHAT_SLOTS) expect(chatSlotFillers(slot)).toEqual([{ id: "garden", Component: undefined }]);
+    await loadModule("garden");
+    expect(loadedModule("garden")).toBeDefined();
+    for (const slot of CHAT_SLOTS) expect(chatSlotFillers(slot)).toEqual([{ id: "garden", Component: Part }]);
+    setModuleSwitchedOff("garden", true);
+    for (const slot of CHAT_SLOTS) expect(chatSlotFillers(slot)).toEqual([]);
+  });
+
+  it("refuses code that leaves out a slot, a category or a card kind its descriptor names, naming it", async () => {
+    code.mockImplementationOnce(async () => ({ chat: { "chat.tail": Part } }) as never);
+    registerModule(garden({ feature: undefined, chatSlots: ["chat.tail", "chat.bar"] }));
+    await expect(loadModule("garden")).rejects.toThrow(/the chat slot "chat.bar", which its code does not draw/);
+    expect(loadedModule("garden")).toBeUndefined();
+    resetModulesForTest();
+    code.mockImplementationOnce(async () => ({}) as never);
+    registerModule(garden({ feature: undefined, settingsTabs: [{ key: "garden", label: () => "G", hint: () => "", icon: "heart", group: "labs" }] }));
+    await expect(loadModule("garden")).rejects.toThrow(/the Settings category "garden", which its code does not draw/);
+    resetModulesForTest();
+    code.mockImplementationOnce(async () => ({}) as never);
+    registerModule(garden({ feature: undefined, cardRenderers: ["garden-card"] }));
+    await expect(loadModule("garden")).rejects.toThrow(/the card kind "garden-card", which its code does not draw/);
+  });
+
+  it("lists Settings categories and card renderers of enabled modules only", () => {
+    registerModule(garden({ cardRenderers: ["garden-card"], settingsTabs: [{ key: "garden", label: () => "Garden", hint: () => "", icon: "heart", group: "device" }] }));
+    expect(enabledSettingsTabs().map((x) => [x.module, x.key])).toEqual([["garden", "garden"]]);
+    expect(cardRendererOf("garden-card")?.id).toBe("garden");
+    expect(cardRendererOf("question")).toBeUndefined();
+    setState({ loaded: true, features: [MODULES_FEATURE] });
+    expect(enabledSettingsTabs()).toEqual([]);
+    expect(cardRendererOf("garden-card")).toBeUndefined();
+  });
+
+  it("keeps CORE_CARD_KINDS to the pending-card kinds lib/types.ts names", async () => {
+    const { default: types } = await import("../lib/types.ts?raw");
+    const line = types.split("\n").find((l) => /^\s*kind: "question" \|/.test(l))!;
+    const kinds = [...line.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]!);
+    expect([...CORE_CARD_KINDS].sort()).toEqual(kinds.sort());
   });
 });

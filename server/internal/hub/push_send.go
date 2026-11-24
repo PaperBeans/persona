@@ -172,7 +172,8 @@ func (p *Pusher) sendLiveActivityThen(d Device, token string, payload map[string
 			outcome(o)
 		}
 	}
-	if p == nil || token == "" || !p.reachable(d) {
+	// Office network mode sends no Live Activity: iOS reads its content-state in the clear (private_network.go).
+	if p == nil || token == "" || !p.reachable(d) || p.privateOnly {
 		tell(pushRefused)
 		close(done)
 		return done
@@ -381,17 +382,27 @@ func (p *Pusher) sendBuiltWith(build localized, collapseID, pushType, priority s
 			}(d)
 			continue
 		}
-		if b.unfit != nil {
+		directCollapse := collapseID
+		if p.privateOnly {
+			// Office network mode: APNs gets the relay's content-free envelope, the payload sealed to the phone.
+			sealed, err := p.sealedDirect(d, pushType, payload)
+			if err != nil {
+				p.logf("apns %s: %v", d.Name, err) // never falls back to sending it in the clear
+				p.pushed(d, err)
+				continue
+			}
+			body, directCollapse = sealed, relayCollapseID(collapseID)
+		} else if b.unfit != nil {
 			p.pushed(d, b.unfit)
 			continue
 		}
 		p.notePush(d, nil, event, "apns", "attempt", 0, int64(len(body)), 0)
 		p.sends.Add(1)
-		go func(d Device) {
+		go func(d Device, body []byte) {
 			defer p.sends.Done()
 			sent := time.Now()
 			res, err := p.sendDirect(d, apns.Request{Token: d.APNSToken, Env: d.APNSEnv, Topic: d.Topic,
-				PushType: pushType, Priority: priority, CollapseID: collapseID, Body: body})
+				PushType: pushType, Priority: priority, CollapseID: directCollapse, Body: body})
 			p.noteDirectResult(d, nil, event, err, res.Status, int64(len(body)), time.Since(sent))
 			if err != nil {
 				p.logf("apns %s: %v", d.Name, err)
@@ -405,7 +416,7 @@ func (p *Pusher) sendBuiltWith(build localized, collapseID, pushType, priority s
 			} else { // when APNs took it: for measuring wake-up latency (docs/assistant/assistant.md)
 				p.logf("apns %s: %s push accepted in %d ms", d.Name, pushType, time.Since(sent).Milliseconds())
 			}
-		}(d)
+		}(d, body)
 	}
 	return len(devices), len(reachable)
 }

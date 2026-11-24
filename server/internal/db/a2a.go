@@ -218,6 +218,33 @@ func (d *DB) A2AClaim(ctx context.Context, limit int) ([]A2ARow, error) {
 	return out, rows.Err()
 }
 
+// A2ALaunchesForTargets resolves durable A2A/dispatch launch rows for the exact set of
+// visible target sessions on machine, with no age or global row-count truncation.
+func (d *DB) A2ALaunchesForTargets(ctx context.Context, machine string, sessions []string) ([]A2ARow, error) {
+	if machine == "" || len(sessions) == 0 {
+		return nil, nil
+	}
+	rows, err := d.pool.Query(ctx, `SELECT `+a2aColumns+` FROM a2a_tasks
+		WHERE target_machine = $1
+		  AND target_session = ANY($2::text[])
+		  AND body ? 'launch'
+		  AND source_session <> ''
+		ORDER BY created_at DESC,id DESC`, machine, sessions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []A2ARow
+	for rows.Next() {
+		r, err := scanA2A(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
+}
+
 // A2ADispatches lists recent launches and all active launches for the caller's
 // dispatch tools, concurrency limit, and delegation depth check.
 func (d *DB) A2ADispatches(ctx context.Context, owner, machine, session string, since time.Time) ([]A2ARow, error) {

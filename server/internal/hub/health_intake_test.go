@@ -44,7 +44,7 @@ func TestHealthIntakeNewRoutesAuthenticateBeforeForwarding(t *testing.T) {
 		}
 		return map[string]any{}, nil
 	})
-	for _, path := range []string{"/api/v1/assistant/health/intake/ui", "/api/v1/assistant/health/water/reminder"} {
+	for _, path := range []string{"/api/v1/assistant/health/intake/ui", "/api/v1/assistant/health/water/reminder", "/api/v1/assistant/health/intake/import"} {
 		if code, body := call(t, h.routes(), "POST", path, "", `{}`); code != 401 {
 			t.Fatalf("unauthenticated %s: %d %v", path, code, body)
 		}
@@ -52,7 +52,7 @@ func TestHealthIntakeNewRoutesAuthenticateBeforeForwarding(t *testing.T) {
 	if strings.Contains(m.log(), assistantwire.MethodHTTP+" ") {
 		t.Fatal("unauthenticated request reached the manager")
 	}
-	for _, path := range []string{"/api/v1/assistant/health/intake/ui", "/api/v1/assistant/health/water/reminder"} {
+	for _, path := range []string{"/api/v1/assistant/health/intake/ui", "/api/v1/assistant/health/water/reminder", "/api/v1/assistant/health/intake/import"} {
 		if code, body := call(t, h.routes(), "POST", path+"?space=health", h.cfg.Token, `{}`); code != 200 {
 			t.Fatalf("full access %s: %d %v", path, code, body)
 		}
@@ -129,6 +129,7 @@ func TestHealthIntakeExtensionsCannotReachRoutes(t *testing.T) {
 		{"GET", "/api/v1/assistant/health/intake/changes"},
 		{"POST", "/api/v1/assistant/health/intake/ui"},
 		{"POST", "/api/v1/assistant/health/water/reminder"},
+		{"POST", "/api/v1/assistant/health/intake/import"},
 	} {
 		if code, body := call(t, h.routes(), route.method, route.path, extTokenPrefix+"synthetic-token", `{}`); code != 403 {
 			t.Errorf("extension %s %s: %d %v", route.method, route.path, code, body)

@@ -14,8 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
+	"github.com/nwverse/persona/server/internal/botport"
+
 	"github.com/nwverse/persona/server/internal/extwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -56,6 +58,11 @@ func configureWorld(t *testing.T, code int) (*botWorld, *configureStore, *config
 	h.store = st
 	f := &configurePlatform{code: code}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A Persona node on the machine running these tests probes this port too (GET /, node/ports.go): answered 404,
+		// it is neither a platform request (configurePoll compares their count) nor an unexpected one.
+		if ignoreProbe(w, r) {
+			return
+		}
 		f.mu.Lock()
 		f.requests++
 		code, publishCode, reject, before, beforeInfo := f.code, f.publishCode, f.reject, f.beforeConfig, f.beforeInfo
@@ -90,7 +97,7 @@ func configureWorld(t *testing.T, code int) (*botWorld, *configureStore, *config
 	target, _ := url.Parse(srv.URL)
 	original := http.DefaultTransport
 	http.DefaultTransport = configureTransport(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host != "open.feishu.cn" && r.URL.Host != strings.TrimPrefix(feishubot.DomainLark, "https://") && r.URL.Host != "private.example" {
+		if r.URL.Host != "open.feishu.cn" && r.URL.Host != strings.TrimPrefix(botcard.DomainLark, "https://") && r.URL.Host != "private.example" {
 			return nil, fmt.Errorf("unexpected outbound host")
 		}
 		clone := r.Clone(r.Context())
@@ -103,6 +110,31 @@ func configureWorld(t *testing.T, code int) (*botWorld, *configureStore, *config
 	mux := http.NewServeMux()
 	h.botRoutes(mux)
 	return &botWorld{h: h, mux: mux}, st, f
+}
+
+// The fake platform answers a local node's port probe 404 without counting it or failing the test: the probe landed
+// on it during TestFeishuConfigureDiagnosticLifecycle/rejected_replacement in about 1 run in 15 on a machine with a
+// node, as "unexpected platform request: GET /".
+func TestConfigurePlatformIgnoresPortProbes(t *testing.T) {
+	needsLarkModule(t)
+	_, _, f := configureWorld(t, 230002)
+	req, err := http.NewRequest(http.MethodGet, "https://open.feishu.cn/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("User-Agent", "persona-ports") // node.portProbeAgent
+	req.Header.Set("Accept", "text/html")
+	res, err := http.DefaultClient.Do(req) // configureWorld routes it to the fake platform
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	f.mu.Lock()
+	requests := f.requests
+	f.mu.Unlock()
+	if res.StatusCode != http.StatusNotFound || requests != 0 {
+		t.Fatalf("a port probe: HTTP %d, counted %d platform requests", res.StatusCode, requests)
+	}
 }
 
 func configureCredentials(t *testing.T, w *botWorld, id, secret, domain string) map[string]any {
@@ -136,18 +168,19 @@ func configurePoll(t *testing.T, w *botWorld, st *configureStore, f *configurePl
 
 // Exercise the Hub's real channel bind route, keeping both official cloud URLs and every HTTP request on a fake platform.
 func TestFeishuConfigureDiagnosticSurvivesPairPoll(t *testing.T) {
+	needsLarkModule(t)
 	for _, tc := range []struct {
 		name        string
 		code        int
 		publishCode int
-		issue       feishubot.ConfigureIssue
+		issue       botcard.ConfigureIssue
 	}{
-		{"missing_scope", 230002, 0, feishubot.IssuePatchScope},
-		{"bot_capability", 210041, 0, feishubot.IssueBotCapability},
-		{"not_self_built", 210001, 0, feishubot.IssueNotSelfBuilt},
-		{"incompatible", 210031, 0, feishubot.IssueIncompatible},
-		{"unreachable", 99991, 0, feishubot.IssueUnreachable},
-		{"publish_failure", 0, 230002, feishubot.IssuePatchScope},
+		{"missing_scope", 230002, 0, botcard.IssuePatchScope},
+		{"bot_capability", 210041, 0, botcard.IssueBotCapability},
+		{"not_self_built", 210001, 0, botcard.IssueNotSelfBuilt},
+		{"incompatible", 210031, 0, botcard.IssueIncompatible},
+		{"unreachable", 99991, 0, botcard.IssueUnreachable},
+		{"publish_failure", 0, 230002, botcard.IssuePatchScope},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w, st, f := configureWorld(t, tc.code)
@@ -156,7 +189,7 @@ func TestFeishuConfigureDiagnosticSurvivesPairPoll(t *testing.T) {
 			if strings.Contains(fmt.Sprint(first), "raw-sensitive") || strings.Contains(fmt.Sprint(first), "fake-secret") {
 				t.Fatal("raw details reached initial client response")
 			}
-			want := feishuConfigureNote(i18n.ZhHans, feishubot.ConfigureReport{Issue: tc.issue}, "feishu", "cli_example")
+			want := feishuConfigureNote(i18n.ZhHans, botcard.ConfigureReport{Issue: tc.issue}, "feishu", "cli_example")
 			if first["step"] != "pair" || !strings.Contains(fmt.Sprint(first["hint"]), want) {
 				t.Fatalf("first response has no expected diagnostic: %v want=%s", first, want)
 			}
@@ -169,7 +202,7 @@ func TestFeishuConfigureDiagnosticSurvivesPairPoll(t *testing.T) {
 			for _, lang := range []i18n.Lang{i18n.En, i18n.Ja} {
 				w.h.opts.Lang = func() i18n.Lang { return lang }
 				p := configurePoll(t, w, st, f)
-				want := feishuConfigureNote(lang, feishubot.ConfigureReport{Issue: tc.issue}, "feishu", "cli_example")
+				want := feishuConfigureNote(lang, botcard.ConfigureReport{Issue: tc.issue}, "feishu", "cli_example")
 				if !strings.Contains(fmt.Sprint(p["hint"]), want) {
 					t.Fatalf("poll did not localize retained report: %v", p)
 				}
@@ -185,6 +218,7 @@ func TestFeishuConfigureDiagnosticSurvivesPairPoll(t *testing.T) {
 }
 
 func TestFeishuConfigureDiagnosticLifecycle(t *testing.T) {
+	needsLarkModule(t)
 	t.Run("renewal_and_reload", func(t *testing.T) {
 		w, st, f := configureWorld(t, 230002)
 		first := configureCredentials(t, w, "cli_example", "fake-secret", "feishu")
@@ -284,7 +318,7 @@ func TestFeishuConfigureDiagnosticLifecycle(t *testing.T) {
 		w, st, f := configureWorld(t, 230002)
 		withAssistant(w.h)
 		p := configureCredentials(t, w, "cli_example", "fake-secret", "feishu")
-		w.h.botPair(feishubot.New("cli_example", "fake-secret", "feishu"), "ou_owner", "oc_owner", p["user_code"].(string))
+		w.h.botPair(botport.New("cli_example", "fake-secret", "feishu"), "ou_owner", "oc_owner", p["user_code"].(string))
 		if p := configurePoll(t, w, st, f); p["done"] != true {
 			t.Fatalf("not paired: %v", p)
 		}
@@ -306,6 +340,7 @@ func TestFeishuConfigureDiagnosticLifecycle(t *testing.T) {
 
 // No response from an older credentials save may supply a diagnosis for the current save, even after A -> B -> A.
 func TestFeishuConfigureDiagnosticIgnoresLateResult(t *testing.T) {
+	needsLarkModule(t)
 	for _, tc := range []struct {
 		name   string
 		bodies []string
@@ -375,6 +410,7 @@ func TestFeishuConfigureDiagnosticIgnoresLateResult(t *testing.T) {
 // The network validator starts from an earlier snapshot. A replacement committed during validation must not
 // lend its diagnostic to the credentials being saved, even when those looked unchanged in that earlier snapshot.
 func TestFeishuConfigureDiagnosticUsesCommitTimeCredentials(t *testing.T) {
+	needsLarkModule(t)
 	for _, tc := range []struct {
 		name    string
 		replace func(*Manager, *FeishuBotSettings)
@@ -399,7 +435,7 @@ func TestFeishuConfigureDiagnosticUsesCommitTimeCredentials(t *testing.T) {
 				w.h.bots.mu.Lock()
 				defer w.h.bots.mu.Unlock()
 				tc.replace(w.h, &w.h.bots.set)
-				w.h.bots.set.Configure = &botConfigure{Issue: feishubot.IssueBotCapability}
+				w.h.bots.set.Configure = &botConfigure{Issue: botcard.IssueBotCapability}
 				if err := w.h.saveBotSettingsLocked(); err != nil {
 					t.Error(err)
 				}
@@ -449,6 +485,7 @@ func configureAwait(t *testing.T, ch <-chan struct{}, what string) {
 // The main-line binding gate now serializes the formerly reproducible route interleaving. Cancellation while
 // A is paused must not commit B, and later successful settings saves keep or retire the authoritative outcome.
 func TestFeishuConfigureCommittedReceiptThroughRoute(t *testing.T) {
+	needsLarkModule(t)
 	for _, bodies := range [][]string{
 		{`{"app_id":"cli_example","app_secret":"fake-secret","domain":"feishu"}`},
 		{`{"app_id":"cli_other","app_secret":"other-secret","domain":"feishu"}`, `{"app_id":"cli_example","app_secret":"fake-secret","domain":"feishu"}`},
@@ -494,6 +531,7 @@ func TestFeishuConfigureCommittedReceiptThroughRoute(t *testing.T) {
 // Exercise the receipt-returning commit used by the real bind route, releasing the gate before a later real PUT.
 // The old request may not obtain that later save's identity when it finally starts configuration.
 func TestFeishuConfigureCommittedReceiptCannotAdoptLaterSave(t *testing.T) {
+	needsLarkModule(t)
 	for _, bodies := range [][]string{
 		{`{"app_id":"cli_example","app_secret":"fake-secret","domain":"feishu"}`},
 		{`{"app_id":"cli_other","app_secret":"other-secret","domain":"feishu"}`, `{"app_id":"cli_example","app_secret":"fake-secret","domain":"feishu"}`},
@@ -538,6 +576,7 @@ func TestFeishuConfigureCommittedReceiptCannotAdoptLaterSave(t *testing.T) {
 }
 
 func TestFeishuConfigurePairedThenUnpairedThroughRoutes(t *testing.T) {
+	needsLarkModule(t)
 	w, st, f := configureWorld(t, 230002)
 	withAssistant(w.h)
 	status, out := w.do(t, "PUT", "/api/v1/bots/feishu", `{"enabled":true,"app_id":"cli_example","app_secret":"fake-secret","domain":"feishu"}`)
@@ -563,7 +602,7 @@ func TestFeishuConfigurePairedThenUnpairedThroughRoutes(t *testing.T) {
 	configureAwait(t, entered, "configuration not reached")
 	// Install the fake transport client as the running bot; redemption still enters the real botEvent handler.
 	w.h.bots.mu.Lock()
-	w.h.bots.api = feishubot.New("cli_example", "fake-secret", "feishu")
+	w.h.bots.api = botport.New("cli_example", "fake-secret", "feishu")
 	w.h.bots.mu.Unlock()
 	if _, err := w.h.botEvent(context.Background(), botMessageEvent("om_configure_pair_cycle", "ou_owner", "text", textContent(original["user_code"].(string)), nil)); err != nil {
 		t.Fatal(err)
@@ -588,6 +627,7 @@ func TestFeishuConfigurePairedThenUnpairedThroughRoutes(t *testing.T) {
 }
 
 func TestFeishuConfigureWriteFailureBoundaries(t *testing.T) {
+	needsLarkModule(t)
 	for _, tc := range []struct {
 		name  string
 		write int64
@@ -620,6 +660,7 @@ func TestFeishuConfigureWriteFailureBoundaries(t *testing.T) {
 }
 
 func TestFeishuConfigureFailedCorrectionRetainsDurableOutcome(t *testing.T) {
+	needsLarkModule(t)
 	w, st, f := configureWorld(t, 230002)
 	first := configureCredentials(t, w, "cli_example", "fake-secret", "feishu")
 	f.mu.Lock()
@@ -636,7 +677,7 @@ func TestFeishuConfigureFailedCorrectionRetainsDurableOutcome(t *testing.T) {
 	}
 	var saved FeishuBotSettings
 	_, _ = st.Setting(context.Background(), botSettingsKey, &saved)
-	if saved.Configure == nil || saved.Configure.Issue != feishubot.IssuePatchScope {
+	if saved.Configure == nil || saved.Configure.Issue != botcard.IssuePatchScope {
 		t.Fatal("previous outcome not durable")
 	}
 	st.rejectWrite.Store(0)
@@ -648,10 +689,11 @@ func TestFeishuConfigureFailedCorrectionRetainsDurableOutcome(t *testing.T) {
 }
 
 func TestFeishuConfigureUnpairFailurePreservesOwner(t *testing.T) {
+	needsLarkModule(t)
 	w, st, f := configureWorld(t, 230002)
 	withAssistant(w.h)
 	p := configureCredentials(t, w, "cli_example", "fake-secret", "feishu")
-	w.h.botPair(feishubot.New("cli_example", "fake-secret", "feishu"), "ou_owner", "oc_owner", p["user_code"].(string))
+	w.h.botPair(botport.New("cli_example", "fake-secret", "feishu"), "ou_owner", "oc_owner", p["user_code"].(string))
 	var unpaired atomic.Int64
 	w.h.opts.AssistantEvent = func(_ string, _ json.RawMessage) { unpaired.Add(1) }
 	st.rejectWrite.Store(st.writes.Load() + 1)
@@ -679,6 +721,7 @@ func TestFeishuConfigureUnpairFailurePreservesOwner(t *testing.T) {
 }
 
 func TestFeishuConfigureSaveFailureLocalizedAndRetryable(t *testing.T) {
+	needsLarkModule(t)
 	for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
 		t.Run(string(lang), func(t *testing.T) {
 			w, st, f := configureWorld(t, 230002)

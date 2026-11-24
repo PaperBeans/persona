@@ -3,15 +3,17 @@ package extmgr
 import (
 	"context"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
+	"github.com/nwverse/persona/server/internal/botport"
+
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 // botConfigure retains only what the localized pairing hint needs, never the platform's raw error text.
 // It belongs to the saved credentials and survives pairing-code renewal and manager restarts.
 type botConfigure struct {
-	Issue      feishubot.ConfigureIssue `json:"issue,omitempty"`
-	Configured bool                     `json:"configured,omitempty"`
+	Issue      botcard.ConfigureIssue `json:"issue,omitempty"`
+	Configured bool                   `json:"configured,omitempty"`
 }
 
 var errBotSettingsSave = i18n.Err("hub-bots.settings_save_failed")
@@ -45,7 +47,10 @@ func (h *Manager) configureBotForPairing(ctx context.Context, receipt botConfigu
 	if err != nil {
 		return errBotSettingsSave
 	}
-	rep := feishubot.New(receipt.appID, secret, receipt.domain).AutoConfigure(ctx)
+	if !botport.Available() {
+		return botport.ErrUnavailable
+	}
+	rep := botport.New(receipt.appID, secret, receipt.domain).AutoConfigure(ctx)
 	if rep.Detail != "" {
 		h.logf("bots: auto-configure: %s", rep.Detail)
 	}

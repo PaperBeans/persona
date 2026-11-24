@@ -180,6 +180,8 @@ struct ChatView: View {
     @Environment(\.shell) private var shell
     /// iPhone Duo's bars down the side: the shell's bar over the Persona conversation is the side rail (`ShellSideRail`).
     @Environment(\.shellRailEdge) private var railEdge
+    /// Room under the assistant's top bar for what the page draws there (a space conversation's categories, #13500).
+    @Environment(\.assistantTopExtra) private var topExtra
     /// iPhone Duo's side column under the tab bar: how much of it this chat's buttons have (`sideButtons`, #9837).
     @Environment(\.sideColumn) private var sideColumn
     /// The page draws this chat's lifted message (`MessageLiftHost`).
@@ -1298,8 +1300,10 @@ struct ChatView: View {
         ChatPin.Spot(y: g.frame(in: .global).minY, content: g.frame(in: .named(ChatPin.space)).maxY)
     }
 
-    /// The main Persona conversation's composer can keep its own model pick; its remedy and composer open this same sheet.
-    private var assistantModelPickAvailable: Bool { key == model.assistantMain && model.keepsConversationModelPick(key.group) }
+    /// Every Persona conversation can keep its own model pick; its remedy and composer open this same sheet.
+    private var assistantModelPickAvailable: Bool {
+        AssistantModelChoice.pickerAvailable(assistant: style == .assistant, keepsPick: model.keepsConversationModelPick(key.group))
+    }
     private var openAssistantModel: (() -> Void)? {
         guard assistantModelPickAvailable else { return nil }
         return { showAssistantModel = true }
@@ -1313,11 +1317,9 @@ struct ChatView: View {
     }
 
     private var conversationDefaultRule: AssistantModelChoice.DefaultRule {
-        let supervisor = model.isBackgroundSupervisor(key.sessionID)
-        if supervisor { return .supervise }
-        return AssistantModelChoice.followsDefault(isMain: key == model.assistantMain, supervisor: false,
-                                                   leader: model.assistantLeaders.contains(key.sessionID),
-                                                   origin: session?.origin) ? .main : .own
+        AssistantModelChoice.defaultRule(isMain: key == model.assistantMain,
+                                         supervisor: model.isBackgroundSupervisor(key.sessionID),
+                                         leader: model.assistantLeaders.contains(key.sessionID), origin: session?.origin)
     }
 
     /// Persona's last turn ended on a model set-up error the hub named (`turn_error_code`, docs/assistant/onboarding.md 4.4):
@@ -1760,7 +1762,7 @@ struct ChatView: View {
                 try? await Task.sleep(for: .milliseconds(60))
                 if n == 1 { hideChrome() } // once the header has measured itself
                 guard let bottom = scratch.landingMaxY, scratch.listFrame.height > 0 else { continue }
-                let want = scratch.listFrame.minY + (style == .dev ? (sideBars ? sideHeaderHeight : chrome.settledHeight) : AssistantTopBar.room(railEdge)) + Self.inputTail
+                let want = scratch.listFrame.minY + (style == .dev ? (sideBars ? sideHeaderHeight : chrome.settledHeight) : AssistantTopBar.room(railEdge) + topExtra) + Self.inputTail
                 let off = want - bottom // > 0: too high; the flipped list scrolls toward older to lower it
                 if abs(off) < 1 { break }
                 scrollList(to: chrome.offset + off)
@@ -2088,7 +2090,7 @@ struct ChatView: View {
     /// list scrolls under it.
     private var headerRoom: CGFloat {
         if backgroundActivity { return 0 }
-        return style == .dev ? (sideBars ? sideHeaderHeight : chrome.height) : AssistantTopBar.room(railEdge)
+        return style == .dev ? (sideBars ? sideHeaderHeight : chrome.height) : AssistantTopBar.room(railEdge) + topExtra
     }
 
     /// Git only for repositories, files only when we know the directory; the assistant has neither.
@@ -2739,8 +2741,9 @@ struct ChatView: View {
             let column = VStack(spacing: Theme.Space.m) {
                 if style == .assistant, viewing == nil { taskFooter }
                 // An agent operating a Mac (its own Cua Driver): with its running work, over the box (#1343).
-                if style == .dev, viewing == nil, ComputerActivityPill.shows(computerActivity) {
-                    ComputerActivityPill(activity: computerActivity, from: key).frame(maxWidth: .infinity, alignment: .leading)
+                if style == .dev, viewing == nil, ModuleViews.any(.chatFooter, .init(from: key, activity: computerActivity)) {
+                    ModuleViews(place: .chatFooter, context: .init(from: key, activity: computerActivity))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if !cardsDocked, !pendingCards.isEmpty {
                     PendingCards(cards: pendingCards, room: footerRoom)
@@ -2795,27 +2798,23 @@ struct ChatView: View {
                     TerminalOnlyBar(openTerminal: openTerminal)
                 } else if let s = session, !s.canSend, let reason = s.sourceSubtitle {
                     #if os(iOS)
-                    if UIDevice.current.userInterfaceIdiom == .phone {
-                        ViewThatFits(in: .horizontal) {
-                            HStack(alignment: .center, spacing: Theme.Space.s) {
-                                Text(reason).foregroundStyle(.secondary).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-                                CodexTakeoverControl(session: s, coordinator: takeoverCoordinator) { adopted in
-                                    model.adopt(adopted)
-                                    switchTo(adopted.key)
-                                }
-                            }
-                            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                                Text(reason).foregroundStyle(.secondary)
-                                CodexTakeoverControl(session: s, coordinator: takeoverCoordinator) { adopted in
-                                    model.adopt(adopted)
-                                    switchTo(adopted.key)
-                                }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .center, spacing: Theme.Space.s) {
+                            Text(reason).foregroundStyle(.secondary).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                            CodexTakeoverControl(session: s, coordinator: takeoverCoordinator) { adopted in
+                                model.adopt(adopted)
+                                switchTo(adopted.key)
                             }
                         }
-                        .font(Theme.Font.caption).frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        Text(reason).font(Theme.Font.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                            Text(reason).foregroundStyle(.secondary)
+                            CodexTakeoverControl(session: s, coordinator: takeoverCoordinator) { adopted in
+                                model.adopt(adopted)
+                                switchTo(adopted.key)
+                            }
+                        }
                     }
+                    .font(Theme.Font.caption).frame(maxWidth: .infinity, alignment: .leading)
                     #else
                     Text(reason).font(Theme.Font.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                     #endif
@@ -3558,7 +3557,7 @@ struct ChatView: View {
             if status.isActive, session?.canInterrupt == true {
                 Button { Task { await model.interrupt(key) } } label: { Label("Interrupt [Composer Buttons f9d193]", systemImage: Theme.Icon.interrupt) }
             }
-            ScreenMenu(machine: nil, recent: computerActivity?.machine, from: key)
+            ModuleViews(place: .chatMenu, context: .init(recent: computerActivity?.machine, from: key))
             if let s = session {
                 Button { UIPasteboard.general.string = s.cwd } label: { Label("Copy Directory", systemImage: Theme.Icon.folder) }
                 if s.status.isLive && s.canClose {
@@ -3641,7 +3640,8 @@ struct ChatView: View {
                     Label(model.isMuted(key) ? String(localized: "Unmute [Chat View 3834f9]") : String(localized: "Mute"), systemImage: model.isMuted(key) ? Theme.Icon.unmute : Theme.Icon.mute)
                 }
             }
-            ScreenMenu(machine: session?.assistant == true ? nil : key.machineRef, recent: computerActivity?.machine, from: key)
+            ModuleViews(place: .chatMenu, context: .init(machine: session?.assistant == true ? nil : key.machineRef,
+                                                         recent: computerActivity?.machine, from: key))
             Divider()
             if let s = session {
                 if s.canTerminal {
@@ -5631,22 +5631,32 @@ struct Composer: View, Equatable {
         return s.canSend && s.canTerminal && s.paneID != nil && !s.isCodex && !s.isTraex && !s.assistant
     }
 
-    /// The main Persona conversation, named by the hub's assistant snapshot: the only conversation with a
-    /// per-conversation model pick (#6911). A leader, the background supervisor or another assistant conversation
-    /// carries the assistant flag too, so that flag alone can't gate the picker.
+    /// The main Persona conversation is named by the hub's assistant snapshot; leaders and other Assistant chats
+    /// carry the same assistant flag and can keep their own picks too (#9248).
     private var isMainAssistantChat: Bool { model.assistantMain == key }
     /// The hub keeps a conversation's own model pick (#5033); an older hub keeps nothing and the row stays read-only.
-    private var assistantModelPickAvailable: Bool { isMainAssistantChat && model.keepsConversationModelPick(key.group) }
-    /// What the main chat's next message runs on: its own pick, then the Main chat default, then the running process's
-    /// last model while the picker has not answered (the 11-13 Haiku/Opus divergence fix).
+    private var assistantModelPickAvailable: Bool {
+        AssistantModelChoice.pickerAvailable(assistant: isMainAssistantChat || model.session(key)?.assistant == true,
+                                             keepsPick: model.keepsConversationModelPick(key.group))
+    }
+    private var assistantDefaultRule: AssistantModelChoice.DefaultRule {
+        AssistantModelChoice.defaultRule(isMain: isMainAssistantChat,
+                                         supervisor: model.isBackgroundSupervisor(key.sessionID),
+                                         leader: model.assistantLeaders.contains(key.sessionID),
+                                         origin: model.session(key)?.origin)
+    }
+    /// What this conversation's next message runs on: its own pick, its inheritance rule, then the running process.
     private var assistantEffective: AssistantModelChoice.Effective? {
-        guard isMainAssistantChat else { return nil }
+        guard isMainAssistantChat || model.session(key)?.assistant == true else { return nil }
         // The response cache is unobserved; this small revision is the redraw signal after a fresh hub answer.
         _ = model.assistantLauncherRevision
-        return AssistantModelChoice.effective(session: model.session(key), response: model.cachedAssistantLaunchers(key.machineRef, main: true))
+        let rule = assistantDefaultRule
+        return AssistantModelChoice.effective(
+            session: model.session(key), response: model.cachedAssistantLaunchers(key.machineRef, main: true), rule: rule,
+            superviseResponse: rule == .supervise
+                ? model.cachedAssistantLaunchers(key.machineRef, purpose: "assistant.supervise") : nil)
     }
-    /// The model name the composer title and the modes menu row both show for the main chat, from the one effective
-    /// setup (#6911 M7): the two surfaces never name different models.
+    /// The model name the composer title and the modes menu row both show, from the one effective setup.
     private var assistantEffectiveName: String? {
         assistantEffective.flatMap { AssistantModelChoice.displayName($0, response: model.cachedAssistantLaunchers(key.machineRef, main: true)) }
     }
@@ -6239,12 +6249,15 @@ struct Composer: View, Equatable {
         }) {
             PermissionModeSheet(key: key) { permissionsPick = $0 }
         }
-        // Keep the effective Main chat model fresh so the composer title matches what the next message runs (#6542):
+        // Keep the effective conversation model fresh so the composer title matches what the next message runs (#6542):
         // re-read when the conversation changes or Model/Assistant settings change. A transcript rev would cancel this
         // request every streaming tick, so the AppModel invalidates the cache from assistant snapshots instead.
-        .task(id: "\(key.sessionID)-\(model.assistantLauncherRequestRevision)") {
+        .task(id: "\(key.sessionID)-\(model.session(key)?.assistant == true)-\(model.assistantLauncherRequestRevision)") {
             guard assistantModelPickAvailable else { return }
             _ = try? await model.assistantLaunchers(key.machineRef, refresh: true, main: true)
+            if assistantDefaultRule == .supervise {
+                _ = try? await model.assistantLaunchers(key.machineRef, refresh: true, purpose: "assistant.supervise")
+            }
         }
         .onChange(of: picks) { _, items in
             guard !items.isEmpty else { return }

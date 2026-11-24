@@ -64,6 +64,9 @@ export interface ListCounts {
   just_finished?: number;
   /** How many of `state.needs_you` only wait on held non-interrupting cards (P1/P2) for push grading. */
   held_needs?: number;
+  /** How many of `state.needs_you` only wait on cards a task's supervisor holds (lib/supervisor-held.ts), apart from
+   *  `held_needs`: the lists count them Working, in neither Needs you nor the badge. Absent from an older hub. */
+  supervisor_held?: number;
   revision: string;
 }
 export interface ListPage<T> {

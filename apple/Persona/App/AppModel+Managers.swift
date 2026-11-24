@@ -165,7 +165,7 @@ extension AppModel {
         guard let roster = managerRosters[key.group], roster.isMulti else { return nil }
         let manager: String?
         if let s = session(key) {
-            guard s.assistant, !s.isHealth else { return nil }
+            guard s.assistant, !s.inSpace else { return nil }
             manager = s.manager
         } else {
             guard let m = assistantItemManagers[key] else { return nil }

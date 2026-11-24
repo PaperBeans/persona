@@ -1,6 +1,8 @@
 import { t } from "../../i18n";
 import { LOCAL_SHORTCUTS, SHORTCUTS } from "../../lib/shortcuts";
-import { TAB_INFO, TABS, type Tab } from "./nav";
+import { enabledSettingsTabs, registeredModules } from "../../core/module-host";
+import { MODULES_LABS_ID } from "../../core/module-labs";
+import { tabInfo, TABS, type Tab } from "./nav";
 
 // ── search ──────────────────────────────────────────────
 
@@ -187,6 +189,12 @@ export const SEARCH_INDEX: SearchGroup[] = [
   { tab: "devices", group: t("settings-connectdevice.add"), anchor: "devices" },
 ];
 
+/** Labs › Features: one entry per module's switch, from the module list (core/module-labs.ts draws each as a row of
+ *  the configuration form, `configuration-<document>-<field>`). */
+function moduleSwitchEntries(): SearchGroup[] {
+  return registeredModules().map((d) => ({ tab: "labs", group: path(t("settings-labs.area_features"), d.title()), hint: d.description(), anchor: `configuration-${MODULES_LABS_ID}-${d.id}` }));
+}
+
 // What is typed and what is matched, compared without case or spaces: "timezone" finds "Time zone", "apikey" "API Key".
 const fold = (s: string) => s.toLocaleLowerCase().replace(/\s+/g, "");
 
@@ -196,7 +204,7 @@ export function searchSettings(query: string): { tabs: Tab[]; groups: SearchGrou
   if (!q) return { tabs: [], groups: [] };
   const has = (...texts: (string | undefined)[]) => texts.some((s) => s && fold(s).includes(q));
   return {
-    tabs: TABS.filter((t) => has(TAB_INFO[t].label, TAB_INFO[t].hint)),
-    groups: SEARCH_INDEX.filter((g) => has(g.group, g.hint)),
+    tabs: [...TABS, ...enabledSettingsTabs().map((m) => m.key)].filter((k) => has(tabInfo(k).label, tabInfo(k).hint)),
+    groups: [...SEARCH_INDEX, ...moduleSwitchEntries()].filter((g) => has(g.group, g.hint)),
   };
 }

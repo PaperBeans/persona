@@ -18,6 +18,7 @@ import (
 	"github.com/nwverse/persona/server/internal/kbwire"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/screen"
 )
 
 // The tools on the knowledge base, which is the assistant's own (kb_*, kb.go), and on what the hub keeps: its
@@ -296,8 +297,9 @@ func prefix(p, s string) string {
 // toolInteractionAnswer answers another agent's question for the user (docs/assistant/assistant.md). A permission or
 // a plan is answered here only by the supervisor it was handed to (ask_route.go): it is the supervisor's call, kept
 // as the assistant's (AnsweredBy), never the user's, and one that is the user's alone (userApproval) is refused for
-// ask_escalate. Any other permission or plan, and a terminal dialog, are the user's to decide, and an assistant
-// conversation (this one among them) is never answered by the assistant.
+// ask_escalate. A terminal dialog handed to it is answered the same way (answerScreenCard). Any other permission, plan
+// or terminal dialog is the user's to decide, and an assistant conversation (this one among them) is never answered by
+// the assistant.
 func (s *Service) toolInteractionAnswer(ctx context.Context, self string, args json.RawMessage) (string, error) {
 	var a struct {
 		Machine       string          `json:"machine"`
@@ -328,13 +330,8 @@ func (s *Service) toolInteractionAnswer(ctx context.Context, self string, args j
 		return "", interactionEnded(id, got.Status)
 	}
 	ix := got.Interaction
-	if ix.Kind == proto.IxScreen {
-		// A terminal dialog (Claude's Bypass Permissions confirmation, a safety check): its card offers the user its
-		// choices; it is never answered for them.
-		return "", fmt.Errorf("interaction %s is a screen (a terminal dialog), only the user can answer it in the app, where its card offers its choices", ix.ID)
-	}
 	approval := ix.Kind == proto.IxPermission || ix.Kind == proto.IxPlan
-	if ix.Kind != proto.IxQuestion && !approval {
+	if ix.Kind != proto.IxQuestion && ix.Kind != proto.IxScreen && !approval {
 		return "", fmt.Errorf("interaction %s is a %s, only the user can answer it in the app", ix.ID, ix.Kind)
 	}
 	if ix.MachineID != am.ID || ix.SessionID != c.SessionID {
@@ -345,6 +342,9 @@ func (s *Service) toolInteractionAnswer(ctx context.Context, self string, args j
 	}
 	if approval {
 		return s.answerApprovalCard(ctx, self, ix, a.Allow, a.Reason)
+	}
+	if ix.Kind == proto.IxScreen {
+		return s.answerScreenCard(ctx, self, ix, a.Answers, a.Allow, a.Reason)
 	}
 	answers, err := interactionAnswers(ix, a.Answers)
 	if err != nil {
@@ -404,6 +404,88 @@ func (s *Service) answerApprovalCard(ctx context.Context, self string, ix proto.
 		verb = "Denied"
 	}
 	return fmt.Sprintf("%s for the agent, as its supervisor: kept as task %s's decision (yours, not the user's), and the agent sees it was not the user's answer.", verb, todo), nil
+}
+
+// answerScreenCard is interaction_answer on terminal dialog ix (a screen card): only the conversation supervising its
+// task that it was handed to (or the main conversation) may pick its option, as it allows a permission
+// (answerApprovalCard), and not one that is the user's (userScreen). The option is named as a question's is (answers:
+// the dialog's question → an option's label, or its number), or with allow for a yes/no dialog (its first option
+// starting "Yes", or "No").
+func (s *Service) answerScreenCard(ctx context.Context, self string, ix proto.Interaction, answers json.RawMessage, allow *bool, reason string) (string, error) {
+	if held, ok := s.pendingIx(ix.ID); ok && held.Dialog != nil {
+		ix.Dialog = held.Dialog // the dialog as the card read it, its revision the node checks before any key
+	}
+	todo, routed := s.routedTo(ix.ID, self, s.isMain(ctx, self))
+	if !routed || !supervisedScreen(ix) {
+		return "", fmt.Errorf("interaction %s is a screen (a terminal dialog) that was not handed to you as its task's supervisor: only the user can answer it in the app", ix.ID)
+	}
+	if why := userScreen(ix); why != "" {
+		return "", fmt.Errorf("interaction %s %s: only the user decides it; hand it to them with ask_escalate (todo_id %s), with your recommendation", ix.ID, why, todo)
+	}
+	picked, err := screenPick(ix, answers, allow)
+	if err != nil {
+		return "", err
+	}
+	reason = clip(oneLine(reason), 120)
+	if err := s.answeredScreen(ctx, todo, self, ix, picked, reason); err != nil {
+		if errors.Is(err, errNotPending) {
+			return "", interactionEnded(ix.ID, s.endedStatus(ctx, ix.ID, err))
+		}
+		return "", err
+	}
+	return fmt.Sprintf("Picked %q in the agent's terminal, as its supervisor: kept as task %s's decision (yours, not the user's).", picked.Label, todo), nil
+}
+
+// screenPick is the option of terminal dialog ix that answers (the dialog's question → a label or a number) or allow
+// name: only an option to pick (not a free-text row, not "Chat about this"), one only.
+func screenPick(ix proto.Interaction, answers json.RawMessage, allow *bool) (screen.Option, error) {
+	d := ix.Dialog
+	var choices []string
+	for _, o := range d.Options {
+		if o.Kind == "" && o.Label != "" {
+			choices = append(choices, o.Key+". "+o.Label)
+		}
+	}
+	list := strings.Join(choices, " / ")
+	if d.Multi {
+		return screen.Option{}, fmt.Errorf("interaction %s is a multi-select terminal question: hand it to the user with ask_escalate, or tell the agent with agent_send", ix.ID)
+	}
+	var want string
+	switch {
+	case len(answers) > 0 && string(answers) != "null":
+		var raw map[string]json.RawMessage
+		if json.Unmarshal(answers, &raw) != nil || len(raw) != 1 {
+			return screen.Option{}, fmt.Errorf("answers takes one entry for a terminal dialog: %q → one of its options (%s)", d.Question, list)
+		}
+		for _, v := range raw {
+			if json.Unmarshal(v, &want) != nil {
+				return screen.Option{}, fmt.Errorf("%q takes one option label or number: %s", d.Question, list)
+			}
+		}
+	case allow != nil:
+		prefix := "no"
+		if *allow {
+			prefix = "yes"
+		}
+		for _, o := range d.Options {
+			if l := strings.ToLower(strings.TrimSpace(o.Label)); o.Kind == "" && (l == prefix || strings.HasPrefix(l, prefix+",") || strings.HasPrefix(l, prefix+" ")) {
+				return o, nil
+			}
+		}
+		return screen.Option{}, fmt.Errorf("interaction %s has no yes/no option for allow: name one in answers (%q → %s)", ix.ID, d.Question, list)
+	default:
+		return screen.Option{}, fmt.Errorf("answers is required for a terminal dialog: %q → one of its options (%s)", d.Question, list)
+	}
+	want = strings.TrimSpace(unquoted(want))
+	for _, o := range d.Options {
+		if o.Kind != "" || o.Label == "" {
+			continue
+		}
+		if want == o.Label || want == o.Key || want == o.Key+". "+o.Label || strings.EqualFold(want, o.Label) {
+			return o, nil
+		}
+	}
+	return screen.Option{}, fmt.Errorf("%q is not one of %q's options: %s", want, d.Question, list)
 }
 
 // interactionEnded says how an interaction that is no longer pending ended (status, from the hub's history), or that

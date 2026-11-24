@@ -140,9 +140,11 @@ func restartedOn(t *testing.T, st Store) (*Service, *fakeHub) {
 	t.Helper()
 	s, f := newTaskServiceOn(t, st)
 	shortSupervise(t, s)
+	f.mu.Lock()
 	f.hello.Assistant.MachineID = "server"
-	setSettings(t, s, func(v *Settings) { v.Main = "conv1" })
 	f.known["conv1"] = true
+	f.mu.Unlock()
+	setSettings(t, s, func(v *Settings) { v.Main = "conv1" })
 	f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
 	return s, f
 }
@@ -1007,6 +1009,7 @@ func TestCompletionAfterAnUnnamedTurnWithTheNodeClockBehind(t *testing.T) {
 // A meeting's turn in the task's agent is never the task's completion: found by the sweep with no start heard, it is
 // left alone (no receipt, no start taken), kept as seen and not read again.
 func TestCompletionUnheardMeetingTurn(t *testing.T) {
+	needsRecordingModule(t) // a path of the recording module's
 	s, f, todo := newSupervisedService(t)
 	nodeListed(s, f, turnRow(proto.StatusIdle, 1, ""))
 	sweeps(t, s, todo.ID, 1)

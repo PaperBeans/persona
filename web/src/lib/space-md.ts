@@ -9,7 +9,9 @@ export type SpaceMdPart =
   /** `text` is the whole block, markers included; `body` what is between them. */
   | { kind: "managed"; name: string; text: string; body: string };
 
-const BEGIN = /<!-- persona:managed:([a-z0-9_-]+):begin -->/g;
+const NAME = "[A-Za-z0-9_.-]+";
+const BEGIN = new RegExp(`<!-- persona:managed:(${NAME}):begin -->`, "g");
+const MARKER = new RegExp(`<!-- persona:managed:(${NAME}):(begin|end) -->`, "g");
 
 /** Splits the file into human parts and managed blocks, in order; joining them gives the file back unchanged. A block
  *  whose end marker is missing runs to the end of the file, so nothing of it becomes editable. */
@@ -48,23 +50,46 @@ export function editableParts(parts: readonly SpaceMdPart[]): { parts: SpaceMdPa
 }
 
 /** The file from `parts` with the fields' words (`edits`, by part index) in place of their human parts. A field written
- *  right before a block keeps a line break between them, so the block's begin marker stays on a line of its own. */
+ *  adjacent to a block keeps a line break between them, so the block's markers stay on lines of their own. */
 export function assembleSpaceMd(parts: readonly SpaceMdPart[], edits: Readonly<Record<number, string>>): string {
   return parts
     .map((p, i) => {
       if (p.kind !== "human" || edits[i] === undefined) return p.text;
-      const text = edits[i]!;
-      return parts[i + 1]?.kind === "managed" && text !== "" && !text.endsWith("\n") ? `${text}\n\n` : text;
+      let text = edits[i]!;
+      if (text !== "") {
+        if (parts[i - 1]?.kind === "managed" && !text.startsWith("\n")) text = `\n\n${text}`;
+        if (parts[i + 1]?.kind === "managed" && !text.endsWith("\n")) text = `${text}\n\n`;
+      }
+      return text;
     })
     .join("");
 }
 
-/** Whether every managed block of `after` is byte for byte one of `before`'s, in the same order (what the hub checks). */
+function managedParts(s: string): string[] {
+  const markers = [...s.matchAll(MARKER)];
+  const out: string[] = [];
+  for (let i = 0; i < markers.length; i++) {
+    const m = markers[i]!;
+    if (m[2] === "begin") {
+      let j = i + 1;
+      while (j < markers.length && !(markers[j]![1] === m[1] && markers[j]![2] === "end")) j++;
+      if (j < markers.length) {
+        const end = markers[j]!;
+        out.push(s.slice(m.index, end.index + end[0].length));
+        i = j;
+        continue;
+      }
+    }
+    out.push(m[0]);
+  }
+  return out;
+}
+
+/** Whether every managed block and marker of `after` is byte for byte one of `before`'s, in the same order (what the hub checks). */
 export function sameManagedBlocks(before: string, after: string): boolean {
+  const eq = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
   const blocks = (s: string) => splitSpaceMd(s).flatMap((p) => (p.kind === "managed" ? [p.text] : []));
-  const a = blocks(before);
-  const b = blocks(after);
-  return a.length === b.length && a.every((x, i) => x === b[i]);
+  return eq(blocks(before), blocks(after)) && eq(managedParts(before), managedParts(after));
 }
 
 /** SPACE.md without the blocks Persona keeps (`<!-- persona:managed:… -->`): what the user wrote, as the

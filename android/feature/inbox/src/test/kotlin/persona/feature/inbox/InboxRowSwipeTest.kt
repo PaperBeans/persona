@@ -48,6 +48,7 @@ import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.lang.reflect.Proxy
 import kotlin.math.abs
+import persona.core.inbox.*
 
 /**
  * The Inbox's rows swipe as iOS's do (`InboxView`, #4210 T1): one swipe, from the end, Done in the positive tone or Move Back

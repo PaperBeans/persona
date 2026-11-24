@@ -15,6 +15,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -1108,5 +1109,195 @@ func TestA2AConcurrentSendsToSameTargetSerializeCleanly(t *testing.T) {
 		if !delivered[i].After(delivered[i-1]) {
 			t.Fatalf("tasks did not drain in strict FIFO created_at order: %v", delivered)
 		}
+	}
+}
+
+// A2A launches are enabled by default across confirmed personal computers (including same-machine
+// cross-harness), without enabling agents.dispatch.enabled; explicit launch=false or machines=[]
+// disables launching cleanly, and optional permission_mode is capped by the parent's permission level.
+func TestA2ADefaultSubagentLaunchCrossMachineAndSameMachineCrossHarness(t *testing.T) {
+	s, h, st, _, parent, _ := a2aFixture(t)
+	ctx := t.Context()
+	h.fakeModel(t)
+	// Default config: Machines == nil, Dispatch.Enabled == nil (off), Launch == nil (default on).
+	h.hello.Agents.A2A = assistantwire.A2AConfig{}
+	h.hello.Agents.Dispatch.Enabled = nil
+	h.sessions[parent.Ref.Machine][0].PermissionMode = "acceptEdits"
+	h.startReply = func(args map[string]any, row *proto.Session) *proto.StartInstead {
+		row.SessionID = args["session_id"].(string)
+		return nil
+	}
+
+	// 1. Cross-machine launch succeeds by default without agents.dispatch.enabled.
+	raw, _ := json.Marshal(map[string]any{
+		"machine_id": "box", "cwd": "/code/app", "launcher": "codex",
+		"message_id": "default-cross-launch", "text": "Run Linux integration tests.",
+	})
+	res := s.mcpCall(ctx, parent.Ref.Machine, parent.Ref.Session, "a2a_send", raw, false)
+	if res.IsError {
+		t.Fatalf("default cross-machine A2A launch failed: %s", resultText(res))
+	}
+	var view a2aTaskView
+	if err := json.Unmarshal([]byte(resultText(res)), &view); err != nil {
+		t.Fatal(err)
+	}
+	task, err := decodeA2A(st.A2AGet(ctx, view.ID))
+	if err != nil || task == nil || task.Launch == nil || !task.Launch.Subagent {
+		t.Fatalf("launch metadata missing subagent=true: %+v %v", task, err)
+	}
+
+	// 2. Same-machine cross-harness launch (e.g. Claude -> Codex on mac) succeeds by default
+	// and honors permission_mode only with live source-node attestation.
+	rawSame, _ := json.Marshal(map[string]any{
+		"machine_id": parent.Ref.Machine, "cwd": "/code/app", "launcher": "codex",
+		"permission_mode": "acceptEdits",
+		"message_id":      "same-machine-cross-harness", "text": "Review this diff with Codex.",
+	})
+	if unattested := s.mcpCall(ctx, parent.Ref.Machine, parent.Ref.Session, "a2a_send", rawSame, false); !unattested.IsError {
+		t.Fatalf("same-machine acceptEdits without live attestation must fail: %s", resultText(unattested))
+	}
+	bypassCtx := devicewire.WithSourcePermission(ctx, testSourcePermission(parent.Ref.Session, "a2a_send", rawSame, "bypass"))
+	resSame := s.mcpCall(bypassCtx, parent.Ref.Machine, parent.Ref.Session, "a2a_send", rawSame, false)
+	if resSame.IsError {
+		t.Fatalf("same-machine cross-harness A2A launch failed: %s", resultText(resSame))
+	}
+
+	// 3. Escalating permission_mode (including "auto" and "bypassPermissions") under prompting attestation is refused.
+	for _, mode := range []string{"acceptEdits", "auto", "bypassPermissions"} {
+		rawEsc, _ := json.Marshal(map[string]any{
+			"machine_id": "box", "cwd": "/code/app", "permission_mode": mode,
+			"message_id": "escalate-attempt-" + mode, "text": "Should fail.",
+		})
+		promptCtx := devicewire.WithSourcePermission(ctx, testSourcePermission(parent.Ref.Session, "a2a_send", rawEsc, "prompting"))
+		if resEsc := s.mcpCall(promptCtx, parent.Ref.Machine, parent.Ref.Session, "a2a_send", rawEsc, false); !resEsc.IsError {
+			t.Fatalf("permission escalation to %q should be rejected, got: %s", mode, resultText(resEsc))
+		}
+	}
+
+	// 4. Explicit launch=false blocks new launches while keeping peer discovery available.
+	off := false
+	h.hello.Agents.A2A = assistantwire.A2AConfig{Launch: &off}
+	rawDisabled, _ := json.Marshal(map[string]any{
+		"machine_id": "box", "cwd": "/code/app",
+		"message_id": "disabled-launch", "text": "Should be disabled.",
+	})
+	if r := s.mcpCall(ctx, parent.Ref.Machine, parent.Ref.Session, "a2a_send", rawDisabled, false); !r.IsError {
+		t.Fatalf("launch=false must reject new launches: %s", resultText(r))
+	}
+	if r := s.mcpCall(ctx, parent.Ref.Machine, parent.Ref.Session, "a2a_sessions", json.RawMessage(`{}`), false); r.IsError {
+		t.Fatalf("launch=false must keep peer discovery working: %s", resultText(r))
+	}
+
+	// 5. Explicit empty machines=[] disables A2A completely.
+	h.hello.Agents.A2A = assistantwire.A2AConfig{Machines: []string{}}
+	if r := s.mcpCall(ctx, parent.Ref.Machine, parent.Ref.Session, "a2a_send", rawDisabled, false); !r.IsError {
+		t.Fatalf("machines=[] must disable A2A launches: %s", resultText(r))
+	}
+}
+
+// A2A-launched subagents are durably tagged across restarts, excluded from a2a_sessions peer
+// discovery and unsolicited peer sends, yet remain allowed on their own launch task to receive
+// messages, call a2a_report / a2a_get, and be observed — while ordinary peer A2A messages to
+// existing independent sessions never mark them as subagents.
+func TestA2ASubagentPersistenceAndVisibilityDecoupling(t *testing.T) {
+	s, h, st, cfg, parent, peer := a2aFixture(t)
+	ctx := t.Context()
+	h.fakeModel(t)
+	h.startReply = func(args map[string]any, row *proto.Session) *proto.StartInstead {
+		row.SessionID = args["session_id"].(string)
+		return nil
+	}
+
+	// Ordinary A2A message to an existing peer session must NOT mark the peer as a subagent.
+	if _, err := s.a2aStart(ctx, st, cfg, parent, peer, "peer-msg", "", "Hey peer.", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	peerRows := []proto.Session{{MachineID: peer.Machine, SessionID: peer.Session, Status: proto.StatusIdle, Agent: "pi"}}
+	s.decorateSubagents(ctx, peer.Machine, peerRows)
+	if peerRows[0].IsSubagent || peerRows[0].A2ATaskID() != "" || peerRows[0].ParentSessionID != "" {
+		t.Fatalf("ordinary peer A2A message marked independent session as subagent: %+v %+v", peerRows[0], peerRows[0].Hierarchy)
+	}
+
+	// Launch a cross-machine subagent via A2A.
+	tk, err := s.a2aStart(ctx, st, cfg, parent, a2aRef{Machine: "box"}, "launch-sub", "", "Inspect failing tests.", true,
+		&a2aLaunch{CWD: "/code/project", Pending: true, Subagent: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a2aProcessOne(t, s, st, cfg, tk.ID)
+	waitFor(t, "A2A launch completed", func() bool {
+		tk, err = decodeA2A(st.A2AGet(ctx, tk.ID))
+		return err == nil && !tk.Launch.Pending
+	})
+
+	// Simulate manager restart: fresh Service reading Postgres a2a_tasks must restore subagent provenance.
+	restarted := New(Options{Hub: h, Store: func() Store { return st }, Logf: testLogf(t)})
+	subRef := tk.target()
+	subRow := proto.Session{
+		MachineID: subRef.Machine, SessionID: subRef.Session, Status: proto.StatusIdle, Agent: "codex",
+		Capabilities: &proto.SessionCapabilities{Send: true, Read: true},
+	}
+	decorated := []proto.Session{subRow}
+	restarted.decorateSubagents(ctx, subRef.Machine, decorated)
+	got := decorated[0]
+	if !got.IsSubagent || got.ParentSessionID != parent.Ref.Session || got.ParentMachineID() != parent.Ref.Machine ||
+		got.A2ATaskID() != tk.ID || got.SubagentOrigin() != proto.SubagentOriginA2A {
+		t.Fatalf("subagent provenance lost after restart: row=%+v hierarchy=%+v", got, got.Hierarchy)
+	}
+
+	// Place the decorated IsSubagent=true session into hub sessions (as the fleet does).
+	h.mu.Lock()
+	h.sessions[subRef.Machine] = append(h.sessions[subRef.Machine], got)
+	h.mu.Unlock()
+
+	// 1. Subagent is excluded from a2a_sessions peer discovery.
+	disc := restarted.mcpCall(ctx, parent.Ref.Machine, parent.Ref.Session, "a2a_sessions", json.RawMessage(`{}`), false)
+	if disc.IsError || strings.Contains(resultText(disc), subRef.Session) || !strings.Contains(resultText(disc), peer.Session) {
+		t.Fatalf("a2a_sessions discovery leaked subagent or dropped peer: %s", resultText(disc))
+	}
+
+	// 2. Unsolicited new peer send directly to the subagent is refused.
+	if _, err := restarted.a2aStart(ctx, st, cfg, parent, subRef, "unsolicited-peer-send", "", "Hi directly.", false, nil); !errors.Is(err, errA2AUnavailable) {
+		t.Fatalf("unsolicited peer send to subagent must fail with errA2AUnavailable, got: %v", err)
+	}
+
+	// 3. Subagent still receives A2A tools (for a2a_report / a2a_get) and can report input_required.
+	tools, err := restarted.sessionMCPToolsChecked(ctx, subRef.Machine, subRef.Session, false, false)
+	if err != nil || !toolListed(tools, "a2a_report") || !toolListed(tools, "a2a_get") {
+		t.Fatalf("A2A-launched subagent missing A2A tools: err=%v tools=%d", err, len(tools))
+	}
+	reportArgs, _ := json.Marshal(map[string]any{
+		"task_id": tk.ID, "message_id": "sub-ask-1", "state": a2aInput, "text": "Which target should I run?",
+	})
+	rep := restarted.mcpCall(ctx, subRef.Machine, subRef.Session, "a2a_report", reportArgs, false)
+	if rep.IsError {
+		t.Fatalf("A2A-launched subagent could not call a2a_report: %s", resultText(rep))
+	}
+
+	// 4. Parent answers on the same task_id and delivery reaches the IsSubagent=true target.
+	ansArgs, _ := json.Marshal(map[string]any{
+		"task_id": tk.ID, "message_id": "parent-ans-1", "text": "Run the integration suite.",
+	})
+	ans := restarted.mcpCall(ctx, parent.Ref.Machine, parent.Ref.Session, "a2a_send", ansArgs, false)
+	if ans.IsError {
+		t.Fatalf("parent follow-up to A2A subagent failed: %s", resultText(ans))
+	}
+	tk = a2aProcessOne(t, restarted, st, cfg, tk.ID)
+	if tk.State != a2aWorking || len(h.sentCalls()) == 0 || !strings.Contains(string(h.sentCalls()[len(h.sentCalls())-1].Params), "Run the integration suite.") {
+		t.Fatalf("follow-up was not delivered to A2A subagent: state=%s sends=%+v", tk.State, h.sentCalls())
+	}
+
+	// 5. Subagent can complete its task via a2a_report AND cannot launch a grandchild (depth-1 guard).
+	grandchildArgs, _ := json.Marshal(map[string]any{
+		"machine_id": "mac", "cwd": "/code/project", "message_id": "grandchild", "text": "Nested launch.",
+	})
+	if gc := restarted.mcpCall(ctx, subRef.Machine, subRef.Session, "a2a_send", grandchildArgs, false); !gc.IsError || !strings.Contains(resultText(gc), "does not dispatch") {
+		t.Fatalf("A2A subagent bypassed depth-1 guardrail: %s", resultText(gc))
+	}
+	doneArgs, _ := json.Marshal(map[string]any{
+		"task_id": tk.ID, "message_id": "sub-done-1", "state": a2aComplete, "text": "All integration tests passed.",
+	})
+	if done := restarted.mcpCall(ctx, subRef.Machine, subRef.Session, "a2a_report", doneArgs, false); done.IsError {
+		t.Fatalf("A2A subagent could not report completion: %s", resultText(done))
 	}
 }

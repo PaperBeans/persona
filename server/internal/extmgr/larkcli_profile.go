@@ -7,9 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/cliport"
+	"github.com/nwverse/persona/server/internal/cliwire"
+
 	"github.com/nwverse/persona/server/internal/connector"
-	larkcliconnector "github.com/nwverse/persona/server/internal/connector/larkcli"
-	larkcliadapter "github.com/nwverse/persona/server/internal/larkcli"
 )
 
 const managedLarkCLIProfile = "persona"
@@ -189,7 +190,7 @@ func (h *Manager) syncLarkCLIProfile(ctx context.Context) error {
 		return nil
 	}
 	cli := h.cfg.Lark.CLI
-	show := larkcliadapter.New(larkcliadapter.Config{Bin: cli.Bin, Profile: managedLarkCLIProfile, Timeout: 15 * time.Second})
+	show := cliport.NewRunner(cliwire.Config{Bin: cli.Bin, Profile: managedLarkCLIProfile, Timeout: 15 * time.Second})
 	showCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	current, err := show.ConfigShow(showCtx)
 	cancel()
@@ -197,7 +198,7 @@ func (h *Manager) syncLarkCLIProfile(ctx context.Context) error {
 		return nil
 	}
 	brand := larkCLIBrand(domain)
-	initRunner := larkcliadapter.New(larkcliadapter.Config{Bin: cli.Bin, Timeout: 15 * time.Second})
+	initRunner := cliport.NewRunner(cliwire.Config{Bin: cli.Bin, Timeout: 15 * time.Second})
 	initCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	err = initRunner.InitProfile(initCtx, managedLarkCLIProfile, appID, secret, brand)
 	cancel()
@@ -222,7 +223,7 @@ func (h *Manager) validateLarkCLIProfile(ctx context.Context, choice string) err
 	if err != nil {
 		return err
 	}
-	r := larkcliadapter.New(larkcliadapter.Config{Bin: cli.Bin, Profile: profile, Timeout: 5 * time.Second, ResolveProfile: h.larkCLIExecutionProfile})
+	r := cliport.NewRunner(cliwire.Config{Bin: cli.Bin, Profile: profile, Timeout: 5 * time.Second, ResolveProfile: h.larkCLIExecutionProfile})
 	profiles, err := r.Profiles(ctx)
 	if err != nil {
 		return err
@@ -272,13 +273,13 @@ func larkCLIBrand(domain string) string {
 // newLarkCLIConnector builds the connector for an effective profile with its
 // Inbox wiring (state store, gateway preference), so a rebuild after a profile
 // change keeps the chat Inbox working.
-func (h *Manager) newLarkCLIConnector(profile string) *larkcliconnector.Connector {
+func (h *Manager) newLarkCLIConnector(profile string) cliport.Connector {
 	cli := h.cfg.Lark.CLI
-	var lc *larkcliconnector.Connector
-	lc = larkcliconnector.New(larkcliadapter.Config{Bin: cli.Bin, Profile: profile,
+	var lc cliport.Connector
+	lc = cliport.NewConnector(cliwire.Config{Bin: cli.Bin, Profile: profile,
 		InboxPoll: cli.InboxPoll(), InboxPageLimit: cli.InboxPageLimit,
 		ResolveProfile: func(ctx context.Context) (string, error) {
-			if h.connectors.Get(larkcliconnector.ID) != lc {
+			if h.connectors.Get(cliwire.ConnectorID) != lc {
 				return "", errBotSettingsUnread // a retired instance never owns current-account calls
 			}
 			current, err := h.larkCLIExecutionProfile(ctx)
@@ -288,7 +289,7 @@ func (h *Manager) newLarkCLIConnector(profile string) *larkcliconnector.Connecto
 			if current != profile {
 				// Retained callers must not use the old connector's Inbox cursor
 				// and caches for the recovered account. The replacement owns them.
-				if live, ok := h.connectors.Get(larkcliconnector.ID).(*larkcliconnector.Connector); ok && live.Profile() != current {
+				if live, ok := h.connectors.Get(cliwire.ConnectorID).(cliport.Connector); ok && live.Profile() != current {
 					h.larkCLIRecovery.needed.Store(true)
 					h.requestLarkCLIRecovery(ctx)
 				}
@@ -337,26 +338,26 @@ func (h *Manager) refreshLarkCLIConnectorAtPublication(ctx context.Context, befo
 	if err != nil {
 		return err
 	}
-	existing := h.connectors.Get(larkcliconnector.ID)
+	existing := h.connectors.Get(cliwire.ConnectorID)
 	if existing == nil {
 		return errBotSettingsUnread
 	}
 	unread := h.larkCLIRecovery.preferencesUnread.Load()
-	enabled := h.connectors.Enabled(larkcliconnector.ID)
+	enabled := h.connectors.Enabled(cliwire.ConnectorID)
 	var cs connectorSettings
 	if unread {
 		cs, err = h.readConnectorSettings(ctx)
 		if err != nil {
 			return err
 		}
-		enabled = h.connectorOn(cs, larkcliconnector.ID)
+		enabled = h.connectorOn(cs, cliwire.ConnectorID)
 	}
 	if err = h.syncLarkCLIProfile(ctx); err != nil {
 		h.logf("larkcli profile sync: %v", err)
 		return err
 	}
 	same := false
-	if c, ok := existing.(*larkcliconnector.Connector); ok {
+	if c, ok := existing.(cliport.Connector); ok {
 		same = c.Profile() == profile
 	}
 	if same && !unread {
@@ -364,7 +365,7 @@ func (h *Manager) refreshLarkCLIConnectorAtPublication(ctx context.Context, befo
 	}
 	next := h.newLarkCLIConnector(profile)
 	if unread {
-		if raw, ok := cs.Options[larkcliconnector.ID]; ok {
+		if raw, ok := cs.Options[cliwire.ConnectorID]; ok {
 			if err = next.SetOptions(raw); err != nil {
 				return err
 			}
@@ -379,16 +380,16 @@ func (h *Manager) refreshLarkCLIConnectorAtPublication(ctx context.Context, befo
 	h.larkCLIRecovery.publishing.Store(true)
 	defer h.larkCLIRecovery.publishing.Store(false)
 	// Keep Add from starting a watcher before the new instance has its switch.
-	if err = h.connectors.SetEnabled(larkcliconnector.ID, false); err != nil {
+	if err = h.connectors.SetEnabled(cliwire.ConnectorID, false); err != nil {
 		return err
 	}
 	if unread {
-		on, chosen := cs.Inbox[larkcliconnector.ID]
-		if err = h.connectors.SetFeed(larkcliconnector.ID, connector.FeedInbox, !chosen || on); err != nil {
+		on, chosen := cs.Inbox[cliwire.ConnectorID]
+		if err = h.connectors.SetFeed(cliwire.ConnectorID, connector.FeedInbox, !chosen || on); err != nil {
 			return err
 		}
 	}
-	h.connectors.Remove(larkcliconnector.ID)
+	h.connectors.Remove(cliwire.ConnectorID)
 	h.larkCLIRecovery.needed.Store(false) // synchronized before Add can start the new watcher
 	if err = h.addConnector(next); err != nil {
 		return err
@@ -398,7 +399,7 @@ func (h *Manager) refreshLarkCLIConnectorAtPublication(ctx context.Context, befo
 	}
 	// Reapply off to the new pointer as well as preserving the registry's ID
 	// switch: StatusOf uses the connector instance's disabled mark.
-	if err = h.connectors.SetEnabled(larkcliconnector.ID, false); err != nil {
+	if err = h.connectors.SetEnabled(cliwire.ConnectorID, false); err != nil {
 		return err
 	}
 	if unread {
@@ -406,7 +407,7 @@ func (h *Manager) refreshLarkCLIConnectorAtPublication(ctx context.Context, befo
 	}
 	h.larkCLIRecovery.publishing.Store(false)
 	if enabled {
-		return h.connectors.SetEnabled(larkcliconnector.ID, true)
+		return h.connectors.SetEnabled(cliwire.ConnectorID, true)
 	}
 	return nil
 }
@@ -425,7 +426,7 @@ func (h *Manager) larkCLIView(ctx context.Context, botAppID string) *larkCLIBotV
 	choice := h.larkCLIProfileChoice(ctx)
 	appID := ""
 	cli := h.cfg.Lark.CLI
-	r := larkcliadapter.New(larkcliadapter.Config{Bin: cli.Bin, Profile: profile, Timeout: 5 * time.Second, ResolveProfile: h.larkCLIExecutionProfile})
+	r := cliport.NewRunner(cliwire.Config{Bin: cli.Bin, Profile: profile, Timeout: 5 * time.Second, ResolveProfile: h.larkCLIExecutionProfile})
 	if auth, err := r.AuthStatus(ctx); err == nil {
 		appID = auth.AppID
 	}

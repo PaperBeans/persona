@@ -96,6 +96,16 @@ func shortTaskStartReconcile(t *testing.T) {
 	})
 }
 
+// shortTaskStartAdopt shortens only the search for the session of a start that did not answer (one second, quick polls),
+// for a test whose fake fails the start at once. The start keeps its budget: what it reads before it asks the node (the
+// plan, the model configuration in Postgres) is not squeezed into milliseconds (#14158).
+func shortTaskStartAdopt(t *testing.T) {
+	t.Helper()
+	oldWait, oldPoll := taskStartAdoptWait, taskStartAdoptPoll
+	taskStartAdoptWait, taskStartAdoptPoll = time.Second, 15*time.Millisecond
+	t.Cleanup(func() { taskStartAdoptWait, taskStartAdoptPoll = oldWait, oldPoll })
+}
+
 // reconcileHub is a fake hub with the given machines (no sessions yet) whose session.start always spends the
 // caller's wait, like a node whose link is stuck while it builds the tab.
 func reconcileHub(t *testing.T, machines ...string) (*Service, *fakeHub) {

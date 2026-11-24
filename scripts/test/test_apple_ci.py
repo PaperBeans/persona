@@ -232,6 +232,11 @@ class AppleCIPreparationTests(unittest.TestCase):
         # So did the module registry's package tests (#13432), pinned on their own as well.
         modules = script[script.index('  # The module contract and registry (#13432'):script.index("  ci_run 'Persona Input build'")]
         self.assertIn("ci_run 'PersonaModuleAPI unit tests'", modules)
+        # And the core-only build without the moved feature modules (#14017), pinned on its own too.
+        core_only = script[script.index('  # The app without its moved feature modules'):script.index('fi\nif [ "$LANE" = ios18 ]; then')]
+        self.assertIn("ci_run 'Generate core-only Apple project' 120 env PERSONA_CORE_ONLY=YES xcodegen generate", core_only)
+        self.assertIn("ci_run 'Core-only iOS build' 1800", core_only)
+        self.assertIn("ci_run 'Generate Apple project again (whole)' 120 xcodegen generate", core_only)
         for lane in ('ios', 'ios-focused', 'ios-regressions'):
             current = script.replace('      --output "$watch_log" --stop "$watch_log/stop" --seconds "$seconds" \\\n      --derived-data "$output/ios-tests" &',
                                      '      --output "$watch_log" --stop "$watch_log/stop" --seconds "$seconds" &')
@@ -328,6 +333,7 @@ class AppleCIPreparationTests(unittest.TestCase):
                                       '"${XCODE[@]}"')
             current = current.replace(wire, '')
             current = current.replace(modules, '')
+            current = current.replace(core_only, '')
             current = current.replace(' || [ "$LANE" = ios-ipad-diagnostic ]', '').replace('|ios-ipad-diagnostic', '')
             current = current.replace('      checker="$1"; bundle="$2"; log="$3"; watch_log="$4"; udid="$5"; ci_root="$6"; bundle_id="$7"; output="$8"; diagnostics="$9"; lane="${10}"; shift 10',
                                       '      checker="$1"; bundle="$2"; log="$3"; watch_log="$4"; udid="$5"; ci_root="$6"; bundle_id="$7"; output="$8"; shift 8')

@@ -12,7 +12,7 @@ import (
 // Only the current main conversation's latest completed silent supervision
 // round changes unread state. The audit transcript and full history stay intact.
 const (
-	conversationAttentionKey  = "assistant.conversation_attention.v1"
+	conversationAttentionKey  = "assistant.conversation_attention.v2"
 	conversationAttentionScan = 4
 )
 

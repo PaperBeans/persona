@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
@@ -188,4 +188,42 @@ test('a send during idle retirement waits for the old worker to exit before star
   assert.notEqual(resumed.worker, oldPID)
   assert.deepEqual(calls().filter((entry) => entry.started).map((entry) => entry.started), [oldPID, resumed.worker])
   process.kill(resumed.worker, 'SIGKILL')
+})
+
+test('the generic Assistant environment reaches only its dedicated worker and each replacement', async (t) => {
+  const { pids, start, call, calls, assistantDir } = await fixture(t, { assistantAcpIdleMs: 250, promptInactivityMs: 0 })
+  const bin = join(assistantDir, 'fake-extension-bin')
+  mkdirSync(bin, { recursive: true })
+  writeFileSync(join(bin, 'fake-extension-cli'), '#!/bin/sh\nprintf fake\n', { mode: 0o700 })
+  const environment = (handle) => ({
+    PATH: `${bin}${delimiter}${process.env.PATH || ''}`,
+    EXAMPLE_EXTENSION_CREDENTIAL: handle,
+    EXAMPLE_EXTENSION_ACCOUNT: '2',
+  })
+  const latestWorker = () => calls().filter((entry) => entry.started).at(-1)
+  const assertEnvironment = (handle) => {
+    const started = latestWorker()
+    assert.equal(started.fakeExtensionCredential, handle)
+    assert.equal(started.fakeExtensionAccount, '2')
+    assert.equal(started.path, environment(handle).PATH)
+  }
+
+  const assistant = await start({ assistant: true, env: environment('fake-credential-handle') })
+  assertEnvironment('fake-credential-handle')
+  await start({ env: environment('must-not-reach-an-agent') })
+  assert.equal(latestWorker().fakeExtensionCredential, null)
+  assert.notEqual(latestWorker().path, environment('must-not-reach-an-agent').PATH)
+
+  await until('first Assistant worker retired', () => !pids()[assistant])
+  await call('send', assistant, { text: 'resume', env: environment('fake-credential-handle-2') })
+  assertEnvironment('fake-credential-handle-2')
+
+  process.kill(pids()[assistant], 'SIGKILL')
+  await until('crashed Assistant worker cleared', () => !pids()[assistant])
+  await call('send', assistant, { text: 'restart', env: environment('fake-credential-handle-3') })
+  assertEnvironment('fake-credential-handle-3')
+
+  await until('second Assistant worker retired', () => !pids()[assistant])
+  await call('modes', assistant, { model: 'test-model', env: environment('fake-credential-handle-4') })
+  assertEnvironment('fake-credential-handle-4')
 })

@@ -11,6 +11,7 @@ import (
 )
 
 func TestLarkCLIRecoveryPublicationRejectsCallsAndRetiredInstances(t *testing.T) {
+	needsLarkCLI(t)
 	for _, profile := range []string{"fixed", ""} {
 		t.Run("profile_"+profile, func(t *testing.T) {
 			w := newBotLoadWorld(t, true, false)

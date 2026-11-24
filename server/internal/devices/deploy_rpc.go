@@ -11,20 +11,93 @@ import (
 	"slices"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/link"
 	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
+// Adaptive chunk bounds for node.update.chunk over Persona Link / relayed RPC (#13761): each chunk is sent
+// synchronously as JSON base64 (~4/3 raw size), so keeping each chunk well under the Link pong timeout avoids starving
+// WebSocket pings on slow or high-RTT connections (both framed and unframed) while ramping quickly on fast links.
+const (
+	nodeUpdateMinChunk    = 16 << 10
+	nodeUpdateInitChunk   = 64 << 10
+	nodeUpdateMaxChunk    = proto.MachineFileUploadChunkBytes // 256 KiB raw (~341 KiB JSON base64)
+	nodeUpdateChunkStep   = 4 << 10
+	nodeUpdateTargetFloor = 250 * time.Millisecond
+	nodeUpdateTargetCap   = 1500 * time.Millisecond
+)
+
+type nodeUpdateChunkSizer struct {
+	min, max, cur int
+	target        time.Duration
+}
+
+func newNodeUpdateChunkSizer(pingTimeout time.Duration) *nodeUpdateChunkSizer {
+	if pingTimeout <= 0 {
+		pingTimeout = link.PingTimeout
+	}
+	target := min(max(pingTimeout/4, nodeUpdateTargetFloor), nodeUpdateTargetCap)
+	maxChunk := min(nodeUpdateMaxChunk, proto.UploadChunkBytes)
+	init := nodeUpdateInitChunk
+	if defaultTarget := link.PingTimeout / 4; target < defaultTarget {
+		init = int(int64(nodeUpdateInitChunk) * int64(target) / int64(defaultTarget))
+		maxChunk = int(int64(maxChunk) * int64(target) / int64(defaultTarget))
+	}
+	maxChunk = max((maxChunk/nodeUpdateChunkStep)*nodeUpdateChunkStep, nodeUpdateMinChunk)
+	s := &nodeUpdateChunkSizer{
+		min:    nodeUpdateMinChunk,
+		max:    maxChunk,
+		target: target,
+	}
+	s.cur = s.clamp(init)
+	return s
+}
+
+func (s *nodeUpdateChunkSizer) next() int { return s.cur }
+
+func (s *nodeUpdateChunkSizer) observe(sent int, elapsed time.Duration, stats rpc.LaneStats) {
+	if sent <= 0 {
+		return
+	}
+	var desired int
+	if elapsed <= 0 {
+		desired = s.cur * 2
+	} else {
+		desired = int(float64(sent) * s.target.Seconds() / elapsed.Seconds())
+	}
+	if desired > s.cur {
+		// Grow at most 2x per chunk so a single highly-compressible section cannot jump straight to max.
+		desired = min(desired, s.cur*2)
+	}
+	if stats.Framed && stats.RTT > 2*s.target {
+		// Frames are already queueing toward the ping deadline: hold steady or shrink, never grow.
+		desired = min(desired, s.cur)
+		if stats.RTT > 3*s.target {
+			desired = min(desired, s.cur/2)
+		}
+	}
+	s.cur = s.clamp(desired)
+}
+
+func (s *nodeUpdateChunkSizer) clamp(n int) int {
+	n = (n / nodeUpdateChunkStep) * nodeUpdateChunkStep
+	return min(max(n, s.min), s.max)
+}
+
 // The desired deployment survives a hub restart. Only the node's local recovery
 // transaction lives beside its executable; hub state stays in Postgres settings.
 type nodeDeployRecord struct {
-	Target string    `json:"target"`
-	State  string    `json:"state"` // queued | succeeded | failed
-	Phase  string    `json:"phase,omitempty"`
-	Error  string    `json:"error,omitempty"`
-	At     time.Time `json:"at"`
+	Development *devicewire.DevelopmentTarget `json:"development,omitempty"`
+	Source      string                        `json:"source,omitempty"`
+	Target      string                        `json:"target"`
+	State       string                        `json:"state"` // queued | succeeded | failed
+	Phase       string                        `json:"phase,omitempty"`
+	Error       string                        `json:"error,omitempty"`
+	At          time.Time                     `json:"at"`
 	// Fallback: the target is a fallback build (another version than the hub's), which only an explicit Redeploy
 	// sends; a record queued for the hub's own version never resumes as one.
 	Fallback bool `json:"fallback,omitempty"`
@@ -124,7 +197,7 @@ func (m *Machine) startRPCDeploymentRun(pkg nodePackage, saved *nodeDeployRecord
 	}
 	run := m.beginDeployLocked("waiting_idle")
 	m.mu.Unlock()
-	record := nodeDeployRecord{Target: pkg.Version, State: "queued", Phase: "waiting_idle", At: time.Now().UTC(), Fallback: pkg.Fallback}
+	record := nodeDeployRecord{Development: pkg.development, Target: pkg.Version, State: "queued", Phase: "waiting_idle", At: time.Now().UTC(), Fallback: pkg.Fallback}
 	if saved != nil {
 		record = *saved
 	}
@@ -152,7 +225,10 @@ func (m *Machine) runRPCDeployment(ctx context.Context, pkg nodePackage, record 
 			err = m.deploymentPhase(ctx, &record, "transferring")
 		}
 		if err == nil {
-			bin, err = m.d.fetchPackage(ctx, pkg)
+			bin, err = m.fetchDeployment(ctx, pkg)
+			m.mu.Lock()
+			record.Source = m.deploySource
+			m.mu.Unlock()
 		}
 	}
 	if err == nil {
@@ -354,15 +430,22 @@ func (m *Machine) sendNodeUpdate(ctx context.Context, bin string, record *nodeDe
 	if _, err := f.Seek(begin.Offset, io.SeekStart); err != nil {
 		return err
 	}
-	buf := make([]byte, proto.UploadChunkBytes)
+	pingTimeout := link.PingTimeout
+	if m.d != nil {
+		_, pingTimeout, _ = m.d.linkPingTimes()
+	}
+	sizer := newNodeUpdateChunkSizer(pingTimeout)
+	buf := make([]byte, sizer.max)
 	for offset := begin.Offset; offset < stat.Size(); {
-		n, err := io.ReadFull(f, buf[:min(int64(len(buf)), stat.Size()-offset)])
+		want := min(int64(sizer.next()), stat.Size()-offset)
+		n, err := io.ReadFull(f, buf[:want])
 		if err != nil {
 			return explain(i18n.Err("devices-deploy.read_package_failed", i18n.Args{"err": err.Error()}), err)
 		}
 		var chunk struct {
 			Offset int64 `json:"offset"`
 		}
+		began := time.Now()
 		if err := peer.Call(ctx, "node.update.chunk", map[string]any{"id": begin.ID, "offset": offset, "data": buf[:n]}, &chunk); err != nil {
 			return explain(i18n.Err("devices-deploy.transfer_failed", i18n.Args{"err": err.Error()}), err)
 		}
@@ -370,6 +453,12 @@ func (m *Machine) sendNodeUpdate(ctx context.Context, bin string, record *nodeDe
 		if chunk.Offset != offset {
 			return i18n.Err("devices-deploy.wrong_offset")
 		}
+		if offset < stat.Size() {
+			sizer.observe(n, time.Since(began), peer.LaneStats())
+		}
+	}
+	if err := m.d.CheckDevelopmentTarget(ctx, record.Development); err != nil {
+		return err
 	}
 	if err := m.deploymentPhase(ctx, record, "restarting"); err != nil {
 		return err
@@ -416,6 +505,9 @@ func (m *Machine) confirmNodeDeployment(ctx context.Context, record *nodeDeployR
 		peer, online, version := m.peer, m.online, m.info.Version
 		m.mu.Unlock()
 		if online && peer != nil && version == record.Target {
+			if err := m.d.CheckDevelopmentTarget(ctx, record.Development); err != nil {
+				return err
+			}
 			confirm, ccancel := context.WithTimeout(deadline, 10*time.Second)
 			err := peer.Call(confirm, "node.update.confirm", map[string]any{"version": record.Target}, nil)
 			ccancel()
@@ -439,7 +531,9 @@ func (m *Machine) confirmNodeDeployment(ctx context.Context, record *nodeDeployR
 // Confirm a healthy replacement even if the hub restarted during transfer. An
 // unconfirmed target must never remain installed just because a worker vanished.
 func (m *Machine) nodeUpdateConnected(ctx context.Context, peer *rpc.Peer, info proto.NodeInfo) {
-	if info.NodeUpdate && (info.Version == m.d.hubVersion() || info.Version == m.d.nodeTarget(info)) {
+	cfg := m.d.config()
+	if info.NodeUpdate && !cfg.DevelopmentHold && (info.Version == cfg.HubVersion || info.Version == m.d.nodeTarget(info)) &&
+		m.d.CheckDevelopmentTarget(ctx, cfg.DevelopmentTarget) == nil {
 		confirm, cancel := context.WithTimeout(ctx, 10*time.Second)
 		err := peer.Call(confirm, "node.update.confirm", map[string]any{"version": info.Version}, nil)
 		cancel()
@@ -464,6 +558,14 @@ func (m *Machine) nodeUpdateConnected(ctx context.Context, peer *rpc.Peer, info 
 		if err != nil {
 			m.d.logf("[%s] load pending node update: %v", m.cfg.ID, err)
 		}
+		return
+	}
+	if record.Source != "" {
+		m.mu.Lock()
+		m.deploySource, m.deployVersion = record.Source, record.Target
+		m.mu.Unlock()
+	}
+	if record.Development != nil && m.d.CheckDevelopmentTarget(ctx, record.Development) != nil {
 		return
 	}
 	if record.State != "queued" {
@@ -537,6 +639,6 @@ func (m *Machine) queueOfflineNodeUpdate(ctx context.Context) error {
 		m.d.logf("update: [%s] build %s is a fallback (not the hub's version): not queued, sent only on Redeploy", m.cfg.ID, pkg.Version)
 		return nil
 	}
-	record := nodeDeployRecord{Target: pkg.Version, State: "queued", Phase: "waiting_idle", At: time.Now().UTC()}
+	record := nodeDeployRecord{Development: pkg.development, Target: pkg.Version, State: "queued", Phase: "waiting_idle", At: time.Now().UTC()}
 	return m.saveDeployRecord(ctx, record)
 }

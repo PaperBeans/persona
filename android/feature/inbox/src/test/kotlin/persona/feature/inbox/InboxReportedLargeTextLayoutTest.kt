@@ -41,6 +41,7 @@ import persona.core.domain.sort.AgentPreferences
 import java.time.Instant
 import java.time.ZoneOffset
 import kotlin.math.abs
+import persona.core.inbox.*
 
 /** Measured geometry for reported originals, including the 200% text new-line contract. */
 @RunWith(AndroidJUnit4::class)

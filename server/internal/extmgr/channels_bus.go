@@ -8,9 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botport"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -109,34 +111,34 @@ func (h *Manager) channelsAppCall(ctx context.Context, p assistantwire.AppCall) 
 
 func (h *Manager) feishuCall(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	var a struct {
-		ReplyTo    string               `json:"reply_to"`
-		Card       string               `json:"card"`
-		Fallback   string               `json:"fallback"`
-		FullAnswer bool                 `json:"full_answer"`
-		UUID       string               `json:"uuid"`
-		NoDetour   bool                 `json:"no_detour"` // feishu.post / feishu.text: a reply to a parent that is gone fails, it is not sent into the chat
-		Text       string               `json:"text"`
-		MessageID  string               `json:"message_id"`
-		Emoji      string               `json:"emoji"`
-		ReactionID string               `json:"reaction_id"`
-		Key        string               `json:"key"`
-		Kind       string               `json:"kind"`
-		Name       string               `json:"name"`
-		MachineID  string               `json:"machine_id"`
-		AsFile     bool                 `json:"as_file"` // feishu.resource: the message's inline image slots are full
-		OpenID     string               `json:"open_id"`
-		Enabled    *bool                `json:"enabled"`
-		Features   map[string]bool      `json:"features"`
-		CotID      string               `json:"cot_id"`
-		Events     []feishubot.CotEvent `json:"events"`
-		Reason     string               `json:"reason"`
-		ChatID     string               `json:"chat_id"`   // feishu.post / feishu.text: the chat to send into (default: the owner's)
-		InThread   bool                 `json:"in_thread"` // feishu.post / feishu.text: a reply goes into the parent's thread
-		Exclusive  bool                 `json:"exclusive"` // feishu.pin: the bot's other pins in the chat come off
-		CardID     string               `json:"card_id"`   // feishu.card_*: the card entity
-		Element    string               `json:"element"`   // feishu.card_stream: the element streamed into
-		Sequence   int64                `json:"sequence"`  // feishu.card_*: the write's place, larger than the last
-		Streaming  bool                 `json:"streaming"` // feishu.card_settings
+		ReplyTo    string             `json:"reply_to"`
+		Card       string             `json:"card"`
+		Fallback   string             `json:"fallback"`
+		FullAnswer bool               `json:"full_answer"`
+		UUID       string             `json:"uuid"`
+		NoDetour   bool               `json:"no_detour"` // feishu.post / feishu.text: a reply to a parent that is gone fails, it is not sent into the chat
+		Text       string             `json:"text"`
+		MessageID  string             `json:"message_id"`
+		Emoji      string             `json:"emoji"`
+		ReactionID string             `json:"reaction_id"`
+		Key        string             `json:"key"`
+		Kind       string             `json:"kind"`
+		Name       string             `json:"name"`
+		MachineID  string             `json:"machine_id"`
+		AsFile     bool               `json:"as_file"` // feishu.resource: the message's inline image slots are full
+		OpenID     string             `json:"open_id"`
+		Enabled    *bool              `json:"enabled"`
+		Features   map[string]bool    `json:"features"`
+		CotID      string             `json:"cot_id"`
+		Events     []botcard.CotEvent `json:"events"`
+		Reason     string             `json:"reason"`
+		ChatID     string             `json:"chat_id"`   // feishu.post / feishu.text: the chat to send into (default: the owner's)
+		InThread   bool               `json:"in_thread"` // feishu.post / feishu.text: a reply goes into the parent's thread
+		Exclusive  bool               `json:"exclusive"` // feishu.pin: the bot's other pins in the chat come off
+		CardID     string             `json:"card_id"`   // feishu.card_*: the card entity
+		Element    string             `json:"element"`   // feishu.card_stream: the element streamed into
+		Sequence   int64              `json:"sequence"`  // feishu.card_*: the write's place, larger than the last
+		Streaming  bool               `json:"streaming"` // feishu.card_settings
 		// This optional constraint can only narrow a reminder post to its original private-chat pairing.
 		TodoReminderPairing *struct {
 			Owner    string    `json:"owner"`
@@ -244,7 +246,7 @@ func (h *Manager) feishuCall(ctx context.Context, method string, params json.Raw
 		if k := callerKey(a.UUID, feishuMaxUUID); k != "" {
 			replyUUID = k
 		}
-		msgType, content := feishubot.TypeText, feishubot.TextContent(a.Text)
+		msgType, content := botcard.TypeText, botcard.TextContent(a.Text)
 		if a.FullAnswer {
 			msgType, content, err = h.feishuAnswerContent(ctx, api, a.ReplyTo, replyUUID, a.Text)
 			if err != nil {
@@ -343,7 +345,7 @@ func (h *Manager) feishuCall(ctx context.Context, method string, params json.Raw
 		return map[string]any{"name": h.botName(ctx, api, a.OpenID)}, nil
 	case assistantwire.FeishuResource:
 		data, mime, err := api.Resource(ctx, a.MessageID, a.Key, a.Kind, botFileMax)
-		if errors.Is(err, feishubot.ErrTooLarge) {
+		if errors.Is(err, botcard.ErrTooLarge) {
 			return map[string]any{"too_large": true, "name": a.Key}, nil
 		}
 		if err != nil {
@@ -375,7 +377,7 @@ func (h *Manager) feishuCall(ctx context.Context, method string, params json.Raw
 			return nil, noDevice(a.MachineID)
 		}
 		data, _, err := api.Resource(ctx, a.MessageID, a.Key, a.Kind, botFileMax)
-		if errors.Is(err, feishubot.ErrTooLarge) {
+		if errors.Is(err, botcard.ErrTooLarge) {
 			return map[string]any{"too_large": true}, nil // the rest of the message still goes
 		}
 		if err != nil {
@@ -435,7 +437,7 @@ func feishuCoded(err error) error {
 		return nil
 	}
 	code := -1
-	var ae *feishubot.APIError
+	var ae *botcard.APIError
 	if errors.As(err, &ae) {
 		code = ae.Code
 	}
@@ -446,7 +448,7 @@ func feishuCoded(err error) error {
 // checkReactTarget refuses an emoji (or taking one away) on a message of a chat the bot may not use: the owner's private
 // chat, the groups opted in, and the messages the owner's "@bot /ai" was taken from (aiSource, which carries its chat) are
 // the only places it reacts. Where a message is is found as for a reply's parent (checkReplyParent).
-func (h *Manager) checkReactTarget(ctx context.Context, api *feishubot.Client, set FeishuBotSettings, messageID string) error {
+func (h *Manager) checkReactTarget(ctx context.Context, api botport.Client, set FeishuBotSettings, messageID string) error {
 	if messageID == "" {
 		return errors.New("feishu: a reaction needs a message")
 	}
@@ -462,7 +464,7 @@ var errNotBotDMMessage = errors.New("feishu: only the bot's own messages in the 
 
 // checkOwnDMMessage: messageID is a message the bot sent in the owner's private chat, the only ones feishu.pin and
 // feishu.recall take (the workbench's cards).
-func checkOwnDMMessage(ctx context.Context, api *feishubot.Client, set FeishuBotSettings, messageID string) error {
+func checkOwnDMMessage(ctx context.Context, api botport.Client, set FeishuBotSettings, messageID string) error {
 	if messageID == "" || set.Owner == nil || set.Owner.ChatID == "" {
 		return errNotBotDMMessage
 	}
@@ -481,7 +483,7 @@ func checkOwnDMMessage(ctx context.Context, api *feishubot.Client, set FeishuBot
 }
 
 // unpinBotOthers takes off the pins the bot made in chatID, but keep's; the owner's own pins stay.
-func unpinBotOthers(ctx context.Context, api *feishubot.Client, chatID, keep string) error {
+func unpinBotOthers(ctx context.Context, api botport.Client, chatID, keep string) error {
 	pins, err := api.Pins(ctx, chatID)
 	if err != nil {
 		return err

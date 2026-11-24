@@ -186,3 +186,37 @@ func TestCacheKeepaliveGoesWithEveryManagerSend(t *testing.T) {
 		t.Fatalf("switched off: %v", p)
 	}
 }
+
+// A node never marks its own rows Assistant: only the hub's decorated list does. The retained inventory the eligibility
+// check reads is the node's, so a main or lead running in the assistant directory must count as an assistant row there,
+// or every start lost its refresh role and no proxy was ever mounted.
+func TestCacheKeepaliveAcceptsNodeListedAssistantRows(t *testing.T) {
+	f := newFakeHub().withMachine()
+	s := newTestService(t, f)
+	d := newFleetDevs()
+	d.add("server", "Computer")
+	s.devs = d
+	m, ok := s.fleetMachine("server")
+	if !ok {
+		t.Fatal("no fleet machine")
+	}
+	dir := m.assistantCwd()
+	d.setSessions("server", []proto.Session{
+		{SessionID: "main", Agent: "claude", Cwd: dir},
+		{SessionID: "lead", Agent: "claude", Cwd: dir},
+		{SessionID: "worker", Agent: "claude", Cwd: "/home/u/project"},
+		{SessionID: "child", Agent: "claude", Cwd: dir, IsSubagent: true},
+		{SessionID: "archived", Agent: "claude", Cwd: dir, Archived: true},
+	})
+	setSettings(t, s, func(v *Settings) {
+		v.Main = "main"
+		v.Leaders = []string{"lead", "worker", "child", "archived"}
+	})
+	for _, id := range []string{"main", "lead", "worker", "child", "archived"} {
+		p := map[string]any{}
+		s.putCacheKeepalive(context.Background(), "server", id, id == "main", p)
+		if (p["cache_keepalive"] != nil) != (id == "main" || id == "lead") {
+			t.Fatalf("%s policy: %v", id, p["cache_keepalive"])
+		}
+	}
+}

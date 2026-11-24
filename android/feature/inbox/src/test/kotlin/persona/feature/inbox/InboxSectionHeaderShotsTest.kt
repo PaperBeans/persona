@@ -49,6 +49,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /** Inbox headers at a narrow width, in every style, light and dark, at ordinary and 200% input text. */
 @RunWith(AndroidJUnit4::class)

@@ -115,11 +115,13 @@ func (s *Service) assignAgentUnder(ctx context.Context, mid, sid, lead, title st
 	if lead == "" {
 		return Todo{}, false, errors.New("there is no main conversation to supervise it")
 	}
-	if lead != cfg.Main && !s.isLeader(ctx, lead) {
-		return Todo{}, false, fmt.Errorf("%s is not a leader conversation (GET /api/v1/assistant/leaders lists them)", lead)
-	}
-	if lead != cfg.Main && s.runtimeWithoutSupervisionPolicy(ctx, cfg.MachineID, lead) {
-		return Todo{}, false, errors.New("the target lead's runtime cannot receive supervision policy")
+	if lead != cfg.Main {
+		if err := s.validateSupervisorLead(ctx, lead); err != nil {
+			return Todo{}, false, err
+		}
+		if s.runtimeWithoutSupervisionPolicy(ctx, cfg.MachineID, lead) {
+			return Todo{}, false, errors.New("the target lead's runtime cannot receive supervision policy")
+		}
 	}
 	am, ok := s.device(ctx, mid)
 	if !ok {
@@ -284,7 +286,14 @@ func (s *Service) agentRouteRoutes() {
 		}
 		todo, made, err := s.putAgentUnder(r.Context(), r.PathValue("mid"), r.PathValue("sid"), strings.TrimSpace(in.Supervisor), in.Title)
 		if err != nil {
-			apierr.Write(w, cond(errors.Is(err, errAgentNotFound), http.StatusNotFound, http.StatusConflict), err)
+			status := http.StatusConflict
+			switch {
+			case errors.Is(err, errAgentNotFound):
+				status = http.StatusNotFound
+			case errors.Is(err, errDirectionUnavailable):
+				status = http.StatusServiceUnavailable
+			}
+			apierr.Write(w, status, err)
 			return
 		}
 		apierr.WriteJSON(w, map[string]any{"todo": todo, "made": made})

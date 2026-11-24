@@ -25,8 +25,13 @@ vi.mock("../../views/chat/ChatView", () => ({
   ChatView: ({ mid, sid, headerActions, placeholder }: { mid: string; sid: string; headerActions?: React.ReactNode; placeholder?: string }) => <div><p data-chat data-placeholder={placeholder}>{`${mid}/${sid}`}</p>{headerActions}</div>,
 }));
 
-import { Health } from "./Health";
+import { registerModule } from "../../core/module-host";
+import { health } from "./module";
+import { Health, HealthPage, healthRoute } from "./Health";
 import { t } from "../../i18n";
+import { parse } from "../../lib/router";
+
+registerModule(health);
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -130,27 +135,63 @@ describe("a health conversation", () => {
   });
 });
 
-// Entering Health (#4329): back in the latest conversation, as Codex does; the new conversation page when there is none;
-// New in a conversation's header opens that page.
+// Entering Health (#13273): the home opens immediately and lists past chats; New returns to it.
 describe("entering Health", () => {
   const conv = (session_id: string, updated_at: string) => ({ session_id, updated_at, title: session_id, space: "health" });
 
   beforeEach(() => history.replaceState(null, "", "/health"));
 
-  it("opens the latest health conversation, in place of /health", async () => {
+  it("stays on /health and lists the conversations newest first, excluding archived ones", async () => {
     const before = history.length;
-    hub.answers.push(() => Promise.resolve({ machine_id: "mac", conversations: [conv("old", "2026-11-01T08:00:00Z"), conv("latest", "2026-11-11T08:00:00Z")] }));
+    hub.answers.push(() => Promise.resolve({ machine_id: "mac", conversations: [conv("old", "2026-11-01T08:00:00Z"), conv("latest", "2026-11-11T08:00:00Z"), { ...conv("archived", "2026-11-12T08:00:00Z"), archived: true }] }));
     act(() => root.render(<Health onToggleSidebar={() => {}} />));
     await flush();
-    expect(location.pathname).toBe("/health/latest");
-    expect(history.length).toBe(before); // replaced: Back does not come back to /health and bounce
+    expect(location.pathname).toBe("/health");
+    expect(history.length).toBe(before);
+    expect(host.querySelector("textarea")).not.toBeNull();
+    expect(host.querySelector("[data-chat]")).toBeNull();
+    expect([...host.querySelectorAll<HTMLAnchorElement>('a[href^="/health/"]')].map((a) => a.getAttribute("href"))).toEqual(["/health/latest", "/health/old"]);
+    await act(async () => host.querySelector<HTMLAnchorElement>('a[href="/health/old"]')!.click());
+    expect(location.pathname).toBe("/health/old");
   });
 
-  it("opens the new conversation page when the space has none", async () => {
+  it("opens the home before the conversation list arrives", async () => {
+    hub.answers.push(() => new Promise(() => {}));
+    act(() => root.render(<Health onToggleSidebar={() => {}} />));
+    await flush();
+    expect(location.pathname).toBe("/health");
+    expect(host.querySelector("textarea")).not.toBeNull();
+    expect(host.querySelector("h1")?.textContent).toBe(t("health.title"));
+  });
+
+  it("keeps the home available when the list cannot be read", async () => {
+    hub.answers.push(failing);
+    act(() => root.render(<Health onToggleSidebar={() => {}} />));
+    await flush();
+    expect(location.pathname).toBe("/health");
+    expect(host.querySelector("textarea")).not.toBeNull();
+    expect(host.textContent).toContain("hub away");
+  });
+
+  it("stays on the home when the space has no conversations", async () => {
     hub.answers.push(listed);
     act(() => root.render(<Health onToggleSidebar={() => {}} />));
     await flush();
+    expect(location.pathname).toBe("/health");
+    expect(host.textContent).toContain(t("health.empty_title"));
+  });
+
+  it("still opens the home at /health/new", async () => {
+    history.replaceState(null, "", "/health/new");
+    hub.answers.push(listed);
+    const route = parse(location.pathname);
+    expect(route).toEqual(healthRoute({ fresh: true }));
+    if (route.name !== "module") throw new Error("Expected the Health module route");
+    act(() => root.render(<HealthPage {...route} onToggleSidebar={() => {}} />));
+    await flush();
     expect(location.pathname).toBe("/health/new");
+    expect(host.querySelector("textarea")).not.toBeNull();
+    expect(host.querySelector("[data-chat]")).toBeNull();
   });
 
   it("New in a health conversation opens the new conversation page; the clock lists the past ones", async () => {
@@ -160,6 +201,6 @@ describe("entering Health", () => {
     expect(host.querySelector(`button[aria-label="${t("health.history")}"]`)).not.toBeNull();
     const fresh = host.querySelector<HTMLButtonElement>(`button[aria-label="${t("health.new_chat")}"]`)!;
     await act(async () => fresh.click());
-    expect(location.pathname).toBe("/health/new");
+    expect(location.pathname).toBe("/health");
   });
 });

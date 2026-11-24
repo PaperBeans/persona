@@ -8,10 +8,10 @@ has already closed the connection, so over TLS the write returns a bare `net.Err
 connection"). Retrying the whole operation on a new login sends the search again, and the server ends that connection
 too: two QQ accounts' `mail_search` failed on every try with `fetch: use of closed network connection`, and nothing
 was logged. What a try already got (the search's UIDs) has to survive into the retry, so the retry only does what
-failed (`listOne` in `server/internal/mail/imap_list.go`). Tell a dead connection by `Client.State() ==
+failed (`listOne` in `server/internal/modules/mail/imap_list.go`). Tell a dead connection by `Client.State() ==
 ConnStateLogout`: the reader sets it before it fails the waiting commands, so a command that failed sees it already,
 and `Client.Close()` then returns the reader's own error, the reason to log. A proxy that closes after a chosen tagged
-answer reproduces it (`server/internal/mail/closed_conn_test.go`).
+answer reproduces it (`server/internal/modules/mail/closed_conn_test.go`).
 
 ## Under a full-tunnel VPN the default route's address is the tunnel's (#11125)
 
@@ -2708,7 +2708,7 @@ On TestFlight 224 an extension's **Review** spun for two minutes and then failed
 
 ## What the port relay costs, hop by hop (2026-11-10, #3067)
 
-`server/cmd/vncbench relay` puts an echo server behind `…/ports/{port}/connect`. With everything on the hub machine
+`server/internal/modules/screen-share/vncbench relay` puts an echo server behind `…/ports/{port}/connect`. With everything on the hub machine
 (client, hub, manager, its own node) a small message's round trip is 1.6 ms, 0.8 ms more than a WebSocket ping to the
 hub, and a download runs at 88 MB/s: the hub, the bus, the manager and the stream mux are not where a live screen's
 latency goes. The hub → node leg (`ssh -T` over Tailscale on the LAN) is where it varies; plain `ssh host cat` shows the
@@ -2915,7 +2915,7 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
 `internal/assistant`'s `TestPlacesThatSealAreKnown` (`keyrotate_guard_test.go`) counts every `.Seal(`, `sealKey(`,
 `.encrypt(`, `SealWith(` and `secretkey.New` per file under `internal/` and `cmd/`, so nothing new seals with the
 manager's `secret.key` without the key rotation re-sealing it. It counts AEADs with keys of their own too, in packages
-that have nothing to do with the assistant: #7954 sealed the live screen's UDP packets in `internal/screenlink`, its
+that have nothing to do with the assistant: #7954 sealed the live screen's UDP packets in `internal/modules/screen-share/screenlink`, its
 tests and its importers passed, and the hub deploy failed on this guard. When code under `internal/` or `cmd/` seals,
 run `go test -run TestPlacesThatSealAreKnown ./internal/assistant` (no database needed) and record the file there:
 with `secret.key`, after putting where it keeps the sealed value into `db.sealedTables` or `db.sealedSettings`; with

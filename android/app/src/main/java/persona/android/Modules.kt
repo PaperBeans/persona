@@ -15,6 +15,7 @@ object Modules {
     /** Every module, by id; the `:module:<id>` project of each is in settings.gradle.kts. */
     internal val known: List<Pair<String, () -> PersonaModule>> = listOf(
         module("voice") { persona.module.voice.VoiceModule },
+        module("knowledge-ui") { persona.module.knowledge.KnowledgeModule },
     )
 
     /** The modules this build carries (BuildConfig.PERSONA_MODULES, from `-Ppersona.modules`). */

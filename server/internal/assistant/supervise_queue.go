@@ -28,6 +28,71 @@ func decodeDigestSignals(raw string) ([]superviseSignal, bool) {
 	return list, true
 }
 
+// Outside directions never appear in a session listing to drain a digest queued by an older manager.
+func (s *Service) recoverOutsideDirectionDigests(ctx context.Context) {
+	here := s.settings(ctx)
+	if here.Main == "" {
+		return
+	}
+	r := &s.relays
+	r.mu.Lock()
+	var queues []string
+	if s.relayLocked(ctx) {
+		queues = slices.Collect(maps.Keys(r.st.Queue))
+	}
+	r.mu.Unlock()
+	moved := false
+	for _, from := range queues {
+		d, _, _ := s.directionSnapshot(ctx, from)
+		if d.Outside != nil && from != here.Main && s.moveOutsideDirectionDigests(ctx, from, here.Main) {
+			moved = true
+		}
+	}
+	if moved {
+		s.drainConversations(here.MachineID, []string{here.Main})
+	}
+}
+
+// Move the queued messages in one checkpoint. Queue admission already acknowledged their fingerprints.
+// Main's normal drain rechecks each structured signal against the current task and renders it for its recipient.
+func (s *Service) moveOutsideDirectionDigests(ctx context.Context, from, main string) bool {
+	r := &s.relays
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !s.relayLocked(ctx) || r.draining[from] {
+		return false
+	}
+	var moved, kept []relayMsg
+	for _, msg := range r.st.Queue[from] {
+		signals, structured := decodeDigestSignals(msg.Signals)
+		if msg.Tool != superviseTool || !structured || len(signals) == 0 || msg.Withdrawn || !msg.TriedAt.IsZero() || !msg.DoubtedAt.IsZero() {
+			kept = append(kept, msg)
+			continue
+		}
+		msg.OnceID = "" // the delivery id includes its destination
+		moved = append(moved, msg)
+	}
+	if len(moved) == 0 {
+		return false
+	}
+	next := r.st
+	next.Queue = maps.Clone(r.st.Queue)
+	if len(kept) == 0 {
+		delete(next.Queue, from)
+	} else {
+		next.Queue[from] = kept
+	}
+	next.Queue[main] = append(slices.Clone(next.Queue[main]), moved...)
+	if st := s.store(); st != nil {
+		if err := st.PutSetting(ctx, relayKey, next); err != nil {
+			s.logf("supervise: could not move the outside direction's queue to main: %v", err)
+			return false
+		}
+	}
+	r.st = next
+	return true
+}
+
 // Keep the same rendering for initial dispatch and a queue that has waited while tasks changed.
 func (s *Service) renderQueuedDigest(ctx context.Context, to string, list []prompts.SuperviseEntry, originalFresh ...bool) string {
 	here := s.settings(ctx)
@@ -155,10 +220,9 @@ func (s *Service) recheckDigestTo(ctx context.Context, cfg Settings, g supervise
 	return lead
 }
 
-// recheckDigestTarget applies the same runtime policy boundary as an immediate delivery without discarding the
-// supervisor preserved by recheckDigestTo.
+// recheckDigestTarget resolves the delivery conversation for the supervisor preserved by recheckDigestTo.
 func (s *Service) recheckDigestTarget(ctx context.Context, cfg Settings, g superviseSignal) string {
-	return s.digestRuntimeTarget(ctx, cfg, g, s.recheckDigestTo(ctx, cfg, g))
+	return s.digestConversation(ctx, cfg, g, s.recheckDigestTo(ctx, cfg, g))
 }
 
 // Recheck structured queue entries at the last delivery boundary. Unknown task state keeps the original queue.

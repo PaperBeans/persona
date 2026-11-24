@@ -92,6 +92,7 @@ func nudgePersistenceSnapshot(t *testing.T, h *Manager, st *nudgePersistenceStor
 }
 
 func TestBotNudgePersistenceFailure(t *testing.T) {
+	needsLarkModule(t)
 	thirty := 30
 	for _, tc := range []struct {
 		name    string
@@ -164,6 +165,7 @@ func TestBotNudgePersistenceFailure(t *testing.T) {
 }
 
 func TestBotNudgePersistencePermissions(t *testing.T) {
+	needsLarkModule(t)
 	h, st, mux, token := newNudgePersistenceManager(t, nil)
 	before := nudgePersistenceSnapshot(t, h, st)
 	for _, invalid := range []string{"", "invalid-token", h.extTokens.issueAll("example", "Example"), h.extTokens.issue("reader", "Reader", []string{extension.ScopeAgentsRead})} {
@@ -186,6 +188,7 @@ func TestBotNudgePersistencePermissions(t *testing.T) {
 }
 
 func TestBotNudgePersistenceConcurrentSave(t *testing.T) {
+	needsLarkModule(t)
 	for _, tc := range []struct {
 		name, body string
 		minutes    int
@@ -258,6 +261,7 @@ func TestBotNudgePersistenceConcurrentSave(t *testing.T) {
 }
 
 func TestBotNudgePersistenceLocalizedFailure(t *testing.T) {
+	needsLarkModule(t)
 	for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
 		t.Run(string(lang), func(t *testing.T) {
 			_, _, mux, token := newNudgePersistenceManager(t, nil)
@@ -276,6 +280,7 @@ func TestBotNudgePersistenceLocalizedFailure(t *testing.T) {
 // The existing route saves its fields in steps. A nudge failure must not undo
 // an earlier successful feature save or continue with later settings writes.
 func TestBotNudgePersistenceKeepsEarlierSave(t *testing.T) {
+	needsLarkModule(t)
 	thirty := 30
 	h, st, mux, token := newNudgePersistenceManager(t, &thirty)
 	before := nudgePersistenceSnapshot(t, h, st)

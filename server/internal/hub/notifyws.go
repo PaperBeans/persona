@@ -147,14 +147,29 @@ func replyKey(sessionID, text, given string) string {
 // extensions hear no agent.finished. One collapse id a to-do: a later round's push takes the place of the earlier one,
 // whose OK could only answer "already handled".
 func (h *Hub) notifyDecide(owner, machineID, machine, sessionID, title, text string, todo assistantwire.NotifyTodo) {
+	h.notifyDecideKeyed(owner, machineID, machine, sessionID, title, text, todo, "")
+}
+
+// notifyDecideKeyed is notifyDecide with the manager's related key (assistantwire.Notification). A key of the to-do
+// and a reason ("todo:<id>:decide", assistantwire.TodoPushKey) rings once while the to-do still waits on the owner for
+// it (push_todo_dedup.go); without one (an older manager) the key is the round, and each round rings as before. The
+// payload is as before either way. It never carries an interaction_id: the iOS app clears a delivered push whose
+// interaction_id is not in its card list as stale, and a decision is never in that list.
+func (h *Hub) notifyDecideKeyed(owner, machineID, machine, sessionID, title, text string, todo assistantwire.NotifyTodo, relatedKey string) {
+	key := strings.TrimSpace(relatedKey)
+	if id, _, ok := assistantwire.TodoPushKeyParts(key); !ok || id != todo.ID {
+		// One key a round: the same decision does not ring twice in 12 hours, but a new round of it (asked again) does.
+		key = "todo:" + todo.ID + "@" + todo.AskedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !h.push.claimTodoPush(key) {
+		return // the same to-do's decision rang and still waits on the owner
+	}
 	build := func(i18n.Lang) map[string]any {
 		return decidePayloadIn(owner, machineID, machine, sessionID, title, text, todo)
 	}
 	wants := pushWants{Kind: "input"}
 	sum := sha256.Sum256([]byte("todo_decide\x00" + todo.ID))
-	// One key a round: the same decision does not ring twice in 12 hours, but a new round of it (asked again) does.
-	policy := pushPolicy{level: assistantwire.LevelP0, relatedKey: "todo:" + todo.ID + "@" + todo.AskedAt.UTC().Format(time.RFC3339Nano),
-		title: title, body: text}
+	policy := pushPolicy{level: assistantwire.LevelP0, relatedKey: key, title: title, body: text}
 	if _, _, heldReason := h.push.sendFromPolicy(owner, policy, build, "td_"+hex.EncodeToString(sum[:12]), wants.fn(), wants.quiet(), nil, nil); heldReason == "" {
 		h.notifyWSFrom(owner, "assistant", build, wants.fn(), wants.quiet())
 	}

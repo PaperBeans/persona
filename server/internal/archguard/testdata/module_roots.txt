@@ -3,3 +3,9 @@
 # outside internal/modules imports a module (TestCoreImportsNoModule).
 internal/manager
 internal/managercli
+# The binaries that run the built-in modules' extension programs as subcommands (`personad volc`, internal/builtinext).
+cmd/personad
+cmd/persona-manager
+# The node's composition root (`personad node`, persona-node and the manager's local node): imports
+# internal/modules/all/node, the modules that also run on the user's computers (the iMessage reader of a Mac).
+internal/nodecmd

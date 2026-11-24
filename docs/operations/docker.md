@@ -182,7 +182,7 @@ the documented profile/override before required extensions can run.
 `server-other` CI runs the real extension filesystem/network isolation test as the
 non-root image user in a disposable container built from the same runtime stage,
 with all outer capabilities dropped and the supplied security options. It also requires the manager tests for refusal, `active=true` and the official
-exemption to pass inside that container. A skipped isolation test fails that check. This does not require a running hub or real state.
+exemption to pass inside that container. A skipped isolation test fails that check. On GitHub-hosted test VMs that advertise AppArmor, the workflow loads the checked-in host profile before starting the test container. This does not require a running hub or real state.
 
 ## Environment variables (override hub.json, not written back to the file)
 

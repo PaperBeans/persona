@@ -320,12 +320,13 @@ func (n *Node) assistantDirOfProject(base string) string {
 
 // assistantHome is the directory session id is listed in at rest: the directory its node record says it started in,
 // when that is an assistant or space directory (the unresolved path its running process and resumes use), else cwd
-// (what its transcript says: where an assistant conversation started, an agent's latest directory, #2368).
+// (what its transcript says: where an assistant conversation started, an agent's latest directory, #2368). A record
+// of a scoped node's unlisted built-in directory (unlistedAssistantDir) is passed over for the transcript's.
 func (n *Node) assistantHome(id, cwd string) string {
 	if n.state == nil {
 		return cwd
 	}
-	if st, ok := n.state.get(id); ok && (identity.IsAssistantDir(st.Cwd) || identity.InSpace(st.Cwd)) {
+	if st, ok := n.state.get(id); ok && (identity.IsAssistantDir(st.Cwd) || identity.InSpace(st.Cwd)) && !n.unlistedAssistantDir(st.Cwd) {
 		return st.Cwd
 	}
 	return cwd

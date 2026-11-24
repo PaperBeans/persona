@@ -2,7 +2,7 @@
   "version": 1,
   "counts": {
     "agents_needs_you": {
-      "rule": "The Agents that wait for the user: one per waiting session, folded to its parent; Persona conversations, quiet tasks' agents, muted agents, directory-hidden sessions and sessions whose only pending cards are held (delegating, a routed terminal question excepted) left out; a card on no session counts 1. The needs-you fixture's badge rule (expected.badge_rows).",
+      "rule": "The Agents that wait for the user: one per waiting session, folded to its parent; Persona conversations, quiet tasks' agents, muted agents, directory-hidden sessions and sessions whose only pending cards are held (delegating; a card its task's supervisor holds, a routed terminal question included, is in no row either) left out; a card on no session counts 1. The needs-you fixture's badge rule (expected.badge_rows).",
       "pinned_by": "spec/fixtures/needs-you",
       "waits_on": [],
       "refined_by": ["D11"]

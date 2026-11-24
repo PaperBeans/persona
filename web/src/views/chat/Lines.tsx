@@ -1,5 +1,5 @@
 // Transcript notices, recaps and model errors. Background continuation belongs to the normal execution summary.
-import { memo, Suspense, useMemo, useState } from "react";
+import { lazy, memo, Suspense, useMemo, useState } from "react";
 import { lineItemIds } from "../../lib/chat-search";
 import { useChatContext } from "./chat-context";
 import { useExpanded } from "./expanded";
@@ -10,7 +10,7 @@ import { isImageLimitError } from "../../lib/compact-resend";
 import type { RecoveryExhaustedView } from "../../lib/model-fallback";
 import { runAction, turnErrorFix, type TurnFix } from "../../lib/readiness";
 import { wakeSummary } from "../../lib/tasks";
-import { type ChatLine, type OpenRecap } from "../../lib/turns";
+import { isInterruptNotice, type ChatLine, type OpenRecap, type UserMessage } from "../../lib/turns";
 import { sourceLabel } from "../../lib/message-source";
 import type { Item } from "../../lib/types";
 import { Button, copyText, cx, Dialog } from "../../ui/atoms";
@@ -24,6 +24,7 @@ import { ScrollFold } from "./fold-scroll";
 import { lazyPage } from "../../lib/lazy-page";
 
 export const RefusalNotice = lazyPage(() => import("./RefusalNotice").then((m) => m.RefusalNotice));
+const EmptyResponse = lazy(() => import("./EmptyResponse"));
 
 export interface LineProps {
   line: ChatLine;
@@ -51,6 +52,7 @@ export interface LineProps {
   offscreen?: (section: HTMLElement) => () => void;
   /** The chat's last exchange while the chat is still at work (SegmentView `busy`). */
   busy?: boolean;
+  retryEmpty?: (user: UserMessage, signal: AbortSignal) => Promise<boolean>;
   /** Only the live line: the dock owns its foreground elapsed clock (#12380). Kept out of ChatContext so a turn
    *  starting or ending does not invalidate finished exchanges (#12446). */
   dockTurnClock?: boolean;
@@ -65,7 +67,7 @@ export const ChatLineView = memo(function ChatLineView(props: LineProps) {
   );
 });
 
-function LineBody({ line, mid, sid, streaming, expandFold, assistant, launcher, fix, turnErrorCode, limit, exhausted, trace, offscreen, busy, dockTurnClock }: LineProps) {
+function LineBody({ line, mid, sid, streaming, expandFold, assistant, launcher, fix, turnErrorCode, limit, exhausted, trace, offscreen, busy, retryEmpty, dockTurnClock }: LineProps) {
   switch (line.kind) {
     case "supervision":
       return <SupervisionLine line={line} mid={mid} sid={sid} streaming={streaming} expandFold={expandFold} assistant={assistant} dockTurnClock={dockTurnClock} />;
@@ -82,6 +84,9 @@ function LineBody({ line, mid, sid, streaming, expandFold, assistant, launcher, 
           expandFold={expandFold}
           offscreen={offscreen}
           busy={busy}
+          beforeWords={line.seg.emptyResponse && !busy && !streaming?.trim() && line.seg.user && (
+            <Suspense fallback={null}><EmptyResponse user={line.seg.user} onRetry={retryEmpty} /></Suspense>
+          )}
           dockTurnClock={dockTurnClock}
         />
       );
@@ -148,7 +153,7 @@ function LineNotice({ item, assistant }: { item: Item; assistant?: boolean }) {
       </div>
     );
   }
-  const text = item.text ?? "";
+  const text = isInterruptNotice(item) ? t("chat-chatview.interrupted") : item.text ?? "";
   if (!text.includes("\n") && text.length <= 60) {
     return (
       <div className="flex justify-center">

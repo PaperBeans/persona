@@ -93,6 +93,12 @@ func (n *Node) confirmWorkFirst(ctx context.Context, pane, kind, prompt string) 
 		if try == firstPromptTries {
 			return fmt.Sprintf(lostTries, firstPromptTries)
 		}
+		if kind == agyAgent {
+			if err := n.agyClearOverlay(ctx, pane, s); err != nil {
+				log.Printf("start in pane %s: clear agy overlay before retry: %v", pane, err)
+				return lostTimeout
+			}
+		}
 		log.Printf("start in pane %s: %s did not take its first message (try %d), typing it again", pane, kind, try)
 		err = n.hostPrompt(ctx, pane, prompt)
 		if errors.Is(err, host.ErrAgentBlocked) {

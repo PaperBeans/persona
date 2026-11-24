@@ -207,6 +207,15 @@ struct InteractionPreviewCard: View {
     private var summary: String { interaction.askLine(includeToolName: true) ?? "" }
 
     @ViewBuilder private var quickActions: some View {
+        // A card its task's supervisor holds is not the user's to answer: no buttons, a line saying who has it.
+        if !interaction.answerableHere {
+            SupervisorHeldNote(compact: true).modifier(UnderTitle())
+        } else {
+            quickAnswers
+        }
+    }
+
+    @ViewBuilder private var quickAnswers: some View {
         switch interaction.kind {
         case .question:
             if let qs = interaction.questions, qs.count == 1, let q = qs.first, !q.multiSelect, q.options.count <= 4 {
@@ -254,6 +263,36 @@ struct InteractionPreviewCard: View {
         default:
             EmptyView()
         }
+    }
+}
+
+/// What a card its task's supervisor holds shows in place of its answers (`Interaction.supervisorHeld`): the supervisor
+/// has it, and it reaches the user only once the supervisor passes it up. Read-only: nothing here answers it.
+/// `compact`: the title line alone, under a list's card.
+struct SupervisorHeldNote: View {
+    var compact = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+            ThemedIcon(Theme.Icon.view)
+                .font(Theme.Font.captionStrong)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                Text("Supervisor is handling this")
+                    .font(Theme.Font.captionStrong)
+                if !compact {
+                    Text("This went to its task's supervisor first. It comes to you only if the supervisor passes it up.")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(compact ? Theme.Space.s : Theme.Space.m)
+        .background(Theme.Fill.well, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("interaction.supervisor-held")
     }
 }
 
@@ -608,6 +647,15 @@ struct InteractionPanel: View {
     }
 
     @ViewBuilder private var form: some View {
+        // A card its task's supervisor holds (`Interaction.supervisorHeld`): no form to answer it, a line saying who has it.
+        if !interaction.answerableHere {
+            SupervisorHeldNote()
+        } else {
+            answerForm
+        }
+    }
+
+    @ViewBuilder private var answerForm: some View {
         switch interaction.kind {
         case .question: QuestionForm(interaction: interaction)
         case .plan: PlanForm(interaction: interaction, showFull: $showFullPlan)

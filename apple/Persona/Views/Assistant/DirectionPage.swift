@@ -575,6 +575,7 @@ struct MoveToChoices: View {
 struct DirectionPageMenuItem: View {
     @Environment(AppModel.self) private var model
     let key: SessionKey?
+    @Binding var showsPermissions: Bool
 
     var body: some View {
         if let key, DirectionFilings.shared.shows(model), model.directionTree?.leader(key.sessionID) != nil {
@@ -582,6 +583,10 @@ struct DirectionPageMenuItem: View {
                 Label(String(localized: "Tasks and Chats [Direction Page]"), systemImage: Theme.Icon.list).lineLimit(1)
             }
             .accessibilityIdentifier("assistant-direction-page")
+            Button { showsPermissions = true } label: {
+                Label(String(localized: "Default Permissions"), systemImage: Theme.Icon.permissions).lineLimit(1)
+            }
+            .accessibilityIdentifier("direction-default-permissions")
         }
     }
 }

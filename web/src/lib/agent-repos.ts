@@ -264,11 +264,15 @@ function nestWorktrees(worktrees: RepoWorktree[], bySpace: ReadonlyMap<string, R
 
 /** Whether By repo shows a worktree row, rather than putting a lone main or equivalently named worktree's agents
  *  directly under the project. A worktree with children always keeps its level, and so does a branch the node named
- *  (#1805: machine → project → branch → sessions, as Orca shows it). */
+ *  (#1805: machine → project → branch → sessions, as Orca shows it). A host's workspace keeps it while its name says
+ *  more than the repository's, or while it has no Agent to list in its place; one named after its folder, which is the
+ *  repository's, only repeated that name (#13454), and its heading carries its marks and menu instead. */
 export function showsWorktreeLevel(tree: RepoTree): boolean {
   if (tree.worktrees.length !== 1) return true;
   const w = tree.worktrees[0]!;
-  return Boolean(w.workspace) || w.children.length > 0 || Boolean(w.branch) || (!w.main && w.name !== tree.name);
+  if (w.children.length > 0 || w.branch) return true;
+  if (w.workspace) return w.name !== tree.name || w.sessions.length === 0;
+  return !w.main && w.name !== tree.name;
 }
 
 type RepoBucket = { tree: RepoTree; orca: boolean; git: boolean; bySpace: Map<string, RepoWorktree> };
@@ -550,6 +554,14 @@ function catalogRepos(sessions: Session[], machineId: string, options: RepoCatal
     }
     repo.worktrees.push(root);
     repo.count += root.tree.length;
+  }
+  // A host that does not say which of its workspaces is a repository's main checkout (herdr) leaves it to the folder: the
+  // workspace at the repository's own folder is. It wears the home mark and comes first, as Git's main checkouts do
+  // (#13454), instead of sorting by name among the linked trees.
+  for (const repo of repos.values()) {
+    const unmarked = repo.worktrees.filter((w) => w.workspace!.is_main === undefined && catalogPath(w.path) === catalogPath(repo.repo));
+    for (const w of unmarked) w.main = true;
+    if (unmarked.length) repo.worktrees.sort(order);
   }
   const unmatched = query ? loose.filter((s) => `${s.title} ${s.cwd}`.toLocaleLowerCase().includes(query)) : loose;
   const groupedNavigation = new Set([...nodes.values()].flatMap((node) => node.directSessions!));

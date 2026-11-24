@@ -1,4 +1,5 @@
 {
+  "reporting_direction_supervisor": "This direction is for progress reports. Choose a Persona conversation to supervise the task.",
   "archive_main": "The main chat can’t be archived",
   "archive_background_supervisor": "The background supervisor can’t be archived",
   "supervision_source": "Supervisor",

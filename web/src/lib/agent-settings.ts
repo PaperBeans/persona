@@ -317,7 +317,7 @@ export function mailRequest(f: MailForm, gmailAppPassword = false): AddMailAccou
 
 /**
  * Where a QQ / NetEase address typed under Other IMAP makes its authorization code (the provider and its web mail), null for any
- * other. The hub says the same steps for the same domains (server/internal/mail/preset.go, Guide; iOS CodeGuide):
+ * other. The hub says the same steps for the same domains (server/internal/modules/mail/preset.go, Guide; iOS CodeGuide):
  * change them together.
  */
 export function mailCodeGuide(f: Pick<MailForm, "kind" | "email" | "imapHost" | "smtpHost">): { provider: "qq" | "netease"; webMail: string } | null {

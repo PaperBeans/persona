@@ -122,15 +122,19 @@ func (h *Hub) relayBroadcastFrom(from string, message json.RawMessage) error {
 	if typ == "inbox" { // before the apps hear it: the list they ask for then is fetched afresh (inbox_answers.go)
 		h.inboxAnswers.changed(from)
 	}
+	var intake uint64 // the widget revision this event carries to the open apps (widget_wake.go)
 	if typ == "health_intake" && h.live != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		owner, err := h.defaultOwnerOrErr(ctx)
 		cancel()
 		if err == nil && from == owner {
-			h.live.intakeChanged()
+			intake = h.live.intakeChanged()
 		}
 	}
 	h.broadcastRaw(typ, out)
+	if intake != 0 {
+		h.live.intakeSent(intake)
+	}
 	return nil
 }
 

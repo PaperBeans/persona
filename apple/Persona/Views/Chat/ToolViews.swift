@@ -1669,7 +1669,7 @@ struct ComputerToolDetail: View {
                     .lineLimit(3)
             }
             ForEach(Array(call.images.enumerated()), id: \.offset) { i, img in Base64Image(payload: img, gallery: call.images, index: i) }
-            ScreenEntry(call: call)
+            ModuleViews(place: .toolCall, context: .init(call: call))
             RawInputToggle(raw: $raw, pinKey: "raw-" + call.id).accessibilityIdentifier("computer-raw")
             if raw {
                 CodeBlock(text: input, maxLines: 14)

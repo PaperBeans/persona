@@ -172,7 +172,14 @@ func (n *Node) forkOnRuntime(ctx context.Context, h *runtimeConn, source proto.S
 		Session *proto.Session `json:"session"`
 	}
 	assistant := n.runtimeAssistant(source.SessionID)
-	if err := h.peer.Call(ctx, "session.fork", map[string]any{"session_id": source.SessionID, "at_item_id": at, "assistant": assistant}, &out); err != nil {
+	params := map[string]any{"session_id": source.SessionID, "at_item_id": at, "assistant": assistant}
+	if assistant {
+		st, _ := n.state.get(source.SessionID)
+		if env := n.assistantEnvForRuntime(h, n.runtimeAssistantCwd(source.SessionID, source.Cwd, st)); env != nil {
+			params["env"] = env
+		}
+	}
+	if err := h.peer.Call(ctx, "session.fork", params, &out); err != nil {
 		return "", err
 	}
 	if !runtimeIDRe.MatchString(out.ID) || out.ID == source.SessionID || out.Session != nil && out.Session.SessionID != out.ID {
@@ -189,7 +196,7 @@ func (n *Node) forkOnRuntime(ctx context.Context, h *runtimeConn, source proto.S
 			st.Launcher = firstNonEmpty(st.Launcher, out.Session.Launcher)
 		}
 		n.state.put(out.ID, sessionState{Cwd: st.Cwd, Launcher: st.Launcher, Model: st.Model,
-			ModelFingerprint: st.ModelFingerprint, ModelEffort: st.ModelEffort, AppMode: st.AppMode, AppEffort: st.AppEffort,
+			ModelFingerprint: st.ModelFingerprint, ModelEffort: st.ModelEffort, AppMode: st.AppMode, AppModeExplicit: st.AppModeExplicit, AppEffort: st.AppEffort,
 			Origin: st.Origin, OriginKnown: true, StartedAt: time.Now().UTC()})
 	}
 	if out.Session != nil {

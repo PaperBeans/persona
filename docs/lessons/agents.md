@@ -1645,3 +1645,12 @@ labels and other URI schemes survive; keep embedded-resource transport intact an
 A read-only session skips card creation, but must not skip evidence validation. Normalize model `blocked / user`
 results with no grounded question or authorization link before storing them and when displaying old records.
 Otherwise a guess appears as "Awaiting your reply" with nothing in the chat to answer.
+
+## A herdr pane's title is its terminal's, and agy sets none (#13639)
+
+herdr reports the title the program in a pane gives its terminal. agy gives none, so an agy pane's row kept the
+shell's (`user@host: /path`, a path on a primary screen) or nothing, and the apps showed herdr's tab name (`agent-2`),
+even after the node read the pane's conversation and merged its model and usage from the companion's row. When a
+herdr row's conversation comes from somewhere else, so does its title: pi and opencode take their runtime's, agy the
+companion's, else its own (`cache/conversation_metadata.json`), else the first message typed into it. Merging a
+runtime's row into a pane's, go through every field the runtime knows better, not only the ones a report named.

@@ -18,7 +18,7 @@ func a2aSessionCaller(ref a2aRef) a2aCaller {
 
 func (s *Service) a2aTool(ctx context.Context, ref a2aRef, name string, args json.RawMessage) proto.ToolResult {
 	cfg := s.a2aConfig(ctx)
-	if !s.a2aAllowed(ctx, cfg, ref) {
+	if !s.a2aToolAllowed(ctx, cfg, ref) {
 		return proto.TextResult(errA2AUnavailable.Error(), true)
 	}
 	st, err := s.a2aStore()
@@ -42,15 +42,16 @@ func (s *Service) a2aTool(ctx context.Context, ref a2aRef, name string, args jso
 
 type a2aToolArgs struct {
 	a2aRef
-	Task     string `json:"task_id"`
-	ID       string `json:"message_id"`
-	Context  string `json:"context_id"`
-	Text     string `json:"text"`
-	State    string `json:"state"`
-	Wake     *bool  `json:"wake"`
-	Before   string `json:"before"`
-	CWD      string `json:"cwd"`
-	Launcher string `json:"launcher"`
+	Task           string `json:"task_id"`
+	ID             string `json:"message_id"`
+	Context        string `json:"context_id"`
+	Text           string `json:"text"`
+	State          string `json:"state"`
+	Wake           *bool  `json:"wake"`
+	Before         string `json:"before"`
+	CWD            string `json:"cwd"`
+	Launcher       string `json:"launcher"`
+	PermissionMode string `json:"permission_mode"`
 }
 
 type a2aTaskView struct {
@@ -116,7 +117,7 @@ func (s *Service) a2aToolCall(ctx context.Context, st a2aStore, cfg assistantwir
 				if err := s.workerRefusal(ctx, c.Ref.Machine, c.Ref.Session); err != nil {
 					return nil, err
 				}
-				launch = &a2aLaunch{CWD: a.CWD, Launcher: a.Launcher, Pending: true}
+				launch = &a2aLaunch{CWD: a.CWD, Launcher: a.Launcher, PermissionMode: a.PermissionMode, Pending: true, Subagent: true}
 			} else if err := s.a2aCanSendMessage(ctx, c.Ref, a.a2aRef, a.Text); err != nil {
 				return nil, err
 			}

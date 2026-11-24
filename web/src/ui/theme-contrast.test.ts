@@ -12,7 +12,7 @@ import { MODULES } from "../modules";
 // (#2804); the same backgrounds extension themes are checked against (extension-theme.ts).
 const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 // The minutes' summary card's own tokens load with the Knowledge page (#6563).
-const minutesCss = readFileSync(new URL("../views/knowledge/minutes-overview.css", import.meta.url), "utf8");
+const minutesCss = readFileSync(new URL("../modules/recording/minutes-overview.css", import.meta.url), "utf8");
 const BACKGROUNDS = ["page", "canvas", "surface", "inset", "hover", "hover-2", "field"];
 const TEXT = ["ink", "ink-2", "ink-3", "accent-ink", "attention", "green", "orange", "red", "ai", "source-terminal", "source-desktop"];
 
@@ -156,12 +156,27 @@ describe("default palette contrast", () => {
       for (const name of Object.values(BUILTIN_PAGE_COLORS)) expect(COLORS, name).toContain(name);
       // a feature module's sidebar entry names its own color (core/module-host.ts ModuleNavItem.color): the same rules
       const moduleColors = MODULES.flatMap((m) => (m.navItems ?? []).flatMap((n) => (n.color ? [[`${m.id}/${n.key}`, n.color] as const] : [])));
-      expect(moduleColors.length).toBeGreaterThan(0);
+      // (the core-only lane, #13932, has no module and so none to check)
+      if (MODULES.length) expect(moduleColors.length).toBeGreaterThan(0);
       for (const [entry, name] of moduleColors) {
         expect(COLORS, entry).toContain(name);
         for (const bg of ["canvas", "hover"]) expect(contrast(hueOf(name), t[bg]), `${entry} --hue-${name} on --${bg}`).toBeGreaterThanOrEqual(MIN_ROLE_CONTRAST);
       }
       expect(contrast(t.ink, t["hover-2"])).toBeGreaterThanOrEqual(4.5);
+    });
+    it(`${scheme}: usage timeline hues (--hue-teal, --hue-blue) keep >= 3:1 contrast on surface and inset`, () => {
+      for (const name of ["teal", "blue"]) {
+        for (const bg of ["surface", "inset"]) {
+          expect(contrast(hueOf(name), t[bg]), `--hue-${name} on --${bg}`).toBeGreaterThanOrEqual(MIN_ROLE_CONTRAST);
+        }
+      }
+    });
+    it(`${scheme}: fresh tiered and stale neutral usage percentage tokens keep >= 4.5:1 contrast on surface and inset`, () => {
+      for (const role of ["green", "orange", "red", "ink-2"]) {
+        for (const bg of ["surface", "inset"]) {
+          expect(contrast(t[role], t[bg]), `--${role} on --${bg}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
     });
     it(`${scheme}: no theme color or extension theme moves the named colors or the sidebar's backgrounds`, () => {
       const theme = { extension: "example-theme", extension_name: "Example Theme", id: "sea", name: "Sea", light: { accent: "#1d4ed8" }, dark: { accent: "#8ab4ff" } };

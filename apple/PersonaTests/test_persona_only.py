@@ -135,9 +135,14 @@ class PersonaOnlyTests(unittest.TestCase):
         shared = {item["path"] for item in targets["PersonaWatchWidgets"]["sources"] if item["path"].startswith("Shared/")}
         watch_pet = {"Shared/WatchPetSnapshot.swift", "Shared/Recording/AllDaySnapshot.swift", "Shared/Design/WatchFaceTokens.swift"}
         self.assertTrue(watch_pet.issubset(shared))
+        # The water and protein complications (#13275) are the watch face's too: visionOS has no complications.
+        watch_intake = {"Shared/WatchIntake.swift", "Shared/WatchIntakeConfiguration.swift", "Shared/WatchIntakeComplicationView.swift",
+                        "Shared/StatusPalette.swift", "Shared/Design/Palette.swift", "Shared/Design/HealthIntakePalette.swift"}
+        self.assertTrue(watch_intake.issubset(shared))
         vision_sources = {item["path"] for item in widget["sources"]}
         self.assertTrue(watch_pet.isdisjoint(vision_sources))
-        self.assertEqual(vision_sources, (shared - watch_pet) | {"PersonaVisionWidgets"})
+        self.assertTrue(watch_intake.isdisjoint(vision_sources))
+        self.assertEqual(vision_sources, (shared - watch_pet - watch_intake) | {"PersonaVisionWidgets"})
         for target in (app, widget):
             self.assertEqual(target["entitlements"]["properties"]["com.apple.security.application-groups"], ["$(PERSONA_APP_GROUP)"])
             self.assertEqual(target["info"]["properties"]["PersonaAppGroup"], "$(PERSONA_APP_GROUP)")

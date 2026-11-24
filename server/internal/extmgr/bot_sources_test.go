@@ -25,6 +25,7 @@ func (p *botSourcePeer) Call(_ context.Context, method string, params, out any) 
 }
 
 func TestManagerRegistersOnlyConfiguredBotEndpoints(t *testing.T) {
+	needsLarkModule(t)
 	h := newTestManager(t)
 	h.cfg.Bots.Endpoints = []agents.BotRegistration{
 		{ID: "research", Provider: "orca", Title: "Research bot", MachineID: "machine-b", SessionID: "claude_exact_registered"},
@@ -51,6 +52,7 @@ func TestManagerRegistersOnlyConfiguredBotEndpoints(t *testing.T) {
 }
 
 func TestInvalidBotRegistrationDoesNotDisableValidRegistration(t *testing.T) {
+	needsLarkModule(t)
 	h := newTestManager(t)
 	h.cfg.Bots.Endpoints = []agents.BotRegistration{
 		{ID: "bad:id", Provider: "orca", Title: "Bad", MachineID: "machine-b", SessionID: "claude_bad"},

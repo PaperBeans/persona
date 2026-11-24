@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -137,14 +138,14 @@ func a2aReadTurn(items []proto.Item, current bool) a2aTurnView {
 }
 
 func (s *Service) a2aProcess(ctx context.Context, st a2aStore, cfg assistantwire.A2AConfig, t *a2aTask) error {
-	if t.SourceSession != "" && !s.a2aAllowed(ctx, cfg, t.source()) {
+	if t.SourceSession != "" && !s.a2aTaskEndpointAllowed(ctx, cfg, t.source(), t) {
 		if !a2aTerminal(t.State) && s.a2aEndpointClosed(ctx, cfg, t.source()) {
 			t.fail("The sending session was closed.", false)
 			return s.a2aSave(ctx, st, t)
 		}
 		return nil
 	}
-	if !s.a2aAllowed(ctx, cfg, t.target()) {
+	if !s.a2aTaskEndpointAllowed(ctx, cfg, t.target(), t) {
 		if !t.TargetClosed && s.a2aEndpointClosed(ctx, cfg, t.target()) {
 			t.TargetClosed = true
 			if !a2aTerminal(t.State) {
@@ -158,6 +159,15 @@ func (s *Service) a2aProcess(ctx context.Context, st a2aStore, cfg assistantwire
 	}
 	if t.State == a2aQueued {
 		return nil
+	}
+	// If A2A subagent launches were disabled while a launch was still queued (never sent to a node),
+	// fail it explicitly even before the target computer comes back online. Already-attempted launches
+	// keep reconciling normally, and ordinary peer messages or dispatches are unaffected.
+	if t.Launch != nil && t.Launch.Pending && !t.Launch.Dispatch && !a2aTerminal(t.State) &&
+		len(t.Events) > 0 && t.Events[0].Delivery == a2aQueued && !cfg.LaunchAllowed() {
+		t.fail("Starting new A2A subagent sessions is disabled by configuration.", true)
+		s.forgetA2ASubagent(t.ID)
+		return s.a2aSave(ctx, st, t)
 	}
 	machine := s.logicalExecutionMachine(ctx, t.TargetMachine, t.TargetSession)
 	offline := s.computerState(machine).state == standingComputerOffline
@@ -337,8 +347,9 @@ func (s *Service) a2aDeliver(ctx context.Context, st a2aStore, t *a2aTask, i int
 	if err != nil || !ok {
 		return s.a2aExpireDelivery(ctx, st, t, i)
 	}
-	resume := e.Kind != "message" && a2aResumeAllowed(sess)
-	if !resume && (!a2aSendable(sess) || !a2aIdle(sess)) {
+	allowSubagent := t.Launch != nil && t.target() == to
+	resume := e.Kind != "message" && a2aResumeAllowed(sess, allowSubagent)
+	if !resume && (!a2aTaskSendable(sess, t, to) || !a2aIdle(sess)) {
 		return s.a2aExpireDelivery(ctx, st, t, i)
 	}
 	if device, remote := strings.CutPrefix(t.Owner, "device:"); remote && e.Kind == "message" {
@@ -379,8 +390,12 @@ func (s *Service) a2aDeliver(ctx context.Context, st a2aStore, t *a2aTask, i int
 	return true, s.a2aSendNode(ctx, st, t.ID, e.Seq, to, "session.a2a.send", params)
 }
 
-func a2aResumeAllowed(sess proto.Session) bool {
-	if sess.Status != proto.StatusOffline || !a2aVisible(sess) || sess.Capabilities == nil {
+func a2aResumeAllowed(sess proto.Session, allowSubagent bool) bool {
+	visible := a2aDiscoverable(sess)
+	if allowSubagent {
+		visible = a2aEndpointVisible(sess)
+	}
+	if sess.Status != proto.StatusOffline || !visible || sess.Capabilities == nil {
 		return false
 	}
 	if a2aStopped(sess) {
@@ -452,6 +467,11 @@ func (s *Service) a2aLaunch(ctx context.Context, st a2aStore, t *a2aTask) error 
 		}
 		return nil
 	}
+	if !t.Launch.Dispatch && !s.a2aConfig(ctx).LaunchAllowed() {
+		t.fail("Starting new A2A subagent sessions is disabled by configuration.", true)
+		s.forgetA2ASubagent(t.ID)
+		return s.a2aSave(ctx, st, t)
+	}
 	dev, ok := s.machineByName(ctx, t.TargetMachine)
 	if !ok || !dev.Online && !dev.Reachable {
 		return nil
@@ -461,9 +481,10 @@ func (s *Service) a2aLaunch(ctx context.Context, st a2aStore, t *a2aTask) error 
 		return err
 	}
 	taskID, mid, sid := t.ID, t.TargetMachine, t.TargetSession
+	permMode := cmp.Or(t.Launch.PermissionMode, "plan")
 	request := map[string]any{"cwd": t.Launch.CWD, "launcher": t.Launch.Launcher, "session_id": sid,
 		"prompt": a2aPrompt(t, e, t.source(), string(s.lang(ctx))), "client_msg_id": a2aDeliveryID(taskID, 1),
-		"message_source": a2aMessageSource(t.source()), "permission_mode": "plan"}
+		"message_source": a2aMessageSource(t.source()), "permission_mode": permMode}
 	go func() {
 		ctx, cancel := context.WithTimeout(s.runCtx(), agentStartTimeout)
 		defer cancel()
@@ -507,7 +528,18 @@ func (s *Service) a2aLaunched(ctx context.Context, st a2aStore, t *a2aTask, sess
 			t.Events[0].Delivery = a2aUncertain
 		}
 	}
-	return s.a2aSave(ctx, st, t)
+	if err := s.a2aSave(ctx, st, t); err != nil {
+		return err
+	}
+	if failed {
+		s.forgetA2ASubagent(t.ID)
+	} else if t.TargetSession != "" {
+		s.recordA2ASubagent(t)
+		if s.fleetOn() {
+			go s.publishSessions(t.TargetMachine)
+		}
+	}
+	return nil
 }
 
 func a2aNoDelivery(err error) bool {

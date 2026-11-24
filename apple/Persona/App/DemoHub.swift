@@ -289,6 +289,7 @@ final class DemoHub {
         case ["mutes"]: return mutes
         case ["assistant"]:
             var a = data["assistant"]?.object ?? [:]
+            a["default_permission_mode"] = a["default_permission_mode"] ?? "default"
             // ?space=health lists the health space's own (docs/assistant/health.md); the plain list never holds them.
             let space = q["space"] ?? ""
             a["conversations"] = .array(sessions.filter { $0["assistant"]?.bool == true && ($0["space"]?.string ?? "") == space })
@@ -430,11 +431,18 @@ final class DemoHub {
             guard let purpose = catalog["purposes"]?.array?.first(where: { $0["id"]?.string == id }) else { throw notFound() }
             guard body["revision"]?.int == purpose["revision"]?.int else { throw APIError(status: 409, message: String(localized: "The settings changed. Reload and try again.")) }
             var binding = purpose["override"]?.object ?? [:]
-            for field in ["provider", "model", "effort", "runtime"] {
+            for field in ["provider", "model", "effort", "runtime", "permission_mode"] {
                 guard let value = body[field] else { continue }
                 if value == .null { binding.removeValue(forKey: field) } else { binding[field] = value }
             }
             modelBindings[id] = ["override": .object(binding), "revision": .number(Double((purpose["revision"]?.int ?? 0) + 1))]
+            return try get(p, [:])
+        }
+        if p == ["assistant"], method == "PUT", body.object?.count == 1,
+           let mode = body["default_permission_mode"]?.string {
+            var assistant = data["assistant"]?.object ?? [:]
+            assistant["default_permission_mode"] = .string(mode)
+            data["assistant"] = .object(assistant)
             return try get(p, [:])
         }
         if let answer = try providers.change(method, p, body) { return answer }

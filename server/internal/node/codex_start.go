@@ -614,6 +614,9 @@ func CodexStart(args []string) error {
 		}
 	}
 	for len(words) > 0 && shellcmd.AssignRe.MatchString(words[0]) {
+		if name, _, ok := strings.Cut(words[0], "="); ok {
+			env = withoutEnv(env, []string{name})
+		}
 		env = append(env, words[0])
 		explicit = append(explicit, words[0])
 		words = words[1:]

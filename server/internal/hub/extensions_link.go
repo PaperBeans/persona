@@ -218,7 +218,7 @@ func machineExtrasEqual(a, b map[string]extwire.MachineExtras) bool {
 // features are the hub's features with those of the extensions serving part of the API.
 func (h *Hub) features() []string {
 	out := append(slices.Clone(proto.Features), featureSessionsList, featureSessionsLookup, featureSessionsPaneSource, featureSessionsManager, featureSessionsPageCounts,
-		featureSessionsSearch, featureAgentsPageCounts, featureAgentsProviderOR, featureSessionsHierarchy, featureSessionsCatalog, featureSessionsTodo, featureSessionsQuickFilters, featureSessionsJustFinished, featureSessionsAgentsOnly, featureMachineRename, featureDesktopUnregister, nodeproto.MCPWait, "starred_messages")
+		featureSessionsSearch, featureAgentsPageCounts, featureAgentsProviderOR, featureSessionsHierarchy, featureSessionsCrossMachineHierarchy, featureSessionsCatalog, featureSessionsTodo, featureSessionsQuickFilters, featureSessionsJustFinished, featureSessionsAgentsOnly, featureMachineRename, featureDesktopUnregister, nodeproto.MCPWait, "starred_messages")
 	out = append(out, h.agentSessionArchiveFeatures()...)
 	out = append(out, h.agentAutonameFeatures()...)
 	out = append(out, h.sessionsSideFoldFeatures()...)
@@ -232,6 +232,11 @@ func (h *Hub) features() []string {
 	out = append(out, h.meetingTranscriptionFeatures()...)
 	out = append(out, h.recordingDayFeatures()...)
 	out = append(out, h.assistantSearchFeatures()...)
+	for _, f := range h.defaultManagerModuleFeatures() {
+		if !slices.Contains(out, f) {
+			out = append(out, f)
+		}
+	}
 	if h.defaultManagerNames(assistantwire.CapabilityHealthIntake) {
 		out = append(out, assistantwire.CapabilityHealthIntake)
 	}
@@ -245,6 +250,7 @@ func (h *Hub) features() []string {
 	out = append(out, h.remoteImagesFeatures()...)
 	out = append(out, h.assistantStartServiceTierFeatures()...)
 	out = append(out, h.todoViewFeatures()...)
+	out = append(out, h.todoRevisionFeatures()...)
 	out = append(out, h.todoAsksFeatures()...)
 	out = append(out, h.todoTimelineFeatures()...)
 	out = append(out, h.todoImageFeatures()...)
@@ -253,10 +259,13 @@ func (h *Hub) features() []string {
 	// a client may run HTML: that is each platform's own security sign-off, else fallback.
 	out = append(out, "assistant_views", "assistant_html_bridge")
 	for _, f := range h.extReport().Features {
+		if f == "modules" || strings.HasPrefix(f, "module.") {
+			continue // only the default manager's hello can publish module presence
+		}
 		switch f {
 		case assistantwire.CapabilityHealthIntake, assistantwire.CapabilityAssistantSegments, featureAgentSessionArchives, featureAgentSessionArchiveClose, featureAgentAutoname, featureMeetingAttendance, featureMeetingConversation,
 			featureMeetingPhotos, featureMeetingLiveView, featureMeetingHighlights, featureMeetingNotes, featureMeetingEcho, featureMeetingTranscription, featureRecordingDay,
-			assistantwire.CapabilityTaskInput, featureAssistantSearch, featureDirectionSessions, featureAssistantStartServiceTier, featureSessionsSideFold, featureRemoteImages, featureTodoView, featureTodoPlaces, featureTodoAsks, featureTodoTimeline:
+			assistantwire.CapabilityTaskInput, featureAssistantSearch, featureDirectionSessions, featureAssistantStartServiceTier, featureSessionsSideFold, featureRemoteImages, featureTodoView, featureTodoRevision, featureTodoPlaces, featureTodoAsks, featureTodoTimeline:
 			continue // only manager hello can promise fleet archives, requested names, meetings, all-day recordings, chat search, direction sessions, start speed, the side-session fold, remote images, the To-dos view, its answers and its history
 		}
 		if !slices.Contains(out, f) {
@@ -264,6 +273,21 @@ func (h *Hub) features() []string {
 		}
 	}
 	return out
+}
+
+// defaultManagerModuleFeatures are the loaded built-in modules' flags from the default manager's hello. A manager
+// without the field, or one that is offline, announces none; extension reports cannot promise these module-only flags.
+func (h *Hub) defaultManagerModuleFeatures() []string {
+	id := h.defaultOwner(context.Background())
+	if h.busConnOf(id) == nil {
+		return nil
+	}
+	for _, manager := range h.busRoster() {
+		if manager.ID == id {
+			return slices.Clone(manager.Features)
+		}
+	}
+	return nil
 }
 
 // extrasOf is machine m's Cua, ego and iPhone state as the manager reports it (each nil when not on), read from one

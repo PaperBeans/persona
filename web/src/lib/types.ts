@@ -31,6 +31,8 @@ export interface Machine {
   deploy_reason?: string;
   deploy_phase?: "waiting_idle" | "transferring" | "restarting" | "confirming";
   deploy_error?: string;
+  /** Where the owning assistant obtained the program for this deployment, when known. */
+  deploy_source?: "hub_package" | "local_build";
   system?: { name?: string; model?: string; cpu?: string; cores?: number; memory?: number };
   /** The terminal engine its sessions come from (herdr when absent); `engines`: what its node found, empty while offline. */
   engine?: string;

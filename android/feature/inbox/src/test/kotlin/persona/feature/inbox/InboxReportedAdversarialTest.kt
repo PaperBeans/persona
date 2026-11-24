@@ -32,6 +32,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.domain.sort.AgentPreferences
 import java.time.Instant
 import java.time.ZoneOffset
+import persona.core.inbox.*
 
 /** Boundaries that must not be inferred from the long-row happy path alone. */
 @RunWith(AndroidJUnit4::class)

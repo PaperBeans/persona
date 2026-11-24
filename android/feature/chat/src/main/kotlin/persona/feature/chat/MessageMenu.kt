@@ -1,5 +1,6 @@
 package persona.feature.chat
 
+import persona.core.moduleapi.asMenuActions
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -196,6 +197,9 @@ internal fun MessageMenuSheet(
     val resources = LocalResources.current
     val extras = MessageExtras(fork = onFork != null, rewind = rewind != null, rewindBlock = rewind?.block, delete = onDelete != null,
         dontSend = PersonaTheme.style == AppStyle.Glass, star = if (onStar != null) star else null)
+    // The modules' message actions (#13847), last, while a message's menu is open.
+    val moduleActions = if (target == null) emptyList() else persona.core.moduleapi.LocalModuleActions.current.actions(
+        persona.core.moduleapi.MenuSlot.MessageActions, persona.core.moduleapi.ModuleActionTarget(messageId = target.id, text = target.text))
     if (target != null) MessageMenuOverlay(menu.pointerAnchor,
         messageMenuActions(target, writes, onForward != null, resources, extras) { action ->
         when (action) {
@@ -215,7 +219,7 @@ internal fun MessageMenuSheet(
             MessageAction.Rewind -> rewinding = target
             MessageAction.Delete -> onDelete?.invoke(target)
         }
-    }, onDismiss = menu::close)
+    } + moduleActions.asMenuActions(menu::close), onDismiss = menu::close)
     // "Rewind chat only" / "Rewind code and chat" (web's submenu); the second asks again: it puts files back too. Where the
     // node says it puts no files back (`rewind_code` false: a runtime's session, a Codex thread) only the first.
     rewinding?.let { at ->

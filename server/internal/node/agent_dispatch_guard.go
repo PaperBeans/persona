@@ -2,14 +2,13 @@ package node
 
 import (
 	"context"
+	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
-	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -57,13 +56,28 @@ func (n *Node) guardAgentDirectory(ctx context.Context, cwd string) error {
 	return nil
 }
 
-// agentGOOS is the platform whose Agent rules a new session.start adds: this machine's. The package's tests set a
-// platform without any (TestMain), so a start's task instructions are what the test sent on every platform.
-var agentGOOS = runtime.GOOS
+// agentRulesFile is the optional file in the node's data directory whose text goes with every new Agent started on
+// this computer (#13642): its owner's standing rules for it, carried like the caller's task instructions (Claude Code's
+// instruction file, Codex's developer instructions, else after the first message). Persona adds no rules of its own: a
+// computer without the file starts each Agent with what its caller sent, on every platform.
+const agentRulesFile = "agent-rules.md"
 
-func agentPlatformInstructions(goos, rules string) string {
-	if goos != "darwin" {
+// agentStartRules is rules followed by this computer's agent-rules.md when it has text, else rules as they are (no
+// file, an empty one, or one that cannot be read).
+func (n *Node) agentStartRules(rules string) string {
+	if n.dir == "" {
 		return rules
 	}
-	return strings.TrimSpace(rules + "\n\n" + prompts.RenderAgentMacRules())
+	raw, err := os.ReadFile(filepath.Join(n.dir, agentRulesFile))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("agent rules: %v", err)
+		}
+		return rules
+	}
+	own := strings.TrimSpace(string(raw))
+	if own == "" {
+		return rules
+	}
+	return strings.TrimSpace(rules + "\n\n" + own)
 }

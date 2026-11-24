@@ -7,7 +7,7 @@ import persona.feature.agents.AgentsDraftSource
 import persona.feature.agents.AgentsOperationsBindings
 import persona.feature.agents.AgentsWiringState
 import persona.feature.chat.ChatAppBindings
-import persona.feature.inbox.InboxSnapshot
+import persona.core.inbox.InboxSnapshot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.JsonElement
@@ -201,6 +201,19 @@ internal fun ChatActions.inGroup(names: GroupNames): ChatActions {
         override suspend fun catalogPrices(ids: List<String>) = source.catalogPrices(ids)
         override suspend fun fork(session: Session, atItemId: String) = source.fork(names.rawSession(session), atItemId)
         override suspend fun rewind(session: Session, target: RewindTarget, restore: RewindRestore) = source.rewind(names.rawSession(session), target, restore)
+        override suspend fun codexTakeoverInfo(session: Session) = source.codexTakeoverInfo(names.rawSession(session))
+        override suspend fun codexTakeover(session: Session, token: String, confirmStop: Boolean) =
+            names.session(source.codexTakeover(names.rawSession(session), token, confirmStop))
+        override suspend fun startCodexContinuation(session: Session, info: CodexTakeoverInfo, operationId: String) =
+            when (val r = source.startCodexContinuation(names.rawSession(session), info, operationId)) {
+                is AgentStartResult.Created -> AgentStartResult.Created(names.session(r.session))
+                else -> r
+            }
+        override suspend fun codexContinuationOperation(session: Session, operationId: String) =
+            when (val r = source.codexContinuationOperation(names.rawSession(session), operationId)) {
+                is AgentStartResult.Created -> AgentStartResult.Created(names.session(r.session))
+                else -> r
+            }
     }
 }
 
@@ -416,6 +429,19 @@ internal fun AgentOperations.inGroup(names: GroupNames): AgentOperations {
         override suspend fun interruptSession(key: SessionKey) = source.interruptSession(names.raw(key))
         override suspend fun deleteSession(key: SessionKey) = source.deleteSession(names.raw(key))
         override suspend fun forkSession(key: SessionKey) = source.forkSession(names.raw(key))
+        override suspend fun codexTakeoverInfo(key: SessionKey) = source.codexTakeoverInfo(names.raw(key))
+        override suspend fun codexTakeover(key: SessionKey, token: String, confirmStop: Boolean) =
+            names.session(source.codexTakeover(names.raw(key), token, confirmStop))
+        override suspend fun startCodexContinuation(key: SessionKey, info: CodexTakeoverInfo, operationId: String, todoId: String?) =
+            when (val r = source.startCodexContinuation(names.raw(key), info, operationId, todoId)) {
+                is AgentStartResult.Created -> AgentStartResult.Created(names.session(r.session))
+                else -> r
+            }
+        override suspend fun codexContinuationOperation(key: SessionKey, operationId: String) =
+            when (val r = source.codexContinuationOperation(names.raw(key), operationId)) {
+                is AgentStartResult.Created -> AgentStartResult.Created(names.session(r.session))
+                else -> r
+            }
     }
 }
 

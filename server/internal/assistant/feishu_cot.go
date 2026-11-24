@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -47,7 +47,7 @@ type cotProgress struct {
 	calls map[string]bool // tool calls shown and not settled yet (their output goes under them); Ext "cot_calls"
 	// queue is what was made of the items already taken and has not reached Feishu yet (sent 50 at a time, the rest
 	// next time): an append is never made twice.
-	queue []feishubot.CotEvent
+	queue []botcard.CotEvent
 	// The agent message as this run has it (the answer works on a copy of the run, and may be tried again).
 	cot, msg, para string
 	done, off      bool
@@ -172,13 +172,13 @@ func hasProcess(items []proto.Item) bool {
 // cotEvents turns the new items of a run's process into events (words held back until a tool call follows them: the
 // words a turn ends with are its answer, which goes out on its own). para is the last paragraph so far.
 // finish: the turn ended, and the thinking held with its last words goes in (the words are its answer).
-func cotEvents(l i18n.Lang, p *cotProgress, items []proto.Item, para string, start func(first string) []feishubot.CotEvent, finish bool) ([]feishubot.CotEvent, string) {
-	var out []feishubot.CotEvent
+func cotEvents(l i18n.Lang, p *cotProgress, items []proto.Item, para string, start func(first string) []botcard.CotEvent, finish bool) ([]botcard.CotEvent, string) {
+	var out []botcard.CotEvent
 	paragraph := func(id, text string) {
 		if para == "" {
 			out = append(out, start(id)...)
 		}
-		out = append(out, feishubot.CotParagraph(id, text)...)
+		out = append(out, botcard.CotParagraph(id, text)...)
 		para = id
 	}
 	// p changes only once the events are taken (an append that did not reach Feishu is made again from the same items).
@@ -215,7 +215,7 @@ func cotEvents(l i18n.Lang, p *cotProgress, items []proto.Item, para string, sta
 			if detail != "" {
 				title += " · " + detail
 			}
-			out = append(out, feishubot.CotToolCall(id, para, it.ToolName, title, cotIcon(it.ToolName))...)
+			out = append(out, botcard.CotToolCall(id, para, it.ToolName, title, cotIcon(it.ToolName))...)
 			calls[id] = true
 		case proto.KindToolResult:
 			if !calls[it.ToolUseID] {
@@ -224,13 +224,13 @@ func cotEvents(l i18n.Lang, p *cotProgress, items []proto.Item, para string, sta
 			delete(calls, it.ToolUseID)
 			text := strings.TrimSpace(it.Text)
 			if text == "" {
-				out = append(out, feishubot.CotToolResult(it.ToolUseID, i18n.T(l, "assistant-feishu.cot_tool_done"), false))
+				out = append(out, botcard.CotToolResult(it.ToolUseID, i18n.T(l, "assistant-feishu.cot_tool_done"), false))
 				continue
 			}
 			if r := []rune(text); len(r) > cotResultMost {
 				text = string(r[:cotResultMost]) + "\n…"
 			}
-			out = append(out, feishubot.CotToolResult(it.ToolUseID, text, true))
+			out = append(out, botcard.CotToolResult(it.ToolUseID, text, true))
 		}
 	}
 	if finish {
@@ -268,7 +268,7 @@ func (f feishuSink) cotPush(ctx context.Context, r *channel.Run, p *chanLive, it
 	s := f.s
 	l := s.botLang(ctx)
 	cot, msg := p.cot.cot, p.cot.msg
-	start := func(first string) []feishubot.CotEvent { return feishubot.CotStart(r.SessionID, cot, first) }
+	start := func(first string) []botcard.CotEvent { return botcard.CotStart(r.SessionID, cot, first) }
 	if p.cot.sent > len(items) {
 		p.cot.sent = len(items)
 	}
@@ -277,15 +277,15 @@ func (f feishuSink) cotPush(ctx context.Context, r *channel.Run, p *chanLive, it
 	events = append(slices.Clone(p.cot.queue), events...)
 	if finish {
 		for _, id := range slices.Sorted(maps.Keys(next.calls)) { // calls whose output never came: settled, not left spinning
-			events = append(events, feishubot.CotToolResult(id, i18n.T(l, "assistant-feishu.cot_tool_done"), false))
+			events = append(events, botcard.CotToolResult(id, i18n.T(l, "assistant-feishu.cot_tool_done"), false))
 		}
 		next.calls = nil
 		if para == "" { // nothing of the process: an empty one would not open
 			para = "p-" + r.ID + "-done"
 			events = append(events, start(para)...)
-			events = append(events, feishubot.CotParagraph(para, i18n.T(l, "assistant-feishu.cot_done"))...)
+			events = append(events, botcard.CotParagraph(para, i18n.T(l, "assistant-feishu.cot_done"))...)
 		}
-		events = append(events, feishubot.CotFinish(r.SessionID, cot, para)...)
+		events = append(events, botcard.CotFinish(r.SessionID, cot, para)...)
 	}
 	// The items are taken now; what of them does not reach Feishu waits in the queue.
 	p.cot.words, p.cot.sent = next.words, len(items)
@@ -460,15 +460,15 @@ const (
 
 // processPanel is the fallback card's folded process, self-bounded for the quiet end card outside answerCards
 // (its foot/note are short).
-func processPanel(l i18n.Lang, c *feishubot.Card, steps []string) {
+func processPanel(l i18n.Lang, c *botcard.Card, steps []string) {
 	addProcessPanel(l, c, steps, fitPanelSteps(l, steps, min(processPanelStepsMost, len(steps)), processPanelMaxBytes))
 }
 
 // fitPanelSteps halves from start until the panel's JSON inside an empty card envelope is at most maxBytes.
 func fitPanelSteps(l i18n.Lang, steps []string, start, maxBytes int) int {
-	empty := len(feishubot.NewCard("", "", "").JSON())
+	empty := len(botcard.NewCard("", "", "").JSON())
 	for n := start; n > 0; n /= 2 {
-		probe := feishubot.NewCard("", "", "")
+		probe := botcard.NewCard("", "", "")
 		addProcessPanel(l, probe, steps, n)
 		if len(probe.JSON())-empty <= maxBytes {
 			return n
@@ -478,7 +478,7 @@ func fitPanelSteps(l i18n.Lang, steps []string, start, maxBytes int) int {
 }
 
 // addProcessPanel shows the last maxSteps clipped lines; title counts all steps, a line notes hidden earlier ones.
-func addProcessPanel(l i18n.Lang, c *feishubot.Card, steps []string, maxSteps int) {
+func addProcessPanel(l i18n.Lang, c *botcard.Card, steps []string, maxSteps int) {
 	if maxSteps <= 0 || len(steps) == 0 {
 		return
 	}

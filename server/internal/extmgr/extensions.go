@@ -498,8 +498,10 @@ func (h *Manager) attachExtensions(ctx context.Context) {
 	if err := reg.AddBuiltinTranslated(iphoneManifest(h), "", false, iphoneTranslations()); err != nil { // the same, for paired iPhones (iphone.go)
 		h.logf("plugin iphone: %v", err)
 	}
-	if err := reg.AddBuiltin(imessageManifest(h), "", false); err != nil { // which Mac's Messages (imessage_extension.go)
-		h.logf("plugin imessage: %v", err)
+	if m := imessageManifest(h); m != nil { // which Mac's Messages (imessage_extension.go); none without the module
+		if err := reg.AddBuiltin(m, "", false); err != nil {
+			h.logf("plugin imessage: %v", err)
+		}
 	}
 	h.addVoiceExtension(ctx, reg, store) // `personad voice`, taking hub.json's entry of it over (voice_extension.go)
 	h.addVolcExtension(ctx, reg, store)  // `personad volc`, off until the owner turns it on (volc_extension.go)

@@ -493,6 +493,13 @@ func (f *File) End() Span {
 	return Span{History: f.history(), To: f.lines}
 }
 
+// TurnClosedAfter reports whether a non-hidden turn close occurred after seq in the lines f has parsed.
+func (f *File) TurnClosedAfter(seq int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.meta.TurnClosed && f.meta.turnEndSeq > seq && (f.tree == nil || !f.tree.hidden[f.meta.turnEndLine])
+}
+
 // CoversClosedTurnAfter reports whether the checked end still covers every line after seq in history and the latest
 // turn ended after the send. An open turn or a closing record on a discarded branch cannot establish that.
 func (f *File) CoversClosedTurnAfter(end Span, history string, seq int, sentAt time.Time) bool {

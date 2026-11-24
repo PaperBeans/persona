@@ -10,6 +10,7 @@ android { namespace = "persona.core.moduleapi" }
 dependencies {
     api(project(":core:navigation"))
     api(project(":core:designsystem"))
+    api(project(":core:contracts"))
     api(libs.okhttp)
     api(libs.coroutines.core)
     testImplementation(libs.junit)

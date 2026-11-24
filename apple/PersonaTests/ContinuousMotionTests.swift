@@ -8,7 +8,7 @@ import Testing
 struct ContinuousMotionTests {
     private static let apple = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
     /// The app targets; `Packages/` (BeautifulUI) is a library with its own rules.
-    private static let dirs = ["Persona", "PersonaWatch", "PersonaWidgets", "PersonaWatchWidgets", "LiveActivity",
+    private static let dirs = ["Persona", "Modules", "PersonaWatch", "PersonaWidgets", "PersonaWatchWidgets", "LiveActivity",
                                "Shared", "Vision", "PersonaVisionWidgets", "PersonaLink"]
     private static let loop = try! NSRegularExpression(
         pattern: #"repeatForever|TimelineView\(\.animation|phaseAnimator|repeatCount = \.infinity|startAnimating\(\)"#)

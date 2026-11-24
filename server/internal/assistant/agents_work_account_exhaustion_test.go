@@ -5,13 +5,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
+
+func autoContinueTextForTest(text string) string {
+	return prompts.MessageSourceText(text, &proto.MessageSource{Kind: "auto-continue"})
+}
+
+func requireAutoContinueSource(t *testing.T, params map[string]any) {
+	t.Helper()
+	source, _ := params["message_source"].(map[string]any)
+	if source["kind"] != "auto-continue" {
+		t.Fatalf("message_source = %v, want kind auto-continue", params["message_source"])
+	}
+}
 
 func TestAccountExhaustionDoesNotAutoContinueByDefault(t *testing.T) {
 	for _, errText := range []string{
 		"API Error: 503 no other eligible account",
 		"API Error: 503 no eligible upstream account",
+		"API Error: 503 the upstream request failed and no other eligible upstream account",
 		"API Error: 503 upstream attempt budget is exhausted",
 		"API Error: 503 no eligible upstream",
 	} {
@@ -104,26 +118,49 @@ func TestAccountExhaustionCancelsAlreadyQueuedContinuation(t *testing.T) {
 	}
 }
 
-// All Assistant conversations are exempt: main chat, leader and
+// Assistant is the shared classification for the main chat, leader and
 // background-supervision conversations, side chats, scheduled-task and health
-// chats, and meeting rooms. This fixture intentionally has none of the three
-// protected roles, so it pins the wider exemption. Task-leader Agents are
-// coding Agents and remain subject to the budget.
-func TestAssistantAccountExhaustionStillAutoContinues(t *testing.T) {
-	s, f := transientService(t)
-	c := apiErrorTurn("s1", "API Error: 503 no eligible upstream account")
-	c.Assistant = true
-	f.setSessions("box", c)
-	triage(t, s, "s1")
+// chats, and meeting rooms. They all use the same account-exhaustion budget as
+// coding Agents: selecting another launcher cannot help when no account is eligible.
+func TestAssistantAccountExhaustionDoesNotAutoContinue(t *testing.T) {
+	for _, errText := range []string{
+		"API Error: 503 no eligible upstream account",
+		"API Error: 503 the upstream request failed and no other eligible upstream account",
+	} {
+		t.Run(errText, func(t *testing.T) {
+			s, f := transientService(t)
+			c := apiErrorTurn("s1", errText)
+			c.Assistant = true
+			f.setSessions("box", c)
+			triage(t, s, "s1")
 
+			if e, ok := s.workEntry([2]string{"box", "s1"}); ok && (e.WakeAt != nil || e.Work.WakeAt != nil) {
+				t.Fatalf("assistant account exhaustion scheduled an automatic continuation: %+v", e)
+			}
+			s.workTick(context.Background(), time.Now().Add(time.Hour))
+			if got := f.sentToAgents(); len(got) != 0 {
+				t.Fatalf("assistant account exhaustion automatically continued: %v", got)
+			}
+		})
+	}
+}
+
+func TestAutomaticContinuationHasSourceMarker(t *testing.T) {
+	s, f := transientService(t)
+	f.setSessions("box", apiErrorTurn("s1", "API Error: 503 Service Unavailable"))
+	triage(t, s, "s1")
 	e := entryOf(t, s, "s1")
-	if e.WakeAt == nil || e.Work.On != proto.WaitTransient {
-		t.Fatalf("assistant transient continuation was not scheduled: %+v", e)
-	}
 	s.workTick(context.Background(), *e.WakeAt)
-	if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: 继续" {
-		t.Fatalf("assistant account-exhaustion behavior changed: sent %v", got)
+
+	got := f.sentToAgents()
+	want := "s1: " + autoContinueTextForTest(continueText)
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("automatic continuation lacks structured provenance: sent %v, want %q", got, want)
 	}
+	f.mu.Lock()
+	params := f.agentSent[0]
+	f.mu.Unlock()
+	requireAutoContinueSource(t, params)
 }
 
 func TestOrdinaryTransientErrorsStillAutoContinue(t *testing.T) {
@@ -142,7 +179,7 @@ func TestOrdinaryTransientErrorsStillAutoContinue(t *testing.T) {
 				t.Fatalf("ordinary transient error was not scheduled: %+v", e)
 			}
 			s.workTick(context.Background(), *e.WakeAt)
-			if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: 继续" {
+			if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: "+autoContinueTextForTest(continueText) {
 				t.Fatalf("ordinary transient error did not continue exactly once: %v", got)
 			}
 		})

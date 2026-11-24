@@ -91,6 +91,9 @@ type Placement struct {
 	MemoryDreaming bool `json:"memory_dreaming,omitempty"`
 	// CompleteAgentlessTodos lets a supervising conversation complete its own agentless memo without another card.
 	CompleteAgentlessTodos bool `json:"complete_agentless_todos,omitempty"`
+	// AutoApproveReversibleSettings skips confirmation cards only for the exact, restorable Assistant settings allowlist.
+	// It is set only by manager.json, never by persona_settings.
+	AutoApproveReversibleSettings bool `json:"auto_approve_reversible_settings,omitempty"`
 	// SupervisionBatchMinutes is manager.json's administrator-pinned routine supervision interval. Nil leaves the
 	// assistant's saved setting in effect; an explicit zero pins immediate delivery through the legacy cadence.
 	SupervisionBatchMinutes *int `json:"supervision_batch_minutes,omitempty"`

@@ -23,6 +23,7 @@ import persona.core.contracts.api.*
 import persona.core.navigation.Navigator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import persona.core.inbox.*
 
 /**
  * Heard after a mail was handed to Persona ("Hand to AI"): the host may show the assistant with it. The message is already

@@ -973,7 +973,9 @@ export function checkSocket() {
 setInterval(() => checkSocket(), 5_000);
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && !stopped && (!ws || Date.now() - lastMessage > 40_000)) connect();
+    if (!pageInFront()) return;
+    if (pushedHidden) todosPushed();
+    if (!stopped && (!ws || Date.now() - lastMessage > 40_000)) connect();
   });
 }
 if (typeof window !== "undefined") {
@@ -1585,23 +1587,25 @@ function numbered<T>(path: string, read: () => Promise<T> = () => api<T>(path)) 
 // no body. Most {"type":"todos"} pushes change nothing the list holds, and the whole list is hundreds of KB on a busy
 // hub, so a read sends the tag and a 304 applies the kept answer again, as a 200 with those same bytes would. Memory
 // only, one login's: reset() drops it, and a tag kept under another login is not sent.
-let keptTodos: { owner: string; etag: string; answer: { todos: Todo[] } } | null = null;
+let keptTodos: { owner: string; etag: string; revision: string; answer: { todos: Todo[] } } | null = null;
 
 async function readTodos(): Promise<{ todos: Todo[] }> {
   const owner = credentialOwner();
   const kept = keptTodos?.owner === owner ? keptTodos : null;
   let status = 0;
-  let etag = "";
+  let reply: Headers | undefined;
   const answer = await api<{ todos: Todo[] }>("/todos", {
-    headers: kept ? { "If-None-Match": kept.etag } : undefined,
-    onResponse: (headers, code) => {
-      status = code;
-      etag = headers?.get("ETag") ?? "";
-    },
+    headers: kept?.etag ? { "If-None-Match": kept.etag } : undefined,
+    onResponse: (headers, code) => { status = code; reply = headers; },
   });
-  if (status === 304 && kept) return kept.answer;
-  // a hub without the validator sends no tag: nothing is kept, and the next read is whole as before
-  if (owner === credentialOwner()) keptTodos = etag ? { owner, etag, answer } : null;
+  const etag = reply?.get("ETag") ?? "";
+  const revision = reply?.get("X-Persona-Todos-Revision") ?? "";
+  if (status === 304 && kept) {
+    if (revision) kept.revision = revision;
+    return kept.answer;
+  }
+  // a hub without either validator keeps nothing, and the next read is whole as before
+  if (owner === credentialOwner()) keptTodos = etag || revision ? { owner, etag, revision, answer } : null;
   return answer;
 }
 
@@ -1712,24 +1716,33 @@ export function dropTodo(id: string) {
   set({ todos: state.todos.filter((t) => t.id !== id) });
 }
 
-// A push that says the to-dos changed ({"type":"todos"}, a task's feed item) comes in bursts: the hub sends one per write,
-// and a supervised task's report, stage and links land within the same second. Every GET /todos is the whole list (tens
-// of KB on a busy hub), so pushes read it one at a time: one that lands while such a read is out asks for one more read
-// after it, however many land meanwhile. What this page itself just changed still reads at once (refreshTodos).
-let pushedRead = false;
-let pushedAgain = false;
+// A push that says the to-dos changed ({"type":"todos"}, a task's feed item) comes in bursts. Settle 200 ms, then ask
+// the hub's cheap merged revision when every manager supports it (#13804). Only a changed revision reads the complete
+// list. Hidden pages leave the pending push until they become visible; old hubs keep the original full-read path.
+// What this page itself just changed still reads at once (refreshTodos).
+// The loop itself loads on the first push, not with the first screen. The epoch drops a load that reset beat.
+let pushedEpoch = 0;
+let pushedHidden = false; // only a failed hidden import; the loaded loop owns its own pending push
+let resetPushedTodos: () => void = () => {};
 
 export function todosPushed() {
-  if (pushedRead) {
-    pushedAgain = true;
-    return;
-  }
-  pushedRead = true;
-  void refreshTodos().finally(() => {
-    pushedRead = false;
-    if (!pushedAgain) return;
-    pushedAgain = false;
-    todosPushed();
+  const epoch = pushedEpoch;
+  void import("./todo-pushes").catch(() => null).then((m) => {
+    if (epoch !== pushedEpoch) return;
+    pushedHidden = false;
+    if (!m) {
+      if (pageInFront()) void refreshTodos();
+      else pushedHidden = true;
+      return;
+    }
+    resetPushedTodos = m.reset;
+    // Positional hooks keep their property names out of the first-screen chunk; the lazy module names the tuple.
+    m.push([
+      () => hubHas(state.features, "todo_revision") && keptTodos?.owner === credentialOwner() ? keptTodos.revision : "",
+      refreshTodos,
+      pageInFront,
+      api,
+    ]);
   });
 }
 
@@ -1977,8 +1990,10 @@ export function reset() {
   endedHere.clear();
   // a /todos or /assistant answer still on its way belongs to the old login
   todosAsked.forget();
-  keptTodos = null; // and its list's validator
-  pushedAgain = false; // the next login reads its own list
+  keptTodos = null; // and its list's validators
+  pushedEpoch++;
+  pushedHidden = false;
+  resetPushedTodos();
   assistantAsked.forget();
   assistantByManager.clear();
   restoredAssistant = null;

@@ -329,13 +329,18 @@ func (s *Service) toolTaskRetry(ctx context.Context, self string, args json.RawM
 		if err := s.retryOn(ctx, &pt, m, with); err != nil {
 			return "", err
 		}
+	} else {
+		pt.RetryFromAgent, pt.RetryFromAllowAll = "", false
+		if m, ok := s.machineByName(ctx, pt.Machine); ok {
+			s.rememberRetryFrom(ctx, &pt, m, from)
+		}
 	}
 	st, claimed := s.claimTaskStart(todo.ID)
 	if !claimed {
 		return "", errors.New("it is starting again already")
 	}
-	moved := pt.Launcher != p.Tasks[i].Launcher || pt.Model != p.Tasks[i].Model // retryOn pinned another
-	switched := pt.Launcher != p.Tasks[i].Launcher && pt.Launcher != from       // not the launcher that failed
+	moved := pt.Launcher != p.Tasks[i].Launcher || pt.Model != p.Tasks[i].Model || pt.Tier != p.Tasks[i].Tier // retryOn pinned another launch or cleared its tier
+	switched := pt.Launcher != p.Tasks[i].Launcher && pt.Launcher != from                                     // not the launcher that failed
 	inPane := ""
 	if time.Now().Before(pt.Start.Until) && !switched && pt.Model == p.Tasks[i].Model {
 		inPane = pt.Start.Pane // another launcher starts in a new tab: an agent of the old one may hold the kept tab
@@ -344,6 +349,10 @@ func (s *Service) toolTaskRetry(ctx context.Context, self string, args json.RawM
 		if moved {
 			t.Launcher, t.Model, t.Tier, t.Effort, t.Permission, t.Why = pt.Launcher, pt.Model, pt.Tier, pt.Effort, pt.Permission, pt.Why
 		}
+		if with.launcher != "" {
+			t.LauncherDefaultModel = pt.LauncherDefaultModel
+		}
+		t.RetryFromAgent, t.RetryFromAllowAll = pt.RetryFromAgent, pt.RetryFromAllowAll
 		t.Start.Attempt, t.Start.By, t.Start.At = attempt, "assistant", time.Now().UTC()
 		t.Error, t.ErrorCode, t.ErrorArgs, t.RetryWith = "", "", nil, nil
 	}); err != nil {

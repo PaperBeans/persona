@@ -4,6 +4,7 @@ import { stateOf } from "../lib/format";
 import { orderPending } from "../lib/pending-order";
 import { withWorkView, type Route } from "../lib/router";
 import type { AnsweredCard } from "../lib/store";
+import { supervisorHeldOnly, userCards } from "../lib/supervisor-held";
 import type { Interaction, Session } from "../lib/types";
 import { answeredSessions } from "./assistant/answered-lookup";
 
@@ -21,7 +22,9 @@ const sessionKey = (mid: string, sid: string) => `session:${JSON.stringify([mid,
 export function sidebarPending(sessions: Session[], interactions: Interaction[], answered: Record<string, AnsweredCard>): SidebarPendingRow[] {
   const bySession = new Map(sessions.map((s) => [sessionKey(s.machine_id, s.session_id), s]));
   const rows = new Map<string, SidebarPendingRow>();
-  const cards = [...new Map(interactions.map((ix) => [ix.id, ix])).values()];
+  // a card a task's supervisor holds is not the user's yet (lib/supervisor-held.ts), nor is an agent waiting only on such
+  const cards = [...new Map(userCards(interactions).map((ix) => [ix.id, ix])).values()];
+  const held = supervisorHeldOnly(interactions);
   for (const ix of cards.sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? "") || a.id.localeCompare(b.id))) {
     // a child session's card is its parent's (#5120): one row per parent, opening the parent
     const key = ix.session_id ? sessionKey(ix.machine_id, requestHome(ix)) : `request:${ix.id}`;
@@ -39,6 +42,7 @@ export function sidebarPending(sessions: Session[], interactions: Interaction[],
   for (const s of waiting) {
     const home = requestHome(s);
     const key = sessionKey(s.machine_id, home);
+    if (held.has(`${s.machine_id}/${home}`)) continue;
     if (!rows.has(key)) rows.set(key, { key, machineId: s.machine_id, session: bySession.get(key) ?? s, cards: [], to: { name: "session", mid: s.machine_id, sid: home, view: "chat", work: true } });
   }
   // Urgency class first, then the longest wait within it (#8167); the row set above is unchanged by the ordering.

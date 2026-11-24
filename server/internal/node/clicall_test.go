@@ -57,7 +57,13 @@ func TestAssistantCLICallerUsesOnlyVerifiedRuntimeWorkers(t *testing.T) {
 
 func testAssistantCLICallerVerifiedRuntimeWorkers(t *testing.T, engine string) {
 	n, hub := runtimeNode(t)
-	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(t.TempDir(), "s"), Net: "unix"})
+	// Short: a Unix socket path must stay under 104 bytes on macOS, and t.TempDir() there carries the long test name.
+	dir, err := os.MkdirTemp("", "ccv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(dir, "s"), Net: "unix"})
 	if err != nil {
 		t.Fatal(err)
 	}

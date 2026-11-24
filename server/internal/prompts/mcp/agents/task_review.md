@@ -2,7 +2,7 @@ accepted closes work after the delivery gate (default delivery_gate=merged: park
 
 For accepted (outcome=done), include each done_when criterion once in checks (met=true, nonblank evidence), even with user_check. outcome=cannot, cancelled and no-criteria tasks are unchanged. Other verdicts can omit checks and keep progress. Report each criterion met/not_met/dropped, then also_done. Judge the scoped brief over handovers or Agent claims.
 
-Give accepted outcome/reason/link. The hub sends conclusion cards and passes verification unless user_check. needs_user can default to recommend at 24h/deadline. Irreversible or visible_to_others only remind. Recheck at 24h. can_wait needs low cost, nobody blocked today and no deadline within 12h. “You decide”, “This isn't what I asked for” and “Tell me the background first” return to supervision. Clarify without repeating or acting irreversibly/externally.
+Give accepted outcome/reason/link. The hub sends conclusion cards and passes verification unless user_check. needs_user can default to recommend at 24h/deadline. Irreversible or visible_to_others only remind. Recheck at 24h. “You decide”, “This isn't what I asked for” and “Tell me the background first” return to supervision. Clarify without repeating or acting irreversibly/externally.
 
 A non-main reviewer of another supervisor's task may only accept/cancel; send gaps via agent_send. A leader's needs_user reaches main too. Cancel only duplicates/unwanted tasks; their Agents close/archive and cards end.{{template "shared/mcp_language" .}}
 
@@ -84,7 +84,7 @@ A non-main reviewer of another supervisor's task may only accept/cancel; send ga
           "leads_to": {"type": "string", "description": "one sentence: what choosing it leads to"}
         }
       },
-      "description": "needs_user (required): 2 to 4 options the user chooses from, the recommended one first"
+      "description": "needs_user (required): 2–4 options, recommended first"
     },
     "cost_of_waiting": {
       "type": "string",
@@ -92,21 +92,25 @@ A non-main reviewer of another supervisor's task may only accept/cancel; send ga
     },
     "question_quote": {
       "type": "string",
-      "description": "needs_user: quote the Agent's original question verbatim if reason paraphrases it, so the hub can check for an existing reply"
+      "description": "needs_user: the Agent's question verbatim when reason paraphrases it (hub checks for an existing reply)"
     },
     "can_wait": {
       "type": "boolean",
-      "description": "needs_user, optional: defer to next daily briefing (no deadline <12h, low cost_of_waiting); no push/card, listed in Needs you. Ignored for irreversible/visible_to_others, deadline <12h, reversible=false, or no briefing with facts due within 24h and >=12h before deadline; default false"
+      "description": "needs_user, optional: defer to next daily briefing (low cost, nobody blocked today, no deadline <12h); no push/card, listed in Needs you. Ignored for irreversible/visible_to_others, deadline <12h, reversible=false, or no briefing with facts due within 24h and >=12h before deadline; default false"
     },
     "deadline": {
       "type": "string",
-      "description": "needs_user, optional: until when the decision waits, a duration (\"4h\", \"90m\") or an RFC 3339 time, 1 minute to 30 days ahead; needs reversible. Default: 24h and reversible, except for why_owner irreversible and visible_to_others, which have none"
+      "description": "needs_user, optional: how long the decision waits, duration (\"4h\") or RFC 3339 time, 1m–30d ahead; needs reversible. Default 24h reversible; none for why_owner irreversible/visible_to_others"
     },
     "also_done": {
       "type": "array",
       "maxItems": 6,
       "items": {"type": "string"},
       "description": "accepted, optional: what was done beyond the task's brief (one line each); the task's page lists it after the criteria"
+    },
+    "withdraw_needs_user": {
+      "type": "boolean",
+      "description": "accepted only, task in needs_user: its supervisor or main takes it back and closes it silently (no card/push)"
     },
     "user_check": {
       "type": "boolean",

@@ -602,6 +602,7 @@ func (n *Node) noteRoundFork(forkID, baseID string) {
 				SupervisionInstructions: st.SupervisionInstructions,
 				FollowsSetting:          st.FollowsSetting,
 				AppMode:                 st.AppMode,
+				AppModeExplicit:         st.AppModeExplicit,
 				AppEffort:               st.AppEffort,
 				StartedAt:               time.Now().UTC(),
 				RoundForkOf:             baseID,

@@ -49,8 +49,8 @@ type Settings struct {
 	WorkspaceRules workspacenaming.Rules `json:"workspace_rules,omitempty"`
 	MachineID      string                `json:"machine_id"`
 	Launcher       string                `json:"launcher"`
-	// DefaultPermissionMode applies only to new non-guest conversations without an explicit mode.
-	// Empty keeps the runtime's existing default; it never changes an existing conversation.
+	// DefaultPermissionMode applies to new non-guest conversations and stopped Claude Code resumes without an explicit mode.
+	// Empty selects the built-in bypassPermissions default; other agents keep legacy resume precedence, and live/explicit modes are unchanged.
 	DefaultPermissionMode string `json:"default_permission_mode,omitempty"`
 	// Timezone is the phone's (IANA name): routines and the snapshot read times in it, and the hub its own.
 	Timezone string `json:"timezone,omitempty"`
@@ -179,7 +179,8 @@ type Settings struct {
 	Leaders []string `json:"leaders,omitempty"`
 	// BriefingWaits tunes only the deterministic wait rows in morning/evening facts: the briefing module's setting
 	// (internal/modules/briefing, Waits), kept here as stored, also while the module is off. Nil uses the module's
-	// defaults (the supervision thresholds); changes go through persona_settings' ordinary owner approval (modules.go).
+	// defaults (the supervision thresholds); changes go through persona_settings' ordinary owner approval (modules.go),
+	// except the administrator's exact reversible-setting switch for this key.
 	BriefingWaits moduleValue `json:"briefing_waits,omitempty"`
 	// InterjectBackground: a message the user sends while a Claude conversation is still answering moves what runs in
 	// the foreground (Bash commands, subagents) to the background, so the message is taken up at once instead of after
@@ -272,12 +273,23 @@ func (s *Service) savedSettings(ctx context.Context) (Settings, bool) {
 
 // updateSettings changes the saved settings with fn (which may refuse) and saves them.
 func (s *Service) updateSettings(ctx context.Context, fn func(*Settings) error) (Settings, error) {
-	return s.updateSettingsSave(ctx, fn, nil)
+	return s.updateSettingsSaveChecked(ctx, fn, nil, nil)
+}
+
+// updateSettingsChecked also checks the freshly read saved state while holding the settings write lock. The automatic
+// reversible-setting path uses it to reject a concurrent edit instead of rebasing its recorded before-image.
+func (s *Service) updateSettingsChecked(ctx context.Context, fn func(*Settings) error, check func(Settings) error) (Settings, error) {
+	return s.updateSettingsSaveChecked(ctx, fn, nil, check)
 }
 
 // updateSettingsSave is updateSettings with an optional atomic writer for state that must change with the settings.
 // The ordinary path still writes only the assistant setting; a custom writer receives the store and complete value.
 func (s *Service) updateSettingsSave(ctx context.Context, fn func(*Settings) error, save func(context.Context, Store, Settings) error) (Settings, error) {
+	return s.updateSettingsSaveChecked(ctx, fn, save, nil)
+}
+
+// updateSettingsSaveChecked composes the optional freshly-read-state check and atomic writer under one settings lock.
+func (s *Service) updateSettingsSaveChecked(ctx context.Context, fn func(*Settings) error, save func(context.Context, Store, Settings) error, check func(Settings) error) (Settings, error) {
 	b := &s.prefs
 	b.change.Lock()
 	defer b.change.Unlock()
@@ -287,6 +299,11 @@ func (s *Service) updateSettingsSave(ctx context.Context, fn func(*Settings) err
 	v, ok := s.savedSettings(ctx)
 	if !ok {
 		return Settings{}, errors.New("the assistant's settings could not be read")
+	}
+	if check != nil {
+		if err := check(v); err != nil {
+			return Settings{}, err
+		}
 	}
 	if err := fn(&v); err != nil {
 		return Settings{}, err
@@ -701,7 +718,6 @@ func (s *Service) leadSessions(ctx context.Context, v Settings) []SessionRef {
 func (s *Service) settingsChanged(ctx context.Context) {
 	s.transcriptionSettingsChanged(ctx) // only another contribution chosen drops the readiness answer
 	s.ProfileChanged(ctx)
-	s.retryOwnerWaits(ctx) // a restored main/conversation can deliver an explicitly pending owner push
 	s.revalidateFailedStartDeferrals(ctx)
 	s.publish(ctx)
 }

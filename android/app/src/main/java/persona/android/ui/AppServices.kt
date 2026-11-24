@@ -1,5 +1,6 @@
 package persona.android.ui
 
+import persona.feature.inbox.forPages
 import persona.android.AppText
 import persona.android.R
 import android.app.Application
@@ -249,7 +250,7 @@ class AppServices @Inject constructor(
         val conversations = RealAssistantRepository(demo.inboxConnection, local.sessions, scope, snapshots, localPreferences)
         mode.edit().putBoolean("demo", true).apply()
         mutableSession.value = ShellSession(demo.hubScope.path, demo, local.sessions, local.chats, local.interactions,
-            messages, conversations, localInbox, AgentsPreferences(listPreferences, localPreferences), demo = demo)
+            messages, conversations, localInbox.forPages(), AgentsPreferences(listPreferences, localPreferences), demo = demo)
         scope.launch { demo.notices.collect { feedback.notice(it) } }
         scope.launch {
             try { awaitCancellation() }

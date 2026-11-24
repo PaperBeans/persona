@@ -66,6 +66,14 @@ const (
 // Older nodes ignore it and retain their default clamp; newer nodes never treat its absence as permission to bypass.
 const InboxPermissionModeParam = "inbox_permission_mode"
 
+// DefaultPermissionModeParam carries the manager's current default separately from an explicit permission_mode.
+// PermissionModeExplicitParam marks the latter as a deliberate per-conversation choice. Older nodes ignore both and
+// retain their legacy resume behavior; newer nodes keep the legacy behavior when an older manager omits them.
+const (
+	DefaultPermissionModeParam  = "default_permission_mode"
+	PermissionModeExplicitParam = "permission_mode_explicit"
+)
+
 // CodeUndeliveredAhead: SendParams refuses the owner's message because older ones to the same conversation are kept
 // undelivered (MethodKeepUndelivered): the hub keeps this one behind them instead of sending it first.
 const CodeUndeliveredAhead = "undelivered_ahead"

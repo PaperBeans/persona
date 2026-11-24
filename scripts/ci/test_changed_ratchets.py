@@ -112,6 +112,19 @@ class CheckTests(RepositoryCase):
         base = self.git("rev-parse", "main")
         self.assertEqual(self.check(), (sleep_ratchet.raised_against({GO: 2}, {GO: 1}, base[:12]), []))
 
+    def test_a_moved_file_keeps_its_entry_and_a_moved_raise_still_fails(self):
+        moved = "server/internal/modules/demo/demo_test.go"
+        (self.repo / moved).parent.mkdir(parents=True)
+        self.git("mv", GO, moved)
+        self.baselines(sleeps={moved: 1})
+        self.commit("moved")
+        self.assertEqual(self.check(), ([], []))
+        self.write(moved, go(2))
+        self.baselines(sleeps={moved: 2})
+        self.commit("moved and raised")
+        base = self.git("rev-parse", "main")
+        self.assertEqual(self.check(), (sleep_ratchet.raised_against({moved: 2}, {moved: 1}, base[:12]), []))
+
     def test_an_entry_lowered_for_a_file_the_change_does_not_touch_is_checked(self):
         self.baselines(sleeps={})
         self.commit("lowered by hand")

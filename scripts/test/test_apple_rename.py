@@ -185,7 +185,8 @@ class AppleRenameTests(unittest.TestCase):
         selection = root.split('private var usesShell: Bool {', 1)[1].split('\n    }', 1)[0]
         self.assertRegex(selection, r'#if os\(visionOS\)[\s\S]*?return false')
         # Active compact width still selects the shell; #2836 holds that width while iOS snapshots the app away.
-        self.assertRegex(selection, r'#elseif os\(iOS\)\s+return \(heldWidthClass \?\? widthClass\) == \.compact \|\| flipped\s+#else\s+return false')
+        # No other platform since the Mac app went (#13611): iOS is the last branch.
+        self.assertRegex(selection, r'#elseif os\(iOS\)\s+return \(heldWidthClass \?\? widthClass\) == \.compact \|\| flipped\s+#endif')
         # The Sidebar layout when it is chosen, at every width (#6332: the drawer on a phone, the column at regular width);
         # otherwise the shell at compact width, else the tabs. Nothing picked is Merged where wide and the shell at compact
         # width (#4206, NavigationLayout.effective).

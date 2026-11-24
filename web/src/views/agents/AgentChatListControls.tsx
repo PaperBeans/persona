@@ -454,7 +454,7 @@ export const AgentChatListRow = memo(function AgentChatListRow({
             </span>
           ) : (
             (line?.lead || previewText) && (
-              <span className="truncate text-[11.5px] leading-4 text-ink-3">
+              <span className="truncate text-submeta leading-4 text-ink-3">
                 {line?.lead && (
                   <span className={cx("mr-1 font-medium", line.tone === "reply" ? "text-green" : "text-attention")}>
                     {line.lead}
@@ -465,7 +465,7 @@ export const AgentChatListRow = memo(function AgentChatListRow({
             )
           )}
 
-          <BackgroundStallHint session={s} className="text-[11px] leading-4" />
+          <BackgroundStallHint session={s} className="text-submeta leading-4" />
 
           {/* Line 3: Compact metadata capsules (Machine · Project · Tab · Harness · Model) */}
           <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[10.5px] leading-4 text-ink-3" data-testid="agent-chatlist-chips">

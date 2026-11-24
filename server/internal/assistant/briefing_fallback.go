@@ -108,7 +108,7 @@ func (s *Service) briefFallbackRun(ctx context.Context, scheduled ScheduleRun, t
 	}
 	cancel()
 
-	if feat, ready := s.feishuFeatures(ctx); ready && feat.Pushes {
+	if feat, ready := s.chat().Features(ctx); ready && feat.Pushes {
 		mirror := &mirrorSend{l: l, cards: cards,
 			target: botTarget{Kind: targetPersona, MachineID: m.ID, SessionID: scheduled.SessionID}, label: run.label,
 			key: "f" + id, sent: func() { s.briefAsked(run.facts, shown) }}

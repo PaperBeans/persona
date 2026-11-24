@@ -20,10 +20,14 @@ import (
 )
 
 // shortAgentStartTimeout makes the start wait and adoption pause expire in milliseconds, not the production bounds.
-func shortAgentStartTimeout(t *testing.T) {
+func shortAgentStartTimeout(t *testing.T) { agentStartTimeoutOf(t, 30*time.Millisecond) }
+
+// agentStartTimeoutOf sets the start wait for one test. A test whose start records its task in Postgres takes a
+// longer one: the task record shares the wait, and on a busy machine 30 ms runs out before the slow start does.
+func agentStartTimeoutOf(t *testing.T, d time.Duration) {
 	t.Helper()
 	oldTimeout, oldRetry := agentStartTimeout, agentStartAdoptRetry
-	agentStartTimeout, agentStartAdoptRetry = 30*time.Millisecond, 5*time.Millisecond
+	agentStartTimeout, agentStartAdoptRetry = d, 5*time.Millisecond
 	t.Cleanup(func() { agentStartTimeout, agentStartAdoptRetry = oldTimeout, oldRetry })
 }
 
@@ -1125,7 +1129,10 @@ func TestAgentStartDefiniteFailuresStayErrors(t *testing.T) {
 // definite failure. This is the release-side control for the detached failure write above.
 func TestAgentStartCallerCancellationKeepsUnknownResultNeutral(t *testing.T) {
 	s, f := newQuietServiceOn(t, todoTestDB(t))
-	shortAgentStartTimeout(t)
+	// The bound running out is what makes the start unknown here (the fake never answers, and the detached start
+	// outlives the caller's cancel). It also covers the reads before the node is asked, the model configuration from
+	// Postgres among them: one second was not always enough for those on a loaded machine (#14159).
+	agentStartTimeoutOf(t, 3*time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	f.slowStart = true
 	f.onStart = func(*fakeHub, map[string]any) { cancel() }

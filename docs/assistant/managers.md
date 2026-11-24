@@ -348,9 +348,34 @@ On an upgraded install the manager's `secret.key` began as the same bytes as the
 
 ## Automatic updates for an independent manager
 
-An independent manager's executable is separate from the Hub and the node. Updating either
-of those does not update that manager. Older `manager run` processes have no update command
-or RPC. Their first update is driven externally by the existing release publisher, executing
+An independent assistant runs its own manager executable and deploys the node programs
+on the computers it owns. Each installation confirms its own update.
+
+### Following a Web development commit
+
+When a Linux or macOS Hub with a built-in child assistant confirms a Web development
+update, it sends capable independent managers the confirmed commit, version and build.
+A pending candidate and a failed Hub update never become manager update targets.
+
+The manager authenticates to the Hub, requests a package for its own platform and
+verifies the archive and executable hashes. If the manifest lacks that platform,
+the manager can use Git and Go on its host to build the same detached commit from the
+canonical Persona repository. The program must match the target's version, commit and
+build. Missing tools or failed verification leave the running manager in place.
+
+The manager waits until it is idle to replace its program and keeps its previous
+executable through startup. If the new manager fails to start, recovery restores the
+previous program. The manager also obtains packages for the computers it owns and reports
+each deployment separately. See [Node packages](../operations/node-update.md#node-packages).
+
+A remote assistant with its own storage can keep running during the Hub's backup. Another
+manager installed under the Hub's runtime, or extra databases or data roots in that backup,
+requires a pair of local quiesce and resume hooks. See [Web development updates](../operations/hub-update.md#web-development-updates).
+
+### Release bootstrap for older managers
+
+Older `manager run` processes have no update command or RPC. Their first update is
+driven externally by the existing release publisher, executing
 the **new, same-source release artifact** as `personad manager update`. It does not ask the
 old process to execute a new command, reinstall or join again.
 

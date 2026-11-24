@@ -156,13 +156,18 @@ struct SidebarWaitingBadge: View {
 /// replacing what was there (as the web's routes). In the other layouts Health is presented by flag, as before.
 enum SidebarRoute: Hashable, Sendable {
     case health, messages
+    /// A domain space's home and the new space form (#13500), drawn as Health's page is.
+    case space(String), newSpace
+
+    /// The id of the module shell page that draws `.health` (the `health` module's, `ModuleSlot.shellPlaces`).
+    static let healthPage = "health"
 }
 
 extension ShellPage {
     /// A place the sidebar lists, its row shaded while it is beside the sidebar.
     var isSidebarPlace: Bool {
         switch self {
-        case .inbox, .todos, .routines, .knowledge, .machines, .health, .recordings, .extensionPage, .messages: true
+        case .inbox, .todos, .routines, .knowledge, .machines, .health, .recordings, .extensionPage, .messages, .space, .newSpace: true
         #if os(iOS)
         case .starred: true
         #endif
@@ -248,6 +253,8 @@ struct UnifiedSidebarColumn<Agents: View>: View {
                          onMachines: { show(.machines) },
                          onOpenExtension: { show(.extensionPage($0)) },
                          openHealth: { show(.health) },
+                         openSpace: { show(.space($0)) },
+                         openNewSpace: { show(.newSpace) },
                          openRecordingsPage: { show(.recordings) },
                          openMessages: LarkHomePreference.shared.shows ? { show(.messages) } : nil,
                          openStarred: { show(.starred) },

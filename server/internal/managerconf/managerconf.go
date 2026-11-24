@@ -41,7 +41,7 @@ var Moved = []string{
 	"extensions", "plugins", "trusted_extension_markets", "extension_market", "extension_runtime", "ui_page_sessions", "usage", "sent_ledger_days", "sent_recall_hours",
 	"agents", "kb", "ai", "inbox", "hook_timeout_minutes",
 	"assistant.owner", "assistant.notes", "assistant.machine", "assistant.launcher", "assistant.memory_dreaming",
-	"assistant.complete_agentless_todos", "assistant.supervision_batch_minutes",
+	"assistant.complete_agentless_todos", "assistant.auto_approve_reversible_settings", "assistant.supervision_batch_minutes",
 	"assistant.task_execution_wait_seconds", "assistant.task_execution_legacy_fallback", "assistant.node_update_handoff_grace_seconds",
 }
 

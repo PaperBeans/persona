@@ -11,8 +11,9 @@ import (
 )
 
 // Recorded from the unlocalized upstream tool inventory, including task_plan
-// ownership (#13362) and agent_supervise leader adoption (#13357). This covers the description and
-// schema of every tool, not only a representative golden.
+// ownership (#13362), agent_supervise leader adoption (#13357), and default
+// cross-machine/cross-harness A2A subagent launches (#14215). This covers the
+// description and schema of every tool, not only a representative golden.
 func TestMCPLegacyBytes(t *testing.T) {
 	raw, err := os.ReadFile("testdata/mcp_legacy.json")
 	if err != nil {
@@ -23,7 +24,7 @@ func TestMCPLegacyBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Unified-ledger tools were introduced after the frozen legacy inventory.
-	newTools := []string{"decision_record", "decisions_query", "space_state_update", "lark_image"}
+	newTools := []string{"decision_record", "decisions_query", "space_state_update", "lark_image", "conversations_switch"}
 	for _, name := range newTools {
 		if _, exists := expected[name]; exists {
 			t.Fatalf("%s is not a legacy tool", name)

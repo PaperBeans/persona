@@ -328,9 +328,8 @@ func (p *Pusher) noteKeyPushedLocked(key string, now time.Time) {
 // URL form. Opaque keys all have an empty destination and do not split the existing same-minute conclusion merge.
 func relatedDestination(key string) string {
 	key = strings.TrimSpace(key)
-	if id, ok := strings.CutPrefix(key, "todo:"); ok {
-		id, _, _ = strings.Cut(id, "@")
-		if id = strings.TrimSpace(id); id != "" {
+	if strings.HasPrefix(key, "todo:") { // todo:<id>, the legacy todo:<id>@<round> and todo:<id>:<reason>
+		if id := assistantwire.RelatedTodoID(key); id != "" {
 			return "todo:" + id
 		}
 	}

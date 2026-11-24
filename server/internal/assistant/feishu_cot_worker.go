@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -15,7 +15,7 @@ import (
 // of ticks. A terminal snapshot supersedes progress and cancels its in-flight I/O.
 type cotFallback struct {
 	message string
-	card    *feishubot.Card
+	card    *botcard.Card
 }
 
 type cotWorker struct {

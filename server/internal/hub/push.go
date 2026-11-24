@@ -39,6 +39,10 @@ type Pusher struct {
 	direct *apns.Client
 	// relay posts to the devices' relays over connections kept between pushes (apns.NewTransport, #4800).
 	relay *http.Client
+	// privateOnly is office network mode (private_network.go): no relay is ever posted to, the hub's own key pushes only
+	// sealed payloads with the relay's content-free envelope (sealedDirect), and Live Activities, which iOS reads in the
+	// clear, are not pushed.
+	privateOnly bool
 	// retryWaits: how long a push the relay did not take for a reason that may pass waits before each further try
 	// (postRelayRetrying); tests shorten them.
 	retryWaits []time.Duration
@@ -81,7 +85,9 @@ type Pusher struct {
 	acceptedDirty map[string]bool
 	// withdrawals: where each card's push went, to take it back when the card is over (push_withdraw.go).
 	withdrawals withdrawals
-	saveMu      sync.Mutex // one device row write at a time, always the latest state (register, setPrefsBy, renewal, forget, maintenance)
+	// todoPushes: when each to-do's push to the owner about one reason last rang (push_todo_dedup.go).
+	todoPushes todoPushBook
+	saveMu     sync.Mutex // one device row write at a time, always the latest state (register, setPrefsBy, renewal, forget, maintenance)
 	// storeTimeout bounds each device row write, which never runs under mu; tests shorten it.
 	storeTimeout time.Duration
 	// prefsEdit holds one change of a device's settings from its read to its write (editPrefs); taken before saveMu
@@ -266,7 +272,7 @@ func (p *Pusher) writeDeviceIn(parent context.Context, d Device) error {
 
 // relayed: this device can be pushed through its relay (the hub has no key of its own).
 func (p *Pusher) relayed(d Device) bool {
-	return p.direct == nil && d.RelayURL != "" && d.RelayGrant != "" && d.PushKey != ""
+	return !p.privateOnly && p.direct == nil && d.RelayURL != "" && d.RelayGrant != "" && d.PushKey != ""
 }
 
 // reachable: a push to this device can go anywhere.

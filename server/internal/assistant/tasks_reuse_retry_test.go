@@ -144,7 +144,7 @@ func TestDirectionTodoFailedStartRetriesCurrentAssignment(t *testing.T) {
 }
 
 func TestDirectionTodoWithoutAssignmentStaysNotRetryable(t *testing.T) {
-	shortTaskStartReconcile(t)
+	shortTaskStartAdopt(t)
 	for _, backend := range []string{"memory", "database"} {
 		t.Run(backend, func(t *testing.T) {
 			var store Store
@@ -210,7 +210,7 @@ func TestDirectionTodoWithoutAssignmentStaysNotRetryable(t *testing.T) {
 // Two started plans binding the same plan-less to-do is ambiguous: every retry and remedy entry fails closed instead
 // of guessing which plan owns it, the same guarantee continuation to-dos already had (#8770).
 func TestDirectionTodoAmbiguousAssignmentStaysNotRetryable(t *testing.T) {
-	shortTaskStartReconcile(t)
+	shortTaskStartAdopt(t)
 	for _, backend := range []string{"memory", "database"} {
 		t.Run(backend, func(t *testing.T) {
 			var store Store

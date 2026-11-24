@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/db"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
@@ -213,14 +213,14 @@ func TestInboxAndThreadAndPrereqSignalsWakeDuringNeedsUser(t *testing.T) {
 		}
 		beforeNotices := len(f.notices())
 
-		ev := feishubot.MessageEvent{}
+		ev := botcard.MessageEvent{}
 		ev.Sender.SenderType = "user"
 		ev.Sender.SenderID.OpenID = "ou_me"
 		ev.Message.MessageID = "om_reply_1"
 		ev.Message.ChatID = "oc_group1"
 		ev.Message.ThreadID = "omt_thread1"
 		st := FeishuStatus{Ready: true, Enabled: true, Owner: "ou_me", Features: FeishuFeatures{Main: true, Cards: true, Reports: true}}
-		s.threadMessage(ctx, ev, st, feishubot.Content{Text: "Go ahead after QA signs off"})
+		s.threadMessage(ctx, ev, st, botcard.Content{Text: "Go ahead after QA signs off"})
 
 		waitFor(t, "thread external info wake", func() bool {
 			for _, n := range f.notices()[beforeNotices:] {

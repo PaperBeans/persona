@@ -4,7 +4,7 @@
 import { useSidebarUsageShown } from "../lib/sidebar-usage";
 import { type ComponentType, useEffect, useRef, useState } from "react";
 import { t as tr } from "../i18n";
-import { fullest, isWarn, liveAccounts, selectSidebarUsageAccounts, sourceNames, usePinnedUsageAccounts, useUsageWindows, type UnconnectedProvider, type UsageAccount } from "../lib/usage-windows";
+import { fullest, isBalanceAccount, isWarn, liveAccounts, selectSidebarUsageAccounts, sourceNames, usePinnedUsageAccounts, useUsageWindows, type UnconnectedProvider, type UsageAccount } from "../lib/usage-windows";
 import { cx } from "../ui/atoms";
 import { lazyOverlay } from "./LazyOverlay";
 
@@ -18,12 +18,28 @@ const fill = (p: number) => (isWarn(p) ? "bg-orange" : "bg-accent");
 const ROW_NAME = "min-w-0 flex-1 truncate text-submeta text-ink-3";
 const ROW_VALUE = "shrink-0 text-submeta tabular-nums";
 
-/** A bar: the track, the used part (caution colour from 80%) and, with `expected`, a tick where an even pace would be. */
-export function Meter({ used, expected, protect, label, tall }: { used: number; expected?: number; protect?: number; label: string; tall?: boolean }) {
+/** A bar: the track, the used part (caution colour from 80%, or a caller-chosen tier class) and, with `expected`, a 1px tick where an even pace would be. */
+export function Meter({
+  used,
+  expected,
+  protect,
+  label,
+  tall,
+  barClass,
+  reserveTop = true,
+}: {
+  used: number;
+  expected?: number;
+  protect?: number;
+  label: string;
+  tall?: boolean;
+  barClass?: string;
+  reserveTop?: boolean;
+}) {
   const hasProtect = typeof protect === "number" && Number.isFinite(protect) && protect >= 0 && protect <= 100;
   return (
-    <div role="progressbar" aria-label={hasProtect ? `${label}, ${tr("usage.protect_label", { percent: Math.round(protect) })}` : label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent(used))} className={cx("relative w-full rounded-full bg-inset", tall ? "h-1.5" : "h-1", hasProtect && "mt-3.5")}>
-      <div className={cx("h-full rounded-full transition-[width] duration-300", fill(used))} style={{ width: `${percent(used)}%` }} />
+    <div role="progressbar" aria-label={hasProtect ? `${label}, ${tr("usage.protect_label", { percent: Math.round(protect) })}` : label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent(used))} className={cx("relative w-full rounded-full bg-inset", tall ? "h-1.5" : "h-1", hasProtect && reserveTop && "mt-3.5")}>
+      <div className={cx("h-full rounded-full transition-[width] duration-300", barClass ?? fill(used))} style={{ width: `${percent(used)}%` }} />
       {hasProtect && (
         <>
           <span aria-hidden data-protect-zone className="absolute inset-y-0 right-0 rounded-r-full" style={{ left: `${percent(protect)}%`, backgroundImage: "repeating-linear-gradient(135deg, transparent 0 2px, color-mix(in srgb, var(--orange) 45%, transparent) 2px 3px)" }} />
@@ -33,7 +49,7 @@ export function Meter({ used, expected, protect, label, tall }: { used: number; 
           </span>
         </>
       )}
-      {expected !== undefined && <span aria-hidden data-pace-tick className="absolute -top-0.5 -bottom-0.5 w-0.5 -translate-x-1/2 rounded-full bg-ink-2" style={{ left: `${percent(expected)}%` }} />}
+      {expected !== undefined && <span aria-hidden data-pace-tick className="absolute -top-0.5 -bottom-0.5 w-px -translate-x-1/2 rounded-full bg-ink-3" style={{ left: `${percent(expected)}%` }} />}
     </div>
   );
 }
@@ -47,6 +63,7 @@ export function UsageBars({ accounts, unconnected = EMPTY_UNCONNECTED, now = Dat
   const pinnedIds = usePinnedUsageAccounts();
   const live = liveAccounts(accounts, now);
   const { bars: top, balances } = selectSidebarUsageAccounts(live, pinnedIds);
+  const notices = !top.length && !balances.length ? live.filter((a) => !isBalanceAccount(a) && a.windows.length === 0 && Boolean(a.notice?.trim() || a.headline?.trim())).slice(0, 2) : [];
 
   useEffect(() => {
     if (!open) return;
@@ -62,7 +79,7 @@ export function UsageBars({ accounts, unconnected = EMPTY_UNCONNECTED, now = Dat
     };
   }, [open]);
 
-  if (!top.length && !balances.length && !unconnected.length) return null;
+  if (!top.length && !balances.length && !notices.length && !unconnected.length) return null;
   return (
     <div ref={ref} className="relative shrink-0 px-2.5 pb-2.5 pt-1" data-usage-bars>
       {open && <UsagePopover accounts={live} unconnected={unconnected} onClose={() => setOpen(false)} />}
@@ -90,6 +107,12 @@ export function UsageBars({ accounts, unconnected = EMPTY_UNCONNECTED, now = Dat
         })}
         {balances.map((a) => (
           <BalanceRow key={a.id} a={a} />
+        ))}
+        {notices.map((a) => (
+          <span key={a.id} data-usage-notice-strip={a.id} className={cx("flex items-baseline gap-2", a.stale && "opacity-60")}>
+            <span className={ROW_NAME}>{a.name}</span>
+            <span className="min-w-0 max-w-[55%] truncate text-submeta text-ink-3">{a.notice?.trim() || a.headline?.trim()}</span>
+          </span>
         ))}
         {unconnected.slice(0, Math.max(1, 4 - top.length)).map((p) => (
           <span key={`_${p.id}`} data-usage-unconnected={p.id} className="flex items-baseline gap-2 text-xs text-ink-3">

@@ -488,7 +488,10 @@ type agyWatch struct {
 	stepHashes                  map[int][32]byte
 }
 
-type agyPaneFiles struct{ transcript, full, receipts os.FileInfo }
+type agyPaneFiles struct {
+	source                  string
+	primary, full, receipts os.FileInfo
+}
 
 func sameAgyFile(a, b os.FileInfo) bool {
 	if a == nil || b == nil {
@@ -501,37 +504,48 @@ func agyStepsHistory(conversation string) agyHistory {
 	return agyHistory{token: "agy-pane:" + conversation + ":steps:context-resources-v1:lazy-media:checkpoints:wakes:file-links:full-text"}
 }
 
-// agyRead projects the compact export for pages and live updates, filling in
-// verified text from the full export before deciding whether history changed.
+// agyRead projects the compact export when present, filling in verified text
+// from the full export. A full-only export has its own cursor and revision cache.
 func (n *Node) agyRead(root *os.Root, key, conversation string, previous *agyPaneFiles) (agyHistory, *agyPaneFiles, error) {
 	empty := agyStepsHistory(conversation)
-	info, err := root.Stat(agyTranscriptPath)
+	source := agyTranscriptPath
+	info, err := root.Stat(source)
+	fullFile, fullErr := root.Lstat(agyFullTranscriptPath)
+	if errors.Is(err, os.ErrNotExist) {
+		source = agyFullTranscriptPath
+		info, err = fullFile, fullErr
+		fullFile = nil
+		empty.token += ":full-export"
+		key = filepath.Join(key, source)
+	}
 	if err != nil {
 		return empty, nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return empty, nil, os.ErrNotExist
+		return empty, nil, fmt.Errorf("%s is not a regular file", filepath.Base(source))
 	}
 	receiptsFile, _ := root.Lstat(agyWakeReceipts)
 	if receiptsFile != nil && !receiptsFile.Mode().IsRegular() {
 		receiptsFile = nil
 	}
-	fullFile, _ := root.Lstat(agyFullTranscriptPath)
 	if fullFile != nil && !fullFile.Mode().IsRegular() {
 		fullFile = nil
 	}
 	fullUnsettled := fullFile != nil && time.Since(fullFile.ModTime()) <= time.Second
-	files := &agyPaneFiles{transcript: info, full: fullFile, receipts: receiptsFile}
-	if previous != nil && sameAgyFile(info, previous.transcript) && sameAgyFile(fullFile, previous.full) &&
+	files := &agyPaneFiles{source: source, primary: info, full: fullFile, receipts: receiptsFile}
+	if previous != nil && previous.source == source && sameAgyFile(info, previous.primary) && sameAgyFile(fullFile, previous.full) &&
 		sameAgyFile(receiptsFile, previous.receipts) && time.Since(info.ModTime()) > time.Second && !fullUnsettled {
 		return agyHistory{}, files, nil
 	}
-	raw, err := root.ReadFile(agyTranscriptPath)
+	raw, err := root.ReadFile(source)
 	if err != nil {
 		return empty, nil, err
 	}
 	raw = raw[:bytes.LastIndexByte(raw, '\n')+1]
 	steps, rev := parseAgySteps(raw, conversation)
+	if !slices.ContainsFunc(steps, func(step agyStep) bool { return step.Type != "" }) && len(bytes.TrimSpace(raw)) != 0 {
+		return empty, nil, errors.New("unrecognized Antigravity transcript format")
+	}
 	if fullFile != nil && slices.ContainsFunc(steps, agyNeedsFullText) {
 		full, err := n.agyFullSteps(root, key, conversation, fullFile, fullUnsettled)
 		if err != nil {

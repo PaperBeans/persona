@@ -16,6 +16,8 @@
     "build": "tsc -b && vite build && vite build --config vite.public.config.ts",
     "prebuild:development": "npm run check:privacy && npm run pake:build",
     "build:development": "tsc -b && vite build --mode development-update && vite build --config vite.public.config.ts",
+    "build:core-only": "PERSONA_WEB_MODULES=none vite build --outDir node_modules/.cache/persona-core-only --emptyOutDir",
+    "test:core-only": "PERSONA_WEB_MODULES=none node scripts/process-group.mjs -- node scripts/run-tests.mjs",
     "build:public": "vite build --config vite.public.config.ts",
     "dev:public": "vite --config vite.public.config.ts",
     "typecheck": "tsc -b",

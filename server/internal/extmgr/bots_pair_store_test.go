@@ -95,6 +95,7 @@ func pairStored(t *testing.T, st *pairWriteStore) FeishuBotSettings {
 // A name is optional enrichment after the owner/code commit. Its failure cannot
 // undo the durable owner or leave a name that a restart would forget.
 func TestBotPairStoreNameFailureKeepsCommittedOwner(t *testing.T) {
+	needsLarkModule(t)
 	w, st, seed := pairStoreWorld(t)
 	w.h.opts.AssistantEvent = nil
 	st.failAt = 2
@@ -127,6 +128,7 @@ func TestBotPairStoreNameFailureKeepsCommittedOwner(t *testing.T) {
 // If only the first write fails, the later name write must never persist the
 // owner that the redemption failed to commit.
 func TestBotPairStoreFirstWriteFailureStopsBeforeEnrichment(t *testing.T) {
+	needsLarkModule(t)
 	w, st, seed := pairStoreWorld(t)
 	st.failAt = 1
 	pairStoreEvent(t, w, "om_first_write_failure", "ou_pair_owner", seed.Pairing.Code)
@@ -145,6 +147,7 @@ func TestBotPairStoreFirstWriteFailureStopsBeforeEnrichment(t *testing.T) {
 }
 
 func TestBotPairStoreWrongCodeFailureKeepsAttempts(t *testing.T) {
+	needsLarkModule(t)
 	for _, fails := range []int{0, botPairTries - 1} {
 		t.Run(string(rune('0'+fails)), func(t *testing.T) {
 			w, st, seed := pairStoreWorld(t)
@@ -187,6 +190,7 @@ func TestBotPairStoreWrongCodeFailureKeepsAttempts(t *testing.T) {
 }
 
 func TestBotPairStoreFailureKeepsCodeAndCanRetry(t *testing.T) {
+	needsLarkModule(t)
 	for _, lang := range []i18n.Lang{"en", "zh-Hans", "ja"} {
 		for _, offline := range []bool{false, true} {
 			name := string(lang) + "/assistant"

@@ -148,6 +148,7 @@ assistant.ask        GET /api/v1/assistant
 -                    GET /api/v1/assistant/calls/{id}
 assistant.ask        GET /api/v1/assistant/capabilities
 -                    GET /api/v1/assistant/captures
+-                    GET /api/v1/assistant/conversation-switches/{batch}
 -                    GET /api/v1/assistant/conversations/{id}/always
 -                    GET /api/v1/assistant/conversations/{id}/categories
 assistant.ask        GET /api/v1/assistant/conversations/{id}/feed
@@ -384,6 +385,7 @@ agents.read          GET /api/v1/sessions/{mid}/{sid}/screen
 -                    GET /api/v1/task-trust
 todos.read           GET /api/v1/todos
 todos.read           GET /api/v1/todos/places
+-                    GET /api/v1/todos/revision
 todos.read           GET /api/v1/todos/{id}
 -                    GET /api/v1/todos/{id}/backend-workspace
 -                    GET /api/v1/todos/{id}/backend-workspace/operations/{operation_id}
@@ -409,6 +411,7 @@ agents.read          GET /api/v1/workspaces
 -                    GET {base}/market-settings
 -                    GET {base}/markets
 -                    GET {bus.Path}
+-                    GET {devicewire.DevelopmentPackagesPath}/{commit}/{version}/{file}
 -                    GET {devicewire.RelayPath}
 -                    GET {link.Path}
 -                    GET {link.StreamPath}
@@ -457,6 +460,7 @@ agents.control       POST /api/v1/agents/sessions/{id}/read
 -                    POST /api/v1/assistant/agents/{mid}/{sid}/supervisor
 -                    POST /api/v1/assistant/calls/{id}/state
 -                    POST /api/v1/assistant/captures
+-                    POST /api/v1/assistant/conversation-switches
 assistant.ask        POST /api/v1/assistant/conversations
 -                    POST /api/v1/assistant/conversations/{id}/archive
 -                    POST /api/v1/assistant/conversations/{id}/compact
@@ -480,6 +484,7 @@ leaders.write        POST /api/v1/assistant/directions/{id}/progress
 -                    POST /api/v1/assistant/feishu/workbench
 -                    POST /api/v1/assistant/followups/{id}/run
 -                    POST /api/v1/assistant/health/intake
+-                    POST /api/v1/assistant/health/intake/import
 -                    POST /api/v1/assistant/health/intake/ui
 -                    POST /api/v1/assistant/health/water/reminder
 -                    POST /api/v1/assistant/health/workouts

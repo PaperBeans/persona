@@ -415,6 +415,10 @@ func (n *Node) assistantCompactionSettings(id, cwd, settings string, c assistant
 	}
 	if c.cacheProxyBase != "" {
 		env["ANTHROPIC_BASE_URL"] = c.cacheProxyBase
+		// The refresh replays only requests that declare a one-hour cache (cachewarm.Replay). Claude Code declares
+		// one only for a subscriber or with this switch; on an API key or a gateway it sends a bare five-minute
+		// ephemeral marker, so nothing was ever retained to refresh.
+		env[promptCaching1hEnv] = "1"
 	}
 	s["env"] = env
 

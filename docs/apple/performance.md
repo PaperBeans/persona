@@ -647,7 +647,7 @@ Grep counts are across `apple/` without tests; they are leads to read, not each 
 
 - `apple/Persona/App/AppModel.swift:277`: `assistantCurrent` writes UserDefaults on every set, even when the value did not change; `apple/Persona/App/AppModel.swift:229` writes `dev.openChat` on every chat open. Each write recomputes every `@AppStorage` view (49 remain, most in `apple/Persona/Views/Session/SessionPanes.swift` and `apple/Persona/Views/Session/Terminal/TerminalExtras.swift`).
 - `apple/PersonaWatch/PersonaWatchApp.swift:196`: the watch writes its whole seen-card list to UserDefaults on each refresh that finds new cards.
-- `apple/Persona/Views/Machines/ScreenCredentials.swift:36`: a keychain read on the main actor when Screen Sharing opens (once per tap; minor).
+- `apple/Modules/ScreenShare/ScreenCredentials.swift:33`: a keychain read on the main actor when Screen Sharing opens (once per tap; minor).
 
 **P3: `@State` initial values**
 

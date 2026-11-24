@@ -373,7 +373,7 @@ func noticeAsk(ix proto.Interaction) string {
 			}
 			b.WriteByte('\n')
 		}
-	case terminalQuestion(ix):
+	case supervisedScreen(ix):
 		if title := clip(oneLine(ix.SessionTitle), 70); title != "" {
 			b.WriteString(title + " · ")
 		}

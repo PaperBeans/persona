@@ -5,8 +5,11 @@
 package kernel
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"sync"
 
@@ -41,9 +44,12 @@ func Builtin() []modapi.Module {
 // served are the manifest slots this host serves: a module that declares any other slot is not loaded, so nothing
 // it expects goes missing quietly. The rest of modapi.Info is declared but not yet served.
 func served(info modapi.Info) error {
-	unserved := map[string][]string{"hub_routes": info.HubRoutes, "mcp_tools": info.MCPTools, "prompt_sections": info.PromptSections,
+	if info.Feature != "" && info.Feature != "module."+info.ID {
+		return fmt.Errorf("feature %q must name its own module as %q", info.Feature, "module."+info.ID)
+	}
+	unserved := map[string][]string{"prompt_sections": info.PromptSections,
 		"shell_places": info.ShellPlaces, "chat_card_kinds": info.ChatCardKinds, "composer_actions": info.ComposerActions,
-		"chat_accessories": info.ChatAccessories, "background_jobs": info.BackgroundJobs, "db_migrations": info.DBMigrations,
+		"chat_accessories": info.ChatAccessories, "db_migrations": info.DBMigrations,
 		"i18n_namespaces": info.I18nNamespaces, "node_programs": info.NodePrograms, "channel_kinds": info.ChannelKinds,
 		"frame_handlers": info.FrameHandlers, "push_categories": info.PushCategories}
 	var names []string
@@ -51,9 +57,6 @@ func served(info modapi.Info) error {
 		if len(list) > 0 {
 			names = append(names, name)
 		}
-	}
-	if info.Feature != "" {
-		names = append(names, "feature")
 	}
 	for _, s := range info.Schedules {
 		if s != modapi.ScheduleFactsName {
@@ -69,10 +72,26 @@ func served(info modapi.Info) error {
 
 // Kernel is the loaded modules and what they added.
 type Kernel struct {
-	loaded   []modapi.Info
-	skipped  map[string]string // id → why it is not loaded
-	settings map[string]modapi.Setting
-	facts    *modapi.ScheduleFacts
+	loaded     []modapi.Info
+	skipped    map[string]string // id → why it is not loaded
+	settings   map[string]modapi.Setting
+	facts      *modapi.ScheduleFacts
+	routes     map[string]http.HandlerFunc
+	routeOrder []string
+	tools      map[string]modapi.MCPTool
+	toolOrder  []string
+	jobs       map[string]modapi.BackgroundJob
+	jobOrder   []string
+	check      func(routes, tools []string) error
+}
+
+// LoadOptions are the host's load-time rules beyond the module contract.
+type LoadOptions struct {
+	Off  func(id string) bool
+	Logf func(format string, args ...any)
+	// Check validates and reserves one module's route and tool names against the host's core and previously accepted
+	// modules. It runs in load order after every kernel check; a nil result commits the module without further errors.
+	Check func(routes, tools []string) error
 }
 
 // New loads mods, leaving out those off says are switched off (off may be nil), those written for another API or
@@ -81,10 +100,16 @@ type Kernel struct {
 // the modules it needs, and after those it wants that load; otherwise list order holds. An id listed again is
 // ignored after its first entry. logf may be nil.
 func New(mods []modapi.Module, off func(id string) bool, logf func(format string, args ...any)) *Kernel {
+	return NewWithOptions(mods, LoadOptions{Off: off, Logf: logf})
+}
+
+// NewWithOptions is New with the host's core-namespace checks.
+func NewWithOptions(mods []modapi.Module, o LoadOptions) *Kernel {
+	off, logf := o.Off, o.Logf
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	k := &Kernel{skipped: map[string]string{}, settings: map[string]modapi.Setting{}}
+	k := &Kernel{skipped: map[string]string{}, settings: map[string]modapi.Setting{}, routes: map[string]http.HandlerFunc{}, tools: map[string]modapi.MCPTool{}, jobs: map[string]modapi.BackgroundJob{}, check: o.Check}
 	skip := func(id, why string) {
 		k.skipped[id] = why
 		if why != "switched off" {
@@ -155,7 +180,7 @@ func New(mods []modapi.Module, off func(id string) bool, logf func(format string
 		}
 		c := pending[next]
 		pending = slices.Delete(pending, next, next+1)
-		h := &host{info: c.info, settings: map[string]modapi.Setting{}, logf: logf}
+		h := &host{info: c.info, settings: map[string]modapi.Setting{}, routes: map[string]http.HandlerFunc{}, tools: map[string]modapi.MCPTool{}, jobs: map[string]modapi.BackgroundJob{}, logf: logf}
 		if err := c.m.Register(h); err != nil {
 			skip(c.info.ID, "register: "+err.Error())
 			continue
@@ -179,12 +204,44 @@ func (k *Kernel) take(h *host) error {
 	if h.facts != nil && k.facts != nil {
 		return errors.New("another module gives the routine facts")
 	}
+	for pattern := range h.routes {
+		if _, ok := k.routes[pattern]; ok {
+			return fmt.Errorf("route %s is another module's", pattern)
+		}
+	}
+	for name := range h.tools {
+		if _, ok := k.tools[name]; ok {
+			return fmt.Errorf("tool %s is another module's", name)
+		}
+	}
+	for name := range h.jobs {
+		if _, ok := k.jobs[name]; ok {
+			return fmt.Errorf("background job %s is another module's", name)
+		}
+	}
+	if k.check != nil {
+		if err := k.check(h.routeOrder, h.toolOrder); err != nil {
+			return err
+		}
+	}
 	for key, s := range h.settings {
 		k.settings[key] = s
 	}
 	if h.facts != nil {
 		k.facts = h.facts
 	}
+	for pattern, handler := range h.routes {
+		k.routes[pattern] = handler
+	}
+	k.routeOrder = append(k.routeOrder, h.routeOrder...)
+	for name, tool := range h.tools {
+		k.tools[name] = tool
+	}
+	k.toolOrder = append(k.toolOrder, h.toolOrder...)
+	for name, job := range h.jobs {
+		k.jobs[name] = job
+	}
+	k.jobOrder = append(k.jobOrder, h.jobOrder...)
 	return nil
 }
 
@@ -226,12 +283,68 @@ func (k *Kernel) ScheduleFacts() (modapi.ScheduleFacts, bool) {
 	return *k.facts, true
 }
 
+// HubRoutes are the loaded modules' route patterns in registration order.
+func (k *Kernel) HubRoutes() []string {
+	if k == nil {
+		return nil
+	}
+	return slices.Clone(k.routeOrder)
+}
+
+// HubRoute is a loaded module's handler for pattern.
+func (k *Kernel) HubRoute(pattern string) (http.HandlerFunc, bool) {
+	if k == nil {
+		return nil, false
+	}
+	handler, ok := k.routes[pattern]
+	return handler, ok
+}
+
+// MCPTools are the loaded modules' tools in registration order.
+func (k *Kernel) MCPTools() []modapi.MCPTool {
+	if k == nil {
+		return nil
+	}
+	out := make([]modapi.MCPTool, 0, len(k.toolOrder))
+	for _, name := range k.toolOrder {
+		out = append(out, k.tools[name])
+	}
+	return out
+}
+
+// MCPTool is a loaded module's tool by name.
+func (k *Kernel) MCPTool(name string) (modapi.MCPTool, bool) {
+	if k == nil {
+		return modapi.MCPTool{}, false
+	}
+	tool, ok := k.tools[name]
+	return tool, ok
+}
+
+// BackgroundJobs are the loaded modules' loops in registration order.
+func (k *Kernel) BackgroundJobs() []modapi.BackgroundJob {
+	if k == nil {
+		return nil
+	}
+	out := make([]modapi.BackgroundJob, 0, len(k.jobOrder))
+	for _, name := range k.jobOrder {
+		out = append(out, k.jobs[name])
+	}
+	return out
+}
+
 // host is modapi.Host for one module while it registers: it takes only what the module's manifest declares.
 type host struct {
-	info     modapi.Info
-	settings map[string]modapi.Setting
-	facts    *modapi.ScheduleFacts
-	logf     func(format string, args ...any)
+	info       modapi.Info
+	settings   map[string]modapi.Setting
+	facts      *modapi.ScheduleFacts
+	routes     map[string]http.HandlerFunc
+	routeOrder []string
+	tools      map[string]modapi.MCPTool
+	toolOrder  []string
+	jobs       map[string]modapi.BackgroundJob
+	jobOrder   []string
+	logf       func(format string, args ...any)
 }
 
 func (h *host) Logf(format string, args ...any) { h.logf(h.info.ID+": "+format, args...) }
@@ -262,5 +375,50 @@ func (h *host) AddScheduleFacts(f modapi.ScheduleFacts) error {
 		return errors.New("schedule facts added twice")
 	}
 	h.facts = &f
+	return nil
+}
+
+func (h *host) AddHubRoute(pattern string, handler http.HandlerFunc) error {
+	switch {
+	case !slices.Contains(h.info.HubRoutes, pattern):
+		return fmt.Errorf("route %q is not in the manifest's hub_routes", pattern)
+	case handler == nil:
+		return fmt.Errorf("route %q needs a handler", pattern)
+	}
+	if _, ok := h.routes[pattern]; ok {
+		return fmt.Errorf("route %q added twice", pattern)
+	}
+	h.routes[pattern] = handler
+	h.routeOrder = append(h.routeOrder, pattern)
+	return nil
+}
+
+func (h *host) AddMCPTool(name, description string, schema json.RawMessage, run func(context.Context, string, string, json.RawMessage) (string, error)) error {
+	switch {
+	case !slices.Contains(h.info.MCPTools, name):
+		return fmt.Errorf("tool %q is not in the manifest's mcp_tools", name)
+	case run == nil:
+		return fmt.Errorf("tool %q needs a handler", name)
+	}
+	if _, ok := h.tools[name]; ok {
+		return fmt.Errorf("tool %q added twice", name)
+	}
+	h.tools[name] = modapi.MCPTool{Name: name, Description: description, InputSchema: slices.Clone(schema), Run: run}
+	h.toolOrder = append(h.toolOrder, name)
+	return nil
+}
+
+func (h *host) AddBackgroundJob(name string, run func(context.Context) error) error {
+	switch {
+	case !slices.Contains(h.info.BackgroundJobs, name):
+		return fmt.Errorf("background job %q is not in the manifest's background_jobs", name)
+	case run == nil:
+		return fmt.Errorf("background job %q needs a run function", name)
+	}
+	if _, ok := h.jobs[name]; ok {
+		return fmt.Errorf("background job %q added twice", name)
+	}
+	h.jobs[name] = modapi.BackgroundJob{Name: name, Run: run}
+	h.jobOrder = append(h.jobOrder, name)
 	return nil
 }

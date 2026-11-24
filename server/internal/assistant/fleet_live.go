@@ -164,6 +164,7 @@ func (s *Service) fleetInputsInto(kept map[string][]proto.Session) ([]fleetInput
 			return !slices.ContainsFunc(machines, func(m fleetMachine) bool { return m.ID == id })
 		})
 	}
+	s.pruneRemovedFoldMachines()
 	agents := make([]fleetInput, 0, n)
 	turns := s.turnsBook()
 	for i, m := range machines {
@@ -250,11 +251,13 @@ func keyOf(sess *proto.Session) agentKey { return agentKey{sess.MachineID, sess.
 // needsYou is the agents that need the user, one each, as the Agents list has them (#3571): those with a card by their
 // oldest card that stands (ixs come oldest first), then those in a terminal dialog without one, in agents' order.
 // counts says which agents count at all, stands which cards may stand for one; the assistant's own dialog never
-// counts. The Live Activity and Persona Link's summary (fleet_attention.go) differ in those, not in this.
+// counts. The Live Activity and Persona Link's summary (fleet_attention.go) differ in those, not in this. An agent whose
+// every pending card its task's supervisor holds (supervisorHeldOnly) is not the user's: it is none of them.
 func needsYou(agents []fleetInput, ixs []proto.Interaction, counts func(fleetInput) bool, stands func(proto.Interaction) bool) []needer {
 	var out []needer
-	var asked map[agentKey]bool
+	var asked, held map[agentKey]bool
 	if len(ixs) > 0 {
+		held = supervisorHeldOnly(ixs)
 		byKey := make(map[agentKey]int, len(agents)) // the agent's place in agents: the last one listed under its key
 		for i, a := range agents {
 			if counts(a) {
@@ -265,18 +268,49 @@ func needsYou(agents []fleetInput, ixs []proto.Interaction, counts func(fleetInp
 		for i := range ixs {
 			ix := &ixs[i]
 			key := agentKey{ix.MachineID, ix.SessionID}
-			if a, ok := byKey[key]; ok && !asked[key] && stands(*ix) {
+			if a, ok := byKey[key]; ok && !asked[key] && !held[key] && stands(*ix) {
 				asked[key] = true
 				out = append(out, needer{agent: agents[a], card: ix})
 			}
 		}
 	}
 	for _, a := range agents {
-		if counts(a) && a.Session.State == proto.StateNeedsYou && !a.Session.Assistant && !asked[keyOf(a.Session)] {
+		if key := keyOf(a.Session); counts(a) && a.Session.State == proto.StateNeedsYou && !a.Session.Assistant && !asked[key] && !held[key] {
 			out = append(out, needer{agent: a})
 		}
 	}
 	return out
+}
+
+// supervisorHeldCard: a card its task's supervisor holds (routeAsk, ask_route.go): marked delegating and no question
+// (only a question is ever delegated to the assistant's own decision, which the user may still answer first). It is
+// not the user's until the supervisor escalates it (2026-11-23, D11 of docs/plans/plan-derived-counts.md).
+func supervisorHeldCard(ix proto.Interaction) bool {
+	return ix.Delegating && ix.Kind != proto.IxQuestion
+}
+
+// supervisorHeldOnly are the agents whose pending cards (ixs) are all held by their task's supervisor: their needs_you
+// is the supervisor's, not the user's (the hub's supervisor_held count, hub/sessions_list.go). Nil when there are none.
+func supervisorHeldOnly(ixs []proto.Interaction) map[agentKey]bool {
+	var held, other map[agentKey]bool
+	for _, ix := range ixs {
+		key := agentKey{ix.MachineID, ix.SessionID}
+		if supervisorHeldCard(ix) {
+			if held == nil {
+				held = map[agentKey]bool{}
+			}
+			held[key] = true
+		} else {
+			if other == nil {
+				other = map[agentKey]bool{}
+			}
+			other[key] = true
+		}
+	}
+	for key := range other {
+		delete(held, key)
+	}
+	return held
 }
 
 // liveCounts: the agent is on the Live Activity at all (muted agents and subtasks are not: Codex sub-agents, and a

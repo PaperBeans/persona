@@ -175,7 +175,10 @@ class OutboxMessageSender(
                 for (id in unresolved) if (id !in deadlines) {
                     deadlines[id] = scope.launch {
                         delay(reviewTimeoutMillis)
-                        store.transition(id, reviewable, OutboxState.NeedsConfirmation)
+                        // An Unknown row can belong to a composer retry that is still in flight. Use the same
+                        // ownership guard as automatic sending: a deadline must not turn that active operation
+                        // into NeedsConfirmation and force the composer to fail its durable start.
+                        transitionAutomatic(id, reviewable, OutboxState.NeedsConfirmation)
                         wake.trySend(Unit)
                     }
                 }
@@ -411,7 +414,9 @@ class OutboxMessageSender(
         val moved = store.transition(id, from, OutboxState.Sending, error = null, opId = opId)
         if (!moved) {
             val current = store.entries.first().firstOrNull { it.clientMessageId == id }
-            check(current?.state == OutboxState.Sending && current.operationId == opId) { "Message state changed" }
+            check(current?.state == OutboxState.Sending && current.operationId == opId) {
+                "Message state changed: state=${current?.state} operation=${current?.operationId} requested=$opId"
+            }
         }
         receiptState.begin(request(entry).copy(opId = opId), entry.mainTarget)
     }
@@ -662,19 +667,18 @@ class OutboxMessageSender(
         }
     }
 
-    /** Only the transition to Unknown owns rollback if a composer claims while its suspended write commits. */
+    /** If a composer claims during a suspended write, keep its operation authoritative. */
     private suspend fun transitionAutomatic(id: String, from: Set<OutboxState>, to: OutboxState): Boolean = lifecycle.withLock {
         if (composerActive(id)) return@withLock false
         if (!store.transition(id, from, to)) return@withLock false
         if (!composerActive(id)) return@withLock true
-        if (to == OutboxState.Unknown) {
-            // The manual claim is already visible but its durable start is queued behind this lock. Undo only this
-            // write for a still-active Sending row, retaining its operation id. A composer that already acquired
-            // lifecycle may have sent or shown the message; that newer result must not regress to Sending.
-            val current = store.entries.first().firstOrNull { it.clientMessageId == id }
-            if (current?.state == OutboxState.Sending || current?.state == OutboxState.Unknown) {
-                store.transition(id, setOf(current.state), OutboxState.Sending, current.error, current.operationId)
-            }
+        // The manual claim is already visible but its durable start is queued behind this lock. An automatic
+        // Unknown settlement and the same attempt's immediate Unknown→Sending retry both belong to the old
+        // operation. Restore only an unsettled Sending row with its current operation, never a Sent/Shown result.
+        // In particular, a manual claim during the second write must not let the old operation replace its opId.
+        val current = store.entries.first().firstOrNull { it.clientMessageId == id }
+        if (current?.state == OutboxState.Sending || current?.state == OutboxState.Unknown) {
+            store.transition(id, setOf(current.state), OutboxState.Sending, current.error, current.operationId)
         }
         false
     }

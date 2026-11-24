@@ -77,14 +77,14 @@ import persona.feature.assistant.proactive.AssistantProactiveScreen
 import persona.feature.chat.*
 import persona.feature.inbox.InboxItemPages
 import persona.feature.inbox.InboxItemExtensionScreen
-import persona.feature.inbox.InboxItemKey
+import persona.core.inbox.InboxItemKey
 import persona.feature.inbox.InboxRepository
 import persona.feature.inbox.LocalInboxItemPages
 import persona.feature.inbox.InboxLanding
 import persona.feature.inbox.LocalInboxLanding
 import persona.feature.inbox.LocalInboxListActive
 import persona.feature.inbox.ManagerLinks
-import persona.feature.inbox.InboxTriage
+import persona.core.inbox.InboxTriage
 import persona.feature.inbox.InboxTriageSetup
 import persona.feature.inbox.LocalInboxTriageSetup
 import persona.feature.inbox.inboxEntries
@@ -93,7 +93,6 @@ import persona.feature.inbox.needsYouCount
 import persona.feature.inbox.inboxUnreadCount
 import persona.feature.inbox.agentWorking
 import persona.feature.inbox.inboxSourcePage
-import persona.feature.knowledge.*
 import persona.feature.machines.LocalSidebarUsage
 import persona.feature.machines.SidebarUsageStrip
 import persona.feature.machines.machinesEntries
@@ -718,6 +717,25 @@ internal fun PersonaShell(session: ShellSession, openNavigation: MutableState<((
         key(module.id) { module.menuActions(persona.core.moduleapi.MenuSlot.AssistantTitle, moduleUi(module.id)) }
     }
     // Links over the whole shell, persona:// links from conversations, "Hand to Persona" from pages (ShellLinks.kt).
+    // The modules' actions in the composer's, a conversation's and a message's menus, and their Settings pages (#13847).
+    val moduleActions = remember(modules, navigator, session.modules, connection) {
+        object : persona.core.moduleapi.ModuleActions {
+            @Composable
+            override fun actions(slot: persona.core.moduleapi.MenuSlot, target: persona.core.moduleapi.ModuleActionTarget) =
+                modules.flatMap { module ->
+                    key(module.id) {
+                        module.menuActions(slot, persona.core.moduleapi.ModuleUiContext(navigator, session.modules[module.id],
+                            active = connection == ConnectionState.Online, target = target))
+                    }
+                }
+        }
+    }
+    val appContext = LocalContext.current.applicationContext
+    val moduleSettingsPages = remember(hubFeatures) { persona.android.Modules.carried.settingsPages(hubFeatures) }
+    val modulePlaces = remember(modules) { modules.flatMap { it.places }.toSet() }
+    CompositionLocalProvider(persona.core.moduleapi.LocalModuleActions provides moduleActions,
+        persona.core.moduleapi.LocalModuleSettingsPages provides moduleSettingsPages,
+        persona.core.moduleapi.LocalModulePlaces provides modulePlaces) {
     ShellLinkHost(session, navigator, shell.feedback) {
         val uriHandler = LocalUriHandler.current
         // Each page shows the connection state in its own title, so the shell adds no banner above it.
@@ -1191,18 +1209,24 @@ internal fun PersonaShell(session: ShellSession, openNavigation: MutableState<((
                 entry<persona.core.navigation.AddComputerRoute> { UnavailablePage(stringResource(R.string.app_demo_no_machines), navigator) }
                 entry<MachineDetailRoute> { UnavailablePage(stringResource(R.string.app_demo_no_machines), navigator) }
             }
-            session.knowledge?.let { knowledgeEntries(navigator, it, session.assistant, session.sender, session.sessions,
-                session.knowledgeNamespace, uriHandler::openUri,
-                onNewAgent = { start -> navigator.navigate(NewAgentRoute(start.machineId, start.cwd, start.prompt)) }) } ?: run {
-                entry<KnowledgeRoute> { UnavailablePage(stringResource(R.string.app_demo_no_knowledge), navigator) }
-                entry<KnowledgeKindRoute> { UnavailablePage(stringResource(R.string.app_demo_no_knowledge), navigator) }
-                entry<KnowledgeDetailRoute> { UnavailablePage(stringResource(R.string.app_demo_no_knowledge), navigator) }
-            }
             settingsDetailEntries(navigator, services, askSubscriptions)
             // Each module's pages (Modules.kt); in demo mode a module has no services and says why its pages cannot work.
+            // What a module's pages use of the core (the knowledge base, the assistant, sending, sessions); none in demo mode.
+            val moduleShell = session.knowledge?.let { knowledge ->
+                object : persona.core.moduleapi.ModuleShell {
+                    override val knowledge = knowledge
+                    override val knowledgeNamespace = session.knowledgeNamespace
+                    override val assistant = session.assistant
+                    override val sender = session.sender
+                    override val sessions = session.sessions
+                    override fun openLink(url: String) = uriHandler.openUri(url)
+                    override fun mainConversationSender() = dagger.hilt.android.EntryPointAccessors.fromApplication(
+                        appContext, persona.feature.assistant.AssistantEntryPoint::class.java).mainConversationSender()
+                }
+            }
             moduleEntries(modules) { module ->
                 persona.core.moduleapi.ModuleNavContext(navigator, session.modules[module.id],
-                    unavailable = { message -> UnavailablePage(message, navigator) })
+                    unavailable = { message -> UnavailablePage(message, navigator) }, shell = moduleShell)
             }
             tools?.run { register(navigator) }
         }
@@ -1481,6 +1505,7 @@ internal fun PersonaShell(session: ShellSession, openNavigation: MutableState<((
               }
           }
         }
+    }
     }
 }
 

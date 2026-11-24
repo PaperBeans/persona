@@ -397,6 +397,15 @@ extension Theme {
         static let contexts = "rectangle.stack"
         static let space = "square.stack.3d.up"
         static let spaceFilled = "square.stack.3d.up.fill"
+        /// A domain space (#13500, docs/assistant/health.md "Tracks and kinds"): one part of the user's life with its own
+        /// conversations and notes, the Assistant sidebar's Spaces section and its fallback mark. Not `space`, which is an
+        /// Agents engine's space of agents.
+        static let domainSpace = "square.3.layers.3d"
+        /// A domain space's own icons (the server's `layers` … `sun` tokens, `SpaceIcon`) where no meaning above has them.
+        static let spaceBook = "book.closed"
+        static let spaceFlag = "flag"
+        static let spaceSun = "sun.haze"
+        static let spaceSmile = "face.smiling.inverse"
         /// Open Space: go into a space from its menu.
         static let openSpace = "arrow.right.square"
         /// A busy space's idle agents folded into one row (N more idle).

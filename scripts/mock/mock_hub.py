@@ -1087,15 +1087,6 @@ if os.environ.get("MOCK_BG_WAITING") == "1":
                       background=[{"id": "bb1d5te2k", "kind": "shell", "description": "打包发布产物", "command": "make release",
                                    "started_at": ago(minutes=4)}])
 
-if os.environ.get("MOCK_BG_STALLED") == "1":  # #13744: the blog's test run used no CPU and wrote nothing for hours, still Working
-    for _s in SESSIONS:
-        if _s["session_id"] == BLOG:
-            _s.update(status="done", state="working", state_since=ago(hours=4), seen_at=None, background_working=True,
-                      background_waiting=False, background_stalled_since=ago(hours=3, minutes=5),
-                      last_text="迁移完成，测试在后台跑着。",
-                      background=[{"id": "bq7ci42wa", "kind": "shell", "description": "跑全部测试", "command": "pnpm test",
-                                   "started_at": ago(hours=4)}])
-
 # MOCK_HEADER_MODES=1 (#3719): one agent per permission mode, for the mode at the end of the Agents header's second row
 # and its menu. The widget agent: Auto-Edit, and it can take Allow Everything while it runs; tests: Ask First, with a long
 # title; photos: Plan Only; release: Auto; review: no mode reported yet; blog: Allow Everything with no way back from the
@@ -2661,6 +2652,8 @@ ASSISTANT_CONFIG = {"machine_id": "server", "launcher": "claude", "timezone": "A
                     # prefers (#3659); fixing unhelpful session names (#4965): on, at most once, no regular updates.
                     # Left out with MOCK_LEGACY_HUB (Agent Follow-Up, #7005).
                     "start_requested_tasks": True, "task_workspace_preference": "prefer-existing",
+                    # New conversations without an explicit choice start in Ask First until the owner changes this.
+                    "default_permission_mode": "default",
                     "agent_auto_naming": True, "agent_auto_naming_max": 1, "agent_auto_naming_interval_hours": 0,
                     # The role a meeting recording pre-selects (#2981; MOCK_MEETING_ATTENDANCE_DEFAULT=listener starts there)
                     "meeting_attendance_default": os.environ.get("MOCK_MEETING_ATTENDANCE_DEFAULT", "off"),
@@ -2697,6 +2690,7 @@ def assistant_state(space="", archived=False):
                    main_supervises_own_tasks=cfg["main_supervises_own_tasks"], next_suggestions=cfg["next_suggestions"],
                    claude_interactive=cfg["claude_interactive"],
                    start_requested_tasks=cfg["start_requested_tasks"], task_workspace_preference=cfg["task_workspace_preference"],
+                   default_permission_mode=cfg["default_permission_mode"],
                    agent_auto_naming=cfg["agent_auto_naming"], agent_auto_naming_max=cfg["agent_auto_naming_max"],
                    agent_auto_naming_interval_hours=cfg["agent_auto_naming_interval_hours"],
                    **({} if os.environ.get("MOCK_RECENT_TASK_CHATS") == "absent" else {"recent_task_chats": cfg["recent_task_chats"]}))
@@ -5206,7 +5200,7 @@ def meeting_ask(h, st, body, rec):
 
 
 # The meeting conversation (#3862, docs/assistant/meeting-minutes.md "Phase 1: the meeting conversation"), as the hub
-# branch has it (server/internal/assistant/meeting_*.go, server/internal/kb/meeting.go, hub/meeting_receipts.go): the
+# branch has it (server/internal/modules/recording/meeting_*.go, server/internal/kb/meeting.go, hub/meeting_receipts.go): the
 # feature `meeting_conversation` (only beside meeting_attendance); the upload's `room` and `private`, kept apart from the
 # #2981 fields as meeting.json is (a recording that once had `room` stays a room meeting, its role the room's); one room
 # conversation per attended room meeting (an assistant conversation, origin `meeting`, header first); …/ask answered in
@@ -5858,7 +5852,7 @@ def meeting_receipt(h, kind, raw, run):
     return h.send_json(out, status) or True
 
 
-# Handing a meeting to an Agent after it (#8852, assistant/meeting_handoff.go): POST /api/v1/recordings/{id}/handoff sends
+# Handing a meeting to an Agent after it (#8852, modules/recording/meeting_handoff.go): POST /api/v1/recordings/{id}/handoff sends
 # the meeting to an Agent listed here as the owner's own message, after its checks (503, 404 / 410, 400, 409
 # meeting_running, 409 no_material), and keeps each try in MEETING_HANDOFFS (oldest first, the last 20), shown as
 # detail.meta.handoffs. As attending's rules: a Persona conversation is not_agent; Allow All or a machine not listed
@@ -17981,10 +17975,12 @@ if os.environ.get("MOCK_CHAT_CONTENT") == "1":
     ]
 
 # MOCK_LONG_HISTORY=1 (or "oldest": the work line first): the weather chat with fifteen earlier exchanges in front, so its work line and thought sit in
-# the middle of a long chat and the list can scroll both ways around them (opening and closing them in place).
-if os.environ.get("MOCK_LONG_HISTORY") in ("1", "oldest"):
+# the middle of a long chat and the list can scroll both ways around them (opening and closing them in place). A number
+# above one chooses that many exchanges instead (90 exercises the web's deferred long-chat window).
+_long_history = os.environ.get("MOCK_LONG_HISTORY", "")
+if _long_history in ("1", "oldest") or (_long_history.isdigit() and int(_long_history) > 1):
     _hist = []
-    for _k in range(15):
+    for _k in range(15 if _long_history in ("1", "oldest") else int(_long_history)):
         _hist.append(it("user", "text", 600 - _k * 30, text="第 %d 个问题：顺便看一下这一块的写法有没有问题？" % (_k + 1)))
         _hist.append(it("assistant", "text", 599 - _k * 30, text="看过了，第 %d 块没有问题。命名可以再统一一点，"
                                                             "测试也覆盖到了主要的分支，我顺手把两处重复的判断合并了。" % (_k + 1)))
@@ -20486,8 +20482,9 @@ def case_route(h, method, p, q, body):
     return True
 # /mock/paging?on=1: pages of history as the hub cuts them (node.go PageTurns): the latest page and the backlog of a
 # first subscribe hold the last 2 whole turns, an older page `turns` more; otherwise the whole history comes at once.
+# `first=60` gives the browser an already-windowed first page, while older pages still arrive two turns at a time.
 # ChatFollowTests' cold start at a saved place far up needs it (#597). /mock/reset turns it off.
-PAGING = {"on": False}
+PAGING = {"on": False, "first": 2}
 
 
 # MOCK_CHAT_SEARCH=1 (#6281, docs/design/proposals/assistant-search.md): the long Persona conversation (ASK4) is one whose
@@ -26697,6 +26694,7 @@ class H(BaseHTTPRequestHandler):
             return self.send_json(mesh_state())
         if p == "/mock/paging":
             PAGING["on"] = q.get("on", ["0"])[0] == "1"
+            PAGING["first"] = int(q.get("first", ["2"])[0])
             return self.send_json({"ok": True, **PAGING})
         if p == "/mock/replay":
             n = int((parse_qs(urlparse(self.path).query).get("n") or ["1"])[0])
@@ -26721,7 +26719,7 @@ class H(BaseHTTPRequestHandler):
             HERDR_STOPPED.clear(); HERDR_STOPPED.update(herdr_env()); HERDR_STARTS.clear()  # the herdr row (#1916)
             HERDR_MODE["start"] = os.environ.get("MOCK_HERDR_START", ""); HERDR_MODE["gen"] += 1
             # A test that died before putting them back: the start-up delay (MOCK_DELAY), no paging.
-            NET["delay"], PAGING["on"] = float(os.environ.get("MOCK_DELAY", "0")), os.environ.get("MOCK_CHAT_SEARCH") == "1"
+            NET["delay"], PAGING["on"], PAGING["first"] = float(os.environ.get("MOCK_DELAY", "0")), os.environ.get("MOCK_CHAT_SEARCH") == "1", 2
             HISTORY_NOW["token"] = HISTORY
             # ExtensionMarketTests' update installed (#2988): example-gateway at 1.0.0 again, its newer version waiting.
             PLUGINS.pop("example-gateway-next", None); _UPGRADE_WHILE_ON.pop("example-gateway", None)
@@ -27299,7 +27297,10 @@ class H(BaseHTTPRequestHandler):
             if b: items = [x for x in items if x["seq"] < int(b)]
             more = False
             if PAGING["on"]:
-                items, more = last_turns(items, int(q.get("turns", ["2"])[0] or 2))
+                # The web asks for two turns explicitly, so a configured long first page must override that value;
+                # older before_seq pages keep the requested (normally two-turn) size.
+                turns = PAGING["first"] if not b and PAGING["first"] != 2 else int(q.get("turns", ["2"])[0] or 2)
+                items, more = last_turns(items, turns)
             out = {"items": lazy_images(fold_work(items) if q.get("fold_work") == ["1"] else items), "has_more": more,
                    **span(items, None, int(b) - 1 if b else last)}
             served(sid, "page", out)
@@ -28944,6 +28945,11 @@ class H(BaseHTTPRequestHandler):
                     return self.send_json({"error": "%s must be %d–%d" % (key, low, high)}, 400)
             if "task_workspace_preference" in body and body["task_workspace_preference"] not in ("prefer-existing", "prefer-new"):
                 return self.send_json({"error": "task_workspace_preference must be prefer-existing or prefer-new"}, 400)
+            if "default_permission_mode" in body:
+                mode = body["default_permission_mode"]
+                if mode not in ("default", "acceptEdits", "plan", "auto", "bypassPermissions"):
+                    return self.send_json({"error": "bad default_permission_mode"}, 400)
+                ASSISTANT_CONFIG["default_permission_mode"] = mode
             for key in ("start_requested_tasks", "agent_auto_naming"):
                 if isinstance(body.get(key), bool):
                     ASSISTANT_CONFIG[key] = body[key]

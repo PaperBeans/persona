@@ -189,11 +189,15 @@ type TaskReview struct {
 	// SupersededReason records the supervisor's natural-language reason when this task_review superseded an earlier
 	// pending needs_user decision without fabricating an owner selection (#13112).
 	SupersededReason string `json:"superseded_reason,omitempty"`
+	// WithdrewNeedsUser: this accepted review is the supervisor taking back the needs_user it had raised
+	// (task_review withdraw_needs_user): no owner answered it, and nothing was pushed or carded for it.
+	WithdrewNeedsUser bool `json:"withdrew_needs_user,omitempty"`
 }
 
-// OwnerWait is a judgment that a supervised task's stretch of work (begun at Work) stopped on the owner's decision:
-// when it was judged and the judge's reason. PushPending marks a new, still-undelivered push; NotifiedAt records its
-// success. Legacy waits have neither and are not replayed on upgrade.
+// OwnerWait is a judgment that a supervised task's stretch of work (begun at Work) stopped on a decision its agent
+// says is the owner's: when it was judged and the judge's reason. It goes to the supervisor, never straight to the
+// owner (noteOwnerWait). PushPending and NotifiedAt are what earlier versions recorded of their own push to the owner;
+// they are read and kept, never set.
 type OwnerWait struct {
 	Work        time.Time  `json:"work"`
 	At          time.Time  `json:"at"`
@@ -642,8 +646,8 @@ func taskHealth(t Todo, agents []proto.Session, now time.Time) (string, int) {
 	if t.DoneAt != nil {
 		return "", 8
 	}
-	if v.Waits != nil { // the judge found it stopped on the owner's decision (#1277): not to be accepted as done
-		return "停下等用户拍板，别直接验收", 0 // i18n-ignore: the snapshot is the assistant's prompt
+	if v.Waits != nil { // the judge found it stopped on what its agent says is the owner's decision (#1277)
+		return "Agent 停下说要用户拍板：先判断是不是用户的事，别直接验收", 0 // i18n-ignore: the snapshot is the assistant's prompt
 	}
 	if snapshotDoneRule(t, agents, nil, nil, now, now.Location()) == ruleAccepted {
 		// v.state masks an accepted review after reopening; acceptanceStands inside the shared triage rule still holds

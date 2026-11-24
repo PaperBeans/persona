@@ -113,6 +113,8 @@ struct ShellView: View {
                          onMachines: { go(.machines) },
                          onOpenExtension: { go(.extensionPage($0)) },
                          openHealth: { go(.health) },
+                         openSpace: { go(.space($0)) },
+                         openNewSpace: { go(.newSpace) },
                          openRecordingsPage: openRecordingsPage,
                          openStarred: openStarredPage)
             // Keep the drawer's route closures out of the page strip's opaque type (#6735, #12249).
