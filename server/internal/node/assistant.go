@@ -1319,9 +1319,15 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 			Reason          string                      `json:"reason"` // tuiFallbackSubtype: why interactive did not start
 			ModelUsage      map[string]claudeModelUsage `json:"modelUsage"`
 		}
-		if json.Unmarshal(line, &ev) != nil {
+		if err := json.Unmarshal(line, &ev); err != nil {
 			p.invalidateUpdateTasks()
-			continue
+			// A field of another type than the node reads (a gateway's token count as a string, say) fails the line
+			// but not the fields around it, which are decoded all the same. A turn's end is still its end: dropped,
+			// the conversation stayed working until its next turn ended (#14351).
+			var mismatch *json.UnmarshalTypeError
+			if ev.Type != "result" || !errors.As(err, &mismatch) {
+				continue
+			}
 		}
 		if p.round && ev.SessionID != "" && ev.SessionID != p.id && validID(ev.SessionID) {
 			n.noteRoundFork(ev.SessionID, p.id)

@@ -252,9 +252,11 @@ func (n *Node) reapAssistants(ctx context.Context) {
 	}
 }
 
-// sweepAssistants is one look of reapAssistants: it compacts the idle processes worth compacting before they go
-// (idleCompactable) and lets the other idle ones go (reapable).
+// sweepAssistants is one look of reapAssistants: it ends the turns Claude Code says are over though no result came
+// (reconcileAssistantTurns), compacts the idle processes worth compacting before they go (idleCompactable) and lets
+// the other idle ones go (reapable).
 func (n *Node) sweepAssistants() {
+	n.reconcileAssistantTurns() // first: a turn that ended unheard no longer keeps its process busy
 	n.mu.Lock()
 	ids := make([]string, 0, len(n.procs))
 	for id := range n.procs {

@@ -25,7 +25,7 @@ esac
 // CLAUDE_CONFIG_DIR in cli-profile, keeps every stdin line in stdin.jsonl, answers control requests (an error from
 // control-mode-error.json or control-effort-error.json, held while control-hold exists, after the lines in
 // control-extra.jsonl, exiting at control-exit), and plays a fixed turn for each user message (no result while
-// $CLI_FAKE_DIR/hold exists).
+// $CLI_FAKE_DIR/hold exists, nothing at all while $CLI_FAKE_DIR/mute does).
 const fakeCLI = fakeCLIAuthStatus + `printf '%s\n' "$*" >> "$CLI_FAKE_DIR/cli-argv"
 printf '%s\n' "$CLAUDE_CONFIG_DIR" > "$CLI_FAKE_DIR/cli-profile"
 echo '{"type":"system","subtype":"init"}'
@@ -54,6 +54,7 @@ while IFS= read -r line; do
         *) echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"$id\",\"error\":\"unsupported\"}}" ;;
       esac ;;
     *'"type":"user"'*)
+      if [ -e "$CLI_FAKE_DIR/mute" ]; then continue; fi
       echo '{"type":"stream_event","event":{"type":"message_start","message":{"usage":{"input_tokens":5}}},"parent_tool_use_id":null}'
       echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hel"}},"parent_tool_use_id":null}'
       echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}},"parent_tool_use_id":null}'
