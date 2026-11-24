@@ -83,7 +83,7 @@ struct ChatLines {
 
     /// Folded children placed into the exchanges that were going on when they started. Empty for every other chat.
     var childPlaces: [ChildSessions.Place] = []
-    var childSessions: [String: Session] = [:]
+    var childSessions: [SessionKey: Session] = [:]
     /// History has been read back to the start, so a child that started earlier can sit in the first exchange.
     var historyComplete = false
 

@@ -18,6 +18,7 @@ import (
 
 // Drive the real ask-answer route: the card must describe the relay result, not guess it from the answer's spelling.
 func TestCheckDecisionWordsCardDelivery(t *testing.T) {
+	needsLarkLayer(t)
 	for _, tc := range []struct {
 		name, kind, supervisor string
 		stop                   func(*fakeHub)

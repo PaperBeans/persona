@@ -103,22 +103,35 @@ func dialJob(t *testing.T, pl *Plugin) *manager {
 
 func (m *manager) send(f extwire.TranscriptionFrame) {
 	m.t.Helper()
-	b, _ := json.Marshal(f)
-	if err := m.c.Write(context.Background(), websocket.MessageText, b); err != nil {
+	if err := m.write(f); err != nil {
 		m.t.Fatal(err)
 	}
+}
+
+func (m *manager) write(f extwire.TranscriptionFrame) error {
+	m.t.Helper()
+	b, _ := json.Marshal(f)
+	return m.c.Write(context.Background(), websocket.MessageText, b)
 }
 
 // audio sends pcm in frames of 100 ms.
 func (m *manager) audio(pcm []byte) {
 	m.t.Helper()
+	if err := m.writeAudio(pcm); err != nil {
+		m.t.Fatal(err)
+	}
+}
+
+func (m *manager) writeAudio(pcm []byte) error {
+	m.t.Helper()
 	for len(pcm) > 0 {
 		n := min(len(pcm), bytesPerSec/10)
 		if err := m.c.Write(context.Background(), websocket.MessageBinary, pcm[:n]); err != nil {
-			m.t.Fatal(err)
+			return err
 		}
 		pcm = pcm[n:]
 	}
+	return nil
 }
 
 // next reads the next frame, failing after a while.
@@ -358,12 +371,12 @@ func TestLiveJobReconnects(t *testing.T) {
 // still ends at a window's second failure (#8887).
 func TestReplayJobGaps(t *testing.T) {
 	fast(t)
-	old, oldMost, oldDelays := replayWindow, replayWindowMost, retryDelays
+	// Service events provide synchronization; keep the production response deadlines so CPU starvation in a release
+	// validation run does not become a different test failure.
+	asrFinalWait, asrAnswerWait = 15*time.Second, 10*time.Second
+	old, oldMost := replayWindow, replayWindowMost
 	replayWindow, replayWindowMost = 2*time.Second, 3*time.Second
-	// Every retry waits, so the second window's audio is all in before it is given up (it ends where the audio is then;
-	// the first window's result between its failures would make the first delay count again).
-	retryDelays = []time.Duration{300 * time.Millisecond, 300 * time.Millisecond, 300 * time.Millisecond}
-	t.Cleanup(func() { replayWindow, replayWindowMost, retryDelays = old, oldMost, oldDelays })
+	t.Cleanup(func() { replayWindow, replayWindowMost = old, oldMost })
 	windows := func(fs []extwire.TranscriptionFrame) (out []extwire.TranscriptionFrame) {
 		for _, f := range fs {
 			if f.Type == extwire.TFWindow {
@@ -377,7 +390,9 @@ func TestReplayJobGaps(t *testing.T) {
 	var fv *volctest.Service
 	run := func(drop []int, ref bool) (got []extwire.TranscriptionFrame, last extwire.TranscriptionFrame) {
 		fv = fake(t)
-		fv.Set(func(s *volctest.Script) { s.DropLines = drop })
+		firstWindow := make(chan struct{})
+		// The second window covers 2.1 s; drop only after those bytes actually arrived and the first window was emitted.
+		fv.Set(func(s *volctest.Script) { s.DropLines, s.DropLinesAfter, s.DropGate = drop, 2100, firstWindow })
 		m := dialJob(t, testPlugin(t, Form{}, "k"))
 		m.send(extwire.TranscriptionFrame{Type: extwire.TFStart, Mode: "replay", Speed: 1000, At: extwire.F(0.0)})
 		m.until(extwire.TFReady)
@@ -388,6 +403,9 @@ func TestReplayJobGaps(t *testing.T) {
 		for {
 			f := m.next()
 			got = append(got, f)
+			if f.Type == extwire.TFWindow && len(windows(got)) == 1 {
+				close(firstWindow)
+			}
 			if f.Type == extwire.TFError || f.Type == extwire.TFWindow && len(windows(got)) == 2 {
 				break
 			}
@@ -450,8 +468,9 @@ func TestReplayJobGaps(t *testing.T) {
 	for last = m.next(); last.Type != extwire.TFError; last = m.next() {
 		got = append(got, last)
 		if last.Type == extwire.TFWindow {
-			m.audio(volctest.PCM(line(3, 1.4, 0.8)))
-			m.send(extwire.TranscriptionFrame{Type: extwire.TFEnd})
+			// The next window may already have failed too; its fatal frame, not a client write race, is the outcome.
+			_ = m.writeAudio(volctest.PCM(line(3, 1.4, 0.8)))
+			_ = m.write(extwire.TranscriptionFrame{Type: extwire.TFEnd})
 		}
 		if last.Type == extwire.TFDone {
 			break
@@ -466,6 +485,58 @@ func TestReplayJobGaps(t *testing.T) {
 	got, last = run([]int{2}, true)
 	if last.Type != extwire.TFError || !last.Fatal || len(windows(got)) != 1 {
 		t.Errorf("a final pass: %s", frameList(append(got, last)))
+	}
+}
+
+// Audio that arrives while a bounded window waits for its retry belongs to the next window at that bound. An
+// unbounded retry still owns the arriving audio, so no overlapping session may open.
+func TestReplayAudioOpensAtBoundedRetryEnd(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		until   float64
+		covered float64
+		want    float64
+		open    bool
+	}{
+		{name: "bounded", until: 4.1, want: 4.1, open: true},
+		{name: "bounded after a later window", until: 4.1, covered: 4.4, want: 4.4, open: true},
+		{name: "unbounded", until: -1, open: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			j := &job{pl: testPlugin(t, Form{}, "k"), ctx: ctx, ups: make(chan dialed, 1),
+				mode: extwire.TranscriptionReplay, speed: 1000, started: true, ready: true,
+				ring: ring{most: 10 * bytesPerSec}, retry: []*sess{{at: 2, until: test.until}}}
+			if test.covered > 0 {
+				j.sessions = []*sess{{at: test.until, until: test.covered, closed: true}}
+			}
+			t.Cleanup(func() {
+				if j.n > 0 {
+					select {
+					case d := <-j.ups:
+						if d.s != nil {
+							d.s.close()
+						}
+					case <-time.After(time.Second):
+						t.Error("the opened session did not finish dialing")
+					}
+				}
+				cancel()
+			})
+			j.ring.add(volctest.PCM(line(1, 1.4, 0.8), line(2, 1.4, 0.8)))
+			j.inPos = j.ring.end()
+			j.onAudio(volctest.PCM(volctest.Line{N: 3, Silence: 0.1}))
+			if !test.open {
+				if j.dialing != nil {
+					t.Fatalf("an unbounded retry opened an overlapping session at %.1f", j.dialing.at)
+				}
+				return
+			}
+			if j.dialing == nil || !near(j.dialing.at, test.want) {
+				t.Fatalf("next session at %+v, want %.1f (n=%d, retry=%+v, inPos=%.1f, ringEnd=%.1f)", j.dialing, test.want, j.n, j.retry, j.inPos, j.ring.end())
+			}
+		})
 	}
 }
 

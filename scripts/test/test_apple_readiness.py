@@ -287,6 +287,12 @@ class AppleReadinessTests(unittest.TestCase):
         (self.output / "config.json").write_text(json.dumps({"app": {"bundle_id": "org.example.persona.ci"}}))
         whole = yaml.safe_load((ROOT / 'apple/project.yml').read_text())
         whole.pop('include')
+        modules = yaml.safe_load((ROOT / 'apple/modules.yml').read_text())['targets']['Persona']
+        whole['targets']['Persona']['sources'] = [
+            *modules['sources'], *whole['targets']['Persona']['sources'],
+        ]
+        whole['targets']['Persona']['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = \
+            modules['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']
         whole['targets']['Persona']['dependencies'] = [
             {'target': 'PersonaWatch'}, {'target': 'PersonaShare'},
             *whole['targets']['Persona']['dependencies'],
@@ -335,7 +341,7 @@ class AppleReadinessTests(unittest.TestCase):
                                      "collector or nested child escaped the observer group")
                     assert_process_not_running(self, record["pid"])
 
-    def run_preparation(self, regular_only=False, regression_only=False, **options):
+    def run_preparation(self, regular_only=False, regression_only=False, lane=None, **options):
         source = SCRIPT.read_text()
         helpers = source[source.index("simulator_udid() {"):source.index("cleanup() {")]
         helpers += source[source.index("result() {"):source.index('\n  fi', source.index("\ntest_batch() {")) + 8]
@@ -378,7 +384,7 @@ OFFLINE_PROJECT="$SOURCE/apple/PersonaOfflineUnitTests.xcodeproj"
 TEST_SIGNING=(CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER=)
 ''' + helpers + block
         env = dict(os.environ, PATH=str(self.fixture.bin) + os.pathsep + os.environ["PATH"],
-                   LANE="ios-regressions" if regression_only else "ios", CI_ROOT=str(ROOT), SOURCE=str(ROOT), OUTPUT=str(self.output),
+                   LANE=lane or ("ios-regressions" if regression_only else "ios"), CI_ROOT=str(ROOT), SOURCE=str(ROOT), OUTPUT=str(self.output),
                    PERSONA_CONFIG=str(self.output / "config.json"), SIM_NAME="owned readiness fixture",
                    SPM="/fixture/spm",
                    DIAGNOSTICS=str(self.root / "diagnostic-artifacts"),
@@ -507,6 +513,57 @@ TEST_SIGNING=(CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manu
             "Verify hosted iOS test readiness|900", "Grant Reminders access to the owned test app|300",
             "iOS offline unit and design/token tests|1800", "Inspect test results (ios-unit)|120",
         ])
+
+    def test_model_picker_lane_executes_only_both_suites_after_the_shared_probe(self):
+        result, calls = self.run_preparation(
+            regression_only=True, lane="ios-model-picker",
+            FULL_RESULT_SUITE="AssistantModelChoiceTests,AssistantModelPanelModelTests")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([call[-1] for call in calls], ["build-for-testing"] + ["test-without-building"] * 2)
+        selectors = lambda args: [a for a in args if a.startswith(("-only-testing:", "-skip-testing:"))]
+        expected = ["-only-testing:PersonaTests/AssistantModelChoiceTests",
+                    "-only-testing:PersonaTests/AssistantModelPanelModelTests"]
+        self.assertEqual(selectors(calls[0]), expected)
+        self.assertEqual(selectors(calls[1]), ["-only-testing:PersonaTests/TypeScaleTests"])
+        self.assertEqual(selectors(calls[2]), expected)
+        for call in calls:
+            self.assertEqual(call[call.index("-scheme") + 1], "PersonaOfflineUnitTests")
+        self.assertIn("ios-unit.xcresult: 2 test cases, zero failed/skipped", result.stdout)
+        self.assertEqual((self.root / "calls").read_text().count("simctl create"), 1)
+        self.assertFalse((self.root / "regular-probe-started").exists())
+        self.assertFalse((self.root / "regular-suite-started").exists())
+        self.assertTrue((self.output / "diagnostics/live-readiness/observer.status.txt").is_file())
+        self.assertFalse((self.output / "regular-readiness-context.json").exists())
+        self.assertEqual((self.root / "budgets").read_text().splitlines(), [
+            "Generate iPhone-only offline unit-test project|120", "Generate offline unit-test Xcode project|120",
+            "Build iOS offline unit tests|1800", "No CallKit in the simulator build|300",
+            "Create stock iOS 26.0 test simulator|100",
+            "Verify hosted iOS test readiness|900", "Grant Reminders access to the owned test app|300",
+            "iOS offline unit and design/token tests|1800", "Inspect test results (ios-unit)|120",
+        ])
+
+    def assert_model_picker_result_rejected(self, **options):
+        options.setdefault("FULL_RESULT_SUITE", "AssistantModelChoiceTests,AssistantModelPanelModelTests")
+        result, _ = self.run_preparation(regression_only=True, lane="ios-model-picker", **options)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.root / "full-suite-started").exists())
+        self.assertFalse((self.root / "regular-probe-started").exists())
+        self.assertFalse((self.root / "regular-suite-started").exists())
+
+    def test_model_picker_rejects_a_missing_suite(self):
+        self.assert_model_picker_result_rejected(FULL_RESULT_SUITE="AssistantModelChoiceTests")
+
+    def test_model_picker_rejects_an_empty_result(self):
+        self.assert_model_picker_result_rejected(FULL_RESULT_EMPTY="1")
+
+    def test_model_picker_rejects_a_failed_case(self):
+        self.assert_model_picker_result_rejected(FULL_RESULT="Failed")
+
+    def test_model_picker_rejects_a_skipped_case(self):
+        self.assert_model_picker_result_rejected(FULL_RESULT="Skipped")
+
+    def test_model_picker_rejects_a_nonzero_xcode_status(self):
+        self.assert_model_picker_result_rejected(FULL_STATUS="65")
 
     def test_readiness_shell_does_not_depend_on_unexported_ci_variables(self):
         source = SCRIPT.read_text()

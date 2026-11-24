@@ -276,6 +276,7 @@ func TestCardlessAskEndsLikeACardedOne(t *testing.T) {
 
 // Verifying a card-less ask says so in the to-do's Lark topic, as verifying on a card does.
 func TestCardlessAcceptSaysSoInTheTopic(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	e := newPostEnv(t)
 	id := e.bound("验收", testThread)

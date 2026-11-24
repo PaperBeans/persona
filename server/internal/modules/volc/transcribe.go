@@ -394,8 +394,34 @@ func (j *job) onAudio(pcm []byte) {
 	j.ring.add(pcm)
 	j.q.add(pcm)
 	j.inPos = j.ring.end()
-	if j.cur == nil && j.dialing == nil && len(j.retry) == 0 {
-		j.open(&sess{at: from, until: -1, why: j.nextWhy()}, false)
+	if j.cur == nil && j.dialing == nil {
+		open := len(j.retry) == 0
+		if !j.live() && len(j.retry) > 0 {
+			// A pending unbounded retry still owns new audio. Otherwise start after every bounded retry and window,
+			// including a window that opened and ended while a retry was waiting.
+			open = true
+			start := -1.0
+			for _, r := range j.retry {
+				if r.until < 0 {
+					open = false
+					break
+				}
+				start = max(start, r.until)
+			}
+			for _, ss := range j.sessions {
+				if ss.until >= 0 {
+					start = max(start, ss.until)
+				}
+			}
+			if open && start <= from+0.001 {
+				from = max(start, j.ring.at)
+			} else {
+				open = false
+			}
+		}
+		if open {
+			j.open(&sess{at: from, until: -1, why: j.nextWhy()}, false)
+		}
 	}
 	if taking := cmpOr(j.cur, j.dialing); taking != nil && !j.live() {
 		long := j.inPos - taking.at

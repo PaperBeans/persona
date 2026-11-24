@@ -230,6 +230,8 @@ struct ChatsView: View {
     @State private var spaceAt: [Int: String] = [:]
     /// Opens a space's page from a chat on this page (`\.openSpace`): the same object for the page's life (#10303).
     @State private var spaceOpener = SpaceOpener()
+    /// Opens a parent session focused on Session Overview's Subagents section from a row's rollup subtitle (P5).
+    @State private var subagentsOpener = SubagentsOverviewOpener()
     @State private var query = ""
     @State private var searching = false
     /// What was searched for when a result was opened: closing the search empties the system field (our text stays,
@@ -415,6 +417,13 @@ struct ChatsView: View {
         .animation(Theme.Motion.state, value: path.isEmpty)
         .environment(\.openSpace, spaceOpener.set { space in
             if spaceAt[path.count - 2] == space { path.removeLast() } else { pushSpace(space) }
+        })
+        .environment(\.openSubagentsOverview, subagentsOpener.set { key in
+            #if os(iOS)
+            AgentMenuRouting.shared.open(.subagents, at: key)
+            #endif
+            if searching { searching = false }
+            openFromList(key)
         })
     }
 

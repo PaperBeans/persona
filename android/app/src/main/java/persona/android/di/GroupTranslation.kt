@@ -30,12 +30,23 @@ internal class GroupNames(val namespace: String?) {
     fun owns(machineId: String) = GroupKeys.namespaceOf(machineId) == namespace
 
     fun machine(value: Machine) = if (plain) value else value.copy(id = machineId(value.id), name = value.name.ifEmpty { value.id })
-    fun session(value: Session) = if (plain) value else value.copy(machineId = machineId(value.machineId))
+    fun session(value: Session) = if (plain) value else value.copy(
+        machineId = machineId(value.machineId),
+        parentMachineId = value.parentMachineId?.takeIf(String::isNotBlank)?.let(::machineId),
+        foldedUnderMachineId = value.foldedUnderMachineId?.takeIf(String::isNotBlank)?.let(::machineId),
+    )
     /** Interaction ids are the hub's own and two hubs can use the same one: other groups' carry the suffix too. */
     fun interactionId(raw: String) = GroupKeys.machine(raw, namespace)
-    fun interaction(value: Interaction) = if (plain) value else value.copy(id = interactionId(value.id), machineId = machineId(value.machineId))
-    fun rawInteraction(value: Interaction) = if (plain) value else
-        value.copy(id = GroupKeys.raw(value.id), machineId = rawMachine(value.machineId))
+    fun interaction(value: Interaction) = if (plain) value else value.copy(
+        id = interactionId(value.id),
+        machineId = machineId(value.machineId),
+        foldedUnderMachineId = value.foldedUnderMachineId?.takeIf(String::isNotBlank)?.let(::machineId),
+    )
+    fun rawInteraction(value: Interaction) = if (plain) value else value.copy(
+        id = GroupKeys.raw(value.id),
+        machineId = rawMachine(value.machineId),
+        foldedUnderMachineId = value.foldedUnderMachineId?.takeIf(String::isNotBlank)?.let(::rawMachine),
+    )
     fun fleet(value: FleetState) = if (plain) value else value.copy(items = value.items.map { item ->
         // The id is "machine/session": FleetSummary.key opens and answers by its machine part.
         item.copy(id = path(item.id), interaction = item.interaction?.let(::interactionId))
@@ -78,7 +89,11 @@ internal class GroupNames(val namespace: String?) {
     // Plain values for the group's own services. Ids of another group never reach them (the facades route by suffix).
     fun raw(key: SessionKey) = GroupKeys.rawKey(key)
     fun rawMachine(machineId: String) = GroupKeys.raw(machineId)
-    fun rawSession(value: Session) = if (plain) value else value.copy(machineId = GroupKeys.raw(value.machineId))
+    fun rawSession(value: Session) = if (plain) value else value.copy(
+        machineId = GroupKeys.raw(value.machineId),
+        parentMachineId = value.parentMachineId?.takeIf(String::isNotBlank)?.let(::rawMachine),
+        foldedUnderMachineId = value.foldedUnderMachineId?.takeIf(String::isNotBlank)?.let(::rawMachine),
+    )
     fun rawDraftKey(value: DraftKey) = if (plain || value !is DraftKey.Chat) value else DraftKey.Chat(raw(value.session))
     fun rawDraft(value: DraftSnapshot) = if (plain) value else value.copy(key = rawDraftKey(value.key))
     fun rawOperationPreferences(value: AgentOperationPreferences) = if (plain) value else

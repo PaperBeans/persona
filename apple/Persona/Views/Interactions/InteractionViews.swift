@@ -2861,7 +2861,7 @@ extension Interaction {
     /// The line under a card's title in a list: its session's title; a sessionless card says where it comes from, and
     /// Script when its title does not already name who asks (`personad ask` labels its cards Script, docs/integrations/script-cli.md).
     func placeLine(machine: String?) -> String {
-        if let under = foldedUnder, !under.isEmpty, under != sessionID {
+        if requestHomeKey != sessionKey {
             let title = sessionTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             // A side session's card says so (#7944), in the words its parent's chat uses.
             if foldedAs == SideFold.side || foldedSide != nil, !title.isEmpty {

@@ -129,7 +129,7 @@
     <string name="agents_row_loop_next">循环，下次 %1$s</string>
     <string name="agents_row_loop_pending">循环，下次时间待更新</string>
     <string name="agents_row_background">后台 %1$d</string>
-    <string name="agents_row_subagents">子 Agent %1$d</string>
+    <string name="agents_row_subagents">子智能体 %1$d</string>
     <string name="agents_row_queued">待发 %1$d</string>
     <string name="agents_row_draft">草稿</string>
     <string name="agents_row_draft_attachments">草稿含附件</string>

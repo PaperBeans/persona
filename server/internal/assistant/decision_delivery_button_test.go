@@ -15,6 +15,7 @@ import (
 
 // The real Lark callback must give the same known-option receipt as the saved and refreshed conclusion card.
 func TestDecisionButtonReceiptMatchesCard(t *testing.T) {
+	needsLarkLayer(t)
 	for _, tc := range []struct {
 		name, kind string
 		check      bool

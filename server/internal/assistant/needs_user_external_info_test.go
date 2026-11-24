@@ -307,6 +307,7 @@ func TestNeedsUserExternalInfoSilentFinishKeepsCardIntact(t *testing.T) {
 }
 
 func TestTaskReviewSupersedesNeedsUserCleanlyAcrossVerdicts(t *testing.T) {
+	needsLarkLayer(t)
 	parkedArgs := personReplyParkArgs(time.Now())
 	parkedArgs["reason"] = "Waiting for external QA sign-off per thread reply"
 	verdicts := []struct {

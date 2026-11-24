@@ -680,7 +680,7 @@ internal fun firstPaintSnapshot(rows: List<Session>, limit: Int): List<Session> 
     for (row in rows) {
         if (picked.size >= limit) break
         if (row.key in picked) continue
-        val parent = row.foldedUnder?.takeIf(String::isNotBlank)?.let { byKey[SessionKey(row.machineId, it)] }
+        val parent = row.foldedUnderKey?.let(byKey::get)
         if (parent != null && parent.key !in picked) {
             if (picked.size + 2 > limit) continue
             picked[parent.key] = parent

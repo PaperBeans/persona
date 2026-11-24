@@ -302,6 +302,7 @@ func TestUserCheckReplacesAnEarlierDecision(t *testing.T) {
 }
 
 func TestUserCheckFeedbackRoundPersistsAcrossRestart(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	for _, via := range []string{"verification card", "task card", "Agent chat"} {
 		t.Run(via, func(t *testing.T) {

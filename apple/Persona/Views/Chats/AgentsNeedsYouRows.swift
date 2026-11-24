@@ -37,8 +37,9 @@ nonisolated extension AgentsNeedsYou {
         // The sessions a card its task's supervisor holds sits under: no row of their own unless a card not held is.
         var held: Set<SessionKey> = []
         for ix in cards {
-            // A folded child's card counts under its parent, once, and only when that parent is a row here.
-            let home = SessionKey(group: ix.group, machineID: ix.machineID, sessionID: ix.requestHome)
+            // A folded child's card counts under its parent (same-machine or cross-machine), once, and only when that
+            // parent is a row here. Orphan subagent cards stay visible in Needs You under their own key.
+            let home = ix.requestHomeKey
             let key = home != ix.sessionKey && waitingKeys.contains(home) ? home : ix.sessionKey
             if ix.supervisorHeld {
                 if !ix.isSessionless { held.insert(key) }

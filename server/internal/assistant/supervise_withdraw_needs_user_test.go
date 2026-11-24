@@ -36,6 +36,7 @@ func withdrawArgs() map[string]any {
 }
 
 func TestSupervisorWithdrawsItsNeedsUserQuietly(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	database := todoTestDB(t)
 	s, f, todo, posts, updates := setupNeedsUserTaskWithLark(t, database)

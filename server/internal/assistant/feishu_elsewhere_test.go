@@ -798,6 +798,7 @@ func TestSourceReportWhenTheStartFailed(t *testing.T) {
 // What the report says: the first line of the latest outcome note, never its links; else only that it is done, or that it
 // could not be done. Not the todo's decisions, the topic's words, the judge's reason or the error of a start.
 func TestSourceReportText(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	add := func(e *askEnv, id string, rows ...db.TodoDecisionRow) {
 		for i, r := range rows {
@@ -963,6 +964,7 @@ func TestSourceReportWhenAccepted(t *testing.T) {
 // sends what @s the bot starts every message with) turns it off, is recorded as the user's decision from the topic, goes to
 // no Agent, and the closing then says nothing to the original message. Other text is a word.
 func TestSourceNoReply(t *testing.T) {
+	needsLarkLayer(t)
 	for _, cmd := range []string{"/noreply", "／NoReply", "  /noreply  ", "@_user_1 /noreply", "@_user_1   ／noreply"} {
 		t.Run(cmd, func(t *testing.T) {
 			database := todoTestDB(t)
@@ -1073,6 +1075,7 @@ func topicEventIn(id, chat, thread, text string) botcard.MessageEvent {
 // The plan is kept with the todo: a restart in the window keeps the time (not shortened, not forgotten), shows no second
 // notice, and tells once when it comes.
 func TestSourceReportPlanSurvivesARestart(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	e := newAskEnv(t, database)
 	e.ask(ownerAsk("om_pr1", "/ai 修登录崩溃"))
@@ -1111,6 +1114,7 @@ func TestSourceReportPlanSurvivesARestart(t *testing.T) {
 // 4. The report is made once however the assistant restarts: told before, it is not told again; closed while the assistant
 // was away, it is shown and told once after.
 func TestSourceReportOnceAcrossRestarts(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	e := newAskEnv(t, database)
 	e.ask(ownerAsk("om_rs1", "/ai 修登录崩溃"))
@@ -1364,6 +1368,7 @@ func TestSourceReportLoopFindsALostTimer(t *testing.T) {
 
 // What is told is what the topic was shown: an outcome that is written between the notice and the time does not change it.
 func TestSourceReportSendsWhatTheTopicWasShown(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	e := newAskEnv(t, database)
 	e.ask(ownerAsk("om_sh1", "/ai 修登录崩溃"))
@@ -1468,6 +1473,7 @@ func TestElsewhereRichTextCommand(t *testing.T) {
 // A to-do reopened in the window between the notice and the time cancels what was planned (text and time gone); closed
 // again, it is planned afresh: the new text, a new notice, a new wait. What goes out is the last text the topic was shown.
 func TestSourceReportIsPlannedAgainAfterAReopen(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	e := newAskEnv(t, database)
 	e.ask(ownerAsk("om_ro1", "/ai 修登录崩溃"))
@@ -1552,6 +1558,7 @@ func TestCleanReport(t *testing.T) {
 // What leaves for the original chat has no link, path, command or mention of the outcome note's sentence, whoever wrote the
 // note, and the topic's notice and the text told are the same words; a sentence with nothing else in it is just "Done.".
 func TestSourceReportIsCleanedAndTheNoticeIsTheText(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	for name, c := range map[string]struct{ note, want string }{
 		"all kinds":   {"已修好 https://example.com/pr/1 命令 `rm -rf /tmp/x` 路径 /Users/someone/proj/a.go 通知 <at user_id=\"all\"></at> @张三 完成。\nhttps://example.com/pr/2", "已修好 命令 路径 通知 完成。"},
@@ -1611,6 +1618,7 @@ func TestSourceReportIsCancelledWhenTheTopicIsUnbound(t *testing.T) {
 // The store has the say on when and what: a plan that another assistant made afresh since (a later time, another text) is
 // not told early by a timer of this one's, and when its time comes what goes out is the store's text.
 func TestSourceReportClaimFollowsThePlanInTheStore(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	e := newAskEnv(t, database)
 	e.ask(ownerAsk("om_pl1", "/ai 修登录崩溃"))
@@ -1724,6 +1732,7 @@ func dmReply(id, text, root, parent string) botcard.MessageEvent {
 // or to something under them. It turns the report off, is recorded as the user's decision, goes to no Agent, and is
 // answered under the message.
 func TestNoHomeNoReplyInThePrivateChat(t *testing.T) {
+	needsLarkLayer(t)
 	for name, ev := range map[string]botcard.MessageEvent{
 		"a reply to the first message":     dmReply("om_c1", "/noreply", "om_dm1", "om_dm1"),
 		"a reply to the notice":            dmReply("om_c1", "／NoReply", "om_dm1", "om_notice"),
@@ -1830,6 +1839,7 @@ func TestNoHomeNoticeThatCannotBeShownPlansNothing(t *testing.T) {
 // A planned report of a to-do with no topic survives a restart (the anchor is read back from the store), is told once, and
 // "/noreply" still works afterwards.
 func TestNoHomePlanSurvivesARestart(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	e := newAskEnv(t, database)
 	e.home = ""

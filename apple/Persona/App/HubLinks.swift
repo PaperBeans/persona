@@ -53,6 +53,7 @@ final class HubLink: Identifiable {
         c.sessionLookup = features.contains("sessions_lookup")
         c.sessionList = features.contains("sessions_list")
         c.sessionsHierarchy = features.contains(ChildSessions.feature)
+        c.sessionsCrossMachineHierarchy = features.contains(ChildSessions.crossMachineFeature)
         #if DEBUG
         c.transport = transportForTests
         #endif

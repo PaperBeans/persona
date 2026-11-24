@@ -76,7 +76,7 @@ func listSep(l i18n.Lang) string {
 	if strings.HasPrefix(string(l), "en") {
 		return ", "
 	}
-	return "、"
+	return "、" // i18n-ignore: the CJK enumeration comma between list items, punctuation not prose
 }
 
 // progressCard is a run's card while it goes on; waiting: the note while its message is not found in the

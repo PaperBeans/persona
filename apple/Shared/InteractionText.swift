@@ -166,7 +166,7 @@ nonisolated extension Interaction {
     /// is still loading. Any other card whose session is unknown stays blocked.
     func canAnswer(session: Session?) -> Bool {
         if let session { return isSessionless || session.canApprove }
-        if let under = foldedUnder, !under.isEmpty, under != sessionID { return true }
+        if requestHomeKey != sessionKey { return true }
         return isSessionless
     }
 

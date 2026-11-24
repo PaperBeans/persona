@@ -42,7 +42,7 @@ struct ModelChangeTests {
     }
 
     private func marked(_ items: [Item], folded: Bool = false, openFolded: Bool = false,
-                        places: [ChildSessions.Place] = [], sessions: [String: Session] = [:]) -> [ChatLine] {
+                        places: [ChildSessions.Place] = [], sessions: [SessionKey: Session] = [:]) -> [ChatLine] {
         let blocks = ChatStore.rebuild(items, settled: nil).blocks
         var builder = ChatLines(openWork: [], foldSupervision: folded, foldBackground: folded, main: folded,
                                 openAllSupervision: openFolded)
@@ -221,7 +221,7 @@ struct ModelChangeTests {
         let lines = marked([
             user(1, "first"), answer(2, Self.opus), wake,
             call(4, Self.sonnet), result(5, of: call(4, Self.sonnet)), answer(6, Self.sonnet),
-        ], places: [ChildSessions.Place(sessionID: "child", time: nil)], sessions: ["child": child])
+        ], places: [ChildSessions.Place(key: child.key, time: nil)], sessions: [child.key: child])
         let hasChildCard = lines.contains { line in
             guard case .work(_, let items, _, _, _) = line.content else { return false }
             return items.contains { item in

@@ -451,7 +451,9 @@ private fun ChatPage(
     }).collectAsStateWithLifecycle()
     // The chat jumps to a task's notice through the task host's navigation.
     // The message a hub link named (`?at=`, #2194) while it is being landed on: like a search hit, its drawer opens.
-    val childCards = rememberChatChildren(key, session, sessionList, chrome, repository)
+    var overviewOpen by remember(key) { mutableStateOf(false) }
+    var openSubagentsPending by rememberSaveable(key.path, chrome.openSubagents) { mutableStateOf(chrome.openSubagents) }
+    val childCards = rememberChatChildren(key, session, sessionList, chrome, repository, forceRead = overviewOpen)
     val modeChangeStore = remember(key, repository, scope) { ModeChangeStore(scope) { repository.modeChanges(it) } }
     DisposableEffect(modeChangeStore) { onDispose(modeChangeStore::close) }
     LaunchedEffect(key, repository, renderStyle, session != null, session?.permissionMode, session?.bypassPending) {
@@ -459,7 +461,7 @@ private fun ChatPage(
     }
     val modeChangesUntil = remember(timelineVersion, projection) { modeChangesCutoff(timeline.isFrozen(), projection.lines) }
     val pageLines = rememberChatPageLines(key, renderStyle, snapshot, session, foldsBackground, supervisingConversation, tasks, taskTodos, search,
-        openWork, projection, feed, taskPlans, taskCardProjection, childCards.rows.values.toList(), modeChanges = modeChangeStore.changes,
+        openWork, projection, feed, taskPlans, taskCardProjection, childCards.list, modeChanges = modeChangeStore.changes,
         modeChangesUntil = modeChangesUntil)
     var jumpItem by pageLines.jumpItem
     val assistantPresentation = pageLines.assistantPresentation
@@ -1027,7 +1029,17 @@ private fun ChatPage(
                                         onForkSession = if (onFork != null && session?.canFork == true) ({ onFork("") }) else null,
                                         forking = forking,
                                         takeover = pageTakeover,
-                                        menuOpen = headerMenuOpen)
+                                        menuOpen = headerMenuOpen,
+                                        machines = machines,
+                                        childRows = childCards.list,
+                                        onOpenSubagent = chrome.onOpenSubagent ?: chrome.onOpenSession,
+                                        onOpenBackgroundDestination = openBackground,
+                                        onStopLoop = if (readOnly || !canSend) null else ({ send(ChatActivity.STOP_LOOP) }),
+                                        overviewActions = chrome.actions,
+                                        overviewConnection = chrome.connection,
+                                        openSubagentsRequested = openSubagentsPending,
+                                        onOpenSubagentsHandled = { openSubagentsPending = false },
+                                        onOverviewVisible = { overviewOpen = it })
                                     // The space's other tabs under the title (iOS SiblingTabs); not for the assistant's conversation.
                                     if (tabs && session != null && onOpenSibling != null) {
                                         ChatSiblingTabs(session, siblingSessions, onOpenSibling, trailing = activityPill)

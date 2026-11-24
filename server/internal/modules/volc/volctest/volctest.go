@@ -35,19 +35,21 @@ const EnvService = "PERSONA_VOLC_SERVICE"
 
 // Script is how the stand-in misbehaves; Set changes it while it runs.
 type Script struct {
-	RefuseASR      int    // an HTTP status refusing every recognition handshake (0: none), with RefuseBody
-	RefuseBody     string //
-	DropLines      []int  // a session sent speech of one of these lines (Line.N) drops at once: a window that keeps failing
-	DropAll        bool   // every session drops at its next audio packet: the service is down
-	RefuseRequest  uint32 // an error frame's code answering the request (0: none), with RefuseMessage
-	RefuseMessage  string //
-	DropAfter      int    // the socket of each of the first DropN sessions closes after this many audio packets
-	DropN          int    //
-	EmptyAudio     bool   // a session that heard only silence ends with error 45000002 (empty audio)
-	TTSStatus      int    // an HTTP status refusing synthesis (0: none), with TTSBody
-	TTSBody        string //
-	TTSLineCode    int    // a line with this code in place of the audio (0: none), with TTSLineMessage
-	TTSLineMessage string //
+	RefuseASR      int             // an HTTP status refusing every recognition handshake (0: none), with RefuseBody
+	RefuseBody     string          //
+	DropLines      []int           // a session sent speech of one of these lines (Line.N) drops at once: a window that keeps failing
+	DropLinesAfter int             // if positive, DropLines waits until this many session milliseconds have arrived
+	DropGate       <-chan struct{} // if non-nil, a DropLines failure waits for this test event
+	DropAll        bool            // every session drops at its next audio packet: the service is down
+	RefuseRequest  uint32          // an error frame's code answering the request (0: none), with RefuseMessage
+	RefuseMessage  string          //
+	DropAfter      int             // the socket of each of the first DropN sessions closes after this many audio packets
+	DropN          int             //
+	EmptyAudio     bool            // a session that heard only silence ends with error 45000002 (empty audio)
+	TTSStatus      int             // an HTTP status refusing synthesis (0: none), with TTSBody
+	TTSBody        string          //
+	TTSLineCode    int             // a line with this code in place of the audio (0: none), with TTSLineMessage
+	TTSLineMessage string          //
 }
 
 // Session is one recognition session as the service saw it.
@@ -284,6 +286,7 @@ func (s *Service) serveASR(w http.ResponseWriter, r *http.Request) {
 	live := sess.Endpoint == "bigmodel_async"
 	var h hearing
 	handed := map[int]bool{}
+	dropLineHeard := false
 	answer := func(seq int32, last bool) error {
 		all := h.utterances(last)
 		var out []map[string]any
@@ -321,7 +324,16 @@ func (s *Service) serveASR(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		down := s.script.DropAll // read at each packet: a test turns it on while sessions run
 		s.mu.Unlock()
-		if down || n <= sc.DropN && packets >= sc.DropAfter || slices.ContainsFunc(sc.DropLines, func(line int) bool { return speaks(pcm, line) }) {
+		dropLineHeard = dropLineHeard || slices.ContainsFunc(sc.DropLines, func(line int) bool { return speaks(pcm, line) })
+		dropLine := dropLineHeard && (sc.DropLinesAfter <= 0 || h.ms() >= sc.DropLinesAfter)
+		if down || n <= sc.DropN && packets >= sc.DropAfter || dropLine {
+			if dropLine && sc.DropGate != nil {
+				select {
+				case <-sc.DropGate:
+				case <-ctx.Done():
+					return
+				}
+			}
 			c.CloseNow()
 			return
 		}

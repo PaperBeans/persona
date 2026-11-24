@@ -241,6 +241,17 @@ A view that fetches once per id cannot recover when the store puts the same id b
   message" are independent; after an interrupt, look for the queued message becoming a new turn rather than assuming the
   interrupt cancelled it. The parser must not treat that later turn as a new user message typed after the stop.
 
+## Messages queued behind a turn with no tool call come back as one line (2026-11-24, #14338, Claude Code 2.1.330)
+
+- A turn that makes no more tool calls has no tool boundary left to take a queued message at. When it ends, Claude Code
+  dequeues every message queued meanwhile and writes them as **one** `user` line. Each message keeps its own blocks, in
+  the order typed: the assistant's live snapshot, interjection note, pictures and text.
+- Seen with bursts of five and six channel messages sent within seconds. The first message had its own line. The others
+  shared the next one.
+- Anything that ties a send to "its line" must let one line hold several sends. The echo now splits such a line into
+  each send's items (`docs/protocol/protocol.md`, "Matching pending messages"). Before that, a folded channel run waited
+  for messages that were never tied, and ended asking for a resend.
+
 ## A herdr started from inside a Claude session makes its panes write no transcript (measured Claude Code 2.1.2xx; re-check)
 
 - Claude Code sets `CLAUDE_CODE_CHILD_SESSION` for the processes it starts. A herdr that someone launches from inside a

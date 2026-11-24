@@ -202,6 +202,9 @@ nonisolated struct APIClient: Sendable {
     /// The hub's hello has `sessions_hierarchy`: windowed lists and counts send `roots=1`. Older hubs do not, so a
     /// child stays a row of its own. A parent-session page is a separate request and never sends `roots`.
     var sessionsHierarchy = false
+    /// The hub's hello has `sessions_cross_machine_hierarchy`: windowed root lists send `cross_machine_hierarchy=1`
+    /// and child queries send `parent_machine_id` + `parent_session_id` to retrieve cross-machine and archived-parent children.
+    var sessionsCrossMachineHierarchy = false
     /// Execution surface is diagnostic only; authorization still uses the paired hub credential.
     var clientMetadata: RequestClientMetadata = .current
     /// Answers the demo config's requests (DemoHub registers it at launch); every endpoint goes through `request`.

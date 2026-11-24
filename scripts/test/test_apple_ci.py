@@ -149,12 +149,13 @@ class AppleCIPreparationTests(unittest.TestCase):
     def test_explicit_unsigned_build_lane_preserves_the_real_build_and_skips_devices(self):
         script = SCRIPT.read_text()
         workflow = (ROOT / '.github/workflows/apple-test.yml').read_text()
-        self.assertIn('options: [ios, ios18, ios-build, packages, ios-focused, ios-regressions, ios-ipad-diagnostic]', workflow)
+        self.assertIn('options: [ios, ios18, ios-build, packages, ios-focused, ios-regressions, ios-model-picker, ios-ipad-diagnostic]', workflow)
         self.assertIn("inputs.lane == 'packages' && 'Native package tests (Xcode 26.0)'", workflow)
         self.assertIn("inputs.lane == 'ios-focused' && 'Focused iOS and About tests (Xcode 26.0)'", workflow)
         self.assertIn("inputs.lane == 'ios-regressions' && 'iOS stack and Live Activity regressions (Xcode 26.0)'", workflow)
-        self.assertIn('all|ios|ios18|packages|ios-build|ios-focused|ios-regressions|ios-ipad-diagnostic', script)
-        self.assertIn('[ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = ios-build ] || [ "$LANE" = ios-focused ] || [ "$LANE" = ios-regressions ] || [ "$LANE" = ios-ipad-diagnostic ]', script)
+        self.assertIn("inputs.lane == 'ios-model-picker' && 'iOS Assistant model picker regressions (Xcode 26.0)'", workflow)
+        self.assertIn('all|ios|ios18|packages|ios-build|ios-focused|ios-regressions|ios-model-picker|ios-ipad-diagnostic', script)
+        self.assertIn('[ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = ios-build ] || [ "$LANE" = ios-focused ] || [ "$LANE" = ios-regressions ] || [ "$LANE" = ios-model-picker ] || [ "$LANE" = ios-ipad-diagnostic ]', script)
         self.assertIn('[ "$LANE" != packages ] && [ "$LANE" != ios-build ]', script)
         start = script.index('if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = ios-build ] || [ "$LANE" = ios-focused ] || [ "$LANE" = ios-regressions ]')
         end = script.index('if [ "$LANE" = ios18 ]; then', start)
@@ -334,6 +335,25 @@ class AppleCIPreparationTests(unittest.TestCase):
             current = current.replace(wire, '')
             current = current.replace(modules, '')
             current = current.replace(core_only, '')
+            model_runtime = '''    # This focused lane runs no Watch or device batch, so it prepares only iOS.
+    if [ "$LANE" = ios-model-picker ] && [ "$platform" = watchOS ]; then
+      continue
+    fi
+'''
+            current = current.replace(model_runtime, '')
+            current = current.replace('  if [ "$LANE" != ios-model-picker ]; then\n', '')
+            model_selection = script[script.index('  if [ "$LANE" = ios-model-picker ]; then',
+                                                  script.index('  IOS_EXCLUSIONS=')):script.index(
+                                                      '  if [ "$LANE" = ios-regressions ]; then',
+                                                      script.index('  IOS_EXCLUSIONS='))]
+            current = current.replace(model_selection, '')
+            model_result = script[script.index('  if [ "$LANE" = ios-model-picker ]; then',
+                                               script.index('  IOS_FAILED=0')):script.index(
+                                                   '  if [ "$LANE" = ios-regressions ]; then',
+                                                   script.index('  IOS_FAILED=0'))]
+            current = current.replace(model_result, '')
+            current = current.replace(' && [ "$LANE" != ios-model-picker ]', '')
+            current = current.replace(' || [ "$LANE" = ios-model-picker ]', '').replace('|ios-model-picker', '')
             current = current.replace(' || [ "$LANE" = ios-ipad-diagnostic ]', '').replace('|ios-ipad-diagnostic', '')
             current = current.replace('      checker="$1"; bundle="$2"; log="$3"; watch_log="$4"; udid="$5"; ci_root="$6"; bundle_id="$7"; output="$8"; diagnostics="$9"; lane="${10}"; shift 10',
                                       '      checker="$1"; bundle="$2"; log="$3"; watch_log="$4"; udid="$5"; ci_root="$6"; bundle_id="$7"; output="$8"; shift 8')
@@ -399,8 +419,42 @@ class AppleCIPreparationTests(unittest.TestCase):
         self.assertEqual(focused, '''if [ "$LANE" = ios-focused ] || [ "$LANE" = ios-ipad-diagnostic ]; then
     result ios-unit "$SIM" PageSearchableTests StarredMessagesTests LauncherModelChoiceTests OmpNewAgentTests PaseoPermissionModesTests PaseoProvidersTests AboutVersionCompactVisualTests
 ''')
-        self.assertIn('elif [ "$LANE" != ios-regressions ]; then', script[focused_start:ordinary])
+        self.assertIn('elif [ "$LANE" != ios-regressions ] && [ "$LANE" != ios-model-picker ]; then', script[focused_start:ordinary])
         self.assertIn('if [ "$LANE" != ios-focused ]; then', script[finish:])
+
+    def test_model_picker_lane_skips_unrelated_builds_and_stops_after_strict_suites(self):
+        script = SCRIPT.read_text()
+        selection_start = script.index('  if [ "$LANE" = ios-model-picker ]; then',
+                                       script.index('  IOS_EXCLUSIONS='))
+        selection_end = script.index('  if [ "$LANE" = ios-regressions ]; then', selection_start)
+        selection = script[selection_start:selection_end]
+        self.assertEqual(re.findall(r'-only-testing:PersonaTests/(\w+)', selection), [
+            'AssistantModelChoiceTests', 'AssistantModelPanelModelTests',
+        ])
+        self.assertNotIn('IOS_EXCLUSIONS', selection)
+        self.assertIn('if [ "$LANE" = ios-model-picker ] && [ "$platform" = watchOS ]; then', script)
+        resolve = script.index('  resolve Persona')
+        guard = script.index('  if [ "$LANE" != ios-model-picker ]; then', resolve)
+        unsigned = script.index("ci_run 'Unsigned iOS and embedded watch/extensions build'", resolve)
+        core_only = script.index("ci_run 'Core-only iOS build'", resolve)
+        self.assertLess(resolve, guard)
+        self.assertLess(guard, unsigned)
+        self.assertLess(unsigned, core_only)
+        readiness = script.index("ci_run 'Verify hosted iOS test readiness' 900")
+        batch = script.index("test_batch ios-unit 'iOS offline unit and design/token tests'")
+        strict = script.index('result ios-unit "$SIM" AssistantModelChoiceTests AssistantModelPanelModelTests')
+        stop = script.rindex('  if [ "$LANE" = ios-model-picker ]; then', batch, strict)
+        finish = script.index('  if [ "$LANE" = ios-regressions ]; then', strict)
+        self.assertLess(readiness, batch)
+        self.assertLess(batch, stop)
+        self.assertLess(stop, strict)
+        self.assertEqual(script[stop:finish], '''  if [ "$LANE" = ios-model-picker ]; then
+    result ios-unit "$SIM" AssistantModelChoiceTests AssistantModelPanelModelTests
+    exit "$IOS_FAILED"
+  fi
+''')
+        self.assertLess(strict, script.index("test_batch ios-html-card 'iOS HTML card tests"))
+        self.assertLess(strict, script.index('  REGULAR_SIM_STARTED=1'))
 
     def test_regular_ipad_observer_has_an_independent_scope_and_strict_probe(self):
         script = SCRIPT.read_text()

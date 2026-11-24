@@ -83,7 +83,8 @@ internal fun mergedSessions(stacks: GroupStacks): SessionsRepository = object : 
     override suspend fun setListFilter(filter: SessionListFilter) = stacks.forEach { stack ->
         if (!selected(stack)) return@forEach
         val machine = filter.machineId?.let { id -> if (stack.names.owns(id)) GroupKeys.raw(id) else id }
-        stack.repositories.sessions.setListFilter(filter.forHub(stack.namespace).copy(machineId = machine))
+        val parentMachine = filter.parentMachineId?.let { id -> if (stack.names.owns(id)) GroupKeys.raw(id) else id }
+        stack.repositories.sessions.setListFilter(filter.forHub(stack.namespace).copy(machineId = machine, parentMachineId = parentMachine))
     }
     override suspend fun loadMore() = stacks.forEach { if (selected(it)) it.repositories.sessions.loadMore() }
     override suspend fun loadPrevious() = stacks.forEach { if (selected(it)) it.repositories.sessions.loadPrevious() }

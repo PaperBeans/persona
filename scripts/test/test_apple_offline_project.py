@@ -25,6 +25,13 @@ class AppleOfflineProjectTests(unittest.TestCase):
         self.base = yaml.safe_load((ROOT / 'apple/project.yml').read_text())
         self.project = deepcopy(self.base)
         self.project.pop('include')
+        modules = yaml.safe_load((ROOT / 'apple/modules.yml').read_text())['targets']['Persona']
+        self.module_sources = modules['sources']
+        self.project['targets']['Persona']['sources'] = [
+            *self.module_sources, *self.project['targets']['Persona']['sources'],
+        ]
+        self.project['targets']['Persona']['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = \
+            modules['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']
         self.project['schemes'] = {name: self.base['schemes'][name] for name in (
             'Persona', 'PersonaOfflineUnitTests', 'AboutVersionVisualTests',
             'AboutVersionAccessibilityHost', 'PersonaWatch', 'PersonaVision')}
@@ -36,6 +43,12 @@ class AppleOfflineProjectTests(unittest.TestCase):
 
     def test_real_host_dependencies_survive_but_watch_and_share_do_not(self):
         dependencies = self.result['targets']['Persona']['dependencies']
+        self.assertEqual(self.result['targets']['Persona']['sources'],
+                         self.project['targets']['Persona']['sources'])
+        self.assertEqual(self.result['targets']['Persona']['sources'][:len(self.module_sources)],
+                         self.module_sources)
+        self.assertEqual(self.result['targets']['Persona']['settings'],
+                         self.project['targets']['Persona']['settings'])
         expected = self.project['targets']['Persona']['dependencies'][2:]
         self.assertEqual(dependencies, expected)
         self.assertIn({'target': 'PersonaWidgets'}, dependencies)
@@ -94,6 +107,8 @@ class AppleOfflineProjectTests(unittest.TestCase):
                 {'package': 'PersonaCore', 'product': 'PersonaCoreTestSupport'}),
             'package declaration': lambda project: project['packages']['MarkdownUI'].__setitem__('from', '1.0.0'),
             'host sources': lambda project: project['targets']['Persona'].__setitem__('sources', []),
+            'module compilation conditions': lambda project: project['targets']['Persona']['settings']['base'].pop(
+                'SWIFT_ACTIVE_COMPILATION_CONDITIONS'),
             'test assertions': lambda project: project['schemes']['PersonaOfflineUnitTests']['test'].__setitem__(
                 'gatherCoverageData', False),
         }
