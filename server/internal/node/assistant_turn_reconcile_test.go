@@ -206,6 +206,67 @@ func TestAssistantBusyKeptWhenTurnBeginsDuringTheLook(t *testing.T) {
 	}
 }
 
+// A failed turn's result read while Claude Code's state was being read hands the turn to a model recovery: it is
+// registered under n.mu (recoverAssistantResultFor) and its retry is on its way, with nothing else to show for it on
+// the process. That busy is the recovery's, not a turn that ended unheard: it stays, and when the retry cannot be
+// delivered the recovery's own end is what turns the row idle.
+func TestAssistantBusyKeptWhenRecoveryTakesTheTurnDuringTheLook(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	n := assistantNode(t)
+	n.recoveries = map[string]*assistantTurnRecovery{}
+	p := busyProc(n, id)
+	var r *assistantTurnRecovery
+	claudeStatus(t, func(string) string {
+		n.mu.Lock() // as recoverAssistantResultFor: registered, running, the retry not yet sent
+		r = &assistantTurnRecovery{proc: p, running: true}
+		n.recoveries[id] = r
+		n.mu.Unlock()
+		return "idle"
+	})
+	p.mu.Lock()
+	active := p.lastActive
+	p.mu.Unlock()
+	n.reconcileAssistantTurns()
+	p.mu.Lock()
+	busy, kept := p.busy, p.lastActive.Equal(active)
+	p.mu.Unlock()
+	n.mu.Lock()
+	owned := n.recoveries[id] == r && r.running
+	n.mu.Unlock()
+	if !busy || !kept || !owned {
+		t.Fatalf("busy %v, untouched %v, recovery still owns the turn %v: the recovery's turn was taken as ended", busy, kept, owned)
+	}
+	n.finishAssistantRecovery(p, r) // the retry could not be delivered
+	p.mu.Lock()
+	busy = p.busy
+	p.mu.Unlock()
+	n.mu.Lock()
+	left := n.recoveries[id]
+	n.mu.Unlock()
+	if busy || left != nil {
+		t.Fatalf("after the recovery ended: busy %v, recovery left %v; want idle and none", busy, left != nil)
+	}
+}
+
+// A process that replaced the one looked at keeps its busy: it is another turn's.
+func TestAssistantBusyKeptWhenProcessReplacedDuringTheLook(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	n := assistantNode(t)
+	p := busyProc(n, id)
+	claudeStatus(t, func(string) string {
+		n.mu.Lock()
+		n.procs[id] = &assistantProc{id: id, agent: "claude", busy: true}
+		n.mu.Unlock()
+		return "idle"
+	})
+	n.reconcileAssistantTurns()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.busy {
+		t.Fatal("a process no longer the conversation's was taken as ended")
+	}
+}
+
 // A result line with a field of another type than the node reads (a gateway's token count as a string) used to be
 // dropped whole, and the turn it ended stayed working (#14351). Its type and words are decoded all the same.
 func TestAssistantResultWithAnUnreadableFieldStillEndsTheTurn(t *testing.T) {

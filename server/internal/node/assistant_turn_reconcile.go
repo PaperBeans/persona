@@ -76,16 +76,7 @@ func (n *Node) reconcileAssistantTurns() {
 		if status != "idle" && status != "shell" {
 			continue
 		}
-		// Only if nothing happened while the file was read: a line printed or a message sent since is a turn's own.
-		p.mu.Lock()
-		quiet := p.quiet()
-		ended := p.busy && !p.compacting && !p.manual && p.reading.Load() == 0 && p.lastOut.Load() == mark.out && p.lastActive.Equal(mark.active)
-		if ended {
-			p.busy = false
-			p.lastActive = time.Now()
-			p.partial.Reset()
-		}
-		p.mu.Unlock()
+		quiet, ended := n.endUnheardTurn(p, mark)
 		if !ended {
 			continue
 		}
@@ -94,4 +85,28 @@ func (n *Node) reconcileAssistantTurns() {
 		n.emitDelta(p.id, "")
 		n.notifySessionsSoon()
 	}
+}
+
+// endUnheardTurn clears p's busy flag when nothing happened to it since mark was taken: still the conversation's
+// process, no model recovery holding its turn, no line printed or message sent. The state file was read with no lock
+// held, so all of that is looked at again here, with n.mu and then p.mu (the node's order: stopSettled,
+// sweepAssistants, cancelAssistantRecovery) held from the look to the change. A result read meanwhile that handed
+// the failed turn to a model recovery registers it under n.mu (recoverAssistantResultFor) before it marks the process
+// busy again, so it either shows here or comes after busy is cleared; the recovery's busy is never taken for a turn
+// that ended unheard. quiet is how long p printed nothing, for the log.
+func (n *Node) endUnheardTurn(p *assistantProc, mark busyMark) (quiet time.Duration, ended bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.procs[p.id] != p || n.recoveries[p.id] != nil {
+		return 0, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.busy || p.compacting || p.manual || p.reading.Load() > 0 || p.lastOut.Load() != mark.out || !p.lastActive.Equal(mark.active) {
+		return 0, false
+	}
+	p.busy = false
+	p.lastActive = time.Now()
+	p.partial.Reset()
+	return p.quiet(), true
 }
