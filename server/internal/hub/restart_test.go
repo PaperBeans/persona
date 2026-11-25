@@ -146,14 +146,14 @@ func TestHelloResumes(t *testing.T) {
 	}
 	stream := h.events.stream
 	c := &client{out: make(chan []byte, 512)}
-	h.helloLocked(c, map[string]any{"type": "hello"}, stream, 1, true)
+	h.helloLocked(c, wsHello{Type: "hello"}, stream, 1, true)
 	got := read(c)
 	if len(got) != 3 || got[0]["type"] != "hello" || got[0]["resumed"] != true || got[0]["event_seq"] != float64(4) ||
 		got[1]["type"] != "inbox" || got[1]["event_seq"] != float64(2) || got[2]["type"] != "lark" {
 		t.Fatalf("resumed hello and replay (the form held back): %v", got)
 	}
 	c = &client{out: make(chan []byte, 512)}
-	h.helloLocked(c, map[string]any{"type": "hello"}, "another", 1, true)
+	h.helloLocked(c, wsHello{Type: "hello"}, "another", 1, true)
 	if got := read(c); len(got) != 1 || got[0]["resumed"] != false || got[0]["event_stream"] != stream {
 		t.Fatalf("another stream: %v", got)
 	}

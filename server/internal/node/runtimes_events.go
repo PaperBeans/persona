@@ -379,7 +379,7 @@ func (n *Node) runtimeAsk(ctx context.Context, h *runtimeConn, params json.RawMe
 		ix.Agent, ix.AgentLabel = agent, label
 	}
 	now := time.Now().UTC()
-	ix.MachineID, ix.Screen, ix.Dialog, ix.Secret = "", "", nil, false
+	ix.MachineID, ix.Screen, ix.Dialog, ix.Secret, ix.OutwardWrite = "", "", nil, false, false
 	// "Always allow for this session" kept by the hub for a runtime's permission card (#3974): what it grants is the node's word, never
 	// the runtime's — one key for this runtime's tool, which the manager keeps under this session id, so it never
 	// reaches another session or another tool. Only for a runtime that asked for it in its hello (caps.keep_always: it

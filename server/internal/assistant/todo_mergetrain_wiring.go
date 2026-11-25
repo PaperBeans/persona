@@ -192,13 +192,33 @@ func (c *mergeTrainCoordinator) observe(todoID string, status TodoPRStatus, repo
 		if latest, ok := c.train.Entry(repoKey, todoID); ok {
 			entry = latest
 		}
+		// Escalated entries must never trigger head evaluation (they may still be queued behind
+		// a different active head, whose checks must not be evaluated using this PR's status).
+		if entry.State == mergetrain.StateEscalated {
+			reason := "rebase failure circuit breaker tripped"
+			if entry.LastError != "" {
+				reason = fmt.Sprintf("rebase failure circuit breaker tripped (%d/%d): %s",
+					entry.RebaseFailures, entry.MaxRebaseFailures, entry.LastError)
+			}
+			return mergeTrainOutcome{
+				Tracked: true,
+				RepoKey: repoKey,
+				Decision: mergetrain.Decision{
+					RepoKey: repoKey,
+					TodoID:  todoID,
+					Action:  mergetrain.ActionEscalateNeedsUser,
+					State:   mergetrain.StateEscalated,
+					Reason:  reason,
+				},
+			}
+		}
 		// Only evaluate the repository head using this PR's own checks; queued entries wait their turn.
-		if entry.State == mergetrain.StateActive || entry.State == mergetrain.StateAwaitingApproval || entry.State == mergetrain.StateEscalated {
+		if entry.State == mergetrain.StateActive || entry.State == mergetrain.StateAwaitingApproval {
 			checksGreen := strings.EqualFold(strings.TrimSpace(status.Checks), "success") && !status.Draft
-			reviewBlocked := strings.EqualFold(strings.TrimSpace(status.Review), "changes_requested") ||
-				strings.EqualFold(strings.TrimSpace(status.Review), "required")
-			// Never auto-merge an already-approved entry if review subsequently became blocked.
-			if reviewBlocked && (entry.Policy == mergetrain.PolicyAutoMerge || entry.Approved) {
+			reviewApproved := strings.EqualFold(strings.TrimSpace(status.Review), "approved")
+			// Never auto-merge an already-approved entry if current review status is no longer approved
+			// (e.g. changes_requested, required, pending after dismissal/truncation, or empty).
+			if !reviewApproved && (entry.Policy == mergetrain.PolicyAutoMerge || entry.Approved) {
 				checksGreen = false
 			}
 			dec := c.train.EvaluateHead(repoKey, checksGreen)

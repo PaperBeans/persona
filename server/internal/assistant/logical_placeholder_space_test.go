@@ -160,10 +160,17 @@ func switchedLogical(machine, rootID, activeSegID string) db.LogicalConversation
 		Epoch:     2,
 		Revision:  200,
 		Segments: []conversationlog.Segment{
-			{ID: "seg-1", Ordinal: 1, MachineID: machine, SessionID: rootID, Engine: "claude", State: "retired"},
-			{ID: "seg-2", Ordinal: 2, MachineID: machine, SessionID: activeSegID, Engine: "codex", State: "active"},
+			placeholderSegment("seg-1", 1, machine, rootID, "claude", "retired"),
+			placeholderSegment("seg-2", 2, machine, activeSegID, "codex", "active"),
 		},
 	}
+}
+
+// placeholderSegment is one segment of switchedLogical, built from the documented zero (archguard's out-literal rule).
+func placeholderSegment(id string, ordinal int, machine, session, engine, state string) conversationlog.Segment {
+	var s conversationlog.Segment
+	s.ID, s.Ordinal, s.MachineID, s.SessionID, s.Engine, s.State = id, ordinal, machine, session, engine, state
+	return s
 }
 
 func TestLogicalDevicesOfflinePlaceholderSpaceIsolationAndFailClosed(t *testing.T) {

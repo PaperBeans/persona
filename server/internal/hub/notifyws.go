@@ -342,7 +342,7 @@ func (h *Hub) notifyWSFrom(manager, kind string, build localized, wants func(Not
 	defer h.mu.Unlock()
 	live := map[string]bool{} // devices whose ws_notify socket accepted this event
 	for c := range h.clients {
-		if !c.has("ws_notify") {
+		if c.role == roleReadOnly || c.role == roleScoped || !c.has("ws_notify") {
 			continue
 		}
 		if len(required) > 0 && !c.has(required[0]) {

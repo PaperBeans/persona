@@ -15,12 +15,12 @@ import (
 )
 
 // The assistant's tools on Persona's todos (#1683, docs/assistant/todos.md "The assistant's todo tools"): list, read,
-// create, change, complete, reopen and delete them, as the apps do through /api/v1/todos. The user's own todos (no agent,
-// not a task) are created, changed, completed and reopened at once; deleting one is confirmed on the phone every time,
-// and so is completing or reopening a task or a todo agents work on (completing it closes its agents, tasks_close.go). A
-// health conversation asks before anything leaves its space (confirmOutbound). Plain todos only: work for an agent
-// still goes through task_plan. With manager.json's assistant.complete_agentless_todos enabled, a conversation can
-// complete its own agentless memo without the extra card; every other boundary stays the same (#11371).
+// create, change, complete, reopen and delete them, as the apps do through /api/v1/todos. Deleting a to-do is confirmed
+// on the phone every time, and reopening a task or a to-do with Agents is confirmed too. Completing a to-do asks on the
+// phone only when it has a real side effect: crossing conversation/supervisor ownership or stopping/closing a live or
+// hanging linked Agent (tasks_close.go). Plain to-dos and same-session to-dos with no active Agents complete directly.
+// A health conversation still asks before anything leaves its space (confirmOutbound). Plain todos only: work for an
+// agent still goes through task_plan.
 
 // The tools' descriptions and arguments are in prompts/mcp/todo (todo_list … todo_delete; tools.go lists them).
 
@@ -512,14 +512,9 @@ func (s *Service) toolTodoDone(ctx context.Context, machine, self, name string, 
 	if complete && t.isConcern() {
 		return "", fmt.Errorf("%s is a concern: it closes only when you report its outcome to the user with concern_report", t.ID)
 	}
-	var needsConfirm bool
-	if complete && s.settings(ctx).todosV2On() {
-		needsConfirm = s.todoHasActiveAgents(ctx, t)
-	} else {
-		supervisor := supervisorOf(t)
-		direct := complete && self != "" && t.PlanID == "" && s.hello(ctx).Assistant.CompleteAgentlessTodos && !todoHasAgents(t) &&
-			(supervisor == self || supervisor == "" && t.Origin == self)
-		needsConfirm = todoHasWork(t) && !direct
+	needsConfirm := todoHasWork(t)
+	if complete {
+		needsConfirm = s.todoCompleteNeedsConfirm(ctx, t, self)
 	}
 	if needsConfirm {
 		key := "assistant-todos.reopen_card"
@@ -634,9 +629,32 @@ func todoHasAgents(t Todo) bool {
 	return slices.ContainsFunc(t.Agents, func(a TodoAgent) bool { return a.DismissedAt == nil })
 }
 
-// todoHasWork: t is a task or agents work on it, so completing it closes them (tasks_close.go).
+// todoHasWork: t is a task or agents work on it, so reopening it still confirms.
 func todoHasWork(t Todo) bool {
 	return t.Origin != "" || t.Supervision != nil || todoHasAgents(t)
+}
+
+// todoCompleteCrossSession reports whether caller session self is completing a to-do owned or supervised
+// by another conversation (or by an unknown caller when the to-do has an owner or supervisor).
+func todoCompleteCrossSession(t Todo, self string) bool {
+	if sup := strings.TrimSpace(supervisorOf(t)); sup != "" {
+		return self == "" || self != sup
+	}
+	if origin := strings.TrimSpace(t.Origin); origin != "" {
+		return self == "" || self != origin
+	}
+	return false
+}
+
+// todoCompleteNeedsConfirm reports whether completing t from session self has a real side effect
+// requiring owner confirmation: crossing conversation ownership or stopping/closing a live or hanging
+// linked Agent. Plain to-dos and same-session to-dos with no active Agents complete directly
+// (health-space outbound confirmation still runs via confirmOutbound).
+func (s *Service) todoCompleteNeedsConfirm(ctx context.Context, t Todo, self string) bool {
+	if todoCompleteCrossSession(t, self) {
+		return true
+	}
+	return s.todoHasActiveAgents(ctx, t)
 }
 
 // sortTodosByDue orders todos as the tools list them: open first, then by due moment (none last), priority, newest.

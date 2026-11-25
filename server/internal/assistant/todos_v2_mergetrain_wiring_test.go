@@ -342,3 +342,145 @@ func TestTodosV2MergeTrainRollbackClearsStateAndConcurrentIsolation(t *testing.T
 		t.Fatalf("s2 was unexpectedly affected by s1 rollback: %+v", r2After)
 	}
 }
+
+func TestTodosV2MergeTrainQueuedEscalatedEntryDoesNotResetOrCorruptHead(t *testing.T) {
+	s, _ := newQuietServiceOn(t, nil)
+	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+	setMergeTrainTodosV2Flag(t, s, true, false)
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// task1 is active head with failing CI; task2 is queued behind it in the same repo.
+	task1 := newMergeTrainTask(t, s, "Head PR failing CI", "https://github.com/example/serial/pull/1")
+	task2 := newMergeTrainTask(t, s, "Queued PR with conflicts", "https://github.com/example/serial/pull/2")
+
+	out1 := s.onPRStatusMergeTrain(ctx, task1, TodoPRStatus{
+		URL: task1.PRURL, State: "open", HeadOID: "t1-sha", Review: "approved", Checks: "failure", CheckedAt: now,
+	})
+	if out1.Decision.Action != mergetrain.ActionWaitQueue || out1.Decision.TodoID != task1.ID {
+		t.Fatalf("initial task1 decision = %+v, want ActionWaitQueue for %s", out1.Decision, task1.ID)
+	}
+
+	// Trip 2-strike conflict escalation on queued task2.
+	for i, head := range []string{"t2-conflict-1", "t2-conflict-2"} {
+		out := s.onPRStatusMergeTrain(ctx, task2, TodoPRStatus{
+			URL: task2.PRURL, State: "open", HeadOID: head, Review: "approved", Checks: "failure", Conflicts: true,
+			CheckedAt: now.Add(time.Duration(i+1) * time.Second),
+		})
+		if i == 1 && (out.Decision.Action != mergetrain.ActionEscalateNeedsUser || out.Decision.State != mergetrain.StateEscalated) {
+			t.Fatalf("task2 strike 2 decision = %+v, want ActionEscalateNeedsUser/StateEscalated", out.Decision)
+		}
+	}
+
+	// Clearing conflicts on queued escalated task2 with green checks MUST NOT evaluate task1 (head)
+	// with task2's checks and MUST return ActionEscalateNeedsUser for task2 itself.
+	out2Cleared := s.onPRStatusMergeTrain(ctx, task2, TodoPRStatus{
+		URL: task2.PRURL, State: "open", HeadOID: "t2-clean", Review: "approved", Checks: "success", Conflicts: false,
+		CheckedAt: now.Add(3 * time.Second),
+	})
+	if out2Cleared.Decision.TodoID != task2.ID || out2Cleared.Decision.Action != mergetrain.ActionEscalateNeedsUser || out2Cleared.Decision.State != mergetrain.StateEscalated {
+		t.Fatalf("queued escalated task2 cleared conflicts = %+v, want %s ActionEscalateNeedsUser/StateEscalated", out2Cleared.Decision, task2.ID)
+	}
+
+	// Merging task1 promotes task2 to head, but task2 must remain StateEscalated and never reset/auto-merge.
+	mergedOut := s.onPRStatusMergeTrain(ctx, task1, TodoPRStatus{
+		URL: task1.PRURL, State: "merged", HeadOID: "t1-sha", CheckedAt: now.Add(4 * time.Second),
+	})
+	if mergedOut.Decision.TodoID != task2.ID || mergedOut.Decision.Action != mergetrain.ActionEscalateNeedsUser || mergedOut.Decision.State != mergetrain.StateEscalated {
+		t.Fatalf("merging task1 decision = %+v, want promoted %s ActionEscalateNeedsUser/StateEscalated", mergedOut.Decision, task2.ID)
+	}
+
+	out2AfterPromote := s.onPRStatusMergeTrain(ctx, task2, TodoPRStatus{
+		URL: task2.PRURL, State: "open", HeadOID: "t2-clean", Review: "approved", Checks: "success", Conflicts: false,
+		CheckedAt: now.Add(5 * time.Second),
+	})
+	if out2AfterPromote.Decision.Action != mergetrain.ActionEscalateNeedsUser || out2AfterPromote.Decision.State != mergetrain.StateEscalated {
+		t.Fatalf("promoted escalated task2 with green checks = %+v, want ActionEscalateNeedsUser/StateEscalated", out2AfterPromote.Decision)
+	}
+
+	repo, ok := findRepoSnapshot(s.mergeTrainSnapshot(ctx), "github.com/example/serial")
+	if !ok || repo.Head == nil || repo.Head.TodoID != task2.ID || repo.Head.State != mergetrain.StateEscalated || repo.Head.RebaseFailures != 2 {
+		t.Fatalf("repo head after promotion = %+v, want %s StateEscalated RebaseFailures=2", repo.Head, task2.ID)
+	}
+}
+
+func TestTodosV2MergeTrainNonApprovedReviewBlocksAutoMerge(t *testing.T) {
+	t.Run("auto_merge_entry_approval_dismissed_to_pending_or_empty", func(t *testing.T) {
+		s, _ := newQuietServiceOn(t, nil)
+		s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+		setMergeTrainTodosV2Flag(t, s, true, false)
+
+		ctx := context.Background()
+		now := time.Now().UTC()
+		task := newMergeTrainTask(t, s, "Approved then dismissed PR", "https://github.com/example/review-guard/pull/10")
+
+		// Poll 1: approved while checks pending -> enqueued with PolicyAutoMerge.
+		first := s.onPRStatusMergeTrain(ctx, task, TodoPRStatus{
+			URL: task.PRURL, State: "open", HeadOID: "sha-1", Review: "approved", Checks: "pending", CheckedAt: now,
+		})
+		if first.Decision.Action != mergetrain.ActionWaitQueue {
+			t.Fatalf("poll 1 decision = %+v, want ActionWaitQueue", first.Decision)
+		}
+
+		// Poll 2: approval dismissed (or truncated review history) -> Review is "pending" with green checks.
+		for i, review := range []string{"pending", ""} {
+			out := s.onPRStatusMergeTrain(ctx, task, TodoPRStatus{
+				URL: task.PRURL, State: "open", HeadOID: "sha-2", Review: review, Checks: "success",
+				CheckedAt: now.Add(time.Duration(i+1) * time.Second),
+			})
+			if out.Decision.Action == mergetrain.ActionRebaseAndMerge {
+				t.Fatalf("Review=%q unexpectedly allowed ActionRebaseAndMerge: %+v", review, out.Decision)
+			}
+			if out.Decision.Action != mergetrain.ActionWaitQueue {
+				t.Fatalf("Review=%q decision = %+v, want ActionWaitQueue", review, out.Decision)
+			}
+		}
+
+		// Poll 4: once re-approved with green checks, rebase_and_merge is allowed again.
+		reapproved := s.onPRStatusMergeTrain(ctx, task, TodoPRStatus{
+			URL: task.PRURL, State: "open", HeadOID: "sha-2", Review: "approved", Checks: "success",
+			CheckedAt: now.Add(3 * time.Second),
+		})
+		if reapproved.Decision.Action != mergetrain.ActionRebaseAndMerge {
+			t.Fatalf("re-approved decision = %+v, want ActionRebaseAndMerge", reapproved.Decision)
+		}
+	})
+
+	t.Run("human_review_entry_approved_then_dismissed", func(t *testing.T) {
+		s, _ := newQuietServiceOn(t, nil)
+		s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+		setMergeTrainTodosV2Flag(t, s, true, false)
+
+		ctx := context.Background()
+		now := time.Now().UTC()
+		task := newMergeTrainTask(t, s, "Human review approved then dismissed", "https://github.com/example/review-guard/pull/11")
+
+		// Poll 1: required -> PolicyHumanReviewRequired / StateAwaitingApproval.
+		p1 := s.onPRStatusMergeTrain(ctx, task, TodoPRStatus{
+			URL: task.PRURL, State: "open", HeadOID: "sha-1", Review: "required", Checks: "success", CheckedAt: now,
+		})
+		if p1.Decision.Action != mergetrain.ActionAwaitHumanReview {
+			t.Fatalf("poll 1 = %+v, want ActionAwaitHumanReview", p1.Decision)
+		}
+
+		// Poll 2: approved while checks pending -> Approved=true.
+		p2 := s.onPRStatusMergeTrain(ctx, task, TodoPRStatus{
+			URL: task.PRURL, State: "open", HeadOID: "sha-2", Review: "approved", Checks: "pending", CheckedAt: now.Add(time.Second),
+		})
+		if p2.Decision.Action != mergetrain.ActionWaitQueue {
+			t.Fatalf("poll 2 = %+v, want ActionWaitQueue", p2.Decision)
+		}
+
+		// Poll 3: approval dismissed to "pending" when checks turn green -> MUST NOT auto-merge.
+		p3 := s.onPRStatusMergeTrain(ctx, task, TodoPRStatus{
+			URL: task.PRURL, State: "open", HeadOID: "sha-2", Review: "pending", Checks: "success", CheckedAt: now.Add(2 * time.Second),
+		})
+		if p3.Decision.Action == mergetrain.ActionRebaseAndMerge {
+			t.Fatalf("dismissed approval unexpectedly allowed ActionRebaseAndMerge: %+v", p3.Decision)
+		}
+		if p3.Decision.Action != mergetrain.ActionWaitQueue {
+			t.Fatalf("poll 3 = %+v, want ActionWaitQueue", p3.Decision)
+		}
+	})
+}

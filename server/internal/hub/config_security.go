@@ -10,7 +10,9 @@ type SecurityConfig struct {
 	// PlaintextLoopbackOnly refuses plaintext from the LAN too (plaintext_lan.go); it needs public.tls_listen.
 	PlaintextLoopbackOnly bool `json:"plaintext_loopback_only,omitempty"`
 	// PrivateNetworkOnly is office network mode (private_network.go): nothing of the hub reaches or answers the internet.
-	PrivateNetworkOnly     bool `json:"private_network_only,omitempty"`
+	PrivateNetworkOnly bool `json:"private_network_only,omitempty"`
+	// AllowReadOnlySessions enables issuing and authenticating temporary read-only verification credentials (readonly_sessions.go).
+	AllowReadOnlySessions  bool `json:"allow_readonly_sessions,omitempty"`
 	AuthFailures           int  `json:"auth_failures,omitempty"`
 	AuthWindowSeconds      int  `json:"auth_window_seconds,omitempty"`
 	AuthBlockSeconds       int  `json:"auth_block_seconds,omitempty"`

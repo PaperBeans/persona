@@ -86,7 +86,7 @@ func resumeRun(t *testing.T, seed int64) {
 		c = &client{out: make(chan []byte, 8192)}
 		h.mu.Lock()
 		h.clients[c] = struct{}{}
-		h.helloLocked(c, map[string]any{"type": "hello"}, app.stream, app.seq, app.stream != "")
+		h.helloLocked(c, wsHello{Type: "hello"}, app.stream, app.seq, app.stream != "")
 		h.mu.Unlock()
 		h.sendPendingInteractions(c, false)
 	}

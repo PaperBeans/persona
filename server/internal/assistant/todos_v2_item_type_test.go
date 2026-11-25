@@ -306,26 +306,44 @@ func TestTodosV2TodoCompleteDirectAndLiveAgentConfirmation(t *testing.T) {
 		}
 	}
 
-	t.Run("todos_v2=false preserves legacy phone confirmation on agent-free task", func(t *testing.T) {
+	t.Run("todos_v2=false completes same-session agent-free task directly and confirms cross-session", func(t *testing.T) {
 		e := newTodoEnv(t, nil)
 		putTodo(e.s, Todo{
-			ID:          "todo_legacy_rollup",
+			ID:          "todo_default_rollup",
 			Title:       "Phase 3 milestone rollup",
 			Origin:      "conv1",
 			PlanID:      "plan_1",
 			Supervision: &Supervision{Supervisor: "conv1"},
 		})
+		res, err := directComplete(t, e, "conv1", "todo_default_rollup")
+		if err != nil || !strings.HasPrefix(res, "Completed: ") {
+			t.Fatalf("same-session direct completion: res=%q err=%v", res, err)
+		}
+		if got := todoNow(e.s, "todo_default_rollup"); got.DoneAt == nil {
+			t.Fatal("expected todo_default_rollup to be marked done")
+		}
+		if len(e.s.pendingQuestions()) != 0 {
+			t.Fatal("unexpected phone confirmation card for same-session agent-free task")
+		}
+
+		putTodo(e.s, Todo{
+			ID:          "todo_default_cross_session",
+			Title:       "Another session's rollup",
+			Origin:      "conv2",
+			PlanID:      "plan_1",
+			Supervision: &Supervision{Supervisor: "conv2"},
+		})
 		shown := make(chan proto.Interaction, 1)
 		go answerArchiveCard(t, e.s, false, shown)
-		res, err := e.tool("todo_complete", map[string]any{"id": "todo_legacy_rollup"})
+		res, err = e.tool("todo_complete", map[string]any{"id": "todo_default_cross_session"})
 		if err != nil || !strings.Contains(res, "declined") {
-			t.Fatalf("legacy completion: res=%q err=%v", res, err)
+			t.Fatalf("cross-session completion: res=%q err=%v", res, err)
 		}
 		if card := <-shown; card.ToolName != "todo_complete" {
 			t.Fatalf("unexpected card: %+v", card)
 		}
-		if got := todoNow(e.s, "todo_legacy_rollup"); got.DoneAt != nil {
-			t.Fatal("completed despite decline")
+		if got := todoNow(e.s, "todo_default_cross_session"); got.DoneAt != nil {
+			t.Fatal("completed cross-session task despite decline")
 		}
 	})
 
@@ -411,6 +429,30 @@ func TestTodosV2TodoCompleteDirectAndLiveAgentConfirmation(t *testing.T) {
 		}
 	})
 
+	t.Run("todos_v2=true still requires phone confirmation for cross-session completion", func(t *testing.T) {
+		e := newTodoEnv(t, nil)
+		setTodosV2(t, e.s, true, false)
+		putTodo(e.s, Todo{
+			ID:          "todo_v2_cross_session",
+			Title:       "Owned by another conversation",
+			Origin:      "conv2",
+			Supervision: &Supervision{Supervisor: "conv2"},
+			ItemType:    db.ItemTypeTask,
+		})
+		shown := make(chan proto.Interaction, 1)
+		go answerArchiveCard(t, e.s, false, shown)
+		res, err := e.tool("todo_complete", map[string]any{"id": "todo_v2_cross_session"})
+		if err != nil || !strings.Contains(res, "declined") {
+			t.Fatalf("v2 cross-session completion: res=%q err=%v", res, err)
+		}
+		if card := <-shown; card.ToolName != "todo_complete" {
+			t.Fatalf("expected todo_complete confirmation card, got: %+v", card)
+		}
+		if got := todoNow(e.s, "todo_v2_cross_session"); got.DoneAt != nil {
+			t.Fatal("completed cross-session task despite decline")
+		}
+	})
+
 	t.Run("todos_v2=true still refuses todo_complete for concern", func(t *testing.T) {
 		e := newTodoEnv(t, nil)
 		setTodosV2(t, e.s, true, false)
@@ -428,27 +470,41 @@ func TestTodosV2TodoCompleteDirectAndLiveAgentConfirmation(t *testing.T) {
 		}
 	})
 
-	t.Run("rollback off->on->off restores legacy confirmation behavior", func(t *testing.T) {
+	t.Run("rollback off->on->off keeps side-effect confirmation boundaries", func(t *testing.T) {
 		e := newTodoEnv(t, nil)
 		setTodosV2(t, e.s, true, false)
 		setTodosV2(t, e.s, false, true)
 		putTodo(e.s, Todo{
-			ID:          "todo_rollback_confirm",
-			Title:       "Rollup after rollback",
+			ID:          "todo_rollback_direct",
+			Title:       "Same-session rollup after rollback",
 			Origin:      "conv1",
 			Supervision: &Supervision{Supervisor: "conv1"},
 		})
+		res, err := directComplete(t, e, "conv1", "todo_rollback_direct")
+		if err != nil || !strings.HasPrefix(res, "Completed: ") {
+			t.Fatalf("post-rollback same-session completion: res=%q err=%v", res, err)
+		}
+		if got := todoNow(e.s, "todo_rollback_direct"); got.DoneAt == nil {
+			t.Fatal("expected todo_rollback_direct to be marked done")
+		}
+
+		putTodo(e.s, Todo{
+			ID:          "todo_rollback_cross",
+			Title:       "Cross-session rollup after rollback",
+			Origin:      "conv2",
+			Supervision: &Supervision{Supervisor: "conv2"},
+		})
 		shown := make(chan proto.Interaction, 1)
 		go answerArchiveCard(t, e.s, false, shown)
-		res, err := e.tool("todo_complete", map[string]any{"id": "todo_rollback_confirm"})
+		res, err = e.tool("todo_complete", map[string]any{"id": "todo_rollback_cross"})
 		if err != nil || !strings.Contains(res, "declined") {
-			t.Fatalf("post-rollback completion: res=%q err=%v", res, err)
+			t.Fatalf("post-rollback cross-session completion: res=%q err=%v", res, err)
 		}
 		if card := <-shown; card.ToolName != "todo_complete" {
 			t.Fatalf("expected todo_complete card after rollback, got: %+v", card)
 		}
-		if got := todoNow(e.s, "todo_rollback_confirm"); got.DoneAt != nil {
-			t.Fatal("completed after rollback despite decline")
+		if got := todoNow(e.s, "todo_rollback_cross"); got.DoneAt != nil {
+			t.Fatal("completed cross-session task after rollback despite decline")
 		}
 	})
 }

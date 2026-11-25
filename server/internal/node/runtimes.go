@@ -82,8 +82,9 @@ type runtimeHello struct {
 		// policy channel (separate from user messages) on session.start and session.send, and fails closed
 		// (assistant_supervision_runtime) when a nonempty policy cannot be applied (#11173).
 		SupervisionPolicy bool `json:"supervision_policy"`
-		// AssistantEnvironment: the local runtime applies the generic, non-proxied Assistant process environment
-		// only to dedicated Assistant workers, including replacements, and never to shared ordinary-Agent workers.
+		// AssistantEnvironment: the local runtime applies the generic Assistant process environment (including
+		// session-scoped gate proxy addresses, never Auth-held credentials or raw upstream sockets) only to dedicated
+		// Assistant workers, including replacements, and never to shared ordinary-Agent workers.
 		AssistantEnvironment bool `json:"assistant_environment"`
 		// Execution reports the actual per-session execution environment via session.execution.
 		Execution bool `json:"execution"`
@@ -264,9 +265,10 @@ func (h *runtimeConn) supervisionPolicy() bool {
 	return h.hello.Caps.Assistant && h.hello.Caps.SupervisionPolicy
 }
 
-// assistantEnvironment permits local, dedicated-worker runtimes to opt into the generic non-proxied environment.
-// A daemon or remote-agent runtime can run off-machine or without local filesystem access, where local command
-// paths and non-proxied credentials must not be sent.
+// assistantEnvironment permits local, dedicated-worker runtimes to opt into the generic Assistant environment
+// (with session-scoped local gate proxy addresses for Auth-backed / relayed gates). A daemon or remote-agent
+// runtime can run off-machine or without local filesystem access, where local command paths and local proxy
+// addresses must not be sent.
 func (h *runtimeConn) assistantEnvironment() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()

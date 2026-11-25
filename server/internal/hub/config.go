@@ -262,6 +262,10 @@ func (c *Config) applyEnv() {
 			*e.to(c) = v
 		}
 	}
+	if v := strings.TrimSpace(identity.Getenv("PERSONA_ALLOW_READONLY_SESSIONS")); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		c.Security.AllowReadOnlySessions = err == nil && enabled
+	}
 }
 
 // LoadConfig reads ~/.persona/hub.json for the hub's own start (and the programs that run beside it in its container). On

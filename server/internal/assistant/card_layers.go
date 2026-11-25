@@ -213,7 +213,7 @@ func hubCardSource(ix proto.Interaction) string {
 			return cardDeviceControl
 		}
 	}
-	if slices.Contains(outboundVerbs, connector.WriteVerb(ix.ToolName)) {
+	if ix.OutwardWrite || slices.Contains(outboundVerbs, connector.WriteVerb(ix.ToolName)) {
 		return cardOutboundWrite
 	}
 	return cardExtensionApproval
@@ -234,6 +234,8 @@ func (s *Service) inputCardSource(ix proto.Interaction, escalated bool) string {
 	switch {
 	case secretOrForm(ix):
 		return cardAgentSecretForm
+	case ix.Kind == proto.IxPermission && ix.OutwardWrite:
+		return cardOutboundWrite
 	case escalated:
 		return cardAskEscalated
 	case ix.Kind == proto.IxPermission:

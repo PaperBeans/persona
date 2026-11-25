@@ -256,7 +256,9 @@ each visit.
 - **Awaiting Reply keeps its own state** (`docs/design/DECISIONS.md` ("11-10 Awaiting Reply stays its own state")): its
   row says Awaiting Reply, it is not counted in N, and Can wait only files it under Needs you's header, folded.
 - **Within a section** the hub's `rank` orders rows: Needs you by deadline, then oldest ask; Working by latest
-  activity; Just finished newest first; Waiting by soonest wake; To do by overdue, today, due date, the owner's order.
+  activity; Just finished newest first; Waiting by soonest wake; To do by due date (overdue, today, later, no date
+  last), then priority (high, normal, low), then the newest. The owner's order has no input yet: priority and age
+  stand in.
 - **Steps roll up**: a step (a child to-do) is never a row in its parent's place; the parent carries the most urgent
   phase of itself and its steps, counted once, and line 2 names the step ("Ryokan · Which of 3?").
 - **Rows never move under a finger**: a phase change re-files a row only while the list is idle (a 0.2-s fade). Moves

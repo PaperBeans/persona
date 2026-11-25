@@ -296,10 +296,19 @@ func pairExpires(p *db.PairToken) time.Time {
 	return until
 }
 
+// expiringContext returns a context canceled when until is reached (or immediately when already elapsed).
+// A zero until returns a plain cancelable context with no deadline timer.
+func expiringContext(parent context.Context, until time.Time) (context.Context, context.CancelFunc) {
+	if until.IsZero() {
+		return context.WithCancel(parent)
+	}
+	return context.WithDeadline(parent, until)
+}
+
 // An open WS must not keep a pairing credential alive indefinitely. Recheck redemption while it is open,
 // then cancel exactly at the earlier of its original expiry and the redemption grace deadline.
 func (h *Hub) pairContext(parent context.Context, p principal) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancel := expiringContext(parent, p.PairExpires)
 	go func() {
 		defer cancel()
 		until := p.PairExpires

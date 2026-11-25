@@ -66,6 +66,8 @@ extensions.call:{id} /api/v1/extensions/{id}/
 -                    DELETE /api/v1/assistant/tasks/{id}
 -                    DELETE /api/v1/assistant/tasks/{id}/skip-next
 -                    DELETE /api/v1/assistant/tasks/{id}/start-grant
+-                    DELETE /api/v1/auth/readonly-sessions
+-                    DELETE /api/v1/auth/readonly-sessions/{id}
 -                    DELETE /api/v1/auth/tokens/{id}
 -                    DELETE /api/v1/bots/feishu/owner
 -                    DELETE /api/v1/channels/{id}/binding
@@ -211,6 +213,7 @@ spaces               GET /api/v1/assistant/tracks/{slug}/space-md
 -                    GET /api/v1/assistant/urgent-call
 assistant.start_defaults GET /api/v1/assistant/worker-presets
 -                    GET /api/v1/auth/password/state
+-                    GET /api/v1/auth/readonly-sessions
 -                    GET /api/v1/auth/tokens
 -                    GET /api/v1/bots/feishu
 -                    GET /api/v1/channels
@@ -557,6 +560,7 @@ todos.write          POST /api/v1/assistant/workspace-naming/preview
 -                    POST /api/v1/auth/password/exchange
 -                    POST /api/v1/auth/password/finish
 -                    POST /api/v1/auth/password/start
+-                    POST /api/v1/auth/readonly-sessions
 -                    POST /api/v1/auth/tokens
 -                    POST /api/v1/bots/feishu/pair
 -                    POST /api/v1/bots/feishu/test

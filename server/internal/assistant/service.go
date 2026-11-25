@@ -209,6 +209,8 @@ type Service struct {
 	todoAskAfter time.Duration
 	// retryNow is the clock a due retry checks the task's time against (retryStillDue; nil: time.Now, tests set it).
 	retryNow func() time.Time
+	// machineNow is the clock collectMachineSnapshots checks sample freshness and silent-node age against (nil: time.Now, tests set it).
+	machineNow func() time.Time
 
 	mux            *http.ServeMux
 	routes         []string
