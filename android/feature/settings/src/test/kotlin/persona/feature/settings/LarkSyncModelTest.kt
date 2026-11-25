@@ -109,6 +109,8 @@ class LarkSyncModelTest {
         // One that must be authorized again says so itself, not "ends soon".
         assertNull(reauthSoon(b.copy(reauthDueDays = 3, health = "needs_reauth")))
         assertTrue(needsAuthorize(b.copy(health = "unauthorized")))
+        assertTrue(needsAuthorize(b.copy(health = "scope_missing")))
+        assertNull(reauthSoon(b.copy(health = "scope_missing", reauthDueDays = 30)))
         assertFalse(needsAuthorize(b))
         assertEquals(LarkSync.TierFull, reauthTier(b.copy(tier = null), LarkSyncBot(tier = LarkSync.TierFull)))
         assertEquals(LarkSync.TierDocs, reauthTier(b.copy(tier = ""), null))

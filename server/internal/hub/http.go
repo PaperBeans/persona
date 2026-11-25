@@ -82,8 +82,12 @@ func (h *Hub) routes() http.Handler {
 		ixs := visibleInteractions(h.pendingInteractions(), h.requestHasElicitation(r))
 		if restrictedAgentData(r) {
 			em := extensionManager(r)
+			ro := principalOf(r.Context()).Role == roleReadOnly
 			ixs = slices.DeleteFunc(ixs, func(ix proto.Interaction) bool {
-				return em != "" && cmp.Or(ix.Manager, assistantwire.AssistantID) != em || ix.Private || h.spacesHidden(r) && h.hiddenFromExtensions(ix)
+				return em != "" && cmp.Or(ix.Manager, assistantwire.AssistantID) != em ||
+					ix.Private ||
+					(ro && ix.ToolName == proto.SecretHandoffTool) ||
+					h.spacesHidden(r) && h.hiddenFromExtensions(ix)
 			})
 		}
 		writeJSON(w, map[string]any{"interactions": h.withMuted(ixs)})
@@ -113,6 +117,7 @@ func (h *Hub) routes() http.Handler {
 	h.extensionRoutesRelayed(api)
 	api.HandleFunc("GET /api/v1/ws", h.serveWS)
 	h.tokenRoutes(api)
+	h.readOnlySessionRoutes(api)
 	h.portRoutes(api)
 	h.previewRoutes(api)
 	h.pairRoutes(api)
@@ -199,6 +204,16 @@ func (h *Hub) auth(next http.Handler) http.Handler {
 		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if tok == "" {
 			tok = r.URL.Query().Get("token")
+		}
+		if tok == "" && isReadOnlySessionsRoute(r.URL.Path) {
+			if r2, handled, authorized := h.tryAdminReadOnlyAuth(w, r); handled {
+				if !authorized {
+					return
+				}
+				w.Header().Set("Cache-Control", "no-store")
+				h.observeClientRequest(next, w, r2, principal{Role: "admin"})
+				return
+			}
 		}
 		// An extension's token that fails counts in a bucket of its own, which gates extensions' tokens only: never the
 		// bus, the apps or any other credential. A relayed manager's extensions call from its address, and calls the
@@ -323,6 +338,15 @@ func (h *Hub) auth(next http.Handler) http.Handler {
 			if !h.authorizeScopedDevice(w, r, p) {
 				return
 			}
+		} else if p.Role == roleReadOnly {
+			if !h.readOnlySessionsAllowed() {
+				h.disconnectReadOnlyClients()
+				h.securityError(w, r, http.StatusForbidden, "readonly_sessions_disabled", 0)
+				return
+			}
+			if !h.authorizeReadOnly(w, r, p) {
+				return
+			}
 		} else if !allowed(p, r.Method, r.URL.Path) {
 			msg := "this device can only read and answer"
 			if p.Role == roleLink || p.Role == roleLinkPair {
@@ -336,6 +360,10 @@ func (h *Hub) auth(next http.Handler) http.Handler {
 		r = r.WithContext(context.WithValue(r.Context(), principalKey{}, p))
 		if p.PairHash != "" && r.URL.Path == "/api/v1/ws" {
 			ctx, cancel := h.pairContext(r.Context(), p)
+			defer cancel()
+			r = r.WithContext(ctx)
+		} else if !p.ExpiresAt.IsZero() && r.URL.Path != "/api/v1/ws" {
+			ctx, cancel := expiringContext(r.Context(), p.ExpiresAt)
 			defer cancel()
 			r = r.WithContext(ctx)
 		}
@@ -695,7 +723,7 @@ func (h *Hub) sessionItems(w http.ResponseWriter, r *http.Request, m *Machine) {
 	}
 	res.Items = clientItemsCompat(h.requestLang(r), h.requestWants(r, featureCardRing), h.requestWants(r, featureMarkdownCloseout), h.requestWants(r, proto.FeatureToolViews), localizedItems(h.requestLang(r), h.withInjected(res.Items)))
 	// Allow binding a pending live Hub TTFT on latest-page / incremental reads while keeping historical pages read-only.
-	allowBind := atoi(q.Get("before_seq")) == 0 && atoi(q.Get("through_seq")) == 0
+	allowBind := atoi(q.Get("before_seq")) == 0 && atoi(q.Get("through_seq")) == 0 && principalOf(r.Context()).Role != roleReadOnly
 	h.ttft.annotate(m.cfg.ID, r.PathValue("sid"), res.Items, allowBind)
 	if q.Get("lazy_images") == "1" {
 		res.Items = proto.WithoutImageData(res.Items)
@@ -727,7 +755,7 @@ func (h *Hub) sessionItemFull(w http.ResponseWriter, r *http.Request, m *Machine
 		return
 	}
 	it := full.Item
-	if !strict {
+	if !strict && principalOf(r.Context()).Role != roleReadOnly {
 		// A client opened an item whole. Let the channels following its view see it too (fleet_follow.go).
 		h.asstOf(h.sessionOwner(m.cfg.ID, r.PathValue("sid"))).notify(assistantwire.EventSessionItems, assistantwire.SessionItems{MachineID: m.cfg.ID, SessionID: r.PathValue("sid"),
 			Items: []proto.Item{it}})
@@ -1340,6 +1368,8 @@ type client struct {
 	desktop bool
 	// device and role: whose credential opened the connection (devicetokens.go); device is empty for the pairing token.
 	device, role string
+	scopes       []string
+	expiresAt    time.Time
 	uiConnection string // hub-owned identity for targeted extension page transport
 	uiRequests   chan struct{}
 	uiManagers   map[string]bool
@@ -1584,8 +1614,26 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(64 << 20)
 	ctx, cancel := context.WithCancel(r.Context())
 	who := principalOf(r.Context())
+	if who.Role == roleReadOnly && (!h.readOnlySessionsAllowed() || who.ExpiresAt.IsZero() || !time.Now().Before(who.ExpiresAt)) {
+		cancel()
+		_ = conn.Close(wsCloseReadOnlyExpired, "read-only session expired")
+		return
+	}
+	if !who.ExpiresAt.IsZero() {
+		expCtx, expCancel := expiringContext(ctx, who.ExpiresAt)
+		defer expCancel()
+		go func() {
+			<-expCtx.Done()
+			if ctx.Err() == nil {
+				_ = conn.Close(wsCloseReadOnlyExpired, "session expired")
+				cancel()
+			}
+		}()
+	}
 	c := &client{cancel: cancel, done: ctx.Done(), hub: h, conn: conn, out: make(chan []byte, 512), subs: map[[2]string]bool{}, since: time.Now(),
-		device: who.ID, role: who.Role, delta: who.Role != roleScoped && wantsFeature(r, featureSessionsDelta), listMode: who.Role != roleScoped && wantsFeature(r, featureSessionsList), have: map[string]map[string][]byte{},
+		device: who.ID, role: who.Role, scopes: slices.Clone(who.Scopes), expiresAt: who.ExpiresAt,
+		delta:    who.Role != roleScoped && who.Role != roleReadOnly && wantsFeature(r, featureSessionsDelta),
+		listMode: who.Role != roleScoped && wantsFeature(r, featureSessionsList), have: map[string]map[string][]byte{},
 		urlFeatures: urlFeatures(r), acceptLang: i18n.FromRequest(r), meta: clientMeta{updates: make(chan heartbeatConfig, 512), done: ctx.Done()}}
 	c.traffic = h.requestTrafficAttribution(r, who)
 	c.uiConnection = randomHex(24)
@@ -1595,10 +1643,14 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 		h.sessionListIndex() // before registration: never seed the index under h.mu
 	}
 	h.mu.Lock()
-	if h.wsStopping || h.isDeviceRevoked(c.device) {
+	if h.wsStopping || h.isDeviceRevoked(c.device) || (c.role == roleReadOnly && !h.readOnlySessionsAllowed()) {
 		h.mu.Unlock()
 		cancel()
-		_ = conn.CloseNow()
+		if c.role == roleReadOnly {
+			_ = conn.Close(wsCloseReadOnlyExpired, "read-only session unavailable")
+		} else {
+			_ = conn.CloseNow()
+		}
 		return
 	}
 	if h.wsConnections == nil {
@@ -1641,12 +1693,15 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	}
 	// The hello goes first, then (resuming) what the client missed, before any live event: under h.mu, which
 	// broadcastTo holds while it numbers and sends (eventlog.go).
-	hello := h.hello()
+	hello := h.helloFor(who)
 	stream, after, resuming := resumeOf(r)
 	h.mu.Lock()
 	// Check under the registration lock so revocation either rejects this client or sees it to close it.
-	if h.wsStopping || h.isDeviceRevoked(c.device) {
+	if h.wsStopping || h.isDeviceRevoked(c.device) || (c.role == roleReadOnly && !h.readOnlySessionsAllowed()) {
 		h.mu.Unlock()
+		if c.role == roleReadOnly {
+			_ = conn.Close(wsCloseReadOnlyExpired, "read-only session unavailable")
+		}
 		return
 	}
 	h.clients[c] = struct{}{}
@@ -1656,7 +1711,9 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 		h.helloLocked(c, hello, stream, after, resuming)
 	}
 	h.mu.Unlock()
-	go h.fleetClientsChanged() // an app that takes elicitations (fleet_link.go)
+	if c.role != roleReadOnly {
+		go h.fleetClientsChanged() // an app that takes elicitations (fleet_link.go)
+	}
 
 	writerDone = make(chan struct{})
 	go func() {
@@ -1751,6 +1808,20 @@ func (h *Hub) onClientMessage(ctx context.Context, c *client, data []byte) {
 	if c.role == roleScoped && !scopedSocketCommand(msg.Type) {
 		return
 	}
+	if c.role == roleReadOnly {
+		if !h.readOnlySessionsAllowed() {
+			if c.conn != nil {
+				go c.conn.Close(wsCloseReadOnlyExpired, "read-only sessions disabled")
+			}
+			if c.cancel != nil {
+				c.cancel()
+			}
+			return
+		}
+		if !readOnlySocketCommand(msg.Type) {
+			return
+		}
+	}
 	h.mu.Lock()
 	c.activeAt = time.Now()
 	h.mu.Unlock()
@@ -1803,7 +1874,7 @@ func (h *Hub) onClientMessage(ctx context.Context, c *client, data []byte) {
 		if m == nil {
 			return
 		}
-		if c.role == roleScoped && !h.scopedPublicSession(m.cfg.ID, msg.SessionID) {
+		if (c.role == roleScoped || c.role == roleReadOnly) && !h.scopedPublicSession(m.cfg.ID, msg.SessionID) {
 			return
 		}
 		if m.conversationDeleted(msg.SessionID) {

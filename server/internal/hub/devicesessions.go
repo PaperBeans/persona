@@ -109,7 +109,7 @@ type deviceSessionConnection struct {
 
 func (h *Hub) deviceSessionConnected(r *http.Request, c *client) *deviceSessionConnection {
 	p := principalOf(r.Context())
-	if h.store == nil || p.ID == "" || p.PairHash != "" {
+	if h.store == nil || p.ID == "" || p.PairHash != "" || p.Role == roleReadOnly {
 		return nil
 	}
 	source := ""

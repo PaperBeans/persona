@@ -27,7 +27,7 @@ func TestHelloAndHealthCarryTheHubsFeatures(t *testing.T) {
 		}
 		seen[f] = true
 	}
-	if got, _ := h.hello()["features"].([]string); !slices.Equal(got, want) {
+	if got := h.hello().Features; !slices.Equal(got, want) {
 		t.Fatalf("hello features:\n%v\nwant\n%v", got, want)
 	}
 	for _, from := range []source{sourceLoopback, sourceLAN} {

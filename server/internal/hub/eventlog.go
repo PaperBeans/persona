@@ -206,7 +206,7 @@ func resumeOf(r *http.Request) (stream string, after int64, resuming bool) {
 
 // helloLocked queues the hello, which says where the client's stream stands (event_stream, event_seq) and whether it
 // resumes (resumed: what it missed follows at once, it need not refetch), then those events; h.mu is held.
-func (h *Hub) helloLocked(c *client, hello map[string]any, stream string, after int64, resuming bool) {
+func (h *Hub) helloLocked(c *client, hello wsHello, stream string, after int64, resuming bool) {
 	if h.events == nil {
 		h.events = newEventLog()
 	}
@@ -215,8 +215,12 @@ func (h *Hub) helloLocked(c *client, hello map[string]any, stream string, after 
 	if resuming {
 		missed, ok = h.events.since(stream, after)
 	}
-	hello["event_stream"], hello["event_seq"], hello["resumed"] = h.events.stream, h.events.seq, ok
-	b, err := json.Marshal(hello)
+	b, err := json.Marshal(wsStreamHello{
+		wsHello:     hello,
+		EventStream: h.events.stream,
+		EventSeq:    h.events.seq,
+		Resumed:     ok,
+	})
 	if err != nil {
 		return
 	}

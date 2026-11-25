@@ -55,6 +55,7 @@ model_profile_switch
 model_profile_rollback
 model_profile_capture
 model_probe
+launcher_import
 repositories_list
 repository_get
 repository_add

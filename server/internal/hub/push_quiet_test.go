@@ -273,7 +273,7 @@ func TestPushGradingHelloAndLiveBroadcast(t *testing.T) {
 	h.push.store = newGradingStore()
 	c := &client{device: "web-1", out: make(chan []byte, 4)}
 	addTestClient(h, c)
-	if got, _ := h.hello()["push_grading"].(bool); got {
+	if h.hello().PushGrading {
 		t.Fatal("hello push_grading = true before enabling")
 	}
 	mux := http.NewServeMux()
@@ -287,7 +287,7 @@ func TestPushGradingHelloAndLiveBroadcast(t *testing.T) {
 		}
 	}
 	put(`{"enabled":true}`)
-	if got, _ := h.hello()["push_grading"].(bool); !got {
+	if !h.hello().PushGrading {
 		t.Fatal("hello push_grading = false after enabling")
 	}
 	var msg map[string]any
@@ -295,7 +295,7 @@ func TestPushGradingHelloAndLiveBroadcast(t *testing.T) {
 		t.Fatalf("broadcast = %+v, err=%v", msg, err)
 	}
 	put(`{"enabled":false}`)
-	if got, _ := h.hello()["push_grading"].(bool); got {
+	if h.hello().PushGrading {
 		t.Fatal("hello push_grading = true after disabling")
 	}
 	if err := json.Unmarshal(<-c.out, &msg); err != nil || msg["type"] != "push_grading" || msg["enabled"] != false {

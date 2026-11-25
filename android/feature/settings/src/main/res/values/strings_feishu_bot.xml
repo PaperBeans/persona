@@ -34,4 +34,5 @@
     <string name="settings_feishu_bot_platform_lark" translatable="false">Lark</string>
     <string name="settings_feishu_bot_secret_filled">Filled in; tap Verify and save</string>
     <string name="settings_feishu_bot_unpairs">Saving another App ID ends the pairing; pair again on the bot\'s channel page.</string>
+    <string name="settings_feishu_bot_step_sync_permissions">For knowledge sync, also approve these user scopes: offline_access, search:message, drive:drive:readonly, drive:drive.metadata:readonly, docx:document:readonly, docs:document.content:read, sheets:spreadsheet:readonly, bitable:app:readonly, wiki:wiki:readonly, wiki:node:retrieve, wiki:space:retrieve, minutes:minutes:readonly, minutes:minutes.transcript:export, im:chat:read, im:chat:readonly, im:message:readonly, im:message.group_msg:get_as_user, im:message.p2p_msg:get_as_user, drive:file:download, contact:user.base:readonly, contact:contact.base:readonly. Publish the permissions, get admin approval if required, then authorize again to add missing permissions. Sender-name repair retries automatically after authorization.</string>
 </resources>

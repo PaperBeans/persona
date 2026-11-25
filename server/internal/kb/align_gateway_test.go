@@ -3,6 +3,7 @@ package kb
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -434,5 +435,142 @@ func TestIngestRepairsPre15486SenderNamesAndIsIdempotent(t *testing.T) {
 	}
 	if afterText := e.Store.Since("larksync-oc_grp", time.Time{}, 1<<20); afterText != beforeText {
 		t.Fatalf("replay modified archive:\nbefore:\n%s\nafter:\n%s", beforeText, afterText)
+	}
+}
+
+// Source renderers differ in link notation, entity escaping and inline media placeholders. The additional match
+// preserves exact receipt times, known senders, attachment counts and every meaningful word/link destination.
+func TestGatewayAlignerEquivalentBodyAndAttachmentFormats(t *testing.T) {
+	cases := []struct {
+		name, gateway, synced string
+		media                 bool
+	}{
+		{"link", "Read [guide](https://example.com/guide)", "Read guide (https://example.com/guide)", false},
+		{"entity", "Review A &amp; B", "Review A & B", false},
+		{"inline_image", "Before after", "Before [image] after", true},
+		{"inline_video", "Watch this now", "Watch [video] this now", true},
+	}
+	for _, archived := range []bool{false, true} {
+		t.Run(fmt.Sprint("archived=", archived), func(t *testing.T) {
+			e := testEngine(t, nil)
+			ctx := context.Background()
+			at := alignAt()
+			gw := SourceChat{ID: "f_formats", Name: "Example formats", Kind: "group"}
+			sc := SourceChat{ID: "oc_formats", Name: gw.Name, Kind: "group"}
+			// Keep an existing sync chat so duplicate delivery exercises its durable per-message receipts.
+			// A chat containing only duplicates intentionally stores no empty directory (covered above).
+			if _, err := e.Ingest(ctx, named("larksync"), sc, []SourceMessage{
+				{ID: "om_sync_only", SenderName: "Example Sender", Text: "Only in sync", At: at.Add(-time.Minute)},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var synced []SourceMessage
+			for i, c := range cases {
+				g := SourceMessage{ID: "gateway_" + c.name, SenderName: "Example Sender", Text: c.gateway, At: at.Add(time.Duration(i) * time.Minute)}
+				m := SourceMessage{ID: "sync_" + c.name, SenderName: g.SenderName, Text: c.synced, At: g.At.Add(time.Second)}
+				if c.media {
+					g.Media, m.Media = []string{"gateway-ref"}, []string{"sync-ref"}
+				}
+				if _, err := e.Ingest(ctx, named("lark"), gw, []SourceMessage{g}); err != nil {
+					t.Fatal(err)
+				}
+				synced = append(synced, m)
+			}
+			if !archived {
+				e.Align = NewGatewayAligner(e.Store)
+			}
+			n, err := e.Ingest(ctx, named("larksync"), sc, synced)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if archived {
+				if n != len(cases) {
+					t.Fatalf("archive seed: %d", n)
+				}
+				// A deployed version-1 pass must not prevent the new representation repair from running.
+				marker := filepath.Join(e.Store.Dir, KindChat, larkSyncRepairFile)
+				if err := os.WriteFile(marker, []byte(`{"version":1}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if n := e.DedupeLarkSyncChats(); n != len(cases) {
+					t.Fatalf("format repair dropped %d, want %d", n, len(cases))
+				}
+				if n := e.DedupeLarkSyncChats(); n != 0 {
+					t.Fatalf("format repair is not idempotent: %d", n)
+				}
+			} else if n != 0 {
+				t.Fatalf("new equivalent messages written twice: %d", n)
+			}
+			for _, m := range synced {
+				if _, ok := receiptIDs(t, e.Store, "larksync-oc_formats")[m.ID]; !ok {
+					t.Errorf("receipt lost for %s", m.ID)
+				}
+			}
+			if readCrosswalk(t, e.Store)["larksync-oc_formats"] != "lark-f_formats" {
+				t.Fatal("format match did not preserve chat provenance")
+			}
+		})
+	}
+}
+
+func TestGatewayAlignerFormatFallbackRefusesUncertainMatches(t *testing.T) {
+	for _, name := range []string{"different_sender", "unknown_sender", "different_time", "minute_only", "different_url", "url_case", "literal_media", "media_count", "file_name", "code", "attachment_only", "ambiguous_lines", "ambiguous_chats"} {
+		t.Run(name, func(t *testing.T) {
+			e, _ := alignEngine(t)
+			ctx := context.Background()
+			at := alignAt()
+			g := SourceMessage{ID: "g1", SenderName: "Example Sender", Text: "Read [guide](https://example.com/Guide)", At: at}
+			m := SourceMessage{ID: "om_one", SenderName: g.SenderName, Text: "Read guide (https://example.com/Guide)", At: at.Add(time.Second)}
+			switch name {
+			case "different_sender":
+				m.SenderName = "Another Sender"
+			case "unknown_sender":
+				m.SenderName = ""
+			case "different_time":
+				m.At = at.Add(10 * time.Second)
+			case "minute_only":
+				g.ID = ""
+			case "different_url":
+				m.Text = "Read guide (https://example.com/other)"
+			case "url_case":
+				m.Text = "Read guide (https://example.com/guide)"
+			case "literal_media":
+				g.Text, m.Text = "Before after", "Before [image] after"
+			case "media_count":
+				g.Text, m.Text = "Before after", "Before [image] after"
+				g.Media, m.Media = []string{"one"}, []string{"one", "two"}
+			case "file_name":
+				m.Text += " [file different-report.pdf]"
+				g.Media, m.Media = []string{"one"}, []string{"other"}
+			case "code":
+				g.Text, m.Text = "`A &amp; B`", "`A & B`"
+			case "attachment_only":
+				g.Text, m.Text = "", "[video]"
+				g.Media, m.Media = []string{"one"}, []string{"other"}
+			case "ambiguous_lines":
+				g.Text, m.Text = "Review A &amp; B", "Review A & B"
+			}
+			gw := SourceChat{ID: "f_safe", Name: "Example safe", Kind: "group"}
+			if _, err := e.Ingest(ctx, named("lark"), gw, []SourceMessage{g}); err != nil {
+				t.Fatal(err)
+			}
+			if name == "ambiguous_lines" {
+				g.ID, g.Text = "g2", "Review A &#38; B"
+				if _, err := e.Ingest(ctx, named("lark"), gw, []SourceMessage{g}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if name == "ambiguous_chats" {
+				if _, err := e.Ingest(ctx, named("lark"), SourceChat{ID: "f_other", Name: gw.Name, Kind: "group"}, []SourceMessage{g}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if n, err := e.Ingest(ctx, named("larksync"), SourceChat{ID: "oc_safe", Name: gw.Name, Kind: "group"}, []SourceMessage{m}); err != nil || n != 1 {
+				t.Fatalf("uncertain match must be retained: added=%d err=%v", n, err)
+			}
+			if _, err := os.Stat(filepath.Join(e.Store.Dir, KindChat, crosswalkFile)); !os.IsNotExist(err) {
+				t.Fatal("uncertain match created a crosswalk")
+			}
+		})
 	}
 }

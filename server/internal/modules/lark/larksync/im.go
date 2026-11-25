@@ -1088,6 +1088,8 @@ func (r *run) senderName(ctx context.Context, openID string) string {
 	if err != nil {
 		if e := asSyncError(err); e != nil && e.Kind == larksyncwire.ErrKindScope {
 			r.namesOff = true
+			// Keep readable messages and their cursors; expose the missing name permission separately.
+			r.fail("sender_names", err)
 			return ""
 		}
 		// Only a missing contact scope disables lookups for the rest of the run; a per-sender failure

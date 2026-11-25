@@ -36,7 +36,7 @@ func (s *tokenStore) DeviceTokenByHash(_ context.Context, hash string) (*db.Devi
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, ok := s.rows[hash]
-	if !ok || s.rev[t.ID] {
+	if !ok || s.rev[t.ID] || (t.ExpiresAt != nil && !time.Now().Before(*t.ExpiresAt)) {
 		return nil, nil
 	}
 	return &t, nil

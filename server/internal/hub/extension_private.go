@@ -29,7 +29,7 @@ func extensionToken(r *http.Request) bool { return principalOf(r.Context()).Role
 
 func restrictedAgentData(r *http.Request) bool {
 	role := principalOf(r.Context()).Role
-	return role == roleExtension || role == roleScoped
+	return role == roleExtension || role == roleScoped || role == roleReadOnly
 }
 
 // ownerExtension: r carries the token of an extension the user marked as their own (#13246,

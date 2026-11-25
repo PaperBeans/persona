@@ -83,7 +83,7 @@ func TestInboxModelOutboundToolsDenied(t *testing.T) {
 
 	own := []string{
 		"notify_user", "ask_user", "agent_start", "agent_send", "conversation_send",
-		"conversation_new", "task_plan", "schedule_followup", "urgent_call", "model_probe",
+		"conversation_new", "task_plan", "schedule_followup", "urgent_call", "model_probe", "launcher_import",
 	}
 	for _, name := range own {
 		t.Run(name, func(t *testing.T) {

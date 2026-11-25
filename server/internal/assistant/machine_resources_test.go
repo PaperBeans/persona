@@ -1,11 +1,13 @@
 package assistant
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -240,4 +242,372 @@ func TestMachineResourcesAmbiguousFutureAndReconnectAreNull(t *testing.T) {
 			t.Fatalf("future sample_age_seconds = %v, want null", m["sample_age_seconds"])
 		}
 	}
+}
+
+func TestMachineResourcesUnlistedSessionsReturnNull(t *testing.T) {
+	f := newFakeHub()
+	f.devices = []Device{
+		{ID: "unlisted-box", Name: "Unlisted", Online: true, Reachable: true},
+		{ID: "empty-listed-box", Name: "Empty Listed", Online: true, Reachable: true},
+	}
+	f.devicesFull = true
+
+	d := &resourceDevs{
+		fleetDevs: newFleetDevs(),
+		machines: map[string]*proto.Machine{
+			"unlisted-box":     {OS: "linux", Arch: "amd64"},
+			"empty-listed-box": {OS: "linux", Arch: "amd64"},
+		},
+		samples:  map[string]*proto.MetricSample{},
+		versions: map[string]*bool{},
+	}
+	unlisted := d.add("unlisted-box", "Unlisted")
+	unlisted.unlisted = true
+	d.add("empty-listed-box", "Empty Listed")
+	d.setSessions("empty-listed-box", []proto.Session{})
+
+	s := newTestService(t, f)
+	s.devs = d
+
+	for _, role := range []string{roleExtension, roleScoped, roleFull} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/assistant/machine-resources", nil)
+		req.Header.Set(RoleHeader, role)
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("role=%s status=%d body=%s", role, rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Machines []map[string]any `json:"machines"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		byID := map[string]map[string]any{}
+		for _, m := range out.Machines {
+			byID[m["id"].(string)] = m
+		}
+		if val, exists := byID["unlisted-box"]["working_agents"]; !exists || val != nil {
+			t.Fatalf("role=%s unlisted-box working_agents = %v (exists=%v), want explicit null", role, val, exists)
+		}
+		if got := byID["empty-listed-box"]["working_agents"]; got != float64(0) {
+			t.Fatalf("role=%s empty-listed-box working_agents = %v, want 0", role, got)
+		}
+	}
+
+	text, err := s.toolMachinesList(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var factsOut struct {
+		Machines []machineFacts `json:"machines"`
+	}
+	if err := json.Unmarshal([]byte(text), &factsOut); err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]machineFacts{}
+	for _, m := range factsOut.Machines {
+		byID[m.ID] = m
+	}
+	if byID["unlisted-box"].WorkingAgents.Value != nil || byID["unlisted-box"].WorkingAgents.Reason != "sessions_not_listed" {
+		t.Fatalf("machines_list unlisted-box working_agents = %+v, want null with sessions_not_listed", byID["unlisted-box"].WorkingAgents)
+	}
+	if byID["empty-listed-box"].WorkingAgents.Value != float64(0) || byID["empty-listed-box"].WorkingAgents.Reason != "" {
+		t.Fatalf("machines_list empty-listed-box working_agents = %+v, want known 0", byID["empty-listed-box"].WorkingAgents)
+	}
+}
+
+func TestMachineResourcesScopedTokenExcludesSpaceSessions(t *testing.T) {
+	f := newFakeHub()
+	f.devices = []Device{
+		{ID: "box", Name: "Box", Online: true, Reachable: true},
+	}
+	f.devicesFull = true
+	f.sessions["box"] = []proto.Session{
+		{SessionID: "pub-work", Title: "Public", Status: proto.StatusWorking, Cwd: "/work/repo"},
+		{SessionID: "health-space", Title: "Health Space", Status: proto.StatusWorking, Space: SpaceHealth, Cwd: "/work/other"},
+		{SessionID: "custom-space", Title: "Custom Space", Status: proto.StatusWorking, Space: "finance", Cwd: "/work/finance"},
+		{SessionID: "health-dir", Title: "Health Dir", Status: proto.StatusWorking, Cwd: identity.HealthDir("/home/owner")},
+		{SessionID: "idle-job", Title: "Idle", Status: proto.StatusIdle, Cwd: "/work/repo"},
+	}
+
+	d := &resourceDevs{
+		fleetDevs: newFleetDevs(),
+		machines:  map[string]*proto.Machine{"box": {OS: "linux", Arch: "amd64"}},
+		samples:   map[string]*proto.MetricSample{},
+		versions:  map[string]*bool{},
+	}
+	d.add("box", "Box")
+	d.setSessions("box", f.sessions["box"])
+
+	s := newTestService(t, f)
+	s.devs = d
+
+	fetch := func(role string) (string, map[string]any) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/assistant/machine-resources", nil)
+		req.Header.Set(RoleHeader, role)
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("role=%s status=%d body=%s", role, rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Machines []map[string]any `json:"machines"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Machines) != 1 {
+			t.Fatalf("role=%s machines len = %d, want 1", role, len(out.Machines))
+		}
+		return rec.Body.String(), out.Machines[0]
+	}
+
+	for _, role := range []string{roleExtension, roleScoped} {
+		body, row := fetch(role)
+		if row["working_agents"] != float64(1) {
+			t.Fatalf("role=%s working_agents = %v, want 1 (body=%s)", role, row["working_agents"], body)
+		}
+		for _, leak := range []string{"Health Space", "Custom Space", "Health Dir", "health-space", "custom-space", "health-dir", "pub-work"} {
+			if strings.Contains(body, leak) {
+				t.Fatalf("role=%s leaked %q: %s", role, leak, body)
+			}
+		}
+	}
+
+	_, fullRow := fetch(roleFull)
+	text, err := s.toolMachinesList(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var factsOut struct {
+		Machines []machineFacts `json:"machines"`
+	}
+	if err := json.Unmarshal([]byte(text), &factsOut); err != nil {
+		t.Fatal(err)
+	}
+	if fullRow["working_agents"] != factsOut.Machines[0].WorkingAgents.Value {
+		t.Fatalf("full role working_agents = %v, machines_list = %v", fullRow["working_agents"], factsOut.Machines[0].WorkingAgents.Value)
+	}
+	if fullRow["working_agents"].(float64) < 3 {
+		t.Fatalf("full role working_agents = %v, want >= 3", fullRow["working_agents"])
+	}
+}
+
+type hookedResourceDevs struct {
+	*resourceDevs
+	onMachineResources func(id string)
+}
+
+func (d *hookedResourceDevs) MachineResources(id string) (*proto.Machine, *proto.MetricSample, *bool) {
+	if d.onMachineResources != nil {
+		d.onMachineResources(id)
+	}
+	return d.resourceDevs.MachineResources(id)
+}
+
+func TestMachineResourcesSampleAgeAfterSlowRPC(t *testing.T) {
+	t0 := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	cpu, load := 18.5, 0.75
+
+	t.Run("slow devices list RPC", func(t *testing.T) {
+		var clockMu sync.Mutex
+		now := t0
+		advance := func(delta time.Duration) {
+			clockMu.Lock()
+			now = now.Add(delta)
+			clockMu.Unlock()
+		}
+		readClock := func() time.Time {
+			clockMu.Lock()
+			defer clockMu.Unlock()
+			return now
+		}
+
+		f := newFakeHub()
+		f.devices = []Device{
+			{ID: "aged-out", Name: "Aged Out", Online: true, Reachable: true},
+			{ID: "arrived-during-rpc", Name: "Arrived During RPC", Online: true, Reachable: true},
+		}
+		f.devicesFull = true
+		f.onDevicesList = func() {
+			advance(40 * time.Second)
+		}
+
+		d := &resourceDevs{
+			fleetDevs: newFleetDevs(),
+			machines: map[string]*proto.Machine{
+				"aged-out":           {OS: "linux", Arch: "amd64"},
+				"arrived-during-rpc": {OS: "linux", Arch: "amd64"},
+			},
+			samples: map[string]*proto.MetricSample{
+				"aged-out": {
+					T:         t0.Add(-5 * time.Second).Unix(),
+					CPU:       &cpu,
+					Load:      &load,
+					MemTotal:  100,
+					MemUsed:   40,
+					DiskTotal: 200,
+					DiskUsed:  50,
+				},
+				"arrived-during-rpc": {
+					T:         t0.Add(35 * time.Second).Unix(),
+					CPU:       &cpu,
+					Load:      &load,
+					MemTotal:  100,
+					MemUsed:   40,
+					DiskTotal: 200,
+					DiskUsed:  50,
+				},
+			},
+			versions: map[string]*bool{},
+		}
+		d.add("aged-out", "Aged Out")
+		d.add("arrived-during-rpc", "Arrived During RPC")
+
+		s := newTestService(t, f)
+		s.devs = d
+		s.machineNow = readClock
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/assistant/machine-resources", nil)
+		req.Header.Set(RoleHeader, roleExtension)
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Machines []map[string]any `json:"machines"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		byID := map[string]map[string]any{}
+		for _, m := range out.Machines {
+			byID[m["id"].(string)] = m
+		}
+
+		aged := byID["aged-out"]
+		if aged["sample_age_seconds"] != float64(45) {
+			t.Fatalf("aged-out sample_age_seconds = %v, want 45", aged["sample_age_seconds"])
+		}
+		for _, field := range []string{"cpu_busy_percent", "load_1m", "memory_available_bytes", "memory_total_bytes", "disk_free_bytes", "disk_total_bytes"} {
+			if aged[field] != nil {
+				t.Fatalf("aged-out.%s = %v, want null after slow RPC", field, aged[field])
+			}
+		}
+
+		fresh := byID["arrived-during-rpc"]
+		if fresh["sample_age_seconds"] != float64(5) || fresh["cpu_busy_percent"] != cpu || fresh["load_1m"] != load ||
+			fresh["memory_available_bytes"] != float64(60) || fresh["disk_free_bytes"] != float64(150) {
+			t.Fatalf("arrived-during-rpc = %v, want fresh sample with age 5", fresh)
+		}
+	})
+
+	t.Run("clock advances before later machine snapshot", func(t *testing.T) {
+		var clockMu sync.Mutex
+		now := t0
+		advance := func(delta time.Duration) {
+			clockMu.Lock()
+			now = now.Add(delta)
+			clockMu.Unlock()
+		}
+		readClock := func() time.Time {
+			clockMu.Lock()
+			defer clockMu.Unlock()
+			return now
+		}
+
+		f := newFakeHub()
+		f.devices = []Device{
+			{ID: "first", Name: "First", Online: true, Reachable: true},
+			{ID: "second-fresh", Name: "Second Fresh", Online: true, Reachable: true},
+			{ID: "third-stale", Name: "Third Stale", Online: true, Reachable: true},
+		}
+		f.devicesFull = true
+
+		base := &resourceDevs{
+			fleetDevs: newFleetDevs(),
+			machines: map[string]*proto.Machine{
+				"first":        {OS: "linux", Arch: "amd64"},
+				"second-fresh": {OS: "linux", Arch: "amd64"},
+				"third-stale":  {OS: "linux", Arch: "amd64"},
+			},
+			samples: map[string]*proto.MetricSample{
+				"first": {
+					T:         t0.Add(-5 * time.Second).Unix(),
+					CPU:       &cpu,
+					Load:      &load,
+					MemTotal:  100,
+					MemUsed:   40,
+					DiskTotal: 200,
+					DiskUsed:  50,
+				},
+				"second-fresh": {
+					T:         t0.Add(35 * time.Second).Unix(),
+					CPU:       &cpu,
+					Load:      &load,
+					MemTotal:  100,
+					MemUsed:   40,
+					DiskTotal: 200,
+					DiskUsed:  50,
+				},
+				"third-stale": {
+					T:         t0.Add(-5 * time.Second).Unix(),
+					CPU:       &cpu,
+					Load:      &load,
+					MemTotal:  100,
+					MemUsed:   40,
+					DiskTotal: 200,
+					DiskUsed:  50,
+				},
+			},
+			versions: map[string]*bool{},
+		}
+		for _, id := range []string{"first", "second-fresh", "third-stale"} {
+			base.add(id, id)
+		}
+		d := &hookedResourceDevs{
+			resourceDevs: base,
+			onMachineResources: func(id string) {
+				if id == "second-fresh" {
+					advance(40 * time.Second)
+				}
+			},
+		}
+
+		s := newTestService(t, f)
+		s.devs = d
+		s.machineNow = readClock
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/assistant/machine-resources", nil)
+		req.Header.Set(RoleHeader, roleExtension)
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Machines []map[string]any `json:"machines"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		byID := map[string]map[string]any{}
+		for _, m := range out.Machines {
+			byID[m["id"].(string)] = m
+		}
+
+		if byID["first"]["sample_age_seconds"] != float64(5) || byID["first"]["cpu_busy_percent"] != cpu {
+			t.Fatalf("first = %v, want fresh sample age 5", byID["first"])
+		}
+		if byID["second-fresh"]["sample_age_seconds"] != float64(5) || byID["second-fresh"]["cpu_busy_percent"] != cpu ||
+			byID["second-fresh"]["memory_available_bytes"] != float64(60) || byID["second-fresh"]["disk_free_bytes"] != float64(150) {
+			t.Fatalf("second-fresh = %v, want fresh sample age 5 (not sample_clock_in_future)", byID["second-fresh"])
+		}
+		if byID["third-stale"]["sample_age_seconds"] != float64(45) || byID["third-stale"]["cpu_busy_percent"] != nil ||
+			byID["third-stale"]["memory_available_bytes"] != nil || byID["third-stale"]["disk_free_bytes"] != nil {
+			t.Fatalf("third-stale = %v, want stale null metrics at age 45", byID["third-stale"])
+		}
+	})
 }

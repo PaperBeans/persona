@@ -1,4 +1,4 @@
-Capture current purposes/launcher model fields into an existing profile with exact before/after phone approval. Preserves tiers, rechecks revision and reads back. Does not change current configuration; switch to apply.{{template "shared/mcp_language" .}}
+Capture current model fields into a profile with phone approval; does not apply them.{{template "shared/mcp_language" .}}
 
 ```json
 {

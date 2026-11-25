@@ -573,3 +573,28 @@ func TestLarkSyncRedirectRule(t *testing.T) {
 		}
 	}
 }
+
+func TestLarkSyncReauthorizationReconfiguresMissingScopesWithSameRedirect(t *testing.T) {
+	w := newLarkWorld(t)
+	ctx := context.Background()
+	key, _ := w.adopt(t, larksyncwire.PrimaryBot, "ou_owner", "example-access", "example-refresh", 24*time.Hour)
+	w.ua.configure = larksyncwire.RedirectReport{Configured: true, Published: true}
+	if _, err := w.h.larkSyncChange(ctx, func(st *larkSyncState) error {
+		st.prefs.PrimaryRedirect = larkRedirect
+		b := st.binding(key)
+		b.Health, b.Tier = larksyncwire.HealthScopeMissing, larksyncwire.TierFull
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, out := w.do(t, "POST", "/api/v1/bots/feishu/sync/bots/primary/authorize", `{"redirect_uri":"`+larkRedirect+`","tier":"full_with_im"}`)
+	if code != 200 || out["mode"] != larkSyncModeBrowser {
+		t.Fatalf("authorize: status=%d mode=%v", code, out["mode"])
+	}
+	if !slices.Equal(w.ua.configured, []string{"cli_primary " + larkRedirect}) {
+		t.Fatal("missing scopes did not reconfigure an already known redirect")
+	}
+	if !slices.Equal(w.ua.authorized[0].Scopes, larksyncwire.ScopesFor(larksyncwire.TierFull)) {
+		t.Fatal("reauthorization did not request the expanded full scope pack")
+	}
+}

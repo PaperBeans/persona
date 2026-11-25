@@ -28,7 +28,7 @@
     <string name="settings_lark_sync_health_unauthorized">Not connected yet</string>
     <string name="settings_lark_sync_health_needs_reauth">Authorize again</string>
     <string name="settings_lark_sync_health_rate_limited">Continues next time</string>
-    <string name="settings_lark_sync_health_scope_missing">Needs admin approval</string>
+    <string name="settings_lark_sync_health_scope_missing">Reauthorize to add missing permissions</string>
     <string name="settings_lark_sync_health_awaiting">Waiting for admin approval</string>
     <string name="settings_lark_sync_health_failing">Last sync failed</string>
     <string name="settings_lark_sync_health_unknown">Unknown</string>

@@ -33,4 +33,5 @@
     <string name="settings_feishu_bot_not_saved">保存失败：%1$s</string>
     <string name="settings_feishu_bot_secret_filled">已填写，点验证并保存</string>
     <string name="settings_feishu_bot_unpairs">换成别的 App ID 会解除现在的配对，保存后到机器人的渠道页重新配对。</string>
+    <string name="settings_feishu_bot_step_sync_permissions">如需知识同步，还要开通以下用户权限：offline_access, search:message, drive:drive:readonly, drive:drive.metadata:readonly, docx:document:readonly, docs:document.content:read, sheets:spreadsheet:readonly, bitable:app:readonly, wiki:wiki:readonly, wiki:node:retrieve, wiki:space:retrieve, minutes:minutes:readonly, minutes:minutes.transcript:export, im:chat:read, im:chat:readonly, im:message:readonly, im:message.group_msg:get_as_user, im:message.p2p_msg:get_as_user, drive:file:download, contact:user.base:readonly, contact:contact.base:readonly。发布权限并完成所需的管理员审批后，需要重新授权以补齐权限；人名补救会在授权后自动重跑。</string>
 </resources>

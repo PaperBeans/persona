@@ -238520,25 +238520,48 @@
         }
       }
     },
-    "Needs Admin Approval [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Needs Admin Approval"
+    "Knowledge sync permissions [Lark bot setup]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "For knowledge sync, also approve these user scopes: offline_access, search:message, drive:drive:readonly, drive:drive.metadata:readonly, docx:document:readonly, docs:document.content:read, sheets:spreadsheet:readonly, bitable:app:readonly, wiki:wiki:readonly, wiki:node:retrieve, wiki:space:retrieve, minutes:minutes:readonly, minutes:minutes.transcript:export, im:chat:read, im:chat:readonly, im:message:readonly, im:message.group_msg:get_as_user, im:message.p2p_msg:get_as_user, drive:file:download, contact:user.base:readonly, contact:contact.base:readonly. Publish the permissions, get admin approval if required, then authorize again to add missing permissions. Sender-name repair retries automatically after authorization."
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "管理者の承認が必要"
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "如需知识同步，还要开通以下用户权限：offline_access, search:message, drive:drive:readonly, drive:drive.metadata:readonly, docx:document:readonly, docs:document.content:read, sheets:spreadsheet:readonly, bitable:app:readonly, wiki:wiki:readonly, wiki:node:retrieve, wiki:space:retrieve, minutes:minutes:readonly, minutes:minutes.transcript:export, im:chat:read, im:chat:readonly, im:message:readonly, im:message.group_msg:get_as_user, im:message.p2p_msg:get_as_user, drive:file:download, contact:user.base:readonly, contact:contact.base:readonly。发布权限并完成所需的管理员审批后，需要重新授权以补齐权限；人名补救会在授权后自动重跑。"
           }
         },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "需要管理员审批"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ナレッジ同期には、次のユーザー権限も許可します：offline_access, search:message, drive:drive:readonly, drive:drive.metadata:readonly, docx:document:readonly, docs:document.content:read, sheets:spreadsheet:readonly, bitable:app:readonly, wiki:wiki:readonly, wiki:node:retrieve, wiki:space:retrieve, minutes:minutes:readonly, minutes:minutes.transcript:export, im:chat:read, im:chat:readonly, im:message:readonly, im:message.group_msg:get_as_user, im:message.p2p_msg:get_as_user, drive:file:download, contact:user.base:readonly, contact:contact.base:readonly。権限を公開し、必要な管理者承認を得た後、不足する権限を追加するため再認可してください。送信者名の補完は認可後に自動で再試行されます。"
+          }
+        }
+      }
+    },
+    "Reauthorize to Add Missing Permissions [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reauthorize to add missing permissions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要重新授权以补齐权限"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不足する権限の追加には再認可が必要"
           }
         }
       }

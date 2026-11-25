@@ -10,6 +10,8 @@
 DELETE /api/v1/admin/devices/{id}
 DELETE /api/v1/admin/machines/{id}
 DELETE /api/v1/admin/peers/{hub_id}
+DELETE /api/v1/auth/readonly-sessions
+DELETE /api/v1/auth/readonly-sessions/{id}
 DELETE /api/v1/auth/tokens/{id}
 DELETE /api/v1/looks/uploads/{id} # the hub keeps the looks: personas/ is its own directory (look_uploads.go)
 DELETE /api/v1/machines/{mid}/files/entry
@@ -31,6 +33,7 @@ GET /api/v1/admin/sessions/{mid}/{sid}/ownership-inspection
 GET /api/v1/admin/state
 GET /api/v1/app/android/apk
 GET /api/v1/app/android/latest
+GET /api/v1/auth/readonly-sessions
 GET /api/v1/auth/tokens
 GET /api/v1/devices/push
 GET /api/v1/devices/{id}/lock-tests/{test_id}
@@ -135,6 +138,7 @@ POST /api/v1/admin/sessions/{mid}/{sid}/owner
 POST /api/v1/admin/setup
 POST /api/v1/admin/setup-code
 POST /api/v1/auth/pair-codes
+POST /api/v1/auth/readonly-sessions
 POST /api/v1/auth/tokens
 POST /api/v1/devices
 POST /api/v1/devices/{id}/live-activity

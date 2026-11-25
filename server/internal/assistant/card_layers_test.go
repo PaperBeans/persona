@@ -169,6 +169,15 @@ func TestInputCardSource(t *testing.T) {
 		{proto.Interaction{ID: "ix_b", Kind: proto.IxQuestion, Secret: true}, false, cardAgentSecretForm},
 		{proto.Interaction{ID: "ix_c", Kind: proto.IxPermission, ToolName: "Bash"}, true, cardAskEscalated},
 		{proto.Interaction{ID: "ix_d", Kind: proto.IxPermission, ToolName: "Bash"}, false, cardAgentPermission},
+		// Trusted connector gate outward writes count as category 3 regardless of session title or escalation.
+		{proto.Interaction{ID: "ix_gate_out", Kind: proto.IxPermission, ToolName: "Feishu", SessionTitle: "Project Chat", OutwardWrite: true}, false, cardOutboundWrite},
+		{proto.Interaction{ID: "ix_gate_esc", Kind: proto.IxPermission, ToolName: "Feishu", SessionTitle: "Project Chat", OutwardWrite: true}, true, cardOutboundWrite},
+		{proto.Interaction{ID: "ix_gate_persona", Kind: proto.IxPermission, ToolName: "Feishu", SessionTitle: "Persona", OutwardWrite: true}, false, cardOutboundWrite},
+		// Text wording alone never elevates an untagged agent permission to outbound_write.
+		{proto.Interaction{ID: "ix_untagged_text", Kind: proto.IxPermission, ToolName: "Feishu", SessionTitle: "Project Chat", Summary: "Send a message as you", OutwardWrite: false}, false, cardAgentPermission},
+		// Non-permission kinds ignore OutwardWrite.
+		{proto.Interaction{ID: "ix_q_out", Kind: proto.IxQuestion, OutwardWrite: true}, false, cardAgentQuestion},
+		{proto.Interaction{ID: "ix_plan_out", Kind: proto.IxPlan, OutwardWrite: true}, false, cardAgentPlan},
 		{proto.Interaction{ID: "ix_e", Kind: proto.IxPlan}, false, cardAgentPlan},
 		{proto.Interaction{ID: "ix_f", Kind: proto.IxQuestion, ToolName: "ask_user"}, false, cardAskUser},
 		{proto.Interaction{ID: "ix_g", Kind: proto.IxScreen}, false, cardAgentQuestion},

@@ -91,6 +91,7 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	// directory. Keep the actual execution directory separately for the
 	// manager's exact-call continuation fingerprint.
 	ix.ExecutionCwd = cwd
+	ix.OutwardWrite = false
 	cfg := n.assistantLark(ctx)
 	if slices.ContainsFunc(cfg.Gates, func(g proto.CommandGate) bool { return g.Auth != nil }) {
 		n.gates() // the proxy goes by this Node's config from now on (a resident node's next connection)
@@ -182,6 +183,7 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 				// which could be anything, the CLI included. Still asked, as the ordinary Bash card it is (#4890).
 				ix.ToolName, ix.Summary = cmp.Or(ix.ToolName, "Bash"), prettyBody(command)
 			}
+			ix.OutwardWrite = wholeCommandOutwardWrite(v, write, title)
 			decision, reason, _, err := n.confirmLark(ctx, session, ix, nil, confirmWrites, title)
 			return decision, reason, err
 		}
@@ -242,6 +244,7 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	if confirmWrites || bypass {
 		remember = nil // hard boundaries are confirmed each time
 	}
+	ix.OutwardWrite = slices.ContainsFunc(ask, larkCallOutwardWrite)
 	decision, reason, card, err := n.confirmLark(ctx, session, ix, remember, confirmWrites, ix.ToolName)
 	if decision == "allow" {
 		n.grantGateCalls(cfg, session, ask, card)

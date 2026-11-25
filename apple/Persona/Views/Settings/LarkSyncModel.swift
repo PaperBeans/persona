@@ -150,7 +150,7 @@ enum LarkSyncText {
         case "unauthorized": return (String(localized: "Not Connected Yet [Lark Sync]"), .neutral)
         case "needs_reauth": return (String(localized: "Authorize Again [Lark Sync state]"), .danger)
         case "rate_limited": return (String(localized: "Continues Next Time [Lark Sync]"), .caution)
-        case "scope_missing": return (String(localized: "Needs Admin Approval [Lark Sync]"), .caution)
+        case "scope_missing": return (String(localized: "Reauthorize to Add Missing Permissions [Lark Sync]"), .caution)
         case "awaiting_approval": return (String(localized: "Waiting for Admin Approval [Lark Sync]"), .caution)
         case "failing": return (String(localized: "Last Sync Failed [Lark Sync]"), .danger)
         default: return (String(localized: "Unknown [Lark Sync]"), .neutral)
@@ -178,7 +178,7 @@ enum LarkSyncText {
     }
 
     /// The binding has to be authorized (again) before it can sync.
-    static func needsAuthorize(_ b: LarkSyncView.Binding) -> Bool { b.health == "needs_reauth" || b.health == "unauthorized" }
+    static func needsAuthorize(_ b: LarkSyncView.Binding) -> Bool { b.health == "needs_reauth" || b.health == "unauthorized" || b.health == "scope_missing" }
 
     /// Days left when the authorization ends soon enough to say so; nil otherwise.
     static func reauthSoon(_ b: LarkSyncView.Binding) -> Int? {

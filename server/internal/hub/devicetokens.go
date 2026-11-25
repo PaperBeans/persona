@@ -49,7 +49,8 @@ func (h *Hub) busCredentialRevoked(ctx context.Context, c *busConn, raw json.Raw
 	}
 	for _, token := range tokens {
 		if token.ID == p.ID {
-			return bus.CredentialStatus{Revoked: token.RevokedAt != nil}, nil
+			expired := token.ExpiresAt != nil && !time.Now().Before(*token.ExpiresAt)
+			return bus.CredentialStatus{Revoked: token.RevokedAt != nil || expired}, nil
 		}
 	}
 	return bus.CredentialStatus{Revoked: true}, nil
@@ -61,9 +62,12 @@ func (h *Hub) busCredentialRevoked(ctx context.Context, c *busConn, raw json.Raw
 // watch app does (answerReads, answerWrites) and nothing else.
 
 const (
-	roleFull   = "full"
-	roleScoped = "scoped"
-	roleAnswer = "answer"
+	roleFull     = "full"
+	roleScoped   = "scoped"
+	roleAnswer   = "answer"
+	roleReadOnly = "readonly"
+	// tokenKindReadOnly is the persisted device_tokens.kind for temporary read-only verification credentials.
+	tokenKindReadOnly = "readonly"
 	// roleLink is a persona-link credential (link.go): it opens its machine's link and nothing else.
 	roleLink = "link"
 	// roleLinkPair is a pairing code made for one machine's persona-link (`personad hub pair --machine`): all it can
@@ -79,7 +83,8 @@ type principal struct {
 	Kind        string // persisted enrollment kind; diagnostic fallback only
 	PairHash    string
 	PairExpires time.Time
-	Machine     string // roleLink, roleLinkPair: the machine in hub.json it is bound to; rolePeer: the peer's hub_id
+	ExpiresAt   time.Time // non-zero for expiring device credentials (e.g. roleReadOnly)
+	Machine     string    // roleLink, roleLinkPair: the machine in hub.json it is bound to; rolePeer: the peer's hub_id
 	// roleExtension: the extension the token was made for and the scopes it opens (extension_scopes.go), and the
 	// manager whose extension it is (the one that knew the token): a request that names no manager is its.
 	Extension string
@@ -218,7 +223,14 @@ func (h *Hub) lookupToken(ctx context.Context, tok string) (principal, bool, err
 		}
 		c = cachedToken{at: time.Now(), used: time.Now()}
 		if dt != nil {
-			c.p = &principal{ID: dt.ID, registeredDevice: true, Name: dt.Name, Role: dt.Role, Kind: dt.Kind, Machine: dt.MachineID, Scopes: dt.Scopes}
+			var expiresAt time.Time
+			if dt.ExpiresAt != nil {
+				expiresAt = *dt.ExpiresAt
+			}
+			// Fail closed: read-only sessions require a non-null expiry, and expired credentials are never accepted.
+			if (dt.Role != roleReadOnly || !expiresAt.IsZero()) && (expiresAt.IsZero() || time.Now().Before(expiresAt)) {
+				c.p = &principal{ID: dt.ID, registeredDevice: true, Name: dt.Name, Role: dt.Role, Kind: dt.Kind, Machine: dt.MachineID, Scopes: dt.Scopes, ExpiresAt: expiresAt}
+			}
 		}
 		t.mu.Lock()
 		if c.p != nil && t.isRevoked(c.p.ID) {
@@ -246,6 +258,13 @@ func (h *Hub) lookupToken(ctx context.Context, tok string) (principal, bool, err
 		t.mu.Unlock()
 	}
 	if c.p == nil {
+		return principal{}, false, nil
+	}
+	// Secondary TTL validation on every lookup (including 30s cache hits) eliminates any post-expiry window.
+	if (c.p.Role == roleReadOnly && c.p.ExpiresAt.IsZero()) || (!c.p.ExpiresAt.IsZero() && !time.Now().Before(c.p.ExpiresAt)) {
+		t.mu.Lock()
+		delete(t.cache, hash)
+		t.mu.Unlock()
 		return principal{}, false, nil
 	}
 	t.mu.Lock()

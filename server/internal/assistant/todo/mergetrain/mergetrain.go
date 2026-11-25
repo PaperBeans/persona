@@ -380,7 +380,9 @@ func (t *Train) promoteNextHeadLocked(rq *repoQueue) *queuedItem {
 			continue
 		}
 		rq.queue = slices.Delete(rq.queue, i, i+1)
-		item.entry.State = StateActive
+		if item.entry.State != StateEscalated {
+			item.entry.State = StateActive
+		}
 		rq.head = item
 		return item
 	}
@@ -843,7 +845,20 @@ func (t *Train) finalize(repoKey, todoID string, targetState EntryState, verb st
 	// Always try to promote the next eligible head (covers both head removal and
 	// freeing a conflict block when an escalated entry is cancelled/merged).
 	next := t.promoteNextHeadLocked(rq)
-	if next != nil && (wasHead || next != rq.head || rq.head == next) {
+	if next != nil {
+		if next.entry.State == StateEscalated {
+			reason := fmt.Sprintf("head %s is escalated after %s %s", next.entry.TodoID, tid, verb)
+			if next.entry.LastError != "" {
+				reason = fmt.Sprintf("%s (%d/%d): %s", reason, next.entry.RebaseFailures, next.entry.MaxRebaseFailures, next.entry.LastError)
+			}
+			return Decision{
+				RepoKey: rk,
+				TodoID:  next.entry.TodoID,
+				Action:  ActionEscalateNeedsUser,
+				State:   StateEscalated,
+				Reason:  reason,
+			}, nil
+		}
 		return Decision{
 			RepoKey: rk,
 			TodoID:  next.entry.TodoID,

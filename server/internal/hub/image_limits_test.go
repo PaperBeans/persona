@@ -112,7 +112,7 @@ func TestMessagePicturesAreCountedNotWeighed(t *testing.T) {
 
 // hello publishes the limits the send routes check.
 func TestHelloPublishesImageLimits(t *testing.T) {
-	b, err := json.Marshal((&Hub{cfg: &Config{}}).hello()["image_limits"])
+	b, err := json.Marshal((&Hub{cfg: &Config{}}).hello().ImageLimits)
 	if err != nil {
 		t.Fatal(err)
 	}

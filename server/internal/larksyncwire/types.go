@@ -29,6 +29,8 @@ var ScopesDocs = []string{
 	"offline_access",
 	"search:message",
 	"drive:drive:readonly",
+	// batch_query accepts metadata:readonly, not drive:readonly (linked documents in both tiers).
+	"drive:drive.metadata:readonly",
 	"docx:document:readonly",
 	"docs:document.content:read",
 	"sheets:spreadsheet:readonly",
@@ -43,12 +45,16 @@ var ScopesDocs = []string{
 // ScopesFullExtra are what TierFull adds to ScopesDocs.
 var ScopesFullExtra = []string{
 	"im:chat:read",
+	// GET chats/:chat_id (the p2p name fallback) has a separate read permission from listing chats.
+	"im:chat:readonly",
 	"im:message:readonly",
 	"im:message.group_msg:get_as_user",
 	"im:message.p2p_msg:get_as_user",
 	"drive:file:download",
 	// The senders' names, so a message the Lark gateway already put in the knowledge base is recognized.
 	"contact:user.base:readonly",
+	// GET contact/v3/users/:open_id needs API access as well as the name field permission above.
+	"contact:contact.base:readonly",
 }
 
 // ScopesFor is a tier's user scopes; an unknown tier is TierDocs.

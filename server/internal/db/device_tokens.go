@@ -20,21 +20,22 @@ type DeviceToken struct {
 	CreatedAt time.Time  `json:"created_at"`
 	LastSeen  *time.Time `json:"last_seen,omitempty"`
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// MachineID binds a persona-link credential (kind link) to its machine in hub.json; empty for every other kind.
 	MachineID string `json:"machine_id,omitempty"`
 }
 
 func (d *DB) CreateDeviceToken(ctx context.Context, t DeviceToken, hash string) error {
-	_, err := d.pool.Exec(ctx, `INSERT INTO device_tokens (id, name, kind, role, token_hash, machine_id, scopes)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7)`, t.ID, t.Name, t.Kind, t.Role, hash, t.MachineID, t.Scopes)
+	_, err := d.pool.Exec(ctx, `INSERT INTO device_tokens (id, name, kind, role, token_hash, machine_id, scopes, expires_at)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, $8)`, t.ID, t.Name, t.Kind, t.Role, hash, t.MachineID, t.Scopes, t.ExpiresAt)
 	return err
 }
 
-// DeviceTokenByHash finds a token that is not revoked; nil when there is none.
+// DeviceTokenByHash finds a token that is neither revoked nor expired; nil when there is none.
 func (d *DB) DeviceTokenByHash(ctx context.Context, hash string) (*DeviceToken, error) {
 	var t DeviceToken
-	err := d.pool.QueryRow(ctx, `SELECT id, name, kind, role, created_at, last_seen, COALESCE(machine_id, ''), scopes FROM device_tokens
-		WHERE token_hash = $1 AND revoked_at IS NULL`, hash).Scan(&t.ID, &t.Name, &t.Kind, &t.Role, &t.CreatedAt, &t.LastSeen, &t.MachineID, &t.Scopes)
+	err := d.pool.QueryRow(ctx, `SELECT id, name, kind, role, created_at, last_seen, COALESCE(machine_id, ''), scopes, expires_at FROM device_tokens
+		WHERE token_hash = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())`, hash).Scan(&t.ID, &t.Name, &t.Kind, &t.Role, &t.CreatedAt, &t.LastSeen, &t.MachineID, &t.Scopes, &t.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -45,14 +46,14 @@ func (d *DB) DeviceTokenByHash(ctx context.Context, hash string) (*DeviceToken, 
 }
 
 func (d *DB) DeviceTokens(ctx context.Context) ([]DeviceToken, error) {
-	rows, err := d.pool.Query(ctx, `SELECT id, name, kind, role, created_at, last_seen, revoked_at, COALESCE(machine_id, ''), scopes
+	rows, err := d.pool.Query(ctx, `SELECT id, name, kind, role, created_at, last_seen, revoked_at, COALESCE(machine_id, ''), scopes, expires_at
 		FROM device_tokens WHERE kind <> $1 ORDER BY revoked_at IS NOT NULL, created_at DESC`, tombstoneKind)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (DeviceToken, error) {
 		var t DeviceToken
-		err := r.Scan(&t.ID, &t.Name, &t.Kind, &t.Role, &t.CreatedAt, &t.LastSeen, &t.RevokedAt, &t.MachineID, &t.Scopes)
+		err := r.Scan(&t.ID, &t.Name, &t.Kind, &t.Role, &t.CreatedAt, &t.LastSeen, &t.RevokedAt, &t.MachineID, &t.Scopes, &t.ExpiresAt)
 		return t, err
 	})
 }

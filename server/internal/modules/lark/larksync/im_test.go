@@ -560,7 +560,7 @@ func TestAttachmentsAndMedia(t *testing.T) {
 
 // Senders get their display names (the gateway's copy of a message carries names, and the knowledge base matches on
 // them); a single chat without a name is named after the other person; a refused name lookup stops the lookups for
-// the run without failing anything.
+// the run while reporting the missing permission without discarding readable messages.
 func TestIMNamesSendersAndSingleChats(t *testing.T) {
 	clk := &fakeClock{t: testNow}
 	f := newFakeOpen(t, clk)
@@ -606,8 +606,11 @@ func TestIMNamesSendersAndSingleChats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Messages) != 2 || len(res.Errors) != 0 {
+	if len(res.Messages) != 2 || len(res.Errors) != 1 || res.Errors[0].Resource != "sender_names" || res.Errors[0].Kind != larksyncwire.ErrKindScope {
 		t.Fatalf("result = %+v", res)
+	}
+	if res.Cursors["im:oc_g"] == "" {
+		t.Fatal("a missing name permission discarded the readable messages' cursor")
 	}
 	for _, m := range res.Messages {
 		if m.SenderName != "" || m.ChatName != "Team" {

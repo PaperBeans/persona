@@ -102,6 +102,85 @@ func TestAgentPermissionNonOwnerRoutedAndSixClassesStillPush(t *testing.T) {
 	}
 }
 
+// A connector-gate outward-write permission card pushes to the owner with approval behavior unchanged
+// and is recorded in the card ledger as category 3 (outbound_write) rather than category 0 (agent_permission).
+// Non-permission cards ignore any spoofed OutwardWrite flag.
+func TestConnectorGateOutwardWritePushesToOwnerAndCountsAsCategory3(t *testing.T) {
+	e := newRouteEnv(t, nil, true)
+	now := time.Now().UTC()
+
+	raiseNode := func(ix proto.Interaction) <-chan proto.Resolution {
+		out := make(chan proto.Resolution, 1)
+		go func() {
+			res, _ := e.s.nodeInteraction(context.Background(), ix)
+			out <- res
+		}()
+		e.waitPendingID(ix.ID)
+		return out
+	}
+
+	mainOutward := proto.Interaction{
+		ID: "ix_gate_main", MachineID: "server", SessionID: "conv1", SessionTitle: "Main",
+		Kind: proto.IxPermission, ToolName: "Feishu", Summary: "Send chat message",
+		OutwardWrite: true, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}
+	mainDone := raiseNode(mainOutward)
+	waitFor(t, "main connector gate outward write pushed", func() bool { return e.pushesOf(mainOutward.ID) == 1 })
+
+	agentOutward := proto.Interaction{
+		ID: "ix_gate_agent", MachineID: "mac", SessionID: "standalone-agent", SessionTitle: "Task Chat",
+		Kind: proto.IxPermission, ToolName: "Feishu", Summary: "Update group settings",
+		OutwardWrite: true, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}
+	agentDone := raiseNode(agentOutward)
+	waitFor(t, "agent connector gate outward write pushed", func() bool { return e.pushesOf(agentOutward.ID) == 1 })
+
+	spoofedQuestion := askQuestion("ix_spoofed_q", "standalone-q")
+	spoofedQuestion.OutwardWrite = true
+	qDone := raiseNode(spoofedQuestion)
+	waitFor(t, "non-permission card still routed to main", func() bool {
+		return hasRelayFrom(e.s, "conv1", cardAgentQuestion, "interaction_id="+spoofedQuestion.ID)
+	})
+
+	e.settle()
+	if n := e.pushesOf(spoofedQuestion.ID); n != 0 {
+		t.Fatalf("spoofed question pushed %d times", n)
+	}
+	if got := e.lastShown(spoofedQuestion.ID); got.OutwardWrite {
+		t.Fatalf("nodeInteraction did not strip OutwardWrite on non-permission card: %+v", got)
+	}
+	if hasRelayFrom(e.s, "conv1", cardOutboundWrite, "interaction_id="+agentOutward.ID) {
+		t.Fatal("connector gate outward write was diverted from owner")
+	}
+
+	today := cardsToday(t, e.s)
+	if c := today[cardOutboundWrite]; c.Category != cardCatOutward || c.N != 2 {
+		t.Fatalf("outbound_write ledger = %+v, want category %d count 2", c, cardCatOutward)
+	}
+	if c := today[cardAgentPermission]; c.N != 0 {
+		t.Fatalf("agent_permission ledger = %+v, want 0", c)
+	}
+	report := cardLedgerReport(time.Now().In(e.s.location(context.Background())).Format(time.DateOnly),
+		e.s.cardsOn(context.Background(), time.Now().In(e.s.location(context.Background())).Format(time.DateOnly)))
+	if !strings.Contains(report, "3 outward as the owner: 2\n") || !strings.Contains(report, "None of the six (each one a bug): 0.") {
+		t.Fatalf("unexpected ledger report:\n%s", report)
+	}
+
+	allow := true
+	if err := e.s.resolve(mainOutward.ID, proto.Resolution{Allow: &allow}); err != nil {
+		t.Fatal(err)
+	}
+	answerOf(t, mainDone)
+	if err := e.s.resolve(agentOutward.ID, proto.Resolution{Allow: &allow}); err != nil {
+		t.Fatal(err)
+	}
+	answerOf(t, agentDone)
+	if err := e.s.resolve(spoofedQuestion.ID, proto.Resolution{Answers: map[string]string{spoofedQuestion.Questions[0].Question: "main"}}); err != nil {
+		t.Fatal(err)
+	}
+	answerOf(t, qDone)
+}
+
 // Antigravity's ACP permission title and Skill instruction arguments are local data, not evidence
 // of an outward action. Their sanitized production shapes take the non-owner route without a push
 // or an agent_permission ledger entry; form/secret/owner-proposal precedence is pinned in TestUserApproval.
