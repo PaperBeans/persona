@@ -3,9 +3,8 @@
 // list, so the browser's requests rose with the socket's frames. Here one path has one reader: the first hint after a
 // quiet stretch reads at once, the hints of the next window share one read at its end, and a hint that lands while a
 // read is out gets one trailing read after it, so the last change of a burst is always read. Every follower of the
-// path gets each answer. The same window as a SessionList's (`invalidate` there).
+// path gets each answer.
 import { api } from "./api";
-import { LIST_HINT_WINDOW_MS } from "./session-list";
 import { onShownHint } from "./shown-hints";
 import { documentPage } from "./visible-poll";
 
@@ -26,6 +25,9 @@ interface Reader {
   last?: { value: unknown } | { error: unknown };
   off: () => void;
 }
+
+/** The hints of one window share one read: the same window as a SessionList's (`invalidate` in lib/session-list.ts). */
+export const HINT_WINDOW_MS = 2_000;
 
 const readers = new Map<string, Reader>();
 
@@ -56,7 +58,7 @@ function read(key: string, reader: Reader, path: string): void {
 function hint(key: string, reader: Reader, path: string): void {
   if (reader.reading) { reader.dirty = true; return; }
   if (reader.timer !== undefined) return; // the window's read is set already: this hint shares it
-  const wait = reader.doneAt + LIST_HINT_WINDOW_MS - Date.now();
+  const wait = reader.doneAt + HINT_WINDOW_MS - Date.now();
   if (wait <= 0) read(key, reader, path);
   else reader.timer = setTimeout(() => read(key, reader, path), wait);
 }

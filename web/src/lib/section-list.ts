@@ -1,7 +1,7 @@
 // One open section of a grouped Agents list (views/agents/GroupedSessions.tsx): a SessionList that passes over the
 // `sessions_list` hints naming none of its rows (#9176). With several sections open, each read for every agent's update
 // anywhere: seven open to-dos made about seven reads a second. Kept out of session-list.ts, which the first screen loads.
-import { LIST_HINT_WINDOW_MS, SessionList, type ListChangeHint } from "./session-list";
+import { SessionList, type ListChangeHint } from "./session-list";
 
 export class SectionList<T> extends SessionList<T> {
   /** Where the hints were followed to without a read, and the read revision that was from: a read that moves
@@ -20,7 +20,7 @@ export class SectionList<T> extends SessionList<T> {
     if (hint && this.passes(hint)) return;
     // One that lands while a read is out waits for the window's end, not the read's: a busy section read about twice
     // a window (SessionList.invalidate starts its trailing read as soon as the read is in).
-    const wait = this.invalidatedAt + LIST_HINT_WINDOW_MS - Date.now();
+    const wait = this.invalidatedAt + 2_000 - Date.now();
     if (this.work.promise && wait > 0) {
       this.held ??= setTimeout(() => {
         this.held = undefined;

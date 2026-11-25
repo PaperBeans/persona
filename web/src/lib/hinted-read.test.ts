@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
-import { followHinted } from "./hinted-read";
-import { LIST_HINT_WINDOW_MS } from "./session-list";
+import { followHinted, HINT_WINDOW_MS } from "./hinted-read";
 
 const hub = vi.hoisted(() => ({ handlers: new Set<{ event: string; fn: () => void }>() }));
 vi.mock("./api", async (original) => ({ ...await original<typeof import("./api")>(), api: vi.fn() }));
@@ -67,13 +66,13 @@ describe("followHinted", () => {
 
   it("a hint after a quiet stretch reads at once; a burst's hints share one read per window", async () => {
     follow(); follow();
-    await wait(LIST_HINT_WINDOW_MS + 100);
+    await wait(HINT_WINDOW_MS + 100);
     const quiet = reads();
     change();
     await wait(0);
     expect(reads()).toBe(quiet + 1); // at once: feedback first
     for (let i = 0; i < 30; i++) { change(); await wait(100); }
-    await wait(2 * LIST_HINT_WINDOW_MS);
+    await wait(2 * HINT_WINDOW_MS);
     // 3 s of hints: about one read per 2 s window, plus the one after the last hint
     expect(reads() - quiet).toBeLessThanOrEqual(4);
   });
@@ -82,12 +81,12 @@ describe("followHinted", () => {
     const a = follow(), b = follow();
     await wait(10); // the first read is out
     for (let i = 0; i < 12; i++) { change(); await wait(37); }
-    await wait(2 * LIST_HINT_WINDOW_MS);
+    await wait(2 * HINT_WINDOW_MS);
     expect(a.values.at(-1)).toBe(version);
     expect(b.values.at(-1)).toBe(version);
     // and nothing more is read while nothing changes
     const settled = reads();
-    await wait(10 * LIST_HINT_WINDOW_MS);
+    await wait(10 * HINT_WINDOW_MS);
     expect(reads()).toBe(settled);
   });
 
@@ -97,7 +96,7 @@ describe("followHinted", () => {
     const b = follow();
     expect(b.values).toEqual([0]);
     change();
-    await wait(LIST_HINT_WINDOW_MS + 100);
+    await wait(HINT_WINDOW_MS + 100);
     expect(reads()).toBe(2);
     expect(a.values.at(-1)).toBe(1);
     expect(b.values.at(-1)).toBe(1);
@@ -122,7 +121,7 @@ describe("followHinted", () => {
     expect(a.errors).toHaveLength(1);
     expect(b.errors).toHaveLength(1);
     change();
-    await wait(LIST_HINT_WINDOW_MS + 100);
+    await wait(HINT_WINDOW_MS + 100);
     expect(a.values.at(-1)).toBe(1);
   });
 
@@ -134,7 +133,7 @@ describe("followHinted", () => {
     b.off();
     expect(signals[0]?.aborted).toBe(true);
     change();
-    await wait(LIST_HINT_WINDOW_MS + 100);
+    await wait(HINT_WINDOW_MS + 100);
     expect(reads()).toBe(1);
     expect(hub.handlers.size).toBe(0);
   });
