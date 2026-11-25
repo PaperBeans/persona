@@ -8,6 +8,8 @@ export const SESSIONS_LIST_FEATURE = "sessions_list";
  *  and which rows changed (`changed`), so an open chat reads its row only when it is one of them (#6685). */
 export const SESSIONS_LIST_CHANGES_FEATURE = "sessions_list_changes";
 export const PAGE_SIZE = 50;
+/** The hints of one window share one read (`SessionList.invalidate`, lib/hinted-read.ts). */
+export const LIST_HINT_WINDOW_MS = 2_000;
 /** UTF-8 lexical order follows Unicode code points, not locale or JavaScript's surrogate-unit order. */
 export function compareListIds(a: string, b: string): number {
   let left = 0, right = 0;
@@ -281,7 +283,7 @@ export class SessionList<T> {
     queueMicrotask(() => {
       if (!this.current(generation) || !this.invalidationQueued) return;
       // inside the last read's window (none yet: invalidatedAt 0 is long past)
-      const wait = this.invalidatedAt + 2_000 - Date.now();
+      const wait = this.invalidatedAt + LIST_HINT_WINDOW_MS - Date.now();
       if (wait > 0) {
         // invalidationQueued stays set: further hints of this window return at once. The window's end clears it
         // first, or its own invalidate would return at once too and no hint would ever read again.
