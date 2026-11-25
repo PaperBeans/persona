@@ -95,19 +95,30 @@ func (n *Node) runtimeAssistantCwd(id, cwd string, st sessionState) string {
 	return identity.AssistantDir(n.home)
 }
 
-// assistantEnvForRuntime returns nil unless the local runtime explicitly accepts dedicated-worker environments.
+// assistantEnvForRuntime returns nil unless the local runtime explicitly accepts dedicated-worker environments and
+// session is known (reusing session-scoped proxy leases idempotently per (session, command)).
 func (n *Node) assistantEnvForRuntime(h *runtimeConn, cwd, session string) map[string]string {
-	if h == nil || !h.assistantEnvironment() {
+	if h == nil || !h.assistantEnvironment() || session == "" {
 		return nil
 	}
-	entries := n.assistantRuntimeEnv(cwd, session)
+	env, _, _ := n.assistantEnvForRuntimeLease(h, cwd, session)
+	return env
+}
+
+// assistantEnvForRuntimeLease builds the runtime assistant environment and returns lifecycle hooks when session is
+// empty (a new session.start): call bind(id) once session.start returns an id, or release() if starting fails.
+func (n *Node) assistantEnvForRuntimeLease(h *runtimeConn, cwd, session string) (map[string]string, func(), func(string)) {
+	if h == nil || !h.assistantEnvironment() {
+		return nil, func() {}, func(string) {}
+	}
+	entries, release, bind := n.assistantRuntimeEnv(cwd, session)
 	env := make(map[string]string, len(entries))
 	for _, entry := range entries {
 		if name, value, ok := strings.Cut(entry, "="); ok {
 			env[name] = value
 		}
 	}
-	return env
+	return env, release, bind
 }
 
 // assistantSendRuntime is assistantSend on a runtime (h, nil when it is not connected): a new conversation is started
@@ -169,7 +180,7 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		n.assistantRuntimeSkills(cwd)
 	}
 	memDir := n.memoryForUse(cwd)
-	environment := n.assistantEnvForRuntime(h, cwd, id)
+	environment, releaseEnv, bindEnv := n.assistantEnvForRuntimeLease(h, cwd, id)
 	turn := map[string]any{"assistant": true, "memory_dir": memDir}
 	if environment != nil {
 		turn["env"] = environment
@@ -200,9 +211,15 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		}
 		s, err := n.runtimeStartWith(ctx, h, startParams)
 		if err != nil {
+			releaseEnv()
 			return "", n.localizeSupervisionRefusal(ctx, err)
 		}
 		id = s.SessionID
+		if id == "" {
+			releaseEnv()
+		} else {
+			bindEnv(id)
+		}
 		st.AwaitingFirstMessage = true
 		if supportsPolicy {
 			st.SupervisionInstructions = policy
@@ -304,6 +321,9 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 			return "", n.localizeSupervisionRefusal(ctx, err)
 		}
 		return "", fmt.Errorf("%s: %w", h.label(), err)
+	}
+	if h.agent() == agyAgent {
+		n.clearAgyStopped(id, sentAt)
 	}
 	if runtimeAnswerFlag(said, "queued") {
 		if !command {

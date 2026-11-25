@@ -242,7 +242,7 @@ private fun LarkBindingRow(
         JRow(name, subtitle = larkStatusLine(res, b), subtitleLines = 3, trailing = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                 healthOf(b).Draw()
-                JSwitch(b.enabled, { on -> scope.launch { model.setEnabled(b, on) } }, enabled = !busy && !authorize)
+                JSwitch(b.enabled, { on -> scope.launch { model.setEnabled(b, on) } }, enabled = !busy && (!authorize || b.health == "scope_missing"))
             }
         })
         Column(Modifier.padding(horizontal = rowPadding).padding(bottom = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {

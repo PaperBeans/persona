@@ -10,7 +10,7 @@ D=".cache/persona-test-$(basename "$PWD")"
 # Resolve the hub's state directory, never prepare it: a test run must not create it or its old-name alias (#1424). The
 # resolver exports _PERSONA_STATE_DIR, so db.sh uses that one too.
 python3 scripts/persona_identity.py --service hub --prefix scripts/deploy/db.sh | ssh "$H" 'bash -s' >/dev/null
-ssh "$H" "mkdir -p ~/$D/sdk ~/$D/schema ~/$D/scripts/mock ~/$D/scripts/deploy ~/$D/web/src/i18n ~/$D/integrations/antigravity/test"
+ssh "$H" "mkdir -p ~/$D/sdk ~/$D/schema ~/$D/scripts/mock ~/$D/scripts/deploy ~/$D/scripts/ci ~/$D/web/src/i18n ~/$D/integrations/antigravity/test"
 rsync -a --delete --exclude bin server/ "$H":"$D/server/"
 # Go's local SDK replacement must keep the same sibling path as in this checkout, including embedded schemas.
 rsync -a --delete sdk/go/ "$H":"$D/sdk/go/"
@@ -33,6 +33,9 @@ rsync -a --delete spec/ "$H":"$D/spec/"
 rsync -a --delete integrations/antigravity/test/fixtures/ "$H":"$D/integrations/antigravity/test/fixtures/"
 # Hub inbox list tests read this shared mock fixture from ../../../scripts/mock.
 rsync -a scripts/mock/inbox_events.json "$H":"$D/scripts/mock/inbox_events.json"
+# The domain rule tests (archguard TestDomainLayers, each package's TestDomainRules) read the wire-types baseline's
+# bare-id names from ../scripts/ci (internal/archguard/domainrules/bareid.go).
+rsync -a scripts/ci/wire_types_baseline.json "$H":"$D/scripts/ci/wire_types_baseline.json"
 # pgdocker's server-args test compares the container with this deployment script next to the Go module (#3575).
 rsync -a scripts/deploy/db.sh "$H":"$D/scripts/deploy/db.sh"
 rsync -a --delete --prune-empty-dirs --include '*/' --include '*.swift' --exclude '*' apple/ "$H":"$D/apple/"

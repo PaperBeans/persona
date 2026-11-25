@@ -78,6 +78,9 @@ import UIKit
         for h in ["rate_limited", "scope_missing", "awaiting_approval"] { #expect(LarkSyncText.health(b(h)).tone == .caution) }
         #expect(LarkSyncText.health(b("something_new")).tone == .neutral)
         #expect(LarkSyncText.needsAuthorize(b("unauthorized")) && LarkSyncText.needsAuthorize(b("needs_reauth")))
+        #expect(LarkSyncText.needsAuthorize(b("scope_missing")))
+        #expect(LarkSyncText.health(b("scope_missing")).text == String(localized: "Reauthorize to Add Missing Permissions [Lark Sync]"))
+        #expect(LarkSyncText.reauthSoon(b("scope_missing", due: 30)) == nil)
         #expect(LarkSyncText.reauthSoon(b("ok", due: 6)) == 6)
         #expect(LarkSyncText.reauthSoon(b("ok", due: 15)) == nil)
         #expect(LarkSyncText.reauthSoon(b("ok", due: -2)) == 0)

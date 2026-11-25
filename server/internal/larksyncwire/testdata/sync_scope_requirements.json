@@ -1,0 +1,192 @@
+[
+  {
+    "reader": "Drive listing",
+    "url": "https://open.feishu.cn/document/server-docs/docs/drive-v1/folder/list",
+    "any_of": [
+      "drive:drive:readonly"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Linked file metadata",
+    "url": "https://open.feishu.cn/document/server-docs/docs/drive-v1/file/batch_query",
+    "any_of": [
+      "drive:drive.metadata:readonly"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Readable text download",
+    "url": "https://open.feishu.cn/document/server-docs/docs/drive-v1/download/download",
+    "any_of": [
+      "drive:drive:readonly",
+      "drive:file:download"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Docx metadata",
+    "url": "https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/get",
+    "any_of": [
+      "docx:document:readonly"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Docx blocks",
+    "url": "https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/list",
+    "any_of": [
+      "docx:document:readonly"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Docx raw content fallback",
+    "url": "https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/raw_content",
+    "any_of": [
+      "docx:document:readonly"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Sheet list",
+    "url": "https://open.feishu.cn/document/server-docs/docs/sheets-v3/spreadsheet-sheet/query",
+    "any_of": [
+      "sheets:spreadsheet:readonly",
+      "drive:drive:readonly"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Sheet values",
+    "url": "https://open.feishu.cn/document/server-docs/docs/sheets-v3/data-operation/reading-a-single-range",
+    "any_of": [
+      "sheets:spreadsheet:readonly",
+      "drive:drive:readonly"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Base tables",
+    "url": "https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table/list",
+    "any_of": [
+      "bitable:app:readonly"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Base records",
+    "url": "https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-record/list",
+    "any_of": [
+      "bitable:app:readonly"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Wiki spaces",
+    "url": "https://open.feishu.cn/document/server-docs/docs/wiki-v2/space/list",
+    "any_of": [
+      "wiki:wiki:readonly",
+      "wiki:space:retrieve"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Wiki children",
+    "url": "https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/list",
+    "any_of": [
+      "wiki:wiki:readonly",
+      "wiki:node:retrieve"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Wiki link resolution",
+    "url": "https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/get_node",
+    "any_of": [
+      "wiki:wiki:readonly"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Minutes metadata",
+    "url": "https://open.feishu.cn/document/server-docs/minutes-v1/minute/get",
+    "any_of": [
+      "minutes:minutes:readonly"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Minutes transcript",
+    "url": "https://open.feishu.cn/document/minutes-v1/minute-transcript/get",
+    "any_of": [
+      "minutes:minutes.transcript:export"
+    ],
+    "full_only": false
+  },
+  {
+    "reader": "Message search and p2p discovery",
+    "url": "https://open.feishu.cn/document/server-docs/search-v2/suite-search/create",
+    "any_of": [
+      "search:message"
+    ],
+    "full_only": true
+  },
+  {
+    "reader": "Chat listing",
+    "url": "https://open.feishu.cn/document/server-docs/group/chat/list",
+    "any_of": [
+      "im:chat:read",
+      "im:chat:readonly"
+    ],
+    "full_only": true
+  },
+  {
+    "reader": "Chat name fallback",
+    "url": "https://open.feishu.cn/document/server-docs/group/chat/get",
+    "any_of": [
+      "im:chat:readonly"
+    ],
+    "full_only": true
+  },
+  {
+    "reader": "Chat history",
+    "url": "https://open.feishu.cn/document/server-docs/im-v1/message/list",
+    "any_of": [
+      "im:message:readonly"
+    ],
+    "full_only": true
+  },
+  {
+    "reader": "Search hit message",
+    "url": "https://open.feishu.cn/document/server-docs/im-v1/message/get",
+    "any_of": [
+      "im:message:readonly"
+    ],
+    "full_only": true
+  },
+  {
+    "reader": "Lazy message attachment",
+    "url": "https://open.feishu.cn/document/server-docs/im-v1/message/get-2",
+    "any_of": [
+      "im:message:readonly"
+    ],
+    "full_only": true
+  },
+  {
+    "reader": "Sender name API access",
+    "url": "https://open.feishu.cn/document/server-docs/contact-v3/user/get",
+    "any_of": [
+      "contact:contact.base:readonly"
+    ],
+    "full_only": true
+  },
+  {
+    "reader": "Sender name field",
+    "url": "https://open.feishu.cn/document/server-docs/contact-v3/user/get",
+    "any_of": [
+      "contact:user.base:readonly"
+    ],
+    "full_only": true
+  }
+]

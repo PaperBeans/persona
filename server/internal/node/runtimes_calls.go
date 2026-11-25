@@ -308,6 +308,9 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 				out, err := call(method, input)
 				finishAgy(err, false)
 				said = out
+				if err == nil && h.agent() == agyAgent && n.clearAgyStopped(p.SessionID, sentAt) {
+					n.publishSessionsSoon()
+				}
 				if (err != nil && !maybeDelivered(err)) || (err == nil && runtimeAnswerFlag(out, "queued")) {
 					n.ttft.disarm(p.SessionID, sentAt)
 				}
@@ -373,6 +376,11 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 		finishAgy := n.runtimes.agyWorkBegin(h, method, p.SessionID)
 		_, err := call("session.close", closeParams)
 		finishAgy(err, true)
+		if err == nil {
+			if gp := n.existingGates(); gp != nil {
+				gp.releaseSession(p.SessionID)
+			}
+		}
 		return okResult(err), err, true
 	case "session.archive", "session.unarchive":
 		// Its own archive (archive.go): one that has none keeps the archive Persona's alone.
@@ -460,11 +468,15 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 		if !caps.QueueSendNow || strings.Contains(p.SessionID, subagentSep) {
 			return nil, errRuntimeUnsupported(label, "这个操作"), true
 		}
+		sentAt := time.Now()
 		finishAgy := n.runtimes.agyWorkBegin(h, method, p.SessionID)
 		_, err := call(method, map[string]any{"session_id": p.SessionID})
 		finishAgy(err, false)
 		if err != nil {
 			return nil, err, true
+		}
+		if h.agent() == agyAgent && n.clearAgyStopped(p.SessionID, sentAt) {
+			n.publishSessionsSoon()
 		}
 		return map[string]any{"sent": true}, nil, true
 	}

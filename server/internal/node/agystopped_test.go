@@ -1,6 +1,11 @@
 package node
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -131,4 +136,346 @@ func TestNativeArchiveOfAnAgyRow(t *testing.T) {
 	if _, err := n.nativeArchive(t.Context(), "not a session", true); err == nil {
 		t.Fatal("an invalid id was taken")
 	}
+}
+
+func agyCompanionStoppedRow(sessions []proto.Session, id string) (proto.Session, bool) {
+	for _, s := range sessions {
+		if s.SessionID == id {
+			return s, true
+		}
+	}
+	return proto.Session{}, false
+}
+
+func isUserStoppedRow(s proto.Session) bool {
+	return s.Status == proto.StatusOffline && s.Capabilities != nil && s.Capabilities.StopCause == proto.StopUser
+}
+
+func setRuntimeAnswer(host *fakeRuntime, fn func(string, json.RawMessage) (any, error)) {
+	host.mu.Lock()
+	host.answer = fn
+	host.mu.Unlock()
+}
+
+func dialAgyCompanionForStoppedTest(t *testing.T, n *Node, convRow string, updatedAt time.Time) *fakeRuntime {
+	t.Helper()
+	hello := assistantRuntimeHello()
+	hello["runtime"], hello["agent"], hello["launcher"] = agyAgent, agyAgent, agyAgent
+	caps := hello["caps"].(map[string]any)
+	caps["queue_send_now"] = true
+	host := dialRuntime(t, n, hello)
+	if err := host.peer.Notify("runtime.sessions", map[string]any{
+		"sessions": []map[string]any{{
+			"session_id": convRow,
+			"cwd":        n.home,
+			"status":     proto.StatusDone,
+			"title":      "Stopped conversation",
+			"updated_at": updatedAt.UTC().Format(time.RFC3339Nano),
+			"capabilities": map[string]any{
+				"read":             true,
+				"send":             true,
+				"a2a_wake_on_send": true,
+			},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "agy companion session listed", func() bool {
+		return n.runtimes.ownerOf(convRow) != nil
+	})
+	return host
+}
+
+// Continuing a user-stopped agy-<conversation> companion session within agyStopGrace must clear n.agyStopped so the
+// resumed turn is neither masked as StatusOffline (StopUser) nor permanently trapped offline when it finishes inside
+// the grace window. Failed/refused sends and newer concurrent closes must keep the stop mark intact.
+func TestAgyCompanionSendClearsStoppedMark(t *testing.T) {
+	const convRow = "agy-" + agyTestID
+
+	t.Run("session.send unmasks working turn even when runtime.sessions races ahead and stays unmasked on fast completion", func(t *testing.T) {
+		n, hub := runtimeNode(t)
+		closedAt := time.Now()
+		n.mu.Lock()
+		n.agyStopped = map[string]agyStop{agyTestID: {row: agyTestRow, at: closedAt}}
+		n.mu.Unlock()
+
+		host := dialAgyCompanionForStoppedTest(t, n, convRow, closedAt.Add(-time.Minute))
+		waitFor(t, "initial stopped row pushed to hub", func() bool {
+			row, ok := agyCompanionStoppedRow(hub.lastList(), convRow)
+			return ok && isUserStoppedRow(row)
+		})
+
+		// Companion pushes StatusWorking inside agyStopGrace BEFORE session.send returns.
+		workingUpdatedAt := closedAt.Add(5 * time.Second)
+		setRuntimeAnswer(host, func(method string, _ json.RawMessage) (any, error) {
+			if method != "session.send" {
+				return map[string]any{"ok": true}, nil
+			}
+			if err := host.peer.Notify("runtime.sessions", map[string]any{
+				"sessions": []map[string]any{{
+					"session_id": convRow,
+					"cwd":        n.home,
+					"status":     proto.StatusWorking,
+					"title":      "Stopped conversation",
+					"rev":        2,
+					"updated_at": workingUpdatedAt.UTC().Format(time.RFC3339Nano),
+				}},
+			}); err != nil {
+				return nil, err
+			}
+			// Wait on the RPC goroutine without calling testing.T helpers off the test goroutine.
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				if owner := n.runtimes.ownerOf(convRow); owner != nil {
+					if row, ok := owner.row(convRow); ok && row.Status == proto.StatusWorking {
+						break
+					}
+				}
+				if time.Now().After(deadline) {
+					return nil, fmt.Errorf("timed out waiting for in-flight runtime.sessions StatusWorking")
+				}
+				<-time.After(5 * time.Millisecond)
+			}
+			return map[string]any{"ok": true}, nil
+		})
+
+		if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": convRow, "text": "continue"}); err != nil {
+			t.Fatalf("session.send: %v", err)
+		}
+
+		// Clearing agyStopped must schedule a fresh hub publish so the active turn becomes visible immediately.
+		waitFor(t, "hub observes unmasked StatusWorking", func() bool {
+			row, ok := agyCompanionStoppedRow(hub.lastList(), convRow)
+			return ok && row.Status == proto.StatusWorking && (row.Capabilities == nil || row.Capabilities.StopCause == "")
+		})
+
+		// If the turn finishes inside agyStopGrace (UpdatedAt <= closedAt + agyStopGrace), it must show StatusDone,
+		// not fall back into permanent StatusOffline (StopUser).
+		doneUpdatedAt := closedAt.Add(10 * time.Second)
+		if err := host.peer.Notify("runtime.sessions", map[string]any{
+			"sessions": []map[string]any{{
+				"session_id": convRow,
+				"cwd":        n.home,
+				"status":     proto.StatusDone,
+				"title":      "Stopped conversation",
+				"rev":        3,
+				"updated_at": doneUpdatedAt.UTC().Format(time.RFC3339Nano),
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "hub observes unmasked StatusDone", func() bool {
+			row, ok := agyCompanionStoppedRow(hub.lastList(), convRow)
+			return ok && row.Status == proto.StatusDone && (row.Capabilities == nil || row.Capabilities.StopCause == "")
+		})
+	})
+
+	t.Run("failed send, refused A2A send, and concurrent newer close preserve agyStopped", func(t *testing.T) {
+		n, hub := runtimeNode(t)
+		closedAt := time.Now()
+		n.mu.Lock()
+		n.agyStopped = map[string]agyStop{agyTestID: {row: agyTestRow, at: closedAt}}
+		n.mu.Unlock()
+
+		host := dialAgyCompanionForStoppedTest(t, n, convRow, closedAt.Add(-time.Minute))
+		waitFor(t, "initial stopped row pushed to hub", func() bool {
+			row, ok := agyCompanionStoppedRow(hub.lastList(), convRow)
+			return ok && isUserStoppedRow(row) && row.Capabilities.A2AWakeOnSend
+		})
+
+		// 1. Companion RPC error keeps agyStopped.
+		setRuntimeAnswer(host, func(method string, _ json.RawMessage) (any, error) {
+			if method == "session.send" {
+				return nil, errors.New("companion busy")
+			}
+			return map[string]any{"ok": true}, nil
+		})
+		if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": convRow, "text": "retry"}); err == nil {
+			t.Fatal("expected session.send error")
+		}
+		row, ok := agyCompanionStoppedRow(listSessions(t, n), convRow)
+		if !ok || !isUserStoppedRow(row) {
+			t.Fatalf("failed send cleared agyStopped: %+v %+v", row, row.Capabilities)
+		}
+
+		// 2. Refused A2A send (via session.a2a.send with a2a_wake_on_send: true) must be blocked by StopUser and
+		// never reach the companion or clear agyStopped.
+		sendsBeforeA2A := len(host.got("session.send"))
+		if _, err := nodeCall(t, n, "session.a2a.send", map[string]any{
+			"session_id":       convRow,
+			"text":             "a2a ping",
+			"a2a_wake_on_send": true,
+		}); rpcCode(err) != "a2a_session_busy" {
+			t.Fatalf("expected a2a_session_busy, got %v", err)
+		}
+		if got := len(host.got("session.send")); got != sendsBeforeA2A {
+			t.Fatalf("refused A2A send forwarded %d extra session.send call(s)", got-sendsBeforeA2A)
+		}
+		row, ok = agyCompanionStoppedRow(listSessions(t, n), convRow)
+		if !ok || !isUserStoppedRow(row) {
+			t.Fatalf("refused A2A send cleared agyStopped: %+v %+v", row, row.Capabilities)
+		}
+
+		// 3. A newer stop recorded while session.send is in flight must not be cleared by that send finishing.
+		setRuntimeAnswer(host, func(method string, _ json.RawMessage) (any, error) {
+			if method == "session.send" {
+				n.mu.Lock()
+				n.agyStopped[agyTestID] = agyStop{row: agyTestRow, at: time.Now().Add(time.Second)}
+				n.mu.Unlock()
+			}
+			return map[string]any{"ok": true}, nil
+		})
+		if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": convRow, "text": "in flight"}); err != nil {
+			t.Fatalf("session.send: %v", err)
+		}
+		row, ok = agyCompanionStoppedRow(listSessions(t, n), convRow)
+		if !ok || !isUserStoppedRow(row) {
+			t.Fatalf("in-flight send cleared a newer agyStopped mark: %+v %+v", row, row.Capabilities)
+		}
+	})
+
+	t.Run("session.queue.send_now clears agyStopped on success and keeps it on error", func(t *testing.T) {
+		n, hub := runtimeNode(t)
+		closedAt := time.Now()
+		n.mu.Lock()
+		n.agyStopped = map[string]agyStop{agyTestID: {row: agyTestRow, at: closedAt}}
+		n.mu.Unlock()
+
+		host := dialAgyCompanionForStoppedTest(t, n, convRow, closedAt.Add(-time.Minute))
+		waitFor(t, "initial stopped row pushed to hub", func() bool {
+			row, ok := agyCompanionStoppedRow(hub.lastList(), convRow)
+			return ok && isUserStoppedRow(row)
+		})
+
+		setRuntimeAnswer(host, func(method string, _ json.RawMessage) (any, error) {
+			if method == "session.queue.send_now" {
+				return nil, errors.New("nothing queued")
+			}
+			return map[string]any{"ok": true}, nil
+		})
+		if _, err := nodeCall(t, n, "session.queue.send_now", map[string]any{"session_id": convRow}); err == nil {
+			t.Fatal("expected session.queue.send_now error")
+		}
+		if row, ok := agyCompanionStoppedRow(listSessions(t, n), convRow); !ok || !isUserStoppedRow(row) {
+			t.Fatalf("failed send_now cleared agyStopped: %+v", row)
+		}
+
+		setRuntimeAnswer(host, func(method string, _ json.RawMessage) (any, error) {
+			return map[string]any{"ok": true}, nil
+		})
+		if _, err := nodeCall(t, n, "session.queue.send_now", map[string]any{"session_id": convRow}); err != nil {
+			t.Fatalf("session.queue.send_now: %v", err)
+		}
+		waitFor(t, "hub observes unmasked row after queue.send_now", func() bool {
+			row, ok := agyCompanionStoppedRow(hub.lastList(), convRow)
+			return ok && row.Status == proto.StatusDone && (row.Capabilities == nil || row.Capabilities.StopCause == "")
+		})
+	})
+
+	t.Run("assistantSendRuntime and assistantCompactRuntime clear agyStopped on accepted prompt and keep it on error", func(t *testing.T) {
+		n, hub := runtimeNode(t)
+		assistantHub(hub)
+		closedAt := time.Now()
+		cwd := filepath.Join(n.home, ".persona", "assistant")
+		n.state.put(convRow, sessionState{Launcher: agyAgent, Cwd: cwd})
+		n.mu.Lock()
+		n.agyStopped = map[string]agyStop{agyTestID: {row: agyTestRow, at: closedAt}}
+		n.mu.Unlock()
+
+		host := dialAgyCompanionForStoppedTest(t, n, convRow, closedAt.Add(-time.Minute))
+		waitFor(t, "initial stopped row pushed to hub", func() bool {
+			row, ok := agyCompanionStoppedRow(hub.lastList(), convRow)
+			return ok && isUserStoppedRow(row)
+		})
+
+		// Empty input (!hasInput) must not clear agyStopped.
+		if _, err := n.assistantSendRuntime(context.Background(), n.runtimes.ownerOf(convRow), convRow, cwd, agyAgent, "", nil, "", false, false, false, nil); err != nil {
+			t.Fatalf("empty assistantSendRuntime: %v", err)
+		}
+		if row, ok := agyCompanionStoppedRow(listSessions(t, n), convRow); !ok || !isUserStoppedRow(row) {
+			t.Fatalf("empty assistantSendRuntime cleared agyStopped: %+v", row)
+		}
+
+		// Real prompt clears agyStopped and unmasks StatusWorking immediately.
+		setRuntimeAnswer(host, func(method string, _ json.RawMessage) (any, error) {
+			return map[string]any{"ok": true}, nil
+		})
+		if _, err := n.assistantSendRuntime(context.Background(), n.runtimes.ownerOf(convRow), convRow, cwd, agyAgent, "follow up", nil, "", false, false, false, nil); err != nil {
+			t.Fatalf("assistantSendRuntime: %v", err)
+		}
+		waitFor(t, "hub observes unmasked StatusWorking after assistantSendRuntime", func() bool {
+			row, ok := agyCompanionStoppedRow(hub.lastList(), convRow)
+			return ok && row.Status == proto.StatusWorking && (row.Capabilities == nil || row.Capabilities.StopCause == "")
+		})
+
+		// Re-mark stopped BEFORE pushing StatusDone so hub.lastList() observes StatusOffline (StopUser) before compact.
+		n.mu.Lock()
+		n.agyStopped[agyTestID] = agyStop{row: agyTestRow, at: time.Now()}
+		n.mu.Unlock()
+		if err := host.peer.Notify("runtime.sessions", map[string]any{
+			"sessions": []map[string]any{{
+				"session_id": convRow,
+				"cwd":        cwd,
+				"status":     proto.StatusDone,
+				"title":      "Stopped conversation",
+				"rev":        4,
+				"updated_at": closedAt.Add(15 * time.Second).UTC().Format(time.RFC3339Nano),
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "hub observes re-stopped row before compact", func() bool {
+			row, ok := agyCompanionStoppedRow(hub.lastList(), convRow)
+			return ok && isUserStoppedRow(row)
+		})
+
+		// Failed compact must keep agyStopped.
+		setRuntimeAnswer(host, func(method string, _ json.RawMessage) (any, error) {
+			if method == "session.send" {
+				return nil, errors.New("compact rejected")
+			}
+			return map[string]any{"ok": true}, nil
+		})
+		if err := n.assistantCompactRuntime(context.Background(), convRow, false); err == nil {
+			t.Fatal("expected assistantCompactRuntime error")
+		}
+		if row, ok := agyCompanionStoppedRow(listSessions(t, n), convRow); !ok || !isUserStoppedRow(row) {
+			t.Fatalf("failed assistantCompactRuntime cleared agyStopped: %+v", row)
+		}
+
+		// Accepted compact clears agyStopped and republishes unmasked StatusDone with CompactionRunning.
+		setRuntimeAnswer(host, func(method string, _ json.RawMessage) (any, error) {
+			return map[string]any{"ok": true}, nil
+		})
+		if err := n.assistantCompactRuntime(context.Background(), convRow, false); err != nil {
+			t.Fatalf("assistantCompactRuntime: %v", err)
+		}
+		waitFor(t, "hub observes unmasked row after assistantCompactRuntime", func() bool {
+			row, ok := agyCompanionStoppedRow(hub.lastList(), convRow)
+			return ok && row.Status == proto.StatusDone &&
+				(row.Capabilities == nil || row.Capabilities.StopCause == "") &&
+				row.Compaction != nil && row.Compaction.State == proto.CompactionRunning
+		})
+		if row, ok := agyCompanionStoppedRow(listSessions(t, n), convRow); !ok || isUserStoppedRow(row) {
+			t.Fatalf("listSessions remained stopped after assistantCompactRuntime: %+v", row)
+		}
+
+		// Settle the background awaitRuntimeCompaction goroutine cleanly before t.Cleanup.
+		if err := host.peer.Notify("runtime.sessions", map[string]any{
+			"sessions": []map[string]any{{
+				"session_id": convRow,
+				"cwd":        cwd,
+				"status":     proto.StatusDone,
+				"title":      "Stopped conversation",
+				"rev":        5,
+				"updated_at": closedAt.Add(20 * time.Second).UTC().Format(time.RFC3339Nano),
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "compaction settled before cleanup", func() bool {
+			row, ok := agyCompanionStoppedRow(hub.lastList(), convRow)
+			return ok && row.Compaction != nil && row.Compaction.State == proto.CompactionDone
+		})
+	})
 }

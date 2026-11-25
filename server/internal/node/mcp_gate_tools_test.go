@@ -190,7 +190,7 @@ func TestMCPGateToolsOnTheHookSocketForARuntimesAssistant(t *testing.T) {
 		card = hub.asked[0]
 	}
 	hub.mu.Unlock()
-	if asked != 1 || card.SessionID != sid || card.ToolName == "" {
+	if asked != 1 || card.SessionID != sid || card.ToolName == "" || !card.OutwardWrite {
 		t.Fatalf("%d cards, first %+v", asked, card)
 	}
 	// Missing args: the tool says how to call it, nothing runs.

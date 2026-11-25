@@ -1935,7 +1935,7 @@
   },
   {
     "name": "model_profile_capture",
-    "description": "Capture current purposes/launcher model fields into an existing profile with exact before/after phone approval. Preserves tiers, rechecks revision and reads back. Does not change current configuration; switch to apply.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Capture current model fields into a profile with phone approval; does not apply them.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -1953,29 +1953,25 @@
   },
   {
     "name": "model_probe",
-    "description": "Run bounded samples through a saved provider; real inference, configuration unchanged. Saved connection settings only; no overrides or secrets in output. Ordered results: status, latency, block types, usage, redacted text (8 KiB cap), generation_truncated for token limits. Messages off sends thinking.type=disabled; Chat off sends reasoning_effort=none. Retries reported; 429 returns Retry-After without retry.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Run bounded real samples through a saved provider; configuration unchanged, secrets hidden. Returns status, latency, blocks, usage, retries and redacted text.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "properties": {
         "provider": {
-          "type": "string",
-          "description": "Saved provider name"
+          "type": "string"
         },
         "api": {
           "type": "string",
           "enum": [
             "messages",
             "chat"
-          ],
-          "description": "Protocol on the same saved gateway; default: provider's API"
+          ]
         },
         "model": {
-          "type": "string",
-          "description": "Model override; default: provider's model"
+          "type": "string"
         },
         "effort": {
-          "type": "string",
-          "description": "Effort override; default: provider's effort"
+          "type": "string"
         },
         "samples": {
           "type": "array",
@@ -1993,8 +1989,7 @@
                 "maxLength": 128
               },
               "system": {
-                "type": "string",
-                "description": "system+user \u003c=16384 UTF-8 bytes"
+                "type": "string"
               },
               "user": {
                 "type": "string",
@@ -2030,6 +2025,45 @@
       "required": [
         "provider",
         "samples"
+      ]
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "launcher_import",
+    "description": "Preview/import Claude shell aliases. Preview is read-only/redacted. Commit needs names/owner approval and reuses current import rules. Names select groups/raw aliases; split/hide_originals control per-alias import/hiding. No overrides or secrets.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "preview",
+            "commit"
+          ]
+        },
+        "machine": {
+          "type": "string"
+        },
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 128
+        },
+        "split": {
+          "type": "boolean"
+        },
+        "hide_originals": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "machine"
       ]
     },
     "defer_loading": true

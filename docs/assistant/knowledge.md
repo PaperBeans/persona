@@ -1331,3 +1331,14 @@ the one repeated line the benchmarks used before, the 4M index is 22 MB and buil
 - Names allow two lines (documents and meetings differ in the second half of their titles).
 - Document / meeting / event details show time and **Open document** (in-app), with source chat among associations; project associations include documents, meetings and events (up to 30 each, newest first).
 - If a profile is empty after removing content already in the page header, do not show an empty card.
+
+### Equivalent Lark archive representations
+
+Gateway alignment also recognizes Markdown links versus `label (URL)`, escaped text entities, and inline
+image/video placeholders backed by media references. This additional path requires exact receipt timestamps on
+both sides (within the existing two-second bucket window), the same known sender, equal attachment counts, a
+non-empty equivalent body and exactly one matching gateway line. URL destinations and case remain significant;
+code stays literal. Minute-only, unnamed, attachment-only, changed-content and ambiguous matches are retained.
+Unpaired same-name chats must have exactly one matching chat before a crosswalk is written. Repair version 2
+rechecks archived sync lines even when version 1 previously completed, preserving all receipt IDs and connector
+ownership. Regression cases live in `server/internal/kb/align_gateway_test.go`. No fuzzy or model-based match is used.

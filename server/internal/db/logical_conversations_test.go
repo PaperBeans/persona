@@ -667,3 +667,69 @@ func TestAcceptedInputKeepsOnlyDigestAndCannotReplayAfterPayloadCleanup(t *testi
 		t.Fatal("reused identity changed content")
 	}
 }
+
+func TestConversationSegmentDispatched(t *testing.T) {
+	d, _ := historyDB(t)
+	ctx := t.Context()
+	op := prepareLogicalSwitch(t, d)
+	if err := d.ActivateConversationSegment(ctx, "root-machine", "root-chat", op.OperationID, 1); err != nil {
+		t.Fatal(err)
+	}
+	// Earlier-epoch accepted inputs belong to seg-one, not the freshly activated seg-two.
+	payload1 := json.RawMessage(`{"text":"before switch"}`)
+	if err := d.EnqueueConversationInput(ctx, "root-machine", "root-chat", "old-turn", 2, payload1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.pool.Exec(ctx, `UPDATE conversation_inputs SET epoch=1,state='accepted' WHERE client_msg_id='old-turn'`); err != nil {
+		t.Fatal(err)
+	}
+	// A merely queued input at epoch 2 has not yet been dispatched to seg-two.
+	payload2 := json.RawMessage(`{"text":"queued only"}`)
+	if err := d.EnqueueConversationInput(ctx, "root-machine", "root-chat", "queued-turn", 2, payload2); err != nil {
+		t.Fatal(err)
+	}
+	if dispatched, err := d.ConversationSegmentDispatched(ctx, "root-machine", "root-chat", "second"); err != nil || dispatched {
+		t.Fatalf("fresh 0-turn segment with only queued input reported dispatched=%v err=%v", dispatched, err)
+	}
+	// Root segment (no switch targeting it) fails closed.
+	if dispatched, err := d.ConversationSegmentDispatched(ctx, "root-machine", "root-chat", "first"); err != nil || !dispatched {
+		t.Fatalf("root segment without switch targeting it should fail closed: dispatched=%v err=%v", dispatched, err)
+	}
+	// Claiming the input marks it sending at epoch >= expected_epoch + 1 -> dispatched=true.
+	if row, err := d.ClaimConversationInput(ctx, "root-machine", "root-chat", 2); err != nil || row == nil {
+		t.Fatalf("claim: %+v %v", row, err)
+	}
+	if dispatched, err := d.ConversationSegmentDispatched(ctx, "root-machine", "root-chat", "second"); err != nil || !dispatched {
+		t.Fatalf("segment with sending input should report dispatched=true: dispatched=%v err=%v", dispatched, err)
+	}
+	if err := d.ResolveConversationDelivery(ctx, "root-machine", "root-chat", "queued-turn", 2, op.OperationID, "accepted"); err != nil {
+		t.Fatal(err)
+	}
+	if dispatched, err := d.ConversationSegmentDispatched(ctx, "root-machine", "root-chat", "second"); err != nil || !dispatched {
+		t.Fatalf("segment with accepted input should report dispatched=true: dispatched=%v err=%v", dispatched, err)
+	}
+}
+
+func TestMarkConversationSegmentDispatchedPersistsWithoutInputs(t *testing.T) {
+	d, _ := historyDB(t)
+	ctx := t.Context()
+	op := prepareLogicalSwitch(t, d)
+	if err := d.ActivateConversationSegment(ctx, "root-machine", "root-chat", op.OperationID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if dispatched, err := d.ConversationSegmentDispatched(ctx, "root-machine", "root-chat", "second"); err != nil || dispatched {
+		t.Fatalf("fresh active segment reported dispatched=%v err=%v", dispatched, err)
+	}
+	if err := d.MarkConversationSegmentDispatched(ctx, "root-machine", "root-chat", "first"); !errors.Is(err, ErrConversationEpoch) {
+		t.Fatalf("marking retired segment did not fail with ErrConversationEpoch: %v", err)
+	}
+	if err := d.MarkConversationSegmentDispatched(ctx, "root-machine", "root-chat", "second"); err != nil {
+		t.Fatalf("MarkConversationSegmentDispatched: %v", err)
+	}
+	if dispatched, err := d.ConversationSegmentDispatched(ctx, "root-machine", "root-chat", "second"); err != nil || !dispatched {
+		t.Fatalf("directly marked segment reported dispatched=%v err=%v", dispatched, err)
+	}
+	if dispatched, err := d.ConversationSegmentDispatched(ctx, "root-machine", "root-chat", "missing-seg"); err != nil || !dispatched {
+		t.Fatalf("unknown segment should fail closed: dispatched=%v err=%v", dispatched, err)
+	}
+}

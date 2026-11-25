@@ -442,7 +442,7 @@ export function MachineDetail({ mid, onToggleSidebar }: { mid: string; onToggleS
       </section>
 
       {/* which engine the agents above come from (iOS engineRow) */}
-      <EngineSection machine={m} heading={<Heading title={t("machines-machinedetail.engine")} />} />
+      <EngineSection key={m.id} machine={m} heading={<Heading title={t("machines-machinedetail.engine")} />} />
 
       {/* what this computer can do for Persona, from the node's self-check (docs/server/machines.md "Doctor: what this computer can do") */}
       <NodeHealth machine={m} heading={<Heading title={t("node-health.title")} />} />

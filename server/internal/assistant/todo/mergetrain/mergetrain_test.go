@@ -300,6 +300,85 @@ func TestRebaseCircuitBreakerAndResetOnSuccess(t *testing.T) {
 	}
 }
 
+func TestQueuedEscalatedEntryPreservesEscalationOnPromotion(t *testing.T) {
+	t.Run("head_merged", func(t *testing.T) {
+		tr := New()
+		_, _ = tr.Enqueue(Entry{TodoID: "todo_1", RepoKey: "repo/app"})
+		_, _ = tr.Enqueue(Entry{TodoID: "todo_2", RepoKey: "repo/app"})
+		_, _ = tr.Enqueue(Entry{TodoID: "todo_3", RepoKey: "repo/app"})
+
+		// Trip the circuit breaker on queued todo_2 while todo_1 is still active head.
+		d1, err := tr.RecordRebaseFailure("repo/app", "todo_2", "conflict 1")
+		if err != nil || d1.Action != ActionWaitQueue || d1.State != StateQueued {
+			t.Fatalf("queued failure 1 = (%+v, %v), want ActionWaitQueue/StateQueued", d1, err)
+		}
+		d2, err := tr.RecordRebaseFailure("repo/app", "todo_2", "conflict 2")
+		if err != nil || d2.Action != ActionEscalateNeedsUser || d2.State != StateEscalated {
+			t.Fatalf("queued failure 2 = (%+v, %v), want ActionEscalateNeedsUser/StateEscalated", d2, err)
+		}
+
+		// Merging todo_1 promotes todo_2 to head, but MUST preserve StateEscalated.
+		promoted, err := tr.RecordMerged("repo/app", "todo_1")
+		if err != nil {
+			t.Fatalf("RecordMerged todo_1: %v", err)
+		}
+		if promoted.TodoID != "todo_2" || promoted.Action != ActionEscalateNeedsUser || promoted.State != StateEscalated {
+			t.Fatalf("RecordMerged decision = %+v, want todo_2 ActionEscalateNeedsUser/StateEscalated", promoted)
+		}
+
+		e2, ok := tr.Entry("repo/app", "todo_2")
+		if !ok || e2.State != StateEscalated || e2.RebaseFailures != 2 {
+			t.Fatalf("promoted todo_2 = %+v, want StateEscalated with RebaseFailures=2", e2)
+		}
+
+		// EvaluateHead, RecordRebaseSuccess, and Approve must all respect the tripped circuit breaker.
+		if eval := tr.EvaluateHead("repo/app", true); eval.Action != ActionEscalateNeedsUser || eval.State != StateEscalated || eval.TodoID != "todo_2" {
+			t.Fatalf("EvaluateHead after promoting escalated entry = %+v, want ActionEscalateNeedsUser", eval)
+		}
+		if err := tr.RecordRebaseSuccess("repo/app", "todo_2"); !errors.Is(err, ErrEntryEscalated) {
+			t.Fatalf("RecordRebaseSuccess on promoted escalated entry = %v, want ErrEntryEscalated", err)
+		}
+		if _, err := tr.Approve("repo/app", "todo_2"); !errors.Is(err, ErrEntryEscalated) {
+			t.Fatalf("Approve on promoted escalated entry = %v, want ErrEntryEscalated", err)
+		}
+
+		// Cancelling a queued entry behind an escalated head still reports the head as escalated.
+		cancelQueued, err := tr.Cancel("repo/app", "todo_3")
+		if err != nil {
+			t.Fatalf("Cancel todo_3: %v", err)
+		}
+		if cancelQueued.TodoID != "todo_2" || cancelQueued.Action != ActionEscalateNeedsUser || cancelQueued.State != StateEscalated {
+			t.Fatalf("Cancel queued behind escalated head = %+v, want todo_2 ActionEscalateNeedsUser/StateEscalated", cancelQueued)
+		}
+
+		// Only after explicitly cancelling escalated head todo_2 does a fresh queued entry activate.
+		_, _ = tr.Enqueue(Entry{TodoID: "todo_4", RepoKey: "repo/app"})
+		afterCancel, err := tr.Cancel("repo/app", "todo_2")
+		if err != nil || afterCancel.TodoID != "todo_4" || afterCancel.State != StateActive {
+			t.Fatalf("Cancel escalated head = (%+v, %v), want todo_4 StateActive", afterCancel, err)
+		}
+	})
+
+	t.Run("head_cancelled", func(t *testing.T) {
+		tr := New()
+		_, _ = tr.Enqueue(Entry{TodoID: "todo_a", RepoKey: "repo/app"})
+		_, _ = tr.Enqueue(Entry{TodoID: "todo_b", RepoKey: "repo/app"})
+		_, _ = tr.RecordRebaseFailure("repo/app", "todo_b", "conflict 1")
+		_, _ = tr.RecordRebaseFailure("repo/app", "todo_b", "conflict 2")
+
+		promoted, err := tr.Cancel("repo/app", "todo_a")
+		if err != nil {
+			t.Fatalf("Cancel todo_a: %v", err)
+		}
+		if promoted.TodoID != "todo_b" || promoted.Action != ActionEscalateNeedsUser || promoted.State != StateEscalated {
+			t.Fatalf("Cancel head decision = %+v, want todo_b ActionEscalateNeedsUser/StateEscalated", promoted)
+		}
+		if eval := tr.EvaluateHead("repo/app", true); eval.Action != ActionEscalateNeedsUser || eval.State != StateEscalated {
+			t.Fatalf("EvaluateHead after head cancel = %+v, want ActionEscalateNeedsUser", eval)
+		}
+	})
+}
+
 func TestAdvanceOnEscalationSkipsConflictingEntries(t *testing.T) {
 	tr := New(WithAdvanceOnEscalation(true))
 	_, _ = tr.Enqueue(Entry{TodoID: "todo_1", RepoKey: "repo/app"})

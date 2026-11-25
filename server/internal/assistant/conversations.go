@@ -1787,7 +1787,7 @@ func (s *Service) toolConversationSend(ctx context.Context, self string, args js
 	if c.SessionID == self {
 		return "", errors.New("that is this conversation: you can't send a message to yourself")
 	}
-	if c.LogicalPlaceholder {
+	if c.LogicalPlaceholder && !s.isZeroTurnPlaceholderConversation(ctx, c.MachineID, c.SessionID) {
 		// Its active physical segment is gone. Keep the durable conversation readable, but never manufacture a new
 		// execution segment or queue a message for an identity that no longer exists.
 		return "", logicalRefusal(ctx, "unavailable")

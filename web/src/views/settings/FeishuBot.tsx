@@ -78,6 +78,7 @@ export const FEATURES: { key: keyof BotFeatures; icon: IconName; title: string; 
 export const STEPS = [
   t("settings-feishubot.step_create_app"),
   t("settings-feishubot.step_permissions"),
+  t("settings-feishubot.step_sync_permissions"),
   t("settings-feishubot.step_events"),
   t("settings-feishubot.step_publish"),
 ];

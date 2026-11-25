@@ -106,7 +106,15 @@ func (s *Service) logicalItemsWindow(ctx context.Context, st logicalConversation
 		}
 		var source proto.ItemsWindow
 		if err := s.physicalHistoryCall(ctx, seg.MachineID, proto.MethodSessionItemsWindow, scoped, &source); err != nil {
+			if isMissingTranscriptErr(err) && s.isZeroTurnPreparedSegment(ctx, c, seg) {
+				knownEnd = max(knownEnd, seg.Offset)
+				continue
+			}
 			return nil, err
+		}
+		if source.History == "" && len(source.Items) == 0 && source.ToSeq == 0 && s.isZeroTurnPreparedSegment(ctx, c, seg) {
+			knownEnd = max(knownEnd, seg.Offset)
+			continue
 		}
 		if !source.Matches(scoped) {
 			return nil, errors.New("invalid source item window")

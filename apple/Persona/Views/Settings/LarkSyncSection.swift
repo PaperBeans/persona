@@ -142,7 +142,7 @@ struct LarkSyncSections: View {
                 Spacer(minLength: Theme.Space.s)
                 Toggle(String(localized: "Sync \(name) every day"), isOn: Binding(get: { b.enabled }, set: { on in Task { await model.setEnabled(b, on) } }))
                     .labelsHidden()
-                    .disabled(busy || authorize)
+                    .disabled(busy || (authorize && b.health != "scope_missing"))
             }
             if let e = b.error, !e.isEmpty, b.running != true {
                 Text(e).font(Theme.Font.caption).foregroundStyle(Theme.cautionText)

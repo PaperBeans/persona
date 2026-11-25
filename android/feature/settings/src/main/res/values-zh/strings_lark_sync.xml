@@ -28,7 +28,7 @@
     <string name="settings_lark_sync_health_unauthorized">还没连接</string>
     <string name="settings_lark_sync_health_needs_reauth">需要重新授权</string>
     <string name="settings_lark_sync_health_rate_limited">下次继续</string>
-    <string name="settings_lark_sync_health_scope_missing">需要管理员审批</string>
+    <string name="settings_lark_sync_health_scope_missing">需要重新授权以补齐权限</string>
     <string name="settings_lark_sync_health_awaiting">等待管理员审批</string>
     <string name="settings_lark_sync_health_failing">上次同步失败</string>
     <string name="settings_lark_sync_health_unknown">未知</string>

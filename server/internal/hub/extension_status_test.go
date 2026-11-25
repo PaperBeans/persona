@@ -46,7 +46,7 @@ func TestExtensionAuthLanguageAndReplay(t *testing.T) {
 	for _, l := range []i18n.Lang{i18n.Ja, i18n.En, i18n.ZhHans} {
 		resumed := &client{hub: h, out: make(chan []byte, 8), acceptLang: l}
 		h.mu.Lock()
-		h.helloLocked(resumed, map[string]any{"type": "hello"}, h.events.stream, 0, true)
+		h.helloLocked(resumed, wsHello{Type: "hello"}, h.events.stream, 0, true)
 		h.mu.Unlock()
 		<-resumed.out
 		read(resumed, l)

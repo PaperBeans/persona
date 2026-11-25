@@ -207,8 +207,9 @@ struct FeishuBotView: View {
         Section {
             step(1, "Create a custom app on the Lark Open Platform and enable the Bot capability")
             step(2, "Under Permissions, enable: read and send direct messages (im:message, im:message:send_as_bot), receive direct messages sent to the bot, and upload and download message resources. Reading contact names helps too (contact:user.base:readonly)")
-            step(3, "In Events & Callbacks, choose “Receive events through persistent connection” and subscribe to “Receive messages” and “Card action callbacks”")
-            step(4, "Publish a version (your company's admin may need to approve it), then enter the App ID and App Secret above")
+            step(3, "Knowledge sync permissions [Lark bot setup]")
+            step(4, "In Events & Callbacks, choose “Receive events through persistent connection” and subscribe to “Receive messages” and “Card action callbacks”")
+            step(5, "Publish a version (your company's admin may need to approve it), then enter the App ID and App Secret above")
         } header: {
             Text("How to Set Up the Bot")
         } footer: {

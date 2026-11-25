@@ -97,6 +97,19 @@ afterEach(() => {
 });
 
 describe("Lark daily sync section", () => {
+  it("explains missing permissions and offers reauthorization even far from expiry", async () => {
+    await draw(view({ bindings: [binding({ health: "scope_missing", reauth_due_days: 300, tier: "full_with_im" })] }));
+    const row = rowOf("primary~a1");
+    expect(row.textContent).toContain(t("settings-larksync.health_scope_missing"));
+    expect(row.querySelector<HTMLButtonElement>('[role="switch"]')!.disabled).toBe(false);
+    expect(row.textContent).not.toContain(t("settings-larksync.run_now"));
+    const authorize = [...row.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === t("settings-larksync.authorize_again"));
+    expect(authorize).toBeDefined();
+    api.authorizeSyncBot.mockResolvedValue({ mode: "browser", url: "https://accounts.example.com/authorize" });
+    await act(async () => authorize!.click());
+    expect(api.authorizeSyncBot).toHaveBeenCalledWith("primary", expect.stringMatching(/\/lark-oauth$/), "full_with_im");
+  });
+
   it("lists the chat bot first, then each bot's accounts with their state", async () => {
     await draw();
     expect(text()).toContain(t("settings-larksync.title"));

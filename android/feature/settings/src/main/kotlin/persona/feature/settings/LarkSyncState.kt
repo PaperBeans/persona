@@ -91,7 +91,7 @@ internal fun tierText(tier: String?): Int =
     if (tier == LarkSync.TierFull) R.string.settings_lark_sync_tier_full else R.string.settings_lark_sync_tier_docs
 
 /** The binding has to be authorized (again) before it can sync. */
-internal fun needsAuthorize(b: LarkSyncBinding): Boolean = b.health == "needs_reauth" || b.health == "unauthorized"
+internal fun needsAuthorize(b: LarkSyncBinding): Boolean = b.health == "needs_reauth" || b.health == "unauthorized" || b.health == "scope_missing"
 
 /** Days left when the authorization ends soon enough to say so; null otherwise. */
 internal fun reauthSoon(b: LarkSyncBinding): Int? {

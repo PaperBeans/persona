@@ -124,6 +124,10 @@ type Interaction struct {
 	// EditableText is the outgoing body text a Claude Code Lark send/reply approval card may let the user edit before
 	// allowing. It is set only by that command gate; runtimes and other cards cannot declare it.
 	EditableText string `json:"editable_text,omitempty"`
+	// OutwardWrite marks a permission card raised by a trusted connector gate for an outward write acting as
+	// the owner (node/larkgate.go). Runtimes cannot declare it (node/runtimes_events.go clears it), and the
+	// manager honors it only on permission cards.
+	OutwardWrite bool `json:"outward_write,omitempty"`
 	// Format is a script ask's opt-in card rendering. Only "markdown" is emitted; absent keeps literal text.
 	Format          string       `json:"format,omitempty"`
 	Summary         string       `json:"summary,omitempty"`

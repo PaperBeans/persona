@@ -99,27 +99,29 @@ func (h *Hub) onClientHello(c *client, data []byte) {
 	c.meta = msg.clientMeta
 	updates, done := c.meta.updates, c.meta.done
 	c.mu.Unlock()
-	// Last, after the cards it can now answer: the notify events kept while it had no ws_notify socket (notifyring.go).
-	defer h.replayNotifyRing(c)
-	go h.fleetClientsChanged() // its features (elicitation) count now (fleet_link.go)
-	h.noteClientApp(c)         // its version, for the assistant (client_apps.go)
-	if c.role == roleFull && c.hub != nil {
-		// Only this device changing its language changes the user's (locale.go); an invalid one changes nothing.
-		c.hub.noteUserLang(deviceLangKey(c, msg.clientMeta), i18n.Lang(msg.Locale))
-	}
-	if c.role == roleFull && wasLang != c.lang() {
-		c.sendJSON(map[string]any{"type": "machines", "machines": localizedMachines(c.lang(), h.machineList())})
-	}
-	if !wasElicitation && c.has("elicitation") {
-		defer h.sendPendingInteractions(c, true)
-	}
-	if wasDesktopsLink != c.wants(featureDesktopsLink) {
-		// The list it has left the Persona Link desktops out, or holds ones it will not hear end.
-		defer h.sendDesktops(c)
-	}
-	if !wasLiveTools && c.wants(proto.FeatureSessionLiveTools) {
-		// The hello may follow a subscribe. Send the ack before replaying any current snapshots.
-		defer h.replaySubscribedLiveTools(c)
+	if c.role != roleReadOnly {
+		// Last, after the cards it can now answer: the notify events kept while it had no ws_notify socket (notifyring.go).
+		defer h.replayNotifyRing(c)
+		go h.fleetClientsChanged() // its features (elicitation) count now (fleet_link.go)
+		h.noteClientApp(c)         // its version, for the assistant (client_apps.go)
+		if c.role == roleFull && c.hub != nil {
+			// Only this device changing its language changes the user's (locale.go); an invalid one changes nothing.
+			c.hub.noteUserLang(deviceLangKey(c, msg.clientMeta), i18n.Lang(msg.Locale))
+		}
+		if c.role == roleFull && wasLang != c.lang() {
+			c.sendJSON(map[string]any{"type": "machines", "machines": localizedMachines(c.lang(), h.machineList())})
+		}
+		if !wasElicitation && c.has("elicitation") {
+			defer h.sendPendingInteractions(c, true)
+		}
+		if wasDesktopsLink != c.wants(featureDesktopsLink) {
+			// The list it has left the Persona Link desktops out, or holds ones it will not hear end.
+			defer h.sendDesktops(c)
+		}
+		if !wasLiveTools && c.wants(proto.FeatureSessionLiveTools) {
+			// The hello may follow a subscribe. Send the ack before replaying any current snapshots.
+			defer h.replaySubscribedLiveTools(c)
+		}
 	}
 	if updates == nil {
 		c.helloAck(hb)

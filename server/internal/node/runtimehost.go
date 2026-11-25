@@ -43,8 +43,12 @@ type RuntimeHost struct {
 	// when it could not be made. Set by Listen before any runtime starts, then fixed.
 	pipe string
 
-	mu   sync.Mutex
-	node *Node // the Node serving a hub connection now; nil between connections
+	mu                   sync.Mutex
+	node                 *Node                           // the Node serving a hub connection now; nil between connections
+	gp                   *gateProxy                      // last attached Node's gate proxy (resident keeper's) so disconnects between hub links release leases
+	leaseDisconnectGrace time.Duration                   // zero: runtimeLeaseDisconnectGrace (tests shorten it)
+	pendingReleases      map[string]*pendingLeaseRelease // runtime id -> deferred disconnect release while same instance may reconnect
+	closed               bool                            // Listen context ended; no new deferred timers are armed
 
 	// The daemons it dials (daemons.go), by id: their ids are reserved against runtimes on the socket.
 	dmu        sync.Mutex
@@ -98,6 +102,9 @@ func (rh *RuntimeHost) attach(n *Node) {
 		rh.reg.clearAssistantPIDs()
 	}
 	rh.node = n
+	if gp := n.existingGates(); gp != nil {
+		rh.gp = gp
+	}
 	rh.mu.Unlock()
 	rh.reg.resetWatches()
 	rh.notifyHub(true)
@@ -110,11 +117,152 @@ func (rh *RuntimeHost) detach(n *Node) {
 		rh.mu.Unlock()
 		return
 	}
+	if gp := n.existingGates(); gp != nil {
+		rh.gp = gp
+	}
 	rh.node = nil
 	rh.reg.clearAssistantPIDs()
 	rh.mu.Unlock()
 	rh.reg.resetWatches()
 	rh.notifyHub(false)
+}
+
+// runtimeLeaseDisconnectGrace keeps session-scoped gate proxy leases alive across a brief non-overlapping socket
+// disconnect so a surviving companion process (runtime-sdk RETRY_PRESENT = 1s) reconnecting with the same instance
+// keeps its live Assistant workers' proxy URLs working, while still reclaiming leases if it never returns.
+const runtimeLeaseDisconnectGrace = 15 * time.Second
+
+type pendingLeaseRelease struct {
+	instance string
+	sessions []string
+	timer    *time.Timer
+}
+
+func (rh *RuntimeHost) leaseGrace() time.Duration {
+	if rh.leaseDisconnectGrace > 0 {
+		return rh.leaseDisconnectGrace
+	}
+	return runtimeLeaseDisconnectGrace
+}
+
+func (rh *RuntimeHost) releaseSessionGates(sessions []string) {
+	if len(sessions) == 0 {
+		return
+	}
+	rh.mu.Lock()
+	n, gp := rh.node, rh.gp
+	rh.mu.Unlock()
+	if cur := n.existingGates(); cur != nil {
+		cur.releaseSessions(sessions)
+	} else if gp != nil {
+		gp.releaseSessions(sessions)
+	}
+}
+
+func mergeUniqueStrings(a, b []string) []string {
+	out := make([]string, 0, len(a)+len(b))
+	seen := make(map[string]struct{}, len(a)+len(b))
+	for _, list := range [][]string{a, b} {
+		for _, s := range list {
+			if s == "" {
+				continue
+			}
+			if _, ok := seen[s]; ok {
+				continue
+			}
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (rh *RuntimeHost) scheduleSessionGateRelease(h *runtimeConn, procID osproc.ProcIdentity, released []string) {
+	if len(released) == 0 {
+		return
+	}
+	h.mu.Lock()
+	id, instance, pid := h.hello.Runtime, h.hello.Instance, h.pid
+	h.mu.Unlock()
+	dead := pid > 0 && procID.Start != "" && !procID.StillIs(pid)
+
+	var immediate []string
+	rh.mu.Lock()
+	if id == "" || rh.closed {
+		immediate = released
+	} else if activeInst, connected := rh.reg.activeInstance(id); connected {
+		// Another connection for id is already active: same-instance reconnect preserves leases, and
+		// different-instance takeover already handled replacement in onRuntimeHello.
+		_ = activeInst
+	} else if dead {
+		immediate = released
+		if prev := rh.pendingReleases[id]; prev != nil {
+			prev.timer.Stop()
+			delete(rh.pendingReleases, id)
+			immediate = mergeUniqueStrings(prev.sessions, immediate)
+		}
+	} else {
+		if rh.pendingReleases == nil {
+			rh.pendingReleases = map[string]*pendingLeaseRelease{}
+		}
+		sessions := released
+		if prev := rh.pendingReleases[id]; prev != nil {
+			prev.timer.Stop()
+			if prev.instance != "" && instance != "" && prev.instance != instance {
+				immediate = prev.sessions
+			} else {
+				sessions = mergeUniqueStrings(prev.sessions, sessions)
+			}
+		}
+		entry := &pendingLeaseRelease{instance: instance, sessions: sessions}
+		grace := rh.leaseGrace()
+		entry.timer = time.AfterFunc(grace, func() { rh.expirePendingLeaseRelease(id, entry) })
+		rh.pendingReleases[id] = entry
+	}
+	rh.mu.Unlock()
+	rh.releaseSessionGates(immediate)
+}
+
+func (rh *RuntimeHost) expirePendingLeaseRelease(id string, entry *pendingLeaseRelease) {
+	rh.mu.Lock()
+	if rh.pendingReleases[id] != entry {
+		rh.mu.Unlock()
+		return
+	}
+	if activeInst, connected := rh.reg.activeInstance(id); connected && (activeInst == "" || entry.instance == "" || activeInst == entry.instance) {
+		delete(rh.pendingReleases, id)
+		rh.mu.Unlock()
+		return
+	}
+	delete(rh.pendingReleases, id)
+	sessions := rh.reg.unownedSessions(entry.sessions)
+	rh.mu.Unlock()
+	rh.releaseSessionGates(sessions)
+}
+
+func (rh *RuntimeHost) onRuntimeHello(id, instance string, replacedSessions []string) {
+	var toRelease []string
+	rh.mu.Lock()
+	if prev := rh.pendingReleases[id]; prev != nil {
+		prev.timer.Stop()
+		delete(rh.pendingReleases, id)
+		if prev.instance != "" && instance != "" && prev.instance != instance {
+			toRelease = append(toRelease, prev.sessions...)
+		}
+	}
+	rh.mu.Unlock()
+	toRelease = mergeUniqueStrings(toRelease, replacedSessions)
+	rh.releaseSessionGates(toRelease)
+}
+
+func (rh *RuntimeHost) cancelPendingLeaseReleases() {
+	rh.mu.Lock()
+	rh.closed = true
+	for id, entry := range rh.pendingReleases {
+		entry.timer.Stop()
+		delete(rh.pendingReleases, id)
+	}
+	rh.mu.Unlock()
 }
 
 // notifyHub tells every connected runtime whether a hub is connected.
@@ -143,6 +291,7 @@ func (rh *RuntimeHost) Listen(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
+				rh.cancelPendingLeaseReleases()
 				return
 			case <-t.C:
 			}
@@ -202,6 +351,7 @@ func (rh *RuntimeHost) serveConn(ctx context.Context, c io.ReadWriteCloser, daem
 	defer c.Close()
 	peer := rpc.New("r", c)
 	pid := 0
+	var procID osproc.ProcIdentity
 	if nc, ok := c.(net.Conn); ok {
 		pid, _ = peerPID(nc) // 0 for a pipe, or where the system does not tell
 	}
@@ -210,6 +360,9 @@ func (rh *RuntimeHost) serveConn(ctx context.Context, c io.ReadWriteCloser, daem
 	// runs would descend from it.
 	if pid > 0 && slices.Contains(nodeLineage(), pid) {
 		pid = 0
+	}
+	if pid > 0 {
+		procID = osproc.Identify(pid)
 	}
 	h := rh.reg.add(peer)
 	h.mu.Lock()
@@ -224,7 +377,8 @@ func (rh *RuntimeHost) serveConn(ctx context.Context, c io.ReadWriteCloser, daem
 	err := peer.Serve(ctx, c)
 	peer.Close(err)
 	cancel()
-	rh.reg.remove(h)
+	released := rh.reg.remove(h)
+	rh.scheduleSessionGateRelease(h, procID, released)
 	if id := h.id(); id != "" {
 		if id == agyRuntimeID {
 			rh.wakeAgyBridge()
@@ -307,10 +461,11 @@ func (rh *RuntimeHost) registerRuntime(ctx context.Context, h *runtimeConn, hell
 			}
 		}
 	}
-	stale, err := rh.reg.hello(h, hello, rh.reservedID, preempt)
+	stale, replacedSessions, err := rh.reg.registerHello(h, hello, rh.reservedID, preempt)
 	if err != nil {
 		return err
 	}
+	rh.onRuntimeHello(hello.Runtime, hello.Instance, replacedSessions)
 	if yieldedOpencode != nil && !slices.Contains(stale, yieldedOpencode) {
 		stale = append(stale, yieldedOpencode)
 	}

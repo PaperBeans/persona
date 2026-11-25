@@ -94,7 +94,12 @@ func (h *Manager) larkSyncAuthorize(ctx context.Context, botID, redirect, tier s
 	}
 	mode := larkSyncModeBrowser
 	consoleURL := ""
-	if configured != redirect {
+	// A known redirect does not imply the app has scopes added by a newer reader. Reconfigure a binding
+	// reporting missing scopes when the owner explicitly starts authorization again.
+	missingScopes := slices.ContainsFunc(st.bindings, func(b larkSyncBinding) bool {
+		return b.BotID == botID && b.Health == larksyncwire.HealthScopeMissing
+	})
+	if configured != redirect || missingScopes {
 		rep := ua.ConfigureRedirect(ctx, app, redirect, scopes)
 		if rep.Detail != "" {
 			h.logf("lark sync: %s: configure: %s", botID, rep.Detail)
@@ -373,6 +378,7 @@ func (h *Manager) larkSyncAdopt(ctx context.Context, botID, pendingKey, tier str
 		b.AuthorizedAt, b.GrantedScopes = now, slices.Clone(tok.Scopes)
 		b.Health, b.LastError, b.Failures, b.RemindedDays = larksyncwire.HealthOK, "", 0, nil
 		b.NextRunAt = now
+		b.NextIMRunAt = now
 		return nil
 	})
 	if err != nil {

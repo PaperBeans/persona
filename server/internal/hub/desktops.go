@@ -332,7 +332,9 @@ func (h *Hub) dropClient(c *client) {
 	phone, device := c.phone, c.pushDevice
 	h.mu.Unlock()
 	h.fsWatchRelease(c) // the folders its panels had open are no longer watched (fswatch.go)
-	go h.fleetClientsChanged()
+	if c.role != roleReadOnly {
+		go h.fleetClientsChanged()
+	}
 	if desktop {
 		h.logf("desktop %q disconnected (device %s)", c.name, c.device)
 	}

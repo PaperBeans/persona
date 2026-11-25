@@ -3,7 +3,7 @@ import { storedValue, storeValue } from "./compatibility";
 // "<source>:<sessionKey>" and bridge keys contain "/", so the whole id is percent-encoded in paths.
 import { useSyncExternalStore } from "react";
 import { t } from "../i18n";
-import { api, errorText } from "./api";
+import { api, errorText, invalidateInFlightGets } from "./api";
 import { SessionList, compareListIds } from "./session-list";
 import { toast } from "../ui/atoms";
 
@@ -362,6 +362,8 @@ export function resetAgents() {
   bounded = false;
   personalSessions.reset();
   listGen++;
+  invalidateInFlightGets("/agents/sessions");
+  invalidateInFlightGets("/agents");
   // the next login's first pull starts right away instead of waiting behind the old one
   inflight = null;
   queued = null;
@@ -555,7 +557,7 @@ export function refreshAgentPrefs(): Promise<void> {
   const rev = prefsOut ? -1 : prefsRev;
   if (rev === -1) prefsPullAfterSave = true;
   const seq = ++prefsGetSeq;
-  return api<AgentPrefs>("/agents/prefs")
+  return api<AgentPrefs>("/agents/prefs", { dedupe: false })
     .then((p) => {
       hubPrefs = true;
       if (rev !== prefsRev || seq < prefsGetApplied) return;
