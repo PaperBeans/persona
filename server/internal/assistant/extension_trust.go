@@ -152,7 +152,10 @@ func (s *Service) extensionHides(ctx context.Context, space string) bool {
 // extensionHidesConversation: the extension reading in ctx is not shown conversation c, by its categories as a whole
 // (its track's, as c says it, and what it was tagged with; not known while a turn of it waits to be tagged).
 func (s *Service) extensionHidesConversation(ctx context.Context, c proto.Session) bool {
-	space := spaceOf(c)
+	space, known := s.conversationRowSpace(ctx, c)
+	if !known {
+		return true
+	}
 	cats, _, ok := s.categoryStateIn(ctx, c.SessionID, space, true)
 	info := infoUse{Categories: cats, Known: ok && !s.infoTagWaiting.has(c.SessionID), SourceTrack: space, Rules: s.trackRules(ctx, space)}
 	return usage(info, sceneExtension, readerGrant(ctx)) == usageDeny

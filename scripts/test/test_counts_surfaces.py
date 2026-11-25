@@ -6,6 +6,9 @@ draws, its scope, each client's code symbol and test, and whether drawing the ma
 
 - its shape: known clients, scopes and counts; a `differs` row names decisions the plan's section 6 lists, a `matches`
   row none; a row that draws a count whose rule waits on a decision differs, naming it;
+- every count the counts view carries (schema/wire/counts.schema.json) names its producer, the adapter function in the
+  manager that writes it, and only those do; the adapter's own test checks that the function writes exactly the counts
+  that name it (step 7a);
 - every code symbol is declared in its file, and every test file names its symbol;
 - `matches` rows with the same label draw the same count;
 - the replays' report surfaces (`replays`) are rows of each lane, read from keys every fixture case has, and a
@@ -37,6 +40,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 import check_fast_map  # noqa: E402
 
 TABLE = "spec/fixtures/counts/surfaces.json"
+SCHEMA = "schema/wire/counts.schema.json"
 README = "spec/fixtures/counts/README.md"
 PLAN = "docs/plans/plan-derived-counts.md"
 SUITE = "scripts/test/test_counts_surfaces.py"
@@ -57,12 +61,13 @@ _SKIP_DIRS = {".git", "node_modules", "build", ".build", "dist", "DerivedData", 
 SCOPES = {"assistant", "unscoped", "default_manager", "manager", "each_assistant", "all_hubs", "list"}
 STATUSES = ("matches", "differs")
 ROW_KEYS = {"client", "surface", "label", "shown_on", "count", "scope", "code", "tests", "status", "why"}
-COUNT_KEYS = {"rule", "pinned_by", "waits_on"}
+COUNT_KEYS = {"rule", "pinned_by", "producer", "waits_on"}
 COUNT_OPTIONAL_KEYS = {"refined_by"}
 OPTIONAL_KEYS = {"decisions", "local", "view"}
 _DECISION = re.compile(r"D[0-9]+")
 _PLAN_DECISION = re.compile(r"^- \*\*(D[0-9]+)\*\*", re.M)
 _README_COUNT = re.compile(r"`differs` rows today: ([0-9]+)")
+_ADAPTER = re.compile(r"^//persona:layer adapter\s*$", re.M)
 
 # How each language declares a name: a dotted symbol's every part must be declared in its file.
 _DECLARATIONS = {
@@ -83,11 +88,17 @@ def rid(row):
 
 
 def declared(text, symbol, suffix):
-    """Whether every part of a dotted symbol is declared in a source file's text."""
+    """Whether every part of a dotted symbol is declared in a source file's text; in Go, <Type>.<Method> is also a
+    method the file declares on that type."""
     pattern = _DECLARATIONS.get(suffix)
     if pattern is None:
         return False
-    return all(re.search(pattern.format(name=re.escape(part)), text) for part in symbol.split("."))
+    parts = symbol.split(".")
+    if suffix == ".go" and len(parts) == 2 and re.search(
+            r"\bfunc\s+\(\s*\w*\s*\*?" + re.escape(parts[0]) + r"(?:\[[^\]]*\])?\s*\)\s*" + re.escape(parts[1]) + r"\b",
+            text):
+        return True
+    return all(re.search(pattern.format(name=re.escape(part)), text) for part in parts)
 
 
 def plan_decisions(plan_text):
@@ -111,8 +122,13 @@ def shape_problems(table, decisions, root):
         return found + ["counts: missing"]
     for name, count in counts.items():
         if not isinstance(count, dict) or not COUNT_KEYS <= set(count) or set(count) - COUNT_KEYS - COUNT_OPTIONAL_KEYS:
-            found.append(f"counts.{name}: needs rule, pinned_by and waits_on, may have refined_by, and nothing else")
+            found.append(f"counts.{name}: needs rule, pinned_by, producer and waits_on, may have refined_by, and "
+                         "nothing else")
             continue
+        producer = count["producer"]
+        if producer is not None and not (isinstance(producer, dict) and set(producer) == {"file", "symbol"}
+                                         and all(isinstance(producer[k], str) and producer[k] for k in producer)):
+            found.append(f"counts.{name}: producer is {{file, symbol}}, or null while the view does not carry it")
         refined = count.get("refined_by", [])
         if not isinstance(refined, list) or "refined_by" in count and not refined or any(
                 d not in decisions for d in refined):
@@ -197,6 +213,49 @@ def symbol_problems(table, root):
                 found.append(f"{rid(row)}: test {entry['file']} does not exist")
             elif not re.search(r"(?<![\w])" + re.escape(entry["symbol"]) + r"(?![\w])", path.read_text(errors="replace")):
                 found.append(f"{rid(row)}: test {entry['file']} never names {entry['symbol']}")
+    return found
+
+
+def view_counts(root):
+    """The count ids the counts view carries: the fields of its counts and of its totals in the schema."""
+    defs = json.loads((root / SCHEMA).read_text(encoding="utf-8")).get("$defs", {})
+    return (set((defs.get("CountsViewCounts") or {}).get("properties") or {}),
+            set((defs.get("CountsViewTotals") or {}).get("properties") or {}))
+
+
+def producer_problems(table, root):
+    """Every count the view carries names the adapter function in the manager that writes it (D18 of the plan: the
+    one place a wire count is written), and only those do. Which counts the function writes is its package's test's."""
+    found = []
+    if not (root / SCHEMA).is_file():
+        return [f"{SCHEMA} does not exist"]
+    counts, totals = view_counts(root)
+    for name in sorted(counts ^ totals):
+        found.append(f"{SCHEMA}: {name} is in one of counts and totals, not both")
+    for name in sorted(counts - set(table["counts"])):
+        found.append(f"{SCHEMA}: the view carries {name}, which counts does not list")
+    for name, count in table["counts"].items():
+        producer = count["producer"]
+        if producer is None:
+            if name in counts:
+                found.append(f"counts.{name}: the view carries it ({SCHEMA}), so producer names the function that "
+                             "writes it")
+            continue
+        if name not in counts:
+            found.append(f"counts.{name}: names a producer, but the view carries no {name} ({SCHEMA})")
+        path = root / producer["file"]
+        if not (producer["file"].startswith("server/") and producer["file"].endswith(".go")
+                and not producer["file"].endswith("_test.go")):
+            found.append(f"counts.{name}: producer {producer['file']} is not a server Go file: the manager writes "
+                         "every count")
+        elif not path.is_file():
+            found.append(f"counts.{name}: producer {producer['file']} does not exist")
+        elif not declared(path.read_text(errors="replace"), producer["symbol"], ".go"):
+            found.append(f"counts.{name}: producer {producer['file']} declares no {producer['symbol']}")
+        elif not any(_ADAPTER.search(p.read_text(errors="replace")) for p in sorted(path.parent.glob("*.go"))
+                     if not p.name.endswith("_test.go")):
+            found.append(f"counts.{name}: producer {producer['file']} is not in an adapter package "
+                         "(//persona:layer adapter): an adapter writes the wire's counts")
     return found
 
 
@@ -364,14 +423,16 @@ def fallback_problems(table, root):
 def named_files(table):
     files = {entry["file"] for row in table["surfaces"] for key in ("code", "tests") for entry in row[key]}
     files |= {row["view"]["fallback"]["file"] for row in table["surfaces"] if row.get("view")}
+    files |= {count["producer"]["file"] for count in table["counts"].values() if count.get("producer")}
     return sorted(files)
 
 
 def check_fast_problems(table, checks):
-    """check-fast runs this guard for the table, its README, the plan and every file the table names."""
+    """check-fast runs this guard for the table, its README, the plan, the view's schema and every file the table
+    names."""
     wanted = "suite:" + SUITE
     return [f"check-fast does not run {SUITE} for {path} (scripts/ci/check_fast_map.py)"
-            for path in [TABLE, README, PLAN, *named_files(table)] if wanted not in checks(path)]
+            for path in [TABLE, README, PLAN, SCHEMA, *named_files(table)] if wanted not in checks(path)]
 
 
 def problems(root, table, readme_text, plan_text, base_table=None, checks=None):
@@ -380,6 +441,7 @@ def problems(root, table, readme_text, plan_text, base_table=None, checks=None):
     if found:
         return found
     found += symbol_problems(table, root)
+    found += producer_problems(table, root)
     found += label_problems(table)
     found += replay_problems(table, root)
     found += ratchet_problems(table, readme_text, base_table)
@@ -495,6 +557,10 @@ class SeededViolationTests(unittest.TestCase):
         "web/src/lib/inbox.ts": "export function badgeCount(items: number[]): number { return items.length; }\n",
         "web/src/lib/inbox.test.ts": "import { badgeCount } from './inbox';\n",
         "server/internal/live/live.go": "package live\n\nfunc (s *Service) needsYou() int { return 1 }\n",
+        "server/internal/live/liveadapt/doc.go": "// Package liveadapt.\n//\n//persona:layer adapter\npackage liveadapt\n",
+        "server/internal/live/liveadapt/view.go": "package liveadapt\n\nfunc (f *Fleet) View() int { return 1 }\n",
+        SCHEMA: json.dumps({"$defs": {"CountsViewCounts": {"properties": {"agents": {}}},
+                                      "CountsViewTotals": {"properties": {"agents": {}}}}}),
         "spec/fixtures/cases/cases.json": json.dumps({"version": 1, "cases": [
             {"name": "one", "expected": {"rows": [{"id": "a", "cards": []}], "badge": 1}},
             {"name": "marked", "expected": {"rows": [], "badge": 0},
@@ -503,9 +569,11 @@ class SeededViolationTests(unittest.TestCase):
     TABLE = {
         "version": 1,
         "counts": {
-            "agents": {"rule": "Agents that wait.", "pinned_by": "spec/fixtures/cases", "waits_on": []},
-            "unread": {"rule": "Unread items.", "pinned_by": None, "waits_on": ["D7"]},
-            "persona": {"rule": None, "pinned_by": None, "waits_on": ["D1"]},
+            "agents": {"rule": "Agents that wait.", "pinned_by": "spec/fixtures/cases",
+                       "producer": {"file": "server/internal/live/liveadapt/view.go", "symbol": "Fleet.View"},
+                       "waits_on": []},
+            "unread": {"rule": "Unread items.", "pinned_by": None, "producer": None, "waits_on": ["D7"]},
+            "persona": {"rule": None, "pinned_by": None, "producer": None, "waits_on": ["D1"]},
         },
         "replays": {"cases": {"lanes": ["ios"], "surfaces": {"tab": {"value": "badge", "keys": "rows"}}}},
         "surfaces": [
@@ -621,6 +689,38 @@ class SeededViolationTests(unittest.TestCase):
         self.assertCaught(self.broken(lambda t: t["counts"]["agents"].update(extra=1)), "counts.agents",
                           "nothing else")
 
+    def test_every_count_the_view_carries_names_its_producer(self):
+        # A planted table missing the producer of a count the view carries.
+        self.assertCaught(self.broken(lambda t: t["counts"]["agents"].update(producer=None)),
+                          "counts.agents", "the view carries it", "producer")
+        # A producer for a count the view does not carry.
+        self.assertCaught(self.broken(lambda t: t["counts"]["unread"].update(
+            producer={"file": "server/internal/live/liveadapt/view.go", "symbol": "Fleet.View"})),
+            "counts.unread", "the view carries no unread")
+        # A producer that is not there, not the manager's, or not an adapter's.
+        self.assertCaught(self.broken(lambda t: t["counts"]["agents"]["producer"].update(symbol="Fleet.Gone")),
+                          "counts.agents", "declares no Fleet.Gone")
+        self.assertCaught(self.broken(lambda t: t["counts"]["agents"]["producer"].update(
+            file="server/internal/live/liveadapt/gone.go")), "counts.agents", "does not exist")
+        self.assertCaught(self.broken(lambda t: t["counts"]["agents"]["producer"].update(
+            file="web/src/lib/inbox.ts", symbol="badgeCount")), "counts.agents", "not a server Go file")
+        self.assertCaught(self.broken(lambda t: t["counts"]["agents"]["producer"].update(
+            file="server/internal/live/live.go", symbol="needsYou")), "counts.agents", "not in an adapter package")
+        self.assertCaught(self.broken(lambda t: t["counts"]["agents"].update(producer="Fleet.View")),
+                          "counts.agents", "producer is {file, symbol}")
+        self.assertCaught(self.broken(lambda t: t["counts"]["agents"].pop("producer")),
+                          "counts.agents", "needs rule, pinned_by, producer and waits_on")
+        # A count the view carries that the table does not list, and one in counts but not totals.
+        schema = self.root / SCHEMA
+        try:
+            schema.write_text(json.dumps({"$defs": {
+                "CountsViewCounts": {"properties": {"agents": {}, "inbox_action": {}}},
+                "CountsViewTotals": {"properties": {"agents": {}}}}}))
+            self.assertCaught(self.TABLE, SCHEMA, "the view carries inbox_action, which counts does not list")
+            self.assertCaught(self.TABLE, SCHEMA, "inbox_action is in one of counts and totals")
+        finally:
+            schema.write_text(self.FILES[SCHEMA])
+
     def test_a_differs_row_names_a_decision_of_the_plan(self):
         self.assertCaught(self.broken(lambda t: t["surfaces"][0].pop("decisions")), "names the decisions")
         self.assertCaught(self.broken(lambda t: t["surfaces"][0].update(decisions=["D99"])), "D99")
@@ -712,6 +812,9 @@ class SeededViolationTests(unittest.TestCase):
         self.assertTrue(declared("private fun List<NeedsYouRow>.ids(): X", "ids", ".kt"))
         self.assertTrue(declared("export function stateCounts(all) {", "stateCounts", ".ts"))
         self.assertTrue(declared("func (s *Service) tellInboxNeedsYou() {", "tellInboxNeedsYou", ".go"))
+        self.assertTrue(declared("func (f *Fleet) View(t fleetcount.Tally) X {", "Fleet.View", ".go"))
+        self.assertTrue(declared("func (f Fleet) View() X {", "Fleet.View", ".go"))
+        self.assertFalse(declared("func (f *Other) View() X {", "Fleet.View", ".go"))
         self.assertTrue(declared("type treeCounts struct {", "treeCounts", ".go"))
         self.assertTrue(declared("fn counts(base: &[Row]) -> Counts {", "counts", ".rs"))
         self.assertFalse(declared("let n = stateCounts(all)", "stateCounts", ".ts"))

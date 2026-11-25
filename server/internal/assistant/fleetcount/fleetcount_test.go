@@ -327,6 +327,27 @@ func TestTheCoreOwnsItsArrays(t *testing.T) {
 	expect(t, rows.String(), "agent 0 by card 0 needs_you\ntotal 1")
 }
 
+// A tally says which surface's rows it is, so what renders one surface's rows can refuse another's; the zero Tally is
+// on none.
+func TestATallyIsOnTheSurfaceItWasDecidedFor(t *testing.T) {
+	surfaces := []fleetcount.Surface{fleetcount.SurfaceBadge(), fleetcount.SurfaceLiveActivity(), fleetcount.SurfaceLink()}
+	for _, on := range surfaces {
+		tally := fleetcount.AgentsNeedsYou(on, fleetcount.NewAgents(nil), fleetcount.NewCards(nil))
+		for _, other := range surfaces {
+			if tally.On(other) != (other == on) {
+				t.Errorf("a tally decided for %v says On(%v) = %v", on, other, tally.On(other))
+			}
+		}
+	}
+	var none fleetcount.Tally
+	var noSurface fleetcount.Surface
+	for _, on := range append(surfaces, noSurface) {
+		if none.On(on) {
+			t.Errorf("the zero Tally is on %v", on)
+		}
+	}
+}
+
 func TestVisibilityLeavesQuietAndHiddenAgentsOutOfTheFleet(t *testing.T) {
 	for _, c := range []struct {
 		v    fleetcount.Visibility

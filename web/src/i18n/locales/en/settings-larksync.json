@@ -30,7 +30,7 @@
   "health_unauthorized": "Not connected yet",
   "health_needs_reauth": "Authorize again",
   "health_rate_limited": "Continues next time",
-  "health_scope_missing": "Needs admin approval",
+  "health_scope_missing": "Reauthorize to add missing permissions",
   "health_awaiting": "Waiting for admin approval",
   "health_failing": "Last sync failed",
   "health_unknown": "Unknown",

@@ -30,7 +30,7 @@
   "health_unauthorized": "还没连接",
   "health_needs_reauth": "需要重新授权",
   "health_rate_limited": "下次继续",
-  "health_scope_missing": "需要管理员审批",
+  "health_scope_missing": "需要重新授权以补齐权限",
   "health_awaiting": "等待管理员审批",
   "health_failing": "上次同步失败",
   "health_unknown": "未知",

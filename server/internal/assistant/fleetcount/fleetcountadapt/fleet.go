@@ -14,18 +14,28 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// Fleet is one surface's agents and cards for one round, as the caller lists them, and the rows fleetcount decides on
-// them. Each agent and card keeps the caller's session or interaction at its slot, which the renderers read the wire's
-// text from. A caller keeps one Fleet per surface from round to round, so the arrays it fills are reused; nothing
+// Fleet is one round's agents and cards, as the caller lists them, and the rows fleetcount decides on them for a
+// surface or two. Each agent and card keeps the caller's session or interaction at its slot, which the renderers read
+// the wire's text from. A caller keeps a Fleet from round to round, so the arrays it fills are reused; nothing
 // fleetcount owns is. The zero Fleet is empty.
 type Fleet struct {
 	seats  []seat
 	ixs    []card
 	agents []fleetcount.Agent
 	cards  []fleetcount.Card
+	core   coreValues
 	live   liveRows
 	link   linkRows
+	counts countsRows
 	why    whyWord
+}
+
+// coreValues is the round's agents and cards as fleetcount holds them, made once a round for every surface decided on
+// them, so its copy of them is made once.
+type coreValues struct {
+	agents fleetcount.Agents
+	cards  fleetcount.Cards
+	made   bool
 }
 
 // seat is one agent as the caller has it: its computer's name for people, its session (read, never written) and
@@ -51,6 +61,7 @@ func (f *Fleet) Reset() {
 	clear(f.agents)
 	clear(f.cards)
 	f.seats, f.ixs, f.agents, f.cards = f.seats[:0], f.ixs[:0], f.agents[:0], f.cards[:0]
+	f.core = coreValues{}
 }
 
 // Agent adds the agent a session is: machine is its computer's name for people, muted whether the owner muted it.
@@ -60,6 +71,7 @@ func (f *Fleet) Agent(machine string, s *proto.Session, muted bool) outcome.Of[f
 	if a, failed := outcome.Unpack(built); failed == nil {
 		f.seats = append(f.seats, seat{machine: machine, session: s, muted: muted})
 		f.agents = append(f.agents, a)
+		f.core = coreValues{}
 	}
 	return built
 }
@@ -71,13 +83,33 @@ func (f *Fleet) Card(ix *proto.Interaction, told bool) outcome.Of[fleetcount.Car
 	if c, failed := outcome.Unpack(built); failed == nil {
 		f.ixs = append(f.ixs, card{ix: ix, told: told})
 		f.cards = append(f.cards, c)
+		f.core = coreValues{}
 	}
 	return built
 }
 
+// Agents is the agents f holds, as fleetcount takes them (fleetcount.AgentsNeedsYou). Every surface decided on them in
+// a round shares the one copy fleetcount makes.
+func (f *Fleet) Agents() fleetcount.Agents {
+	f.made()
+	return f.core.agents
+}
+
+// Cards is the cards f holds, as fleetcount takes them, shared as Agents is.
+func (f *Fleet) Cards() fleetcount.Cards {
+	f.made()
+	return f.core.cards
+}
+
+func (f *Fleet) made() {
+	if !f.core.made {
+		f.core = coreValues{agents: fleetcount.NewAgents(f.agents), cards: fleetcount.NewCards(f.cards), made: true}
+	}
+}
+
 // decide is fleetcount's rows of f's agents and cards on a surface.
 func (f *Fleet) decide(on fleetcount.Surface) fleetcount.Tally {
-	return fleetcount.AgentsNeedsYou(on, fleetcount.NewAgents(f.agents), fleetcount.NewCards(f.cards))
+	return fleetcount.AgentsNeedsYou(on, f.Agents(), f.Cards())
 }
 
 // Visibility is whether the owner's lists show a session's agent: hidden by an Agent-folder rule first, else a quiet

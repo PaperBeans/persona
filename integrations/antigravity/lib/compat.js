@@ -23,14 +23,15 @@ export function mcpServers(bin, pid, assistant, a2aToken) {
   for (const [name, value] of [['PERSONA_SESSION_ID', pid], ...(assistant ? [['PERSONA_ASSISTANT', '1']] : [])]) {
     env.push({ name, value }, { name: legacyEnvName(name), value })
   }
-  // Keep the regular catalog on its existing server. A scoped ticket grants only A2A tools.
-  // Assistant tools go through the proxy so deferred tools remain reachable (#7333).
+  // Route regular Agent persona tools through the agent-mode proxy so agy's eager tool budget keeps core/leader
+  // coordination tools declared while secondary tools stay reachable via persona_call (#7333, #15822).
+  // Keep persona_a2a on its separate direct scoped server.
   if (!assistant) {
-    const server = { name: 'persona', command: bin, args: ['mcp'], env }
+    const server = { name: 'persona', command: process.execPath, args: [MCP_PROXY, '--agent', bin, 'mcp'], env }
     if (!a2aToken) return [server]
     return [
       { ...server, env: [...env, { name: 'PERSONA_MCP_EXCLUDE_A2A', value: '1' }] },
-      { ...server, name: 'persona_a2a', env: [...env, { name: 'PERSONA_A2A_TOKEN', value: a2aToken }] },
+      { name: 'persona_a2a', command: bin, args: ['mcp'], env: [...env, { name: 'PERSONA_A2A_TOKEN', value: a2aToken }] },
     ]
   }
   return [{ name: 'persona', command: process.execPath, args: [MCP_PROXY, bin, 'mcp'], env }]

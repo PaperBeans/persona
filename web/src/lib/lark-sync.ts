@@ -218,7 +218,7 @@ export function tierText(tier?: string): string {
 
 /** The binding has to be authorized (again) before it can sync. */
 export function needsAuthorize(b: LarkSyncBinding): boolean {
-  return b.health === "needs_reauth" || b.health === "unauthorized";
+  return b.health === "needs_reauth" || b.health === "unauthorized" || b.health === "scope_missing";
 }
 
 /** Days left when the authorization ends soon enough to say so; null otherwise. */

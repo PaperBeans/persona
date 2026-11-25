@@ -216,6 +216,7 @@ func (r *run) readChat(ctx context.Context, c chatInfo) error {
 	seen := map[string]bool{}
 	seenThreads := map[string]bool{}
 	var committedMsgs []larksyncwire.Message
+	var committedThreadCursors []threadCursorMove
 	extraURLs := map[string][]string{}
 	var committedLast int64 // newest create_time (ms) of fully committed chat items
 	pagesDone := 0
@@ -260,6 +261,7 @@ func (r *run) readChat(ctx context.Context, c chatInfo) error {
 		}
 
 		var pageMsgs []larksyncwire.Message
+		var pageThreadCursors []threadCursorMove
 		var pageLast int64
 		stoppedMidPage := false
 		for _, am := range items {
@@ -292,13 +294,16 @@ func (r *run) readChat(ctx context.Context, c chatInfo) error {
 							extraURLs[am.MessageID] = urls
 						}
 					}
-					thMsgs, thExtra, thIncomplete, err := r.readThread(ctx, c, am.ThreadID, from, end, maxThreadPages, seen)
+					thMsgs, thExtra, thCursor, thIncomplete, err := r.readThread(ctx, c, am.ThreadID, from, end, maxThreadPages, seen)
 					if err != nil {
 						return r.settle(ctx, resource, err)
 					}
 					seenThreads[am.ThreadID] = true
 					threadsRead++
 					pageMsgs = append(pageMsgs, thMsgs...)
+					if thCursor.cursor != "" {
+						pageThreadCursors = append(pageThreadCursors, thCursor)
+					}
 					for id, urls := range thExtra {
 						extraURLs[id] = urls
 					}
@@ -327,6 +332,9 @@ func (r *run) readChat(ctx context.Context, c chatInfo) error {
 		if len(pageMsgs) > 0 {
 			r.nameSenders(ctx, pageMsgs)
 			committedMsgs = append(committedMsgs, pageMsgs...)
+		}
+		if len(pageThreadCursors) > 0 {
+			committedThreadCursors = append(committedThreadCursors, pageThreadCursors...)
 		}
 		committedLast = max(committedLast, pageLast)
 		if stoppedMidPage {
@@ -386,13 +394,24 @@ func (r *run) readChat(ctx context.Context, c chatInfo) error {
 	if cursor > 0 {
 		r.moveCursor(resource, unixCursor(cursor))
 	}
+	// Apply im_thread:<th> cursor updates only after committedMsgs have been added so an earlier
+	// error in readChat never persists thread cursors for discarded messages.
+	for _, tc := range committedThreadCursors {
+		r.moveCursor(tc.resource, tc.cursor)
+	}
 	return nil
 }
 
+type threadCursorMove struct {
+	resource string
+	cursor   string
+}
+
 // readThread reads up to maxPages pages of thread th in ascending create_time order, resuming from im_thread:<th>
-// when a previous run stopped partway through the thread. Completed pages are kept and advance im_thread:<th> when
-// incomplete (budget or page cap), so a large thread also makes forward progress across runs.
-func (r *run) readThread(ctx context.Context, c chatInfo, th string, chatFrom, end int64, maxPages int, seen map[string]bool) ([]larksyncwire.Message, map[string][]string, bool, error) {
+// when a previous run stopped partway through the thread. It returns any pending im_thread:<th> cursor update for
+// readChat to apply once the chat's messages are committed, so a later chat/thread failure never persists a moved
+// thread cursor for discarded replies.
+func (r *run) readThread(ctx context.Context, c chatInfo, th string, chatFrom, end int64, maxPages int, seen map[string]bool) ([]larksyncwire.Message, map[string][]string, threadCursorMove, bool, error) {
 	thRes := threadCursorStem + th
 	thCur := r.cursors[thRes]
 	thOld := int64(0)
@@ -421,7 +440,7 @@ func (r *run) readThread(ctx context.Context, c chatInfo, th string, chatFrom, e
 		}
 		items, more, next, err := r.listMessages(ctx, "thread", th, thFrom, end, tok)
 		if err != nil {
-			return nil, nil, false, err
+			return nil, nil, threadCursorMove{}, false, err
 		}
 		for _, am := range items {
 			thLast = max(thLast, parseUnix(am.CreateTime))
@@ -445,14 +464,15 @@ func (r *run) readThread(ctx context.Context, c chatInfo, th string, chatFrom, e
 		}
 		tok = next
 	}
+	var move threadCursorMove
 	if incomplete {
 		if thLast > thOld {
-			r.moveCursor(thRes, unixCursor(thLast))
+			move = threadCursorMove{resource: thRes, cursor: unixCursor(thLast)}
 		}
 	} else if thOld > 0 {
-		r.moveCursor(thRes, "done")
+		move = threadCursorMove{resource: thRes, cursor: "done"}
 	}
-	return msgs, extra, incomplete, nil
+	return msgs, extra, move, incomplete, nil
 }
 
 // listMessages is one page of a chat's or a thread's messages in [from, end] (seconds), oldest first.
@@ -1068,6 +1088,8 @@ func (r *run) senderName(ctx context.Context, openID string) string {
 	if err != nil {
 		if e := asSyncError(err); e != nil && e.Kind == larksyncwire.ErrKindScope {
 			r.namesOff = true
+			// Keep readable messages and their cursors; expose the missing name permission separately.
+			r.fail("sender_names", err)
 			return ""
 		}
 		// Only a missing contact scope disables lookups for the rest of the run; a per-sender failure

@@ -130,7 +130,7 @@ func serverSlots() []serverSlot {
 			return h.AddHubRoute(name, func(http.ResponseWriter, *http.Request) {})
 		}, func(k *Kernel, name string) bool { _, ok := k.HubRoute(name); return ok }},
 		{"tool", func(i *modapi.Info, name string) { i.MCPTools = []string{name} }, func(h modapi.Host, name string) error {
-			return h.AddMCPTool(name, "test", json.RawMessage(`{"type":"object"}`), func(context.Context, string, string, json.RawMessage) (string, error) { return "", nil })
+			return h.AddMCPTool(modapi.MCPTool{Name: name, Description: "test", InputSchema: modapi.ToolSchema(`{"type":"object"}`), Run: func(context.Context, modapi.ToolCall) (modapi.ToolResult, error) { return modapi.ToolResult{}, nil }})
 		}, func(k *Kernel, name string) bool { _, ok := k.MCPTool(name); return ok }},
 		{"job", func(i *modapi.Info, name string) { i.BackgroundJobs = []string{name} }, func(h modapi.Host, name string) error {
 			return h.AddBackgroundJob(name, func(context.Context) error { return nil })
@@ -344,5 +344,36 @@ func TestNewWithPortsServesPortsAndRunner(t *testing.T) {
 	f, ok := k.ScheduleFacts()
 	if !ok || f.Runner != wantRunner {
 		t.Fatalf("runner not served: ok=%v runner=%v", ok, f.Runner)
+	}
+}
+
+// AddMCPTool's refusals keep their wording whatever shape the tool value has (#15397): a tool the manifest does not
+// name, a tool with no handler (modapi.Tool with a nil run gives one), a tool added twice.
+func TestAddMCPToolRefusalsKeepTheirText(t *testing.T) {
+	run := func(context.Context, modapi.ToolCall) (modapi.ToolResult, error) { return modapi.ToolResult{}, nil }
+	var got []string
+	m := plainModule("tool-refusals")
+	m.info.MCPTools = []string{"declared", "typed"}
+	m.reg = func(h modapi.Host) error {
+		for _, tool := range []modapi.MCPTool{
+			{Name: "undeclared", Run: run},
+			{Name: "declared"},
+			modapi.Tool[struct{}]("typed", "", nil, nil),
+			{Name: "declared", Run: run},
+			{Name: "declared", Run: run},
+		} {
+			if err := h.AddMCPTool(tool); err != nil {
+				got = append(got, err.Error())
+			}
+		}
+		return nil
+	}
+	k := New([]modapi.Module{m}, nil, t.Logf)
+	want := []string{`tool "undeclared" is not in the manifest's mcp_tools`, `tool "declared" needs a handler`, `tool "typed" needs a handler`, `tool "declared" added twice`}
+	if !slices.Equal(got, want) {
+		t.Fatalf("refusals = %q, want %q", got, want)
+	}
+	if tools := k.MCPTools(); len(tools) != 1 || tools[0].Name != "declared" {
+		t.Fatalf("tools = %+v, want the one accepted tool", tools)
 	}
 }

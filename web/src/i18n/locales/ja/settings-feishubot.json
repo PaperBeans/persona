@@ -125,5 +125,6 @@
   "topic_group_name": "グループ名（任意）",
   "topic_add": "グループを追加",
   "topic_policy_footer": "このグループでのあなたのメッセージと設定コマンドにのみ適用されます。他のメッセージは無視します。このスイッチをオンにして追加したグループは自動でメインになりません。オフにすると通常のトピックの動作に戻ります。",
-  "topic_home_default": "既定のメイングループに戻す"
+  "topic_home_default": "既定のメイングループに戻す",
+  "step_sync_permissions": "ナレッジ同期には、次のユーザー権限も許可します：offline_access, search:message, drive:drive:readonly, drive:drive.metadata:readonly, docx:document:readonly, docs:document.content:read, sheets:spreadsheet:readonly, bitable:app:readonly, wiki:wiki:readonly, wiki:node:retrieve, wiki:space:retrieve, minutes:minutes:readonly, minutes:minutes.transcript:export, im:chat:read, im:chat:readonly, im:message:readonly, im:message.group_msg:get_as_user, im:message.p2p_msg:get_as_user, drive:file:download, contact:user.base:readonly, contact:contact.base:readonly。権限を公開し、必要な管理者承認を得た後、不足する権限を追加するため再認可してください。送信者名の補完は認可後に自動で再試行されます。"
 }

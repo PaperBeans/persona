@@ -7,7 +7,6 @@
   "sections": "Sections",
   "bar_count": "{name}, {count}",
   "bar_all": "All",
-  "all": "All",
   "clean_all": "Clean up all",
   "clean_all_scope": "Clean up all: {scope}",
   "confirm_clean_title": "Clean up all?",

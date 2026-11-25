@@ -3,7 +3,7 @@
 // assistant head while the roster loads or a temporary read fails. A hub without a roster keeps the earlier product
 // row (AppMark, Persona and the hub's connection status) and its original menu.
 // The current pick is kept per hub (lib/manager-choice.ts), including while its roster loads after a reload.
-import { memo, useId, useLayoutEffect, useState } from "react";
+import { memo, useId, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { useAssistantIdentity } from "../lib/assistant-identity";
 import { BREATHING, connStatus, phaseTone, type ConnPhase } from "../lib/connection";
@@ -13,6 +13,7 @@ import { loadRoster, managerError, managerOf, managerOrder, multiManager, renewC
 import { refreshReadiness } from "../lib/readiness";
 import { navigate, type Route } from "../lib/router";
 import { routeAfterSwitch } from "../lib/persona-nav";
+import { sameValue } from "../lib/stable-lines";
 import { AppMark } from "../ui/AppMark";
 import { AssistantAvatar } from "../ui/AssistantAvatar";
 import { PersonaAvatar } from "./assistant/Persona";
@@ -90,9 +91,12 @@ export const AssistantSwitcher = memo(function AssistantSwitcher(props: Switcher
   );
 });
 
-function ManagerBadgesCollector({ onChange }: { onChange: (badges: Record<string, number>) => void }) {
+export function ManagerBadgesCollector({ onChange }: { onChange: (badges: Record<string, number>) => void }) {
   const badges = useManagerBadges();
+  const published = useRef<Record<string, number> | undefined>(undefined);
   useLayoutEffect(() => {
+    if (published.current && sameValue(published.current, badges)) return;
+    published.current = badges;
     onChange(badges);
   }, [badges, onChange]);
   return null;

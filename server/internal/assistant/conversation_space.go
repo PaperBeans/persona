@@ -127,6 +127,9 @@ func (s *Service) listedSpace(c proto.Session) (string, bool) {
 	if c.SessionID == "" || c.IsDeleted() || !s.isAssistantRow(c) {
 		return "", false
 	}
+	if s.isLogicalOfflineRow(c) && c.Space == "" && c.Cwd == "" {
+		return "", false
+	}
 	return runSpace(c), true
 }
 
@@ -311,7 +314,7 @@ func (s *Service) conversationSpaces(ctx context.Context, ids []string) map[stri
 		case out[id].known && out[id].space != "": // a row of a space under the id: whatever else is listed
 		case runSpace(l) != "":
 			out[id] = spaceTold{runSpace(l), true}
-		case s.isAssistantRow(l):
+		case s.isAssistantRow(l) && !(s.isLogicalOfflineRow(l) && l.Space == "" && l.Cwd == ""):
 			out[id] = spaceTold{spaceOf(l), true}
 		default:
 			return false

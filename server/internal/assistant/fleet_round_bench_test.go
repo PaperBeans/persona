@@ -56,9 +56,11 @@ func roundFleet() ([]fleetInput, []proto.Interaction, map[string]bool) {
 }
 
 // BenchmarkRound is one live round's needs-you work on roundFleet, as liveLoop does it over the arrays its last round
-// kept (round): the Live Activity's state and Persona Link's summary built from the agents and cards. allocs/op is the
-// gate (docs/plans/plan-derived-counts.md, step 5); B/op may rise only by the counting core's own copies of the agents
-// and cards, which core-copies makes for both surfaces (fleetcount.NewAgents and NewCards, twice).
+// kept (round): the Live Activity's state, and Persona Link's summary and the counts view built from one fill of the
+// agents and cards. allocs/op is the gate (docs/plans/plan-derived-counts.md, steps 5 and 7a); B/op may rise only by
+// the counting core's own copies of the agents and cards, which core-copies makes for both fills (fleetcount.NewAgents
+// and NewCards, twice: the summary and the view share theirs). counts-tell is the view's telling in a round whose
+// counts did not change, which is most rounds.
 func BenchmarkRound(b *testing.B) {
 	agents, ixs, told := roundFleet()
 	b.Run("round", func(b *testing.B) {
@@ -66,13 +68,23 @@ func BenchmarkRound(b *testing.B) {
 		if st := r.buildFleet("en", agents, ixs); st.NeedsYou == 0 || st.Working == 0 || st.Unread == 0 {
 			b.Fatalf("the fleet: %+v", st)
 		}
-		if a := r.linkAttention("en", agents, ixs, told); a.NeedsYou == 0 {
-			b.Fatalf("the summary: %+v", a)
+		if a, v := r.linkAndCounts("en", agents, ixs, told); a.NeedsYou == 0 || v.Counts.AgentsNeedsYou.N == 0 {
+			b.Fatalf("the summary: %+v; the view: %+v", a, v.Counts.AgentsNeedsYou)
 		}
 		b.ReportAllocs()
 		for b.Loop() {
 			r.buildFleet("en", agents, ixs)
-			r.linkAttention("en", agents, ixs, told)
+			r.linkAndCounts("en", agents, ixs, told)
+		}
+	})
+	b.Run("counts-tell", func(b *testing.B) {
+		s := New(Options{Hub: newFakeHub(), Logf: func(string, ...any) {}, Devices: newFleetDevs()})
+		var r fleetRound
+		_, v := r.linkAndCounts("en", agents, ixs, told)
+		s.tellCounts(v)
+		b.ReportAllocs()
+		for b.Loop() {
+			s.tellCounts(v)
 		}
 	})
 	b.Run("core-copies", func(b *testing.B) {

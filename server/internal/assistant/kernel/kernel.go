@@ -6,7 +6,6 @@ package kernel
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -406,17 +405,19 @@ func (h *host) AddHubRoute(pattern string, handler http.HandlerFunc) error {
 	return nil
 }
 
-func (h *host) AddMCPTool(name, description string, schema json.RawMessage, run func(context.Context, string, string, json.RawMessage) (string, error)) error {
+func (h *host) AddMCPTool(tool modapi.MCPTool) error {
+	name := tool.Name
 	switch {
 	case !slices.Contains(h.info.MCPTools, name):
 		return fmt.Errorf("tool %q is not in the manifest's mcp_tools", name)
-	case run == nil:
+	case tool.Run == nil:
 		return fmt.Errorf("tool %q needs a handler", name)
 	}
 	if _, ok := h.tools[name]; ok {
 		return fmt.Errorf("tool %q added twice", name)
 	}
-	h.tools[name] = modapi.MCPTool{Name: name, Description: description, InputSchema: slices.Clone(schema), Run: run}
+	tool.InputSchema = slices.Clone(tool.InputSchema)
+	h.tools[name] = tool
 	h.toolOrder = append(h.toolOrder, name)
 	return nil
 }

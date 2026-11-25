@@ -248,7 +248,7 @@ export function DecisionQueuePanel({
           </span>
           <div className="flex items-center gap-2">
             <Button tone="quiet" disabled={submitting} onClick={onClose}>
-              {t("common.close")}
+              {t("ui-atoms.close")}
             </Button>
             <Button
               tone="primary"

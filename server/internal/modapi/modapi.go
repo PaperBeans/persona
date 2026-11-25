@@ -1,6 +1,7 @@
 // Package modapi is the module contract of Persona Core (docs/architecture/core-and-modules.md): what a built-in
 // feature module declares about itself (Info, the manifest of schema/module.schema.json), what it is (Module), and the
-// one way it reaches the core (Host). It holds types, constants and the list of client-only module ids, imports nothing but the standard library,
+// one way it reaches the core (Host). It holds types, constants and the list of client-only module ids, imports nothing but the standard library and the
+// contract's ID types (internal/wireids),
 // and is a contract package (internal/archguard/testdata/contracts.txt): the core (internal/assistant/kernel serves
 // Host) and the modules (internal/modules/<id>) both import it, never each other.
 package modapi
@@ -90,8 +91,9 @@ type Host interface {
 	AddScheduleFacts(ScheduleFacts) error
 	// AddHubRoute serves one declared "METHOD /api/v1/…" route while the module is loaded.
 	AddHubRoute(pattern string, handler http.HandlerFunc) error
-	// AddMCPTool serves one declared assistant tool while the module is loaded.
-	AddMCPTool(name, description string, schema json.RawMessage, run func(context.Context, string, string, json.RawMessage) (string, error)) error
+	// AddMCPTool serves one declared assistant tool (Info.MCPTools names it) while the module is loaded.
+	// The tool is built with Tool (typed arguments, decoded strictly) or as an MCPTool value (tool.go).
+	AddMCPTool(MCPTool) error
 	// AddBackgroundJob runs one declared loop under the Service Run context while the module is loaded.
 	AddBackgroundJob(name string, run func(context.Context) error) error
 
@@ -111,14 +113,6 @@ type Host interface {
 type BackgroundJob struct {
 	Name string
 	Run  func(context.Context) error
-}
-
-// MCPTool is a module's assistant tool definition and handler. Run receives the calling machine, conversation and JSON arguments.
-type MCPTool struct {
-	Name        string
-	Description string
-	InputSchema json.RawMessage
-	Run         func(context.Context, string, string, json.RawMessage) (string, error)
 }
 
 // Setting is a module's value in persona_settings. The core keeps the stored value (also while the module is off,

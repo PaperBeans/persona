@@ -286,7 +286,40 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 			}
 		}
 		var said json.RawMessage // what the runtime answered: it may say the message only queued behind the turn
+		syntheticSegment := isSyntheticSegmentMsgID(opts.ClientMsgID)
 		err := n.sends.onceReplacing(opts.ClientMsgID, previous, func() error {
+			sendFn := func() error {
+				if err := n.a2aSendReady(ctx, p.SessionID); err != nil {
+					return err
+				}
+				input := map[string]any{"session_id": p.SessionID, "text": p.Text, "images": p.Images}
+				if !syntheticSegment {
+					input["client_msg_id"] = opts.ClientMsgID
+				}
+				if p.PermissionMode != "" {
+					input["mode"] = p.PermissionMode
+				}
+				if p.A2AWakeOnSend {
+					input["a2a_wake_on_send"] = true
+				}
+				sentAt := time.Now()
+				n.ttft.arm(p.SessionID, sentAt, "")
+				finishAgy := n.runtimes.agyWorkBegin(h, method, p.SessionID)
+				out, err := call(method, input)
+				finishAgy(err, false)
+				said = out
+				if (err != nil && !maybeDelivered(err)) || (err == nil && runtimeAnswerFlag(out, "queued")) {
+					n.ttft.disarm(p.SessionID, sentAt)
+				}
+				return err
+			}
+			if syntheticSegment && retry == nil {
+				err := sendFn()
+				if err == nil {
+					n.recordSegmentInput(p.SessionID, opts.ClientMsgID)
+				}
+				return err
+			}
 			var after echoAfter
 			if opts.ClientMsgID != "" {
 				after = echoAfter{seq: n.runtimes.lastPushed(p.SessionID), in: echoInRuntime}
@@ -310,28 +343,7 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 				}
 				retry, after = &check.record, check.after
 			}
-			return n.sendWithEcho(p.SessionID, opts.ClientMsgID, p.Text, len(p.Images), after, p.MessageSource, retry, func() error {
-				if err := n.a2aSendReady(ctx, p.SessionID); err != nil {
-					return err
-				}
-				input := map[string]any{"session_id": p.SessionID, "text": p.Text, "images": p.Images, "client_msg_id": opts.ClientMsgID}
-				if p.PermissionMode != "" {
-					input["mode"] = p.PermissionMode
-				}
-				if p.A2AWakeOnSend {
-					input["a2a_wake_on_send"] = true
-				}
-				sentAt := time.Now()
-				n.ttft.arm(p.SessionID, sentAt, "")
-				finishAgy := n.runtimes.agyWorkBegin(h, method, p.SessionID)
-				out, err := call(method, input)
-				finishAgy(err, false)
-				said = out
-				if (err != nil && !maybeDelivered(err)) || (err == nil && runtimeAnswerFlag(out, "queued")) {
-					n.ttft.disarm(p.SessionID, sentAt)
-				}
-				return err
-			})
+			return n.sendWithEcho(p.SessionID, opts.ClientMsgID, p.Text, len(p.Images), after, p.MessageSource, retry, sendFn)
 		})
 		if rpcCode(err) == runtimeHandover && ctx.Value(handingOver{}) == nil {
 			res, err := n.handOver(ctx, h, p.SessionID, params)

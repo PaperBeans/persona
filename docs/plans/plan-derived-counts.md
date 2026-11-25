@@ -359,6 +359,31 @@ identifier on one line); the tell from liveLoop. *Gate:* steps 5 and 6. *Rollbac
 `agents_needs_you.n` equals the fixture rule over the same inputs; a quiet fleet tells nothing; a hub built from
 `origin/main` drops the event; the round benchmark stays within 5% of step 5's.
 
+*Landed (#15650):* `CapabilityCountsView` (`counts_view`), `EventCountsView` (`counts.view`) and `CountsViewMaxBytes` in
+`assistantwire/counts.go`; the capability on the hello's list; and the tell from liveLoop (`assistant/counts_view.go`):
+package assistant calls `fleetcount.AgentsNeedsYou` on the badge surface, then `fleetcountadapt`'s `Fleet.View`, a
+TallyVisitor of the adapter's own that writes `counts` and `totals` in one `Accept` pass (D12) and alone spells the
+`why` word (D11); package assistant adds the epoch (one per run), the rev (up one only when the counts change), `as_of`
+and `build`, tells nothing for a round that changed nothing, and tells the last view again after each handshake.
+`TestCountsViewFollowsTheSharedFixtures` holds `n` and the keys to the fixture's badge over a round's inputs,
+`TestTheCountsViewIsToldWhenItChanges` the rest; `busEvents` in `hub/bus.go` has no `counts.view`, so a hub from
+`origin/main` drops it. The bound and the limit are settled together: a view takes at most 16 KB, the most the hub will
+keep, and `keys` and `held` stop at 200 rows or at the first row past that bound, the counted rows first (`more` carries
+the rest). What differs, and why: `View` is a method of the adapter's `Fleet`, since a tally's Slots are places in that
+fleet; the view is decided on the fill Persona Link's summary uses (its cards ordered by time, then id), so the two
+share one copy of the core's values (`Fleet.Agents`, `Fleet.Cards`); `Tally.On(surface)` lets `View` refuse another
+surface's tally; a count's `producer` is keyed to the view's schema rather than to an empty `waits_on`: every count the
+schema carries names its producer and no other does, since `inbox_action` waits on no decision but joins the view only
+with step 12 and its fixture (`docs/protocol/counts.md`, "Later ids"), and `TestViewWritesTheCountsThatNameIt` is the
+code map's check; the Inbox's and the to-dos' counts enter as inputs of `View` once the schema carries them, so none is
+added here; and `badgeRows` now cuts its lists from four arrays (and makes none when nothing waits), which took the
+view's share of the round from 47 allocations to 11. The gate, measured against `origin/main` on one machine
+(`BenchmarkRound`, 60 agents and 12 cards, the round now building the view too): 255 to 266 allocs/op (+4.3%, within 5%)
+and 30,008 to 35,096 B/op (+17%, past 5%): the badge decision takes 4 allocations and 3,776 B (its tally and the scratch
+the core makes each round rather than keep between rounds) and `View` 7 and 1,312 B, measured apart.
+`BenchmarkLiveRound` (500 agents, none waiting): 136 to 139 allocs/op and about 161.8 KB/op either way. Telling an
+unchanged view allocates nothing.
+
 **7b. The hub relays it** (section 3.2). *Change:* a new hub/counts_view.go and one field in `hub/bus.go` (1 open PR,
 #6924d); one line each in bus_broadcast.go (3) and features() in extensions_link.go (5); the kept views go out in the
 connect sequence in `hub/http.go` (7) and after a client hello in `hub/clientmeta.go` (0). Rows in protocol.md,

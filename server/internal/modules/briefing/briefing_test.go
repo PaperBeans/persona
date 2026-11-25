@@ -123,13 +123,11 @@ func newFakeHost(t *testing.T) *fakeHost {
 	}
 }
 
-func (h *fakeHost) Logf(format string, args ...any)               { h.t.Logf(format, args...) }
-func (h *fakeHost) AddSetting(s modapi.Setting) error             { h.setting = &s; return nil }
-func (h *fakeHost) AddScheduleFacts(f modapi.ScheduleFacts) error { h.facts = &f; return nil }
-func (h *fakeHost) AddHubRoute(string, http.HandlerFunc) error    { return nil }
-func (h *fakeHost) AddMCPTool(string, string, json.RawMessage, func(context.Context, string, string, json.RawMessage) (string, error)) error {
-	return nil
-}
+func (h *fakeHost) Logf(format string, args ...any)                            { h.t.Logf(format, args...) }
+func (h *fakeHost) AddSetting(s modapi.Setting) error                          { h.setting = &s; return nil }
+func (h *fakeHost) AddScheduleFacts(f modapi.ScheduleFacts) error              { h.facts = &f; return nil }
+func (h *fakeHost) AddHubRoute(string, http.HandlerFunc) error                 { return nil }
+func (h *fakeHost) AddMCPTool(modapi.MCPTool) error                            { return nil }
 func (h *fakeHost) AddBackgroundJob(string, func(context.Context) error) error { return nil }
 func (h *fakeHost) Tasks() modapi.TaskPort                                     { return h.tasks }
 func (h *fakeHost) Todos() modapi.TodoPort                                     { return h.todos }

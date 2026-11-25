@@ -125,6 +125,69 @@ function urlHint(f: ProviderForm): string {
   return t("settings-providerwizard.url_gateway_hint");
 }
 
+/** Default starter model seeded when picking Codex or omp in a fresh custom provider form. */
+const ENGINE_SEED_MODELS: Partial<Record<ProviderForm["agent"], { id: string; name: string }>> = {
+  codex: { id: "gpt-5.4", name: "GPT-5.4" },
+  omp: { id: "google-antigravity/gemini-4-argon:high", name: "Gemini 4 Argon (High)" },
+};
+
+type ProviderKindChoice = "launcher" | "codex" | "agy" | "omp" | "api";
+
+function providerKindChoice(f: Pick<ProviderForm, "kind" | "agent">): ProviderKindChoice {
+  if (f.kind === "api") return "api";
+  if (f.agent === "codex" || f.agent === "agy" || f.agent === "omp") return f.agent;
+  return "launcher";
+}
+
+function isUntouchedEngineSeed(f: ProviderForm): boolean {
+  if (f.kind !== "launcher") return false;
+  const seed = ENGINE_SEED_MODELS[f.agent];
+  if (!seed || f.models.length !== 1 || f.model !== seed.id) return false;
+  const [only] = f.models;
+  return (
+    only.id === seed.id &&
+    only.name === seed.name &&
+    only.checked &&
+    !only.context_window &&
+    !only.efforts.length &&
+    !only.default_effort &&
+    !Object.keys(only.meta).length
+  );
+}
+
+const CLEARED_CLAUDE_TIERS: Pick<ProviderForm, "opus_model" | "sonnet_model" | "haiku_model" | "fable_model" | "small_model" | "subagent_model" | "subagent_force" | "tier_source"> = {
+  opus_model: "",
+  sonnet_model: "",
+  haiku_model: "",
+  fable_model: "",
+  small_model: "",
+  subagent_model: "",
+  subagent_force: false,
+  tier_source: {},
+};
+
+/** Switch custom provider kind/agent while clearing untouched engine starter seeds and preserving user models. */
+function switchProviderKind(x: ProviderForm, v: ProviderKindChoice): ProviderForm {
+  if (v === providerKindChoice(x)) return x;
+  const seeded = isUntouchedEngineSeed(x);
+  const models = seeded ? [] : x.models;
+  const model = seeded ? "" : x.model;
+  if (v === "api") return { ...x, kind: "api", agent: "claude", api: "messages", models, model };
+  if (v === "agy") return { ...x, ...CLEARED_CLAUDE_TIERS, kind: "launcher", agent: "agy", api: "messages", models, model };
+  if (v === "codex" || v === "omp") {
+    const seed = ENGINE_SEED_MODELS[v]!;
+    return {
+      ...x,
+      ...CLEARED_CLAUDE_TIERS,
+      kind: "launcher",
+      agent: v,
+      api: "messages",
+      ...(models.length ? { models, model } : { models: [formModel(seed)], model: seed.id }),
+    };
+  }
+  return { ...x, kind: "launcher", agent: "claude", api: "messages", models, model };
+}
+
 /** What a single-line field keeps of pasted text: no line breaks, no space at the ends. */
 const oneLine = (s: string) => s.replace(/[\r\n]+/g, "").trim();
 
@@ -333,8 +396,8 @@ export function ProviderWizard({ existing, onClose, onSaved, draft = null, link 
   const shownProblem = (k: ConnectField) => (tried ? fieldProblems[k] || undefined : undefined);
   // models were found for this connection: choosing them is what comes next
   const foundModels = !!found && !found.error && found.n > 0;
-  const openAI = f.kind === "api" && (f.api === "responses" || f.api === "chat");
   const hasLegacyChat = Object.keys(legacyChatClears(old)).length > 0;
+  const canProbe = !problems.reach && !hasLegacyChat && !referencePending(f) && !!f.base_url.trim();
   // a paste goes on like the gateway typed by hand
   const presetFlow = isNew && choice !== CUSTOM && !pasting;
   const presetReady = !!preset && (hubNames || !!pf.name.trim()) && !launcherNameProblem(pf.name) && !displayNameProblem(pf.display_name) && !!pf.api_key.trim() && !keyTest?.running;
@@ -374,7 +437,7 @@ export function ProviderWizard({ existing, onClose, onSaved, draft = null, link 
   };
 
   const runTest = async () => {
-    if (hasLegacyChat) return;
+    if (hasLegacyChat || !f.base_url.trim()) return;
     setChecked(true);
     const model = modelToTest;
     lastTest.current = { model, state: "running" };
@@ -406,7 +469,7 @@ export function ProviderWizard({ existing, onClose, onSaved, draft = null, link 
   };
   /** `check`: part of the step's check, so its end tests the connection (by hand it only fetches). */
   const runDiscover = async (check = false) => {
-    if (hasLegacyChat) return;
+    if (hasLegacyChat || !f.base_url.trim()) return;
     setChecked(true);
     const generation = connectionGeneration.current;
     const seq = ++discoverySeq.current;
@@ -692,16 +755,10 @@ export function ProviderWizard({ existing, onClose, onSaved, draft = null, link 
             {!idInMore && idField}
             {isNew && (
               <Labelled label={t("settings-providerwizard.kind")} hint={f.kind === "api" ? t("settings-providerwizard.kind_api_hint") : t("settings-providerwizard.kind_launcher_hint", { agent: f.agent === "codex" ? "Codex" : f.agent === "agy" ? "Antigravity" : f.agent === "omp" ? "omp" : "Claude Code" })}>
-                <Segmented<"launcher" | "codex" | "agy" | "omp" | "api">
+                <Segmented<ProviderKindChoice>
                   label={t("settings-providerwizard.kind")}
-                  value={f.kind === "api" ? "api" : f.agent === "codex" ? "codex" : f.agent === "agy" ? "agy" : f.agent === "omp" ? "omp" : "launcher"}
-                  onChange={(v) => {
-                    if (v === "api") setF((x) => ({ ...x, kind: "api", agent: "claude", api: "messages" }));
-                    else if (v === "codex") setF((x) => ({ ...x, kind: "launcher", agent: "codex", api: "messages", models: x.models.length ? x.models : [formModel({ id: "gpt-5.4", name: "GPT-5.4" })], model: x.model || "gpt-5.4" }));
-                    else if (v === "agy") setF((x) => ({ ...x, kind: "launcher", agent: "agy", api: "messages", models: x.agent === "agy" ? x.models : [], model: x.agent === "agy" ? x.model : "" }));
-                    else if (v === "omp") setF((x) => ({ ...x, kind: "launcher", agent: "omp", api: "messages", models: x.models.length ? x.models : [formModel({ id: "google-antigravity/gemini-4-argon:high", name: "Gemini 4 Argon (High)" })], model: x.model || "google-antigravity/gemini-4-argon:high" }));
-                    else setF((x) => ({ ...x, kind: "launcher", agent: "claude", api: "messages" }));
-                  }}
+                  value={providerKindChoice(f)}
+                  onChange={(v) => setF((x) => switchProviderKind(x, v))}
                   options={[{ v: "launcher", label: "Claude Code" }, { v: "codex", label: "Codex" }, { v: "agy", label: "Antigravity" }, { v: "omp", label: "omp" }, { v: "api", label: t("settings-providerwizard.direct_api") }]}
                 />
               </Labelled>
@@ -729,7 +786,7 @@ export function ProviderWizard({ existing, onClose, onSaved, draft = null, link 
               // left for another field or the page; the window losing focus keeps the field focused, and the URL unfinished
               onBlur={(e) => !flagging.current && document.activeElement !== e.currentTarget && setUrlTyping(false)}
               hint={urlHint(f)} />
-            {!openAI && !autoAuth && authField}
+            {asksAuth(f) && !autoAuth && authField}
             <KeyField field="api_key" error={shownProblem("api_key")} label={isNew || !old?.has_key ? "API Key" : t("settings-providerwizard.key_keep")} value={f.api_key} onChange={set("api_key")} placeholder={old?.has_key ? t("settings-providerwizard.key_set") : "sk-…"} hint={f.key_by_reference ? undefined : t("settings-providerwizard.key_hint")}
               byReference={f.key_by_reference} stored={old?.key_reference}
               onByReference={keyRefs ? (on) => setF((x) => ({ ...x, key_by_reference: on, api_key: "" })) : undefined} />
@@ -748,10 +805,10 @@ export function ProviderWizard({ existing, onClose, onSaved, draft = null, link 
                 <div className="flex flex-wrap items-center gap-2">
                   <input value={probeModel} onChange={(e) => setProbeModel(e.target.value)} placeholder={testModel(f) || t("settings-providerwizard.test_model")} aria-label={t("settings-providerwizard.test_model")} autoComplete="off" spellCheck={false}
                     className={cx(FIELD, "h-8 w-full min-w-0 px-2.5 font-mono text-[12.5px] sm:w-auto sm:flex-1")} />
-                  <Button tone="secondary" icon="run" busy={testing} disabled={!!problems.reach || hasLegacyChat || referencePending(f)} onClick={testByHand}>
+                  <Button tone="secondary" icon="run" busy={testing} disabled={!canProbe} onClick={testByHand}>
                     {t("settings-providerwizard.test")}
                   </Button>
-                  <Button tone="secondary" icon="download" busy={discovering} disabled={!!problems.reach || hasLegacyChat || referencePending(f)} onClick={() => void runDiscover()}>
+                  <Button tone="secondary" icon="download" busy={discovering} disabled={!canProbe} onClick={() => void runDiscover()}>
                     {t("settings-providerwizard.discover")}
                   </Button>
                 </div>
@@ -1321,23 +1378,12 @@ function Advanced({ f, setF, set, hadEnv }: {
   set: <K extends keyof ProviderForm>(k: K) => (v: ProviderForm[K]) => void;
   hadEnv: boolean;
 }) {
-  const list = useId();
   const ids = useMemo(() => checkedIds(f), [f.models]);
   const launcher = f.kind !== "api";
   const chat = !launcher && f.api === "chat";
   if (chat) return <p className="text-[11.5px] leading-relaxed text-ink-3">{t("settings-providerwizard.chat_advanced_hint")}</p>;
-  const tier = (k: "opus_model" | "sonnet_model" | "haiku_model" | "fable_model" | "small_model", label: string, hint?: string) => (
-    <Labelled label={label} hint={hint}>
-      <input value={f[k]} onChange={(e) => set(k)(e.target.value)} list={list} placeholder={t("settings-providerwizard.same_as_default")} aria-label={label} autoComplete="off" spellCheck={false} className={cx(INPUT, "font-mono")} />
-    </Labelled>
-  );
   return (
     <>
-      <datalist id={list}>
-        {ids.map((id) => (
-          <option key={id} value={id} />
-        ))}
-      </datalist>
       {launcher && hasTiers(f) && (
         // the tiers people change most are in "Claude Code tiers" above (#4975); Fable and forcing stay here
         <div className="grid items-start gap-3 sm:grid-cols-2">
@@ -1350,28 +1396,6 @@ function Advanced({ f, setF, set, hadEnv }: {
             <Switch on={f.subagent_force} onChange={set("subagent_force")} label={t("settings-providerwizard.force_subagent")} />
           </div>
         </div>
-      )}
-      {launcher && !hasTiers(f) && (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {tier("opus_model", t("settings-providerwizard.tier_model", { tier: "Opus" }))}
-            {tier("sonnet_model", t("settings-providerwizard.tier_model", { tier: "Sonnet" }))}
-            {tier("haiku_model", t("settings-providerwizard.tier_model", { tier: "Haiku" }))}
-            {tier("fable_model", t("settings-providerwizard.tier_model", { tier: "Fable" }))}
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {tier("small_model", t("settings-providerwizard.small_model"), t("settings-providerwizard.small_model_hint"))}
-            <Labelled label={t("settings-providerwizard.subagent_model")} hint={t("settings-providerwizard.subagent_hint")}>
-              <div className="flex items-center gap-2">
-                <input value={f.subagent_model} onChange={(e) => set("subagent_model")(e.target.value)} list={list} placeholder={t("settings-providerwizard.same_as_default")} aria-label={t("settings-providerwizard.subagent_model")} autoComplete="off" spellCheck={false} className={cx(INPUT, "font-mono")} />
-                <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12px] text-ink-2">
-                  {t("settings-providerwizard.force")}
-                  <Switch on={f.subagent_force} onChange={set("subagent_force")} label={t("settings-providerwizard.force_label")} />
-                </span>
-              </div>
-            </Labelled>
-          </div>
-        </>
       )}
       <SecretField
         label={t("settings-providerwizard.env")}

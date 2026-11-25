@@ -235,7 +235,13 @@ func (s *Service) localFleetDeviceCall(ctx context.Context, p DeviceCall) (json.
 				sess.Assistant = m.isAssistant(sess)
 			}
 			if sess.Assistant && sess.Space == "" {
-				sess.Space = identity.SpaceOf(sess.Cwd)
+				if sess.LogicalPlaceholder {
+					if sp, known := s.logicalRowSpace(ctx, sess); known {
+						sess.Space = sp
+					}
+				} else {
+					sess.Space = identity.SpaceOf(sess.Cwd)
+				}
 			}
 			s.nameAgentRow(m.ID, &sess)
 			// The node fills in no unified state: the callers that ask whether it works or waits for the user

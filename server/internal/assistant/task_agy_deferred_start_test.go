@@ -259,3 +259,187 @@ func TestAgyImmediateCompanionAnswerNeedsNoSecondFirstPrompt(t *testing.T) {
 		t.Fatalf("the old Companion's first prompt changed: %q", prompt)
 	}
 }
+
+func planAgyLeaderWith(t *testing.T, s *Service, mutate func(map[string]any)) {
+	t.Helper()
+	var input struct {
+		Tasks []map[string]any `json:"tasks"`
+	}
+	if err := json.Unmarshal(leaderPlanArgs(roleLeader), &input); err != nil {
+		t.Fatal(err)
+	}
+	input.Tasks[0]["launcher"] = "agy"
+	if mutate != nil {
+		mutate(input.Tasks[0])
+	}
+	raw, _ := json.Marshal(input)
+	res, err := s.toolTaskPlan(context.Background(), "conv1", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id := planIDRe.FindString(res); id != "" && !strings.Contains(res, "without asking") {
+		if _, err := s.startPlan(context.Background(), id, nil, false); err != nil {
+			t.Fatalf("%s: %v", res, err)
+		}
+	}
+}
+
+func TestAgyDeferredStartReadonlyAndExplicitHostLeadersKeepRoleAndBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{
+			name: "readonly leader",
+			mutate: func(task map[string]any) {
+				task["readonly"] = true
+				delete(task, "permission")
+				delete(task, "done_when")
+				task["goal"] = "Audit the repository structure without modifying files."
+			},
+		},
+		{
+			name: "explicit host agy leader",
+			mutate: func(task map[string]any) {
+				task["host"] = proto.HostAgy
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f := newQuietService(t)
+			prepareDeferredAgy(f)
+			linkedAtActivation := map[string]bool{}
+			f.answerNode(DeviceSessionSend, func(_ string, raw json.RawMessage) (any, error) {
+				var params map[string]any
+				_ = json.Unmarshal(raw, &params)
+				f.agentSent = append(f.agentSent, params)
+				sid, _ := params["session_id"].(string)
+				linked := s.isLeaderSession("box", sid)
+				if task, ok := s.taskOf(context.Background(), "box", sid); ok && task.Supervision != nil {
+					linked = linked || task.Supervision.Supervisor == "box/s1"
+				}
+				if _, seen := linkedAtActivation[sid]; !seen {
+					linkedAtActivation[sid] = linked
+				}
+				return map[string]any{}, nil
+			})
+
+			planAgyLeaderWith(t, s, tc.mutate)
+			waitFor(t, "the Companion leader's link", func() bool { return len(onlyTodo(s).Agents) == 1 })
+			waitFor(t, "the Companion leader's first prompt", func() bool { return len(deliveredTo(f, "s1")) == 1 })
+
+			starts := f.started()
+			if len(starts) != 1 || starts[0]["host"] != proto.HostAgy || starts[0]["defer_mcp"] != true {
+				t.Fatalf("leader did not use deferred Companion start: %+v", starts)
+			}
+			f.mu.Lock()
+			linkedLeader := linkedAtActivation["s1"]
+			f.mu.Unlock()
+			if !linkedLeader {
+				t.Fatal("leader first prompt preceded role link")
+			}
+
+			leaderTools := leaderToolNames(s.sessionMCPTools(context.Background(), "box", "s1", false, false))
+			for _, name := range []string{"task_plan", "task_review", "report_to_supervisor", "task_spawn"} {
+				if !slices.Contains(leaderTools, name) {
+					t.Fatalf("leader catalog lacks %s: %v", name, leaderTools)
+				}
+			}
+			if slices.Contains(leaderTools, "machines_list") {
+				t.Fatalf("leader catalog unexpectedly exposed assistant-only machines_list: %v", leaderTools)
+			}
+			if res := s.mcpCall(context.Background(), "box", "s1", "machines_list", json.RawMessage(`{}`), false); !res.IsError {
+				t.Fatalf("leader unexpectedly called assistant-only machines_list: %+v", res)
+			}
+
+			f.setSessions("box", proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: "agy", Launcher: "agy", Status: proto.StatusIdle})
+			worker := planWorker(t, s, f, map[string]any{
+				"launcher": "agy",
+				"readonly": true,
+				"goal":     "Inspect the layout without editing files.",
+			})
+			workerSession := worker.Agents[0].SessionID
+			waitFor(t, "the worker's first prompt", func() bool { return len(deliveredTo(f, workerSession)) == 1 })
+
+			starts = f.started()
+			if len(starts) != 2 || starts[1]["host"] != proto.HostAgy || starts[1]["defer_mcp"] != true {
+				t.Fatalf("read-only agy worker did not use deferred Companion start: %+v", starts)
+			}
+			workerTools := leaderToolNames(s.sessionMCPTools(context.Background(), "box", workerSession, false, false))
+			if !slices.Contains(workerTools, "report_to_supervisor") || !slices.Contains(workerTools, "task_spawn") {
+				t.Fatalf("worker catalog missing supervision tools: %v", workerTools)
+			}
+			for _, forbidden := range []string{"task_plan", "task_review", "machines_list"} {
+				if slices.Contains(workerTools, forbidden) {
+					t.Fatalf("worker catalog exposed forbidden tool %s: %v", forbidden, workerTools)
+				}
+			}
+			for _, forbidden := range []string{"task_plan", "task_review", "machines_list"} {
+				args := json.RawMessage(`{}`)
+				if forbidden == "task_plan" {
+					args = workerArgs(nil)
+				} else if forbidden == "task_review" {
+					args, _ = json.Marshal(map[string]any{"todo_id": worker.ID, "verdict": "accepted"})
+				}
+				if res := s.mcpCall(context.Background(), "box", workerSession, forbidden, args, false); !res.IsError {
+					t.Fatalf("worker unexpectedly called %s: %+v", forbidden, res)
+				}
+			}
+		})
+	}
+
+	t.Run("explicit host agy fails closed when companion is offline", func(t *testing.T) {
+		s, f := newQuietService(t)
+		prepareDeferredAgy(f)
+		f.refuseHost = map[string]error{proto.HostAgy: companionAwayErr}
+		planAgyLeaderWith(t, s, func(task map[string]any) {
+			task["host"] = proto.HostAgy
+		})
+		waitFor(t, "explicit agy leader failure", func() bool { return onlyTodo(s).DoneAt != nil })
+		starts := f.started()
+		if len(starts) != 1 || starts[0]["host"] != proto.HostAgy || starts[0]["defer_mcp"] != true {
+			t.Fatalf("explicit host agy fell back to another host or omitted defer_mcp: %+v", starts)
+		}
+		if got := onlyTodo(s).StartError; got == "" {
+			t.Fatal("expected StartError when explicit Companion host is offline")
+		}
+	})
+}
+
+func TestAgyDeferredStartPreservesTaskInstructionsAndAttachments(t *testing.T) {
+	s, f := newQuietService(t)
+	prepareDeferredAgy(f)
+	f.mu.Lock()
+	f.devices = []Device{{ID: "server", Online: true, Reachable: true}, {ID: "box", Online: true, Reachable: true, TaskInstructions: true}}
+	f.mu.Unlock()
+
+	startAgyLeader(t, s, f)
+	waitFor(t, "the leader's first prompt with instructions", func() bool { return len(deliveredTo(f, "s1")) == 1 })
+
+	starts := f.started()
+	if len(starts) != 1 || starts[0]["defer_mcp"] != true {
+		t.Fatalf("modern node leader did not use deferred start: %+v", starts)
+	}
+	rawPrompt, _ := starts[0]["prompt"].(string)
+	instructions, _ := starts[0]["task_instructions"].(string)
+	if instructions == "" || !strings.Contains(instructions, "you are the leader") {
+		t.Fatalf("expected leader instructions in task_instructions, got %q", instructions)
+	}
+	if strings.Contains(rawPrompt, "you are the leader") {
+		t.Fatalf("expected modern node to separate task_instructions from prompt: %q", rawPrompt)
+	}
+
+	sent := deliveredTo(f, "s1")[0]
+	if !strings.Contains(sent, rawPrompt) || !strings.Contains(sent, instructions) {
+		t.Fatalf("deferred activation dropped task_instructions: sent=%q instructions=%q", sent, instructions)
+	}
+
+	combined := deferredTaskPrompt("Task body.\n\n<attached_images>/tmp/1.png</attached_images>", map[string]any{
+		"task_instructions": "Leader rule.",
+		"task_attachments":  "Attachment note.",
+	})
+	want := "Task body.\n\nLeader rule.\n\nAttachment note.\n\n<attached_images>/tmp/1.png</attached_images>"
+	if combined != want {
+		t.Fatalf("deferredTaskPrompt = %q, want %q", combined, want)
+	}
+}

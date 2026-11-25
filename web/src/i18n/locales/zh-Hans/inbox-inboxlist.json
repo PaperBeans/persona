@@ -7,7 +7,6 @@
   "sections": "分段",
   "bar_count": "{name}，{count}",
   "bar_all": "全部",
-  "all": "全部",
   "clean_all": "全部清理",
   "clean_all_scope": "全部清理：{scope}",
   "confirm_clean_title": "全部清理？",

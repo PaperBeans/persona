@@ -110,7 +110,7 @@ missing quietly.
 | `settings` | Yes | `Host.AddSetting(modapi.Setting)`: the module says what a value means (`Value`, `Check`, `Describe`); the core keeps it stored, lists it in `persona_settings` and asks the owner to approve a change |
 | `feature` | Yes | The manifest value is `module.<id>`. While the module is loaded it joins the manager hello's `features`; the hub forwards it while that default manager is connected. Every built-in module declares it, and the manager announces the client-only modules' flags itself (below) |
 | `hub_routes` | Yes | `Host.AddHubRoute(pattern, handler)`: the assistant serves the declared `METHOD /api/v1/…` route only while the module is loaded |
-| `mcp_tools` | Yes | `Host.AddMCPTool(...)`: the assistant lists and dispatches the declared tool only while the module is loaded |
+| `mcp_tools` | Yes | `Host.AddMCPTool(modapi.MCPTool)`: the assistant lists and dispatches the declared tool only while the module is loaded ("Assistant tools" below) |
 | `background_jobs` | Yes | `Host.AddBackgroundJob(name, run)`: `Service.Run` starts the declared loop under its context; an absent module starts none |
 | `schedules`: `facts` | Yes | `Host.AddScheduleFacts(modapi.ScheduleFacts)`: the wait rules and `ScheduleFactsRunner` for scheduled routines with facts or reports, using narrow `Host` ports (`Tasks`, `Todos`, `Inbox`, `Later`, `Schedule`, `Feed`, `Delivery`, `DayRecap`, `Prompts`) |
 | `schedules` (others), `prompt_sections`, `db_migrations`, `i18n_namespaces`, `node_programs`, `channel_kinds`, `frame_handlers`, `push_categories`, `shell_places`, `chat_card_kinds`, `composer_actions`, `chat_accessories` | Not yet | Declared but not served: each gets a `Host` method when its first module moves (#13408 remaining work, #13400 to #13403) |
@@ -118,6 +118,35 @@ missing quietly.
 Route validation uses the real `http.ServeMux` conflict rules, including equivalent wildcard patterns, against the core
 and previously accepted modules. The reserved tool names include conditional core tools and compatibility aliases. A
 conflict rejects the module's complete contribution before the live mux changes; core tool dispatch remains authoritative.
+
+**Assistant tools.** A module's tool is a `modapi.MCPTool` (`server/internal/modapi/tool.go`): the name its manifest
+lists in `mcp_tools`, the description and input schema the model is shown, and a handler. Build it with `modapi.Tool`
+and an argument struct, so the contract decodes the model's arguments once and strictly before the handler runs:
+
+```go
+type remindArgs struct {
+	Text string `json:"text"`
+}
+
+err := h.AddMCPTool(modapi.Tool("module_remind", "Remind the owner of something.", modapi.ToolSchema(remindSchema),
+	func(ctx context.Context, call modapi.ToolCall, a remindArgs) (modapi.ToolResult, error) {
+		return modapi.ToolText("Reminder saved for " + call.Machine.String() + "."), nil
+	}))
+```
+
+- `ToolCall` says who called: `Machine` (`wireids.MachineID`) and `Session` (`wireids.SessionID`, the calling Agent
+  session on that machine: an assistant conversation's session or another Agent's that was offered the tool; empty
+  when the core calls the tool with no session behind it), and `Args`, the model's arguments as sent.
+- An argument the struct does not declare, a value of the wrong type or anything after the object fails the call with
+  `invalid arguments: …` before the handler runs; a call with no arguments decodes an empty object. Keep the struct's
+  `json` tags and the schema's properties the same. Never decode into a map.
+- `ToolResult.Text` reaches the model as it is; a failure is the handler's error, whose text the model sees as the
+  tool's error. `TestModuleToolWireIsPinned` (`server/internal/assistant/modules_tool_wire_test.go`) pins the
+  definition, the output and the error as the model receives them.
+- Raw JSON crosses this slot in two named types only: `ToolSchema` (the JSON Schema text shown to the model, which the
+  core never reads) and `ToolArgs` (the model's arguments on their way to the tool's decoder). A tool that must read
+  its arguments itself fills `MCPTool.Run` and reads `call.Args`.
+- `AddMCPTool` refuses a tool the manifest does not name, a tool without a handler and a tool added twice.
 
 A manager that publishes module flags also announces the reserved `modules` marker, including when every module is off
 or built out. Clients treat a module with a `feature` as off only when the hello has `modules` and lacks that feature;

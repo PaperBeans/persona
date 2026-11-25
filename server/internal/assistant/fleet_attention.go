@@ -51,15 +51,25 @@ func linkAttention(l i18n.Lang, agents []fleetInput, ixs []proto.Interaction, to
 // and its items are fleetcountadapt's: the cards are read oldest first, those of the same time by id, so that the card
 // that stands for an agent does not depend on the order they were read in.
 func (r *fleetRound) linkAttention(l i18n.Lang, agents []fleetInput, ixs []proto.Interaction, told map[string]bool) link.Attention {
+	r.fillLink(agents, ixs, told)
+	defer r.letLinkGo()
+	return r.link.Link(string(l), sessionTitle)
+}
+
+// fillLink puts a round's agents and cards into the fleet Persona Link's summary is decided on, the cards oldest first
+// and those of the same time by id (linkAttention), told which cards are the owner's.
+func (r *fleetRound) fillLink(agents []fleetInput, ixs []proto.Interaction, told map[string]bool) {
 	r.cards = append(r.cards[:0], ixs...)
 	slices.SortStableFunc(r.cards, func(a, b proto.Interaction) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
 	})
 	r.fill(&r.link, agents, r.cards, told)
-	out := r.link.Link(string(l), sessionTitle)
-	r.link.Reset() // the round's lists are let go until the next one
+}
+
+// letLinkGo lets the round's lists go until the next one.
+func (r *fleetRound) letLinkGo() {
+	r.link.Reset()
 	clear(r.cards)
-	return out
 }
 
 // linkCovers is whether card ix, told, is what Persona Link's summary (linkAttention, as liveLoop works it out next)

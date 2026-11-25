@@ -54,12 +54,14 @@ const (
 // liveState is what was told the hub last, and the needs-you arrays fleetSnapshot and linkCovers reuse (liveLoop
 // keeps its own).
 type liveState struct {
-	mu     sync.Mutex
-	sent   string
-	signal chan struct{}
+	mu         sync.Mutex
+	sent       string
+	countsTold bool // the hub has the counts view liveLoop made last (counts_view.go)
+	signal     chan struct{}
 
 	roundMu sync.Mutex
 	round   fleetRound
+	counts  countsTeller // liveLoop's own
 }
 
 func (l *liveState) ch() chan struct{} {
@@ -79,7 +81,7 @@ func (s *Service) liveChanged(force bool) {
 	}
 	if force {
 		s.fleet.live.mu.Lock()
-		s.fleet.live.sent = ""
+		s.fleet.live.sent, s.fleet.live.countsTold = "", false
 		s.fleet.live.mu.Unlock()
 	}
 	select {
@@ -89,7 +91,7 @@ func (s *Service) liveChanged(force bool) {
 }
 
 // liveLoop tells the hub the fleet when it changed, at most every 100 ms, and looks at the numbers every 15 s; the
-// devices get Persona Link's summary of the same agents.
+// devices get Persona Link's summary of the same agents, and the hub this manager's counts view of them.
 func (s *Service) liveLoop(ctx context.Context) {
 	tick := time.NewTicker(15 * time.Second)
 	defer tick.Stop()
@@ -115,7 +117,9 @@ func (s *Service) liveLoop(ctx context.Context) {
 		l := s.lang(context.Background())
 		agents, ixs, told := s.fleetInputsInto(lists)
 		s.tellLive(round.buildFleet(l, agents, ixs))
-		s.devs.SetAttention(round.linkAttention(l, agents, ixs, told)) // sent on only when it changed
+		attention, counts := round.linkAndCounts(l, agents, ixs, told)
+		s.devs.SetAttention(attention) // sent on only when it changed
+		s.tellCounts(counts)
 	}
 }
 

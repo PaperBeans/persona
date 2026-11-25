@@ -317,6 +317,9 @@ func (s *Service) beginLogicalSwitch(ctx context.Context, machine, id string, p 
 		if sourceEngine == "" {
 			return nil, logicalRefusal(ctx, "unknown_engine")
 		}
+		if known && !row.LogicalPlaceholder && s.isAssistantRow(row) {
+			s.noteConversationSpaces(ctx, []db.ConversationSpace{{MachineID: machine, SessionID: id, Space: runSpace(row)}})
+		}
 		if err = st.AdoptConversationAliases(ctx, machine, id, randomHex(16), sourceEngine, historyGen, s.physicalAliases(machine)); err != nil {
 			return nil, err
 		}

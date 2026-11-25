@@ -574,7 +574,13 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 			list[i].Assistant = true
 		}
 		if list[i].Assistant && list[i].Space == "" {
-			list[i].Space = identity.SpaceOf(list[i].Cwd)
+			if list[i].LogicalPlaceholder {
+				if sp, known := s.logicalRowSpace(context.Background(), list[i]); known {
+					list[i].Space = sp
+				}
+			} else {
+				list[i].Space = identity.SpaceOf(list[i].Cwd)
+			}
 		}
 		if t := shown[list[i].SessionID].Title; t != "" && list[i].Assistant {
 			list[i].Title = t // "MMDD | type | topic", the user's own, "Persona" for the main one (titles.go)

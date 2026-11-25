@@ -36,8 +36,7 @@ import { recentConversations } from "../lib/conversation-origins";
 import { isBackgroundSupervisor } from "../lib/background-supervisor";
 import { setRecentMore, useRecentCount, useRecentMore } from "../lib/sidebar-recent";
 import { countsLabel, directionExternal, directionLabel, useDirectionNames, useLeaderCounts, visibleSectionCounts } from "../lib/direction-names";
-import type { ExternalDirection } from "../lib/direction-tree";
-import { SidebarDirectionRow } from "./SidebarDirections";
+import { resolveSidebarDirections, sidebarConversations, SidebarDirectionsSection, type SidebarDirectionEntry } from "./SidebarDirections";
 import { conversationPage } from "../lib/conversation-page";
 import { href, navigate, onLinkClick, showsSession, type Route } from "../lib/router";
 import { useScrollMemory } from "../lib/scroll-memory";
@@ -46,7 +45,7 @@ import { heldAsWorking, rowCards } from "../lib/supervisor-held";
 import { isInFlightLaunch } from "../lib/launch-handoff";
 import { getState, refresh, refreshTodos, useHubUnreachable, useStore } from "../lib/store";
 import { SESSIONS_SIDE_FOLD_FEATURE } from "../lib/side-fold";
-import { conversationTitle, mergeConversations } from "./assistant/conversations";
+import { conversationTitle } from "./assistant/conversations";
 import { sameManager, useShownManager } from "../lib/manager-choice";
 import { agentGroupLabel, agentTreeState, buildTodoTree, shareTree, worstTreeState, type TodoTree } from "../lib/todo-tree";
 import { consumeBoardSidebarTree } from "../features/todos/board-consumer";
@@ -344,7 +343,6 @@ function GlideHighlight({ box }: { box: ReturnType<typeof glideStore> }) {
 const MORE_BUTTON = "whitespace-nowrap rounded-[7px] px-2 py-1 text-left text-[12px] text-ink-3 hover:text-ink-2 [@media(pointer:coarse)]:min-h-11";
 
 const NO_CONVERSATIONS: Session[] = [];
-type DirectionEntry = { id: string; conversation?: Session; external?: ExternalDirection };
 
 export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActions, active = true }: { route: Route; onSearch: () => void; onNewAgent: () => void; onNavigate?: () => void; workspaceActions?: WorkspaceTreeActions; active?: boolean }) {
   const bindings = useBindings();
@@ -353,11 +351,11 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
   const manager = useShownManager();
   const assistantMachine = assistant?.machine_id;
   const liveChats = useStore((s) => (assistantMachine ? s.sessions[assistantMachine] ?? NO_CONVERSATIONS : NO_CONVERSATIONS));
-  const unarchived = useMemo(
-    () => mergeConversations([], assistant?.conversations ?? NO_CONVERSATIONS, liveChats, manager)
-      .filter((c) => !c.archived).length,
+  const allConversations = useMemo(
+    () => sidebarConversations(assistant?.conversations ?? NO_CONVERSATIONS, liveChats, manager),
     [assistant?.conversations, liveChats, manager],
   );
+  const unarchived = allConversations.length;
   const { phase, online, total, main: mainConversation, sections, more } = useNavPages();
   const mainWaiting = useMainWaiting(active ? mainConversation : undefined);
   // a phone's drawer has the pages as two rows of icons, so its first screen reaches the Agents (#1996)
@@ -369,32 +367,44 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
   // you, and an open sidebar follows the hub's `directions` (lib/store.ts). Then "最近", the newest of the user's other
   // chats (#4873): as many as the setting says, more after each Show more (#5146); every chat is under 全部对话.
   // The background supervisor is neither: it is built in, listed with the scheduled tasks' chats under 全部对话 (#5082).
-  const leaders = (assistant?.leaders ?? []).filter((id) => id !== assistant?.main && !isBackgroundSupervisor(assistant, id));
+  const leaders = useMemo(
+    () => (assistant?.leaders ?? []).filter((id) => id !== assistant?.main && !isBackgroundSupervisor(assistant, id)),
+    [assistant],
+  );
   const isLeader = (id: string) => leaders.includes(id);
-  const conversationOf = (id: string) => assistant?.conversations.find((c) => c.session_id === id);
-  const directions = leaders.map((id): DirectionEntry | null => {
-    const conversation = conversationOf(id);
-    if (conversation) return { id, conversation };
-    const external = directionExternal(id);
-    return external ? { id, external } : null;
-  }).filter((d): d is DirectionEntry => !!d);
+  const conversationById = useMemo(
+    () => new Map(allConversations.map((c) => [c.session_id, c])),
+    [allConversations],
+  );
+  const conversationOf = (id: string) => conversationById.get(id);
+  // Every direction id belongs in the key: with only conversationless directions there is still a `/leaders` fallback ask.
+  const directionNames = useDirectionNames(leaders.map((id) => `${id}\u0000${conversationOf(id)?.title ?? ""}`).join("\u0001"));
+  const baseCounts = useLeaderCounts();
+  const directions = useMemo(
+    () => resolveSidebarDirections({
+      leaders,
+      main: assistant?.main,
+      backgroundSupervisor: assistant?.background_supervisor,
+      conversations: allConversations,
+      externalOf: directionExternal,
+    }),
+    // directionNames and baseCounts re-run when direction tree / leaders metadata refreshes directionExternal.
+    [leaders, assistant?.main, assistant?.background_supervisor, allConversations, directionNames, baseCounts],
+  );
   const recentCount = useRecentCount();
   const recentMore = useRecentMore();
-  const ownChats = recentConversations(assistant?.conversations ?? [], assistant?.main, leaders, assistant?.background_supervisor, assistant?.recent_task_chats === true, assistant?.conversation_order);
+  const ownChats = recentConversations(allConversations, assistant?.main, leaders, assistant?.background_supervisor, assistant?.recent_task_chats === true, assistant?.conversation_order);
   const [arranging, setArranging] = useState(false);
   const recent = ownChats.slice(0, recentCount * (1 + recentMore));
   const recentLeft = ownChats.length - recent.length;
   const recentLess = recentMore > 0 && ownChats.length > recentCount;
-  // Every direction id belongs in the key: with only conversationless directions there is still a `/leaders` fallback ask.
-  const directionNames = useDirectionNames(leaders.map((id) => `${id}\u0000${conversationOf(id)?.title ?? ""}`).join("\u0001"));
-  const baseCounts = useLeaderCounts();
   const plans = useFeed((s) => s.plans);
   useEffect(() => { if (active && assistant?.main) void loadFeed(assistant.main); }, [active, assistant?.main, manager]);
   const counts = useMemo(() => {
-    const owned = new Set((assistant?.conversations ?? []).map((c) => c.session_id));
+    const owned = new Set(allConversations.map((c) => c.session_id));
     if (assistant?.main) owned.add(assistant.main);
     return pendingPlanCounts(baseCounts, plans, manager, owned);
-  }, [baseCounts, plans, assistant, manager]);
+  }, [baseCounts, plans, allConversations, assistant?.main, manager]);
   // the main row sits above the pages, so"Persona chats"waits for the assistant (a hub without it has none)
   const chats = !!assistant;
   // a conversation row's ⋯ / right click (iOS: its long press)
@@ -413,8 +423,8 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
 
   // A conversation-backed lead's row is unchanged. An external one reuses that row, but opens only its actual outside
   // Agent (never a fabricated `/persona/<direction-id>`), has no conversation menu, and is a plain row without a pair.
-  const directionName = (d: DirectionEntry) => directionLabel(directionNames, d.id, d.conversation ? conversationTitle(d.conversation) : t("lib-format.untitled_session"));
-  const directionRow = (d: DirectionEntry) => {
+  const directionName = (d: SidebarDirectionEntry) => directionLabel(directionNames, d.id, d.conversation ? conversationTitle(d.conversation) : t("lib-format.untitled_session"));
+  const directionRow = (d: SidebarDirectionEntry) => {
     if (d.conversation) {
       const c = d.conversation;
       return <SessionRow key={c.session_id} s={c} k={`j:${c.session_id}`} reg={reg} hover={hover} active={activeKey === `j:${c.session_id}`} to={conversationPage(c.session_id, c.machine_id, c.manager)} go={go} label={directionName(d)} hint={countsLabel(counts.get(c.session_id), t) || undefined} hintFull showState={false} workingMark={counts.get(c.session_id)?.running ?? false} keepTrailing onMenu={onConvMenu} menuLabel={t("conversation-menu.actions")} />;
@@ -495,14 +505,7 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
             }
           >
             <div className="sidebar-indent">
-              {directions.length > 0 && (
-                <>
-                  <SubHeading label={t("sidebar.directions")} />
-                  <div className="sidebar-indent">
-                    {directions.map((d) => <SidebarDirectionRow key={d.id} id={d.id} name={directionName(d)} row={directionRow(d)} reg={reg} hover={hover} go={go} onNavigate={onNavigate} />)}
-                  </div>
-                </>
-              )}
+              <SidebarDirectionsSection directions={directions} nameOf={directionName} renderRow={directionRow} reg={reg} hover={hover} go={go} onNavigate={onNavigate} />
               {arranging ? ownChats.length > 0 && (
                 <Suspense fallback={null}>
                   <SidebarConversationArrange rows={ownChats} row={recentRow} onClose={() => setArranging(false)} />

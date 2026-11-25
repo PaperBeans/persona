@@ -127,7 +127,7 @@ internal fun FeishuBotPage(api: FeishuBotSettings?, onBack: () -> Unit) {
             Column(Modifier.padding(top = Tokens.Space.l), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                 JSectionHeader(stringResource(R.string.settings_feishu_bot_howto))
                 listOf(R.string.settings_feishu_bot_step_create_app, R.string.settings_feishu_bot_step_permissions,
-                    R.string.settings_feishu_bot_step_events, R.string.settings_feishu_bot_step_publish).forEachIndexed { i, step ->
+                    R.string.settings_feishu_bot_step_sync_permissions, R.string.settings_feishu_bot_step_events, R.string.settings_feishu_bot_step_publish).forEachIndexed { i, step ->
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
                         Text("${i + 1}", style = PersonaTheme.type.caption, color = PersonaTheme.palette.accent, maxLines = 1)
                         Text(stringResource(step), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)

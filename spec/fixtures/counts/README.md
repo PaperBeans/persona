@@ -9,13 +9,14 @@ count (`docs/design/PRINCIPLES.md`, "Consistency first" and "Rules are checkable
 
 `surfaces.json` is `{"version": 1, "counts": {...}, "replays": {...}, "surfaces": [...]}`.
 
-- `counts`: each count id with its `rule` (one sentence, or `null` while a decision has yet to give it one), the
-  fixture that pins it (`pinned_by`, or `null`) and the decisions it waits on (`waits_on`). The ids are the plan's
-  (section 3.1): `agents_needs_you` (pinned by `spec/fixtures/needs-you`), `inbox_unread`, `inbox_action`,
-  `todos_needs_you` (pinned by `spec/fixtures/todo-counts`) and `persona_cards`. An id starts with the rule of the
-  clients it replaces; `persona_cards` has none until D9, since iOS and Android count different cards today. A count
-  a decision refined after step 4 lists it in `refined_by` (the plan's D18: a refinement keeps the id):
-  `agents_needs_you` names D11, which leaves sessions whose only cards are held out of it.
+- `counts`: each count id with its `rule` (one sentence, or `null` while a decision has yet to give it one), the fixture
+  that pins it (`pinned_by`, or `null`), the function in the manager that writes it into the counts view (`producer`,
+  `{file, symbol}`, or `null` while the view does not carry it; step 7a, D18) and the decisions it waits on
+  (`waits_on`). The ids are the plan's (section 3.1): `agents_needs_you` (pinned by `spec/fixtures/needs-you`),
+  `inbox_unread`, `inbox_action`, `todos_needs_you` (pinned by `spec/fixtures/todo-counts`) and `persona_cards`. An id
+  starts with the rule of the clients it replaces; `persona_cards` has none until D9, since iOS and Android count
+  different cards today. A count a decision refined after step 4 lists it in `refined_by` (the plan's D18: a refinement
+  keeps the id): `agents_needs_you` names D11, which leaves sessions whose only cards are held out of it.
 - `surfaces`: one row per place a count is drawn on one client, from the plan's section 2 (the inventory, read at
   e4308ecc23) and checked against the code this table names. A row's id is `<client>.<surface>`.
 
@@ -51,7 +52,12 @@ are held, so each names D11 (the web's switcher, which matched before, by it alo
 
 - the shape: known clients, scopes and count ids; a `differs` row names decisions the plan's section 6 lists, a
   `matches` row none; a row that draws a count with no rule differs, naming the decision it waits on;
-- every `code` symbol is declared in its file (each part of a dotted one), and every `tests` file names its symbol;
+- every `code` symbol is declared in its file (each part of a dotted one, or in Go a method of the type before the
+  dot), and every `tests` file names its symbol;
+- every count the counts view carries (the fields of `counts` and `totals` in `schema/wire/counts.schema.json`) names
+  its `producer`, a function declared in a Go file of an adapter package in `server/`, and no other count names one; a
+  field the schema has that `counts` lacks fails too. The producer's own package test checks that it writes exactly
+  the counts that name it (`TestViewWritesTheCountsThatNameIt` in `server/internal/assistant/fleetcount/fleetcountadapt`);
 - `matches` rows with the same label draw the same count;
 - each replay's surfaces are rows of every lane that reports them, read from keys every case's `expected` has;
 - a lane's mark in a replayed case (`known_differences.<lane>`) that changes a key a surface reads makes that lane's
@@ -63,8 +69,8 @@ are held, so each names D11 (the web's switcher, which matched before, by it alo
   the merge base with `origin/main`) no row differs that did not, but a row that names a decision this change adds to
   the `refined_by` of a count it draws; once the base lists the refinement, no further row comes to differ by it;
 - a row with `view` names its fallback symbol in no source file of its client but the fallback's own (tests aside);
-- check-fast runs the guard for this directory, the plan, and every file the table names
-  (`scripts/ci/check_fast_map.py` reads the table for them, so a new row needs no edit there).
+- check-fast runs the guard for this directory, the plan, the view's schema, and every file the table names, producers
+  included (`scripts/ci/check_fast_map.py` reads the table for them, so a new row needs no edit there).
 
 Its unit tests run it on the table, then break each rule in a small tree of their own and check that it is caught.
 Run: `python3 -B scripts/test/test_counts_surfaces.py`.

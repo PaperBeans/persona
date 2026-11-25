@@ -27,10 +27,11 @@ type row struct {
 }
 
 // Tally is the rows that need the owner on one surface, in the order the surface lists them, and the surface's number.
-// The zero Tally is empty.
+// The zero Tally is empty, and on no surface.
 type Tally struct {
 	tally []row
 	total RowCount
+	on    Surface
 }
 
 // TallyVisitor is told every row of a tally, then the total.
@@ -60,6 +61,9 @@ func (t Tally) Accept(v TallyVisitor) {
 	v.VisitTotal(t.total)
 }
 
+// On says whether the tally is a surface's rows: what renders one surface's rows refuses another's.
+func (t Tally) On(surface Surface) bool { return t.on == surface && surface != (Surface{}) }
+
 // AgentsNeedsYou is the agents and cards that need the owner on a surface: one row per agent that waits, by the card
 // that stands for it (or by the dialog in its terminal when none does), and the surface's number.
 //
@@ -77,14 +81,18 @@ func (t Tally) Accept(v TallyVisitor) {
 // So one list of agents and cards serves every surface: the caller hands in the quiet and the hidden with the rest. The
 // zero Surface is a defect.
 func AgentsNeedsYou(on Surface, agents Agents, cards Cards) Tally {
+	var t Tally
 	switch on {
 	case SurfaceBadge():
-		return badgeRows(agents.agents, cards.cards)
+		t = badgeRows(agents.agents, cards.cards)
 	case SurfaceLiveActivity(), SurfaceLink():
-		return fleetRows(on, agents.agents, cards.cards)
+		t = fleetRows(on, agents.agents, cards.cards)
+	default:
+		defect.Raise("fleetcount.AgentsNeedsYou", "the zero Surface")
+		return Tally{}
 	}
-	defect.Raise("fleetcount.AgentsNeedsYou", "the zero Surface")
-	return Tally{}
+	t.on = on
+	return t
 }
 
 // mark is what the cards say of one agent that counts on the surface, as the bits below.
@@ -205,31 +213,45 @@ func fleetWhy(on Surface, a Agent, m mark) Why {
 }
 
 // badgeRows is the Agents list's rows (see AgentsNeedsYou). Each row is put together in parallel lists by its place
-// among the rows: its agent (-1 for a card of no session), its first card and the others (places in cards, -1 for
-// none), whether a card or a dialog of it is the owner's, whether an agent of it waits in its terminal and since when.
+// among the rows: its agent (-1 for a card of no session), its first and last card (places in cards, -1 for none; the
+// cards between follow the first through next), whether a card or a dialog of it is the owner's, whether an agent of
+// it waits in its terminal and since when. The lists are cut from three arrays made to the most rows there can be
+// (one per card and one per agent waiting in its terminal), so a round makes four arrays whatever it holds.
 func badgeRows(agents []Agent, cards []Card) Tally {
-	host := make([]int, len(agents)) // the agent whose row each agent's cards and dialog go to, -1 for none
+	bound := len(cards)
+	for i := range agents {
+		if agents[i].waitsInItsTerminal() {
+			bound++
+		}
+	}
+	if bound == 0 { // no card and no dialog: no row, and nothing to put one together with
+		return Tally{}
+	}
+	ints := make([]int, 2*len(agents)+2*len(cards)+4*bound)
+	cutInts := func(n int) []int { part := ints[:n:n]; ints = ints[n:]; return part }
+	flags := make([]bool, 2*len(agents)+2*bound)
+	cutFlags := func(n int) []bool { part := flags[:n:n]; flags = flags[n:]; return part }
+	times := make([]instant.Instant, 2*bound)
+	cutTimes := func(n int) []instant.Instant { part := times[:n:n]; times = times[n:]; return part }
+
+	host := cutInts(len(agents)) // the agent whose row each agent's cards and dialog go to, -1 for none
 	for i := range agents {
 		host[i] = hostOf(agents, i)
 	}
-	order := make([]int, len(cards)) // the cards, oldest first
+	order, next := cutInts(len(cards)), cutInts(len(cards)) // the cards, oldest first; each row's card after this one
 	for i := range order {
-		order[i] = i
+		order[i], next[i] = i, -1
 	}
 	slices.SortStableFunc(order, func(x, y int) int { return compareInstants(cards[x].asked, cards[y].asked) })
-	carded := make([]bool, len(agents))     // the agent has a card in the list
-	supervised := make([]bool, len(agents)) // the agent has a card its task's supervisor holds
-	var (
-		agentOf, first []int
-		more           [][]int
-		own, waits     []bool
-		waiting        []instant.Instant
-	)
+	carded := cutFlags(len(agents))     // the agent has a card in the list
+	supervised := cutFlags(len(agents)) // the agent has a card its task's supervisor holds
+	agentOf, first, last := cutInts(bound)[:0], cutInts(bound)[:0], cutInts(bound)[:0]
+	own, waits, waiting := cutFlags(bound)[:0], cutFlags(bound)[:0], cutTimes(bound)[:0]
 	var unknown instant.Instant
-	rowOf := make([]int, len(agents)) // each row agent's place among the rows, plus one; 0 for none yet
+	rowOf := cutInts(len(agents)) // each row agent's place among the rows, plus one; 0 for none yet
 	join := func(h int) int {
 		if rowOf[h] == 0 {
-			agentOf, first, more = append(agentOf, h), append(first, -1), append(more, nil)
+			agentOf, first, last = append(agentOf, h), append(first, -1), append(last, -1)
 			own, waits, waiting = append(own, false), append(waits, false), append(waiting, unknown)
 			rowOf[h] = len(agentOf)
 		}
@@ -238,15 +260,16 @@ func badgeRows(agents []Agent, cards []Card) Tally {
 	for _, ci := range order {
 		switch h := badgeHost(agents, host, &cards[ci], carded, supervised); {
 		case h == -1:
-			agentOf, first, more = append(agentOf, -1), append(first, ci), append(more, nil)
+			agentOf, first, last = append(agentOf, -1), append(first, ci), append(last, ci)
 			own, waits, waiting = append(own, cards[ci].holding == HoldingForTheOwner()), append(waits, false), append(waiting, unknown)
 		case h >= 0:
 			g := join(h)
 			if first[g] < 0 {
 				first[g] = ci
 			} else {
-				more[g] = append(more[g], ci)
+				next[last[g]] = ci
 			}
+			last[g] = ci
 			own[g] = own[g] || cards[ci].holding == HoldingForTheOwner()
 		}
 	}
@@ -260,8 +283,8 @@ func badgeRows(agents []Agent, cards []Card) Tally {
 		}
 		waits[g], own[g] = true, true
 	}
-	since := make([]instant.Instant, len(agentOf)) // what each row is ordered by: its oldest card, else its dialog
-	rows := make([]int, len(agentOf))
+	since := cutTimes(bound)[:len(agentOf)] // what each row is ordered by: its oldest card, else its dialog
+	rows := cutInts(bound)[:len(agentOf)]
 	for g := range agentOf {
 		since[g], rows[g] = waiting[g], g
 		if first[g] >= 0 {
@@ -283,7 +306,7 @@ func badgeRows(agents []Agent, cards []Card) Tally {
 			out = append(out, row{kind: agentRow(), agent: agents[agentOf[g]].at, why: why, since: since[g]})
 		default:
 			out = append(out, row{kind: agentByCardRow(), agent: agents[agentOf[g]].at, card: cards[first[g]].at, why: why})
-			for _, ci := range more[g] {
+			for ci := next[first[g]]; ci >= 0; ci = next[ci] {
 				out = append(out, row{kind: cardUnderRow(), card: cards[ci].at})
 			}
 		}

@@ -106,10 +106,10 @@ func TestModuleRouteFollowsModulePresence(t *testing.T) {
 func TestModuleToolFollowsModulePresence(t *testing.T) {
 	const name = "module_echo"
 	m := testSlotModule{info: moduleTestInfo("tool-test"), register: func(h modapi.Host) error {
-		return h.AddMCPTool(name, "Echo the input", json.RawMessage(`{"type":"object"}`),
-			func(_ context.Context, _, _ string, args json.RawMessage) (string, error) {
-				return "echo:" + string(args), nil
-			})
+		return h.AddMCPTool(modapi.MCPTool{Name: name, Description: "Echo the input", InputSchema: modapi.ToolSchema(`{"type":"object"}`),
+			Run: func(_ context.Context, call modapi.ToolCall) (modapi.ToolResult, error) {
+				return modapi.ToolText("echo:" + string(call.Args)), nil
+			}})
 	}}
 	m.info.MCPTools = []string{name}
 	f := newFakeHub().withMachine()
@@ -139,11 +139,14 @@ func TestModuleToolConflictWithCoreDropsWholeModule(t *testing.T) {
 	m := testSlotModule{info: moduleTestInfo("tool-conflict")}
 	m.info.MCPTools = []string{unique, "notify_user"}
 	m.register = func(h modapi.Host) error {
-		run := func(context.Context, string, string, json.RawMessage) (string, error) { return "module shadow", nil }
-		if err := h.AddMCPTool(unique, "Unique module tool", json.RawMessage(`{"type":"object"}`), run); err != nil {
+		run := func(context.Context, modapi.ToolCall) (modapi.ToolResult, error) {
+			return modapi.ToolText("module shadow"), nil
+		}
+		schema := modapi.ToolSchema(`{"type":"object"}`)
+		if err := h.AddMCPTool(modapi.MCPTool{Name: unique, Description: "Unique module tool", InputSchema: schema, Run: run}); err != nil {
 			return err
 		}
-		return h.AddMCPTool("notify_user", "Conflicting module tool", json.RawMessage(`{"type":"object"}`), run)
+		return h.AddMCPTool(modapi.MCPTool{Name: "notify_user", Description: "Conflicting module tool", InputSchema: schema, Run: run})
 	}
 	f := newFakeHub().withMachine()
 	s := New(Options{Hub: f, Store: func() Store { return &memStore{} }, Logf: testLogf(t), Modules: []modapi.Module{m}})
@@ -186,7 +189,8 @@ func TestModuleRouteConflictWithCoreDropsWholeModule(t *testing.T) {
 		if err := h.AddHubRoute(core.Routes()[0], handler); err != nil {
 			return err
 		}
-		return h.AddMCPTool(uniqueTool, "Unique module tool", json.RawMessage(`{"type":"object"}`), func(context.Context, string, string, json.RawMessage) (string, error) { return "", nil })
+		return h.AddMCPTool(modapi.MCPTool{Name: uniqueTool, Description: "Unique module tool", InputSchema: modapi.ToolSchema(`{"type":"object"}`),
+			Run: func(context.Context, modapi.ToolCall) (modapi.ToolResult, error) { return modapi.ToolResult{}, nil }})
 	}
 	s := newService([]modapi.Module{m})
 	if s.modules.Loaded("route-core-conflict") || !strings.Contains(s.modules.Skipped("route-core-conflict"), "route") {

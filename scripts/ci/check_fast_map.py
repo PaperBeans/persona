@@ -26,13 +26,16 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _counts_table_files(root=ROOT):
     """Every file the counts surface table names (spec/fixtures/counts/surfaces.json, #11900): each surface's code and
-    tests, and a hub-fed surface's fallback. Its guard reads them all, so a rename in any of them runs it. Read on each
-    run, so a new row needs no edit here; a missing or unreadable table names none, and its own rule still runs the
-    guard."""
+    tests, a hub-fed surface's fallback and the function that writes each count into the manager's view (its
+    producer). Its guard reads them all, so a rename in any of them runs it. Read on each run, so a new row needs no
+    edit here; a missing or unreadable table names none, and its own rule still runs the guard."""
     try:
-        rows = json.loads((root / "spec/fixtures/counts/surfaces.json").read_text(encoding="utf-8"))["surfaces"]
+        table = json.loads((root / "spec/fixtures/counts/surfaces.json").read_text(encoding="utf-8"))
+        rows = table["surfaces"]
         files = {entry["file"] for row in rows for key in ("code", "tests") for entry in row.get(key, ())}
         files |= {row["view"]["fallback"]["file"] for row in rows if isinstance(row.get("view"), dict)}
+        files |= {count["producer"]["file"] for count in table.get("counts", {}).values()
+                  if isinstance(count, dict) and isinstance(count.get("producer"), dict)}
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return ()
     return tuple(sorted(path for path in files if isinstance(path, str) and path))
@@ -328,7 +331,8 @@ TABLE = (
     (
         (("spec/fixtures/counts/*", "spec/fixtures/needs-you/*"),
          ("scripts/test/test_counts_surfaces.py", "scripts/test/test_counts_agreement.py")),
-        (("docs/plans/plan-derived-counts.md", *_counts_table_files()), ("scripts/test/test_counts_surfaces.py",)),
+        (("docs/plans/plan-derived-counts.md", "schema/wire/counts.schema.json", *_counts_table_files()),
+         ("scripts/test/test_counts_surfaces.py",)),
     ),
 )
 

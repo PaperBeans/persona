@@ -357,7 +357,7 @@ function BindingRow({ view, b, botTier, busy, upgrading, anyBusy, confirming, se
       <Row label={name} hint={statusLine(b)} wrapHint stackOnNarrow>
         {withoutChat && <Pill tone="orange">{t("settings-larksync.no_chat_badge")}</Pill>}
         <Pill tone={state.tone}>{state.text}</Pill>
-        <Switch on={b.enabled} disabled={busy || authorize} label={t("settings-larksync.enabled_label", { name })} onChange={onToggle} />
+        <Switch on={b.enabled} disabled={busy || (authorize && b.health !== "scope_missing")} label={t("settings-larksync.enabled_label", { name })} onChange={onToggle} />
       </Row>
       {b.error && !b.running && <SettingsHint caution>{b.error}</SettingsHint>}
       {soon !== null && <SettingsHint caution>{t("settings-larksync.reauth_soon", { count: soon })}</SettingsHint>}

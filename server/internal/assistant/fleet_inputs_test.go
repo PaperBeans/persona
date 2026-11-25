@@ -205,10 +205,13 @@ func liveFleet(tb testing.TB, machines, rows int) *Service {
 }
 
 // liveRoundOnce is one of liveLoop's rounds without the telling: the fleet read (over kept, nil: new copies) and the
-// state and the summary built from it, over the needs-you arrays r kept from its last round, as liveLoop's.
+// state, the summary and the counts view built from it, over the needs-you arrays r kept from its last round, as
+// liveLoop's.
 func liveRoundOnce(s *Service, kept map[string][]proto.Session, r *fleetRound) (assistantwire.FleetState, link.Attention) {
 	agents, ixs, told := s.fleetInputsInto(kept)
-	return r.buildFleet("en", agents, ixs), r.linkAttention("en", agents, ixs, told)
+	st := r.buildFleet("en", agents, ixs)
+	attention, _ := r.linkAndCounts("en", agents, ixs, told)
+	return st, attention
 }
 
 // BenchmarkLiveRound: one of liveLoop's rounds over 10 computers of 50 sessions, with new copies of the lists

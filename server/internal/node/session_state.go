@@ -36,6 +36,7 @@ type sessionState struct {
 
 	SegmentRetired          bool            `json:"segment_retired,omitempty"`
 	SegmentOperation        string          `json:"segment_operation,omitempty"`
+	SegmentInputs           []string        `json:"segment_inputs,omitempty"`
 	TaskInstructions        string          `json:"task_instructions,omitempty"`
 	TaskInstructionFile     string          `json:"task_instruction_file,omitempty"`
 	TaskInstructionChannel  string          `json:"task_instruction_channel,omitempty"`
@@ -177,8 +178,14 @@ func (s *stateFile) merge(m map[string]sessionState) {
 		if observationOnly(v) {
 			continue // not Persona's, and what it says of the user's session is not kept either (observationOnly)
 		}
-		if _, ok := s.Sessions[id]; !ok {
+		if cur, ok := s.Sessions[id]; !ok {
+			if len(v.SegmentInputs) > 0 {
+				v.SegmentInputs = mergeSegmentInputs(nil, v.SegmentInputs)
+			}
 			s.Sessions[id] = v
+		} else if len(v.SegmentInputs) > 0 {
+			cur.SegmentInputs = mergeSegmentInputs(v.SegmentInputs, cur.SegmentInputs)
+			s.Sessions[id] = cur
 		}
 	}
 }
@@ -332,6 +339,9 @@ func (s *stateFile) adoptSwitch(id string, v sessionState) {
 		cur.EngineHistory, cur.PendingHandoff = v.EngineHistory, v.PendingHandoff // a switch to another engine (engine_switch.go)
 		cur.EngineRuntime = v.EngineRuntime
 		cur.RemoteAgent = cur.RemoteAgent || v.RemoteAgent
+		if len(v.SegmentInputs) > 0 {
+			cur.SegmentInputs = mergeSegmentInputs(cur.SegmentInputs, v.SegmentInputs)
+		}
 		v = cur
 	}
 	s.Sessions[id] = v
@@ -473,6 +483,11 @@ func (s *stateFile) put(id string, v sessionState) bool {
 		if old.SegmentOperation != "" {
 			v.SegmentOperation = old.SegmentOperation
 		}
+		if len(old.SegmentInputs) > 0 {
+			v.SegmentInputs = old.SegmentInputs
+		} else if len(v.SegmentInputs) > 0 {
+			v.SegmentInputs = mergeSegmentInputs(nil, v.SegmentInputs)
+		}
 		// Owned by state.update: older process snapshots cannot replace the
 		// idle clock or the latest compaction result.
 		v.IdleCompaction, v.Compaction = old.IdleCompaction, old.Compaction
@@ -491,6 +506,8 @@ func (s *stateFile) put(id string, v sessionState) bool {
 		if old.RemoteAgent {
 			v.RemoteAgent = true // latch-only security posture: never cleared by later writes
 		}
+	} else if len(v.SegmentInputs) > 0 {
+		v.SegmentInputs = mergeSegmentInputs(nil, v.SegmentInputs)
 	}
 	s.Sessions[id] = v
 	persist := s.persist

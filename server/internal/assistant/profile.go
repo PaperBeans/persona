@@ -935,20 +935,29 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 			// Select the headless conversations before copying, decorating or serializing the inventory: coding
 			// sessions can outnumber them by thousands.
 			if m, found := s.fleetMachine(d.ID); found {
-				list = s.decorateInventory(m.ID, s.assistantSessions(m), false)
+				list = s.decorateInventory(m.ID, s.assistantSessions(ctx, m), false)
 			}
 		} else {
 			list, _ = s.sessions(ctx, d.ID)
 		}
 		for _, c := range list {
-			if c.Assistant && !c.IsDeleted() && spaceOf(c) == sp && (withArchived || !c.Archived) {
-				out.Conversations = append(out.Conversations, c)
+			if !c.Assistant || c.IsDeleted() || !(withArchived || !c.Archived) {
+				continue
 			}
+			rowSpace, known := s.conversationRowSpace(ctx, c)
+			if !known || rowSpace != sp {
+				continue
+			}
+			c.Space = rowSpace
+			out.Conversations = append(out.Conversations, c)
 		}
 	}
 	if sp == "" && v.MainMachineID != "" && v.MainMachineID != v.MachineID {
-		if c, ok := s.session(ctx, v.MainMachineID, v.Main); ok && c.Assistant && spaceOf(c) == "" {
-			out.Conversations = append(out.Conversations, c)
+		if c, ok := s.session(ctx, v.MainMachineID, v.Main); ok && c.Assistant {
+			if rowSpace, known := s.conversationRowSpace(ctx, c); known && rowSpace == "" {
+				c.Space = rowSpace
+				out.Conversations = append(out.Conversations, c)
+			}
 		}
 	}
 	return out
@@ -972,7 +981,7 @@ func (s *Service) profileRoutes() {
 		}
 		if r.Header.Get(RoleHeader) == roleExtension {
 			out.StartDefaults = nil // read with its own scope (GET /api/v1/assistant/start-defaults), not assistant.ask
-			out.Conversations = extensionConversations(out.Conversations)
+			out.Conversations = s.extensionViewConversations(r.Context(), out.Conversations)
 		}
 		apierr.WriteJSON(w, out)
 	})

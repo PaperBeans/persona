@@ -207,6 +207,27 @@ type deferredTaskStart struct {
 	permissionMode string
 }
 
+// deferredTaskPrompt folds separate task_instructions and task_attachments into the first prompt sent by deferred
+// Companion activation, matching node.startRuntime's immediate fallback order and keeping <attached_images> last.
+func deferredTaskPrompt(prompt string, params map[string]any) string {
+	instructions, _ := params["task_instructions"].(string)
+	attachments, _ := params["task_attachments"].(string)
+	return appendDeferredPromptSection(appendDeferredPromptSection(prompt, instructions), attachments)
+}
+
+func appendDeferredPromptSection(prompt, section string) string {
+	if strings.TrimSpace(section) == "" {
+		return prompt
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return section
+	}
+	if i := strings.LastIndex(prompt, "\n\n<attached_images>"); i >= 0 && strings.HasSuffix(strings.TrimSpace(prompt), "</attached_images>") {
+		return strings.TrimSpace(prompt[:i]) + "\n\n" + section + prompt[i:]
+	}
+	return strings.TrimSpace(prompt) + "\n\n" + section
+}
+
 // startTaskAgent starts the agent for t on its machine (another when its launcher does not work there: t says which)
 // and answers the machine's id and the session's: the machine it reached is the one the agent is linked to (looking it
 // up again after the start could find another, or none). A failed start counts against the launcher there.
@@ -637,9 +658,11 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	clearStandardSpeed(params)
 	s.setPlanThen(ctx, m.ID, params)
 	deferredImages, _ := params["images"].([]proto.Image)
+	deferredText := deferredTaskPrompt(prompt, params)
+	companionTarget := t.inPane == "" && !t.backendWorkspace() && params["host"] == proto.HostAgy
 	// A role-bearing Companion start must not attach MCP before linkPlanAgent can answer its identity-scoped tools/list.
 	// The real ACP id comes back first; only a Companion that actually answers Starting is activated after the link.
-	if companion && (t.Role == roleLeader || t.Parent != "") && (prompt != "" || len(deferredImages) > 0) {
+	if companionTarget && (t.Role == roleLeader || t.Parent != "") && (deferredText != "" || len(deferredImages) > 0) {
 		params["defer_mcp"] = true
 		if id, _ := params["client_msg_id"].(string); id == "" {
 			params["client_msg_id"] = newStartSessionID() // the post-link send has the same once-only identity as an immediate start
@@ -651,7 +674,7 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		}
 		clientMsgID, _ := params["client_msg_id"].(string)
 		permMode, _ := params["permission_mode"].(string)
-		t.deferredStart = &deferredTaskStart{text: prompt, images: append([]proto.Image(nil), deferredImages...), clientMsgID: clientMsgID, permissionMode: permMode}
+		t.deferredStart = &deferredTaskStart{text: deferredText, images: append([]proto.Image(nil), deferredImages...), clientMsgID: clientMsgID, permissionMode: permMode}
 	}
 	callNode := func() error {
 		if err := s.checkContinuationScope(t); err != nil {

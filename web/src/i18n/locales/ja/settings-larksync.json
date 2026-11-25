@@ -30,7 +30,7 @@
   "health_unauthorized": "未接続",
   "health_needs_reauth": "再認可が必要",
   "health_rate_limited": "次回に続行",
-  "health_scope_missing": "管理者の承認が必要",
+  "health_scope_missing": "不足する権限の追加には再認可が必要",
   "health_awaiting": "管理者の承認待ち",
   "health_failing": "前回の同期に失敗",
   "health_unknown": "不明",

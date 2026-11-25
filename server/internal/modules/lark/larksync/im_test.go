@@ -560,7 +560,7 @@ func TestAttachmentsAndMedia(t *testing.T) {
 
 // Senders get their display names (the gateway's copy of a message carries names, and the knowledge base matches on
 // them); a single chat without a name is named after the other person; a refused name lookup stops the lookups for
-// the run without failing anything.
+// the run while reporting the missing permission without discarding readable messages.
 func TestIMNamesSendersAndSingleChats(t *testing.T) {
 	clk := &fakeClock{t: testNow}
 	f := newFakeOpen(t, clk)
@@ -606,8 +606,11 @@ func TestIMNamesSendersAndSingleChats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Messages) != 2 || len(res.Errors) != 0 {
+	if len(res.Messages) != 2 || len(res.Errors) != 1 || res.Errors[0].Resource != "sender_names" || res.Errors[0].Kind != larksyncwire.ErrKindScope {
 		t.Fatalf("result = %+v", res)
+	}
+	if res.Cursors["im:oc_g"] == "" {
+		t.Fatal("a missing name permission discarded the readable messages' cursor")
 	}
 	for _, m := range res.Messages {
 		if m.SenderName != "" || m.ChatName != "Team" {
@@ -1595,5 +1598,232 @@ func TestModeIMThreadPaginationResumeAndOverlapBurstProgress(t *testing.T) {
 	}
 	if !byID2["om_tr_4"] || !byID2["om_tr_5"] {
 		t.Fatalf("run 2 missing remaining replies: %v", byID2)
+	}
+}
+
+// A transient error on a later thread in the same chat page must not persist an earlier thread's
+// im_thread:<th> cursor while readChat discards the uncommitted thread replies; otherwise the next
+// run skips the already-indexed overlap root and permanently loses those replies.
+func TestReadChatThreadErrorDoesNotPrematurelyCommitThreadCursor(t *testing.T) {
+	clk := &fakeClock{t: testNow}
+	f := newFakeOpen(t, clk)
+	s := newTestSyncer(t, clk)
+	b := binding(f, "primary~a1", larksyncwire.TierFull)
+	b.Mode = larksyncwire.ModeIM
+	b.Budget = 5 * time.Minute
+
+	f.data("/open-apis/im/v1/chats", map[string]any{"items": []any{
+		map[string]any{"chat_id": "oc_c", "name": "Topic Chat", "chat_mode": "topic"},
+	}})
+	f.data("/open-apis/search/v2/message", map[string]any{"items": []string{}})
+
+	baseAt := testNow.Add(-2 * time.Hour)
+	// om_0 precedes om_1 at the same timestamp so run 1 advances im:oc_c to baseAt while om_1's
+	// thread stops partway at imThreadPagesMost=3.
+	msg0 := textMsg("om_0", "oc_c", "ou_a", "preamble", baseAt)
+	root1 := textMsg("om_1", "oc_c", "ou_a", "thread one root", baseAt)
+	root1["thread_id"] = "omt_1"
+	root2 := textMsg("om_2", "oc_c", "ou_a", "thread two root", baseAt.Add(2*time.Minute))
+	root2["thread_id"] = "omt_2"
+
+	th1Pages := make([]map[string]any, 5)
+	for i := range th1Pages {
+		m := textMsg("om_r"+strconv.Itoa(i+1), "oc_c", "ou_b", "reply "+strconv.Itoa(i+1), baseAt.Add(time.Duration(i+1)*10*time.Minute))
+		m["thread_id"] = "omt_1"
+		th1Pages[i] = m
+	}
+	th2Reply := textMsg("om_2_r1", "oc_c", "ou_b", "thread two reply", baseAt.Add(3*time.Minute))
+	th2Reply["thread_id"] = "omt_2"
+
+	includeSecondThread := false
+	failSecondThread := false
+	f.handle("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch q.Get("container_id") {
+		case "oc_c":
+			items := []any{msg0, root1}
+			if includeSecondThread {
+				items = append(items, root2)
+			}
+			writeData(w, map[string]any{"items": items})
+		case "omt_1":
+			startSec, _ := strconv.ParseInt(q.Get("start_time"), 10, 64)
+			var filtered []map[string]any
+			for _, m := range th1Pages {
+				if parseUnix(m["create_time"].(string))/1000 >= startSec {
+					filtered = append(filtered, m)
+				}
+			}
+			idx := 0
+			if tok := q.Get("page_token"); tok != "" {
+				idx, _ = strconv.Atoi(tok)
+			}
+			if idx >= len(filtered) {
+				writeData(w, map[string]any{"items": []any{}})
+				return
+			}
+			hasMore := idx+1 < len(filtered)
+			nextTok := ""
+			if hasMore {
+				nextTok = strconv.Itoa(idx + 1)
+			}
+			writeData(w, map[string]any{"items": []any{filtered[idx]}, "has_more": hasMore, "page_token": nextTok})
+		case "omt_2":
+			if failSecondThread {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"code":99991400,"msg":"temporary error"}`))
+				return
+			}
+			writeData(w, map[string]any{"items": []any{th2Reply}})
+		default:
+			t.Errorf("unexpected container %q", q.Get("container_id"))
+		}
+	})
+
+	idx := newMemIndex()
+	cursors := map[string]string{}
+	mergeCursors := func(moved map[string]string) {
+		for k, v := range moved {
+			cursors[k] = v
+		}
+	}
+
+	// Run 1: reads om_0, om_1, and first 3 pages of omt_1; persists im:oc_c and im_thread:omt_1.
+	res1, err := s.Run(t.Context(), b, staticToken("tok"), cursors, idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mergeCursors(res1.Cursors)
+	wantThCur := msgTime(baseAt.Add(time.Duration(imThreadPagesMost) * 10 * time.Minute))
+	if got := cursors[threadCursorStem+"omt_1"]; got != wantThCur {
+		t.Fatalf("run 1 thread cursor = %q, want %q", got, wantThCur)
+	}
+
+	// Run 2: omt_1 completes (reading om_r4 & om_r5), then omt_2 fails transiently with HTTP 500.
+	// readChat discards all staged messages; it must NOT advance im_thread:omt_1 to "done".
+	includeSecondThread = true
+	failSecondThread = true
+	clk.advance(15 * time.Minute)
+	res2, err := s.Run(t.Context(), b, staticToken("tok"), cursors, idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res2.Errors) == 0 {
+		t.Fatal("run 2 expected chat error when omt_2 returns 500")
+	}
+	for _, m := range res2.Messages {
+		if m.ID == "om_r4" || m.ID == "om_r5" {
+			t.Fatalf("run 2 unexpectedly committed message %s from failed chat", m.ID)
+		}
+	}
+	if moved, ok := res2.Cursors[threadCursorStem+"omt_1"]; ok {
+		t.Fatalf("run 2 prematurely moved %s to %q despite failed readChat", threadCursorStem+"omt_1", moved)
+	}
+	mergeCursors(res2.Cursors)
+
+	// Run 3: transient error clears. Both omt_1's remaining replies (om_r4, om_r5) and omt_2 must be delivered.
+	failSecondThread = false
+	clk.advance(15 * time.Minute)
+	res3, err := s.Run(t.Context(), b, staticToken("tok"), cursors, idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res3.Errors) != 0 {
+		t.Fatalf("run 3 unexpected errors: %+v", res3.Errors)
+	}
+	byID3 := map[string]bool{}
+	for _, m := range res3.Messages {
+		byID3[m.ID] = true
+	}
+	for _, want := range []string{"om_r4", "om_r5", "om_2", "om_2_r1"} {
+		if !byID3[want] {
+			t.Errorf("run 3 lost message %s (got %v)", want, byID3)
+		}
+	}
+	if got := res3.Cursors[threadCursorStem+"omt_1"]; got != "done" {
+		t.Fatalf("run 3 thread cursor = %q, want done", got)
+	}
+}
+
+// A transient error fetching page 2 of a chat must not commit im_thread:<th> cursors from page 1.
+func TestReadChatNextPageErrorDoesNotPrematurelyCommitThreadCursor(t *testing.T) {
+	clk := &fakeClock{t: testNow}
+	f := newFakeOpen(t, clk)
+	s := newTestSyncer(t, clk)
+	b := binding(f, "primary~a1", larksyncwire.TierFull)
+	b.Mode = larksyncwire.ModeIM
+	b.Budget = 5 * time.Minute
+
+	f.data("/open-apis/im/v1/chats", map[string]any{"items": []any{
+		map[string]any{"chat_id": "oc_p", "name": "Multi Page Chat", "chat_mode": "topic"},
+	}})
+	f.data("/open-apis/search/v2/message", map[string]any{"items": []string{}})
+
+	baseAt := testNow.Add(-2 * time.Hour)
+	root1 := textMsg("om_p1_root", "oc_p", "ou_a", "page 1 thread", baseAt)
+	root1["thread_id"] = "omt_p1"
+	replyLate := textMsg("om_p1_late", "oc_p", "ou_b", "page 1 late reply", baseAt.Add(40*time.Minute))
+	replyLate["thread_id"] = "omt_p1"
+	page2Msg := textMsg("om_p2_msg", "oc_p", "ou_a", "page 2 message", baseAt.Add(50*time.Minute))
+
+	failPage2 := true
+	f.handle("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch q.Get("container_id") {
+		case "oc_p":
+			if q.Get("page_token") == "" {
+				writeData(w, map[string]any{"items": []any{root1}, "has_more": true, "page_token": "p2"})
+				return
+			}
+			if failPage2 {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"code":99991400,"msg":"page 2 error"}`))
+				return
+			}
+			writeData(w, map[string]any{"items": []any{page2Msg}})
+		case "omt_p1":
+			writeData(w, map[string]any{"items": []any{replyLate}})
+		default:
+			t.Errorf("unexpected container %q", q.Get("container_id"))
+		}
+	})
+
+	idx := newMemIndex()
+	cursors := map[string]string{
+		"im:oc_p":                   msgTime(baseAt),
+		threadCursorStem + "omt_p1": msgTime(baseAt.Add(30 * time.Minute)),
+	}
+
+	// Run 1: page 1 finishes omt_p1, then page 2 fails with 500. Neither om_p1_late nor im_thread:omt_p1="done" may commit.
+	res1, err := s.Run(t.Context(), b, staticToken("tok"), cursors, idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res1.Errors) == 0 {
+		t.Fatal("run 1 expected page 2 error")
+	}
+	if moved, ok := res1.Cursors[threadCursorStem+"omt_p1"]; ok {
+		t.Fatalf("run 1 prematurely moved %s to %q despite page 2 error", threadCursorStem+"omt_p1", moved)
+	}
+	for k, v := range res1.Cursors {
+		cursors[k] = v
+	}
+
+	// Run 2: page 2 succeeds; om_p1_late and om_p2_msg are both delivered and im_thread:omt_p1 becomes "done".
+	failPage2 = false
+	clk.advance(15 * time.Minute)
+	res2, err := s.Run(t.Context(), b, staticToken("tok"), cursors, idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID2 := map[string]bool{}
+	for _, m := range res2.Messages {
+		byID2[m.ID] = true
+	}
+	if !byID2["om_p1_late"] || !byID2["om_p2_msg"] {
+		t.Fatalf("run 2 missing messages: %v", byID2)
+	}
+	if got := res2.Cursors[threadCursorStem+"omt_p1"]; got != "done" {
+		t.Fatalf("run 2 thread cursor = %q, want done", got)
 	}
 }

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { initI18n, t } from "../../i18n";
 import { agyModels, claudeModels, codexModels, neon } from "../../lib/launcher-model-binding.fixture";
 import type { ModelProvider, ModelPurpose } from "../../lib/model-config";
-import type { ModelProfile } from "../../lib/model-profiles";
+import type { ModelProfile, ModelProfileSaveInput } from "../../lib/model-profiles";
 import { ModelPicker } from "./ModelBindingPickers";
 import { ModelProfileEditor } from "./ModelProfileEditor";
 
@@ -23,7 +23,7 @@ const purpose: ModelPurpose = {
 
 let host: HTMLDivElement;
 let root: Root;
-const saved = vi.fn(async () => {});
+const saved = vi.fn<(input: ModelProfileSaveInput) => Promise<void>>(async () => {});
 const card = (id: string) => host.querySelector<HTMLElement>(`[data-testid="profile-${id}"]`)!;
 const effort = (scope: ParentNode, label = t("settings-modelconfiguration.effort")) =>
   [...scope.querySelectorAll("select")].find((node) => node.closest("label")?.querySelector("span")?.textContent === label)!;
@@ -159,4 +159,84 @@ it("preserves leave unchanged, clear, and explicit launcher fields and independe
   expect(saved).toHaveBeenLastCalledWith(expect.objectContaining({
     launchers: { agy: { model: `${neon}-high`, small_model: "", effort: "" }, claude: { model: "sonnet" } },
   }));
+});
+
+it("keeps an AGY launcher override saveable when legacy effort is unsupported on the inherited variant model", async () => {
+  await render({ launchers: { agy: { effort: "max" } } });
+  const launcherCard = card("launcher-agy");
+  expect(modelPicker(launcherCard).textContent).toContain(t("settings-modelprofiles.leave_unchanged"));
+  await save();
+  expect(saved).toHaveBeenLastCalledWith(expect.objectContaining({
+    launchers: { agy: { effort: "" } },
+  }));
+  expect(saved.mock.calls.at(-1)?.[0]?.launchers?.agy).not.toHaveProperty("model");
+});
+
+it("restores effort to leave unchanged when reverting an explicit AGY variant model back to leave unchanged", async () => {
+  await render({ launchers: { agy: {}, claude: { model: "sonnet", effort: "" } } });
+  const primaryOptions = (scope: ParentNode) =>
+    [...scope.querySelectorAll<HTMLButtonElement>('[role="option"]')].filter((node) => !node.closest("details"));
+
+  const agyCard = card("launcher-agy");
+  if (modelPicker(agyCard).getAttribute("aria-expanded") !== "true") await act(async () => modelPicker(agyCard).click());
+  const agyNeon = primaryOptions(agyCard).filter((node) => node.textContent?.startsWith("Gemini 4 Neon"));
+  expect(agyNeon).toHaveLength(1);
+  await act(async () => agyNeon[0].click());
+  expect(launcherEffort("agy").value).toBe("medium");
+
+  // Switching from folded Gemini 4 Neon to a non-folded AGY model (Gemini 4 Flash) also clears synthetic effort: "".
+  if (modelPicker(agyCard).getAttribute("aria-expanded") !== "true") await act(async () => modelPicker(agyCard).click());
+  const agyFlash = primaryOptions(agyCard).find((node) => node.textContent?.startsWith("Gemini 4 Flash"));
+  expect(agyFlash).toBeDefined();
+  await act(async () => agyFlash!.click());
+  expect(launcherEffort("agy").value).toBe("__unset__");
+  await save();
+  expect(saved).toHaveBeenLastCalledWith(expect.objectContaining({
+    launchers: { agy: { model: "gemini-4-flash" }, claude: { model: "sonnet", effort: "" } },
+  }));
+  expect(saved.mock.calls.at(-1)?.[0]?.launchers?.agy).not.toHaveProperty("effort");
+
+  // Re-pick Gemini 4 Neon, then revert AGY model back to Leave unchanged: synthetic effort: "" clears to unset.
+  if (modelPicker(agyCard).getAttribute("aria-expanded") !== "true") await act(async () => modelPicker(agyCard).click());
+  await act(async () => primaryOptions(agyCard).find((node) => node.textContent?.startsWith("Gemini 4 Neon"))!.click());
+  expect(launcherEffort("agy").value).toBe("medium");
+
+  if (modelPicker(agyCard).getAttribute("aria-expanded") !== "true") await act(async () => modelPicker(agyCard).click());
+  const leaveUnchanged = primaryOptions(agyCard).find((node) => node.textContent?.startsWith(t("settings-modelprofiles.leave_unchanged")));
+  expect(leaveUnchanged).toBeDefined();
+  await act(async () => leaveUnchanged!.click());
+
+  expect(launcherEffort("agy").value).toBe("__unset__");
+
+  // Reverting a non-folded launcher (Claude) with explicit Clear on switch must preserve effort: "".
+  const claudeCard = card("launcher-claude");
+  if (modelPicker(claudeCard).getAttribute("aria-expanded") !== "true") await act(async () => modelPicker(claudeCard).click());
+  const claudeLeave = primaryOptions(claudeCard).find((node) => node.textContent?.startsWith(t("settings-modelprofiles.leave_unchanged")));
+  expect(claudeLeave).toBeDefined();
+  await act(async () => claudeLeave!.click());
+  expect(launcherEffort("claude").value).toBe("");
+
+  await save();
+  expect(saved).toHaveBeenLastCalledWith(expect.objectContaining({
+    launchers: { claude: { effort: "" } },
+  }));
+});
+
+it("clears stale speed when switching a tier candidate from codex to agy", async () => {
+  await render({ tiers: { review: { launcher: "codex", model: "gpt-5.5", speed: "fast" } } });
+  const tierCard = card("tier-edit-review");
+  const launcherSelect = tierCard.querySelector<HTMLSelectElement>(`select[aria-label="${t("settings-modelprofiles.tier_launcher")}"]`)!;
+  const speedSelect = tierCard.querySelector<HTMLSelectElement>(`select[aria-label="${t("settings-modelprofiles.tier_speed")}"]`)!;
+  expect(speedSelect.value).toBe("fast");
+  expect(speedSelect.disabled).toBe(false);
+
+  await choose(launcherSelect, "agy");
+  expect(speedSelect.value).toBe("");
+  expect(speedSelect.disabled).toBe(true);
+
+  await save();
+  expect(saved).toHaveBeenLastCalledWith(expect.objectContaining({
+    tiers: { review: { launcher: "agy" } },
+  }));
+  expect(saved.mock.calls.at(-1)?.[0]?.tiers?.review).not.toHaveProperty("speed");
 });

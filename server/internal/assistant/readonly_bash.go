@@ -35,6 +35,9 @@ func readonlyTaskSafeBash(raw json.RawMessage, cwd string) bool {
 		if len(seg.Words) == 0 || seg.Subst || seg.ArgSubst || len(seg.Nested) > 0 {
 			return false
 		}
+		if hasUnsafeReadonlyShellExpansion(seg.Text) {
+			return false
+		}
 		if !safeReadonlyRedirect(seg.Redirect) {
 			return false
 		}
@@ -61,6 +64,68 @@ func safeReadonlyRedirect(redirect string) bool {
 	return true
 }
 
+// hasUnsafeReadonlyShellExpansion reports whether text contains shell expansions or line
+// continuations that Bash evaluates before executing parsed words: unquoted/double-quoted
+// parameter expansion ($VAR, ${VAR}, $'...'), line continuations (\<newline>), unquoted
+// brace expansion ({...}), or unquoted pathname globs (*, ?, [).
+func hasUnsafeReadonlyShellExpansion(text string) bool {
+	r := []rune(text)
+	const (
+		quoteNone = iota
+		quoteSingle
+		quoteDouble
+	)
+	mode := quoteNone
+	for i := 0; i < len(r); i++ {
+		c := r[i]
+		switch mode {
+		case quoteSingle:
+			if c == '\'' {
+				mode = quoteNone
+			}
+		case quoteDouble:
+			switch c {
+			case '\\':
+				if i+1 < len(r) {
+					if r[i+1] == '\n' || r[i+1] == '\r' {
+						return true
+					}
+					if strings.ContainsRune("\"\\$`", r[i+1]) {
+						i++
+					}
+				}
+			case '"':
+				mode = quoteNone
+			case '$':
+				return true
+			}
+		default:
+			switch c {
+			case '\\':
+				if i+1 < len(r) {
+					if r[i+1] == '\n' || r[i+1] == '\r' {
+						return true
+					}
+					i++
+				}
+			case '\'':
+				mode = quoteSingle
+			case '"':
+				mode = quoteDouble
+			case '$', '{', '}', '*', '?', '[':
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// matchesLongFlagPrefix reports whether flag (without any =value suffix) is an unambiguous
+// prefix of blocked with at least minLen characters (matching getopt_long / git parse_options).
+func matchesLongFlagPrefix(flag, blocked string, minLen int) bool {
+	return len(flag) >= minLen && strings.HasPrefix(blocked, flag)
+}
+
 func safeReadonlySegment(words []string, cwd string) bool {
 	switch words[0] {
 	case "git":
@@ -82,8 +147,10 @@ func safeReadonlySegment(words []string, cwd string) bool {
 			"-n": true, "-c": true, "--lines": true, "--bytes": true,
 		})
 	case "ls":
+		// Do not include --color (optional =WHEN only, never consumes the next token) or -w / -I
+		// (take no argument on BSD/macOS ls).
 		return safeReadonlyFileTool(words[1:], cwd, false, false, map[string]bool{
-			"-I": true, "--ignore": true, "--color": true, "--time-style": true, "--sort": true, "--format": true, "-w": true, "--width": true,
+			"--ignore": true, "--time-style": true, "--sort": true, "--format": true, "--width": true,
 		})
 	case "wc":
 		return safeReadonlyFileTool(words[1:], cwd, false, true, nil)
@@ -132,22 +199,152 @@ func safeReadonlyGit(args []string, cwd string) bool {
 	default:
 		return false
 	}
-	for _, a := range args[i+1:] {
-		if a == "--" {
-			break
+	rest := args[i+1:]
+	afterDashDash := false
+	grepHasPattern := false
+	grepLongValueFlags := map[string]bool{
+		"--after-context": true, "--before-context": true, "--context": true,
+		"--max-count": true, "--max-depth": true, "--threads": true,
+	}
+	for j := 0; j < len(rest); j++ {
+		a := rest[j]
+		if !afterDashDash {
+			if a == "--" {
+				afterDashDash = true
+				continue
+			}
+			if sub == "grep" && a == "-e" {
+				if j+1 >= len(rest) {
+					return false
+				}
+				grepHasPattern = true
+				j++
+				continue
+			}
+			if strings.HasPrefix(a, "--") {
+				flag, _, hasVal := strings.Cut(a, "=")
+				if matchesLongFlagPrefix(flag, "--ext-diff", len("--ext")) ||
+					matchesLongFlagPrefix(flag, "--textconv", len("--textc")) ||
+					matchesLongFlagPrefix(flag, "--no-index", len("--no-i")) ||
+					matchesLongFlagPrefix(flag, "--output", len("--out")) ||
+					matchesLongFlagPrefix(flag, "--exec", len("--exe")) ||
+					matchesLongFlagPrefix(flag, "--paginate", len("--pag")) ||
+					matchesLongFlagPrefix(flag, "--batch-command", len("--batch-co")) ||
+					matchesLongFlagPrefix(flag, "--write-commit-graph", len("--write-c")) {
+					return false
+				}
+				switch sub {
+				case "cat-file":
+					if matchesLongFlagPrefix(flag, "--textconv", len("--t")) ||
+						matchesLongFlagPrefix(flag, "--filters", len("--fi")) {
+						return false
+					}
+				case "blame":
+					if matchesLongFlagPrefix(flag, "--contents", len("--con")) ||
+						matchesLongFlagPrefix(flag, "--ignore-revs-file", len("--ignore-r")) {
+						return false
+					}
+				case "grep":
+					if matchesLongFlagPrefix(flag, "--file", len("--fil")) ||
+						matchesLongFlagPrefix(flag, "--open-files-in-pager", len("--op")) ||
+						matchesLongFlagPrefix(flag, "--untracked", len("--u")) ||
+						matchesLongFlagPrefix(flag, "--no-exclude-standard", len("--no-ex")) {
+						return false
+					}
+					if grepLongValueFlags[flag] && !hasVal {
+						if j+1 >= len(rest) {
+							return false
+						}
+						j++
+					}
+				}
+				continue
+			}
+			if strings.HasPrefix(a, "-") && len(a) > 1 {
+				if strings.HasPrefix(a, "-o") || strings.HasPrefix(a, "-x") {
+					return false
+				}
+				if sub == "blame" {
+					bundle := a[1:]
+					for k := 0; k < len(bundle); k++ {
+						ch := bundle[k]
+						if ch == 'S' {
+							return false
+						}
+						if ch == 'L' || ch == 'C' || ch == 'M' {
+							break
+						}
+					}
+				}
+				if sub == "grep" {
+					bundle := a[1:]
+					for k := 0; k < len(bundle); k++ {
+						ch := bundle[k]
+						if ch == 'f' || ch == 'O' {
+							return false
+						}
+						if ch == 'e' {
+							grepHasPattern = true
+							if k == len(bundle)-1 {
+								if j+1 >= len(rest) {
+									return false
+								}
+								j++
+							}
+							break
+						}
+						if ch == 'A' || ch == 'B' || ch == 'C' || ch == 'm' {
+							if k == len(bundle)-1 {
+								if j+1 >= len(rest) {
+									return false
+								}
+								j++
+							}
+							break
+						}
+					}
+				}
+				continue
+			}
+			if sub == "grep" && !grepHasPattern {
+				grepHasPattern = true
+				continue
+			}
 		}
-		switch {
-		case a == "--ext-diff", strings.HasPrefix(a, "--ext-diff="),
-			a == "--textconv",
-			a == "--no-index",
-			a == "--output", strings.HasPrefix(a, "--output="), a == "-o",
-			a == "--exec", strings.HasPrefix(a, "--exec="), a == "-x",
-			a == "--paginate",
-			a == "--batch-command",
-			a == "--write-commit-graph":
+		if !safeReadonlyGitArg(a, cwd) {
 			return false
-		case sub == "grep" && (a == "-f" || a == "--file" || strings.HasPrefix(a, "--file=")):
+		}
+	}
+	return true
+}
+
+// safeReadonlyGitArg validates a non-flag git argument (revision, pathspec, or diff operand)
+// so implicit --no-index paths (such as `git diff /dev/null /etc/passwd` or `.env`) and
+// tilde/traversal/credential paths cannot escape the task workspace, while allowing quoted
+// tracked-only git pathspecs (such as `git diff -- '*.go'`).
+func safeReadonlyGitArg(arg, cwd string) bool {
+	if arg == "" || strings.ContainsRune(arg, '\x00') || strings.HasPrefix(arg, "~") || strings.ContainsRune(arg, '$') {
+		return false
+	}
+	for _, seg := range strings.Split(filepath.ToSlash(arg), "/") {
+		if seg == ".." || readonlyCredentialSegment(seg) {
 			return false
+		}
+	}
+	if filepath.IsAbs(arg) {
+		if cwd == "" || !filepath.IsAbs(cwd) {
+			return false
+		}
+		cleanCwd := filepath.Clean(cwd)
+		cleanArg := filepath.Clean(arg)
+		rel, err := filepath.Rel(cleanCwd, cleanArg)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			return false
+		}
+		for _, seg := range strings.Split(filepath.ToSlash(rel), "/") {
+			if seg == ".." || readonlyCredentialSegment(seg) {
+				return false
+			}
 		}
 	}
 	return true
@@ -183,9 +380,34 @@ func safeReadonlyGH(args []string) bool {
 	default:
 		return false
 	}
-	for _, a := range args[2:] {
-		if a == "-w" || a == "--web" || a == "-o" || a == "--output" || strings.HasPrefix(a, "--output=") {
-			return false
+	for j := 2; j < len(args); j++ {
+		a := args[j]
+		if a == "--" {
+			break
+		}
+		if strings.HasPrefix(a, "--") {
+			flag, _, _ := strings.Cut(a, "=")
+			if flag == "--web" || flag == "--output" || flag == "--watch" {
+				return false
+			}
+			continue
+		}
+		if strings.HasPrefix(a, "-") && len(a) > 1 {
+			short, _, _ := strings.Cut(a[1:], "=")
+			for k := 0; k < len(short); k++ {
+				ch := short[k]
+				if ch == 'w' || ch == 'o' {
+					return false
+				}
+				// Stop scanning once a value-taking gh short flag starts so its attached value
+				// (e.g. -Rowner/repo) is not mistaken for bundled short flags.
+				if strings.ContainsRune("RqtAaBHlLSsjube", rune(ch)) {
+					if k == len(short)-1 && !strings.ContainsRune(a, '=') && j+1 < len(args) {
+						j++
+					}
+					break
+				}
+			}
 		}
 	}
 	return true
@@ -199,23 +421,30 @@ func safeReadonlySearch(args []string, cwd string, isRG bool) bool {
 		"-e": true, "--regexp": true,
 		"-A": true, "--after-context": true,
 		"-B": true, "--before-context": true,
-		"-C": true, "--context": true,
+		"-C": true,
 		"-m": true, "--max-count": true,
-		"--color": true, "--label": true, "--binary-files": true,
+		"--label": true, "--binary-files": true,
 		"-d": true, "--directories": true,
+	}
+	shortValueFlags := map[byte]bool{
+		'A': true, 'B': true, 'C': true, 'm': true, 'd': true,
 	}
 	if isRG {
 		for _, f := range []string{
 			"-g", "--glob", "--iglob", "-t", "--type", "-T", "--type-not",
 			"--max-depth", "--max-columns", "--max-filesize", "--sort", "--sortr",
-			"-j", "--threads", "--engine", "-E", "--encoding",
+			"-j", "--threads", "--engine", "-E", "--encoding", "--color", "--context",
 		} {
 			valueFlags[f] = true
+		}
+		for _, ch := range []byte{'g', 't', 'T', 'E', 'r', 'M', 'j'} {
+			shortValueFlags[ch] = true
 		}
 	} else {
 		for _, f := range []string{"--include", "--exclude", "--exclude-dir"} {
 			valueFlags[f] = true
 		}
+		shortValueFlags['D'] = true
 	}
 	hasPattern := false
 	endOfFlags := false
@@ -228,10 +457,35 @@ func safeReadonlySearch(args []string, cwd string, isRG bool) bool {
 			}
 			if strings.HasPrefix(a, "--") {
 				flag, _, hasVal := strings.Cut(a, "=")
-				switch flag {
-				case "--file", "--pre", "--pre-glob", "--search-zip", "--ignore-file", "--ignore-file-case-insensitive":
+				if isRG && flag == "--files" {
+					if hasVal {
+						return false
+					}
+					hasPattern = true
+					continue
+				}
+				if matchesLongFlagPrefix(flag, "--file", len("--fil")) ||
+					matchesLongFlagPrefix(flag, "--pre", len("--pre")) ||
+					matchesLongFlagPrefix(flag, "--pre-glob", len("--pre-g")) ||
+					matchesLongFlagPrefix(flag, "--search-zip", len("--search-z")) ||
+					matchesLongFlagPrefix(flag, "--ignore-file", len("--ignore-f")) ||
+					matchesLongFlagPrefix(flag, "--ignore-file-case-insensitive", len("--ignore-file-c")) ||
+					matchesLongFlagPrefix(flag, "--exclude-from", len("--exclude-f")) ||
+					matchesLongFlagPrefix(flag, "--hostname-bin", len("--hostname-b")) {
 					return false
-				case "--regexp":
+				}
+				if isRG && (matchesLongFlagPrefix(flag, "--follow", len("--fol")) ||
+					matchesLongFlagPrefix(flag, "--hidden", len("--hid")) ||
+					matchesLongFlagPrefix(flag, "--no-ignore", len("--no-ig")) ||
+					strings.HasPrefix(flag, "--no-ignore-") ||
+					matchesLongFlagPrefix(flag, "--unrestricted", len("--unr"))) {
+					return false
+				}
+				if !isRG && (matchesLongFlagPrefix(flag, "--file", len("--fi")) ||
+					matchesLongFlagPrefix(flag, "--dereference-recursive", len("--der"))) {
+					return false
+				}
+				if flag == "--regexp" {
 					hasPattern = true
 					if !hasVal {
 						if i+1 >= len(args) {
@@ -265,15 +519,25 @@ func safeReadonlySearch(args []string, cwd string, isRG bool) bool {
 					i++
 					continue
 				}
-				// Short flag bundle (e.g. -ni, -nE); reject -f and (for rg) -z anywhere before -e.
+				// Short flag bundle (e.g. -ni, -nE); stop at the first value-taking short flag
+				// so attached flag values (e.g. -Tmake, -g'*.feature') are not misparsed as flags.
 				bundle := a[1:]
 				for j := 0; j < len(bundle); j++ {
 					ch := bundle[j]
-					if ch == 'f' || (isRG && ch == 'z') {
+					if ch == 'f' || (isRG && (ch == 'z' || ch == 'L' || ch == 'u' || ch == '.')) || (!isRG && ch == 'R') {
 						return false
 					}
 					if ch == 'e' {
 						hasPattern = true
+						if j == len(bundle)-1 {
+							if i+1 >= len(args) {
+								return false
+							}
+							i++
+						}
+						break
+					}
+					if shortValueFlags[ch] {
 						if j == len(bundle)-1 {
 							if i+1 >= len(args) {
 								return false
@@ -311,10 +575,10 @@ func safeReadonlyFileTool(args []string, cwd string, noFollow, rejectFiles0 bool
 			}
 			if strings.HasPrefix(a, "--") {
 				flag, _, hasVal := strings.Cut(a, "=")
-				if noFollow && (flag == "--follow" || flag == "--pid") {
+				if noFollow && (matchesLongFlagPrefix(flag, "--follow", len("--f")) || matchesLongFlagPrefix(flag, "--pid", len("--p"))) {
 					return false
 				}
-				if rejectFiles0 && flag == "--files0-from" {
+				if rejectFiles0 && matchesLongFlagPrefix(flag, "--files0-from", len("--f")) {
 					return false
 				}
 				if valueFlags[flag] && !hasVal {
@@ -349,7 +613,7 @@ func safeReadonlyPath(arg, cwd string) bool {
 	if arg == "" || strings.ContainsRune(arg, '\x00') {
 		return false
 	}
-	if arg == "~" || strings.HasPrefix(arg, "~/") || strings.HasPrefix(arg, `~\`) {
+	if strings.HasPrefix(arg, "~") || strings.ContainsAny(arg, "*?[]{}$") {
 		return false
 	}
 	if readonlyGuardedDir(cwd) {

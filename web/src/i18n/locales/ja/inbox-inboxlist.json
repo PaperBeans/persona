@@ -7,7 +7,6 @@
   "sections": "セクション",
   "bar_count": "{name}、{count}",
   "bar_all": "すべて",
-  "all": "すべて",
   "clean_all": "すべて片付ける",
   "clean_all_scope": "すべて片付ける：{scope}",
   "confirm_clean_title": "すべて片付けますか？",

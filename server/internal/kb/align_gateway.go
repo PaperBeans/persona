@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"html"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -39,7 +40,7 @@ const crosswalkFile = ".crosswalk.json"
 // (<data>/chats/.larksync_repair.json).
 const (
 	larkSyncRepairFile    = ".larksync_repair.json"
-	larkSyncRepairVersion = 1
+	larkSyncRepairVersion = 2
 )
 
 // alignNamesEvery is how long the gateway chats' names are kept before they are listed again: a chat the gateway
@@ -83,11 +84,13 @@ type gatewayDay struct {
 
 // gatewayLine is one archived message as the aligner compares it.
 type gatewayLine struct {
-	minute time.Time // the line's minute (the day file's "15:04")
-	exact  time.Time // its time from the chat's receipts; zero when they do not bind it to one
-	sender string
-	body   string // without its trailing attachments
-	media  bool   // it had attachments
+	minute     time.Time // the line's minute (the day file's "15:04")
+	exact      time.Time // its time from the chat's receipts; zero when they do not bind it to one
+	sender     string
+	body       string // without its trailing attachments
+	formatBody string // retains named file placeholders for the stricter format-only comparison
+	media      bool   // it had attachments
+	mediaCount int    // number of archived attachment markers, or live media references
 }
 
 func (a *gatewayAligner) align(src Source, sc SourceChat, m SourceMessage) bool {
@@ -105,11 +108,18 @@ func (a *gatewayAligner) align(src Source, sc SourceChat, m SourceMessage) bool 
 	if name == "" {
 		return false
 	}
+	match := ""
 	for _, gw := range a.gatewayChats()[name] {
 		if a.within(gw, sc, m) {
-			a.pair(id, gw)
-			return true
+			if match != "" {
+				return false // same-name chats are ambiguous: never choose the first one
+			}
+			match = gw
 		}
+	}
+	if match != "" {
+		a.pair(id, match)
+		return true
 	}
 	return false
 }
@@ -190,7 +200,7 @@ func (a *gatewayAligner) within(gw string, sc SourceChat, m SourceMessage) bool 
 			}
 		}
 	}
-	return false
+	return a.withinFormatted(gw, gatewayLine{exact: m.At, sender: sender, body: body, formatBody: m.Text, media: media, mediaCount: len(m.Media)})
 }
 
 // syncPlaceholder is the text the sync gives an image or a file of a message ("[image]", "[file <name>]"), which the
@@ -287,6 +297,7 @@ func (a *gatewayAligner) day(id, day string) []gatewayLine {
 				break
 			}
 			text, l.media = text[:loc[0]], true
+			l.mediaCount++
 		}
 		l.body = text
 		lines = append(lines, l)
@@ -386,13 +397,73 @@ func (a *gatewayAligner) alignArchivedLine(id, chatName string, gl gatewayLine) 
 	if name == "" {
 		return false
 	}
+	match := ""
 	for _, gw := range a.gatewayChats()[name] {
 		if a.withinArchived(gw, chatName, gl) {
-			a.pair(id, gw)
-			return true
+			if match != "" {
+				return false
+			}
+			match = gw
 		}
 	}
+	if match != "" {
+		a.pair(id, match)
+		return true
+	}
 	return false
+}
+
+// The additional format-only match is deliberately stricter than the legacy fingerprint: both exact receipt
+// times, the same known sender, equal attachment counts, a non-empty body and exactly one candidate are required.
+// URLs and all words remain significant. No edit distance, substring match or attachment-only guess is used.
+func (a *gatewayAligner) withinFormatted(gw string, src gatewayLine) bool {
+	if src.exact.IsZero() || src.sender == "" || src.sender == unknownSender {
+		return false
+	}
+	body := src.formatBody
+	if body == "" {
+		body = src.body
+	}
+	body = equivalentGatewayBody(body, src.mediaCount)
+	if body == "" {
+		return false
+	}
+	matches := 0
+	for _, day := range alignDays(src.exact, a.s.Zone()) {
+		for _, dst := range a.day(gw, day) {
+			if dst.exact.IsZero() || normalizeText(dst.sender) != normalizeText(src.sender) ||
+				dst.media != src.media || dst.mediaCount != src.mediaCount {
+				continue
+			}
+			bucket := dst.exact.Unix()/2 - src.exact.Unix()/2
+			if bucket < -1 || bucket > 1 {
+				continue
+			}
+			if body == equivalentGatewayBody(dst.body, dst.mediaCount) {
+				matches++
+			}
+		}
+	}
+	return matches == 1
+}
+
+var gatewayMarkdownLink = lazyre.New(`\[([^\[\]\n]+)\]\((https?://[^\s()]+)\)`)
+var gatewayAutoLink = lazyre.New(`<((?:https?://)[^<>\s]+)>`)
+var gatewayInlineMedia = lazyre.New(`\[(?:image|video|audio)\]`)
+
+// equivalentGatewayBody reconciles the sync's "label (URL)" and Markdown links, escaped entities and inline
+// attachment placeholders backed by real media. Code and unsupported Markdown remain literal. A caption and
+// an attachment's identity are not interchangeable: an empty caption never authorizes this fallback.
+func equivalentGatewayBody(body string, mediaCount int) string {
+	if !strings.Contains(body, "`") {
+		body = gatewayMarkdownLink.ReplaceAllString(body, "$1 ($2)")
+		body = gatewayAutoLink.ReplaceAllString(body, "$1")
+		body = html.UnescapeString(body)
+		if marks := gatewayInlineMedia.FindAllStringIndex(body, -1); len(marks) > 0 && len(marks) <= mediaCount {
+			body = gatewayInlineMedia.ReplaceAllString(body, " ")
+		}
+	}
+	return strings.Join(strings.Fields(body), " ")
 }
 
 // hasGatewayCandidate reports whether sync chat id is already paired in .crosswalk.json or shares a normalized name
@@ -487,7 +558,7 @@ func (a *gatewayAligner) withinArchived(gw, chatName string, src gatewayLine) bo
 			}
 		}
 	}
-	return false
+	return a.withinFormatted(gw, src)
 }
 
 // parseArchiveLine parses one formatted dayLine (from dayLines) into a gatewayLine for alignment.
@@ -515,7 +586,9 @@ func parseArchiveLine(dl dayLine, day string, zone *time.Location, exact time.Ti
 			break
 		}
 		text, gl.media = text[:loc[0]], true
+		gl.mediaCount++
 	}
+	gl.formatBody = strings.TrimSpace(text)
 	// Also strip larksync attachment placeholders when attachments were not downloaded (older than attachment_days).
 	if gl.media {
 		for {

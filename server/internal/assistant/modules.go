@@ -18,6 +18,7 @@ import (
 	"github.com/nwverse/persona/server/internal/larkhost"
 	"github.com/nwverse/persona/server/internal/modapi"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/wireids"
 )
 
 // The built-in feature modules (docs/architecture/core-and-modules.md): the assistant reaches them only through its
@@ -247,19 +248,21 @@ func (s *Service) moduleFeatures() []string {
 func (s *Service) moduleTools() []proto.Tool {
 	var out []proto.Tool
 	for _, tool := range s.modules.MCPTools() {
-		out = append(out, proto.Tool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
+		out = append(out, proto.Tool{Name: tool.Name, Description: tool.Description, InputSchema: json.RawMessage(tool.InputSchema)})
 	}
 	return out
 }
 
-// runModuleTool dispatches a loaded module's tool; ok is false for an off or unknown tool.
+// runModuleTool dispatches a loaded module's tool; ok is false for an off or unknown tool. The caller's bare machine
+// and session strings become the contract's ID types here, once, and the module's result becomes the text every
+// tool returns.
 func (s *Service) runModuleTool(ctx context.Context, machine, self, name string, args json.RawMessage) (out string, err error, ok bool) {
 	tool, ok := s.modules.MCPTool(name)
 	if !ok {
 		return "", nil, false
 	}
-	out, err = tool.Run(ctx, machine, self, args)
-	return out, err, true
+	res, err := tool.Run(ctx, modapi.ToolCall{Machine: wireids.MachineID(machine), Session: wireids.SessionID(self), Args: modapi.ToolArgs(args)})
+	return res.Text, err, true
 }
 
 // runModuleJobs starts every loaded module's loop under the Service Run context. Cancellation is normal shutdown.

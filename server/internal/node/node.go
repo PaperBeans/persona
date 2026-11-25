@@ -44,6 +44,7 @@ import (
 type Node struct {
 	cacheWarm     *assistantCachePool
 	segmentStarts segmentStarts
+	segmentInputs segmentInputs
 	runtimeUsage  runtimeUsageReports
 
 	// Only the manager's initial node.info can negotiate source delivery on this connection.
@@ -773,6 +774,7 @@ func (n *Node) fetchState(ctx context.Context) bool {
 		return false
 	}
 	n.state.merge(res.Sessions)
+	n.flushSegmentInputs()
 	// What a launcher switch that outlived the last connection wrote since, over what the hub had (switch_share.go).
 	n.switches().receive(n)
 	go n.recoverAssistantTasks(n.recoverAssistantSend)
@@ -1165,8 +1167,12 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		return nil, refusal("identity_conflict", "会话 ID 与另一来源重复，不能恢复", nil)
 	}
 	if method == "assistant.send" || sessionSend {
-		source := prompts.ItemSource(proto.Item{Role: "user", Kind: proto.KindText, Text: p.Text, Source: p.MessageSource, ClientMsgID: p.ClientMsgID})
-		if source == nil && p.ClientMsgID == "" && !prompts.UserAuthoredContext(p.Text) {
+		clientMsgID := p.ClientMsgID
+		if isSyntheticSegmentMsgID(clientMsgID) {
+			clientMsgID = ""
+		}
+		source := prompts.ItemSource(proto.Item{Role: "user", Kind: proto.KindText, Text: p.Text, Source: p.MessageSource, ClientMsgID: clientMsgID})
+		if source == nil && clientMsgID == "" && !prompts.UserAuthoredContext(p.Text) {
 			if injected := prompts.ParseInjected(p.Text); injected != nil && injected.Kind == proto.InjectedTaskNotice {
 				source = &proto.MessageSource{Kind: proto.InjectedTaskNotice}
 			}
@@ -1995,7 +2001,9 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 				return true
 			})
 		}
-		sctx = withClientMsgID(sctx, opts.ClientMsgID) // a runtime's message goes under it (assistant_runtime.go)
+		if !isSyntheticSegmentMsgID(opts.ClientMsgID) {
+			sctx = withClientMsgID(sctx, opts.ClientMsgID) // a runtime's message goes under it (assistant_runtime.go)
+		}
 		sctx = withSupervisionDelivery(sctx, p.MessageSource)
 		n.setSessionCategories(p.SessionID, p.Categories, p.CategoriesUnknown)
 		send := func() (string, error) {
@@ -2016,18 +2024,33 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 			OnceID string `json:"once_id"`
 		}
 		_ = json.Unmarshal(params, &once)
-		if p.NewSessionID == "" && p.SessionID != "" && once.OnceID != "" {
-			// A message its sender may try again under the same once_id (the manager's relays between conversations,
-			// relay_once.go): sent once. The sender waits a bounded time and asks again when no answer came in it; the
-			// first send may have written the line already, and a second one made the conversation read it twice. The
-			// id is no client_msg_id: a line that carries one reads as the owner's own message.
+		if p.NewSessionID == "" && p.SessionID != "" && (once.OnceID != "" || opts.ClientMsgID != "") {
+			// A message its sender may try again under the same once_id or logical client_msg_id (relay_once.go,
+			// logical_calls.go): sent once and receipted so assistant.segment.input can reconcile an in-doubt reply
+			// without tagging relay/internal transcript lines as owner messages.
+			dedupKey := once.OnceID
+			if dedupKey == "" {
+				dedupKey = opts.ClientMsgID
+			}
 			var id string
-			err := n.sends.once(once.OnceID, func() (err error) {
+			err := n.sends.once(dedupKey, func() (err error) {
 				id, err = send()
+				if err == nil {
+					n.recordSegmentInput(p.SessionID, opts.ClientMsgID)
+					if id != "" && id != p.SessionID {
+						n.recordSegmentInput(id, opts.ClientMsgID)
+					}
+				}
 				return err
 			})
-			if err == nil && id == "" {
-				id = p.SessionID // the same message asked again while it went: the conversation it went to
+			if err == nil {
+				if id == "" {
+					id = p.SessionID // the same message asked again while it went: the conversation it went to
+				}
+				n.recordSegmentInput(p.SessionID, opts.ClientMsgID)
+				if id != p.SessionID {
+					n.recordSegmentInput(id, opts.ClientMsgID)
+				}
 			}
 			return round.answer(map[string]any{"session_id": id}), err
 		}
@@ -2122,25 +2145,42 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		if opts.OwnerInput && ownerInputExact(params) {
 			ctx, owner = withOwnerDelivery(ctx) // ccplugin.go: which way the owner's message went in
 		}
+		syntheticSegment := isSyntheticSegmentMsgID(opts.ClientMsgID)
 		err := n.sends.onceReplacing(opts.ClientMsgID, previous, func() error {
 			if retry != nil {
 				return n.sendUnseen(ctx, p.SessionID, p.Text, p.Images, opts, *retry)
+			}
+			sendFn := func() error {
+				if n.isAssistantSession(p.SessionID) {
+					n.setSessionCategories(p.SessionID, p.Categories, p.CategoriesUnknown)
+					msgCtx := ctx
+					if !syntheticSegment {
+						msgCtx = withClientMsgID(msgCtx, opts.ClientMsgID)
+					}
+					_, err := n.assistantSend(withSkillOwner(msgCtx, p.SkillOwner), p.SessionID, "", p.Launcher, p.Text, p.Images, "", "", (modelExecution{Source: p.ModelSource, PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Runtime: n.externalRuntime(p.SessionID, p.Launcher, p.Runtime), External: p.External, IsMain: p.IsMain, MainCompactWindow: p.MainCompact, FollowsSetting: p.FollowsSetting, CacheKeepalive: p.CacheKeepalive, ConfigDir: p.ConfigDir, Origin: p.Origin, OriginKnown: p.OriginKnown, InboxPermissionMode: p.InboxPermissionMode, DefaultPermissionMode: p.DefaultPermissionMode, PermissionModeExplicit: p.PermissionModeExplicit, OriginDecisionRequired: true, Public: p.Public, Interject: p.Interject, Interactive: p.Interactive}).withSupervision(p.SupervisionInstructions))
+					return err
+				}
+				callOpts := opts
+				if syntheticSegment {
+					callOpts.ClientMsgID = ""
+				}
+				if callOpts.CompactIfFull { // compact_before_send.go (#11137)
+					return n.sendCompacting(ctx, p.SessionID, p.Text, p.Images, callOpts)
+				}
+				return n.send(ctx, p.SessionID, p.Text, p.Images, callOpts)
+			}
+			if syntheticSegment {
+				err := sendFn()
+				if err == nil {
+					n.recordSegmentInput(p.SessionID, opts.ClientMsgID)
+				}
+				return err
 			}
 			var after echoAfter
 			if opts.ClientMsgID != "" {
 				after = n.echoBase(p.SessionID)
 			}
-			return n.sendWithEcho(p.SessionID, opts.ClientMsgID, p.Text, len(p.Images), after, p.MessageSource, nil, func() error { // echo.go
-				if n.isAssistantSession(p.SessionID) {
-					n.setSessionCategories(p.SessionID, p.Categories, p.CategoriesUnknown)
-					_, err := n.assistantSend(withSkillOwner(withClientMsgID(ctx, opts.ClientMsgID), p.SkillOwner), p.SessionID, "", p.Launcher, p.Text, p.Images, "", "", (modelExecution{Source: p.ModelSource, PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Runtime: n.externalRuntime(p.SessionID, p.Launcher, p.Runtime), External: p.External, IsMain: p.IsMain, MainCompactWindow: p.MainCompact, FollowsSetting: p.FollowsSetting, CacheKeepalive: p.CacheKeepalive, ConfigDir: p.ConfigDir, Origin: p.Origin, OriginKnown: p.OriginKnown, InboxPermissionMode: p.InboxPermissionMode, DefaultPermissionMode: p.DefaultPermissionMode, PermissionModeExplicit: p.PermissionModeExplicit, OriginDecisionRequired: true, Public: p.Public, Interject: p.Interject, Interactive: p.Interactive}).withSupervision(p.SupervisionInstructions))
-					return err
-				}
-				if opts.CompactIfFull { // compact_before_send.go (#11137)
-					return n.sendCompacting(ctx, p.SessionID, p.Text, p.Images, opts)
-				}
-				return n.send(ctx, p.SessionID, p.Text, p.Images, opts)
-			})
+			return n.sendWithEcho(p.SessionID, opts.ClientMsgID, p.Text, len(p.Images), after, p.MessageSource, nil, sendFn) // echo.go
 		})
 		if err != nil {
 			return ok(withOwnerRoute(err, owner)) // ccplugin.go: an unconfirmed relay still says why it was relayed

@@ -4,19 +4,136 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
+	"sync"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
-	"strings"
-	"sync"
 )
+
+const segmentInputReceiptCap = 64
 
 type segmentStarts struct {
 	mu   sync.Mutex
 	seen map[string]bool
 }
 
+type segmentInputs struct {
+	mu   sync.Mutex
+	seen map[string][]string
+}
+
 type segmentTitleKey struct{}
+
+// isSyntheticSegmentMsgID reports whether id was synthesized by the logical
+// conversation queue (logical_calls.go) solely to track segment delivery and
+// reconciliation; it must never be forwarded to runtimes or tagged onto
+// transcript lines as an owner-authored client_msg_id.
+func isSyntheticSegmentMsgID(id string) bool {
+	return strings.HasPrefix(id, "segment-once:") || strings.HasPrefix(id, "segment-input:")
+}
+
+func appendSegmentInput(list []string, client string) ([]string, bool) {
+	if client == "" || slices.Contains(list, client) {
+		return list, false
+	}
+	next := make([]string, 0, min(len(list)+1, segmentInputReceiptCap))
+	if len(list) >= segmentInputReceiptCap {
+		next = append(next, list[len(list)-(segmentInputReceiptCap-1):]...)
+	} else {
+		next = append(next, list...)
+	}
+	next = append(next, client)
+	return next, true
+}
+
+func mergeSegmentInputs(older, newer []string) []string {
+	var out []string
+	for _, id := range older {
+		out, _ = appendSegmentInput(out, id)
+	}
+	for _, id := range newer {
+		out, _ = appendSegmentInput(out, id)
+	}
+	return out
+}
+
+// recordSegmentInput records a positively accepted logical client_msg_id on
+// sessionID so assistant.segment.input can reconcile a lost RPC reply without
+// tagging relay or internal transcript items as owner messages.
+func (n *Node) recordSegmentInput(sessionID, clientMsgID string) {
+	if sessionID == "" || clientMsgID == "" {
+		return
+	}
+	n.segmentInputs.mu.Lock()
+	if n.segmentInputs.seen == nil {
+		n.segmentInputs.seen = map[string][]string{}
+	}
+	if next, changed := appendSegmentInput(n.segmentInputs.seen[sessionID], clientMsgID); changed {
+		n.segmentInputs.seen[sessionID] = next
+	}
+	n.segmentInputs.mu.Unlock()
+	if n.state != nil {
+		n.state.update(sessionID, func(st *sessionState) bool {
+			next, changed := appendSegmentInput(st.SegmentInputs, clientMsgID)
+			if !changed {
+				return false
+			}
+			st.SegmentInputs = next
+			return true
+		})
+	}
+}
+
+func (n *Node) segmentInputAccepted(sessionID, clientMsgID string) bool {
+	if sessionID == "" || clientMsgID == "" {
+		return false
+	}
+	n.segmentInputs.mu.Lock()
+	found := slices.Contains(n.segmentInputs.seen[sessionID], clientMsgID)
+	n.segmentInputs.mu.Unlock()
+	if found {
+		return true
+	}
+	if n.state != nil {
+		if st, ok := n.state.get(sessionID); ok && slices.Contains(st.SegmentInputs, clientMsgID) {
+			return true
+		}
+	}
+	return false
+}
+
+// flushSegmentInputs folds receipts accepted before state.load completed into
+// loaded sessionState records so they are persisted via state.put.
+func (n *Node) flushSegmentInputs() {
+	if n.state == nil {
+		return
+	}
+	n.segmentInputs.mu.Lock()
+	if len(n.segmentInputs.seen) == 0 {
+		n.segmentInputs.mu.Unlock()
+		return
+	}
+	pending := make(map[string][]string, len(n.segmentInputs.seen))
+	for sid, ids := range n.segmentInputs.seen {
+		if len(ids) > 0 {
+			pending[sid] = slices.Clone(ids)
+		}
+	}
+	n.segmentInputs.mu.Unlock()
+	for sid, ids := range pending {
+		n.state.update(sid, func(st *sessionState) bool {
+			merged := mergeSegmentInputs(st.SegmentInputs, ids)
+			if slices.Equal(st.SegmentInputs, merged) {
+				return false
+			}
+			st.SegmentInputs = merged
+			return true
+		})
+	}
+}
 
 // A positive persisted receipt can reconcile a lost manager reply. Absence is
 // deliberately unknown after a node restart: it never authorizes a second start.
@@ -74,15 +191,20 @@ func (n *Node) assistantSegment(ctx context.Context, method string, raw json.Raw
 	if method == "assistant.segment.input" {
 		id, _ := p["session_id"].(string)
 		client, _ := p["client_msg_id"].(string)
-		accepted := false
-		n.echoes.mu.Lock()
-		for _, r := range n.echoes.recs[id] {
-			if r.ClientMsgID == client && r.Accepted {
-				accepted = true
-				break
-			}
+		if id == "" || client == "" {
+			return map[string]bool{"accepted": false}, nil
 		}
-		n.echoes.mu.Unlock()
+		accepted := n.segmentInputAccepted(id, client)
+		if !accepted {
+			n.echoes.mu.Lock()
+			for _, r := range n.echoes.recs[id] {
+				if r.ClientMsgID == client && r.Accepted {
+					accepted = true
+					break
+				}
+			}
+			n.echoes.mu.Unlock()
+		}
 		return map[string]bool{"accepted": accepted}, nil
 	}
 	operation, _ := p["operation_id"].(string)

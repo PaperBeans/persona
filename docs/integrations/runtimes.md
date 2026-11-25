@@ -759,13 +759,19 @@ node's shell check. Shell and managed launchers keep their own execution context
 
 A chat gets Persona's MCP server, named `persona`, through ACP `mcpServers`. Regular Agent chats can also get
 `persona_a2a` with a session-scoped ticket. `agy` defers the tools over its
-declaration budget, largest first, and has no `call_mcp_tool` for servers passed through ACP, so an assistant chat's
-server runs behind `integrations/antigravity/mcp-proxy.mjs`, which adds a small `persona_call` tool that calls any
-Persona tool by name (#7333). The proxy declares only the tools larger than `persona_call`, so it is always the smallest
-declared and never the one deferred, however many small tools connectors add (sizes are what agy declares of a tool: its
-name, description and input schema). The others stay callable through it: `persona_call` with no name lists every tool,
-and those left out with their description and arguments (#10756).
-A role-bearing task start uses `defer_mcp` as described under "What to implement": the real ACP session id exists and the task's role link is committed before the first MCP attach and prompt, so that first catalog already has the correct leader or worker scope (#15327). This ordering is independent of the direct server versus assistant proxy choice above.
+declaration budget, largest first, and has no `call_mcp_tool` for servers passed through ACP, so `persona` runs behind
+`integrations/antigravity/mcp-proxy.mjs`, which adds a small `persona_call` tool that calls any Persona tool by name
+(#7333). The proxy declares only the tools larger than `persona_call`, so it is always the smallest declared and never
+the one deferred, however many small tools connectors add (sizes are what agy declares of a tool: its name, description
+and input schema). The others stay callable through it: `persona_call` with no name lists every tool, and those left out
+with their description and arguments (#10756). For non-assistant Agent sessions (`--agent`), the proxy prioritizes core
+task, leader and supervision tools and caps secondary declarations within the eager budget so `agy` does not evict
+leader or supervision tools while keeping secondary tools reachable through `persona_call` (#15822); `persona_a2a` stays
+on its separate scoped server.
+A role-bearing task start targeting the Companion (including read-only and explicit `agy` host starts) uses `defer_mcp`
+as described under "What to implement": the real ACP session id exists and the task's role link is committed before the
+first MCP attach and prompt, and deferred activation preserves separate `task_instructions` and `task_attachments`, so
+that first catalog already has the correct leader or worker scope (#15327, #15822).
 
 Implementation: `integrations/antigravity/lib/runtime.js`, `integrations/antigravity/lib/acp.js` and `integrations/antigravity/lib/policy.js`.
 
