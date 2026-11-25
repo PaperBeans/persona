@@ -609,3 +609,39 @@ func TestProbeGoesTheClientsWay(t *testing.T) {
 		t.Fatal("a proxy that cannot reach the hub passed for it")
 	}
 }
+
+// A peer the service closed itself (rpc.Peer.Close: it wants everything read again on a new connection) ends the
+// connection: the client hangs up and dials again. It used to wait for the hub to close a socket whose peer
+// answered nothing any more.
+func TestClientDialsAgainOnceItsPeerIsClosed(t *testing.T) {
+	f := &fakeHub{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	var log logLines
+	c := &Client{Hub: srv.URL, Token: "t", HelloMethod: "manager.hello", Logf: log.logf, Backoff: 10 * time.Millisecond}
+	ctx, _, _ := runClient(t, c)
+	wctx, wcancel := context.WithTimeout(ctx, 10*time.Second)
+	defer wcancel()
+	if err := c.Wait(wctx); err != nil {
+		t.Fatal(err)
+	}
+	first := c.Peer()
+	if first == nil {
+		t.Fatal("no peer once connected")
+	}
+	why := errors.New("read everything again")
+	first.Close(why)
+	log.waitFor(t, tryEnded, 1, 10*time.Second)
+	if n := log.count(why.Error()); n != 1 {
+		t.Errorf("the log does not say why the connection ended: %q", log.all())
+	}
+	if err := c.Wait(wctx); err != nil { // the peer was let go before the log said so: this waits for the next
+		t.Fatalf("no new connection: %v", err)
+	}
+	if p := c.Peer(); p == nil || p == first {
+		t.Fatalf("the peer after the new connection: %p, the closed one %p", p, first)
+	}
+	if n := f.dials.Load(); n != 2 {
+		t.Errorf("%d dials, want the first and the one after the peer was closed", n)
+	}
+}
