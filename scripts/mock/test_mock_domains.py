@@ -130,6 +130,71 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(h.sent[0][0], want)
             self.assertEqual(h.response_headers.get("Allow"), "DELETE" if want == 405 else None)
 
+    def test_extension_map_mock_serves_page_card_downgrade_and_tool_views(self):
+        import extension_map_mock
+
+        seq = [0]
+
+        def fake_it(role, kind, ts_min, **kw):
+            seq[0] += 1
+            return {"id": f"m{seq[0]}", "seq": seq[0], "ts": ts_min, "role": role, "kind": kind, **kw}
+
+        def fake_tool(name, inp, result, ts_min):
+            tid = f"call_{seq[0] + 1}"
+            return [fake_it("assistant", "tool_use", ts_min, tool_use_id=tid, tool_name=name, tool_input=inp),
+                    fake_it("user", "tool_result", ts_min, tool_use_id=tid, text=result)]
+
+        def fake_fold(items):
+            run = items[1:-1]
+            return [items[0], {"id": "fold:m2", "seq": run[0]["seq"], "role": "assistant", "kind": "fold",
+                                "fold": {"items": len(run), "through_seq": run[-1]["seq"]}}, items[-1]]
+
+        ns = {
+            "PLUGINS_MODE": "1",
+            "EXTENSION_UI_EXTRA": [],
+            "ITEMS": {},
+            "TASK_FEED": {},
+            "ASSISTANT": [],
+            "it": fake_it,
+            "tool": fake_tool,
+            "assistant_sess": lambda sid, title, minutes, last: {"session_id": sid, "title": title, "last_text": last},
+            "fold_work": fake_fold,
+        }
+        r, d = registry(ns)
+        with patch.dict(os.environ, {"MOCK_EXTENSION_MAP": "1"}):
+            importlib.reload(extension_map_mock)
+            extension_map_mock.register(d)
+        try:
+            self.assertIn("tool_views", r.features([]))
+            self.assertEqual([u["id"] for u in ns["EXTENSION_UI_EXTRA"]], ["route-planner", "route-planner-card"])
+            h = FakeHandler(extension_map_mock.PAGE)
+            self.assertTrue(r.http(h, "POST", extension_map_mock.PAGE, json.dumps({"context": {"ui_version": 12}}).encode()))
+            view = h.sent.pop()[1]["view"]
+            comp = next(item for item in view["sections"][0]["items"] if item["type"] == "map")
+            self.assertEqual([rt["id"] for rt in comp["routes"]], ["r-fastest", "r-alt"])
+
+            hc = FakeHandler(extension_map_mock.PAGE + "-card")
+            self.assertTrue(r.http(hc, "POST", extension_map_mock.PAGE + "-card", json.dumps({"context": {"ui_version": 12}}).encode()))
+            card_item = hc.sent.pop()[1]["view"]["sections"][0]["items"][0]
+            self.assertEqual(card_item["aspect"], "wide")
+
+            hp = FakeHandler(extension_map_mock.PAGE)
+            self.assertTrue(r.http(hp, "POST", extension_map_mock.PAGE,
+                                   json.dumps({"action": "open-stop", "values": {"id": "waypoint"}}).encode()))
+            self.assertEqual(hp.sent.pop()[1]["view"]["title"], "Coffee Stop")
+
+            for payload in ({"context": {"ui_version": 11}}, {"context": {"ui_version": 12, "unsupported": ["map"]}}):
+                hd = FakeHandler(extension_map_mock.PAGE)
+                self.assertTrue(r.http(hd, "POST", extension_map_mock.PAGE, json.dumps(payload).encode()))
+                items = hd.sent.pop()[1]["view"]["sections"][0]["items"]
+                self.assertFalse(any(i.get("type") == "map" for i in items))
+
+            folded = ns["fold_work"](ns["ITEMS"][extension_map_mock.ASK_MAP])
+            fold_row = next(row for row in folded if row.get("kind") == "fold")
+            self.assertEqual(fold_row["fold"]["tool_views"][0]["tool"], "mcp__amap__maps_direction_driving")
+        finally:
+            importlib.reload(extension_map_mock)
+
     def test_route_matches_method_and_whole_path(self):
         r, d = registry()
         seen = []

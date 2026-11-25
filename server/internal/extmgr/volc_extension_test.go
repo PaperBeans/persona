@@ -14,32 +14,34 @@ import (
 	"github.com/nwverse/persona/server/internal/extension/host"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/modules/volc/volctest"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 )
 
 // needsVolcModule is the extension its module provides, or skips the test in a build without the module
 // (persona_without_volc, persona_core_only); TestNoVolcWithoutItsModule covers that build.
 func needsVolcModule(t *testing.T) builtinext.Volc {
 	t.Helper()
-	volc, ok := builtinext.VolcSpeech()
+	volc, ok := builtinext.VolcSpeech(moduleswitch.Set{})
 	if !ok {
 		t.Skip("the volc module is not in this build")
 	}
 	return volc
 }
 
-// Without its module the extension is not there: nothing registers it, nothing names it a transcription, and the
-// assistant's settings tool knows no meetings switch of it.
+// Without its module, or with it switched off in the `modules` setting the manager started with, the extension is not
+// there: nothing registers it, nothing names it a transcription, and the assistant's settings tool knows no meetings
+// switch of it.
 func TestNoVolcWithoutItsModule(t *testing.T) {
-	if _, ok := builtinext.VolcSpeech(); ok {
-		t.Skip("the volc module is in this build")
-	}
 	h := newTestManager(t)
+	if _, ok := builtinext.VolcSpeech(moduleswitch.Set{}); ok { // built in: switched off at run time
+		h.opts.Modules = moduleswitch.Off("volc")
+	}
 	h.store = newExtensionStore()
 	startTestExtensions(t, h)
 	if p := h.extensions.reg.Get("volc"); p != nil {
 		t.Fatalf("%+v", p.Record)
 	}
-	if volcRef() != "" || isVolc(nil) || h.IsTranscriptionContribution("volc/volc") {
+	if volcRef(h.modules()) != "" || isVolc(h.modules(), nil) || h.IsTranscriptionContribution("volc/volc") {
 		t.Fatal("the extension is named without its module")
 	}
 }
@@ -148,11 +150,11 @@ func TestVolcSetup(t *testing.T) {
 		hp := h.extensions.get(volc.ExtensionID)
 		return hp != nil && hp.proc != nil && hp.healthy(context.Background())
 	})
-	if !h.IsTranscriptionContribution(volcRef()) {
+	if !h.IsTranscriptionContribution(volcRef(moduleswitch.Set{})) {
 		t.Fatal("volc/volc is not a transcription contribution")
 	}
 	waitLong(t, "the transcription's info without a key", func() bool {
-		info, err := h.TranscriptionInfo(context.Background(), volcRef())
+		info, err := h.TranscriptionInfo(context.Background(), volcRef(moduleswitch.Set{}))
 		return err == nil && info.Setup == "key"
 	})
 
@@ -184,7 +186,7 @@ func TestVolcSetup(t *testing.T) {
 		t.Fatalf("%+v", v)
 	}
 	waitLong(t, "the restarted program's transcription", func() bool {
-		info, err := h.TranscriptionInfo(context.Background(), volcRef())
+		info, err := h.TranscriptionInfo(context.Background(), volcRef(moduleswitch.Set{}))
 		return err == nil && info.Setup == "" && slices.Contains(info.Features, "interim")
 	})
 

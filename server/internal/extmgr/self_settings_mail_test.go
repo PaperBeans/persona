@@ -10,6 +10,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extmgr/mailport"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/mailwire"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -83,7 +84,7 @@ func TestSelfSettingsMailNeedsPhoneInput(t *testing.T) {
 func TestMailAccountRequestInEnglish(t *testing.T) {
 	// The providers' guides are the mail module's; a build without it checks the rest.
 	var guide func(lang, email string) string
-	if mailport.Factory() != nil {
+	if mailport.Factory(moduleswitch.Set{}) != nil {
 		guide = testMail(t).PasswordGuide
 		if _, summary, err := mailAccountRequest(i18n.Default, json.RawMessage(`{"email":"me@qq.com"}`), guide); err != nil ||
 			!strings.Contains(summary, "mail.qq.com") || !strings.Contains(summary, "生成授权码") {

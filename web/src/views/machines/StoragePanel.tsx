@@ -8,6 +8,7 @@ import { bytesBin, percent } from "../../lib/machine-detail";
 import type { Machine } from "../../lib/types";
 import { Button, cx, Dialog, Loading } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
+import { UsageMap } from "./UsageMap";
 
 export interface MountStat {
   mount: string;
@@ -193,7 +194,14 @@ function UsageBar({ pct, label }: { pct: number; label: string }) {
   );
 }
 
-export function StoragePanel({ machines, initialMachineId }: { machines: Machine[]; initialMachineId?: string }) {
+/** A request to open the disk map (#14576): on `mid`, in reclaim mode; `seq` changes on every request. */
+export interface StorageFocus {
+  mid: string;
+  mode: "reclaim";
+  seq: number;
+}
+
+export function StoragePanel({ machines, initialMachineId, focus }: { machines: Machine[]; initialMachineId?: string; focus?: StorageFocus }) {
   const orderedMachines = useMemo(() => {
     return [...machines].sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
   }, [machines]);
@@ -208,6 +216,12 @@ export function StoragePanel({ machines, initialMachineId }: { machines: Machine
       setSelectedId(orderedMachines[0]?.id ?? "");
     }
   }, [machines, orderedMachines, selectedId]);
+
+  // a disk alert's "See what's using space" picks its computer, even with the panel already open
+  useEffect(() => {
+    if (focus && machines.some((m) => m.id === focus.mid)) setSelectedId(focus.mid);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.seq]);
 
   const machine = useMemo(() => machines.find((m) => m.id === selectedId), [machines, selectedId]);
 
@@ -482,6 +496,9 @@ export function StoragePanel({ machines, initialMachineId }: { machines: Machine
           })}
         </div>
       </section>
+
+      {/* The disk map (#14576): the lists below stay as they are */}
+      {machine && <UsageMap key={machine.id} machine={machine} focus={focus && focus.mid === machine.id ? { mode: focus.mode, seq: focus.seq } : undefined} />}
 
       {/* Per-mount capacity & inode utilization */}
       <section className="rounded-card bg-surface px-4 py-3.5 shadow-card" data-testid="storage-mounts-section">

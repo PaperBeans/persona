@@ -19,9 +19,8 @@ import (
 // Codex rollouts (~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl) are a different JSONL: every line is
 // {timestamp, type, payload}. The conversation lives in event_msg/item_completed (UserMessage, AgentMessage,
 // Reasoning, CommandExecution, FileChange, McpToolCall, ImageView, Extension, SubAgentActivity, CollabAgentToolCall,
-// ContextCompaction); response_item lines repeat the same content in the model's wire format and are skipped. They map
-// onto the same items as Claude's transcript, with Claude's tool names (Bash, Edit, Read, mcp__server__tool) so the
-// apps render them alike.
+// ContextCompaction). A confirmed update_plan call can also arrive in the response_item wire records. Items map
+// onto the same tools as Claude's transcript (Bash, Edit, Read, TodoWrite, mcp__server__tool).
 
 type codexLine struct {
 	Timestamp time.Time       `json:"timestamp"`
@@ -29,10 +28,16 @@ type codexLine struct {
 	Payload   json.RawMessage `json:"payload"`
 }
 
+type codexThreadSettings struct {
+	Model       string          `json:"model"`
+	ServiceTier json.RawMessage `json:"service_tier"`
+}
+
 type codexPayload struct {
-	Type       string          `json:"type"`
-	TurnID     string          `json:"turn_id"`
-	DurationMS json.RawMessage `json:"duration_ms"`
+	Settings   codexThreadSettings `json:"thread_settings"`
+	Type       string              `json:"type"`
+	TurnID     string              `json:"turn_id"`
+	DurationMS json.RawMessage     `json:"duration_ms"`
 	// task_complete: what failed the turn, null when it ended well ({message, codex_error_info}, CodexTurnError)
 	Error json.RawMessage `json:"error"`
 	// session_meta
@@ -305,6 +310,9 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 		meta.codexWorked(out)
 		return meta.codexModel(out)
 	}
+	if l.Type == "response_item" {
+		return meta.codexPlanResponse(seq, l)
+	}
 	var p codexChatPayload
 	if json.Unmarshal(l.Payload, &p) != nil {
 		return nil
@@ -318,7 +326,7 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 		return nil
 	case "turn_context":
 		if p.Model != "" {
-			meta.Model, meta.ModelAt = p.Model, l.Timestamp
+			meta.observeCodexSettings(codexThreadSettings{Model: p.Model}, l.Timestamp)
 		}
 		meta.codexTurnModel = p.Model
 		meta.PermissionMode, meta.CodexSandbox, meta.ModeAt = p.ApprovalPolicy, p.SandboxPolicy.Type, l.Timestamp
@@ -337,6 +345,17 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 		return proto.Item{ID: fmt.Sprintf("%s#%d", id, idx), Seq: seq, TS: l.Timestamp, Role: role, Kind: kind}
 	}
 	switch p.Type {
+	case "plan_update":
+		return meta.codexPlanEvent(seq, l.Timestamp, l.Payload)
+	case "thread_settings_applied":
+		previous := meta.Model
+		meta.observeCodexSettings(p.Settings, l.Timestamp)
+		if previous != "" && p.Settings.Model != "" && previous != meta.Model {
+			it := mk(0, "", "system", "model_change")
+			it.Text, it.Model = previous, meta.Model
+			return []proto.Item{it}
+		}
+		return nil
 	case "token_count":
 		if p.Info != nil {
 			meta.ContextTokens, meta.OutputTokens = int(p.Info.Last.Input), int(p.Info.Total.Output)
@@ -497,8 +516,15 @@ func codexItemLines(seq int, ts time.Time, turnID string, it *codexItem, meta *M
 				return []proto.Item{u}
 			}
 		}
+		var quoted []proto.QuestionReply
+		visibleParts := 0
 		for i := range parts {
-			parts[i] = codexUserText(parts[i])
+			text, replies := codexUserPart(parts[i])
+			parts[i] = text
+			if text != "" {
+				visibleParts++
+				quoted = replies
+			}
 		}
 		text := strings.TrimSpace(strings.Join(parts, "\n"))
 		items, paseo := paseoInput(func(n int, role, kind string) proto.Item { return mk(n, it.ID, role, kind) }, 0, text)
@@ -526,6 +552,9 @@ func codexItemLines(seq int, ts time.Time, turnID string, it *codexItem, meta *M
 		}
 		u := mk(0, it.ID, "user", proto.KindText)
 		u.Text = clip(fullText)
+		if visibleParts == 1 {
+			u.QuestionReplies = quoted
+		}
 		if meta.codexUserID == "" {
 			meta.codexUserID = u.ID
 		}
@@ -825,29 +854,37 @@ func attachImages(items []proto.Item, images []string) bool {
 	return false
 }
 
-// codexUserText cleans what Codex records as the user's message: ambient context (and Persona's) goes, and the answer to a question
-// Codex asked (request_user_input, stored as JSON) reads as the answer itself ("question: answer", with a full-width colon, when several).
-func codexUserText(s string) string {
+// codexUserPart keeps the legacy plain answer for all clients. Only a standalone reply
+// envelope supplies a quoted question: prose quoting the same XML is not a reply.
+func codexUserPart(s string) (string, []proto.QuestionReply) {
 	s = StripInterject(s)
-	s = legacyLarkAgent(strings.TrimSpace(ContextRe.ReplaceAllString(dropTagged(ViewErrorsRe, "<persona-view-errors", codexAmbientRe.ReplaceAllString(s, "")), "")))
-	return strings.TrimSpace(CodexReplyRe.ReplaceAllStringFunc(s, func(block string) string {
-		var replies []struct {
-			Question string `json:"question"`
-			Answer   string `json:"answer"`
-		}
-		m := CodexReplyRe.FindStringSubmatch(block)
-		if json.Unmarshal([]byte(m[1]), &replies) != nil || len(replies) == 0 {
+	s = codexAmbientRe.ReplaceAllString(s, "")
+	s = dropTagged(ViewErrorsRe, "<persona-view-errors", s)
+	s = strings.TrimSpace(legacyLarkAgent(strings.TrimSpace(ContextRe.ReplaceAllString(s, ""))))
+	var quotes []proto.QuestionReply
+	text := CodexReplyRe.ReplaceAllStringFunc(s, func(block string) string {
+		replies := codexReplies(CodexReplyRe.FindStringSubmatch(block)[1])
+		if len(replies) == 0 {
 			return block
 		}
 		if len(replies) == 1 {
+			q := strings.TrimSpace(replies[0].Question)
+			if block == s && q != "" {
+				quotes = []proto.QuestionReply{{Question: q}}
+			}
 			return replies[0].Answer
 		}
-		var lines []string
+		lines := make([]string, 0, len(replies))
 		for _, r := range replies {
-			lines = append(lines, strings.TrimSpace(r.Question)+"："+r.Answer)
+			q := strings.TrimSpace(r.Question)
+			lines = append(lines, q+"："+r.Answer)
+			if block == s {
+				quotes = append(quotes, proto.QuestionReply{Question: q, Answer: r.Answer})
+			}
 		}
 		return strings.Join(lines, "\n")
-	}))
+	})
+	return strings.TrimSpace(text), quotes
 }
 
 // codexWebSearch shows a web search (or a page it opened) the way Claude's WebSearch / WebFetch calls look: the query or

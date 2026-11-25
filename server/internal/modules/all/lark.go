@@ -21,7 +21,7 @@ import (
 // assistant reaches the owner's chat through (internal/larkhost).
 func init() {
 	modules = append(modules, lark.Module{})
-	botport.Provide(botport.Provider{
+	botport.Provide(lark.Module{}.Info().ID, botport.Provider{
 		New: func(appID, appSecret, domain string, h *http.Client) botport.Client {
 			c := feishubot.New(appID, appSecret, domain)
 			if h != nil {
@@ -40,8 +40,8 @@ func init() {
 			return r
 		},
 	})
-	larkhost.Provide(func(h larkhost.Host) larkhost.Layer { return lark.New(h) })
-	cliport.Provide(cliport.Provider{
+	larkhost.Provide(lark.Module{}.Info().ID, func(h larkhost.Host) larkhost.Layer { return lark.New(h) })
+	cliport.Provide(lark.Module{}.Info().ID, cliport.Provider{
 		NewRunner:    func(cfg cliwire.Config) cliport.Runner { return larkcli.New(cfg) },
 		NewConnector: func(cfg cliwire.Config) cliport.Connector { return larkconnector.New(cfg) },
 	})

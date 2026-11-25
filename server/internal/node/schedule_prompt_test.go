@@ -84,7 +84,7 @@ func (schedulePromptHub) Tell(string, any) error                                
 func TestScheduledPromptDeliveryThroughNode(t *testing.T) {
 	f := cliTestBash(t)
 	f.n.machineID = "fixture"
-	cwd := t.TempDir()
+	cwd := resolved(t, t.TempDir()) // a picked file carries the cwd the node reported, resolved (macOS: /var -> /private/var)
 	name := "Q&A [review] 資料.txt"
 	file := filepath.Join(cwd, name)
 	selection := fmt.Sprintf(`<persona-context kind="file" path="%s" machine="%s" cwd="%s" launcher="claude">Notes</persona-context>`,
@@ -351,6 +351,107 @@ func TestScheduledPromptFirstUseOfDefaultDirectory(t *testing.T) {
 	}
 	if !gotFile {
 		t.Fatal("the run did not resolve the file selected from the default directory")
+	}
+}
+
+// A node whose data directory is reached through a symlink: preview and save resolve the default directory, and the run
+// must start in that same form, or the selected skill's id (which includes the cwd) and the selected file's cwd no
+// longer match and every run is refused (#15004). The link is made here, so this holds on any system, not only where
+// the temp directory itself sits behind one (macOS's /var).
+func TestScheduledRunInALinkedDataDirectoryKeepsItsSelections(t *testing.T) {
+	f := cliTestBash(t)
+	// As in TestScheduledPromptFirstUseOfDefaultDirectory: the preview checks "claude" against this fixture's launchers,
+	// not ones an earlier test of the process cached for a minute.
+	launcherCache.Lock()
+	at, list := launcherCache.at, launcherCache.list
+	codex, aliases, settings, scripts := launcherCache.codex, launcherCache.codexAliases, launcherCache.settings, launcherCache.scripts
+	launcherCache.at, launcherCache.list = time.Time{}, nil
+	launcherCache.Unlock()
+	t.Cleanup(func() {
+		launcherCache.Lock()
+		launcherCache.at, launcherCache.list = at, list
+		launcherCache.codex, launcherCache.codexAliases, launcherCache.settings, launcherCache.scripts = codex, aliases, settings, scripts
+		launcherCache.Unlock()
+	})
+	linked := filepath.Join(t.TempDir(), "linked-data")
+	if err := os.Symlink(f.n.dir, linked); err != nil {
+		t.Fatal(err)
+	}
+	f.n.dir = linked // what the node reports, and so the hub's default directory, goes through the link
+	f.n.machineID = "linked-fixture"
+	service := assistant.New(assistant.Options{Hub: &schedulePromptHub{node: f.n}})
+	skillDir := filepath.Join(f.n.home, ".claude", "skills", "fixture-review")
+	if err := os.MkdirAll(skillDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(skillDir, "SKILL.md"), "---\nname: fixture-review\ndescription: Review fixture notes\n---\nRead the notes.\n")
+
+	call := func(method, route string, fields map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, err := json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		service.ServeHTTP(rec, httptest.NewRequest(method, route, bytes.NewReader(raw)).WithContext(t.Context()))
+		return rec
+	}
+	decode := func(rec *httptest.ResponseRecorder, out any) {
+		t.Helper()
+		if err := json.Unmarshal(rec.Body.Bytes(), out); rec.Code != http.StatusOK || err != nil {
+			t.Fatalf("%d %s (%v)", rec.Code, rec.Body, err)
+		}
+	}
+	var preview struct {
+		Execution assistant.TaskExecution
+		Catalog   assistantskills.Catalog
+	}
+	decode(call(http.MethodPost, "/api/v1/assistant/tasks/input-context", map[string]any{
+		"execution_machine_id": f.n.machineID, "launcher": "claude", "cwd": "", "catalog": true,
+	}), &preview)
+	cwd := preview.Execution.Cwd
+	if want := filepath.Join(resolved(t, linked), "assistant"); cwd != want {
+		t.Fatalf("preview cwd = %q, want the resolved default directory %q", cwd, want)
+	}
+	var skill string
+	for _, entry := range preview.Catalog.Skills {
+		if entry.Name == "fixture-review" {
+			skill = entry.ID
+		}
+	}
+	if skill == "" {
+		t.Fatalf("the preview did not list the fixture skill: %+v", preview.Catalog)
+	}
+	file := filepath.Join(cwd, "notes.txt")
+	writeFile(t, file, "Synthetic notes")
+	prompt := fmt.Sprintf(`<persona-context kind="skill" ref="%s">fixture-review</persona-context>`, skill) + "\n" +
+		fmt.Sprintf(`<persona-context kind="file" path="notes.txt" machine="%s" cwd="%s" launcher="claude">Notes</persona-context>`, f.n.machineID, cwd)
+	var saved struct{ Task assistant.Task }
+	decode(call(http.MethodPost, "/api/v1/assistant/tasks", map[string]any{
+		"title": "Review", "repeat": "daily", "time": "09:00", "enabled": true,
+		"execution_machine_id": f.n.machineID, "structured_prompt": prompt,
+	}), &saved)
+	if saved.Task.ID == "" || saved.Task.Cwd != "" || !saved.Task.PromptSelections {
+		t.Fatalf("save did not keep the default-directory binding: %+v", saved.Task)
+	}
+	var run struct {
+		SessionID string `json:"session_id"`
+	}
+	decode(call(http.MethodPost, "/api/v1/assistant/tasks/"+saved.Task.ID+"/run", nil), &run)
+	if run.SessionID == "" {
+		t.Fatal("task did not run")
+	}
+	f.idle(t, run.SessionID)
+	inputs := emptyStartUserInputs(t, f.file("stdin.jsonl"))
+	if len(inputs) != 1 {
+		t.Fatalf("one run, one turn: got %d", len(inputs))
+	}
+	gotFile := false
+	for _, content := range inputs[0].Message.Content {
+		gotFile = gotFile || strings.Contains(content.Text, "file-instructions") && strings.Contains(content.Text, resolved(t, file))
+	}
+	if !gotFile {
+		t.Fatal("the run did not deliver the file selected from the default directory")
 	}
 }
 

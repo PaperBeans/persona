@@ -9,7 +9,7 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// What /read asks the assistant to run (#11803, assistant/feishu_read.go, prompts/bot/read_group.md): read a group as
+// What /read asks the assistant to run (#11803, modules/lark/read.go, prompts/bot/read_group.md): read a group as
 // the user and download its images and files into a directory of their own. lark-cli rates the resource download
 // "Risk: write" (it writes a local file), so the gate reads it as a read: none of these may raise a Lark card. Ids are
 // placeholders. The listing downloads nothing (no --download-resources: it would skip the size limits); each image or

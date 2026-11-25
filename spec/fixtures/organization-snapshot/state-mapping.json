@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "live_working",
+      "description": "A live turn maps to working.",
+      "source": "server/internal/assistant/organization_snapshot_nodes.go orgRuntimeState",
+      "input": {"session_state": "working", "session_status": "working", "machine_status": "available", "accept_loaded": true},
+      "expected": {"state": "working", "activity": "working", "availability": "available"}
+    },
+    {
+      "name": "background_waiting",
+      "description": "Background waiting stays working with its detail.",
+      "source": "docs/protocol/agent-states.md background work",
+      "input": {"session_state": "working", "session_status": "idle", "background_waiting": true, "machine_status": "available", "accept_loaded": true},
+      "expected": {"state": "working", "activity": "waiting_background", "availability": "available"}
+    },
+    {
+      "name": "open_interaction",
+      "description": "An open interaction needs the owner.",
+      "source": "server/internal/proto/session.go unified agent states",
+      "input": {"session_state": "needs_you", "session_status": "blocked", "machine_status": "available", "accept_loaded": true},
+      "expected": {"state": "needs_you", "activity": "open_interaction", "availability": "available"}
+    },
+    {
+      "name": "awaits_reply",
+      "description": "A cardless unanswered reply needs the owner.",
+      "source": "server/internal/proto/session.go AwaitsReply",
+      "input": {"session_state": "idle", "session_status": "idle", "awaits_reply": true, "machine_status": "available", "accept_loaded": true},
+      "expected": {"state": "needs_you", "activity": "awaits_reply", "availability": "available"}
+    },
+    {
+      "name": "unread",
+      "description": "An unread finished turn is stopped.",
+      "source": "server/internal/proto/session.go StateUnread",
+      "input": {"session_state": "unread", "session_status": "done", "machine_status": "available", "accept_loaded": true},
+      "expected": {"state": "stopped", "activity": "unread", "availability": "available"}
+    },
+    {
+      "name": "idle",
+      "description": "An idle session is stopped, not an owner request.",
+      "source": "server/internal/proto/session.go StateIdle",
+      "input": {"session_state": "idle", "session_status": "idle", "machine_status": "available", "accept_loaded": true},
+      "expected": {"state": "stopped", "activity": "idle", "availability": "available"}
+    },
+    {
+      "name": "planned",
+      "description": "A planned to-do with no Agent is stopped.",
+      "source": "server/internal/assistant/leader_reports.go notStarted",
+      "input": {"planned": true, "machine_status": "available", "accept_loaded": true},
+      "expected": {"state": "stopped", "activity": "planned", "availability": "available"}
+    },
+    {
+      "name": "session_offline",
+      "description": "Session offline on a connected machine is stopped.",
+      "source": "docs/protocol/agent-states.md offline",
+      "input": {"session_state": "offline", "session_status": "offline", "machine_status": "available", "accept_loaded": true},
+      "expected": {"state": "stopped", "activity": "offline", "availability": "available"}
+    },
+    {
+      "name": "interrupted",
+      "description": "Raw interrupted host status is retained even without a unified state.",
+      "source": "server/internal/proto/session.go StatusInterrupted",
+      "input": {"session_state": "unknown", "session_status": "interrupted", "machine_status": "available", "accept_loaded": true},
+      "expected": {"state": "stopped", "activity": "interrupted", "availability": "available"}
+    },
+    {
+      "name": "host_unknown",
+      "description": "Unknown host state has no three-state value.",
+      "source": "server/internal/proto/session.go StateUnknown",
+      "input": {"session_state": "unknown", "session_status": "unknown", "machine_status": "available", "accept_loaded": true},
+      "expected": {"state": null, "activity": "", "availability": "unknown"}
+    },
+    {
+      "name": "machine_offline",
+      "description": "A whole offline machine makes the current state unknown, not stopped.",
+      "source": "server/internal/assistant/organization_snapshot_nodes.go machine availability",
+      "input": {"session_state": "working", "session_status": "working", "machine_status": "offline", "accept_loaded": true},
+      "expected": {"state": null, "activity": "", "availability": "offline"}
+    },
+    {
+      "name": "stale_last_known",
+      "description": "Stale last-known working data is not current.",
+      "source": "server/internal/assistant/organization_snapshot_nodes.go machine availability",
+      "input": {"session_state": "working", "session_status": "working", "machine_status": "stale", "accept_loaded": true},
+      "expected": {"state": null, "activity": "", "availability": "stale"}
+    },
+    {
+      "name": "durable_decision_offline",
+      "description": "A current owner decision survives a machine disconnect.",
+      "source": "server/internal/assistant/organization_snapshot_nodes.go orgDurableDecision",
+      "input": {"session_state": "offline", "session_status": "offline", "owner_decision": true, "machine_status": "offline", "accept_loaded": true},
+      "expected": {"state": "needs_you", "activity": "owner_decision", "availability": "offline"}
+    },
+    {
+      "name": "supervisor_wait_not_owner",
+      "description": "A supervisor-held OwnerWait alone is not an owner-facing request.",
+      "source": "server/internal/assistant/supervise_events.go noteOwnerWait",
+      "input": {"session_state": "idle", "session_status": "idle", "supervisor_wait": true, "machine_status": "available", "accept_loaded": true},
+      "expected": {"state": "stopped", "activity": "idle", "availability": "available"}
+    }
+  ]
+}

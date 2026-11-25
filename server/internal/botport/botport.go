@@ -15,6 +15,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/nwverse/persona/server/internal/moduleswitch"
+
 	"github.com/nwverse/persona/server/internal/botcard"
 )
 
@@ -76,15 +78,24 @@ type Provider struct {
 var provided *Provider
 
 // Provide provides the bot's client (init only).
-func Provide(p Provider) {
+func Provide(module string, p Provider) {
 	if provided != nil {
 		panic("botport: provided twice")
 	}
 	provided = &p
+	switched.Provide(module, struct{}{})
 }
 
-// Available reports whether this build has the bot's client.
-func Available() bool { return provided != nil }
+// switched keeps the module's id for the run-time switch (moduleswitch): Available asks it.
+var switched = moduleswitch.NewPort[struct{}]("botport")
+
+// InBuild reports whether this build has the bot (the lark module), whatever the switch.
+func InBuild() bool { return provided != nil }
+
+// Available reports whether this build has the bot and s has the lark module on: the one question the extension
+// manager asks before it makes anything of the port (the constructors below are called only after it). A switched-off
+// module is absent exactly as one built out.
+func Available(s moduleswitch.Set) bool { return provided != nil && switched.On(s) }
 
 // ErrUnavailable: this build has no bot client (the lark module is left out).
 var ErrUnavailable = errors.New("the Feishu / Lark bot is not part of this build")

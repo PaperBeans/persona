@@ -56,6 +56,31 @@ test('AGY streams one assistant message at a time across tool calls', { timeout:
   await until('live text cleared at completion', () => node.last('session.delta')?.text === '', 15_000)
 })
 
+for (const withTool of [true, false]) {
+  test(`AGY keeps text before a following thought in event order (tool: ${withTool})`, { timeout: 20_000 }, async (t) => {
+    const { node, update, chunk, promptCount, runtime } = await fixture(t)
+    await node.peer.call('session.send', { session_id: SESSION, text: 'Inspect.' })
+    await promptCount(1)
+    await chunk('I will inspect the file.')
+    update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Check its contents first.' } })
+    await until('thought after text is pushed', () => node.last('session.items')?.items.some((item) => item.kind === 'thinking'))
+    if (withTool) {
+      update({ sessionUpdate: 'tool_call', toolCallId: 'read', name: 'read_file' })
+      await until('tool after thought is pushed', () => node.last('session.items')?.items.some((item) => item.kind === 'tool_use'))
+    }
+    update({ end: true })
+    await until('turn settles before the final order is checked', () => runtime.idle() && node.last('session.delta')?.text === '')
+    const page = await node.peer.call('session.items', { session_id: SESSION })
+    assert.equal(page.items.filter((item) => item.role === 'assistant' && item.kind === 'text' && item.text === 'I will inspect the file.').length, 1)
+    assert.deepEqual(page.items.map((item) => [item.role, item.kind, item.text ?? item.tool_name]), [
+      ['user', 'text', 'Inspect.'],
+      ['assistant', 'text', 'I will inspect the file.'],
+      ['assistant', 'thinking', 'Check its contents first.'],
+      ...withTool ? [['assistant', 'tool_use', 'Read']] : [],
+    ])
+  })
+}
+
 test('AGY normalizes closed local file:// links while streaming without rewriting incomplete URLs', { timeout: 20_000 }, async (t) => {
   const { node, update, chunk, promptCount } = await fixture(t)
   await node.peer.call('session.send', { session_id: SESSION, text: 'Show the file.' })

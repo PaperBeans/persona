@@ -53,5 +53,14 @@
   "file_waiting": "等待中",
   "file_failed": "失败 · 点击重试",
   "file_cancel": "取消上传 {name}",
-  "file_retry": "重试 {name}"
+  "file_retry": "重试 {name}",
+  "confirm_run_title": "执行 {word}？",
+  "confirm_ok": "确定",
+  "confirm_cancel": "取消",
+  "drop_here": "拖放图片或文件到此处",
+  "pasted_preview_hint": "点击预览或展开到输入框",
+  "pasted_chip_other": "已粘贴文本 · {count} 字",
+  "pasted_remove": "移除粘贴文本",
+  "pasted_stats": "{lines} 行 · {chars} 字",
+  "pasted_expand": "展开到输入框"
 }

@@ -31,6 +31,7 @@ const answers: Record<string, unknown> = { "/api/v1/sessions": { sessions }, "/a
 let host: HTMLDivElement;
 let root: Root;
 const flush = async () => {
+  await act(async () => { await vi.dynamicImportSettled(); });
   for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve(); });
 };
 

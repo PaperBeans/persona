@@ -4,7 +4,7 @@ The main conversation and Agent sessions use the same local send lifecycle on iP
 The UI does not modify the runtime's session state, session ordering or notifications.
 
 - **Sending** starts synchronously when the client accepts the send or retry.
-- **Processing** starts when the send API succeeds. Runtime startup and first output are separate, later milestones.
+- **Processing** starts on a trusted hub `message_send_state` receipt for the message's `client_msg_id`, with the send API's HTTP answer kept as the fallback on older hubs or dropped sockets (#12773). Runtime startup and first output are separate, later milestones.
 - Transcript echo does not remove the attempt record. A response that arrives after echo still updates acceptance.
 - A reply, a fresh failure or terminal runtime update ends the fallback. A late acknowledgement cannot revive a finished attempt.
 - Waiting for the network or a refused send ends optimistic activity; the existing outbox retains the message and its retry safety.
@@ -40,5 +40,6 @@ XCTest ends captures Springboard instead; those images are not UI evidence.
 `ChatSendFeedbackTests` covers acknowledgement-before-output, echo-before-acknowledgement, late acknowledgements,
 request correlation, failure/offline recovery, stale snapshots and the acceptance deadline.
 
-The client currently treats successful send responses as acceptance. A future server event can update the same
-attempt by message ID; it must not replace reliable outbox delivery with speculative success.
+A trusted `message_send_state` receipt updates the same attempt by message ID (`ChatSendFeedback.receive`) without
+replacing reliable outbox delivery with speculative success; the HTTP response remains authoritative for outbox state
+and serves as the fallback when receipts are unavailable or untrusted.

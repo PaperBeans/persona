@@ -14,6 +14,16 @@ var codexPagedDBs = struct {
 }{byHome: map[string]*codexAppDB{}}
 
 func codexPaginatedThreads(home string) map[string]codexAppThread {
+	return codexPaginatedThreadsMode(home, false)
+}
+
+// codexPaginatedThreadsFresh re-reads state_*.sqlite immediately when its file stamp changed on disk,
+// while still returning cached rows with no SQLite query when the database files are unchanged.
+func codexPaginatedThreadsFresh(home string) map[string]codexAppThread {
+	return codexPaginatedThreadsMode(home, true)
+}
+
+func codexPaginatedThreadsMode(home string, fresh bool) map[string]codexAppThread {
 	if codexHistoryDBPath(home) == "" {
 		return nil
 	}
@@ -28,7 +38,7 @@ func codexPaginatedThreads(home string) map[string]codexAppThread {
 		c = &codexAppDB{}
 		codexPagedDBs.byHome[home] = c
 	}
-	if c.stamp == stamp || time.Since(c.at) < codexAppDBRefresh {
+	if c.stamp == stamp || (!fresh && time.Since(c.at) < codexAppDBRefresh) {
 		defer codexPagedDBs.Unlock()
 		return c.byID
 	}

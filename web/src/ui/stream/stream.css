@@ -14,17 +14,22 @@
 @keyframes status-done-pop { 0% { transform: scale(.85); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .stream-word, [data-stream-marker]::marker, .status-breath, .status-done { animation: none; } }
 
-/* Markdown in the chat (cindy's markdown rules): headings 20 / 18 / 16 at 500, code
-   blocks with a 12px corner that wrap instead of scrolling. `.prose-j.prose-j` outranks styles.css whatever the order
-   the two load in; compact cards keep their own. */
+/* Markdown in the chat (cindy's markdown rules): headings 20 / 18 / 16 at 500, code blocks with a 12px corner that
+   scroll horizontally by default and wrap when [data-wrap="true"] is toggled. `.prose-j.prose-j` outranks styles.css
+   whatever the order the two load in; compact cards keep their own. */
 .prose-j.prose-j:not(.prose-compact) :is(h1, h2, h3) { font-weight: 500; }
 .prose-j.prose-j:not(.prose-compact) h1 { font-size: 20px; }
 .prose-j.prose-j:not(.prose-compact) h2 { font-size: 18px; }
 .prose-j.prose-j:not(.prose-compact) h3 { font-size: 16px; }
-.prose-j.prose-j pre { border-radius: 12px; padding: 16px; overflow-x: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
-.prose-j.prose-j pre code { white-space: inherit; }
+.prose-j.prose-j :not(pre):not(a) > code { cursor: pointer; transition: background-color 150ms; }
+.prose-j.prose-j :not(pre):not(a) > code:hover { background: var(--hover-2); }
+.prose-j.prose-j pre { border-radius: 12px; padding: 12px 14px; overflow-x: auto; white-space: pre; }
 .prose-j.prose-j .code-block { border-radius: 12px; }
-.prose-j.prose-j .code-block > pre { margin: 0; border-radius: 0; }
+.prose-j.prose-j .code-block > pre,
+.prose-j.prose-j [data-code-block] pre { margin: 0; border-radius: 0; box-shadow: none; background: transparent; padding: 12px 14px; }
+.prose-j.prose-j :is([data-wrap="true"] pre, pre[data-wrap="true"]) { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
+.prose-j.prose-j pre code { white-space: inherit; overflow-wrap: inherit; }
+.prose-j.prose-compact [data-code-block] { margin: .2em 0; }
 .prose-j.prose-compact pre { padding: 6px 10px; }
 
 /* highlight.js classes (rehype-highlight). Colors are the page's tokens, so light and dark each have their own set;

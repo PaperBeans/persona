@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { linkArguments, publicLinkStatus } from "../src/link-contract.cjs";
+import { extractLinkPairURI, linkArguments, publicLinkStatus } from "../src/link-contract.cjs";
 import { hubPartition } from "../src/sessions.js";
 import { parseHubAddress } from "../src/urls.js";
 
 test("Link commands have fixed argv and pairing credentials only on stdin", () => {
   assert.deepEqual(linkArguments({ action: "status" }), { args: ["status", "--json"] });
   assert.deepEqual(linkArguments({ action: "pair-active", value: "persona://link?token=example" }), { args: ["pair", "-"], stdin: "persona://link?token=example" });
+  assert.deepEqual(
+    linkArguments({ action: "pair-active", value: "persona-link pair 'persona://link?url=https%3A%2F%2Fhub.example&token=example'" }),
+    { args: ["pair", "-"], stdin: "persona://link?url=https%3A%2F%2Fhub.example&token=example" },
+  );
+  assert.equal(
+    extractLinkPairURI("  \"persona://link?token=example\"  "),
+    "persona://link?token=example",
+  );
   assert.equal(linkArguments({ action: "pair-active", value: "https://evil.test" }), undefined);
   assert.equal(linkArguments({ action: "rename", value: "x".repeat(41) }), undefined);
   assert.equal(linkArguments({ action: "pair-passive", value: "--help" }), undefined);

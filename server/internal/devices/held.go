@@ -262,6 +262,9 @@ func (d *Devices) heldLoop(ctx context.Context) {
 	h.mu.Lock()
 	h.ctx = ctx
 	h.mu.Unlock()
+	d.heldStarts.mu.Lock()
+	d.heldStarts.ctx = ctx
+	d.heldStarts.mu.Unlock()
 	t := time.NewTicker(heldTick)
 	defer t.Stop()
 	for {
@@ -279,6 +282,7 @@ func (d *Devices) heldLoop(ctx context.Context) {
 				d.heldWake(machine)
 			}
 		}
+		d.heldStartTick(ctx)
 		select {
 		case <-ctx.Done():
 			return

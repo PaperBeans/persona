@@ -416,3 +416,29 @@ func TestChannelsInTheUsersLanguage(t *testing.T) {
 		t.Fatalf("feishu %v, app %v", feishu, app)
 	}
 }
+
+func TestChannelReceivePreservesGroupTopicRoutingFields(t *testing.T) {
+	w := newChannelWorld(t)
+	p, _ := json.Marshal(channel.ReceiveParams{
+		Contribution: "examplechat",
+		Message: channel.Message{
+			ID:       "m_topic",
+			Text:     "group topic message",
+			ChatID:   "oc_group_1",
+			ChatKind: channel.ChatKindTopic,
+			TopicID:  "omt_99",
+			Thread:   "oc_group_1:omt_99",
+		},
+	})
+	if _, err := w.h.extensionChannelCall("example-chat", channel.MReceive, p); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, 5*time.Second, "message with routing fields handed to assistant", func() bool { return len(w.received()) == 1 })
+	var got channel.Message
+	if err := json.Unmarshal(w.received()[0].Message, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "m_topic" || got.ChatID != "oc_group_1" || got.ChatKind != channel.ChatKindTopic || got.TopicID != "omt_99" || got.Thread != "oc_group_1:omt_99" {
+		t.Fatalf("forwarded message = %+v", got)
+	}
+}

@@ -16,7 +16,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
@@ -34,10 +37,13 @@ import persona.core.contracts.api.AgentLauncher
 import persona.core.contracts.api.AssistantLaunchers
 import persona.core.contracts.api.AssistantManagement
 import persona.core.contracts.api.ChatAction
+import persona.core.contracts.api.ConversationSwitchRequest
 import persona.core.contracts.api.LauncherModels
+import persona.core.contracts.api.hubCodedFailure
 import persona.core.contracts.isTraeCliId
 import persona.core.contracts.unknownAgentName
 import persona.core.designsystem.*
+import persona.core.designsystem.R as DesignR
 import persona.core.domain.models.AgentModelPanel
 import persona.core.domain.models.ModeStep
 import persona.core.domain.models.ModelList
@@ -52,6 +58,7 @@ import persona.core.domain.models.PersonaModelPanel
 import persona.core.domain.models.PillSetup
 import persona.core.domain.models.PillView
 import java.io.IOException
+import java.util.UUID
 
 /**
  * What a chat's model pill and panel read (#5055, the web's `lib/session-models.ts`): the computers' launchers and each
@@ -224,6 +231,7 @@ internal fun panelWords(res: Resources, names: Map<String, String> = emptyMap())
                 PanelReason.Locked -> res.getString(R.string.chat_modelpanel_locked)
                 PanelReason.Busy -> res.getString(R.string.chat_modelpanel_busy)
                 PanelReason.ProviderGone -> res.getString(R.string.chat_modelpill_provider_gone)
+                PanelReason.SupervisionUnavailable -> res.getString(R.string.chat_modelpanel_supervision_unavailable)
                 is PanelReason.Hub -> reason.words
             }
         },
@@ -456,12 +464,16 @@ internal fun EngineSwitchConfirmation(onDismiss: () -> Unit, confirmEnabled: Boo
  */
 internal data class DrawnPick(val pick: ModelPick?, val rev: Long?)
 
+private class ConversationSwitchUnavailableException : Exception()
+
 /**
  * A Persona chat's model pill and its panel (#5055, the web's `AssistantModelPill` and `AssistantModelPanel` from #5033;
  * Glass): what the chat's next message runs on and, in the panel's strip, where that comes from. On a hub with
  * `assistant_model_pick` a pick is kept for the conversation (`PUT …/model`, drawn at once, put back with the hub's
- * words if it says no) and Follow default / Undo pick drops it (`DELETE`); on an older hub the pick lives on this page
- * ([pagePick]) and goes with each message. [session] null: the new-chat page, whose pick goes with the start.
+ * words if it says no) and Follow default / Undo pick drops it (`DELETE`); on a hub with `assistant_segments`, switching
+ * an existing conversation across engines or runtimes confirms first and submits `POST …/switch`; on an older hub the
+ * pick lives on this page ([pagePick]) and goes with each message. Every Assistant conversation exposes the pill (#9248,
+ * #13956); [session] null is the new-chat page, whose pick goes with the start.
  */
 @Composable
 fun PersonaModelPill(
@@ -484,6 +496,10 @@ fun PersonaModelPill(
     /** A one-off request to follow the default, using the same optimistic clear as the panel's strip. */
     clearRequested: Boolean = false,
     onClearHandled: () -> Unit = {},
+    /** Known leader conversation ids for this manager, used to label Follow default vs Undo pick before config arrives. */
+    leaderConversations: Set<String> = emptySet(),
+    /** Called after a confirmed cross-engine conversation switch so the page can refresh authoritative state. */
+    onSwitched: () -> Unit = {},
 ) {
     val res = LocalResources.current
     val features = LocalHubFeatures.current
@@ -492,19 +508,36 @@ fun PersonaModelPill(
     var open by remember { mutableStateOf(false) }
     var prefs by rememberPanelPrefs(PanelScope.Assistant)
     var config by remember(management) { mutableStateOf<persona.core.contracts.api.AssistantConfig?>(null) }
+    var configLoaded by remember(management) { mutableStateOf(false) }
     var drawn by remember(session?.key) { mutableStateOf<DrawnPick?>(null) }
+    var supervisionRequired by remember(session?.key) { mutableStateOf(false) }
+    var switchPick by remember(session?.key) { mutableStateOf<ModelPick?>(null) }
+    var switchConfig by remember(session?.key) { mutableStateOf<PanelConfig?>(null) }
+    var switchRequest by remember(session?.key) { mutableStateOf<ConversationSwitchRequest?>(null) }
+    var switchError by remember(session?.key) { mutableStateOf<String?>(null) }
+    var switching by remember(session?.key) { mutableStateOf(false) }
+    var switchUncertain by remember(session?.key) { mutableStateOf(false) }
     LaunchedEffect(open) { onOverlay(open) }
     LaunchedEffect(openRequested) {
         if (openRequested) { open = true; onOpenHandled() }
     }
     DisposableEffect(Unit) { onDispose { onOverlay(false) } }
     LaunchedEffect(management) {
-        try { config = management?.config() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { }
+        try { config = management?.config() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { }
+        finally { configLoaded = true }
     }
     val loadedConfig = config
+    val roleReady = session == null || configLoaded
     val isMain = session != null && loadedConfig?.main == session.sessionId
+    val followsDefault = session != null && (isMain ||
+        loadedConfig?.backgroundSupervisor == session.sessionId ||
+        session.sessionId in loadedConfig?.leaders.orEmpty() ||
+        session.sessionId in leaderConversations ||
+        session.origin == "task")
     fun readCatalog(refresh: Boolean = false) {
-        if (session != null && loadedConfig == null) return // Wait until the conversation's role is known.
+        if (!roleReady) return // Wait until the conversation's role is known.
         val api = management ?: return
         if (machineId.isNotBlank()) lists.readAssistantCatalog(machineId, main = isMain) {
             if (isMain) api.mainAssistantLauncherList(machineId, refresh) else api.assistantLauncherList(machineId, refresh)
@@ -514,26 +547,37 @@ fun PersonaModelPill(
         val api = management ?: return
         if (machineId.isNotBlank()) lists.readAssistantModels(machineId, provider, again) { api.launcherModels(machineId, provider) }
     }
-    LaunchedEffect(management, machineId, session?.rev, isMain) {
+    LaunchedEffect(management, machineId, session?.rev, isMain, roleReady) {
         // Hub pushes can change the effective Main chat model even while the panel is closed (#6542).
         readCatalog()
     }
-    LaunchedEffect(management, machineId, open, isMain) {
+    LaunchedEffect(management, machineId, open, isMain, roleReady) {
         if (open) {
             val previous = lists.assistantCatalog(machineId, main = isMain)
             readCatalog(refresh = previous is JLoadable.Failed || previous is JLoadable.Loaded && previous.failure != null)
         }
     }
     val kept = PersonaModelPanel.MODEL_PICK in features
+    val canSwitch = PersonaModelPanel.SEGMENTS in features
+    LaunchedEffect(open, canSwitch, management, session?.key) {
+        val s = session ?: return@LaunchedEffect
+        val api = management ?: return@LaunchedEffect
+        if (!canSwitch) {
+            supervisionRequired = false
+            return@LaunchedEffect
+        }
+        if (!open) return@LaunchedEffect
+        try {
+            supervisionRequired = api.conversationSwitchState(s.key).supervisionRequired
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Keep existing supervision state; the hub re-attests on switch submission.
+        }
+    }
     val shownSession = session?.let { s -> drawn?.takeIf { it.rev == s.rev }?.let { s.copy(modelPick = it.pick) } ?: s }
     val chat = PersonaModelPanel.Chat(shownSession, isMain = isMain, kept = kept,
-        config = config?.launcher, pagePick = pagePick)
-    // Only the main conversation has a per-conversation model pick (#6911): a leader, the background supervisor or
-    // another assistant conversation draws no pill and follows the default or what it started with. The new-chat page
-    // (session null) keeps its starter pick, which goes with the main conversation's start. A model-route remedy may
-    // still open this chat's existing panel; once it closes (and after its clear request is handled), the non-main chat
-    // goes back to drawing no pill.
-    if (session != null && !chat.isMain && !open && !clearRequested) return
+        config = config?.launcher, pagePick = pagePick, followsDefault = followsDefault)
     val catalog = lists.assistantCatalog(machineId, main = isMain)
     val info = (catalog as? JLoadable.Loaded)?.value
     val setup = PersonaModelPanel.setup(chat, info)
@@ -565,28 +609,120 @@ fun PersonaModelPill(
     }
     if (!open) return
     val running = session?.agent?.isNotBlank() == true
-    val panel = PersonaModelPanel.panel(setup, info, { lists.list(machineId, it) }, typed = PersonaModelPanel.TYPED_MODELS in features,
-        engine = session?.let(AgentModelPanel::engine) ?: "claude", running = running)
+    val panel = PersonaModelPanel.panel(
+        setup,
+        info,
+        { lists.list(machineId, it) },
+        typed = PersonaModelPanel.TYPED_MODELS in features,
+        engine = session?.let(AgentModelPanel::engine) ?: "claude",
+        running = running,
+        switching = canSwitch && kept && session != null,
+        supervision = supervisionRequired,
+    )
     val named = listOfNotNull(info?.launchers?.firstOrNull { it.name == setup.provider }?.title ?: setup.provider,
         panel.providers.firstOrNull { it.id == setup.provider }?.models?.firstOrNull { it.id == panel.state.current?.model }?.name ?: view.setup.model)
         .joinToString(" · ")
+    fun needsExplicitSwitch(pick: ModelPick): Boolean {
+        val s = session ?: return false
+        if (!kept || !canSwitch) return false
+        val provider = panel.providers.firstOrNull { it.id == pick.launcher } ?: return false
+        val target = info?.launchers?.firstOrNull { it.name == pick.launcher } ?: return false
+        return PersonaModelPanel.switchNeeded(s, target, provider.engine)
+    }
+    fun cancelSwitch() {
+        if (switching) return
+        switchPick = null
+        switchConfig = null
+        switchRequest = null
+        switchError = null
+        switchUncertain = false
+    }
+    fun confirmSwitch() {
+        val s = session ?: return
+        val pick = switchPick ?: return
+        val api = management ?: return
+        if (switching) return
+        switching = true
+        switchError = null
+        scope.launch {
+            var submitted = false
+            try {
+                val request = switchRequest ?: run {
+                    val state = api.conversationSwitchState(s.key)
+                    PersonaModelPanel.buildSwitchRequest(s, pick, state, UUID.randomUUID().toString())
+                        ?: throw ConversationSwitchUnavailableException()
+                }.also { switchRequest = it }
+                submitted = true
+                api.submitConversationSwitch(s.key, request)
+                switchConfig?.let { prefs = prefs.pushRecent(it) }
+                switchPick = null
+                switchConfig = null
+                switchRequest = null
+                switchError = null
+                switchUncertain = false
+                open = false
+                onNotice(res.getString(R.string.chat_modelpanel_switch_requested))
+                onSwitched()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                val detail = if (error is ConversationSwitchUnavailableException) {
+                    res.getString(R.string.chat_modelpanel_switch_unavailable)
+                } else {
+                    hubReason(error) ?: operationFeedback(error).text.resolve(res)
+                }
+                val uncertain = submitted && hubCodedFailure(error)?.delivered != "none"
+                switchUncertain = uncertain
+                switchError = if (uncertain) {
+                    res.getString(R.string.chat_modelpanel_switch_unconfirmed, detail)
+                } else {
+                    detail
+                }
+            } finally {
+                switching = false
+            }
+        }
+    }
     JModelPanel(panel.providers, panel.state, prefs, { prefs = it }, remember(res) { panelWords(res) },
         onPick = { picked ->
             val pick = PersonaModelPanel.pickOf(picked, lists.list(machineId, picked.provider).list, panel.state.current)
             if (pick == null) { open = false; return@JModelPanel }
+            if (needsExplicitSwitch(pick)) {
+                switchPick = pick
+                switchConfig = picked
+                switchRequest = null
+                switchError = null
+                switchUncertain = false
+                return@JModelPanel
+            }
             prefs = prefs.pushRecent(picked)
             keep(pick)
             // an older hub keeps the effort on the session (what the effort chip did)
             if ((!kept || session == null) && pick.effort != null && pick.effort != session?.effort) onEffort?.invoke(pick.effort!!)
             open = false
         },
-        onDismiss = { open = false },
+        onDismiss = {
+            if (!switching) {
+                cancelSwitch()
+                open = false
+            }
+        },
+        picking = switching,
         header = { PickStrip(chat, setup, named) { keep(null) } },
         onApplyCurrent = panel.state.current?.let { now -> { effort: String ->
             PersonaModelPanel.pickOf(now.copy(effort = effort), lists.list(machineId, now.provider).list, null)?.let { pick ->
-                if (session != null && kept) keep(pick) else { onPagePick(pick); onEffort?.invoke(effort) }
+                if (needsExplicitSwitch(pick)) {
+                    switchPick = pick
+                    switchConfig = now.copy(effort = effort)
+                    switchRequest = null
+                    switchError = null
+                    switchUncertain = false
+                } else if (session != null && kept) {
+                    keep(pick)
+                } else {
+                    onPagePick(pick); onEffort?.invoke(effort)
+                }
             }
-            Unit
         } },
         onReload = { readModels(it, again = true) },
         onConfigure = onConfigure,
@@ -596,6 +732,49 @@ fun PersonaModelPill(
             else -> catalog
         },
         onRetryCatalog = if (machineId.isNotBlank()) ({ readCatalog(refresh = true) }) else null)
+    switchPick?.let { pendingSwitch ->
+        val targetName = panel.providers.firstOrNull { it.id == pendingSwitch.launcher }?.name ?: pendingSwitch.launcher
+        PersonaSwitchConfirmation(
+            targetName = targetName,
+            error = switchError,
+            switching = switching,
+            uncertain = switchUncertain,
+            onDismiss = ::cancelSwitch,
+            onConfirm = ::confirmSwitch,
+        )
+    }
+}
+
+@Composable
+internal fun PersonaSwitchConfirmation(
+    targetName: String,
+    error: String?,
+    switching: Boolean,
+    uncertain: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val palette = PersonaTheme.palette
+    JDialog(
+        onDismiss = onDismiss,
+        title = stringResource(R.string.chat_modelpanel_switch_title),
+        text = stringResource(R.string.chat_modelpanel_switch_explanation, targetName),
+        confirm = stringResource(R.string.chat_modelpanel_switch_confirm) to onConfirm,
+        dismiss = stringResource(if (uncertain) DesignR.string.designsystem_close else DesignR.string.designsystem_cancel) to onDismiss,
+        confirmEnabled = !switching,
+        dismissEnabled = !switching,
+        confirmLoading = switching,
+        content = error?.takeIf(String::isNotBlank)?.let { message ->
+            {
+                Text(
+                    message,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }.testTag("switch-error"),
+                    style = PersonaTheme.type.caption,
+                    color = palette.danger.text,
+                )
+            }
+        },
+    )
 }
 
 /** The strip on top of a Persona chat's panel (the web's `PickStrip`): where the setup comes from and, for a pick, the way back. */
@@ -609,8 +788,8 @@ private fun PickStrip(chat: PersonaModelPanel.Chat, setup: PersonaModelPanel.Set
         setup.source == PersonaModelPanel.Source.Default -> stringResource(R.string.chat_modelpill_header_default, named)
         else -> stringResource(R.string.chat_modelpill_header_own, named)
     }
-    // the main chat and the new one go back to the default; another chat's pick is undone (it then keeps what it runs)
-    val back = stringResource(if (chat.session != null && !chat.isMain) R.string.chat_modelpill_undo_pick else R.string.chat_modelpill_follow_default)
+    // the main chat, leaders, supervisor, task chats and the new one go back to the default; another chat's pick is undone (it then keeps what it runs)
+    val back = stringResource(if (chat.session != null && !chat.followsDefault) R.string.chat_modelpill_undo_pick else R.string.chat_modelpill_follow_default)
     Column(Modifier.fillMaxWidth().testTag("pick-strip")) {
         Row(Modifier.fillMaxWidth().padding(horizontal = pagePadding, vertical = Tokens.Space.xs),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {

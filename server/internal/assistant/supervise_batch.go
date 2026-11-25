@@ -72,7 +72,7 @@ func (s *Service) supervisionBatchInterval(ctx context.Context) time.Duration {
 func supervisionBatchImmediate(g superviseSignal) bool {
 	switch g.Kind {
 	case sigNeedsYou, sigAsk, sigEscalated, sigDecide, sigDecisionReply, sigParkDecided, sigOwnerCannot, sigRecheck, sigUndecidable, sigDeliveryHold, sigFailed, sigCardlessWait,
-		sigParkedDue, sigTodoReady, sigPRMerged, sigParentCloseout, sigNeedsUserExternalInfo: // a parked task whose time came (#11614), unblocked dependent (#12606), merge/parent closeout (#13100), or external info during needs_user (#13112)
+		sigParkedDue, sigTodoReady, sigPRMerged, sigParentCloseout, sigNeedsUserExternalInfo, sigOwnerPresent: // a parked task whose time came (#11614), unblocked dependent (#12606), merge/parent closeout (#13100), external info during needs_user (#13112), or owner returned while waiting on owner action (#15087)
 		return true
 	case sigCheck: // the owner's answer to a check's decision; the check's own news can wait for the batch
 		return g.Report == checkDecidedReport

@@ -28,6 +28,7 @@ var FleetRoutes = []string{
 	"POST /api/v1/interactions/{id}/resolve",
 	"POST /api/v1/interactions/{id}/clarify",
 	"POST /api/v1/interactions/{id}/reanswer",
+	"POST /api/v1/interactions/{id}/seen",
 	"GET /api/v1/interactions/history",
 	"POST /api/v1/sessions/{mid}/{sid}/seen",
 }
@@ -95,7 +96,11 @@ func (s *Service) fleetHandler(next http.Handler) http.Handler {
 		}
 		apierr.WriteJSON(w, map[string]any{"ok": true, "pending": true})
 	})
-	mux.HandleFunc("POST /api/v1/interactions/{id}/reanswer", s.serveReanswer)    // "Change answer" (fleet_delegate.go)
+	mux.HandleFunc("POST /api/v1/interactions/{id}/reanswer", s.serveReanswer) // "Change answer" (fleet_delegate.go)
+	mux.HandleFunc("POST /api/v1/interactions/{id}/seen", func(w http.ResponseWriter, r *http.Request) {
+		s.markInteractionSeen(r.Context(), r.PathValue("id"))
+		apierr.WriteJSON(w, map[string]any{"ok": true})
+	})
 	mux.HandleFunc("GET /api/v1/interactions/history", s.serveInteractionHistory) // interaction_history.go
 	mux.HandleFunc("POST /api/v1/sessions/{mid}/{sid}/seen", func(w http.ResponseWriter, r *http.Request) {
 		m, ok := s.fleetMachine(r.PathValue("mid"))

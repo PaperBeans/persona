@@ -9,15 +9,19 @@ targets:
         excludes: ["**/*.md"]
       - path: Modules/Health
         excludes: ["**/*.md"]
+      - path: Modules/Voice
+        excludes: ["**/*.md"]
     settings:
       base:
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PERSONA_MODULE_SCREEN_SHARE PERSONA_MODULE_HEALTH"
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PERSONA_MODULE_SCREEN_SHARE PERSONA_MODULE_HEALTH PERSONA_MODULE_VOICE"
   PersonaVision:
     sources:
       - path: Modules/ScreenShare
         excludes: ["**/*.md"]
       - path: Modules/Health
         excludes: ["**/*.md"]
+      - path: Modules/Voice
+        excludes: ["**/*.md"]
     settings:
       base:
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PERSONA_MODULE_SCREEN_SHARE PERSONA_MODULE_HEALTH"
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PERSONA_MODULE_SCREEN_SHARE PERSONA_MODULE_HEALTH PERSONA_MODULE_VOICE"

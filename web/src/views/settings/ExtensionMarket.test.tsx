@@ -162,3 +162,45 @@ describe("MarketCatalog updating state (#6468)", () => {
     expect(host.querySelector("[role=status]")).toBeNull();
   });
 });
+
+describe("MarketCatalog header Manage markets entry (#14958)", () => {
+  it("supports onManageMarkets and custom backLabel for Integrations while keeping legacy onMarkets compatible", async () => {
+    catalog.value = { markets: [market("official")], extensions: [] } satisfies Catalog;
+    const onManageMarkets = vi.fn();
+    const onBack = vi.fn();
+    act(() =>
+      root.render(
+        <MarketCatalog backLabel="集成与扩展" onBack={onBack} onOpen={() => {}} onManageMarkets={onManageMarkets} />,
+      ),
+    );
+    await flush();
+    const backBtn = button("集成与扩展");
+    expect(backBtn).toBeTruthy();
+    act(() => backBtn!.click());
+    expect(onBack).toHaveBeenCalledOnce();
+
+    const manageBtn = host.querySelector<HTMLButtonElement>('[data-testid="market-manage-markets"]');
+    expect(manageBtn).not.toBeNull();
+    expect(manageBtn!.textContent).toContain("管理市场");
+    act(() => manageBtn!.click());
+    expect(onManageMarkets).toHaveBeenCalledOnce();
+
+    // Phone layout (onBack omitted) still shows the top-right Manage markets button.
+    act(() => root.render(<MarketCatalog onOpen={() => {}} onManageMarkets={onManageMarkets} />));
+    await flush();
+    const phoneManageBtn = host.querySelector<HTMLButtonElement>('[data-testid="market-manage-markets"]');
+    expect(phoneManageBtn).not.toBeNull();
+    act(() => phoneManageBtn!.click());
+    expect(onManageMarkets).toHaveBeenCalledTimes(2);
+
+    // Legacy Extensions.tsx call signature (onMarkets without backLabel) keeps default "扩展" back label and Manage markets button.
+    const onMarkets = vi.fn();
+    act(() => root.render(<MarketCatalog onBack={() => {}} onOpen={() => {}} onMarkets={onMarkets} />));
+    await flush();
+    expect(button("扩展")).toBeTruthy();
+    const legacyManageBtn = host.querySelector<HTMLButtonElement>('[data-testid="market-manage-markets"]');
+    expect(legacyManageBtn).not.toBeNull();
+    act(() => legacyManageBtn!.click());
+    expect(onMarkets).toHaveBeenCalledOnce();
+  });
+});

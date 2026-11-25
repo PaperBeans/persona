@@ -67,8 +67,6 @@ class VisualNoiseShotsTest {
                     DecisionOption("Option", {}, Modifier.testTag("option"), recommended = true, selected = true)
                     expected["destructive"] = p.statusSurface.compositeOn(p.background)
                     JButton("Remove", {}, Modifier.testTag("destructive").width(160.dp), kind = JButtonKind.Destructive)
-                    expected["voice-danger"] = p.statusSurface.compositeOn(p.background)
-                    VoiceControl(PhIcons.PhoneDisconnect, "End call", {}, Modifier.testTag("voice-danger"), kind = VoiceControlKind.Danger)
                     if (style != AppStyle.Brief) {
                         expected["advice"] = p.statusSurface.compositeOn(p.background)
                         DecisionAdvice("Advice", Modifier.testTag("advice"))
@@ -82,8 +80,7 @@ class VisualNoiseShotsTest {
             expected.forEach { (tag, fill) ->
                 val bitmap = rule.onNodeWithTag(tag).captureToImage().asAndroidBitmap()
                 // Right-hand padding, clear of the text and icon. Density is 2px/dp.
-                val actual = if (tag == "voice-danger") Color(bitmap.getPixel(bitmap.width / 2, 24))
-                    else Color(bitmap.getPixel(bitmap.width - 12, bitmap.height / 2))
+                val actual = Color(bitmap.getPixel(bitmap.width - 12, bitmap.height / 2))
                 for ((a, b) in listOf(actual.red to fill.red, actual.green to fill.green, actual.blue to fill.blue)) {
                     assertEquals("$tag ${s.key} dark=$d neutral backing", b, a, 1.1f / 255f)
                 }

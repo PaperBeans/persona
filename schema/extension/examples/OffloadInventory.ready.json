@@ -1,0 +1,15 @@
+{
+  "state": "ready",
+  "tool": {"name": "example-cli", "title": "Example Cloud tool", "version": "2.1.0", "installed": true},
+  "at": 1767000000,
+  "total_bytes": 48318382080,
+  "stored_bytes": 30064771072,
+  "items": [
+    {"id": "app-1", "name": "Example Editor", "kind": "app", "bytes": 9100000000, "stored_bytes": 6400000000,
+     "origin_path": "/Applications/Example Editor.app", "stub_path": "/Applications/Example Editor.app", "local_bytes": 2400000,
+     "offloaded_at": 1766000000, "used_at": 1741000000, "group": "app-1", "restorable": true},
+    {"id": "f-9", "name": "Raw footage 2024", "kind": "dir", "bytes": 39218382080, "origin_path": "/Users/me/Movies/Raw footage 2024",
+     "stub_path": "/Users/me/Movies/Raw footage 2024.placeholder", "offloaded_at": 1765000000, "restorable": true}
+  ],
+  "more": {"count": 0, "bytes": 0}
+}

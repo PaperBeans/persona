@@ -95,12 +95,12 @@ func (s *Service) toolSecretRun(ctx context.Context, machine, self string, args 
 	input, _ := json.Marshal(map[string]any{"machine": m.ID, "machine_name": name, "purpose": a.Purpose, "commands": a.Commands,
 		"delivery": "stdin"})
 	now := time.Now().UTC()
-	expires := now.Add(secretRunCardWait)
+	expires := now.Add(ownerCardMaxWait)
 	r, err := s.ask(withCard(ctx, cardSecretForm), proto.Interaction{ID: "ix_" + randomHex(6), MachineID: machine, SessionID: self, SessionTitle: "Persona",
 		Kind: proto.IxPermission, ToolName: proto.SecretRunTool, ToolInput: input, Summary: secretRunSummary(l, name, a.Purpose, a.Commands),
 		Fields: []proto.Field{{Key: secretRunField, Label: i18n.T(l, "assistant-secret_run.password"),
 			Placeholder: i18n.T(l, "assistant-secret_run.password_hint"), Secret: true}},
-		CreatedAt: now, ExpiresAt: expires})
+		CreatedAt: now, ExpiresAt: expires, SeenTTLSeconds: secondsCeil(secretRunCardWait)})
 	if err != nil {
 		return "", err
 	}

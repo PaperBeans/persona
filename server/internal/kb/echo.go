@@ -1,13 +1,12 @@
 package kb
 
 import (
-	"cmp"
 	"encoding/json"
 	"math"
 	"slices"
-	"strings"
 	"unicode"
 
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -29,58 +28,15 @@ const echoContainment = 0.6
 // Limits of an upload's spoken: more spans than maxSpokenSpans ignores the list, a text over maxSpokenText bytes is cut
 // at a character boundary.
 const (
-	maxSpokenSpans = 1000
-	maxSpokenText  = 4000
+	maxSpokenSpans = recordingwire.MaxSpokenSpans
+	maxSpokenText  = recordingwire.MaxSpokenText
 )
 
-// SpokenSpan is a stretch Persona spoke in, seconds on the recording's clock, with what it said (the upload's spoken).
-// Text is empty for a span the phone saved before #5905: such a span keeps the old time rule.
-type SpokenSpan struct {
-	Start float64 `json:"start"`
-	End   float64 `json:"end"`
-	Text  string  `json:"text,omitempty"`
-}
+// SpokenSpan is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type SpokenSpan = recordingwire.SpokenSpan
 
-// readSpoken is the upload's spoken, leniently: a value that is not a list, or a list over maxSpokenSpans, is no spans;
-// a span that is not an object with numeric, finite start and end (end not before start) and a string text, if any, is
-// left out. It never fails the upload: the same request carries the transcript.
-func readSpoken(raw json.RawMessage) []SpokenSpan {
-	if jsonNull(raw) {
-		return nil
-	}
-	var items []json.RawMessage
-	if json.Unmarshal(raw, &items) != nil || len(items) > maxSpokenSpans {
-		return nil
-	}
-	var out []SpokenSpan
-	for _, item := range items {
-		var sp struct {
-			Start *float64 `json:"start"`
-			End   *float64 `json:"end"`
-			Text  *string  `json:"text"`
-		}
-		if json.Unmarshal(item, &sp) != nil || sp.Start == nil || sp.End == nil || !finite(*sp.Start) || !finite(*sp.End) || *sp.End < *sp.Start {
-			continue
-		}
-		span := SpokenSpan{Start: *sp.Start, End: *sp.End}
-		if sp.Text != nil {
-			span.Text = cutBytes(*sp.Text, maxSpokenText)
-		}
-		out = append(out, span)
-	}
-	return out
-}
-
-// MeetingLines is segs without Persona's echo: what the summary, the minutes and the follow-up read.
-func MeetingLines(segs []RecordingSegment) []RecordingSegment {
-	out := make([]RecordingSegment, 0, len(segs))
-	for _, sg := range segs {
-		if !sg.Echo {
-			out = append(out, sg)
-		}
-	}
-	return out
-}
+// readSpoken is the upload's spoken, read leniently (recordingwire.ReadSpoken).
+func readSpoken(raw json.RawMessage) []SpokenSpan { return recordingwire.ReadSpoken(raw) }
 
 // markEcho marks the segments that are Persona's echo by spans; a segment the phone marked stays marked.
 func markEcho(segs []RecordingSegment, spans []SpokenSpan) {
@@ -97,23 +53,23 @@ func markEcho(segs []RecordingSegment, spans []SpokenSpan) {
 // isEcho: the line start–end saying text is Persona's echo by one of spans.
 func isEcho(start, end float64, text string, spans []SpokenSpan) bool {
 	for _, sp := range spans {
-		if sp.echoes(start, end, text) {
+		if spanEchoes(sp, start, end, text) {
 			return true
 		}
 	}
 	return false
 }
 
-// echoes: the line is Persona's echo by this span. A span without text keeps the time rule from before #5905 (holds).
-func (sp SpokenSpan) echoes(start, end float64, text string) bool {
+// spanEchoes: the line is Persona's echo by this span. A span without text keeps the time rule from before #5905 (holds).
+func spanEchoes(sp SpokenSpan, start, end float64, text string) bool {
 	if sp.Text == "" {
-		return sp.holds(start, end)
+		return spanHolds(sp, start, end)
 	}
-	return sp.overlaps(start, end) && echoMatches(text, sp.Text)
+	return spanOverlaps(sp, start, end) && echoMatches(text, sp.Text)
 }
 
-// overlaps: the line overlaps the span widened by echoMargin on both sides; a line of no length, when it starts inside.
-func (sp SpokenSpan) overlaps(start, end float64) bool {
+// spanOverlaps: the line overlaps the span widened by echoMargin on both sides; a line of no length, when it starts inside.
+func spanOverlaps(sp SpokenSpan, start, end float64) bool {
 	from, to := sp.Start-echoMargin, sp.End+echoMargin
 	if end <= start {
 		return start >= from && start <= to
@@ -121,9 +77,9 @@ func (sp SpokenSpan) overlaps(start, end float64) bool {
 	return end >= from && start <= to
 }
 
-// holds is the time rule from before #5905: at least half of the line inside the span (no margin); a line of no
+// spanHolds is the time rule from before #5905: at least half of the line inside the span (no margin); a line of no
 // length, when it starts inside.
-func (sp SpokenSpan) holds(start, end float64) bool {
+func spanHolds(sp SpokenSpan, start, end float64) bool {
 	length := end - start
 	if length <= 0 {
 		return start >= sp.Start && start <= sp.End
@@ -220,51 +176,5 @@ func EchoSpanClosed(t Timeline, openFrom float64) (to float64, ok bool) {
 	return 0, false
 }
 
-// SpokenText is a speaking span's text as the hub keeps it (a speaking frame's, the timeline's): cut at maxSpokenText
-// bytes, at a character boundary, as an upload's spoken.
-func SpokenText(text string) string {
-	return cutBytes(text, maxSpokenText)
-}
-
-// spokenUnion is the union of spans (Timeline.Merge): sorted by start, overlapping and touching spans made one, their
-// texts joined in time order (spokenJoin: a span received again counts once). A span that is not one (a number that
-// is not finite, end before start) is left out.
-func spokenUnion(spans []SpokenSpan) []SpokenSpan {
-	var out []SpokenSpan
-	for _, sp := range spans {
-		if finite(sp.Start) && finite(sp.End) && sp.Start <= sp.End {
-			out = append(out, sp)
-		}
-	}
-	slices.SortStableFunc(out, func(a, b SpokenSpan) int {
-		if c := cmp.Compare(a.Start, b.Start); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.End, b.End)
-	})
-	merged := out[:0]
-	for _, sp := range out {
-		if n := len(merged); n > 0 && sp.Start <= merged[n-1].End {
-			merged[n-1].End = max(merged[n-1].End, sp.End)
-			merged[n-1].Text = spokenJoin(merged[n-1].Text, sp.Text)
-			continue
-		}
-		merged = append(merged, sp)
-	}
-	if len(merged) == 0 {
-		return nil
-	}
-	return merged
-}
-
-// spokenJoin is the text of two spans made one, a's first: a text the other already holds counts once (every upload
-// and every socket's start sends the whole timeline again), and the whole is cut at maxSpokenText bytes like a span's.
-func spokenJoin(a, b string) string {
-	switch {
-	case b == "" || strings.Contains(a, b):
-		return a
-	case a == "" || strings.Contains(b, a):
-		return cutBytes(b, maxSpokenText)
-	}
-	return cutBytes(a+" "+b, maxSpokenText)
-}
+// SpokenText is a speaking span's text as the hub keeps it (recordingwire.SpokenText).
+func SpokenText(text string) string { return recordingwire.SpokenText(text) }

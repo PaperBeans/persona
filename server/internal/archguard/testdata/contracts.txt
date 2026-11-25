@@ -17,6 +17,7 @@ internal/mailwire
 internal/modapi
 internal/nodeproto
 internal/proto
+internal/recordingwire
 internal/relayproto
 internal/repositorywire
 internal/rpc

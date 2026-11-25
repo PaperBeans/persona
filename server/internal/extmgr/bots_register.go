@@ -70,7 +70,7 @@ func (h *Manager) registrar() botport.Registrar {
 	b := &h.bots
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.registrar == nil && botport.Available() {
+	if b.registrar == nil && botport.Available(h.modules()) {
 		b.registrar = botport.NewRegistrar("")
 	}
 	return b.registrar
@@ -285,7 +285,7 @@ func (h *Manager) finishFeishuRegistration(ctx context.Context, reg botRegistrat
 	}
 	// Best-effort, as after typed credentials: the template opened the scopes and the callback; this subscribes the
 	// events over the long connection and submits the publish.
-	if !botport.Available() {
+	if !botport.Available(h.modules()) {
 		return "", botport.ErrUnavailable
 	}
 	if rep := botport.New(reg.AppID, secret, domain).AutoConfigure(ctx); rep.Detail != "" {

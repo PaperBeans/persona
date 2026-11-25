@@ -104,6 +104,9 @@ func TestAgentStartAdoptedSessionLinkFailureKeepsConfirmedResult(t *testing.T) {
 	if st.linkCount() != 1 {
 		t.Fatalf("link attempts = %d, want only the adopted session", st.linkCount())
 	}
+	if p := onlyStoredPlacement(t, st); p.TaskID != onlyTodo(s).ID || p.Choice != "box" || p.SessionID != "s-adopt-1" {
+		t.Fatalf("placement lost the adopted session: %+v", p)
+	}
 	requireStartUnknownState(t, s, onlyTodo(s).ID, false)
 }
 
@@ -136,6 +139,9 @@ func TestAgentStartExactCreationIDLinkFailureDoesNotAdoptAnotherSession(t *testi
 		t.Fatalf("exact-session link failure answer = %q", res)
 	}
 	todo := onlyTodo(s)
+	if p := onlyStoredPlacement(t, st); p.TaskID != todo.ID || p.Choice != "box" || p.SessionID != "s-exact-1" {
+		t.Fatalf("placement lost the session confirmed by creation ID: %+v", p)
+	}
 	if len(todo.Agents) != 0 {
 		t.Fatalf("another session was linked after the exact link failed: %+v", todo.Agents)
 	}

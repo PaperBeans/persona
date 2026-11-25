@@ -153,7 +153,7 @@ func (s *Service) putSpaceRecording(ctx context.Context, rawID string, u kb.Reco
 	if strings.EqualFold(strings.TrimSpace(u.Kind), kb.RecordingDay) {
 		return "", "", errSpaceRecordingDay // an all-day recording has its own recap in the knowledge base
 	}
-	if err := u.Clean(); err != nil {
+	if err := kb.CleanRecordingUpload(&u); err != nil {
 		return "", "", err
 	}
 	// One the knowledge base holds stays there (a later upload naming a track would make a second copy of it).

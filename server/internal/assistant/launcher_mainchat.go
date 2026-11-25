@@ -383,8 +383,9 @@ func launcherLabel(l ConfiguredLauncher) string { return cmp.Or(l.DisplayName, l
 // Why a launcher or provider is in the main chat picker's unavailable list (GET /api/v1/machines/{mid}/launchers?purpose=
 // assistant, #5033), besides proto.CodeLauncherOutOfScope and proto.CodeLauncherOwnService.
 const (
-	unavailableAPIProtocol = "api_protocol"  // a direct API provider speaking Responses or Chat Completions, not Messages
-	unavailableNotMainChat = "not_main_chat" // its agent or engine can't run the assistant (a Paseo provider, managed Codex…)
+	unavailableAPIProtocol = "api_protocol"       // a direct API provider speaking Responses or Chat Completions, not Messages
+	unavailableNotMainChat = "not_main_chat"      // its agent or engine can't run the assistant (a Paseo provider, managed Codex…)
+	unavailableUnhealthy   = "launcher_unhealthy" // its latest health check on the computer failed (withHealth, #14535)
 )
 
 // unavailableLauncher is one launcher or provider the main chat can't run on a machine, and why in the user's words.

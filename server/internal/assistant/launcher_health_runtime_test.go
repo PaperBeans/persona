@@ -82,6 +82,38 @@ func TestLauncherHealthRoundRechecksTheMainChatsRuntime(t *testing.T) {
 	}
 }
 
+// A round keeps old runtime records for inspection. Only current failures of launchers the round covers can
+// start repair or acquire a blocked reason, including when no repair agent is configured (#14600).
+func TestLauncherHealthRoundRepairsOnlyCurrentEligibleFailures(t *testing.T) {
+	s, f := launcherHealthRuntimeHub(t)
+	ctx := context.Background()
+	now := time.Now()
+	records := []struct {
+		machine, launcher string
+		age               time.Duration
+	}{
+		{"server", "dsh", 7 * time.Hour}, // expired and outside periodic checks
+		{"l4", "dsh", time.Minute},       // current, outside periodic checks
+		{"box", "agy", 7 * time.Hour},    // eligible main chat runtime, expired
+	}
+	for _, tc := range records {
+		s.recordHealth(ctx, tc.machine, tc.launcher, healthResult{err: agyRouteError, source: healthSourceStart, at: now.Add(-tc.age)})
+	}
+
+	s.healthRound(ctx, true)
+	checked := checkedNow(f)
+	for _, tc := range records {
+		r := healthState(s, tc.machine, tc.launcher)
+		if r.State != healthFailing || !r.CheckedAt.Equal(now.Add(-tc.age)) || r.BlockedReason != "" || r.Repairs != 0 ||
+			slices.Contains(checked, tc.machine+"/"+tc.launcher) {
+			t.Errorf("%s/%s should keep its recorded failure: %+v, checked %v", tc.machine, tc.launcher, r, checked)
+		}
+	}
+	if r := healthState(s, "l4", "work"); r.State != healthBlocked || r.BlockedReason == "" {
+		t.Errorf("current failure of a checked launcher should still enter repair: %+v", r)
+	}
+}
+
 // Agents' default launcher is a runtime's too: its failure is rechecked the same way; the main chat's launcher, not
 // failing anywhere, is not checked.
 func TestLauncherHealthRoundRechecksAgentsDefaultRuntime(t *testing.T) {
@@ -101,8 +133,8 @@ func TestLauncherHealthRoundRechecksAgentsDefaultRuntime(t *testing.T) {
 }
 
 // "Check now" of the main chat's runtime launcher (POST /api/v1/launchers/health/check?launcher=agy) checks it while it
-// fails, with the periodic checks off as by default, and answers its new record; one that works is not checked, nor is
-// another runtime's launcher, whatever its record.
+// fails, with the periodic checks off as by default, and answers its new record. Asked for by name, a runtime's launcher
+// the machine lists is checked whatever its record says (#14534): agy once it works, dsh that nobody runs on.
 func TestLauncherHealthCheckNowRechecksTheMainChatsRuntime(t *testing.T) {
 	s, f := launcherHealthRuntimeHub(t)
 	f.mu.Lock()
@@ -130,12 +162,65 @@ func TestLauncherHealthCheckNowRechecksTheMainChatsRuntime(t *testing.T) {
 		if err := json.Unmarshal(postJSON(t, s, "/api/v1/launchers/health/check?machine=server&launcher="+launcher), &out); err != nil {
 			t.Fatal(err)
 		}
-		if len(out.Records) != 0 {
+		if len(out.Records) != 1 || out.Records[0].Launcher != launcher || out.Records[0].State != healthOK {
 			t.Fatalf("check now of %s: %+v", launcher, out.Records)
 		}
 	}
-	if got := checkedNow(f)[n:]; len(got) != 0 {
-		t.Fatalf("checked %v: a working agy and a runtime launcher nobody runs on must not be", got)
+	if got := checkedNow(f)[n:]; !slices.Equal(got, []string{"server/agy", "server/dsh"}) {
+		t.Fatalf("checked %v: want the two launchers asked for, once each", got)
+	}
+	if r := healthState(s, "server", "dsh"); r.State != healthOK {
+		t.Fatalf("a passing check now should clear dsh's record: %+v", r)
+	}
+}
+
+// The case #14534 met: agy is neither the main chat's nor the Agents' launcher, and a failed start left it failing.
+// "Test again" checks it and answers its new record (still failing, then passing); a check of one launcher keeps the
+// records of the others the machine lists, checked or not, and drops only those of a launcher it no longer lists.
+func TestLauncherHealthCheckNowChecksAnyListedRuntimeLauncher(t *testing.T) {
+	s, f := launcherHealthHub(t)
+	f.mu.Lock()
+	f.launcherList = []proto.Launcher{{Name: "work"}, agyRuntimeLauncher, dshRuntimeLauncher}
+	f.hello.Agents.LauncherHealth.Enabled = nil
+	f.checks["server/agy"] = proto.LauncherCheck{Agent: "agy", Error: "Method not found: session/set_mode"}
+	f.mu.Unlock()
+	ctx := context.Background()
+	s.recordHealth(ctx, "server", "agy", healthResult{err: "Method not found: session/set_mode", source: healthSourceStart, at: time.Now().Add(-30 * time.Minute)})
+	s.recordHealth(ctx, "server", "dsh", healthResult{err: agyRouteError, source: healthSourceStart})
+	s.recordHealth(ctx, "server", "gone", healthResult{err: agyRouteError, source: healthSourceStart})
+
+	check := func() []LauncherHealth {
+		t.Helper()
+		var out struct {
+			Records []LauncherHealth `json:"records"`
+		}
+		if err := json.Unmarshal(postJSON(t, s, "/api/v1/launchers/health/check?machine=server&launcher=agy"), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Records
+	}
+	got := check()
+	if len(got) != 1 || got[0].Launcher != "agy" || got[0].State == healthOK || got[0].Kind != errKindCLIOutdated || got[0].Source != healthSourceCheck {
+		t.Fatalf("test again of a failing agy: %+v", got)
+	}
+	if r, ok := s.launcherHealth(ctx, "server", "dsh"); !ok || !r.unusable() {
+		t.Fatalf("checking agy dropped dsh's record, which the machine still lists: %+v %v", r, ok)
+	}
+	if r, ok := s.launcherHealth(ctx, "server", "gone"); ok {
+		t.Fatalf("the record of a launcher the machine no longer lists stayed: %+v", r)
+	}
+
+	f.mu.Lock()
+	delete(f.checks, "server/agy") // agy updated
+	f.mu.Unlock()
+	if got := check(); len(got) != 1 || got[0].State != healthOK {
+		t.Fatalf("test again of a fixed agy: %+v", got)
+	}
+	if r := healthState(s, "server", "agy"); r.State != healthOK || r.unusable() {
+		t.Fatalf("a passing test again should clear agy's record: %+v", r)
+	}
+	if checked := checkedNow(f); slices.ContainsFunc(checked, func(c string) bool { return c != "server/agy" }) {
+		t.Fatalf("checked %v: test again of agy checks agy alone", checked)
 	}
 }
 

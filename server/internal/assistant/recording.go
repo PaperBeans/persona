@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/moduleswitch"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kb"
@@ -27,13 +29,10 @@ import (
 type recordingLayer = recordinghost.Layer
 
 // loadRecording makes the module's layer when the build has the module and the modules row does not switch it off
-// (off, Options.ModulesOff): as the kernel decides, before it loads, since the module's routes are registered with the
-// knowledge base's (kbRoutes).
-func (s *Service) loadRecording(off []string) {
-	if slices.Contains(off, recordinghost.ModuleID) {
-		return
-	}
-	if rec, ok := recordinghost.New(recordingHost{s}); ok {
+// (the port asks the switch, moduleswitch, as every provider seam does), before the kernel loads, since the module's
+// routes are registered with the knowledge base's (kbRoutes).
+func (s *Service) loadRecording() {
+	if rec, ok := recordinghost.New(s.moduleSwitch, recordingHost{s}); ok {
 		s.rec = rec
 	}
 }
@@ -69,7 +68,7 @@ var recordingCapabilities = []string{assistantwire.CapabilityMeetingAttendance, 
 // withRecording is caps without the recording module's capabilities when svc has no recording layer (none yet: when
 // the build has no recording module), in their order.
 func withRecording(caps []string, svc *Service) []string {
-	on := recordinghost.InBuild()
+	on := recordinghost.InBuild(moduleswitch.Set{}) // no service yet: as the build has it
 	if svc != nil {
 		on = svc.recordingOn()
 	}

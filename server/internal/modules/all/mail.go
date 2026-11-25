@@ -11,5 +11,5 @@ import (
 // "Provider seams"); it registers nothing with the kernel yet.
 func init() {
 	modules = append(modules, mail.Module{})
-	mailport.Provide(mail.Open)
+	mailport.Provide(mail.Module{}.Info().ID, mail.Open)
 }

@@ -44,7 +44,7 @@ The Inbox is the busiest single domain on every side, and most of its changes al
 - **Ten files outside the Inbox core** (`inbox*.go` less the task bridge's files) **reach its in-memory state**
   (`inboxBook`, `s.inbox`). Five write no item: `assistant/context.go` (`followingInboxItems`, 529-532),
   `assistant/tasks_draft_decisions.go` (88-89, 111-118), `assistant/service.go` (350), and through `b := &s.inbox`
-  `assistant/origins.go` (`gatherOriginEvidence`, 219) and `assistant/feishu_workbench.go` (`workbenchItem`, 575). Five
+  `assistant/origins.go` (`gatherOriginEvidence`, 219) and `assistant/inbox_workbench.go` (`workbenchItem`; it was in `feishu_workbench.go` until that moved into the lark module). Five
   are the task bridge's (section 2), and they also write items under the book's lock: `assistant/supervise_inbox.go`
   (51, 154; writes at 179-186), `assistant/tasks_inbox.go` (27, 65, 85; writes at 86-96; `checkTaskInbox`, a method on
   `*inboxBook`, at 43), `assistant/inbox_task_links.go` (211, 281; writes at 232-235, 247-252 and 305-313),
@@ -276,7 +276,7 @@ for it.
   - Web, a first byte-neutral PR separate from W1: `web/src/views/inbox/lark.svg`, the only brand mark outside
     `web/src/ui/brands`, moves there (`web/src/ui/BrandMark.tsx` and `web/src/views/inbox/InboxParts.tsx` import it),
     and a boundary test lists every outside importer of `web/src/views/inbox`: the lazy route in `web/src/App.tsx`,
-    `web/src/views/messages/Messages.tsx`'s LarkThread (the designed exception), the 7 importers of InboxParts,
+    `web/src/modules/lark/Messages.tsx`'s LarkThread (the designed exception), the 7 importers of InboxParts,
     `web/src/modules/recording/RecordingHandoff.tsx` (HandOffTargets), `web/src/lib/inbox-actions.test.ts` and
     `web/src/views/extensions/ExtensionSlots.managers.test.tsx`. The Inbox's Chip moves to `web/src/ui` only with a
     `docs/design/DESIGN_SYSTEM.md` row; its Count stays, since converging on `web/src/ui/CountBadge.tsx` changes pixels
@@ -391,7 +391,7 @@ repository and the facade; and the client steps wait for the client domain guard
   `assistant/todo_outcome.go:542`. `assistant/tasks_draft_decisions.go` reads the book through the first two Reader
   methods (the card-send lock, an item copy) and leaves the allowlist. Deferred until their PRs land: `replyInDoubt`
   (`assistant/inbox_triage.go:470`, 7 open PRs), `modelPaused` and the purpose constants (`assistant/inbox_hub.go`, 4),
-  `assistant/context.go` (7), `assistant/feishu_workbench.go` (4), `assistant/origins.go` (#2049, idle since
+  `assistant/context.go` (7), `assistant/inbox_workbench.go` (formerly `feishu_workbench.go`, 4), `assistant/origins.go` (#2049, idle since
   2026-11-09).
 - **Done when:** `go build ./...` succeeds; the full `./internal/assistant` package passes once, with its duration, and
   `./internal/archguard` passes; the allowlist is shorter; `scripts/test/test_doc_go_paths.py` passes.

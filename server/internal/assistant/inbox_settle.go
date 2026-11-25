@@ -120,7 +120,7 @@ func positionAfter(a, b string) bool {
 // settleCandidate: an open "Needs you" event of a grouping connector, not handled by its conversation, with no
 // suggestion waiting, whose newest message from someone else is known (the group tool's anchor). Under b.mu.
 func settleCandidate(it *InboxItem) bool {
-	return it.open() && it.Tier == TierAction && it.Group != nil && it.Lark != nil && it.Lark.ReplyTo != "" && it.Last != "" &&
+	return it.open() && !it.VisibilityExcluded && it.Tier == TierAction && it.Group != nil && it.Lark != nil && it.Lark.ReplyTo != "" && it.Last != "" &&
 		!it.handled() && currentSuggestion(it) == nil
 }
 
@@ -197,6 +197,10 @@ type settleSnapshot struct {
 func (s *Service) settleOne(ctx context.Context, it *InboxItem) *inboxWrite {
 	ctx, cancel := context.WithTimeout(ctx, settleTimeout)
 	defer cancel()
+	allowed, visibilityErr := s.inboxVisibilityModelAllowed(ctx, it)
+	if visibilityErr != nil || !allowed {
+		return nil
+	}
 	b := &s.inbox
 	b.mu.Lock()
 	if !settleCandidate(it) {
@@ -230,6 +234,10 @@ func (s *Service) settleOne(ctx context.Context, it *InboxItem) *inboxWrite {
 	how, at, newest := settleVerdict(snap, msgs)
 	why := ""
 	if how == "" && newest != "" && newest != asked { // the model already said "open" to exactly these
+		allowed, visibilityErr = s.inboxVisibilityModelAllowed(ctx, it)
+		if visibilityErr != nil || !allowed {
+			return nil
+		}
 		var answered bool
 		how, why, at, answered = s.askSettled(ctx, snap, msgs)
 		if answered { // a failed call is asked again next time

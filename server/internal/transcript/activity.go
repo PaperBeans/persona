@@ -90,7 +90,7 @@ func Activity(name string, input json.RawMessage) string {
 		default:
 			s = join("在派子任务", str("name"))
 		}
-	case "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet":
+	case claudeDesktopPlan, "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet":
 		s = "在更新计划"
 	case "Skill":
 		s = join("在用技能", str("skill"))

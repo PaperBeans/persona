@@ -934,7 +934,7 @@ class CompilerResourceTests(unittest.TestCase):
 
     def test_every_lane_scope_and_budget_reaches_the_same_build_and_observer(self):
         source = (ROOT / "scripts/ci/apple.sh").read_text()
-        start = source.index('if [ "$LANE" != packages ] && [ "$LANE" != ios-build ]; then')
+        start = source.index('if [ "$LANE" != packages ] && [ "$LANE" != ios-build ] && [ "$LANE" != ios-core-only ]; then')
         end = source.index("ci_run 'No CallKit in the simulator build'", start)
         block = source[start:end]
         self.assertIn('ci_run \'Build iOS offline unit tests\' "$BUILD_SECONDS" bash -c', block)
@@ -944,6 +944,7 @@ class CompilerResourceTests(unittest.TestCase):
             "ios18": 3600,
             "packages": None,
             "ios-build": None,
+            "ios-core-only": None,
         }
         with tempfile.TemporaryDirectory() as directory:
             fixture = Path(directory)
@@ -1043,7 +1044,7 @@ class CompilerResourceTests(unittest.TestCase):
                     self.assertEqual(xcode_args.read_text().splitlines(), expected_args)
                     self.assertTrue((output / "diagnostics/build-resources/stop").is_file())
                     self.assertNotIn("unbound variable", result.stdout + result.stderr)
-        self.assertIn('if [ "$LANE" != packages ] && [ "$LANE" != ios-build ]; then', block)
+        self.assertIn('if [ "$LANE" != packages ] && [ "$LANE" != ios-build ] && [ "$LANE" != ios-core-only ]; then', block)
         self.assertIn('ci_root="$1"; output="$2"; seconds="$3"; shift 3', block)
         self.assertIn('\' -- "$CI_ROOT" "$OUTPUT" "$BUILD_SECONDS" "${IOS_COMMON[@]}"', block)
         self.assertIn('"$@"\n', block)

@@ -255,7 +255,7 @@ struct PendingCards: View {
             // never from the footer as measured: that moves with the cap, and a cap within a point of half flipped between
             // the two every frame.
             guard inCall, room.height > 0 else { return sharesRoom ? min(half, shared) : half }
-            let others = VoiceBarRoom.shared.height + countHeight + Theme.Space.s * 3 + Theme.Space.m
+            let others = (AppModel.shared.voice?.barHeight ?? 0) + countHeight + Theme.Space.s * 3 + Theme.Space.m
             let fits = room.height - room.fixedHeader - room.listFloor - Theme.Size.voiceThreadRoom - others
             return max(Theme.Size.tapTarget, min(half, fits))
         }
@@ -273,7 +273,7 @@ struct PendingCards: View {
 
     /// A voice call is on in the cards' conversation (docs/assistant/voice.md 6.2).
     private var inCall: Bool {
-        cards.first.map { VoiceCalls.shared.isLive(on: $0.interaction.sessionKey) } ?? false
+        cards.first.map { AppModel.shared.voice?.isLive(on: $0.interaction.sessionKey) ?? false } ?? false
     }
 
     /// As tall as the cards (with the scrolling margins), at most the cap; with the keyboard up no taller than they need,

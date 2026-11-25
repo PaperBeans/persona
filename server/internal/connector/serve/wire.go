@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/nwverse/persona/sdk/go/wire"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/connectorwire"
 	"github.com/nwverse/persona/server/internal/extension"
@@ -193,6 +194,9 @@ type (
 		// Images are tools.call's pictures for the model, after the text (connector.ToolResult holds them to its limits);
 		// actions.do and catalog.call have none.
 		Images []connector.ToolImage `json:"images,omitempty"`
+		// Views are out-of-band declarative views from tools.call rendered inline alongside the turn; actions.do and
+		// catalog.call have none.
+		Views []wire.View `json:"views,omitempty"`
 		// MessageRef is actions.do's: the id of the message the write made on the other side
 		// (connector.DoResult.MessageRef), when the connector knows one.
 		MessageRef string `json:"message_ref,omitempty"`

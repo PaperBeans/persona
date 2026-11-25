@@ -74,6 +74,18 @@ class PartitionTests(unittest.TestCase):
             self.assertEqual(listed.call_args.args[0], ["go", "test", "-list", ".*", package])
             self.assertEqual(listed.call_args.kwargs["cwd"], "/server")
 
+    def test_list_patterns_forwards_wrapper_prefix_and_build_flags(self):
+        listing = "TestA\nTestB\nok  \texample\t0.1s\n"
+        prefix = ["python3", "server_test_env.py", "--database-file", "/tmp/db.json", "--"]
+        flags = ["-tags", "persona_core_only", "-race", "-trimpath"]
+        env = {"GOFLAGS": "-trimpath"}
+        with mock.patch.object(gp.subprocess, "check_output", return_value=listing) as listed:
+            patterns = gp.list_patterns("/server", "./internal/assistant", env=env, prefix=prefix, flags=flags)
+        self.assertEqual(patterns, ["^(TestA)$", "^(TestB)$"])
+        self.assertEqual(listed.call_args.args[0], [*prefix, "go", "test", *flags, "-list", ".*", "./internal/assistant"])
+        self.assertEqual(listed.call_args.kwargs["cwd"], "/server")
+        self.assertIs(listed.call_args.kwargs["env"], env)
+
     def test_a_package_that_splits_itself_is_partitioned_and_still_has_its_own_split(self):
         # go_test_partitioned.py leaves these to their own TestMain under a <dir>/... argument: a package that lost its
         # split would then run serially there, so the claim is checked against the package's tests.

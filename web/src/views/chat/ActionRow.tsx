@@ -36,7 +36,7 @@ export const STATUS_SLOT = "inline-flex h-[18px] w-4 shrink-0 items-center justi
 
 const COMMAND_TOOLS = new Set(["Bash", "exec_command", "shell", "PowerShell"]);
 const FILE_TOOLS = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"]);
-export const DIFF_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
+export const DIFF_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
 /** cindy's verbAggregator (its Chinese wording is the zh-Hans text). */
 const VERB: Record<string, string> = {
@@ -171,8 +171,21 @@ export function editDiffs(use: Item): Op[][] | null {
       return typeof inp.content === "string" ? [lineDiff("", inp.content)] : null;
     case "MultiEdit":
       return Array.isArray(inp.edits) ? (inp.edits as Record<string, unknown>[]).map((e) => lineDiff(String(e.old_string ?? ""), String(e.new_string ?? ""))) : null;
+    case "NotebookEdit":
+      return typeof inp.new_source === "string" ? [lineDiff("", inp.new_source)] : null;
   }
   return null;
+}
+
+/** Format diff blocks as unified diff text (`+`/`-`/` ` prefixed). */
+export function formatUnifiedDiff(diffs: Op[][]): string {
+  return diffs
+    .map((block) =>
+      block
+        .map((l) => `${l.kind === "add" ? "+" : l.kind === "del" ? "-" : " "}${l.text}`)
+        .join("\n"),
+    )
+    .join("\n@@\n");
 }
 
 export function diffStats(diffs: Op[][]): { add: number; del: number } {
@@ -215,6 +228,7 @@ export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trac
   const { use, result, images } = step;
   const name = use.tool_name ?? "";
   const { tasks, scope } = useChatContext();
+  const narrow = useMedia(NARROW);
   const p = useMemo(() => presentAction(use), [use]);
   const diffs = useMemo(() => (DIFF_TOOLS.has(name) ? editDiffs(use) : null), [name, use]);
   const stats = diffs ? diffStats(diffs) : null;
@@ -225,7 +239,6 @@ export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trac
   const bg = call && (tasks.started.has(call) || tasks.notes.has(call)) ? taskBadge(tasks.notes.get(call) ?? []) : null;
   const error = Boolean(result?.is_error);
   // the call's own elapsed time (#8163): a quiet suffix on wide rows, the row's hover title on compact layouts
-  const narrow = useMedia(NARROW);
   const duration = toolDurationLabel(step);
   const rawDurationMs = toolDurationMs(step);
   const hasTelemetry =
@@ -347,15 +360,210 @@ export function foldDiffs(diffs: Op[][], max = DIFF_FOLD_LINES): { shown: Op[][]
   return { shown, hidden: total - max };
 }
 
+const DIFF_CONTEXT = 3;
+const INTRALINE_MAX_CHARS = 500;
+const INTRALINE_MAX_CELLS = 2500;
+
+export interface DiffSegment {
+  text: string;
+  changed: boolean;
+}
+
+function pushSegment(out: DiffSegment[], text: string, changed: boolean) {
+  if (!text) return;
+  const last = out[out.length - 1];
+  if (last && last.changed === changed) last.text += text;
+  else out.push({ text, changed });
+}
+
+function tokenizeLine(line: string): string[] {
+  return line.match(/[\p{L}\p{N}_$]+|\s+|./gu) ?? [];
+}
+
+/** Fast intraline word/token diff with prefix/suffix trimming and O(N*M) cap for long lines. */
+export function computeIntralineDiff(oldLine: string, newLine: string): { oldParts: DiffSegment[]; newParts: DiffSegment[] } {
+  if (oldLine === newLine) {
+    return {
+      oldParts: oldLine ? [{ text: oldLine, changed: false }] : [],
+      newParts: newLine ? [{ text: newLine, changed: false }] : [],
+    };
+  }
+  if (oldLine.length > INTRALINE_MAX_CHARS || newLine.length > INTRALINE_MAX_CHARS) {
+    return {
+      oldParts: oldLine ? [{ text: oldLine, changed: false }] : [],
+      newParts: newLine ? [{ text: newLine, changed: false }] : [],
+    };
+  }
+  const a = tokenizeLine(oldLine);
+  const b = tokenizeLine(newLine);
+  let prefix = 0;
+  while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < a.length - prefix && suffix < b.length - prefix && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]) suffix++;
+
+  const prefixText = a.slice(0, prefix).join("");
+  const suffixText = suffix > 0 ? a.slice(a.length - suffix).join("") : "";
+  const midA = a.slice(prefix, a.length - suffix);
+  const midB = b.slice(prefix, b.length - suffix);
+
+  const oldParts: DiffSegment[] = [];
+  const newParts: DiffSegment[] = [];
+  pushSegment(oldParts, prefixText, false);
+  pushSegment(newParts, prefixText, false);
+
+  if (midA.length === 0 || midB.length === 0 || midA.length * midB.length > INTRALINE_MAX_CELLS) {
+    pushSegment(oldParts, midA.join(""), true);
+    pushSegment(newParts, midB.join(""), true);
+  } else {
+    const m = midA.length;
+    const n = midB.length;
+    const dp = new Uint16Array((m + 1) * (n + 1));
+    const stride = n + 1;
+    for (let i = m - 1; i >= 0; i--) {
+      for (let j = n - 1; j >= 0; j--) {
+        dp[i * stride + j] =
+          midA[i] === midB[j]
+            ? dp[(i + 1) * stride + (j + 1)] + 1
+            : Math.max(dp[(i + 1) * stride + j], dp[i * stride + (j + 1)]);
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < m && j < n) {
+      if (midA[i] === midB[j]) {
+        pushSegment(oldParts, midA[i], false);
+        pushSegment(newParts, midB[j], false);
+        i++;
+        j++;
+      } else if (dp[(i + 1) * stride + j] >= dp[i * stride + (j + 1)]) {
+        pushSegment(oldParts, midA[i++], true);
+      } else {
+        pushSegment(newParts, midB[j++], true);
+      }
+    }
+    while (i < m) pushSegment(oldParts, midA[i++], true);
+    while (j < n) pushSegment(newParts, midB[j++], true);
+  }
+
+  pushSegment(oldParts, suffixText, false);
+  pushSegment(newParts, suffixText, false);
+  return { oldParts, newParts };
+}
+
+type LineRow = { kind: "same" | "add" | "del"; text: string; oldLine: number | null; newLine: number | null; segments?: DiffSegment[] };
+
+type NumberedRow = LineRow | { kind: "gap"; skipped?: number };
+
+/** Number each line of a diff block (old / new), collapse long unchanged stretches into `⋯` gap rows,
+ *  and compute intraline word-diffs for equal-length contiguous `del`/`add` hunks. */
+function buildDiffRows(diffs: Op[][]): NumberedRow[] {
+  const rows: NumberedRow[] = [];
+  diffs.forEach((block, blockIdx) => {
+    if (blockIdx > 0) rows.push({ kind: "gap" });
+    let oldLine = 1;
+    let newLine = 1;
+    const numbered: LineRow[] = block.map((l) => {
+      if (l.kind === "same") return { kind: "same", text: l.text, oldLine: oldLine++, newLine: newLine++ };
+      if (l.kind === "del") return { kind: "del", text: l.text, oldLine: oldLine++, newLine: null };
+      return { kind: "add", text: l.text, oldLine: null, newLine: newLine++ };
+    });
+    const hasChanges = numbered.some((r) => r.kind !== "same");
+    if (!hasChanges) {
+      rows.push(...numbered);
+      return;
+    }
+    const keep = new Uint8Array(numbered.length);
+    for (let i = 0; i < numbered.length; i++) {
+      if (numbered[i].kind !== "same") {
+        const from = Math.max(0, i - DIFF_CONTEXT);
+        const to = Math.min(numbered.length - 1, i + DIFF_CONTEXT);
+        for (let j = from; j <= to; j++) keep[j] = 1;
+      }
+    }
+    let i = 0;
+    while (i < numbered.length) {
+      if (keep[i]) {
+        rows.push(numbered[i++]);
+      } else {
+        let j = i;
+        while (j < numbered.length && !keep[j]) j++;
+        // only collapse if skipping more than 1 line; otherwise just show the single line
+        if (j - i > 1) rows.push({ kind: "gap", skipped: j - i });
+        else rows.push(numbered[i]);
+        i = j;
+      }
+    }
+  });
+  // Pair contiguous equal-length del/add blocks for intraline word-diff highlighting
+  let i = 0;
+  while (i < rows.length) {
+    if (rows[i].kind !== "del") {
+      i++;
+      continue;
+    }
+    let delEnd = i;
+    while (delEnd < rows.length && rows[delEnd].kind === "del") delEnd++;
+    let addEnd = delEnd;
+    while (addEnd < rows.length && rows[addEnd].kind === "add") addEnd++;
+    const delCount = delEnd - i;
+    const addCount = addEnd - delEnd;
+    if (delCount > 0 && delCount === addCount) {
+      for (let k = 0; k < delCount; k++) {
+        const delRow = rows[i + k] as LineRow;
+        const addRow = rows[delEnd + k] as LineRow;
+        const { oldParts, newParts } = computeIntralineDiff(delRow.text, addRow.text);
+        delRow.segments = oldParts;
+        addRow.segments = newParts;
+      }
+    }
+    i = addEnd;
+  }
+  return rows;
+}
+
 export function DiffBlocks({ diffs }: { diffs: Op[][] }) {
-  return diffs.map((d, n) => (
-    <div key={n} className="min-w-fit overflow-hidden rounded-[8px] py-1 font-mono text-label leading-[1.6] shadow-hairline">
-      {d.map((l, i) => (
-        <div key={i} className={cx("flex min-w-fit pr-3", l.kind === "add" && "bg-diff-add-bg", l.kind === "del" && "bg-diff-del-bg")} data-diff-line={l.kind}>
-          <span className={cx("w-6 shrink-0 text-center select-none", l.kind === "add" ? "text-diff-add-fg" : l.kind === "del" ? "text-diff-del-fg" : "text-ink-3")}>{l.kind === "add" ? "+" : l.kind === "del" ? "−" : " "}</span>
-          <span className="whitespace-pre text-ink">{l.text || " "}</span>
-        </div>
-      ))}
+  const rows = useMemo(() => buildDiffRows(diffs), [diffs]);
+  return (
+    <div className="min-w-fit overflow-hidden rounded-[8px] py-1 font-mono text-xs leading-[1.6] shadow-hairline">
+      {rows.map((r, i) =>
+        r.kind === "gap" ? (
+          <div key={i} className="flex min-w-fit items-center bg-inset/80 py-0.5 text-submeta text-ink-3 select-none" data-diff-gap>
+            <span className="w-9 shrink-0 pr-1.5 text-right tabular-nums">⋯</span>
+            <span className="w-9 shrink-0 border-r border-line/60 pr-1.5 text-right tabular-nums">⋯</span>
+            <span className="w-6 shrink-0 text-center">⋯</span>
+            {r.skipped ? <span className="pr-3 text-submeta text-ink-3">{t("chat-actionrow.diff_skipped", { count: r.skipped })}</span> : null}
+          </div>
+        ) : (
+          <div key={i} className={cx("flex min-w-fit pr-3", r.kind === "add" && "bg-diff-add-bg", r.kind === "del" && "bg-diff-del-bg")} data-diff-line={r.kind}>
+            <span className={cx("w-9 shrink-0 pr-1.5 text-right text-submeta tabular-nums select-none", r.kind === "add" ? "text-diff-add-fg/75" : r.kind === "del" ? "text-diff-del-fg/75" : "text-ink-3/70")}>
+              {r.oldLine ?? ""}
+            </span>
+            <span className={cx("w-9 shrink-0 border-r border-line/60 pr-1.5 text-right text-submeta tabular-nums select-none", r.kind === "add" ? "text-diff-add-fg/75" : r.kind === "del" ? "text-diff-del-fg/75" : "text-ink-3/70")}>
+              {r.newLine ?? ""}
+            </span>
+            <span className={cx("w-6 shrink-0 text-center select-none", r.kind === "add" ? "text-diff-add-fg" : r.kind === "del" ? "text-diff-del-fg" : "text-ink-3")}>
+              {r.kind === "add" ? "+" : r.kind === "del" ? "−" : " "}
+            </span>
+            <span className="whitespace-pre text-ink">
+              {r.segments && r.segments.length > 0
+                ? r.segments.map((seg, si) =>
+                    seg.changed ? (
+                      <span
+                        key={si}
+                        className={cx("rounded-[2px] font-medium", r.kind === "del" ? "bg-diff-del-fg/20" : "bg-diff-add-fg/20")}
+                        data-diff-intraline
+                      >
+                        {seg.text}
+                      </span>
+                    ) : (
+                      <span key={si}>{seg.text}</span>
+                    ),
+                  )
+                : r.text || " "}
+            </span>
+          </div>
+        ),
+      )}
     </div>
-  ));
+  );
 }

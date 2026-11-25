@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -890,4 +891,665 @@ func TestAssistantRuntimeStartPropagatesPermissionMode(t *testing.T) {
 	if start.PermissionMode != "acceptEdits" {
 		t.Fatalf("session.start permission_mode = %q, want acceptEdits (%s)", start.PermissionMode, starts[0])
 	}
+}
+
+func TestRemoteAgentMemoryToolsAndPlanMode(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+
+	remoteHello := map[string]any{
+		"runtime": "pac", "name": "PAC", "launcher": "pac",
+		"caps": map[string]any{"start": true, "send": true, "interrupt": true, "assistant": true, "remote_agent": true},
+	}
+	remoteHost := dialRuntime(t, n, remoteHello)
+	localHost := dialRuntime(t, n, assistantRuntimeHello())
+
+	cwd := identity.AssistantDir(n.home)
+	remoteHost.answer = func(method string, _ json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": map[string]any{"session_id": "pac-remote-1", "cwd": cwd, "status": "idle"}}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+	localHost.answer = func(method string, _ json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": map[string]any{"session_id": "dsh-local-1", "cwd": cwd, "status": "idle"}}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+
+	if _, err := nodeCall(t, n, "assistant.send", map[string]any{"launcher": "pac", "cwd": cwd, "text": "hello remote"}); err != nil {
+		t.Fatal(err)
+	}
+	sends := remoteHost.got("session.send")
+	if len(sends) != 1 || !strings.Contains(string(sends[0]), "memory_read") || !strings.Contains(string(sends[0]), "memory_write") {
+		t.Fatalf("expected initial context to instruct memory_read/memory_write, got: %s", sends)
+	}
+
+	var remoteTools struct {
+		Tools []proto.Tool `json:"tools"`
+	}
+	if err := remoteHost.peer.Call(context.Background(), "mcp.tools", map[string]any{"assistant": true, "session_id": "pac-remote-1"}, &remoteTools); err != nil {
+		t.Fatal(err)
+	}
+	hasTool := func(tools []proto.Tool, name string) bool {
+		return slices.ContainsFunc(tools, func(tool proto.Tool) bool { return tool.Name == name })
+	}
+	if !hasTool(remoteTools.Tools, "memory_read") || !hasTool(remoteTools.Tools, "memory_write") {
+		t.Fatalf("remote runtime missing memory tools: %+v", remoteTools.Tools)
+	}
+
+	if _, err := nodeCall(t, n, "assistant.send", map[string]any{"launcher": "dsh", "cwd": cwd, "text": "hello local"}); err != nil {
+		t.Fatal(err)
+	}
+	var localTools struct {
+		Tools []proto.Tool `json:"tools"`
+	}
+	if err := localHost.peer.Call(context.Background(), "mcp.tools", map[string]any{"assistant": true, "session_id": "dsh-local-1"}, &localTools); err != nil {
+		t.Fatal(err)
+	}
+	if hasTool(localTools.Tools, "memory_read") || hasTool(localTools.Tools, "memory_write") {
+		t.Fatalf("non-remote runtime should not receive memory tools: %+v", localTools.Tools)
+	}
+
+	callMemory := func(tool string, args map[string]any) proto.ToolResult {
+		t.Helper()
+		rawArgs, _ := json.Marshal(args)
+		var res proto.ToolResult
+		if err := remoteHost.peer.Call(context.Background(), "mcp.call", map[string]any{
+			"name": tool, "args": json.RawMessage(rawArgs), "session_id": "pac-remote-1", "assistant": true,
+		}, &res); err != nil {
+			t.Fatalf("mcp.call %s: %v", tool, err)
+		}
+		return res
+	}
+
+	// Reading before the memory directory exists returns an empty note rather than an error, without creating the directory.
+	if _, err := os.Stat(n.memoryDir(cwd)); !os.IsNotExist(err) {
+		t.Fatalf("expected memory directory to not exist yet, stat err = %v", err)
+	}
+	if res := callMemory("memory_read", map[string]any{"name": "MEMORY.md"}); res.IsError || len(res.Content) != 1 || res.Content[0].Text != "" {
+		t.Fatalf("expected empty note before memory dir exists, got: %+v", res)
+	}
+	if _, err := os.Stat(n.memoryDir(cwd)); !os.IsNotExist(err) {
+		t.Fatalf("expected memory_read not to create directory, stat err = %v", err)
+	}
+
+	if res := callMemory("memory_write", map[string]any{"name": "MEMORY.md", "content": "# Notes\nhello\n"}); res.IsError {
+		t.Fatalf("memory_write failed: %+v", res)
+	}
+	if res := callMemory("memory_read", map[string]any{"name": "MEMORY.md"}); res.IsError || len(res.Content) == 0 || res.Content[0].Text != "# Notes\nhello\n" {
+		t.Fatalf("memory_read mismatch: %+v", res)
+	}
+	if res := callMemory("memory_read", map[string]any{"name": "missing.md"}); res.IsError || len(res.Content) != 1 || res.Content[0].Text != "" {
+		t.Fatalf("expected empty note for absent file, got: %+v", res)
+	}
+
+	// Invalid names, unknown args, and oversized content must be rejected.
+	for _, name := range []string{"../escape.md", "sub/file.md", "notes.txt", ""} {
+		if res := callMemory("memory_read", map[string]any{"name": name}); !res.IsError {
+			t.Fatalf("expected invalid filename %q to fail, got: %+v", name, res)
+		}
+	}
+	if res := callMemory("memory_read", map[string]any{"name": "MEMORY.md", "extra": 1}); !res.IsError {
+		t.Fatalf("expected unknown argument to fail: %+v", res)
+	}
+	if res := callMemory("memory_write", map[string]any{"name": "big.md", "content": strings.Repeat("a", 65*1024)}); !res.IsError {
+		t.Fatalf("expected oversized write to fail: %+v", res)
+	}
+
+	// Symlinks and directories inside the memory directory must be refused.
+	memDir := n.memoryDir(cwd)
+	symPath := filepath.Join(memDir, "link.md")
+	_ = os.WriteFile(filepath.Join(t.TempDir(), "outside.md"), []byte("secret"), 0o600)
+	if err := os.Symlink(filepath.Join(t.TempDir(), "outside.md"), symPath); err == nil {
+		if res := callMemory("memory_read", map[string]any{"name": "link.md"}); !res.IsError {
+			t.Fatalf("expected symlink read to fail: %+v", res)
+		}
+		if res := callMemory("memory_write", map[string]any{"name": "link.md", "content": "nope"}); !res.IsError {
+			t.Fatalf("expected symlink write to fail: %+v", res)
+		}
+	}
+	dirTarget := filepath.Join(memDir, "dir.md")
+	if err := os.MkdirAll(dirTarget, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if res := callMemory("memory_read", map[string]any{"name": "dir.md"}); !res.IsError || len(res.Content) == 0 || !strings.Contains(res.Content[0].Text, "regular file") {
+		t.Fatalf("expected directory read to fail with regular file error: %+v", res)
+	}
+	if res := callMemory("memory_write", map[string]any{"name": "dir.md", "content": "nope"}); !res.IsError || len(res.Content) == 0 || !strings.Contains(res.Content[0].Text, "regular file") {
+		t.Fatalf("expected directory write to fail with regular file error: %+v", res)
+	}
+
+	// Plan mode permits memory_read and refuses memory_write.
+	n.noteModes("pac-remote-1", proto.ModePlan, "")
+	if res := callMemory("memory_write", map[string]any{"name": "plan.md", "content": "denied"}); !res.IsError {
+		t.Fatalf("expected memory_write in plan mode to fail: %+v", res)
+	}
+	if res := callMemory("memory_read", map[string]any{"name": "MEMORY.md"}); res.IsError {
+		t.Fatalf("expected memory_read in plan mode to succeed: %+v", res)
+	}
+
+	// Guest sessions neither see nor can invoke memory tools.
+	n.noteModes("pac-remote-1", "default", "")
+	st, _ := n.state.get("pac-remote-1")
+	st.Guest = []string{"read_only"}
+	n.state.put("pac-remote-1", st)
+
+	var guestTools struct {
+		Tools []proto.Tool `json:"tools"`
+	}
+	if err := remoteHost.peer.Call(context.Background(), "mcp.tools", map[string]any{"assistant": true, "session_id": "pac-remote-1"}, &guestTools); err != nil {
+		t.Fatal(err)
+	}
+	if hasTool(guestTools.Tools, "memory_read") || hasTool(guestTools.Tools, "memory_write") {
+		t.Fatalf("guest session should not see memory tools: %+v", guestTools.Tools)
+	}
+	if res := callMemory("memory_read", map[string]any{"name": "MEMORY.md"}); !res.IsError {
+		t.Fatalf("expected guest memory_read to fail: %+v", res)
+	}
+	if res := callMemory("memory_write", map[string]any{"name": "MEMORY.md", "content": "x"}); !res.IsError {
+		t.Fatalf("expected guest memory_write to fail: %+v", res)
+	}
+}
+
+func TestRemoteAgentGateWriteRequiresConfirmEvenInBypass(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+
+	n.mu.Lock()
+	n.larkCfg = olCfg()
+	n.larkCfgAt = time.Now().Add(time.Hour)
+	n.larkCfg.CLI = &proto.LarkCLI{Bin: "/nonexistent/lark-cli"}
+	n.larkRisks = map[string]string{"\x00docs +create": "write"}
+	n.mu.Unlock()
+
+	hub.mu.Lock()
+	hub.resolve = func(proto.Interaction) proto.Resolution {
+		no := false
+		return proto.Resolution{Allow: &no}
+	}
+	hub.mu.Unlock()
+
+	remoteHost := dialRuntime(t, n, map[string]any{
+		"runtime": "pac", "name": "PAC", "launcher": "pac",
+		"caps": map[string]any{"start": true, "send": true, "interrupt": true, "assistant": true, "remote_agent": true},
+	})
+	localHost := dialRuntime(t, n, assistantRuntimeHello())
+
+	cwd := identity.AssistantDir(n.home)
+	remoteHost.answer = func(method string, _ json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": map[string]any{"session_id": "pac-bypass-1", "cwd": cwd, "status": "idle"}}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+	localHost.answer = func(method string, _ json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": map[string]any{"session_id": "dsh-bypass-1", "cwd": cwd, "status": "idle"}}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+
+	if _, err := nodeCall(t, n, "assistant.send", map[string]any{"launcher": "pac", "cwd": cwd, "text": "init remote", "permission_mode": proto.ModeBypass}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := nodeCall(t, n, "assistant.send", map[string]any{"launcher": "dsh", "cwd": cwd, "text": "init local", "permission_mode": proto.ModeBypass}); err != nil {
+		t.Fatal(err)
+	}
+	n.noteModes("pac-bypass-1", proto.ModeBypass, "")
+	n.noteModes("dsh-bypass-1", proto.ModeBypass, "")
+
+	const cmd = `lark-cli docs +create --title notes --markdown hi`
+
+	// Non-remote assistant session in bypassPermissions executes ordinary write without a card.
+	decLocal, _, err := n.larkCheck(context.Background(), "dsh-bypass-1", cwd, cmd,
+		proto.Interaction{SessionID: "dsh-bypass-1", Cwd: cwd, ExpiresAt: time.Now().Add(time.Minute)})
+	if err != nil {
+		t.Fatalf("local larkCheck: %v", err)
+	}
+	if decLocal == "deny" {
+		t.Fatalf("expected non-remote bypass session to allow docs +create without denial")
+	}
+	hub.mu.Lock()
+	localCards := len(hub.asked)
+	hub.mu.Unlock()
+	if localCards != 0 {
+		t.Fatalf("expected 0 confirmation cards for non-remote bypass session, got %d", localCards)
+	}
+
+	// Remote runtime session in bypassPermissions still raises a confirmation card with no AlwaysKeys.
+	decRemote, _, err := n.larkCheck(context.Background(), "pac-bypass-1", cwd, cmd,
+		proto.Interaction{SessionID: "pac-bypass-1", Cwd: cwd, ExpiresAt: time.Now().Add(time.Minute)})
+	if err != nil {
+		t.Fatalf("remote larkCheck: %v", err)
+	}
+	if decRemote != "deny" {
+		t.Fatalf("expected remote larkCheck to confirm (and deny on fake hub's allow=false), got %q", decRemote)
+	}
+	hub.mu.Lock()
+	asked := len(hub.asked)
+	var firstAlways []string
+	if asked > 0 {
+		firstAlways = append([]string(nil), hub.asked[0].AlwaysKeys...)
+	}
+	hub.mu.Unlock()
+	if asked != 1 {
+		t.Fatalf("expected 1 confirmation card for remote bypass session, got %d", asked)
+	}
+	if len(firstAlways) != 0 {
+		t.Fatalf("expected AlwaysKeys to be empty on remote confirm card, got %v", firstAlways)
+	}
+
+	// Configured allow rules still allow reads for remote sessions, but non-read writes must still confirm.
+	n.mu.Lock()
+	n.larkCfg.Gates[0].Rules = []proto.LarkRule{
+		{Method: "GET", Path: "/me", Action: "allow"},
+		{Method: "POST", Path: "/events", Action: "allow"},
+	}
+	n.mu.Unlock()
+
+	decRead, _, err := n.larkCheck(context.Background(), "pac-bypass-1", cwd, `ex GET /me`,
+		proto.Interaction{SessionID: "pac-bypass-1", Cwd: cwd, ExpiresAt: time.Now().Add(time.Minute)})
+	if err != nil || decRead != "allow" {
+		t.Fatalf("remote allowed read: dec=%q err=%v, want allow", decRead, err)
+	}
+	decRuleWrite, _, err := n.larkCheck(context.Background(), "pac-bypass-1", cwd, `ex POST /events '{}'`,
+		proto.Interaction{SessionID: "pac-bypass-1", Cwd: cwd, ExpiresAt: time.Now().Add(time.Minute)})
+	if err != nil || decRuleWrite != "deny" {
+		t.Fatalf("remote rule-allowed write must still confirm (denied by fake hub): dec=%q err=%v", decRuleWrite, err)
+	}
+
+	// Approving a rule-matched write with Always=true must still confirm on subsequent calls and never populate AlwaysKeys.
+	hub.mu.Lock()
+	hub.resolve = func(proto.Interaction) proto.Resolution {
+		yes := true
+		return proto.Resolution{Allow: &yes, Always: true}
+	}
+	hub.mu.Unlock()
+	for attempt := 0; attempt < 2; attempt++ {
+		dec, _, err := n.larkCheck(context.Background(), "pac-bypass-1", cwd, `ex POST /events '{}'`,
+			proto.Interaction{SessionID: "pac-bypass-1", Cwd: cwd, ExpiresAt: time.Now().Add(time.Minute)})
+		if err != nil || dec != "allow" {
+			t.Fatalf("remote rule-matched write attempt %d: dec=%q err=%v", attempt+1, dec, err)
+		}
+	}
+	hub.mu.Lock()
+	if len(hub.asked) != 4 {
+		hub.mu.Unlock()
+		t.Fatalf("expected 4 cards before non-assistant checks, got %d", len(hub.asked))
+	}
+	for i := 1; i < 4; i++ {
+		if len(hub.asked[i].AlwaysKeys) != 0 {
+			hub.mu.Unlock()
+			t.Fatalf("expected AlwaysKeys empty on card %d, got %v", i, hub.asked[i].AlwaysKeys)
+		}
+	}
+	hub.mu.Unlock()
+
+	// Remote non-assistant sessions also ignore larkAlways and require fresh confirmation on writes,
+	// whereas a local non-assistant control session honors larkAlways.
+	nonAssistCwd := t.TempDir()
+	if err := remoteHost.peer.Notify("runtime.sessions", map[string]any{
+		"sessions": []map[string]any{{"session_id": "pac-nonassist-1", "cwd": nonAssistCwd, "status": "idle"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := localHost.peer.Notify("runtime.sessions", map[string]any{
+		"sessions": []map[string]any{{"session_id": "dsh-nonassist-1", "cwd": nonAssistCwd, "status": "idle"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "non-assistant runtime sessions owned", func() bool {
+		_, _, remoteOK := n.runtimes.rowOf("pac-nonassist-1")
+		_, _, localOK := n.runtimes.rowOf("dsh-nonassist-1")
+		return remoteOK && localOK
+	})
+	n.rememberLarkAlways("pac-nonassist-1", "CLI /docs/+create")
+	n.rememberLarkAlways("dsh-nonassist-1", "CLI /docs/+create")
+	decLocalAlways, _, err := n.larkCheck(context.Background(), "dsh-nonassist-1", nonAssistCwd, cmd,
+		proto.Interaction{SessionID: "dsh-nonassist-1", Cwd: nonAssistCwd, ExpiresAt: time.Now().Add(time.Minute)})
+	if err != nil || decLocalAlways != "allow" {
+		t.Fatalf("local non-assistant write with larkAlways: dec=%q err=%v, want allow", decLocalAlways, err)
+	}
+	hub.mu.Lock()
+	afterLocalAlways := len(hub.asked)
+	hub.mu.Unlock()
+	if afterLocalAlways != 4 {
+		t.Fatalf("expected local non-assistant larkAlways to suppress card, got %d cards", afterLocalAlways)
+	}
+	decAlways, _, err := n.larkCheck(context.Background(), "pac-nonassist-1", nonAssistCwd, cmd,
+		proto.Interaction{SessionID: "pac-nonassist-1", Cwd: nonAssistCwd, ExpiresAt: time.Now().Add(time.Minute)})
+	if err != nil || decAlways != "allow" {
+		t.Fatalf("remote non-assistant write must still confirm (allowed by hub): dec=%q err=%v", decAlways, err)
+	}
+	hub.mu.Lock()
+	totalCards := len(hub.asked)
+	var lastAlways []string
+	if totalCards > 0 {
+		lastAlways = append([]string(nil), hub.asked[totalCards-1].AlwaysKeys...)
+	}
+	hub.mu.Unlock()
+	if totalCards != 5 {
+		t.Fatalf("expected 5 confirmation cards total, got %d", totalCards)
+	}
+	if len(lastAlways) != 0 {
+		t.Fatalf("expected AlwaysKeys empty on remote non-assistant confirm card, got %v", lastAlways)
+	}
+}
+
+func TestRemoteAgentMemoryToolsSymlinkDirAndWorkspaceScoping(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+
+	remoteHost := dialRuntime(t, n, map[string]any{
+		"runtime": "pac", "name": "PAC", "launcher": "pac",
+		"caps": map[string]any{"start": true, "send": true, "interrupt": true, "assistant": true, "remote_agent": true},
+	})
+
+	assistantDir := identity.AssistantDir(n.home)
+	nonAssistantDir := t.TempDir()
+
+	// 1. Symlinked memory directory (~/.claude/projects/<key>/memory -> dotfiles) works, while symlinked note targets are still rejected.
+	realMemDir := t.TempDir()
+	memLink := n.memoryDir(assistantDir)
+	if err := os.MkdirAll(filepath.Dir(memLink), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realMemDir, memLink); err == nil {
+		remoteHost.answer = func(method string, _ json.RawMessage) (any, error) {
+			if method == "session.start" {
+				return map[string]any{"session": map[string]any{"session_id": "pac-sym-1", "cwd": assistantDir, "status": "idle"}}, nil
+			}
+			return map[string]any{"ok": true}, nil
+		}
+		if _, err := nodeCall(t, n, "assistant.send", map[string]any{"launcher": "pac", "cwd": assistantDir, "text": "hello symlink"}); err != nil {
+			t.Fatal(err)
+		}
+		rawWrite, _ := json.Marshal(map[string]any{"name": "MEMORY.md", "content": "# Symlinked\nworks\n"})
+		var wRes proto.ToolResult
+		if err := remoteHost.peer.Call(context.Background(), "mcp.call", map[string]any{
+			"name": "memory_write", "args": json.RawMessage(rawWrite), "session_id": "pac-sym-1", "assistant": true,
+		}, &wRes); err != nil {
+			t.Fatal(err)
+		}
+		if wRes.IsError {
+			t.Fatalf("memory_write through symlinked memory dir failed: %+v", wRes)
+		}
+		rawRead, _ := json.Marshal(map[string]any{"name": "MEMORY.md"})
+		var rRes proto.ToolResult
+		if err := remoteHost.peer.Call(context.Background(), "mcp.call", map[string]any{
+			"name": "memory_read", "args": json.RawMessage(rawRead), "session_id": "pac-sym-1", "assistant": true,
+		}, &rRes); err != nil {
+			t.Fatal(err)
+		}
+		if rRes.IsError || len(rRes.Content) == 0 || rRes.Content[0].Text != "# Symlinked\nworks\n" {
+			t.Fatalf("memory_read through symlinked memory dir mismatch: %+v", rRes)
+		}
+		outside := filepath.Join(t.TempDir(), "outside.md")
+		_ = os.WriteFile(outside, []byte("secret"), 0o600)
+		if err := os.Symlink(outside, filepath.Join(realMemDir, "escape.md")); err == nil {
+			badArgs, _ := json.Marshal(map[string]any{"name": "escape.md", "content": "nope"})
+			var badWrite proto.ToolResult
+			if err := remoteHost.peer.Call(context.Background(), "mcp.call", map[string]any{
+				"name": "memory_write", "args": json.RawMessage(badArgs), "session_id": "pac-sym-1", "assistant": true,
+			}, &badWrite); err != nil {
+				t.Fatal(err)
+			}
+			if !badWrite.IsError {
+				t.Fatalf("expected symlinked note file write inside symlinked memory dir to fail: %+v", badWrite)
+			}
+		}
+	}
+
+	hasTool := func(tools []proto.Tool, name string) bool {
+		return slices.ContainsFunc(tools, func(tool proto.Tool) bool { return tool.Name == name })
+	}
+
+	// 2. Non-assistant workspace: neither instructions nor mcp.tools advertise memory tools, and mcp.call rejects them.
+	remoteHost.answer = func(method string, _ json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": map[string]any{"session_id": "pac-track-1", "cwd": nonAssistantDir, "status": "idle"}}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+	beforeSends := len(remoteHost.got("session.send"))
+	if _, err := nodeCall(t, n, "assistant.send", map[string]any{"launcher": "pac", "cwd": nonAssistantDir, "text": "hello track"}); err != nil {
+		t.Fatal(err)
+	}
+	sends := remoteHost.got("session.send")
+	if len(sends) != beforeSends+1 {
+		t.Fatalf("expected new session.send, got %d", len(sends))
+	}
+	if strings.Contains(string(sends[len(sends)-1]), "memory_read") || strings.Contains(string(sends[len(sends)-1]), "memory_write") {
+		t.Fatalf("non-assistant session instructions unexpectedly mentioned memory tools: %s", sends[len(sends)-1])
+	}
+	var trackTools struct {
+		Tools []proto.Tool `json:"tools"`
+	}
+	if err := remoteHost.peer.Call(context.Background(), "mcp.tools", map[string]any{"assistant": true, "session_id": "pac-track-1"}, &trackTools); err != nil {
+		t.Fatal(err)
+	}
+	if hasTool(trackTools.Tools, "memory_read") || hasTool(trackTools.Tools, "memory_write") {
+		t.Fatalf("non-assistant session should not be advertised memory tools: %+v", trackTools.Tools)
+	}
+	rawRead, _ := json.Marshal(map[string]any{"name": "MEMORY.md"})
+	var trackCall proto.ToolResult
+	if err := remoteHost.peer.Call(context.Background(), "mcp.call", map[string]any{
+		"name": "memory_read", "args": json.RawMessage(rawRead), "session_id": "pac-track-1", "assistant": true,
+	}, &trackCall); err != nil {
+		t.Fatal(err)
+	}
+	if !trackCall.IsError {
+		t.Fatalf("expected non-assistant memory_read call to fail closed: %+v", trackCall)
+	}
+
+	// 3. Session with no recorded cwd fails closed instead of falling back to assistantDir.
+	if err := remoteHost.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{{"session_id": "pac-empty-cwd", "status": "idle"}}}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "empty-cwd runtime session owned", func() bool {
+		_, _, ok := n.runtimes.rowOf("pac-empty-cwd")
+		return ok
+	})
+	var emptyTools struct {
+		Tools []proto.Tool `json:"tools"`
+	}
+	if err := remoteHost.peer.Call(context.Background(), "mcp.tools", map[string]any{"assistant": true, "session_id": "pac-empty-cwd"}, &emptyTools); err != nil {
+		t.Fatal(err)
+	}
+	if hasTool(emptyTools.Tools, "memory_read") || hasTool(emptyTools.Tools, "memory_write") {
+		t.Fatalf("session with empty cwd should not be advertised memory tools: %+v", emptyTools.Tools)
+	}
+	res := n.assistantMemoryTool(context.Background(), "memory_read", "pac-empty-cwd", rawRead)
+	if !res.IsError || len(res.Content) == 0 || !strings.Contains(res.Content[0].Text, "assistant workspace") {
+		t.Fatalf("expected empty cwd to fail closed without falling back to assistant dir, got: %+v", res)
+	}
+}
+
+func TestRemoteAgentConfirmWritesPersistsAcrossDisconnectOwnershipChangeAndRestart(t *testing.T) {
+	t.Setenv("PERSONA_SKILLS_DIR", t.TempDir())
+	t.Setenv("PERSONA_PLUGIN_SKILLS_DIR", t.TempDir())
+	api := newFakeAPI(t)
+
+	setupNode := func() (*Node, *runtimeHub, string) {
+		n, hub := runtimeNode(t)
+		assistantHub(hub)
+		n.dir = filepath.Join(n.home, ".persona")
+		allowWrite := proto.LarkRule{Method: "POST", Path: "/events", Action: "allow"}
+		n.mu.Lock()
+		n.larkCfg = proto.AssistantLark{Gates: []proto.CommandGate{proxiedGate(api.URL, allowWrite)}}
+		n.larkCfgAt = time.Now().Add(time.Hour)
+		n.larkCfg.CLI = &proto.LarkCLI{Bin: "/nonexistent/lark-cli"}
+		n.larkRisks = map[string]string{"\x00docs +create": "write"}
+		n.mu.Unlock()
+		hub.mu.Lock()
+		hub.resolve = func(proto.Interaction) proto.Resolution {
+			no := false
+			return proto.Resolution{Allow: &no}
+		}
+		hub.mu.Unlock()
+		cwd := identity.AssistantDir(n.home)
+		skillDir := filepath.Join(cwd, ".claude", "skills", "example", "scripts")
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(skillDir, "ex.sh"), []byte("#!/bin/bash\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { n.gates().close() })
+		return n, hub, cwd
+	}
+
+	n, hub, cwd := setupNode()
+
+	remoteHost := dialRuntime(t, n, map[string]any{
+		"runtime": "pac", "name": "PAC", "launcher": "pac",
+		"caps": map[string]any{"start": true, "send": true, "interrupt": true, "assistant": true, "remote_agent": true},
+	})
+	localHost := dialRuntime(t, n, assistantRuntimeHello())
+
+	remoteHost.answer = func(method string, _ json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": map[string]any{"session_id": "pac-bypass-1", "cwd": cwd, "status": "idle"}}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+
+	if _, err := nodeCall(t, n, "assistant.send", map[string]any{
+		"launcher": "pac", "cwd": cwd, "text": "init remote", "permission_mode": proto.ModeBypass,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	n.noteModes("pac-bypass-1", proto.ModeBypass, "")
+
+	nonAssistCwd := t.TempDir()
+	if err := remoteHost.peer.Notify("runtime.sessions", map[string]any{
+		"sessions": []map[string]any{{"session_id": "pac-nonassist-1", "cwd": nonAssistCwd, "status": "idle"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "remote non-assistant owned", func() bool {
+		_, _, ok := n.runtimes.rowOf("pac-nonassist-1")
+		return ok
+	})
+	n.rememberLarkAlways("pac-nonassist-1", "CLI /docs/+create")
+
+	env, release := n.assistantLarkEnv(cwd, "pac-bypass-1")
+	t.Cleanup(release)
+	proxyBase, ok := envOf(env, "EXAMPLE_BASE")
+	if !ok {
+		t.Fatalf("missing EXAMPLE_BASE in env: %v", env)
+	}
+
+	const bypassCmd = `lark-cli docs +create --title notes --markdown hi`
+	const ruleWriteCmd = `ex POST /events '{}'`
+
+	assertPosture := func(phase string, targetNode *Node, targetHub *runtimeHub, baseURL string) {
+		t.Helper()
+		if !targetNode.isRemoteRuntimeSession("pac-bypass-1") {
+			t.Fatalf("%s: expected pac-bypass-1 to retain remote posture", phase)
+		}
+		if decBypass, _, err := targetNode.larkCheck(context.Background(), "pac-bypass-1", cwd, bypassCmd,
+			proto.Interaction{SessionID: "pac-bypass-1", Cwd: cwd, ExpiresAt: time.Now().Add(time.Minute)}); err != nil || decBypass != "deny" {
+			t.Fatalf("%s: expected bypass write to require confirmation (denied by hub): dec=%q err=%v", phase, decBypass, err)
+		}
+		targetHub.mu.Lock()
+		before := len(targetHub.asked)
+		targetHub.mu.Unlock()
+		decRule, _, err := targetNode.larkCheck(context.Background(), "pac-bypass-1", cwd, ruleWriteCmd,
+			proto.Interaction{SessionID: "pac-bypass-1", Cwd: cwd, ExpiresAt: time.Now().Add(time.Minute)})
+		if err != nil || decRule != "deny" {
+			t.Fatalf("%s: expected rule-matched write to require confirmation (denied by hub): dec=%q err=%v", phase, decRule, err)
+		}
+		targetHub.mu.Lock()
+		after := len(targetHub.asked)
+		var lastAlways []string
+		if after > 0 {
+			lastAlways = append([]string(nil), targetHub.asked[after-1].AlwaysKeys...)
+		}
+		targetHub.mu.Unlock()
+		if after != before+1 || len(lastAlways) != 0 {
+			t.Fatalf("%s: expected fresh card with empty AlwaysKeys (%d -> %d), got AlwaysKeys=%v", phase, before, after, lastAlways)
+		}
+		beforeAPI := len(api.requests())
+		code, _ := send(t, http.MethodPost, baseURL+"/api/v1/events", `{"k":1}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("%s: gateProxy allowed rule-matched write without card: HTTP %d", phase, code)
+		}
+		if len(api.requests()) != beforeAPI {
+			t.Fatalf("%s: gateProxy forwarded unconfirmed write to upstream API", phase)
+		}
+	}
+
+	// 1. Disconnect the remote runtime: belongs() now returns (nil, label, true).
+	_ = remoteHost.conn.Close()
+	waitFor(t, "remote runtime disconnected", func() bool {
+		conn, _, known := n.runtimes.belongs("pac-bypass-1")
+		return conn == nil && known
+	})
+	assertPosture("after disconnect", n, hub, proxyBase)
+	hub.mu.Lock()
+	cardsBeforeNonAssist := len(hub.asked)
+	hub.mu.Unlock()
+	if dec, _, err := n.larkCheck(context.Background(), "pac-nonassist-1", nonAssistCwd, bypassCmd,
+		proto.Interaction{SessionID: "pac-nonassist-1", Cwd: nonAssistCwd, ExpiresAt: time.Now().Add(time.Minute)}); err != nil || dec != "deny" {
+		t.Fatalf("after disconnect non-assistant write must still confirm: dec=%q err=%v", dec, err)
+	}
+	hub.mu.Lock()
+	if len(hub.asked) != cardsBeforeNonAssist+1 {
+		hub.mu.Unlock()
+		t.Fatalf("after disconnect expected confirmation card for pac-nonassist-1")
+	}
+	hub.mu.Unlock()
+
+	// 2. A non-remote runtime claims/lists the same session IDs: confirm-writes remains latched.
+	if err := localHost.peer.Notify("runtime.sessions", map[string]any{
+		"sessions": []map[string]any{
+			{"session_id": "pac-bypass-1", "cwd": cwd, "status": "idle"},
+			{"session_id": "pac-nonassist-1", "cwd": nonAssistCwd, "status": "idle"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "local runtime owns sessions", func() bool {
+		c1, _, _ := n.runtimes.belongs("pac-bypass-1")
+		c2, _, _ := n.runtimes.belongs("pac-nonassist-1")
+		return c1 != nil && c1.id() == "dsh" && !c1.remoteAgent() && c2 != nil && c2.id() == "dsh" && !c2.remoteAgent()
+	})
+	assertPosture("after non-remote takeover", n, hub, proxyBase)
+	hub.mu.Lock()
+	cardsBeforeLocalNonAssist := len(hub.asked)
+	hub.mu.Unlock()
+	if dec, _, err := n.larkCheck(context.Background(), "pac-nonassist-1", nonAssistCwd, bypassCmd,
+		proto.Interaction{SessionID: "pac-nonassist-1", Cwd: nonAssistCwd, ExpiresAt: time.Now().Add(time.Minute)}); err != nil || dec != "deny" {
+		t.Fatalf("after non-remote takeover non-assistant write must still confirm: dec=%q err=%v", dec, err)
+	}
+	hub.mu.Lock()
+	if len(hub.asked) != cardsBeforeLocalNonAssist+1 {
+		hub.mu.Unlock()
+		t.Fatalf("after non-remote takeover expected confirmation card for pac-nonassist-1")
+	}
+	hub.mu.Unlock()
+
+	// 3. stateFile.put preserves the RemoteAgent latch even if a subsequent write omits it.
+	n.state.put("pac-bypass-1", sessionState{Launcher: "pac", Cwd: cwd})
+	if st, ok := n.state.get("pac-bypass-1"); !ok || !st.RemoteAgent {
+		t.Fatalf("expected RemoteAgent latch to survive stateFile.put, got %+v (ok=%v)", st, ok)
+	}
+
+	// 4. Fresh Node (simulating restart) loading persisted state enforces confirm-writes before any runtime connects.
+	n2, hub2, cwd2 := setupNode()
+	n2.state.merge(map[string]sessionState{
+		"pac-bypass-1": {Launcher: "pac", Cwd: cwd2, RemoteAgent: true, AppMode: proto.ModeBypass},
+	})
+	n2.noteModes("pac-bypass-1", proto.ModeBypass, "")
+	env2, release2 := n2.assistantLarkEnv(cwd2, "pac-bypass-1")
+	t.Cleanup(release2)
+	proxyBase2, ok := envOf(env2, "EXAMPLE_BASE")
+	if !ok {
+		t.Fatalf("missing EXAMPLE_BASE on restarted node: %v", env2)
+	}
+	cwd = cwd2
+	assertPosture("after node restart", n2, hub2, proxyBase2)
 }

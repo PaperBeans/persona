@@ -183,7 +183,7 @@ nonisolated final class MeetingTalkTap: @unchecked Sendable {
 /// recorder's player through the same jitter buffer as a phone call's (`VoicePlayout`, reading how much the player has
 /// left off its render position, `VoicePlayerClock`, #13963); stopping it lets go of both and
 /// leaves the recording as it was. A made-up recording (`-showMeetingSample`) has no player: the voice then "plays" for
-/// as long as its PCM lasts, as `VoiceSample.SilentAudio` does, so the call and the echo spans follow it.
+/// as long as its PCM lasts, as `SilentVoiceAudio` does, so the call and the echo spans follow it.
 @MainActor final class MeetingCallAudio: VoiceAudio {
     nonisolated static let log = Logger(subsystem: "persona", category: "meeting-call")
 
@@ -225,19 +225,45 @@ nonisolated final class MeetingTalkTap: @unchecked Sendable {
         playout = VoicePlayout(rate: format.outputRate)
         clock.restart()
         tap.connect(uplink)
-        Self.log.notice("meeting call: the voice plays on the recorder's player (\(PhoneVoiceAudio.describe(AVAudioSession.sharedInstance()), privacy: .public), echo cancellation \(self.cancelsEcho, privacy: .public))")
+        Self.log.notice("meeting call: the voice plays on the recorder's player (\(PhoneVoiceAudio.describe(), privacy: .public), echo cancellation \(self.cancelsEcho, privacy: .public))")
     }
 
     func reconfigure(_ format: VoiceAudioFormat) throws {
         guard format != self.format else { return }
         dropQueued()
         self.format = format
-        playout = VoicePlayout(rate: format.outputRate, level: playout.level) // the same call's link (#12922)
+        playout = playout.moved(to: format.outputRate) // the same call's link (#12922)
     }
 
     func play(_ pcm: Data) { schedule(pcm, voice: true) }
 
     func cue(_ pcm: Data) { schedule(pcm, voice: false) }
+
+    /// A reply began, or ended: then what is held plays now, without waiting for `quiet` or the lead (#14933). Without a
+    /// player the voice "plays" as it comes, so there is nothing to hold.
+    func reply(_ open: Bool) {
+        guard !open else {
+            playout.replyBegan()
+            logEndedReply()
+            return holdUntilDue()
+        }
+        let ready = playout.replyEnded()
+        logEndedReply()
+        holdUntilDue()
+        guard let player = capture.callPlayer, capture.engineRunning else { return }
+        for piece in ready { enqueue(piece.buffer, level: piece.level, on: player) }
+    }
+
+    var lead: VoiceLead { playout.lead }
+
+    func startLead(at level: Int) {
+        dropHeld()
+        playout = VoicePlayout(rate: playout.rate, level: level)
+        if level > 0 {
+            let lead = Int(playout.leadNow * 1000)
+            Self.log.notice("meeting call: this voice came slower than it plays on a call before: gathering \(lead, privacy: .public) ms before playing")
+        }
+    }
 
     func clear() {
         logCut()
@@ -356,7 +382,7 @@ nonisolated final class MeetingTalkTap: @unchecked Sendable {
         let left = max(0, measured ?? 0)
         guard left > 0 || playout.isHolding || (measured == nil && !queued.isEmpty) else { return }
         let amount = measured == nil ? "an unknown amount" : "\(Int((left * 1000).rounded())) ms"
-        let route = PhoneVoiceAudio.describe(AVAudioSession.sharedInstance().currentRoute)
+        let route = PhoneVoiceAudio.describe(AudioSessionBroker.shared.currentRoute)
         Self.log.notice("meeting call: cut off with \(amount, privacy: .public) still in the player\(self.playout.isHolding ? " and more held" : "", privacy: .public) (\(route, privacy: .public), echo cancellation \(self.cancelsEcho, privacy: .public))")
     }
 
@@ -401,15 +427,20 @@ nonisolated final class MeetingTalkTap: @unchecked Sendable {
 
     private func dropQueued() {
         generation += 1
+        dropHeld()
+        queued = []
+        silentEnd?.cancel()
+        silentEnd = nil
+        silentUntil = .distantPast
+    }
+
+    /// What is held goes, and its timer; what was scheduled plays on.
+    private func dropHeld() {
         holdTimer?.cancel()
         holdTimer = nil
         holdDue = nil
         playout.clear()
         logEndedReply()
-        queued = []
-        silentEnd?.cancel()
-        silentEnd = nil
-        silentUntil = .distantPast
     }
 }
 #endif

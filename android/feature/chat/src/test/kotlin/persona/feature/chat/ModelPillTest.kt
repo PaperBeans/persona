@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertContentDescriptionContains
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -233,7 +234,7 @@ class ModelPillTest {
         override suspend fun deleteMemory(name: String) = Unit
     }
 
-    private fun hasDialogText(text: String) = hasText(text) and hasAnyAncestor(isDialog())
+    private fun hasDialogText(text: String, substring: Boolean = false) = hasText(text, substring = substring) and hasAnyAncestor(isDialog())
 
     private fun showAssistantPill(hub: Hub) {
         val session = Session("box", "main", assistant = true, launcher = "claude", status = "idle", rev = 3)
@@ -392,7 +393,7 @@ class ModelPillTest {
                 }
             }
         }
-        rule.onNodeWithTag("model-pill").assertDoesNotExist()
+        rule.onNodeWithTag("model-pill").assertExists()
         rule.runOnIdle { open = true }
         rule.waitUntil(5_000) { rule.onAllNodes(hasDialogText("Sonnet 4.5"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         assertFalse(open)
@@ -471,20 +472,257 @@ class ModelPillTest {
         rule.onNode(hasDialogText("Team API · claude-sonnet-4-5"), useUnmergedTree = true).assertExists()
     }
 
-    @Test fun aNonMainAssistantConversationDrawsNoPill() {
-        val hub = Hub()
+    @Test fun nonMainAssistantConversationsExposeTheModelPillAndKeepPicks() {
+        val hub = object : Hub() {
+            override suspend fun config(): AssistantConfig =
+                super.config().copy(leaders = listOf("leader-1"))
+        }
         val side = JsonCodec.decodeFromString<Session>("""{"machine_id":"box","session_id":"side","assistant":true,"agent":"claude","status":"idle",
             "launcher":"claude","model":"claude-opus-5-5","effort":"high","rev":3}""")
+        val leader = JsonCodec.decodeFromString<Session>("""{"machine_id":"box","session_id":"leader-1","assistant":true,"agent":"claude","status":"idle",
+            "launcher":"claude","model":"claude-opus-5-5","effort":"high","rev":3}""")
+        var current by mutableStateOf(side)
         rule.setContent {
             CompositionLocalProvider(LocalHubFeatures provides setOf("assistant_model_pick")) {
                 PersonaTheme(reduceMotion = true, style = AppStyle.Glass) {
-                    Box { PersonaModelPill(side, "box", hub, ModelPillWidth.Wide, pagePick = null, onPagePick = { }, onNotice = {}) }
+                    key(current.key) {
+                        Box { PersonaModelPill(current, "box", hub, ModelPillWidth.Wide, pagePick = null, onPagePick = { error("kept on hub") }, onNotice = {}) }
+                    }
                 }
             }
         }
-        rule.waitUntil(5_000) { hub.configReads >= 1 } // the role is known; no picker is drawn for another assistant chat
-        rule.onNodeWithTag("model-pill").assertDoesNotExist()
-        assertTrue("nothing is written for a conversation without a pick", hub.asked.isEmpty())
+        rule.waitUntil(5_000) { hub.configReads >= 1 && hub.launcherListReads >= 1 }
+        rule.onNodeWithTag("model-pill").assertExists().performClick()
+        waitForDialogText("Sonnet 4.5")
+        rule.onNode(hasDialogText("Sonnet 4.5"), useUnmergedTree = true).performClick()
+        rule.waitUntil(5_000) { hub.asked.contains("PUT side ModelPick(launcher=team, model=sonnet, effort=null)") }
+        rule.onNodeWithTag("model-pill").performClick()
+        waitForDialogText("Undo pick")
+        rule.onNode(hasDialogText("Undo pick"), useUnmergedTree = true).performClick()
+        rule.waitUntil(5_000) { hub.asked.contains("DELETE side") }
+
+        rule.runOnIdle { current = leader }
+        rule.waitUntil(5_000) { rule.onAllNodes(hasText("Opus 5.5", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithTag("model-pill").assertExists().performClick()
+        waitForDialogText("Sonnet 4.5")
+        assertTrue(rule.onAllNodes(hasText("Following the default", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+        rule.onNode(hasDialogText("Sonnet 4.5"), useUnmergedTree = true).performClick()
+        rule.waitUntil(5_000) { hub.asked.contains("PUT leader-1 ModelPick(launcher=team, model=sonnet, effort=null)") }
+        rule.onNodeWithTag("model-pill").performClick()
+        waitForDialogText("Follow default")
+        rule.onNode(hasDialogText("Follow default"), useUnmergedTree = true).performClick()
+        rule.waitUntil(5_000) { hub.asked.contains("DELETE leader-1") }
+    }
+
+    private open class SwitchHub(
+        var segments: ConversationSwitchState = ConversationSwitchState(enabled = true, epoch = 4, supervisionRequired = false),
+        var submitBehavior: (ConversationSwitchRequest) -> Unit = {},
+    ) : Hub() {
+        var segmentReads = 0
+        val submitted = mutableListOf<ConversationSwitchRequest>()
+
+        override suspend fun assistantLauncherList(machineId: String): AssistantLaunchers = AssistantLaunchers(
+            launchers = listOf(
+                AgentLauncher("claude", source = "builtin"),
+                AgentLauncher("agy", agentType = "agy", displayName = "Antigravity CLI", source = "agy", assistant = true, supervisionPolicy = false),
+            ),
+            default = LauncherDefault("claude", "opus", "high"),
+        )
+
+        override suspend fun launcherModels(machineId: String, launcher: String) = when (launcher) {
+            "agy" -> LauncherModels("agy", listOf(AgentModel("gemini-3", "Gemini 3", efforts = listOf("low", "high"))))
+            else -> super.launcherModels(machineId, launcher)
+        }
+
+        override suspend fun conversationSwitchState(session: SessionKey): ConversationSwitchState {
+            segmentReads++
+            return segments
+        }
+
+        override suspend fun submitConversationSwitch(session: SessionKey, request: ConversationSwitchRequest) {
+            submitted += request
+            submitBehavior(request)
+        }
+    }
+
+    @Test fun crossEngineSwitchRequiresConfirmationAndCancelSendsNothing() {
+        val hub = SwitchHub()
+        val chat = JsonCodec.decodeFromString<Session>("""{"machine_id":"box","session_id":"main","assistant":true,"agent":"claude","status":"idle",
+            "launcher":"claude","model":"claude-opus-5-5","effort":"high","permission_mode":"acceptEdits","rev":3}""")
+        rule.setContent {
+            CompositionLocalProvider(LocalHubFeatures provides setOf("assistant_model_pick", "assistant_segments")) {
+                PersonaTheme(reduceMotion = true, style = AppStyle.Glass) {
+                    Box { PersonaModelPill(chat, "box", hub, ModelPillWidth.Wide, pagePick = null, onPagePick = {}, onNotice = {}) }
+                }
+            }
+        }
+        rule.onNodeWithTag("model-pill").performClick()
+        waitForDialogText("Gemini 3")
+        rule.onNode(hasDialogText("Gemini 3"), useUnmergedTree = true).performClick()
+        waitForDialogText("Switch this conversation?")
+        assertTrue(rule.onAllNodes(hasDialogText("Continue with Antigravity CLI", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+        rule.runOnIdle {
+            assertTrue("picking alone must not call setModelPick", hub.asked.isEmpty())
+            assertTrue("picking alone must not submit switch", hub.submitted.isEmpty())
+        }
+        rule.onNode(hasDialogText("Cancel"), useUnmergedTree = true).performClick()
+        rule.waitUntil(5_000) { rule.onAllNodes(hasDialogText("Switch this conversation?"), useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+        rule.runOnIdle {
+            assertTrue(hub.asked.isEmpty())
+            assertTrue(hub.submitted.isEmpty())
+        }
+    }
+
+    @Test fun crossEngineSwitchPreservesOperationIdAfterUncertainFailureAndRetriesIdempotently() {
+        var failFirst = true
+        val hub = SwitchHub(submitBehavior = {
+            if (failFirst) {
+                failFirst = false
+                throw persona.core.hub.HubFailure(
+                    persona.core.hub.HubError.Server,
+                    message = "response unconfirmed",
+                    status = 502,
+                    code = "timeout",
+                    delivered = "unknown",
+                )
+            }
+        })
+        val notices = mutableListOf<String>()
+        var switchedCount = 0
+        val chat = JsonCodec.decodeFromString<Session>("""{"machine_id":"box","session_id":"leader-2","assistant":true,"agent":"claude","status":"idle",
+            "launcher":"claude","model":"claude-opus-5-5","effort":"high","permission_mode":"acceptEdits","rev":3}""")
+        rule.setContent {
+            CompositionLocalProvider(LocalHubFeatures provides setOf("assistant_model_pick", "assistant_segments")) {
+                PersonaTheme(reduceMotion = true, style = AppStyle.Glass) {
+                    Box {
+                        PersonaModelPill(
+                            chat,
+                            "box",
+                            hub,
+                            ModelPillWidth.Wide,
+                            pagePick = null,
+                            onPagePick = {},
+                            onNotice = { notices += it },
+                            onSwitched = { switchedCount++ },
+                        )
+                    }
+                }
+            }
+        }
+        rule.onNodeWithTag("model-pill").performClick()
+        waitForDialogText("Gemini 3")
+        rule.waitUntil(5_000) { hub.segmentReads == 1 }
+        rule.onNode(hasDialogText("Gemini 3"), useUnmergedTree = true).performClick()
+        waitForDialogText("Switch connection")
+        rule.onNode(hasDialogText("Switch connection"), useUnmergedTree = true).performClick()
+
+        waitForDialogText("The switch result is unconfirmed. Retrying uses the same request; it will not start another switch. response unconfirmed")
+        rule.onNode(hasDialogText("Close"), useUnmergedTree = true).assertExists()
+        rule.onNode(hasDialogText("Cancel"), useUnmergedTree = true).assertDoesNotExist()
+        rule.runOnIdle {
+            assertEquals(1, hub.submitted.size)
+            assertEquals(2, hub.segmentReads)
+            assertEquals(4L, hub.submitted.single().expectedEpoch)
+            assertEquals("agy", hub.submitted.single().launcher)
+            assertEquals("gemini-3", hub.submitted.single().model)
+            assertEquals("high", hub.submitted.single().effort)
+            assertEquals("acceptEdits", hub.submitted.single().permissionMode)
+            assertEquals("box", hub.submitted.single().sourceMachineId)
+            assertEquals("box", hub.submitted.single().machineId)
+            assertTrue(hub.asked.isEmpty())
+        }
+
+        // Retrying sends the exact same operation_id and expected_epoch without re-reading /segments.
+        rule.onNode(hasDialogText("Switch connection"), useUnmergedTree = true).performClick()
+        rule.waitUntil(5_000) { switchedCount == 1 }
+        rule.runOnIdle {
+            assertEquals(2, hub.submitted.size)
+            assertEquals(hub.submitted[0], hub.submitted[1])
+            assertEquals(2, hub.segmentReads)
+            assertEquals(listOf("Switch requested. You can continue in this conversation."), notices)
+            assertTrue("ordinary setModelPick must never be called for an explicit switch", hub.asked.isEmpty())
+        }
+        rule.onNode(isDialog()).assertDoesNotExist()
+    }
+
+    @Test fun crossEngineSwitchDefinitiveRefusalKeepsCancelButtonAndShowsHubReason() {
+        val hub = SwitchHub(submitBehavior = {
+            throw persona.core.hub.HubFailure(
+                persona.core.hub.HubError.Server,
+                message = "Conversation is busy",
+                status = 409,
+                code = "conversation_busy",
+                delivered = "none",
+            )
+        })
+        val chat = JsonCodec.decodeFromString<Session>("""{"machine_id":"box","session_id":"main","assistant":true,"agent":"claude","status":"idle",
+            "launcher":"claude","model":"claude-opus-5-5","effort":"high","rev":3}""")
+        rule.setContent {
+            CompositionLocalProvider(LocalHubFeatures provides setOf("assistant_model_pick", "assistant_segments")) {
+                PersonaTheme(reduceMotion = true, style = AppStyle.Glass) {
+                    Box { PersonaModelPill(chat, "box", hub, ModelPillWidth.Wide, pagePick = null, onPagePick = {}, onNotice = {}) }
+                }
+            }
+        }
+        rule.onNodeWithTag("model-pill").performClick()
+        waitForDialogText("Gemini 3")
+        rule.onNode(hasDialogText("Gemini 3"), useUnmergedTree = true).performClick()
+        waitForDialogText("Switch connection")
+        rule.onNode(hasDialogText("Switch connection"), useUnmergedTree = true).performClick()
+        waitForDialogText("Conversation is busy")
+        rule.onNode(hasDialogText("Cancel"), useUnmergedTree = true).assertExists()
+        rule.onNode(hasDialogText("Close"), useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test fun supervisionRequiredConversationMarksIneligibleConnectionsUnavailable() {
+        val hub = SwitchHub(segments = ConversationSwitchState(enabled = true, epoch = 2, supervisionRequired = true))
+        val chat = JsonCodec.decodeFromString<Session>("""{"machine_id":"box","session_id":"leader-1","assistant":true,"agent":"claude","status":"idle",
+            "launcher":"claude","model":"claude-opus-5-5","effort":"high","rev":3}""")
+        rule.setContent {
+            CompositionLocalProvider(LocalHubFeatures provides setOf("assistant_model_pick", "assistant_segments")) {
+                PersonaTheme(reduceMotion = true, style = AppStyle.Glass) {
+                    Box { PersonaModelPill(chat, "box", hub, ModelPillWidth.Wide, pagePick = null, onPagePick = {}, onNotice = {}) }
+                }
+            }
+        }
+        rule.onNodeWithTag("model-pill").performClick()
+        waitForDialogText("This connection cannot receive separate task follow-up instructions.")
+    }
+
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    @Config(sdk = [35], qualifiers = "en-w400dp-h900dp-xhdpi")
+    @Test fun personaSwitchConfirmationRendersInLightAndDark() = switchConfirmScene(false)
+
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    @Config(sdk = [35], qualifiers = "en-w400dp-h900dp-xhdpi", fontScale = 2f)
+    @Test fun personaSwitchConfirmationRendersAtLargestTextSize() = switchConfirmScene(true)
+
+    private fun switchConfirmScene(largeText: Boolean) {
+        org.robolectric.RuntimeEnvironment.setFontScale(if (largeText) 2f else 1f)
+        var dark by mutableStateOf(false)
+        rule.setContent {
+            PersonaTheme(darkTheme = dark, reduceMotion = true, style = AppStyle.Glass) {
+                PersonaSwitchConfirmation(
+                    targetName = "Antigravity CLI",
+                    error = null,
+                    switching = false,
+                    uncertain = false,
+                    onDismiss = {},
+                    onConfirm = {},
+                )
+            }
+        }
+        val out = File(System.getProperty("persona.shots") ?: "build/persona-switch-shots").apply { mkdirs() }
+        for (night in listOf(false, true)) {
+            rule.runOnIdle { dark = night }
+            rule.waitForIdle()
+            rule.onNode(hasDialogText("Switch connection"), useUnmergedTree = true).assertExists()
+            rule.onNode(hasDialogText("Cancel"), useUnmergedTree = true).assertExists()
+            val bitmap = rule.onNode(isDialog() and hasAnyDescendant(hasText("Switch this conversation?")), useUnmergedTree = true)
+                .captureToImage().asAndroidBitmap()
+            File(out, "persona-switch-${if (largeText) "large" else "default"}-${if (night) "dark" else "light"}.png")
+                .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
     }
 
     @Test fun aHubPushThatBumpsTheRevisionReReadsTheEffectiveMainChatModel() {

@@ -478,6 +478,27 @@ class WatcherTests(unittest.TestCase):
             self.watcher.discover()
         enqueue.assert_called_once_with("example/one", 7, SHA_B, "poll")
 
+    def test_discovery_polls_open_prs_older_than_the_newest_two_hundred(self):
+        # gh lists the newest PRs first and stops at --limit (#14864).
+        listing = [{"number": 300 - index, "headRefOid": SHA_A, "isDraft": False,
+                    "baseRefName": "main", "mergeable": "MERGEABLE"} for index in range(250)]
+        def gh(argv, **kwargs):
+            return listing[:int(argv[argv.index("--limit") + 1])]
+        logs = []
+        with patch.object(pr_watch, "gh_json", side_effect=gh), \
+                patch.object(self.watcher, "enqueue") as enqueue, \
+                patch.object(self.watcher, "log", side_effect=logs.append):
+            self.watcher.discover()
+        self.assertEqual(sorted(call.args[1] for call in enqueue.call_args_list), list(range(51, 301)))
+        self.assertEqual(logs, [])
+        with patch.object(pr_watch, "DISCOVERY_LIMIT", 250), \
+                patch.object(pr_watch, "gh_json", side_effect=gh), \
+                patch.object(self.watcher, "enqueue"), \
+                patch.object(self.watcher, "log", side_effect=logs.append):
+            self.watcher.discover()
+        self.assertEqual(len(logs), 1)
+        self.assertIn("example/one: discovery reached its bound of 250 open PRs", logs[0])
+
     def test_same_head_backoff_and_terminal_records_skip_stale_activity(self):
         evidence_key = "example/one#7@" + SHA_BASE + ".." + SHA_A
         cases = [

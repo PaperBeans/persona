@@ -106,6 +106,7 @@ spec/
 | screen-link | [README](fixtures/screen-link/README.md): the live screen's session wire (#6398), every message framed byte for byte alike by the node and the iPhone's client |
 | file-types | [README](fixtures/file-types/README.md): a `.ts` / `.mts` / `.cts` file typed by its first bytes (#7974), a real TypeScript module and a real MPEG-TS segment, checked by the node and the hub (Go) |
 | graph-layout | [README](fixtures/graph-layout/README.md): an extension view's `graph` (UI version 10, #9727), each node's place in slots, the edges drawn, the reading order with depths, fold counts and group frames, written by the reference `scripts/gen/graph_layout.py` and checked by the web, iOS, Android and the hub |
+| organization-snapshot | [README](fixtures/organization-snapshot/README.md): the owner-only runtime tree, three-state availability mapping, open to-dos, concurrency, dated model observations, and complete or incomplete P0 lineage, replayed by the Go server and reserved for later client implementations |
 | tokens | 见各自 [README](tokens/README.md)；校验夹具如放在 `fixtures/tokens/`，结构由该领域 README 说明 |
 
 ## 夹具约定

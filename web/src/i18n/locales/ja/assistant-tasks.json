@@ -141,6 +141,9 @@
   "review_missing": "不足",
   "review_note": "監督メモ：{note}",
   "review_expect": "目安 {minutes} 分",
+  "evidence_author_supervisor": "監督",
+  "evidence_author_agent": "エージェント",
+  "evidence_author_reviewer": "レビュアー",
   "dock_task_asks": "{title}：{ask}",
   "dock_agent": "エージェント{title}、{state}",
   "report_question": "Persona に確認：{text}",
@@ -181,5 +184,16 @@
   "start_cause_not_allowed": "このコンピューターで許可されませんでした",
   "start_cause_needs_update": "このコンピューターの Persona を更新する必要があります",
   "start_failed_short": "開始できませんでした。",
-  "start_failed_details": "起動できませんでした。開いて詳細を確認してください。"
+  "start_failed_details": "起動できませんでした。開いて詳細を確認してください。",
+  "dispatch_reason_first": "プリセット {tier} の候補 {candidate} を使用",
+  "dispatch_reason_score": "プリセット {tier} の候補 {candidate}：直近2週間 {minutes} 分・一発通過 {first_pass}%・余力 {headroom}%",
+  "dispatch_reason_score_short": "効率と余力によりプリセット {tier} の候補 {candidate} を選択",
+  "dispatch_reason_quota": "上位候補の余力が不足しているため、候補 {candidate} を使用",
+  "dispatch_reason_quota_detail": "上位候補の余力が不足しているため（{detail}）、候補 {candidate} を使用",
+  "dispatch_reason_unavailable": "上位候補はこのマシンで利用できないため、候補 {candidate} を使用",
+  "dispatch_reason_kept": "前のエージェントの候補を引き継ぎ",
+  "dispatch_reason_switched": "前の候補から候補 {candidate} に切り替え",
+  "dispatch_reason_switched_detail": "前の候補から切り替え（{detail}）、候補 {candidate} を使用",
+  "dispatch_reason_over_pace": "すべての候補がペース超過のため、順に候補 {candidate} を使用",
+  "dispatch_reason_fallback": "プリセット {tier} 候補 {candidate}（{reason}）"
 }

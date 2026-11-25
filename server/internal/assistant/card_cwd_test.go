@@ -15,6 +15,7 @@ import (
 // node lists, for every node version. An agent's card, another manager's conversation's and one with no row keep
 // their own; a card from inside a health space keeps that (a mix-up can only hide more).
 func TestNodeCardsArePlacedInTheConversationsDirectory(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	ft := newFleetTest(t)
 	const health, assistant = "/home/u/.persona/health", "/home/u/.persona/assistant"
 	ft.sessions("mac",

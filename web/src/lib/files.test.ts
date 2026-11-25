@@ -221,6 +221,13 @@ describe("diff", () => {
     expect(parts["docs/part b/renamed.md"]).toBe(renamed);
   });
 
+  it("keeps only filenames with a diff chunk in the lookup", () => {
+    const README = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n";
+    const file = "diff --git a/constructor b/constructor\n--- a/constructor\n+++ b/constructor\n@@ -1 +1 @@\n-old\n+new\n";
+    expect(splitDiff(README)["constructor"]).toBeUndefined();
+    expect(splitDiff(README + file)["constructor"]).toBe(file);
+  });
+
   it("maps actual Git-produced headers for names with spaces, which end their ---/+++ lines with a tab", () => {
     const dir = mkdtempSync(join(tmpdir(), "persona-space-diff-"));
     const git = (...args: string[]) => {

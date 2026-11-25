@@ -33,6 +33,7 @@ const (
 	sigReport        = "report"         // its agent reported to the supervisor (report_to_supervisor, agent_control.go)
 	sigEscalated     = "escalated"      // its leader conversation judged it needs the user (supervise_leader.go): told the main one
 	sigOrphaned      = "orphaned"       // nobody works on it: its agents are closed or offline and nothing brings one back (tasks_orphan.go)
+	sigRecovered     = "recovered"      // a node reconnected after an outage or reboot and left affected work unresumable (node_recovery.go, #14781)
 	sigAsk           = "ask"            // its agent's card came to the supervisor before the user (ask_route.go)
 	sigDecide        = "decide"         // a task leader's worker needs a decision its leader cannot make: told the conversation above the leader (task_leader.go)
 	sigDecisionReply = "decision_reply" // the owner wrote in a task's Agent chat; its pending decision needs confirmation
@@ -92,8 +93,9 @@ type superviseSignal struct {
 	// An ACK removes exactly its own Key; a still-present predecessor's dedup reservation is not delivery proof.
 	PendingPredecessors []string
 	PRURL               string // draft_pr: the current or earlier followed PR, revalidated before delivery
-	// Unreachable: this decision exists because the task leader's agent could not be reached, not because the worker
-	// waits for the user. It stays a decision even though the worker's ledger is not needs_user (task_leader.go).
+	// Unreachable: this decision exists because its assigned task leader Agent or Assistant supervisor could not be
+	// reached, not because the worker waits for the user. It stays a decision even when the worker is not needs_user.
+	// Recipient distinguishes an unreachable Assistant supervisor from the existing task-leader-Agent escalation.
 	Unreachable      bool
 	At               time.Time
 	Machine, Session string
@@ -223,9 +225,9 @@ func (g superviseSignal) urgent() bool {
 		// that needs the supervisor soon: every stopped task says the same until the model is back, and each used to
 		// wake the main conversation on its own. They go out together, on the ordinary schedule.
 		return !g.JudgeDown
-	case sigNeedsYou, sigIdle, sigAllStopped, sigFailed, sigInterrupted, sigStarted, sigPRConflict, sigDraftPR, sigPREvent, sigEscalated, sigAsk, sigOrphaned, sigDecide, // started: the user waits to hear it
+	case sigNeedsYou, sigIdle, sigAllStopped, sigFailed, sigInterrupted, sigStarted, sigPRConflict, sigDraftPR, sigPREvent, sigEscalated, sigAsk, sigOrphaned, sigRecovered, sigDecide, // started: the user waits to hear it
 		sigRecheck, sigUndecidable, sigDeliveryHold, sigOwnerCannot, sigEstimateDue, sigTimedOut, // the owner, an automatic deadline or a stopped task waits
-		sigParkedDue, sigParkDecided, sigDecisionReply, sigHandoffResult, sigCardlessWait, sigTodoReady, sigPRMerged, sigParentCloseout, sigNeedsUserExternalInfo:
+		sigParkedDue, sigParkDecided, sigDecisionReply, sigHandoffResult, sigCardlessWait, sigTodoReady, sigPRMerged, sigParentCloseout, sigNeedsUserExternalInfo, sigOwnerPresent:
 		return true
 	case sigReport:
 		return g.Report != upReportProgress
@@ -267,6 +269,7 @@ type superviseBook struct {
 	told             map[string]time.Time // conversation → last accepted supervision message
 	timer            *time.Timer
 	timerAt          time.Time
+	off              supervisionOff // the automatic-supervision switch's memory (supervise_switch.go)
 
 	resuming map[[2]string]struct{} // fingerprints of offline leader sends in flight, under dedupMu
 
@@ -907,6 +910,9 @@ func (s *Service) signal(g superviseSignal) {
 
 // signalReplacing records g and, when old is still pending, atomically replaces that older stretch in the outbox.
 func (s *Service) signalReplacing(old *superviseSignal, g superviseSignal) {
+	if !s.autoSupervisionOn(context.Background()) {
+		return // automatic supervision messages are off: nothing is gathered, scheduled or told (supervise_switch.go)
+	}
 	if g.Todo != "" {
 		if t, ok := s.todoNow(g.Todo); ok && s.reporterStopped(context.Background(), t.Origin) {
 			return // /stop silences the reporting task's notices on every route until the user speaks again (#3308)
@@ -971,6 +977,9 @@ func (s *Service) releaseReportsLocked(g superviseSignal) []string {
 
 // queueSignalReplacing also removes the older stretch it supersedes from the durable outbox.
 func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) {
+	if !s.autoSupervisionOn(context.Background()) {
+		return // the same for a signal that skipped signal (supervise_switch.go)
+	}
 	if g.Kind != sigAsk {
 		g = s.currentSupervisorSignal(g)
 	}
@@ -1057,8 +1066,8 @@ func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) 
 
 // scheduleDigestLocked sets the timer for when the pending signals are due; s.supervise.mu is held.
 func (s *Service) scheduleDigestLocked(now time.Time) {
-	if s.runCtx().Err() != nil {
-		return
+	if s.runCtx().Err() != nil || !s.autoSupervisionOn(context.Background()) {
+		return // stopping, or automatic supervision messages are off: no digest is scheduled
 	}
 	b := &s.supervise
 	batch := s.supervisionBatchInterval(context.Background())
@@ -1084,7 +1093,7 @@ func (s *Service) scheduleDigestLocked(now time.Time) {
 
 // retryDigestLocked tries the digest again in d, unless one is due sooner (b.mu held).
 func (s *Service) retryDigestLocked(d time.Duration) {
-	if s.runCtx().Err() != nil {
+	if s.runCtx().Err() != nil || !s.autoSupervisionOn(context.Background()) {
 		return
 	}
 	b := &s.supervise
@@ -1177,12 +1186,15 @@ func watchSignals(t Todo, agents []proto.Session, now time.Time, groups ...super
 	return out
 }
 
-// reviewKey names one review a task waits for: when it began to wait.
+// reviewKey names one review a task waits for: when it began to wait. The time is cut to the microsecond the database
+// keeps: a manager that loaded the task again (a restart) reads UpdatedAt back at that precision, and a key of the
+// nanosecond one would name the same review differently than the pending copy the manager before it left in the
+// outbox, so both would be told.
 func reviewKey(v *Supervision) string {
 	if r := v.externalPRWake(); r != nil {
 		return externalPRReviewPrefix + r.At.UTC().Format(time.RFC3339Nano)
 	}
-	return "review@" + v.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	return "review@" + v.UpdatedAt.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
 }
 
 // stallAfter is how long without progress counts as stuck for a task that should take expect minutes.
@@ -1219,6 +1231,7 @@ func (s *Service) superviseLoop(ctx context.Context) {
 // conversation left waiting to the main conversation's follow-up (handOverUnreviewed), and lets go of a hold on the
 // main conversation's pushes that outlived superviseHoldMax.
 func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
+	s.syncAutoSupervision(ctx) // a switch left off, also across a restart, empties what automatic supervision holds
 	s.autoReviewTick(ctx, now)
 	s.sessionReviewTick(ctx, now)
 	s.askTick(now)                 // cards held past their time go up a rung (ask_route.go)
@@ -1237,6 +1250,7 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 	history := s.planHistoryOnce() // and the plans read once, when a task's start needs them (start_remedy.go)
 	s.backfillBriefs(ctx, tasks)   // tasks from before briefs get one from what they still have (task_brief.go)
 	groups := allStoppedTaskGroups(tasks)
+	todosV2 := s.settings(ctx).todosV2On()
 	backfilled := 0
 	for _, t := range tasks {
 		if t.Supervision == nil && t.DoneAt == nil {
@@ -1314,6 +1328,9 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 				s.signal(g)
 			}
 			s.signalCardlessWait(ctx, t, agents, lists, now) // a review the owner cannot answer (#12648)
+			if todosV2 {
+				s.signalPendingReviewNudge(ctx, t, agents, lists, now) // todos_v2 >2h lightweight supervisor nudge (#14620)
+			}
 		}
 		if g, ok := s.deliveryHoldSignal(ctx, t, now); ok { // an owner hold with no card goes to its supervisor first
 			s.signal(g)

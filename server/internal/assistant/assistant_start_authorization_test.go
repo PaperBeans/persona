@@ -73,8 +73,11 @@ func TestAssistantStartAuthorizesRuntimeDiscovery(t *testing.T) {
 			var session proto.Session
 			var err error
 			if origin == OriginInbox {
+				f.inbox = newFakeInbox()
+				it := &InboxItem{ID: "event", Title: "Message", Agent: &InboxAgent{State: AgentRunning, ProcessingTurn: "runtime-discovery"}}
+				s.inbox.items = map[string]*InboxItem{it.ID: it}
 				session.MachineID, session.SessionID, err = s.startInboxAgent(context.Background(),
-					InboxAgentConfig{Enabled: true, Machine: "other"}, &InboxItem{ID: "event", Title: "Message"}, "Handle this message")
+					InboxAgentConfig{Enabled: true, Machine: "other"}, it, "Handle this message")
 			} else {
 				session, err = s.Start(context.Background(), StartParams{MachineID: "other", Text: "Private request", Untitled: true})
 			}

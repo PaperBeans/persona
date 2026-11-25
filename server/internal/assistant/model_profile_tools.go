@@ -57,10 +57,16 @@ func (s *Service) applyStartTier(ctx context.Context, params map[string]any) err
 	if tier == "" {
 		return nil
 	}
-	t, err := s.tierModel(ctx, tier)
+	slot := tierStartOf(ctx)
+	facts := tierFacts{}
+	if slot != nil {
+		facts.Machine, facts.Keep = slot.machine, slot.keep
+	}
+	pick, err := s.pickTierCandidate(ctx, tier, facts)
 	if err != nil {
 		return err
 	}
+	t := pick.Tier
 	launcher, _ := params["launcher"].(string)
 	model, _ := params["model"].(string)
 	effort, _ := params["effort"].(string)
@@ -72,6 +78,9 @@ func (s *Service) applyStartTier(ctx context.Context, params map[string]any) err
 		}
 		if mode == "" && t.PermissionMode != "" {
 			mode = t.PermissionMode
+		}
+		if slot != nil {
+			slot.pick = &pick // the tier gave the start its launcher: its pick is the dispatch's
 		}
 	}
 	params["launcher"], params["model"], params["effort"], params["speed"] = launcher, model, effort, speed
@@ -96,6 +105,7 @@ func layTier(t ModelTier, launcher, model, effort *string) bool {
 }
 
 func (s *Service) applyTaskTier(ctx context.Context, t *PlanTask) error {
+	ctx, _ = withTierStart(ctx, t.Machine) // the preview picks the candidate the start on t.Machine would
 	p := map[string]any{"tier": t.Tier, "launcher": t.Launcher, "model": t.Model, "effort": t.Effort, "speed": t.Speed, "permission_mode": t.Permission}
 	if err := s.applyStartTier(ctx, p); err != nil {
 		return err
@@ -127,7 +137,9 @@ func (s *Service) modelProfileContext(ctx context.Context) *prompts.SnapshotProf
 	out := &prompts.SnapshotProfile{ID: p.ID, Name: p.Name}
 	for _, name := range slices.Sorted(maps.Keys(p.Tiers)) {
 		t := p.Tiers[name]
-		out.Tiers = append(out.Tiers, prompts.SnapshotTier{Name: name, Launcher: t.Launcher, Model: t.Model, Effort: t.Effort, Speed: t.Speed, PermissionMode: t.PermissionMode, Description: t.Description})
+		// The first candidate, with how many others follow it: the whole list would grow every turn's snapshot.
+		out.Tiers = append(out.Tiers, prompts.SnapshotTier{Name: name, Launcher: t.Launcher, Model: t.Model, Effort: t.Effort, Speed: t.Speed,
+			PermissionMode: t.PermissionMode, Description: t.Description, More: len(t.list()) - 1, Aliases: t.Aliases})
 	}
 	return out
 }

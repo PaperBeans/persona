@@ -506,7 +506,10 @@ func TestAHandoverQueuedForALostBackgroundSupervisor(t *testing.T) {
 				At: time.Now().UTC(), Handover: id, Quote: quote})
 			done()
 			to := d.mainID
-			if !moves {
+			if moves {
+				// An idle receiver drains immediately. Keep it in a turn while inspecting the moved queue.
+				d.setStatus(to, proto.StatusWorking)
+			} else {
 				to = ""
 			}
 			d.s.backgroundLost(ctx, d.bgID, to, d.s.webBase(ctx))
@@ -520,6 +523,7 @@ func TestAHandoverQueuedForALostBackgroundSupervisor(t *testing.T) {
 			if e.State != handoverQueued || e.To != d.mainID || e.ToTitle != conversationName(d.idle(d.mainID), d.mainID) {
 				t.Fatalf("moved: %+v", e)
 			}
+			d.setStatus(d.mainID, proto.StatusIdle)
 			drainRelayTest(t, d.s, d.idle(d.mainID))
 			if s := handoverState(d.s, id); s != handoverDelivered || d.f.sentTo(d.mainID) != 1 {
 				t.Fatalf("after it went into the main conversation: %s, %d sent", s, d.f.sentTo(d.mainID))

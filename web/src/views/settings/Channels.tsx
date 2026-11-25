@@ -9,7 +9,7 @@ import { errorText } from "../../lib/api";
 import {
   bindChannel, bindTitle, useChannels, canBind, capabilityText, channelDetail, channelSections, channelStateText, channelSubtitle,
   channelTone, forgetChannels, isBound, isPolled, listChannels, targetText, testChannel, unbindChannel, updateChannel,
-  type Channel, type ChannelDetail, type ChannelPrompt, type ChannelTarget, type ChannelTone,
+  type Channel, type ChannelDetail, type ChannelPrompt, type ChannelTarget, type ChannelTargetOverride, type ChannelTone,
 } from "../../lib/channels";
 import { canSendStep, fieldInput } from "../../lib/connectors";
 import { otherManager, ownedSub, pinManager, useChosenManager } from "../../lib/manager-choice";
@@ -20,11 +20,22 @@ import { Button, copyText, cx, Dialog, EASE, IconButton, Loading, Spinner, toast
 import { ChannelMark } from "../../ui/ChannelMark";
 import { Icon } from "../../ui/icons";
 import { QRStep, useStepPolling } from "./LoginSteps";
-import { Group, Pill, Row, Switch } from "./SettingsParts";
+import { Group, Pill, Row, SettingsHint, Switch } from "./SettingsParts";
 import { byTime } from "../../lib/times";
 
 const DOT: Record<ChannelTone, string> = { green: "bg-green", red: "bg-red", idle: "bg-line-strong" };
 const fieldClass = "h-8 w-full rounded-control bg-field px-2.5 text-[12.5px] text-ink shadow-inset-field outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--accent)] disabled:opacity-60";
+
+function targetOverrideText(override: ChannelTargetOverride): string {
+  switch (override.mode) {
+    case "topics":
+      return t("settings-channels.target_override_topics");
+    case "threads":
+      return t("settings-channels.target_override_threads");
+    default:
+      return t("settings-channels.target_override_generic");
+  }
+}
 
 /** `compact`: under the name in the narrow column beside an open channel, in the size the other lists use there. */
 function StateLabel({ c, compact }: { c: Channel; compact?: boolean }) {
@@ -307,6 +318,25 @@ export function ChannelPage({ id, manager: named, onBack, onSettings, headerBack
           <Row label={t("settings-channels.target_row")} onClick={() => !busy && setPicking(true)}>
             <span className="max-w-[220px] truncate">{targetText(d.target)}</span>
           </Row>
+          {d.target_override && (
+            <SettingsHint>
+              {targetOverrideText(d.target_override)}
+              {d.settings_url && (
+                <>
+                  {" "}
+                  <button
+                    type="button"
+                    onClick={() => onSettings(d.settings_url!)}
+                    className="font-medium whitespace-nowrap text-accent-ink hover:underline"
+                  >
+                    {d.source === "plugin"
+                      ? t("settings-channels.target_override_extension_settings")
+                      : t("settings-channels.target_override_settings")}
+                  </button>
+                </>
+              )}
+            </SettingsHint>
+          )}
         </Group>
       )}
 
@@ -404,7 +434,7 @@ export function ChannelPage({ id, manager: named, onBack, onSettings, headerBack
 }
 
 /** "Send messages to": the main conversation, a new one, or one of the assistant's conversations. */
-function TargetPicker({ open, current, onClose, onPick }: { open: boolean; current?: ChannelTarget; onClose: () => void; onPick: (t: ChannelTarget) => void }) {
+export function TargetPicker({ open, current, onClose, onPick }: { open: boolean; current?: ChannelTarget; onClose: () => void; onPick: (t: ChannelTarget) => void }) {
   const sessions = useStore((s) => s.sessions);
   const conversations = useMemo(
     () =>

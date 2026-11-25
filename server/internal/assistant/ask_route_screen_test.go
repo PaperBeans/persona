@@ -24,14 +24,35 @@ func commandScreen(id, session string) proto.Interaction {
 
 // A supervised Agent's terminal command approval goes to its supervisor only: no push, the card shown as delegating,
 // the supervisor told the command and the warning. The supervisor picks the option itself, kept as the assistant's
-// answer; an unrelated conversation cannot. An Agent of no supervised task still rings the user.
+// answer; an unrelated conversation cannot. An unsupervised Agent's non-six-class dialog goes to the main conversation
+// without pushing to the owner, while a six-class dialog (folder trust) still rings the owner.
 func TestSupervisedCommandScreenStaysWithItsSupervisor(t *testing.T) {
 	e := newRouteEnv(t, nil, false)
 	plain := commandScreen("ordinary", "unrelated-session")
 	plainAnswer := e.raise(plain)
-	waitFor(t, "the unsupervised dialog pushed to the owner", func() bool { return e.pushesOf(plain.ID) == 1 })
-	if e.lastShown(plain.ID).Delegating {
-		t.Fatal("an unsupervised Agent's dialog went to a supervisor")
+	waitFor(t, "the unsupervised dialog routed to the main conversation", func() bool {
+		for _, m := range laterFor(e.s, "conv1") {
+			if m.From == cardAgentQuestion && strings.Contains(m.Text, "interaction_id="+plain.ID) {
+				return true
+			}
+		}
+		return false
+	})
+	if !e.lastShown(plain.ID).Delegating {
+		t.Fatal("an unsupervised non-owner dialog was not marked delegating")
+	}
+
+	trust := commandScreen("trust-folder", "unrelated-session-2")
+	trust.Dialog.Command, trust.Dialog.Warning = "", ""
+	trust.Dialog.Question = "Quick safety check: Is this a project you trust?"
+	trust.Dialog.Options = []screen.Option{
+		{Key: "1", Label: "Yes, I trust this folder", Keys: []string{"enter"}},
+		{Key: "2", Label: "No, exit", Keys: []string{"down", "enter"}},
+	}
+	trustAnswer := e.raise(trust)
+	waitFor(t, "the six-class trust dialog pushed to the owner", func() bool { return e.pushesOf(trust.ID) == 1 })
+	if e.lastShown(trust.ID).Delegating {
+		t.Fatal("a six-class folder trust dialog went to a supervisor")
 	}
 
 	ix := commandScreen("scr_mac_worker-1_r1", "worker-1")
@@ -66,13 +87,20 @@ func TestSupervisedCommandScreenStaysWithItsSupervisor(t *testing.T) {
 	if n := e.pushesOf(ix.ID); n != 0 {
 		t.Fatalf("the supervised dialog rang the owner %d times", n)
 	}
-	if n := e.pushesOf(plain.ID); n != 1 {
-		t.Fatalf("the unsupervised dialog rang %d times", n)
+	if n := e.pushesOf(plain.ID); n != 0 {
+		t.Fatalf("the unsupervised non-owner dialog rang %d times", n)
+	}
+	if n := e.pushesOf(trust.ID); n != 1 {
+		t.Fatalf("the six-class trust dialog rang %d times, want 1", n)
 	}
 	if err := e.s.resolve(plain.ID, proto.Resolution{Option: "2"}); err != nil {
 		t.Fatal(err)
 	}
 	answerOf(t, plainAnswer)
+	if err := e.s.resolve(trust.ID, proto.Resolution{Option: "2"}); err != nil {
+		t.Fatal(err)
+	}
+	answerOf(t, trustAnswer)
 }
 
 // allow picks a supervised dialog's Yes or No; a dialog that is the user's (a deletion Claude Code cannot rule out, a

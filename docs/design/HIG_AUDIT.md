@@ -711,13 +711,13 @@ Each block lists: Severity, Platform, Location, Violates, Problem, Evidence, Fix
 - **Evidence**: `static let surface = Color.clear`.
 - **Fix**: a system background for system families and clear only for accessory families; check light, dark, tinted and clear.
 
-#### HIG-078 Retired PersonaLink menu mixed hard-coded Chinese with localized strings
-- **Severity**: P2 (historical). **Platform**: retired macOS menu bar UI, removed in #6770.
-- **Location**: the retired Mac menu bar UI, retained in git history rather than as a current repository path.
+#### HIG-078 PersonaLink menu mixed hard-coded Chinese with localized strings (fixed)
+- **Severity**: P2 (fixed). **Platform**: macOS menu bar App (Persona Link).
+- **Location**: `apple/PersonaLink/App/Sources/PersonaLink/MenuView.swift`, `apple/PersonaLink/App/Sources/PersonaLink/Resources/Localizable.xcstrings`.
 - **Violates**: [Layout](https://developer.apple.com/design/human-interface-guidelines/layout): test localizations; [Writing][writing]: one consistent voice.
-- **Problem**: row titles used plain strings, bypassing the retired package's catalog. The desktop setup now uses its three-language resources, and the connector uses terminal localization.
-- **Evidence**: `MenuRow(title: <hard-coded Chinese>, ...)` versus `MenuRow(title: linkText("Set Web Address…"), ...)`.
-- **Resolution**: the menu bar UI and its separate catalog are removed, not carried into Electron.
+- **Problem**: the menu bar App removed in #6770 had row titles in plain strings, bypassing its catalog.
+- **Evidence**: then `MenuRow(title: <hard-coded Chinese>, ...)` next to `MenuRow(title: linkText(...), ...)`.
+- **Resolution**: the restored App (`apple/PersonaLink/App`) takes every title from its catalog through `linkText`, in en, zh-Hans and ja; `scripts/i18n/apple_l10n.py`'s `link_problems` fails a `linkText` key missing from the catalog and any hard-coded Chinese or Japanese literal in its sources.
 
 #### HIG-079 Live Activity secondary text is regular weight
 - **Severity**: P2. **Platform**: Live Activity.
@@ -727,13 +727,13 @@ Each block lists: Severity, Platform, Location, Violates, Problem, Evidence, Fix
 - **Evidence**: `Text(FleetText.line(item)).font(.caption).foregroundStyle(secondary).lineLimit(1)`.
 - **Fix**: a shared medium-weight caption style, starting with the needs-you request line; use one secondary opacity.
 
-#### HIG-080 Retired PersonaLink menu rows highlighted only on hover
-- **Severity**: P2 (historical). **Platform**: retired macOS menu bar UI, removed in #6770.
-- **Location**: the retired Mac menu bar UI, retained in git history rather than as a current repository path.
+#### HIG-080 PersonaLink menu rows highlighted only on hover (fixed)
+- **Severity**: P2 (fixed). **Platform**: macOS menu bar App (Persona Link).
+- **Location**: `apple/PersonaLink/App/Sources/PersonaLink/MenuView.swift` (`MenuItem`, `MenuItemStyle`).
 - **Violates**: [Buttons][btn]: always include a press state for a custom button; [Accessibility][a11y]: support Full Keyboard Access.
-- **Problem**: rows were plain buttons whose accent fill came only from hover; keyboard focus had no highlight.
-- **Evidence**: `Button(action: action) { content(hover && !disabled) }.buttonStyle(.plain).onHover { hover = $0 }`.
-- **Resolution**: the custom menu bar interaction is removed; Link controls live in the Electron setup window and its keyboard/accessibility behavior.
+- **Problem**: in the menu bar App removed in #6770, rows were plain buttons whose accent fill came only from hover; keyboard focus had no highlight.
+- **Evidence**: then `Button(action: action) { content(hover && !disabled) }.buttonStyle(.plain).onHover { hover = $0 }`.
+- **Resolution**: the restored App's rows use `MenuItemStyle`: the accent under the pointer or with keyboard focus (`.focused`, the system focus ring replaced by the same highlight), and darker while pressed.
 
 #### HIG-081 Mac Link panel header buttons rely on tooltips
 - **Severity**: P2. **Platform**: macOS.

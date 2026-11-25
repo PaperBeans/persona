@@ -5,9 +5,11 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { registerModule, resetModulesForTest } from "../../core/module-host";
 import { t } from "../../i18n";
 import { allTypes } from "../../lib/configuration/fixtures/shared";
 import type { ConfigurationUpdate } from "../../lib/configuration/contract";
+import { chooseManager, MANAGER_HEADER } from "../../lib/manager-choice";
 import { LabsDialog, LabsSettings, type LabsModule } from "./Labs";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -46,6 +48,19 @@ const click = async (el: HTMLElement) => {
 };
 
 describe("Settings › Labs", () => {
+  it("keeps shipped module switches out of Labs and its dialog", async () => {
+    registerModule({ id: "garden", title: () => "Garden", description: () => "A synthetic module", load: async () => ({}) });
+    try {
+      await render();
+      expect(host.querySelector('[data-configuration="features"]')).toBeNull();
+      await act(async () => root.render(<LabsDialog open onClose={() => {}} />));
+      expect(document.querySelector('[data-labs-dialog] [data-configuration="terminal"]')).not.toBeNull();
+      expect(document.querySelector('[data-labs-dialog] [data-configuration="features"]')).toBeNull();
+    } finally {
+      resetModulesForTest();
+    }
+  });
+
   it("explains Labs and that each item states its own scope, and shows the terminal renderer under Agents", async () => {
     await render();
     expect(host.textContent).toContain(t("settings-labs.intro"));
@@ -130,6 +145,119 @@ describe("Settings › Labs", () => {
     await settle();
     expect(chosen()).toBe(t("settings-labs.terminal_renderer_webgl"));
   });
+
+  it("mounts the assistant-scoped New To-dos & Tasks toggle for the chosen manager", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/api/v1/assistant")) {
+        if (init?.method === "PUT") {
+          const body = JSON.parse(String(init.body ?? "{}")) as { todos_v2?: boolean };
+          return new Response(JSON.stringify({ manager: "example", work_guide: false, todos_v2: body.todos_v2 === true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ manager: "example", work_guide: false, todos_v2: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("{}", { status: 404 });
+    });
+    chooseManager("example");
+    try {
+      await render();
+      const todosForm = host.querySelector<HTMLElement>('[data-configuration="assistant-todos-v2"]');
+      expect(todosForm).not.toBeNull();
+      const row = todosForm!.querySelector<HTMLElement>('[data-configuration-field="todos_v2"]')!;
+      expect(row.textContent).toContain(t("settings-labs.todos_v2_title"));
+      expect(row.textContent).toContain(t("settings-labs.todos_v2_hint"));
+      expect([...row.querySelectorAll("dt")].map((d) => d.textContent)).toEqual([
+        t("settings-labs.scope"),
+        t("settings-labs.activation"),
+        t("settings-labs.rollback"),
+      ]);
+      const toggle = row.querySelector<HTMLButtonElement>('[role="switch"]')!;
+      expect(toggle.getAttribute("aria-checked")).toBe("false");
+      await click(toggle);
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
+      const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+      expect(putCall).toBeDefined();
+      expect(new Headers(putCall?.[1]?.headers).get(MANAGER_HEADER)).toBe("example");
+      expect(JSON.parse(String(putCall?.[1]?.body))).toEqual({ todos_v2: true, expected_todos_v2: false });
+    } finally {
+      act(() => chooseManager(null));
+    }
+  });
+
+  it("mounts the assistant-scoped Unified Integrations & Extensions toggle for the chosen manager", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/api/v1/assistant")) {
+        if (init?.method === "PUT") {
+          const body = JSON.parse(String(init.body ?? "{}")) as { integrations_v2?: boolean };
+          return new Response(JSON.stringify({ manager: "example", work_guide: false, todos_v2: false, integrations_v2: body.integrations_v2 === true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ manager: "example", work_guide: false, todos_v2: false, integrations_v2: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("{}", { status: 404 });
+    });
+    chooseManager("example");
+    try {
+      await render();
+      const integrationsForm = host.querySelector<HTMLElement>('[data-configuration="assistant-integrations-v2"]');
+      expect(integrationsForm).not.toBeNull();
+      const row = integrationsForm!.querySelector<HTMLElement>('[data-configuration-field="integrations_v2"]')!;
+      expect(row.textContent).toContain(t("settings-labs.integrations_v2_title"));
+      expect(row.textContent).toContain(t("settings-labs.integrations_v2_hint"));
+      expect([...row.querySelectorAll("dt")].map((d) => d.textContent)).toEqual([
+        t("settings-labs.scope"),
+        t("settings-labs.activation"),
+        t("settings-labs.rollback"),
+      ]);
+      const toggle = row.querySelector<HTMLButtonElement>('[role="switch"]')!;
+      expect(toggle.getAttribute("aria-checked")).toBe("false");
+      await click(toggle);
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
+      const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+      expect(putCall).toBeDefined();
+      expect(new Headers(putCall?.[1]?.headers).get(MANAGER_HEADER)).toBe("example");
+      expect(JSON.parse(String(putCall?.[1]?.body))).toEqual({ integrations_v2: true, expected_integrations_v2: false });
+    } finally {
+      act(() => chooseManager(null));
+    }
+  });
+
+  it("renders Unified Integrations & Extensions as read-only when an older hub omits integrations_v2", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/api/v1/assistant")) {
+        return new Response(JSON.stringify({ manager: "example", work_guide: false, todos_v2: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("{}", { status: 404 });
+    });
+    chooseManager("example");
+    try {
+      await render();
+      const integrationsForm = host.querySelector<HTMLElement>('[data-configuration="assistant-integrations-v2"]');
+      expect(integrationsForm).not.toBeNull();
+      const row = integrationsForm!.querySelector<HTMLElement>('[data-configuration-field="integrations_v2"]')!;
+      expect(row.textContent).toContain(t("settings-labs.integrations_v2_unsupported"));
+      const toggle = row.querySelector<HTMLButtonElement>('[role="switch"]')!;
+      expect(toggle.disabled).toBe(true);
+    } finally {
+      act(() => chooseManager(null));
+    }
+  });
 });
 
 describe.each(["settings", "feature dialog"])("experiment guidance from %s", (entry) => {
@@ -178,35 +306,5 @@ describe.each(["settings", "feature dialog"])("experiment guidance from %s", (en
     expect(dialog()).toBeUndefined();
     expect(update).toHaveBeenCalledTimes(2);
     expect(row.querySelector("[aria-live]")?.textContent).toBe(t("settings-configuration.saved"));
-  });
-});
-
-describe("Settings › Labs › Features (#13434)", () => {
-  it("switches a feature module off and on in this browser, through the generic form", async () => {
-    const { registerModule, resetModulesForTest, enabledNavItems } = await import("../../core/module-host");
-    const { forgetModuleSwitches } = await import("../../core/module-switch");
-    const { modulesLabsSource } = await import("../../core/module-labs");
-    forgetModuleSwitches();
-    resetModulesForTest();
-    registerModule({ id: "garden", title: () => "Garden", description: () => "A synthetic module", navItems: [{ key: "garden", path: "/garden", icon: "heart", label: () => "Garden", after: "inbox" }], load: async () => ({}) });
-    try {
-      act(() => root.render(<LabsSettings modules={[{ source: modulesLabsSource()! }]} />));
-      await settle();
-      const row = host.querySelector<HTMLElement>('[data-configuration-field="garden"]')!;
-      expect(row.textContent).toContain("Garden");
-      expect(row.textContent).toContain("A synthetic module");
-      const toggle = row.querySelector<HTMLButtonElement>('[role="switch"]')!;
-      expect(toggle.getAttribute("aria-checked")).toBe("true");
-      expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
-      await click(toggle);
-      expect(localStorage.getItem("persona.modules.off")).toBe('["garden"]');
-      expect(enabledNavItems()).toEqual([]);
-      await click(host.querySelector<HTMLButtonElement>('[data-configuration-field="garden"] [role="switch"]')!);
-      expect(localStorage.getItem("persona.modules.off")).toBeNull();
-      expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
-    } finally {
-      resetModulesForTest();
-      forgetModuleSwitches();
-    }
   });
 });

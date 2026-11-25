@@ -1,0 +1,12 @@
+{
+  "sections": [
+    {
+      "items": [
+        {
+          "type": "map",
+          "markers": [{"id": "p1", "lat": 39.9, "lon": 116.3, "label": "Home"}]
+        }
+      ]
+    }
+  ]
+}

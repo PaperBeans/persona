@@ -315,8 +315,8 @@ func (s *Service) backgroundStranded(ctx context.Context) {
 	b.dedupMu.Lock()
 	defer b.dedupMu.Unlock()
 	lost := s.backgroundLost(ctx, id, cfg.Main, s.webBase(ctx))
-	if len(lost) == 0 {
-		return
+	if len(lost) == 0 || !s.autoSupervisionOn(ctx) {
+		return // with automatic supervision messages off what was lost is not told again
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()

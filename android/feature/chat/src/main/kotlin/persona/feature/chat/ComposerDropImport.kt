@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
+import persona.core.contracts.ImageLimits
 import persona.core.contracts.api.DraftUploadState
 import java.io.File
 import java.io.IOException
@@ -17,11 +18,17 @@ internal data class ComposerDropImportResult(
 )
 
 /**
- * Copy one dropped URI to an app-owned file while its transient grant is held. The returned attachment then follows the
- * exact picker path: [selectAttachment], the existing JPEG / video handling and ChatComposer's upload LaunchedEffect.
+ * Copy one dropped URI to an app-owned file while its transient grant is held. Pictures follow [limits] (spilling into
+ * file attachments when [canSpill] and file slots remain); videos keep their own cap of [MAX_COMPOSER_VIDEOS].
  * Call on an IO dispatcher.
  */
-internal fun importDroppedAttachment(context: Context, source: Uri, mediaCount: Int): ComposerDropImportResult {
+internal fun importDroppedAttachment(
+    context: Context,
+    source: Uri,
+    existing: List<ComposerAttachment> = emptyList(),
+    limits: ImageLimits = ImageLimits.Standard,
+    canSpill: Boolean = true,
+): ComposerDropImportResult {
     if (source.scheme != "content" && source.scheme != "file") return rejected(context)
     val mime = runCatching { context.contentResolver.getType(source) }.getOrNull()?.lowercase(Locale.ROOT)
     val directory = mime == DocumentsContract.Document.MIME_TYPE_DIR ||
@@ -29,8 +36,14 @@ internal fun importDroppedAttachment(context: Context, source: Uri, mediaCount: 
     if (directory) return rejected(context)
     val image = mime?.startsWith("image/") == true
     val video = mime?.startsWith("video/") == true
-    if ((image || video) && mediaCount >= MAX_COMPOSER_MEDIA) {
-        return ComposerDropImportResult(notice = context.getString(R.string.chat_composer_photo_limit))
+    if (video && composerVideoRoom(existing) == 0) {
+        return ComposerDropImportResult(notice = context.getString(R.string.chat_composer_video_limit, MAX_COMPOSER_VIDEOS))
+    }
+    if (image && !composerCanAddPhoto(existing, limits, canSpill = canSpill)) {
+        return ComposerDropImportResult(notice = context.getString(R.string.chat_composer_photo_limit, limits.perMessage))
+    }
+    if (!image && !video && composerFileRoom(existing) == 0) {
+        return ComposerDropImportResult(notice = context.getString(R.string.chat_composer_file_limit))
     }
     val name = runCatching { attachmentName(context, source) }
         .getOrDefault(context.getString(R.string.chat_attach_default_name))
@@ -47,6 +60,17 @@ internal fun importDroppedAttachment(context: Context, source: Uri, mediaCount: 
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.chat.files", file)
         val selected = selectAttachment(context, uri, image = image, video = video)
         val attachment = selected.copy(name = name, size = size)
+        if (image && attachment.uploadState != DraftUploadState.Invalid) {
+            val resolvedExisting = refreshHeldPhotoSizesBlocking(context, existing, limits)
+            val scaled = measurePhotoBytes(context, uri, limits)
+            val plan = planComposerPhotos(resolvedExisting, listOf(PhotoCandidate(attachment, scaled)), limits, canSpill = canSpill)
+            val admitted = plan.added.singleOrNull()
+            if (admitted == null) {
+                return ComposerDropImportResult(notice = plan.notices(context.resources, limits).firstOrNull())
+            }
+            owned = null
+            return ComposerDropImportResult(admitted, plan.notices(context.resources, limits).firstOrNull())
+        }
         owned = null // the draft owns it now; leftDrops/deleteDrop clean it after removal or send
         return ComposerDropImportResult(attachment, attachment.error)
     } catch (error: DropTooLarge) {

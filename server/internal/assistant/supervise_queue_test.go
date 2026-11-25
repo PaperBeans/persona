@@ -123,6 +123,12 @@ func (unreadableDigestTasks) ListTodos(context.Context) ([]db.TodoRow, error) {
 	return nil, errors.New("synthetic unavailable tasks")
 }
 
+// Setting fails too: the settings in effect are the last good ones (settingsLastGood), as with any unreadable store. The
+// drain reads them for the switch for automatic supervision messages.
+func (unreadableDigestTasks) Setting(context.Context, string, any) (bool, error) {
+	return false, errors.New("synthetic unavailable settings")
+}
+
 func TestQueuedDigestKeepsUnreadableTasks(t *testing.T) {
 	s, f, _ := queuedDigestFixture(t, "Recoverable example")
 	oldStore := s.store

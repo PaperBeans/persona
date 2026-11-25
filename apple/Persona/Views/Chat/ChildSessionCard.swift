@@ -154,7 +154,8 @@ struct ChildSessionCard: View {
     }
 
     private var title: String {
-        let name = session?.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let preferTab = session.map { model.prefersHerdrTabName(for: $0) } ?? false
+        let name = session?.displayTitle(preferTab: preferTab).trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return name.isEmpty ? String(localized: "Subagent task [Child Session]") : name
     }
 

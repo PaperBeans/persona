@@ -348,7 +348,7 @@ private struct ExtensionSceneCanvas: View {
                 let pins = scene.pins ?? []
                 let labels = scene.labels ?? []
                 let scale = Theme.sizeScale(typeSize)
-                let placements = Self.placePins(pins, projection: projection, scale: scale)
+                let placements = ExtensionScenePinLayout.place(pins, projection: projection, scale: scale)
 
                 ZStack(alignment: .topLeading) {
                     ExtensionSceneKitHost(
@@ -479,18 +479,23 @@ private struct ExtensionSceneCanvas: View {
             withAnimation(Theme.Motion.state) { updates() }
         }
     }
+}
 
-    private struct PinPlacement {
+/// Where each device pin's pill goes (#14335, #14356). A pin with an icon is drawn as its dot and icon only, the same
+/// size whatever its words, so turning or zooming never swaps a pill between long and short (its name and state are in
+/// VoiceOver, the long-press menu and the Large Content Viewer). A pin without an icon shows its name and state; front
+/// to back, one that would overlap a nearer pill collapses to a compact pill without losing its single-tap action.
+/// A pill whose spot is on screen stays inside the viewport.
+enum ExtensionScenePinLayout {
+    struct Placement: Equatable {
         var point: CGPoint
         var depth: Double
         var collapsed: Bool
         var rect: CGRect
     }
 
-    /// Front-to-back screen-space collision pass: frontmost pins keep their full label+state pill, while tightly
-    /// overlapping pins behind them collapse to a compact icon+dot pill without losing their single-tap action.
-    private static func placePins(_ pins: [ExtensionScenePin], projection: ExtensionSceneProjection,
-                                  scale: CGFloat) -> [String: PinPlacement] {
+    static func place(_ pins: [ExtensionScenePin], projection: ExtensionSceneProjection,
+                      scale: CGFloat) -> [String: Placement] {
         var raw: [(pin: ExtensionScenePin, point: CGPoint, depth: Double)] = []
         raw.reserveCapacity(pins.count)
         for pin in pins where pin.at.count >= 2 {
@@ -500,33 +505,39 @@ private struct ExtensionSceneCanvas: View {
         let frontToBack = raw.sorted { $0.depth < $1.depth }
         var occupied: [CGRect] = []
         occupied.reserveCapacity(frontToBack.count)
-        var out: [String: PinPlacement] = [:]
+        var out: [String: Placement] = [:]
         out.reserveCapacity(frontToBack.count)
 
         let pillHeight = Theme.Size.scenePinHeight * scale
+        func pill(_ item: (pin: ExtensionScenePin, point: CGPoint, depth: Double), width: CGFloat) -> CGRect {
+            projection.keptInside(CGRect(x: item.point.x - width * 0.5, y: item.point.y - pillHeight * 0.5,
+                                         width: width, height: pillHeight), anchor: item.point)
+        }
         for item in frontToBack {
             let hasIcon = item.pin.icon?.isEmpty == false
-            let hasState = item.pin.state?.isEmpty == false
             let compactWidth = (hasIcon ? Theme.Size.scenePinCompactWidth : Theme.Size.scenePinBaseWidth) * scale
-            let textPts = estimatedTextWidth(item.pin.label) + estimatedTextWidth(item.pin.state ?? "")
-            let iconPts = hasIcon ? Theme.Size.scenePinIconWidth : 0
-            let stateGapPts = hasState ? Theme.Size.scenePinStateGap : 0
-            let fullWidth = (Theme.Size.scenePinBaseWidth + iconPts + stateGapPts + min(textPts, Theme.Size.scenePinTextMaxWidth)) * scale
-            let candidate = projection.keptInside(CGRect(x: item.point.x - fullWidth * 0.5, y: item.point.y - pillHeight * 0.5,
-                                                         width: fullWidth, height: pillHeight), anchor: item.point)
-            let collides = occupied.contains { $0.intersects(candidate) }
-            let chosenRect = collides
-                ? projection.keptInside(CGRect(x: item.point.x - compactWidth * 0.5, y: item.point.y - pillHeight * 0.5,
-                                               width: compactWidth, height: pillHeight), anchor: item.point)
-                : candidate
+            let collapsed: Bool
+            let chosenRect: CGRect
+            if hasIcon {
+                collapsed = true
+                chosenRect = pill(item, width: compactWidth)
+            } else {
+                let hasState = item.pin.state?.isEmpty == false
+                let textPts = estimatedTextWidth(item.pin.label) + estimatedTextWidth(item.pin.state ?? "")
+                let stateGapPts = hasState ? Theme.Size.scenePinStateGap : 0
+                let fullWidth = (Theme.Size.scenePinBaseWidth + stateGapPts + min(textPts, Theme.Size.scenePinTextMaxWidth)) * scale
+                let candidate = pill(item, width: fullWidth)
+                collapsed = occupied.contains { $0.intersects(candidate) }
+                chosenRect = collapsed ? pill(item, width: compactWidth) : candidate
+            }
             occupied.append(chosenRect)
-            out[item.pin.id] = PinPlacement(point: CGPoint(x: chosenRect.midX, y: chosenRect.midY), depth: item.depth,
-                                            collapsed: collides, rect: chosenRect)
+            out[item.pin.id] = Placement(point: CGPoint(x: chosenRect.midX, y: chosenRect.midY), depth: item.depth,
+                                         collapsed: collapsed, rect: chosenRect)
         }
         return out
     }
 
-    fileprivate static func estimatedTextWidth(_ text: String) -> CGFloat {
+    static func estimatedTextWidth(_ text: String) -> CGFloat {
         var total: CGFloat = 0
         for scalar in text.unicodeScalars {
             total += scalar.value >= 0x2E80 ? Theme.Size.scenePinWideCharWidth : Theme.Size.scenePinCharWidth
@@ -593,7 +604,7 @@ struct ExtensionSceneLabelsLayer: View {
         let height = Theme.Size.sceneLabelHeight * scale
         for label in labels where !label.text.isEmpty && label.at.count >= 2 {
             let projected = projection.project(planX: label.at[0], planY: label.at[1], height: label.height ?? 0.02)
-            let width = (ExtensionSceneCanvas.estimatedTextWidth(label.text) + 2 * Theme.Space.s) * scale
+            let width = (ExtensionScenePinLayout.estimatedTextWidth(label.text) + 2 * Theme.Space.s) * scale
             let rect = { (point: CGPoint) in
                 CGRect(x: point.x - width * 0.5, y: point.y - height * 0.5, width: width, height: height)
             }

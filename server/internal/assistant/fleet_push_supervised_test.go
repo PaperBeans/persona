@@ -236,6 +236,7 @@ func TestSupervisedAgentFinishIsNotPushed(t *testing.T) {
 // An Agent nobody supervises (on no to-do, or on a to-do the user made, which has no ledger) is pushed and gets its
 // Lark card as before, and the card that lands is logged with its kind, computer and session.
 func TestUnsupervisedAgentFinishStillPushed(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, tc := range []struct {
 		name  string
 		setup func(e *supervisedEnv)
@@ -261,6 +262,7 @@ func TestUnsupervisedAgentFinishStillPushed(t *testing.T) {
 // A cancelled task stays closed when its Agent works again, so the Agent's next turn, started after the close, is its
 // own again and is pushed.
 func TestSupervisedTaskClosedWhileThePushWaits(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, accepted := range []bool{true, false} {
 		t.Run(fmt.Sprintf("accepted=%v", accepted), func(t *testing.T) {
 			e := newSupervisedEnv(t, true)
@@ -296,6 +298,7 @@ func TestSupervisedTaskClosedWhileThePushWaits(t *testing.T) {
 // notify_user's Lark copy is not a finished turn's: the supervisor's notice reaches the phone and Lark as before while
 // its task's Agent finishes unpushed, and the copy that lands is logged as a push of that conversation.
 func TestSupervisorNotifyUserStillCopiedToLark(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newSupervisedEnv(t, true)
 	e.task("conv1", "conv1")
 	e.holdDone()

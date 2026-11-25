@@ -217,11 +217,13 @@ func (s *Service) nodeRequest(ctx context.Context, machine, method string, param
 		var p struct {
 			Assistant  bool   `json:"assistant"`
 			SessionID  string `json:"session_id"`
+			CallerCwd  string `json:"caller_cwd"`
 			Guest      bool   `json:"guest"` // the node's word that it is a guest conversation (guest.go)
 			Revision   string `json:"revision"`
 			LeaderOnly bool   `json:"leader_only"`
 		}
 		_ = json.Unmarshal(params, &p)
+		ctx = withNodeCallerCwd(ctx, machine, p.SessionID, p.CallerCwd)
 		if p.LeaderOnly {
 			return map[string]any{"tools": s.runtimeLeaderTools(ctx, machine, p.SessionID, p.Guest)}, true, nil
 		}
@@ -239,6 +241,7 @@ func (s *Service) nodeRequest(ctx context.Context, machine, method string, param
 			Name             string                 `json:"name"`
 			Args             json.RawMessage        `json:"args"`
 			SessionID        string                 `json:"session_id"`
+			CallerCwd        string                 `json:"caller_cwd"`
 			Origin           string                 `json:"origin"` // the node's attested origin, including during assistant startup
 			Assistant        bool                   `json:"assistant"`
 			Guest            bool                   `json:"guest"`
@@ -249,6 +252,7 @@ func (s *Service) nodeRequest(ctx context.Context, machine, method string, param
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, true, err
 		}
+		ctx = withNodeCallerCwd(ctx, machine, p.SessionID, p.CallerCwd)
 		ctx = devicewire.WithSourcePermission(ctx, proto.SourcePermission{})
 		if p.SourcePermission.Matches(p.SessionID, p.Name, p.Args) {
 			ctx = devicewire.WithSourcePermission(ctx, p.SourcePermission)
@@ -298,8 +302,12 @@ func (s *Service) FleetEvent(ctx context.Context, name string, params json.RawMe
 		var c assistantwire.Clients
 		if json.Unmarshal(params, &c) == nil {
 			s.fleet.mu.Lock()
+			wasOnline := s.fleet.clients.AppOnline
 			s.fleet.clients = c
 			s.fleet.mu.Unlock()
+			if c.AppOnline && !wasOnline {
+				go s.ownerAppeared(context.WithoutCancel(ctx), "app_online", "")
+			}
 		}
 	case assistantwire.EventMutes:
 		var p assistantwire.FleetMutes
@@ -317,6 +325,11 @@ func (s *Service) FleetEvent(ctx context.Context, name string, params json.RawMe
 			if m, ok := s.fleetMachine(p.MachineID); ok {
 				s.markSeen(ctx, m.ID, p.SessionID)
 			}
+		}
+	case assistantwire.EventInteractionSeen:
+		var p assistantwire.FleetInteractionSeen
+		if json.Unmarshal(params, &p) == nil && p.InteractionID != "" {
+			s.markInteractionSeen(ctx, p.InteractionID)
 		}
 	default:
 		return false

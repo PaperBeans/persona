@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/db"
@@ -80,6 +81,7 @@ func TestLogicalAdoptedConversationRowIsReadFromTheFleet(t *testing.T) {
 func TestLogicalPreparationCarriesTheSupervisorPolicy(t *testing.T) {
 	s, f, d, _ := logicalPair(t, "codex")
 	ctx := t.Context()
+	f.setSessions("server", proto.Session{SessionID: "side-chat", Assistant: true, Agent: "claude", Title: "Project notes", Rev: 100})
 	setSettings(t, s, func(cfg *Settings) { cfg.Leaders = append(cfg.Leaders, "side-chat") })
 	if err := d.ResolveConversationSwitch(ctx, "server", "side-chat", "operation", "rejected", ""); err != nil {
 		t.Fatal(err)
@@ -111,9 +113,57 @@ func TestLogicalPreparationCarriesTheSupervisorPolicy(t *testing.T) {
 	if prepared["supervision_instructions"] != want {
 		t.Fatalf("preparation policy: %v", prepared["supervision_instructions"])
 	}
+	if prepared["title"] != "Project notes" {
+		t.Fatalf("preparation title: %v", prepared["title"])
+	}
 	for _, key := range []string{"text", "prompt", "images", "client_msg_id"} {
 		if _, ok := prepared[key]; ok {
 			t.Fatalf("preparation carried input %q", key)
 		}
+	}
+}
+
+func TestLogicalHandoffIncludesToolOutcomesAndPreviousExecution(t *testing.T) {
+	items := []proto.Item{
+		{ID: "1", Seq: 1, Role: "user", Kind: proto.KindText, Text: "Create a test to-do"},
+		{ID: "2", Seq: 2, Role: "assistant", Kind: proto.KindToolUse, ToolName: "todo_create", ToolInput: json.RawMessage(`{"title":"Switch check"}`)},
+		{ID: "3", Seq: 3, Role: "user", Kind: proto.KindToolResult, ToolName: "todo_create", Text: `{"id":"todo_1234","status":"open"}`},
+		{ID: "4", Seq: 4, Role: "assistant", Kind: proto.KindText, Text: "Created todo_1234.", Model: "model-alpha"},
+	}
+
+	var roles []string
+	var texts []string
+	for _, item := range items {
+		turn, ok, partial := logicalHandoffTurn(item)
+		if !ok || partial {
+			t.Fatalf("unexpected handoff turn for %+v: ok=%v partial=%v", item, ok, partial)
+		}
+		roles = append(roles, turn.Role)
+		texts = append(texts, turn.Text)
+	}
+	if strings.Join(roles, ",") != "user,tool_use,tool_result,assistant" {
+		t.Fatalf("handoff turn roles = %v", roles)
+	}
+	if !strings.Contains(texts[1], "todo_create") || !strings.Contains(texts[2], "todo_1234") {
+		t.Fatalf("tool evidence missing from handoff turns: %v", texts)
+	}
+
+	c := &db.LogicalConversation{MachineID: "server", SessionID: "side-chat", Epoch: 1}
+	launcher, model := logicalHandoffExecution(proto.Session{MachineID: "server", SessionID: "side-chat", Launcher: "primary-launcher"}, c, items)
+	if launcher != "primary-launcher" || model != "model-alpha" {
+		t.Fatalf("execution = (%q, %q), want (primary-launcher, model-alpha)", launcher, model)
+	}
+
+	renderedZH := renderLogicalHandoff("zh-Hans", mainHandoff{FromLauncher: launcher, FromModel: model, Summary: "Created todo_1234."}, "Continue")
+	if !strings.Contains(renderedZH, "此前运行环境：启动器 primary-launcher，模型 model-alpha。") {
+		t.Fatalf("zh-Hans handoff missing previous execution: %s", renderedZH)
+	}
+	renderedEN := renderLogicalHandoff("en", mainHandoff{FromLauncher: launcher, FromModel: model, Summary: "Created todo_1234."}, "Continue")
+	if !strings.Contains(renderedEN, "Previous execution: launcher primary-launcher, model model-alpha.") {
+		t.Fatalf("en handoff missing previous execution: %s", renderedEN)
+	}
+	renderedJA := renderLogicalHandoff("ja", mainHandoff{FromLauncher: launcher, FromModel: model, Summary: "Created todo_1234."}, "Continue")
+	if !strings.Contains(renderedJA, "直前の実行環境：ランチャー primary-launcher、モデル model-alpha。") {
+		t.Fatalf("ja handoff missing previous execution: %s", renderedJA)
 	}
 }

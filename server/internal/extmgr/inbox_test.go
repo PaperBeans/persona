@@ -491,6 +491,10 @@ func TestInboxSourcesAnswerTheManager(t *testing.T) {
 	_ = h.addConnector(g)
 	h.cfg.Inbox.Rules = "  示例规则  "
 	h.cfg.Inbox.Agent = InboxAgentConfig{Enabled: true, Concurrency: 2}
+	h.cfg.Inbox.ReplyPolicy = &InboxReplyPolicyConfig{
+		Enabled: true, Revision: "rpc-v1", Sources: []string{"lark", "mail"}, RequireIndependentReview: true,
+		Categories: map[string]string{"ordinary_coordination": "owner_draft", "approval_permission": "owner_only", "unknown": "owner_only"},
+	}
 	h.cfg.Lark.Account = 3
 	app := func(app, method string, params any) (json.RawMessage, error) {
 		raw, _ := json.Marshal(params)
@@ -558,6 +562,27 @@ func TestInboxSourcesAnswerTheManager(t *testing.T) {
 	if err != nil || json.Unmarshal(out, &cfg) != nil || cfg.Rules != "示例规则" || !cfg.Agent.Enabled || cfg.Agent.Concurrency != 2 || cfg.LarkAccount != 3 ||
 		!slices.Contains(cfg.Extensions, "examplechat") {
 		t.Fatalf("the settings: %s %v", out, err)
+	}
+	policy := cfg.ReplyPolicy
+	if policy == nil || !policy.Enabled || policy.Revision != "rpc-v1" || !slices.Equal(policy.Sources, []string{"lark", "mail"}) ||
+		!policy.RequireIndependentReview || policy.Categories["ordinary_coordination"] != "owner_draft" ||
+		policy.Categories["approval_permission"] != "owner_only" || policy.Categories["unknown"] != "owner_only" {
+		t.Fatalf("compiled reply policy did not survive the real inbox.config RPC: %s", out)
+	}
+	h.cfg.Inbox.ReplyPolicy = &assistantwire.InboxReplyPolicyConfig{
+		Enabled: true, Revision: "rpc-v1", Sources: []string{"lark", "mail"}, UnknownMode: "owner_only", RequireIndependentReview: true,
+		Routes: map[string]string{"ordinary_coordination": "owner_draft", "approval_permission": "owner_only"},
+	}
+	cfg = assistantwire.InboxConfig{}
+	out, err = inbox(assistantwire.InboxConfigMethod, map[string]any{})
+	if err != nil || json.Unmarshal(out, &cfg) != nil {
+		t.Fatalf("read the legacy reply policy through inbox.config: %s %v", out, err)
+	}
+	policy = cfg.ReplyPolicy
+	if policy == nil || !policy.Enabled || policy.Revision != "rpc-v1" || !slices.Equal(policy.Sources, []string{"lark", "mail"}) ||
+		policy.UnknownMode != "owner_only" || !policy.RequireIndependentReview ||
+		policy.Routes["ordinary_coordination"] != "owner_draft" || policy.Routes["approval_permission"] != "owner_only" {
+		t.Fatalf("reply policy did not survive the real inbox.config RPC: %s", out)
 	}
 	// A mail's text for translation keeps the HTML's paragraphs and links.
 	if out, err := inbox(assistantwire.InboxMailBody, assistantwire.InboxMailRef{AccountID: "acc1", UID: 9, Mailbox: "INBOX", Readable: true}); err != nil ||

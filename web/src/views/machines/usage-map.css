@@ -1,0 +1,44 @@
+/* The disk usage map (#14576, views/machines/UsageTreemap.tsx, docs/server/machine-usage-map.md "The map"). Loaded with
+   the map's own chunk, not with styles.css: the first screen's budget (src/startup-preload.ts) has no room for a page
+   most people never open. The tokens are the map's semantic colors, light and dark, read only here and by the legend:
+   the same values as the Apple apps' Theme.UsageMap (docs/design/DESIGN_SYSTEM.md "Usage treemap"), with --ink on
+   every fill (names at least 5:1 on each in both themes; sizes are drawn at full opacity to keep 4.5:1). */
+:root {
+  --umap-apps: #a9c8f5; --umap-personal: #a6dbb3; --umap-appdata: #cdb9f2; --umap-cache: #f6c78f; --umap-system: #c5cad3; --umap-other: #dadadf; --umap-free: transparent;
+  --umap-age-none: var(--umap-other); --umap-age-recent: #e6eef7; --umap-age-months: #bfd5ee; --umap-age-half_year: #8db5e0; --umap-age-year: #5d93d0;
+  --umap-age-none-ink: var(--ink); --umap-age-recent-ink: var(--ink); --umap-age-months-ink: var(--ink); --umap-age-half_year-ink: var(--ink); --umap-age-year-ink: var(--ink);
+}
+.dark {
+  --umap-apps: #234b82; --umap-personal: #1f5c35; --umap-appdata: #4a3685; --umap-cache: #7a4411; --umap-system: #404753; --umap-other: #35353a;
+  --umap-age-none: var(--umap-other); --umap-age-recent: #262b32; --umap-age-months: #22405f; --umap-age-half_year: #1f5187; --umap-age-year: #1d62b0;
+  --umap-age-none-ink: var(--ink); --umap-age-recent-ink: var(--ink); --umap-age-months-ink: var(--ink); --umap-age-half_year-ink: var(--ink); --umap-age-year-ink: var(--ink);
+}
+.umap-box { --u: var(--umap-other); --u-ink: var(--ink); position: absolute; display: flex; flex-direction: column; align-items: flex-start; overflow: hidden; white-space: nowrap; box-sizing: border-box; padding: 4px 6px; border: 1px solid var(--surface); border-radius: 4px; background: var(--u); color: var(--u-ink); font-size: var(--text-label); line-height: 16px; text-align: left; cursor: default; }
+.umap-box[data-depth="1"] { border-radius: 8px; }
+.umap-box[data-inline] { flex-direction: row; gap: 6px; }
+.umap-box[data-big] { padding: 8px 10px; font-size: var(--text-meta); line-height: 18px; }
+.umap-box[data-frame] { flex-direction: row; gap: 6px; padding: 0 6px; background: color-mix(in srgb, var(--u) 22%, var(--surface)); color: var(--ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--u) 45%, var(--surface)); }
+.umap-box[data-frame] > span { height: 21px; line-height: 21px; }
+.umap-box[data-frame][data-depth="1"] .umap-name { font-size: var(--text-meta); }
+.umap-name { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.umap-size { flex: 0 0 auto; font-size: var(--text-submeta); font-variant-numeric: tabular-nums; }
+.umap-box[data-frame] .umap-size { color: var(--ink-3); opacity: 1; }
+.umap-box[data-zoom] { cursor: zoom-in; }
+.umap-box:hover { filter: brightness(1.08); }
+.umap-box[data-frame]:hover { filter: none; background: color-mix(in srgb, var(--u) 34%, var(--surface)); }
+.umap-box:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; box-shadow: inset 0 0 0 4px var(--surface); filter: none; }
+.umap-box[data-cat="free"] { --u: var(--umap-free); color: var(--ink-3); border: 1px dashed var(--line-strong); background-image: repeating-linear-gradient(135deg, transparent 0 6px, var(--line) 6px 7px); }
+.umap-box[data-cat="free"][data-gain] { border-color: var(--green); color: var(--green); }
+.umap-box[data-selected] { box-shadow: inset 0 0 0 2px var(--surface), inset 0 0 0 4px var(--accent); }
+.umap-box[data-ghost] { background-color: color-mix(in srgb, var(--u) 30%, var(--surface)); background-image: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--u) 55%, transparent) 5px 7px); color: var(--ink); }
+.umap-box[data-twin] { background: transparent; border: 1.5px dashed var(--accent); color: var(--accent-ink); }
+.umap-box[data-suggested]::after { content: ""; position: absolute; inset: 1px; border-radius: inherit; box-shadow: 0 0 0 2px var(--orange); pointer-events: none; }
+.umap-box[data-lit] { filter: brightness(1.12); box-shadow: inset 0 0 0 2px var(--accent); }
+.umap-box[data-busy] { background-image: repeating-linear-gradient(135deg, rgb(255 255 255 / 0.16) 0 10px, transparent 10px 20px); background-size: 28px 28px; animation: umap-busy 0.9s linear infinite; }
+.umap-badge { position: absolute; display: inline-flex; align-items: center; gap: 2px; height: 18px; padding: 0 5px; border-radius: 9999px; background: var(--surface); color: var(--accent-ink); font-size: var(--text-submeta); line-height: 18px; box-shadow: var(--shadow-btn); }
+.umap-zoom .umap-box { animation: umap-in 160ms ease-out both; }
+.umap-drop { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 10px; }
+@keyframes umap-in { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes umap-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes umap-busy { from { background-position: 0 0; } to { background-position: 28px 0; } }
+@media (prefers-reduced-motion: reduce) { .umap-zoom .umap-box { animation: umap-fade 160ms linear both; } .umap-box[data-busy] { animation: none; } }

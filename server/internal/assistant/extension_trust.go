@@ -158,6 +158,19 @@ func (s *Service) extensionHidesConversation(ctx context.Context, c proto.Sessio
 	return usage(info, sceneExtension, readerGrant(ctx)) == usageDeny
 }
 
+// extensionHidesEntryWith decides whether an extension with grant is hidden from ledger entry e, combining its source
+// track's floor and usage rules (base) with the entry's own categories (scene 6, #13548).
+func extensionHidesEntryWith(grant extensionGrant, base infoUse, e proto.AssistantEntry) bool {
+	cats, catsKnown := normalCategories(append(slices.Clone(base.Categories), e.Category...))
+	info := infoUse{
+		Categories:  cats,
+		Known:       base.Known && catsKnown,
+		SourceTrack: base.SourceTrack,
+		Rules:       base.Rules,
+	}
+	return usage(info, sceneExtension, grant) == usageDeny
+}
+
 // extensionReaderRequest is r with the reading extension's grant in its context, when an extension's token sent it
 // (the hub's headers: a client's own are dropped on the way).
 func (s *Service) extensionReaderRequest(r *http.Request) *http.Request {
@@ -256,10 +269,14 @@ func (s *Service) extensionTrustSet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) conversationCategoriesGet(w http.ResponseWriter, r *http.Request) {
-	if !userOnly(w, r) {
+	if !spacesWriter(w, r) {
 		return
 	}
 	id := r.PathValue("id")
+	if space, _ := s.conversationSpace(r.Context(), id); space != "" && r.Header.Get(RoleHeader) == roleExtension && s.extensionHides(r.Context(), space) {
+		apierr.Write(w, http.StatusNotFound, errors.New("conversation not found"))
+		return
+	}
 	if !validSessionID(id) {
 		apierr.Write(w, http.StatusBadRequest, errors.New("invalid conversation id"))
 		return
@@ -273,10 +290,14 @@ func (s *Service) conversationCategoriesGet(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Service) conversationCategoriesSet(w http.ResponseWriter, r *http.Request) {
-	if !userOnly(w, r) {
+	if !spacesWriter(w, r) {
 		return
 	}
 	id := r.PathValue("id")
+	if space, _ := s.conversationSpace(r.Context(), id); space != "" && r.Header.Get(RoleHeader) == roleExtension && s.extensionHides(r.Context(), space) {
+		apierr.Write(w, http.StatusNotFound, errors.New("conversation not found"))
+		return
+	}
 	if !validSessionID(id) {
 		apierr.Write(w, http.StatusBadRequest, errors.New("invalid conversation id"))
 		return

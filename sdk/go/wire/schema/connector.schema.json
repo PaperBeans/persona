@@ -332,7 +332,7 @@
       "type": "string",
       "enum": ["status", "tools", "actions", "events", "inbox", "settle", "archive", "chats", "items", "login",
                "options", "threads", "snapshot", "group", "meta", "fallback", "machines", "recall", "history",
-               "history_anchors", "catalog"]
+               "history_anchors", "catalog", "inbox_visibility"]
     },
     "ConnectorState": {
       "description": "ConnectorStatus.state. disabled is the hub's own (the user switched it off); a program never answers it.",
@@ -479,6 +479,7 @@
       "properties": {
         "text": {"type": "string"},
         "images": {"type": "array", "items": {"$ref": "#/$defs/ConnectorToolImage"}, "description": "tools.call only (actions.do and catalog.call ignore it): pictures for the model after the text, on a hub whose initialize lists the capability tool_images (an older hub ignores them; the text must stand on its own). At most 16, each a whole JPEG, PNG or WebP of at most 1 MiB and 2000 pixels a side, together at most 4 MiB and 8 million pixels; the hub leaves out any over a limit and says so after the text."},
+        "views": {"type": "array", "maxItems": 4, "items": {"$ref": "view.schema.json#/$defs/View"}, "description": "tools.call only (actions.do and catalog.call ignore it): declarative Views rendered out-of-band inline on the tool call item in chat (never added to the model's context), on a hub whose initialize lists the capability tool_views. At most 4 views and 128 KiB JSON total; the text must still stand on its own."},
         "message_ref": {"type": "string", "description": "actions.do only (tools.call ignores it): the id, on the other side, of the message the write made, when the service gave one (a comment's id, a mail's Message-ID, a chat message's id). The hub trims it and keeps it as the sent-as-user ledger row's message_ref; one longer than 200 characters is dropped (the row has none), not cut. Leave it out when there is none."}
       }
     },

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
-	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -106,14 +105,24 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		t.Schedule, t.ScheduleTitle, t.ScheduleBasis = "", "", ""
 		// Reroute is hub-owned: drop any reroute a model passes in task_plan args, so healthyPlace seeds it only from a
 		// real health detour and its first-detour guard keeps the true original machine (#2271).
-		t.Reroute = nil
+		t.Reroute, t.Placement = nil, nil
+		t.Dispatch = nil // the hub's: written by the start that resolves the tier
 		t.Title, t.Prompt, t.Cwd = strings.TrimSpace(t.Title), strings.TrimSpace(t.Prompt), strings.TrimSpace(t.Cwd)
 		t.Model = strings.TrimSpace(t.Model)
 		t.Speed = strings.TrimSpace(t.Speed)
 		t.Permission = strings.TrimSpace(t.Permission)
+		if t.Host = strings.TrimSpace(t.Host); checkStartHostName(t.Host) != nil {
+			return "", fmt.Errorf("task %d: %w", i+1, checkStartHostName(t.Host))
+		}
 		if t.OwnerStep = strings.TrimSpace(t.OwnerStep); !validOwnerStep(t.OwnerStep) {
 			return "", fmt.Errorf("task %d: owner_step must be empty, %q, %q or %q", i+1, ownerStepMoney, ownerStepOutward, ownerStepIrreversible)
 		}
+		aud, err := todoAudience(t.Audience)
+		if err != nil {
+			return "", fmt.Errorf("task %d: %w", i+1, err)
+		}
+		t.Audience = aud
+		t.DirectionID = strings.TrimSpace(t.DirectionID)
 		if err := t.checkRole(scope != nil); err != nil {
 			return "", fmt.Errorf("task %d: %w", i+1, err)
 		}
@@ -182,7 +191,9 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		if err := s.applyTaskTier(ctx, &preview); err != nil {
 			return "", fmt.Errorf("task %d: %w", i+1, err)
 		}
-		s.healthyPlace(ctx, &preview) // health follows the resolved launcher
+		if s.previewHealthPlacement(ctx, &preview) {
+			t.Placement = preview.Placement
+		}
 		t.Machine, t.Cwd, t.Why = preview.Machine, preview.Cwd, preview.Why
 		t.Reroute = preview.Reroute
 		// What it runs on the computer it lands on (#2640): a default that computer lacks is swapped now, so the card
@@ -370,12 +381,23 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 	step := planOwnerStep(p.Tasks)
 	needsOwner := policy.ConfirmOutbound || step != "" ||
 		slices.ContainsFunc(p.Tasks, func(task PlanTask) bool { return task.RequestGate != "" })
-	if needsOwner || (!orchestrates && !s.planStartsAtOnceUnder(ctx, p.Tasks, granted)) {
+	var autoStartReasons []string
+	if !needsOwner && !orchestrates {
+		autoStartReasons = s.planAutoStartReasons(ctx, p.Tasks, granted)
+	}
+	if needsOwner || (!orchestrates && autoStartReasons == nil) {
 		s.event(ctx, map[string]any{"type": "task_plan", "plan": s.planWithSpace(ctx, s.planWithSuggestion(ctx, p, s.lang(ctx)))})
+		var b strings.Builder
+		fmt.Fprintf(&b, "Plan %s needs the user's Start on its card; nothing has started through this call.\n", p.ID)
+		for _, t := range p.Tasks {
+			fmt.Fprintf(&b, "- %s: waiting for the user to tap Start\n", t.Title)
+		}
+		b.WriteString("After the user taps Start, check the task cards or context snapshot for the outcome.")
+		b.WriteString(dups)
+		b.WriteString(taskPlanEstimateNotes(p.Tasks))
 		if _, talking := s.ownersPresent(time.Now())[sessionID]; talking {
 			// The owner is talking in this very conversation: the card is in front of them, a push would only repeat it.
-			return fmt.Sprintf("Plan %s is on the user's screen as a card in this conversation; nothing has started. "+
-				"Don't wait for it: carry on. When they start it, the tasks show up in the context snapshot.", p.ID) + dups + taskPlanEstimateNotes(p.Tasks), nil
+			return b.String(), nil
 		}
 		// A card below the answer is easy to miss: push it as well.
 		titles := make([]string, 0, len(p.Tasks))
@@ -401,8 +423,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 			s.lreports.plansDue.Store(true)
 			s.directionsSoon() // a leader's plan waiting for Start is a decision for the owner (leader_reports.go)
 		}
-		return fmt.Sprintf("Plan %s is on the user's screen as a card and pushed to their phone; nothing has started. "+
-			"Don't wait for it: carry on. When they start it, the tasks show up in the context snapshot.", p.ID) + dups + taskPlanEstimateNotes(p.Tasks), nil
+		return b.String(), nil
 	}
 	started, err := s.startPlan(ctx, p.ID, nil, false)
 	if err != nil {
@@ -410,16 +431,21 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 	}
 	var b strings.Builder
 	supervisor := ""
-	fmt.Fprintf(&b, "Queued %d task(s) for dispatch without asking (released by you as their supervisor, read-only, asked for "+
-		"by the user, a kind the user trusts, or one the user lets this scheduled task start):\n", len(started.Tasks))
-	for _, t := range started.Tasks {
+	fmt.Fprintf(&b, "Queued %d task(s) for dispatch without asking (plan %s):\n", len(started.Tasks), started.ID)
+	for i, t := range started.Tasks {
+		reason := "delegated by the direction lead"
+		if orchestrates && !s.isLeader(ctx, sessionID) {
+			reason = "released by you as their supervisor"
+		} else if !orchestrates {
+			reason = autoStartReasons[i]
+		}
 		if t.Error != "" {
-			fmt.Fprintf(&b, "- %s on %s: dispatch failed: %s\n", t.Title, t.Machine, t.Error)
+			fmt.Fprintf(&b, "- %s: automatic dispatch failed (%s) on %s: %s\n", t.Title, reason, t.Machine, t.Error)
 		} else {
 			if t.Queue != nil && t.Queue.Key == workspaceQueueKey {
-				fmt.Fprintf(&b, "- %s → todo %s on %s (queued: %s)\n", t.Title, t.TodoID, t.Machine, t.Queue.Reason)
+				fmt.Fprintf(&b, "- %s: automatic start queued (%s) → todo %s on %s (queued: %s)\n", t.Title, reason, t.TodoID, t.Machine, t.Queue.Reason)
 			} else {
-				fmt.Fprintf(&b, "- %s → todo %s on %s (dispatching)\n", t.Title, t.TodoID, t.Machine)
+				fmt.Fprintf(&b, "- %s: automatic start initiated (%s) → todo %s on %s (dispatching)\n", t.Title, reason, t.TodoID, t.Machine)
 			}
 			if todo, ok := s.todoNow(t.TodoID); ok && todo.Supervision != nil {
 				supervisor = todo.Supervision.Supervisor
@@ -491,7 +517,7 @@ func applyPlanEdit(t *PlanTask, e PlanTask) {
 			t.MachinePolicy = machineFixed
 			// The user's explicit retarget supersedes a plan-time health detour: drop the stale reroute so the receipt
 			// names the machine the task will actually run on, not the old landing (#2271).
-			t.Reroute = nil
+			t.Reroute, t.Placement = nil, nil
 		}
 		t.Machine = s
 	}
@@ -558,12 +584,6 @@ func (t *PlanTask) checkRole(byLeader bool) error {
 	return nil
 }
 
-// planPushOver takes a plan card's push back once the card is decided anywhere (Start, Don't start, a withdrawal):
-// the hub withdraws the push it sent with the plan's id as its card (Notification.CardID) from the devices it went to,
-// as it does an answered interaction's (#4349), and the apps drop the card. A plan that was never pushed costs a no-op.
-func (s *Service) planPushOver(id string) {
-	if s.hub == nil {
-		return
-	}
-	s.hub.Tell(assistantwire.EventFleetResolved, assistantwire.FleetResolved{ID: id})
-}
+// planPushOver: a plan card is decided anywhere (Start, Don't start, a withdrawal). Its push carried the plan's id as
+// its card (Notification.CardID), so the card is over everywhere at once (resolveCard).
+func (s *Service) planPushOver(id string) { s.resolveCard(id) }

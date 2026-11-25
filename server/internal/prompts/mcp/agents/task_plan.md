@@ -4,7 +4,7 @@ Fixed machine_policy stays on that machine and refuses unavailable launchers; fl
 
 Started tasks keep a hub brief (owner request or started_why). Give goal, done_when, out_of_bounds: writable needs done_when (PR/Issue defaults to merged+closed unless PR/draft-only); read-only needs goal. Omit expect_minutes for auto estimate; positive overrides (manual Agents lack estimate_due). Use continues+continues_why to continue, task_retry for failed starts, task_scope+scope_revision for approved changes.
 
-Edits need readonly=false and authorized write permission; replace read-only Codex with writable for fixes, or use agent_send when permissions match. readonly=true adds the read-only constraint. Claude-family uses bypassPermissions for both; Codex uses plan unless assistant.readonly_mode=prompt; pi/cursor/agy refuse readonly. Set role=worker, or leader for direct workers via restricted task_plan/task_review (workers cannot delegate).
+Edits need readonly=false and authorized write permission; replace read-only Codex with writable for fixes, or use agent_send when permissions match. readonly=true adds the read-only constraint. Claude-family uses bypassPermissions for both; Codex, and agy on its companion, use plan unless assistant.readonly_mode=prompt; pi/cursor refuse readonly. Set role=worker, or leader for direct workers via restricted task_plan/task_review (workers cannot delegate).
 
 Resolve repository identity via repositories_list (repository_get only when useful). The user's explicit repository URL or path takes precedence. A saved binding is a reference, not authorization; never infer a machine or checkout path from it. Non-repository tasks need no lookup; retrieval is not a mandatory dispatch preflight. Closing the terminal on acceptance is the owner's choice; this tool cannot set it.
 
@@ -90,7 +90,11 @@ Workspace policy: "new" isolates a checkout; {"new":{"branch":"task/my-change"}}
           },
           "launcher": {
             "type": "string",
-            "description": "listed launcher (Claude Code, pi, cursor or agy in herdr); unknown names refused with choices; empty: default/fallback, claude first, why says which"
+            "description": "listed launcher; unknown names refused with choices; empty: default/fallback, claude first, why says which"
+          },
+          "host": {
+            "type": "string",
+            "description": "agy (Antigravity companion) or an enabled engine"
           },
           "model": {
             "type": "string",
@@ -118,7 +122,7 @@ Workspace policy: "new" isolates a checkout; {"new":{"branch":"task/my-change"}}
           },
           "readonly": {
             "type": "boolean",
-            "description": "true only for a task that must remain read-only; false for explicitly authorized file changes (a Codex read-only sandbox: see the description). The first message adds「本任务只读：不改项目文件、不提交、不对外写入」 only when true"
+            "description": "true only for a task that must remain read-only; false for explicitly authorized file changes (see the description). The first message adds「本任务只读：不改项目文件、不提交、不对外写入」 only when true"
           },
           "user_requested": {
             "type": "boolean",
@@ -171,20 +175,32 @@ Workspace policy: "new" isolates a checkout; {"new":{"branch":"task/my-change"}}
             "items": {
               "type": "string"
             },
-            "description": "abs paths of pictures/files user gave in this chat (Claude Code path or app attachment); copied to agent with updated mentions; others refused"
+            "description": "Abs paths of chat pictures/files (Claude/app); copied with updated mentions; others refused."
           },
           "expect_minutes": {
             "type": "integer",
             "minimum": 0,
-            "description": "Optional minutes override. Omit/0: comparable history, or the 60-minute system_default; positive: override. Review at 1×; stuck at 1.5× (min 20m); overdue at 3× (min 24h)."
+            "description": "Optional minutes override (omit/0: history or 60m default). Review 1×; stuck 1.5× (min 20m); overdue 3× (min 24h)."
           },
           "project": {
             "type": "string",
             "description": "Existing kb_list projects slug/name for a clear long-term area; no near-duplicates."
           },
+          "audience": {
+            "type": "string",
+            "enum": [
+              "human",
+              "autonomous"
+            ],
+            "description": "Optional: human or autonomous."
+          },
+          "direction_id": {
+            "type": "string",
+            "description": "Direction id."
+          },
           "part_of": {
             "type": "string",
-            "description": "Optional request todo this is a piece of."
+            "description": "Request todo this is a piece of."
           },
           "after": {
             "type": "array",
@@ -199,11 +215,11 @@ Workspace policy: "new" isolates a checkout; {"new":{"branch":"task/my-change"}}
           },
           "inbox_item": {
             "type": "string",
-            "description": "Handed-off Inbox ID, or 'none' for unrelated work. Checks the conversation and manager; links without filing or replying."
+            "description": "Handed-off Inbox ID or 'none'; links without filing/replying."
           },
           "tier": {
             "type": "string",
-            "description": "Agent preset from the snapshot's 模型档位 line; choose by purpose; resolved at task start with its profile; explicit launcher/model/effort/speed overrides"
+            "description": "Agent preset from the 模型档位 line, by kind of work (old names work); its candidate is picked at start; explicit launcher/model/effort/speed overrides"
           },
           "speed": {
             "type": "string",

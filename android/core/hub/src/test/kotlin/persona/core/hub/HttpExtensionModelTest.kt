@@ -52,6 +52,7 @@ class HttpExtensionModelTest {
                         val named = owner.takeUnless { it == "assistant" }
                         assertNull(request.getHeader(ManagerHeader))
                         assertEquals(named, request.requestUrl?.queryParameter(ManagerQuery))
+                        assertEquals("1", request.requestUrl?.queryParameter("entry_lists"))
                         assertEquals("/api/v1/extensions/example-pack/-/", request.requestUrl?.encodedPath)
                         AssistantManagerChoice.pick("unrelated")
                     }
@@ -84,18 +85,18 @@ class HttpExtensionModelTest {
             assertFalse(detail.extension.sandbox!!.active)
             assertEquals(2L, detail.extension.sandbox!!.egress!!.denied)
             server.takeRequest().let {
-                assertEquals("/api/v1/$root/example/-/contributions/ui/notes", (it.path).zhAny())
+                assertEquals("/api/v1/$root/example/-/contributions/ui/notes?entry_lists=1", (it.path).zhAny())
                 assertEquals("PUT", (it.method).zhAny())
                 assertEquals("""{"enabled":false}""", (it.body.readUtf8()).zhAny())
             }
             server.enqueue(MockResponse().setBody("""{"id":"example"}"""))
             api.setContribution("example", "example-export.notes", "new", true)
-            assertEquals("/api/v1/$root/example/-/contributions/example-export.notes/new", (server.takeRequest().path).zhAny())
+            assertEquals("/api/v1/$root/example/-/contributions/example-export.notes/new?entry_lists=1", (server.takeRequest().path).zhAny())
             try { api.setContribution("example", "../notes", "new", false); fail() } catch (_: IllegalArgumentException) { }
             // The hub lets an extension id start with a digit (1password), so its exported points do too (#5193).
             server.enqueue(MockResponse().setBody("""{"id":"x"}"""))
             api.setContribution("x", "1password.vault", "c", true)
-            assertEquals("/api/v1/$root/x/-/contributions/1password.vault/c", (server.takeRequest().path).zhAny())
+            assertEquals("/api/v1/$root/x/-/contributions/1password.vault/c?entry_lists=1", (server.takeRequest().path).zhAny())
             for (bad in listOf("_ext.vault", "1password.2vault", "1password.va-ult", "1password.", "a.b.c"))
                 try { api.setContribution("x", bad, "c", true); fail(bad) } catch (_: IllegalArgumentException) { }
         }

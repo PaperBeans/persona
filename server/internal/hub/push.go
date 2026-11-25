@@ -117,6 +117,15 @@ type Pusher struct {
 	sentMirrorMu   sync.Mutex
 	gradingWriting bool // the one saver goroutine is running
 
+	// Extension push grading layers (push_grading_layer.go): keyed by (manager, extension), persisted in hub_settings
+	// under gradingLayersSettingKey, guarded in memory by gradingMu and serialized on disk by gradingLayerSaveMu.
+	gradingLayerSaveMu   sync.Mutex
+	gradingLayers        map[gradingLayerKey]PushGradingLayer
+	gradingLayersVersion uint64
+	gradingLayersDirty   bool
+	gradingLayersWriting bool
+	gradingLayersIdle    chan struct{}
+
 	maintenanceWake     chan struct{}
 	maintenanceDeferred bool
 	pendingForgets      []Device

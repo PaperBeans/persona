@@ -44,7 +44,6 @@ export type Route =
   // `manager`: whose item it is when that is another manager than the default (`?manager=`, docs/assistant/managers.md
   // "Clients"): two managers may list the same id
   | { name: "inbox"; id?: string; manager?: string }
-  | { name: "messages"; id?: string }
   | { name: "starred" }
   | { name: "routines" }
   | { name: "kb"; kind?: string; id?: string }
@@ -123,7 +122,6 @@ export function parse(path: string, search = ""): Route {
     const manager = p[1] ? new URLSearchParams(search).get("manager") : null;
     return manager ? { name: "inbox", id: p[1], manager } : { name: "inbox", id: p[1] };
   }
-  if (p[0] === "messages") return { name: "messages", id: p[1] };
   if (p[0] === "starred" && p.length === 1) return { name: "starred" };
   if (p[0] === "routines") return { name: "routines" };
   // an entry of a kind a feature module draws (a recording) is unknown while the module is off (core/module-host.ts)
@@ -218,8 +216,6 @@ export function routePath(r: Route): string {
       return "/assistant";
     case "inbox":
       return r.id ? `/inbox/${encodeURIComponent(r.id)}${r.manager ? `?manager=${encodeURIComponent(r.manager)}` : ""}` : "/inbox";
-    case "messages":
-      return r.id ? `/messages/${encodeURIComponent(r.id)}` : "/messages";
     case "starred":
       return "/starred";
     case "routines":

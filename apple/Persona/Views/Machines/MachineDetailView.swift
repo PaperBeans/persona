@@ -97,6 +97,9 @@ struct MachineDetailView: View {
                             }
                             MachineLinkSwitchView(machine: machine).id(Self.linkSwitchAnchor)
                         }
+                        if online, let s = data?.latest, MetricLevel.of(s.diskPercent, warn: 80, crit: 90) > .normal {
+                            DiskGuidanceBanner(ref: ref, percent: s.diskPercent ?? 0)
+                        }
                         agentsSection(machine)
                         filesRow(online: online)
                         #if os(iOS)
@@ -111,7 +114,7 @@ struct MachineDetailView: View {
                         MachineUsageSection(ref: ref)
                         VStack(alignment: .leading, spacing: Theme.Space.m) {
                             heading(String(localized: "Monitor [Message Views fdc390]"))
-                            if let s = data?.latest, online { NowGrid(sample: s, cores: system?.cores) }
+                            if let s = data?.latest, online { NowGrid(ref: ref, sample: s, cores: system?.cores) }
                             SegmentedChoice(String(localized: "Time Range"), MetricRange.allCases.map { ($0, $0.title) }, selection: $range)
                                 .accessibilityIdentifier("metric-range")
                             charts(system: system)
@@ -258,7 +261,7 @@ struct MachineDetailView: View {
                         if i > 0 { Divider().padding(.leading, Theme.Space.l) }
                         NavigationLink(value: s.key) {
                             HStack(spacing: Theme.Space.s) {
-                                SessionRow(session: s, machine: machine, showMachine: false)
+                                SessionRow(session: s, machine: machine, showMachine: false, preferHerdrTabName: model.prefersHerdrTabName(for: s))
                                 ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.labelStrong).foregroundStyle(.tertiary)
                             }
                             .padding(.horizontal, Theme.Space.l)
@@ -599,8 +602,26 @@ struct MachineDetailView: View {
     }
 }
 
+/// While the disk is 80 % full or more (docs/server/machines.md), one line that leads to the usage map in reclaim mode
+/// (docs/server/machine-usage-map.md "Low-disk guidance").
+private struct DiskGuidanceBanner: View {
+    var ref: MachineRef
+    var percent: Double
+
+    var body: some View {
+        NoticeBanner(text: String(localized: "The disk is \(MetricFormat.percent(percent)) full."), tone: .caution, symbol: Theme.Icon.storage, lineLimit: 1) {
+            MachineUsageMapLink(route: MachineUsageMapRoute(ref: ref, reclaim: true)) {
+                Text("See What's Using Space").font(Theme.Font.labelStrong).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityIdentifier("machine.disk.guidance")
+        }
+    }
+}
+
 /// The values now, two columns: CPU, memory, network, load, disk, swap.
 private struct NowGrid: View {
+    var ref: MachineRef
     var sample: MetricSample
     var cores: Int?
 
@@ -614,8 +635,15 @@ private struct NowGrid: View {
             tile(String(localized: "Network"), "↓ " + MetricFormat.rate(sample.netRx), detail: "↑ " + MetricFormat.rate(sample.netTx), fraction: nil, color: MetricColor.rx, level: .normal)
             tile(String(localized: "Load"), MetricFormat.load(sample.load), detail: cores.map { String(localized: "\($0) cores") }, fraction: nil, color: MetricColor.load,
                  level: MetricLevel.of(sample.load.flatMap { l in cores.map { l / Double(max($0, 1)) } }, warn: 1, crit: 2))
-            tile(String(localized: "Disk"), MetricFormat.percent(sample.diskPercent), detail: MetricFormat.bytes(sample.diskUsed) + " / " + MetricFormat.bytes(sample.diskTotal),
-                 fraction: sample.diskPercent.map { $0 / 100 }, color: .secondary, level: MetricLevel.of(sample.diskPercent, warn: 80, crit: 90))
+            // The Disk tile opens the disk usage map (#14576), in reclaim mode while the level is raised.
+            let disk = MetricLevel.of(sample.diskPercent, warn: 80, crit: 90)
+            MachineUsageMapLink(route: MachineUsageMapRoute(ref: ref, reclaim: disk > .normal)) {
+                tile(String(localized: "Disk"), MetricFormat.percent(sample.diskPercent), detail: MetricFormat.bytes(sample.diskUsed) + " / " + MetricFormat.bytes(sample.diskTotal),
+                     fraction: sample.diskPercent.map { $0 / 100 }, color: .secondary, level: disk)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(String(localized: "Shows what's using the space"))
+            .accessibilityIdentifier("machine.now.disk")
             tile(String(localized: "Swap"), sample.swapTotal > 0 ? MetricFormat.bytes(sample.swapUsed) : String(localized: "Off [Machine Detail View f95ea7]"),
                  detail: sample.swapTotal > 0 ? String(localized: "\(MetricFormat.bytes(sample.swapTotal)) total") : nil,
                  fraction: sample.swapPercent.map { $0 / 100 }, color: .secondary, level: .normal)

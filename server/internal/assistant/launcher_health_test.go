@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http/httptest"
 	"regexp"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -31,6 +33,8 @@ func TestClassifyLauncherError(t *testing.T) {
 		`ERROR codex_models_manager: No Trae auth token available for Trae model fetch`:         errKindAuth,
 		`error: unknown option '--plugin-dir'`:                                                  errKindCLIOutdated,
 		`Claude Code version 2.0.1 is no longer supported, please update`:                       errKindCLIOutdated,
+		`Method not found: session/set_mode`:                                                    errKindCLIOutdated,
+		`This Antigravity CLI (agy) is too old to switch to the "accept-edits" mode: it has no session/set_mode. Please update agy.`:                              errKindCLIOutdated,
 		`Claude Code 还没完成首次引导（hasCompletedOnboarding 未置为 true）：请在这台机器的终端里运行一次 claude`:                                                                             errKindOnboarding,
 		`claude did not become ready within 1m0s of starting: this machine's Claude Code has not completed its first-run setup (hasCompletedOnboarding is unset)`: errKindOnboarding,
 		`zsh: command not found: work`: errKindOther,
@@ -44,14 +48,16 @@ func TestClassifyLauncherError(t *testing.T) {
 // First-run setup is a person's job: an onboarding failure never starts an automatic repair, however many probes
 // failed in a row; periodic and on-demand checks clear it once the setup is finished.
 func TestOnboardingFailureNeverRepairs(t *testing.T) {
-	r := LauncherHealth{Kind: errKindOnboarding, Fails: 5}
+	r := LauncherHealth{State: healthFailing, CheckedAt: time.Now(), Kind: errKindOnboarding, Fails: 1}
+	if r.repairNow() {
+		t.Fatal("an onboarding failure must not repair on its first failure")
+	}
+	r.Fails = 5
 	if r.repairNow() {
 		t.Fatal("an onboarding failure must never enter auto repair")
 	}
-	if (LauncherHealth{Kind: errKindOnboarding}).repairNow() {
-		t.Fatal("an onboarding failure must not repair on its first failure either")
-	}
-	if (LauncherHealth{Kind: errKindUpstream, Fails: 5}).repairNow() {
+	r.Kind = errKindUpstream
+	if r.repairNow() {
 		t.Fatal("an upstream pool outage must not trigger local launcher repair")
 	}
 }
@@ -184,6 +190,118 @@ func TestPickerHidesAFailedLauncherThatIsNotTheDefault(t *testing.T) {
 	postJSON(t, s, "/api/v1/launchers/health/check?machine=l4&launcher=work")
 	if names := launcherNamesAt(t, s, "/api/v1/machines/l4/launchers"); !slices.Contains(names, "work") {
 		t.Fatalf("picker still hides the launcher that works again: %v", names)
+	}
+}
+
+// unavailableAt is what GET path lists off (`unavailable`), by name, asked in lang.
+func unavailableAt(t *testing.T, s *Service, path, lang string) map[string]unavailableLauncher {
+	t.Helper()
+	var body struct {
+		Unavailable []unavailableLauncher `json:"unavailable"`
+	}
+	r := httptest.NewRequest("GET", path, nil)
+	r.Header.Set("Accept-Language", lang)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("GET %s: %d %s", path, w.Code, w.Body)
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	out := map[string]unavailableLauncher{}
+	for _, u := range body.Unavailable {
+		out[u.Name] = u
+	}
+	return out
+}
+
+// New Agent lists a launcher whose latest check failed as unavailable, with why, instead of leaving it out (#14535): the
+// failure's class on that computer and the record's line, in the request's language, under code launcher_unhealthy; it
+// stays out of the launchers (and so of the presets). It goes back to the launchers when a check passes. The configured
+// default stays listed with its record, never in both; the main chat's list is unchanged.
+func TestNewAgentListsAFailedLauncherAsUnavailable(t *testing.T) {
+	s, f := launcherHealthHub(t)
+	pointDefaultAt(t, s, f, "other")
+	f.mu.Lock()
+	f.launcherList = append(f.launcherList, proto.Launcher{Name: "agy", Source: "antigravity", Agent: "agy", DisplayName: "Antigravity"})
+	f.checks["l4/work"] = proto.LauncherCheck{Error: "API Error: 401 invalid api key"}
+	f.mu.Unlock()
+	ctx := context.Background()
+	s.healthRound(ctx, true)
+	s.recordHealth(ctx, "l4", "agy", healthResult{err: "Method not found: session/set_mode", source: healthSourceStart})
+
+	for _, tc := range []struct{ lang, work, agy string }{
+		{"en", "Its key or sign-in was rejected in its last check on l4: API Error: 401 invalid api key",
+			"Its CLI on l4 is too old. Update it, then test it again: Method not found: session/set_mode"},
+		{"zh-Hans", "在 l4 上的上次检查里，Key 或登录被拒绝了：API Error: 401 invalid api key",
+			"l4 上的命令行工具版本太旧，更新后再测一次：Method not found: session/set_mode"},
+		{"ja", "l4 での前回のチェックで、キーまたはサインインが拒否されました：API Error: 401 invalid api key",
+			"l4 の CLI のバージョンが古すぎます。更新してからもう一度テストしてください：Method not found: session/set_mode"},
+	} {
+		got := unavailableAt(t, s, "/api/v1/machines/l4/launchers", tc.lang)
+		work, agy := got["work"], got["agy"]
+		if work.Code != unavailableUnhealthy || work.Kind != "launcher" || work.Reason != tc.work {
+			t.Errorf("%s: work: %+v", tc.lang, work)
+		}
+		if agy.Code != unavailableUnhealthy || agy.Agent != "agy" || agy.DisplayName != "Antigravity" || agy.Reason != tc.agy {
+			t.Errorf("%s: agy: %+v", tc.lang, agy)
+		}
+	}
+	if names := launcherNamesAt(t, s, "/api/v1/machines/l4/launchers?purpose=agent.new"); slices.Contains(names, "work") || slices.Contains(names, "agy") {
+		t.Fatalf("New Agent offers a launcher that failed its check: %v", names)
+	}
+	if got := unavailableAt(t, s, "/api/v1/machines/l4/launchers?purpose=agent.new", "en"); got["work"].Code != unavailableUnhealthy {
+		t.Fatalf("purpose=agent.new does not list work as unavailable: %+v", got)
+	}
+	if got := unavailableAt(t, s, "/api/v1/machines/l4/launchers?purpose=assistant", "en"); got["work"].Code == unavailableUnhealthy || got["agy"].Code == unavailableUnhealthy {
+		t.Fatalf("the main chat's list changed: %+v", got)
+	}
+	if got := unavailableAt(t, s, "/api/v1/machines/server/launchers", "en"); len(got) != 0 {
+		t.Fatalf("a computer whose launchers all work lists some as unavailable: %+v", got)
+	}
+
+	f.mu.Lock()
+	delete(f.checks, "l4/work")
+	f.mu.Unlock()
+	postJSON(t, s, "/api/v1/launchers/health/check?machine=l4&launcher=work")
+	if names := launcherNamesAt(t, s, "/api/v1/machines/l4/launchers"); !slices.Contains(names, "work") {
+		t.Fatalf("a launcher that works again is not offered: %v", names)
+	}
+	if got := unavailableAt(t, s, "/api/v1/machines/l4/launchers", "en"); got["work"].Name != "" {
+		t.Fatalf("a launcher that works again is still unavailable: %+v", got["work"])
+	}
+
+	// the configured default keeps its row and record, and is not listed off as well
+	pointDefaultAt(t, s, f, "agy")
+	if names := launcherNamesAt(t, s, "/api/v1/machines/l4/launchers"); !slices.Contains(names, "agy") {
+		t.Fatalf("the configured default is not listed: %v", names)
+	}
+	if got := unavailableAt(t, s, "/api/v1/machines/l4/launchers", "en"); got["agy"].Name != "" {
+		t.Fatalf("the configured default is listed off as well: %+v", got["agy"])
+	}
+}
+
+// The failure classes each have their words; a class the picker has none for says the check failed, and a long record
+// line is clipped to one short line.
+func TestUnhealthyUnavailableWordsEachClass(t *testing.T) {
+	long := strings.Repeat("x", 400) + "\nsecond line"
+	got := unhealthyUnavailable(i18n.En, "box", []unhealthyLauncher{
+		{ConfiguredLauncher: ConfiguredLauncher{Launcher: proto.Launcher{Name: "a"}, AgentType: "codex"}, record: LauncherHealth{Kind: errKindUsageLimit}},
+		{ConfiguredLauncher: ConfiguredLauncher{Launcher: proto.Launcher{Name: "b"}}, record: LauncherHealth{Kind: "something_new", Error: long}},
+	})
+	if len(got) != 2 || got[0].Reason != "Reached its subscription usage limit on box" || got[0].Agent != "codex" {
+		t.Fatalf("usage limit: %+v", got)
+	}
+	if !strings.HasPrefix(got[1].Reason, "Failed its last check on box: xxx") || strings.Contains(got[1].Reason, "\n") || len([]rune(got[1].Reason)) > 200 {
+		t.Fatalf("unknown class with a long line: %q", got[1].Reason)
+	}
+	for _, kind := range []string{errKindAuth, errKindModelRoute, errKindCLIOutdated, errKindTimeout, errKindUsageLimit, errKindUpstream, errKindOnboarding, errKindOther} {
+		for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
+			if text := i18n.T(lang, unhealthyReasonKey(kind), i18n.Args{"machine": "box"}); !strings.Contains(text, "box") || strings.Contains(text, "unhealthy_") {
+				t.Errorf("%s %s: %q", kind, lang, text)
+			}
+		}
 	}
 }
 
@@ -474,6 +592,25 @@ func TestLauncherHealthMovesPlannedTasks(t *testing.T) {
 	if task := p.Tasks[0]; task.Machine != "box" || task.Cwd != "/Users/me/code/app" || !strings.Contains(task.Why, "failed its health check on l4") {
 		t.Fatalf("task: %+v", task)
 	}
+}
+
+// A refusal on the detour happens before bind can fill in the chosen machine.
+func TestAgentStartRecordsRefusedHealthDetour(t *testing.T) {
+	s, f := launcherHealthHub(t)
+	ctx := context.Background()
+	f.checks["server/work"] = proto.LauncherCheck{Error: "unavailable"}
+	s.healthRound(ctx, true)
+	s.devs = &resourceDevs{
+		fleetDevs: newFleetDevs(),
+		machines:  map[string]*proto.Machine{"box": admissionMachine(8)},
+		samples:   map[string]*proto.MetricSample{"box": admissionSample(99, 16<<30, 2<<30, 1)},
+	}
+	_, err := s.runTool(ctx, "server", "conv9", "agent_start", json.RawMessage(`{"machine":"l4","cwd":"/home/me/code/app","prompt":"Check CI"}`))
+	if !isAdmissionDenied(err) || len(f.starts) != 0 {
+		t.Fatalf("expected admission refusal on the detour, got %v, starts %v", err, f.starts)
+	}
+	p := onlyStoredPlacement(t, s.store().(settingsPrefixStore))
+	checkPlacementGolden(t, &p, "v1 enforce l4 -> box (assistant-tasks.admission_load) | l4 launcher_unhealthy no_resources | server launcher_unhealthy no_resources | box assistant-tasks.admission_load health=0")
 }
 
 func TestAgentStartDetourRecomputesLauncherPermission(t *testing.T) {

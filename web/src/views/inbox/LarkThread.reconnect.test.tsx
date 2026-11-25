@@ -2,6 +2,7 @@
 // #4629: the `lark` pushes missed while away are replayed only when the hub resumes the stream. After a hello it could
 // not resume, the open chat reads its newest page again, the chat list, a chat's Pin list and the message display
 // settings read again (as for a push naming the chat, or saying the settings changed); a resumed hello reads nothing.
+// The Messages page's own lists: src/modules/lark/Messages.reconnect.test.tsx.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,8 +21,6 @@ vi.mock("../../lib/store", async (original) => {
     },
   };
 });
-import { setLarkHome } from "../../lib/lark-chats";
-import { Messages } from "../messages/Messages";
 import { LarkPinsDialog } from "./LarkPins";
 import { LarkThread } from "./LarkThread";
 
@@ -140,26 +139,4 @@ describe("飞书的列表在重连后", () => {
     expect(count("/conversations/f1/pins?")).toBe(first + 1);
   });
 
-  it("hub 没能续传时会话列表、账号未读和消息显示设置重读，续传时不读", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    setLarkHome(true); // the "Messages" page is on in this browser; a hub that names no features has Feishu
-    await act(async () => root.render(<Messages onToggleSidebar={() => {}} />));
-    await flush();
-    const chats = count("/lark/conversations?");
-    const accounts = count("/lark/accounts");
-    const display = count("/lark/message-display");
-    expect(chats).toBeGreaterThan(0);
-    expect(display).toBeGreaterThan(0);
-    expect(accounts).toBeGreaterThan(0);
-    await emit("hello", { resumed: true });
-    await wait(1000);
-    expect(count("/lark/conversations?")).toBe(chats);
-    expect(count("/lark/message-display")).toBe(display);
-    await emit("hello", { resumed: false });
-    await wait(1000);
-    expect(count("/lark/conversations?")).toBe(chats + 1);
-    expect(count("/lark/accounts")).toBe(accounts + 1);
-    // the message display settings ("Keep recalled messages", "Edit history") too: a push saying they changed is not replayed either
-    expect(count("/lark/message-display")).toBe(display + 1);
-  });
 });

@@ -5,16 +5,18 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { parseAPIError } from "../../lib/api-errors";
 import { turnErrorFix } from "../../lib/readiness";
 import { recoveryExhausted } from "../../lib/model-fallback";
 import { usageLimitClock } from "../../lib/usage-limit";
 import type { ChatLine } from "../../lib/turns";
 import type { Item } from "../../lib/types";
-import { ChatLineView, ErrorBanner, errorKey } from "./Lines";
+import { APIErrorDetails, ChatLineView, ErrorBanner, errorKey } from "./Lines";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+beforeAll(async () => { await APIErrorDetails.preload(); });
 
 type ErrorLine = Extract<ChatLine, { kind: "apiError" }>;
 function line(text: string): ErrorLine {

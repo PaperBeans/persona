@@ -24,7 +24,7 @@ COPIED = ('scripts/app/mac-link.sh', 'scripts/persona_config.py', 'scripts/perso
           'apple/PersonaLink/Input/Package.swift', 'apple/PersonaLink/Input/PersonaInput-Info.plist',
           'apple/PersonaLink/Input/Sources/PersonaInput/main.swift', 'apple/PersonaLink/Input/Sources/PersonaInput/UnixSocket.swift',
           'apple/Packages/PersonaInputKit/Package.swift', 'apple/Packages/PersonaInputKit/Sources/PersonaInputKit/ScrollRecord.swift',
-          'apple/PersonaLink/Package.swift')
+          'apple/PersonaLink/Package.swift', 'apple/PersonaLink/App/Info.plist', 'apple/PersonaLink/App/AppIcon.png')
 # Whole folders: Persona Screen, the kit it is built from, and a PersonaScreenKit file it is not built from.
 COPIED_TREES = ('apple/PersonaLink/Sources/PersonaScreen', 'apple/Packages/PersonaScreenCore/Sources',
                 'apple/Packages/PersonaScreenKit/Sources')
@@ -33,9 +33,17 @@ STUBS = {
     'lipo': 'while [ $# -gt 0 ]; do [ "$1" = -output ] && : > "$2"; shift; done',
     'codesign': 'echo "$*" >> "$CODESIGN_LOG"',
     'git': 'echo v0.0.0-test',
+    'xcodebuild': 'while [ $# -gt 0 ]; do case $1 in -derivedDataPath) d=$2;; esac; shift; done\n'
+                  'p="$d/Build/Products/Release"; mkdir -p "$p/PersonaLink_PersonaLink.bundle"; '
+                  ': > "$p/PersonaLink"; chmod +x "$p/PersonaLink"',
+    'PlistBuddy': 'echo 15.0',
+    'vtool': '[ "${1:-}" != -show-build ] || echo "        sdk 27.2"',
+    'sips': 'while [ $# -gt 0 ]; do case $1 in --out) o=$2;; esac; shift; done; : > "$o"',
+    'iconutil': 'while [ $# -gt 0 ]; do case $1 in -o) o=$2;; esac; shift; done; : > "$o"',
     # `swift build` of a helper: an empty executable named for --product in its scratch path, each real build logged by
-    # product; --show-bin-path says where.
-    'xcrun': 'while [ $# -gt 0 ]; do case $1 in --scratch-path) s=$2;; --product) p=$2;; --show-bin-path) show=1;; esac; shift; done\n'
+    # product; --show-bin-path says where. The SDK query feeds the menu App's vtool check.
+    'xcrun': 'if [ "${1:-}" = --sdk ]; then echo 27.2; exit 0; fi\n'
+             'while [ $# -gt 0 ]; do case $1 in --scratch-path) s=$2;; --product) p=$2;; --show-bin-path) show=1;; esac; shift; done\n'
              'if [ -n "${show:-}" ]; then echo "$s/release"; else mkdir -p "$s/release" && : > "$s/release/$p" && chmod +x "$s/release/$p" && echo "$p" >> "$SWIFT_LOG"; fi',
 }
 
@@ -51,6 +59,9 @@ class MacLinkBundleIdTests(unittest.TestCase):
             shutil.copy2(ROOT / name, target)
         for name in COPIED_TREES:
             shutil.copytree(ROOT / name, self.root / name)
+        # Keep the real build logic, but route macOS's absolute PlistBuddy path through the portable tool stub.
+        menu_script = self.root / 'scripts/app/mac-link.sh'
+        menu_script.write_text(menu_script.read_text().replace('/usr/libexec/PlistBuddy', 'PlistBuddy'))
         bin_dir = self.tmp / 'bin'
         bin_dir.mkdir()
         for name, body in STUBS.items():
@@ -73,7 +84,7 @@ class MacLinkBundleIdTests(unittest.TestCase):
                               env={**self.env, **env}, capture_output=True, text=True, timeout=60)
 
     def built_ids(self, result):
-        """The Persona Screen bundle id and the Link helpers' signing identifiers of a finished build."""
+        """The Persona Screen bundle id and the Link App's and helpers' signing identifiers of a finished build."""
         self.assertEqual(result.returncode, 0, result.stderr)
         app = self.root / 'apple/PersonaLink/build/Persona Link.app/Contents/Helpers'
         with open(app / 'Persona Screen.app/Contents/Info.plist', 'rb') as f:
@@ -103,7 +114,7 @@ class MacLinkBundleIdTests(unittest.TestCase):
         screen, signed = self.built_ids(self.build({'app': {'bundle_id': 'org.sample.assistant'}}))
         self.assertEqual(screen, 'org.sample.assistant.link.screen')
         self.assertEqual(self.input_id(), 'org.sample.assistant.link.input')
-        self.assertEqual(signed, ['org.sample.assistant.link.helper', 'org.sample.assistant.link.persona-node'])
+        self.assertEqual(signed, ['org.sample.assistant.link', 'org.sample.assistant.link.helper', 'org.sample.assistant.link.persona-node'])
 
     def test_persona_input_is_built_once_until_its_sources_change(self):
         config = {'app': {'bundle_id': 'org.sample.assistant'}}
@@ -156,13 +167,13 @@ class MacLinkBundleIdTests(unittest.TestCase):
     def test_the_exported_app_identity_names_it_without_a_config(self):
         screen, signed = self.built_ids(self.build(PERSONA_BUNDLE_ID='org.sample.exported'))
         self.assertEqual(screen, 'org.sample.exported.link.screen')
-        self.assertEqual(signed, ['org.sample.exported.link.helper', 'org.sample.exported.link.persona-node'])
+        self.assertEqual(signed, ['org.sample.exported.link', 'org.sample.exported.link.helper', 'org.sample.exported.link.persona-node'])
 
     def test_mac_link_bundle_id_wins_over_the_app_identity(self):
         config = {'app': {'bundle_id': 'org.sample.assistant'}, 'mac': {'link_bundle_id': 'org.sample.link'}}
         screen, signed = self.built_ids(self.build(config, PERSONA_BUNDLE_ID='org.sample.exported'))
         self.assertEqual(screen, 'org.sample.link.screen')
-        self.assertEqual(signed, ['org.sample.link.helper', 'org.sample.link.persona-node'])
+        self.assertEqual(signed, ['org.sample.link', 'org.sample.link.helper', 'org.sample.link.persona-node'])
 
     def test_the_environment_wins_over_the_config(self):
         config = {'app': {'bundle_id': 'org.sample.assistant'}, 'mac': {'link_bundle_id': 'org.sample.link'}}

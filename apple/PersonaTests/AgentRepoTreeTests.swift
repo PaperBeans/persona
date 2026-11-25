@@ -384,14 +384,18 @@ struct AgentRepoTreeTests {
         var newest = paseoWorkspace("newest", project: "zeta", pin: 20)
         main.isMain = true
         let alpha = paseoWorkspace("alpha", project: "alpha")
-        let before = RepoTree.build([], machines: machines, workspaces: [old, alpha, main, newest])[0].repos
+        // Default (showEmptyWorkspaces: false) keeps only pinned empty workspaces, aligned with Android and Web.
+        let defaultOnly = RepoTree.build([], machines: machines, workspaces: [old, alpha, main, newest])[0].repos
+        #expect(defaultOnly.map(\.name) == ["zeta"])
+        #expect(defaultOnly[0].worktrees.map(\.name) == ["newest", "old"])
+        let before = RepoTree.build([], machines: machines, workspaces: [old, alpha, main, newest], showEmptyWorkspaces: true)[0].repos
         #expect(before.map(\.name) == ["zeta", "alpha"], "the project containing the newest pin is reachable first")
         #expect(before[0].worktrees.map(\.name) == ["newest", "old", "main"])
         #expect(before[0].sessions.isEmpty, "empty pinned workspaces keep a container, without inventing sessions")
         #expect(before[0].worktrees[2].workspace?.pinnedAt == nil, "pinning one task does not pin the project's main checkout")
         let ids = Set(before.flatMap(\.worktrees).map(\.id))
         old.pinnedAt = nil; newest.pinnedAt = nil
-        let after = RepoTree.build([], machines: machines, workspaces: [newest, main, alpha, old])[0].repos
+        let after = RepoTree.build([], machines: machines, workspaces: [newest, main, alpha, old], showEmptyWorkspaces: true)[0].repos
         #expect(after.map(\.name) == ["alpha", "zeta"])
         #expect(after[1].worktrees.map(\.name) == ["main", "newest", "old"])
         #expect(Set(after.flatMap(\.worktrees).map(\.id)) == ids, "a pin never changes navigation identity")
@@ -406,14 +410,14 @@ struct AgentRepoTreeTests {
         otherHub.group = "work"; otherHub.pinnedAt = nil
         let sessions = [placed("for-b", "/same", ["space_kind": "paseo", "workspace_id": "b", "space_id": "app"]),
                         placed("for-a", "/same", ["space_kind": "paseo", "workspace_id": "a", "space_id": "app"])]
-        let tree = RepoTree.build(sessions, machines: machines, workspaces: [b, otherHub, otherSource, otherMachine, a])
+        let tree = RepoTree.build(sessions, machines: machines, workspaces: [b, otherHub, otherSource, otherMachine, a], showEmptyWorkspaces: true)
         let repos = tree.flatMap(\.repos)
         #expect(repos.count == 4, "the same project ID in another engine, computer or hub is another project")
         let own = try #require(repos.first { $0.worktrees.contains { $0.workspace?.key == a.key } })
         #expect(own.worktrees.map(\.workspace?.key) == [a.key, b.key], "equal pins use full identity, even with the same title and path")
         #expect(own.worktrees.map { $0.sessions.map(\.sessionID) } == [["for-a"], ["for-b"]])
         #expect(repos.filter { $0.id != own.id }.allSatisfy { $0.latestPinnedAt == nil && $0.sessions.isEmpty })
-        let reversed = RepoTree.build(Array(sessions.reversed()), machines: machines, workspaces: [a, otherMachine, otherSource, otherHub, b])
+        let reversed = RepoTree.build(Array(sessions.reversed()), machines: machines, workspaces: [a, otherMachine, otherSource, otherHub, b], showEmptyWorkspaces: true)
         #expect(reversed.flatMap(\.repos).flatMap(\.worktrees).map(\.id) == tree.flatMap(\.repos).flatMap(\.worktrees).map(\.id))
     }
 
@@ -422,19 +426,24 @@ struct AgentRepoTreeTests {
         let root = paseoWorkspace("root", project: "zeta")
         var child = paseoWorkspace("child", project: "nested", pin: 20)
         child.parentSourceID = root.sourceID
-        let tree = RepoTree.build([], machines: machines, workspaces: [alpha, child, root])
+        // Default keeps the pinned child and its empty parent ancestor while hiding unpinned empty alpha.
+        let defaultTree = RepoTree.build([], machines: machines, workspaces: [alpha, child, root])
+        #expect(defaultTree[0].repos.map(\.name) == ["zeta"])
+        let tree = RepoTree.build([], machines: machines, workspaces: [alpha, child, root], showEmptyWorkspaces: true)
         #expect(tree[0].repos.map(\.name) == ["zeta", "alpha"])
         let top = tree[0].repos[0].worktrees[0]
         #expect(top.latestPinnedAt == child.pinnedAt)
         #expect(top.workspace?.pinnedAt == nil, "only the pinned workspace gets the pin badge")
         #expect(top.children.map(\.workspace?.key) == [child.key])
         #expect(RepoTree.build([], machines: machines, workspaces: [alpha, child, root], includeEmpty: false).isEmpty)
-        #expect(RepoTree.build([], machines: machines, workspaces: [alpha, child, root], search: "missing").isEmpty)
+        #expect(RepoTree.build([], machines: machines, workspaces: [alpha, child, root], showEmptyWorkspaces: true, search: "missing").isEmpty)
     }
 
-    @Test func catalogRetainsExistingEmptyAncestorsAndIndependentEmptyWorkspaces() throws {
+    @Test func catalogRetainsExistingEmptyAncestorsAndHidesStandaloneEmptiesByDefault() throws {
         let catalog = [workspace("root"), workspace("child", parent: "root"), workspace("leaf", parent: "child"), workspace("empty")]
-        let tree = RepoTree.build([orca("agent", "/work/leaf", space: "leaf")], machines: machines, workspaces: catalog)
+        let defaultTree = RepoTree.build([orca("agent", "/work/leaf", space: "leaf")], machines: machines, workspaces: catalog)
+        #expect(defaultTree.first?.repos.map(\.name) == ["root"])
+        let tree = RepoTree.build([orca("agent", "/work/leaf", space: "leaf")], machines: machines, workspaces: catalog, showEmptyWorkspaces: true)
         let repos = try #require(tree.first?.repos)
         #expect(repos.map(\.name) == ["empty", "root"])
         let root = try #require(repos.first { $0.name == "root" }?.worktrees.first)
@@ -453,16 +462,43 @@ struct AgentRepoTreeTests {
         #expect(tree[0].repos[0].worktrees[0].children[0].children[0].sessions.count == 1)
         #expect(RepoTree.build([], machines: machines, workspaces: catalog, includeEmpty: false).isEmpty)
         #expect(RepoTree.build([], machines: machines, workspaces: catalog, includeEmpty: false, search: "leaf").isEmpty)
-        let byName = RepoTree.build([], machines: machines, workspaces: catalog, search: "leaf")
+        #expect(RepoTree.build([], machines: machines, workspaces: catalog, search: "leaf").isEmpty)
+        let byName = RepoTree.build([], machines: machines, workspaces: catalog, showEmptyWorkspaces: true, search: "leaf")
         #expect(byName[0].repos.map(\.name) == ["root"])
         #expect(byName[0].repos[0].worktrees[0].children[0].children[0].name == "leaf")
+    }
+
+    @Test func unavailableOfflineAndHiddenEmptyWorkspacesHonorHostPinsAndNavigationSessions() {
+        var deadUnpinned = workspace("dead-unpinned"); deadUnpinned.available = false
+        var offlineUnpinned = workspace("offline-unpinned"); offlineUnpinned.online = false
+        var deadPinned = workspace("dead-pinned"); deadPinned.available = false; deadPinned.pinnedAt = Date(timeIntervalSince1970: 10)
+        var offlinePinned = workspace("offline-pinned"); offlinePinned.online = false; offlinePinned.pinnedAt = Date(timeIntervalSince1970: 10)
+        var hiddenPinned = workspace("hidden-pinned"); hiddenPinned.hiddenByDirectory = true; hiddenPinned.pinnedAt = Date(timeIntervalSince1970: 10)
+        var hiddenUnpinned = workspace("hidden-unpinned"); hiddenUnpinned.hiddenByDirectory = true
+        let live = workspace("live")
+        let all = [deadUnpinned, offlineUnpinned, deadPinned, offlinePinned, hiddenPinned, hiddenUnpinned, live]
+        // Default keeps host-pinned non-hidden empties across disconnects/unavailability, while hiding unpinned and hidden empties.
+        #expect(RepoTree.build([], machines: machines, workspaces: all).flatMap(\.repos).map(\.name).sorted() == ["dead-pinned", "offline-pinned"])
+        // Opting in adds live available non-hidden empties while keeping unpinned dead/offline and all hidden empties filtered.
+        #expect(RepoTree.build([], machines: machines, workspaces: all, showEmptyWorkspaces: true).flatMap(\.repos).map(\.name).sorted() == ["dead-pinned", "live", "offline-pinned"])
+        // Filters and search still apply to host-pinned empties.
+        #expect(RepoTree.build([], machines: machines, workspaces: all, includeEmpty: false).isEmpty)
+        #expect(RepoTree.build([], machines: machines, workspaces: all, search: "offline-pinned").flatMap(\.repos).map(\.name) == ["offline-pinned"])
+        // A workspace with an actual session stays visible even if marked hiddenByDirectory (e.g. supervised task).
+        let withSession = RepoTree.build([orca("supervised", "/work/hidden", space: "hidden-unpinned")], machines: machines, workspaces: [hiddenUnpinned])
+        #expect(withSession.flatMap(\.repos).map(\.name) == ["hidden-unpinned"])
+        // A workspace whose only Agent is pinned (navigation-only) stays visible with zero duplicate rows.
+        let navTree = RepoTree.build([], machines: machines, workspaces: [live, workspace("empty")],
+                                     navigationSessions: [orca("pinned", "/work/live", space: "live")])
+        #expect(navTree.flatMap(\.repos).map(\.name) == ["live"])
+        #expect(navTree[0].repos[0].worktrees[0].sessions.isEmpty)
     }
 
     @Test func catalogIdentityIsNotTheDirectoryAndParentsNeverCrossMachineOrHub() {
         let catalog = [workspace("root", path: "/same"), workspace("other", path: "/same"),
                        workspace("child", parent: "root", machine: "machine-b"),
                        workspace("work-child", parent: "root", group: "work")]
-        let tree = RepoTree.build([], machines: machines, workspaces: catalog)
+        let tree = RepoTree.build([], machines: machines, workspaces: catalog, showEmptyWorkspaces: true)
         #expect(tree.flatMap(\.repos).count == 4)
         #expect(Set(tree.flatMap(\.repos).map(\.id)).count == 4)
         #expect(tree.flatMap(\.repos).flatMap(\.worktrees).allSatisfy { $0.children.isEmpty })
@@ -471,7 +507,7 @@ struct AgentRepoTreeTests {
     @Test func catalogCyclesSelfParentsAndMissingParentsStayVisible() {
         let catalog = [workspace("a", parent: "b"), workspace("b", parent: "a"), workspace("self", parent: "self"),
                        workspace("orphan", parent: "gone")]
-        let repos = RepoTree.build([], machines: machines, workspaces: catalog).flatMap(\.repos)
+        let repos = RepoTree.build([], machines: machines, workspaces: catalog, showEmptyWorkspaces: true).flatMap(\.repos)
         #expect(repos.count == 4)
         #expect(repos.flatMap(\.worktrees).allSatisfy { $0.children.isEmpty })
     }
@@ -502,7 +538,7 @@ struct AgentRepoTreeTests {
         child.projectID = "other-project"; child.projectName = "other"
         child.isMain = true
         catalog.append(child)
-        let repos = RepoTree.build([orca("live", child.cwd, space: "nested")], machines: machines, workspaces: catalog)[0].repos
+        let repos = RepoTree.build([orca("live", child.cwd, space: "nested")], machines: machines, workspaces: catalog, showEmptyWorkspaces: true)[0].repos
         #expect(repos.count == 1)
         let repo = try #require(repos.first)
         #expect(repo.name == "app" && repo.path == "/code/app")
@@ -511,6 +547,9 @@ struct AgentRepoTreeTests {
         #expect(repo.worktrees[2].children.map(\.name) == ["nested"], "cross-project lineage still follows the chosen parent")
         #expect(repo.worktrees[2].children[0].main, "a nested project's original checkout keeps its Primary badge")
         #expect(repo.sessions.map(\.sessionID) == ["live"])
+        // Default keeps only the ancestor chain holding the live agent.
+        let defaultRepos = RepoTree.build([orca("live", child.cwd, space: "nested")], machines: machines, workspaces: catalog)[0].repos
+        #expect(defaultRepos[0].worktrees.map(\.name) == ["research"])
     }
 
     @Test func projectIdentityIsScopedAndDoesNotDependOnItsDisplayName() {
@@ -519,17 +558,17 @@ struct AgentRepoTreeTests {
         a.projectID = "one"; b.projectID = "two"; remote.projectID = "one"; otherHub.projectID = "one"
         a.projectName = "app"; b.projectName = "app"; remote.projectName = "app"; otherHub.projectName = "app"
         let catalog = [a, b, remote, otherHub]
-        let repos = RepoTree.build([], machines: machines, workspaces: catalog).flatMap(\.repos)
+        let repos = RepoTree.build([], machines: machines, workspaces: catalog, showEmptyWorkspaces: true).flatMap(\.repos)
         #expect(repos.count == 4 && Set(repos.map(\.id)).count == 4)
         var renamed = catalog
         renamed[0].projectName = "renamed"
-        #expect(Set(RepoTree.build([], machines: machines, workspaces: renamed).flatMap(\.repos).map(\.id)) == Set(repos.map(\.id)))
+        #expect(Set(RepoTree.build([], machines: machines, workspaces: renamed, showEmptyWorkspaces: true).flatMap(\.repos).map(\.id)) == Set(repos.map(\.id)))
     }
 
     @Test func olderCatalogCanGroupTheDocumentedOrcaProjectAddresses() {
         let a = workspace("repo-id::/code/app/.worktrees/a", path: "/code/app/.worktrees/a")
         let b = workspace("repo-id::/code/app/.worktrees/b", path: "/code/app/.worktrees/b")
-        let repos = RepoTree.build([], machines: machines, workspaces: [a, b])[0].repos
+        let repos = RepoTree.build([], machines: machines, workspaces: [a, b], showEmptyWorkspaces: true)[0].repos
         #expect(repos.count == 1 && repos[0].name == "app")
         #expect(repos[0].worktrees.count == 2)
     }

@@ -103,10 +103,21 @@ func rank(list []Facts, placed []placement, now time.Time) {
 	for i := range placed {
 		bySection[placed[i].Section] = append(bySection[placed[i].Section], i)
 	}
+	var blocked map[string]int
+	if needsYouRows := bySection[assistantwire.TodoListSectionNeedsYou]; len(needsYouRows) > 1 && anyTodosV2(list, needsYouRows) {
+		blocked = downstreamBlockedCounts(list, placed)
+	}
 	for section, rows := range bySection {
+		useCriticalPath := section == assistantwire.TodoListSectionNeedsYou && blocked != nil
 		keys := make(map[int]rankKey, len(rows))
 		for _, i := range rows {
-			keys[i] = rankKeyOf(&list[i], &placed[i], now)
+			k := rankKeyOf(&list[i], &placed[i], now)
+			if useCriticalPath {
+				k.criticalPath = true
+				k.canWait = placed[i].CanWait
+				k.downstreamBlocked = blocked[list[i].ID]
+			}
+			keys[i] = k
 		}
 		slices.SortFunc(rows, func(a, b int) int {
 			return cmp.Or(compareRank(section, keys[a], keys[b]), strings.Compare(list[a].ID, list[b].ID))
@@ -117,10 +128,71 @@ func rank(list []Facts, placed []placement, now time.Time) {
 	}
 }
 
+func anyTodosV2(list []Facts, rows []int) bool {
+	for _, i := range rows {
+		if list[i].TodosV2 {
+			return true
+		}
+	}
+	return false
+}
+
+// downstreamBlockedCounts computes, for each open to-do in list, how many distinct open downstream
+// to-dos transitively depend on it via after (dep -> dependent) or part_of (step -> parent) edges.
+// Closed and Someday to-dos are excluded, and graph traversal is cycle-safe.
+func downstreamBlockedCounts(list []Facts, placed []placement) map[string]int {
+	open := make(map[string]bool, len(list))
+	for i := range list {
+		if list[i].ID != "" && isOpen(placed[i].TodoSummary) {
+			open[list[i].ID] = true
+		}
+	}
+	if len(open) == 0 {
+		return nil
+	}
+	downstream := make(map[string][]string, len(open))
+	for i := range list {
+		f := &list[i]
+		if !open[f.ID] {
+			continue
+		}
+		for _, dep := range f.After {
+			if dep != "" && dep != f.ID && open[dep] {
+				downstream[dep] = append(downstream[dep], f.ID)
+			}
+		}
+		if f.PartOf != "" && f.PartOf != f.ID && !outsideDecisionRow(*f) && open[f.PartOf] {
+			downstream[f.ID] = append(downstream[f.ID], f.PartOf)
+		}
+	}
+	counts := make(map[string]int, len(open))
+	for start := range open {
+		if len(downstream[start]) == 0 {
+			continue
+		}
+		visited := map[string]bool{start: true}
+		queue := append([]string(nil), downstream[start]...)
+		for len(queue) > 0 {
+			cur := queue[0]
+			queue = queue[1:]
+			if visited[cur] {
+				continue
+			}
+			visited[cur] = true
+			queue = append(queue, downstream[cur]...)
+		}
+		counts[start] = len(visited) - 1
+	}
+	return counts
+}
+
 // rankKey is what a section's rule compares; a zero time is "none", which goes last where a time leads.
 type rankKey struct {
 	deadline, since, activity, wake, due, back, created time.Time
 	priority                                            int
+	criticalPath                                        bool
+	canWait                                             bool
+	downstreamBlocked                                   int
 }
 
 func rankKeyOf(f *Facts, p *placement, now time.Time) rankKey {
@@ -141,6 +213,18 @@ func rankKeyOf(f *Facts, p *placement, now time.Time) rankKey {
 	return k
 }
 
+// compareBool orders false before true.
+func compareBool(a, b bool) int {
+	switch {
+	case a == b:
+		return 0
+	case !a && b:
+		return -1
+	default:
+		return 1
+	}
+}
+
 // soonest compares two times where the earlier leads and none goes last.
 func soonest(a, b time.Time) int {
 	switch {
@@ -157,7 +241,17 @@ func soonest(a, b time.Time) int {
 // compareRank orders two rows of section by its rule.
 func compareRank(section string, a, b rankKey) int {
 	switch section {
-	case assistantwire.TodoListSectionNeedsYou, assistantwire.TodoListSectionCanWait:
+	case assistantwire.TodoListSectionNeedsYou:
+		if a.criticalPath && b.criticalPath {
+			if c := compareBool(a.canWait, b.canWait); c != 0 {
+				return c
+			}
+			if c := cmp.Compare(b.downstreamBlocked, a.downstreamBlocked); c != 0 {
+				return c
+			}
+		}
+		return cmp.Or(soonest(a.deadline, b.deadline), soonest(a.since, b.since))
+	case assistantwire.TodoListSectionCanWait:
 		return cmp.Or(soonest(a.deadline, b.deadline), soonest(a.since, b.since))
 	case assistantwire.TodoListSectionWorking:
 		return b.activity.Compare(a.activity)

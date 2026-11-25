@@ -72,9 +72,12 @@ DOMAINS = [
     "dock_mock",  # more of the main conversation's tasks waiting in the To Decide pager (#12831), MOCK_DOCK
     "meeting_finishing_mock",  # a meeting's final pass in progress for shots of the minutes line (#13461), MOCK_MEETING_FINISHING
     "extension_scene_mock",  # UI version 11's scene on a made-up Home page (#12544), MOCK_EXTENSION_SCENE
+    "extension_map_mock",  # UI version 12's map page, overview card, and tool_views (#14730), MOCK_EXTENSION_MAP
     "spaces_mock",  # domain spaces: tracks, kinds, SPACE.md, categories, extension trust (#13500), MOCK_SPACES
     "question_rail_mock",  # the main chat's question rail states and read marks (#13021), MOCK_QUESTION_RAIL
     "hub_modules_mock",  # a hub that publishes module flags: `modules` and `module.<id>` (#13849), MOCK_HUB_MODULES
+    "usage_map_mock",  # the disk usage map: scan, trash, cleanup and an offload provider (#14576), MOCK_USAGE_MAP
+    "dashboards_mock",  # Dashboards: the -pages places and pages, the `dashboards` switch (#15017), MOCK_DASHBOARDS
 ]
 
 METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")

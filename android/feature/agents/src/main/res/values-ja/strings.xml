@@ -634,4 +634,12 @@
         <item quantity="other">期限なし %1$d 件</item>
     </plurals>
     <string name="agents_sidebar_heading">エージェント</string>
+    <string name="agents_side_unread_kicker">子セッションに新着：%1$s</string>
+    <string name="agents_side_unread_more">+%1$d</string>
+    <string name="agents_side_unread_spoken">子セッション「%1$s」に新しい返信があります</string>
+    <string name="agents_side_unread_open">子セッション「%1$s」を開く</string>
+    <string name="agents_side_unread_also">ほかにも新しい返信：%1$s</string>
+    <plurals name="agents_side_unread_count">
+        <item quantity="other">%1$d件の子セッションに新しい返信があります</item>
+    </plurals>
 </resources>

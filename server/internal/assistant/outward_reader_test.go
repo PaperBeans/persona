@@ -15,7 +15,9 @@ import (
 // included, read everything as before.
 func TestOutwardConversationsReadNoPrivateProfile(t *testing.T) {
 	st := &memStore{}
-	s := newKBServiceOn(t, newFakeHub(), st)
+	f := newFakeHub()
+	f.inbox = newFakeInbox()
+	s := newKBServiceOn(t, f, st)
 	e := kbEng(t, s)
 	if err := e.Store.PutPerson(&kb.Person{ID: "p1", Name: "Example Person"}); err != nil {
 		t.Fatal(err)

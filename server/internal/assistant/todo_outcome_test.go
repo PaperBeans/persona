@@ -293,7 +293,7 @@ func TestAgentStartCarriesExtensionProjectContext(t *testing.T) {
 
 func TestProjectContextMemoryOrderBoundsAndConflicts(t *testing.T) {
 	s, f, _ := outcomeEnv(t, nil, outcomeReply)
-	f.hello.Locale = "en"
+	f.setLocale("en")
 	e := kbEng(t, s)
 	p, _ := e.Store.Project("天气-app")
 	p.Kind = "long"
@@ -352,7 +352,7 @@ func TestProjectContextMemoryOrderBoundsAndConflicts(t *testing.T) {
 
 func TestProjectContextMemoryFallsBackToOneLineWithoutSummary(t *testing.T) {
 	s, f, _ := outcomeEnv(t, nil, outcomeReply)
-	f.hello.Locale = "en"
+	f.setLocale("en")
 	e := kbEng(t, s)
 	if err := e.AppendProjectMemory("天气-app", kb.ProjectMemoryRecord{ID: "one", Type: kb.ProjectMemoryOutcome, Conclusion: "result"}); err != nil {
 		t.Fatal(err)
@@ -365,7 +365,7 @@ func TestProjectContextMemoryFallsBackToOneLineWithoutSummary(t *testing.T) {
 
 func TestProjectContextSummaryUsesLongProjectBudget(t *testing.T) {
 	s, f, _ := outcomeEnv(t, nil, outcomeReply)
-	f.hello.Locale = "en"
+	f.setLocale("en")
 	e := kbEng(t, s)
 	p, _ := e.Store.Project("天气-app")
 	p.Kind = "long"
@@ -392,7 +392,7 @@ func TestProjectContextSummaryUsesLongProjectBudget(t *testing.T) {
 
 func TestProjectContextWithoutMemoryStaysLegacy(t *testing.T) {
 	s, f, todo := outcomeEnv(t, nil, outcomeReply)
-	f.hello.Locale = "en"
+	f.setLocale("en")
 	e := kbEng(t, s)
 	if err := e.Store.PutSummary(kb.KindProject, "天气-app", "Legacy summary must not replace OneLine"); err != nil {
 		t.Fatal(err)

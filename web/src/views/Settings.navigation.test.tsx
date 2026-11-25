@@ -47,6 +47,8 @@ vi.mock("./settings/HubConnector", () => ({
 }));
 vi.mock("./settings/SentSettings", () => ({ SentSettings: () => <div data-page="sent" /> }));
 
+import { enabledNavItems, registerModule, resetModulesForTest } from "../core/module-host";
+import { forgetModuleSwitches, MODULE_SWITCH_KEY } from "../core/module-switch";
 import { initI18n, t } from "../i18n";
 import { Settings } from "./Settings";
 import { loadPages } from "../lib/lazy-page";
@@ -117,6 +119,46 @@ describe("Settings category navigation", () => {
       await initI18n("zh-Hans");
     }
   });
+  it("omits Optional features when the build registers no modules", async () => {
+    await mount("/settings?tab=general");
+    expect(host.querySelector('[data-configuration="features"]')).toBeNull();
+  });
+
+  it("switches a module off and back on from General and reflects another tab's choice", async () => {
+    forgetModuleSwitches();
+    registerModule({
+      id: "garden", title: () => "Garden", description: () => "A synthetic module",
+      navItems: [{ key: "garden", path: "/garden", icon: "heart", label: () => "Garden", after: "inbox" }],
+      load: async () => ({}),
+    });
+    try {
+      await mount("/settings?tab=general");
+      const toggle = () => host.querySelector<HTMLButtonElement>('[data-configuration-field="garden"] [role="switch"]')!;
+      expect(toggle()).not.toBeNull();
+      expect(toggle().getAttribute("aria-checked")).toBe("true");
+      expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
+
+      await act(async () => toggle().click());
+      expect(localStorage.getItem(MODULE_SWITCH_KEY)).toBe('["garden"]');
+      expect(enabledNavItems()).toEqual([]);
+
+      await act(async () => toggle().click());
+      expect(localStorage.getItem(MODULE_SWITCH_KEY)).toBeNull();
+      expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
+
+      await act(async () => {
+        localStorage.setItem(MODULE_SWITCH_KEY, '["garden"]');
+        window.dispatchEvent(new StorageEvent("storage", { key: MODULE_SWITCH_KEY, newValue: '["garden"]' }));
+      });
+      expect(toggle().getAttribute("aria-checked")).toBe("false");
+      expect(enabledNavItems()).toEqual([]);
+    } finally {
+      await act(async () => resetModulesForTest());
+      localStorage.removeItem(MODULE_SWITCH_KEY);
+      forgetModuleSwitches();
+    }
+  });
+
   // audit item 17: General's hints were cut at one line ("切换后页面会重新载…"), at every width
   it.each([false, true])("lets General's hints wrap rather than cutting them (phone: %s)", async (phone) => {
     viewport.phone = phone;
@@ -133,6 +175,43 @@ describe("Settings category navigation", () => {
       expect(hint, anchor).toBeTruthy();
       expect(hint!.classList.contains("truncate"), anchor).toBe(false);
     }
+  });
+
+  // #13398: General keeps the default appearance; the opt-in looks moved to Advanced › Appearance with no storage change
+  it("moves the non-default looks to Advanced and keeps an existing choice", async () => {
+    await mount("/settings?tab=general");
+    let region = host.querySelector('[role="region"]')!;
+    expect(region.querySelector('[data-settings-row="theme"]')).not.toBeNull();
+    expect(region.querySelector('[data-settings-row="text-size"]')).not.toBeNull();
+    expect(region.querySelector('[data-settings-row="theme-color"]')).toBeNull();
+    expect(region.querySelector('[data-settings-row="font"]')).toBeNull();
+    expect(region.querySelector('[data-settings-row="sidebar-icons"]')).toBeNull();
+
+    await act(async () => category(t("settings-nav.tab_advanced")).click());
+    expect(location.search).toBe("?tab=advanced");
+    region = host.querySelector('[role="region"]')!;
+    expect(region.getAttribute("aria-label")).toBe(t("settings-nav.tab_advanced"));
+    expect(region.querySelector('[data-settings-group="appearance"]')).not.toBeNull();
+    const color = region.querySelector('[data-settings-row="theme-color"]')!;
+    expect(region.querySelector('[data-settings-row="font"]')).not.toBeNull();
+    expect(region.querySelector('[data-settings-row="sidebar-icons"]')).not.toBeNull();
+    // the default still stores nothing
+    expect(color.querySelector('[aria-checked="true"]')?.getAttribute("aria-label")).toContain(t("ui-look.default"));
+
+    const radio = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('[data-settings-row="theme-color"] [role="radio"]')]
+      .find((r) => r.getAttribute("aria-label")?.startsWith(name))!;
+    await act(async () => radio(t("ui-look.coral")).click());
+    expect(localStorage.getItem("persona.accent")).toBe("coral");
+    expect(document.documentElement.dataset.accent).toBe("coral");
+
+    // a reload lands on the same Advanced page with the same choice
+    await act(async () => root.render(null));
+    await act(async () => root.render(<Settings onToggleSidebar={() => {}} />));
+    expect(location.search).toBe("?tab=advanced");
+    expect(radio(t("ui-look.coral")).getAttribute("aria-checked")).toBe("true");
+
+    await act(async () => radio(t("ui-look.default")).click());
+    expect(localStorage.getItem("persona.accent")).toBeNull();
   });
 
   it("opens knowledge selection as the current assistant's, with no manager in the address", async () => {
@@ -371,9 +450,13 @@ describe("Settings category navigation", () => {
     expect(new URLSearchParams(location.search).get("extension")).toBe(to);
   });
 
-  it("keeps a connector page's own Back on a wide screen", async () => {
+  it("keeps a connector page's own Back on a wide screen and leaves legacy scroll container unchanged", async () => {
     await mount("/settings?tab=connectors&connector=github");
     expect(host.querySelector("[data-own-back]")).not.toBeNull();
+    const region = host.querySelector<HTMLElement>('[role="region"]')!;
+    expect(region.hasAttribute("data-integrations-split-host")).toBe(false);
+    expect(region.classList.contains("overflow-y-auto")).toBe(true);
+    expect(region.classList.contains("overscroll-contain")).toBe(true);
   });
 
   it.each(["/settings?tab=sent", "/settings/sent", "/settings/sent/"])("redirects %s to the secondary Sent page", async (url) => {

@@ -443,18 +443,18 @@ func TestSetupBlockSwitchesNothingOn(t *testing.T) {
 		}
 		return out
 	}
-	before, puts := snapshot(), store.puts
+	before, puts := snapshot(), store.putCount()
 
 	b := s.setupFor(ctx, now, s.location(ctx), i18n.En, testWeb)
 	if got := setupIDs(b); !slices.Equal(got, []string{setupDelegate, setupAutoContinue}) {
 		t.Fatalf("block: %v", got)
 	}
-	if store.puts != puts {
-		t.Fatalf("computing the block wrote %d settings", store.puts-puts)
+	if after := store.putCount(); after != puts {
+		t.Fatalf("computing the block wrote %d settings", after-puts)
 	}
 	s.setupTold(b, now)
-	if store.puts != puts+1 {
-		t.Fatalf("telling the block wrote %d settings, want its own book only", store.puts-puts)
+	if after := store.putCount(); after != puts+1 {
+		t.Fatalf("telling the block wrote %d settings, want its own book only", after-puts)
 	}
 	after := snapshot()
 	if len(after) != len(before) {

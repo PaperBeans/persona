@@ -210,6 +210,11 @@ struct SettingsView: View {
         if d.bool(forKey: "openMachines") {
             p.append(MachineListRoute())
             if let id = d.string(forKey: "openMachineDetail") { p.append(MachineDetailRoute(id: id)) }
+            // `-openUsageMap <machine>` (`reclaim:<machine>`: the disk alert's reclaim mode): its disk usage map (#14576).
+            if let id = d.string(forKey: "openUsageMap") {
+                let reclaim = id.hasPrefix("reclaim:")
+                p.append(MachineUsageMapRoute(ref: MachineRef(path: reclaim ? String(id.dropFirst("reclaim:".count)) : id), reclaim: reclaim))
+            }
         }
         else if d.bool(forKey: "openAdvancedSettings") { p.append(SettingsPage.advanced) } // Settings › Advanced (#13395)
         else if d.bool(forKey: "openStorage") { p.append(SettingsPage.storage) }
@@ -432,6 +437,7 @@ private struct SettingsDestinations: ViewModifier {
             .navigationDestination(for: ModelPurposeRoute.self) { r in ModelPurposeEditorView(purposeID: r.id).splitDetailPage() }
             .navigationDestination(for: ModelLauncherRoute.self) { r in ModelLauncherDetailView(name: r.name).splitDetailPage() }
             .navigationDestination(for: MachineDetailRoute.self) { r in MachineDetailView(ref: r.ref).splitDetailPage() }
+            .navigationDestination(for: MachineUsageMapRoute.self) { r in UsageMapView(route: r).splitDetailPage() }
             .navigationDestination(for: TerminalsRoute.self) { r in TerminalsView(only: r.machine).splitDetailPage() }
             .navigationDestination(for: MessagesChatsRoute.self) { r in MessagesChatListView(manager: r.manager).splitDetailPage() }
             .navigationDestination(for: MessagesThreadRoute.self) { r in MessagesThreadView(id: r.id, name: r.name, manager: r.manager).splitDetailPage() }

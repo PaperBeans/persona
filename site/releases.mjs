@@ -123,7 +123,8 @@ export function summarizeNotes(body) {
     else if (type === "fix") { counts.fixes++; fixes.push({ scope, title: text }); }
     else counts.other++;
   }
-  return { counts, highlights: pick(features.length ? features : fixes) };
+  const highlights = pick(features);
+  return { counts, highlights: highlights.length ? highlights : pick(fixes) };
 }
 
 // Areas people use come first in the highlights; build, test and release plumbing never appears there.

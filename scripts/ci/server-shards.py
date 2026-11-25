@@ -32,6 +32,18 @@ def select_packages(packages, shard):
     return [package for package in packages if shard_for(package) == shard]
 
 
+def server_test_env(database_file):
+    """The server_test_env.py wrapper shared by partition listing and partition go test runs so both use the exact
+    same cleaned environment and GOFLAGS (including -trimpath) and share GOCACHE (#14633)."""
+    return [sys.executable, str(ROOT / "scripts/test/server_test_env.py"), "--database-file", database_file, "--"]
+
+
+def list_patterns(package, database_file):
+    """List one partitioned package's tests through server_test_env.py so GOCACHE is warmed with the matching build
+    action ID before the shard fans out its partition workers."""
+    return go_partitions.list_patterns(ROOT / "server", package, prefix=server_test_env(database_file))
+
+
 def go_test(shard, database_file):
     """The go test command line a shard's processes start with, before their packages."""
     workers = {"node": 1, "managers": 3, "other": 4, AFFECTED: 3}[shard]
@@ -189,7 +201,7 @@ def main():
         # at once, on a busy CI machine).
         listed = go_partitions.split(packages)[1]
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(len(listed), 1)) as pool:
-            patterns = list(pool.map(lambda package: go_partitions.list_patterns(ROOT / "server", package), listed))
+            patterns = list(pool.map(lambda package: list_patterns(package, args.database_file), listed))
         partitions = dict(zip(listed, patterns))
     except subprocess.CalledProcessError as error:
         # Listing a partitioned package's tests compiles it; a compile error ends the shard here, before any test.

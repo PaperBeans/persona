@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "owner_main_two_direction_tree",
+      "description": "A synthetic owner, main, two directions, workers, and a subagent share one snapshot.",
+      "source": "docs/protocol/protocol.md organization runtime snapshot",
+      "input": {
+        "generated_at": "2026-11-24T00:30:00Z",
+        "time_zone": "Asia/Shanghai",
+        "main": "conv_main",
+        "directions": ["conv_lead_a", "conv_lead_b"],
+        "tasks": [
+          {
+            "id": "todo_a",
+            "title": "Task A",
+            "supervisor": "conv_lead_a",
+            "direction_id": "conv_lead_a",
+            "review_state": "pending_review",
+            "agents": [
+              {
+                "machine": "mac",
+                "session": "raw-worker-a",
+                "title": "Readable worker A",
+                "launcher": "launcher-a",
+                "requested_model": "requested-a",
+                "effort": "high",
+                "goal": "Ship A",
+                "observations": [{"id": "item-a", "seq": 11, "ts": "2026-11-24T00:15:00Z", "model": "actual-a"}],
+                "subagents": [{"id": "agent-1", "description": "Inspect the contract", "model": "actual-sub-a", "observations": [{"id": "item-sub-a", "seq": 12, "ts": "2026-11-24T00:16:00Z", "model": "actual-sub-a"}]}]
+              }
+            ]
+          },
+          {
+            "id": "todo_b",
+            "title": "Task B",
+            "supervisor": "conv_lead_b",
+            "direction_id": "conv_lead_a",
+            "done_when": ["B criteria"],
+            "agents": [{"machine": "mini", "session": "raw-worker-b", "title": "Readable worker B", "launcher": "launcher-b", "requested_model": "requested-b", "effort": "medium", "observations": [{"id": "item-b", "seq": 21, "ts": "2026-11-24T00:17:00Z", "model": "actual-b"}]}]
+          },
+          {
+            "id": "todo_main",
+            "title": "Main task",
+            "supervisor": "conv_main",
+            "done_when": ["Main criteria"],
+            "agents": [{"machine": "server", "session": "raw-worker-main", "title": "Readable main worker", "launcher": "launcher-main", "requested_model": "requested-main", "effort": "max", "observations": [{"id": "item-main", "seq": 31, "ts": "2026-11-24T00:18:00Z", "model": "actual-main"}]}]
+          }
+        ],
+        "interactions": [{"id": "ix-full", "machine": "mac", "session": "raw-worker-a"}, {"id": "ix-partial", "machine": "mac", "session": "missing-worker"}],
+        "machine_claims": {"mac": 2},
+        "direction_claims": {"conv_lead_a": 1},
+        "machine_limit": 7,
+        "direction_limit": 5
+      },
+      "expected": {
+        "generated_at": "2026-11-24T00:30:00Z",
+        "day": "2026-11-24",
+        "time_zone": "Asia/Shanghai",
+        "nodes": [
+          {"id": "owner", "parent_id": null, "kind": "owner"},
+          {"id": "main:conv_main", "parent_id": "owner", "kind": "main"},
+          {"id": "direction:conv_lead_a", "parent_id": "main:conv_main", "kind": "direction", "goal_status": "unknown", "drift_status": "unknown", "review_pending": 1, "review_task_ids": ["todo_a"]},
+          {"id": "agent:mac/raw-worker-a", "parent_id": "direction:conv_lead_a", "kind": "worker", "display_name": "Readable worker A", "state": "working", "goal": "Ship A", "goal_source": "runtime_goal_info", "model": "actual-a", "requested_model": "requested-a", "effort": "high", "preset_status": "unknown"},
+          {"id": "agent:mac/raw-worker-a@agent-1", "parent_id": "agent:mac/raw-worker-a", "kind": "subagent", "display_name": "Inspect the contract", "state": "working", "model": "actual-sub-a", "requested_model": null, "goal_status": "unknown"},
+          {"id": "direction:conv_lead_b", "parent_id": "main:conv_main", "kind": "direction"},
+          {"id": "agent:mini/raw-worker-b", "parent_id": "direction:conv_lead_b", "kind": "worker", "display_name": "Readable worker B", "goal": "B criteria", "goal_source": "supervision_done_when", "model": "actual-b", "requested_model": "requested-b", "effort": "medium", "organization_direction_status": "unknown"},
+          {"id": "agent:server/raw-worker-main", "parent_id": "main:conv_main", "kind": "worker", "display_name": "Readable main worker", "goal": "Main criteria", "model": "actual-main", "requested_model": "requested-main", "effort": "max"}
+        ],
+        "open_todo_ids": ["todo_a", "todo_b", "todo_main"],
+        "open_todo_unknown_ids": ["todo_b"],
+        "model_observation_nodes": ["agent:mac/raw-worker-a", "agent:mac/raw-worker-a@agent-1", "agent:mini/raw-worker-b", "agent:server/raw-worker-main"],
+        "machine_running": {"mac": 1, "mini": 1, "server": 1},
+        "machine_claims": {"mac": 2, "mini": 0, "server": 0},
+        "machine_limits": {"mac": 7, "mini": 7, "server": 20},
+        "unknown_machine_ids": ["m"],
+        "direction_running": {"direction:conv_lead_a": 1, "direction:conv_lead_b": 1, "main:conv_main": 1},
+        "direction_claims": {"direction:conv_lead_a": 1, "direction:conv_lead_b": 0, "main:conv_main": 0},
+        "direction_limits": {"direction:conv_lead_a": 5, "direction:conv_lead_b": 5, "main:conv_main": 5},
+        "complete_p0_path": ["agent:mac/raw-worker-a", "direction:conv_lead_a", "main:conv_main", "owner"],
+        "incomplete_p0_id": "ix-partial"
+      }
+    }
+  ]
+}

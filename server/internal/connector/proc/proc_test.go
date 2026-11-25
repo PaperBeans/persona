@@ -59,6 +59,8 @@ func TestMain(m *testing.M) {
 				return refProgram{&exampleProgram{secrets: s}}, nil
 			case "images":
 				return imageProgram{&exampleProgram{secrets: s}}, nil
+			case "views":
+				return viewProgram{&exampleProgram{secrets: s}}, nil
 			case "catalog":
 				return &catalogProgram{exampleProgram: &exampleProgram{secrets: s}}, nil
 			case "history":

@@ -993,7 +993,7 @@ func TestPhotoDeleteUncitesAtOnce(t *testing.T) {
 	if _, err := e.SetMinutesTodos(recID, m.Version, map[string]string{"a1": "todo_2"}, nil); !errors.Is(err, ErrMinutesStale) {
 		t.Fatalf("a confirm of the version before: %v", err)
 	}
-	if r := recordingNow(t, e, recID); r.MinutesState != MinutesPending || !r.quietMinutes() || !slices.Equal(told, []int{1}) {
+	if r := recordingNow(t, e, recID); r.MinutesState != MinutesPending || !quietMinutes(r) || !slices.Equal(told, []int{1}) {
 		t.Fatalf("made again: %q quiet %d asks %d told %v", r.MinutesState, r.MinutesQuiet, r.MinutesAsks, told)
 	}
 	e.WriteMinutes(ctx, 2)
@@ -1045,7 +1045,7 @@ func TestPhotoDeleteFinishedByARepeat(t *testing.T) {
 		Points: []MinutesPoint{{Text: "第一句", At: 0}, {Text: "照片上的", At: 2, Photo: 2}}})
 	changeRecording(t, e, recID, func(r *Recording) {
 		r.MinutesRev, r.MinutesVersion = 1, 1
-		r.planMinutes()
+		planMinutes(r)
 	})
 	st, start := e.Store, recordingNow(t, e, recID).StartedAt
 	st.recFilesMu.Lock()
@@ -1069,7 +1069,7 @@ func TestPhotoDeleteFinishedByARepeat(t *testing.T) {
 	if m, _ := e.Store.ReadMinutes(recID); m == nil || m.Version != 2 || len(m.Points) != 1 || m.Points[0].Photo != 0 {
 		t.Fatalf("minutes %+v", m)
 	}
-	if r := recordingNow(t, e, recID); r.MinutesAsks != asks+1 || !r.quietMinutes() || r.MinutesVersion != 2 {
+	if r := recordingNow(t, e, recID); r.MinutesAsks != asks+1 || !quietMinutes(r) || r.MinutesVersion != 2 {
 		t.Fatalf("not made again: asks %d (was %d) quiet %d v%d", r.MinutesAsks, asks, r.MinutesQuiet, r.MinutesVersion)
 	}
 	// Nothing left: a repeat changes nothing.
@@ -1155,7 +1155,7 @@ func TestMinutesQuietAcrossARetry(t *testing.T) {
 	addPhoto(t, e, recID, photoUpload(1, 5, "白板", ""), false)
 	quiet := recordingNow(t, e, recID).MinutesQuiet
 	putRecording(t, e, recID, u, start.Add(2*time.Minute))
-	if r := recordingNow(t, e, recID); r.MinutesQuiet != quiet || !r.quietMinutes() || r.MinutesState != MinutesPending {
+	if r := recordingNow(t, e, recID); r.MinutesQuiet != quiet || !quietMinutes(r) || r.MinutesState != MinutesPending {
 		t.Fatalf("after the retry: %q quiet %d (was %d) asks %d", r.MinutesState, r.MinutesQuiet, quiet, r.MinutesAsks)
 	}
 	e.WriteMinutes(ctx, 2)

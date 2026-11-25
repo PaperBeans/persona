@@ -145,6 +145,7 @@ POST /api/v1/interactions/{id}/choose
 POST /api/v1/interactions/{id}/clarify # owner-only relay to the prepared operation's manager, like resolve
 POST /api/v1/interactions/{id}/reanswer
 POST /api/v1/interactions/{id}/resolve
+POST /api/v1/interactions/{id}/seen # owner-only card view receipt to start short countdown on owner-only timed cards
 POST /api/v1/looks/uploads # the hub keeps the looks: personas/ is its own directory (look_uploads.go)
 POST /api/v1/machines/{id}/confirm
 POST /api/v1/machines/{id}/reject
@@ -245,14 +246,18 @@ POST /api/v1/phone/write-queue/{id}/cancel
 PUT /api/v1/phone/primary
 
 # Web Push to browsers (#7459): push delivery, the hub's own (hub/webpush_routes.go).
+DELETE /api/v1/push/grading/layer # push grading extension layer, hub push delivery (push_grading_layer.go)
 DELETE /api/v1/push/web/{device}
 GET /api/v1/push/intercepts # held pushes, read-only (push_grading.go)
 GET /api/v1/push/ln-mode # push grading switch, legacy alias (push_grading.go)
 GET /api/v1/push/grading # push grading switch, neutral alias of ln-mode (push_grading.go)
+GET /api/v1/push/grading/layer # push grading extension layer, hub push delivery (push_grading_layer.go)
 GET /api/v1/push/stats/daily # push grading delivered/held counts per day, read-only (push_grading.go)
 GET /api/v1/push/web
 GET /api/v1/push/web/{device}
+POST /api/v1/push/grading/preview # push grading read-only preview, hub push delivery (push_grading_layer.go)
 POST /api/v1/push/web/{device}/test
+PUT /api/v1/push/grading/layer # push grading extension layer, hub push delivery (push_grading_layer.go)
 PUT /api/v1/push/web/{device}
 
 /api/v1/auth/password/

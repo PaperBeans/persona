@@ -44,6 +44,11 @@ func TestReferenceReportLinks(t *testing.T) {
 			want: nil,
 		},
 		{
+			name: "sentence initial background sync worker delivery stays delivery",
+			text: "Background sync worker fixed in " + own,
+			want: nil,
+		},
+		{
 			// Explicit framing still marks the link reference, including the colon form and the "as background" form.
 			name: "explicit background framing is reference",
 			text: own + " is included as background only; our delivery is " + foreign + ".",

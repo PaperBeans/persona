@@ -37,6 +37,7 @@ import (
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/managerconf"
 	"github.com/nwverse/persona/server/internal/managerupdate"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/update"
 )
@@ -50,10 +51,15 @@ func Main(ctx context.Context, build update.Build, stdin io.Reader) error {
 	return MainWith(ctx, build, stdin, MainHooks{})
 }
 
-// MainHooks are what a caller of MainWith gets of the running manager besides.
+// MainHooks are what a caller of MainWith / RunManagerWith gets of the running manager besides.
 type MainHooks struct {
 	// Ready is given the manager's Idle once it is made (before it connects to the hub).
 	Ready func(Idle)
+	// PendingRestart is given a setter to report pending_restart to the hub once BusHub is made.
+	PendingRestart func(func(bool))
+	// HostDataDir is the host's Persona data directory (~/.persona) captured before PERSONA_HOME is redirected to an
+	// independent manager's directory, so manager.hello can read the co-located node's machine-uid.
+	HostDataDir string
 }
 
 // MainWith is Main with h.
@@ -129,7 +135,11 @@ func MainWith(ctx context.Context, build update.Build, stdin io.Reader, h MainHo
 	// itself again): nothing of it runs next to the one that has the token (manager.RunBuiltin waits for a new one).
 	o.Fingerprint, o.StopWhenRevoked, o.TokenFirst = fingerprint, deploy == DeployService, deploy == DeployService
 	o.RotateSecretKey = true
-	o.Logf, o.ExtConfig, o.Ready = logger.Printf, ext, h.Ready
+	o.Logf, o.ExtConfig, o.Ready, o.PendingRestart = logger.Printf, ext, h.Ready, h.PendingRestart
+	o.HostDataDir = h.HostDataDir
+	if o.HostDataDir == "" {
+		o.HostDataDir = home
+	}
 	// Its own database, its data moved there once (owndb.go); the hub's while that cannot be yet.
 	if o.DatabaseURL, o.OnHubDatabase, err = builtinDatabase(ctx, home, cfg.DatabaseURL, provisionOwn, logger.Printf); err != nil {
 		return err
@@ -257,6 +267,10 @@ type runOptions struct {
 	Logf       func(format string, args ...any)
 	// Ready is given the manager's Idle once its service is made (MainHooks.Ready); nil: nobody asks.
 	Ready func(Idle)
+	// PendingRestart is given BusHub.SetPendingRestart once BusHub is made (MainHooks.PendingRestart); nil: nobody asks.
+	PendingRestart func(func(bool))
+	// HostDataDir is the host's Persona data directory (~/.persona) used to read machine-uid for manager.hello.
+	HostDataDir string
 	// Errors is the process's log writer that reports its error lines (newErrorTee); nil: run makes one.
 	Errors *errorTee
 }
@@ -366,9 +380,14 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 		UpdateHandoffGrace:     func() time.Duration { return nodeUpdateHandoffGraceOf(svc.hello(context.Background())) },
 		PromptLanguage:         func() string { return answerLanguage(svc.hello(context.Background()).Locale) },
 		// The extensions' part of a node's connection and its events (internal/extmgr).
-		Own:         func(ctx context.Context, machine string) map[string]json.RawMessage { return ext.Own(ctx, machine) },
-		OnConnected: func(machine string) { ext.NodeConnected(machine) },
-		OnEvent:     func(machine, event string, params json.RawMessage) bool { return ext.NodeEvent(machine, event, params) },
+		Own: func(ctx context.Context, machine string) map[string]json.RawMessage { return ext.Own(ctx, machine) },
+		OnConnected: func(machine string) {
+			ext.NodeConnected(machine)
+			if svc != nil {
+				svc.NodeConnected(ctx, machine)
+			}
+		},
+		OnEvent: func(machine, event string, params json.RawMessage) bool { return ext.NodeEvent(machine, event, params) },
 		// The messages held for a machine's Agents changed (devices held.go): its rows again, nothing else of a list.
 		HeldChanged: func(machine string) { svc.publishSessions(machine) },
 		// A node's new connection gets the launchers added in Persona, with their keys (models_launchers_push.go).
@@ -390,9 +409,19 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 			return ext.UsageQuery(ctx, id, launcher)
 		},
 		Hub: lazyHost{c: func() *bus.Client { return bh.Client() }}})
+	// The run-time module switch (the modules settings row), read once here, before the extensions: the kernel and every
+	// provider seam (moduleswitch) get the same list, so a module switched off is absent as one built out.
+	assistantStore := repositorystore.New(database)
+	modulesOff := ReadModuleSwitch(ctx, assistantStore, logf)
+	// The assistant's pages (Dashboards, #15017) are the built-in manager's: the hub relays the extensions' routes to
+	// the default manager, and no other has pages (pages_ui.go).
+	var pages extmgr.Pages
+	if o.ID == assistantwire.AssistantID {
+		pages = pagesHook{svc: func() *Service { return svc }}
+	}
 	// The extensions, connectors and bots (internal/extmgr): the data directory here, its own sections in manager.json
 	// (as moveConfig read and checked them) and its own secret.key.
-	ext = extmgr.New(extmgr.Options{Dir: home, ConfigFile: o.ConfigFile, Config: o.ExtConfig, SecretKey: o.SecretKey,
+	ext = extmgr.New(extmgr.Options{Modules: moduleswitch.Off(modulesOff...), Dir: home, ConfigFile: o.ConfigFile, Config: o.ExtConfig, SecretKey: o.SecretKey,
 		Store: database, Build: build, ManagerID: o.ID, HubURL: hub, HubClient: httpClient, HubProofKey: extwire.ProofKey(token),
 		Logf: log.New(stderr, "extensions: ", log.LstdFlags).Printf,
 		Hub:  lazyHost{c: func() *bus.Client { return bh.Client() }, b: func() *BusHub { return bh }}, Devices: devs,
@@ -405,6 +434,11 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 		TranscriptionChanged: func() {
 			if svc != nil {
 				svc.transcriptionReadinessChanged()
+			}
+		},
+		TracksChanged: func() {
+			if svc != nil {
+				svc.tracksChanged()
 			}
 		},
 		AssistantTools: func() []proto.Tool { return svc.toolsNow() },
@@ -426,18 +460,21 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 			return nil
 		},
 		Lang:     func() i18n.Lang { return svc.lang(context.Background()) },
-		Timezone: func() string { return svc.userTZ() }})
+		Timezone: func() string { return svc.userTZ() },
+		Pages:    pages})
 	o.Errors.ext.Store(ext)
 	bh = NewBusHub(BusOptions{ID: o.ID, Hub: hub, Token: token, HTTPClient: httpClient, Version: version, Deploy: deploy,
-		ConfigFile: o.ConfigFile, Outbox: database, Features: func() []string { return svc.moduleFeatures() },
+		HostDataDir: o.HostDataDir, ConfigFile: o.ConfigFile, Outbox: database, Features: func() []string { return svc.moduleFeatures() },
 		Logf: logf, Devices: devs, Extensions: ext, StopWhenRevoked: o.StopWhenRevoked, StopWhenRejected: o.TokenFirst})
+	if o.PendingRestart != nil {
+		o.PendingRestart(bh.SetPendingRestart)
+	}
 	// The knowledge base in its directory, kept as its manager.json's kb section says (over the hub's hello). The model
 	// providers' keys are sealed with its own secret.key.
-	assistantStore := repositorystore.New(database)
 	svc = New(Options{Hub: bh, Store: func() Store { return assistantStore }, Logf: logf, Devices: devs,
-		ModulesOff: ReadModuleSwitch(ctx, assistantStore, logf), // the built-in modules switched off (modules.go)
+		ModulesOff: modulesOff, // the built-in modules switched off (modules.go)
 		KB:         &KBOptions{Dir: o.KBDir, KeyDir: o.HandlesDir}, SecretKey: o.SecretKey,
-		Trust: devs, AgentDirs: devs, ID: o.ID, Build: version, RepositoryConfig: o.ConfigFile,
+		Trust: devs, AgentDirs: devs, HerdrSessions: devs, ID: o.ID, Build: version, RepositoryConfig: o.ConfigFile,
 		RemoteImageCache: filepath.Join(home, "cache", "remote-images")})
 	svc.SetExtensions(ext) // the connectors', Cua's and ego's tools, in this process (fleet_tools.go)
 	// When the north star's recording began (north_star.go).

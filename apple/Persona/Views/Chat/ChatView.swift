@@ -622,13 +622,13 @@ struct ChatView: View {
         // leaves the phone's voice chat bound to it with the bar back to it at the top, and coming back takes the bar away
         // (docs/assistant/voice.md 6.5; #9887 one button: it no longer ends there).
         .onChange(of: key) { old, new in
-            VoiceCalls.shared.leave(old)
-            VoiceCalls.shared.returned(new)
+            model.voice?.leave(old)
+            model.voice?.returned(new)
         }
-        .onTabVisibility(appear: { [key] in VoiceCalls.shared.returned(key) }, disappear: { [key] in VoiceCalls.shared.leave(key) })
+        .onTabVisibility(appear: { [key, model] in model.voice?.returned(key) }, disappear: { [key, model] in model.voice?.leave(key) })
         // The bar back to this conversation's voice chat tapped over a cover of this page (#9887: a full-screen picture,
         // the terminal): the cover goes, and the page showing again takes the bar away (`VoiceCalls.returnTo`).
-        .onChange(of: VoiceCalls.shared.returning == key) { _, back in if back { closeCovers() } }
+        .onChange(of: model.voice?.isReturning(to: key) ?? false) { _, back in if back { closeCovers() } }
         .onChange(of: status) { _, st in if !st.isActive { Task { await loadGit() } } }
         .stackSegment()
     }
@@ -891,6 +891,7 @@ struct ChatView: View {
                                        quietAgents: quietSubagents, workflowCalls: workflowCalls,
                                        day: style == .assistant ? Calendar.current.startOfDay(for: .now) : nil,
                                        supervision: openSupervision, active: shownRoundActive, background: foldsBackground,
+                                       foldRoutineRelayReplies: foldRoutineRelayReplies, latestReplyNeedsAttention: latestReplyNeedsAttention,
                                        closeout: shownCloseout != nil, children: childStamp, modes: modes.map { "\($0.kind)@\($0.at.timeIntervalSince1970)" })
         if scratch.linesKey == key { return scratch.lines }
         var blocks = store.blocks
@@ -956,6 +957,14 @@ struct ChatView: View {
                                   leaders: Set(model.assistantLeaders))
     }
 
+    private var latestReplyNeedsAttention: Bool {
+        ChatLines.needsReplyAttention(session)
+    }
+
+    private var foldRoutineRelayReplies: Bool {
+        style == .assistant && shownKey == model.assistantMain && model.assistantConfig?.foldRoutineRelayReplies == true
+    }
+
     /// A later turn must not make a frozen historical question look like a live one.
     private var shownRoundActive: Bool { frozen.map { $0.live != nil } ?? status.isActive }
 
@@ -965,6 +974,7 @@ struct ChatView: View {
                   openAllRuns: Self.debugOpenRuns, chipRuns: AppStyle.current.usesBeautifulUI,
                   foldsIntoRun: foldsIntoRun, foldSupervision: style == .assistant, foldBackground: foldsBackground,
                   main: shownKey.sessionID == model.assistantMain?.sessionID,
+                  foldRoutineRelayReplies: foldRoutineRelayReplies, latestReplyNeedsAttention: latestReplyNeedsAttention,
                   openSupervision: openSupervision, openAllSupervision: Self.debugOpenSupervision, active: shownRoundActive)
     }
     private func unfoldWork(_ lines: [ChatLine]) -> [ChatLine] { lineBuilder.unfold(lines) }
@@ -1538,6 +1548,8 @@ struct ChatView: View {
             RecapCard(items: items).chatPinned("recap-" + line.id) // where the open recap folds to (`dismissRecap`)
         case .viewed(_, let images):
             ViewedImagesRow(images: images).equatable()
+        case .toolViews(_, let views):
+            ToolViewAttachmentsRow(views: views, link: $link).equatable()
         }
     }
 
@@ -1694,7 +1706,7 @@ struct ChatView: View {
     /// unsent message, error or call captions. Read loosely: anything that might be there counts.
     private var newestAlone: Bool {
         shownPending.isEmpty && sendPhase == nil && store.error == nil && (frozen?.text ?? store.liveText).isEmpty
-            && !(viewing == nil && VoiceCalls.shared.isBound(to: key))
+            && !(viewing == nil && (model.voice?.isBound(to: key) ?? false))
     }
 
     /// How far off the newest end may be placed before the list is built again (rounding, a pixel).
@@ -2759,7 +2771,7 @@ struct ChatView: View {
         let tasks = TasksStore.shared
         // What waits for the owner, one card at a time behind To Decide (#12831): the conversation's own cards and its tasks'.
         let own = dockCards
-        QuestionDock(own: own, conversation: conversation, room: footerRoom, state: dock, inCall: VoiceCalls.shared.isLive(on: key))
+        QuestionDock(own: own, conversation: conversation, room: footerRoom, state: dock, inCall: model.voice?.isLive(on: key) ?? false)
             .environment(\.cardSources, cardSources)
             .task(id: CardSourceInputs(cards: own.map(\.id), count: store.items.count, last: store.items.last?.id)) {
                 if !own.isEmpty { findCardSources() }
@@ -2777,7 +2789,7 @@ struct ChatView: View {
             }
         }
         // Out of the way of a voice call (docs/assistant/voice.md 6.2「通话期间」), back when it ends.
-        VoiceCallHides(key: key) {
+        HiddenDuringCall(key: key) {
             // Needs You / In Progress in the dock's capsules, each opening its tray (#3393), on every device.
             AssistantActionBar(conversation: conversation, key: key, computer: computerActivity, dock: dock, dockOwn: own)
             RouteChip(conversation: conversation)
@@ -2831,7 +2843,7 @@ struct ChatView: View {
             cards.append(PendingCards.Card(interaction: ix, enabled: true, localOnly: true))
         }
         // `-showVoiceSample asking|approval|plan_feedback`: the card the voice asks about or points to.
-        cards += VoiceSample.cards(key).map { PendingCards.Card(interaction: $0, enabled: true) }
+        cards += (model.voice?.sampleCards(key) ?? []).map { PendingCards.Card(interaction: $0, enabled: true) }
         // `-showSideSessions …`: the sample side's question, in its own chat and in its parent's.
         if let parent = model.sideParent(of: key), let ix = SideSessionSamples.card(for: key, parent: parent) {
             cards.append(PendingCards.Card(interaction: ix, enabled: true))
@@ -2877,6 +2889,7 @@ struct ChatView: View {
                 }
                 if !cardsDocked, !pendingCards.isEmpty {
                     PendingCards(cards: pendingCards, room: footerRoom)
+                        .stackSegment() // keep the deepest card subtree out of the page's opaque view chain (#15274)
                         .environment(\.cardSources, cardSources)
                         .task(id: CardSourceInputs(cards: pendingCards.map(\.id), count: store.items.count, last: store.items.last?.id)) {
                             findCardSources()
@@ -2888,7 +2901,7 @@ struct ChatView: View {
                 }
                 // The last card was answered: one low-key entry to the next conversation that needs you (#4348).
                 if let next = nextNeedsYouSession {
-                    NextNeedsYouStrip(title: next.assistant ? (next.title.isEmpty ? model.assistantShownName : next.title) : next.displayTitle) {
+                    NextNeedsYouStrip(title: next.assistant ? (next.title.isEmpty ? model.assistantShownName : next.title) : next.displayTitle(preferTab: model.prefersHerdrTabName(for: next))) {
                         openNext(next)
                     }
                 }
@@ -3047,8 +3060,8 @@ struct ChatView: View {
                 .id(Self.bottomID)
             // A voice call's captions, the thread's last rows while it is bound here (docs/assistant/voice.md 6.2): they read the
             // call themselves; the page only asks whether one is bound.
-            if viewing == nil, VoiceCalls.shared.isBound(to: key) {
-                VoiceThreadTail(key: key, held: frozen != nil)
+            if viewing == nil, let voice = model.voice, voice.isBound(to: key) {
+                voice.threadTail(key: key, held: frozen != nil)
                     .flippedBack()
                     .id("voice-tail")
             }
@@ -3152,7 +3165,7 @@ struct ChatView: View {
                                    message: String(localized: "This Agent stopped before it left any messages."))
                         .flippedBack().accessibilityIdentifier("chat-empty-placeholder")
                 } else if model.session(key)?.awaitingFirstMessage == true {
-                    // A Codex opened with no first message (docs/integrations/codex.md「Starting without a first message」):
+                    // A Codex opened with no first message (docs/integrations/codex.md「Standalone TUI takeover」):
                     // it waits for one, sent from here or typed in its terminal. Said once, here, as the web's note.
                     let computer = model.machine(key.machineRef)?.title ?? key.machineID
                     EmptyStateView(symbol: Theme.Icon.conversation, title: String(localized: "No messages yet"),
@@ -3416,7 +3429,7 @@ struct ChatView: View {
         // Not while a tapped header is held in place (`ChatPin`): opening a work line loads its steps.
         .onChange(of: store.items.count) { _, _ in contentArrived(foldChrome: true) }
         .modifier(ChatStreamFollow(store: store) { contentArrived(foldChrome: true) })
-        .modifier(VoiceTailFollow(key: key) { contentArrived(foldChrome: false) }) // a voice call's captions, likewise
+        .background { model.voice?.tailFollower(key: key) { contentArrived(foldChrome: false) } } // a voice call's captions, likewise
         // Your own message brings you to the newest — only yours (one typed on the computer, or sent by another session,
         // used to pull you out of the history you were reading too), and only if you have not scrolled since sending it:
         // Claude can take it in seconds later, while you went back up to read (2026-10-30).
@@ -3860,11 +3873,12 @@ struct ChatView: View {
             Menu {
                 Section("Switch Agent") {
                     ForEach(host.agents) { s in
+                        let agentTitle = s.displayTitle(preferTab: model.prefersHerdrTabName(for: s))
                         Button { if s.key != key { host.select(s.key) } } label: {
                             if s.key == key {
-                                Label(s.displayTitle, systemImage: Theme.Icon.success)
+                                Label(agentTitle, systemImage: Theme.Icon.success)
                             } else {
-                                Text("\(s.displayTitle) · \(s.state.label)")
+                                Text("\(agentTitle) · \(s.state.label)")
                             }
                         }
                     }
@@ -3940,7 +3954,7 @@ struct ChatView: View {
     /// A hosting page's part of ⋯ (#3255): what it is about (the session's own title when the page's differs, the
     /// page's note), its own actions, and the agent in the Agents page, where its space's other agents are.
     @ViewBuilder private func hostedMenuItems(_ host: HostedChat) -> some View {
-        let own = session?.displayTitle ?? ""
+        let own = session?.displayTitle(preferTab: preferHerdrTabName) ?? ""
         let header = [own != title ? own : nil, host.note].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         if header.isEmpty {
             hostedMenuActions(host)
@@ -3966,17 +3980,17 @@ struct ChatView: View {
             let words = stateWords(s, now: now)
             // Hosted (one agent's page, #3255) the line is status · machine · project: the tab's name would crowd the machine out.
             let tabShown = host != nil || !model.siblings(of: key).isEmpty
-            let place = [s.spaceName, tabShown ? nil : s.slotLabel].compactMap { $0 }.joined(separator: " › ")
             let machine = model.namedMachine(s.machineRef)?.title ?? s.machineID
+            let rest = s.chatSubtitleParts(machine: machine, tabShown: tabShown, preferTab: preferHerdrTabName)
             HStack(spacing: Theme.Space.xs) {
                 AgentMark(s, side: Theme.Size.markXS) // its agent before its state (#6390); this line is an agent's only
                 StatusDot(state: s.state, size: 7, waiting: s.waitsInBackground)
                 // Not ViewThatFits: that measured both lines again at every width of a window resize (#1337).
                 FirstFitting {
-                    subtitleLine(s, words, [machine, place])
-                    subtitleLine(s, words, [place.isEmpty ? machine : place]) // truncates when it must
+                    subtitleLine(s, words, rest.full)
+                    subtitleLine(s, words, rest.short) // truncates when it must
                 }
-                .firstFittingText(subtitleText(s, words, [machine, place]))
+                .firstFittingText(subtitleText(s, words, rest.full))
             }
         }
     }
@@ -4128,7 +4142,7 @@ struct ChatView: View {
     /// (Agents chats, a subagent's transcript, a voice call, which puts the capsules away): there the chat is gone by the
     /// composer's top edge.
     private var underFooter: CGFloat {
-        style == .assistant && !backgroundActivity && viewing == nil && !VoiceCalls.shared.isLive(on: key) ? Self.underDock : 0
+        style == .assistant && !backgroundActivity && viewing == nil && !(model.voice?.isLive(on: key) ?? false) ? Self.underDock : 0
     }
 
     /// The fog over the list's end: clear `newestGap` above the footer, where the newest message rests, and solid from
@@ -5090,8 +5104,10 @@ struct ChatView: View {
         let item = model.chat(key).items.first { $0.id == bar.id }
         let role: ForwardMessage.Role = bar.isUser ? .user : bar.from != nil ? .other : s?.assistant == true ? .persona : .agent
         let author = bar.from ?? (role == .persona ? "Persona" : s?.agentLabel ?? "Claude")
-        let project = s?.assistant == true ? nil : [s?.spaceName, s?.slotLabel].compactMap { $0 }.joined(separator: " › ")
-        let source = ForwardMessage.Source(key: key, item: bar.id, role: role, author: author, chat: s?.displayTitle ?? "",
+        let preferTab = s.map { model.prefersHerdrTabName(for: $0) } ?? false
+        let primaryTab = s?.displayTabName(preferTab: preferTab)
+        let project = s?.assistant == true ? nil : [s?.spaceName, primaryTab != nil ? nil : s?.slotLabel].compactMap { $0 }.joined(separator: " › ")
+        let source = ForwardMessage.Source(key: key, item: bar.id, role: role, author: author, chat: s?.displayTitle(preferTab: preferTab) ?? "",
                                            project: project, machine: s?.assistant == true ? nil : model.machine(key.machineRef)?.name,
                                            time: bar.date ?? item?.ts)
         // The transcript's text, as the bubble or the source card reads it; what the bar has when the item is not loaded.
@@ -5217,7 +5233,7 @@ struct ChatView: View {
         let without = pickedDrafts(questions: false), with = pickedDrafts(questions: true)
         guard let first = with.first else { return }
         let s = model.session(key)
-        exporting = ExportRequest(title: s?.displayTitle ?? "",
+        exporting = ExportRequest(title: s?.displayTitle(preferTab: s.map { model.prefersHerdrTabName(for: $0) } ?? false) ?? "",
                                   agent: s?.assistant == true ? model.assistantShownName(in: key) : (s?.agentLabel ?? ""),
                                   pieces: { questions in (questions ? with : without).flatMap(\.pieces) },
                                   loadImage: first.loadImage, width: menu.areaWidth > 0 ? menu.areaWidth : Self.phoneWidth,
@@ -5272,9 +5288,15 @@ struct ChatView: View {
         }
     }
 
+    private var preferHerdrTabName: Bool {
+        guard style == .dev else { return false }
+        return session.map { model.prefersHerdrTabName(for: $0) } ?? model.prefersHerdrTabName(for: key.group)
+    }
+
     private var title: String {
         if backgroundActivity { return String(localized: "Background activity") }
         if style == .dev, let t = host?.title, !t.isEmpty { return t }
+        if style == .dev, let s = session, let tab = s.displayTabName(preferTab: preferHerdrTabName) { return tab }
         let t = session?.title ?? ""
         if style == .assistant { return t.isEmpty || t == "Claude Code" ? "Persona" : t }
         return t.isEmpty ? String(localized: "Chat") : t
@@ -5297,9 +5319,12 @@ struct ChatView: View {
             let launcher = model.assistantLaunchers[key] ?? s.launcher
             return s.status.isActive ? String(localized: "Working…") : ([launcher, Fmt.model(s.model)].compactMap { $0 }.joined(separator: " · "))
         }
+        let preferTab = preferHerdrTabName
+        let primaryTab = s.displayTabName(preferTab: preferTab)
+        let titleDetail = s.displayTitleDetail(preferTab: preferTab)
         let machine = model.namedMachine(s.machineRef)?.title ?? s.machineID
-        let place = [s.spaceName, s.slotLabel].compactMap { $0 }.joined(separator: " › ")
-        return [s.sourceSubtitle, machine, place.isEmpty ? nil : place, s.hasSource ? nil : s.agentLabel, s.stateLabel(muted: model.isMuted(s))].compactMap { $0 }.joined(separator: " · ")
+        let place = [s.spaceName, primaryTab != nil ? nil : s.slotLabel].compactMap { $0 }.joined(separator: " › ")
+        return [titleDetail, s.sourceSubtitle, machine, place.isEmpty ? nil : place, s.hasSource ? nil : s.agentLabel, s.stateLabel(muted: model.isMuted(s))].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// The extension that opened this Persona conversation (#3758), when `item` is the message it opened it with: the
@@ -5702,33 +5727,27 @@ struct Composer: View, Equatable {
     @State private var showPermissions = false
     @State private var permissionsPick: String?
     @FocusState private var focused: Bool
-    /// The 「+」 menu's Voice Chat where the page offers no call: why (docs/assistant/voice.md 1.3).
-    @State private var voiceNote: VoiceUnavailableNote?
     /// The model menu's "Other Model…" (#1644): a model ID typed by hand, through POST …/modes.
     @State private var typingModel = false
 
-    /// The voice call bound to this conversation, live or ended (docs/assistant/voice.md 6.2): the bar takes the box's place while
-    /// it is on, and 「语音已结束 · 继续」 sits over the box after it ended by itself.
-    private var voiceCall: VoiceConversation? { VoiceCalls.shared.call(on: key) }
-
     /// The composer's phone icon (docs/assistant/voice.md 6.1; #9887 one button: the one voice entry): only where a call
     /// can start. On the iPhone it calls this conversation through the system; elsewhere it is the voice chat in the app
-    /// (`VoiceEntry.start`). Why a call could not be placed shows over the app (`PersonaCalls.refusal`).
+    /// (the voice module's `ConversationVoice`). Why a call could not be placed shows over the app (`PersonaCalls.refusal`).
     private var voiceEntry: (() -> Void)? {
-        guard VoiceSupport.shared.availability(for: model.session(key), group: key.group).isAvailable else { return nil }
+        guard model.voice?.offersCall(in: key) == true else { return nil }
         return { startVoice() }
     }
 
     /// `inApp`: the voice chat in the app whatever the device (DEBUG `-openVoice`).
     private func startVoice(inApp: Bool = false) {
         focused = false
-        voiceNote = VoiceEntry.start(key, model: model, inApp: inApp) { voiceNote = $0 }
+        model.voice?.start(key, inApp: inApp)
     }
 
     /// Voice Chat in the 「+」 menu of the composers with no phone icon (Apple Vision Pro's: the Mac has no call audio yet,
     /// docs/assistant/voice.md 6.9). The iPhone's and the iPad's + have none: the phone icon is their one voice entry.
     @ViewBuilder private var voiceMenuItem: some View {
-        if VoicePlatform.current == .phone {
+        if model.voice?.listsVoiceChat == true {
             Button { startVoice() } label: { Label("Voice Chat", systemImage: Theme.Icon.voiceChannel) }
                 .accessibilityIdentifier("composer-menu-voice")
         }
@@ -6050,8 +6069,8 @@ struct Composer: View, Equatable {
     private var gate: SendGate? { isMain && !status.isActive ? model.readinessGate(route: $failureRoute, pickModel: openAssistantModel) : nil }
 
     private var composerNotes: some View {
-        let call = voiceCall
-        let inCall = call.map { !$0.isOver } ?? false
+        let voice = model.voice
+        let inCall = voice?.isLive(on: key) ?? false
         return VStack(spacing: Theme.Space.s) {
             SessionLiveRetryNote(key: key)
             if offlineManager == nil, let session = model.session(key), let away = model.offlineAgent(session) {
@@ -6141,12 +6160,12 @@ struct Composer: View, Equatable {
                 }
             }
             // A call that ended by itself: 「语音已结束 · 继续」 over the box, until the page goes (docs/assistant/voice.md 1.2 L).
-            if let call, call.isOver, case .ended(let end) = call.phase, let note = VoiceEndNote.make(end, extensionID: call.extensionID) {
-                VoiceEndedStrip(call: call, note: note)
+            if let voice, !inCall, voice.showsEnded(on: key) {
+                voice.endedLine(key: key)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            if let call, inCall {
-                VoiceBar(call: call, key: key, label: VoiceEntry.label(key, model: model))
+            if let voice, inCall {
+                voice.bar(key: key, label: nil)
                     .transition(.opacity)
             } else if usesShellComposer {
                 // The shell's composer (docs/apple/ios.md「New shell」), whatever the style: the assistant's and an agent's (#1091).
@@ -6156,7 +6175,7 @@ struct Composer: View, Equatable {
                                  hasAttachments: hasAttachments,
                                  stop: status.isActive && model.session(key)?.canInterrupt == true ? { Task { await model.interrupt(key) } } : nil,
                                  voice: voiceEntry,
-                                 voiceLabel: VoiceEntry.iconLabel(key),
+                                 voiceLabel: model.voice?.iconLabel(key),
                                  modesTitle: modesTitle,
                                  modesDisclosure: assistantModelPickAvailable,
                                  quotes: contexts,
@@ -6202,7 +6221,7 @@ struct Composer: View, Equatable {
                                hasAttachments: hasAttachments,
                                stop: status.isActive && model.session(key)?.canInterrupt == true ? { Task { await model.interrupt(key) } } : nil,
                                attach: PromptItems.attachments(camera: CameraPicker.isAvailable, modules: Modules.registry.composerActions)
-                                   + (VoicePlatform.current == .phone ? [PromptItems.voice] : []),
+                                   + (model.voice?.listsVoiceChat == true ? [PromptItems.voice] : []),
                                mentions: mentions,
                                commands: promptCommands,
                                models: canPickModel ? PromptItems.composerModels(running: model.session(key)?.model, list: runningModels) : [],
@@ -6298,7 +6317,7 @@ struct Composer: View, Equatable {
             await declarations.refreshWhileActive(api: model.api(key.group))
         }
         // Voice (docs/assistant/voice.md 6.1): asks the hub about it, says why there is none, and the DEBUG switches (6.8).
-        .modifier(ComposerVoice(key: key, note: $voiceNote, active: phase == .active, offered: { voiceEntry != nil }, start: { startVoice(inApp: true) }))
+        .background { model.voice?.composerSupport(key: key, active: phase == .active, offered: { voiceEntry != nil }, start: { startVoice(inApp: true) }) }
         #if DEBUG
         .task { // `-showSampleQuotes YES`: a page's text and another session quoted over the box (#986, screenshots)
             guard UserDefaults.standard.bool(forKey: "showSampleQuotes") else { return }
@@ -6994,6 +7013,7 @@ struct QueueStrip: View {
     /// (#8144).
     var agentName = "Claude"
     private var agent: String { persona ?? agentName }
+    private let relays: [QueuedRelay?]
     @State private var busy = false
     @State private var expanded = false
     /// Messages from other conversations collapse into one line until the owner opens them (#6394).
@@ -7002,6 +7022,19 @@ struct QueueStrip: View {
     @State private var rowHeight: CGFloat = 0
     @Environment(\.dynamicTypeSize) private var typeSize
     private static let visibleRows: CGFloat = 3
+
+    init(key: SessionKey, queued: [String], own: Int, sending: [PendingMessage] = [], photoMarks: [Int] = [],
+         steers: Bool = false, persona: String? = nil, agentName: String = "Claude") {
+        self.key = key
+        self.queued = queued
+        self.own = own
+        self.sending = sending
+        self.photoMarks = photoMarks
+        self.steers = steers
+        self.persona = persona
+        self.agentName = agentName
+        relays = queued.dropFirst(own).map { QueuedRelay($0) }
+    }
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
@@ -7047,7 +7080,10 @@ struct QueueStrip: View {
     }
 
     private var tray: some View { ThemedIcon("tray.and.arrow.down").accessibilityHidden(true) }
-    private var title: Text { Text("\(total) queued · \(agent) will handle them in order [Queue Strip]") }
+    private var title: Text {
+        if relays.contains(where: { $0?.noWake == true }) { return Text("\(total) queued [Queue Strip]") }
+        return Text("\(total) queued · \(agent) will handle them in order [Queue Strip]")
+    }
 
     /// The tray, the title on one line and Send Now at the end.
     private var oneLine: some View {
@@ -7247,9 +7283,17 @@ struct QueueStrip: View {
     @ViewBuilder
     private func relayedRow(_ i: Int) -> some View {
         let q = queued[i]
-        let draft = QueuedDraft(q)
+        let relay = relays[i - own]
+        let draft = QueuedDraft(relay?.text ?? q)
+        let source = relay.map { String(localized: "From \($0.source)") }
+        let body = QueuedWords.spoken(draft)
+        let words = [source, body].compactMap { $0 }.joined(separator: " · ")
+        let noWake = relay?.noWake == true
         Menu {
-            Button { UIPasteboard.general.string = draft.text.isEmpty ? q : draft.text } label: { Label("Copy [Readiness Views d37380]", systemImage: Theme.Icon.copy) }
+            Button {
+                let copy = QueuedDraft(q).text
+                UIPasteboard.general.string = copy.isEmpty ? q : copy
+            } label: { Label("Copy [Readiness Views d37380]", systemImage: Theme.Icon.copy) }
         } label: {
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 Text("\(i + 1)")
@@ -7258,8 +7302,9 @@ struct QueueStrip: View {
                     .scaledFrame(width: Theme.Size.badge, height: Theme.Size.badge)
                     .background(Theme.accent.opacity(0.14), in: .circle)
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                    if let source { Text(source).font(Theme.Font.labelStrong).lineLimit(1) }
                     QueuedWords(draft: draft)
-                    Text("Arrives when this turn ends [Queue Strip]")
+                    (noWake ? Text("Arrives with the next message [Queue Strip]") : Text("Arrives when this turn ends [Queue Strip]"))
                         .font(Theme.Font.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -7270,7 +7315,9 @@ struct QueueStrip: View {
             .background(Theme.Fill.well, in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
         }
         .disabled(busy)
-        .accessibilityLabel(Text("Item \(i + 1): \(QueuedWords.spoken(draft)), arrives when this turn ends [Queue Strip]"))
+        .accessibilityLabel(noWake
+            ? Text("Item \(i + 1): \(words), arrives with the next message [Queue Strip]")
+            : Text("Item \(i + 1): \(words), arrives when this turn ends [Queue Strip]"))
         .accessibilityIdentifier("queue-item")
         .accessibilityHint(Text("Copy [Readiness Views d37380]"))
     }
@@ -7465,6 +7512,8 @@ struct ChatLine: Identifiable {
         case day(Date)
         /// The images an exchange's work looked at, between it and the answer (`ViewedImages`, docs/protocol/protocol.md「Images viewed this turn」).
         case viewed(id: String, images: [ViewedImage])
+        /// Declarative extension views emitted out-of-band by a turn's tool calls (`ToolViews`).
+        case toolViews(id: String, views: [ExtensionView])
         /// A part of a long finished answer, a row of its own (#4970, `AnswerParts`): the first has the answer's id.
         case answerPart(item: Item, part: AnswerParts.Part, index: Int, count: Int)
         /// A permission mode change the hub recorded, at the end of the exchange it happened in (#10297,
@@ -7492,6 +7541,7 @@ struct ChatLine: Identifiable {
             case .placeMap(let m): "map-" + m.callID
             case .day(let d): "day-\(Int(d.timeIntervalSince1970))"
             case .viewed(let id, _): id
+            case .toolViews(let id, _): id
             case .answerPart(let item, _, let index, _): index == 0 ? item.id : item.id + "/part-\(index)"
             case .modeChange(let id, _): id
             case .modelChange(let id, _, _): id
@@ -7544,6 +7594,7 @@ struct ChatLine: Identifiable {
         return line
     }
     static func viewed(id: String, images: [ViewedImage]) -> Self { Self(.viewed(id: id, images: images)) }
+    static func toolViews(id: String, views: [ExtensionView]) -> Self { Self(.toolViews(id: id, views: views)) }
     static func answerPart(item: Item, part: AnswerParts.Part, index: Int, count: Int) -> Self {
         Self(.answerPart(item: item, part: part, index: index, count: count))
     }
@@ -8373,6 +8424,8 @@ final class ChatScratch {
         var active = false
         /// Background rounds fold (`ChatLines.foldBackground`): the main conversation with the hub's switch on.
         var background = false
+        var foldRoutineRelayReplies = false
+        var latestReplyNeedsAttention = false
         /// The header shows the session's closeout card: its raw block is left out of the last reply.
         var closeout = false
         /// Folded children placed in this chat. A change of row rebuilds the lines.

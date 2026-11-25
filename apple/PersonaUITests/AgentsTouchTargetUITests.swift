@@ -32,6 +32,7 @@ final class AgentsTouchTargetUITests: XCTestCase {
     }
 
     override func tearDown() {
+        if !hub.isEmpty { setHierarchyFold(true) }
         if let app, (testRun?.totalFailureCount ?? 0) > 0 {
             let shot = XCTAttachment(screenshot: app.screenshot())
             shot.name = "failure"
@@ -94,6 +95,9 @@ final class AgentsTouchTargetUITests: XCTestCase {
         if host.exists && host.isHittable { foldsByItsEdges(host, "the machine's heading") }
         app.terminate()
 
+        // Current hubs fold Codex subagents into their parent chat (`sessions_hierarchy`, #5120/#8010); turn hierarchy
+        // folding off on the mock to exercise the pre-hierarchy `CodexSubtasksRow` (`agents.subtasks`) fallback (#13575).
+        setHierarchyFold(false)
         launch(grouping: "state", display: "list")
         let state = app.buttons.matching(identifier: "agents.section").matching(NSPredicate(format: "label BEGINSWITH 'Unread'")).firstMatch
         bringUp(state, column: column)
@@ -111,6 +115,7 @@ final class AgentsTouchTargetUITests: XCTestCase {
         tap(subtasks, nearTop: false)
         XCTAssertTrue(waitUntil { !subagent.exists }, "a tap by the Subtasks row's bottom edge did not fold it")
         app.terminate()
+        setHierarchyFold(true)
 
         launch(grouping: "space", display: "list")
         let idle = app.buttons.matching(identifier: "agents.idleFold").firstMatch
@@ -123,14 +128,30 @@ final class AgentsTouchTargetUITests: XCTestCase {
     }
 
     /// Taps by its top edge, then by its bottom edge: each folds or opens it (its label says which).
+    /// When a section header cell wraps an inner plain Button, verifies the inner button covers the cell's vertical edges
+    /// so edge taps land inside the button on iOS 26 as well as iOS 27 (#13575).
     @MainActor private func foldsByItsEdges(_ element: XCUIElement, _ what: String) {
-        XCTAssertGreaterThanOrEqual(element.frame.height, Self.floor, "\(what) is \(element.frame.height) pt tall")
+        let outer = element.frame
+        XCTAssertGreaterThanOrEqual(outer.height, Self.floor, "\(what) is \(outer.height) pt tall")
+        let inner = element.buttons.firstMatch
+        if inner.exists {
+            let f = inner.frame
+            XCTAssertLessThanOrEqual(f.minY - outer.minY, 1.5, "\(what) has \(f.minY - outer.minY) pt dead margin at its top edge")
+            XCTAssertLessThanOrEqual(outer.maxY - f.maxY, 1.5, "\(what) has \(outer.maxY - f.maxY) pt dead margin at its bottom edge")
+        }
         for top in [true, false] {
             let before = element.label
             tap(element, nearTop: top)
             let changed = waitUntil { element.exists && element.label != before }
             XCTAssertTrue(changed, "a tap by \(what)'s \(top ? "top" : "bottom") edge did nothing (\(before))")
         }
+    }
+
+    private func setHierarchyFold(_ on: Bool) {
+        guard let url = URL(string: "\(hub)/mock/hierarchy?on=\(on ? 1 : 0)") else { return }
+        let sem = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: url) { _, _, _ in sem.signal() }.resume()
+        _ = sem.wait(timeout: .now() + 5)
     }
 
     @MainActor private func tap(_ element: XCUIElement, nearTop: Bool) {

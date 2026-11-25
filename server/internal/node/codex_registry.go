@@ -336,6 +336,9 @@ func (n *Node) discoverCodex() {
 	liveCanQuit := map[string]bool{}
 	stdioHomes := map[string]bool{}
 	for _, p := range found {
+		if n.herdrSessionBlocked(p.herdrSession) {
+			continue
+		}
 		home := canonicalCodexHome(firstNonEmpty(p.home, n.codexHome()), n.home)
 		if home != "" && p.endpoint == "stdio://" {
 			stdioHomes[home] = true
@@ -358,6 +361,13 @@ func (n *Node) discoverCodex() {
 					continue
 				}
 				if thread := rolloutThreadID(home, path); thread != "" {
+					if n.herdrSessionBlocked(p.herdrSession) {
+						id := n.codexPublicID(home, thread)
+						if !n.isAssistantSession(id) && !n.keptSessions()[id] {
+							n.noteHerdrSessionID(id, p.herdrSession)
+							continue
+						}
+					}
 					id := n.registerCodex(home, thread, path)
 					liveRollouts[id] = holder
 					if sharedEndpoint != "" {
@@ -380,6 +390,9 @@ func (n *Node) discoverCodex() {
 	r.mu.Unlock()
 	byPane := map[string]string{}
 	for _, p := range found {
+		if n.herdrSessionBlocked(p.herdrSession) {
+			continue
+		}
 		home := canonicalCodexHome(firstNonEmpty(p.home, n.codexHome()), n.home)
 		if home == "" {
 			continue

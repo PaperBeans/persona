@@ -166,6 +166,7 @@ func runResident(ctx context.Context, b Build, supervised bool) error {
 		logger.Printf("tailcat: %v (serving relays over ssh only)", err)
 	}
 	reload := &node.ResidentReload{}
+	reload.SetLogger(logger)
 	handover := make(chan *node.ResidentFiles, 1)
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)

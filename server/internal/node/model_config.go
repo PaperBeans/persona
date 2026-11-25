@@ -20,11 +20,12 @@ import (
 type modelExecution struct {
 	Source modelhttp.Source `json:"ModelSource,omitzero"`
 
-	Strict           bool   `json:",omitempty"` // scheduled execution never substitutes another model or agent
-	TaskInstructions string `json:"-"`
-	TaskAttachments  string `json:"-"`
-	Model            string
-	Effort           string
+	CodexEffortFallback string `json:"-"`
+	Strict              bool   `json:",omitempty"` // scheduled execution never substitutes another model or agent
+	TaskInstructions    string `json:"-"`
+	TaskAttachments     string `json:"-"`
+	Model               string
+	Effort              string
 	// Speed is a one-shot Agent start choice, resolved only against the actual terminal dispatch. FastMode is the
 	// Claude Code form. Neither is kept as process state or included in the execution fingerprint.
 	Speed    string `json:"-"`

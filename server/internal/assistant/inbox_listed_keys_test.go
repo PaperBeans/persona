@@ -19,37 +19,54 @@ import (
 // (docs/plans/plan-inbox-vertical-slice.md, section 3.2).
 var listedDrops = map[string]string{
 	// The item's bookkeeping, persisted, not listed (inbox.go: InboxItem).
-	"context":     "the conversation as text, for triage and Hand to AI; GET /api/v1/inbox/{id} returns it",
-	"last":        "bookkeeping: the newest message position or mail uid",
-	"triaged_at":  "bookkeeping: Last when it was triaged",
-	"body_of":     "bookkeeping: Last when a mail's full text was read",
-	"judged_at":   "bookkeeping: Last when model 2 looked at it",
-	"folder_of":   "bookkeeping: Last when the model was asked for its folder",
-	"rules":       "the item's own triage rules, from its connector",
-	"triage_rev":  "bookkeeping: the tier criteria's revision it was sorted under",
-	"rule_of":     "bookkeeping: Last when the rules gave the tier",
-	"settled_of":  "bookkeeping: the evidence it was filed on as handled elsewhere",
-	"replied_of":  "bookkeeping: Last when a state report recorded the owner's reply",
-	"arrived_of":  "bookkeeping: what ArrivedAt stamps",
-	"arrived_at":  "bookkeeping: when it first held Last",
-	"meta":        "the connector's event meta, kept and handed back as it is",
-	"group":       "the event's conversation (inbox_group.go)",
-	"chain_seq":   "bookkeeping: numbers the chain's entries",
-	"suggest_seq": "bookkeeping: the last suggestion's version",
-	"title_by":    "who wrote the title (inbox_follow.go): kept, not listed",
+	"context":                 "the conversation as text, for triage and Hand to AI; GET /api/v1/inbox/{id} returns it",
+	"last":                    "bookkeeping: the newest message position or mail uid",
+	"triaged_at":              "bookkeeping: Last when it was triaged",
+	"body_of":                 "bookkeeping: Last when a mail's full text was read",
+	"judged_at":               "bookkeeping: Last when model 2 looked at it",
+	"folder_of":               "bookkeeping: Last when the model was asked for its folder",
+	"rules":                   "the item's own triage rules, from its connector",
+	"triage_rev":              "bookkeeping: the tier criteria's revision it was sorted under",
+	"rule_of":                 "bookkeeping: Last when the rules gave the tier",
+	"settled_of":              "bookkeeping: the evidence it was filed on as handled elsewhere",
+	"replied_of":              "bookkeeping: Last when a state report recorded the owner's reply",
+	"arrived_of":              "bookkeeping: what ArrivedAt stamps",
+	"arrived_at":              "bookkeeping: when it first held Last",
+	"meta":                    "the connector's event meta, kept and handed back as it is",
+	"group":                   "the event's conversation (inbox_group.go)",
+	"chain_seq":               "bookkeeping: numbers the chain's entries",
+	"suggest_seq":             "bookkeeping: the last suggestion's version",
+	"reply_policy":            "bookkeeping: latest server-side reply-policy classification (inbox_reply_policy.go)",
+	"reply_content_sources":   "#11901: internal member-text provenance for reply-policy scope after merge and Undo",
+	"reply_context_truncated": "#11901: internal incomplete-classification-input marker, not client content",
+	"mail_body_truncated":     "#11901: persisted mail-body clipping state, not client content",
+	"reply_instruction":       "#11901: durable owner rewrite provenance, not another client-visible chain entry",
+	"rejected_reply_draft":    "#11901: rejected on-demand exact-text provenance, not a client draft",
+	"rejected_reply_drafts":   "#11901: every rejected on-demand exact text, not client drafts",
+	"title_by":                "who wrote the title (inbox_follow.go): kept, not listed",
 	// Kept so that Undo of a merge puts the title back (inbox_merge_title.go).
 	"pre_merge_title":    "kept for Undo of a merge",
 	"pre_merge_title_by": "kept for Undo of a merge",
 	"merge_title":        "kept for Undo of a merge",
 	// The current suggestion's own bookkeeping (inbox_handling.go: InboxSuggestion).
-	"suggestion.cwd":         "where an agent suggestion's Agent starts",
-	"suggestion.mail_target": "the reply's internal conflict check, not a client's target to choose",
-	"suggestion.owner":       "binds an unsent reply to its author",
-	"suggestion.source_of":   "binds an unsent reply to its source snapshot",
+	"suggestion.cwd":                       "where an agent suggestion's Agent starts",
+	"suggestion.mail_target":               "the reply's internal conflict check, not a client's target to choose",
+	"suggestion.owner":                     "binds an unsent reply to its author",
+	"suggestion.source_of":                 "binds an unsent reply to its source snapshot",
+	"suggestion.reply_policy":              "binds an accepted reply suggestion to its server-side reply-policy snapshot (inbox_reply_policy.go)",
+	"suggestion.on_demand":                 "#11901: distinguishes an on-demand generated draft from owner-authored text",
+	"suggestion.reply_publication_pending": "#11901: internal two-phase durable-publication marker",
+	"suggestion.reply_instruction":         "#11901: binds authorization to the exact instructed generated text",
+	"suggestion.reply_publication_failed":  "#11901: fail-closed unpublished-model-text tombstone, not client content",
 	// A send attempt's identity and frozen payload (inbox_suggestion_attempt.go: listedSuggestionAttempts).
-	"suggestion_attempts[].client_id": "the attempt's send identity",
-	"suggestion_attempts[].target":    "the attempt's frozen target",
-	"suggestion_attempts[].proposal":  "the attempt's frozen payload",
+	"suggestion_attempts[].client_id":       "the attempt's send identity",
+	"suggestion_attempts[].target":          "the attempt's frozen target",
+	"suggestion_attempts[].proposal":        "the attempt's frozen payload",
+	"suggestion_attempts[].category":        "the attempt's reply-policy category snapshot",
+	"suggestion_attempts[].route":           "the attempt's server-resolved reply-policy route",
+	"suggestion_attempts[].content_version": "the attempt's item content version snapshot",
+	"suggestion_attempts[].policy_revision": "the attempt's reply-policy revision snapshot",
+	"suggestion_attempts[].reviewed":        "the attempt's independent-review authorization snapshot",
 	// The processing conversation's bookkeeping (inbox_agent.go: InboxAgent).
 	"agent.pending":                "notes waiting to be told to the processing conversation",
 	"agent.wake":                   "whether those notes start a turn",
@@ -76,8 +93,18 @@ var listedDrops = map[string]string{
 // listedDropsOpenPRs are paths open PRs add to the item and leave out of the list: listed here so those PRs merge
 // without touching this file. Move an entry to listedDrops when its PR lands; drop it when the PR closes.
 var listedDropsOpenPRs = map[string]string{
-	"tier_was":       "#4512: what the item had before the user moved it, for Undo",
-	"reply_approval": "#9790, #10580, #10587: the overdue reply reminder's receipt",
+	"visibility_content_refs":              "#11902: internal visibility provenance for merged and undone content, not client content",
+	"tier_was":                             "#4512: what the item had before the user moved it, for Undo",
+	"reply_approval":                       "#9790, #10580, #10587: the overdue reply reminder's receipt",
+	"reply_content_sources":                "#11901: internal member-text provenance for reply-policy scope after merge and Undo",
+	"reply_context_truncated":              "#11901: internal incomplete-classification-input marker, not client content",
+	"reply_instruction":                    "#11901: durable owner rewrite provenance, not another client-visible chain entry",
+	"rejected_reply_draft":                 "#11901: rejected on-demand exact-text provenance, not a client draft",
+	"rejected_reply_drafts":                "#11901: every rejected on-demand exact text, not client drafts",
+	"suggestion.on_demand":                 "#11901: distinguishes an on-demand generated draft from owner-authored text",
+	"suggestion.reply_publication_pending": "#11901: internal two-phase durable-publication marker",
+	"suggestion.reply_instruction":         "#11901: binds authorization to the exact instructed generated text",
+	"suggestion.reply_publication_failed":  "#11901: fail-closed unpublished-model-text tombstone, not client content",
 }
 
 // listed() lists every key of a filled item but listedDrops, adds none, and computes the keys it owns (status, now,
@@ -142,6 +169,18 @@ func TestListedKeys(t *testing.T) {
 		if !slices.Contains(jsonPaths(t, open.listed()), key) {
 			t.Errorf("listed() does not write %s for the open item", key)
 		}
+	}
+}
+
+func TestInboxVisibilityReview12ListedRedactsVisibilityContentRefs(t *testing.T) {
+	refs := []InboxMergeRef{{ID: "synthetic-private-member", Source: "synthetic-private", Title: "SYNTHETIC-PRIVATE-TITLE"}}
+	it := &InboxItem{ID: "synthetic-survivor", VisibilityContentRefs: refs}
+	listed := it.listed()
+	if listed.VisibilityContentRefs != nil {
+		t.Errorf("listed() exposed visibility content refs: %+v", listed.VisibilityContentRefs)
+	}
+	if len(it.VisibilityContentRefs) != 1 || it.VisibilityContentRefs[0] != refs[0] {
+		t.Errorf("listed() changed the stored item's visibility content refs: %+v", it.VisibilityContentRefs)
 	}
 }
 

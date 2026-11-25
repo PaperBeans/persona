@@ -112,7 +112,11 @@ class ShardTests(unittest.TestCase):
         self.assertIn("actions/cache/save@v4", save)
         cached_paths = re.findall(r"^\s+(~/.m2/\S+)$", workflow, re.M)
         self.assertEqual(set(cached_paths), {"~/.m2/repository/org/robolectric/android-all",
-                                            "~/.m2/repository/org/robolectric/android-all-instrumented"})
+                                            "~/.m2/repository/org/robolectric/android-all-instrumented",
+                                            "~/.m2/repository/org/robolectric/nativeruntime-dist-compat"})
+        # Both steps include the native runtime: Maven Central's HTTP 429 must not make each uncached run fail (#14693).
+        for step in (restore, save):
+            self.assertIn("~/.m2/repository/org/robolectric/nativeruntime-dist-compat", step)
         self.assertNotIn("continue-on-error", workflow)
         self.assertIn("timeout-minutes: 90", workflow)
 

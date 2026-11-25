@@ -249,8 +249,8 @@ func TestDayCoverageMended(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []CoverageGap{{0, 10, long[:maxGapReason]}, {200, 450, "paused"}, {450, 500, "interrupted"}, {700, 800, "something new"},
-		{800, 810, GapErased}}
+	want := []CoverageGap{{From: 0, To: 10, Reason: long[:maxGapReason]}, {From: 200, To: 450, Reason: "paused"}, {From: 450, To: 500, Reason: "interrupted"}, {From: 700, To: 800, Reason: "something new"},
+		{From: 800, To: 810, Reason: GapErased}}
 	if c.To != 0 || !slices.Equal(c.Gaps, want) {
 		t.Errorf("mended %+v\nwant %+v", c, want)
 	}
@@ -272,7 +272,7 @@ func TestDayCoverageMended(t *testing.T) {
 			t.Fatalf("overlapping after joining: %+v %+v", c.Gaps[i-1], c.Gaps[i])
 		}
 	}
-	if c.Gaps[0] != (CoverageGap{0, 60, GapPaused}) {
+	if c.Gaps[0] != (CoverageGap{From: 0, To: 60, Reason: GapPaused}) {
 		t.Errorf("first joined %+v", c.Gaps[0])
 	}
 	// Only gaps of the same reason are joined while that is enough, never erased ones: two paused gaps 90 s apart
@@ -288,8 +288,8 @@ func TestDayCoverageMended(t *testing.T) {
 	gaps[1].Reason, gaps[3].Reason = GapErased, GapPaused
 	gaps[11].From, gaps[11].To = 1015, 1020
 	c, _ = mendCoverage(&RecordingCoverage{To: 1e6, Gaps: gaps})
-	if len(c.Gaps) != maxCoverageGaps || c.Gaps[1] != (CoverageGap{100, 110, GapErased}) || c.Gaps[2] != (CoverageGap{200, 310, GapPaused}) ||
-		!slices.Contains(c.Gaps, CoverageGap{1000, 1010, GapPaused}) || !slices.Contains(c.Gaps, CoverageGap{1015, 1020, GapInterrupted}) {
+	if len(c.Gaps) != maxCoverageGaps || c.Gaps[1] != (CoverageGap{From: 100, To: 110, Reason: GapErased}) || c.Gaps[2] != (CoverageGap{From: 200, To: 310, Reason: GapPaused}) ||
+		!slices.Contains(c.Gaps, CoverageGap{From: 1000, To: 1010, Reason: GapPaused}) || !slices.Contains(c.Gaps, CoverageGap{From: 1015, To: 1020, Reason: GapInterrupted}) {
 		t.Errorf("same reason first: %d gaps, %+v", len(c.Gaps), c.Gaps[:12])
 	}
 	// Reasons alternating past the limit (a phone gone wrong): the closest joined whatever their reason, never erased.
@@ -305,7 +305,7 @@ func TestDayCoverageMended(t *testing.T) {
 		gaps = append(gaps, CoverageGap{From: float64(i * 20), To: float64(i*20 + 10), Reason: reason})
 	}
 	c, _ = mendCoverage(&RecordingCoverage{To: 1e6, Gaps: gaps})
-	if len(c.Gaps) != maxCoverageGaps || c.Gaps[1] != (CoverageGap{20, 30, GapErased}) {
+	if len(c.Gaps) != maxCoverageGaps || c.Gaps[1] != (CoverageGap{From: 20, To: 30, Reason: GapErased}) {
 		t.Errorf("alternating: %d gaps, %+v", len(c.Gaps), c.Gaps[:3])
 	}
 }

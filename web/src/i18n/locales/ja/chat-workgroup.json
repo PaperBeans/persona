@@ -3,5 +3,18 @@
   "retry": "再試行",
   "loading_steps_other": "{count}件を取得中",
   "run_clock": "直前のメッセージまたは作業開始から、次のメッセージ、作業終了、または現在までの時間です。",
-  "exchange_clock": "やり取りの開始から最後の動作までの時間です。進行中は現在までを計測します。"
+  "exchange_clock": "やり取りの開始から最後の動作までの時間です。進行中は現在までを計測します。",
+  "summary_reads_other": "{count} 件のファイルを参照",
+  "summary_edits_other": "{count} 箇所を編集",
+  "summary_cmds_other": "{count} 件のコマンドを実行",
+  "summary_searches_other": "{count} 回検索",
+  "summary_agents_other": "サブエージェント {count} 件",
+  "summary_other_other": "その他 {count} 件の操作",
+  "summary_sep": "、",
+  "live_steps_other": "{count} ステップ実行済み",
+  "cluster_read_other": "{count} 件のファイルを連続参照",
+  "cluster_search_other": "{count} 回連続検索",
+  "cluster_command_other": "{count} 件のコマンドを連続実行",
+  "cluster_running": "実行中",
+  "cluster_error": "エラーあり"
 }

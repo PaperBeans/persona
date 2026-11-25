@@ -47,7 +47,16 @@ func TestSessionsChangedEventKeepsLittle(t *testing.T) {
 		return
 	}
 	s, params := sessionsChangedOf()
+	// NodeEvent queues SessionsChanged. Reuse the same marker so both samples include
+	// all preceding callbacks without allocating a barrier inside the measured window.
+	done := make(chan struct{})
+	mark := func() { done <- struct{}{} }
+	drain := func() {
+		s.inOrder(mark)
+		<-done
+	}
 	s.NodeEvent("mac", "sessions.changed", params)
+	drain()
 	const runs = 200
 	runtime.GC()
 	var before, after runtime.MemStats
@@ -55,6 +64,7 @@ func TestSessionsChangedEventKeepsLittle(t *testing.T) {
 	for range runs {
 		s.NodeEvent("mac", "sessions.changed", params)
 	}
+	drain()
 	runtime.ReadMemStats(&after)
 	per := (after.TotalAlloc - before.TotalAlloc) / runs
 	if per > 1025000 {

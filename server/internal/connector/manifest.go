@@ -36,6 +36,7 @@ var capabilities = []capability{
 	{CapFallback, nil, false},
 	{CapMachines, reflect.TypeFor[Machines](), false},
 	{CapRecall, nil, false},
+	{CapInboxVisibility, nil, false},
 	{CapHistory, reflect.TypeFor[History](), true},
 	{CapHistoryAnchors, reflect.TypeFor[HistoryAnchors](), true},
 }

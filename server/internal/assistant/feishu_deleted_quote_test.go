@@ -49,6 +49,7 @@ func quoteReadbackAPI(t *testing.T, f *fakeHub, items []map[string]any, code int
 // A deleted parent can still contain its old body and resource keys in a successful readback.
 // Both the private handler and botSend must omit that quote while retaining the new message's media.
 func TestFeishuReplyDeletedQuote(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	needsLarkModule(t)
 	parents := []struct{ kind, body string }{
 		{"text", `{"text":"old-quote-text"}`},
@@ -98,7 +99,7 @@ func TestFeishuReplyDeletedQuote(t *testing.T) {
 							e.deliver(ev)
 						} else {
 							content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
-							if err := e.s.botSend(context.Background(), &ev, content, botTarget{Kind: targetMain}); err != nil {
+							if err := e.s.larkModule().Send(context.Background(), &ev, content, botTarget{Kind: targetMain}); err != nil {
 								t.Fatal(err)
 							}
 						}
@@ -176,6 +177,7 @@ func TestFeishuReplyDeletedQuote(t *testing.T) {
 }
 
 func TestFeishuReplyUnavailableQuote(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	needsLarkModule(t)
 	for _, tc := range []struct {
 		name   string

@@ -77,5 +77,7 @@
   "move_offline": "离线",
   "needs_update": "需要更新",
   "needs_update_note": "它的 personad 版本较旧，还不读自己的设置（manager.json），在用内置的默认值。请在它所在的电脑上更新 personad。",
+  "pending_restart": "待空闲重启",
+  "pending_restart_note": "磁盘上的 personad 程序已更新，这个助手会在空闲后自动重启生效。",
   "machine_offline": "它的助手「{name}」离线，助手回来后这台电脑会恢复在线。"
 }

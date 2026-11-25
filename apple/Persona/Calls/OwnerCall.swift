@@ -169,7 +169,7 @@ extension PersonaCalls {
         let calls = voiceCalls
         var deps = VoiceDeps.live(group: key.group)
         #if DEBUG
-        if VoiceSample.silentAudio { deps.audio = { VoiceSample.SilentAudio() } }
+        if SilentVoiceAudio.isRequested { deps.audio = { SilentVoiceAudio() } }
         #endif
         Task { await calls.start(key, extensionID: extensionID, surface: .phone, recent: recent, deps: deps) }
     }

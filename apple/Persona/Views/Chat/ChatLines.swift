@@ -153,13 +153,21 @@ struct ChatLines {
         let results = all.reduce(into: [String: Item]()) { out, item in
             if item.kind == .toolResult, let id = item.toolUseID { out[id] = item }
         }
+        let attentionReply = latestReplyNeedsAttention && foldRoutineRelayReplies ? all.last(where: Supervision.isAnswerText)?.id : nil
         var timeline: [ChatLine] = []
         var activity: [ChatLine] = []
         var intervals: [ActivityInterval] = []
         for line in placed {
-            guard main, case .supervision(_, let trace, let running, let source) = line.content,
-                  Supervision.completedSilent(trace.flatMap(Self.lineItems), results: results, live: running,
-                                              routineMainRelay: source?.kind == "conversation") else {
+            guard main, case .supervision(_, let trace, let running, let source) = line.content else {
+                timeline.append(line)
+                continue
+            }
+            let quietRelay = foldRoutineRelayReplies && source?.kind == "conversation"
+            guard Supervision.completedSilent(trace.flatMap(Self.lineItems), results: results, live: running, showReply: { item in
+                !quietRelay || item.id == attentionReply || APIErrorInfo.parse(item.text) != nil
+            }, needsAttention: { item in
+                item.id == attentionReply || APIErrorInfo.parse(item.text) != nil
+            }) else {
                 timeline.append(line)
                 continue
             }
@@ -191,8 +199,11 @@ struct ChatLines {
     /// Background rounds fold too (docs/apple/ios.md "Background rounds"): the main conversation and the leader
     /// conversations (`AssistantInfo.leaders`, #6595), with the hub's `main_background_folded` on. Needs `foldSupervision`.
     var foldBackground = false
-    /// The main Assistant conversation: a routine relay reply stays folded; leader conversations keep the old fallback.
+    /// The main Assistant conversation: completed silent rounds have a separate Background activity projection.
     var main = false
+    /// The main conversation explicitly opted into folding routine relay replies.
+    var foldRoutineRelayReplies = false
+    var latestReplyNeedsAttention = false
     var openSupervision: Set<String> = []
     var openAllSupervision = false
     var active = false
@@ -204,6 +215,14 @@ struct ChatLines {
         guard assistant, on, !conversation.isEmpty else { return false }
         if let main, !main.isEmpty, conversation == main { return true }
         return leaders.contains(conversation)
+    }
+
+    /// A question or a turn that stopped abnormally still needs the owner's attention with quiet relays on.
+    static func needsReplyAttention(_ session: Session?) -> Bool {
+        guard let session else { return false }
+        return session.awaitsReply || session.turnError?.isEmpty == false || session.turnErrorKind?.isEmpty == false ||
+            session.failureReason?.isEmpty == false || session.status == .blocked || session.wasInterrupted ||
+            session.work?.phase == "blocked"
     }
 
     /// The sources whose rounds are background rounds: a supervising conversation's message, a follow-up, a scheduled run.
@@ -245,6 +264,7 @@ struct ChatLines {
     func lines(_ blocks: [ChatBlock], live liveID: String?, streaming: Bool = false) -> [ChatLine] {
         guard foldSupervision else { return flatLines(blocks, live: liveID, streaming: streaming) }
         let all = blocks.flatMap(Self.transcriptItems)
+        let attentionReply = latestReplyNeedsAttention && foldRoutineRelayReplies ? all.last(where: Supervision.isAnswerText)?.id : nil
         let results = all.reduce(into: [String: Item]()) { out, item in
             if item.kind == .toolResult, let id = item.toolUseID { out[id] = item }
         }
@@ -264,7 +284,12 @@ struct ChatLines {
                 entry = nil
             }
             guard let trace = round, let first = trace.first else { return }
-            if Supervision.visible(evidence, results: results, live: running, routineMainRelay: main && source?.kind == "conversation") {
+            let quietRelay = foldRoutineRelayReplies && source?.kind == "conversation"
+            if Supervision.visible(evidence, results: results, live: running, showReply: { item in
+                !quietRelay || item.id == attentionReply || APIErrorInfo.parse(item.text) != nil
+            }, needsAttention: { item in
+                item.id == attentionReply || APIErrorInfo.parse(item.text) != nil
+            }) {
                 out += trace
             } else {
                 out.append(.supervision(id: "sv-" + first.id, lines: trace, live: running, source: source))
@@ -430,9 +455,10 @@ struct ChatLines {
                                          start: seg.user?.firstTS ?? (k == 0 ? wokeAt : nil) ?? seg.rows.first?.firstTS ?? t.startedAt,
                                          end: Self.workEnd(ending) ?? seg.rows.last?.lastTS))
                     }
-                    // Between the work and the answer: what the work looked at. Its id stays as pictures come in and
-                    // the answer changes, so the strip grows sideways in place.
+                    // Between the work and the answer: what the work looked at and out-of-band tool UI views. Its id
+                    // stays as items arrive so the row updates in place while the turn runs.
                     out += Self.viewed("vi-" + (seg.user?.id ?? opening ?? seg.rows.first?.id ?? t.id), items)
+                    out += Self.toolViews("tv-" + (seg.user?.id ?? opening ?? seg.rows.first?.id ?? t.id), items)
                     if let last { out.append(.row(seg.rows[last])) }
                     out += after.sorted().map { .row(seg.rows[$0]) }
                     if opening != nil, out.count > firstLine {
@@ -706,6 +732,11 @@ struct ChatLines {
     static func viewed(_ id: String, _ work: [WorkItem]) -> [ChatLine] {
         let images = ViewedImages.of(work)
         return images.isEmpty ? [] : [.viewed(id: id, images: images)]
+    }
+
+    static func toolViews(_ id: String, _ work: [WorkItem]) -> [ChatLine] {
+        let views = ToolViews.of(work)
+        return views.isEmpty ? [] : [.toolViews(id: id, views: views)]
     }
 
     static func photos(_ rows: [ChatRow]) -> [Item] {

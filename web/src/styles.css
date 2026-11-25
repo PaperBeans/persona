@@ -340,12 +340,12 @@ body {
 
 
 /* ── Persona additions ──────────────────────────────────── */
-[data-terminal-scheme="light"], :root { --status-needs: var(--attention); --status-working: var(--orange); --status-waiting: color-mix(in srgb, var(--status-working) 55%, var(--ink-3)); --status-unread: var(--green); --status-idle: var(--ink-3); --user-bubble: #dceaff; --neutral-bubble: #f0f1f3; --term-magenta: #a347ba; --term-cyan: #0f8a9c; }
-[data-terminal-scheme="dark"], .dark { --user-bubble: #1d3557; --neutral-bubble: #2c2d31; --term-magenta: #c678dd; --term-cyan: #4fb6c4; }
+[data-terminal-scheme="light"], :root { --status-needs: var(--attention); --status-working: var(--orange); --status-waiting: color-mix(in srgb, var(--status-working) 55%, var(--ink-3)); --status-unread: var(--green); --status-idle: var(--ink-3); --user-bubble: #dceaff; --neutral-bubble: #f0f1f3; --term-magenta: #a347ba; --term-cyan: #0f8a9c; --term-bg: #1b1c1f; --term-fg: #e6e7e9; }
+[data-terminal-scheme="dark"], .dark { --user-bubble: #1d3557; --neutral-bubble: #2c2d31; --term-magenta: #c678dd; --term-cyan: #4fb6c4; --term-bg: #141517; --term-fg: #e6e7e9; }
 /* The chat's trace (aligned with cindy's defaults, #1963): tool rows and their chevrons, the work group's rail, thought
    text, diff counts and the running status bar's accent. */
-:root { --tool-ink: #525252; --tool-rail: #ddd6cb; --thinking-ink: #a3a3a3; --diff-add-fg: #22863a; --diff-del-fg: #b31d28; --diff-add-bg: #e6ffec; --diff-del-bg: #ffebe9; --diff-add-word: #abf2bc; --diff-del-word: #ffcecb; --status-accent: #ea6b17; --tool-hover: #ececec; }
-.dark { --tool-ink: #a3a3a3; --tool-rail: #404040; --thinking-ink: #737373; --diff-add-fg: #7ee787; --diff-del-fg: #ff7b72; --diff-add-bg: #2ea04326; --diff-del-bg: #f8514926; --diff-add-word: #2ea04366; --diff-del-word: #f8514966; --status-accent: #ea6b17; --tool-hover: #333436; }
+:root { --tool-ink: #525252; --tool-rail: #ddd6cb; --thinking-ink: #a3a3a3; --diff-add-fg: #22863a; --diff-del-fg: #b31d28; --diff-add-bg: #e6ffec; --diff-del-bg: #ffebe9; --diff-add-word: #abf2bc; --diff-del-word: #ffcecb; --status-accent: var(--accent-ink); --tool-hover: #ececec; }
+.dark { --tool-ink: #a3a3a3; --tool-rail: #404040; --thinking-ink: #737373; --diff-add-fg: #7ee787; --diff-del-fg: #ff7b72; --diff-add-bg: #2ea04326; --diff-del-bg: #f8514926; --diff-add-word: #2ea04366; --diff-del-word: #f8514966; --status-accent: var(--accent-ink); --tool-hover: #333436; }
 @theme inline { --color-tool-ink: var(--tool-ink); --color-tool-rail: var(--tool-rail); --color-thinking-ink: var(--thinking-ink); --color-diff-add-fg: var(--diff-add-fg); --color-diff-del-fg: var(--diff-del-fg); --color-diff-add-bg: var(--diff-add-bg); --color-diff-del-bg: var(--diff-del-bg); --color-diff-add-word: var(--diff-add-word); --color-diff-del-word: var(--diff-del-word); --color-status-accent: var(--status-accent); --color-tool-hover: var(--tool-hover); }
 /* The least a sidebar agent row's title keeps behind a tab's or an agent's name (Sidebar ROW_TITLE_MIN): about 4.5
    characters of its 13px text, at the page's text size. */
@@ -392,6 +392,23 @@ body {
    card keeps the column's, so nothing in it moves while the ring shows */
 [data-answer][data-search-hit] { outline-offset: 6px; } /* text has no padding of its own: the ring sits just outside it */
 [data-answer][data-search-hit]:not(:has(pre, table, .card-ui)) { width: fit-content; max-width: 100%; }
+/* Active working/thinking text shimmer (inspired by Orca tw-shimmer). */
+.chat-shimmer {
+  background-image: linear-gradient(90deg, currentColor 0%, color-mix(in srgb, currentColor 42%, transparent) 50%, currentColor 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-text 2.2s linear infinite;
+}
+/* Smooth bottom fade on folded long user prompts. */
+.user-bubble-fade {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.75rem), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.75rem), transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-shimmer { animation: none; background-image: none; color: inherit; -webkit-background-clip: border-box; background-clip: border-box; }
+}
 
 html, body, #root { height: 100%; }
 /* Pulling down at the top of a scroller must not reload the app. Vertical only: the drawer's sideways drags are unaffected. */

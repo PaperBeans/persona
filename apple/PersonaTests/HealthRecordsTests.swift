@@ -100,6 +100,10 @@ struct HealthRecordsTests {
         #expect(try unit("active_energy_burned") == "kcal")
         #expect(try unit("dietary_protein") == "g")
         #expect(try unit("oxygen_saturation") == "%")
+        for name in ["body_fat_percentage", "walking_double_support_percentage", "walking_asymmetry_percentage",
+                     "atrial_fibrillation_burden", "peripheral_perfusion_index"] {
+            #expect(try unit(name) == "%", "a ratio is not a count: \(name)")
+        }
         #expect(try unit("heart_rate_variability_sdnn") == "ms")
         #expect(try unit("body_temperature") == "degC")
         #expect(try unit("blood_glucose") == "mg/dL")

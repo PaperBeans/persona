@@ -50,7 +50,7 @@ export function ExtensionThemeProvider({ children }: { children: ReactNode }) {
 export function ExtensionThemePicker() {
   const { available, selected, select } = useContext(PaletteContext);
   if (!available.length) return null;
-  return <div className="flex items-center gap-3 px-4 py-2.5">
+  return <div className="flex items-center gap-3 px-4 py-2.5" data-settings-row="extension-theme">
     <span className="min-w-0 flex-1 text-[13px] text-ink">{t("ui-extensionthemepicker.label")}</span>
     <select aria-label={t("ui-extensionthemepicker.label")} value={selected} onChange={(e) => select(e.target.value)} className="h-8 max-w-[60%] rounded-control bg-field px-2.5 text-[12.5px] text-ink shadow-inset-field outline-none focus:shadow-[inset_0_0_0_1px_var(--accent)]">
       <option value="">{t("ui-extensionthemepicker.default")}</option>

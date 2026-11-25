@@ -56,10 +56,15 @@ def patterns(test_names, partitions=2, package="the package"):
     return result
 
 
-def list_patterns(cwd, package, env=None):
-    """List one partitioned package's tests in the server module at cwd and split them."""
-    listing = subprocess.check_output(["go", "test", "-list", ".*", package], cwd=cwd, env=env, text=True,
-                                      timeout=600)
+def list_patterns(cwd, package, env=None, prefix=(), flags=()):
+    """List one partitioned package's tests in the server module at cwd and split them.
+
+    prefix prepends a wrapper command (such as scripts/test/server_test_env.py) and flags forwards build-affecting
+    go test flags (such as -tags, -race, -trimpath) so listing warms GOCACHE with the exact same build action ID
+    as the partition runs that follow.
+    """
+    listing = subprocess.check_output([*prefix, "go", "test", *flags, "-list", ".*", package], cwd=cwd, env=env,
+                                      text=True, timeout=600)
     return patterns(names(listing), PACKAGES[package], package)
 
 

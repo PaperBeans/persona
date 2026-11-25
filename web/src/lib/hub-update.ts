@@ -47,7 +47,7 @@ export interface HubUpdateStatus {
   backup?: { id: string; retained: number; pruned: string[] | null };
   version: string;
   build: number;
-  channel: string; // release | docker | dev
+  channel: string; // release | beta | docker | dev
   can_update: boolean;
   why_not?: string;
   latest?: {
@@ -139,6 +139,7 @@ export function workingUpdateTitle(s: HubUpdateStatus): string | undefined {
       return t("lib-hub-update.state_downloading");
     case "waiting_idle":
       return s.busy.length ? t("lib-hub-update.state_waiting_busy", { count: s.busy.length }) : t("lib-hub-update.state_waiting_idle");
+    case "installing":
     case "restarting":
       return t("lib-hub-update.state_restarting");
     case "confirming":

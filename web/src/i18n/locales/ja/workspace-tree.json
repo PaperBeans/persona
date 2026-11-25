@@ -1,5 +1,6 @@
 {
   "disclosure": "{name} を展開または折りたたむ",
   "actions": "{name} の操作",
-  "unavailable": "ワークスペースを利用できません"
+  "unavailable": "ワークスペースを利用できません",
+  "worktree_kind": "ワークツリー"
 }

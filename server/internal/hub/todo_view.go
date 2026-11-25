@@ -120,20 +120,109 @@ func (h *Hub) todoImageFeatures() []string {
 }
 
 // todoListSums are the members of a merged to-dos list the hub adds up over its answers (mergeList, before the list's
-// validator is taken): counts, those of every answer the merge takes that has them (sumTodoCounts). None when no such
-// answer has them (every manager is older): the merged list then has none either.
+// validator is taken): counts, those of every answer the merge takes that has them (sumTodoCounts), and optional
+// todos_v2 shared_blockers merged deterministically across managers when present.
 func todoListSums(answers []listAnswer) map[string]json.RawMessage {
 	var all []json.RawMessage
+	var blockers []json.RawMessage
 	for i := range answers {
 		if raw, ok := mergedMember(&answers[i], "todos", "counts"); ok {
 			all = append(all, raw)
 		}
+		if raw, ok := mergedMember(&answers[i], "todos", "shared_blockers"); ok {
+			blockers = append(blockers, raw)
+		}
 	}
-	sum, ok := sumTodoCounts(all)
-	if !ok {
-		return nil
+	var out map[string]json.RawMessage
+	if sum, ok := sumTodoCounts(all); ok {
+		out = map[string]json.RawMessage{"counts": sum}
 	}
-	return map[string]json.RawMessage{"counts": sum}
+	if merged, ok := mergeSharedBlockers(blockers); ok {
+		if out == nil {
+			out = map[string]json.RawMessage{}
+		}
+		out["shared_blockers"] = merged
+	}
+	return out
+}
+
+type mergedSharedBlocker struct {
+	Key     string   `json:"key"`
+	Kind    string   `json:"kind"`
+	Label   string   `json:"label"`
+	URL     string   `json:"url,omitempty"`
+	TodoIDs []string `json:"todo_ids"`
+	Count   int      `json:"count"`
+}
+
+func mergeSharedBlockers(all []json.RawMessage) (json.RawMessage, bool) {
+	if len(all) == 0 {
+		return nil, false
+	}
+	var valid [][]mergedSharedBlocker
+	var first json.RawMessage
+	for _, raw := range all {
+		var list []mergedSharedBlocker
+		if json.Unmarshal(raw, &list) != nil || len(list) == 0 {
+			continue
+		}
+		if first == nil {
+			first = raw
+		}
+		valid = append(valid, list)
+	}
+	switch len(valid) {
+	case 0:
+		return nil, false
+	case 1:
+		return first, true
+	}
+	type group struct {
+		entry mergedSharedBlocker
+		todos map[string]bool
+	}
+	groups := map[string]*group{}
+	for _, list := range valid {
+		for _, item := range list {
+			if item.Key == "" {
+				continue
+			}
+			g := groups[item.Key]
+			if g == nil {
+				g = &group{entry: item, todos: map[string]bool{}}
+				groups[item.Key] = g
+			} else if item.Label != "" && (g.entry.Label == "" || item.Label < g.entry.Label) {
+				g.entry.Label = item.Label
+			}
+			for _, id := range item.TodoIDs {
+				if id != "" {
+					g.todos[id] = true
+				}
+			}
+		}
+	}
+	var merged []mergedSharedBlocker
+	for _, g := range groups {
+		if len(g.todos) < 2 {
+			continue
+		}
+		ids := make([]string, 0, len(g.todos))
+		for id := range g.todos {
+			ids = append(ids, id)
+		}
+		slices.Sort(ids)
+		g.entry.TodoIDs = ids
+		g.entry.Count = len(ids)
+		merged = append(merged, g.entry)
+	}
+	if len(merged) == 0 {
+		return nil, false
+	}
+	slices.SortFunc(merged, func(a, b mergedSharedBlocker) int {
+		return cmp.Or(cmp.Compare(b.Count, a.Count), cmp.Compare(a.Key, b.Key))
+	})
+	b, err := json.Marshal(merged)
+	return b, err == nil
 }
 
 // sumTodoCounts adds up the counts objects of all (each answer's; anything not an object, null included, is none):

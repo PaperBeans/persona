@@ -15,7 +15,7 @@ struct ModulesTests {
     @Test func theListRegistersWithoutProblems() {
         let all = ModuleRegistry<PersonaHostApp>(modules: Modules.builtIn, isEnabled: { _ in true })
         #expect(all.problems.isEmpty)
-        #expect(all.active.map(\.id) == ["glasses", "screen-share", "health"])
+        #expect(all.active.map(\.id) == ["glasses", "screen-share", "health", "voice"])
         #expect(Modules.registry.problems.isEmpty)
     }
 
@@ -80,6 +80,7 @@ struct ModulesTests {
         for place in [PersonaHostApp.Place.chatMenu, .chatFooter, .toolCall] { #expect(off.views(at: place).isEmpty) }
         #expect(off.settingsEntry(id: "live-screen") == nil)
         #expect(off.capability((any LiveScreen).self) == nil)
+        #expect(off.audioLease(id: "screen-share.pip") == nil)
     }
 
     @Test func screenShareOnServesItsPlaces() {
@@ -90,6 +91,7 @@ struct ModulesTests {
         }
         #expect(on.settingsEntry(id: "live-screen")?.module == "screen-share")
         #expect(on.capability((any LiveScreen).self) != nil)
+        #expect(on.audioLease(id: "screen-share.pip") == ModuleAudioLease(id: "screen-share.pip", module: "screen-share", kind: .playback))
     }
 
     @Test func screenShareFollowsItsHubFlag() {
@@ -133,6 +135,36 @@ struct ModulesTests {
             s.heard(["modules", "module.screen-share"], from: "home", isHub: true, defaults: d)
             #expect(s.registry.offByHub == ["health"])
             #expect(s.registry.shellPage(id: SidebarRoute.healthPage) == nil)
+        }
+    }
+
+    // Voice (#13431): the core reaches the conversation's voice only through `ConversationVoice`, so with it off the
+    // page has no call, no bar and no captions; the composer's dictation is the core's and stays.
+    @Test func voiceOffProvidesNoConversationVoice() {
+        let off = registry(glasses: false)
+        #expect(!off.isActive("voice"))
+        #expect(off.capability((any ConversationVoice).self) == nil)
+    }
+
+    @Test func voiceOnProvidesConversationVoice() {
+        let on = ModuleRegistry<PersonaHostApp>(modules: Modules.builtIn, isEnabled: { $0.descriptor.id == "voice" })
+        #expect(on.problems.isEmpty)
+        #expect(on.capability((any ConversationVoice).self) === ConversationVoiceState.shared)
+    }
+
+    @Test func voiceFollowsItsHubFlag() {
+        #expect(VoiceModule().descriptor.feature == "module.voice")
+        withDefaults { d in
+            let s = ModuleState(group: "home", defaults: d, isEnabled: { $0.descriptor.id == "voice" })
+            s.heard(["file_upload"], from: "home", isHub: true, defaults: d)
+            #expect(s.registry.isActive("voice"), "an older hub leaves it on")
+            s.heard(["modules", "module.voice"], from: "home", isHub: true, defaults: d)
+            #expect(s.registry.capability((any ConversationVoice).self) != nil)
+            s.heard(["modules", "module.health"], from: "home", isHub: true, defaults: d)
+            #expect(s.registry.offByHub == ["voice"])
+            #expect(s.registry.capability((any ConversationVoice).self) == nil)
+            s.heard(["modules", "module.voice"], from: "home", isHub: true, defaults: d)
+            #expect(s.registry.capability((any ConversationVoice).self) != nil, "back on with the flag")
         }
     }
 

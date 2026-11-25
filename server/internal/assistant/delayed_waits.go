@@ -18,6 +18,7 @@ type delayedWaitKind string
 const (
 	delayedScheduledRetry delayedWaitKind = "scheduled_usage_limit_retry"
 	delayedReceiptRecheck delayedWaitKind = "task_receipt_recheck"
+	delayedFanoutWake     delayedWaitKind = "conversation_fanout_wake"
 )
 
 type delayedWait struct {
@@ -28,6 +29,7 @@ type delayedWait struct {
 	Unknown bool                 `json:"unknown,omitempty"`
 	Retry   *scheduledLimitRetry `json:"retry,omitempty"`
 	Receipt *receiptRecheck      `json:"receipt,omitempty"`
+	Fanout  *fanoutWake          `json:"fanout,omitempty"`
 	// replace is local-only: persistence superseded an older binding, so its earlier map entry must not block this timer.
 	replace bool
 }
@@ -274,13 +276,111 @@ func (s *Service) requeueClaimedReceiptRechecks(ctx context.Context) error {
 	return s.updateDelayedWaits(ctx, func(doc *delayedWaitDoc) (bool, error) {
 		changed := false
 		for i := range doc.Waits {
-			if doc.Waits[i].Kind == delayedReceiptRecheck && doc.Waits[i].Claim != "" {
+			if (doc.Waits[i].Kind == delayedReceiptRecheck || doc.Waits[i].Kind == delayedFanoutWake) && doc.Waits[i].Claim != "" {
 				doc.Waits[i].Claim = ""
 				changed = true
 			}
 		}
 		return changed, nil
 	})
+}
+
+// persistFanoutWake keeps one unclaimed deferred wake per (sender, target), scheduling a new one at the back of
+// sender's wake queue so broadcasts stay spread out over time (#14352).
+func (s *Service) persistFanoutWake(ctx context.Context, sender, target, machine string, now time.Time) (selected delayedWait, err error) {
+	err = s.updateDelayedWaits(ctx, func(doc *delayedWaitDoc) (bool, error) {
+		selected = delayedWait{}
+		for _, existing := range doc.Waits {
+			if existing.Kind == delayedFanoutWake && existing.Claim == "" && !existing.Unknown &&
+				existing.Fanout != nil && existing.Fanout.Sender == sender && existing.Fanout.Target == target {
+				selected = existing
+				return false, nil
+			}
+		}
+		at := nextFanoutSlot(s.sendFanout.senderWindow(sender, now), doc.Waits, sender, "", time.Time{}, now)
+		selected = delayedWait{
+			ID:     "fanout_" + randomHex(12),
+			Kind:   delayedFanoutWake,
+			At:     at.UTC(),
+			Fanout: &fanoutWake{Sender: sender, Target: target, MachineID: machine},
+		}
+		doc.Waits = append(doc.Waits, selected)
+		return true, nil
+	})
+	return selected, err
+}
+
+// persistFanoutWakeExisting persists a fallback deferred wake whose initial save failed transiently, deduplicating
+// against any unclaimed wait already persisted for the same (sender, target).
+func (s *Service) persistFanoutWakeExisting(ctx context.Context, w delayedWait) (selected delayedWait, err error) {
+	if w.Fanout == nil {
+		return w, nil
+	}
+	err = s.updateDelayedWaits(ctx, func(doc *delayedWaitDoc) (bool, error) {
+		selected = delayedWait{}
+		for _, existing := range doc.Waits {
+			if existing.ID == w.ID || (existing.Kind == delayedFanoutWake && existing.Claim == "" && !existing.Unknown &&
+				existing.Fanout != nil && existing.Fanout.Sender == w.Fanout.Sender && existing.Fanout.Target == w.Fanout.Target) {
+				selected = existing
+				return false, nil
+			}
+		}
+		doc.Waits = append(doc.Waits, w)
+		selected = w
+		return true, nil
+	})
+	return selected, err
+}
+
+// releaseFanoutWakeWait returns a claimed deferred wake to pending at minAt or the next back-of-queue slot for sender.
+func (s *Service) releaseFanoutWakeWait(ctx context.Context, w delayedWait, token string, minAt time.Time, useQueue bool) (nextAt time.Time, released bool, err error) {
+	err = s.updateDelayedWaits(ctx, func(doc *delayedWaitDoc) (bool, error) {
+		nextAt, released = time.Time{}, false
+		for i := range doc.Waits {
+			cur := &doc.Waits[i]
+			if cur.ID == w.ID && cur.Claim == token && !cur.Unknown {
+				targetAt := minAt.UTC()
+				if useQueue && cur.Fanout != nil {
+					now := time.Now().UTC()
+					slot := nextFanoutSlot(s.sendFanout.senderWindow(cur.Fanout.Sender, now), doc.Waits, cur.Fanout.Sender, cur.ID, cur.At, now)
+					if slot.After(targetAt) {
+						targetAt = slot
+					}
+				}
+				cur.Claim, cur.At = "", targetAt
+				nextAt, released = targetAt, true
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	return nextAt, released, err
+}
+
+// cancelFanoutWakeWait removes unclaimed deferred wakes for (sender, target) once stillNeeded reports that no unread
+// DeferredWake message from sender remains for target. Evaluated under delayedMu so a concurrent new send is never lost.
+func (s *Service) cancelFanoutWakeWait(ctx context.Context, sender, target string, stillNeeded func() bool) (removed []string, err error) {
+	err = s.updateDelayedWaits(ctx, func(doc *delayedWaitDoc) (bool, error) {
+		removed = nil
+		if stillNeeded != nil && stillNeeded() {
+			return false, nil
+		}
+		kept := doc.Waits[:0]
+		for _, w := range doc.Waits {
+			if w.Kind == delayedFanoutWake && w.Claim == "" && !w.Unknown &&
+				w.Fanout != nil && w.Fanout.Sender == sender && w.Fanout.Target == target {
+				removed = append(removed, w.ID)
+				continue
+			}
+			kept = append(kept, w)
+		}
+		if len(removed) == 0 {
+			return false, nil
+		}
+		doc.Waits = kept
+		return true, nil
+	})
+	return removed, err
 }
 
 // releaseReceiptRecheck retains uncertainty, but drops the old look when its handler already scheduled a successor.
@@ -365,6 +465,12 @@ func (s *Service) restoreDelayedWaits(ctx context.Context) bool {
 			if w.Receipt != nil && w.Claim == "" {
 				s.delayedRestored[w.ID] = true
 				s.armReceiptRecheck(w, true)
+			}
+		case delayedFanoutWake:
+			if w.Fanout != nil && w.Claim == "" {
+				s.ensureFanoutLoaded(ctx)
+				s.delayedRestored[w.ID] = true
+				s.armFanoutWake(w, true)
 			}
 		}
 	}

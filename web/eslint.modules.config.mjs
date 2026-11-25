@@ -1,6 +1,7 @@
 // The feature-module boundary (#13434, #13430 section 6; docs/web/web.md "Modules"), over all of src (`npm run lint`'s
 // second pass): Persona Core never reaches into a module, and a module reaches another only when its descriptor names it
-// in `needs`. Only the module list (src/modules/index.ts) and the module host (src/core/module-host.ts) join them.
+// in `needs`. Only the module list (src/modules/index.ts, and standalone.ts, its part main.tsx imports) and the module
+// host (src/core/module-host.ts) join them.
 //
 //   - outside src/modules: no import of a module's files (`modules/<id>/…`), static or dynamic; the list itself
 //     (`./modules`, `../modules`) is the way in. Tests may reach a module's files to test them.
@@ -29,7 +30,8 @@ export function moduleNeeds() {
     });
 }
 
-const INTO_A_MODULE = "(^|/)modules/(?!index$)[^/]+";
+// the list is index.ts, and standalone.ts, its part main.tsx imports (src/modules/standalone.ts says why)
+const INTO_A_MODULE = "(^|/)modules/(?!(index|standalone)$)[^/]+";
 const outside = "Persona Core reaches a module only through the module list (src/modules/index.ts) and the module host (src/core/module-host.ts): docs/web/web.md \"Modules\".";
 const inCore = "src/core knows no module: the module list registers them with the host (docs/web/web.md \"Modules\").";
 
@@ -64,7 +66,7 @@ function landing(abs, partial, incomplete = false) {
   }
   if (rel === "") return partial ? { kind: "unknown" } : { kind: "list" };
   const [first, ...rest] = rel.split(sep);
-  if (!rest.length && /^index(\.[cm]?[jt]sx?)?$/.test(first)) return { kind: "list" };
+  if (!rest.length && /^(index|standalone)(\.[cm]?[jt]sx?)?$/.test(first)) return { kind: "list" };
   if (incomplete && !rest.length) return { kind: "unknown" }; // `modules/hea${x}`: which module is not written
   return NEEDS.has(first) ? { kind: "module", id: first } : { kind: "unknown" };
 }
@@ -127,7 +129,7 @@ const base = {
   languageOptions: { parser, parserOptions: { ecmaVersion: "latest", sourceType: "module", ecmaFeatures: { jsx: true } } },
 };
 
-const LIST = ["(^|/)modules/?$", "(^|/)modules/index(\\.[jt]sx?)?$"];
+const LIST = ["(^|/)modules/?$", "(^|/)modules/(index|standalone)(\\.[jt]sx?)?$"];
 
 export default [
   { ...base, files: ["src/**/*.ts", "src/**/*.tsx"], rules: { "persona-modules/boundary": "error" } },

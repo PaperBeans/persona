@@ -15,7 +15,7 @@ import { memo, useCallback, useEffect, useRef, useState, type ReactNode, type Re
 import { t } from "../../i18n";
 import { agentName } from "../../lib/agent-kind";
 import { onModelPicker, requestModelPicker, sessionLauncher } from "../../lib/model-switch";
-import { modelSupportsFast } from "../../lib/launcher-models";
+import { effortVariantBase, modelSupportsFast, withoutEffortQualifier } from "../../lib/launcher-models";
 import { effortTitle } from "../../lib/session-actions";
 import { dropPick, launcherOffered, pickFast, usePickedEffort, usePickedFast, usePickedLauncher, usePickedModel } from "../../lib/assistant-chat";
 import { isBackgroundSupervisor } from "../../lib/background-supervisor";
@@ -38,10 +38,10 @@ import { UltraMark } from "./Ultracode";
 // the panel (and what it is built from) loads on the pill's first tap, not with every chat's composer
 const SessionModelPanel = lazyOverlay(() => import("./SessionModelPanel").then((m) => m.SessionModelPanel));
 
-/** The effort as the pill says it: English shortens "Very high" to "Extra" here only (the tooltip and the panel keep the
- *  full name); other languages say it in full. */
-export function pillEffort(id: string): string {
-  return id === "xhigh" ? t("chat-modelpill.effort_xhigh_short") : effortTitle(id);
+function pillDisplayName({ model, effort, engine }: PillSetup): string | undefined {
+  if (!model || !effort) return model;
+  // Before the catalog arrives, Antigravity can report only the variant ID and its effort.
+  return (engine === "agy" && effortVariantBase(model, effort)) || withoutEffortQualifier(model);
 }
 
 // the composer card's widths (Composer.tsx `@container/composer`): narrow < 600, dense < 520, ultra < 420
@@ -90,14 +90,14 @@ export function ModelPill({
   const shown = pending ?? current;
   const launcher = shown.launcherName;
   const unknown = !shown.model;
-  const name = shown.model ?? (loading ? t("chat-modelpill.loading") : failed ? t("chat-modelpill.failed") : t("chat-modelpill.default_model"));
+  const name = pillDisplayName(shown) ?? (loading ? t("chat-modelpill.loading") : failed ? t("chat-modelpill.failed") : t("chat-modelpill.default_model"));
   const describe = (x: PillSetup) =>
-    [agentName(x.engine, x.engineLabel), x.model ?? name, x.launcherName || x.provider, x.effort && effortTitle(x.effort), x.fast && t("chat-sessiondialogs.speed_fast")].filter(Boolean).join(" · ");
+    [agentName(x.engine, x.engineLabel), pillDisplayName(x) ?? name, x.launcherName || x.provider, x.effort && effortTitle(x.effort), x.fast && t("chat-sessiondialogs.speed_fast")].filter(Boolean).join(" · ");
   const title = pending
     ? t("chat-modelpill.current_and_next", { current: describe(current), next: describe(pending) })
     : [describe(current), failed && !unknown ? t("chat-modelpill.failed") : ""].filter(Boolean).join(" · ");
   const short = pillShortName(name);
-  const effort = shown.effort ? effortTitle(shown.effort) : "";
+  const effort = effortTitle(shown.effort);
   // An explicit Agent launcher matches the panel even across engines; other pills keep the existing pending label.
   const target = launcher || (pending ? (pending.engine !== current.engine ? agentName(pending.engine, pending.engineLabel) : pending.provider) : "");
   const label = t(
@@ -123,15 +123,17 @@ export function ModelPill({
       )}
       {/* the name gives way first (a far larger shrink than the effort's): narrow, the effort truncates only once the
           name has no room left */}
-      <span title={name} className={cx("shrink-[1000] truncate text-ink @max-[600px]/composer:max-w-[108px]", launcher ? "min-w-[3ch]" : "min-w-0", short !== name && "@max-[600px]/composer:hidden", !launcher && ULTRA_HIDDEN)}>{name}</span>
-      {/* narrow, the name without its bracketed qualifier, a context size kept short (the tooltip keeps all of it): the
-          108 px would cut it there */}
-      {short !== name && (
-        <span title={name} data-pill-short className={cx("hidden shrink-[1000] truncate text-ink @max-[600px]/composer:block @max-[600px]/composer:max-w-[108px]", launcher ? "min-w-[3ch]" : "min-w-0", !launcher && ULTRA_HIDDEN)}>{short}</span>
-      )}
+      <span title={name} className={cx("shrink-[1000] truncate text-ink @max-[600px]/composer:max-w-[108px]", launcher ? "min-w-[3ch]" : "min-w-0", !launcher && ULTRA_HIDDEN)}>
+        {short === name ? name : (
+          <>
+            <span className="@max-[600px]/composer:hidden">{name}</span>
+            <span data-pill-short className="hidden @max-[600px]/composer:inline">{short}</span>
+          </>
+        )}
+      </span>
       {shown.effort && (
         <span title={effort} data-pill-effort className={cx("ml-1 shrink-0 whitespace-nowrap text-ink @max-[600px]/composer:min-w-0 @max-[600px]/composer:shrink @max-[600px]/composer:truncate", ULTRA_HIDDEN)}>
-          {pillEffort(shown.effort)}
+          {effort}
         </span>
       )}
       {shown.fast && <Icon name="bolt" stroke={2} className={cx("ml-0.5 size-[13px] shrink-0 fill-current text-ink-2 @max-[520px]/composer:size-[12px]", ULTRA_HIDDEN)} />}

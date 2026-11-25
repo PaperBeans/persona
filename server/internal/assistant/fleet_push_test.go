@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"strings"
 	"testing"
@@ -154,49 +155,108 @@ func TestFinishedPushSkipsBackgroundPlaceholder(t *testing.T) {
 	}
 }
 
-// A turn a channel answers is no push to the phone (the channel has it), nor an inbox agent's.
+// The relay is delivered in every case. Only an ordinary finished alert for a completed main relay may be quiet.
 func TestFinishedPushFoldsOnlyRoutineMainRelay(t *testing.T) {
-	for _, tc := range []struct {
-		name, source, main, turnError string
-		promote                       bool
-		want                          int
-	}{
-		{name: "routine main relay", source: proto.SourceConversation, main: "main-1", want: 0},
-		{name: "same relay outside main", source: proto.SourceConversation, main: "leader-1", want: 1},
-		{name: "main explicitly promotes", source: proto.SourceConversation, main: "main-1", promote: true, want: 1},
-		{name: "main scheduled reply", source: proto.SourcePatrol, main: "main-1", want: 1},
-		{name: "main relay failure still pushes", source: proto.SourceConversation, main: "main-1", turnError: "Model overloaded", want: 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ft := newFleetTestNoStore(t)
-			fastDone(ft)
-			setSettings(t, ft.s, func(v *Settings) { v.Main = tc.main })
-			owner := proto.Item{ID: "u1", Role: "user", Kind: proto.KindText, Text: "Report the result."}
-			if tc.source != "" {
-				owner.Source = &proto.MessageSource{Kind: tc.source, ConversationID: "leader"}
-			}
-			items := []proto.Item{owner}
-			if tc.promote {
-				items = append(items,
-					proto.Item{ID: "n1", Role: "assistant", Kind: proto.KindToolUse, ToolName: "notify_user", ToolUseID: "notify-1"},
-					proto.Item{ID: "n2", Role: "user", Kind: proto.KindToolResult, ToolUseID: "notify-1", Text: "sent"})
-			}
-			items = append(items, proto.Item{ID: "a1", Role: "assistant", Kind: proto.KindText, Text: "Verification passed."})
-			ft.f.setItems(items...)
-			work := proto.Session{SessionID: "main-1", Title: "Delegated check", Cwd: "/home/u/.persona/assistant",
-				Assistant: true, Agent: "codex", Status: proto.StatusWorking}
-			ft.f.setSessions("mac", work)
-			ft.sessions("mac", work)
-			done := work
-			done.Status, done.LastText, done.TurnError = proto.StatusDone, "Verification passed.", tc.turnError
-			ft.sessions("mac", done)
-			if got := ft.pushesOf(assistantwire.NotifyDone, 1, 400*time.Millisecond); len(got) != tc.want {
-				t.Fatalf("finished pushes = %d, want %d", len(got), tc.want)
-			}
-		})
+	const on = `{"fold_routine_relay_replies":true}`
+	const off = `{"fold_routine_relay_replies":false}`
+	for _, agent := range []string{"", "codex", "dsh"} {
+		for _, tc := range []struct {
+			name, prefs, source, main, turnError string
+			promote, trailing, cutOff, stuck     bool
+			want                                 int
+		}{
+			{name: "default", source: proto.SourceConversation, main: "main-1", want: 1},
+			{name: "explicitly off", prefs: off, source: proto.SourceConversation, main: "main-1", want: 1},
+			{name: "enabled", prefs: on, source: proto.SourceConversation, main: "main-1"},
+			{name: "display folding disabled", prefs: `{"main_background_folded":false,"fold_routine_relay_replies":true}`, source: proto.SourceConversation, main: "main-1", want: 1},
+			{name: "same relay outside main", prefs: on, source: proto.SourceConversation, main: "leader-1", want: 1},
+			{name: "main explicitly promotes", prefs: on, source: proto.SourceConversation, main: "main-1", promote: true, want: 1},
+			{name: "main scheduled reply", prefs: on, source: proto.SourcePatrol, main: "main-1", want: 1},
+			{name: "direct answer then unanswered relay", prefs: on, main: "main-1", trailing: true, want: 1},
+			{name: "promoted answer then unanswered relay", prefs: on, source: proto.SourceConversation, main: "main-1", promote: true, trailing: true, want: 1},
+			{name: "routine answer then unanswered relay", prefs: on, source: proto.SourceConversation, main: "main-1", trailing: true},
+			{name: "model error", prefs: on, source: proto.SourceConversation, main: "main-1", turnError: "Model overloaded", want: 1},
+			{name: "cut off", prefs: on, source: proto.SourceConversation, main: "main-1", cutOff: true, want: 1},
+			{name: "stuck", prefs: on, source: proto.SourceConversation, main: "main-1", stuck: true, want: 1},
+		} {
+			t.Run(agent+"/"+tc.name, func(t *testing.T) {
+				ft := newFleetTestNoStore(t)
+				fastDone(ft)
+				setSettings(t, ft.s, func(v *Settings) {
+					v.Main = tc.main
+					if tc.prefs != "" {
+						if err := json.Unmarshal([]byte(tc.prefs), v); err != nil {
+							t.Fatal(err)
+						}
+					}
+				})
+				owner := proto.Item{ID: "u1", Role: "user", Kind: proto.KindText, Text: "Report the result."}
+				if tc.source != "" {
+					owner.Source = &proto.MessageSource{Kind: tc.source, ConversationID: "leader"}
+				}
+				items := []proto.Item{owner}
+				if tc.promote {
+					items = append(items, proto.Item{ID: "n1", Role: "assistant", Kind: proto.KindToolUse, ToolName: "notify_user", ToolUseID: "notify-1"},
+						proto.Item{ID: "n2", Role: "user", Kind: proto.KindToolResult, ToolUseID: "notify-1", Text: "sent"})
+				}
+				reply := "Verification passed."
+				if tc.cutOff {
+					reply = "API Error: 529 overloaded"
+				}
+				items = append(items, proto.Item{ID: "a1", Role: "assistant", Kind: proto.KindText, Text: reply})
+				if tc.trailing {
+					items = append(items, proto.Item{ID: "u2", Role: "user", Kind: proto.KindText, Text: "Another report.", Source: &proto.MessageSource{Kind: proto.SourceConversation, ConversationID: "peer"}})
+				}
+				ft.f.setItems(items...)
+				work := proto.Session{SessionID: "main-1", Title: "Delegated check", Cwd: "/home/u/.persona/assistant", Assistant: true, Agent: agent, Status: proto.StatusWorking}
+				if agent == "dsh" {
+					work.SourceKind = proto.SourceRuntime
+				}
+				ft.f.setSessions("mac", work)
+				ft.sessions("mac", work)
+				done := work
+				done.Status, done.LastText, done.TurnError = proto.StatusDone, reply, tc.turnError
+				if tc.stuck {
+					done.Work = &proto.WorkState{Phase: proto.WorkBlocked, Line: "Waiting for the owner"}
+				}
+				ft.sessions("mac", done)
+				got := ft.pushesOf(assistantwire.NotifyDone, 1, 450*time.Millisecond)
+				if len(got) != tc.want {
+					t.Fatalf("finished pushes = %d, want %d", len(got), tc.want)
+				}
+			})
+		}
 	}
 }
 
+// A runtime can report a host-side failure without a model TurnError. That failure must still reach the owner even
+// when the transcript's last answer looks routine and the owner opted into quiet relay replies.
+func TestFinishedPushDeliversRuntimeHostFailure(t *testing.T) {
+	ft := newFleetTestNoStore(t)
+	fastDone(ft)
+	setSettings(t, ft.s, func(v *Settings) {
+		v.Main = "main-1"
+		v.FoldRoutineRelayReplies = new(true)
+	})
+	ft.f.setItems(
+		proto.Item{ID: "u1", Role: "user", Kind: proto.KindText, Text: "Report the result.", Source: &proto.MessageSource{Kind: proto.SourceConversation, ConversationID: "leader"}},
+		proto.Item{ID: "a1", Role: "assistant", Kind: proto.KindText, Text: "Verification passed."},
+	)
+	work := proto.Session{SessionID: "main-1", Title: "Delegated check", Cwd: "/home/u/.persona/assistant", Assistant: true,
+		Agent: "dsh", SourceKind: proto.SourceRuntime, Status: proto.StatusWorking}
+	ft.f.setSessions("mac", work)
+	ft.sessions("mac", work)
+	done := work
+	done.Status, done.LastText = proto.StatusDone, "Verification passed."
+	done.FailureReason = "The host stopped the turn on an error."
+	ft.sessions("mac", done)
+	got := ft.pushesOf(assistantwire.NotifyDone, 1, 450*time.Millisecond)
+	if len(got) != 1 || got[0].SessionID != "main-1" {
+		t.Fatalf("host failure finished pushes = %+v, want the normal notification", got)
+	}
+}
+
+// A turn that a channel answers is no push to the phone, nor is an inbox agent's.
 func TestFinishedPushSkipsChannelTurns(t *testing.T) {
 	ft := newFleetTestNoStore(t)
 	fastDone(ft)

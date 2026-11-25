@@ -30,10 +30,10 @@ var builtinPrograms = map[string]string{"cua": "computer.", "ego": "browser.", "
 var builtinProgramIDs = []string{"cua", "ego", "imessage", "iphone"}
 
 // builtinProgramsInfo is builtin_programs as node.info says them: iphone only when the build has the phone-extra
-// module (internal/node/iphoneport), so a hub offers no phone control on a computer without it. Its id stays reserved
+// module (internal/node/iphoneport) and the hub has not switched it off (modules.go), so a hub offers no phone control on a computer without it. Its id stays reserved
 // (builtinPrograms): no extension's package takes it.
 func builtinProgramsInfo() []string {
-	if iphoneport.Get() != nil {
+	if iphoneport.Get(nodeModules()) != nil {
 		return builtinProgramIDs
 	}
 	out := make([]string, 0, len(builtinProgramIDs))
@@ -125,7 +125,7 @@ func builtinCall(ctx context.Context, id, method string, params json.RawMessage,
 			return browserCookies(ctx, "browser."+method, params)
 		}
 	case "iphone":
-		iphone := iphoneport.Get() // the phone-extra module's (internal/node/iphoneport); none: no such method
+		iphone := iphoneport.Get(nodeModules()) // the phone-extra module's (internal/node/iphoneport); none: no such method
 		if iphone == nil {
 			break
 		}

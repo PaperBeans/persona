@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { injectedOf, parseInjected } from "./injected";
 import { lineOfItem } from "./chat-search";
 import { displayLines } from "./feed";
-import { chatLines, mergeItems, segments, supervisionTool } from "./turns";
+import { chatLines, mergeItems, segments, stripToolResultTimestampHeaders, supervisionTool } from "./turns";
 import type { Item } from "./types";
 
 // i18n-ignore: the fixed supervision header and marker are protocol data.
@@ -143,6 +143,27 @@ describe("supervision rounds", () => {
     expect(chatLines([user(1), use, result(3, use, receipt("user"))])[0].kind).toBe("segment");
     expect(chatLines([user(1), use, result(3, use, receipt("user"), true)])[0].kind).toBe("supervision");
     expect(supervisionTool("mcp__fictional__notify_user")).toBeUndefined();
+  });
+
+  it("handles Antigravity RFC3339 Created At / Completed At wrapped supervision_finish receipts without stripping plain Created At text", () => {
+    const headers =
+      "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n" +
+      "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n";
+    expect(stripToolResultTimestampHeaders(headers + receipt("silent"))).toBe(receipt("silent"));
+    expect(stripToolResultTimestampHeaders("Created At: 2026-11-23T09:10:40Z\r\nCompleted At: 2026-11-23T09:10:44Z\r\nOutput:\r\n" + receipt("silent"))).toBe(receipt("silent"));
+    expect(stripToolResultTimestampHeaders("Created At: 2026-11-23\nCompleted At: 2026-11-23\nHello")).toBe("Created At: 2026-11-23\nCompleted At: 2026-11-23\nHello");
+    expect(stripToolResultTimestampHeaders("Created At: 2026-11-23T16:10:40+08:00\nTitle: Notes")).toBe("Created At: 2026-11-23T16:10:40+08:00\nTitle: Notes");
+
+    const finish = call(2, "mcp_persona_supervision_finish", { visibility: "silent" });
+    const silentLines = chatLines([user(1), finish, result(3, finish, headers + receipt("silent")), answer(4, "OK")], { main: true });
+    expect(silentLines[0]).toMatchObject({ kind: "supervision", completedSilent: true });
+
+    const userLines = chatLines([user(1), finish, result(3, finish, headers + receipt("user")), answer(4, "Needs decision.")], { main: true });
+    expect(userLines[0].kind).toBe("segment");
+
+    // Plain text Created At: is never stripped, so a malformed receipt fails open for the reply.
+    const malformedLines = chatLines([user(1), finish, result(3, finish, "Created At: yesterday\n" + receipt("silent")), answer(4, "Real reply")], { main: true });
+    expect(malformedLines[0].kind).toBe("segment");
   });
 
   it.each(["accepted", "needs_user", "rework", "cancelled"])("keeps successful task_review %s consistent with fold promotion", (verdict) => {

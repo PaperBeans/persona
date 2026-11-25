@@ -6,24 +6,13 @@ import (
 	"time"
 )
 
-// A slow knowledge-base model (#3170). A minutes answer is several times longer than a summary, and a model that needs
-// more than a call's time for it is slow, not wrong. So a try that runs out of its time (one call, or the whole job) is
-// not an unusable answer: it is counted apart, the recording waits before its next try (the other recordings go first
-// meanwhile), and each try gets one minutesCallTimeout more than the one before. minutesTimeoutTries of them for one
-// revision make the minutes failed, so a recording no model ever finishes still can't hold the queue for ever.
-
-const (
-	minutesTimeoutTries = 4               // tries of one revision that ran out of time before the minutes are failed
-	minutesRetry        = 2 * time.Minute // the wait after the first of them, doubled after each further one
-)
-
 // minutesCallTime is how long one model call may take after timeouts tries that ran out of time: 6, 12, 18, 24 minutes.
 func minutesCallTime(timeouts int) time.Duration {
 	return minutesCallTimeout * time.Duration(1+max(0, timeouts))
 }
 
 // minutesTimeouts is how many tries of r's current revision ran out of time.
-func (r *Recording) minutesTimeouts() int {
+func minutesTimeouts(r *Recording) int {
 	if r.MinutesFailRev != r.Revision {
 		return 0
 	}
@@ -31,19 +20,19 @@ func (r *Recording) minutesTimeouts() int {
 }
 
 // minutesWaiting: a try of r's current revision ran out of time and the next one is not due yet.
-func (r *Recording) minutesWaiting(now time.Time) bool {
+func minutesWaiting(r *Recording, now time.Time) bool {
 	return r.MinutesFailRev == r.Revision && now.Before(r.MinutesRetryAt)
 }
 
 // minutesFailuresFor starts r's counts over when they were of another revision than rev.
-func (r *Recording) minutesFailuresFor(rev int64) {
+func minutesFailuresFor(r *Recording, rev int64) {
 	if r.MinutesFailRev != rev {
 		r.MinutesFailRev, r.MinutesFails, r.MinutesTimeouts, r.MinutesRetryAt = rev, 0, 0, time.Time{}
 	}
 }
 
 // clearMinutesFailures forgets the unusable answers and timeouts: minutes were written, or asked for again.
-func (r *Recording) clearMinutesFailures() {
+func clearMinutesFailures(r *Recording) {
 	r.MinutesFails, r.MinutesFailRev, r.MinutesTimeouts, r.MinutesRetryAt = 0, 0, 0, time.Time{}
 }
 
@@ -64,12 +53,12 @@ func (e *Engine) minutesTimedOut(id string, rev int64, now time.Time) {
 	if !ok || r.Revision != rev {
 		return
 	}
-	r.minutesFailuresFor(rev)
+	minutesFailuresFor(r, rev)
 	r.MinutesTimeouts++
 	wait := minutesRetry << min(r.MinutesTimeouts-1, 8)
 	r.MinutesRetryAt = now.Add(wait)
-	r.planMinutes()
-	drop = r.MinutesState == MinutesFailed && r.transcriptionDone()
+	planMinutes(r)
+	drop = r.MinutesState == MinutesFailed && transcriptionDone(r)
 	if st.putEntity(KindRecording, r.ID, r, &r.Tagging, false) == nil && r.MinutesState == MinutesPending {
 		e.logf("recording %s: minutes: try %d of %d ran out of time; the next, with %s per call, in %s", id,
 			r.MinutesTimeouts, minutesTimeoutTries, minutesCallTime(r.MinutesTimeouts), wait)

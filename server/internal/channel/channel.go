@@ -111,6 +111,56 @@ type Account struct {
 	Name string `json:"name"`
 }
 
+// ChatKind is what kind of chat a channel message came from.
+type ChatKind string
+
+const (
+	ChatKindDirect ChatKind = "direct"
+	ChatKindGroup  ChatKind = "group"
+	ChatKindTopic  ChatKind = "topic"
+)
+
+// ThreadMode controls how a channel maps IM chats and topics to Persona conversations when integrations_v2 is enabled.
+type ThreadMode string
+
+const (
+	ThreadModeChannelDefault   ThreadMode = "channel_default"
+	ThreadModePerGroupAndTopic ThreadMode = "per_group_and_topic"
+	ThreadModePerTopic         ThreadMode = "per_topic"
+)
+
+// MaxThreadIdleHours bounds thread_idle_hours so time.Duration conversion never overflows (10 years).
+const MaxThreadIdleHours = 3650 * 24
+
+// Check validates an explicit thread_mode setting value.
+func (m ThreadMode) Check() error {
+	switch m {
+	case ThreadModeChannelDefault, ThreadModePerGroupAndTopic, ThreadModePerTopic:
+		return nil
+	default:
+		return fmt.Errorf("thread_mode %q: channel_default, per_group_and_topic or per_topic", m)
+	}
+}
+
+// Normalized returns m, defaulting an unset value to channel_default.
+func (m ThreadMode) Normalized() ThreadMode {
+	if m == "" {
+		return ThreadModeChannelDefault
+	}
+	return m
+}
+
+// CheckThreadIdleHours validates a channel's thread_idle_hours setting (0 means the default 30-day timeout).
+func CheckThreadIdleHours(hours int) error {
+	if hours < 0 {
+		return errors.New("thread_idle_hours must be 0 or greater")
+	}
+	if hours > MaxThreadIdleHours {
+		return fmt.Errorf("thread_idle_hours must be at most %d", MaxThreadIdleHours)
+	}
+	return nil
+}
+
 // Target is where a channel's messages go.
 type Target struct {
 	Kind      string `json:"kind"` // main | new | conversation | agent
@@ -183,27 +233,43 @@ var DefaultFeatures = map[string]bool{FeatureAsks: true}
 
 // View is a channel as the app sees it (GET /api/v1/channels).
 type View struct {
-	ID           string       `json:"id"`
-	Name         string       `json:"name"`
-	Kind         Kind         `json:"kind"`
-	Source       Source       `json:"source"`
-	Plugin       string       `json:"plugin,omitempty"`
-	Market       string       `json:"market,omitempty"` // for a market's: the market's id
-	Installed    bool         `json:"installed"`
-	Enabled      bool         `json:"enabled"`
-	State        State        `json:"state"`
-	Error        string       `json:"error,omitempty"`
-	Account      *Account     `json:"account,omitempty"`
-	Description  string       `json:"description,omitempty"`
-	Capabilities Capabilities `json:"capabilities"`
-	Target       *Target      `json:"target,omitempty"`
-	Features     []Feature    `json:"features,omitempty"`
-	Bind         Bind         `json:"bind"`
+	ID              string       `json:"id"`
+	Name            string       `json:"name"`
+	Kind            Kind         `json:"kind"`
+	Source          Source       `json:"source"`
+	Plugin          string       `json:"plugin,omitempty"`
+	Market          string       `json:"market,omitempty"` // for a market's: the market's id
+	Installed       bool         `json:"installed"`
+	Enabled         bool         `json:"enabled"`
+	State           State        `json:"state"`
+	Error           string       `json:"error,omitempty"`
+	Account         *Account     `json:"account,omitempty"`
+	Description     string       `json:"description,omitempty"`
+	Capabilities    Capabilities `json:"capabilities"`
+	Target          *Target      `json:"target,omitempty"`
+	ThreadMode      ThreadMode   `json:"thread_mode,omitempty"`
+	ThreadIdleHours int          `json:"thread_idle_hours,omitempty"`
+	Features        []Feature    `json:"features,omitempty"`
+	Bind            Bind         `json:"bind"`
 	// Surfaces are the app channel's ends (iOS, Mac, …), for people.
 	Surfaces    []string  `json:"surfaces,omitempty"`
 	LastEventAt time.Time `json:"last_event_at,omitzero"`
 	// ReadOnly: its settings are elsewhere (hub.json, the plugin's page): the app shows them and links there.
 	ReadOnly bool `json:"read_only,omitempty"`
+}
+
+// TargetOverride modes describe why incoming messages bypass the channel's default target.
+const (
+	// TargetOverrideTopics: group topic routing sends each topic to its own conversation.
+	TargetOverrideTopics = "topics"
+	// TargetOverrideThreads: per-thread routing sends each thread to its own conversation.
+	TargetOverrideThreads = "threads"
+)
+
+// TargetOverride explains that threaded or topic messages currently route to dedicated conversations ahead of the
+// channel's default target, so the default target only applies to messages outside those threads or topics.
+type TargetOverride struct {
+	Mode string `json:"mode"`
 }
 
 // Detail is one channel's page (GET /api/v1/channels/{id}).
@@ -214,6 +280,9 @@ type Detail struct {
 	// SettingsURL: the channel has a full page of its own (the Feishu bot's), linked from this one — an app route
 	// ("settings/connectors/feishu-bot"), not a web address.
 	SettingsURL string `json:"settings_url,omitempty"`
+	// TargetOverride: set when topic or thread routing currently takes precedence over the channel's default target;
+	// omitted when inactive so older clients and channels without overrides are unaffected.
+	TargetOverride *TargetOverride `json:"target_override,omitempty"`
 }
 
 // Waiting is how many answers and questions a channel waits on.
@@ -356,6 +425,9 @@ type Message struct {
 	Text        string   `json:"text,omitempty"`
 	Chat        string   `json:"chat,omitempty"`
 	Topic       string   `json:"topic,omitempty"`
+	ChatID      string   `json:"chat_id,omitempty"`
+	ChatKind    ChatKind `json:"chat_kind,omitempty"`
+	TopicID     string   `json:"topic_id,omitempty"`
 	Context     string   `json:"context,omitempty"`
 	Owner       *bool    `json:"owner,omitempty"`
 	Images      []Blob   `json:"images,omitempty"`

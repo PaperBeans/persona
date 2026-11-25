@@ -76,6 +76,8 @@ struct MachinesView: View {
     private var unmonitoredGroups: Set<String> { metricsLoader.unmonitoredGroups }
     /// Add Computer is up.
     @State private var adding: AddComputerRequest?
+    /// The disk usage map a card's Disk almost full chip opened (pushed from here: the chip sits inside the card's link).
+    @State private var usageMap: MachineUsageMapRoute?
     private var unmonitored: Bool { !unmonitoredGroups.isEmpty && unmonitoredGroups.count >= model.groupIDs.count }
 
     var body: some View {
@@ -130,6 +132,7 @@ struct MachinesView: View {
             .padding(Theme.Space.l)
         }
         .themedGroupedPage()
+        .navigationDestination(item: $usageMap) { UsageMapView(route: $0) }
         .navigationTitle("Machines")
         // Large wherever it is pushed (the Agents list's stack would make it inline, and the principal item below would
         // then hide the title); the bar's middle is only for Connecting… and the like.
@@ -194,7 +197,7 @@ struct MachinesView: View {
             ForEach(ordered, id: \.ref) { m in
                 NavigationLink(value: MachineDetailRoute(m.ref)) {
                     MachineCard(machine: m, tally: tallies[m.ref], metrics: metrics[m.ref], showsMetrics: !unmonitoredGroups.contains(m.group),
-                                fillsRow: true)
+                                fillsRow: true, onUsageMap: { usageMap = $0 })
                 }
                 .buttonStyle(.plain)
             }
@@ -285,6 +288,8 @@ struct MachineCard: View {
     /// In Machines' grid: as tall as the row, an online card's counts and charts at the bottom so they line up across it
     /// (an offline card keeps its words at the top). At the top of a machine's page it is as tall as its content.
     var fillsRow = false
+    /// Opens the disk usage map from the Disk almost full chip when the card itself is a link (Machines' grid).
+    var onUsageMap: ((MachineUsageMapRoute) -> Void)?
 
     var body: some View {
         let system = machine.system ?? metrics?.system
@@ -309,7 +314,17 @@ struct MachineCard: View {
                 }
                 if !alerts.isEmpty {
                     FlowLayoutRow {
-                        ForEach(alerts, id: \.label) { a in AlertChip(alert: a) }
+                        ForEach(alerts, id: \.label) { a in
+                            if a.kind == .disk, machine.online {
+                                // Disk almost full opens what is using the space (#14576), the biggest reclaimable marked.
+                                MachineUsageMapLink(route: MachineUsageMapRoute(ref: machine.ref, reclaim: true), open: onUsageMap) { AlertChip(alert: a) }
+                                    .buttonStyle(.plain)
+                                    .accessibilityHint(String(localized: "Shows what's using the space"))
+                                    .accessibilityIdentifier("machine.alert.disk.\(machine.id)")
+                            } else {
+                                AlertChip(alert: a)
+                            }
+                        }
                     }
                 }
             }
@@ -354,6 +369,14 @@ struct MachineCard: View {
             }
         }
         .contentShape(.rect)
+        // VoiceOver reads the card as one link, so the Disk almost full chip inside it is also an action of the card.
+        .accessibilityActions {
+            if let onUsageMap, machine.online, alerts.contains(where: { $0.kind == .disk }) {
+                Button(String(localized: "See What's Using Space")) {
+                    onUsageMap(MachineUsageMapRoute(ref: machine.ref, reclaim: true))
+                }
+            }
+        }
     }
 
     /// "Ubuntu 24.04.1 LTS · 16 cores · 64.0 GB"; the host name when the machine never said what it runs.

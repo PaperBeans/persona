@@ -238,7 +238,7 @@ func (s *Service) previewStartDefaults(ctx context.Context, policy *StartDefault
 	callerWins := []string{}
 	tierEffort := false
 	if strings.TrimSpace(tier) != "" {
-		if tm, err := s.tierModel(ctx, tier); err == nil && tm.Effort != "" {
+		if pick, err := s.pickTierCandidate(ctx, tier, tierFacts{Machine: facts.Machine}); err == nil && pick.Tier.Effort != "" {
 			tierEffort = true
 		}
 	}

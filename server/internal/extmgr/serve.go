@@ -38,9 +38,9 @@ import (
 // Run starts the extensions, connectors and bots and runs their loops until ctx ends; then it stops the programs.
 func (h *Manager) Run(ctx context.Context) error {
 	h.ctx = ctx
-	if ms, ok := h.store.(mailStore); ok && mailport.Factory() != nil {
+	if ms, ok := h.store.(mailStore); ok && mailport.Factory(h.modules()) != nil {
 		var err error
-		if h.mail, err = mailport.Factory()(mailwire.Config{DataDir: h.cfg.dir, SecretKey: h.secretKeyPath(), Store: ms,
+		if h.mail, err = mailport.Factory(h.modules())(mailwire.Config{DataDir: h.cfg.dir, SecretKey: h.secretKeyPath(), Store: ms,
 			GoogleClientID: h.cfg.Google.ClientID, GoogleProxy: h.cfg.Google.Proxy,
 			MicrosoftClientID: h.cfg.Microsoft.ClientID, MicrosoftRedirect: h.cfg.Microsoft.RedirectURI}); err != nil {
 			h.logf("mail disabled: %v", err)
@@ -55,12 +55,13 @@ func (h *Manager) Run(ctx context.Context) error {
 	go h.inboxLoop(ctx)
 	go h.noLockLoop(ctx)
 	go h.extensionLeaseLoop(ctx)
-	h.extensions = newExtensions(h.cfg.dir, h.cfg.extensionConfigs(h.logf), h.logf)
+	h.extensions = newExtensionsWith(h.cfg.dir, h.cfg.extensionConfigs(h.logf), h.logf, h.modules())
 	h.extensions.stats.redact = h.redactOwnSecrets
 	h.startTokenRecord(ctx) // before any extension starts with a token (extension_scopes.go)
 	h.startConnectors(ctx)  // the extensions' connectors join here (attachExtensions)
 	h.startExtensions(ctx)
-	h.startSubscriptions(ctx) // after the connectors it pulls from
+	h.startSpacesMigration(ctx) // existing users only; an installed/disabled choice wins
+	h.startSubscriptions(ctx)   // after the connectors it pulls from
 	go h.extensionUpgradeLoop(ctx)
 	go h.extensionMetricsLoop(ctx)
 	go h.pageLoop(ctx)
@@ -633,9 +634,13 @@ func (h *Manager) report() extwire.Report {
 		r.Looks = h.extensionLooks()
 	}
 	if ps := h.extensions; ps != nil {
+		r.PushGradingDeclared = true
 		for _, p := range ps.reg.List() {
 			if !p.Record.Enabled || p.Problem != "" {
 				continue
+			}
+			if ps.reg.HubScopeAllowed(p.Record.ID, extension.ScopePushGrading) {
+				r.PushGradingExtensions = append(r.PushGradingExtensions, p.Record.ID)
 			}
 			hp := ps.get(p.Record.ID)
 			if hp == nil || hp.proc == nil || hp.proxy == nil {
@@ -645,6 +650,7 @@ func (h *Manager) report() extwire.Report {
 				r.APIs = append(r.APIs, extwire.APIPrefix{Prefix: a.Prefix, Receipts: a.Receipts, Events: a.Events})
 			}
 		}
+		slices.Sort(r.PushGradingExtensions)
 	}
 	for _, m := range h.machinesNow() {
 		var x extwire.MachineExtras
@@ -760,6 +766,24 @@ func (h *Manager) CallTool(ctx context.Context, machine, session, name string, a
 // ConnectorTool says whether name is a registered connector's tool (not Cua's or ego's).
 func (h *Manager) ConnectorTool(name string) bool {
 	return h.connectors != nil && h.connectors.Offers(name)
+}
+
+// InboxVisibilityPreflight reports the provider's explicit visibility-enforcement declaration without running the tool.
+func (h *Manager) InboxVisibilityPreflight(name string) bool {
+	return h.connectors != nil && h.connectors.InboxVisibilityPreflight(name)
+}
+
+// InboxVisibilitySource resolves any registered connector tool to its source id. The assistant uses this positive
+// registry lookup rather than recognizing one vendor's tool names: an older arbitrary source must fail closed too.
+func (h *Manager) InboxVisibilitySource(name string) (string, bool) {
+	if h.connectors == nil || !h.connectors.Offers(name) {
+		return "", false
+	}
+	c := h.connectors.Owner(name)
+	if c == nil {
+		return "", false
+	}
+	return c.ID(), true
 }
 
 // ToolAccess classifies every tool CallTool can dispatch, without running it. Connector reads are declared by the

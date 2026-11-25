@@ -396,6 +396,18 @@ internal class AssistantSettingsState(
         if (!ok) set { copy(config = this.config?.copy(closeEndedTerminals = !on)) }
     }
 
+    /** "Let Persona make dashboards" (#15017): off by default and when the hub leaves it out; only the owner changes it. */
+    suspend fun setDashboards(on: Boolean) {
+        val config = state.value.config ?: return
+        if ((config.dashboards ?: false) == on) return
+        set { copy(config = config.copy(dashboards = on)) }
+        val ok = perform(SettingsText(R.string.assistant_settings_save_failed)) {
+            val updated = api.updateConfig(AssistantConfigUpdate(dashboards = on))
+            set { copy(config = updated) }
+        }
+        if (!ok) set { copy(config = this.config?.copy(dashboards = !on)) }
+    }
+
     /** Exact owner replies: default off, reversible, and accepted only after both the write and a fresh read agree. */
     suspend fun setOwnerReplyApproval(on: Boolean) = setOwnerApprovalSwitch(reply = true, on = on)
 

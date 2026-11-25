@@ -71,7 +71,11 @@ func checkStartSpeed(params map[string]any, agent startAgent, resume string) err
 // params are still returned then so callers can read the configured permission mode.
 func (s *Service) resolveFitPlanTask(ctx context.Context, t *PlanTask) (startAgent, map[string]any, bool, error) {
 	params := map[string]any{"launcher": t.Launcher, "model": t.Model, "effort": t.Effort, "speed": t.Speed, "tier": t.Tier}
-	own, err := s.resolveStart(ctx, params, false)
+	if t.Host != "" {
+		params["host"] = t.Host // as startTaskAgent fits it: a read-only check depends on where it starts (#13464)
+	}
+	tierCtx, _ := withTierStart(ctx, t.Machine) // the candidate the start on t.Machine would take
+	own, err := s.resolveStart(tierCtx, params, false)
 	if err != nil {
 		return startAgent{}, nil, false, err
 	}

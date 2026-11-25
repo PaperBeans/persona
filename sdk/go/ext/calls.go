@@ -66,6 +66,11 @@ const ConnectorNamespace = "connector"
 // contribution. A provider answers them with ext.Methods under this namespace.
 const RepositoryNamespace = "repo"
 
+// OffloadNamespace is the disk_offload extension point's: the manager asks offload.inventory, offload.run, offload.job
+// and the optional offload.cancel (schema/extension/offload.schema.json), with the disk_offload item's id as the
+// contribution. A provider answers them with ext.Methods under this namespace.
+const OffloadNamespace = "offload"
+
 // SentNamespace is the hub's own namespace for the sent-as-user ledger: RecordSent is sent.record.
 const SentNamespace = "sent"
 

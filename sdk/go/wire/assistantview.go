@@ -342,6 +342,13 @@ func StripAssistantFields(v *View) []string {
 					e.Pins[k].Action = nil
 				}
 			}
+			// and a map's markers
+			for k := range e.Markers {
+				if AssistantOnlyAction(e.Markers[k].Action) {
+					drop("assistant_action")
+					e.Markers[k].Action = nil
+				}
+			}
 			items = append(items, e)
 		}
 		s.Items = items

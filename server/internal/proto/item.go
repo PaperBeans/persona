@@ -9,6 +9,8 @@ import (
 	_ "image/png"
 	"strings"
 	"time"
+
+	"github.com/nwverse/persona/sdk/go/wire"
 )
 
 // Item kinds.
@@ -63,6 +65,9 @@ type Fold struct {
 	// Sources: the web pages the run's successful web calls used (FoldSource), so a chat shows its reply's sources
 	// without opening the run. Absent when it used none, and from older nodes.
 	Sources []FoldSource `json:"sources,omitempty"`
+	// ToolViews: the out-of-band declarative views returned by the run's connector tool calls (FoldToolView), rendered
+	// beside Images under the assistant's reply without opening the fold.
+	ToolViews []FoldToolView `json:"tool_views,omitempty"`
 }
 
 // FoldSourcesMax bounds Fold.Sources.
@@ -102,6 +107,17 @@ type FoldImage struct {
 	Size      int    `json:"size,omitempty"` // bytes, about (the base64's length × 3 / 4, like Image.Placeholder)
 	Width     int    `json:"width,omitempty"`
 	Height    int    `json:"height,omitempty"`
+}
+
+// FoldToolViewsMax bounds Fold.ToolViews.
+const FoldToolViewsMax = 8
+
+// FoldToolView is an out-of-band declarative view returned by a connector tool call in a folded run.
+type FoldToolView struct {
+	ItemID    string    `json:"item_id,omitempty"`
+	ToolUseID string    `json:"tool_use_id"`
+	Tool      string    `json:"tool"`
+	View      wire.View `json:"view"`
 }
 
 // FoldTaskSnapshot preserves a successful task result without its raw tool payload.
@@ -196,6 +212,12 @@ func decimalItemPart(s string) bool {
 	return s != "" && !strings.ContainsFunc(s, func(r rune) bool { return r < '0' || r > '9' })
 }
 
+// QuestionReply preserves the question quoted by a Codex reply. A single answer is already in Item.Text.
+type QuestionReply struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer,omitempty"`
+}
+
 // Item is one content block of a Claude Code transcript.
 type Item struct {
 	// Stored identifies an incomplete durable copy. Its source can be requested from
@@ -213,6 +235,9 @@ type Item struct {
 	IsError   bool            `json:"is_error,omitempty"`
 	Image     *Image          `json:"image,omitempty"`
 	Queued    bool            `json:"queued,omitempty"` // user input typed while the agent worked, absorbed mid-turn
+
+	QuestionReplies    []QuestionReply `json:"question_replies,omitempty"`
+	QuestionRepliesCut bool            `json:"question_replies_cut,omitempty"`
 	// Outcome: what a tool_result's call came to (status, exit code, patch, git…), set by the node from the
 	// runtime's record; absent on other items and from older nodes (ToolOutcome).
 	Outcome *ToolOutcome `json:"outcome,omitempty"`
@@ -229,7 +254,7 @@ type Item struct {
 	// Wake marks a background task's notice that started new work after the agent had finished its turn
 	// (not one absorbed mid-turn): the exchange before it is over and its last words are an answer.
 	Wake bool `json:"wake,omitempty"`
-	// Narration marks assistant text belonging to the work summary (Codex commentary), even if sent unfolded.
+	// Narration marks public progress text (Claude narration or Codex commentary), including on unfolded pages.
 	Narration bool `json:"narration,omitempty"`
 	// From names the Claude session that sent this message (cross-session messaging), not the user.
 	From string `json:"from,omitempty"`
@@ -273,6 +298,9 @@ type Item struct {
 	// TTFTMS is the observed time-to-first-token in milliseconds from turn send/request start to the first
 	// assistant token/chunk during live streaming execution. Nil when not observed (such as historical replays).
 	TTFTMS *int64 `json:"ttft_ms,omitempty"`
+	// ToolViews are out-of-band declarative views attached to a tool_result by the node when recording the turn,
+	// rendered inline in conversation UIs and never included in model context.
+	ToolViews []wire.View `json:"tool_views,omitempty"`
 }
 
 type StoredItem struct {

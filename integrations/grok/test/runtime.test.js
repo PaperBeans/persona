@@ -402,6 +402,20 @@ test('plan mode also refuses native write approvals without a prior hook', async
   await f.done()
 })
 
+test('plan mode keeps reading another session with a2a_read and refuses sending', async (t) => {
+  const f = await fixture(t)
+  await f.start()
+  await f.send('Plan only', { mode: 'plan' })
+  await until('prompt starts', () => f.acp.prompts.length)
+  const [server] = f.acp.calls.find((c) => c.method === 'session/load').params.mcpServers
+  const call = async (name) => (await (await fetch(server.url, { method: 'POST', headers: Object.fromEntries(server.headers.map((h) => [h.name, h.value])),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: { machine_id: 'box', session_id: 'other' } } }) })).json()).result
+  assert.deepEqual(await call('a2a_read'), { content: [{ type: 'text', text: 'a2a_read ran' }], isError: false })
+  assert.equal((await call('a2a_send')).isError, true)
+  assert.deepEqual(f.node.toolCalls.map((c) => c.name), ['a2a_read'])
+  await f.done()
+})
+
 test('plan mode survives rediscovery even when new chats default to bypass', async (t) => {
   const f = await fixture(t, { mode: 'bypassPermissions' })
   await f.start()

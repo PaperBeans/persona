@@ -460,6 +460,7 @@ type treeBuild struct {
 	now     time.Time
 
 	sessions map[[2]string]proto.Session
+	lists    map[string][]proto.Session    // the complete lists read once for this build, by machine
 	listed   map[string]bool               // computers whose complete current list was read during this build
 	codexKid map[[2]string][]proto.Session // a machine's Codex sub-agent sessions still going, by parent session
 	// leaderAgent: every task leader's Agent (machine, session) and the to-dos it is the leader Agent of.
@@ -489,7 +490,7 @@ type treeAttach struct {
 func newTreeBuild(s *Service, main string, leads []string, all []listedTodo, lists map[string][]proto.Session,
 	reached map[string]bool, now time.Time, loc *time.Location) *treeBuild {
 	tb := &treeBuild{s: s, main: main, leads: leads, todos: map[string]listedTodo{}, reached: reached, now: now,
-		sessions: map[[2]string]proto.Session{}, listed: map[string]bool{}, codexKid: map[[2]string][]proto.Session{},
+		sessions: map[[2]string]proto.Session{}, lists: lists, listed: map[string]bool{}, codexKid: map[[2]string][]proto.Session{},
 		leaderAgent: map[[2]string][]string{}, workerAt: map[string]treeAttach{}, workersUnder: map[treeAttach][]string{}}
 	for machine, list := range lists {
 		tb.listed[machine] = true

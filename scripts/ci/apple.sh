@@ -1,13 +1,13 @@
 #!/bin/bash
 # Public, local-runnable Apple checks. Requires XcodeGen, Python 3 and rsync.
 # The default lane uses macOS 26 and Xcode 26.0.x; ios18 uses the 18.6 simulator.
-# Usage: scripts/ci/apple.sh [all|ios|ios18|packages|ios-build|ios-focused|ios-regressions|ios-model-picker|ios-ipad-diagnostic]
+# Usage: scripts/ci/apple.sh [all|ios|ios18|packages|ios-build|ios-core-only|ios-focused|ios-regressions|ios-model-picker|ios-ipad-diagnostic]
 # Cache CI_SPM_CACHE (default ~/Library/Caches/persona-ci/spm); keep the printed
 # output directory's *.xcresult bundles when investigating failures.
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
 LANE="${1:-all}"
-case "$LANE" in all|ios|ios18|packages|ios-build|ios-focused|ios-regressions|ios-model-picker|ios-ipad-diagnostic) ;; *) printf 'Usage: %s [all|ios|ios18|packages|ios-build|ios-focused|ios-regressions|ios-model-picker|ios-ipad-diagnostic]\n' "$0" >&2; exit 2 ;; esac
+case "$LANE" in all|ios|ios18|packages|ios-build|ios-core-only|ios-focused|ios-regressions|ios-model-picker|ios-ipad-diagnostic) ;; *) printf 'Usage: %s [all|ios|ios18|packages|ios-build|ios-core-only|ios-focused|ios-regressions|ios-model-picker|ios-ipad-diagnostic]\n' "$0" >&2; exit 2 ;; esac
 [ "$#" -le 1 ] || { printf 'apple-ci: too many arguments\n' >&2; exit 2; }
 [ "$(uname -s)" = Darwin ] || { printf 'apple-ci: FAIL requires macOS with Xcode\n' >&2; exit 1; }
 for tool in python3 xcodebuild xcrun xcodegen rsync git; do
@@ -184,8 +184,11 @@ if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = packages ]; then
   # The module contract and registry (#13432, docs/apple/ios.md "Modules").
   ci_run 'PersonaModuleAPI unit tests' 300 xcrun swift test --package-path "$SOURCE/apple/Packages/PersonaModuleAPI" --scratch-path "$SPM/PersonaModuleAPI" -Xswiftc -warnings-as-errors
   ci_run 'Persona Input build' 600 xcrun swift build -c release --package-path "$SOURCE/apple/PersonaLink/Input" --scratch-path "$SPM/PersonaInput" -Xswiftc -warnings-as-errors
-  # The independent Link package contains only Persona Screen, built as mac-link.sh builds it; PersonaScreenCore's tests
-  # cover its capture decisions. There is no menu-bar app or separate Link UI test target to build.
+  # The Persona Link menu bar App (apple/PersonaLink/App, docs/operations/link.md "Tray and menu bar App"): a package of
+  # its own, apart from Persona Screen's, outside apple/project.yml.
+  ci_run 'Persona Link menu bar unit tests' 600 xcrun swift test --package-path "$SOURCE/apple/PersonaLink/App" --scratch-path "$SPM/PersonaLink" -Xswiftc -warnings-as-errors
+  # Persona Screen's package contains only Persona Screen, built as mac-link.sh builds it; PersonaScreenCore's tests
+  # cover its capture decisions.
   ci_run 'Persona Screen build' 600 xcrun swift build -c release --package-path "$SOURCE/apple/PersonaLink" --scratch-path "$SPM/PersonaScreen" --product PersonaScreen -Xswiftc -warnings-as-errors
   # Blocking calls on the main actor (docs/apple/performance.md, "Automated checks"). The lint is built in a fixed
   # folder beside its build output: the snapshot above moves on every run, and a package whose folder moved is rebuilt
@@ -196,7 +199,7 @@ if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = packages ]; then
   ci_run 'Isolation lint unit tests' 900 xcrun swift test -c release --disable-testable-imports --package-path "$SPM/IsolationLint/package" --scratch-path "$SPM/IsolationLint/build"
   ci_run 'Blocking calls on the main actor (isolation lint)' 300 "$SPM/IsolationLint/build/release/isolation-lint" --root "$SOURCE" --baseline "$SOURCE/scripts/test/apple_isolation_baseline.json"
 fi
-if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = ios-build ] || [ "$LANE" = ios-focused ] || [ "$LANE" = ios-regressions ] || [ "$LANE" = ios-model-picker ] || [ "$LANE" = ios-ipad-diagnostic ]; then
+if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = ios-build ] || [ "$LANE" = ios-core-only ] || [ "$LANE" = ios-focused ] || [ "$LANE" = ios-regressions ] || [ "$LANE" = ios-model-picker ] || [ "$LANE" = ios-ipad-diagnostic ]; then
   for sdk in iphoneos iphonesimulator watchos watchsimulator; do
     ci_run "Require $sdk SDK" 60 xcrun --sdk "$sdk" --show-sdk-version
   done
@@ -215,7 +218,7 @@ if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = ios-build ] || [ "$LANE
     runtimes="$OUTPUT/runtimes-$platform-before.json"
     ci_run "List $platform simulator runtimes" 120 bash -c 'xcrun simctl list runtimes -j > "$1"' -- "$runtimes"
     if ! runtime=$(python3 "$CI_ROOT/scripts/ci/apple_runtime.py" "$runtimes" --platform "$platform"); then
-      ci_run "Download matching $platform 26.0 simulator runtime" 1200 xcodebuild -downloadPlatform "$platform" -architectureVariant universal
+      ci_run "Download matching $platform 26.0 simulator runtime" 1200 python3 "$CI_ROOT/scripts/ci/apple_runtime.py" --platform "$platform" --download
       runtimes="$OUTPUT/runtimes-$platform-after.json"
       ci_run "List downloaded $platform simulator runtimes" 120 bash -c 'xcrun simctl list runtimes -j > "$1"' -- "$runtimes"
       runtime=$(python3 "$CI_ROOT/scripts/ci/apple_runtime.py" "$runtimes" --platform "$platform")
@@ -224,7 +227,7 @@ if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = ios-build ] || [ "$LANE
     if [ "$platform" = iOS ]; then IOS_RUNTIME="$runtime"; fi
   done
   resolve Persona
-  if [ "$LANE" != ios-model-picker ]; then
+  if [ "$LANE" != ios-model-picker ] && [ "$LANE" != ios-core-only ]; then
   # Generic device builds compile the actual watch/widget/notification/share
   # dependency graph; do not delete the watch target to accommodate the runner.
   ci_run 'Unsigned iOS and embedded watch/extensions build' 1800 "${XCODE[@]}" -scheme Persona \
@@ -238,14 +241,20 @@ if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = ios-build ] || [ "$LANE
   # device build fail here (#6735; MainPagesStackTests measures the run-time part in the simulator).
   ci_run 'Debug view stack frames (device build)' 300 python3 "$CI_ROOT/scripts/ci/apple_stack_frames.py" \
     "$OUTPUT/ios-device/Build/Products/Debug-iphoneos/Persona.app"
+  fi
+  if [ "$LANE" = all ] || [ "$LANE" = ios-core-only ]; then
   # The app without its moved feature modules (apple/modules-core-only.yml, #14017; docs/apple/ios.md "Modules"): the
-  # core must build with every apple/Modules/<Name> left out. Generated into the same project, built, then the whole
-  # project generated again for the steps below. Only the app scheme: the watch and extensions compile no module.
+  # core must build with every apple/Modules/<Name> left out. In hosted CI this runs in its own parallel ios-core-only
+  # job so the full ios lane stays inside its 120-minute limit (#14496); the local all lane still runs it after the
+  # device build and regenerates the whole project for the tests below. Only the app scheme: the watch and extensions
+  # compile no module.
   ci_run 'Generate core-only Apple project' 120 env PERSONA_CORE_ONLY=YES xcodegen generate --spec "$SOURCE/apple/project.yml" --project "$SOURCE/apple"
   ci_run 'Core-only iOS build' 1800 "${XCODE[@]}" -scheme Persona \
     -destination 'generic/platform=iOS' -derivedDataPath "$OUTPUT/ios-core-only" \
     -disableAutomaticPackageResolution "${UNSIGNED[@]}" build
+  if [ "$LANE" = all ]; then
   ci_run 'Generate Apple project again (whole)' 120 xcodegen generate --spec "$SOURCE/apple/project.yml" --project "$SOURCE/apple"
+  fi
   fi
 fi
 if [ "$LANE" = ios18 ]; then
@@ -259,7 +268,7 @@ if [ "$LANE" = ios18 ]; then
   fi
   resolve Persona
 fi
-if [ "$LANE" != packages ] && [ "$LANE" != ios-build ]; then
+if [ "$LANE" != packages ] && [ "$LANE" != ios-build ] && [ "$LANE" != ios-core-only ]; then
   if [ "$LANE" = ios18 ]; then
     IOS_VERSION=18.6
     IOS_PHONE="iPhone 16 Pro"
@@ -318,16 +327,25 @@ fi
   IOS_UNIT_SELECTION=(-only-testing:PersonaTests/MainPagesStackTests
     -only-testing:PersonaTests/PhoneSystemToolsTests)
 fi
-  # The same real Persona test host and all of PersonaTests, but no second
-  # compilation of the embedded Watch/Share targets already covered by the
-  # device build. Resolve the ordinary project once, then remove only targets
-  # the offline test host cannot reach. The default/UI/About projects are whole.
+  OFFLINE_PROFILE=full
+  if [ "$LANE" = ios-focused ]; then
+    OFFLINE_PROFILE=focused
+  elif [ "$LANE" = ios-ipad-diagnostic ]; then
+    OFFLINE_PROFILE=ipad-diagnostic
+  fi
+  # -only-testing selects execution, not target membership. Resolve the ordinary
+  # project once, then remove targets the test host cannot reach. Focused lanes
+  # additionally compile their explicit executed suites, probes and shared
+  # helpers; ordinary/ios18/regression lanes retain every PersonaTests source.
+  # The default/UI/About projects and device/simulator DerivedData stay separate.
   ci_run 'Generate iPhone-only offline unit-test project' 120 bash -c '
     set -euo pipefail
-    spec="$1"; output="$2"
+    spec="$1"; output="$2"; profile="$4"; tests="$5"
     xcodegen dump --spec "$spec" --type json > "$output/Persona.whole.json"
-    python3 "$3" "$output/Persona.whole.json" "$output/PersonaOfflineUnitTests.json"
-  ' -- "$SOURCE/apple/project.yml" "$OUTPUT" "$CI_ROOT/scripts/ci/apple_offline_project.py"
+    python3 "$3" "$output/Persona.whole.json" "$output/PersonaOfflineUnitTests.json" \
+      --profile "$profile" --source-root "$tests"
+  ' -- "$SOURCE/apple/project.yml" "$OUTPUT" "$CI_ROOT/scripts/ci/apple_offline_project.py" \
+    "$OFFLINE_PROFILE" "$SOURCE/apple/PersonaTests"
   ci_run 'Generate offline unit-test Xcode project' 120 xcodegen generate \
     --spec "$OUTPUT/PersonaOfflineUnitTests.json" --project-root "$SOURCE/apple" \
     --project "$SOURCE/apple"
@@ -436,6 +454,10 @@ fi
         sleep 0.1
       done
       : > "$watch_log/observer.stop"
+      # This observer has its own process group, so the readiness timeout does
+      # not kill its evidence. Send the stop to that group explicitly: waiting
+      # without it would leave the observer collecting until the full horizon.
+      kill -TERM "-$watcher" 2>/dev/null || kill -TERM "$watcher" 2>/dev/null || true
       # The observer stops polling after its bounded product phase, then
       # completes final evidence. The outer 900-second deadline still owns a
       # stuck watcher; never kill it before that final collection.
@@ -546,14 +568,17 @@ fi
         printf "%s\n" "unavailable: bundle signature collection incomplete" > "$watch_log/product-$product-bundle-signature.pending"
         mv "$watch_log/product-$product-bundle-signature.pending" "$watch_log/product-$product-bundle-signature.txt"
       done
-      # Give the observer its own group so a probe deadline cannot leave its
-      # detached collectors behind. Both steps use the unchanged budget.
+      # Noninteractive Bash gives the observer a separate process group only
+      # with job control enabled. The bounded readiness runner must never kill
+      # this group while it finishes its bounded final evidence.
+      set -m
       bash -c "exec python3 \"\$@\"" -- "$ci_root/scripts/ci/apple_readiness_watch.py" \
         --udid "$udid" --bundle-id "$bundle_id" --scope-root "$output" \
         --app "$output/ios-tests/Build/Products/Debug-iphonesimulator/Persona.app/Persona" \
         --test-bundle "$output/ios-tests/Build/Products/Debug-iphonesimulator/Persona.app/PlugIns/PersonaTests.xctest/PersonaTests" \
         --output "$watch_log" --seconds 900 &
       watcher=$!
+      set +m
       stop_watcher() {
         local code=$?
         trap - EXIT TERM INT
@@ -563,6 +588,9 @@ fi
           sleep 0.1
         done
         : > "$watch_log/observer.stop"
+        # Signal the independent observer group explicitly; otherwise the
+        # stop-file cannot end its polling after the readiness shell is gone.
+        kill -TERM "-$watcher" 2>/dev/null || kill -TERM "$watcher" 2>/dev/null || true
         # Let the stop-aware observer finish bounded final evidence. The
         # existing readiness deadline remains the hard outer bound.
         wait "$watcher" || true
@@ -591,9 +619,46 @@ fi
       exit 0
     fi
     mkdir -p "$OUTPUT/regular-shots"
+    # Observe the actual visual invocation, not only the successful readiness
+    # probe before it. Both stay inside the unchanged 600-second outer step.
     TEST_RUNNER_PERSONA_SHOTS="$OUTPUT/regular-shots" \
-      ci_run 'iOS regular-width About visual test on real iPad' 600 "${IOS_COMMON[@]}" \
-        -destination "platform=iOS Simulator,id=$REGULAR_SIM" -destination-timeout 120 \
+      ci_run 'iOS regular-width About visual test on real iPad' 600 bash -c '
+        set -euo pipefail
+        ci_root="$1"; output="$2"; watch_log="$3"; udid="$4"; bundle_id="$5"; shift 5
+        mkdir -p "$watch_log"
+        printf "%s\n" "collection incomplete; observation only; no launch cause established" > "$watch_log/observer.status.pending"
+        mv "$watch_log/observer.status.pending" "$watch_log/observer.status.txt"
+        printf "%s\n" "unavailable: observation incomplete" > "$watch_log/launch-system-after-60s.txt.pending"
+        mv "$watch_log/launch-system-after-60s.txt.pending" "$watch_log/launch-system-after-60s.txt"
+        printf "%s\n" "incomplete" > "$watch_log/launch-system-after-60s.txt.status.pending"
+        mv "$watch_log/launch-system-after-60s.txt.status.pending" "$watch_log/launch-system-after-60s.txt.status.txt"
+        # The observer owns its process group; the existing deadline still owns
+        # both it and xcodebuild. No boot, shutdown or launch setting changes.
+        set -m
+        python3 "$ci_root/scripts/ci/apple_launch_diagnostics.py" \
+          --record "$output/regular-visual-context.json" --udid "$udid" --bundle-id "$bundle_id"
+        python3 "$ci_root/scripts/ci/apple_regular_visual_watch.py" \
+          --udid "$udid" --bundle-id "$bundle_id" --scope-root "$output" \
+          --output "$watch_log" --seconds 600 &
+        watcher=$!
+        set +m
+        stop_watcher() {
+          local code=$?
+          trap - EXIT TERM INT
+          : > "$watch_log/observer.stop"
+          wait "$watcher" || true
+          if kill -0 "$watcher" 2>/dev/null; then
+            kill -KILL "-$watcher" 2>/dev/null || kill -KILL "$watcher" 2>/dev/null || true
+          fi
+          wait "$watcher" || true
+          exit "$code"
+        }
+        trap stop_watcher EXIT TERM INT
+        command_status=0
+        "$@" 2>&1 | tee "$output/ios-about-regular.log" || command_status=$?
+        exit "$command_status"
+      ' -- "$CI_ROOT" "$OUTPUT" "$OUTPUT/diagnostics/live-regular-visual" "$REGULAR_SIM" "$CI_BUNDLE_ID" \
+        "${IOS_COMMON[@]}" -destination "platform=iOS Simulator,id=$REGULAR_SIM" -destination-timeout 120 \
         -only-testing:PersonaTests/AboutVersionRegularVisualTests \
         -resultBundlePath "$OUTPUT/ios-about-regular.xcresult" test-without-building
     result ios-about-regular "$REGULAR_SIM" AboutVersionRegularVisualTests

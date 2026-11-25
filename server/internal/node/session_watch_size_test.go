@@ -207,3 +207,126 @@ func TestPageReadDoesNotWaitForTheCatchUp(t *testing.T) {
 		t.Fatal("the page read waited for the push lock")
 	}
 }
+
+func fullItemLockFixture(t *testing.T, n *Node, home, id string) (string, string) {
+	t.Helper()
+	path := imageSession(t, n, home, id)
+	appendLines(t, path,
+		`{"type":"user","uuid":"u0","timestamp":"2026-11-23T09:00:00Z","message":{"role":"user","content":"start"}}`,
+		`{"type":"assistant","uuid":"a0","timestamp":"2026-11-23T09:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"on it"}]}}`)
+	probe := transcript.NewFile(path)
+	items, err := probe.Refresh()
+	if err != nil || len(items) == 0 {
+		t.Fatalf("fixture: %d items, %v", len(items), err)
+	}
+	return path, items[len(items)-1].ID
+}
+
+func requestFullItem(t *testing.T, n *Node, id, itemID string, strict bool) <-chan any {
+	t.Helper()
+	params, err := json.Marshal(map[string]any{"session_id": id, "item_id": itemID, "strict_read": strict})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	done := make(chan any, 1)
+	go func() {
+		res, err := n.handle(ctx, "session.item", params)
+		if err != nil {
+			done <- err
+			return
+		}
+		done <- res
+	}()
+	return done
+}
+
+func awaitFullItem(t *testing.T, done <-chan any) {
+	t.Helper()
+	select {
+	case res := <-done:
+		if err, ok := res.(error); ok {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(res)
+		if !strings.Contains(string(b), "on it") {
+			t.Fatalf("full item: %s", b)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the full-item read waited for the push lock")
+	}
+}
+
+func requireFullItemBlocked(t *testing.T, done <-chan any) {
+	t.Helper()
+	select {
+	case res := <-done:
+		t.Fatalf("the full-item read returned before the push lock was released: %v", res)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// Full-item reads follow the page policy only after the transcript's first read. Strict exports always refresh under the lock.
+func TestFullItemReadCatchUpLockPolicy(t *testing.T) {
+	t.Run("warm non-strict", func(t *testing.T) {
+		n, home := testNode(t)
+		const id = "13677000-0000-4000-8000-000000000004"
+		_, itemID := fullItemLockFixture(t, n, home, id)
+		f, err := n.file(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Refresh(); err != nil {
+			t.Fatal(err)
+		}
+		mu := n.pushLock(id)
+		mu.Lock()
+		defer mu.Unlock()
+		awaitFullItem(t, requestFullItem(t, n, id, itemID, false))
+	})
+
+	t.Run("first non-strict", func(t *testing.T) {
+		n, home := testNode(t)
+		const id = "13677000-0000-4000-8000-000000000005"
+		_, itemID := fullItemLockFixture(t, n, home, id)
+		mu := n.pushLock(id)
+		mu.Lock()
+		locked := true
+		defer func() {
+			if locked {
+				mu.Unlock()
+			}
+		}()
+		done := requestFullItem(t, n, id, itemID, false)
+		requireFullItemBlocked(t, done)
+		mu.Unlock()
+		locked = false
+		awaitFullItem(t, done)
+	})
+
+	t.Run("strict export", func(t *testing.T) {
+		n, home := testNode(t)
+		const id = "13677000-0000-4000-8000-000000000006"
+		_, itemID := fullItemLockFixture(t, n, home, id)
+		f, err := n.exportFile(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := f.RefreshExportSpan(); err != nil {
+			t.Fatal(err)
+		}
+		mu := n.pushLock(id)
+		mu.Lock()
+		locked := true
+		defer func() {
+			if locked {
+				mu.Unlock()
+			}
+		}()
+		done := requestFullItem(t, n, id, itemID, true)
+		requireFullItemBlocked(t, done)
+		mu.Unlock()
+		locked = false
+		awaitFullItem(t, done)
+	})
+}

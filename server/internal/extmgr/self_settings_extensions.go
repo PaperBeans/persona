@@ -72,7 +72,7 @@ func (h *Manager) extensionSettingsText(id string) (string, error) {
 	fmt.Fprintf(&b, "Settings of %s (%s); set changes only the fields given, null puts one back to its default:\n", extensionDisplayName(p), p.Record.ID)
 	saved := h.savedSettings(p)
 	for _, f := range assistantExtensionFields(p.Schema.Fields) {
-		if isVolc(p) && f.Name == volcMeetingsField {
+		if isVolc(h.modules(), p) && f.Name == volcMeetingsField {
 			continue // the owner's choice of meeting transcription, never set here
 		}
 		if f.Type == "object" {
@@ -248,7 +248,7 @@ func (h *Manager) setExtensionSettings(id, title string, v json.RawMessage) (*se
 	if p == nil {
 		return nil, fmt.Errorf("no extension %s", id)
 	}
-	if _, ok := patch[volcMeetingsField]; ok && id == volcID() {
+	if _, ok := patch[volcMeetingsField]; ok && id == volcID(h.modules()) {
 		return nil, errors.New(volcMeetingsField + " is the owner's choice of meeting transcription: only Settings › Extensions or Recording settings on a device change it")
 	}
 	for _, f := range iphoneOwnFields {

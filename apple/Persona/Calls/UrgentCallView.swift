@@ -115,7 +115,7 @@ private struct UrgentCallCard: View {
                 }
                 .themedButton(prominent: true)
                 .accessibilityIdentifier("urgentCall.confirm")
-            } else if let card = session.card {
+            } else if let card = session.card, card.answerableHere {
                 switch card.kind {
                 case .question:
                     if let q = card.questions?.first {

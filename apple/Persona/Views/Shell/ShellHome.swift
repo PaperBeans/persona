@@ -440,12 +440,17 @@ struct ShellDestinations: ViewModifier {
     /// (#6332), whose one path has the Agents' (`AgentsDestinations`), the split's first pages without a back.
     var agentRoutes = true
     @StateObject private var accounts = InboxAccountState()
+    @State private var pusher = SplitPush()
 
     /// The explicit closure from Assistant, or this destination's own path in the unified Sidebar layout.
     private var routeChat: ((InboxChatRoute) -> Void)? {
         if let inboxChat { return inboxChat }
         guard enabled else { return nil }
         return { path.append($0) }
+    }
+
+    private var splitPush: SplitPush {
+        pusher.set { [path = $path] value in path.wrappedValue.append(value) }
     }
 
     func body(content: Content) -> some View {
@@ -463,6 +468,7 @@ struct ShellDestinations: ViewModifier {
                 .environment(\.feishuOpen) { path.append($0) }
                 .environment(\.pushInboxChat, routeChat)
                 .environment(\.shellInboxAccounts, accounts)
+                .environment(\.splitPush, splitPush)
                 #if DEBUG
                 .onAppear { ShellTrace.shared.note("inbox chat closure available=\(routeChat != nil)") }
                 #endif
@@ -473,7 +479,9 @@ struct ShellDestinations: ViewModifier {
 
     /// Injects on each returned destination, not only the stack's root content (the iPad split drops the latter).
     private func routed<Content: View>(_ content: Content) -> some View {
-        content.modifier(InboxDestinationEnvironment(chat: routeChat, openFeishu: { path.append($0) }))
+        content
+            .modifier(InboxDestinationEnvironment(chat: routeChat, openFeishu: { path.append($0) }))
+            .environment(\.splitPush, splitPush)
     }
 
     /// What the Agents list registers as well: here only where it does not (the shell, the iPad's Persona tab).
@@ -492,6 +500,10 @@ struct ShellDestinations: ViewModifier {
                     }
                     .navigationDestination(for: MachineDetailRoute.self) { r in
                         MachineDetailView(ref: r.ref)
+                            .modifier(InboxDestinationEnvironment(chat: chat, openFeishu: openFeishu))
+                    }
+                    .navigationDestination(for: MachineUsageMapRoute.self) { r in
+                        UsageMapView(route: r)
                             .modifier(InboxDestinationEnvironment(chat: chat, openFeishu: openFeishu))
                     }
                     .navigationDestination(for: TerminalsRoute.self) { r in

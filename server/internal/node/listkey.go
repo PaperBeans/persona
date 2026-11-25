@@ -48,6 +48,11 @@ func listKeySized(list []proto.Session, size int) string {
 			w.quote(h.AskingParentSessionID, '/')
 			w.int(unixOf(&h.StartedAt), '\n')
 		}
+		if a := s.Aliases(); len(a) > 0 { // the ids its conversation went by, which the manager finds it by (agyaliases.go)
+			w.b.WriteString("aliases:")
+			w.quotes(a)
+			w.b.WriteByte('\n')
+		}
 		if s.TitleSource != proto.TitleSourceUnknown || s.TitleManual || s.OutputTokens != 0 {
 			w.b.WriteString("naming:")
 			w.quote(s.TitleSource.String(), '/')

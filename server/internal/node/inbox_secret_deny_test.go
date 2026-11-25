@@ -137,6 +137,8 @@ func TestInboxSecretDenyRulesPreserveCommaPaths(t *testing.T) {
 // deepest existing parent and restores the missing suffix; no credential file is created or read by this check.
 func TestInboxSecretDenyRulesResolveMissingTargets(t *testing.T) {
 	n, root := testNode(t)
+	// The physical home is the fully resolved one, which macOS's temp directory (behind the /var symlink) is not.
+	root = resolved(t, root)
 	physical := filepath.Join(root, "physical-home")
 	if err := os.MkdirAll(filepath.Join(physical, ".persona"), 0o700); err != nil {
 		t.Fatal(err)

@@ -53,5 +53,14 @@
   "file_waiting": "待機中",
   "file_failed": "失敗 · クリックして再試行",
   "file_cancel": "{name}のアップロードをキャンセル",
-  "file_retry": "{name}を再試行"
+  "file_retry": "{name}を再試行",
+  "confirm_run_title": "{word} を実行しますか？",
+  "confirm_ok": "確定",
+  "confirm_cancel": "キャンセル",
+  "drop_here": "画像やファイルをここにドロップ",
+  "pasted_preview_hint": "クリックしてプレビューまたは入力欄に展開",
+  "pasted_chip_other": "貼り付けテキスト · {count} 文字",
+  "pasted_remove": "貼り付けテキストを削除",
+  "pasted_stats": "{lines} 行 · {chars} 文字",
+  "pasted_expand": "入力欄に展開"
 }

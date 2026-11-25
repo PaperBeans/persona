@@ -378,11 +378,20 @@ func TestSealingKeySettled(t *testing.T) {
 	// committed while it waits: it sees the commit
 	tx, c = open()
 	defer c.Close(ctx)
+	committed := make(chan error, 1)
 	go func() {
+		defer close(committed)
 		time.Sleep(500 * time.Millisecond)
-		_ = tx.Commit(ctx)
+		committed <- tx.Commit(ctx)
+	}()
+	defer func() {
+		for range committed {
+		}
 	}()
 	rec, err := d.SealingKeySettled(ctx, 10*time.Second)
+	if commitErr := <-committed; commitErr != nil {
+		t.Fatalf("commit: %v", commitErr)
+	}
 	if err != nil || rec == nil || rec.Fingerprint != "inflight" {
 		t.Fatalf("settled %+v %v", rec, err)
 	}

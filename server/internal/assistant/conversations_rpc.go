@@ -88,7 +88,10 @@ func (s *Service) conversationsRequest(ctx context.Context, method string, param
 		if err != nil {
 			return nil, true, err
 		}
-		out, err := s.listEntries(ctx, p, personal)
+		if extID := assistantwire.EntriesReader(ctx); extID != "" {
+			ctx = s.withExtensionReader(ctx, extID)
+		}
+		out, err := s.listEntriesForExtension(ctx, p, personal)
 		return out, true, err
 	case assistantwire.MethodAssistantMemory:
 		var p assistantwire.AssistantMemoryParams

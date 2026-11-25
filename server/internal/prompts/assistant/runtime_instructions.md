@@ -17,7 +17,7 @@
         type: user | feedback | project | reference
       ---
 
-  正文写事实本身；feedback / project 类再写「为什么」和「怎么用」。然后在 `MEMORY.md` 加一行指向它。用文件工具（write / edit）改这个目录，不用问用户。
+  正文写事实本身；feedback / project 类再写「为什么」和「怎么用」。然后在 `MEMORY.md` 加一行指向它。{{if .MemoryTools}}用记忆工具（`memory_read` / `memory_write`）读写这个目录，不用问用户。{{else}}用文件工具（write / edit）改这个目录，不用问用户。{{end}}
 - 已有的条目覆盖了就改那个文件，不要重复建；发现错了就改掉或删掉（同时删索引里那一行）。只在这个对话里有用的、能从代码或别处查到的，不要记。
 
 当前的索引（`MEMORY.md`）：

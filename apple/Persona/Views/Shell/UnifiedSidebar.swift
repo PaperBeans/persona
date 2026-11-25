@@ -154,7 +154,7 @@ struct SidebarWaitingBadge: View {
 /// The pages the Sidebar layout opens beside its sidebar by value that are not the shell's places (`ShellRoute`), which
 /// the Persona page registers (Health needs its state): pushed onto the one path the page beside the sidebar has, a pick
 /// replacing what was there (as the web's routes). In the other layouts Health is presented by flag, as before.
-enum SidebarRoute: Hashable, Sendable {
+nonisolated enum SidebarRoute: Hashable, Sendable {
     case health, messages
     /// A domain space's home and the new space form (#13500), drawn as Health's page is.
     case space(String), newSpace
@@ -163,7 +163,7 @@ enum SidebarRoute: Hashable, Sendable {
     static let healthPage = "health"
 }
 
-extension ShellPage {
+nonisolated extension ShellPage {
     /// A place the sidebar lists, its row shaded while it is beside the sidebar.
     var isSidebarPlace: Bool {
         switch self {

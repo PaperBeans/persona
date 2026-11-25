@@ -9,22 +9,26 @@ import Testing
 struct CallSourceTests {
     private static let apple = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
 
-    /// Every Swift file under `apple/` but the local packages, with `//` comments taken out.
-    /// Paths relative to `apple/`, both sides with symlinks resolved: a checkout under a symlinked folder (`/var` →
-    /// `/private/var`, where scripts/ci/apple.sh puts its snapshot) is walked under the resolved name.
+    /// Every Swift file in the iOS app, its feature modules and their shared sources; standalone packages and the
+    /// separate Mac connector app are not this live-call audio-session audit's code (the connector's `setMode` is a
+    /// connection command, not AVAudioSession). Paths relative to `apple/`, both sides with symlinks resolved: a checkout
+    /// under a symlinked folder (`/var` → `/private/var`, where scripts/ci/apple.sh puts its snapshot) is walked under
+    /// the resolved name.
     private static func sources(tests: Bool) throws -> [(path: String, lines: [String])] {
         let root = apple.resolvingSymlinksInPath()
-        let walker = try #require(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
         var out: [(String, [String])] = []
-        for case let url as URL in walker where url.pathExtension == "swift" {
-            let full = url.resolvingSymlinksInPath().path
-            guard full.hasPrefix(root.path + "/") else { continue }
-            let path = String(full.dropFirst(root.path.count + 1))
-            if path.hasPrefix("Packages/") || path.contains("/.build/") || path.contains("DerivedData") { continue }
-            if !tests, path.hasPrefix("PersonaTests/") || path.hasPrefix("PersonaUITests/") { continue }
-            let lines = try String(contentsOf: url, encoding: .utf8).components(separatedBy: "\n")
-                .map { l in l.range(of: "//").map { String(l[..<$0.lowerBound]) } ?? l }
-            out.append((path, lines))
+        for directory in ["Persona", "Modules", "Shared"] + (tests ? ["PersonaTests", "PersonaUITests"] : []) {
+            let base = root.appending(path: directory)
+            let walker = try #require(FileManager.default.enumerator(at: base, includingPropertiesForKeys: nil), directory)
+            for case let url as URL in walker where url.pathExtension == "swift" {
+                let full = url.resolvingSymlinksInPath().path
+                guard full.hasPrefix(root.path + "/") else { continue }
+                let path = String(full.dropFirst(root.path.count + 1))
+                if path.contains("/.build/") || path.contains("DerivedData") { continue }
+                let lines = try String(contentsOf: url, encoding: .utf8).components(separatedBy: "\n")
+                    .map { l in l.range(of: "//").map { String(l[..<$0.lowerBound]) } ?? l }
+                out.append((path, lines))
+            }
         }
         return out
     }
@@ -107,6 +111,7 @@ struct CallSourceTests {
     /// cannot be (a recording, which is refused during one). A new place fails here until it is given one.
     @Test func everyAudioSessionChangeHasAVerdictForALiveCall() throws {
         let audited: [String: (verdict: String, gate: String?)] = [
+            "Shared/AudioSessionBroker.swift": ("the core audio-session broker: every call site below routes through it with its own live-call verdict", nil),
             "Persona/Calls/CallRoute.swift": ("the call's own Speaker", nil),
             "Persona/Calls/CallSystem.swift": ("the call's own: the watchdog's one activation, the Simulator's stand-in", nil),
             "Persona/Calls/PersonaCalls.swift": ("the call's own category, before its Start or as it rings", nil),
@@ -162,7 +167,7 @@ struct CallSourceTests {
     /// manager first (its own conversation shows the call screen, another asks End Call and Start), CarPlay says the call
     /// is on the phone, a meeting recording is refused before its page opens, and the call keeps the microphone.
     @Test func nothingInTheAppEndsALiveCallByItself() throws {
-        let entry = try Self.lines("Persona/Views/Voice/VoiceEntry.swift")
+        let entry = try Self.lines("Persona/Voice/VoiceEntry.swift")
         let start = try #require(Self.body(entry, "private static func prepare("))
         let own = try #require(start.range(of: "case .showCall:"))
         let ask = try #require(start.range(of: "return .said(.endCallFirst(name, key: key))"))
@@ -170,7 +175,7 @@ struct CallSourceTests {
         #expect(own.lowerBound < ask.lowerBound && ask.lowerBound < begin.lowerBound)
         #expect(start.contains("calls.present()"))
         #expect(begin.upperBound < start.endIndex && start.contains("endingCall: endingCall"))
-        let strip = try #require(Self.body(entry, "struct VoiceEndedStrip"))
+        let strip = try #require(Self.body(try Self.lines("Modules/Voice/VoiceComposer.swift"), "struct VoiceEndedStrip"))
         #expect(strip.contains("refusal = .endCallFirst(name, key: call.key, again: true)"))
         let alert = try #require(Self.body(entry, "func voiceUnavailableAlert("))
         #expect(alert.contains("Button(proceed.label, role: .destructive)") && alert.contains("Button(\"Cancel\", role: .cancel) {}"))
@@ -227,11 +232,11 @@ struct CallSourceTests {
     /// The refusal itself is `VoiceCalls`' (`VoiceCallsTests`, `PersonaCallsTests`); here, that every way in says it:
     /// the page's Voice Chat at once, its Continue, CarPlay's start and Continue, and that `PersonaCalls` answers it.
     @Test func voiceChatIsRefusedDuringAnUrgentCall() throws {
-        let entry = try Self.lines("Persona/Views/Voice/VoiceEntry.swift")
+        let entry = try Self.lines("Persona/Voice/VoiceEntry.swift")
         let start = try #require(Self.body(entry, "private static func prepare("))
         #expect(start.contains("let calls = PersonaCalls.shared") && start.contains("switch choose(urgent: calls.urgentInProgress,")
                 && start.contains("case .urgentCall:\n            return .said(PersonaCalls.urgentNote)"))
-        let strip = try #require(Self.body(entry, "struct VoiceEndedStrip"))
+        let strip = try #require(Self.body(try Self.lines("Modules/Voice/VoiceComposer.swift"), "struct VoiceEndedStrip"))
         #expect(strip.contains("refusal = await VoiceCalls.shared.resume(") && strip.contains(".voiceUnavailableAlert($refusal"))
         let car = try Self.lines("Persona/CarPlay/CarPlayVoiceSession.swift").joined(separator: "\n")
         #expect(car.contains("if let refused = await VoiceCalls.shared.start("))
@@ -287,7 +292,7 @@ struct CallSourceTests {
         let guards = try Self.lines("Persona/Calls/CallGuards.swift").joined(separator: "\n")
         #expect(guards.contains("LiveCallGate.callLiveChanged(live)"))
 
-        let entry = try Self.lines("Persona/Views/Voice/VoiceEntry.swift")
+        let entry = try Self.lines("Persona/Voice/VoiceEntry.swift")
         let proceed = try #require(Self.body(entry, "static func proceed("))
         #expect(proceed.contains("return await begin(key, model: model, endingCall: true)"), "the yes does not wait for its refusal")
         let begin = try #require(Self.body(entry, "private static func prepare("))

@@ -176,6 +176,13 @@ callers the node's reported absolute executable as data for the existing scoped 
 unavailable metadata or unknown capabilities omit unverified hints, not the assignment.
 Keep the existing project context, approval snapshot and attachment order intact.
 
+Read that executable from the `node.info` the node's connection began with, as the devices keep it
+(`devices.Summary.Executable`), not from a fresh call (#14446). A node works `node.info` out whole on every call, Claude
+Code's version from an interactive login shell included (`claudeProbe`). On a computer whose shell took about 2.4 s to
+start, while `claude --version` itself took 12 ms, every fresh call outlasted the one-second bound, and every handoff
+there lost its terminal entry. A value that cannot change while the connection lasts needs no round trip: ask the node,
+within the bound, only when the devices name none.
+
 A handoff note that reads as an instruction gets followed (#12995). A Codex worker at high reasoning effort read
 "use the terminal entry below for a separate session on this assignment" as a step of its task: it handed its whole
 assignment to a child in the same checkout, telling it the parent would coordinate and verify, then polled the
@@ -1130,7 +1137,7 @@ Closing is not durable merely because the card vanished: persist the interaction
     guide (`node/sendsafe_submit.go`'s `declineGuide`, reached only after `screen.Guide` / `CheckClaude` recognized the
     screen). Each sends Esc only after its own screen was recognized.
   - Free key presses from a phone terminal, a watch answer, or a Feishu screen card's Esc button
-    (`assistant/feishu_cards.go`): the user's own key, not a decision Persona makes.
+    (`modules/lark/ask_cards.go`): the user's own key, not a decision Persona makes.
 - Before sending `esc` as "stop", confirm the turn is running (session state, or the working status line above the box);
   send it at most once per stop, and never as a way to clear the box — the `/effort` path above shows how easy that is.
 
@@ -1655,3 +1662,23 @@ even after the node read the pane's conversation and merged its model and usage 
 herdr row's conversation comes from somewhere else, so does its title: pi and opencode take their runtime's, agy the
 companion's, else its own (`cache/conversation_metadata.json`), else the first message typed into it. Merging a
 runtime's row into a pane's, go through every field the runtime knows better, not only the ones a report named.
+
+## The companion's agy row can be a conversation a terminal agy has open (#13603)
+
+The Antigravity companion lists every recent agy conversation on disk, including ones an `agy` in a terminal is
+running. When the node had no pane row to merge it into (herdr-core terminals were not recognised as agy), a message to
+`agy-<conversation>`, card answers included, went to the companion, which ran a second agy on the same conversation: the
+terminal never saw it, and the companion's turn overwrote the stored steps from where it had last loaded them. The terminal agy holds an exclusive flock on `presence/<conversation>.lock` and leaves the file after agy exits; never
+probe it by taking even a shared `flock` (`LOCK_SH|LOCK_NB`), because a starting `agy` tries `LOCK_EX|LOCK_NB` once and
+runs its whole session without a lock if that fails (#14561). On Linux, read `/proc/locks` for the file's device and
+inode; where no lock table can be read, fall back to the presence file plus recent transcript writes by another process.
+Calls that drive the conversation go to the pane, or are refused (`agy_in_terminal`) while held.
+
+## First tool discovery can precede the session list (#14855)
+
+An assistant process can ask for MCP tools before its node publishes `sessions.changed`, even while the manager's
+`assistant.send` is still waiting. Resolve an unknown caller's space from the node's verified process launch directory,
+never a model argument or a claimed session's directory. An existing session row remains authoritative. Bind fallback
+evidence to its node machine and caller, and use one session snapshot for both a discovery list and its revision;
+otherwise a row arriving between those reads can leave an incomplete list cached as current. Test the order with real
+`Service.Start`, returning the requested prepare directory and delaying only the node reply and session publication.

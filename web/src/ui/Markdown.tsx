@@ -32,7 +32,7 @@ import { whenIdle } from "./stream/idle";
 import { createWordFadeState, rememberShown, remainingMs, shownBefore, type WordFadeState } from "./stream/wordFade";
 import { cachedMarkdown, markdownCache, markdownKey } from "./markdown-cache";
 import "./stream/stream.css";
-import { CodeBar, ReplyQuote, ReplyStreaming, copyInlineCode, rehypeLinkedCode } from "./ReplyBlocks";
+import { ReplyQuote, ReplyStreaming, rehypeLinkedCode } from "./ReplyBlocks";
 
 // A link ends at whitespace or any non-ASCII character (Chinese text, full-width punctuation), without trailing
 // .,;:!? or an unbalanced ) ] (docs/lessons/ios.md: where a link ends). GFM's autolinks only end at whitespace, so
@@ -375,19 +375,21 @@ function Link({ href, children, mid, cwd, line, title: hover }: { href?: string;
 // rehype-katex turns those into formulas before they get here.
 const hasClass = (cls: string | undefined, name: string) => (cls ?? "").split(/\s+/).includes(name);
 
+function renderPre(children: React.ReactNode) {
+  const code = () => textOf(children).replace(/\n$/, "");
+  if (hasClass(codeClass(children), "math-display")) return <div className="whitespace-pre-wrap" data-math-pending="display">{`$$\n${code()}\n$$`}</div>;
+  const lang = codeLanguage(children);
+  if (lang === "mermaid") return <MermaidBlock code={code()} />;
+  // the assistant's cards (#1850): drawn with the extensions' components; a block that does not read stays code
+  if (CARD_LANGUAGES.includes(lang)) return <AssistantCard lang={lang} code={textOf(children)} fallback={<CodeBlock lang={lang}>{children}</CodeBlock>} />;
+  return <CodeBlock lang={lang}>{children}</CodeBlock>;
+}
+
 export const markdownComponents: Components = {
   a: ({ href, children }) => <Link href={href}>{children}</Link>,
   // third-party images stay unloaded until tapped (#8162); the hub's own images render inline
   img: (props) => <ExternalImage {...props} />,
-  pre: ({ children }) => {
-    const code = () => textOf(children).replace(/\n$/, "");
-    if (hasClass(codeClass(children), "math-display")) return <div className="whitespace-pre-wrap" data-math-pending="display">{`$$\n${code()}\n$$`}</div>;
-    const lang = codeLanguage(children);
-    if (lang === "mermaid") return <MermaidBlock code={code()} />;
-    // the assistant's cards (#1850): drawn with the extensions' components; a block that does not read stays code
-    if (CARD_LANGUAGES.includes(lang)) return <AssistantCard lang={lang} code={textOf(children)} fallback={<CodeBlock>{children}</CodeBlock>} />;
-    return <CodeBlock lang={lang}>{children}</CodeBlock>;
-  },
+  pre: ({ children }) => renderPre(children),
   code: ({ className, children, node: _node, "data-linked": linked, ...rest }: React.ComponentProps<"code"> & { node?: unknown; "data-linked"?: unknown }) =>
     hasClass(className, "math-inline") ? (
       <span data-math-pending="inline">${children}$</span>
@@ -398,7 +400,7 @@ export const markdownComponents: Components = {
           {children}
         </code>
       ) : (
-        <code className={className} {...rest} role="button" tabIndex={0} title={t("ui-markdown.copy")} onClick={copyInlineCode} onKeyDown={copyInlineCode} data-copy-code>
+        <code className={className} {...rest} role="button" tabIndex={0} title={t("ui-markdown.copy")} onClick={handleInlineCodeCopy} onKeyDown={handleInlineCodeCopy} data-copy-code>
           {children}
         </code>
       )
@@ -433,6 +435,20 @@ export function cellFits(node: unknown): boolean {
   return Boolean(node) && walk(node as HastNode);
 }
 
+function handleInlineCodeCopy(e: React.MouseEvent<HTMLElement> | React.KeyboardEvent<HTMLElement>) {
+  // Ignore fenced code blocks and code inside links.
+  const el = e.currentTarget;
+  if (el.closest("pre, a")) return;
+  if ("key" in e && e.key !== "Enter" && e.key !== " ") return;
+  const sel = typeof window !== "undefined" ? window.getSelection?.() : null;
+  const hasSelection = sel ? (typeof sel.isCollapsed === "boolean" ? !sel.isCollapsed : Boolean(sel.toString?.())) : false;
+  if (!("key" in e) && hasSelection) return;
+  e.preventDefault?.();
+  const text = el.textContent ?? "";
+  if (!text) return;
+  void copyText(text);
+}
+
 /** The class of a block's <code>. */
 function codeClass(children: React.ReactNode): string {
   const code = Array.isArray(children) ? children[0] : children;
@@ -441,7 +457,7 @@ function codeClass(children: React.ReactNode): string {
 
 /** The language a fenced block names (```mermaid → "mermaid"), from its <code>'s class. */
 function codeLanguage(children: React.ReactNode): string {
-  return /(?:^|\s)language-([\w-]+)/.exec(codeClass(children))?.[1]?.toLowerCase() ?? "";
+  return /(?:^|\s)language-([\w#+-]+)/.exec(codeClass(children))?.[1]?.toLowerCase() ?? "";
 }
 
 /** Whether text normalizeMath wrote has a formula: a $ it left unescaped outside code (lone ones it wrote as \$). */
@@ -462,10 +478,57 @@ function CodeBlock({ children, lang = "" }: { children: React.ReactNode; lang?: 
   const pre = useRef<HTMLPreElement>(null);
   const code = Array.isArray(children) ? (children.length === 1 ? children[0] : null) : children;
   const lit = useBlockHighlight(pre, isValidElement(code) ? codeClass(code) : undefined, textOf(children));
-  // a title bar on top, as Telegram draws it (#2984): the language and Copy (CodeBar)
+  const [wrapped, setWrapped] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<number | undefined>(undefined);
+  const label = lang || codeLanguage(children);
+
+  useEffect(() => () => window.clearTimeout(timerRef.current), []);
+
+  const handleCopy = () => {
+    void copyText(textOf(children).replace(/\n$/, ""));
+    setCopied(true);
+    window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  // a title bar on top, as Telegram draws it (#2984): the language, line-wrap toggle, and Copy
   return (
-    <div className="code-block" data-code-block>
-      <CodeBar lang={lang} onCopy={() => copyText(textOf(children).replace(/\n$/, ""))} />
+    <div
+      className="code-block group/code"
+      data-code-block=""
+      data-wrap={wrapped ? "true" : undefined}
+    >
+      <div className="flex h-8 items-center gap-2 bg-ink/[0.05] pr-1.5 pl-3 text-xs text-ink-3 select-none" data-code-bar>
+        {label && <span className="min-w-0 truncate font-mono font-medium">{label}</span>}
+        <div className="ml-auto flex shrink-0 flex-row-reverse items-center gap-1">
+          <button
+            type="button"
+            aria-label={t("ui-markdown.copy_code")}
+            title={t("ui-markdown.copy_code")}
+            onClick={handleCopy}
+            className={`touch-hit inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-[6px] px-1.5 transition-colors duration-150 ${
+              copied ? "text-green" : "text-ink-3 hover:bg-hover-2 hover:text-ink focus-visible:text-ink"
+            }`}
+          >
+            <Icon name={copied ? "check" : "copy"} size={12.5} stroke={copied ? 2.4 : 1.9} />
+            {copied ? t("ui-atoms.copied") : t("ui-markdown.copy")}
+          </button>
+          <button
+            type="button"
+            aria-label={t("ui-markdown.toggle_wrap")}
+            title={t("ui-markdown.toggle_wrap")}
+            aria-pressed={wrapped}
+            onClick={() => setWrapped((w) => !w)}
+            className={`touch-hit inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-[6px] px-1.5 transition-colors duration-150 ${
+              wrapped ? "bg-hover-2 text-ink" : "text-ink-3 hover:bg-hover-2 hover:text-ink focus-visible:text-ink"
+            }`}
+          >
+            <Icon name="wrap" size={12.5} />
+            {t("ui-markdown.wrap")}
+          </button>
+        </div>
+      </div>
       <pre ref={pre}>{lit && isValidElement(code) ? cloneElement(code as ReactElement<{ className?: string }>, lit) : children}</pre>
     </div>
   );

@@ -41,6 +41,8 @@ sealed interface PanelReason {
     data object Busy : PanelReason
     /** The chat's provider is not on its computer any more. */
     data object ProviderGone : PanelReason
+    /** This connection cannot receive separate task follow-up instructions. */
+    data object SupervisionUnavailable : PanelReason
     /** The hub's own words (a provider that can't run Persona chats there). */
     data class Hub(val words: String) : PanelReason
 }

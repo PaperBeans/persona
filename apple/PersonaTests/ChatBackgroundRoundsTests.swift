@@ -32,10 +32,10 @@ import PersonaWire
         return value
     }
 
-    private func build(_ items: [Item], background: Bool = true, main: Bool = true, open: Set<String> = [], active: Bool = false) -> [ChatLine] {
+    private func build(_ items: [Item], background: Bool = true, main: Bool = true, relayPreference: Bool? = nil, latestNeedsAttention: Bool = false, open: Set<String> = [], active: Bool = false) -> [ChatLine] {
         let blocks = ChatStore.rebuild(items, settled: nil).blocks
         let live = active ? blocks.last.flatMap { if case .turn(let t) = $0 { t.id } else { nil } } : nil
-        return ChatLines(openWork: [], foldSupervision: true, foldBackground: background, main: main, openSupervision: open, active: active)
+        return ChatLines(openWork: [], foldSupervision: true, foldBackground: background, main: main, foldRoutineRelayReplies: main && relayPreference == true, latestReplyNeedsAttention: latestNeedsAttention, openSupervision: open, active: active)
             .build(blocks, live: live)
     }
 
@@ -72,14 +72,65 @@ import PersonaWire
         #expect(opened.contains { if case .row(.assistant(let i)) = $0.content { i.id == items[1].id } else { false } })
     }
 
+    @Test(arguments: [nil, false, true] as [Bool?])
+    func routineRelayRepliesRequireOptIn(relayPreference: Bool?) {
+        let answer = item(2, text: "The delegated check finished"), items = [relayed(), answer]
+        let lines = build(items, relayPreference: relayPreference)
+        #expect((folded(lines) != nil) == (relayPreference == true))
+        #expect(folded(build(items, background: false, relayPreference: relayPreference)) == nil)
+        #expect(folded(build(items, main: false, relayPreference: relayPreference)) == nil)
+        var direct = item(3, role: "user", text: "What was the result?")
+        direct.clientMsgID = "synthetic-user-result"
+        let directAnswer = item(4, text: "Here is your requested result.")
+        let pending = build(items + [direct, directAnswer, relayed(5)], relayPreference: relayPreference)
+        #expect(pending.contains { if case .row(.assistant(let shown)) = $0.content { shown.id == directAnswer.id } else { false } })
+    }
+
+    @Test(arguments: [
+        #"{"status":"done","awaits_reply":true}"#,
+        #"{"status":"done","turn_error_kind":"model_refusal"}"#,
+        #"{"status":"blocked"}"#,
+        #"{"status":"interrupted"}"#
+    ])
+    func ownerQuestionsAndAbnormalSessionMarkersStayVisible(_ fields: String) throws {
+        let wire = #"{"machine_id":"fixture","session_id":"main","state":"idle","# + fields.dropFirst()
+        let session = try JSON.decoder.decode(Session.self, from: Data(wire.utf8))
+        let lines = build([relayed(), item(2, text: "Please choose the next step.")],
+                          relayPreference: true, latestNeedsAttention: ChatLines.needsReplyAttention(session))
+        #expect(folded(lines) == nil)
+    }
+
+    @Test func hostFailureCanOverrideASilentRelayReceipt() {
+        var finish = item(2, kind: .toolUse)
+        finish.toolName = "mcp__persona__supervision_finish"
+        finish.toolUseID = "synthetic-silent-finish"
+        var receipt = item(3, role: "user", kind: .toolResult, text: #"{"visibility":"silent"}"#)
+        receipt.toolUseID = finish.toolUseID
+        let reply = item(4, text: "The host reported a failure after this reply.")
+        let blocks = ChatStore.rebuild([relayed(), finish, receipt, reply], settled: nil).blocks
+        func projection(attention: Bool) -> ChatLines.Projection {
+            ChatLines(openWork: [], foldSupervision: true, foldBackground: true, main: true,
+                      foldRoutineRelayReplies: true, latestReplyNeedsAttention: attention)
+                .projection(blocks, live: nil)
+        }
+        let failed = projection(attention: true)
+        #expect(failed.activity.isEmpty)
+        #expect(failed.timeline.contains { $0.holds(reply.id) })
+
+        // Without an attention signal, the same canonical silent round still belongs in Background activity.
+        let ordinary = projection(attention: false)
+        #expect(ordinary.timeline.isEmpty)
+        #expect(ordinary.activity.count == 1)
+    }
+
     @Test func mainRelayReplyStaysFoldedAndInspectable() throws {
         let items = [relayed(), item(2, text: "The delegated check finished")]
-        let lines = build(items)
+        let lines = build(items, relayPreference: true)
         let fold = try #require(folded(lines))
         guard case .supervision(_, let trace, _, _) = fold.line.content else { return }
         #expect(trace.contains { $0.holds(items[1].id) })
         // A leader conversation keeps the previous visible-reply fallback.
-        #expect(folded(build(items, main: false)) == nil)
+        #expect(folded(build(items, main: false, relayPreference: true)) == nil)
     }
 
     @Test(arguments: ["daily", "once"])
@@ -252,6 +303,23 @@ import PersonaWire
         #expect(content.count(.needsYou) == 2)
     }
 
+    @Test func aFailedOrBlockedReplyShowsOnlyTheAffectedExchange() {
+        let first = item(2, text: "First result"), second = item(4, text: "Second result")
+        let lines = build([relayed(1), first, relayed(3), second, relayed(5)], relayPreference: true, latestNeedsAttention: true)
+        let visible = lines.compactMap { line -> String? in
+            if case .row(.assistant(let item)) = line.content { return item.id }
+            return nil
+        }
+        #expect(visible == [second.id])
+        #expect(folded(lines)?.line.holds(first.id) == true)
+    }
+
+    @Test func aCutOffRelayShowsItsUsualErrorCard() {
+        let failure = item(2, text: "API Error: 529 overloaded")
+        let lines = build([relayed(), failure], relayPreference: true)
+        #expect(lines.contains { if case .apiError(let item, _, _) = $0.content { item.id == failure.id } else { false } })
+    }
+
     // MARK: The setting
 
     @Test func settingDecodesOnWhenMissing() throws {
@@ -260,6 +328,13 @@ import PersonaWire
         }
         let old = try decode(#"{"machine_id":"box","launcher":"claude","cwd":"/a","conversations":[]}"#)
         #expect(old.mainBackgroundFolded == nil)
+        #expect(old.foldRoutineRelayReplies == nil)
+        for value in [true, false] {
+            let data = Data("{\"machine_id\":\"box\",\"launcher\":\"claude\",\"cwd\":\"/a\",\"conversations\":[],\"fold_routine_relay_replies\":\(value)}".utf8)
+            #expect(try JSON.decoder.decode(APIClient.AssistantState.self, from: data).foldRoutineRelayReplies == value)
+            let write = try JSONSerialization.jsonObject(with: JSONEncoder().encode(APIClient.AssistantConfigBody(foldRoutineRelayReplies: value))) as? [String: Bool]
+            #expect(write == ["fold_routine_relay_replies": value])
+        }
         #expect(old.backgroundFolded)
         let off = try decode(#"{"machine_id":"box","launcher":"claude","cwd":"/a","conversations":[],"main_background_folded":false}"#)
         #expect(off.mainBackgroundFolded == false && !off.backgroundFolded)

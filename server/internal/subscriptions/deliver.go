@@ -59,6 +59,8 @@ type InboxSource struct {
 	Connector  string
 	SourceName string
 	Chats      map[string]string
+	// Off pauses this subscription's stored content without disabling unrelated subscriptions.
+	Off bool
 	// Switched: it is a built-in's Inbox feed now (MigratedFrom), under the built-in's id (#6265), which the manager
 	// gives the built-in's abilities in the round (#6381). ConnectorRows: its rows are the connector's own (a things
 	// recipe), whose counts are the connector's; otherwise the subscription makes them, with its counts (#5671).
@@ -76,7 +78,8 @@ func (s *Service) InboxSources(ctx context.Context) ([]InboxSource, error) {
 	out := []InboxSource{}
 	replying := s.replying(ctx)
 	for _, sub := range all {
-		src := InboxSource{ID: sub.ID, Name: sub.Label, Kinds: kindsOf(sub.Label, s.o.Lang()), Things: []connector.InboxThing{}}
+		src := InboxSource{ID: sub.ID, Name: sub.Label, Kinds: kindsOf(sub.Label, s.o.Lang()), Things: []connector.InboxThing{},
+			Off: !s.readAllowed(ctx, sub)}
 		builtin, migrated := MigratedFrom(sub)
 		if migrated {
 			src.ID, src.Switched = builtin, true // the built-in's Inbox feed now: under its own source id (#6265)
@@ -88,25 +91,29 @@ func (s *Service) InboxSources(ctx context.Context) ([]InboxSource, error) {
 		if kbFrom(sub) != nil {
 			d.chats = map[string]string{}
 		}
-		answer, kept, err := s.answerRows(ctx, sub)
-		if err != nil {
-			return nil, err
-		}
-		if kept {
-			src.Things = append(src.Things, answer...)
-		} else {
-			catchup, live, err := s.inboxHeld(ctx, sub, now)
+		if !src.Off {
+			answer, kept, err := s.answerRows(ctx, sub)
 			if err != nil {
 				return nil, err
 			}
-			src.Things = append(src.Things, d.inboxThings(catchup, live)...)
+			if kept {
+				src.Things = append(src.Things, answer...)
+			} else {
+				catchup, live, err := s.inboxHeld(ctx, sub, now)
+				if err != nil {
+					return nil, err
+				}
+				src.Things = append(src.Things, d.inboxThings(catchup, live)...)
+			}
 		}
 		if !migrated { // a built-in's feed reads as the built-in's to the AI twin
 			src.Connector, src.SourceName, src.Chats = sub.Connector, cmpOr(sub.SourceName, sub.Source), d.chats
 		}
-		src.Things = append(src.Things, d.failing())
-		if inboxFrom(sub) != nil {
-			src.ReadError = readErrorOf(sub.RunState)
+		if !src.Off {
+			src.Things = append(src.Things, d.failing())
+			if inboxFrom(sub) != nil {
+				src.ReadError = readErrorOf(sub.RunState)
+			}
 		}
 		out = append(out, src)
 	}
@@ -172,6 +179,9 @@ func (s *Service) replying(ctx context.Context) map[string]bool {
 func (s *Service) ReplyTarget(ctx context.Context, id, row, last string) (conn connector.Inbox, thread string, err error) {
 	sub, err := s.o.Store.GetSubscription(ctx, id)
 	if err != nil || sub == nil || s.o.Connectors == nil {
+		return nil, "", errReplyUnavailable
+	}
+	if !s.readAllowed(ctx, *sub) {
 		return nil, "", errReplyUnavailable
 	}
 	if last == "" || strings.HasPrefix(last, weakPrefix) {
@@ -707,7 +717,7 @@ func (s *Service) Archives(ctx context.Context) ([]string, error) {
 	}
 	out := []string{}
 	for _, sub := range all {
-		if kbFrom(sub) != nil {
+		if kbFrom(sub) != nil && s.readAllowed(ctx, sub) {
 			out = append(out, sub.ID)
 		}
 	}
@@ -733,6 +743,9 @@ func (s *Service) Changes(ctx context.Context, id, cursor string, _ int) ([]conn
 		return nil, cursor, false, err
 	}
 	if sub == nil || kbFrom(*sub) == nil {
+		return nil, cursor, false, ErrArchiveOff
+	}
+	if !s.readAllowed(ctx, *sub) {
 		return nil, cursor, false, ErrArchiveOff
 	}
 	from := kbFrom(*sub)

@@ -274,6 +274,35 @@ describe("QueuePanel relayed group", () => {
     expect(rows()[0].querySelector("[data-queue-note]")).toBeNull();
   });
 
+  it("shows no-wake relays arriving with the next message in an idle chat", () => {
+    const idle = { ...persona(["来自「日报」（不唤醒）：备忘"], 1), state: "idle" } as Session;
+    render(<QueuePanel session={idle} draftKey="qp-rg" canEdit persona="Nova" />);
+    expect(summary().textContent).toBe("1 条消息来自其他对话 · 随下一轮消息送达");
+    expect(rows()).toHaveLength(0);
+    click(summary());
+    expect(summary().textContent).toBe("1 条消息来自其他对话 · 随下一轮消息送达");
+    expect(within(0, "[data-queue-from]").textContent).toBe("日报");
+    expect(texts()).toEqual(["备忘"]);
+    expect(rows()[0].getAttribute("aria-label")).toBe("排队的第 1 条：来自「日报」 · 备忘 · 随下一轮消息送达");
+    expect(rows()[0].querySelector("button")).toBeNull();
+    expect(host.textContent).not.toContain("对话空闲后送达");
+  });
+
+  it("shows per-row delivery notes for a mixed relay group", () => {
+    show(["来自「日报」（不唤醒）：备忘", "来自「主对话」：帮我看下日程", "督办消息"], 3);
+    expect(summary().textContent).toBe("3 条消息来自其他对话");
+    click(summary());
+    expect(texts()).toEqual(["备忘", "帮我看下日程", "督办消息"]);
+    expect(rows().map((row) => row.querySelector("[data-queue-note]")?.textContent)).toEqual([
+      "随下一轮消息送达", "对话空闲后送达", "对话空闲后送达",
+    ]);
+    expect(rows().map((row) => row.getAttribute("aria-label"))).toEqual([
+      "排队的第 1 条：来自「日报」 · 备忘 · 随下一轮消息送达",
+      "排队的第 2 条：来自「主对话」 · 帮我看下日程 · 对话空闲后送达",
+      "排队的第 3 条：其他对话 · 督办消息 · 对话空闲后送达",
+    ]);
+  });
+
   it("keeps the own rows' actions and a hairline above the relayed group with several of each", () => {
     show(["我的一", "我的二", "来自「主对话」：甲", "来自「日报」：乙"], 2);
     expect(ownList()).not.toBeNull();

@@ -130,6 +130,11 @@ func (s *Service) admit(ctx context.Context, batch *inboxBatch, todo []*InboxIte
 		v := verdicts[i]
 		fallback := b.ruleTier(it)
 		switch {
+		case v.state == triageExcluded:
+			// An older source can hand in an excluded item before the source-side veto is installed. Keep it visible to
+			// the owner, but admit it without triage and persist the same retroactive boundary as an existing item.
+			it.VisibilityExcluded = true
+			it.Tier, it.Reason = TierAction, i18n.T(b.userLang(), "assistant-inbox_agent.never")
 		case v.state == "":
 			it.Tier, it.Summary, it.Reason = v.tier, v.summary, v.reason
 			b.ruledAnswered()
@@ -147,7 +152,9 @@ func (s *Service) admit(ctx context.Context, batch *inboxBatch, todo []*InboxIte
 			continue
 		}
 		it.Urgent = v.state == "" && v.urgent && it.Tier == TierAction
-		b.applyPolicyTier(it)
+		if v.state != triageExcluded {
+			b.applyPolicyTier(it)
+		}
 		it.TriageRev = inboxTriageRev
 		if v.state == triageFailed || v.state == triageTimeout {
 			it.RuleOf = it.Last

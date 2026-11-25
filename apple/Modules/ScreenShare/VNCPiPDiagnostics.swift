@@ -9,11 +9,11 @@ struct VNCPiPDiagnostics: View {
     @Environment(\.dismiss) private var dismiss
 
     private var facts: [(String, String)] {
-        let audio = AVAudioSession.sharedInstance()
+        let category = AudioSessionBroker.shared.category
         return [
             (String(localized: "Picture in Picture supported"), VNCPiP.supported ? String(localized: "Yes [V N C Pi P Diagnostics b5141d]") : String(localized: "No")),
             (String(localized: "Picture in Picture open"), VNCPiP.shared.active ? String(localized: "Yes [V N C Pi P Diagnostics b5141d]") : String(localized: "No")),
-            (String(localized: "Audio session"), Self.categories[audio.category] ?? audio.category.rawValue),
+            (String(localized: "Audio session"), Self.categories[category] ?? category.rawValue),
             (String(localized: "Background audio"), (Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String])?.contains("audio") == true ? String(localized: "Yes [V N C Pi P Diagnostics 90ce0f]") : String(localized: "None [V N C Pi P Diagnostics f12780]")),
         ]
     }

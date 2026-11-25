@@ -25,6 +25,7 @@ func longListName(i int) string {
 // same list as the card's text fallback (with Markdown metacharacters stripped), so a refused card still delivers
 // it (#4362).
 func TestBotCommandListCardsClipAndFallback(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	f, posts := feishuHub("ou_a", time.Unix(100, 0))
 	s := newTestService(t, f)
 	setSettings(t, s, func(v *Settings) { v.MachineID = "server"; v.Main = "main0" })
@@ -35,10 +36,7 @@ func TestBotCommandListCardsClipAndFallback(t *testing.T) {
 			Title: longListName(i), UpdatedAt: now.Add(-time.Duration(i) * time.Minute)})
 	}
 	f.setSessions("server", cs...)
-	ctx := context.Background()
-	if h, _ := s.botCommand(ctx, FeishuFeatures{Main: true}, "om", "/对话", "", ""); !h {
-		t.Fatal("/list not handled")
-	}
+	botSay(t, s, f, FeishuFeatures{Main: true}, "om_list", "/对话", "", "")
 	post := (*posts)[len(*posts)-1]
 	card, _ := post["card"].(string)
 	fallback, _ := post["fallback"].(string)
@@ -63,9 +61,7 @@ func TestBotCommandListCardsClipAndFallback(t *testing.T) {
 			Title: longListName(i), State: states[i%4], UpdatedAt: now})
 	}
 	f.setSessions("box", as...)
-	if h, _ := s.botCommand(ctx, FeishuFeatures{Agents: true}, "om", "/agents", "", ""); !h {
-		t.Fatal("/agents not handled")
-	}
+	botSay(t, s, f, FeishuFeatures{Agents: true}, "om_agents_list", "/agents", "", "")
 	post = (*posts)[len(*posts)-1]
 	card, _ = post["card"].(string)
 	fallback, _ = post["fallback"].(string)
@@ -93,24 +89,25 @@ func TestBotCommandListCardsClipAndFallback(t *testing.T) {
 // reply to the card has it as the parent and a topic started on it has it as the root, so botTargetFor routes both
 // to the target (#5438).
 func TestSwitchBindsPressedCard(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, _, _, _ := startCardHub(t)
 	ctx := context.Background()
 	var a botcard.CardAction
 	a.Action.Value = map[string]any{"a": "switch", "k": targetAgent, "m": "box", "s": "agent01", "t": "修登录 · box"}
 	a.Context.MessageID = "om_agents"
-	r := s.botCardAction(ctx, &a, "")
+	r := s.larkModule().Action(ctx, &a, "")
 	wantToast := i18n.T("", "assistant-feishu_cards.now_to_reply", i18n.Args{"title": "修登录 · box"})
 	if r.Toast == nil || r.Toast.Content != wantToast {
 		t.Fatalf("toast %+v, want %q", r.Toast, wantToast)
 	}
 	want := botTarget{Kind: targetAgent, MachineID: "box", SessionID: "agent01"}
-	if got := s.botTargetFor("", "om_agents"); got != want { // a quote reply to the list card
+	if got := s.larkModule().Route("", "om_agents"); got != want { // a quote reply to the list card
 		t.Fatalf("reply to the card routes to %+v, want %+v", got, want)
 	}
-	if got := s.botTargetFor("om_agents", "om_agents"); got != want { // a topic started on the card
+	if got := s.larkModule().Route("om_agents", "om_agents"); got != want { // a topic started on the card
 		t.Fatalf("topic on the card routes to %+v, want %+v", got, want)
 	}
-	if got := s.botTargetFor("", ""); got != want {
+	if got := s.larkModule().Route("", ""); got != want {
 		t.Fatalf("current target %+v, want %+v", got, want)
 	}
 }
@@ -118,12 +115,13 @@ func TestSwitchBindsPressedCard(t *testing.T) {
 // The agents card's "Start new agent" button posts the same form /start builds (startAgentCard), quoting the
 // pressed list card, and starts nothing itself (#5438).
 func TestStartFormCallbackPostsStartCard(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, posts, _ := startCardHub(t)
 	ctx := context.Background()
 	var a botcard.CardAction
 	a.Action.Value = map[string]any{"a": "start_form"}
 	a.Context.MessageID = "om_agents"
-	r := s.botCardAction(ctx, &a, "")
+	r := s.larkModule().Action(ctx, &a, "")
 	if r.Toast == nil || r.Toast.Content != i18n.T("", "assistant-feishu_cards.start_form_opening") {
 		t.Fatalf("toast %+v", r.Toast)
 	}
@@ -198,14 +196,6 @@ func (f *fakeHub) agentCount() int { // successful session.start calls only (the
 	return f.agents
 }
 
-// pressSlotHeld reports whether message mid's button kind slot is still taken (test only).
-func (s *Service) pressSlotHeld(mid, kind string) bool {
-	s.fbot.mu.Lock()
-	defer s.fbot.mu.Unlock()
-	_, ok := s.fbot.pressAt[mid+kind]
-	return ok
-}
-
 // waitForStart polls until the fake saw wantStarts session starts and drains the newPosts started-cards that go
 // with this step, so the goroutine botStartAgent spawns has posted before the test moves on.
 func waitForStart(t *testing.T, f *fakeHub, posts chan struct{}, says chan string, wantStarts, newPosts int) {
@@ -237,12 +227,13 @@ func waitForStart(t *testing.T, f *fakeHub, posts chan struct{}, says chan strin
 // A double press of the same /start card (a double tap, Feishu's redelivery, or the hub's resend) starts one agent:
 // both presses get the same "Starting" toast and a different card can still start another agent (#4340).
 func TestStartCardDoublePressStartsOneAgent(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, posts, says := startCardHub(t)
 	ctx := context.Background()
 	want := i18n.T("", "assistant-feishu_cards.starting")
 
-	first := s.botCardAction(ctx, startCardAction("om_card1"), "")
-	second := s.botCardAction(ctx, startCardAction("om_card1"), "")
+	first := s.larkModule().Action(ctx, startCardAction("om_card1"), "")
+	second := s.larkModule().Action(ctx, startCardAction("om_card1"), "")
 	if first.Toast == nil || second.Toast == nil || first.Toast.Content != want || second.Toast.Content != want {
 		t.Fatalf("toasts %+v %+v, want both %q", first.Toast, second.Toast, want)
 	}
@@ -259,52 +250,52 @@ func TestStartCardDoublePressStartsOneAgent(t *testing.T) {
 	default:
 	}
 
-	s.botCardAction(ctx, startCardAction("om_card2"), "")
+	s.larkModule().Action(ctx, startCardAction("om_card2"), "")
 	waitForStart(t, f, posts, says, 2, 1)
 }
 
 // A press whose form fails validation (no directory) answers the warning without taking the dedup slot: a corrected
 // press of the same card right afterwards still starts one agent.
 func TestStartCardInvalidFormDoesNotTakeSlot(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, posts, says := startCardHub(t)
 	ctx := context.Background()
 
 	bad := startCardAction("om_card1")
 	bad.Action.FormValue["cwd"] = "   "
-	r := s.botCardAction(ctx, bad, "")
+	r := s.larkModule().Action(ctx, bad, "")
 	want := i18n.T("", "assistant-feishu_cards.pick_machine_dir")
 	if r.Toast == nil || r.Toast.Content != want {
 		t.Fatalf("toast %+v, want %q", r.Toast, want)
 	}
-	s.botCardAction(ctx, startCardAction("om_card1"), "")
+	s.larkModule().Action(ctx, startCardAction("om_card1"), "")
 	waitForStart(t, f, posts, says, 1, 1)
 }
 
 // When the start itself fails (the node refused it), the dedup slot is released: the owner sees the failure and can
 // press the same card again to retry, instead of getting a bare "Starting" with nothing starting.
 func TestStartCardFailedStartLetsNextPressThrough(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, posts, says := startCardHub(t)
 	ctx := context.Background()
 	f.failStart = errors.New("node is down")
 
-	s.botCardAction(ctx, startCardAction("om_card1"), "")
+	s.larkModule().Action(ctx, startCardAction("om_card1"), "")
 	select {
 	case <-says:
 	case <-time.After(2 * time.Second):
 		t.Fatal("the failure note was not sent")
 	}
-	deadline := time.Now().Add(2 * time.Second) // the note lands before the slot is released
-	for s.pressSlotHeld("om_card1", "start") && time.Now().Before(deadline) {
-		time.Sleep(2 * time.Millisecond)
-	}
-	if s.pressSlotHeld("om_card1", "start") {
-		t.Fatal("the failed start kept its dedup slot")
+	// The note lands before the slot is released: the start's work ends after it (the press below shows the slot
+	// was released; the slot itself is the module's TestStartCardLateFailureKeepsNewerSlot).
+	if err := s.larkModule().Wait(ctx); err != nil {
+		t.Fatal(err)
 	}
 	if got := f.agentCount(); got != 0 {
 		t.Fatalf("started agents after failure = %d, want 0", got)
 	}
 	f.failStart = nil
-	s.botCardAction(ctx, startCardAction("om_card1"), "")
+	s.larkModule().Action(ctx, startCardAction("om_card1"), "")
 	waitForStart(t, f, posts, says, 1, 1)
 }
 
@@ -312,52 +303,27 @@ func TestStartCardFailedStartLetsNextPressThrough(t *testing.T) {
 // block on the machine and directory. The window is shrunk after the first start fully posted; botStartAgent's
 // goroutine never reads the window, so shrinking it cannot race with that goroutine.
 func TestStartCardPressAgainAfterWindow(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, posts, says := startCardHub(t)
 	ctx := context.Background()
 
-	s.botCardAction(ctx, startCardAction("om_card1"), "")
+	s.larkModule().Action(ctx, startCardAction("om_card1"), "")
 	waitForStart(t, f, posts, says, 1, 1)
-	botStartCardWindow = 0 // the first press is now older than the window
-	t.Cleanup(func() { botStartCardWindow = 60 * time.Second })
-	s.botCardAction(ctx, startCardAction("om_card1"), "")
+	s.setLarkTiming("start_card_window", 0) // the first press is now older than the window
+	s.larkModule().Action(ctx, startCardAction("om_card1"), "")
 	waitForStart(t, f, posts, says, 2, 1)
 }
 
 // A press without a card message id is never deduped (the guard keys on the card message), so a malformed callback
 // cannot lock the machine out.
 func TestStartCardWithoutMessageIDIsNotDeduped(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, posts, says := startCardHub(t)
 	ctx := context.Background()
 
-	s.botCardAction(ctx, startCardAction(""), "")
-	s.botCardAction(ctx, startCardAction(""), "")
+	s.larkModule().Action(ctx, startCardAction(""), "")
+	s.larkModule().Action(ctx, startCardAction(""), "")
 	waitForStart(t, f, posts, says, 2, 2)
-}
-
-// A start that fails only after the window must not free a slot a later manual press has taken: the late failure
-// callback carries the timestamp its own press stamped, and the compare-and-swap leaves the newer slot in place, so
-// a third press is still swallowed instead of starting a third agent.
-func TestStartCardLateFailureKeepsNewerSlot(t *testing.T) {
-	s, _, _, _ := startCardHub(t)
-	mid := "om_card1"
-
-	botStartCardWindow = 0 // both presses are past the window, so the second press re-stamps the slot
-	t.Cleanup(func() { botStartCardWindow = 60 * time.Second })
-	_, first := s.startCardPressed(mid)
-	time.Sleep(time.Millisecond)
-	if blocked, second := s.startCardPressed(mid); blocked || !second.After(first) {
-		t.Fatalf("second press after the window: blocked=%v second=%v first=%v, want it to take a fresh slot", blocked, second, first)
-	}
-	// The first start's failure arrives late; it owns the old timestamp and must not delete the newer slot.
-	s.forgetStartCard(mid, first)
-	if !s.pressSlotHeld(mid, "start") {
-		t.Fatal("the late failure released the second press's slot")
-	}
-	// Inside the restored window a third press is therefore still swallowed.
-	botStartCardWindow = 60 * time.Second
-	if blocked, _ := s.startCardPressed(mid); !blocked {
-		t.Fatal("third press was not deduped: the late failure had dropped the newer slot")
-	}
 }
 
 // pressStartForm presses the agents card's "Start new agent" button on message mid, as Lark delivers a press, and
@@ -368,7 +334,7 @@ func pressStartForm(t *testing.T, s *Service, mid string) {
 	a.Action.Value = map[string]any{"a": "start_form"}
 	a.Context.MessageID = mid
 	want := i18n.T("", "assistant-feishu_cards.start_form_opening")
-	if r := s.botCardAction(context.Background(), &a, ""); r.Toast == nil || r.Toast.Content != want {
+	if r := s.larkModule().Action(context.Background(), &a, ""); r.Toast == nil || r.Toast.Content != want {
 		t.Fatalf("press of %s: toast %+v, want %q", mid, r.Toast, want)
 	}
 }
@@ -387,6 +353,7 @@ func waitForForm(t *testing.T, posts chan struct{}, why string) {
 // up on) opens one form: the second press gets the same toast and posts nothing, as the /start button does. A press
 // of another list card is another press and opens its own form (#3789).
 func TestStartFormPressOpensOneForm(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, _, posts, _ := startCardHub(t)
 
 	pressStartForm(t, s, "om_agents")
@@ -407,12 +374,12 @@ func TestStartFormPressOpensOneForm(t *testing.T) {
 // After the form window, pressing the same card again opens another form: the guard covers a press delivered twice,
 // not the owner asking for a new form a moment later.
 func TestStartFormPressAgainAfterWindow(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, _, posts, _ := startCardHub(t)
 
 	pressStartForm(t, s, "om_agents")
 	waitForForm(t, posts, "the first start form was not posted")
-	botFormWindow = 0
-	t.Cleanup(func() { botFormWindow = 10 * time.Second })
+	s.setLarkTiming("form_window", 0)
 	pressStartForm(t, s, "om_agents")
 	waitForForm(t, posts, "a press after the window posted no start form")
 }
@@ -420,6 +387,7 @@ func TestStartFormPressAgainAfterWindow(t *testing.T) {
 // A start form that could not be posted says so and frees its press slot: the owner can press the same button again
 // instead of getting "Opening the start form" and nothing after it (#3789).
 func TestStartFormFailedPostFreesThePress(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, posts, says := startCardHub(t)
 	f.answerApp(AppFeishu, FeishuPost, func(json.RawMessage) (any, error) { return nil, errors.New("the app is down") })
 
@@ -477,6 +445,7 @@ func cardButtons(t *testing.T, c *botcard.Card) map[string]map[string]any {
 // for Claude on a conversation, and for another agent only what it says that always allows. A runtime cannot keep
 // Claude's session rule (node/runtimes.go), so the button there would allow once and ask again.
 func TestFeishuPermissionCardOffersAlwaysOnlyWhereItWorks(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	f, _ := feishuHub("ou_a", time.Unix(100, 0))
 	s := newTestService(t, f)
 	ctx := context.Background()
@@ -555,6 +524,7 @@ func cardMarkdown(t *testing.T, c *botcard.Card) string {
 // A plan too long for its card is cut at a line break, and a code block the cut lands in is closed, so the clipped
 // note after it reads as text, not as the code's last line. A plan that fits is shown as it is.
 func TestFeishuPlanCardClipClosesItsCodeBlock(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s := newTestService(t, newFakeHub())
 	ctx := i18n.With(context.Background(), i18n.En)
 	note := i18n.T(i18n.En, "assistant-feishu_cards.plan_clipped")
@@ -620,6 +590,7 @@ func TestFeishuPlanCardClipClosesItsCodeBlock(t *testing.T) {
 // a tag; one row of actions ending in a "more" menu with dismissing and the conversation's page; an approval that
 // lets the agent go on by itself asks first.
 func TestInteractionCardsLook(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	f, _ := feishuHub("ou_a", time.Unix(100, 0))
 	withWebBot(f, "https://hub.example.com")
 	s := newTestService(t, f)
@@ -656,6 +627,7 @@ func TestInteractionCardsLook(t *testing.T) {
 // An agent that goes by its herdr tab name is named by it on the card asking the owner and on the card once answered,
 // its CLI title at the end of the subtitle.
 func TestInteractionCardHerdrSessionNames(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s := newTestService(t, newFakeHub())
 	ctx := context.Background()
 	if err := s.store().PutSetting(ctx, agentsUseHerdrTabNameKey, true); err != nil {
@@ -681,6 +653,7 @@ func TestInteractionCardHerdrSessionNames(t *testing.T) {
 
 // The option the asker recommends is the card's primary button.
 func TestQuestionCardRecommendIsPrimary(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s := newTestService(t, newFakeHub())
 	ix := proto.Interaction{ID: "ix_q", Kind: proto.IxQuestion, Questions: []proto.Question{{Question: "用哪个库？",
 		Options: []proto.QuestionOption{{Label: "A"}, {Label: "B"}}, Recommend: "B"}}}
@@ -693,6 +666,7 @@ func TestQuestionCardRecommendIsPrimary(t *testing.T) {
 
 // With the option the asker recommends as the primary button, the written answer's submit is not one too.
 func TestQuestionCardOnePrimary(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s := newTestService(t, newFakeHub())
 	ix := proto.Interaction{ID: "ix_q", Kind: proto.IxQuestion, Questions: []proto.Question{{Question: "用哪个库？",
 		Options: []proto.QuestionOption{{Label: "A"}, {Label: "B"}}, Recommend: "B"}}}

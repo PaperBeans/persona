@@ -1,5 +1,5 @@
-// First: the live screen's token is read before App's module takes any token out of the address bar.
-import { screen } from "./screen/take";
+// The modules with a page of their own (the live screen, /screen/<machine>): never the whole list (it says why).
+import { standalonePage } from "./modules/standalone";
 import { takeImportLinkOnStart } from "./lib/import-link";
 import { initI18n, startI18n } from "./i18n";
 import "./styles.css";
@@ -27,13 +27,14 @@ const [, { StrictMode, createElement }, { createRoot }, { startPWA }] = await Pr
 
 startPWA();
 
-// The live screen (/screen/<machine>) is a page of its own: no sign-in flow, no sidebar, and noVNC loads only there.
-const target = screen;
+// A module's page of its own (the live screen): no sign-in flow, no sidebar, and its code loads only there. While its
+// module is off the address is an unknown one, and its fragment (a token the app meant for that page) goes before App
+// could take it for a sign-in (modules/standalone.ts).
+const page = await standalonePage(window.location.href);
 // a crash a boundary catches is logged with its component stack (lib/caught-error.ts)
 const root = createRoot(document.getElementById("root")!, { onCaughtError: logCaughtError });
-if (target) {
-  const { ScreenView } = await import("./screen/ScreenView");
-  root.render(createElement(StrictMode, null, createElement(ScreenView, { target })));
+if (page) {
+  root.render(createElement(StrictMode, null, page));
 } else if (window.location.pathname === "/login/device") {
   const { NativePasswordLogin } = await import("./views/PasswordLogin");
   root.render(createElement(StrictMode, null, createElement(NativePasswordLogin)));

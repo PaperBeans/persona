@@ -5,12 +5,9 @@
 //
 // The pure parts (state words, sections, the source of a message, the bind steps) are plain functions for the tests.
 
-import { useEffect, useState, useSyncExternalStore } from "react";
 import { formatList, t } from "../i18n";
 import { api, enc } from "./api";
-import { itemHeaders } from "./manager-choice";
 import type { ConnectorPrompt } from "./connectors";
-import { useStore } from "./store";
 
 // ── wire types (server/internal/channel) ─────────────────
 
@@ -37,6 +34,13 @@ export interface ChannelTarget {
   title?: string;
 }
 
+export type ChannelThreadMode = "channel_default" | "per_group_and_topic" | "per_topic";
+
+export const CHANNEL_THREAD_MODES: readonly ChannelThreadMode[] = ["channel_default", "per_group_and_topic", "per_topic"];
+
+/** Matches channel.MaxThreadIdleHours on the hub (10 years). 0 means the default 30-day timeout. */
+export const MAX_THREAD_IDLE_HOURS = 3650 * 24;
+
 export interface ChannelFeature {
   id: string;
   title: string;
@@ -60,11 +64,19 @@ export interface Channel {
   description?: string;
   capabilities: ChannelCapabilities;
   target?: ChannelTarget;
+  /** Group/topic routing mode when integrations_v2 is enabled; omitted on older hubs. */
+  thread_mode?: ChannelThreadMode;
+  /** Inactivity timeout in hours before a routed group/topic starts a new conversation (0 = default 30 days). */
+  thread_idle_hours?: number;
   features?: ChannelFeature[];
   bind: "none" | "qr" | "code" | "fields" | "config";
   surfaces?: string[];
   last_event_at?: string;
   read_only?: boolean;
+}
+
+export interface ChannelTargetOverride {
+  mode: "topics" | "threads" | (string & {});
 }
 
 /** GET /api/v1/channels/{id} (channel.Detail). */
@@ -73,6 +85,8 @@ export interface ChannelDetail extends Channel {
   conversations?: { machine_id: string; session_id: string; title?: string; at: string }[];
   /** The channel's own full page in the app ("settings/connectors/feishu-bot", "settings/plugins/<id>"). */
   settings_url?: string;
+  /** Set when topic or thread routing currently takes precedence over the channel's default target. */
+  target_override?: ChannelTargetOverride;
 }
 
 /** A bind step (connector.Prompt); a channel adds pair_code, a code to send to the bot, to the kinds a connector has. */
@@ -80,18 +94,36 @@ export type ChannelPrompt = ConnectorPrompt;
 
 // ── the hub's interface ──────────────────────────────────
 
-/** `manager`: whose channels (another manager's, docs/assistant/managers.md "Clients"); none: the default's. */
-export async function listChannels(manager?: string): Promise<Channel[]> {
-  const r = await api<{ channels?: Channel[] }>("/channels", { headers: itemHeaders(manager) });
-  return r.channels ?? [];
-}
-
 export function channelDetail(id: string): Promise<ChannelDetail> {
   return api<ChannelDetail>(`/channels/${enc(id)}`);
 }
 
-export function updateChannel(id: string, body: { enabled?: boolean; target?: ChannelTarget; features?: Record<string, boolean> }): Promise<ChannelDetail> {
+export interface ChannelUpdateBody {
+  enabled?: boolean;
+  target?: ChannelTarget;
+  features?: Record<string, boolean>;
+  thread_mode?: ChannelThreadMode;
+  thread_idle_hours?: number;
+}
+
+export function updateChannel(id: string, body: ChannelUpdateBody): Promise<ChannelDetail> {
   return api<ChannelDetail>(`/channels/${enc(id)}`, { method: "PUT", json: body });
+}
+
+/** Normalizes a channel's thread_mode, falling back to channel_default when absent or unknown. */
+export function normalizeThreadMode(mode?: string): ChannelThreadMode {
+  if (mode === "per_group_and_topic" || mode === "per_topic" || mode === "channel_default") return mode;
+  return "channel_default";
+}
+
+/** Whether the hub advertised thread_mode support on this channel (older hubs omit it). */
+export function supportsThreadRouting(c: Pick<Channel, "thread_mode">): boolean {
+  return typeof c.thread_mode === "string" && c.thread_mode.length > 0;
+}
+
+/** Whether hours is a valid thread_idle_hours value (0 = default 30 days, up to MAX_THREAD_IDLE_HOURS). */
+export function isValidThreadIdleHours(hours: number): boolean {
+  return Number.isInteger(hours) && hours >= 0 && hours <= MAX_THREAD_IDLE_HOURS;
 }
 
 export function bindChannel(id: string, step: string, values: Record<string, string>): Promise<ChannelPrompt> {
@@ -227,78 +259,5 @@ export function settingsTab(tab: string | null): string | null {
   return tab === "plugins" ? "extensions" : tab;
 }
 
-// ── where a message came from ────────────────────────────
-
-/** The channel a message came from, by its client_msg_id's prefix (`wechat-…`), when it is one there is. */
-export function channelOf(clientMsgId: string | undefined, list: Pick<Channel, "id" | "name" | "kind">[]): Pick<Channel, "id" | "name" | "kind"> | undefined {
-  if (!clientMsgId) return undefined;
-  const dash = clientMsgId.indexOf("-");
-  if (dash <= 0) return undefined;
-  const head = clientMsgId.slice(0, dash);
-  return list.find((c) => c.id === head && c.kind !== "app");
-}
-
-/** The name to show for a conversation's latest channel (Session.channels), "" when it has none known. */
-export function conversationChannel(ids: string[] | undefined, list: Pick<Channel, "id" | "name">[]): Pick<Channel, "id" | "name"> | undefined {
-  const id = ids?.[0];
-  return id ? list.find((c) => c.id === id) ?? { id, name: id } : undefined;
-}
-
-// The list, fetched once per hub (it changes when an extension comes or goes: the settings page reloads it), for the
-// source marks in conversations. forgetChannels() starts a new generation: a read already out when it was called is
-// not cached, and the hooks already mounted read again. A read is shared by every hook asking under the same
-// generation and features key, and cached under the key it started with.
-let cached: { key: string; list: Channel[] } | null = null;
-let inflight: { gen: number; key: string; promise: Promise<Channel[]> } | null = null;
-let generation = 0;
-const listeners = new Set<() => void>();
-
-function subscribeGeneration(on: () => void) {
-  listeners.add(on);
-  return () => void listeners.delete(on);
-}
-
-const currentGeneration = () => generation;
-
-/** The shared read for this generation and features key, started when there is none. */
-function readChannels(key: string) {
-  if (inflight && inflight.gen === generation && inflight.key === key) return inflight;
-  const run = { gen: generation, key, promise: listChannels() };
-  inflight = run;
-  run.promise.then((l) => {
-    if (run.gen === generation) cached = { key: run.key, list: l };
-  }, () => {}).finally(() => {
-    if (inflight === run) inflight = null;
-  });
-  return run;
-}
-
-/** The channels as the conversations need them (names for the source marks); [] on a hub without them. */
-export function useChannels(): Channel[] {
-  const has = useStore((s) => s.features.includes("channels"));
-  const key = useStore((s) => s.features.join(","));
-  // The third argument is the server snapshot: renderToString (used by the bubble tests) needs one.
-  const gen = useSyncExternalStore(subscribeGeneration, currentGeneration, currentGeneration);
-  const [list, setList] = useState<Channel[]>(() => (cached && cached.key === key ? cached.list : []));
-  useEffect(() => {
-    if (!has) return;
-    if (cached?.key === key) {
-      setList(cached.list);
-      return;
-    }
-    let live = true;
-    readChannels(key).promise.then((l) => {
-      if (live) setList(l);
-    }, () => {});
-    return () => void (live = false);
-  }, [has, key, gen]);
-  return has ? list : [];
-}
-
-/** Forget the list (the settings page changed something): drop the read in flight and have mounted hooks read again. */
-export function forgetChannels() {
-  cached = null;
-  inflight = null;
-  generation++;
-  for (const on of listeners) on();
-}
+// The list and the source marks conversations draw live in channel-source.ts, off Settings' code (first screen).
+export { channelOf, conversationChannel, forgetChannels, listChannels, useChannels } from "./channel-source";

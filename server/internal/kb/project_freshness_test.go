@@ -85,7 +85,7 @@ func TestProjectCoverageAfterLockedAndPartialRefresh(t *testing.T) {
 	fieldReview(t, summary, "new_evidence", 1)
 	fieldReview(t, one, "", 0)
 	p, _ := e.Store.Project("example")
-	if after.Summary != first.Summary || row.OneLine != "Delivered" || p.Dirty || !p.fieldLocked("summary") ||
+	if after.Summary != first.Summary || row.OneLine != "Delivered" || p.Dirty || !taggingFieldLocked(&p.Tagging, "summary") ||
 		!reflect.DeepEqual(summary.Cutoff, firstSummary.Cutoff) || summary.LockReason != "field_locked" || summary.ReviewBy != "user" ||
 		one.Cutoff.TimelineThrough <= summary.Cutoff.TimelineThrough || row.Updated.Before(firstRow.Updated) {
 		t.Fatalf("locked summary changed or gap lost: %+v / %+v / %+v", p, summary, one)
@@ -255,7 +255,7 @@ func TestProjectReferenceOnlyEnforcesWritesAfterReopen(t *testing.T) {
 	row, after := projectViews(t, e, "example")
 	current, _ := store.Project("example")
 	if row.ProjectMode != ref || row.OneLine != "" || after.Summary != "Old summary\n" || len(after.Log) != 1 ||
-		!strings.Contains(after.Log[0], "Old detail") || current.Goal != "Old goal" || !current.fieldLocked("summary") ||
+		!strings.Contains(after.Log[0], "Old detail") || current.Goal != "Old goal" || !taggingFieldLocked(&current.Tagging, "summary") ||
 		!slices.Equal(current.Aliases, []string{"Guide"}) || !slices.Equal(current.Chats, []string{c.ID}) {
 		t.Fatalf("reference-only history or routing changed: %+v / %+v", current, after)
 	}

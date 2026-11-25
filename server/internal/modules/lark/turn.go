@@ -35,7 +35,7 @@ func (f feishuSink) progress(ctx context.Context, r *channel.Run, took time.Dura
 	s := f.s
 	ctx = s.sendAs(ctx, "progress", r.MachineID, r.SessionID)
 	if s.runExt(r, readChatKey) != "" {
-		return // a /read shows no progress in its group: the reaction says it is being worked on (the core's feishu_read.go)
+		return // a /read shows no progress in its group: the reaction says it is being worked on (read.go)
 	}
 	if s.runExt(r, "chat") != "" {
 		// The topic's card keeps its own immediate lifecycle; the native API must not hold it back.
@@ -43,7 +43,7 @@ func (f feishuSink) progress(ctx context.Context, r *channel.Run, took time.Dura
 	} else if f.cotProgressNow(ctx, r) {
 		return
 	}
-	c := s.h.ProgressCard(s.botLang(ctx), r, took, steps, live)
+	c := progressCard(s.botLang(ctx), r.Label, took, steps, live, s.h.RunProgress(r))
 	prog := s.live(r.ID)
 	if prog == nil {
 		prog = &runLive{} // a run not followed any more: nothing to remember
@@ -175,7 +175,7 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 		steps = append([]string{}, all...)
 	}
 	// A /read's answer is read by the whole group: the process (commands, paths on the computer) and the web link to
-	// the conversation stay out of it (the core's feishu_read.go).
+	// the conversation stay out of it (read.go).
 	read := readRun(r.Ext)
 	if read {
 		steps = nil
@@ -199,18 +199,18 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 	if newCard {
 		answerSteps = nil // they go into the folded progress card
 	}
-	cards := s.answerCards(l, s.linkNamer(ctx), answer, quiet, answerSteps, foot)
+	cards := answerCards(l, s.linkNamer(ctx), answer, quiet, answerSteps, foot)
 	var fallbackCards []botAnswerCard
 	if worker != nil && native && !read {
-		fallbackCards = s.answerCards(l, s.linkNamer(ctx), answer, quiet, all, foot)
+		fallbackCards = answerCards(l, s.linkNamer(ctx), answer, quiet, all, foot)
 	}
 	if quiet {
 		c := botcard.NewCard("", "", foot)
-		s.processPanel(l, c, steps)
+		processPanel(l, c, steps)
 		cards = []botAnswerCard{{card: c.Note(foot)}}
 		if worker != nil && native && !read {
 			fallback := botcard.NewCard("", "", foot)
-			s.processPanel(l, fallback, all)
+			processPanel(l, fallback, all)
 			fallbackCards = []botAnswerCard{{card: fallback.Note(foot)}}
 		}
 	}
@@ -219,7 +219,7 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 	var missing []int // the pieces that did not get out (1-based): said at the end, not sent again
 	defer func() {
 		if len(missing) > 0 {
-			s.botNoteTo(ctx, to, r.ReplyTo, s.h.MissingPiecesNote(l, missing))
+			s.botNoteTo(ctx, to, r.ReplyTo, missingPiecesNote(l, missing))
 		}
 	}()
 	for i, ac := range cards {
@@ -370,7 +370,7 @@ func readAnswerKey(id string, turn time.Time, i int) string {
 func (s core) foldedProgressCard(l i18n.Lang, steps []string) *botcard.Card {
 	below := i18n.T(l, "assistant-feishu.answer_below")
 	c := botcard.NewCard("", "", below)
-	s.processPanel(l, c, steps)
+	processPanel(l, c, steps)
 	return c.Note("↓ " + below)
 }
 

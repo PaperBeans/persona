@@ -217,10 +217,12 @@ func (s *Service) ownerRelayLaterFor(ctx context.Context, to, clientMsgID string
 
 // settleRelayLaterLocked removes items from relayState.Later[to] and, when dropKey is non-empty, deletes that settled
 // reservation from relayState.LaterSends in a single save; b.mu is held and relayLocked succeeded. Reports whether
-// relayState.Later[to] changed (meaning clients need an updated snapshot).
-func (s *Service) settleRelayLaterLocked(to, dropKey string, items []relayMsg) bool {
+// relayState.Later[to] changed (meaning clients need an updated snapshot) and any senders whose DeferredWake messages
+// for to were all consumed by this settlement so their pending deferred wakes can be dropped (#14352).
+func (s *Service) settleRelayLaterLocked(to, dropKey string, items []relayMsg) (bool, []string) {
 	b := &s.relays
 	laterChanged := false
+	var dropWakeSenders []string
 	if len(items) > 0 {
 		q := b.st.Later[to]
 		rest := slices.DeleteFunc(slices.Clone(q), func(m relayMsg) bool { return slices.Contains(items, m) })
@@ -230,6 +232,15 @@ func (s *Service) settleRelayLaterLocked(to, dropKey string, items []relayMsg) b
 				delete(b.st.Later, to)
 			} else {
 				b.st.Later[to] = rest
+			}
+			seen := map[string]bool{}
+			for _, m := range items {
+				if m.DeferredWake && m.From != "" && !seen[m.From] {
+					seen[m.From] = true
+					if !slices.ContainsFunc(rest, func(r relayMsg) bool { return r.DeferredWake && r.From == m.From }) {
+						dropWakeSenders = append(dropWakeSenders, m.From)
+					}
+				}
 			}
 		}
 	}
@@ -241,12 +252,13 @@ func (s *Service) settleRelayLaterLocked(to, dropKey string, items []relayMsg) b
 		}
 	}
 	if !laterChanged && !keyDeleted {
-		return false
+		return false, nil
 	}
 	if err := s.saveRelayLocked(); err != nil {
 		b.loaded = false
+		return laterChanged, nil
 	}
-	return laterChanged
+	return laterChanged, dropWakeSenders
 }
 
 // settleRelayLater removes items from relayState.Later[to] and optionally deletes dropKey from LaterSends in one save,
@@ -261,8 +273,11 @@ func (s *Service) settleRelayLater(ctx context.Context, to, dropKey string, item
 		b.mu.Unlock()
 		return false
 	}
-	laterChanged := s.settleRelayLaterLocked(to, dropKey, items)
+	laterChanged, dropWakeSenders := s.settleRelayLaterLocked(to, dropKey, items)
 	b.mu.Unlock()
+	if len(dropWakeSenders) > 0 {
+		s.cancelFanoutWakes(context.WithoutCancel(ctx), to, dropWakeSenders)
+	}
 	if laterChanged && s.hub != nil {
 		s.publish(context.WithoutCancel(ctx))
 	}
@@ -433,12 +448,16 @@ func (s *Service) relayLaterOwnerOutcome(ctx context.Context, sid, clientMsgID s
 	if clientMsgID != "" {
 		key := relayLaterKey(sid, relayLaterOwnerOnce(clientMsgID))
 		laterChanged := false
+		var dropWakeSenders []string
 		if s.relayLocked(context.WithoutCancel(ctx)) {
 			if carry, ok := b.st.LaterSends[key]; ok {
-				laterChanged = s.settleRelayLaterLocked(sid, key, carry.Items)
+				laterChanged, dropWakeSenders = s.settleRelayLaterLocked(sid, key, carry.Items)
 			}
 		}
 		b.mu.Unlock()
+		if len(dropWakeSenders) > 0 {
+			s.cancelFanoutWakes(context.WithoutCancel(ctx), sid, dropWakeSenders)
+		}
 		if laterChanged && s.hub != nil {
 			s.publish(context.WithoutCancel(ctx))
 		}

@@ -1,0 +1,40 @@
+{
+  "key": "health-strength-eab6a89c-2e1c-5369-8b38-dea38b1a90cc",
+  "version": 2,
+  "view": {
+    "title": "已记下 4 组",
+    "sections": [
+      {
+        "footer": "可在动作页撤销。",
+        "items": [
+          {
+            "type": "row",
+            "title": "Bench press · 20 kg × 12",
+            "subtitle": "热身"
+          },
+          {
+            "type": "row",
+            "title": "Bench press · 60 kg × 8"
+          },
+          {
+            "type": "row",
+            "title": "Bench press · 60 kg × 7"
+          },
+          {
+            "type": "row",
+            "title": "坐姿推胸 · 50 kg × 10"
+          },
+          {
+            "type": "button",
+            "title": "查看",
+            "action": {
+              "id": "view",
+              "open": "https://hub.example.com/extension/-health-intake/pages?state=%7B%22page%22%3A%22strength.overview%22%7D"
+            }
+          }
+        ]
+      }
+    ],
+    "fallback": "已记下 4 组"
+  }
+}

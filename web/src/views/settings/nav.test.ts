@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
 import { searchSettings } from "./search";
-import { ASSISTANT_TABS, categoryState, FROM_LIST, itemState, NAV_GROUPS, openedFromList, redirectLegacySettings, settingsAt, settingsHref, stepsToList, TAB_INFO, TABS } from "./nav";
+import { ASSISTANT_TABS, categoryState, FROM_LIST, itemState, NAV_GROUPS, navGroups, openedFromList, redirectLegacySettings, resolveSettingsTarget, settingsAt, settingsHref, stepsToList, TAB_INFO, TABS } from "./nav";
 
 describe("settings location", () => {
   it("names no category on plain /settings: the phone's list (通用 on a wide screen)", () => {
@@ -87,13 +87,105 @@ describe("settings sidebar groups", () => {
   it("has the current assistant's, this device's, the hub's and Labs on its own, in that order, every category in one of them", () => {
     expect(NAV_GROUPS.map((g) => g.key)).toEqual(["assistant", "device", "hub", "labs"]);
     expect(NAV_GROUPS.map((g) => g.tabs)).toEqual([
-      ["models", "persona", "prompts", "channels", "connectors", "sources", "extensions", "knowledge", "agents"],
-      ["general", "notifications", "shortcuts"],
+      ["models", "persona", "prompts", "integrations", "channels", "connectors", "sources", "extensions", "knowledge", "agents"],
+      ["general", "notifications", "shortcuts", "advanced"],
       ["hub", "managers", "avatar", "devices"],
       ["labs"],
     ]);
     expect(NAV_GROUPS.flatMap((g) => g.tabs).sort()).toEqual([...TABS].sort());
     expect([...ASSISTANT_TABS]).toEqual(NAV_GROUPS[0].tabs);
+    // When integrations_v2 is off (default), legacy tabs stay 100% identical and integrations is hidden.
+    expect(navGroups(false)[0]!.tabs).toEqual([
+      "models", "persona", "prompts", "channels", "connectors", "sources", "extensions", "knowledge", "agents",
+    ]);
+    // When integrations_v2 is on, channels/connectors/extensions collapse into one integrations entry.
+    expect(navGroups(true)[0]!.tabs).toEqual([
+      "models", "persona", "prompts", "integrations", "sources", "knowledge", "agents",
+    ]);
+  });
+
+  it("keeps the default appearance in General and the non-default looks under Advanced (#13398)", () => {
+    expect(NAV_GROUPS.find((g) => g.key === "device")!.tabs).toEqual(["general", "notifications", "shortcuts", "advanced"]);
+    expect(settingsHref("advanced", null, false)).toBe("/settings?tab=advanced");
+    // the default look (Match system / Light / Dark) and text size stay in General
+    expect(searchSettings(t("settings.theme_dark")).groups).toContainEqual(expect.objectContaining({ tab: "general", anchor: "theme" }));
+    expect(searchSettings(t("ui-look.text_size")).groups).toContainEqual(expect.objectContaining({ tab: "general", anchor: "text-size" }));
+    // every opt-in look is reachable only from Advanced › Appearance
+    for (const [query, anchor] of [
+      [t("ui-look.accent"), "theme-color"],
+      [t("ui-extensionthemepicker.label"), "extension-theme"],
+      [t("ui-look.font"), "font"],
+      [t("ui-look.sidebar_icons"), "sidebar-icons"],
+    ]) {
+      const groups = searchSettings(query).groups;
+      expect(groups).toContainEqual(expect.objectContaining({ tab: "advanced", group: query, anchor }));
+      expect(groups.some((g) => g.tab === "general" && g.anchor === anchor)).toBe(false);
+    }
+  });
+
+  it("redirects legacy connectors/channels/extensions routes into integrations when integrations_v2 is on", () => {
+    expect(redirectLegacySettings("?tab=connectors", "", "/settings", true)).toBe("/settings?tab=integrations&filter=data");
+    expect(redirectLegacySettings("?tab=channels", "", "/settings", true)).toBe("/settings?tab=integrations&filter=channels");
+    expect(redirectLegacySettings("?tab=extensions", "", "/settings", true)).toBe("/settings?tab=integrations");
+    expect(redirectLegacySettings("?tab=connectors&connector=github%40work&manager=work", "", "/settings", true))
+      .toBe("/settings?tab=integrations&manager=work&integration=connector%3Agithub%40work");
+    expect(redirectLegacySettings("?tab=connectors&connector=feishu-bot", "", "/settings", true))
+      .toBe("/settings?tab=integrations&integration=builtin%3Afeishu-bot");
+    expect(redirectLegacySettings("?tab=channels&channel=feishu", "", "/settings", true))
+      .toBe("/settings?tab=integrations&integration=builtin%3Afeishu-bot");
+    expect(redirectLegacySettings("?tab=channels&channel=wechat%40work", "", "/settings", true))
+      .toBe("/settings?tab=integrations&integration=channel%3Awechat%40work");
+    expect(redirectLegacySettings("?tab=extensions&extension=larkx%40work", "", "/settings", true))
+      .toBe("/settings?tab=integrations&integration=ext%3Alarkx%40work");
+    expect(redirectLegacySettings("?tab=extensions&extension=larkx%40work%2Fui%2Fboard", "", "/settings", true))
+      .toBe("/settings?tab=integrations&integration=ext%3Alarkx%40work%2Fui%2Fboard");
+    expect(redirectLegacySettings("?tab=extensions&extension=-market%2Fofficial%2Flarkx", "", "/settings", true))
+      .toBe("/settings?tab=integrations&integration=-market%2Fofficial%2Flarkx");
+    expect(redirectLegacySettings("", "", "/settings/connectors/github@work", true))
+      .toBe("/settings?tab=integrations&integration=connector%3Agithub%40work");
+    expect(redirectLegacySettings("", "", "/settings/channels/wechat@work", true))
+      .toBe("/settings?tab=integrations&integration=channel%3Awechat%40work");
+    expect(redirectLegacySettings("", "", "/settings/extensions/larkx@work", true))
+      .toBe("/settings?tab=integrations&integration=ext%3Alarkx%40work");
+    expect(redirectLegacySettings("", "", "/settings/sent", true))
+      .toBe("/settings?tab=integrations&integration=-sent");
+    expect(redirectLegacySettings("?tab=integrations&integration=ext%3Alarkx", "", "/settings", true)).toBeNull();
+  });
+
+  it("redirects integrations routes back to legacy connectors/channels/extensions when integrations_v2 is off", () => {
+    expect(redirectLegacySettings("?tab=integrations", "", "/settings", false)).toBe("/settings?tab=extensions");
+    expect(redirectLegacySettings("?tab=integrations&filter=channels", "", "/settings", false)).toBe("/settings?tab=channels");
+    expect(redirectLegacySettings("?tab=integrations&filter=data", "", "/settings", false)).toBe("/settings?tab=connectors");
+    expect(redirectLegacySettings("", "", "/settings/integrations", false)).toBe("/settings?tab=extensions");
+    expect(redirectLegacySettings("", "", "/settings/integrations/builtin:mail", false)).toBe("/settings?tab=connectors");
+    expect(redirectLegacySettings("", "", "/settings/integrations/builtin:feishu-bot@work", false))
+      .toBe("/settings?tab=connectors&connector=feishu-bot%40work");
+    expect(redirectLegacySettings("", "", "/settings/integrations/connector:github@work", false))
+      .toBe("/settings?tab=connectors&connector=github%40work");
+    expect(redirectLegacySettings("", "", "/settings/integrations/channel:wechat@work", false))
+      .toBe("/settings?tab=channels&channel=wechat%40work");
+    expect(redirectLegacySettings("", "", "/settings/integrations/ext:larkx@work", false))
+      .toBe("/settings?tab=extensions&extension=larkx%40work");
+    expect(redirectLegacySettings("", "", "/settings/integrations/ext:larkx@work/ui/board", false))
+      .toBe("/settings?tab=extensions&extension=larkx%40work%2Fui%2Fboard");
+    expect(redirectLegacySettings("", "", "/settings/integrations/-market", false))
+      .toBe("/settings?tab=extensions&extension=-market");
+    expect(redirectLegacySettings("", "", "/settings/integrations/-sent", false))
+      .toBe("/settings?tab=connectors&connector=-sent");
+    // While assistant state is still loading ("loading"), do not redirect away from integrations yet.
+    expect(redirectLegacySettings("?tab=integrations&integration=builtin%3Amail", "", "/settings", "loading")).toBeNull();
+    // Target helper matches bidirectional rules.
+    expect(resolveSettingsTarget("extensions", "larkx@work", true)).toEqual({ tab: "integrations", sub: "ext:larkx@work" });
+    expect(resolveSettingsTarget("integrations", "channel:wechat@work", false)).toEqual({ tab: "channels", sub: "wechat@work" });
+  });
+
+  it("remaps Settings search to integrations when integrations_v2 is on and hides integrations when off", () => {
+    expect(searchSettings("集成与扩展", false).tabs).not.toContain("integrations");
+    expect(searchSettings("渠道", true).tabs).toContain("integrations");
+    expect(searchSettings("渠道", true).tabs).not.toContain("channels");
+    expect(searchSettings("邮箱", true).groups).toContainEqual(expect.objectContaining({ tab: "integrations", anchor: "mail", sub: "builtin:mail" }));
+    expect(searchSettings("扩展市场", true).groups).toContainEqual(expect.objectContaining({ tab: "integrations", anchor: "market", sub: "-market" }));
+    expect(searchSettings("以你的名义发出", true).groups).toContainEqual(expect.objectContaining({ tab: "integrations", anchor: "sent", sub: "-sent" }));
   });
 
   // audit item 66: the hub's own page was a hard-coded lowercase "hub", and Models and Knowledge selection shared a mark
@@ -155,7 +247,9 @@ describe("settings search", () => {
     const finds = (q: string, tab: string, anchor: string) => expect(searchSettings(q).groups).toContainEqual(expect.objectContaining({ tab, anchor }));
     finds(t("language.label"), "general", "language");
     finds(t("ui-look.text_size"), "general", "text-size");
-    finds(t("ui-look.accent"), "general", "theme-color");
+    finds(t("ui-look.accent"), "advanced", "theme-color");
+    finds(t("ui-look.font"), "advanced", "font");
+    finds(t("ui-look.sidebar_icons"), "advanced", "sidebar-icons");
     finds(t("settings.theme_dark"), "general", "theme");
     finds(t("settings.reply_motion"), "general", "reply-motion");
     finds(t("settings.disconnect_browser"), "general", "disconnect");

@@ -104,7 +104,8 @@ nonisolated struct SecretRunResult: Decodable, Sendable {
     static func parse(_ text: String) -> SecretRunResult? {
         memo(text) { text in
             // A boundary with a fallback: anything that does not decode is shown raw.
-            try? JSONDecoder().decode(SecretRunResult.self, from: Data(text.utf8))
+            let cleaned = HubNaming.stripToolResultTimestampHeaders(text)
+            return try? JSONDecoder().decode(SecretRunResult.self, from: Data(cleaned.utf8))
         }
     }
 

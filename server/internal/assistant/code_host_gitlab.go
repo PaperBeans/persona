@@ -37,7 +37,10 @@ type gitlabInstance struct {
 	TokenFile   string `json:"token_file"`
 }
 
-var errRepositoryConfig = errors.New("manager.json cannot be read")
+var (
+	errRepositoryConfig      = errors.New("manager.json cannot be read")
+	errGitLabTokenUnreadable = errors.New("its token_file cannot be read")
+)
 
 // readRepositoryConfig reads manager.json's repository sections; none without a manager.json.
 func (s *Service) readRepositoryConfig() (repositoryManagerConfig, error) {
@@ -94,7 +97,7 @@ func (g gitlabHost) ReviewStatus(ctx context.Context, link string) (repository.R
 	if g.tokenFile != "" {
 		raw, err := os.ReadFile(expandHome(g.tokenFile))
 		if err != nil {
-			return repository.ReviewStatus{}, errors.New("its token_file cannot be read")
+			return repository.ReviewStatus{}, errGitLabTokenUnreadable
 		}
 		token = strings.TrimSpace(string(raw))
 	}

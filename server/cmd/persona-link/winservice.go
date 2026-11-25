@@ -189,7 +189,7 @@ func (e *env) installNodeBinary(from string) error {
 
 // installTask is install's Windows part, after the pairing: stop the task if it runs (the programs it runs cannot be
 // replaced while they run), put the programs in place, register the task and start it, then wait for the link.
-func installTask(e *env, withNode bool, from string, invite *link.PairInvite) error {
+func installTask(e *env, withNode, withTray bool, from string, invite *link.PairInvite) error {
 	if e.user == "" {
 		return link.NewTextError("link-cli.windows_user_unknown", nil)
 	}
@@ -198,6 +198,7 @@ func installTask(e *env, withNode bool, from string, invite *link.PairInvite) er
 		oldPID = st.PID
 	}
 	e.stopTask()
+	stopTray(e) // it runs from the console-less copy replaced below
 	if link.Running(e.configPath()) {
 		fmt.Fprintln(e.stdout, terminalText("link-cli.windows_other_process"))
 	}
@@ -237,11 +238,13 @@ func installTask(e *env, withNode bool, from string, invite *link.PairInvite) er
 		what = terminalText("link-cli.windows_task_programs")
 	}
 	fmt.Fprintln(e.stdout, terminalText("link-cli.windows_task_installed", i18n.Args{"task": taskName, "path": file, "programs": what, "log": e.personaDir()}))
+	startTray(e, withTray)
 	return waitStarted(e, started, oldPID, invite)
 }
 
 // uninstallTask is uninstall's Windows part: end and delete the task, remove its file and the console-less copy.
 func uninstallTask(e *env) {
+	removeTray(e)
 	_, registered := e.taskStatus()
 	if !registered && !fileExists(e.taskFile()) {
 		fmt.Fprintln(e.stdout, terminalText("link-cli.windows_task_missing", i18n.Args{"task": taskName}))

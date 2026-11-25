@@ -298,8 +298,9 @@ var (
 	// The watch draws extensions' widgets on its faces and runs their shortcuts (docs/extensions/extensions.md "System-level placements").
 	// It also fetches the built-in Milk Frog's art for its row and face, and only that: pet/ of the nwverse package
 	// (docs/apple/persona.md "The Milk Frog on the watch"), not another package or an uploaded look.
+	// The watch can also tell Health (#14714), only on this exact POST path.
 	answerWrites = lazyre.New(`^/api/v1/(interactions/[^/]+/(resolve|choose)|sessions/[^/]+/[^/]+/(messages|seen|interrupt)|` +
-		`assistant/health/intake|inbox/[^/]+/(done|reply|draft|suggestion)|extensions/[^/]+/-/(widget|shortcut)/[^/]+)$`)
+		`assistant/health/intake|assistant/health/tell|inbox/[^/]+/(done|reply|draft|suggestion)|extensions/[^/]+/-/(widget|shortcut)/[^/]+)$`)
 	answerPuts = lazyre.New(`^/api/v1/devices/[^/]+/widgets$`)
 	// answerKey is a key the watch can press on a screen card it could not read: a menu's number, Esc, Return.
 	answerKey = lazyre.New(`^([1-9]|esc|enter)$`)
@@ -534,6 +535,18 @@ func (h *Hub) revokeWebToken(ctx context.Context, id string) (bool, error) {
 		return false, nil
 	}
 	return h.store.RevokeDeviceToken(ctx, id)
+}
+
+// forgetUnknownTokens drops the cached "no such token" answers for these token hashes, once the tokens exist here.
+func (h *Hub) forgetUnknownTokens(hashes []string) {
+	t := &h.devtok
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, hash := range hashes {
+		if c, ok := t.cache[hash]; ok && c.p == nil {
+			delete(t.cache, hash)
+		}
+	}
 }
 
 // revoked forgets a device's cached lookups, closes its live connections (what it relays to the manager too), stops

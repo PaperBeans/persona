@@ -140,7 +140,7 @@ func TestCodexReplyMessage(t *testing.T) {
 	if strings.Contains(m, "\n") || strings.Contains(m, "\\u003c") || !strings.Contains(m, "<b> & co") || !strings.HasPrefix(m, "<send_user_message_question_reply>[{") {
 		t.Errorf("%s", m)
 	}
-	if got := codexUserText(m); got != "a\nb @x" {
+	if got, _ := codexUserPart(m); got != "a\nb @x" {
 		t.Errorf("reads back as %q", got)
 	}
 	if call, i := ParseQuestionItemID(QuestionItemID("call_a1", 2)); call != "call_a1" || i != 2 {

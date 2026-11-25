@@ -256,13 +256,18 @@ func (s *Service) postToInbox(ctx context.Context, machine, session string, a in
 			live.ArrivedOf, live.ArrivedAt = it.ArrivedOf, it.ArrivedAt
 			value, previous, current := reflect.ValueOf(live).Elem(), reflect.ValueOf(before), reflect.ValueOf(latest)
 			for i := range value.NumField() {
-				if name := value.Type().Field(i).Name; name == "Chain" || name == "ChainSeq" {
+				field := value.Type().Field(i)
+				if !field.IsExported() {
+					continue // reflect can neither read nor set it: rebaseInboxBookkeeping does, below
+				}
+				if field.Name == "Chain" || field.Name == "ChainSeq" {
 					continue // apply appended the post to the chain that already holds the concurrent notes
 				}
 				if !reflect.DeepEqual(current.Field(i).Interface(), previous.Field(i).Interface()) {
 					value.Field(i).Set(current.Field(i))
 				}
 			}
+			rebaseInboxBookkeeping(live, &before, &latest)
 		} else {
 			return // a concurrent removal/replacement owns the live row now
 		}
@@ -273,6 +278,19 @@ func (s *Service) postToInbox(ctx context.Context, machine, session string, a in
 		return inboxPosted{}, errInboxNotPersisted
 	}
 	return inboxPosted{id: it.ID, updated: updated}, nil
+}
+
+// rebaseInboxBookkeeping is postToInbox's rebase for InboxItem's unexported fields, which the reflect loop there
+// cannot read (reflect.Value.Interface panics on them): as for the exported ones, a value that changed on the live row
+// while the post's IO was pending (latest differs from before) stays the live row's; otherwise live keeps what the
+// post's apply gave it. A new unexported field of InboxItem belongs here (TestInboxPostRebaseCoversUnexportedFields).
+func rebaseInboxBookkeeping(live, before, latest *InboxItem) {
+	if latest.replyClassifySerial != before.replyClassifySerial {
+		live.replyClassifySerial = latest.replyClassifySerial
+	}
+	if latest.receivedInCollection != before.receivedInCollection {
+		live.receivedInCollection = latest.receivedInCollection
+	}
 }
 
 // inboxPostText is a post's text as the row keeps it: body, the Markdown as written (cut past inboxPostBodyMax), and

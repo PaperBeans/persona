@@ -55,6 +55,7 @@
       "role": "assistant",
       "kind": "text",
       "text": "`fixture-197.cwl`（Sani Kzyun，IMOQONHNI 己丁）丁癸壬辛己丙 Imh Ajffl Gncbrxz 乙辛，丙壬辛庚甲乙。甲丙丙己壬庚癸戊庚甲丙己丙丙壬：",
+      "narration": true,
       "model": "claude-opus-5",
       "usage": [
         {

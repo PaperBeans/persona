@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path"
 	"slices"
@@ -120,9 +121,9 @@ type trackEntry struct {
 // health template and the health category as its overrides of that kind's defaults, in the manager's health
 // directory.
 func (s *Service) builtinTracks() []trackEntry {
-	e := trackEntry{Slug: SpaceHealth, Kind: trackKindSpace, DefaultCategories: []string{categoryHealth},
+	e := trackEntry{Slug: SpaceHealth, Kind: trackKindHealth, DefaultCategories: []string{categoryHealth},
 		Template: trackTemplateHealth, DirName: identity.HealthDirName(s.id), Builtin: true, Revision: 1}
-	e.Config, _ = effectiveTrackConfig(builtinKindConfigs()[trackKindSpace], e.Template, e.DefaultCategories, nil)
+	e.Config, _ = effectiveTrackConfig(builtinKindConfigs()[trackKindHealth], e.Template, e.DefaultCategories, nil)
 	return []trackEntry{e}
 }
 
@@ -199,6 +200,34 @@ func (s *Service) registry(ctx context.Context) ([]trackEntry, []kindEntry) {
 		return r.list, r.kinds
 	}
 	list, kinds := s.builtinTracks(), builtinKinds()
+	if s.trackKindsExt != nil {
+		raw, err := s.trackKindsExt.DomainTrackKindsJSON(ctx)
+		if err != nil {
+			s.logf("track kinds: extensions: %v", err)
+		} else {
+			var items []struct {
+				ID     string                        `json:"id"`
+				Title  string                        `json:"title"`
+				Config assistantwire.TrackKindConfig `json:"config"`
+			}
+			if err := json.Unmarshal(raw, &items); err != nil {
+				s.logf("track kinds: extensions: %v", err)
+			}
+			for _, item := range items {
+				if !identity.ValidTrackSlug(item.ID) || slices.Contains(builtinKindOrder, item.ID) {
+					s.logf("track kinds: extension kind %q is reserved or invalid", item.ID)
+					continue
+				}
+				cfg, err := normalKindConfig(item.Config)
+				k := kindEntry{Slug: item.ID, Title: item.Title, Config: cfg, Extension: true, Revision: 1}
+				if err != nil {
+					k.Disabled = kindDisabledInvalid
+					s.logf("track kinds: extension kind %q: %v", item.ID, err)
+				}
+				kinds = append(kinds, k)
+			}
+		}
+	}
 	st, ok := s.store().(trackStore)
 	if !ok {
 		r.list, r.kinds, r.at = list, kinds, time.Now()

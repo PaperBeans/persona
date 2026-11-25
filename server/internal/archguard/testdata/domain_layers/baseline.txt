@@ -1,0 +1,333 @@
+# Shrink-only counts of the domain rules' findings in code that predates them (docs/operations/testing.md "Count
+# ratchets"): "<key> <rule> <count>", the key being the package for core-* and app-* rules and the core whose type is
+# used for out-* rules. Core, seam and out-* counts are kept only for the five legacy cores. server/internal/archguard's
+# TestDomainLayers fails when a count rises above its line (with a base, above its count at the merge base too, a
+# package without a line included, and when a line is raised or added: a count's lines give no more room than the
+# merge base's) and prints a notice when one falls; lower the lines with
+# python3 scripts/ci/lower_baselines.py --only domain-rules. Code that moves takes its lines along:
+# python3 scripts/test/name_freezes.py moves.
+#
+# "<key> <rule> <Type> #PR ..." is an allowance, made the day the rules landed, for a type an open PR was adding to an
+# app-exported-record or app-named-primitive count. It adds one to that count's limit only while the type is in the
+# package, so the room is that PR's alone. Once the type is on main, lower_baselines.py takes it into the count and
+# removes the line; once its PRs have all closed without it, python3 scripts/test/name_freezes.py pending --write
+# --only domain_layers_baseline drops it. No PR opened later gets one: with a base, the test fails on an allowance the
+# merge base's baseline lacks.
+#
+# These packages predate the rules; their counts only fall; do not copy their shapes. Copy server/internal/domainkit,
+# server/internal/agentref and its adapter, and the compliant twins in
+# server/internal/archguard/testdata/domainrules/planted (assistant/fleetcount and its adapter), or start with
+# python3 scripts/new_domain_slice.py. assistant/chatsearch depends on impure packages (prompts, transcript, lazyre, compat, proto, the
+# SDK's wire and golang.org/x/text): its imports stay frozen here until it is converted.
+cmd/persona-link app-named-primitive 1
+internal/agents app-exported-record 23
+internal/agentsend app-named-primitive 1
+internal/ai app-exported-record 6
+internal/ai app-named-primitive 1
+internal/apns app-exported-record 4
+internal/approval app-exported-record 2
+internal/assistant app-exported-record 164
+internal/assistant app-exported-record ConcernDirection #15068
+internal/assistant app-exported-record ConcernView #15068
+internal/assistant app-exported-record ConcernWord #15068
+internal/assistant app-exported-record HandoffDiffRef #14334
+internal/assistant app-exported-record HandoffGap #14334
+internal/assistant app-exported-record HandoffSourceRange #14334
+internal/assistant app-exported-record InboxFeedback #4512
+internal/assistant app-exported-record InboxProgress #4512
+internal/assistant app-exported-record MessageAuthorization #9782
+internal/assistant app-exported-record ModelProfilePermissionChange #12042
+internal/assistant app-exported-record PlanContinuationRecovery #13587
+internal/assistant app-exported-record TaskDistinctFrom #9744 #12524
+internal/assistant app-exported-record TaskFollow #15068
+internal/assistant app-exported-record TodoContextHandoff #14334
+internal/assistant app-exported-record TodoUsage #13027 #14147
+internal/assistant app-exported-record TodoUsageModel #13027 #14147
+internal/assistant app-exported-record TodoUsagePart #13027 #14147
+internal/assistant app-exported-record TodoUsageSummary #13027 #14147
+internal/assistant app-exported-record UsagePrice #13027 #14147
+internal/assistant app-exported-record UsagePrices #13027 #14147
+internal/assistant app-exported-record UsageTokens #13027 #14147
+internal/assistant app-exported-record Watch #13882 #13914 #14029 #14104 #14362 #14995
+internal/assistant app-exported-record WatchAlert #13882 #13914 #14029 #14104 #14362 #14995
+internal/assistant app-exported-record WatchPoint #13882 #13914 #14029 #14104 #14362 #14995
+internal/assistant app-exported-record WatchReading #13882 #13914 #14029 #14104 #14362 #14995
+internal/assistant app-exported-record WatchSchedule #13882 #13914 #14029 #14104 #14362 #14995
+internal/assistant app-exported-record WatchTable #13882 #13914 #14029 #14104 #14362 #14995
+internal/assistant app-exported-record WatchView #13882 #13914 #14029 #14104 #14362 #14995
+internal/assistant app-lifecycle-write 30
+internal/assistant app-named-primitive 26
+internal/assistant app-named-primitive ModelPurposeStatusCode #12300 #12307
+internal/assistant app-named-primitive launcherFit #12300 #12307
+internal/assistant app-named-primitive scopeHeadingKind #13820 #13912
+internal/assistant app-named-primitive spawnDecision #13760
+internal/assistant app-named-primitive taskWorkflowKind #12286
+internal/assistant/archiverecovery app-exported-record 3
+internal/assistant/archiverecovery app-named-primitive 1
+internal/assistant/chatsearch core-collection 4
+internal/assistant/chatsearch core-constructor 5
+internal/assistant/chatsearch core-package-var 15
+internal/assistant/chatsearch core-primitive-field 1
+internal/assistant/chatsearch core-primitive-signature 11
+internal/assistant/chatsearch core-test-package 1
+internal/assistant/kblark app-exported-record Config #13449
+internal/assistant/kblark app-exported-record Doc #13449
+internal/assistant/kblark app-exported-record Minute #13449
+internal/assistant/kblark app-exported-record Result #13449
+internal/assistant/kernel app-exported-record 1
+internal/assistant/repository app-exported-record 10
+internal/assistant/repositorystore app-exported-record 2
+internal/assistant/saved app-exported-record 8
+internal/assistant/saved app-named-primitive 1
+internal/assistant/todo/conflict app-exported-record 2
+internal/assistant/todo/mergetrain app-exported-record 4
+internal/assistant/todo/mergetrain app-named-primitive 3
+internal/assistant/todo/projection app-exported-record 12
+internal/assistant/todo/projection app-named-primitive 1
+internal/assistant/todo/stagegate app-exported-record 4
+internal/assistant/todo/stagegate app-named-primitive 3
+internal/assistant/todo/timeline core-any 2
+internal/assistant/todo/timeline core-collection 3
+internal/assistant/todo/timeline core-constructor 2
+internal/assistant/todo/timeline core-exported-const 1
+internal/assistant/todo/timeline core-exported-field 108
+internal/assistant/todo/timeline core-field-name 1
+internal/assistant/todo/timeline core-interface-param 2
+internal/assistant/todo/timeline core-outcome-return 1
+internal/assistant/todo/timeline core-pointer-receiver 30
+internal/assistant/todo/timeline core-primitive-field 86
+internal/assistant/todo/timeline core-primitive-signature 2
+internal/assistant/todo/timeline core-receiver-write 2
+internal/assistant/todo/timeline core-tag 21
+internal/assistant/todo/timeline core-test-package 1
+internal/assistant/todo/timeline core-type-param 1
+internal/assistant/todo/timeline core-zero-doc 16
+internal/assistant/todo/timeline out-literal 6
+internal/assistantskills app-exported-record 11
+internal/botcard app-exported-record 26
+internal/botcard app-exported-record BotMenu #11639 #12964
+internal/botcard app-named-primitive 1
+internal/botport app-exported-record 1
+internal/builtinext app-exported-record 3
+internal/bus app-exported-record 3
+internal/channel app-exported-record 25
+internal/channel app-named-primitive 10
+internal/claudeplugin app-exported-record 4
+internal/claudeplugin app-named-primitive 1
+internal/cliport app-exported-record 1
+internal/clitext app-named-primitive 1
+internal/configuration app-exported-record 13
+internal/configuration app-named-primitive 1
+internal/connector app-exported-record 10
+internal/connector app-named-primitive 1
+internal/connector/proc app-exported-record 2
+internal/connector/serve app-exported-record 44
+internal/conversationlog core-accessor 4
+internal/conversationlog core-collection 3
+internal/conversationlog core-constructor 3
+internal/conversationlog core-exported-const 3
+internal/conversationlog core-exported-field 20
+internal/conversationlog core-package-var 1
+internal/conversationlog core-primitive-field 19
+internal/conversationlog core-primitive-signature 17
+internal/conversationlog core-tag 2
+internal/conversationlog core-test-package 2
+internal/conversationlog core-zero-doc 3
+internal/conversationlog out-literal 16
+internal/db app-lifecycle-write 6
+internal/db app-named-primitive 3
+internal/devices app-exported-record 22
+internal/devices app-named-primitive 5
+internal/errreport app-exported-record 2
+internal/extension app-exported-record 108
+internal/extension/conformance app-exported-record 1
+internal/extension/denohost app-exported-record 1
+internal/extension/egress app-exported-record 5
+internal/extension/host app-exported-record 2
+internal/extension/hubrelay app-exported-record 1
+internal/extension/sandbox app-exported-record 8
+internal/extension/serve app-exported-record 1
+internal/extmgr app-exported-record 65
+internal/extmgr app-named-primitive 3
+internal/extmgr/storage app-exported-record 21
+internal/feishubot app-exported-record BotMenu #12964
+internal/herdr app-exported-record 20
+internal/herdrcore app-exported-record 7
+internal/host app-exported-record 12
+internal/hub app-exported-record 28
+internal/hub app-exported-record PartnersConfig #13379
+internal/hub app-named-primitive 9
+internal/hubclient app-exported-record 1
+internal/hubedge app-exported-record 4
+internal/i18n app-exported-record 1
+internal/i18n app-named-primitive 2
+internal/imageorient app-exported-record 1
+internal/kb app-exported-record 51
+internal/kb app-exported-record Milestone #13784 #13891 #13914 #14029 #14104 #14362 #14934
+internal/kb app-exported-record MilestoneEdit #13784 #13891 #13914 #14029 #14104 #14362 #14934
+internal/kb app-exported-record ProjectRef #13784 #13891 #13914 #14029 #14104 #14362 #14934
+internal/kb app-exported-record ProjectTree #13784 #13891 #13914 #14029 #14104 #14362 #14934
+internal/kb app-exported-record TreeError #13784 #13891 #13914 #14029 #14104 #14362 #14934
+internal/kb app-exported-record TreeMove #13784 #13891 #13914 #14029 #14104 #14362 #14934
+internal/kb app-named-primitive 4
+internal/lark app-exported-record 2
+internal/larkperson app-exported-record ConversationScope #13145
+internal/larkperson app-exported-record DeliveryRequest #13145
+internal/larkperson app-exported-record Endpoint #13145
+internal/larkperson app-exported-record HistoryPage #13145
+internal/larkperson app-exported-record HistoryRequest #13145
+internal/larkperson app-exported-record Person #13145
+internal/larkperson app-exported-record ProactiveRequest #13145
+internal/larkperson app-exported-record Reservation #13145
+internal/larkperson app-exported-record RunnerTransport #13145
+internal/larkperson app-exported-record SentBinding #13145
+internal/larkperson app-exported-record Topic #13145
+internal/larkperson app-named-primitive DeliveryState #13145
+internal/lcuconfirm app-named-primitive 1
+internal/link app-exported-record 20
+internal/link app-exported-record CloudflareAccess #12022
+internal/link app-named-primitive 1
+internal/linktray app-exported-record 14
+internal/linktray app-named-primitive 2
+internal/manager app-exported-record 2
+internal/manager app-named-primitive 1
+internal/managerconf app-exported-record 6
+internal/managerupdate app-exported-record 7
+internal/mdns app-exported-record 3
+internal/modelhttp app-exported-record 1
+internal/modules/briefing app-exported-record 1
+internal/modules/imessage app-exported-record 12
+internal/modules/knowledge-ui/kbhistory app-exported-record 9
+internal/modules/knowledge-ui/kbhistory app-named-primitive 1
+internal/modules/lark app-exported-record 1
+internal/modules/lark app-named-primitive 1
+internal/modules/lark/connector/larkcli app-exported-record 2
+internal/modules/lark/feishubot app-exported-record 2
+internal/modules/lark/larkcli app-exported-record 2
+internal/modules/lark/larkcli app-named-primitive 1
+internal/modules/mail app-exported-record 6
+internal/modules/mail app-named-primitive 1
+internal/modules/office/office app-named-primitive 2
+internal/modules/phone-extra/iphone app-exported-record 12
+internal/modules/phone-extra/iphonectl app-exported-record 34
+internal/modules/phone-extra/iphonectl app-named-primitive 3
+internal/modules/recording app-named-primitive 1
+internal/modules/screen-share/screenlink app-exported-record 5
+internal/modules/screen-share/vncbench app-named-primitive 1
+internal/modules/voice app-exported-record 6
+internal/modules/voice app-named-primitive 4
+internal/modules/voice/voicetest app-exported-record 2
+internal/modules/volc app-exported-record 3
+internal/modules/volc/volctest app-exported-record 6
+internal/moduleswitch app-exported-record 1
+internal/netaddr app-exported-record 1
+internal/netaddr app-named-primitive 2
+internal/netproxy app-exported-record 1
+internal/netshape app-exported-record 1
+internal/netshape app-named-primitive 1
+internal/node app-exported-record 25
+internal/node app-named-primitive 14
+internal/node/diskmap app-exported-record 1
+internal/nodeclient app-exported-record 13
+internal/nodecmd app-exported-record 1
+internal/nodesign app-exported-record 1
+internal/nodeupdate app-exported-record 3
+internal/operations/backup app-exported-record 8
+internal/operations/backup app-exported-record Support #12876
+internal/operations/backup app-named-primitive 3
+internal/operations/recovery app-exported-record Bundle #12876
+internal/operations/recovery app-exported-record Capabilities #12876
+internal/operations/recovery app-exported-record Capability #12876
+internal/operations/recovery app-exported-record Check #12876
+internal/operations/recovery app-exported-record Overview #12876
+internal/orcart app-exported-record 27
+internal/orcart/orcarttest app-exported-record 4
+internal/osproc app-exported-record 1
+internal/osproc/osproctest app-exported-record 2
+internal/pgdocker app-exported-record 4
+internal/promptcontent app-exported-record 1
+internal/protectedapps app-exported-record 4
+internal/protectedapps app-named-primitive 2
+internal/proxyproto app-exported-record 3
+internal/quota app-exported-record 7
+internal/relay app-exported-record 1
+internal/remoteimage app-exported-record 4
+internal/resourcequeue app-exported-record 11
+internal/rexcli app-exported-record 10
+internal/runtimepkg app-exported-record 2
+internal/screen app-exported-record 8
+internal/scriptcli app-exported-record 1
+internal/sessionhistory core-accessor 5
+internal/sessionhistory core-any 9
+internal/sessionhistory core-bare-type 1
+internal/sessionhistory core-codec-method 2
+internal/sessionhistory core-collection 10
+internal/sessionhistory core-constructor 8
+internal/sessionhistory core-exported-const 11
+internal/sessionhistory core-exported-field 38
+internal/sessionhistory core-interface-param 2
+internal/sessionhistory core-outcome-return 2
+internal/sessionhistory core-package-var 1
+internal/sessionhistory core-params 2
+internal/sessionhistory core-pointer-receiver 3
+internal/sessionhistory core-primitive-field 23
+internal/sessionhistory core-primitive-signature 16
+internal/sessionhistory core-tag 4
+internal/sessionhistory core-test-package 1
+internal/sessionhistory core-type-param 8
+internal/sessionhistory core-zero-doc 8
+internal/sessionhistory out-literal 30
+internal/sessionhistory out-parse-call 2
+internal/sessionlist app-exported-record 14
+internal/shareproxy app-exported-record 1
+internal/shellcmd app-exported-record 4
+internal/streams app-named-primitive 1
+internal/subscriptions app-exported-record 42
+internal/subscriptionsui app-exported-record 14
+internal/taskworkspace app-exported-record 6
+internal/teamdocs app-exported-record 2
+internal/terminalmaintenance app-exported-record 7
+internal/terncli app-exported-record 11
+internal/terncli app-named-primitive 1
+internal/textfmt app-exported-record 1
+internal/tmux app-exported-record 2
+internal/tokenuse core-accessor 11
+internal/tokenuse core-collection 6
+internal/tokenuse core-constructor 8
+internal/tokenuse core-exported-const 6
+internal/tokenuse core-exported-field 49
+internal/tokenuse core-field-name 1
+internal/tokenuse core-outcome-return 1
+internal/tokenuse core-package-var 6
+internal/tokenuse core-pointer-receiver 8
+internal/tokenuse core-primitive-field 49
+internal/tokenuse core-primitive-signature 20
+internal/tokenuse core-tag 5
+internal/tokenuse core-test-package 1
+internal/tokenuse core-zero-doc 8
+internal/tokenuse out-literal 9
+internal/transcribejob app-exported-record 1
+internal/transcript app-exported-record 12
+internal/transcript app-exported-record BotmuxTurn #10770 #12114 #12161 #12344
+internal/transcript app-exported-record BotmuxTurnAnchor #10770 #12114 #12161 #12344
+internal/transcript app-exported-record BotmuxTurnAttachment #10770 #12114 #12161 #12344
+internal/transcript app-exported-record BotmuxTurnInbound #10770 #12114 #12161 #12344
+internal/transcript app-exported-record BotmuxTurnMention #10770 #12114 #12161 #12344
+internal/transcript app-exported-record BotmuxTurnPlacement #10770 #12114 #12161 #12344
+internal/transcript app-exported-record BotmuxTurnReply #10770 #12114 #12161 #12344
+internal/transcript app-exported-record BotmuxTurnSender #10770 #12114 #12161 #12344
+internal/transcript app-exported-record BotmuxTurnsResponse #10770 #12114 #12161 #12344
+internal/transcript app-exported-record CodexThreadSettings #13294
+internal/transcript app-exported-record SpeedObservation #14495
+internal/transcript app-named-primitive 2
+internal/transcript app-named-primitive botmuxSendFlag #10770 #12114 #12161 #12344
+internal/transcript app-named-primitive fileFingerprint #11629
+internal/tunnel app-exported-record 3
+internal/update app-exported-record 17
+internal/update app-named-primitive 1
+internal/usagesource app-exported-record 7
+internal/webasset app-exported-record 1
+internal/webpush app-exported-record 3
+internal/webpush/webpushtest app-exported-record 1
+internal/workspaceboard app-exported-record 10
+internal/workspacenaming app-exported-record 7

@@ -111,6 +111,10 @@ try {
       await rows.first().waitFor();
       const feedbackMs = performance.now() - openedAt;
       assert.equal(await rows.count(), 5);
+      assert.equal(await rows.locator('[data-wait-collapsed="true"]').count(), 5, "parked rows start collapsed to two lines");
+      for (const id of ["bound", "issue", "comment", "topic", "missing"]) {
+        await page.locator(`[data-task-wait-info="source-${id}"] [data-wait-toggle]`).click();
+      }
       const source = (id) => page.locator(`[data-task-wait-info="source-${id}"] [data-wait-source]`);
       assert.equal(await source("bound").innerText(), "PR #73");
       assert.equal(await source("bound").getAttribute("href"), prURL);

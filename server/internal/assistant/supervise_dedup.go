@@ -78,7 +78,7 @@ func digestFingerprint(e prompts.SuperviseEntry, g superviseSignal) (string, str
 	if len(e.Asks) > 0 { // the cards it lists are what is new about it
 		fields = append(fields, e.Asks)
 	}
-	if keyIsNews(g.Kind) {
+	if keyIsNews(g.Kind) || (g.Kind == sigOrphaned && strings.HasPrefix(g.Key, nodeRecoveryKeyPrefix)) {
 		fields = append(fields, g.Key)
 	}
 	if g.Kind == sigAllStopped {
@@ -96,7 +96,7 @@ func digestFingerprint(e prompts.SuperviseEntry, g superviseSignal) (string, str
 // words stay the same.
 func keyIsNews(kind string) bool {
 	switch kind {
-	case sigParkedDue, sigParkDecided, sigInbox, sigOwnerCannot, sigRecheck, sigUndecidable, sigDeliveryHold, sigFailed, sigStarted, sigAllStopped, sigDecisionReply, sigHandoffResult, sigEstimateDue, sigOverdue, sigTimedOut, sigCardlessWait, sigTodoReady, sigPRMerged, sigParentCloseout, sigNeedsUserExternalInfo,
+	case sigParkedDue, sigParkDecided, sigInbox, sigOwnerCannot, sigRecheck, sigUndecidable, sigDeliveryHold, sigFailed, sigStarted, sigAllStopped, sigDecisionReply, sigHandoffResult, sigEstimateDue, sigOverdue, sigTimedOut, sigCardlessWait, sigReviewNudge, sigTodoReady, sigPRMerged, sigParentCloseout, sigNeedsUserExternalInfo, sigRecovered,
 		sigCheck: // a check's run, or the owner's answer to its decision: an Agent that only runs tools says the same all along
 		return true
 	}
@@ -193,7 +193,7 @@ func (s *Service) reserveSupervisionDelivery(ctx context.Context, entries []prom
 		}
 		fingerprint := superviseFingerprint{Hash: hash, At: now.UTC(), Key: signals[i].Key, Permanent: signals[i].Kind == sigPRConflict ||
 			signals[i].Kind == sigDraftPR || signals[i].Kind == sigParkedSummary || signals[i].Kind == sigPREvent || signals[i].Kind == sigPRMerged || signals[i].Kind == sigNeedsUserExternalInfo}
-		if signals[i].Kind == sigAllStopped || signals[i].Kind == sigParkedSummary || signals[i].Kind == sigPREvent || signals[i].Kind == sigPRMerged || signals[i].Kind == sigNeedsUserExternalInfo || keptUntilChange(signals[i]) {
+		if signals[i].Kind == sigAllStopped || signals[i].Kind == sigParkedSummary || signals[i].Kind == sigPREvent || signals[i].Kind == sigPRMerged || signals[i].Kind == sigNeedsUserExternalInfo || signals[i].Kind == sigRecovered || keptUntilChange(signals[i]) {
 			fingerprint.Todo = signals[i].Todo
 		}
 		if g := signals[i]; g.Kind == sigTodoReady || g.Kind == sigParentCloseout || g.externalPRReview() || g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "unhandled" {
@@ -417,6 +417,9 @@ func (s *Service) clearTaskBoundSignalDedup(ctx context.Context, todoID, kind st
 }
 
 func (s *Service) restoreDigest(signals []superviseSignal, at, prev time.Time) {
+	if !s.autoSupervisionOn(context.Background()) {
+		return // withdrawn, not retried: they would otherwise come back once the switch is on again
+	}
 	b := &s.supervise
 	b.mu.Lock()
 	b.init()

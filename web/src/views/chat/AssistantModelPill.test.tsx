@@ -463,6 +463,50 @@ describe("an older hub and the new-conversation page", () => {
     expect(calls.some((c) => c.method !== "GET")).toBe(false);
   });
 
+  it("picking the displayed default model on a fresh draft pins it, and Follow default clears it explicitly (#13567)", async () => {
+    await show(undefined);
+    await open();
+    const shown = panel.props!.state.current!;
+    expect(shown).toEqual({ provider: "claude", model: "opus", effort: "high" });
+    expect(strip()!.getAttribute("data-pick-strip")).toBe("default");
+    // Picking the already-displayed named model must pin it instead of dropping the pick as a no-op.
+    expect(await act(() => panel.props!.onPick(shown))).toBe(true);
+    expect([pickedLauncher(NEW_CONVERSATION), pickedModel(NEW_CONVERSATION), pickedEffort(NEW_CONVERSATION)]).toEqual(["claude", "opus", "high"]);
+    await flush();
+    expect(strip()!.getAttribute("data-pick-strip")).toBe("pick");
+    // Picking the explicit "default" row follows the launcher default (launcher pinned, model omitted).
+    expect(await act(() => panel.props!.onPick({ provider: "claude", model: "default" }))).toBe(true);
+    expect([pickedLauncher(NEW_CONVERSATION), pickedModel(NEW_CONVERSATION)]).toEqual(["claude", undefined]);
+    // Clicking Follow default clears the whole draft pick back to following Model configuration.
+    await act(async () => strip()!.querySelector("button")!.click());
+    await flush();
+    expect([pickedLauncher(NEW_CONVERSATION), pickedModel(NEW_CONVERSATION), pickedEffort(NEW_CONVERSATION)]).toEqual([undefined, undefined, undefined]);
+    expect(strip()!.getAttribute("data-pick-strip")).toBe("default");
+  });
+
+  it("picking a concrete model marked default: true on a fresh draft keeps its model ID (#13567)", async () => {
+    defaultSetup = { provider: "claude", model: "", effort: "" };
+    const origFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/claude/models")) {
+        return json({
+          agent: "claude",
+          models: [
+            { id: "default", name: "Default (recommended)", default: false, resolved: "claude-opus-5-5", efforts: ALL },
+            { id: "opus", name: "Opus 5.5", default: true, resolved: "claude-opus-5-5", efforts: ALL },
+          ],
+        });
+      }
+      return origFetch(input, init);
+    }));
+    await show(undefined);
+    await open();
+    expect(panel.props!.state.current).toEqual({ provider: "claude", model: "opus" });
+    expect(await act(() => panel.props!.onPick({ provider: "claude", model: "opus" }))).toBe(true);
+    expect([pickedLauncher(NEW_CONVERSATION), pickedModel(NEW_CONVERSATION)]).toEqual(["claude", "opus"]);
+  });
+
   it("replays the shared eligible choices in both pickers without a legacy concrete default model", async () => {
     sharedPicker = true;
     defaultSetup = { provider: "runtime", model: "", effort: "high" };

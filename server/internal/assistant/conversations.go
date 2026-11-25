@@ -278,6 +278,11 @@ type relayMsg struct {
 	// as before, its hand-over stays queued until it expires, and the one it answers stays delivered.
 	Handover string `json:"handover,omitempty"`
 	Answers  string `json:"answers,omitempty"`
+	// DeferredWake marks a message in relayState.Later that was meant to wake its receiver and was held back by the
+	// per-sender wake cap (conversation_fanout.go, #14352). Explicit wake: false messages keep this false and are never
+	// woken on their own. A version that does not know it drops it on its next save: the message stays quiet until the
+	// receiver's next message, as before.
+	DeferredWake bool `json:"deferred_wake,omitempty"`
 }
 
 type relayHop struct {
@@ -316,6 +321,9 @@ type relayState struct {
 	// (relay_lead_hold.go, #11699): until the owner next writes there (userSpoke), what it plans that writes waits for
 	// their Start. A version that does not know it drops it on its next save: those plans then start as before.
 	Handed map[string]time.Time `json:"handed,omitempty"`
+	// Fanout: by sender and target, when sender last woke target by conversation_send within fanoutWindow
+	// (conversation_fanout.go, #14352). Kept across restarts so a restart during a burst preserves the cap.
+	Fanout map[string]map[string]time.Time `json:"fanout,omitempty"`
 }
 
 type relayBook struct {
@@ -415,6 +423,9 @@ func (s *Service) relayLocked(ctx context.Context) bool {
 		}
 	}
 	b.st, b.loaded = rs, true
+	if len(rs.Fanout) > 0 {
+		s.sendFanout.merge(rs.Fanout, time.Now())
+	}
 	// Reloading after an uncertain answer commit must not forget another message's in-flight drain or owner turn.
 	if b.draining == nil {
 		b.sent, b.draining, b.replacing, b.holds = map[[2]string][]time.Time{}, map[string]bool{}, map[string]bool{}, map[string]*time.Timer{}
@@ -454,7 +465,9 @@ func (s *Service) saveRelayLocked() error {
 			delete(s.relays.st.Spawned, id)
 		}
 	}
-	s.pruneRelayLaterLocked(time.Now())
+	now := time.Now()
+	s.pruneRelayLaterLocked(now)
+	s.relays.st.Fanout = s.sendFanout.snapshot(now)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := st.PutSetting(ctx, relayKey, s.relays.st)
@@ -559,6 +572,11 @@ func (s *Service) relayAdmit(r relayRoute, from, to string, now time.Time) (rela
 	if !s.relayLocked(context.Background()) {
 		return relayAdmission{}, errors.New("the relay state could not be read")
 	}
+	return s.relayAdmitLocked(r, from, to, now, true)
+}
+
+func (s *Service) relayAdmitLocked(r relayRoute, from, to string, now time.Time, saveAnswer bool) (relayAdmission, error) {
+	b := &s.relays
 	for k, ts := range b.sent {
 		kept := ts[:0]
 		for _, t := range ts {
@@ -665,7 +683,9 @@ func (s *Service) relayAdmit(r relayRoute, from, to string, now time.Time) (rela
 		hp := b.st.Hops[from]
 		hp.From = "" // answered: another message back is a new request
 		b.st.Hops[from] = hp
-		s.saveRelayLocked()
+		if saveAnswer {
+			s.saveRelayLocked()
+		}
 	}
 	return a, nil
 }
@@ -796,6 +816,9 @@ func (s *Service) queueRelay(to string, msg relayMsg) int {
 // signal is accepted only after its queued message and outbox acknowledgment are saved together. A failed write rolls
 // both in-memory forms back so the durable failed-start outbox and ordinary pending scheduler retry the same generation.
 func (s *Service) queueRelayDurable(to string, msg relayMsg) (int, error) {
+	if msg.Tool == superviseTool && !s.autoSupervisionOn(context.Background()) {
+		return 0, errSupervisionSuppressed // nothing new waits in a queue while automatic supervision messages are off
+	}
 	b := &s.relays
 	b.mu.Lock()
 	if !s.relayLocked(context.Background()) {
@@ -846,6 +869,10 @@ func (s *Service) queuedRelays() (map[string][]string, bool) {
 	out := map[string][]string{}
 	for id, q := range b.st.Later { // kept without waking it (relay_later.go): they go in with its next message
 		for _, msg := range q {
+			if msg.DeferredWake {
+				out[id] = append(out[id], "来自「"+msg.FromTitle+"」（稍后唤醒）："+msg.Text) // i18n-ignore: the queue's label, as the others'
+				continue
+			}
 			out[id] = append(out[id], "来自「"+msg.FromTitle+"」（不唤醒）："+msg.Text) // i18n-ignore: the queue's label, as the others'
 		}
 	}
@@ -885,8 +912,25 @@ func (msg relayMsg) source() *proto.MessageSource {
 // deliverRelay sends one message into an assistant conversation and notes the hop it is working on. A quiet task's
 // notice (quiet.go) is its own text, and the work it starts is not a hop of any chain.
 func (s *Service) deliverRelay(ctx context.Context, machine, to string, msg relayMsg) error {
+	res, round, err := s.sendRelay(ctx, machine, to, msg)
+	if err != nil {
+		return err
+	}
+	if round {
+		s.superviseRoundAnswered(to, res)
+	}
+	s.relayDelivered(ctx, to, msg)
+	return nil
+}
+
+// sendRelay performs the assistant.send RPC for a relayed message without marking supervision delivery complete.
+// Supervision callers confirm the user item in the destination transcript before completing delivery (#12567).
+func (s *Service) sendRelay(ctx context.Context, machine, to string, msg relayMsg) (superviseRoundReply, bool, error) {
+	if msg.Tool == superviseTool && !s.autoSupervisionOn(ctx) {
+		return superviseRoundReply{}, false, errSupervisionSuppressed // the last look before the send: a timer or a drain that was already running
+	}
 	if msg.Tool == superviseTool && s.runtimeWithoutSupervisionPolicy(ctx, machine, to) {
-		return s.supervisionRuntimeRefusal(ctx, machine)
+		return superviseRoundReply{}, false, s.supervisionRuntimeRefusal(ctx, machine)
 	}
 	text := relayDeliveryText(msg)
 	source, onceID := msg.source(), relayMsgID(to, msg)
@@ -900,14 +944,14 @@ func (s *Service) deliverRelay(ctx context.Context, machine, to string, msg rela
 	}
 	pick, kept, err := s.readModelPick(ctx, machine, to)
 	if err != nil {
-		return err // unknown is not permission to use a process that still has an older ordinary connection
+		return superviseRoundReply{}, false, err // unknown is not permission to use a process that still has an older ordinary connection
 	}
 	if !kept && proto.IsExternalLauncher(pick.Launcher) {
-		return i18n.Err("external-adapter.scope_required") // a kept choice on another machine is not a fallback on this one
+		return superviseRoundReply{}, false, i18n.Err("external-adapter.scope_required") // a kept choice on another machine is not a fallback on this one
 	}
 	if kept {
 		if err := s.relayOnPick(ctx, machine, to, params, pick); err != nil {
-			return err
+			return superviseRoundReply{}, false, err
 		}
 	} else if s.isBackground(ctx, to) {
 		s.backgroundModel(ctx, params) // its own model purpose, on every message as the main chat's is (supervise_background.go)
@@ -937,19 +981,12 @@ func (s *Service) deliverRelay(ctx context.Context, machine, to string, msg rela
 			s.releasePushes(ctx, to)
 		}
 		handed(err)
-		return err
+		return superviseRoundReply{}, round, err
 	}
 	if s.isBackground(ctx, to) && res.SessionID != "" && res.SessionID != to {
 		s.registerBackgroundRoundFork(ctx, machine, res.SessionID, to)
 	}
-	if round {
-		s.superviseRoundAnswered(to, res)
-	}
-	if msg.Tool == superviseTool {
-		s.backgroundRoundDelivered(ctx, to, msg, time.Now())
-	}
-	s.relayDelivered(ctx, to, msg)
-	return nil
+	return res, round, nil
 }
 
 // relayDeliveryText is what a relayed message says in the conversation: a notice, a supervision message and an answer
@@ -966,6 +1003,7 @@ func relayDeliveryText(msg relayMsg) string {
 // notice starts.
 func (s *Service) relayDelivered(ctx context.Context, to string, msg relayMsg) {
 	if msg.Tool == superviseTool {
+		s.backgroundRoundDelivered(ctx, to, msg, time.Now())
 		s.askRelayDelivered(to, msg)
 		return
 	}
@@ -1083,6 +1121,11 @@ func (s *Service) takeRelayHeadLocked(id string, msg relayMsg, replayOK bool) (r
 // where the message going in is. A conversation whose messages are all held is drained again when the first hold
 // ends.
 func (s *Service) drainRelays(machine string, list []proto.Session) {
+	if !s.autoSupervisionOn(context.Background()) {
+		// A node that reconnects may still hold supervision input in its conversations' queues from before the switch was
+		// turned off (supervise_switch.go); the switch applies to them as soon as they are listed again.
+		go s.cancelNodeSupervision(context.Background(), machine, slices.Clone(list))
+	}
 	leads := s.queueLeads(context.Background())
 	b := &s.relays
 	b.mu.Lock()
@@ -1159,7 +1202,7 @@ func (s *Service) drainRelays(machine string, list []proto.Session) {
 			// A needs notice may have been answered on the phone after it queued while the agent's node still
 			// reported blocked (#4332): ask the task once more right before it would interrupt. A node that cannot
 			// be reached is not an answer, so its notice stays queued for a later drain.
-			stale, keep := msg.Withdrawn, false
+			stale, keep := msg.Withdrawn || msg.Tool == chatReplyTool && !chatReplyRelayOn(s.settings(ctx)), false
 			if !stale && msg.Tool == noticeTool && msg.State == "needs" {
 				// The loading read covers a hub restart whose first drain runs before the todos were read in:
 				// an unreadable todo is unknown, so the notice is delivered as without the recheck.
@@ -1174,12 +1217,16 @@ func (s *Service) drainRelays(machine string, list []proto.Session) {
 			var err error
 			var retry time.Duration
 			landed := false
-			if !stale && !keep && !msg.TriedAt.IsZero() {
+			if !stale && !keep && (!msg.TriedAt.IsZero() || !msg.DoubtedAt.IsZero()) {
+				if msg.TriedAt.IsZero() {
+					msg.TriedAt = msg.DoubtedAt
+				}
 				landed = s.lookForRelay(machine, id, &msg)
 				if !landed && msg.Looks < relayLookLimit {
 					keep, retry = true, relayLookGap
 				}
 			}
+			suppressed := false // it was not sent because automatic supervision messages are off (supervise_switch.go)
 			if !stale && !keep && !landed && msg.Tool == superviseTool {
 				var checked relayMsg
 				checked, stale, keep = s.recheckQueuedDigest(ctx, id, original)
@@ -1190,6 +1237,9 @@ func (s *Service) drainRelays(machine string, list []proto.Session) {
 			if !stale && !keep && !landed {
 				msg, retry, err = s.tryQueuedRelay(ctx, machine, id, &original)
 				keep = retry > 0
+				if relaySuppressed(err) { // restored after a restart or a reconnect, or left by a withdrawal that did not reach it
+					stale, suppressed, keep, retry, err = true, true, false, 0, nil // leaves unsent: nothing replayed, nobody pushed
+				}
 			}
 			cancel()
 			// Withdrawing the text does not erase an earlier send's outcome. If its in-doubt line has since landed, the
@@ -1240,7 +1290,7 @@ func (s *Service) drainRelays(machine string, list []proto.Session) {
 			var replay []superviseSignal
 			if leaves {
 				queuedBefore := len(b.st.Queue[id])
-				replay = s.takeRelayHeadLocked(id, msg, !landed && !refused)
+				replay = s.takeRelayHeadLocked(id, msg, !landed && !refused && !suppressed)
 				taken = len(b.st.Queue[id]) < queuedBefore
 				if taken {
 					s.saveRelayLocked()
@@ -1268,6 +1318,9 @@ func (s *Service) drainRelays(machine string, list []proto.Session) {
 			}
 			if taken {
 				s.publish(context.Background()) // it no longer shows waiting
+			}
+			if suppressed {
+				s.logf("relay to %s: supervision message suppressed, automatic supervision messages are off", short(id))
 			}
 			if then != nil {
 				then(context.Background())
@@ -1596,12 +1649,15 @@ func (s *Service) toolConversationNew(ctx context.Context, self string, args jso
 		return "", err
 	}
 	var preset ModelTier
+	var tierChoice tierPick
 	a.Tier = strings.TrimSpace(a.Tier)
 	if a.Tier != "" {
-		preset, err = s.tierModel(ctx, a.Tier)
+		// the conversation starts on the main chat's computer: the tier's candidate is picked for that one
+		tierChoice, err = s.pickTierCandidate(ctx, a.Tier, tierFacts{Machine: s.settings(ctx).MachineID})
 		if err != nil {
 			return "", err
 		}
+		preset = tierChoice.Tier
 	}
 	counted := time.Now()
 	hop, _, err := s.relayAllowedOn(s.relayRouteFor(ctx, self), self, relayNewKey, counted) // an opening message is a request, never an answer
@@ -1650,6 +1706,9 @@ func (s *Service) toolConversationNew(ctx context.Context, self string, args jso
 	if a.Tier != "" {
 		run := ModelTier{Launcher: c.Launcher, Model: c.Model, Effort: c.Effort}
 		note += " " + i18n.T(lang, "assistant-conversations.started_on", i18n.Args{"run": run.runs()})
+		row := modelRoutingOf(tierChoice, c.MachineID)
+		row.SessionID = c.SessionID
+		s.recordModelRouting(ctx, row)
 		pick := modelPick{MachineID: c.MachineID, Launcher: preset.Launcher, Model: preset.Model, Effort: preset.Effort, At: time.Now().UTC()}
 		if err := s.setModelPick(sctx, c.SessionID, &pick); err != nil {
 			note += " " + i18n.T(lang, "assistant-conversations.pick_save_failed", i18n.Args{"error": err.Error()})
@@ -1698,33 +1757,54 @@ func (s *Service) toolConversationSend(ctx context.Context, self string, args js
 	if c.SessionID == self {
 		return "", errors.New("that is this conversation: you can't send a message to yourself")
 	}
+	if c.LogicalPlaceholder {
+		// Its active physical segment is gone. Keep the durable conversation readable, but never manufacture a new
+		// execution segment or queue a message for an identity that no longer exists.
+		return "", logicalRefusal(ctx, "unavailable")
+	}
 	// The dispatch policy runs after the target is known and before relayAllowed, whose rate-limit bookkeeping a
 	// refused send must not consume.
 	if err := s.dispatchSendGuard(ctx, self, c.MachineID, c.SessionID, a.Text); err != nil {
 		return "", err
 	}
-	fanned := ""
-	if !later && strings.TrimSpace(a.Quote) == "" && !s.sendFanout.admit(self, c.SessionID, time.Now()) {
-		later, fanned = true, fmt.Sprintf(fanoutNote, fanoutWide, int(fanoutWindow/time.Minute)) // conversation_fanout.go
+	from, err := s.relayFrom(ctx, self)
+	if err != nil {
+		return "", err
 	}
 	if later {
-		// Kept for the receiver, not delivered: no turn, no hop, no place in the rate (relay_later.go, #11614).
-		from, err := s.relayFrom(ctx, self)
-		if err != nil {
-			return "", err
-		}
+		// Explicit wake: false: kept for the receiver, never woken on its own (relay_later.go, #11614).
 		n, ok := s.keepRelayLater(c.SessionID, relayMsg{From: self, FromTitle: from, Tool: "conversation_send", Text: a.Text, At: time.Now().UTC()})
 		if !ok {
 			return "", errors.New("not kept: the relay state could not be read or saved; try again shortly")
 		}
 		s.spawnReported(self, c.SessionID) // a quiet report still answers the conversation that opened this one
 		s.publish(ctx)                     // the receiver shows it waiting above its composer
-		return fmt.Sprintf("Kept for %q without waking it (%d kept there): it goes in with the next message that conversation gets for anything else. No reply will come from it; no need to send it again.%s",
-			conversationName(c, s.settings(ctx).Main), n, fanned), nil
+		return fmt.Sprintf("Kept for %q without waking it (%d kept there): it goes in with the next message that conversation gets for anything else. No reply will come from it; no need to send it again.",
+			conversationName(c, s.settings(ctx).Main), n), nil
 	}
-	from, err := s.relayFrom(ctx, self)
-	if err != nil {
-		return "", err
+	fanoutChecked, fanoutAccepted := false, false
+	var fanoutPrev time.Time
+	var fanoutHadPrev bool
+	fanoutAt := time.Now()
+	if strings.TrimSpace(a.Quote) == "" {
+		admitted, prev, hadPrev := s.admitFanout(ctx, self, c.SessionID, fanoutAt)
+		if !admitted {
+			// Held by the per-sender wake cap: keep in Later with a durable deferred wake (conversation_fanout.go, #14352).
+			n, ok := s.keepRelayLater(c.SessionID, relayMsg{From: self, FromTitle: from, Tool: "conversation_send", Text: a.Text, At: fanoutAt.UTC(), DeferredWake: true})
+			if !ok {
+				return "", errors.New("not kept: the relay state could not be read or saved; try again shortly")
+			}
+			due := s.scheduleFanoutWake(ctx, self, c.SessionID, c.MachineID, fanoutAt)
+			s.spawnReported(self, c.SessionID)
+			s.publish(ctx)
+			return fanoutKeptAnswer(conversationName(c, s.settings(ctx).Main), n, due.Sub(fanoutAt)), nil
+		}
+		fanoutChecked, fanoutPrev, fanoutHadPrev = true, prev, hadPrev
+		defer func() {
+			if fanoutChecked && !fanoutAccepted {
+				s.sendFanout.restore(self, c.SessionID, fanoutPrev, fanoutHadPrev, fanoutAt)
+			}
+		}()
 	}
 	quote, err := s.resolveQuote(ctx, self, a.Quote) // before relayAllowed: a refused quote uses up no rate
 	if err != nil {
@@ -1764,6 +1844,7 @@ func (s *Service) toolConversationSend(ctx context.Context, self string, args js
 		if n == 0 {
 			return "", errors.New("not sent: the relay queue could not be read; try again shortly")
 		}
+		fanoutAccepted = true
 		s.publish(ctx)                                 // the receiver shows it waiting above its composer
 		s.drainRelays(c.MachineID, []proto.Session{c}) // a timer takes it in when its time comes
 		at := msg.Due.In(s.location(ctx))
@@ -1773,6 +1854,7 @@ func (s *Service) toolConversationSend(ctx context.Context, self string, args js
 	if running := c.Status == proto.StatusWorking || c.Starting; running || s.relayWaits(c.SessionID, msg) {
 		n := s.queueRelay(c.SessionID, msg)
 		if n > 0 {
+			fanoutAccepted = true
 			s.spawnReported(self, c.SessionID) // a conversation conversation_new opened reports back (spawned.go)
 		}
 		s.publish(ctx) // the receiver shows it waiting above its composer
@@ -1801,11 +1883,13 @@ func (s *Service) toolConversationSend(ctx context.Context, self string, args js
 		if n == 0 {
 			return "", err
 		}
+		fanoutAccepted = true
 		s.spawnReported(self, c.SessionID)
 		s.publish(ctx)
 		s.drainAfter(c.MachineID, c.SessionID, relayRetryGap)
 		return fmt.Sprintf("%q could not take the message now (%v): it is queued (%d waiting) and goes in once it can.%s", name, err, n, back), nil
 	}
+	fanoutAccepted = true
 	s.spawnReported(self, c.SessionID)
 	return fmt.Sprintf("Sent to 「%s」 (%s).%s", name, c.SessionID, back), nil
 }
@@ -1833,14 +1917,16 @@ func (s *Service) queuedFor(id string) int {
 }
 
 // selfSpace is the space of conversation self ("" the assistant's own, and for a caller that is no conversation), and
-// whether it could be told (the assistant's machine lists it).
+// whether it could be told (the assistant's machine lists it or attests its launch directory).
 func (s *Service) selfSpace(ctx context.Context, self string) (string, bool) {
 	if self == "" {
 		return "", true
 	}
-	c, ok := s.session(ctx, s.settings(ctx).MachineID, self)
+	machine := s.settings(ctx).MachineID
+	c, ok := s.callerSpaceSession(ctx, machine, self)
 	if !ok {
-		return "", false
+		cwd := s.callerCwd(ctx, machine, self)
+		return runSpace(proto.Session{Cwd: cwd}), cwd != ""
 	}
 	return spaceOf(c), true
 }

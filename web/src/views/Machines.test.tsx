@@ -431,3 +431,44 @@ describe("Machines battery and temperature", () => {
     expect(cards[1].querySelector('[data-testid="metric-temp"]')).toBeNull();
   });
 });
+
+describe("Machines co-located managers (#14964)", () => {
+  it("shows hosted manager status, pending_restart and version lag directly on cards while leaving other cards unchanged", async () => {
+    setRoster({
+      default: "m-1",
+      managers: [
+        { id: "m-1", name: "工作助手", online: true, machine_uid: "uid-a", host: "work-box", deploy: "service", version: "v1-202611241200" },
+        { id: "m-2", name: "编译助手", online: true, machine_uid: "uid-b", host: "build-box", deploy: "service", version: "v1-202611201000", pending_restart: true },
+        { id: "m-3", name: "旧版助手", online: true, host: "legacy-box", deploy: "service", version: "v1-202611201000" },
+      ],
+    });
+    fake.machines = [
+      { id: "work", name: "Work Box", online: true, machine_uid: "uid-a", hostname: "work-box", node_version: "v1-202611241200", manager: "m-1" },
+      { id: "build", name: "Build Box", online: true, machine_uid: "uid-b", hostname: "build-box", node_version: "v1-202611241200", manager: "m-1" },
+      { id: "legacy", name: "Legacy Box", online: true, hostname: "LEGACY-BOX", node_version: "v1-202611241200", node_mismatch: true, can_deploy: true, manager: "m-1" },
+      { id: "plain", name: "Plain Node", online: true, machine_uid: "uid-plain", hostname: "plain-box", node_version: "v1-202611241200", manager: "m-1" },
+    ];
+    act(() => root.render(<Machines onToggleSidebar={() => {}} />));
+    await flush();
+    const cardOf = (name: string) => [...host.querySelectorAll("section")].find((s) => s.querySelector("h2")?.textContent === name)!;
+
+    const workBadge = cardOf("Work Box").querySelector('[data-hosted-manager="m-1"]');
+    expect(workBadge?.getAttribute("data-manager-state")).toBe("online");
+    expect(workBadge?.textContent).toContain("工作助手");
+    expect(workBadge?.textContent).toContain("在线");
+
+    const buildBadge = cardOf("Build Box").querySelector('[data-hosted-manager="m-2"]');
+    expect(buildBadge?.getAttribute("data-manager-state")).toBe("pending_restart");
+    expect(buildBadge?.textContent).toContain("编译助手");
+    expect(buildBadge?.textContent).toContain("待空闲重启");
+
+    const legacyBadge = cardOf("Legacy Box").querySelector('[data-hosted-manager="m-3"]');
+    expect(legacyBadge?.getAttribute("data-manager-state")).toBe("version_lag");
+    expect(legacyBadge?.textContent).toContain("旧版助手");
+    expect(legacyBadge?.textContent).toContain("版本落后");
+    expect(cardOf("Legacy Box").querySelector('[data-testid="deploy-co-located-note"]')?.textContent).toContain("旧版助手");
+
+    // Card without hosted managers stays clean with no hosted-managers container
+    expect(cardOf("Plain Node").querySelector('[data-testid="hosted-managers"]')).toBeNull();
+  });
+});

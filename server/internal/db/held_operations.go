@@ -15,6 +15,9 @@ import (
 // HeldKindMessage is a held_operations row's kind for the owner's message to an existing Agent (a session.send).
 const HeldKindMessage = "message"
 
+// HeldKindStart is a held_operations row's kind for the owner's new-Agent start while its computer is away (#10674).
+const HeldKindStart = "start"
+
 // A HeldOperation's states.
 const (
 	HeldWaiting = "waiting" // sent by itself once its computer is back
@@ -60,12 +63,14 @@ type HeldOperation struct {
 	Text         string
 	Images       int
 	CredentialID string
+	Meta         json.RawMessage
 }
 
-// heldShown is what a row shows of its call, read in the database (a held message's pictures never leave it for that).
-const heldShown = `coalesce(call->'params'->>'text', ''),
+// heldShown is what a row shows of its call, read in the database (a held message's or start's pictures never leave it for that).
+const heldShown = `coalesce(call->'params'->>'text', call->'params'->>'prompt', ''),
 	CASE WHEN jsonb_typeof(call->'params'->'images') = 'array' THEN jsonb_array_length(call->'params'->'images') ELSE 0 END,
-	coalesce(call->'caller'->>'credential_id', '')`
+	coalesce(nullif(call->'caller'->>'credential_id', ''), call->'principal'->>'id', ''),
+	call->'meta'`
 
 const heldColumns = `seq, kind, op_id, machine_id, session_id, call, lang, state, failure, error, sent_at, held_at, tried_at, attempts, ` + heldShown
 
@@ -73,7 +78,7 @@ func scanHeld(row pgx.Row) (HeldOperation, error) {
 	var o HeldOperation
 	var tried *time.Time
 	err := row.Scan(&o.Seq, &o.Kind, &o.OpID, &o.MachineID, &o.SessionID, &o.Call, &o.Lang, &o.State, &o.Failure, &o.Error,
-		&o.SentAt, &o.HeldAt, &tried, &o.Attempts, &o.Text, &o.Images, &o.CredentialID)
+		&o.SentAt, &o.HeldAt, &tried, &o.Attempts, &o.Text, &o.Images, &o.CredentialID, &o.Meta)
 	if tried != nil {
 		o.TriedAt = *tried
 	}

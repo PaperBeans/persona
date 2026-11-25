@@ -1,5 +1,6 @@
 {
   "failed": "デプロイに失敗しました：{error}",
   "requesting": "リクエスト中",
-  "details": "詳細"
+  "details": "詳細",
+  "co_located_note": "共有の personad プログラムを更新します。同居するアシスタント（{names}）はアイドル時に自動で再起動します。"
 }

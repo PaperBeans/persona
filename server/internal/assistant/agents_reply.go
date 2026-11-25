@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -217,7 +218,8 @@ func (s *Service) replySince(machine string, sess proto.Session) time.Time {
 	return sess.UpdatedAt
 }
 
-// remindReply pushes that sess still waits on the user's answer, to the devices that take Needs You pushes.
+// remindReply routes an agent waiting for a reply to its supervisor or the main conversation instead of pushing
+// to the owner; only when neither a supervisor nor a main conversation is configured does it fall back to a push.
 func (s *Service) remindReply(machine string, sess proto.Session) error {
 	if s.directoryHiddenSession(machine, sess.SessionID) {
 		return nil
@@ -226,6 +228,19 @@ func (s *Service) remindReply(machine string, sess proto.Session) error {
 	s.logf("reply reminder %s/%s: %s", machine, short(sess.SessionID), body)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if to, ok := s.nonOwnerCardTarget(ctx, machine, sess.SessionID); ok {
+		text := fmt.Sprintf("Agent waiting for a reply (machine=%s session_id=%s): %s\n%s", machine, sess.SessionID, head, body)
+		if _, kept := s.keepRelayLater(to, relayMsg{
+			From:      cardAgentReply,
+			FromTitle: head,
+			Tool:      cardAgentReply,
+			Text:      text,
+			At:        time.Now().UTC(),
+		}); kept {
+			s.publish(ctx)
+		}
+		return nil
+	}
 	n := Notification{ID: "ntf_" + randomHex(8),
 		Kind: assistantwire.NotifyReply, DeviceID: machine, SessionID: sess.SessionID, Subtitle: s.pushPlace(machine, sess),
 		Title: head, Body: body, RelatedKey: replyRelatedKey(sess)}

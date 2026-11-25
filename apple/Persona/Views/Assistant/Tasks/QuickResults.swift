@@ -19,7 +19,7 @@ nonisolated struct QuickResult: Hashable, Sendable {
 
     /// The calls that are drawn this way, by the tool's own name (an MCP name ends in it: mcp__<server>__<name>).
     static func kind(of name: String) -> Kind? {
-        let short = name.components(separatedBy: "__").last ?? name
+        let short = HubNaming.canonicalMCPTool(name).components(separatedBy: "__").last ?? name
         switch short {
         case "phone_reminders_create": return .reminder
         case "phone_calendar_create_event": return .event
@@ -29,7 +29,8 @@ nonisolated struct QuickResult: Hashable, Sendable {
 
     init?(_ call: ToolCall) {
         guard let kind = Self.kind(of: call.name), let result = call.result, result.isError != true,
-              let text = result.text, let data = text.data(using: .utf8),
+              let text = result.text,
+              let data = HubNaming.stripToolResultTimestampHeaders(text).data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let id = obj["id"] as? String, !id.isEmpty else { return nil }
         self.kind = kind

@@ -387,6 +387,14 @@ func (s *Service) translateInbox(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
+			allowed, visibilityErr := s.inboxVisibilityModelAllowed(ctx, j.it)
+			if visibilityErr != nil {
+				s.logf("inbox: translate %s: chat visibility: %v", j.it.ID, visibilityErr)
+				return
+			}
+			if !allowed {
+				continue
+			}
 			t, err := s.translateMailFresh(ctx, assistantwire.InboxMailRef{AccountID: j.account, UID: j.uid, Mailbox: j.mailbox}, j.target, fingerprint)
 			if err != nil {
 				if paused, _ := modelPaused(err); paused { // the rest wait for the next pass

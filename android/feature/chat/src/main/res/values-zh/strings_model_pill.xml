@@ -40,5 +40,12 @@
     <string name="chat_engine_switch_handoff_title">交接内容</string>
     <string name="chat_modelpanel_engine_note">切换引擎会重建上下文，可能丢失内容</string>
     <string name="chat_modelpanel_switch_scheduled">已登记切换：下一条消息发出时，Agent 会换到 %1$s</string>
+    <string name="chat_modelpanel_switch_title">切换此对话的连接？</string>
+    <string name="chat_modelpanel_switch_explanation">使用最近的消息和摘要，在 %1$s 上继续。对话及其任务仍留在这里，部分细节会被概括。新连接将在你发送下一条消息时接手。</string>
+    <string name="chat_modelpanel_switch_confirm">切换连接</string>
+    <string name="chat_modelpanel_switch_requested">已请求切换，可在此对话中继续。</string>
+    <string name="chat_modelpanel_switch_unavailable">暂时无法切换连接，请刷新对话后重试。</string>
+    <string name="chat_modelpanel_switch_unconfirmed">尚未确认切换结果。重试会使用同一请求，不会再次发起切换。%1$s</string>
+    <string name="chat_modelpanel_supervision_unavailable">此连接无法接收独立的任务跟进指令。</string>
     <string name="chat_model_changed">模型已从 %1$s 切换到 %2$s</string>
 </resources>

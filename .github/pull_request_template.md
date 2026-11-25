@@ -8,6 +8,7 @@
 
 <!-- Commands you ran and their results; screenshots for UI changes (light and dark), shown here and not committed. Say what was not run. -->
 
+Domain model: a new server package declares its layer; each declared package it changes passes `go test ./<pkg>/...` (its domain rules); no getter, exported field, primitive or untyped seam added; or N/A.
 
 
 ## Apple performance

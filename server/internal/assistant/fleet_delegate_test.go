@@ -40,7 +40,7 @@ func newDelegateFleet(t *testing.T, decide func(DelegateParams) (DelegateResult,
 	t.Helper()
 	ft := newFleetTest(t)
 	on := true
-	ft.f.hello.Agents.Delegate.Enabled = &on // off by default
+	ft.f.setHello(func(h *Hello) { h.Agents.Delegate.Enabled = &on }) // off by default
 	list := []proto.Session{{SessionID: "s1", Title: "修登录", Cwd: "/code/app", Status: proto.StatusBlocked, UpdatedAt: time.Now().UTC()}}
 	ft.d.setSessions("mac", list)
 	ft.f.setSessions("mac", list...) // where messages to agents go (session.send through the hub)
@@ -194,7 +194,7 @@ func TestDelegateTimesOut(t *testing.T) {
 		<-release
 		return DelegateResult{}, nil
 	})
-	df.f.hello.Agents.Delegate.TimeoutSeconds = 1
+	df.f.setHello(func(h *Hello) { h.Agents.Delegate.TimeoutSeconds = 1 })
 	ix := delegateQuestion("ix_d3")
 	df.ask(ix)
 	time.Sleep(300 * time.Millisecond)
@@ -253,10 +253,10 @@ func TestDelegateOnlyQuestions(t *testing.T) {
 		waitDelegate(t, ix.ID+" pushed", func() bool { return df.pushedFor(ix.ID) != nil })
 	}
 	off := false
-	df.f.hello.Agents.Delegate.Enabled = &off
+	df.f.setHello(func(h *Hello) { h.Agents.Delegate.Enabled = &off })
 	df.ask(delegateQuestion("ix_off"))
 	waitDelegate(t, "pushed with delegate off", func() bool { return df.pushedFor("ix_off") != nil })
-	df.f.hello.Agents.Delegate.Enabled = nil
+	df.f.setHello(func(h *Hello) { h.Agents.Delegate.Enabled = nil })
 	df.ask(delegateQuestion("ix_unset"))
 	waitDelegate(t, "pushed with delegate unset", func() bool { return df.pushedFor("ix_unset") != nil })
 	if got := df.delegateCalls(); got != 0 {
@@ -295,7 +295,7 @@ func TestReanswer(t *testing.T) {
 	}
 
 	off := false
-	df.f.hello.Agents.Delegate.Enabled = &off
+	df.f.setHello(func(h *Hello) { h.Agents.Delegate.Enabled = &off })
 	mine := delegateQuestion("ix_mine")
 	answered := df.ask(mine)
 	df.waitPending(1)

@@ -99,5 +99,6 @@
   "start_link_lost": "和「{machine}」的连接断了，重连后也没看到任务起来：{reason}",
   "start_machine_busy": "「{machine}」一直连着，但在等待时间内没回应（电脑可能太忙）：{reason}",
   "start_link_down": "和「{machine}」的连接断了，等了一阵也没重连上：{reason}",
+  "codex_effort_terminal": "为使用指定的推理强度，Codex 将通过终端启动。审批和提问将通过终端画面处理。",
   "start_goal_skipped": "启动时没能设开始目标：{reason}"
 }

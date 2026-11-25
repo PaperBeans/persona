@@ -4,6 +4,6 @@
 import { Button } from "./atoms";
 import { t } from "../i18n";
 
-export function ListError({ text, onRetry }: { text: string; onRetry: () => void }) {
-  return <div className="px-2 py-2"><p role="alert" className="text-xs text-red">{text}</p><Button onClick={onRetry}>{t("sidebar.retry")}</Button></div>;
+export function ListError({ text, onRetry, action }: { text: string; onRetry: () => void; action?: string }) {
+  return <div className="px-2 py-2"><p role="alert" className="text-xs text-red">{text}</p><Button onClick={onRetry}>{action ?? t("sidebar.retry")}</Button></div>;
 }

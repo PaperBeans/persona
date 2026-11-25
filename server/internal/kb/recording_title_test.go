@@ -195,11 +195,11 @@ func TestLiveTitleNeverOverTheOwnersOrTheCalendars(t *testing.T) {
 		t.Fatalf("renamed: %+v", put)
 	}
 	// An all-day recording keeps its day's name.
-	if (&Recording{Kind: RecordingDay, AITitle: "x", Chars: 5000}).liveTitleDue(now) {
+	if liveTitleDue(&Recording{Kind: RecordingDay, AITitle: "x", Chars: 5000}, now) {
 		t.Error("a day recording is due a live title")
 	}
 	// A lost phone's recording is left as it is.
-	if (&Recording{Chars: 5000, Updated: now.Add(-13 * time.Hour)}).liveTitleDue(now) {
+	if liveTitleDue(&Recording{Chars: 5000, Updated: now.Add(-13 * time.Hour)}, now) {
 		t.Error("a recording with no upload for 13 hours is due a live title")
 	}
 }
@@ -238,8 +238,8 @@ func TestGoldenLiveTitle(t *testing.T) {
 	putRecording(t, e, paused, recUpload(1, start, false, talk(0, 20)...), now)
 	e.Model = &titleModel{errs: []error{&ai.PausedError{Pause: ai.Pause{Reason: ai.ReasonBusy, Until: now.Add(time.Minute)}}}}
 	e.TitleRecordings(context.Background(), 2)
-	if r := recordingNow(t, e, paused); r.LiveTitles != 0 || !r.liveTitleDue(now) {
-		t.Errorf("after a pause: %d calls, due %v", r.LiveTitles, r.liveTitleDue(now))
+	if r := recordingNow(t, e, paused); r.LiveTitles != 0 || !liveTitleDue(r, now) {
+		t.Errorf("after a pause: %d calls, due %v", r.LiveTitles, liveTitleDue(r, now))
 	}
 
 	if got := headAndTail(strings.Repeat("a", 10)+strings.Repeat("b", 10), 3, 4); got != "aaa\n…（中间省略）…\nbbbb" {
@@ -277,7 +277,7 @@ func TestWebRename(t *testing.T) {
 	if err != nil || r.Name != "网页名" || r.NameSource() != NamedByRename || r.RenamedAt == nil {
 		t.Fatalf("renamed: %+v %v", r, err)
 	}
-	if recordingNow(t, e, recID).liveTitleDue(now) {
+	if liveTitleDue(recordingNow(t, e, recID), now) {
 		t.Error("a renamed recording is due a live title")
 	}
 	if states, _ := e.RecordingStates(); states[0].Name != "网页名" || states[0].NameSource != NamedByRename {

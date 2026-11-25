@@ -55,6 +55,26 @@ func foldable(it proto.Item) bool {
 		(it.Kind == proto.KindText && it.Narration) || (it.Kind == proto.KindImage && it.ToolUseID != "")
 }
 
+func TestFoldKeepsLatestBashDescription(t *testing.T) {
+	run := []proto.Item{
+		{Kind: proto.KindToolUse, ToolName: "Bash", ToolInput: json.RawMessage(`{"description":"First"}`)},
+		{Kind: proto.KindToolUse, ToolName: "Bash", ToolInput: json.RawMessage(`{"description":"确认判断用的是哪个模型\nextra","command":"raw arguments"}`)},
+		{Kind: proto.KindToolResult, Text: "raw output"},
+		{Kind: proto.KindThinking, Text: "hidden"},
+	}
+	if got := fold(run).Text; got != "确认判断用的是哪个模型" {
+		t.Fatal(got)
+	}
+	for _, last := range []proto.Item{
+		{Kind: proto.KindToolUse, ToolName: "Read"},
+		{Kind: proto.KindToolUse, ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"unlabelled"}`)},
+	} {
+		if got := fold(append(run, last)).Text; got != "" {
+			t.Fatalf("stale caption %q", got)
+		}
+	}
+}
+
 // The phone's first page of a long session carries the prompts, the replies and one fold per run of work (tools,
 // thoughts) with its counts — not the work itself, which the chat shows folded anyway. Opening a fold fetches
 // exactly what it stands for.

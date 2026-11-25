@@ -5,7 +5,7 @@ package persona.core.contracts
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.KeepGeneratedSerializer
-import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.*
 
 @KeepGeneratedSerializer
 @Serializable(with = MachineSystemSerializer::class)
@@ -387,24 +387,90 @@ data class Heartbeat(val interval: Int, @SerialName("pong_timeout") val pongTime
 @KeepGeneratedSerializer
 @Serializable(with = ImageLimitsSerializer::class)
 data class ImageLimits(
-    @SerialName("request_bytes") val requestBytes: Long = 32 * 1024 * 1024,
-    @SerialName("image_bytes") val imageBytes: Long = 3_750_000,
-    @SerialName("max_side") val maxSide: Int = 1600,
-    @SerialName("per_message") val perMessage: Int = 20,
-)
+    @SerialName("request_bytes") val requestBytes: Long = DEFAULT_REQUEST_BYTES,
+    @SerialName("image_bytes") val imageBytes: Long = DEFAULT_IMAGE_BYTES,
+    @SerialName("max_side") val maxSide: Int = DEFAULT_MAX_SIDE,
+    @SerialName("per_message") val perMessage: Int = DEFAULT_PER_MESSAGE,
+) {
+    /** Whether one more picture fits: [Count] past [perMessage], [Bytes] past what the body leaves for pictures. */
+    enum class Room { Ok, Count, Bytes }
+
+    /** Whether one more picture of [size] base64 bytes fits beside [held] (their base64 lengths). */
+    fun room(held: Collection<Long>, size: Long): Room {
+        if (held.size >= perMessage) return Room.Count
+        val budget = (requestBytes - BODY_ROOM).coerceAtLeast(0L)
+        return if (held.sum() + size > budget) Room.Bytes else Room.Ok
+    }
+
+    /** How many more pictures fit by count alone (a picker's selection room). */
+    fun roomLeft(holding: Int): Int = (perMessage - holding).coerceAtLeast(0)
+
+    companion object {
+        const val DEFAULT_REQUEST_BYTES = 32L * 1024 * 1024
+        const val DEFAULT_IMAGE_BYTES = 3_750_000L
+        const val DEFAULT_MAX_SIDE = 1600
+        const val DEFAULT_PER_MESSAGE = 20
+        /** Room a message keeps beside its pictures, for its words, quotes and other fields (~1 MiB). */
+        const val BODY_ROOM = 1L * 1024 * 1024
+
+        val Standard = ImageLimits()
+
+        /** Base64 length of [rawBytes] decoded bytes (4 characters per 3 bytes, rounded up). */
+        fun base64Bytes(rawBytes: Long): Long = if (rawBytes <= 0L) 0L else ((rawBytes + 2L) / 3L) * 4L
+    }
+}
 
 /** The hub's default set and any per-Agent overrides, not a second definition of its default limits. */
 @KeepGeneratedSerializer
 @Serializable(with = ImageLimitsTableSerializer::class)
 data class ImageLimitsTable(
-    @SerialName("request_bytes") val requestBytes: Long = 32 * 1024 * 1024,
-    @SerialName("image_bytes") val imageBytes: Long = 3_750_000,
-    @SerialName("max_side") val maxSide: Int = 1600,
-    @SerialName("per_message") val perMessage: Int = 20,
+    @SerialName("request_bytes") val requestBytes: Long = ImageLimits.DEFAULT_REQUEST_BYTES,
+    @SerialName("image_bytes") val imageBytes: Long = ImageLimits.DEFAULT_IMAGE_BYTES,
+    @SerialName("max_side") val maxSide: Int = ImageLimits.DEFAULT_MAX_SIDE,
+    @SerialName("per_message") val perMessage: Int = ImageLimits.DEFAULT_PER_MESSAGE,
     val agents: Map<String, ImageLimits> = emptyMap(),
 ) {
-    fun forAgent(agent: String): ImageLimits = agents[agent.ifEmpty { "claude" }]
-        ?: ImageLimits(requestBytes, imageBytes, maxSide, perMessage)
+    val topLevel: ImageLimits get() = ImageLimits(requestBytes, imageBytes, maxSide, perMessage)
+
+    fun forAgent(agent: String? = null): ImageLimits =
+        agents[agent.orEmpty().ifEmpty { "claude" }] ?: topLevel
+
+    companion object {
+        val Standard = ImageLimitsTable()
+    }
+}
+
+internal fun parseImageLimits(element: JsonElement?): ImageLimits? {
+    val obj = element as? JsonObject ?: return null
+    return ImageLimits(
+        requestBytes = positiveLong(obj, "request_bytes", ImageLimits.DEFAULT_REQUEST_BYTES),
+        imageBytes = positiveLong(obj, "image_bytes", ImageLimits.DEFAULT_IMAGE_BYTES),
+        maxSide = positiveInt(obj, "max_side", ImageLimits.DEFAULT_MAX_SIDE),
+        perMessage = positiveInt(obj, "per_message", ImageLimits.DEFAULT_PER_MESSAGE),
+    )
+}
+
+internal fun parseImageLimitsTable(element: JsonElement?): ImageLimitsTable? {
+    val obj = element as? JsonObject ?: return null
+    val top = parseImageLimits(obj) ?: return null
+    val agents = (obj["agents"] as? JsonObject)?.entries?.mapNotNull { (key, value) ->
+        parseImageLimits(value)?.let { key to it }
+    }?.toMap().orEmpty()
+    return ImageLimitsTable(top.requestBytes, top.imageBytes, top.maxSide, top.perMessage, agents)
+}
+
+private fun positiveLong(obj: JsonObject, key: String, fallback: Long): Long {
+    val primitive = (obj[key] as? JsonPrimitive)?.takeUnless { it.isString } ?: return fallback
+    primitive.longOrNull?.let { if (it >= 1L) return it else return fallback }
+    val number = primitive.doubleOrNull ?: return fallback
+    return if (number.isFinite() && number >= 1.0 && number < Long.MAX_VALUE.toDouble()) number.toLong() else fallback
+}
+
+private fun positiveInt(obj: JsonObject, key: String, fallback: Int): Int {
+    val primitive = (obj[key] as? JsonPrimitive)?.takeUnless { it.isString } ?: return fallback
+    primitive.longOrNull?.let { return if (it in 1L..Int.MAX_VALUE.toLong()) it.toInt() else fallback }
+    val number = primitive.doubleOrNull ?: return fallback
+    return if (number.isFinite() && number >= 1.0 && number <= Int.MAX_VALUE.toDouble()) number.toInt() else fallback
 }
 
 @KeepGeneratedSerializer
@@ -467,8 +533,26 @@ object EndpointsResponseSerializer : WireSerializer<EndpointsResponse>(Endpoints
 object HealthSerializer : WireSerializer<Health>(Health.generatedSerializer())
 object HeartbeatSerializer : WireSerializer<Heartbeat>(Heartbeat.generatedSerializer())
 object ErrorBodySerializer : WireSerializer<ErrorBody>(ErrorBody.generatedSerializer())
-object ImageLimitsSerializer : WireSerializer<ImageLimits>(ImageLimits.generatedSerializer())
-object ImageLimitsTableSerializer : WireSerializer<ImageLimitsTable>(ImageLimitsTable.generatedSerializer())
+object ImageLimitsSerializer : kotlinx.serialization.KSerializer<ImageLimits> {
+    private val generated = ImageLimits.generatedSerializer()
+    override val descriptor get() = generated.descriptor
+    override fun deserialize(decoder: kotlinx.serialization.encoding.Decoder): ImageLimits {
+        val input = decoder as? JsonDecoder ?: throw kotlinx.serialization.SerializationException("Wire models require JSON")
+        return parseImageLimits(input.decodeJsonElement())
+            ?: throw kotlinx.serialization.SerializationException("Expected image limits object")
+    }
+    override fun serialize(encoder: kotlinx.serialization.encoding.Encoder, value: ImageLimits) = generated.serialize(encoder, value)
+}
+object ImageLimitsTableSerializer : kotlinx.serialization.KSerializer<ImageLimitsTable> {
+    private val generated = ImageLimitsTable.generatedSerializer()
+    override val descriptor get() = generated.descriptor
+    override fun deserialize(decoder: kotlinx.serialization.encoding.Decoder): ImageLimitsTable {
+        val input = decoder as? JsonDecoder ?: throw kotlinx.serialization.SerializationException("Wire models require JSON")
+        return parseImageLimitsTable(input.decodeJsonElement())
+            ?: throw kotlinx.serialization.SerializationException("Expected image limits table object")
+    }
+    override fun serialize(encoder: kotlinx.serialization.encoding.Encoder, value: ImageLimitsTable) = generated.serialize(encoder, value)
+}
 object ImageCountSerializer : WireSerializer<ImageCount>(ImageCount.generatedSerializer())
 
 /** Where a [Workflow] run stands; a status this app does not know reads as [Completed] (docs/protocol/protocol.md). */

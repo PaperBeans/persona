@@ -196,8 +196,8 @@ class Device:
 
 
 class CaseHub:
-    def __init__(self, case, now=time.monotonic, shift=0):
-        """`shift`: every time in the case that many seconds later (`shift_to`)."""
+    def __init__(self, case, now=time.monotonic, shift=0, live_time=None):
+        """Shift fixture times by `shift` seconds. A live new chat dates transcript appends when they happen."""
         case = moved(case, shift)
         self.case = case
         self.chat = case["chat"]
@@ -209,6 +209,8 @@ class CaseHub:
         self.receipts = {}  # op id -> {"status", "body"}
         self.key_of = {}  # an app's client_msg_id -> the case's message id
         self.last_cmid = {}  # the case's message id -> the client_msg_id its latest write had
+        self.append_times = {}  # new chat transcript item id -> the time when the mock appended it
+        self.live_time = live_time if self.chat.get("new") else None
         self.texts = {}  # the case's message id -> its words (to know a send by them)
         self.start_id = ""
         self.unknown = []
@@ -243,7 +245,21 @@ class CaseHub:
         o = {k: self.tie(x) for k, x in v.items()}
         if isinstance(o.get("client_msg_id"), str):
             o["client_msg_id"] = self.last_cmid.get(o["client_msg_id"], o["client_msg_id"])
+        if o.get("ts") and isinstance(o.get("id"), str) and o["id"] in self.append_times:
+            o["ts"] = self.append_times[o["id"]]
         return o
+
+    def apply_hub_change(self, change):
+        if self.live_time is not None and change.get("append"):
+            # A new chat writes its first transcript line after the app has launched and sent the message.
+            stamp = moved(CLOCK, shift_to(self.live_time()))
+            lines = []
+            for line in change["append"]:
+                if line.get("ts"):
+                    line = {**line, "ts": self.append_times.setdefault(line["id"], stamp)}
+                lines.append(line)
+            change = {**change, "append": lines}
+        self.truth.apply(change)
 
     # ── the socket ──
 
@@ -413,7 +429,7 @@ class CaseHub:
         self.index += 1
         if s.get("hub"):
             with self.lock:
-                self.truth.apply(s["hub"])
+                self.apply_hub_change(s["hub"])
         sock = s.get("socket")
         if sock and sock.get("drop"):
             self.drop(sock["device"])
@@ -590,7 +606,10 @@ def serve_socket(h, hub):
         try:
             frame(8, struct.pack(">H", 1001) + b"case drop")
             h.connection.shutdown(socket.SHUT_RDWR)
-        except OSError:
+        except (OSError, ValueError):
+            # A peer that already closed its stream cannot receive the close
+            # frame. The case has already dropped this socket; do not turn the
+            # old handler's cleanup into a failed unrelated HTTP request.
             pass
 
     conn = Conn(write, close)

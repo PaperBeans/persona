@@ -114,14 +114,16 @@ export function assistantPanel(setup: AssistantSetup, info: AssistantLaunchers |
   return { providers, state };
 }
 
-/** What a pick of `config` keeps for the chat: the launcher, the model unless it is the launcher's default entry, the
- *  effort when the setup has one. null: nothing to keep (an ID the hub would refuse, or the setup the chat runs now). */
+/** What a pick of `config` keeps for the chat: the launcher, the model unless it explicitly follows the launcher's
+ *  default ("default", or the sole default row of a locked launcher), and the effort when the setup has one.
+ *  null: nothing to keep (an ID the hub would refuse, or the setup the chat already keeps as `current`). */
 export function assistantPickOf(config: PanelConfig, list: LauncherModels | null | undefined, current: PanelConfig | null): ModelPick | null {
   const row = list?.models.find((m) => m.id === config.model);
   if (!row && !validModelId(config.model)) return null;
   if (current && current.provider === config.provider && current.model === config.model && (current.effort || "") === (config.effort || "")) return null;
   const pick: ModelPick = { launcher: config.provider };
-  if (!row?.default) pick.model = config.model;
+  const launcherDefault = config.model === "default" || Boolean(list?.locked && row?.default);
+  if (!launcherDefault) pick.model = config.model;
   if (config.effort) pick.effort = config.effort;
   return pick;
 }

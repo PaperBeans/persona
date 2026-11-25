@@ -202,6 +202,42 @@ class RequestTests(unittest.TestCase):
             excluded = json.loads(subprocess.check_output(command + ["--request-breakdown", "--since", "2026-11-19"]))
             self.assertEqual(excluded["request_breakdown"]["rows"], [])
 
+    def test_cli_breakdown_keeps_valid_rows_after_malformed_items(self):
+        invalid_block = {"type": ["invalid"]}
+        invalid_item = {"type": {"invalid": True}}
+        entries = [
+            {"type": "request", "runtime": "anthropic", "request": {"messages": [
+                {"role": "user", "content": [invalid_block, {"type": "text", "text": "question"}]},
+            ]}},
+            {"type": "request", "runtime": "responses", "request": {"input": [invalid_item]}},
+            {"type": "session_meta"},
+            {"type": "response_item", "payload": invalid_block},
+            {"type": "request", "runtime": "responses", "request": {"input": "partial\ud800"}},
+            {"type": "request", "runtime": "responses", "request": {"input": "later"}},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture.jsonl"
+            path.write_text("\n".join(map(json.dumps, entries)))
+            command = [sys.executable, "-B", str(Path(report.__file__)), "--json", "--request-breakdown", str(path)]
+            result = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        anthropic, responses, escaped, later, transcript = json.loads(result.stdout)["request_breakdown"]["rows"]
+        self.assertEqual(anthropic["sources"]["current_message"], {"bytes": 8, "items": 1})
+        for row in (anthropic, responses, transcript):
+            self.assertEqual(row["sources"]["other_content"]["items"], 1)
+            self.assertEqual(row["sources"]["tool_results"], {"bytes": 0, "items": 0})
+        self.assertEqual(escaped["sources"]["current_message"], {"bytes": len(b"partial\\ud800"), "items": 1})
+        self.assertEqual(later["sources"]["current_message"], {"bytes": 5, "items": 1})
+        self.assertNotIn("partial", result.stdout)
+
+    def test_claude_inventory_deduplicates_escaped_surrogate_blocks(self):
+        assistant = {"type": "assistant", "message": {"id": "fixture", "content": [
+            {"type": "text", "text": "value\ud800"},
+        ]}}
+        result = self.run_lines([assistant, assistant])
+        row = result["request_breakdown"]["rows"][0]
+        self.assertEqual(row["sources"]["history"], {"bytes": len(b"value\\ud800"), "items": 1})
+
     def test_cli_since_matches_usage_and_request_rows_across_offsets(self):
         samples = [
             ("2026-11-20T08:00:00.001Z", "fresh", 11),

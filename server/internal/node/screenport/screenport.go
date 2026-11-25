@@ -3,10 +3,15 @@
 // resumed across the hub's relays and the computer's direct routes. The node's composition root
 // (internal/modules/all/node) provides the module's sessions; a build without the module (persona_without_screen_share,
 // persona_core_only) provides none, and a live screen runs as the plain relayed stream it already uses when the phone
-// asks for no session. It is its own package so that the composition root need not import internal/node.
+// asks for no session; so does a node whose hub announced the module switched off (moduleswitch.FromFeatures), from
+// then on. It is its own package so that the composition root need not import internal/node.
 package screenport
 
-import "io"
+import (
+	"io"
+
+	"github.com/nwverse/persona/server/internal/moduleswitch"
+)
 
 // Session is one pair's live screen session.
 type Session interface {
@@ -33,10 +38,16 @@ type Links interface {
 // Factory makes the node's screen sessions; logf is the node's log.
 type Factory func(logf func(string, ...any)) Links
 
-var factory Factory
+var port = moduleswitch.NewPort[Factory]("node/screenport")
 
-// Provide sets the screen-share module's factory; the node's composition root calls it from init.
-func Provide(f Factory) { factory = f }
+// Provide sets the screen-share module's factory under its module id; the node's composition root calls it from init.
+func Provide(module string, f Factory) { port.Provide(module, f) }
 
 // New is the module's factory, nil when this build has no screen-share module.
-func New() Factory { return factory }
+func New() Factory {
+	f, _ := port.Get(moduleswitch.Set{})
+	return f
+}
+
+// On reports whether this build has the module and s has it on: the node asks it before it uses a session.
+func On(s moduleswitch.Set) bool { return port.On(s) }

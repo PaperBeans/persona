@@ -1,0 +1,11 @@
+{
+  "agent_starter_repo": "現在のリポジトリ構造を整理して",
+  "agent_starter_git": "git の状態と最近の変更を確認して",
+  "agent_starter_tests": "テストを実行して結果を報告して",
+  "assistant_starter_todos": "今日の予定やタスクを教えて",
+  "assistant_starter_messages": "最近の重要なメッセージをまとめて",
+  "assistant_starter_tasks": "手元のタスクを整理して",
+  "ask_persona": "{name} に質問",
+  "new_chat": "新しい会話を始める",
+  "subtitle": "アイデアを入力、画像を貼り付け、または / コマンドや @ でファイルを参照"
+}

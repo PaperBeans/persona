@@ -130,7 +130,7 @@ func TestTodoAfterReadySinglePrereqTodoCompleteRoutesToMainNotBackground(t *test
 		proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle},
 		proto.Session{SessionID: "bg1", MachineID: "server", Assistant: true, Status: proto.StatusIdle},
 	)
-	f.hello.Assistant.CompleteAgentlessTodos = true
+	f.setHello(func(h *Hello) { h.Assistant.CompleteAgentlessTodos = true })
 
 	root := createRequestAndPiece(t, s, "conv1", "Batch rollout", "", "", nil)
 	pre := createRequestAndPiece(t, s, "conv1", "Batch 1 schema", "", root.ID, nil)

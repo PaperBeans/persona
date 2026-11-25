@@ -108,5 +108,8 @@ type Handler interface {
 // roleFull is a device that may do everything (an answer-only watch may not).
 const roleFull = "full"
 
+// roleAnswer is the watch's answer-only device credential.
+const roleAnswer = "answer"
+
 // roleExtension is an extension's token (ExtensionHeader says which).
 const roleExtension = "extension"

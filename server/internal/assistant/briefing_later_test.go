@@ -80,6 +80,7 @@ func TestBriefCutsTheQueueAtTenRows(t *testing.T) {
 
 // The briefing card has a "Can wait" section after "To verify", each question with its own Handled button.
 func TestBriefCardHasACanWaitSection(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newBriefRunEnvWith(t, true, func(e *briefRunEnv) {
 		e.later("1", "todo_a", "新接口用 snake_case 还是 camelCase？", 30*time.Hour)
 		e.later("2", "todo_b", "图标要不要换？", time.Hour)
@@ -107,6 +108,7 @@ func TestBriefCardHasACanWaitSection(t *testing.T) {
 
 // With nothing in the queue the card has no such section (not an empty one every morning).
 func TestBriefCardLeavesOutAnEmptyCanWaitSection(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newBriefRunEnv(t, true)
 	e.mirror()
 	if card := e.cards()[0]; strings.Contains(card, "晚点答") || strings.Contains(card, "later_done") {
@@ -116,6 +118,7 @@ func TestBriefCardLeavesOutAnEmptyCanWaitSection(t *testing.T) {
 
 // Too many questions are not cut off in the middle of the card: briefRowsMax of them, the rest counted, inside the size Lark takes.
 func TestBriefCardCountsQuestionsThatDoNotFit(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newBriefRunEnvWith(t, true, func(e *briefRunEnv) {
 		for i := 0; i < 13; i++ {
 			e.later(fmt.Sprint(i), "todo_a", fmt.Sprintf("问题%02d", i), time.Duration(100-i)*time.Hour)
@@ -142,6 +145,7 @@ func TestBriefCardCountsQuestionsThatDoNotFit(t *testing.T) {
 // The Handled button of the card takes the question out of the queue: the next briefing does not list it. Pressed again,
 // or for a question that is not there, it answers "already handled".
 func TestBriefHandledButtonOfTheCard(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newBriefRunEnvWith(t, true, func(e *briefRunEnv) {
 		e.later("1", "todo_a", "新接口用 snake_case 还是 camelCase？", 30*time.Hour)
 		e.later("2", "todo_b", "图标要不要换？", time.Hour)
@@ -155,7 +159,7 @@ func TestBriefHandledButtonOfTheCard(t *testing.T) {
 		var a botcard.CardAction
 		a.Action.Value = map[string]any{"a": "later_done", "id": id}
 		a.Context.MessageID = "om_brief_1"
-		return e.s.botCardAction(ctx, &a, "")
+		return e.s.larkModule().Action(ctx, &a, "")
 	}
 	if r := press(first.Later[0].id); r == nil || r.Toast == nil || r.Toast.Type != "success" || !strings.Contains(r.Toast.Content, "已标记为处理过") {
 		t.Fatalf("the press: %+v", r)
@@ -273,6 +277,7 @@ func TestBriefLaterRoute(t *testing.T) {
 // error: 503 for the web app and an error toast on the card, never "already handled". The question stays, and the next
 // press once the store is back takes it out.
 func TestBriefLaterRouteOnAStoreFailure(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newBriefEnv(t)
 	a := e.later("todo_a", "图标要不要换？", time.Hour)
 	ctx := context.Background()
@@ -284,7 +289,7 @@ func TestBriefLaterRouteOnAStoreFailure(t *testing.T) {
 	press := func(s *Service, id string) *botcard.CardResponse {
 		var c botcard.CardAction
 		c.Action.Value = map[string]any{"a": "later_done", "id": id}
-		return s.botCardAction(ctx, &c, "")
+		return s.larkModule().Action(ctx, &c, "")
 	}
 	unavailable := i18n.T(e.s.botLang(ctx), "http-status.unavailable")
 	failed := func(s *Service, what string) {
@@ -297,9 +302,9 @@ func TestBriefLaterRouteOnAStoreFailure(t *testing.T) {
 		}
 	}
 
-	e.st.failPut = errors.New("database unavailable")
+	e.st.setFailPut(errors.New("database unavailable"))
 	failed(e.s, "not written")
-	e.st.failPut = nil
+	e.st.setFailPut(nil)
 
 	restarted := newBoardEnvOn(t, e.st) // its to-dos are in memory: the question's one is still open
 	restarted.s.todos.todos["todo_a"] = &Todo{ID: "todo_a", Title: "todo_a", Origin: "conv1"}
@@ -341,6 +346,7 @@ func TestBriefRunPushSaysHowManyCanWait(t *testing.T) {
 // Every section over-full at once: the card stays inside Lark's element and size limits, and each "and N more" line is the last
 // line of its section (never after a section that lost its heading).
 func TestBriefCardWithEverySectionOverfullStaysInsideTheLimits(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newBriefRunEnvWith(t, true, func(e *briefRunEnv) {
 		var sessions []proto.Session
 		for i := 0; i < 12; i++ {

@@ -113,11 +113,11 @@ func TestDeletePersonaStorageFailure(t *testing.T) {
 	st := &memStore{vals: map[string][]byte{}}
 	s := newServiceOn(t, f, st)
 	setSettings(t, s, func(v *Settings) { v.MachineID = "server" })
-	st.failPut = errors.New("synthetic storage unavailable")
+	st.setFailPut(errors.New("synthetic storage unavailable"))
 	if err := s.deleteConversation(context.Background(), "server", "work-0000-0000"); err == nil {
 		t.Fatal("failed storage acknowledged")
 	}
-	st.failPut = nil
+	st.setFailPut(nil)
 	if err := s.conversationAvailable(context.Background(), "server", "work-0000-0000"); err != nil {
 		t.Fatalf("failed delete changed memory: %v", err)
 	}

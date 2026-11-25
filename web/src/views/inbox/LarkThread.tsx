@@ -14,7 +14,7 @@ import { comparePosition, isDone, mergeMessages, withToken, type InboxItem, type
 import { cardText, emojiLabel, partRuns } from "../../lib/inbox-page";
 import { LARK_ATTACHMENT_REPLY_FEATURE, LARK_ATTACHMENTS_FEATURE, routeAllowed, type LarkAttachment } from "../../lib/lark-attachments";
 import { larkPath, olAccount } from "../../lib/lark-accounts";
-import { larkAccount } from "../../lib/lark-chats";
+import { larkAccount } from "../../lib/lark-account";
 import {
   cardButtons, chatImages, draftKey, isVoice, loadDraft, mergeAround, reactionsOf, readMark, ReadReceipts, readStates, react,
   statusOf, toggledReactions, type LarkProfileRef, type ReadState,

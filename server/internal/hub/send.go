@@ -657,7 +657,13 @@ func (b *bufferedResponse) Header() http.Header         { return b.header }
 func (b *bufferedResponse) Write(p []byte) (int, error) { return b.body.Write(p) }
 func (b *bufferedResponse) WriteHeader(code int)        { b.status = code }
 
+// writeRaw writes a send's answer, which the hub built itself (callErrBytes, laterBody) or a node returned (a 200): a
+// server error's is the hub's own error, noted for its request line (apierr.NoteError) as WriteBody would.
 func writeRaw(w http.ResponseWriter, status int, body []byte) {
+	var e map[string]any
+	if status >= 500 && json.Unmarshal(body, &e) == nil {
+		apierr.NoteError(w, status, e)
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write(body)

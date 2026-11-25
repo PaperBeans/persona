@@ -143,22 +143,16 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
   };
   const onPick = async (config: PanelConfig) => {
     const list = modelList(mid, config.provider, "assistant").list;
-    const pick = assistantPickOf(config, list, state.current);
+    // On a new draft, state.current is the displayed setup rather than a saved pick: picking it still pins every option.
+    const pick = assistantPickOf(config, list, chat.session ? state.current : null);
     if (pick) {
       if (!(await apply(pick))) return false;
-    } else if (config.provider !== state.current?.provider || config.model !== state.current.model) {
+    } else if (!chat.session || config.provider !== state.current?.provider || config.model !== state.current.model) {
       return false;
     }
     if (!chat.session) {
       const row = list?.models.find((m) => m.id === config.model);
       const fast = Boolean(startServiceTier && config.fast && modelSupportsFast(row));
-      if (!pick && fast) {
-        // A Recent or Favorite can differ from the shown setup only by Fast. Pin every displayed start option anyway:
-        // a cleared main must not revive its carried launcher, model or effort just because assistantPickOf saw no model edit.
-        const pin = assistantPickOf(config, list, null);
-        if (!pin) return false;
-        keepHere(pin);
-      }
       pickFast(fast);
     }
     return true;

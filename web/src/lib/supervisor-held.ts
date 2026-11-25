@@ -33,6 +33,23 @@ export function supervisorHeldOnly(interactions: readonly Interaction[]): Set<st
   return held;
 }
 
+/** The cards for one sidebar row `mid/sid` (counting folded children, homeKey): the first user-owned card (own before
+ *  child), how many user-owned child cards wait, how many own cards a supervisor holds, and whether it waits only on
+ *  supervisor-held cards. One pass, returning plain fields for useStore's shallowEqual. */
+export function rowCards(interactions: readonly Interaction[], mid: string, sid: string) {
+  let own: Interaction | undefined, kid: Interaction | undefined, kidCount = 0, ownHeld = 0, hasHeld = false;
+  const key = `${mid}/${sid}`;
+  for (const ix of interactions) {
+    if (homeKey(ix) !== key) continue;
+    const mine = ix.machine_id === mid && ix.session_id === sid;
+    if (supervisorHeld(ix)) { hasHeld = true; if (mine) ownHeld++; }
+    else if (mine) own ??= ix;
+    else { kid ??= ix; kidCount++; }
+  }
+  const ix = own ?? kid;
+  return { ix, kidCount, ownHeld, heldOnly: hasHeld && !ix };
+}
+
 /** The sessions as the overview lists them: one "Needs you" only for cards its supervisor holds is at work (the
  *  supervisor is), as Working, not waiting on the user. The same array when none is. */
 export function heldAsWorking(sessions: Session[], interactions: readonly Interaction[]): Session[] {

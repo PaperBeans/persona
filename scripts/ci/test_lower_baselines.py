@@ -44,6 +44,37 @@ class OnlyLowersTests(unittest.TestCase):
         self.assertEqual(only_lowers({"a": True}, {"a": False}), ["a: true -> false"])
 
 
+class DomainCountsTests(unittest.TestCase):
+    """The domain rules' baseline is text: a count's limit is its line plus one per allowance, and each allowance is an
+    entry of its own, so taking a landed one into the count keeps the limit and nothing adds one."""
+
+    def test_lines_read_as_counts(self):
+        text = (b"# a header\n\ninternal/a core-any 3\ninternal/b app-exported-record 12\n"
+                b"internal/b app-exported-record Seat #4512 #4513\ninternal/c app-named-primitive Kind #9\n")
+        self.assertEqual(lower_baselines.domain_counts(text),
+                         {"internal/a core-any": 3, "internal/b app-exported-record": 13,
+                          "internal/b app-exported-record Seat": 1, "internal/c app-named-primitive": 1,
+                          "internal/c app-named-primitive Kind": 1})
+        for bad in (b"internal/a core-any three\n", b"internal/a core-any 3 #12\n", b"internal/a core-any Seat\n"):
+            with self.subTest(line=bad), self.assertRaises(ValueError):
+                lower_baselines.domain_counts(bad)
+
+    def test_an_allowance_taken_in_keeps_the_limit_and_a_new_one_does_not_pass(self):
+        old = lower_baselines.domain_counts(b"internal/b app-exported-record 12\ninternal/b app-exported-record Seat #4512\n")
+        self.assertEqual(only_lowers(old, lower_baselines.domain_counts(b"internal/b app-exported-record 13\n")), [])
+        self.assertEqual(only_lowers(old, lower_baselines.domain_counts(
+            b"internal/b app-exported-record 12\ninternal/b app-exported-record Desk #4512\n")),
+            ["internal/b app-exported-record Desk: added"])
+
+    def test_a_lowering_passes_and_a_raise_or_a_new_line_does_not(self):
+        old = lower_baselines.domain_counts(b"internal/a core-any 3\ninternal/a core-tag 1\n")
+        self.assertEqual(only_lowers(old, lower_baselines.domain_counts(b"internal/a core-any 2\n")), [])
+        self.assertEqual(only_lowers(old, lower_baselines.domain_counts(b"internal/a core-any 4\ninternal/a core-tag 1\n")),
+                         ["internal/a core-any: 3 -> 4"])
+        self.assertEqual(only_lowers(old, lower_baselines.domain_counts(b"internal/a core-any 3\ninternal/c core-any 1\n")),
+                         ["internal/c core-any: added"])
+
+
 class LowerTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix="lower-baselines-")

@@ -73,7 +73,9 @@
   "scope_machines_pair": "配对新电脑（仍需你确认后生效）",
   "scope_browser_run": "在已配对电脑的浏览器隔离空间里执行脚本",
   "scope_notify": "给你的设备发通知",
+  "scope_push_grading": "管理自己的推送分级配置层，并预演分级结果",
   "scope_assistant_ask": "给 Persona 开对话、读对话动态",
+  "scope_spaces": "管理你的空间和 SPACE.md",
   "scope_assistant_read": "读你和 Persona 的对话（你的消息和它的回复）",
   "scope_assistant_entries_read": "读取保存的事实、偏好、规矩和决定（包括个人信息）",
   "event_assistant_entries_changed": "条目被标为不对（需要读取条目权限）",
@@ -123,6 +125,8 @@
   "repository_provider_detail": "你添加 {hosts} 上的仓库，或你和你的 Agent 在待办的工作中添加或提到那里的地址时，Persona 请它读取地址、检查仓库并查找链接。它会知道这些地址，不会知道其他网站上的",
   "memory_source_title": "把它的记忆交给 Persona",
   "memory_source_detail": "Persona 逐条读取它记得的关于你的事，由 Persona 决定每个对话、任务和收件箱回复能用哪些，敏感的留在各自的空间里。它原先自己加进对话的内容不再直接加入",
+  "disk_offload_title": "把电脑上的东西移到别处存放",
+  "disk_offload_detail": "它可以列出它已经替每台电脑存放的东西。只有你在电脑的磁盘地图上选中文件和文件夹并确认后，Persona 才会交给它；它要在那台电脑上安装任何东西前，还会再问你一次",
   "assistant_data_title": "往助手读的内容里加它写的东西",
   "assistant_data_detail": "它的程序写的文字可以进助手的说明和技能、Agent 的项目背景，或收件箱的分拣和起草，各有大小上限。每一项都能在它的详情里单独关掉"
 }

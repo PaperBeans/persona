@@ -72,7 +72,23 @@ function TokenHint({ onFix }: { onFix: () => void }) {
 
 const askKey = (q: string, market: string) => `${market}\n${q}`;
 
-export function MarketCatalog({ onBack, onOpen, onMarkets }: { onBack?: () => void; onOpen: (it: CatalogItem) => void; onMarkets: () => void }) {
+export function MarketCatalog({
+  onBack,
+  backLabel,
+  onOpen,
+  onMarkets,
+  onManageMarkets,
+}: {
+  onBack?: () => void;
+  /** Back button label when opened outside legacy Extensions (for example Settings › Integrations). */
+  backLabel?: string;
+  onOpen: (it: CatalogItem) => void;
+  /** Callback to open the Markets management page (legacy Extensions.tsx prop). */
+  onMarkets?: () => void;
+  /** Optional callback to open the Markets management page from the catalog header's top-right action. */
+  onManageMarkets?: () => void;
+}) {
+  const manageMarkets = onManageMarkets ?? onMarkets;
   const [q, setQ] = useState("");
   const [market, setMarket] = useState("");
   const [data, setData] = useState<Catalog | null>(null);
@@ -108,14 +124,16 @@ export function MarketCatalog({ onBack, onOpen, onMarkets }: { onBack?: () => vo
   return (
     <>
       <Back
-        label={t("settings-extensionmarket.extensions")}
+        label={backLabel ?? t("settings-extensionmarket.extensions")}
         onBack={onBack}
         right={
           <>
             <IconButton icon="retry" label={t("settings-extensionmarket.reload_all")} onClick={() => load(true)} disabled={loading} />
-            <Button tone="secondary" icon="gear" onClick={onMarkets}>
-              {t("settings-extensionmarket.manage_markets")}
-            </Button>
+            {manageMarkets && (
+              <Button tone="secondary" icon="gear" testId="market-manage-markets" onClick={manageMarkets}>
+                {t("settings-extensionmarket.manage_markets")}
+              </Button>
+            )}
           </>
         }
       />
@@ -167,8 +185,8 @@ export function MarketCatalog({ onBack, onOpen, onMarkets }: { onBack?: () => vo
               <Icon name="info" size={13} className="mt-0.5 shrink-0" />
               {t("settings-extensionmarket.official_unreachable")}
             </p>
-            {wantsGitHubToken(m) && (
-              <button type="button" onClick={onMarkets} className="mt-1 block max-w-full truncate pr-1 pl-[25px] text-[11.5px] text-ink-3 underline underline-offset-2 hover:text-ink-2">
+            {wantsGitHubToken(m) && manageMarkets && (
+              <button type="button" onClick={manageMarkets} className="mt-1 block max-w-full truncate pr-1 pl-[25px] text-[11.5px] text-ink-3 underline underline-offset-2 hover:text-ink-2">
                 {t("settings-extensionmarket.official_token_link")}
               </button>
             )}
@@ -204,9 +222,11 @@ export function MarketCatalog({ onBack, onOpen, onMarkets }: { onBack?: () => vo
             </span>
             <p className="text-[13px] font-medium text-ink">{t("settings-extensionmarket.no_markets")}</p>
             <p className="max-w-[420px] text-[12px] leading-relaxed text-ink-3">{t("settings-extensionmarket.no_markets_body")}</p>
-            <Button tone="primary" icon="plus" onClick={onMarkets}>
-              {t("settings-extensionmarket.add_market")}
-            </Button>
+            {manageMarkets && (
+              <Button tone="primary" icon="plus" onClick={manageMarkets}>
+                {t("settings-extensionmarket.add_market")}
+              </Button>
+            )}
           </div>
         )}
         {data && !error && !updating && markets.length > 0 && data.extensions.length === 0 && (

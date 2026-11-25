@@ -196,7 +196,7 @@ func (h *Manager) machinesNow() []*Machine {
 			m.listed.Store(&cfg)
 		}
 		m.mu.Lock()
-		m.info, m.online = d.Info, d.Online
+		m.info, m.online = h.switchedInfo(d.Info), d.Online
 		if d.Reachable {
 			m.peer = devicesPeer{d: h.opts.Devices, id: d.ID}
 		} else {

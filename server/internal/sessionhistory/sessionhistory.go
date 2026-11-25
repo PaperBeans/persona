@@ -5,6 +5,8 @@
 // Order is newest first by updated_at in milliseconds, ties by a key that names the row within everything merged
 // (the node's: source, runtime and session id; the hub's: the machine before that). Milliseconds, because that is
 // what a runtime written in JavaScript can tell apart (the SDK's rt.history orders the same way).
+//
+//persona:layer core
 package sessionhistory
 
 import (

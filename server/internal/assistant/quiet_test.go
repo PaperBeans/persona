@@ -30,6 +30,7 @@ func newQuietServiceOn(t testing.TB, st Store) (*Service, *fakeHub) {
 	agentReachAttempts, agentReachBackoff, agentReachMax = 2, time.Millisecond, 200*time.Millisecond
 	t.Cleanup(func() { agentReachAttempts, agentReachBackoff, agentReachMax = reachA, reachB, reachM })
 	s, f := newTaskServiceOn(t, st)
+	f.inbox = newFakeInbox()
 	shortSupervise(t, s)
 	f.mu.Lock()
 	f.hello.Assistant.MachineID = "server"

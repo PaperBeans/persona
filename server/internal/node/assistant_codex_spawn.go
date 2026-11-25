@@ -184,10 +184,14 @@ func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, 
 			n.logger.Printf("assistant codex %s: %s", key, l)
 		}
 	})
+	p.owner.Store(n)
 	liveAssistants.Store(p, struct{}{})
 	go c.read(stdout)
 	go func() {
 		_ = cmd.Wait()
+		if p.stopped.Load() {
+			osproc.SweepGroup(cmd.Process.Pid, assistantGroupSweep)
+		}
 		releaseGates()
 		c.mu.Lock()
 		c.closed = true

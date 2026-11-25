@@ -210,7 +210,7 @@ func (n *Node) takeOriginalGrant(cfg proto.AssistantLark, session, id string, c 
 	var body any
 	parsed := json.Unmarshal([]byte(c.Body), &body) == nil
 	p := n.gates()
-	key := gateKey{command: cfg.Gates[c.Gate].Command, session: session, space: p.spaceSession(session)}
+	key := gateKey{command: cfg.Gates[c.Gate].Command, session: session, space: p.spaceSession(session), remote: n.isRemoteRuntimeSession(session)}
 	query := gateQueryKey(c.Query)
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -221,7 +221,7 @@ func (n *Node) takeOriginalGrant(cfg proto.AssistantLark, session, id string, c 
 			g.command != key.command || g.method != strings.ToUpper(c.Method) || g.path != c.Path || g.query != query {
 			continue
 		}
-		if key.space && (key.session == "" || g.session != key.session) {
+		if (key.space || key.remote) && (key.session == "" || g.session != key.session) {
 			continue
 		}
 		if g.session != "" && key.session != "" && g.session != key.session {

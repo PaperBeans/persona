@@ -12,7 +12,7 @@ import (
 // The screen-share module on the node: a live screen's session (#6398) over the hub's relays and, where the macOS
 // firewall would not ask, this computer's direct routes.
 func init() {
-	screenport.Provide(func(logf func(string, ...any)) screenport.Links {
+	screenport.Provide("screen-share", func(logf func(string, ...any)) screenport.Links {
 		r := screenlink.NewRegistry(screenlink.DefaultLimits, logf)
 		if d, err := screenlink.NewDirect(logf); err != nil {
 			logf("screen: no direct routes: %v", err)

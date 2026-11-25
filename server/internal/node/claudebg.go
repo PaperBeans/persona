@@ -150,6 +150,10 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 		if seen[id] || listed[id] {
 			continue // a pane lists it (and a cli claude's environment is not read for nothing)
 		}
+		if sess := n.claudeProcHerdrSession(c); n.herdrSessionBlocked(sess) && !n.isAssistantSession(id) && !n.keptSessions()[id] {
+			n.noteHerdrSessionID(id, sess)
+			continue
+		}
 		source := n.outsideSource(c)
 		if source == "" {
 			continue
@@ -260,6 +264,9 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 			s.Title = c.Name
 		}
 		n.setSessionContext(&s, m)
+		if s.ContextTokens > 0 && c.pid > 0 && paneEnvOfPID != nil {
+			setClaudeProcessWindow(&s, paneEnvOfPID(c.pid))
+		}
 		s.ModelFallback = m.modelFallback
 		s.Activity, s.ActivityAt = m.activityOf()
 		s.PermissionMode, s.Effort = n.currentModes(id, m)

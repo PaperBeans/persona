@@ -338,27 +338,48 @@ func (s *Service) migrateTierAliases(ctx context.Context, old storedLauncher, ne
 		profiles.Revision++
 		writes[modelProfilesKey] = profiles
 	}
-	if previous := state.Previous; previous != nil {
-		models, hasModels := previous.Launchers[old.Name]
+	migrateImage := func(img *modelProfileImage) (bool, error) {
+		models, hasModels := img.Launchers[old.Name]
 		moved := migration.moved
 		if hasModels {
 			moved = movedTierAliases(launcherWithModels(old, models), launcherWithModels(*next, models), moved)
 		}
-		changed, err := migration.purposes(previous.Purposes, moved)
+		changed, err := migration.purposes(img.Purposes, moved)
 		if err != nil {
-			return migratedTierAliases{}, err
+			return false, err
 		}
 		if hasModels {
 			nextModels, ok := migration.launcherModels(models, moved)
 			if ok {
-				previous.Launchers[old.Name] = nextModels
+				img.Launchers[old.Name] = nextModels
 				changed = true
 			}
 		}
-		if changed {
-			writes[modelProfileStateKey] = state
-			profileChanged = true
+		return changed, nil
+	}
+	stateChanged := false
+	if len(state.Rollbacks) > 0 {
+		for i := range state.Rollbacks {
+			changed, err := migrateImage(&state.Rollbacks[i])
+			if err != nil {
+				return migratedTierAliases{}, err
+			}
+			stateChanged = stateChanged || changed
 		}
+		if stateChanged {
+			top := cloneProfileImage(state.Rollbacks[len(state.Rollbacks)-1])
+			state.Previous = &top
+		}
+	} else if previous := state.Previous; previous != nil {
+		changed, err := migrateImage(previous)
+		if err != nil {
+			return migratedTierAliases{}, err
+		}
+		stateChanged = changed
+	}
+	if stateChanged {
+		writes[modelProfileStateKey] = state
+		profileChanged = true
 	}
 	return migratedTierAliases{settings: writes, profileChanged: profileChanged, active: state.Active}, nil
 }

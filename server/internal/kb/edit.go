@@ -61,7 +61,7 @@ func fieldKey(field string) string {
 	return field
 }
 
-func (t *Tagging) fieldLocked(field string) bool {
+func taggingFieldLocked(t *Tagging, field string) bool {
 	if slices.Contains(t.LockedFields, field) {
 		return true
 	}
@@ -109,7 +109,7 @@ func (s *Store) putEntity(kind, id string, v any, t *Tagging, manual bool) (err 
 	if err != nil {
 		return err
 	}
-	if !exists && t.persisted {
+	if !exists && t.Persisted {
 		return nil
 	} // forgotten during an external call
 	incoming := protectedEntity(v, t, current, manual)
@@ -153,7 +153,7 @@ func (s *Store) putEntity(kind, id string, v any, t *Tagging, manual bool) (err 
 			*entity = Topic{}
 		}
 		_ = json.Unmarshal(after, v)
-		t.persisted = true
+		t.Persisted = true
 	}
 	return err
 }
@@ -262,7 +262,7 @@ func (s *Store) putSummary(kind, id, text string, manual bool, writer ...string)
 		unlock()
 		return fmt.Errorf("%w: cannot save summary", ErrReferenceOnly)
 	}
-	if !manual && (!exists || t.fieldLocked("summary") || (kind == KindPerson && t.Status == "ignored")) {
+	if !manual && (!exists || taggingFieldLocked(&t.Tagging, "summary") || (kind == KindPerson && t.Status == "ignored")) {
 		unlock()
 		return nil
 	}
@@ -283,7 +283,7 @@ func (s *Store) putSummary(kind, id, text string, manual bool, writer ...string)
 			}
 			if p.OneLine != "" && (len(writer) > 0 || len(old) > 0) {
 				p.OneLineNeedsReview = true
-				if len(writer) > 0 && !p.fieldLocked("one_line") {
+				if len(writer) > 0 && !taggingFieldLocked(&p.Tagging, "one_line") {
 					p.Dirty = true
 				}
 			}
@@ -370,12 +370,12 @@ func (e *Engine) unlink(kind, id string, u Update, le linkEdit) error {
 			}
 		}
 		for _, pid := range le.allow["people"] {
-			if err := person(pid, func(p *Person) { p.include("projects", id) }); err != nil {
+			if err := person(pid, func(p *Person) { taggingInclude(&p.Tagging, "projects", id) }); err != nil {
 				return err
 			}
 		}
 		for _, cid := range le.allow["chats"] {
-			if err := chat(cid, func(c *Chat) { c.include("projects", id) }); err != nil {
+			if err := chat(cid, func(c *Chat) { taggingInclude(&c.Tagging, "projects", id) }); err != nil {
 				return err
 			}
 		}
@@ -391,7 +391,7 @@ func (e *Engine) unlink(kind, id string, u Update, le linkEdit) error {
 			}
 		}
 		for _, pid := range le.allow["people"] {
-			if err := person(pid, func(p *Person) { p.include("chats", id) }); err != nil {
+			if err := person(pid, func(p *Person) { taggingInclude(&p.Tagging, "chats", id) }); err != nil {
 				return err
 			}
 		}
@@ -407,7 +407,7 @@ func (e *Engine) unlink(kind, id string, u Update, le linkEdit) error {
 			}
 		}
 		for _, cid := range le.allow["chats"] {
-			if err := chat(cid, func(c *Chat) { c.include("people", id) }); err != nil {
+			if err := chat(cid, func(c *Chat) { taggingInclude(&c.Tagging, "people", id) }); err != nil {
 				return err
 			}
 		}
@@ -429,7 +429,7 @@ func (e *Engine) unlink(kind, id string, u Update, le linkEdit) error {
 			continue
 		}
 		if allowed("projects", slug) && !slices.Contains(u.RemoveProjects, slug) {
-			p.include(list, member)
+			taggingInclude(&p.Tagging, list, member)
 		} else {
 			*p.list(list) = removeStrings(*p.list(list), []string{member})
 			lock(&p.Tagging, list)

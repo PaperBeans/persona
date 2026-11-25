@@ -1,5 +1,8 @@
 {
   "sidebar": "サイドバー",
+  "extension_required_title": "スペース会話がインストールされていません",
+  "extension_required_body": "既存のスペースと会話は残っています。スペース会話をインストールまたは有効にすると、ここで管理できます。",
+  "extension_install": "拡張機能を開く",
   "actions": "スペースの操作",
   "refresh": "更新",
   "history": "過去の会話",

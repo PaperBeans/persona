@@ -64,11 +64,16 @@ describe("task wait information", () => {
     expect(entries.parked).toHaveLength(2);
     await act(async () => root.render(<ParkedTaskRows items={entries.parked} />));
     const rows = [...host.querySelectorAll('[data-wait-kind="todo_handoff"]')];
+    expect(rows.every((row) => row.getAttribute("data-wait-collapsed") === "true")).toBe(true);
     expect(rows.map((row) => row.querySelector("[data-wait-target]")?.getAttribute("href")))
       .toEqual(["/todos?id=shared-verification", "/todos?id=shared-verification"]);
+    expect(rows.every((row) => row.querySelector("[data-wait-wake]") === null)).toBe(true);
+    expect(rows.every((row) => row.querySelector("[data-wait-age]")?.textContent === "Waiting 1 hr")).toBe(true);
+    for (const row of rows) {
+      await act(async () => row.querySelector<HTMLButtonElement>("[data-wait-toggle]")!.click());
+    }
     expect(rows.map((row) => row.querySelector("[data-wait-wake]")?.textContent))
       .toEqual(["Check the sign-in screen", "Check saved settings"]);
-    expect(rows.every((row) => row.querySelector("[data-wait-age]")?.textContent === "Waiting 1 hr")).toBe(true);
     await render(first);
     expect(text("[data-wait-target]")).toBe("Release verification");
     expect(text("[data-wait-wake]")).toBe("Check the sign-in screen");
@@ -171,6 +176,9 @@ describe("task wait information", () => {
     const url = "https://github.com/example/demo/pull/7";
     const todo = makeTodo({ kind: "merge_review", target: "Review team", wake: "Review and merge", ready: true, url, contact: { ...contact, url } });
     await act(async () => root.render(<TaskWaitInfo todo={todo} merges={[{ url, state: "open", draft: false, review: "required", checks: "failure", conflicts: false, checked_at: new Date(NOW).toISOString() }]} />));
+    expect(host.querySelector('[data-wait-collapsed="true"]')).not.toBeNull();
+    expect(host.querySelector("[data-pr-waiting-url]")).toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-wait-toggle]")!.click());
     expect(host.querySelectorAll(`a[href="${url}"]`)).toHaveLength(1);
     expect(text("[data-wait-contact]")).toContain("Riley");
     expect(host.querySelector("[data-wait-contact-missing]")).toBeNull();
@@ -217,6 +225,8 @@ describe("task wait information", () => {
     const items = assistantEntries({ conversation: "conversation-1", main: "conversation-1", todos: [todo],
       sessions: [], interactions: [], plans: {}, feed: [], now: NOW }).parked;
     await act(async () => root.render(<ParkedTaskRows items={items} />));
+    expect(host.querySelector('[data-wait-collapsed="true"]')).not.toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-wait-toggle]")!.click());
     expect([...host.querySelectorAll<HTMLAnchorElement>("[data-wait-source]")].map(a => [a.href, a.textContent]))
       .toEqual([[url, "PR #73"]]);
     expect(host.querySelector(`a[href="${old}"]`)).toBeNull();
@@ -256,6 +266,7 @@ describe("task wait information", () => {
     await act(async () => root.render(<TaskWaitInfo todo={todo} merges={[
       { url, state: "open", draft: false, review: "required", checks: "failure", conflicts: false, checked_at: new Date(NOW).toISOString() },
     ]} />));
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-wait-toggle]")!.click());
     expect(host.querySelectorAll(`a[href="${receipt}"]`)).toHaveLength(1);
     expect(host.querySelector(`a[href="${url}"]`)).toBeNull();
     expect(host.querySelector("[data-pr-waiting-url]")?.textContent).toContain(t("assistant-tasks.pr_blocker_checks_failed"));
@@ -335,16 +346,45 @@ describe("task wait information", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("collapses list rows to one summary line by default and expands full evidence on demand", async () => {
+    const todo = makeTodo({ kind: "person_reply", target: "Design team", wake: "They confirm a date", contact, url: "https://example.test/evidence/7" });
+    await act(async () => root.render(<TaskWaitInfo todo={todo} />));
+    const info = host.querySelector<HTMLElement>('[data-task-wait-info="wait-1"]')!;
+    const toggle = host.querySelector<HTMLButtonElement>("[data-wait-toggle]")!;
+    expect(info.dataset.waitCollapsed).toBe("true");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.textContent).toContain(t("task-wait.details"));
+    expect(text("[data-wait-target]")).toContain("Design team");
+    expect(text("[data-wait-age]")).toContain("2 days");
+    expect(host.querySelector("[data-wait-due]")).not.toBeNull();
+    for (const sel of ["[data-wait-details]", "[data-wait-contact]", "[data-wait-wake]", "[data-wait-source]", "[data-wait-reason]", "[data-wait-request]", '[data-testid="wait-reminder"]']) {
+      expect(host.querySelector(sel)).toBeNull();
+    }
+    await act(async () => toggle.click());
+    expect(info.dataset.waitCollapsed).toBe("false");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.textContent).toContain(t("task-wait.hide_details"));
+    expect(text("[data-wait-contact]")).toContain("Riley");
+    expect(text("[data-wait-wake]")).toContain("They confirm a date");
+    expect(text("[data-wait-reason]")).toContain("Waiting on the external team");
+    expect(text("[data-wait-request]")).toContain(contact.request);
+    expect(host.querySelector('[data-testid="wait-reminder"]')).not.toBeNull();
+    await act(async () => toggle.click());
+    expect(info.dataset.waitCollapsed).toBe("true");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector("[data-wait-details]")).toBeNull();
+  });
+
   it("lets waiting text select its task row while controls and the portalled draft remain separate", async () => {
     const select = vi.fn();
     const todo = makeTodo({ kind: "person_reply", target: "Design team", wake: "They reply", contact });
     await act(async () => root.render(<div onClick={select}><TaskWaitInfo todo={todo} /></div>));
     await act(async () => host.querySelector<HTMLElement>("[data-wait-target]")!.click());
     expect(select).toHaveBeenCalledTimes(1);
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-wait-toggle]")!.click());
     const link = host.querySelector<HTMLAnchorElement>("[data-wait-contact]")!;
     link.addEventListener("click", (event) => event.preventDefault(), { once: true });
     await act(async () => link.click());
-    await act(async () => host.querySelector<HTMLElement>("summary")!.click());
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="wait-reminder"]')!.click());
     await act(async () => document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')!.click());
     await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent === "Cancel")!.click());

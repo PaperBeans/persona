@@ -73,7 +73,7 @@ type FeishuBotSettings struct {
 	// dropped past botAISourcesKeep. Like the topic chats, the owner's: it goes when the owner does.
 	AISources []BotAISource `json:"ai_sources,omitempty"`
 	// NudgeAfter is how many minutes a card the bot sent may wait unanswered before the assistant nudges under it once
-	// (#6084, assistant/feishu_nudge.go): 0 is off, nil (never set) is assistantwire.NudgeAfterDefault.
+	// (#6084, modules/lark/nudge.go): 0 is off, nil (never set) is assistantwire.NudgeAfterDefault.
 	NudgeAfter *int `json:"nudge_after,omitempty"`
 	// SourceReportDelayMinutes is the preview window before a reply to the source group. Zero skips it.
 	SourceReportDelayMinutes *int `json:"source_report_delay_minutes,omitempty"`
@@ -338,8 +338,12 @@ func (h *Manager) restartBotLocked() {
 		b.api = nil
 		return
 	}
-	if !botport.Available() { // a build without the lark module (persona_without_lark): the bot stays off
-		h.logf("bots: %v", botport.ErrUnavailable)
+	if !botport.Available(h.modules()) { // a build without the lark module (persona_without_lark), or switched off: the bot stays off
+		if botport.InBuild() {
+			h.logf("bots: the lark module is switched off in the modules setting")
+		} else {
+			h.logf("bots: %v", botport.ErrUnavailable)
+		}
 		b.api = nil
 		return
 	}
@@ -824,7 +828,7 @@ func (h *Manager) applyBotUpdateWithReceipt(ctx context.Context, enabled *bool, 
 			if plain == "" {
 				return botConfigureReceipt{}, i18n.Err("hub-bots.needs_secret")
 			}
-			if !botport.Available() {
+			if !botport.Available(h.modules()) {
 				return botConfigureReceipt{}, botport.ErrUnavailable
 			}
 			vctx, cancel := context.WithTimeout(ctx, 15*time.Second)

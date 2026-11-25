@@ -70,6 +70,11 @@ type NodeSession struct {
 	// the model: after a node restart too, an extension's resume of such an Agent its computer no longer lists is
 	// checked against the record's directory (#10941).
 	EngineRuntime string `json:"engine_runtime,omitempty"`
+	// StartOpID is the X-Persona-Op-Id that started this session, persisted so reconnect reconciliation after a
+	// mid-flight disconnect or node restart can prove the start already ran (#10674).
+	StartOpID string `json:"start_op_id,omitempty"`
+	// RemoteAgent latches true once a session belongs to a remote assistant runtime (node/session_state.go).
+	RemoteAgent bool `json:"remote_agent,omitempty"`
 }
 
 func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSession) error {
@@ -109,7 +114,7 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 			'awaiting_first_message', $27::boolean, 'idle_compaction', $28::jsonb, 'origin', $29::text,
 			'origin_known', $30::boolean, 'engine_runtime', $31::text, 'model_source', $32::jsonb,
 			'desktop_pending_model', $33::text, 'desktop_pending_effort', $34::text,
-			'app_mode_explicit', $35::boolean, 'ran_at', $36::bigint), now() FROM saved
+			'app_mode_explicit', $35::boolean, 'ran_at', $36::bigint, 'start_op_id', $37::text, 'remote_agent', $38::boolean), now() FROM saved
 		ON CONFLICT (key) DO UPDATE SET value = (CASE
 			WHEN COALESCE((settings.value->>'stop_cause_at')::bigint, 0) > $26
 				OR (COALESCE((settings.value->>'stop_cause_at')::bigint, 0) = $26
@@ -117,13 +122,18 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 			THEN EXCLUDED.value || jsonb_build_object('stop_cause', settings.value->'stop_cause',
 				'stop_cause_at', settings.value->'stop_cause_at')
 			ELSE EXCLUDED.value END)
-			-- ran_at only moves forward: a put that carries none (or an older one) keeps the last sighting.
-			|| jsonb_build_object('ran_at', GREATEST(COALESCE((settings.value->>'ran_at')::bigint, 0), $36::bigint)),
+			-- ran_at only moves forward; remote_agent is latch-only and never clears once set.
+			|| jsonb_build_object('ran_at', GREATEST(COALESCE((settings.value->>'ran_at')::bigint, 0), $36::bigint),
+				'remote_agent', COALESCE((settings.value->>'remote_agent')::boolean, false) OR $38::boolean)
+			-- start_op_id is immutable once recorded: a later update carrying "" keeps the original op id.
+			|| CASE WHEN COALESCE(settings.value->>'start_op_id', '') <> '' AND $37::text = ''
+				THEN jsonb_build_object('start_op_id', settings.value->'start_op_id')
+				ELSE '{}'::jsonb END,
 			updated_at = now()`,
 		machine, id, s.Pane, s.Launcher, s.Cwd, s.StartedAt, tasks, s.Model, s.ModelFingerprint, s.ModelEffort, s.AppMode, s.AppEffort,
 		s.UltracodeProcess, unknownStart, s.CreationID, s.Incarnation, guest, s.GuestKind, s.ConfigDir, pendingSwitch, engineHistory, pendingHandoff,
 		modelRecovery, s.FollowsSetting, string(s.StopCause), s.StopCauseAt, s.AwaitingFirstMessage, jsonOrNil(s.IdleCompaction), s.Origin, s.OriginKnown,
-		s.EngineRuntime, jsonOrNil(s.ModelSource), s.DesktopPendingModel, s.DesktopPendingEffort, s.AppModeExplicit, s.RanAt)
+		s.EngineRuntime, jsonOrNil(s.ModelSource), s.DesktopPendingModel, s.DesktopPendingEffort, s.AppModeExplicit, s.RanAt, s.StartOpID, s.RemoteAgent)
 	return err
 }
 
@@ -172,6 +182,8 @@ type nodeModel struct {
 	// EngineRuntime: the engine runtime whose start wrote the record ("" for a terminal's, and for a row written before
 	// it was kept).
 	EngineRuntime string `json:"engine_runtime"`
+	StartOpID     string `json:"start_op_id"`
+	RemoteAgent   bool   `json:"remote_agent"`
 }
 
 // jsonOrNil is raw, or nil when it holds nothing (empty, or a JSON null).
@@ -212,6 +224,8 @@ func (d *DB) NodeSessions(ctx context.Context, machine string) (map[string]NodeS
 		s.FollowsSetting = m.FollowsSetting
 		s.AwaitingFirstMessage = m.AwaitingFirstMessage
 		s.EngineRuntime = m.EngineRuntime
+		s.StartOpID = m.StartOpID
+		s.RemoteAgent = m.RemoteAgent
 		s.StopCause, s.StopCauseAt = m.StopCause, m.StopCauseAt
 		s.RanAt = m.RanAt
 		if m.StartedAtUnknown {

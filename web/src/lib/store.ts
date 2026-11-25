@@ -104,6 +104,8 @@ export interface State {
   /** Messages other pages sent for a conversation (`mid/sid`), shown there until the transcript has them (lib/outbox.ts). */
   outbox: Record<string, OutboxEntry[]>;
   todos: Todo[];
+  /** Optional `shared_blockers` summary from GET /todos under todos_v2 (#14728); parsed lazily by the To-dos view. */
+  sharedBlockers: unknown[];
   todosSupported: boolean;
   todosLoaded: boolean;
   todosError: string | null;
@@ -150,6 +152,7 @@ let state: State = {
   launches: {},
   outbox: {},
   todos: [],
+  sharedBlockers: [],
   todosSupported: true,
   todosLoaded: false,
   todosError: null,
@@ -1590,14 +1593,14 @@ function numbered<T>(path: string, read: () => Promise<T> = () => api<T>(path)) 
 // no body. Most {"type":"todos"} pushes change nothing the list holds, and the whole list is hundreds of KB on a busy
 // hub, so a read sends the tag and a 304 applies the kept answer again, as a 200 with those same bytes would. Memory
 // only, one login's: reset() drops it, and a tag kept under another login is not sent.
-let keptTodos: { owner: string; etag: string; revision: string; answer: { todos: Todo[] } } | null = null;
+let keptTodos: { owner: string; etag: string; revision: string; answer: { todos: Todo[]; shared_blockers?: unknown[] } } | null = null;
 
-async function readTodos(): Promise<{ todos: Todo[] }> {
+async function readTodos(): Promise<{ todos: Todo[]; shared_blockers?: unknown[] }> {
   const owner = credentialOwner();
   const kept = keptTodos?.owner === owner ? keptTodos : null;
   let status = 0;
   let reply: Headers | undefined;
-  const answer = await api<{ todos: Todo[] }>("/todos", {
+  const answer = await api<{ todos: Todo[]; shared_blockers?: unknown[] }>("/todos", {
     headers: kept?.etag ? { "If-None-Match": kept.etag } : undefined,
     onResponse: (headers, code) => { status = code; reply = headers; },
   });
@@ -1612,7 +1615,7 @@ async function readTodos(): Promise<{ todos: Todo[] }> {
   return answer;
 }
 
-const todosAsked = numbered<{ todos: Todo[] }>("/todos", readTodos);
+const todosAsked = numbered<{ todos: Todo[]; shared_blockers?: unknown[] }>("/todos", readTodos);
 const assistantAsked = numbered<AssistantInfo>("/assistant");
 
 // refresh() calls, numbered the same way: one that started before the last one applied, or before reset(), is older
@@ -1678,20 +1681,21 @@ export async function refresh() {
 }
 
 /** Both refresh paths share the list, error and unsupported-hub (404) handling; only a fresh answer finishes loading. */
-function applyTodos(todos: PromiseSettledResult<{ todos: Todo[] }>, fresh: () => boolean) {
+function applyTodos(todos: PromiseSettledResult<{ todos: Todo[]; shared_blockers?: unknown[] }>, fresh: () => boolean) {
   if (!fresh()) return; // a later answer is in place, or this one belongs to a login reset() ended
   if (todos.status === "fulfilled") {
     const list = todos.value.todos ?? [];
+    const sharedBlockers = Array.isArray(todos.value.shared_blockers) ? todos.value.shared_blockers : [];
     for (const t of list) {
       if (t.manager) noteItemManager(`/todos/${encodeURIComponent(t.id)}`, t.manager);
     }
-    set({ todos: list, todosSupported: true, todosLoaded: true, todosError: null, spacesSupported: computeSpacesSupported(list) });
+    set({ todos: list, sharedBlockers, todosSupported: true, todosLoaded: true, todosError: null, spacesSupported: computeSpacesSupported(list) });
     keepTaskRows([]);
     void lookUpTaskAgents();
     return;
   }
   const reason = todos.reason;
-  if (reason instanceof ApiError && reason.status === 404) return set({ todosSupported: false, todosLoaded: true, todosError: null, spacesSupported: false });
+  if (reason instanceof ApiError && reason.status === 404) return set({ sharedBlockers: [], todosSupported: false, todosLoaded: true, todosError: null, spacesSupported: false });
   set({ todosLoaded: true, todosError: errorText(reason) });
 }
 
@@ -2038,6 +2042,7 @@ export function reset() {
     mutes: { spaces: [], sessions: [], allowed: [] },
     pins: NO_PINS,
     todos: [],
+    sharedBlockers: [],
     todosSupported: true,
     todosLoaded: false,
     todosError: null,

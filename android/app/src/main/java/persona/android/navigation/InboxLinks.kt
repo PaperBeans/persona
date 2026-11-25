@@ -168,12 +168,13 @@ internal fun applySidebarDestination(
     assignPersona: (MutableList<NavKey>) -> Unit,
     landing: InboxLanding,
     records: List<InboxRecord>,
+    alreadyInFront: Boolean = true,
 ) {
     pageRoots.markOpenedAsRoot(key)
     if (!regular) {
         if (key == InboxRoute) {
             val host = hosts.stack(sidebarHostId(InboxRoute))
-            val step = compactInboxPick(host?.toList(), inFront = host != null && hosts.current === host)
+            val step = compactInboxPick(host?.toList(), inFront = alreadyInFront && host != null && hosts.current === host)
             if (!hosts.showRetainedCompact(InboxRoute, listOf(InboxRoute) + step.path)) {
                 hosts.showConversation()
                 pushCompactSidebarPlace(assistantStack, InboxRoute)
@@ -191,7 +192,11 @@ internal fun applySidebarDestination(
         pageRoots.adoptVisible(AssistantRoute)
         return
     }
-    val step = pageRoots.select(key, hosts.current.drop(1))
+    val step = if (!alreadyInFront && pageRoots.current == key) {
+        SidebarPageRoots.Step(key, hosts.current.drop(1), SidebarPageRoots.Move.SwitchRoot)
+    } else {
+        pageRoots.select(key, hosts.current.drop(1))
+    }
     showHost(step.root, step.stack)
     assignPersona(hosts.current)
     if (key == InboxRoute) inboxSidebarPicked(step, landing, inboxRecordOnPath(step.path, records, landing))

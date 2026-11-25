@@ -249,8 +249,16 @@ func (s *Service) deleteConversation(ctx context.Context, machine, id string) er
 		if err != nil {
 			return err
 		}
+		kept := s.conversationKeptPages(ctx, machine, id)
+		// The deletion's transaction moves the pages it kept to Recently removed (db.RemoveConversationAssistantPagesTx).
 		if err := durable.PutConversationDeletion(ctx, machine, id, raw); err != nil {
 			return err
+		}
+		for i, page := range kept {
+			if i == 0 {
+				s.pagesListChanged(ctx)
+			}
+			s.pageChanged(page, pageContent)
 		}
 		return s.finishDeletedConversation(ctx, machine, id)
 	}

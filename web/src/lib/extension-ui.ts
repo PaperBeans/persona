@@ -1,4 +1,5 @@
 import { canonicalAppURL } from "./compatibility";
+import { parse as parseRoute, type Route } from "./router";
 // An extension's declarative UI (docs/extensions/extensions.md "Declarative UI"): the extension sends a View (a few fixed kinds of items), the
 // web draws it with its own design system, and buttons go back to the extension. No extension code runs here, no extension
 // colors, sizes or icons: a tone becomes one of the theme's role colors. The checks match server/internal/extension/ui.go
@@ -20,10 +21,11 @@ import { SUBSCRIPTIONS_UI } from "./subscriptions-ui";
 export { isHttps };
 
 /**
- * The UI version the web draws (context.ui_version): all of 10, the graph canvas (views/extensions/ViewBody10.tsx),
- * the columns layout's (views/extensions/ViewBody8.tsx) and a tile's gauge (views/extensions/ViewBody9.tsx) too.
+ * The UI version the web draws (context.ui_version): all of 12, the map canvas (views/extensions/ViewBody12.tsx), the
+ * graph canvas (views/extensions/ViewBody10.tsx), the columns layout's (views/extensions/ViewBody8.tsx) and a tile's
+ * gauge (views/extensions/ViewBody9.tsx) too.
  */
-export const UI_VERSION = 10;
+export const UI_VERSION = 12;
 
 export type UITone = "neutral" | "positive" | "caution" | "danger";
 
@@ -54,7 +56,7 @@ export interface UIChoice {
 
 /** One item of a section; which fields it has depends on `type`. */
 export interface UIItem {
-  type: "text" | "metric" | "progress" | "row" | "button" | "link" | "field" | "divider" | "chart" | "stat_grid" | "segmented" | "graph" | string;
+  type: "text" | "metric" | "progress" | "row" | "button" | "link" | "field" | "divider" | "chart" | "stat_grid" | "segmented" | "graph" | "map" | string;
   text?: string;
   /** text: body | secondary | caption | code */
   style?: string;
@@ -166,6 +168,13 @@ export interface UIItem {
   folded?: string[];
   layout?: UIGraph["layout"];
   direction?: UIGraph["direction"];
+  /** UI version 12 (#14730, #14998), map: viewport framing, markers, routes, verified https links, static flag and stop list toggle */
+  viewport?: UIMapViewport;
+  markers?: UIMapMarker[];
+  routes?: UIMapRoute[];
+  links?: UIMapLink[];
+  static?: boolean;
+  show_list?: boolean;
 }
 
 /** A view's tabs on top (UI version 4): choosing one sends {name: value} (with the search's q) at once. */
@@ -297,6 +306,76 @@ export interface UIGraph {
   folded?: string[];
 }
 
+// ── UI version 12: a map ────────────────────────────────
+
+export const MAP_MARKER_CAP = 100;
+export const MAP_ROUTE_CAP = 8;
+export const MAP_POINT_CAP = 2000;
+export const MAP_LINK_CAP = 6;
+
+const MAP_MARKER_KINDS: readonly string[] = ["origin", "destination", "waypoint", "pin", "user"];
+const MAP_TRAVEL_MODES: readonly string[] = ["driving", "walking", "transit", "cycling"];
+
+export type UIMapMarkerKind = "origin" | "destination" | "waypoint" | "pin" | "user";
+export type UIMapTravelMode = "driving" | "walking" | "transit" | "cycling";
+
+export interface UIMapCoordinate {
+  lat: number;
+  lon: number;
+}
+
+export interface UIMapViewport {
+  center: UIMapCoordinate;
+  span_lat?: number;
+  span_lon?: number;
+}
+
+export interface UIMapMarker {
+  id: string;
+  lat: number;
+  lon: number;
+  kind?: UIMapMarkerKind;
+  label: string;
+  subtitle?: string;
+  detail?: string;
+  icon?: string;
+  tone?: UITone;
+  color?: UIColor;
+  action?: UIAction;
+}
+
+export interface UIMapRoute {
+  id: string;
+  label?: string;
+  mode?: UIMapTravelMode;
+  distance_meters?: number;
+  duration_seconds?: number;
+  summary?: string;
+  selected?: boolean;
+  tone?: UITone;
+  color?: UIColor;
+  points: UIMapCoordinate[];
+}
+
+export interface UIMapLink {
+  title: string;
+  url: string;
+}
+
+export interface UIMap {
+  key?: string;
+  title?: string;
+  alt: string;
+  caption?: string;
+  aspect?: string;
+  viewport?: UIMapViewport;
+  markers?: UIMapMarker[];
+  routes?: UIMapRoute[];
+  links?: UIMapLink[];
+  static?: boolean;
+  show_list?: boolean;
+}
+
 export interface UISection {
   title?: string;
   footer?: string;
@@ -409,6 +488,8 @@ export interface UIContextSent extends UIContext {
   locale?: string;
   platform: "web";
   ui_version: number;
+  /** Component types in the current UI version that the web client does not render (scene requires native 3D). */
+  unsupported?: string[];
 }
 
 /** The context sent: the place's, with the browser's time zone and language. */
@@ -420,7 +501,7 @@ export function uiContext(context?: UIContext): UIContextSent {
     tz = undefined;
   }
   const locale = typeof navigator !== "undefined" ? navigator.language || undefined : undefined;
-  const out: UIContextSent = { platform: "web", ui_version: UI_VERSION };
+  const out: UIContextSent = { platform: "web", ui_version: UI_VERSION, unsupported: ["scene"] };
   if (tz) out.tz = tz;
   if (locale) out.locale = locale;
   if (context?.launcher) out.launcher = context.launcher;
@@ -458,6 +539,17 @@ const RESERVED_UI_PATHS: Record<string, string> = {
 };
 /** Whether `extension` is one of the manager's own pages: drawn over HTTP only, never as an extension's. */
 export const isReservedUI = (extension: string): boolean => Object.hasOwn(RESERVED_UI_PATHS, extension);
+/** Whether `extension` is a manager's own id (it starts with "-", which no extension's can): its pages are drawn over
+ *  HTTP only and never open the native UI stream, the reserved ids above and those asked at the extensions' own path
+ *  alike (Dashboards' `-pages`, #15017; the hub answers the stream's open for them with `negotiation`). */
+export const httpOnlyUI = (extension: string): boolean => extension.startsWith("-");
+/** Dashboards' reserved id (#15017): the pages the assistant keeps, listed among the extensions' places and drawn at
+ *  their path (/api/v1/extensions/-pages/-/ui/{index|pg_…}) by the default manager. */
+export const PAGES_UI = "-pages";
+/** The Dashboards place itself, the list of pages; every other id of `-pages` is one page (`pg_` and 16 hex). */
+export const PAGES_INDEX = "index";
+/** The hello feature of a hub whose default manager has Dashboards: Settings › Assistant shows their switch. */
+export const ASSISTANT_PAGES_FEATURE = "assistant_pages";
 export const uiPath = (extension: string, ui: string) =>
   (isReservedUI(extension) ? RESERVED_UI_PATHS[extension] : undefined) ?? `${extRoot()}/${enc(extension)}/-/ui/${enc(ui)}`;
 
@@ -559,8 +651,9 @@ export function outcome(
   r: UIActionResult,
   item?: string,
   extension?: string,
-): { view?: UIView; items?: UIItem[]; reload: boolean; toast?: string; url?: string; source?: true; settings?: string; ask?: string; push?: UIPush; pop?: true } {
+): { view?: UIView; items?: UIItem[]; reload: boolean; toast?: string; url?: string; source?: true; settings?: string; ask?: string; track?: Route; push?: UIPush; pop?: true } {
   const url = r.open_url && isHttps(r.open_url) ? r.open_url : undefined;
+  const track = r.open_url ? extensionTrackRoute(r.open_url) : undefined;
   const source = !!item && !!r.open_url && inboxSourceItem(r.open_url) === item;
   const settings = r.open_url ? extensionSettingsHref(r.open_url) : undefined;
   const ask = extension === SUBSCRIPTIONS_UI && r.open_url ? askText(r.open_url) : undefined;
@@ -576,9 +669,21 @@ export function outcome(
     ...(source ? { source: true as const } : {}),
     ...(settings ? { settings } : {}),
     ...(ask ? { ask } : {}),
+    ...(track ? { track } : {}),
     ...(push ? { push } : {}),
     ...(pop ? { pop: true as const } : {}),
   };
+}
+
+/** A space conversation handed back to the app. Only this narrow, read-only
+ * navigation contract is accepted; an extension cannot choose another route. */
+export function extensionTrackRoute(link: string): Route | undefined {
+  const match = /^persona:\/\/tracks\/([^/?#]+)\/([^/?#]+)\/([^/?#]+)$/.exec(canonicalAppURL(link));
+  if (!match) return undefined;
+  const parts = match.slice(1);
+  if (parts[1] === "health") return undefined;
+  const route = parseRoute(`persona/${encodeURIComponent(parts[2])}`, `?machine=${encodeURIComponent(parts[0])}`);
+  return route.name === "persona" && route.sid && route.mid ? route : undefined;
 }
 
 /** The text of a persona://ask?text=… link (an older name's scheme too, as other in-app links); undefined for any other
@@ -685,6 +790,7 @@ export const KNOWN_ITEMS: readonly string[] = [
   "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", // UI version 4
   "image", "grid", "carousel", // UI version 6
   "graph", // UI version 10
+  "map", // UI version 12
 ];
 
 /** An item the web can draw: a known type with what it needs to be drawn at all (a chart with points, a grid with stats). */
@@ -727,6 +833,9 @@ function drawable(it: unknown): it is UIItem {
     // UI version 10: a graph with nodes that read at all; the rest of the reading is readGraph's
     case "graph":
       return Array.isArray(it.nodes) && it.nodes.some((n: Record<string, unknown>) => isObject(n) && typeof n.id === "string" && typeof n.title === "string" && !!n.title);
+    // UI version 12: an interactive map with required alt text and valid geometry
+    case "map":
+      return Boolean(readMap(it));
     default:
       return true;
   }
@@ -888,6 +997,119 @@ export function readGraph(raw: unknown): UIGraph | undefined {
   return out;
 }
 
+const isMapCoord = (c: unknown): c is UIMapCoordinate =>
+  isObject(c) &&
+  typeof c.lat === "number" && Number.isFinite(c.lat) && c.lat >= -90 && c.lat <= 90 &&
+  typeof c.lon === "number" && Number.isFinite(c.lon) && c.lon >= -180 && c.lon <= 180;
+
+/**
+ * Validates and normalizes a UI version 12 `map` component matching sdk/go/wire/viewcheck12.go:
+ * required `alt`, at least one valid geometry source (`viewport`, `markers`, or `routes`), WGS-84 bounds,
+ * unique IDs, mutually exclusive `tone` / `color`, route point caps, and credential-free https links.
+ */
+export function readMap(raw: unknown): UIMap | undefined {
+  if (!isObject(raw) || typeof raw.alt !== "string" || !raw.alt.trim()) return undefined;
+  const runeLen = (s: string) => Array.from(s).length;
+  const runeSlice = (s: string, max: number) => Array.from(s).slice(0, max).join("");
+
+  let viewport: UIMapViewport | undefined;
+  if (isObject(raw.viewport) && isMapCoord(raw.viewport.center)) {
+    const vp: UIMapViewport = { center: { lat: raw.viewport.center.lat, lon: raw.viewport.center.lon } };
+    if (typeof raw.viewport.span_lat === "number" && Number.isFinite(raw.viewport.span_lat) && raw.viewport.span_lat >= 0.0001 && raw.viewport.span_lat <= 180) {
+      vp.span_lat = raw.viewport.span_lat;
+    }
+    if (typeof raw.viewport.span_lon === "number" && Number.isFinite(raw.viewport.span_lon) && raw.viewport.span_lon >= 0.0001 && raw.viewport.span_lon <= 360) {
+      vp.span_lon = raw.viewport.span_lon;
+    }
+    viewport = vp;
+  }
+
+  const markers: UIMapMarker[] = [];
+  const markerIds = new Set<string>();
+  for (const m of Array.isArray(raw.markers) ? raw.markers : []) {
+    if (markers.length >= MAP_MARKER_CAP) break;
+    if (!isObject(m) || typeof m.id !== "string" || !m.id || runeLen(m.id) > 128 || markerIds.has(m.id)) continue;
+    if (!isMapCoord(m) || typeof m.label !== "string" || !m.label.trim()) continue;
+    markerIds.add(m.id);
+    const tone = typeof m.tone === "string" && TONES.includes(m.tone) ? (m.tone as UITone) : undefined;
+    const color = !tone ? colorOf(m.color as string) : undefined;
+    const marker: UIMapMarker = {
+      id: m.id,
+      lat: m.lat,
+      lon: m.lon,
+      label: runeSlice(m.label, 200),
+      ...(typeof m.kind === "string" && MAP_MARKER_KINDS.includes(m.kind) ? { kind: m.kind as UIMapMarkerKind } : {}),
+      ...(typeof m.subtitle === "string" && m.subtitle ? { subtitle: runeSlice(m.subtitle, 200) } : {}),
+      ...(typeof m.detail === "string" && m.detail ? { detail: runeSlice(m.detail, 2000) } : {}),
+      ...(typeof m.icon === "string" && m.icon ? { icon: m.icon } : {}),
+      ...(tone ? { tone } : {}),
+      ...(color ? { color } : {}),
+      ...(readAction(m.action) ? { action: readAction(m.action) } : {}),
+    };
+    markers.push(marker);
+  }
+
+  const routes: UIMapRoute[] = [];
+  const routeIds = new Set<string>();
+  let totalPoints = 0;
+  for (const r of Array.isArray(raw.routes) ? raw.routes : []) {
+    if (routes.length >= MAP_ROUTE_CAP) break;
+    if (!isObject(r) || typeof r.id !== "string" || !r.id || runeLen(r.id) > 128 || routeIds.has(r.id)) continue;
+    if (!Array.isArray(r.points) || r.points.length < 2 || !r.points.every(isMapCoord)) continue;
+    if (totalPoints + r.points.length > MAP_POINT_CAP) continue;
+    routeIds.add(r.id);
+    totalPoints += r.points.length;
+    const tone = typeof r.tone === "string" && TONES.includes(r.tone) ? (r.tone as UITone) : undefined;
+    const color = !tone ? colorOf(r.color as string) : undefined;
+    const route: UIMapRoute = {
+      id: r.id,
+      points: r.points.map((p) => ({ lat: p.lat, lon: p.lon })),
+      ...(typeof r.label === "string" && r.label ? { label: runeSlice(r.label, 200) } : {}),
+      ...(typeof r.mode === "string" && MAP_TRAVEL_MODES.includes(r.mode) ? { mode: r.mode as UIMapTravelMode } : {}),
+      ...(typeof r.distance_meters === "number" && Number.isFinite(r.distance_meters) && r.distance_meters >= 0 && r.distance_meters <= 100_000_000
+        ? { distance_meters: Math.round(r.distance_meters) } : {}),
+      ...(typeof r.duration_seconds === "number" && Number.isFinite(r.duration_seconds) && r.duration_seconds >= 0 && r.duration_seconds <= 100_000_000
+        ? { duration_seconds: Math.round(r.duration_seconds) } : {}),
+      ...(typeof r.summary === "string" && r.summary ? { summary: runeSlice(r.summary, 200) } : {}),
+      ...(r.selected === true ? { selected: true } : {}),
+      ...(tone ? { tone } : {}),
+      ...(color ? { color } : {}),
+    };
+    routes.push(route);
+  }
+
+  if (!viewport && !markers.length && !routes.length) return undefined;
+
+  const links: UIMapLink[] = [];
+  if (Array.isArray(raw.links)) {
+    for (const l of raw.links) {
+      if (links.length >= MAP_LINK_CAP) break;
+      if (
+        isObject(l) &&
+        typeof l.title === "string" && runeLen(l.title.trim()) >= 1 && runeLen(l.title) <= 80 &&
+        typeof l.url === "string" && runeLen(l.url) >= 1 && runeLen(l.url) <= 2000 &&
+        l.url.trim() === l.url && isGraphLink(l.url)
+      ) {
+        links.push({ title: l.title, url: l.url });
+      }
+    }
+  }
+
+  return {
+    alt: runeSlice(raw.alt, 500),
+    ...(typeof raw.key === "string" && raw.key ? { key: runeSlice(raw.key, 128) } : {}),
+    ...(typeof raw.title === "string" && raw.title ? { title: runeSlice(raw.title, 2000) } : {}),
+    ...(typeof raw.caption === "string" && raw.caption ? { caption: runeSlice(raw.caption, 2000) } : {}),
+    ...(typeof raw.aspect === "string" && raw.aspect ? { aspect: raw.aspect } : {}),
+    ...(viewport ? { viewport } : {}),
+    ...(markers.length ? { markers } : {}),
+    ...(routes.length ? { routes } : {}),
+    ...(links.length ? { links } : {}),
+    ...(typeof raw.static === "boolean" ? { static: raw.static } : {}),
+    ...(typeof raw.show_list === "boolean" ? { show_list: raw.show_list } : {}),
+  };
+}
+
 /** An item with its actions read; an empty's button (`action: {title, action}`) under `button`. */
 function readItem(it: UIItem): UIItem {
   const raw = it as unknown as Record<string, unknown>;
@@ -913,6 +1135,22 @@ function readItem(it: UIItem): UIItem {
     if (graph?.selected) out.selected = graph.selected;
     else delete out.selected;
   }
+  if (it.type === "map") {
+    const map = readMap(raw);
+    if (map) {
+      out.alt = map.alt;
+      if (map.key !== undefined) out.key = map.key; else delete out.key;
+      if (map.title !== undefined) out.title = map.title; else delete out.title;
+      if (map.caption !== undefined) out.caption = map.caption; else delete out.caption;
+      if (map.aspect !== undefined) out.aspect = map.aspect; else delete out.aspect;
+      if (map.viewport !== undefined) out.viewport = map.viewport; else delete out.viewport;
+      if (map.markers !== undefined) out.markers = map.markers; else delete out.markers;
+      if (map.routes !== undefined) out.routes = map.routes; else delete out.routes;
+      if (map.links !== undefined) out.links = map.links; else delete out.links;
+      if (map.static !== undefined) out.static = map.static; else delete out.static;
+      if (map.show_list !== undefined) out.show_list = map.show_list; else delete out.show_list;
+    }
+  }
   // UI version 4: the other places an action sits, each read the same way
   for (const k of ["expand", "load", "comment", "reply", "context", "mark_viewed", "draft"] as const) if (k in raw) out[k] = readAction(raw[k]);
   // UI version 6: a row's control and extra actions, a grid's or a carousel's tiles
@@ -937,7 +1175,7 @@ export function refreshDelay(view: UIView | null | undefined): number {
 
 /** A nav_page's icons (docs/extensions/extensions.md "UI slots"); each app draws its own. `plugin` is `extension` under its name
  *  before #1844 (the hub still sends it). */
-export const UI_ICONS = ["extension", "plugin", "chart", "gauge", "list", "bell", "doc", "calendar", "money", "branch", "code", "pull_request", "merge", ...NEW_ICONS_6] as const;
+export const UI_ICONS = ["extension", "plugin", "chart", "gauge", "list", "bell", "doc", "calendar", "money", "branch", "code", "pull_request", "merge", "map", ...NEW_ICONS_6] as const;
 export type UIIcon = (typeof UI_ICONS)[number];
 
 /** An icon the web knows, else extension. */

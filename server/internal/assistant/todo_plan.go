@@ -34,11 +34,14 @@ func (t *Todo) setPlan(row db.TodoRow) {
 	t.Project = row.Project
 	t.Kind = row.Kind
 	t.SeenAt = row.SeenAt
+	t.AutoSeenUndone = row.AutoSeenUndone
 	t.RestoredAt, t.SomedayUntil = row.RestoredAt, row.SomedayUntil
 	t.InboxItem = row.InboxItem
 	t.PartOf, t.After = row.PartOf, slices.Clone(row.After)
 	t.RequireAcceptedAfter = row.RequireAcceptedAfter
 	t.Responsible = cloneResponsible(row.Responsible)
+	t.Audience = row.Audience
+	t.DirectionID = row.DirectionID
 }
 
 // keepPlan writes t's plan, project and the owner's marks (seen, restored, Someday) into row: a row made in memory for a
@@ -52,11 +55,14 @@ func (t *Todo) keepPlan(row *db.TodoRow) {
 	row.Project = t.Project
 	row.Kind = t.Kind
 	row.SeenAt = t.SeenAt
+	row.AutoSeenUndone = t.AutoSeenUndone
 	row.RestoredAt, row.SomedayUntil = t.RestoredAt, t.SomedayUntil
 	row.InboxItem = t.InboxItem
 	row.PartOf, row.After = t.PartOf, slices.Clone(t.After)
 	row.RequireAcceptedAfter = t.RequireAcceptedAfter
 	row.Responsible = cloneResponsible(t.Responsible)
+	row.Audience = t.Audience
+	row.DirectionID = t.DirectionID
 }
 
 // todoRowOf is todo t as a row (what memory has of it; the store-less PATCH changes it).
@@ -99,10 +105,12 @@ func (t Todo) dueText(loc *time.Location) string {
 // todoPlanIn is the plan in a POST or PATCH body: due_at (RFC 3339) or due_date (YYYY-MM-DD), remind_at (RFC 3339),
 // priority. A field left out is kept, null (or "") clears it.
 type todoPlanIn struct {
-	DueAt    json.RawMessage `json:"due_at"`
-	DueDate  json.RawMessage `json:"due_date"`
-	RemindAt json.RawMessage `json:"remind_at"`
-	Priority *string         `json:"priority"`
+	DueAt       json.RawMessage `json:"due_at"`
+	DueDate     json.RawMessage `json:"due_date"`
+	RemindAt    json.RawMessage `json:"remind_at"`
+	Priority    *string         `json:"priority"`
+	Audience    *string         `json:"audience"`
+	DirectionID *string         `json:"direction_id"`
 }
 
 // edit puts the plan into e; an error says which field could not be read.
@@ -134,6 +142,17 @@ func (p todoPlanIn) edit(e *db.TodoEdit) error {
 			return err
 		}
 		e.Priority = &pr
+	}
+	if p.Audience != nil {
+		aud, err := todoAudience(*p.Audience)
+		if err != nil {
+			return err
+		}
+		e.Audience = &aud
+	}
+	if p.DirectionID != nil {
+		dir := strings.TrimSpace(*p.DirectionID)
+		e.DirectionID = &dir
 	}
 	return nil
 }
@@ -178,6 +197,15 @@ func todoPriority(p string) (string, error) {
 	return "", fmt.Errorf("priority must be high, normal or low, not %q", p)
 }
 
+// todoAudience validates an optional to-do audience: "", "human", or "autonomous" (#14619).
+func todoAudience(a string) (string, error) {
+	trimmed := strings.TrimSpace(a)
+	if err := db.ValidateTodoAudience(trimmed); err != nil {
+		return "", err
+	}
+	return trimmed, nil
+}
+
 // createPlainTodo makes a todo of the user's (no conversation, no plan of tasks) with plan's due date, reminder and
 // priority, and tells the apps.
 func (s *Service) createPlainTodo(ctx context.Context, title, notes string, plan db.TodoEdit, bindings ...*repository.CreateBindings) (Todo, error) {
@@ -203,7 +231,7 @@ func (s *Service) createTodoFromWithImages(ctx context.Context, title, notes, in
 
 // createDirectionTodo makes a piece of leader's direction (#5846): a todo with plan's due date, reminder, priority and
 // project, opened by the leader and supervised by it, with no agent and no done_when, as a Lark topic opens one
-// (feishu_thread_open.go). So the direction tree lists it under that direction (as not started until an agent works on
+// (the lark module's thread_open.go). So the direction tree lists it under that direction (as not started until an agent works on
 // it, direction_tree.go), and task_plan's todo_id can run an agent on it later instead of opening a second todo.
 func (s *Service) createDirectionTodo(ctx context.Context, leader, title, notes string, plan db.TodoEdit, bindings ...*repository.CreateBindings) (Todo, error) {
 	now := time.Now().UTC()
@@ -244,6 +272,11 @@ func (s *Service) createPieceTodo(ctx context.Context, conversation, title, note
 // todo it closes has its outcome recorded and a question's to-do answered as dropped. db.ErrTodoNotFound when it is not
 // there.
 func (s *Service) editTodo(ctx context.Context, id string, e db.TodoEdit) (Todo, error) {
+	if e.Audience != nil {
+		if err := db.ValidateTodoAudience(*e.Audience); err != nil {
+			return Todo{}, err
+		}
+	}
 	cur, ok := s.todoNow(id)
 	if !ok {
 		return Todo{}, db.ErrTodoNotFound

@@ -26,5 +26,8 @@
   "dialog_open": "Agent のターミナルのダイアログ「{dialog}」を先に処理してから回答してください。",
   "dialog_open_unnamed": "Agent のターミナルのダイアログを先に処理してから回答してください。",
   "open_terminal": "ターミナルを開く",
-  "answer_recorded": "回答を記録しました。"
+  "answer_recorded": "回答を記録しました。",
+  "open_link": "リンクを開く",
+  "open_link_host": "リンクを開く · {host}",
+  "open_link_aria": "{label} を開く"
 }

@@ -234,7 +234,7 @@ func (e *Engine) PruneProjectAliases() int {
 	}
 	removed := 0
 	for _, p := range projects {
-		if !p.Live() || p.referenceOnly() || len(p.Aliases) == 0 || p.fieldLocked("aliases") {
+		if !p.Live() || p.referenceOnly() || len(p.Aliases) == 0 || taggingFieldLocked(&p.Tagging, "aliases") {
 			continue
 		}
 		own, seen, counted := normName(p.Name), map[string]bool{}, 0

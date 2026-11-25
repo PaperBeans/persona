@@ -239,7 +239,7 @@ func (s *Service) kbRPCRequest(ctx context.Context, method string, raw json.RawM
 		detail, err := e.Get(get.Kind, get.ID, *get.RecentChars)
 		return assistantwire.KBGetResult{Detail: detail}, true, kbRPCError(err)
 	case assistantwire.MethodKBDay:
-		if sentOrigin {
+		if sentOrigin && s.ui != nil { // without the knowledge-ui module a day carries no sent marks
 			out, err := s.kbDaySent(ctx, e, day)
 			return out, true, kbRPCError(err)
 		}

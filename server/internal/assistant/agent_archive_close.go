@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"maps"
@@ -45,6 +46,8 @@ type agentArchiveCloseResult struct {
 	Outcome   string
 	ReasonKey string
 	Detail    string
+	// Session is the id the archive is kept under (archiveSessionOf): a pane's row's conversation's own id.
+	Session string
 }
 
 // agentCloseBusy: closing the agent now would cut off work, or something it runs the user may be using.
@@ -69,6 +72,7 @@ func (svc *Service) archiveAndCloseAgentSession(ctx context.Context, mid, sid st
 		return agentArchiveCloseResult{}, err
 	}
 	res := svc.retireArchived(ctx, row)
+	res.Session = archiveSessionOf(row)
 	if res.Closed {
 		// What the agent wrote while it was closed must not bring the session back (agentArchive.activeAfter).
 		if _, err := svc.noteAgentArchiveClosed(ctx, row, time.Now().UTC(), true); err != nil {
@@ -152,7 +156,8 @@ func (svc *Service) noteAgentArchiveClosed(ctx context.Context, s proto.Session,
 	if err := svc.loadAgentArchivesLocked(ctx); err != nil {
 		return 0, err
 	}
-	key := runtimeListID(s.MachineID, s.SessionID)
+	sid := archiveSessionOf(s) // where noteAgentArchiveAt kept it
+	key := runtimeListID(s.MachineID, sid)
 	rec, ok := b.records[key]
 	if !ok || !rec.Archived || s.ArchiveChangedAt == nil || !rec.ChangedAt.Equal(*s.ArchiveChangedAt) {
 		return 0, nil
@@ -164,7 +169,7 @@ func (svc *Service) noteAgentArchiveClosed(ctx context.Context, s proto.Session,
 		return 0, err
 	}
 	if retryNative {
-		svc.nativeArchiveWanted(s, true) // its terminal is gone: the tool's archive goes through now
+		svc.nativeArchiveWanted(proto.Session{MachineID: s.MachineID, SessionID: sid}, true) // its terminal is gone: the tool's archive goes through now
 	}
 	return b.writes.Load(), nil
 }
@@ -182,11 +187,12 @@ func (svc *Service) retryNativeArchiveClosed(ctx context.Context, s proto.Sessio
 	if err := svc.loadAgentArchivesLocked(ctx); err != nil {
 		return
 	}
-	rec, ok := b.records[runtimeListID(s.MachineID, s.SessionID)]
+	sid := archiveSessionOf(s)
+	rec, ok := b.records[runtimeListID(s.MachineID, sid)]
 	if !ok || !rec.Archived || s.ArchiveChangedAt == nil || !rec.ChangedAt.Equal(*s.ArchiveChangedAt) {
 		return
 	}
-	svc.nativeArchiveWanted(s, true)
+	svc.nativeArchiveWanted(proto.Session{MachineID: s.MachineID, SessionID: sid}, true)
 }
 
 // archiveAndCloseHTTP is POST /api/v1/sessions/{mid}/{sid}/archive?close=1: 200 once archived, with what the close
@@ -208,5 +214,5 @@ func (svc *Service) archiveAndCloseHTTP(w http.ResponseWriter, r *http.Request, 
 		mid = m.ID
 	}
 	apierr.WriteJSON(w, map[string]any{"ok": true, "archived": true, "close": closeBody,
-		"native": svc.nativeArchiveAwaited(r.Context(), mid, r.PathValue("sid"))})
+		"native": svc.nativeArchiveAwaited(r.Context(), mid, cmp.Or(res.Session, r.PathValue("sid")))})
 }

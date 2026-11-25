@@ -112,6 +112,9 @@ enum Modules {
         #if PERSONA_MODULE_HEALTH
         list.append(HealthModule())
         #endif
+        #if PERSONA_MODULE_VOICE
+        list.append(VoiceModule())
+        #endif
         return list
     }
 
@@ -160,20 +163,26 @@ enum HubModuleMemory {
 /// when that hub's hello, or the pick of hub, changes the answer (#13849). Nothing else is observed.
 @MainActor @Observable
 final class ModuleState {
-    static let shared = ModuleState(group: UserDefaults.standard.string(forKey: AppModel.hubGroupKey) ?? "")
+    static let shared = ModuleState(group: UserDefaults.standard.string(forKey: AppModel.hubGroupKey) ?? "",
+                                    audioBroker: .shared)
 
     private(set) var registry: ModuleRegistry<PersonaHostApp>
     /// The hub group whose answer the registry follows.
     @ObservationIgnored private(set) var group: String
     /// The modules whose launch hooks ran; nil before launch.
     @ObservationIgnored private var launched: Set<ModuleID>?
+    /// Optional audio broker kept in sync with the active modules' `audio_leases` declarations.
+    @ObservationIgnored private let audioBroker: AudioSessionBroker?
 
     init(group: String, defaults: UserDefaults = .standard,
          modules: [any PersonaModule<PersonaHostApp>] = Modules.builtIn,
-         isEnabled: @escaping @MainActor (any PersonaModule<PersonaHostApp>) -> Bool = Modules.isEnabled) {
+         isEnabled: @escaping @MainActor (any PersonaModule<PersonaHostApp>) -> Bool = Modules.isEnabled,
+         audioBroker: AudioSessionBroker? = nil) {
         self.group = group
+        self.audioBroker = audioBroker
         registry = ModuleRegistry(modules: modules, isEnabled: isEnabled, hub: HubModuleMemory.remembered(group, in: defaults))
         assert(registry.problems.isEmpty, "module registrations refused: \(registry.problems)")
+        audioBroker?.syncDeclaredLeases(from: registry)
     }
 
     /// Runs the active modules' launch hooks, once, at launch.
@@ -200,6 +209,32 @@ final class ModuleState {
         guard hub != registry.hub else { return }
         registry = registry.rebuilt(hub: hub)
         assert(registry.problems.isEmpty, "module registrations refused: \(registry.problems)")
+        audioBroker?.syncDeclaredLeases(from: registry)
         if let done = launched { launched = registry.launch(after: done) }
+    }
+}
+
+extension AudioSessionBroker.LeaseKind {
+    nonisolated init(_ kind: AudioLeaseKind) {
+        switch kind {
+        case .call: self = .call
+        case .voiceConversation: self = .voiceConversation
+        case .meetingRecording: self = .meetingRecording
+        case .playback: self = .playback
+        }
+    }
+}
+
+extension AudioSessionBroker {
+    /// Acquires a lease declared by an active module in `ModuleRegistry.audioLeases` (#13849).
+    nonisolated func acquire(_ declared: ModuleAudioLease) -> Lease {
+        acquire(id: declared.id, module: declared.module.rawValue, kind: LeaseKind(declared.kind))
+    }
+
+    /// Syncs the active modules' declared `audio_leases` into the broker for inspection.
+    @MainActor func syncDeclaredLeases(from registry: ModuleRegistry<PersonaHostApp>) {
+        setDeclaredLeases(registry.audioLeases.map {
+            DeclaredLease(id: $0.id, module: $0.module.rawValue, kind: LeaseKind($0.kind))
+        })
     }
 }

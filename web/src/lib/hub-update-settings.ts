@@ -10,7 +10,7 @@ export const applyHubUpdateBackup = (id: string) => api<HubUpdateStatus>(`/hub/u
 
 /** An update is under way (the progress row, no buttons). */
 export function updateWorking(s: HubUpdateStatus): boolean {
-  return ["building", "applying_backup", "backing_up", "downloading", "waiting_idle", "restarting", "confirming"].includes(s.state);
+  return ["building", "applying_backup", "backing_up", "downloading", "waiting_idle", "installing", "restarting", "confirming"].includes(s.state);
 }
 
 /** A state that ends an update: the history has a new line. */
@@ -38,6 +38,8 @@ export function updateStateTitle(s: HubUpdateStatus): string {
 export const DOCKER_COMMAND = "docker compose pull && docker compose up -d";
 
 export function channelTitle(channel: string): string {
+  if (channel === "web-dev") return t("settings-hubsettings.web_dev");
+  if (channel === "beta") return t("settings-hubsettings.beta_channel");
   return channel === "release" ? t("lib-hub-update.channel_release") : channel === "docker" ? "Docker" : t("lib-hub-update.channel_dev");
 }
 

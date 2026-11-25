@@ -1,0 +1,22 @@
+{
+  "title": "Named herdr sessions",
+  "footer": "Choose named herdr sessions (herdr --session <name>) on the selected computer to keep out of Persona. Blocking a session stops Persona from listing its panes, workspaces, hooks, approval cards, live processes and remembered transcripts, while herdr keeps running. Unblock a session to show it again. The default server and persona-* data-directory sessions are managed automatically.",
+  "machine": "Computer",
+  "session": "Session name",
+  "placeholder": "agent",
+  "block": "Block",
+  "unblock": "Unblock",
+  "remove": "Remove",
+  "running_visible": "Running · visible",
+  "stopped_visible": "Stopped · visible",
+  "running_blocked": "Running · blocked",
+  "stopped_blocked": "Stopped · blocked",
+  "not_detected_blocked": "Blocked · not detected",
+  "empty": "No named herdr sessions detected or blocked on this computer.",
+  "offline_note": "Offline or older node: showing saved blocked sessions only.",
+  "failed": "Could not load or save herdr sessions: {error}",
+  "retry": "Retry",
+  "name_invalid": "Use letters, digits, -, _ or . only",
+  "name_reserved": "The default server and persona-* sessions cannot be configured here",
+  "name_exists": "Already blocked"
+}

@@ -11,5 +11,7 @@
   "close_agent_detail": "会退出 {machine} 上「{where}」里的 Claude 并关掉这个标签页。对话会留在这里，之后可以在它的终端页恢复。",
   "close_runtime_detail": "会结束 {machine} 上的「{title}」。对话记录会保留。",
   "archive_close_detail": "Persona 会归档「{title}」，并关闭它在 {machine} 上的标签页和进程。对话会保留：可以在「已归档的 Agent」里找回，再在它的终端页点「恢复」让它接着做。",
+  "archive_close_agy_detail": "Persona 会关闭 {machine} 上的对话「{title}」，并把它移到「已归档的 Agent」。给它发条消息，就能让它回来。",
+  "archive_close_agy_pane_detail": "Persona 会关闭 {machine} 上运行「{title}」的窗格，并把对话移到「已归档的 Agent」。给它发条消息，就能让它回来。",
   "archive_close": "归档并关闭"
 }

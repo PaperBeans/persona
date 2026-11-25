@@ -33,6 +33,8 @@ data class DraftAttachment(
     val error: String? = null,
     /** A video's length in seconds, when the phone could read it. */
     val duration: Double? = null,
+    /** Scaled/staged JPEG byte count for an inline photo, used for hub body-budget accounting. */
+    val scaledBytes: Long? = null,
 )
 
 /** History changes on transcript replacement; list rev changes on ordinary messages too. */

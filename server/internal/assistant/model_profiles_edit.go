@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -127,40 +128,25 @@ func checkModelProfile(p *ModelProfile, stored []storedLauncher) error {
 	return nil
 }
 
-// checkModelTiers is what saving tiers needs (normalized in place): names, a launcher each, model ids, effort levels
-// and one-line descriptions. Whether a launcher exists is the editor's to check (settings_tiers.go): a ~/.zshrc one
-// is known only to its computers.
+// checkModelTiers is what saving tiers needs (normalized in place): names, at most maxTierCandidates candidates each,
+// a launcher per candidate, model ids, effort levels, speeds, permission modes, one-line descriptions, and aliases
+// that are tier names no other tier has or answers to. Whether a launcher exists is the editor's to check
+// (settings_tiers.go): a ~/.zshrc one is known only to its computers.
 func checkModelTiers(tiers map[string]ModelTier) error {
 	if len(tiers) > maxModelTiers {
 		return i18n.Err("assistant-model_profiles.err_tiers", i18n.Args{"max": maxModelTiers})
 	}
 	for name, t := range tiers {
-		if proto.IsExternalLauncher(t.Launcher) {
-			return i18n.Err("external-adapter.purpose_unsupported")
-		}
 		if !modelTierName.MatchString(name) {
 			return i18n.Err("assistant-model_profiles.err_tier_name", i18n.Args{"tier": name})
 		}
-		if t.Launcher == "" {
-			return i18n.Err("assistant-model_profiles.err_tier_launcher", i18n.Args{"tier": name})
+		if len(t.Candidates) > maxTierCandidates {
+			return i18n.Err("assistant-model_profiles.err_tier_candidates", i18n.Args{"tier": name, "max": maxTierCandidates})
 		}
-		for field, v := range map[string]string{"launcher": t.Launcher, "model": t.Model} {
-			if !validProfileValue(v) || strings.Contains(v, " ") {
-				return i18n.Err("assistant-model_profiles.err_value", i18n.Args{"where": name, "field": field})
-			}
-		}
-		if t.Effort != "" && !slices.Contains(proto.EffortLevels, t.Effort) {
-			return profileEffortErr(name, t.Effort, proto.EffortLevels)
-		}
-		if !proto.ValidSpeed(t.Speed) {
-			return i18n.Err("assistant-model_profiles.err_tier_speed", i18n.Args{"tier": name, "speed": t.Speed})
-		}
-		if t.PermissionMode != "" {
-			if !slices.Contains(proto.PermissionModes, t.PermissionMode) {
-				return profilePermissionModeErr(name, t.PermissionMode)
-			}
-			if slices.Contains([]string{"omp", "traex", "pi", "cursor"}, t.Launcher) {
-				return i18n.Err("assistant-models.err_permission_mode_unsupported")
+		t.normalize()
+		for i, c := range t.list() {
+			if err := checkTierCandidate(candidateWhere(name, i), c); err != nil {
+				return err
 			}
 		}
 		if t.Description = strings.TrimSpace(t.Description); utf8.RuneCountInString(t.Description) > modelTierAbout ||
@@ -169,15 +155,80 @@ func checkModelTiers(tiers map[string]ModelTier) error {
 		}
 		tiers[name] = t
 	}
+	// Aliases resolve a name to one tier only: none is a tier's name, and none is two tiers' alias.
+	owner := map[string]string{}
+	for _, name := range slices.Sorted(maps.Keys(tiers)) {
+		t := tiers[name]
+		if len(t.Aliases) > maxTierAliases {
+			return i18n.Err("assistant-model_profiles.err_tier_alias", i18n.Args{"tier": name, "alias": t.Aliases[maxTierAliases]})
+		}
+		for _, a := range t.Aliases {
+			_, isTier := tiers[a]
+			if _, taken := owner[a]; taken || isTier || !modelTierName.MatchString(a) {
+				return i18n.Err("assistant-model_profiles.err_tier_alias", i18n.Args{"tier": name, "alias": a})
+			}
+			owner[a] = name
+		}
+	}
 	return nil
 }
 
-// checkTierModel is what a tier added or changed needs of its model: it goes to the agent as --model, so one that is no
-// model id would fail every start on the tier (#1644). Tiers saved before this was checked are left as they are: a
-// switch or an edit of something else never stops on them (a start on one says why).
-func checkTierModel(name string, t ModelTier) error {
-	if t.Model != "" && !proto.ValidModelID(t.Model) {
-		return i18n.Err("assistant-model_profiles.err_tier_model", i18n.Args{"tier": name, "model": t.Model})
+// candidateWhere names candidate i of tier name in a message: the tier itself for candidate 0 (as before candidates),
+// "name #2" for the second.
+func candidateWhere(name string, i int) string {
+	if i == 0 {
+		return name
+	}
+	return name + " #" + strconv.Itoa(i+1)
+}
+
+// checkTierCandidate is what one candidate of a tier needs: a launcher Persona can start an Agent on, and the form of
+// its model, effort, speed and permission mode.
+func checkTierCandidate(where string, c TierCandidate) error {
+	if proto.IsExternalLauncher(c.Launcher) {
+		return i18n.Err("external-adapter.purpose_unsupported")
+	}
+	if c.Launcher == "" {
+		return i18n.Err("assistant-model_profiles.err_tier_launcher", i18n.Args{"tier": where})
+	}
+	for field, v := range map[string]string{"launcher": c.Launcher, "model": c.Model} {
+		if !validProfileValue(v) || strings.Contains(v, " ") {
+			return i18n.Err("assistant-model_profiles.err_value", i18n.Args{"where": where, "field": field})
+		}
+	}
+	if c.Effort != "" && !slices.Contains(proto.EffortLevels, c.Effort) {
+		return profileEffortErr(where, c.Effort, proto.EffortLevels)
+	}
+	if !proto.ValidSpeed(c.Speed) {
+		return i18n.Err("assistant-model_profiles.err_tier_speed", i18n.Args{"tier": where, "speed": c.Speed})
+	}
+	if c.PermissionMode != "" {
+		if !slices.Contains(proto.PermissionModes, c.PermissionMode) {
+			return profilePermissionModeErr(where, c.PermissionMode)
+		}
+		if slices.Contains([]string{"omp", "traex", "pi", "cursor"}, c.Launcher) {
+			return i18n.Err("assistant-models.err_permission_mode_unsupported")
+		}
+	}
+	return nil
+}
+
+// checkTierModel is what a tier added or changed needs of its models: each goes to the agent as --model, so one that
+// is no model id would fail every start on it (#1644). Only the candidates added or changed since was (nil: a new
+// tier) are held to it: a tier saved before this was checked is left as it is, so a switch or an edit of something
+// else never stops on it (a start on one says why).
+func checkTierModel(name string, t ModelTier, was *ModelTier) error {
+	var before []TierCandidate
+	if was != nil {
+		before = was.list()
+	}
+	for i, c := range t.list() {
+		if i < len(before) && before[i].Model == c.Model {
+			continue
+		}
+		if c.Model != "" && !proto.ValidModelID(c.Model) {
+			return i18n.Err("assistant-model_profiles.err_tier_model", i18n.Args{"tier": candidateWhere(name, i), "model": c.Model})
+		}
 	}
 	return nil
 }
@@ -214,11 +265,13 @@ func (s *Service) checkProfilePermissionModes(ctx context.Context, p ModelProfil
 		}
 	}
 	for _, t := range p.Tiers {
-		if t.PermissionMode == "" {
-			continue
-		}
-		if !slices.Contains(s.permissionModesForLauncher(ctx, "", t.Launcher, nil), t.PermissionMode) {
-			return i18n.Err("assistant-models.err_permission_mode_unsupported")
+		for _, c := range t.list() {
+			if c.PermissionMode == "" {
+				continue
+			}
+			if !slices.Contains(s.permissionModesForLauncher(ctx, "", c.Launcher, nil), c.PermissionMode) {
+				return i18n.Err("assistant-models.err_permission_mode_unsupported")
+			}
 		}
 	}
 	return nil
@@ -266,6 +319,9 @@ func (s *Service) saveModelProfileLocked(ctx context.Context, revision *int64, i
 		return p, "", err
 	}
 	ctx = withManagedSnapshot(ctx, stored)
+	if p.Purposes, err = s.normalizeProfilePurposes(ctx, p.Purposes, map[string]modelRecord{}, stored); err != nil {
+		return p, "", err
+	}
 	if err := checkModelProfile(&p, stored); err != nil {
 		return p, "", err
 	}
@@ -273,10 +329,12 @@ func (s *Service) saveModelProfileLocked(ctx context.Context, revision *int64, i
 		return p, "", err
 	}
 	for name, t := range p.Tiers {
-		if was, ok := saved[name]; !ok || was.Model != t.Model {
-			if err := checkTierModel(name, t); err != nil {
-				return p, "", err
-			}
+		var before *ModelTier
+		if was, ok := saved[name]; ok {
+			before = &was
+		}
+		if err := checkTierModel(name, t, before); err != nil {
+			return p, "", err
 		}
 	}
 	now := time.Now().UTC()

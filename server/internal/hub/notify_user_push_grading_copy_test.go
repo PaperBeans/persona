@@ -12,6 +12,8 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistant"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/larkhost"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -149,6 +151,9 @@ func TestNotifyUserFeishuCopyFollowsPushGradingOverTheBus(t *testing.T) {
 		{false, "side-2", "side pr-2 again, switch off", "", "pr-2", true, ""},
 	}
 	gradingOn := false
+	// A core-only build has no Lark provider. Its absent copies are correct; the hub's grading, hold and
+	// deduplication still run below, and the default build exercises the actual fake provider's delivery replies.
+	copiesInBuild := larkhost.InBuild(moduleswitch.Set{})
 	for i, st := range steps {
 		if i == 0 || st.grading != gradingOn {
 			gradingMode(st.grading)
@@ -160,7 +165,7 @@ func TestNotifyUserFeishuCopyFollowsPushGradingOverTheBus(t *testing.T) {
 		got, reason := posted(st.title), held(st.title)
 		t.Logf("grading=%v %s %q level=%q key=%q: Feishu copies %d, hub held %q; answer: %s", st.grading, st.session, st.title, st.lvl, st.key, got, reason, answer)
 		switch {
-		case st.copied && got != 1:
+		case copiesInBuild && st.copied && got != 1:
 			t.Errorf("%q: %d Feishu copies, want 1", st.title, got)
 		case !st.copied && got != 0:
 			t.Errorf("%q: %d Feishu copies of a notice the hub held (%s)", st.title, got, reason)
@@ -168,7 +173,7 @@ func TestNotifyUserFeishuCopyFollowsPushGradingOverTheBus(t *testing.T) {
 			t.Errorf("%q: the hub held it as %q, want %q", st.title, reason, st.reason)
 		}
 		copied := strings.Contains(answer, "Copied to Feishu: delivered.") || strings.Contains(answer, "已抄送飞书，已送到。") // i18n-ignore: the answer in either language
-		if copied != st.copied {
+		if copiesInBuild && copied != st.copied {
 			t.Errorf("%q: answer %q, want it to say the Feishu copy was delivered: %v", st.title, answer, st.copied)
 		}
 	}

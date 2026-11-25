@@ -305,3 +305,106 @@ func TestHeldOperationsShownRetriedAndUnsure(t *testing.T) {
 		t.Fatalf("left %+v", ops)
 	}
 }
+
+// Held new-Agent starts (#10674) reuse held_operations with kind="start" and session_id="", extracting prompt, image
+// count, sender credential id (from caller or principal), and display meta without returning image payloads on list,
+// and recovering interrupted sending rows as unclear on manager restart.
+func TestHeldKindStartPersistenceAndRecovery(t *testing.T) {
+	d, ctx := openHeld(t), context.Background()
+	at := time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC)
+	callA := json.RawMessage(`{
+		"machine_id":"mac",
+		"op_id":"11111111-1111-4111-8111-111111111111",
+		"params":{"machine_id":"mac","cwd":"/work/app","launcher":"claude","prompt":"ship release","images":[{"mime":"image/png","data":"AAAA"},{"mime":"image/png","data":"BBBB"}]},
+		"meta":{"cwd":"/work/app","launcher":"claude","model":"opus","todo_id":"todo-1"},
+		"principal":{"id":"dev-phone","name":"Phone","role":"full"}
+	}`)
+	callB := json.RawMessage(`{
+		"machine_id":"mac",
+		"op_id":"22222222-2222-4222-8222-222222222222",
+		"params":{"machine_id":"mac","cwd":"/work/lib","launcher":"codex","prompt":"run tests"},
+		"meta":{"cwd":"/work/lib","launcher":"codex","work_session":true},
+		"principal":{"id":"dev-fallback","role":"full"},
+		"caller":{"kind":"device","credential_id":"dev-caller"}
+	}`)
+	a, fresh, err := d.HoldOperation(ctx, HeldOperation{
+		Kind: HeldKindStart, OpID: "11111111-1111-4111-8111-111111111111", MachineID: "mac", SessionID: "",
+		Call: callA, Lang: "en", SentAt: at,
+	})
+	if err != nil || !fresh {
+		t.Fatalf("hold start A: %+v %v %v", a, fresh, err)
+	}
+	if a.Text != "ship release" || a.Images != 2 || a.CredentialID != "dev-phone" || len(a.Meta) == 0 {
+		t.Fatalf("shown fields on insert: %+v", a)
+	}
+	b, fresh, err := d.HoldOperation(ctx, HeldOperation{
+		Kind: HeldKindStart, OpID: "22222222-2222-4222-8222-222222222222", MachineID: "mac", SessionID: "",
+		Call: callB, Lang: "ja", SentAt: at.Add(time.Minute),
+	})
+	if err != nil || !fresh {
+		t.Fatalf("hold start B: %+v %v %v", b, fresh, err)
+	}
+	if b.CredentialID != "dev-caller" {
+		t.Fatalf("caller credential_id must take precedence over principal.id: got %q", b.CredentialID)
+	}
+	// Duplicate op_id returns the existing row without inserting another.
+	dup, fresh, err := d.HoldOperation(ctx, HeldOperation{
+		Kind: HeldKindStart, OpID: "11111111-1111-4111-8111-111111111111", MachineID: "mac", SessionID: "",
+		Call: callA, Lang: "en", SentAt: at,
+	})
+	if err != nil || fresh || dup.Seq != a.Seq {
+		t.Fatalf("duplicate hold start: %+v %v %v", dup, fresh, err)
+	}
+	// Claim A (simulate mid-flight start when manager restarts) while B remains waiting.
+	if _, ok, err := d.ClaimHeldOperation(ctx, a.Seq, at.Add(2*time.Minute)); err != nil || !ok {
+		t.Fatalf("claim A: %v %v", ok, err)
+	}
+	// Unrelated HeldKindMessage recovery must not touch HeldKindStart rows.
+	if n, err := d.RecoverHeldOperations(ctx, HeldKindMessage); err != nil || n != 0 {
+		t.Fatalf("recover message kind touched starts: %d %v", n, err)
+	}
+	// Manager restart recovery for HeldKindStart marks A failed/unclear and keeps B waiting.
+	if n, err := d.RecoverHeldOperations(ctx, HeldKindStart); err != nil || n != 1 {
+		t.Fatalf("recover start kind: %d %v", n, err)
+	}
+	list, err := d.HeldOperations(ctx, HeldKindStart)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("list starts: %+v %v", list, err)
+	}
+	if list[0].Seq != a.Seq || list[0].State != HeldFailed || list[0].Failure != HeldUnclear || list[0].Call != nil ||
+		list[0].Text != "ship release" || list[0].Images != 2 || list[0].CredentialID != "dev-phone" {
+		t.Fatalf("recovered A summary: %+v", list[0])
+	}
+	var metaA map[string]any
+	if err := json.Unmarshal(list[0].Meta, &metaA); err != nil || metaA["cwd"] != "/work/app" || metaA["todo_id"] != "todo-1" {
+		t.Fatalf("meta A: %s %v", list[0].Meta, err)
+	}
+	if list[1].Seq != b.Seq || list[1].State != HeldWaiting || list[1].Failure != "" || list[1].Call != nil ||
+		list[1].Text != "run tests" || list[1].CredentialID != "dev-caller" {
+		t.Fatalf("waiting B summary: %+v", list[1])
+	}
+}
+
+// NodeSession persists start_op_id through state.put/state.load and preserves it when later updates carry an empty one.
+func TestNodeSessionStartOpIDRoundTrip(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	opID := "33333333-3333-4333-8333-333333333333"
+	if err := d.PutNodeSession(ctx, "server", "sess-op-1", NodeSession{
+		Launcher: "claude", Cwd: "/work/repo", StartedAt: time.Now().UTC(), StartOpID: opID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A subsequent update without StartOpID (e.g. async/running update) must preserve the recorded StartOpID.
+	if err := d.PutNodeSession(ctx, "server", "sess-op-1", NodeSession{
+		Launcher: "claude", Cwd: "/work/repo", Pane: "w1:p2", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.NodeSessions(ctx, "server")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["sess-op-1"].StartOpID != opID || got["sess-op-1"].Pane != "w1:p2" {
+		t.Fatalf("NodeSession start_op_id round trip: %+v", got["sess-op-1"])
+	}
+}

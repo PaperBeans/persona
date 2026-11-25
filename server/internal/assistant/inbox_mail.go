@@ -68,11 +68,14 @@ func (s *Service) readMailBody(ctx context.Context, a assistantwire.InboxMailAcc
 		return false
 	}
 	text := strings.TrimSpace(m.Text)
+	body := clip(text, 3000)
+	truncated := body != text
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	defer b.settleRound()
 	b.roundWrite(it)
 	it.BodyOf = last
+	it.MailBodyTruncated = &truncated
 	if text == "" {
 		return true
 	}
@@ -85,8 +88,9 @@ func (s *Service) readMailBody(ctx context.Context, a assistantwire.InboxMailAcc
 	for _, t := range m.Cc {
 		cc = append(cc, t.Email)
 	}
-	it.Context = fmt.Sprintf("邮箱 %s 收到的未读邮件（共 %d 封，下面是最新一封）：\n发件人：%s <%s>\n收件人：%s\n抄送：%s\n时间：%s\n主题：%s\n\n%s",
-		a.Email, len(it.Mail.UIDs), m.From.Name, m.From.Email, strings.Join(to, ", "), strings.Join(cc, ", "), m.Date, m.Subject, clip(text, 3000))
+	context := fmt.Sprintf("邮箱 %s 收到的未读邮件（共 %d 封，下面是最新一封）：\n发件人：%s <%s>\n收件人：%s\n抄送：%s\n时间：%s\n主题：%s\n\n%s",
+		a.Email, len(it.Mail.UIDs), m.From.Name, m.From.Email, strings.Join(to, ", "), strings.Join(cc, ", "), m.Date, m.Subject, body)
+	b.replaceContextKeepingMergedMembers(it, context)
 	return true
 }
 
@@ -266,7 +270,7 @@ func (b *inboxBook) applyMailFolder(a assistantwire.InboxMailAccount, f assistan
 		}
 		fillMail(it, a, unseen)
 		it.Read = false
-		it.Context = mailContext(a, unseen, false)
+		b.replaceContextKeepingMergedMembers(it, mailContext(a, unseen, false))
 		b.noteReceived(it, prev, mailMessages(unseen, prev.uids))
 		changed = append(changed, it)
 	}

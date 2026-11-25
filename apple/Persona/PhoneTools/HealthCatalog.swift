@@ -224,6 +224,12 @@ nonisolated enum HealthCatalog {
             || identifier == quantityPrefix + "AppleMoveTime" || identifier == quantityPrefix + "TimeInDaylight" {
             list.append(.minute())
         }
+        if identifier == quantityPrefix + "BodyFatPercentage" || identifier == quantityPrefix + "OxygenSaturation"
+            || identifier == quantityPrefix + "WalkingDoubleSupportPercentage" || identifier == quantityPrefix + "WalkingAsymmetryPercentage"
+            || identifier == quantityPrefix + "AtrialFibrillationBurden" || identifier == quantityPrefix + "PeripheralPerfusionIndex" {
+            // A ratio is not a count, even where HealthKit reports the two units as dimensionally compatible.
+            list.append(.percent())
+        }
         list += [
             .count(), .count().unitDivided(by: .minute()), .meter(), .kilocalorie(), .gram(), .percent(), .second(),
             .degreeCelsius(), .millimeterOfMercury(), .decibelAWeightedSoundPressureLevel(), .liter(),

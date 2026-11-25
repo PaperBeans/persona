@@ -13,6 +13,7 @@ import (
 // A transient turn owned by automatic continuation is retry state, not a final answer for every connected channel.
 // The terminal turn after the chain still goes out once through the ordinary mirror paths.
 func TestTransientRetryTurnsAreNotMirrored(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f := channelPushService(t, false)
 	enableChannelPushFeishu(f)
 	s.work.switches = &TriageSwitches{} // transient_retry's default is on
@@ -50,6 +51,7 @@ func TestTransientRetryTurnsAreNotMirrored(t *testing.T) {
 
 // With automatic continuation off, the same transient error is already terminal and keeps its existing mirror behavior.
 func TestTransientErrorIsMirroredWhenRetryIsDisabled(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f := channelPushService(t, false)
 	enableChannelPushFeishu(f)
 	off := false

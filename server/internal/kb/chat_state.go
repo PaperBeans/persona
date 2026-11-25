@@ -104,7 +104,7 @@ func (e *Engine) FinishProjects(now time.Time, busy func(slug string) bool) []st
 	}
 	var out []string
 	for _, p := range e.Store.Projects() {
-		if !p.Live() || p.referenceOnly() || p.Status != "active" && p.Status != "paused" || p.Kind == "long" || p.fieldLocked("status") {
+		if !p.Live() || p.referenceOnly() || p.Status != "active" && p.Status != "paused" || p.Kind == "long" || taggingFieldLocked(&p.Tagging, "status") {
 			continue
 		}
 		if busy != nil && busy(p.Slug) {

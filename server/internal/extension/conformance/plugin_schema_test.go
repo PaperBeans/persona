@@ -1,6 +1,6 @@
 package conformance_test
 
-// The plugin protocol's schemas (schema/extension/connector.schema.json, channel.schema.json, kb.schema.json, todos.schema.json, leaders.schema.json, models.schema.json, repository.schema.json) describe what the server's
+// The plugin protocol's schemas (schema/extension/connector.schema.json, channel.schema.json, kb.schema.json, todos.schema.json, leaders.schema.json, models.schema.json, repository.schema.json, offload.schema.json) describe what the server's
 // own code sends and reads: every call and event they list is held to the Go types the hub and connector/serve put on
 // the wire, field by field, and every connector method the server knows is in them. The schema is what an extension
 // is written from; this keeps it from drifting from the code.
@@ -166,6 +166,15 @@ var goTypes = map[string]any{
 	"RepoPRStatusParams": wire.RepoPRStatusParams{},
 	"RepoPRStatusResult": wire.RepoPRStatusResult{},
 
+	// The manager calls a disk_offload provider with the generated wire types and reads its answers into them
+	// (extmgr/extension_offload.go), re-checking each answer before it is used.
+	"OffloadInventoryParams": wire.OffloadInventoryParams{},
+	"OffloadInventory":       wire.OffloadInventory{},
+	"OffloadRunParams":       wire.OffloadRunParams{},
+	"OffloadRunResult":       wire.OffloadRunResult{},
+	"OffloadJobParams":       wire.OffloadJobParams{},
+	"OffloadJob":             wire.OffloadJob{},
+
 	"MachinesPairLinkParams": wire.MachinesPairLinkParams{},
 	"MachinesPairLinkResult": wire.MachinesPairLinkResult{},
 	"MachinesStatusParams":   wire.MachinesStatusParams{},
@@ -255,6 +264,10 @@ var leaderCalls = []string{"event." + assistantwire.EventLeaderChanged, "event."
 var repoCalls = []string{ext.RepositoryNamespace + ".parse", ext.RepositoryNamespace + ".check", ext.RepositoryNamespace + ".link",
 	ext.RepositoryNamespace + ".describe", ext.RepositoryNamespace + ".pr_status"}
 
+// The calls the manager makes to a disk_offload contribution's program (offload.schema.json).
+var offloadCalls = []string{ext.OffloadNamespace + ".inventory", ext.OffloadNamespace + ".run", ext.OffloadNamespace + ".job",
+	ext.OffloadNamespace + ".cancel"}
+
 var storageCalls = []string{"storage.request", "storage.get", "storage.list", "storage.transaction",
 	"storage.queue.list", "storage.queue.enqueue", "storage.queue.claim", "storage.queue.renew", "storage.queue.ack", "storage.queue.forget", "storage.queue.retry",
 	"storage.blob.create", "storage.blob.write", "storage.blob.finish", "storage.blob.delete", "storage.blob.read"}
@@ -276,6 +289,7 @@ func TestPluginSchemasListTheServersCalls(t *testing.T) {
 	want = append(want, sentCalls...)
 	want = append(want, storageCalls...)
 	want = append(want, repoCalls...)
+	want = append(want, offloadCalls...)
 	for _, name := range want {
 		if _, ok := wire.Calls[name]; !ok {
 			t.Errorf("%s: the server has it, schema/extension does not list it (x-methods / x-events)", name)
@@ -283,7 +297,7 @@ func TestPluginSchemasListTheServersCalls(t *testing.T) {
 	}
 	for name := range wire.Calls {
 		if (strings.HasPrefix(name, serve.Namespace+".") || strings.HasPrefix(name, channel.Namespace+".") ||
-			strings.HasPrefix(name, "kb.") || strings.HasPrefix(name, "event.kb.") || strings.HasPrefix(name, "event.todo.") || strings.HasPrefix(name, "event.leader.") || strings.HasPrefix(name, "sent.") || strings.HasPrefix(name, "model.") || strings.HasPrefix(name, "transcription.") || strings.HasPrefix(name, "assistant.") || strings.HasPrefix(name, "storage.") || strings.HasPrefix(name, ext.RepositoryNamespace+".")) &&
+			strings.HasPrefix(name, "kb.") || strings.HasPrefix(name, "event.kb.") || strings.HasPrefix(name, "event.todo.") || strings.HasPrefix(name, "event.leader.") || strings.HasPrefix(name, "sent.") || strings.HasPrefix(name, "model.") || strings.HasPrefix(name, "transcription.") || strings.HasPrefix(name, "assistant.") || strings.HasPrefix(name, "storage.") || strings.HasPrefix(name, ext.RepositoryNamespace+".") || strings.HasPrefix(name, ext.OffloadNamespace+".")) &&
 			!slices.Contains(want, name) {
 			t.Errorf("%s: schema/extension lists it, the server has no such call", name)
 		}
@@ -500,6 +514,68 @@ func (s schemas) compare(t *testing.T, at string, node map[string]any, g reflect
 		}
 		if b["type"] == "null" {
 			s.compare(t, at, a, g, seen)
+			return
+		}
+	}
+	if disc := asString(node["x-discriminator"]); disc != "" {
+		if choices := asSlice(node["oneOf"]); len(choices) > 0 {
+			if g.Kind() != reflect.Struct {
+				t.Errorf("%s: the schema says discriminated union (%s), Go has %s", at, disc, g)
+				return
+			}
+			fields := map[string]goField{}
+			jsonFields(g, fields)
+			df, ok := fields[disc]
+			if !ok {
+				t.Errorf("%s.%s: discriminator in the schema, not in Go's %s", at, disc, g)
+			} else {
+				if df.omitempty {
+					t.Errorf("%s.%s: discriminator in the schema, Go's %s leaves it out when empty", at, disc, g)
+				}
+				if df.typ.Kind() != reflect.String {
+					t.Errorf("%s.%s: discriminator is string, Go has %s", at, disc, df.typ)
+				}
+			}
+			merged := map[string]map[string]any{}
+			for _, choice := range choices {
+				cm, _ := choice.(map[string]any)
+				ref := asString(cm["$ref"])
+				if ref == "" {
+					t.Errorf("%s: union branch without $ref", at)
+					continue
+				}
+				vname, variant := s.ref(t, ref)
+				vprops, _ := variant["properties"].(map[string]any)
+				dnode, _ := vprops[disc].(map[string]any)
+				if _, ok := dnode["const"].(string); !ok {
+					t.Errorf("%s→%s.%s: variant discriminator lacks string const", at, vname, disc)
+				}
+				for pname, pv := range vprops {
+					if pname == disc {
+						continue
+					}
+					pm, _ := pv.(map[string]any)
+					if _, exists := merged[pname]; !exists {
+						merged[pname] = pm
+					}
+				}
+			}
+			for pname, pm := range merged {
+				f, ok := fields[pname]
+				if !ok {
+					t.Errorf("%s.%s: in the schema, not in Go's %s", at, pname, g)
+					continue
+				}
+				s.compare(t, at+"."+pname, pm, f.typ, seen)
+			}
+			for fname := range fields {
+				if fname == disc {
+					continue
+				}
+				if _, ok := merged[fname]; !ok {
+					t.Errorf("%s.%s: Go's %s sends it, the schema does not say it", at, fname, g)
+				}
+			}
 			return
 		}
 	}

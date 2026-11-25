@@ -584,6 +584,11 @@ type githubGetter interface {
 	GitHubGet(ctx context.Context, path string, out any) (bool, error)
 }
 
+// githubConnectorStatus is the local connectivity check on extmgr.Manager (zero remote calls).
+type githubConnectorStatus interface {
+	GitHubConnected(ctx context.Context) bool
+}
+
 // forge is where deploy checks read PRs: the test's, else GitHub (through the connector when there is one).
 func (s *Service) forge() prForge {
 	if s.deploy.forge != nil {

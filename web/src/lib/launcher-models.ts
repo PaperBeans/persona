@@ -8,7 +8,7 @@ import { api, ApiError, enc, pastHub } from "./api";
 import { cleanModelId, validModelId } from "./model-id";
 import type { ModelBinding } from "./model-config";
 import type { PanelPrice } from "./model-panel";
-import { EFFORTS } from "./session-actions";
+import { CODEX_EFFORTS, EFFORTS } from "./session-actions";
 import { launcherTitle, type Named } from "./provider-names";
 import type { Launcher, Session } from "./types";
 
@@ -100,7 +100,7 @@ export interface UnavailableLauncher {
   agent?: string;
   /** A direct API's protocol (responses, chat…). */
   api?: string;
-  /** not_main_chat, api_protocol, launcher_out_of_scope, launcher_own_service */
+  /** not_main_chat, api_protocol, launcher_out_of_scope, launcher_own_service, launcher_unhealthy */
   code?: string;
   reason: string;
 }
@@ -122,14 +122,11 @@ export function defaultLabel(d: LauncherDefault | null | undefined, fallback = "
 // The hub gives a model list 70 s (assistant/models_launchers.go): the node may have to start the CLI to ask its /model.
 const MODELS_HUB_MS = 70_000;
 
-/** The list for `launcher` on `mid` (seconds when the node has to start the CLI); null from an older hub (no picker). */
-export async function launcherModels(mid: string, launcher: string, opts: { refresh?: boolean; purpose?: "assistant"; host?: string; manager?: string; signal?: AbortSignal } = {}): Promise<LauncherModels | null> {
+async function readModelCatalog<T extends LauncherModels>(path: string, params: [string, string | undefined][], opts: { manager?: string; signal?: AbortSignal }): Promise<T | null> {
   const query = new URLSearchParams();
-  if (opts.refresh) query.set("refresh", "1");
-  if (opts.purpose) query.set("purpose", opts.purpose);
-  if (opts.host) query.set("host", opts.host);
+  for (const [k, v] of params) if (v) query.set(k, v);
   try {
-    const r = await api<LauncherModels>(`/machines/${enc(mid)}/launchers/${enc(launcher)}/models${query.size ? `?${query}` : ""}`, { signal: opts.signal, timeout: pastHub(MODELS_HUB_MS), headers: opts.manager ? { [MANAGER_HEADER]: opts.manager } : undefined });
+    const r = await api<T>(`${path}${query.size ? `?${query}` : ""}`, { signal: opts.signal, timeout: pastHub(MODELS_HUB_MS), headers: opts.manager ? { [MANAGER_HEADER]: opts.manager } : undefined });
     return { ...r, models: r.models ?? [] };
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
@@ -137,20 +134,16 @@ export async function launcherModels(mid: string, launcher: string, opts: { refr
   }
 }
 
+/** The list for `launcher` on `mid` (seconds when the node has to start the CLI); null from an older hub (no picker). */
+export function launcherModels(mid: string, launcher: string, opts: { refresh?: boolean; purpose?: "assistant"; host?: string; manager?: string; signal?: AbortSignal } = {}): Promise<LauncherModels | null> {
+  return readModelCatalog(`/machines/${enc(mid)}/launchers/${enc(launcher)}/models`, [["refresh", opts.refresh ? "1" : ""], ["purpose", opts.purpose], ["host", opts.host]], opts);
+}
+
 /** "Model configuration"'s list for a launcher provider (`launcher.<name>`, GET /model-config/providers/{id}/models, #943): asked on a
  *  machine that has the launcher, which `machine` names. null: an older hub or a provider without a list (no picker). */
-export async function providerModels(provider: string, opts: { manager?: string; refresh?: boolean; machine?: string; signal?: AbortSignal } = {}): Promise<(LauncherModels & { machine?: string }) | null> {
+export function providerModels(provider: string, opts: { manager?: string; refresh?: boolean; machine?: string; signal?: AbortSignal } = {}): Promise<(LauncherModels & { machine?: string }) | null> {
   // machine: the purpose's own (a task, Lark /agent run there), so the list is that machine's launcher.
-  const query = new URLSearchParams();
-  if (opts.refresh) query.set("refresh", "1");
-  if (opts.machine) query.set("machine", opts.machine);
-  try {
-    const r = await api<LauncherModels & { machine?: string }>(`/model-config/providers/${enc(provider)}/models${query.size ? `?${query}` : ""}`, { signal: opts.signal, timeout: pastHub(MODELS_HUB_MS), headers: opts.manager ? { [MANAGER_HEADER]: opts.manager } : undefined });
-    return { ...r, models: r.models ?? [] };
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
-    throw e;
-  }
+  return readModelCatalog(`/model-config/providers/${enc(provider)}/models`, [["refresh", opts.refresh ? "1" : ""], ["machine", opts.machine]], opts);
 }
 
 /** What is typed in the search, as an id to use when no model has exactly that id (or that alias) and the hub would take
@@ -241,17 +234,17 @@ export function listedModes(l: Pick<Launcher, "permission_modes"> | undefined): 
 }
 
 /** How a start takes a thinking effort: `any` (Claude Code, Antigravity: its model's levels, all of them while its list
- *  doesn't say), `listed` (a launcher that lists its permission modes, `listedModes`: only the levels its model lists,
- *  #8261), `none` (Codex and the rest keep their own). */
+ *  doesn't say), `listed` (Codex and launchers that list permission modes, `listedModes`: only the levels its model
+ *  reports, #8261, #13764), `none` (the rest keep their own). */
 export type EffortRule = "any" | "listed" | "none";
 
 export function effortRule(agent: string, l?: Pick<Launcher, "permission_modes">): EffortRule {
   if (agent === "claude" || agent === "agy") return "any";
-  return listedModes(l) ? "listed" : "none";
+  return agent === "codex" || listedModes(l) ? "listed" : "none";
 }
 
-/** Claude Code and Antigravity start with a thinking effort and permission mode, a launcher that lists its modes with
- *  the effort its model lists (`effortRule`); Codex and the rest keep their own. */
+/** Claude Code and Antigravity start with a thinking effort, and Codex or a launcher that lists its modes starts with
+ *  the effort its model reports (`effortRule`); the rest keep their own. */
 export const takesEffort = (agent: string, l?: Pick<Launcher, "permission_modes">) => effortRule(agent, l) !== "none";
 
 export function defaultModel(models: AgentModel[]): AgentModel | undefined {
@@ -265,6 +258,16 @@ export function modelName(m: { id: string; name?: string }): string {
   const gpt = /^gpt-([a-z0-9]+(?:\.[a-z0-9]+)*(?:-[a-z0-9]+(?:\.[a-z0-9]+)*)*)$/i.exec(name);
   if (!gpt) return name;
   return gpt[1].split("-").map((part, i) => i ? part[0].toUpperCase() + part.slice(1) : part).join(" ");
+}
+
+/** A catalog variant encodes its default effort in its model ID. */
+export function effortVariantBase(id: string, effort?: string): string | undefined {
+  return effort && id.endsWith(`-${effort}`) ? id.slice(0, -effort.length - 1) || undefined : undefined;
+}
+
+/** Drop effort from the trailing qualifiers while keeping context size and other model qualifiers. */
+export function withoutEffortQualifier(name: string): string {
+  return name.replace(/\s*[(（](?:minimal|low|medium|high|xhigh|max|ultra)[)）](?=(?:\s*[(（[][^()（）[\]]*[)）\]])*\s*$)/giu, "").trimEnd() || name;
 }
 
 /** "Default"'s second line: what "Model configuration" sets, else the concrete model the default entry stands for. */
@@ -289,7 +292,7 @@ export function matches(fields: (string | undefined)[], query: string): boolean 
 
 /** What the open list shows for `query` (name, id, resolved model, folded aliases, description; every word): "Default"
  *  first when it matches, then the rest in the agent's order. */
-export function modelRows(models: AgentModel[], query: string, followed: ModelBinding = {}): { showDefault: boolean; rows: AgentModel[] } {
+export function modelRows<M extends AgentModel>(models: M[], query: string, followed: ModelBinding = {}): { showDefault: boolean; rows: M[] } {
   const d = defaultModel(models);
   const showDefault = !query.trim() || matches([t("lib-launcher-models.default"), "default", defaultDetail(models, followed), d && modelName(d), d?.name, d?.id, d?.resolved, d?.description], query);
   const rows = models.filter((m) => m !== d && matches([modelName(m), m.name, m.id, m.resolved, ...(m.aliases ?? []), m.description], query));
@@ -298,6 +301,7 @@ export function modelRows(models: AgentModel[], query: string, followed: ModelBi
 
 /** Every thinking effort Claude Code takes, weakest first: what a model nobody lists the efforts of is offered. */
 export const ALL_EFFORTS = EFFORTS.map((e) => e.id);
+const CODEX_LEVELS = new Set(CODEX_EFFORTS.map((e) => e.id));
 
 /** The efforts the control offers: the picked model's, with none picked the one that runs ("Model configuration"'s, else the
  *  default entry's). No list to go by (loading, failed, older hub), or "Model configuration"'s model not in it under that id: all
@@ -309,7 +313,8 @@ export function effortChoices(list: LauncherModels | null | undefined, model: st
   const id = model || followed.model;
   const m = (id ? listedModel(list.models, id) : undefined) ?? (id ? undefined : defaultModel(list.models));
   // a typed ID (listed as typed before, or not at all): what it takes is not known
-  return m && !m.custom ? (m.efforts ?? []) : unknown;
+  const raw = m && !m.custom ? (m.efforts ?? []) : unknown;
+  return list.agent === "codex" ? raw.filter((e) => CODEX_LEVELS.has(e)) : raw;
 }
 
 /** The effort kept when the choices change: one they no longer offer goes back to "Launcher default". */

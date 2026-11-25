@@ -38,6 +38,7 @@ type fleetBook struct {
 	seen         map[[2]string]time.Time      // (machine, session) -> when the user last looked at it
 	seenLoaded   bool                         // seen holds the table's times (loadSeen succeeded once)
 	stateSince   map[[2]string]stateMark      // (machine, session) -> its state and when it entered it
+	stateListed  map[string]bool              // scratch ids for pruning stateSince, cleared and reused under mu
 	upstream     map[[2]string]upstreamStreak // (machine, session) -> consecutive no-work upstream 5xx turns (fleet_upstream.go)
 	notified     map[string]time.Time         // assistant conversation -> when it last pushed with notify_user
 	// reportSent: assistant conversation -> when a scheduled run or a task notice was sent into it (noteReportTurn):
@@ -497,7 +498,13 @@ func (s *Service) fillStateMarks(machine string, list []proto.Session, now time.
 	// The list is the node's whole list, kept across a disconnect (devices.Machine.setSessions): a session no longer
 	// in it has ended. Forget its mark and its hook flag. A hook flag for a session never listed yet (its hook came
 	// before the node's next list) has no mark and stays.
-	listed := make(map[string]bool, len(list))
+	listed := s.fleet.stateListed
+	if listed == nil {
+		listed = make(map[string]bool, len(list))
+		s.fleet.stateListed = listed
+	} else {
+		clear(listed)
+	}
 	for _, sess := range list {
 		listed[sess.SessionID] = true
 	}

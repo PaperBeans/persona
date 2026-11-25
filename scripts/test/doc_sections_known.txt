@@ -5,7 +5,6 @@ apple/Persona/App/AppModel.swift	docs/operations/hub-update.md	App 里
 apple/Persona/App/AppModel.swift	docs/operations/hub-update.md	兼容
 apple/Persona/Persona/Persona.swift	docs/apple/persona.md	App 图标
 apple/Persona/Views/Chat/ChatView.swift	docs/assistant/unified-entry.md	指向谁
-apple/Persona/Views/Chat/ChatView.swift	docs/integrations/codex.md	守护进程上的会话
 apple/Persona/Views/Mail/MailOutlookViews.swift	docs/extensions/mail.md	Outlook Connection
 apple/Persona/Views/Settings/AppearanceSettingsView.swift	docs/apple/ios.md	设计语言
 apple/Persona/Views/Settings/ExtensionsModel.swift	docs/extensions/extensions.md	自动升级

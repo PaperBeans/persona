@@ -68,7 +68,7 @@ func (s *Service) conclusionQuestion(ctx context.Context, ev *botcard.MessageEve
 	l := s.botLang(ctx)
 	if err := botAllowed(l, features, target); err != nil {
 		s.chat().Note(ctx, larkhost.Target{}, msg.MessageID, err.Error())
-	} else if err := s.botSend(ctx, ev, *content, target); err != nil {
+	} else if err := s.larkModule().Send(ctx, ev, *content, target); err != nil {
 		s.logf("bots: conclusion question for task %s: %v", id, err)
 		s.chat().Note(ctx, larkhost.Target{}, msg.MessageID, i18n.T(l, "assistant-feishu.not_sent", i18n.Args{"error": clip(oneLine(err.Error()), 200)}))
 	}
@@ -131,7 +131,7 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 			s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-reports.accept_decided_not_sent", i18n.Args{"error": why}))
 		} else if result.taken {
 			s.chat().Note(ctx, larkhost.Target{}, messageID, acceptedNote(l, &ask))
-		} else { // not this round that waits: answered as its button answers (feishu_card_actions.go), not swallowed
+		} else { // not this round that waits: answered as its button answers (the lark module's card_actions.go), not swallowed
 			s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
 		}
 		return true

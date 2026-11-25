@@ -22,7 +22,6 @@ const KEY = "persona.sidebar-icons";
 export const BUILTIN_PAGE_COLORS: Record<Exclude<(typeof NAV_PAGES)[number], "terminal" | "starred">, UIColor> = {
   home: "amber",
   inbox: "orange",
-  messages: "green",
   "workspace-board": "yellow",
   todos: "blue",
   routines: "purple",

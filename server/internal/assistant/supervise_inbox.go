@@ -44,6 +44,17 @@ func (s *Service) superviseInbox(ctx context.Context, items []*InboxItem, linked
 	if len(items) == 0 {
 		return
 	}
+	visible := items[:0]
+	for _, it := range items {
+		allowed, err := s.inboxVisibilityModelAllowed(ctx, it)
+		if err == nil && allowed {
+			visible = append(visible, it)
+		}
+	}
+	items = visible
+	if len(items) == 0 {
+		return
+	}
 	s.followContinuations(ctx, items)
 	if !s.inboxSignalsOn(ctx) {
 		return
@@ -104,6 +115,13 @@ func (s *Service) superviseInbox(ctx context.Context, items []*InboxItem, linked
 		s.emitNeedsUserExternalInfo(ctx, w.task, source, summary, "inbox:"+w.sig.Key)
 	}
 	for _, g := range out {
+		b.mu.Lock()
+		it := b.items[g.Inbox.Item]
+		b.mu.Unlock()
+		allowed, err := s.inboxVisibilityModelAllowed(ctx, it)
+		if err != nil || !allowed {
+			continue
+		}
 		if g.Inbox.AfterAcceptance || g.Inbox.URL == "" || !s.taskHasAgent(g.Todo) {
 			s.signal(g)
 			continue
@@ -120,6 +138,17 @@ func (s *Service) superviseInbox(ctx context.Context, items []*InboxItem, linked
 // through report_to_supervisor; a clipped Inbox preview is not a semantic classifier. In the background: the twin's
 // pass does not wait on a node.
 func (s *Service) inboxToAgent(ctx context.Context, g superviseSignal) {
+	if g.Inbox == nil {
+		return
+	}
+	b := &s.inbox
+	b.mu.Lock()
+	it := b.items[g.Inbox.Item]
+	b.mu.Unlock()
+	allowed, err := s.inboxVisibilityModelAllowed(ctx, it)
+	if err != nil || !allowed {
+		return
+	}
 	in := *g.Inbox
 	g.Inbox = &in
 	if t, ok := s.todoNow(g.Todo); ok && taskOpen(t) {
@@ -128,7 +157,7 @@ func (s *Service) inboxToAgent(ctx context.Context, g superviseSignal) {
 		e := taskInboxEvent{ID: namedClientID("task inbox\n" + t.ID + "\n" + g.Key), Key: g.Key, Todo: t.ID, Inbox: in}
 		e.Prompt = prompts.RenderInboxToAgent(prompts.InboxToAgent{Sender: in.Sender,
 			Preview: in.Preview, URL: in.URL, Count: in.Count, Event: e.ID})
-		_, err := s.sendTaskInput(ctx, t, e.Prompt, true, &e, false)
+		_, err = s.sendTaskInput(ctx, t, e.Prompt, true, &e, false)
 		if err != nil {
 			_ = s.updateTaskInboxEvents(ctx, func(events map[string]taskInboxEvent) bool {
 				if cur, ok := events[e.ID]; ok && !cur.Retried {

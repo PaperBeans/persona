@@ -49,7 +49,7 @@ const (
 	DeviceLaunchersModelCheck = "launchers.model.check" // {name, model, configured?} → {agent}
 	DeviceLaunchersShow       = "launchers.show"        // {name} → {definition}
 	DeviceLaunchersCheck      = "launchers.check"       // {name} → proto.LauncherCheck
-	DeviceClaudeAuthStatus    = "claude.auth_status"    // {name} → proto.ClaudeAuthStatus (free: no model request)
+	DeviceClaudeAuthStatus    = "claude.auth_status"    // {name, purpose?, config_dir?, conversation?} → proto.ClaudeAuthStatus (free: no model request)
 	DeviceClaudeSettings      = "claude.settings"       // {locale?} → {settings: [{key, value, …}]}: Settings › Claude Code
 	DeviceLaunchersHTTP       = "launchers.http"        // {name, http?, configured?} → {base_url} or quota.Response
 	DeviceLaunchersRepair     = "launchers.repair"      // {name, action: "upgrade_cli"} → proto.LauncherRepair
@@ -183,6 +183,7 @@ var modelRoutes = []string{
 	"DELETE /api/v1/machines/{mid}/launchers/{name}/models/custom", // ?model=: forget a typed id (#1644)
 	// Model profiles (model_profiles.go there, docs/assistant/model-profiles.md).
 	"GET /api/v1/model-profiles",
+	"GET /api/v1/model-profiles/{id}/candidates",
 	"PUT /api/v1/model-profiles/{id}",
 	"DELETE /api/v1/model-profiles/{id}",
 	"POST /api/v1/model-profiles/{id}/apply",

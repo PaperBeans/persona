@@ -70,7 +70,7 @@ func (e *Engine) ForgetSource(source string, archiveSources ...string) (Forgotte
 			_, _, err := e.Store.updatePerson(p.ID, true, nil, func(p *Person) bool {
 				kept := slices.DeleteFunc(slices.Clone(p.Chats), func(id string) bool { return slices.Contains(out.Chats, id) })
 				removed := len(p.Excluded["chats"])
-				p.include("chats", out.Chats...) // the chats the user had removed go with them
+				taggingInclude(&p.Tagging, "chats", out.Chats...) // the chats the user had removed go with them
 				if len(kept) == len(p.Chats) && len(p.Excluded["chats"]) == removed {
 					return false
 				}
@@ -88,7 +88,7 @@ func (e *Engine) ForgetSource(source string, archiveSources ...string) (Forgotte
 		}
 		kept := slices.DeleteFunc(slices.Clone(c.People), func(id string) bool { return slices.Contains(out.People, id) })
 		removed := len(c.Excluded["people"])
-		c.include("people", out.People...)
+		taggingInclude(&c.Tagging, "people", out.People...)
 		if len(kept) != len(c.People) || len(c.Excluded["people"]) != removed {
 			c.People = kept
 			if err := e.Store.putEntity(KindChat, c.ID, c, &c.Tagging, true); err != nil {
@@ -122,9 +122,9 @@ func (e *Engine) ForgetSource(source string, archiveSources ...string) (Forgotte
 		p.Chats = slices.DeleteFunc(slices.Clone(p.Chats), func(id string) bool { return slices.Contains(out.Chats, id) })
 		p.People = slices.DeleteFunc(slices.Clone(p.People), func(id string) bool { return slices.Contains(out.People, id) })
 		p.Items = slices.DeleteFunc(slices.Clone(p.Items), func(id string) bool { return itemKeys[id] })
-		p.include("chats", out.Chats...)
-		p.include("people", out.People...)
-		p.include("items", slices.Collect(maps.Keys(itemKeys))...)
+		taggingInclude(&p.Tagging, "chats", out.Chats...)
+		taggingInclude(&p.Tagging, "people", out.People...)
+		taggingInclude(&p.Tagging, "items", slices.Collect(maps.Keys(itemKeys))...)
 		p.Moments = slices.DeleteFunc(slices.Clone(p.Moments), goneMoment)
 		if m := p.Merge; m != nil {
 			m.Chats = slices.DeleteFunc(m.Chats, func(id string) bool { return slices.Contains(out.Chats, id) })

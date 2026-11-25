@@ -56,6 +56,18 @@ struct AssistantActionSourceTests {
         let source = try #require(AssistantActionSource.parse(prefix + "\n" + tag))
         #expect(source.text == prefix)
     }
+    /// A tap on a kept Dashboards page goes back to its conversation as the owner speaking (#15017): its source names
+    /// the page (`-pages/<page id>`) and is hidden in the bubble like a live card's.
+    @Test func aDashboardsPageTapIsStripped() throws {
+        let tag = #"<persona-action view="-pages/pg_3f9a1c0d5e7b2a41" action="done_today">{"values":{"note":"轻松跑"}}</persona-action>"#
+        let text = "今天完成\n" + tag
+        let source = try #require(AssistantActionSource.parse(text))
+        #expect(source.text == "今天完成")
+        #expect(source.view == "-pages/pg_3f9a1c0d5e7b2a41" && source.action == "done_today" && source.values == ["note": "轻松跑"])
+        #expect(AssistantActionSource.stripping(text) == "今天完成")
+        let empty = "今天完成\n" + #"<persona-action view="-pages/pg_3f9a1c0d5e7b2a41" action="done_today">{"values":{}}</persona-action>"#
+        #expect(AssistantActionSource.stripping(empty) == "今天完成")
+    }
     @Test func onlyTheLastCanonicalMarkerIsRemoved() throws {
         let prefix = "原文\n" + tag
         let source = try #require(AssistantActionSource.parse(prefix + "\n" + tag))

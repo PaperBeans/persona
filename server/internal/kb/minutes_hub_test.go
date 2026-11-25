@@ -126,7 +126,7 @@ func TestHubMinutesMadeAgainQuietlyAfterTheFinalPass(t *testing.T) {
 	*clock = clock.Add(time.Minute)
 	finishTranscription(t, e, recID, TranscriptionFinal, []RecordingSegment{hseg(0, 8, "final words")})
 	r := recordingNow(t, e, recID)
-	if r.MinutesState != MinutesPending || !r.quietMinutes() {
+	if r.MinutesState != MinutesPending || !quietMinutes(r) {
 		t.Fatalf("not made again quietly: %q quiet %d asks %d", r.MinutesState, r.MinutesQuiet, r.MinutesAsks)
 	}
 	if n := e.WriteMinutes(context.Background(), 2); n != 1 || !strings.Contains(m.calls[1][1], "final words") {
@@ -139,7 +139,7 @@ func TestHubMinutesMadeAgainQuietlyAfterTheFinalPass(t *testing.T) {
 		t.Fatal("the quiet remake kept the audio")
 	}
 	// The summary is made again from the final transcript too.
-	if r := recordingNow(t, e, recID); !r.summaryDue() {
+	if r := recordingNow(t, e, recID); !summaryDue(r) {
 		t.Fatalf("summary not due: %d final %v", r.SummarizedRev, r.SummarizedFinal)
 	}
 }
@@ -162,7 +162,7 @@ func TestHubSummaryMadeAgainAfterTheFinalPass(t *testing.T) {
 	if n := e.SummarizeRecordings(ctx, 3); n != 1 || !strings.Contains(m.calls[0][1], "live words") {
 		t.Fatalf("the live text's summary: %d", n)
 	}
-	if r := recordingNow(t, e, recID); !r.summaryDue() {
+	if r := recordingNow(t, e, recID); !summaryDue(r) {
 		t.Fatalf("the summary of the live text settled it: rev %d final %v", r.SummarizedRev, r.SummarizedFinal)
 	}
 	if n := e.SummarizeRecordings(ctx, 3); n != 1 || !strings.Contains(m.calls[1][1], "final words") {
@@ -286,7 +286,7 @@ func TestHubAudioSweep(t *testing.T) {
 	if !audioThere(e, untold) {
 		t.Fatal("the audio went before the minutes from the final transcript")
 	}
-	if r := recordingNow(t, e, untold); r.MinutesState != MinutesPending || !r.quietMinutes() {
+	if r := recordingNow(t, e, untold); r.MinutesState != MinutesPending || !quietMinutes(r) {
 		t.Fatalf("not made again: %q", r.MinutesState)
 	}
 	*clock = clock.Add(time.Minute)

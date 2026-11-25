@@ -114,4 +114,18 @@ describe("Background activity projection", () => {
     expect(split.activity[0].feed.map((item) => item.id)).toEqual(["later"]);
     expect(split.timelineFeed.map((item) => item.id)).toEqual(["bad"]);
   });
+
+  it("retires Antigravity timestamp-wrapped silent supervision rounds with fallback OK replies into Background activity", () => {
+    const headers =
+      "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n" +
+      "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n";
+    const agyFinish = item(2, "assistant", "tool_use", { tool_name: "mcp_persona_supervision_finish", tool_use_id: "finish", tool_input: { visibility: "silent" } });
+    const agyReceipt = item(3, "user", "tool_result", { tool_use_id: "finish", text: headers + '{"level":"triage","summary":"Handled silently.","visibility":"silent"}' });
+    const fallback = item(4, "assistant", "text", { text: "OK" });
+    const projected = chatLines([input, agyFinish, agyReceipt, fallback, next], { main: true });
+    const split = splitBackgroundActivity(projected, []);
+    expect(split.timeline).toEqual([projected[1]]);
+    expect(split.activity).toHaveLength(1);
+    expect(split.activity[0].line).toMatchObject({ kind: "supervision", completedSilent: true });
+  });
 });

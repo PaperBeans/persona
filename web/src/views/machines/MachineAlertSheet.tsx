@@ -33,6 +33,10 @@ export interface AlertSheetProps {
   onClose: () => void;
   onReconnect: (id: string) => Promise<void> | void;
   onRecords: (records: LauncherHealthRecord[]) => void;
+  /** Opens the disk map on this computer in reclaim mode (closing the sheet); absent where the page has no map. */
+  onUsageMap?: (mid: string) => void;
+  /** Reads every launcher health record again (a check that answered no record for its launcher, #14534). */
+  onReloadRecords?: () => void;
 }
 
 export function MachineAlertSheet(p: AlertSheetProps) {
@@ -65,13 +69,13 @@ export function MachineAlertSheet(p: AlertSheetProps) {
         ) : kind === "memory" || kind === "cpu" || kind === "load" ? (
           <PressureSection kind={kind} machine={m} metrics={p.metrics} agents={p.agents} agentsKnown={p.agentsKnown} redeploy={redeploy} onHandoff={() => setHandoff(true)} />
         ) : kind === "disk" ? (
-          <DiskSection machine={m} metrics={p.metrics} redeploy={redeploy} />
+          <DiskSection machine={m} metrics={p.metrics} redeploy={redeploy} onUsageMap={p.onUsageMap} />
         ) : kind === "mismatch" || kind === "deploy_failed" ? (
           <DeploySection machine={m} agents={p.agents} />
         ) : kind === "offline" ? (
           <OfflineSection machine={m} reason={offlineReason(m)} onReconnect={p.onReconnect} onRedeploy={() => p.onKind("mismatch")} />
         ) : (
-          <LauncherSection machine={m} records={p.records} onRecords={p.onRecords} />
+          <LauncherSection machine={m} records={p.records} onRecords={p.onRecords} onReload={p.onReloadRecords} />
         )}
       </div>
     </Dialog>

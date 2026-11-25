@@ -610,18 +610,17 @@ func TestAgentAutonameReceiptLedgerReadFailureAndCorruption(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := newFleetMem()
-			st.vals = map[string][]byte{}
 			if tc.fail {
 				st.failKey(agentNamingKey, errors.New("ledger unavailable"))
 			} else {
-				st.vals[agentNamingKey] = []byte(tc.ledger)
+				st.setRawSetting(agentNamingKey, []byte(tc.ledger))
 			}
 			s := New(Options{Hub: newFakeHub().withMachine(), Store: func() Store { return st }, Logf: testLogf(t)})
 			if _, err := s.autonameReceiptNaming(t.Context(), "mac", "target-agent"); err == nil {
 				t.Fatal("a failed or corrupt ledger was presented as a usable naming snapshot")
 			}
-			if st.puts != 0 {
-				t.Fatalf("a read wrote settings: %d", st.puts)
+			if puts := st.putCount(); puts != 0 {
+				t.Fatalf("a read wrote settings: %d", puts)
 			}
 		})
 	}

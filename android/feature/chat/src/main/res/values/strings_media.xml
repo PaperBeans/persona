@@ -4,6 +4,12 @@
     <string name="chat_composer_videos_only">Please look at the video</string>
     <string name="chat_composer_files_only">Please look at the attached files</string>
     <string name="chat_composer_file_limit">Up to 10 files in one message</string>
+    <string name="chat_composer_video_limit">Up to %1$d videos at a time</string>
+    <string name="chat_composer_photos_too_large">These pictures are too large to send together</string>
+    <string name="chat_composer_photos_as_files_one">A message holds up to %1$d pictures. The other one will go as a file.</string>
+    <string name="chat_composer_photos_as_files_other">A message holds up to %1$d pictures. The other %2$d will go as files.</string>
+    <string name="chat_composer_photos_bytes_as_files_one">These pictures are too large together. One of them will go as a file.</string>
+    <string name="chat_composer_photos_bytes_as_files_other">These pictures are too large together. %1$d of them will go as files.</string>
     <string name="chat_attach_waiting">Waiting</string>
     <plurals name="chat_files_more">
         <item quantity="one">%1$d more file</item>

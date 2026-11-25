@@ -197,12 +197,14 @@ nonisolated struct RepoTree {
         var index: Int
         var parent: String?
         var sessions: [Session]
+        var hasNavigation = false
         var catalog = false
         var workspace: HostWorkspace? = nil
     }
 
     static func build(_ sessions: [Session], machines: [MachineRef], workspaces: [HostWorkspace] = [],
-                      includeEmpty: Bool = true, search: String = "") -> [Host] {
+                      includeEmpty: Bool = true, showEmptyWorkspaces: Bool = false, search: String = "",
+                      navigationSessions: [Session] = []) -> [Host] {
         var nodes: [String: Node] = [:]
         var loose: [Session] = []
         let paseoWorkspaces = Dictionary(workspaces.filter { $0.source == "paseo" }.map { ($0.key, $0) },
@@ -234,7 +236,17 @@ nonisolated struct RepoTree {
             nodes[w.key] = Node(machine: w.machineRef, path: w.cwd, name: w.title,
                                 index: w.index ?? old?.index ?? Int.max,
                                 parent: w.parentKey ?? (w.index == nil ? old?.parent : nil),
-                                sessions: old?.sessions ?? [], catalog: true, workspace: w)
+                                sessions: old?.sessions ?? [], hasNavigation: old?.hasNavigation ?? false,
+                                catalog: true, workspace: w)
+        }
+        // Pinned Agents rendered in the top Pinned section keep their catalog workspace reachable without duplicating rows.
+        for s in navigationSessions {
+            if s.spaceKind == "paseo", let id = s.workspaceID {
+                let key = s.machineRef.path + "/paseo:" + id
+                if nodes[key] != nil { nodes[key]!.hasNavigation = true }
+            } else if s.spaceKind == "orca", let key = spaceKey(s), nodes[key] != nil {
+                nodes[key]!.hasNavigation = true
+            }
         }
         var parentOf: [String: String] = [:]
         for (key, node) in nodes {
@@ -260,8 +272,12 @@ nonisolated struct RepoTree {
             let below = nested.filter { $0.latestPinnedAt != nil }.sorted {
                 pinPrecedes($0.latestPinnedAt, $1.latestPinnedAt, $0.id, $1.id) == true
             } + nested.filter { $0.latestPinnedAt == nil }
-            let matches = includeEmpty && !search.isEmpty && (n.name + " " + n.path).localizedStandardContains(search)
-            guard includeEmpty && search.isEmpty || matches || !n.sessions.isEmpty || !below.isEmpty else { return nil }
+            let hiddenEmpty = n.workspace?.hiddenByDirectory == true
+            let pinnedEmpty = n.workspace?.pinnedAt != nil
+            let liveEmpty = showEmptyWorkspaces && (n.workspace.map { $0.available && $0.online } ?? true)
+            let allowEmpty = includeEmpty && !hiddenEmpty && (pinnedEmpty || liveEmpty)
+            let matches = allowEmpty && !search.isEmpty && (n.name + " " + n.path).localizedStandardContains(search)
+            guard (allowEmpty && search.isEmpty) || matches || !n.sessions.isEmpty || n.hasNavigation || !below.isEmpty else { return nil }
             let name = n.name.isEmpty ? n.path.split(separator: "/").last.map(String.init) ?? unnamed : n.name
             return Worktree(id: "tree/space/" + key, name: name, path: n.path, main: n.workspace?.isMain ?? false,
                             sessions: n.sessions, children: below, catalog: n.catalog, workspace: n.workspace,

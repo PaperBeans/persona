@@ -6,11 +6,12 @@ import { BASE } from "./base";
 import { enc, getToken } from "./api";
 import { MAX_CODE_LINES, truncateLines, type ElementSpot } from "./comments";
 import type { DraftQuote } from "./drafts";
-import { portLink } from "./port-links";
 import type { Port } from "./types";
 
-/** The hub feature that says it has previews. */
-export const PREVIEW_FEATURE = "preview";
+// The parts the first screen uses (chat links, port chips, comment cards) live in preview-link.ts, so this file loads
+// with the panel.
+export { PREVIEW_FEATURE, addressOf, localhostLink } from "./preview-link";
+
 
 /** A launch.json entry as `…/preview/servers` returns it. */
 export interface PreviewServer {
@@ -228,18 +229,6 @@ export function keyMessage(
 
 // ── addresses ─────────────────────────────────────────
 
-/** What the address field shows for the page's URL: its path when it is on the server being previewed, else the
- *  whole address. */
-export function addressOf(url: string, port: number): string {
-  try {
-    const u = new URL(url);
-    if (u.port === String(port) && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(u.hostname)) return u.pathname + u.search + u.hash;
-    return url;
-  } catch {
-    return url;
-  }
-}
-
 /** An address the page wanted to open elsewhere, when it may be opened in a new tab here (http / https only). */
 export function safeExternal(url: string): string | null {
   try {
@@ -248,14 +237,6 @@ export function safeExternal(url: string): string | null {
   } catch {
     return null;
   }
-}
-
-/** The address a localhost link of a reply stands for on the session's computer: its port and path; null for one that
- *  is not a port of that computer (docs/operations/ports.md "Recognizing links in replies"). `hostnames`: that
- *  computer's own name, which counts as well. */
-export function localhostLink(url: string, hostnames: readonly string[] = []): { port: number; path: string } | null {
-  const l = portLink(/^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `http://${url}`, hostnames);
-  return l && { port: l.port, path: l.path };
 }
 
 // ── a picked element as a comment ─────────────────────

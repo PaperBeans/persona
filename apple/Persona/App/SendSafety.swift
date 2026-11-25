@@ -199,6 +199,9 @@ extension AppModel {
             return .failed
         }
         let socket = socket(key.group)
+        let receiptKey = SendReceipt.Key(group: key.group, kind: .message, id: msg.id.uuidString)
+        sendReceipts.expect(receiptKey, target: .session(machineID: key.machineID, sessionID: key.sessionID))
+        defer { sendReceipts.forget(receiptKey) }
         do {
             // The message's id is its op id too (docs/protocol/protocol.md「Operation receipts」): however often it arrives, the hub
             // types it once. Through a short drop (a hub restart) it keeps trying with that id instead of going to

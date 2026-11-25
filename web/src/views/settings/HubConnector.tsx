@@ -256,7 +256,7 @@ function InfoRow({ k, v }: { k: string; v: string }) {
 // ── switch, feeds, sign-out and delete ───────────────────
 
 /** What a page's actions share: busy while one runs, the hub's errors as toasts. */
-function useActions(id: string, reload: () => Promise<void>) {
+export function useActions(id: string, reload: () => Promise<void>) {
   const [busy, setBusy] = useState("");
   const run = async (what: string, fn: () => Promise<unknown>, done?: (r: unknown) => void) => {
     setBusy(what);
@@ -274,7 +274,7 @@ function useActions(id: string, reload: () => Promise<void>) {
 }
 type Actions = ReturnType<typeof useActions>;
 
-function SwitchGroup({ c, a }: { c: HubConnector; a: Actions }) {
+export function SwitchGroup({ c, a }: { c: HubConnector; a: Actions }) {
   return (
     <Group footer={switchFooter(c)}>
       <div className="flex items-center gap-3 px-4 py-2.5">
@@ -286,7 +286,7 @@ function SwitchGroup({ c, a }: { c: HubConnector; a: Actions }) {
   );
 }
 
-function FeedsGroup({ c, a }: { c: HubConnector; a: Actions }) {
+export function FeedsGroup({ c, a }: { c: HubConnector; a: Actions }) {
   const [confirm, setConfirm] = useState(false);
   const [deleted, setDeleted] = useState("");
   if (c.archive === undefined && c.inbox === undefined) return null;
@@ -359,7 +359,7 @@ export function ExtensionConnectorGroup({ c, reload, onOpen }: { c: HubConnector
   );
 }
 
-function DataGroup({ c, a, logout }: { c: HubConnector; a: Actions; logout: boolean }) {
+export function DataGroup({ c, a, logout }: { c: HubConnector; a: Actions; logout: boolean }) {
   const [confirm, setConfirm] = useState<"" | "logout" | "delete">("");
   const [deleted, setDeleted] = useState("");
   const showsLogout = logout && (isSignedIn(c) || !!c.via);
@@ -730,7 +730,7 @@ export function SignInStep({ name, prompt, values, busy, isChannel, onChange, on
 
 // ── GitHub ───────────────────────────────────────────────
 
-function GitHubSections({ c, reload }: { c: HubConnector; reload: () => Promise<void> }) {
+export function GitHubSections({ c, reload, hideFeeds = false }: { c: HubConnector; reload: () => Promise<void>; hideFeeds?: boolean }) {
   const a = useActions(c.id, reload);
   const [auth, setAuth] = useState<GitHubAuth | null>(null);
   const [authError, setAuthError] = useState("");
@@ -798,14 +798,14 @@ function GitHubSections({ c, reload }: { c: HubConnector; reload: () => Promise<
           {missing.flatMap((m) => m.affects).map((x) => <p key={x} className="px-4 py-2 text-[12.5px] text-ink-2">{x}</p>)}
         </Group>
       )}
-      <FeedsGroup c={c} a={a} />
+      {!hideFeeds && <FeedsGroup c={c} a={a} />}
       <DataGroup c={c} a={a} logout={false} />
     </>
   );
 }
 
 /** GitHub's "Inbox": which CI failures come in, and repositories that bring nothing in (PUT …/github/settings {options}). */
-function GitHubInbox({ options, onSaved }: { options: GitHubInboxOptions; onSaved: (c: HubConnector) => void }) {
+export function GitHubInbox({ options, onSaved }: { options: GitHubInboxOptions; onSaved: (c: HubConnector) => void }) {
   const [o, setO] = useState(options);
   const [repo, setRepo] = useState("");
   const [error, setError] = useState("");
@@ -862,7 +862,7 @@ function GitHubInbox({ options, onSaved }: { options: GitHubInboxOptions; onSave
 
 /** lark-cli's watched documents (PUT …/larkcli/settings {options}, sent whole so the chat options stay): links and Wiki
  * spaces whose comments that mention you come in, and whether every comment on a document you own does. */
-function LarkCLIDocuments({ options, onSaved }: { options: LarkCLIInboxOptions; onSaved: (c: HubConnector) => void }) {
+export function LarkCLIDocuments({ options, onSaved }: { options: LarkCLIInboxOptions; onSaved: (c: HubConnector) => void }) {
   const [o, setO] = useState(options);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -920,7 +920,7 @@ function LinkList({ label, placeholder, values, disabled, onChange }: { label: s
 }
 
 /** lark-cli's triage rules: what counts as Needs you for its items, in the user's words (sent with the other options). */
-function LarkCLITriage({ options, onSaved }: { options: LarkCLIInboxOptions; onSaved: (c: HubConnector) => void }) {
+export function LarkCLITriage({ options, onSaved }: { options: LarkCLIInboxOptions; onSaved: (c: HubConnector) => void }) {
   const [text, setText] = useState(options.triage_rules);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);

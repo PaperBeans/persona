@@ -727,6 +727,42 @@ func TestDeliveryGateChecksLinkedRepositoryIssuesAndPRs(t *testing.T) {
 	})
 }
 
+func TestReferenceIssueDoesNotBlockAcceptance(t *testing.T) {
+	st := newMemRepoStore()
+	s, _ := newQuietServiceOn(t, st)
+	ctx := context.Background()
+	raw, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{
+		"title": "Fix bug #42", "prompt": "Fix issue #42",
+		"machine": "box", "cwd": "/code/app", "readonly": false, "user_requested": true, "why": "repo",
+		"done_when": []string{"Issue #42 closed"},
+	}}})
+	if _, err := s.toolTaskPlan(ctx, "conv1", raw); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "agent", func() bool { return len(onlyTodo(s).Agents) == 1 })
+	todo := onlyTodo(s)
+	issueURL := "https://github.com/o/r/issues/42"
+	if _, err := st.SetTodoRepositoryLinks(ctx, todo.ID, "repo_o_r", repository.LinksInput{Links: []repository.LinkInput{
+		{URL: issueURL, Role: repository.LinkRoleReference},
+	}}); err != nil {
+		t.Fatalf("link reference issue: %v", err)
+	}
+	if got := linkRoles(t, s, todo.ID)[issueURL]; got != repository.LinkRoleReference {
+		t.Fatalf("issue stored as %q, want reference", got)
+	}
+	s.deploy.forge = &fakeForge{issueStates: map[string]string{"o/r#42": "open"}}
+	s.deploy.hubBuild = func(context.Context) (string, string, error) { return "dev", "", nil }
+	s.deploy.listPaths = []string{}
+
+	checks := []ReviewCheck{{Criterion: "Issue #42 closed", Met: true, Evidence: "reference only"}}
+	if _, err := acceptReview(s, todo.ID, map[string]any{"checks": checks}); err != nil {
+		t.Fatalf("open reference issue blocked acceptance: %v", err)
+	}
+	if got := todoNow(s, todo.ID); got.DoneAt == nil {
+		t.Fatal("task stayed open although its only linked issue was a reference")
+	}
+}
+
 // Three-tier delivery_gate setting works via HTTP PUT/GET and persona_settings while staying backward-compatible
 // with legacy done_needs_delivery boolean configs.
 func TestDeliveryGateSettingsAndBackwardCompat(t *testing.T) {

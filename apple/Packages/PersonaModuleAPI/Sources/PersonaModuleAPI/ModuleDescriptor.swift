@@ -61,15 +61,15 @@ public enum ModuleSlot: String, CaseIterable, Sendable {
     /// Interfaces the core declares and asks for, which a module implements (`ModuleRegistrar.provide`): the core does
     /// without one when no active module provides it. A client-side slot, as `launch_hooks`. Served.
     case capabilities = "capabilities"
-    /// Leases on the shared audio session through the core's `AudioSessionBroker` (#13432's remaining work). Declared,
-    /// not served.
+    /// Leases on the shared audio session through the core's `AudioSessionBroker` (`ModuleRegistrar.audioLease`,
+    /// #13849). Served.
     case audioLeases = "audio_leases"
 
     /// True when the core reads this slot today.
     public var isServed: Bool {
         switch self {
         case .launchHooks, .deepLinks, .composerActions, .shellPlaces, .settings, .chatCardKinds, .chatAccessories,
-             .toolbarItems, .capabilities: true
+             .toolbarItems, .capabilities, .audioLeases: true
         default: false
         }
     }

@@ -51,27 +51,7 @@ func cliProfileTest(t *testing.T) *cliFixture {
 	buf := &syncBuffer{}
 	n.logger = log.New(buf, "", 0)
 	fh := withFakeHub(t, n)
-	t.Cleanup(func() {
-		n.mu.Lock()
-		ids := make([]string, 0, len(n.procs))
-		for id := range n.procs {
-			ids = append(ids, id)
-		}
-		spare := n.spare
-		n.spare = nil
-		n.mu.Unlock()
-		var procs []*assistantProc
-		for _, id := range ids {
-			n.cancelAssistantRecovery(id)
-			if p := n.takeAssistant(id); p != nil {
-				procs = append(procs, p)
-			}
-		}
-		if spare != nil {
-			procs = append(procs, spare)
-		}
-		stopAndWait(procs)
-	})
+	t.Cleanup(n.stopAllAssistants)
 	return &cliFixture{n: n, fh: fh, dir: dir, log: buf}
 }
 

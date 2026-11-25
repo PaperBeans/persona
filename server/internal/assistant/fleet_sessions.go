@@ -562,7 +562,9 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 	for i := range list {
 		list[i].MachineID = machine
 		list[i].PendingInteractions = counts[list[i].SessionID]
-		list[i].Assistant = isAssistantSession(&list[i], dir, m.manager)
+		if !list[i].LogicalPlaceholder {
+			list[i].Assistant = isAssistantSession(&list[i], dir, m.manager)
+		}
 		if !list[i].Assistant && bgMatch.matches(&list[i]) {
 			list[i].Assistant = true
 		}

@@ -2,7 +2,7 @@ import { decisionSourceLabel } from "../lib/todo-decision-label";
 import { NewTodoRepositoryBindings, TodoRepositoryBindings, useRepositoryRequestContext } from "../ui/TaskRepositoryBindingsEditor";
 import { cleanRepositoryDraft, createTodoWithRepositories, repositoryDuplicateLink, validRepositoryDraft, type CreateRepositoryBindings, type RepositoryCatalog } from "../lib/task-repositories";
 import { hasRequestPieces } from "../lib/request-pieces";
-import { defaultManager, MANAGER_HEADER, useShownManager } from "../lib/manager-choice";
+import { defaultManager, MANAGER_HEADER, sameManager, useShownManager } from "../lib/manager-choice";
 // Beautiful UI Todos View: left list (sorted by status & created_at), right detail, handover dialog.
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type InputHTMLAttributes, type ReactNode, type RefObject } from "react";
 import { api, apiBlob, credentialOwner, enc, errorText, getToken, subscribeCredentialOwner } from "../lib/api";
@@ -81,7 +81,8 @@ import { SESSION_LIST_STYLE } from "../ui/list-metrics";
 import { formatDate, t } from "../i18n";
 import { groupTodosByProject, treeStateLabel, type TodoProjectGroup, type TreeState } from "../lib/todo-tree";
 import { cancellationReason, formatAgentSource, formatTodoContext } from "../lib/todo-details";
-import { directionTitle, groupsByDirection, useDirectionTree, type Direction } from "../lib/direction-tree";
+import { useCachedDirectionNames } from "../lib/direction-names";
+import { directionTitle, groupsByDirection, refreshDirectionTree, useDirectionTree, type Direction } from "../lib/direction-tree";
 import { DirectionCountsText } from "./DirectionMarks";
 import { FOLDED_SECTIONS, TRIAGE_SECTIONS, checksAsOpen, countsAsOpen, lastActivity, openMergePRs, sectionStartsFolded, supersededFailedStarts, triage, triageTodos, type OwnerNeed, type TriageGroup, type TriageResult, type TriageRule, type TriageSection } from "../lib/todo-triage";
 import { orderWaitGroups } from "../lib/task-wait";
@@ -94,15 +95,34 @@ import {
   isTodoListFilter,
   isTodoListSort,
   listFilterCounts,
+  matchesKindFilter,
   matchesListFilter,
   sortTriageGroups,
+  type TodoKindFilter,
   type TodoListFilter,
   type TodoListSort,
 } from "../lib/todo-list-filter";
 import type { MenuItem } from "../ui/menu-model";
+import { foldGoalTasks, type GoalFoldResult, type GoalSummary } from "../lib/todo-goal-fold";
+import { findSelectedBlocker, matchesSharedBlocker, parseSharedBlockers } from "../lib/todo-shared-blockers";
+import { SharedBlockersStrip } from "../components/SharedBlockersStrip";
+import { reorganizeDirectionOptions, reorganizeTodos, type TodoReorganizeRequest } from "../lib/todo-reorganize";
+import { BatchReorganizeBar } from "../components/BatchReorganizeBar";
+import {
+  classifyTodoDetailTemplate,
+  resolveWorkGoalActions,
+} from "../lib/todo-detail-template";
+import {
+  isPersonalSlimRow,
+  repoCountOf,
+  sectionStartsFoldedV2,
+  slimSecondaryCue,
+  type SlimCueTone,
+} from "../lib/todo-slim-row";
 import { useRestoredTodos } from "../lib/todo-restore";
 import { stepsWords } from "../lib/todo-steps";
 import { useOwnerNeeds, useTodoLookup, useTodoMinute } from "../lib/todo-owner-needs";
+import { evidenceAuthorLabel, type EvidenceAuthorContext } from "../lib/evidence-author";
 import { autoReviewLine, checklist, latestReview, parkedLine, progressLine, type CheckMark, type Supervision } from "../lib/supervision";
 import { resultExtras } from "../lib/brief";
 import { prLink } from "./TodoStageBar";
@@ -144,6 +164,7 @@ const SORT_KEY = "persona.todos.sort";
 /** A filter's and a sort's name, as the menu and the chip say them. */
 const filterLabel = (f: TodoListFilter) => t(`todos.filter_${f}`);
 const sortLabel = (s: TodoListSort) => t(`todos.sort_${s}`);
+const kindFilterLabel = (k: TodoKindFilter) => t(`todos.kind_filter_${k}`);
 
 type TodoGrouping = "status" | "folder" | "direction" | "request";
 
@@ -279,9 +300,37 @@ export function TodosView({
     () => new Map(todos.map((td) => [td.id, triage(td, lookup, Date.now(), restored.get(td.id) ?? 0, superseded.has(td.id)).section])),
     [todos, lookup, restored, superseded, tick],
   );
+  // Unified Labs toggle for To-dos v2 (#14584, #14642): strictly gated on the selected assistant's `todos_v2 === true`.
+  const assistant = useStore((s) => s.assistant);
+  const todosV2 = Boolean(assistant && sameManager(assistant.manager ?? repositoryManager, repositoryManager) && assistant.todos_v2 === true);
+  // open todos under the knowledge-base project they are in (#2581), else the one their agents work in (#2526)
+  const kbProjects = useTodoProjects();
+  const projectName = useMemo(() => projectNames(kbProjects), [kbProjects]);
+  // Direction metadata shared by the direction grouping, batch reorganize, and todos_v2 slim row meta (#14830).
+  const directionTree = useDirectionTree();
+  const leaderTitles = useStore((s) => s.assistant?.conversations);
+  const cachedDirectionNames = useCachedDirectionNames();
+  const reorganizeDirections = useMemo(
+    () => (todosV2 ? reorganizeDirectionOptions(directionTree, leaderTitles, assistant?.leaders) : []),
+    [todosV2, directionTree, leaderTitles, assistant?.leaders],
+  );
+  const directionLabel = useCallback(
+    (id: string) =>
+      reorganizeDirections.find((d) => d.id === id)?.label ||
+      cachedDirectionNames.get(id) ||
+      leaderTitles?.find((c) => c.session_id === id)?.title ||
+      undefined,
+    [reorganizeDirections, cachedDirectionNames, leaderTitles],
+  );
   // A sessions push builds a new lookup: what it leaves in the same order stays the same list (and the same groups,
   // the same row views below), so the rows and sections it did not touch skip their render.
-  const views = useSteady(useMemo(() => todoRowViews(todos, lookup, interactions, sectionOf, needs), [todos, lookup, interactions, sectionOf, needs]), steadyViews);
+  const views = useSteady(
+    useMemo(
+      () => todoRowViews(todos, lookup, interactions, sectionOf, needs, todosV2 ? projectName : undefined, todosV2 ? directionLabel : undefined),
+      [todos, lookup, interactions, sectionOf, needs, todosV2, projectName, directionLabel],
+    ),
+    steadyViews,
+  );
 
   // The filter by due date and the order inside each section (#3740): this browser's, in both groupings
   const [listFilter, setListFilter] = useState<TodoListFilter>(() => {
@@ -292,6 +341,106 @@ export function TodosView({
     const v = pref(SORT_KEY);
     return isTodoListSort(v) ? v : "recent";
   });
+  // Lightweight All / To-dos / Tasks filter gated behind todos_v2 (#14642); turning todos_v2 off reverts immediately.
+  const [kindFilter, setKindFilter] = useState<TodoKindFilter>("all");
+  const effectiveKindFilter: TodoKindFilter = todosV2 ? kindFilter : "all";
+  // Shared external blockers summary strip gated behind todos_v2 (#14728).
+  const rawSharedBlockers = useStore((s) => s.sharedBlockers);
+  const visibleTodoIds = useMemo(() => new Set(todos.map((td) => td.id)), [todos]);
+  const sharedBlockers = useMemo(
+    () => (todosV2 ? parseSharedBlockers(rawSharedBlockers, visibleTodoIds) : []),
+    [todosV2, rawSharedBlockers, visibleTodoIds],
+  );
+  const [selectedBlockerKey, setSelectedBlockerKey] = useState<string | null>(null);
+  const activeBlocker = useMemo(
+    () => (todosV2 ? findSelectedBlocker(selectedBlockerKey, sharedBlockers) : undefined),
+    [todosV2, selectedBlockerKey, sharedBlockers],
+  );
+  useEffect(() => {
+    if (selectedBlockerKey !== null && !activeBlocker) setSelectedBlockerKey(null);
+  }, [selectedBlockerKey, activeBlocker]);
+  // Batch reorganize mode strictly gated behind todos_v2 (#14758); turning todos_v2 off or leaving list mode resets immediately.
+  const [reorganizeMode, setReorganizeMode] = useState(false);
+  const [reorganizeSelected, setReorganizeSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [reorganizeSubmitting, setReorganizeSubmitting] = useState(false);
+  const [reorganizeError, setReorganizeError] = useState<string | null>(null);
+  const [reorganizeFeedback, setReorganizeFeedback] = useState<string | null>(null);
+
+  const exitReorganizeMode = useCallback(() => {
+    setReorganizeMode(false);
+    setReorganizeSelected(new Set());
+    setReorganizeError(null);
+    setReorganizeFeedback(null);
+  }, []);
+
+  const toggleReorganizeMode = useCallback(() => {
+    setReorganizeMode((on) => {
+      if (on) {
+        setReorganizeSelected(new Set());
+        setReorganizeError(null);
+        setReorganizeFeedback(null);
+        return false;
+      }
+      setReorganizeError(null);
+      setReorganizeFeedback(null);
+      return true;
+    });
+  }, []);
+
+  const toggleReorganizeSelect = useCallback((id: string) => {
+    setReorganizeSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setReorganizeError(null);
+  }, []);
+
+  const clearReorganizeSelection = useCallback(() => {
+    setReorganizeSelected(new Set());
+    setReorganizeError(null);
+  }, []);
+
+  // Prune deleted to-dos from selection.
+  useEffect(() => {
+    if (reorganizeSelected.size === 0) return;
+    let changed = false;
+    const next = new Set<string>();
+    for (const id of reorganizeSelected) {
+      if (visibleTodoIds.has(id)) next.add(id);
+      else changed = true;
+    }
+    if (changed) setReorganizeSelected(next);
+  }, [reorganizeSelected, visibleTodoIds]);
+
+  const applyReorganize = useCallback(async (req: TodoReorganizeRequest): Promise<boolean> => {
+    setReorganizeSubmitting(true);
+    setReorganizeError(null);
+    setReorganizeFeedback(null);
+    try {
+      const res = await reorganizeTodos(req);
+      await refreshTodos();
+      if (req.direction_id !== undefined) {
+        void refreshDirectionTree().catch(() => {});
+      }
+      setReorganizeSelected(new Set());
+      const updatedCount = res.updated?.length ?? req.ids.length;
+      const transferredCount = res.transferred_ids?.length ?? 0;
+      setReorganizeFeedback(
+        transferredCount > 0
+          ? t("todos.reorganize_success_transferred", { count: updatedCount, transferred: transferredCount })
+          : t("todos.reorganize_success", { count: updatedCount }),
+      );
+      return true;
+    } catch (e) {
+      setReorganizeError(errorText(e));
+      return false;
+    } finally {
+      setReorganizeSubmitting(false);
+    }
+  }, []);
+
   const chooseFilter = (f: TodoListFilter) => {
     setPref(FILTER_KEY, f);
     setListFilter(f);
@@ -300,7 +449,10 @@ export function TodosView({
     setPref(SORT_KEY, s);
     setListSort(s);
   };
-  const inFilter = (td: Todo) => matchesListFilter(td, listFilter, tick);
+  const inFilter = (td: Todo) =>
+    matchesListFilter(td, listFilter, tick) &&
+    matchesKindFilter(td, effectiveKindFilter) &&
+    matchesSharedBlocker(td, activeBlocker);
   // Filter by search query
   const matchesSearch = (t: Todo) => {
     const q = search.trim().toLowerCase();
@@ -314,25 +466,29 @@ export function TodosView({
   // a search and the filter narrow the to-dos first; the sections (or the folders) place what is left
   const filterTodo = (t: Todo) => matchesSearch(t) && inFilter(t);
 
-  // Developing Persona's view switch (docs/web/web.md "Developing Persona"): the sections from the hub's view, a row
-  // without one placed as before
+  // Hub to-do view projection (#14583, docs/web/web.md "Developing Persona"): preferred by default when the hub lists
+  // `todo_view` (with `persona.todos.viewDraw=0` as browser rollback); a row without a readable view keeps today's place.
   const features = useStore((s) => s.features);
   const fromView = useMemo(() => viewDrawOn(features), [features]);
   const triaged = useMemo(
     () => {
       const r = orderWaitGroups(triageTodos(todos.filter(filterTodo), lookup, Date.now(), restored, { superseded }), Date.now());
-      return fromView ? drawnFromView(r, Date.now()) : r;
+      return fromView ? drawnFromView(r, Date.now(), restored) : r;
     },
-    [todos, lookup, restored, search, listFilter, superseded, tick, fromView],
+    [todos, lookup, restored, search, listFilter, effectiveKindFilter, activeBlocker, superseded, tick, fromView],
   );
+  // Under todos_v2 (#14661), fold non-urgent `part_of` child tasks under their top-level parent goal while surfacing
+  // `needs_you` / active-ask child blockers in `waiting`; when todos_v2 is off, keep `triaged` untouched.
+  const goalFold = useMemo(() => (todosV2 ? foldGoalTasks(triaged) : undefined), [todosV2, triaged]);
+  const displayTriaged = goalFold ? goalFold.triaged : triaged;
   // the header's counts: what the filter shows, whatever is searched
   const triageAll = useMemo(
     () => {
       if (!search.trim()) return triaged;
       const r = orderWaitGroups(triageTodos(todos.filter(inFilter), lookup, Date.now(), restored, { superseded }), Date.now());
-      return fromView ? drawnFromView(r, Date.now()) : r;
+      return fromView ? drawnFromView(r, Date.now(), restored) : r;
     },
-    [todos, lookup, restored, search, listFilter, superseded, triaged, tick, fromView],
+    [todos, lookup, restored, search, listFilter, effectiveKindFilter, activeBlocker, superseded, triaged, tick, fromView],
   );
   // Where the status sections place each to-do the search and the filter leave: its row's section (a merged row takes
   // its most urgent member's), and whether it counts as open (countsAsOpen, the header's Not done, its own reading).
@@ -363,9 +519,6 @@ export function TodosView({
     useMemo(() => sortTodos(todos.filter((td) => placed.row.get(td.id) === "cancelled"), lookup), [todos, placed, lookup]),
     sameList,
   );
-  // open todos under the knowledge-base project they are in (#2581), else the one their agents work in (#2526)
-  const kbProjects = useTodoProjects();
-  const projectName = useMemo(() => projectNames(kbProjects), [kbProjects]);
   const projectGroups = useSteady(
     // a folder holding a to-do in Needs you says so, a failed start waiting on the owner too (audit item 13)
     useMemo(() => groupTodosByProject(filteredUncompleted, lookup, Date.now(), projectName, (td) => sectionOf.get(td.id) === "waiting"), [filteredUncompleted, lookup, projectName, sectionOf]),
@@ -382,7 +535,6 @@ export function TodosView({
   // "Pinned" (#4352): the hub's direction tree, offered while there is a leader; else the list goes by status and the
   // choice is kept for when there is one. Before the first read lands (undefined) a saved 常驻 choice stays and the list
   // shows its loading state, as the sidebar's Agents block does, rather than flashing the status grouping.
-  const directionTree = useDirectionTree();
   const byDirection = groupsByDirection(directionTree);
   const directionPending = chosenGrouping === "direction" && directionTree === undefined;
   // "By request" is offered while some request is in pieces; else the list goes by status and the choice is kept, as
@@ -393,7 +545,26 @@ export function TodosView({
   const byStatus = grouping === "status";
   // "By request": the requests graph takes the page's width, and the detail opens beside it only once a piece is picked
   const requestMode = grouping === "request";
-  const leaderTitles = useStore((s) => s.assistant?.conversations);
+  const visibleReorganizeIds = useMemo(() => [...placed.row.keys()], [placed]);
+  const selectAllReorganize = useCallback(() => {
+    setReorganizeSelected(new Set(visibleReorganizeIds));
+    setReorganizeError(null);
+  }, [visibleReorganizeIds]);
+
+  // Immediately exit organize mode and clear selection if todos_v2 turns off or user leaves list view.
+  useEffect(() => {
+    if (reorganizeMode && (!todosV2 || calendarOn || requestMode)) {
+      exitReorganizeMode();
+    }
+  }, [reorganizeMode, todosV2, calendarOn, requestMode, exitReorganizeMode]);
+
+  const reorganizeProps = useMemo(
+    () =>
+      todosV2 && !calendarOn && !requestMode && reorganizeMode
+        ? { selectedIds: reorganizeSelected, onToggle: toggleReorganizeSelect }
+        : undefined,
+    [todosV2, calendarOn, requestMode, reorganizeMode, reorganizeSelected, toggleReorganizeSelect],
+  );
   // The tree lists only open to-dos (server/internal/assistant/direction_tree.go, the same countsAsOpen rule), so a
   // direction holds the open ones it lists: one ticked here leaves at once, not when the tree's push comes.
   const directionSections = useMemo(() => {
@@ -431,10 +602,10 @@ export function TodosView({
   }, [grouping, byDirection, triaged, placed, listSort]);
   // what waits on the user that the filter leaves out: the line over the sections says how many (#3740)
   const hiddenWaitingCount = useMemo(
-    () => (listFilter === "all" ? 0 : hiddenWaiting(todos.filter(matchesSearch), inFilter, lookup, Date.now(), restored, superseded)),
-    [todos, lookup, restored, search, listFilter, superseded, tick],
+    () => (listFilter === "all" ? 0 : hiddenWaiting(todos.filter((td) => matchesSearch(td) && matchesKindFilter(td, effectiveKindFilter)), (td) => matchesListFilter(td, listFilter, tick), lookup, Date.now(), restored, superseded)),
+    [todos, lookup, restored, search, listFilter, effectiveKindFilter, superseded, tick],
   );
-  const filterCounts = useMemo(() => listFilterCounts(todos.filter(matchesSearch), tick), [todos, search, tick]);
+  const filterCounts = useMemo(() => listFilterCounts(todos.filter((td) => matchesSearch(td) && matchesKindFilter(td, effectiveKindFilter)), tick), [todos, search, effectiveKindFilter, tick]);
   const onRestore = useCallback(
     (id: string) => {
       restoreTodo(id);
@@ -492,13 +663,13 @@ export function TodosView({
     if (requestMode || !split) return undefined;
     if (byStatus) {
       // the first row of an open section; none rather than one that would unfold a folded section (Shelved, Done)
-      for (const sec of TRIAGE_SECTIONS) if (!sectionStartsFolded(sec, triaged.sections[sec], tick) && triaged.sections[sec].length) return triaged.sections[sec][0].lead;
+      for (const sec of TRIAGE_SECTIONS) if (!sectionStartsFolded(sec, displayTriaged.sections[sec], tick) && displayTriaged.sections[sec].length) return displayTriaged.sections[sec][0].lead;
       return undefined;
     }
     // by 常驻: the first row shown (a direction's, else an unfolded status section's below them), else history
     if (grouping === "direction") return directionSections[0]?.todos[0] ?? directionRest.find((s) => !FOLDED_SECTIONS.has(s.sec))?.groups[0].lead ?? filteredCompleted[0] ?? filteredCancelled[0];
     return filteredUncompleted[0] ?? filteredCompleted[0] ?? filteredCancelled[0];
-  }, [activeId, selectedId, todos, filteredUncompleted, filteredCompleted, filteredCancelled, byStatus, requestMode, split, triaged, grouping, directionSections, directionRest]);
+  }, [activeId, selectedId, todos, filteredUncompleted, filteredCompleted, filteredCancelled, byStatus, requestMode, split, displayTriaged, grouping, directionSections, directionRest, tick]);
 
   // The to-do open beside the calendar: the address's, while it is there.
   const selectedTodo = calendarOn && selectedId ? todos.find((td) => td.id === selectedId) : undefined;
@@ -689,20 +860,58 @@ export function TodosView({
       <header className="flex h-13 shrink-0 items-center justify-between border-b border-line bg-surface px-4 sm:px-6">
         <div className="flex items-center gap-3">
           {onToggleSidebar && <IconButton icon="sidebar" label={t("agents-agentsview.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />}
-          <div className="flex items-baseline gap-2">
+          <div className={cx("flex gap-2", todosV2 ? "items-center" : "items-baseline")}>
             <h1 className="text-[16px] font-semibold whitespace-nowrap text-ink">{t("todos.title")}</h1>
             {/* the counts once the list has its to-dos (audit item 83): not while it loads, nor after an empty failed read */}
             {(todosLoaded || todos.length > 0) && !(todos.length === 0 && todosError) && (
-              // a phone's header has the List | Calendar switch to fit (#2029): the counts stay on wider screens
-              <span className="text-[12px] whitespace-nowrap text-ink-3 max-sm:hidden" data-testid="todos-summary">
-                {/* one count in every grouping (audit item 12): open as countsAsOpen counts it, section counts as their
-                    titles do, with Cancelled always separate from Done (#11085, #5732) */}
-                {t(listFilter === "all" ? "todos.summary_triage" : "todos.summary_filtered", { filter: filterLabel(listFilter), open: triageAll.open, parked: sectionSize(triageAll, "parked"), shelved: sectionSize(triageAll, "shelved"), done: sectionSize(triageAll, "done"), cancelled: sectionSize(triageAll, "cancelled") })}
-              </span>
+              todosV2 ? (
+                (() => {
+                  const needsYouCount = sectionSize(triageAll, "waiting");
+                  return needsYouCount > 0 ? (
+                    <span
+                      data-testid="todos-header-attention"
+                      data-count={needsYouCount}
+                      className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-orange-tint px-2.5 text-submeta font-medium whitespace-nowrap text-attention tabular-nums max-sm:hidden"
+                    >
+                      <span className="size-1.5 shrink-0 rounded-full bg-attention" aria-hidden />
+                      {t("todos.v2_header_needs_you", { count: needsYouCount })}
+                    </span>
+                  ) : null;
+                })()
+              ) : (
+                // a phone's header has the List | Calendar switch to fit (#2029): the counts stay on wider screens
+                <span className="text-[12px] whitespace-nowrap text-ink-3 max-sm:hidden" data-testid="todos-summary">
+                  {/* one count in every grouping (audit item 12): open as countsAsOpen counts it, section counts as their
+                      titles do, with Cancelled always separate from Done (#11085, #5732) */}
+                  {t(listFilter === "all" && effectiveKindFilter === "all" && !activeBlocker ? "todos.summary_triage" : "todos.summary_filtered", {
+                    filter: [effectiveKindFilter !== "all" ? kindFilterLabel(effectiveKindFilter) : "", listFilter !== "all" ? filterLabel(listFilter) : "", activeBlocker?.label ?? ""].filter(Boolean).join(" · "),
+                    open: triageAll.open,
+                    parked: sectionSize(triageAll, "parked"),
+                    shelved: sectionSize(triageAll, "shelved"),
+                    done: sectionSize(triageAll, "done"),
+                    cancelled: sectionSize(triageAll, "cancelled"),
+                  })}
+                </span>
+              )
             )}
           </div>
         </div>
         <div className="flex items-center gap-2.5">
+          {todosV2 && (
+            <a
+              href={settingsHref("labs", null, false)}
+              data-testid="todos-v2-labs-link"
+              title={t("todos.v2_labs_badge_hint")}
+              onClick={(e) => {
+                e.preventDefault();
+                navigate(settingsHref("labs", null, false));
+              }}
+              className="touch-hit inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-line bg-inset px-2.5 text-submeta font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-accent max-sm:hidden"
+            >
+              <Icon name="sparkles" size={12} className="shrink-0 text-accent-ink" />
+              <span>{t("todos.v2_labs_badge")}</span>
+            </a>
+          )}
           <Segmented
             label={t("todos.view_label")}
             value={calendarOn ? "calendar" : "list"}
@@ -777,6 +986,7 @@ export function TodosView({
                 onOpenHandover={() => openHandover()}
                 onOpenTodo={(id) => navigate(calendarRoute(calendarMode, anchor, id))}
                 onDeleteClick={() => askDelete(selectedTodo.id)}
+                todosV2={todosV2}
               />
             </div>
           )}
@@ -790,35 +1000,130 @@ export function TodosView({
           data-testid="todos-list-column"
           data-narrow-hidden={detailOnNarrow || undefined}
           // the edge parts the list from the detail beside it; on a phone the list is the whole page and has none
-          className={cx("flex w-full flex-col border-line", requestMode ? "min-w-0 md:flex-1" : "shrink-0 md:w-[380px] lg:w-[400px]", (!requestMode || activeTodo) && "md:border-r", detailOnNarrow && "max-md:hidden")}
+          className={cx(
+            "flex w-full flex-col border-line",
+            requestMode ? "min-w-0 md:flex-1" : todosV2 ? "shrink-0 md:w-[356px] lg:w-[368px]" : "shrink-0 md:w-[380px] lg:w-[400px]",
+            (!requestMode || activeTodo) && "md:border-r",
+            detailOnNarrow && "max-md:hidden",
+          )}
         >
-          {/* Search Bar */}
-          <div className="flex items-center gap-2 p-3">
-            {/* the graph shows every request: a search or a due-date filter has nothing to narrow there */}
-            {!requestMode && (
-              <>
-                <div className="min-w-0 flex-1">
-                  <SearchField tone="inset" value={search} onChange={setSearch} placeholder={t("todos.search_placeholder")} />
-                </div>
-                <TodoListControls filter={listFilter} sort={listSort} counts={filterCounts} onFilter={chooseFilter} onSort={chooseSort} />
-              </>
-            )}
-            <Segmented
-              label={t("todos.grouping_label")}
-              value={grouping}
-              options={[
-                { v: "status", label: t("todos.grouping_status") },
-                { v: "folder", label: t("todos.grouping_folder") },
-                ...(byDirection || directionPending ? [{ v: "direction" as const, label: t("todos.grouping_direction") }] : []),
-                ...(byRequest || chosenGrouping === "request" && !todosLoaded ? [{ v: "request" as const, label: t("todos.grouping_request") }] : []),
-              ]}
-              onChange={(next) => {
-                setPref(GROUPING_KEY, next);
-                setGrouping(next);
-              }}
-              compact
+          {/* Search Bar / Compact Toolbar */}
+          {todosV2 ? (
+            <div className="flex items-center gap-1.5 px-2.5 py-2" data-testid="todos-v2-toolbar">
+              {!requestMode && (
+                <>
+                  <div className="min-w-0 flex-1">
+                    <SearchField tone="inset" value={search} onChange={setSearch} placeholder={t("todos.search_placeholder")} />
+                  </div>
+                  <div
+                    role="radiogroup"
+                    aria-label={t("todos.kind_filter_label")}
+                    data-testid="todos-kind-filter"
+                    className="inline-flex h-8 shrink-0 items-center gap-0.5 rounded-control bg-inset p-0.5 shadow-hairline"
+                  >
+                    {(["all", "todos", "tasks"] as const).map((k) => {
+                      const active = effectiveKindFilter === k;
+                      return (
+                        <button
+                          key={k}
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          data-selected={active}
+                          onClick={() => setKindFilter(k)}
+                          className={cx(
+                            "touch-hit h-7 rounded-chip px-2 text-submeta whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-accent",
+                            active ? "bg-surface font-medium text-ink shadow-btn" : "text-ink-3 hover:text-ink-2",
+                          )}
+                        >
+                          {kindFilterLabel(k)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+              <TodoGroupingMenu
+                grouping={grouping}
+                showDirection={byDirection || directionPending}
+                showRequest={byRequest || (chosenGrouping === "request" && !todosLoaded)}
+                onChange={(next) => {
+                  setPref(GROUPING_KEY, next);
+                  setGrouping(next);
+                }}
+              />
+              {!requestMode && (
+                <>
+                  <TodoListControls filter={listFilter} sort={listSort} counts={filterCounts} onFilter={chooseFilter} onSort={chooseSort} />
+                  <button
+                    type="button"
+                    aria-label={reorganizeMode ? t("todos.reorganize_done") : t("todos.reorganize_toggle")}
+                    title={reorganizeMode ? t("todos.reorganize_done") : t("todos.reorganize_toggle")}
+                    aria-pressed={reorganizeMode}
+                    data-testid="todos-reorganize-toggle"
+                    onClick={toggleReorganizeMode}
+                    className={cx(
+                      "touch-hit flex size-7 shrink-0 items-center justify-center rounded-control transition-colors focus-visible:outline-2 focus-visible:outline-accent",
+                      reorganizeMode
+                        ? "bg-accent-ink text-surface hover:brightness-105"
+                        : "text-ink-3 hover:bg-hover hover:text-ink",
+                    )}
+                  >
+                    <Icon name="layers" size={14} />
+                  </button>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 p-3">
+              {/* the graph shows every request: a search or a due-date filter has nothing to narrow there */}
+              {!requestMode && (
+                <>
+                  <div className="min-w-0 flex-1">
+                    <SearchField tone="inset" value={search} onChange={setSearch} placeholder={t("todos.search_placeholder")} />
+                  </div>
+                  <TodoListControls filter={listFilter} sort={listSort} counts={filterCounts} onFilter={chooseFilter} onSort={chooseSort} />
+                </>
+              )}
+              <Segmented
+                label={t("todos.grouping_label")}
+                value={grouping}
+                options={[
+                  { v: "status", label: t("todos.grouping_status") },
+                  { v: "folder", label: t("todos.grouping_folder") },
+                  ...(byDirection || directionPending ? [{ v: "direction" as const, label: t("todos.grouping_direction") }] : []),
+                  ...(byRequest || chosenGrouping === "request" && !todosLoaded ? [{ v: "request" as const, label: t("todos.grouping_request") }] : []),
+                ]}
+                onChange={(next) => {
+                  setPref(GROUPING_KEY, next);
+                  setGrouping(next);
+                }}
+                compact
+              />
+            </div>
+          )}
+          {todosV2 && !requestMode && sharedBlockers.length > 0 && (
+            <SharedBlockersStrip
+              blockers={sharedBlockers}
+              selectedKey={activeBlocker?.key ?? null}
+              onSelect={setSelectedBlockerKey}
             />
-          </div>
+          )}
+          {todosV2 && !requestMode && reorganizeMode && (
+            <BatchReorganizeBar
+              todos={todos}
+              visibleIds={visibleReorganizeIds}
+              selectedIds={reorganizeSelected}
+              directions={reorganizeDirections}
+              submitting={reorganizeSubmitting}
+              error={reorganizeError}
+              feedback={reorganizeFeedback}
+              onSelectAll={selectAllReorganize}
+              onClearSelection={clearReorganizeSelection}
+              onApply={applyReorganize}
+              onExit={exitReorganizeMode}
+            />
+          )}
 
           {/* List Content */}
           {requestMode ? (
@@ -866,6 +1171,30 @@ export function TodosView({
                     {t("todos.filter_empty_body")}
                   </Empty>
                 </>
+              ) : activeBlocker ? (
+                <Empty
+                  icon="alertCircle"
+                  title={t("todos.shared_blockers_empty")}
+                  action={
+                    <Button tone="secondary" onClick={() => setSelectedBlockerKey(null)}>
+                      {t("todos.shared_blockers_clear")}
+                    </Button>
+                  }
+                >
+                  {t("todos.filter_empty_body")}
+                </Empty>
+              ) : effectiveKindFilter !== "all" ? (
+                <Empty
+                  icon="todo"
+                  title={t(`todos.kind_empty_${effectiveKindFilter}`)}
+                  action={
+                    <Button tone="secondary" onClick={() => setKindFilter("all")}>
+                      {t("todos.filter_show_all")}
+                    </Button>
+                  }
+                >
+                  {t("todos.filter_empty_body")}
+                </Empty>
               ) : (
                 <Empty
                   icon="todo"
@@ -884,15 +1213,19 @@ export function TodosView({
               <div className="flex flex-col gap-1" data-testid="todos-sections" data-todo-source={fromView ? "view" : undefined}>
                 {hiddenWaitingCount > 0 && <HiddenWaitingLine count={hiddenWaitingCount} filter={listFilter} onShowAll={() => chooseFilter("all")} />}
                 {TRIAGE_SECTIONS.map((sec) =>
-                  triaged.sections[sec].length === 0 ? null : (
+                  displayTriaged.sections[sec].length === 0 ? null : (
                     <TodoTriageSection
                       key={sec}
                       section={sec}
-                      // Fresh accepted, ticked and cancelled outcomes stay visible; older history keeps the folded default.
-                      folded={sectionStartsFolded(sec, triaged.sections[sec], tick)}
-                      groups={sortTriageGroups(triaged.sections[sec], listSort)}
-                      count={sectionSize(triaged, sec)}
+                      // Under todos_v2 (#14830), low-noise sections (parked, shelved, done, cancelled) start compactly folded;
+                      // legacy mode keeps fresh outcomes open.
+                      folded={todosV2 ? sectionStartsFoldedV2(sec) : sectionStartsFolded(sec, displayTriaged.sections[sec], tick)}
+                      groups={sortTriageGroups(displayTriaged.sections[sec], listSort)}
+                      count={sectionSize(displayTriaged, sec)}
                       views={views}
+                      goalFold={goalFold}
+                      reorganize={reorganizeProps}
+                      slim={todosV2}
                       selectedId={activeTodo?.id}
                       onSelect={openFromList}
                       onToggleDone={toggleDone}
@@ -914,6 +1247,8 @@ export function TodosView({
                         title={g.title}
                         todos={g.todos}
                         views={views}
+                        reorganize={reorganizeProps}
+                        slim={todosV2}
                         selectedId={activeTodo?.id}
                         onSelect={openFromList}
                         onToggleDone={toggleDone}
@@ -929,10 +1264,12 @@ export function TodosView({
                       <TodoTriageSection
                         key={sec}
                         section={sec}
-                        folded={FOLDED_SECTIONS.has(sec)}
+                        folded={todosV2 ? sectionStartsFoldedV2(sec) : FOLDED_SECTIONS.has(sec)}
                         groups={groups}
                         count={groups.reduce((n, g) => n + g.members.length, 0)}
                         views={views}
+                        reorganize={reorganizeProps}
+                        slim={todosV2}
                         selectedId={activeTodo?.id}
                         onSelect={openFromList}
                         onToggleDone={toggleDone}
@@ -947,7 +1284,10 @@ export function TodosView({
                     key={g.key}
                     group={g}
                     views={sectionViews.get(g.key)!}
+                    reorganize={reorganizeProps}
+                    slim={todosV2}
                     selectedId={activeTodo?.id}
+                    hideUnsortedHeader={todosV2}
                     onSelect={openFromList}
                     onToggleDone={toggleDone}
                     onSeen={seenOn ? onSeen : undefined}
@@ -978,6 +1318,9 @@ export function TodosView({
                             todo={todo}
                             view={views.get(todo.id)!}
                             selected={activeTodo?.id === todo.id}
+                            reorganizeSelected={reorganizeProps?.selectedIds.has(todo.id)}
+                            onToggleReorganize={reorganizeProps?.onToggle}
+                            slim={todosV2}
                             onSelect={openFromList}
                             onToggleDone={toggleDone}
                             onMenu={openRowMenu}
@@ -1001,7 +1344,18 @@ export function TodosView({
                     {showCancelled && (
                       <div className="flex flex-col gap-1 pt-1">
                         {filteredCancelled.map((todo) => (
-                          <TodoListItem key={todo.id} todo={todo} view={views.get(todo.id)!} selected={activeTodo?.id === todo.id} onSelect={openFromList} onToggleDone={toggleDone} onMenu={openRowMenu} />
+                          <TodoListItem
+                            key={todo.id}
+                            todo={todo}
+                            view={views.get(todo.id)!}
+                            selected={activeTodo?.id === todo.id}
+                            reorganizeSelected={reorganizeProps?.selectedIds.has(todo.id)}
+                            onToggleReorganize={reorganizeProps?.onToggle}
+                            slim={todosV2}
+                            onSelect={openFromList}
+                            onToggleDone={toggleDone}
+                            onMenu={openRowMenu}
+                          />
                         ))}
                       </div>
                     )}
@@ -1051,6 +1405,17 @@ export function TodosView({
               onOpenHandover={() => openHandover()}
               onOpenTodo={openFromList}
               onDeleteClick={() => askDelete(activeTodo.id)}
+              todosV2={todosV2}
+              parentTodo={todosV2 && activeTodo.part_of ? todos.find((td) => td.id === activeTodo.part_of) : undefined}
+              childTodos={todosV2 ? todos.filter((td) => td.part_of === activeTodo.id) : undefined}
+              directionName={
+                todosV2 && activeTodo.direction_id
+                  ? reorganizeDirections.find((d) => d.id === activeTodo.direction_id)?.label ||
+                    cachedDirectionNames.get(activeTodo.direction_id) ||
+                    leaderTitles?.find((c) => c.session_id === activeTodo.direction_id)?.title ||
+                    activeTodo.direction_id
+                  : undefined
+              }
             />
           ) : (
             <div className="flex flex-1 items-center justify-center text-[13px] text-ink-3">
@@ -1199,11 +1564,19 @@ function steadyViews(prev: ReadonlyMap<string, TodoRowView>, next: ReadonlyMap<s
 
 const TREE_TONE: Record<TreeState, string> = { needs_you: "text-attention", working: "text-orange", bg_waiting: "text-status-waiting", waiting: "text-ink-2", done: "text-ink-3" };
 
+interface TodoReorganizeSelection {
+  selectedIds: ReadonlySet<string>;
+  onToggle: (id: string) => void;
+}
+
 /** One project's open todos under a folding title with its Needs you / Working / Done (#2526). */
 const TodoProjectSection = memo(function TodoProjectSection({
   group,
   views,
+  reorganize,
+  slim,
   selectedId,
+  hideUnsortedHeader,
   onSelect,
   onToggleDone,
   onSeen,
@@ -1212,7 +1585,11 @@ const TodoProjectSection = memo(function TodoProjectSection({
   group: TodoProjectGroup;
   /** Its todos' row views, in the same order as group.todos. */
   views: readonly TodoRowView[];
+  reorganize?: TodoReorganizeSelection;
+  slim?: boolean;
   selectedId: string | undefined;
+  /** Under todos_v2 (#14642), omit the noisy "Unsorted / 未归类" placeholder header for uncategorized rows. */
+  hideUnsortedHeader?: boolean;
   onSelect: (id: string) => void;
   onToggleDone: (todo: Todo, open?: boolean) => void;
   /** Got it on a row in Just finished (one closed in the last day stays in its folder until it is seen). */
@@ -1221,6 +1598,27 @@ const TodoProjectSection = memo(function TodoProjectSection({
 }) {
   const holds = group.todos.some((td) => td.id === selectedId);
   const [folded, toggle] = useFolded(group.key, group.folded, { follow: true, holds });
+  if (hideUnsortedHeader && group.key === "todos-project:\u0000") {
+    return (
+      <div className="mt-1 first:mt-0 flex flex-col gap-1" data-testid="todo-group" data-group={group.key}>
+        {group.todos.map((todo, i) => (
+          <TodoListItem
+            key={todo.id}
+            todo={todo}
+            view={views[i]}
+            selected={selectedId === todo.id}
+            reorganizeSelected={reorganize?.selectedIds.has(todo.id)}
+            onToggleReorganize={reorganize?.onToggle}
+            slim={slim}
+            onSelect={onSelect}
+            onToggleDone={onToggleDone}
+            onSeen={onSeen}
+            onMenu={onMenu}
+          />
+        ))}
+      </div>
+    );
+  }
   return (
     <div className="mt-1 first:mt-0" data-testid="todo-group" data-group={group.key}>
       <button type="button" aria-expanded={!folded} onClick={toggle} className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded-control px-2 text-left text-[12px] text-ink-2 hover:bg-hover">
@@ -1241,6 +1639,9 @@ const TodoProjectSection = memo(function TodoProjectSection({
               todo={todo}
               view={views[i]}
               selected={selectedId === todo.id}
+              reorganizeSelected={reorganize?.selectedIds.has(todo.id)}
+              onToggleReorganize={reorganize?.onToggle}
+              slim={slim}
               onSelect={onSelect}
               onToggleDone={onToggleDone}
               onSeen={onSeen}
@@ -1252,6 +1653,48 @@ const TodoProjectSection = memo(function TodoProjectSection({
     </div>
   );
 });
+
+/** Compact grouping picker menu for the single-row todos_v2 toolbar (#14830). */
+function TodoGroupingMenu({
+  grouping,
+  showDirection,
+  showRequest,
+  onChange,
+}: {
+  grouping: TodoGrouping;
+  showDirection: boolean;
+  showRequest: boolean;
+  onChange: (g: TodoGrouping) => void;
+}) {
+  const menu = useMenu();
+  const options: { v: TodoGrouping; label: string }[] = [
+    { v: "status", label: t("todos.grouping_status") },
+    { v: "folder", label: t("todos.grouping_folder") },
+    ...(showDirection ? [{ v: "direction" as const, label: t("todos.grouping_direction") }] : []),
+    ...(showRequest ? [{ v: "request" as const, label: t("todos.grouping_request") }] : []),
+  ];
+  const items: MenuItem[] = [
+    { key: "grouping-heading", label: t("todos.grouping_label"), heading: true, onSelect: () => {} },
+    ...options.map((o): MenuItem => ({
+      key: `grouping-${o.v}`,
+      label: o.label,
+      checked: o.v === grouping,
+      radio: true,
+      onSelect: () => onChange(o.v),
+    })),
+  ];
+  return (
+    <>
+      <span data-testid="todos-grouping-menu" data-grouping={grouping} className="relative inline-flex shrink-0">
+        <IconButton icon="list" label={t("todos.grouping_label")} onClick={menu.open} active={Boolean(menu.anchor)} />
+        {grouping !== "status" && (
+          <span aria-hidden className="pointer-events-none absolute top-0.5 right-0.5 size-1.5 rounded-full bg-accent" />
+        )}
+      </span>
+      {menu.anchor && <Menu anchor={menu.anchor} onClose={menu.close} align="right" width={180} items={items} />}
+    </>
+  );
+}
 
 // ── Filter and sort (#3740) ──────────────────────────────────
 
@@ -1323,6 +1766,8 @@ const TodoDirectionSection = memo(function TodoDirectionSection({
   title,
   todos,
   views,
+  reorganize,
+  slim,
   selectedId,
   onSelect,
   onToggleDone,
@@ -1332,6 +1777,8 @@ const TodoDirectionSection = memo(function TodoDirectionSection({
   title: string;
   todos: readonly Todo[];
   views: ReadonlyMap<string, TodoRowView>;
+  reorganize?: TodoReorganizeSelection;
+  slim?: boolean;
   selectedId: string | undefined;
   onSelect: (id: string) => void;
   onToggleDone: (todo: Todo, open?: boolean) => void;
@@ -1351,7 +1798,18 @@ const TodoDirectionSection = memo(function TodoDirectionSection({
       {!folded && (
         <div className="flex flex-col gap-1 pl-2 pt-0.5">
           {todos.map((todo) => (
-            <TodoListItem key={todo.id} todo={todo} view={views.get(todo.id)!} selected={selectedId === todo.id} onSelect={onSelect} onToggleDone={onToggleDone} onMenu={onMenu} />
+            <TodoListItem
+              key={todo.id}
+              todo={todo}
+              view={views.get(todo.id)!}
+              selected={selectedId === todo.id}
+              reorganizeSelected={reorganize?.selectedIds.has(todo.id)}
+              onToggleReorganize={reorganize?.onToggle}
+              slim={slim}
+              onSelect={onSelect}
+              onToggleDone={onToggleDone}
+              onMenu={onMenu}
+            />
           ))}
         </div>
       )}
@@ -1392,6 +1850,9 @@ const TodoTriageSection = memo(function TodoTriageSection({
   groups,
   count,
   views,
+  goalFold,
+  reorganize,
+  slim,
   selectedId,
   onSelect,
   onToggleDone,
@@ -1400,12 +1861,17 @@ const TodoTriageSection = memo(function TodoTriageSection({
   onMenu,
 }: {
   section: TriageSection;
-  /** Whether it starts folded: Shelved and Done. */
+  /** Whether it starts folded: Shelved and Done (plus Parked under todos_v2). */
   folded: boolean;
   groups: TriageGroup[];
   /** To-dos its rows list (a merged row holds several): the number its title shows (#3712, the same on iOS). */
   count: number;
   views: ReadonlyMap<string, TodoRowView>;
+  /** Goal folding summary when todos_v2 is active (#14661); undefined otherwise. */
+  goalFold?: GoalFoldResult;
+  reorganize?: TodoReorganizeSelection;
+  /** Under todos_v2 (#14830), compact row and folded-section presentation. */
+  slim?: boolean;
   selectedId: string | undefined;
   onSelect: (id: string) => void;
   onToggleDone: (todo: Todo, open?: boolean) => void;
@@ -1414,14 +1880,23 @@ const TodoTriageSection = memo(function TodoTriageSection({
   onSeen?: (id: string) => void;
   onMenu: TodoRowMenuOpener;
 }) {
-  const holds = groups.some((g) => g.members.some((m) => m.id === selectedId));
+  const holds = groups.some(
+    (g) =>
+      g.members.some((m) => m.id === selectedId) ||
+      Boolean(goalFold?.goals.get(g.lead.id)?.children.some((c) => c.todo.id === selectedId)),
+  );
   const [folded, toggle] = useFolded(`todos-section:${section}`, foldedFirst, { follow: true, holds });
   const title = sectionTitle(section, groups.flatMap((g) => [...g.triage.values()].map((t) => t.rule)));
   return (
     <section className="mt-1 first:mt-0" data-testid="todo-section" data-section={section} data-count={groups.length} data-todos={count}>
       <button type="button" aria-expanded={!folded} onClick={toggle} className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-control px-2 text-left text-[12px] hover:bg-hover">
         <Icon name="chevron" size={10} stroke={2.4} className="shrink-0 text-ink-3 opacity-60 transition-transform" style={{ transform: folded ? "rotate(-90deg)" : "none" }} />
-        <span className={cx("min-w-0 flex-1 truncate font-semibold whitespace-nowrap", SECTION_TONE[section])}>{title}</span>
+        <span className={cx("shrink-0 truncate font-semibold whitespace-nowrap", !(slim && folded && section === "parked") && "min-w-0 flex-1", SECTION_TONE[section])}>{title}</span>
+        {slim && folded && section === "parked" && (
+          <span data-testid="todo-section-folded-hint" className="min-w-0 flex-1 truncate text-submeta text-ink-3">
+            · {t("todos.parked_folded_hint")}
+          </span>
+        )}
         {folded && <OwnerMarkCount count={ownerCount(groups.flatMap((g) => g.members), views)} />}
         <span className="shrink-0 text-[11px] text-ink-3 tabular-nums">{count}</span>
       </button>
@@ -1429,7 +1904,21 @@ const TodoTriageSection = memo(function TodoTriageSection({
       {!folded && (
         <div className="flex flex-col gap-1 pt-0.5">
           {groups.map((g) => (
-            <TodoTriageRow key={g.key} group={g} views={views} selectedId={selectedId} onSelect={onSelect} onToggleDone={onToggleDone} onRestore={onRestore} onSeen={onSeen} onMenu={onMenu} />
+            <TodoTriageRow
+              key={g.key}
+              group={g}
+              views={views}
+              goalInfo={goalFold?.goals.get(g.lead.id)}
+              surfacedParent={goalFold?.surfacedParent}
+              reorganize={reorganize}
+              slim={slim}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              onToggleDone={onToggleDone}
+              onRestore={onRestore}
+              onSeen={onSeen}
+              onMenu={onMenu}
+            />
           ))}
         </div>
       )}
@@ -1450,6 +1939,10 @@ function mergePinnedOrder(pinned: readonly string[], members: readonly Todo[]): 
 function TodoTriageRow({
   group,
   views,
+  goalInfo,
+  surfacedParent,
+  reorganize,
+  slim,
   selectedId,
   onSelect,
   onToggleDone,
@@ -1459,6 +1952,10 @@ function TodoTriageRow({
 }: {
   group: TriageGroup;
   views: ReadonlyMap<string, TodoRowView>;
+  goalInfo?: GoalSummary;
+  surfacedParent?: ReadonlyMap<string, Todo>;
+  reorganize?: TodoReorganizeSelection;
+  slim?: boolean;
   selectedId: string | undefined;
   onSelect: (id: string) => void;
   onToggleDone: (todo: Todo, open?: boolean) => void;
@@ -1481,6 +1978,16 @@ function TodoTriageRow({
       setPinnedOrder(group.members.map((m) => m.id));
     }
   }
+
+  // Under todos_v2 (#14661), expand folded goal children on demand or when deep-linked directly to a folded child.
+  const selectedFoldedChildId = goalInfo?.children.some((c) => c.todo.id === selectedId && !c.blocker) ? selectedId : undefined;
+  const [goalExpanded, setGoalExpanded] = useState(selectedFoldedChildId !== undefined);
+  const [seenFoldedChildId, setSeenFoldedChildId] = useState(selectedFoldedChildId);
+  if (selectedFoldedChildId !== seenFoldedChildId) {
+    setSeenFoldedChildId(selectedFoldedChildId);
+    if (selectedFoldedChildId !== undefined && !goalExpanded) setGoalExpanded(true);
+  }
+  const toggleGoalExpanded = useCallback(() => setGoalExpanded((v) => !v), []);
 
   if (opened && pinnedOrder) {
     const nextOrder = mergePinnedOrder(pinnedOrder, group.members);
@@ -1515,23 +2022,63 @@ function TodoTriageRow({
       setPinnedOrder(group.members.map((m) => m.id));
     }
   };
-  const item = (td: Todo) => (
+  const item = (td: Todo, isLead = false) => (
     <TodoListItem
       key={td.id}
       todo={td}
       view={views.get(td.id)!}
       selected={selectedId === td.id}
+      reorganizeSelected={reorganize?.selectedIds.has(td.id)}
+      onToggleReorganize={reorganize?.onToggle}
+      slim={slim}
       onSelect={onSelect}
       onToggleDone={onToggleDone}
       section={group.triage.get(td.id)?.section}
       onRestore={onRestore}
       onSeen={onSeen}
       onMenu={onMenu}
+      goalSummary={
+        isLead && goalInfo
+          ? {
+              done: goalInfo.done,
+              total: goalInfo.total,
+              blockedCount: goalInfo.blockedCount,
+              expanded: goalExpanded,
+              onToggle: toggleGoalExpanded,
+            }
+          : undefined
+      }
+      parentGoalTitle={surfacedParent?.get(td.id)?.title}
     />
   );
   return (
     <div data-testid="todo-triage-row" data-id={lead.id} data-group-key={group.key} data-members={displayMembers.length}>
-      {item(lead)}
+      {item(lead, true)}
+      {goalExpanded && goalInfo && goalInfo.children.length > 0 && (
+        <div
+          data-testid="todo-goal-children"
+          data-parent={lead.id}
+          className="ml-6 mt-1 flex flex-col gap-1 border-l border-line pl-2"
+        >
+          {goalInfo.children.map((child) => (
+            <TodoListItem
+              key={child.todo.id}
+              todo={child.todo}
+              view={views.get(child.todo.id)!}
+              selected={selectedId === child.todo.id}
+              reorganizeSelected={reorganize?.selectedIds.has(child.todo.id)}
+              onToggleReorganize={reorganize?.onToggle}
+              slim={slim}
+              onSelect={onSelect}
+              onToggleDone={onToggleDone}
+              section={child.section}
+              onRestore={onRestore}
+              onSeen={onSeen}
+              onMenu={onMenu}
+            />
+          ))}
+        </div>
+      )}
       {others.length > 0 && (
         <button
           type="button"
@@ -1544,7 +2091,7 @@ function TodoTriageRow({
           {!opened && <OwnerMarkCount count={ownerCount(others, views)} />}
         </button>
       )}
-      {opened && others.length > 0 && <div className="ml-6 flex flex-col gap-1 border-l border-line pl-2">{others.map(item)}</div>}
+      {opened && others.length > 0 && <div className="ml-6 flex flex-col gap-1 border-l border-line pl-2">{others.map((m) => item(m))}</div>}
     </div>
   );
 }
@@ -1608,6 +2155,10 @@ export type TodoRowView = {
   wait?: WaitReason;
   /** Why the sidebar's To-dos badge counts it (#11838, lib/todo-owner-needs.ts), unset when it does not: its mark. */
   owner?: OwnerNeed;
+  /** Under todos_v2 (#14642), the resolved project name when assigned; undefined when unset or todos_v2 is off. */
+  projectLabel?: string;
+  /** Under todos_v2 (#14830), the resolved direction name when assigned; undefined when unset or todos_v2 is off. */
+  directionLabel?: string;
 };
 
 const DOT_STATE: Record<TodoStatus, AgentState> = {
@@ -1679,8 +2230,27 @@ function agentRowView(todo: Todo, lookup: SessionLookup, interactions: Interacti
 }
 
 /** Every todo's row view by id, with its status section and why the sidebar's badge counts it (`needs`, its own set). */
-function todoRowViews(todos: Todo[], lookup: SessionLookup, interactions: Interaction[], sections: ReadonlyMap<string, TriageSection>, needs: ReadonlyMap<string, OwnerNeed>): ReadonlyMap<string, TodoRowView> {
-  return new Map(todos.map((td) => [td.id, { ...todoRowView(td, lookup, interactions), section: sections.get(td.id), owner: needs.get(td.id) }]));
+function todoRowViews(
+  todos: Todo[],
+  lookup: SessionLookup,
+  interactions: Interaction[],
+  sections: ReadonlyMap<string, TriageSection>,
+  needs: ReadonlyMap<string, OwnerNeed>,
+  projectLabel?: (slug: string) => string,
+  directionLabel?: (id: string) => string | undefined,
+): ReadonlyMap<string, TodoRowView> {
+  return new Map(
+    todos.map((td) => [
+      td.id,
+      {
+        ...todoRowView(td, lookup, interactions),
+        section: sections.get(td.id),
+        owner: needs.get(td.id),
+        projectLabel: projectLabel && td.project ? projectLabel(td.project) : undefined,
+        directionLabel: directionLabel && td.direction_id ? directionLabel(td.direction_id) : undefined,
+      },
+    ]),
+  );
 }
 
 const TONE_CLASS = TODO_TONE_CLASS;
@@ -1688,20 +2258,46 @@ const TONE_CLASS = TODO_TONE_CLASS;
 /** Opens a row's menu (#4429) where `at` says, for the to-do the row's checkbox shows open (`open`) or done. */
 type TodoRowMenuOpener = (todo: Todo, at: MenuAt, open: boolean) => void;
 
+interface TodoGoalRowControl {
+  done: number;
+  total: number;
+  blockedCount: number;
+  expanded: boolean;
+  onToggle: () => void;
+}
+
+const SLIM_CUE_TONE: Record<SlimCueTone, string> = {
+  attention: "text-attention font-medium",
+  red: "text-red",
+  green: "text-green",
+  orange: "text-orange",
+  muted: "text-ink-3",
+};
+
 const TodoListItem = memo(function TodoListItem({
   todo,
   view,
   selected,
+  reorganizeSelected,
+  onToggleReorganize,
+  slim,
   onSelect,
   onToggleDone,
   section,
   onRestore,
   onSeen,
   onMenu,
+  goalSummary,
+  parentGoalTitle,
 }: {
   todo: Todo;
   view: TodoRowView;
   selected: boolean;
+  /** Under todos_v2 (#14758), whether this row is selected in batch reorganize mode. */
+  reorganizeSelected?: boolean;
+  onToggleReorganize?: (id: string) => void;
+  /** Under todos_v2 (#14830), compact 1-line personal / max 2-line task row layout. */
+  slim?: boolean;
   onSelect: (id: string) => void;
   onToggleDone: (todo: Todo, open?: boolean) => void;
   /** Its status section (#3156): a PR to merge shows its link, a shelved one its Restore, a Just finished one Got it. */
@@ -1710,23 +2306,348 @@ const TodoListItem = memo(function TodoListItem({
   /** Got it (#5707), on a row in Just finished (`section`, else the view's). */
   onSeen?: (id: string) => void;
   onMenu?: TodoRowMenuOpener;
+  /** Under todos_v2 (#14661), compact child-task progress & inline expand toggle on a top-level parent goal row. */
+  goalSummary?: TodoGoalRowControl;
+  /** Under todos_v2 (#14661), parent goal title shown on a surfaced `needs_you` child blocker. */
+  parentGoalTitle?: string;
 }) {
   const { status, dotState, activeCount } = view;
-  const showWait = (section ?? view.section) === "parked";
+  const effectiveSection = section ?? view.section;
+  const showWait = effectiveSection === "parked";
   // the PR it waits on: its current one, or an earlier one still open (#7935)
-  const openPR = (section ?? view.section) === "parked" ? openMergePRs(todo, Date.now())[0] : undefined;
+  const openPR = effectiveSection === "parked" ? openMergePRs(todo, Date.now())[0] : undefined;
   // its state word and tone; a waiting one's say what it waits on, attention only on the owner (#11090)
   const look = todoLook(todo, status, view.wait);
   // its steps as the hub counts them (#11858, lib/todo-steps.ts): in place of Not started, or after its Agent count
-  const steps = stepsWords(todo, status);
+  const steps = goalSummary ? undefined : stepsWords(todo, status);
   const held = heldDelivery(todo);
   const responsible = responsibleOf(todo);
   const thread = useStore((s) => todoThreadsOn(s.features)) ? boundThread(todo) : undefined;
   // a failed start still waiting on the owner reads open, not done, with why it did not start (#3713), in every grouping
-  const open = checksAsOpen(todo, section ?? view.section);
+  const open = checksAsOpen(todo, effectiveSection);
   const failedOpen = open && Boolean(todo.start_error);
   // Its menu (#4429): a right click opens it at the pointer, the menu key and Shift+F10 on the row
   const menu = onMenu ? contextMenuProps((at) => onMenu(todo, at, open)) : undefined;
+
+  if (slim) {
+    const due = todoDueText(todo);
+    const overdue = isOverdue(todo);
+    const highPriority = todo.priority === "high" && !todo.done_at;
+    const remind = Boolean(todo.remind_at && !todo.reminded_at && !todo.done_at);
+    const personalSlim = isPersonalSlimRow(todo, {
+      hasGoalSummary: Boolean(goalSummary),
+      hasParentGoal: Boolean(parentGoalTitle),
+      effectiveSection,
+    });
+
+    if (personalSlim) {
+      return (
+        <div
+          role="button"
+          tabIndex={0}
+          data-todo={todo.id}
+          data-todo-row-layout="personal-slim"
+          aria-current={selected || undefined}
+          onClick={() => onSelect(todo.id)}
+          onContextMenu={menu && ((e) => {
+            if (!(e.target as HTMLElement).closest("a[href]")) menu.onContextMenu(e);
+          })}
+          onKeyDown={(e) => {
+            menu?.onKeyDown(e);
+            if (e.defaultPrevented) return;
+            if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+            e.preventDefault();
+            onSelect(todo.id);
+          }}
+          className={cx(
+            "group/item flex cursor-pointer items-center gap-2 rounded-control px-2.5 py-2 transition-colors focus-visible:outline-2 focus-visible:outline-accent",
+            selected ? "bg-accent-tint/70" : "hover:bg-hover",
+          )}
+        >
+          {onToggleReorganize && (
+            <input
+              type="checkbox"
+              data-testid="todo-reorganize-checkbox"
+              data-todo-id={todo.id}
+              aria-label={t("todos.reorganize_select_item", { title: todo.title })}
+              checked={Boolean(reorganizeSelected)}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+              onChange={() => onToggleReorganize(todo.id)}
+              className="size-4 shrink-0 cursor-pointer accent-accent"
+            />
+          )}
+          <button
+            type="button"
+            aria-label={open ? t("todos.complete_todo") : t("todos.reopen_todo")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleDone(todo, open);
+            }}
+            className={cx(
+              "touch-hit flex size-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+              !open
+                ? "border-accent bg-accent text-white"
+                : "border-line-strong text-transparent hover:border-accent hover:text-accent",
+            )}
+          >
+            <Icon name="check" size={10} stroke={2.6} />
+          </button>
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span
+              className={cx(
+                "truncate text-meta font-medium text-ink",
+                !open && "font-normal text-ink-3",
+                strikesThrough(todo, open) && "line-through",
+              )}
+              data-testid="todo-title"
+            >
+              {todo.title}
+            </span>
+            {view.projectLabel && (
+              <span
+                data-testid="todo-project-tag"
+                className="shrink-0 truncate rounded-chip bg-field px-1.5 py-0.5 text-submeta text-ink-3"
+              >
+                {view.projectLabel}
+              </span>
+            )}
+          </span>
+          <span className="flex shrink-0 items-center gap-1.5 text-submeta text-ink-3 tabular-nums">
+            {highPriority && (
+              <span
+                data-testid="todo-priority-subtle"
+                role="img"
+                aria-label={t("todos.priority_high")}
+                title={t("todos.priority_high")}
+                className="inline-flex shrink-0 items-center gap-0.5 text-ink-3"
+              >
+                <Icon name="flag" size={10} stroke={2} />
+                <span>{t("todos.priority_option_high")}</span>
+              </span>
+            )}
+            {due && (
+              <span data-testid="todo-due-compact" className={cx("whitespace-nowrap", overdue && "text-red")}>
+                {due}
+              </span>
+            )}
+            {remind && todo.remind_at && (
+              <span
+                role="img"
+                aria-label={t("todos.reminder_at", { when: formatDate(todo.remind_at, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) })}
+                className="inline-flex shrink-0"
+              >
+                <Icon name="bell" size={11} stroke={2} />
+              </span>
+            )}
+            {effectiveSection === "just_done" && seenCanFile(todo) && onSeen && <SeenButton onClick={() => onSeen(todo.id)} />}
+          </span>
+        </div>
+      );
+    }
+
+    const pr = prLink(todo.pr_status?.url ?? todo.pr_url);
+    const repoCount = repoCountOf(todo);
+    const cue = slimSecondaryCue(todo, view, {
+      effectiveSection,
+      failedOpen,
+      held,
+      due,
+      overdue,
+    });
+    const showSeenAction = effectiveSection === "just_done" && seenCanFile(todo) && Boolean(onSeen);
+    const showRestoreAction = section === "shelved" && Boolean(onRestore);
+    const hasLine2 = Boolean(
+      parentGoalTitle ||
+      (goalSummary && goalSummary.blockedCount > 0) ||
+      view.directionLabel ||
+      view.projectLabel ||
+      repoCount > 0 ||
+      cue ||
+      showSeenAction ||
+      showRestoreAction,
+    );
+
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        data-todo={todo.id}
+        data-todo-row-layout="task-slim"
+        aria-current={selected || undefined}
+        onClick={() => onSelect(todo.id)}
+        onContextMenu={menu && ((e) => {
+          if (!(e.target as HTMLElement).closest("a[href]")) menu.onContextMenu(e);
+        })}
+        onKeyDown={(e) => {
+          menu?.onKeyDown(e);
+          if (e.defaultPrevented) return;
+          if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+          e.preventDefault();
+          onSelect(todo.id);
+        }}
+        className={cx(
+          "group/item flex cursor-pointer gap-2 rounded-control px-2.5 py-2 transition-colors focus-visible:outline-2 focus-visible:outline-accent",
+          selected ? "bg-accent-tint/70" : "hover:bg-hover",
+        )}
+      >
+        {onToggleReorganize && (
+          <input
+            type="checkbox"
+            data-testid="todo-reorganize-checkbox"
+            data-todo-id={todo.id}
+            aria-label={t("todos.reorganize_select_item", { title: todo.title })}
+            checked={Boolean(reorganizeSelected)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            onChange={() => onToggleReorganize(todo.id)}
+            className="mt-0.5 size-4 shrink-0 cursor-pointer accent-accent"
+          />
+        )}
+        <button
+          type="button"
+          aria-label={open ? t("todos.complete_todo") : t("todos.reopen_todo")}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleDone(todo, open);
+          }}
+          className={cx(
+            "touch-hit mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+            !open
+              ? "border-accent bg-accent text-white"
+              : "border-line-strong text-transparent hover:border-accent hover:text-accent",
+          )}
+        >
+          <Icon name="check" size={10} stroke={2.6} />
+        </button>
+
+        <div className="min-w-0 flex-1">
+          {/* Line 1: status dot + truncated title + compact right anchor */}
+          <div className="flex min-w-0 items-center gap-1.5" data-testid="todo-slim-line1">
+            {open && <StatusMark state={dotState} size="sm" />}
+            <span
+              className={cx(
+                "min-w-0 flex-1 truncate text-meta font-semibold text-ink",
+                !view.ultracode && !open && "font-normal text-ink-3",
+                !view.ultracode && strikesThrough(todo, open) && "line-through",
+              )}
+              data-testid="todo-title"
+            >
+              {todo.title}
+            </span>
+            {view.ultracode && <UltraMark size={11} />}
+            <span className="flex shrink-0 items-center gap-1.5 text-submeta text-ink-3 tabular-nums">
+              {highPriority && (
+                <span
+                  data-testid="todo-priority-subtle"
+                  role="img"
+                  aria-label={t("todos.priority_high")}
+                  title={t("todos.priority_high")}
+                  className="inline-flex shrink-0 items-center gap-0.5 text-ink-3"
+                >
+                  <Icon name="flag" size={10} stroke={2} />
+                  <span>{t("todos.priority_option_high")}</span>
+                </span>
+              )}
+              {goalSummary ? (
+                <button
+                  type="button"
+                  data-testid="todo-goal-toggle"
+                  aria-expanded={goalSummary.expanded}
+                  aria-label={t(goalSummary.expanded ? "todos.goal_collapse" : "todos.goal_expand", {
+                    title: todo.title,
+                    done: goalSummary.done,
+                    total: goalSummary.total,
+                  })}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    goalSummary.onToggle();
+                  }}
+                  className="touch-hit inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-field px-1.5 text-submeta font-medium whitespace-nowrap text-ink-2 tabular-nums transition-colors hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+                >
+                  <Icon
+                    name="chevron"
+                    size={10}
+                    stroke={2.4}
+                    className="shrink-0 opacity-70 transition-transform"
+                    style={{ transform: goalSummary.expanded ? "none" : "rotate(-90deg)" }}
+                  />
+                  <span data-testid="todo-goal-progress">{t("todos.goal_progress", { done: goalSummary.done, total: goalSummary.total })}</span>
+                </button>
+              ) : pr ? (
+                <span data-testid="todo-slim-pr" className="whitespace-nowrap font-medium text-ink-2">
+                  {pr.text}
+                </span>
+              ) : (
+                <span className="whitespace-nowrap" data-testid="todo-age">
+                  {view.age}
+                </span>
+              )}
+            </span>
+          </div>
+
+          {/* Line 2: concise metadata (direction, project, repo count, parent goal, or short blocker/decision cue) */}
+          {hasLine2 && (
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 overflow-hidden text-submeta text-ink-3" data-testid="todo-slim-line2">
+              {parentGoalTitle && (
+                <span data-testid="todo-parent-goal" className="inline-flex min-w-0 shrink items-center gap-1 truncate">
+                  <Icon name="target" size={11} stroke={2} className="shrink-0" />
+                  <span className="truncate">{t("todos.goal_parent_hint", { title: parentGoalTitle })}</span>
+                </span>
+              )}
+              {goalSummary && goalSummary.blockedCount > 0 && (
+                <span data-testid="todo-goal-blocked" className="shrink-0 whitespace-nowrap font-medium text-attention">
+                  {t("todos.goal_blocked", { count: goalSummary.blockedCount })}
+                </span>
+              )}
+              {view.directionLabel && (
+                <span data-testid="todo-direction-tag" className="max-w-28 shrink-0 truncate text-ink-2">
+                  {view.directionLabel}
+                </span>
+              )}
+              {view.projectLabel && (
+                <span data-testid="todo-project-tag" className="max-w-24 shrink-0 truncate rounded-chip bg-field px-1.5 text-ink-3">
+                  {view.projectLabel}
+                </span>
+              )}
+              {repoCount > 0 && (
+                <span data-testid="todo-repo-count" className="shrink-0 whitespace-nowrap tabular-nums">
+                  {t("todos.slim_repo_count", { count: repoCount })}
+                </span>
+              )}
+              {cue && (
+                <span
+                  data-testid={cue.testId}
+                  data-ask={cue.askOutcome}
+                  title={cue.text}
+                  className={cx("min-w-0 flex-1 truncate", SLIM_CUE_TONE[cue.tone])}
+                >
+                  {cue.text}
+                </span>
+              )}
+              {showSeenAction && onSeen && (
+                <span className="ml-auto shrink-0">
+                  <SeenButton onClick={() => onSeen(todo.id)} />
+                </span>
+              )}
+              {showRestoreAction && onRestore && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRestore(todo.id);
+                  }}
+                  className="touch-hit ml-auto shrink-0 whitespace-nowrap font-medium text-accent-ink hover:underline"
+                >
+                  {t("todos.restore")}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -1752,6 +2673,20 @@ const TodoListItem = memo(function TodoListItem({
         selected ? "bg-accent-tint/70" : "hover:bg-hover",
       )}
     >
+      {/* Batch reorganize selection checkbox under todos_v2 (#14758) */}
+      {onToggleReorganize && (
+        <input
+          type="checkbox"
+          data-testid="todo-reorganize-checkbox"
+          data-todo-id={todo.id}
+          aria-label={t("todos.reorganize_select_item", { title: todo.title })}
+          checked={Boolean(reorganizeSelected)}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          onChange={() => onToggleReorganize(todo.id)}
+          className="mt-0.5 size-4 shrink-0 cursor-pointer accent-accent"
+        />
+      )}
       {/* Checkbox button: touch-hit makes the 16px circle a 44px target on touch, its own (no row underneath) */}
       <button
         type="button"
@@ -1773,11 +2708,12 @@ const TodoListItem = memo(function TodoListItem({
       {/* Body */}
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          {view.ultracode || todo.kind === "concern" || view.owner ? (
+          {view.ultracode || todo.kind === "concern" || view.owner || view.projectLabel ? (
             <span className="flex min-w-0 items-center gap-1">
               <span className={cx("truncate text-[13.5px] font-semibold text-ink", !view.ultracode && !open && "text-ink-3 font-normal", !view.ultracode && strikesThrough(todo, open) && "line-through")} data-testid="todo-title">{todo.title}</span>
               {view.ultracode && <UltraMark size={11} />}
               {todo.kind === "concern" && <Tag><span data-testid="todo-concern">{t("todos.concern")}</span></Tag>}
+              {view.projectLabel && <Tag><span data-testid="todo-project-tag">{view.projectLabel}</span></Tag>}
               {view.owner && <OwnerMark need={view.owner} />}
             </span>
           ) : (
@@ -1795,51 +2731,96 @@ const TodoListItem = memo(function TodoListItem({
           </span>
         </div>
 
-        {/* Status Line */}
-        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px]" data-testid="todo-status-line">
-          {open && <StatusMark state={dotState} size="sm" />}
-          <span className={cx("shrink-0 whitespace-nowrap font-medium", TONE_CLASS[look.tone])} data-testid="todo-status">{steps?.label ?? look.label}</span>
-          {!todo.done_at && activeCount > 0 && (
-            <>
-              <span className="text-ink-3">·</span>
-              <span className="text-ink-3">{t("todos.agent_count", { count: activeCount })}</span>
-            </>
-          )}
-          {steps?.after && (
-            <>
-              <span className="text-ink-3">·</span>
-              <span className="shrink-0 whitespace-nowrap text-ink-3" data-testid="todo-steps">{steps.after}</span>
-            </>
-          )}
-          {responsible && (
-            <>
-              <span className="text-ink-3">·</span>
-              <span
-                data-testid="todo-responsible"
-                data-kind={responsible.kind}
-                title={t("todos.responsible_label", { name: responsible.name })}
-                className="inline-flex min-w-0 items-center gap-1 truncate text-ink-2"
-              >
-                <Icon name={responsible.kind === "person" ? "person" : "terminal"} size={11} stroke={2} className="shrink-0 text-ink-3" />
-                <span className="truncate">{responsible.name}</span>
+        {/* Surfaced blocker parent goal context under todos_v2 (#14661) */}
+        {parentGoalTitle && (
+          <div className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-ink-3" data-testid="todo-parent-goal">
+            <Icon name="target" size={11} stroke={2} className="shrink-0" />
+            <span className="truncate">{t("todos.goal_parent_hint", { title: parentGoalTitle })}</span>
+          </div>
+        )}
+
+        {/* Parent goal progress & accessible inline fold toggle under todos_v2 (#14661) */}
+        {goalSummary && (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5" data-testid="todo-goal-summary">
+            <button
+              type="button"
+              data-testid="todo-goal-toggle"
+              aria-expanded={goalSummary.expanded}
+              aria-label={t(goalSummary.expanded ? "todos.goal_collapse" : "todos.goal_expand", {
+                title: todo.title,
+                done: goalSummary.done,
+                total: goalSummary.total,
+              })}
+              onClick={(e) => {
+                e.stopPropagation();
+                goalSummary.onToggle();
+              }}
+              className="touch-hit inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-field px-2 text-xs font-medium whitespace-nowrap text-ink-2 tabular-nums transition-colors hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              <Icon
+                name="chevron"
+                size={10}
+                stroke={2.4}
+                className="shrink-0 opacity-70 transition-transform"
+                style={{ transform: goalSummary.expanded ? "none" : "rotate(-90deg)" }}
+              />
+              <span data-testid="todo-goal-progress">{t("todos.goal_progress", { done: goalSummary.done, total: goalSummary.total })}</span>
+            </button>
+            {goalSummary.blockedCount > 0 && (
+              <span data-testid="todo-goal-blocked" className="inline-flex shrink-0">
+                <Tag tone="accent">{t("todos.goal_blocked", { count: goalSummary.blockedCount })}</Tag>
               </span>
-            </>
-          )}
-          {/* its steps were handed out: what is next once they are all closed, else nothing about handing it over */}
-          {!todo.done_at && activeCount === 0 && (steps?.tail !== undefined ? (
-            steps.tail && <span className="truncate text-ink-3" data-testid="todo-steps-next">· {steps.tail}</span>
-          ) : !responsible ? (
-            <span className="truncate text-ink-3">· {t("todos.not_handed")}</span>
-          ) : null)}
-          {(section ?? view.section) === "just_done" && seenCanFile(todo) && onSeen ? (
-            <span className="ml-auto flex shrink-0 items-center gap-1.5">
-              {!todo.done_at && <ReviewBadge todo={todo} />}
-              <SeenButton onClick={() => onSeen(todo.id)} />
-            </span>
-          ) : (
-            !todo.done_at && <ReviewBadge todo={todo} className="ml-auto" />
-          )}
-        </div>
+            )}
+          </div>
+        )}
+
+        {/* Status Line (parked rows collapse to title + concise TaskWaitInfo summary line) */}
+        {!showWait && (
+          <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px]" data-testid="todo-status-line">
+            {open && <StatusMark state={dotState} size="sm" />}
+            <span className={cx("shrink-0 whitespace-nowrap font-medium", TONE_CLASS[look.tone])} data-testid="todo-status">{steps?.label ?? look.label}</span>
+            {!todo.done_at && activeCount > 0 && (
+              <>
+                <span className="text-ink-3">·</span>
+                <span className="text-ink-3">{t("todos.agent_count", { count: activeCount })}</span>
+              </>
+            )}
+            {steps?.after && (
+              <>
+                <span className="text-ink-3">·</span>
+                <span className="shrink-0 whitespace-nowrap text-ink-3" data-testid="todo-steps">{steps.after}</span>
+              </>
+            )}
+            {responsible && (
+              <>
+                <span className="text-ink-3">·</span>
+                <span
+                  data-testid="todo-responsible"
+                  data-kind={responsible.kind}
+                  title={t("todos.responsible_label", { name: responsible.name })}
+                  className="inline-flex min-w-0 items-center gap-1 truncate text-ink-2"
+                >
+                  <Icon name={responsible.kind === "person" ? "person" : "terminal"} size={11} stroke={2} className="shrink-0 text-ink-3" />
+                  <span className="truncate">{responsible.name}</span>
+                </span>
+              </>
+            )}
+            {/* its steps were handed out: what is next once they are all closed, else nothing about handing it over */}
+            {!todo.done_at && activeCount === 0 && (steps?.tail !== undefined ? (
+              steps.tail && <span className="truncate text-ink-3" data-testid="todo-steps-next">· {steps.tail}</span>
+            ) : !responsible ? (
+              <span className="truncate text-ink-3">· {t("todos.not_handed")}</span>
+            ) : null)}
+            {(section ?? view.section) === "just_done" && seenCanFile(todo) && onSeen ? (
+              <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                {!todo.done_at && <ReviewBadge todo={todo} />}
+                <SeenButton onClick={() => onSeen(todo.id)} />
+              </span>
+            ) : (
+              !todo.done_at && <ReviewBadge todo={todo} className="ml-auto" />
+            )}
+          </div>
+        )}
 
         {/* What it waits on from the user, with the one tap that answers it (#2056) */}
         <TodoAskLine todo={todo} className="mt-1" />
@@ -1965,7 +2946,7 @@ function PlanField({ value, onCommit, ...field }: { value: string; onCommit: (va
 
 /** The detail's due date (a day, with a time when one is set), reminder, priority and project. A pick from a menu is
  *  saved at once, a date or time once it is entered (PlanField); no field is disabled while it saves, so the focus stays. */
-function TodoPlanEditor({ todo }: { todo: Todo }) {
+function TodoPlanEditor({ todo, todosV2 }: { todo: Todo; todosV2?: boolean }) {
   const [busy, setBusy] = useState(false);
   const projects = projectChoices(useTodoProjects(), todo.project);
   const save = async (patch: TodoPatch) => {
@@ -2017,14 +2998,14 @@ function TodoPlanEditor({ todo }: { todo: Todo }) {
           data-testid="todo-plan-remind"
         />
       </span>
-      <span className="inline-flex items-center gap-1.5">
+      <span className={cx("inline-flex items-center gap-1.5", todosV2 && "text-ink-3")}>
         <Icon name="flag" size={13} stroke={2} />
         <span className="whitespace-nowrap">{t("todos.priority_label")}</span>
         <select
           aria-label={t("todos.priority_label")}
           value={todo.priority ?? ""}
           onChange={(e) => void save({ priority: e.target.value })}
-          className={PLAN_FIELD}
+          className={cx(PLAN_FIELD, todosV2 && "text-ink-3")}
           data-testid="todo-plan-priority"
         >
           <option value="high">{t("todos.priority_option_high")}</option>
@@ -2042,7 +3023,7 @@ function TodoPlanEditor({ todo }: { todo: Todo }) {
           className={cx(PLAN_FIELD, "max-w-56 truncate")}
           data-testid="todo-plan-project"
         >
-          <option value="">{t("todos.project_none")}</option>
+          <option value="" aria-label={t("todos.project_none")}>{todosV2 ? "" : t("todos.project_none")}</option>
           {projects.map((p) => (
             <option key={p.slug} value={p.slug}>
               {p.name}
@@ -2131,6 +3112,9 @@ const MARK: Record<CheckMark, { icon: "check" | "x" | "clock" | "minus"; classNa
 
 /** The task's criteria, each as its latest report or review found it, and what the supervisor said last. */
 export function ReviewChecklist({ todo, lookup }: { todo: Todo; lookup?: SessionLookup }) {
+  const cachedDirectionNames = useCachedDirectionNames();
+  const assistant = useStore((s) => s.assistant);
+  const shown = useShownManager();
   const sup = todo.supervision;
   if (!sup) return null;
   const list = checklist(sup);
@@ -2138,6 +3122,14 @@ export function ReviewChecklist({ todo, lookup }: { todo: Todo; lookup?: Session
   const parked = triage(todo, lookup, Date.now()).section === "parked";
   // What this list cannot say of finished work (#3822): the criteria a scope change dropped, and what was done beyond the brief.
   const extras = todo.done_at ? resultExtras(todo) : undefined;
+  const assistantMatchesTodo = Boolean(assistant && sameManager(assistant.manager ?? shown, todo.manager));
+  const authorCtx: EvidenceAuthorContext = {
+    manager: todo.manager,
+    directionNames: sameManager(todo.manager, defaultManager()) ? cachedDirectionNames : undefined,
+    conversations: assistantMatchesTodo ? assistant?.conversations : undefined,
+    mainConversationId: assistantMatchesTodo ? assistant?.main : undefined,
+    lookup,
+  };
   return (
     <section data-testid="review-checklist" className="mt-4 rounded-control bg-inset p-3.5 shadow-hairline">
       <div className="flex items-center gap-2">
@@ -2152,6 +3144,7 @@ export function ReviewChecklist({ todo, lookup }: { todo: Todo; lookup?: Session
         <ul className="mt-2 flex flex-col gap-1.5">
           {list.map((c) => {
             const m = MARK[c.mark];
+            const author = evidenceAuthorLabel(c.by, authorCtx);
             return (
               <li key={c.criterion} className="flex items-start gap-2 text-[13px]">
                 <span role="img" aria-label={m.label()} title={m.label()} className={cx("mt-0.5 shrink-0", m.className)}>
@@ -2160,9 +3153,9 @@ export function ReviewChecklist({ todo, lookup }: { todo: Todo; lookup?: Session
                 <span className="flex min-w-0 flex-col">
                   <span className="text-ink">{c.criterion}</span>
                   {c.evidence && <span className="text-[12px] text-ink-3 select-text">{c.evidence}</span>}
-                  {(c.at || c.by) && (
+                  {(c.at || author) && (
                     <span className="flex flex-wrap gap-x-1.5 text-[11px] text-ink-3">
-                      {c.by && <span>{c.by}</span>}
+                      {author && <span data-testid="review-evidence-author">{author}</span>}
                       {c.at && <time dateTime={c.at} title={c.at}>{new Date(c.at).toLocaleString()}</time>}
                     </span>
                   )}
@@ -2379,6 +3372,10 @@ function TodoDetail({
   onOpenHandover,
   onOpenTodo,
   onDeleteClick,
+  todosV2,
+  parentTodo,
+  childTodos = [],
+  directionName,
 }: {
   todo: Todo;
   owner: string;
@@ -2396,6 +3393,10 @@ function TodoDetail({
   onOpenHandover: () => void;
   onOpenTodo: (id: string) => void;
   onDeleteClick: () => void;
+  todosV2?: boolean;
+  parentTodo?: Todo;
+  childTodos?: readonly Todo[];
+  directionName?: string;
 }) {
   const title = useTodoField({
     remote: todo.title, owner, allowEmpty: false,
@@ -2410,6 +3411,21 @@ function TodoDetail({
   const menu = useMenu();
   const allSessions = useAgentSessions();
   const spacesSupported = useStore((s) => s.spacesSupported);
+  const [repositoryCount, setRepositoryCount] = useState(0);
+  // Under todos_v2 (#14851), all right-pane sections including participated history start expanded by default.
+  const [releasedOpenV2, setReleasedOpenV2] = useState(true);
+  const releasedVisible = todosV2 === true ? releasedOpenV2 : showReleased;
+
+  const template = useMemo(
+    () => (todosV2 === true ? classifyTodoDetailTemplate(todo, childTodos.length, { repositoryCount }) : undefined),
+    [todosV2, todo, childTodos.length, repositoryCount],
+  );
+  const isWorkGoalV2 = todosV2 === true && template === "work_goal";
+  const doneChildCount = useMemo(() => childTodos.filter((c) => Boolean(c.done_at)).length, [childTodos]);
+  const workGoalActions = useMemo(
+    () => (isWorkGoalV2 ? resolveWorkGoalActions(todo, lookup) : undefined),
+    [isWorkGoalV2, todo, lookup],
+  );
 
   const hasLiveAgent = (mid: string, spaceName: string) => {
     return allSessions.some(
@@ -2494,6 +3510,111 @@ function TodoDetail({
   return (
     // a page's reading width (DESIGN_SYSTEM 2.5 "Widths", as the inbox's detail): a wide window centers it (audit item 75)
     <div className="mx-auto flex min-h-full w-full max-w-[760px] flex-col p-6 sm:p-8" data-testid="todo-detail">
+      {/* Work-goal Ownership Strip & Status Summary under todos_v2 (#14777, #14851) */}
+      {isWorkGoalV2 && (
+        <>
+          <div
+            data-testid="todo-detail-ownership"
+            aria-label={t("todos.detail_ownership_region")}
+            className="mb-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-control bg-inset px-3 py-1.5 text-label text-ink-2 shadow-hairline"
+          >
+            <span
+              data-testid="todo-detail-template-badge"
+              className="inline-flex shrink-0 items-center gap-1 font-semibold text-accent-ink"
+            >
+              <Icon name="target" size={12} stroke={2} />
+              <span>{t("todos.detail_template_work_goal")}</span>
+            </span>
+            {todo.direction_id && (
+              <>
+                <span className="text-ink-3" aria-hidden>·</span>
+                <span data-testid="todo-detail-direction" className="inline-flex min-w-0 items-center gap-1 text-ink-2">
+                  <Icon name="folder" size={12} stroke={2} className="shrink-0 text-ink-3" />
+                  <span className="truncate">{directionName || todo.direction_id}</span>
+                </span>
+              </>
+            )}
+            {todo.part_of && (
+              <>
+                <span className="text-ink-3" aria-hidden>·</span>
+                {parentTodo ? (
+                  <button
+                    type="button"
+                    data-testid="todo-detail-parent-link"
+                    onClick={() => onOpenTodo(parentTodo.id)}
+                    className="touch-hit inline-flex min-w-0 items-center gap-1 font-medium text-accent-ink hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+                  >
+                    <span className="truncate">{t("todos.detail_parent_label", { title: parentTodo.title })}</span>
+                    <Icon name="chevronRight" size={11} stroke={2.2} className="shrink-0" />
+                  </button>
+                ) : (
+                  <span data-testid="todo-detail-parent-link" className="truncate text-ink-3">
+                    {t("todos.detail_parent_label", { title: todo.part_of })}
+                  </span>
+                )}
+              </>
+            )}
+            {(todo.priority === "high" || todo.priority === "low") && (
+              <>
+                <span className="text-ink-3" aria-hidden>·</span>
+                <span
+                  data-testid="todo-detail-priority-subtle"
+                  className="inline-flex shrink-0 items-center gap-1 text-submeta text-ink-3"
+                >
+                  <Icon name="flag" size={11} stroke={2} className="shrink-0 text-ink-3" />
+                  <span>{todo.priority === "high" ? t("todos.priority_high") : t("todos.priority_low")}</span>
+                </span>
+              </>
+            )}
+          </div>
+          <div
+            data-testid="todo-detail-status-summary"
+            aria-label={t("todos.detail_status_summary_region")}
+            className="mb-3 flex flex-wrap items-center justify-between gap-2.5 rounded-control border border-line bg-inset px-3 py-2 text-meta text-ink-2"
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <StatusMark state={dotState} size="sm" />
+              <span data-testid="todo-detail-summary-status" className="font-semibold text-ink">
+                {steps?.label ?? look.label}
+              </span>
+              {activeAgents.length > 0 && (
+                <>
+                  <span className="text-ink-3" aria-hidden>·</span>
+                  <span>{t("todos.agent_count", { count: activeAgents.length })}</span>
+                </>
+              )}
+              {childTodos.length > 0 && (
+                <>
+                  <span className="text-ink-3" aria-hidden>·</span>
+                  <span data-testid="todo-detail-summary-subtasks">
+                    {t("todos.detail_subtasks_section", { done: doneChildCount, total: childTodos.length })}
+                  </span>
+                </>
+              )}
+              {repositoryCount > 0 && (
+                <>
+                  <span className="text-ink-3" aria-hidden>·</span>
+                  <span data-testid="todo-detail-summary-repos">
+                    {t("todos.slim_repo_count", { count: repositoryCount })}
+                  </span>
+                </>
+              )}
+            </div>
+            {open && workGoalActions?.primaryAction === "open_agent" && workGoalActions.activeAgent && (
+              <Button
+                tone={instead || canRetry ? "secondary" : "accent"}
+                icon="terminal"
+                testId="todo-summary-open-active-agent"
+                onClick={() => openFromPage({ name: "session", mid: workGoalActions.activeAgent!.machineId, sid: workGoalActions.activeAgent!.sessionId })}
+                className="h-7 shrink-0 px-2.5 text-label whitespace-nowrap"
+              >
+                {t("todos.detail_open_active_agent")}
+              </Button>
+            )}
+          </div>
+        </>
+      )}
+
       {/* Title Row with ⋯ menu */}
       <div className="flex items-center justify-between gap-3">
         <input
@@ -2589,7 +3710,7 @@ function TodoDetail({
       <HeldForBriefing todo={todo} />
 
       {/* Due date, reminder, priority (#1683) */}
-      <TodoPlanEditor todo={todo} />
+      <TodoPlanEditor todo={todo} todosV2={todosV2} />
       {/* The brief its work is held to (#3822): who asked and in what words above the criteria; the scope changes
           and who worked on it under them. */}
       {todo.brief && (
@@ -2629,7 +3750,55 @@ function TodoDetail({
       <TodoImages todo={todo} owner={owner} />
 
       <TodoRepositoryBindings key={`${owner}:${todo.manager ?? defaultManager()}:${todo.id}`} manager={todo.manager ?? defaultManager()} owner={owner} todoId={todo.id}
-        prStatus={todo.pr_status} otherPRs={todo.other_prs} legacyPRs={legacyPR ? [legacyPR] : []} version={todo.updated_at} />
+        prStatus={todo.pr_status} otherPRs={todo.other_prs} legacyPRs={legacyPR ? [legacyPR] : []} version={todo.updated_at} todosV2={todosV2}
+        onRepositoriesCount={todosV2 === true ? setRepositoryCount : undefined} />
+      {isWorkGoalV2 && childTodos.length > 0 && (
+        <section className="mt-6" data-testid="todo-detail-subtasks">
+          <div className="mb-2 text-submeta font-medium tracking-[0.04em] text-ink-3">
+            {t("todos.detail_subtasks_section", {
+              done: doneChildCount,
+              total: childTodos.length,
+            })}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {childTodos.map((child) => {
+              const childDone = Boolean(child.done_at);
+              const childStatus = todoStatus(child, lookup);
+              const childShown = shownStatus(child, childStatus);
+              const childDot =
+                childShown === "needs_you" || childShown === "interrupted"
+                  ? "needs_you"
+                  : childShown === "unread"
+                    ? "unread"
+                    : childShown === "working" || childShown === "waiting"
+                      ? "working"
+                      : "offline";
+              return (
+                <button
+                  key={child.id}
+                  type="button"
+                  data-testid="todo-detail-subtask-item"
+                  data-subtask-id={child.id}
+                  onClick={() => onOpenTodo(child.id)}
+                  className="flex items-center gap-2.5 rounded-control border border-line bg-canvas px-3 py-2 text-left transition-colors hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent"
+                >
+                  {childDone ? (
+                    <span className="flex size-3.5 shrink-0 items-center justify-center rounded-full bg-accent text-white">
+                      <Icon name="check" size={9} stroke={2.6} />
+                    </span>
+                  ) : (
+                    <StatusMark state={childDot} size="sm" />
+                  )}
+                  <span className={cx("min-w-0 flex-1 truncate text-meta", childDone ? "text-ink-3 line-through" : "font-medium text-ink")}>
+                    {child.title}
+                  </span>
+                  <Icon name="chevronRight" size={12} stroke={2} className="shrink-0 text-ink-3" />
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
       <PageBoundary page="workspace-naming">
         <Suspense fallback={<Loading />}>
           <WorkspaceNaming manager={todo.manager ?? defaultManager()} owner={owner} todoId={todo.id} />
@@ -2802,17 +3971,17 @@ function TodoDetail({
           <div className="mt-4">
             <button
               type="button"
-              onClick={onToggleReleased}
+              onClick={todosV2 === true ? () => setReleasedOpenV2((v) => !v) : onToggleReleased}
               className="flex items-center gap-1 text-[12px] text-ink-3 hover:text-ink-2"
             >
               <Icon
                 name="chevron"
                 size={11}
-                className={cx("transition-transform duration-200", showReleased ? "rotate-180" : "")}
+                className={cx("transition-transform duration-200", releasedVisible ? "rotate-180" : "")}
               />
               <span>{t("todos.released_section", { count: releasedAgents.length })}</span>
             </button>
-            {showReleased && (
+            {releasedVisible && (
               <div className="mt-2 flex flex-col gap-1.5">
                 {releasedAgents.map((agent) => {
                   const mName = machines.find((m) => m.id === agent.machine_id)?.name || agent.machine_id;
@@ -2865,10 +4034,59 @@ function TodoDetail({
             {t("todos.retry")}
           </Button>
         )}
-        {open && (
-          <Button tone={canRetry ? "secondary" : "accent"} icon="hand" onClick={onOpenHandover} className="h-8.5 px-3.5 text-[13px] whitespace-nowrap">
-            {t("todos.hand_over")}
-          </Button>
+        {isWorkGoalV2 && open && workGoalActions?.primaryAction === "open_agent" && workGoalActions.activeAgent ? (
+          <>
+            <Button
+              tone={instead || canRetry ? "secondary" : "accent"}
+              icon="terminal"
+              testId="todo-open-active-agent"
+              onClick={() => openFromPage({ name: "session", mid: workGoalActions.activeAgent!.machineId, sid: workGoalActions.activeAgent!.sessionId })}
+              className="h-8.5 px-3.5 text-meta whitespace-nowrap"
+            >
+              {t("todos.detail_open_active_agent")}
+            </Button>
+            {workGoalActions.prUrl && (
+              <a
+                href={workGoalActions.prUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="todo-open-pr"
+                className="inline-flex h-8.5 items-center gap-1.5 rounded-control border border-line bg-surface px-3.5 text-meta font-medium whitespace-nowrap text-ink transition-colors hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                <Icon name="external" size={13} stroke={2} />
+                <span>{t("todos.detail_open_pr")}</span>
+              </a>
+            )}
+            <Button
+              tone="secondary"
+              icon="plus"
+              testId="todo-add-agent"
+              onClick={onOpenHandover}
+              className="h-8.5 px-3.5 text-meta whitespace-nowrap"
+            >
+              {t("todos.detail_add_agent")}
+            </Button>
+          </>
+        ) : (
+          <>
+            {open && (
+              <Button tone={canRetry ? "secondary" : "accent"} icon="hand" onClick={onOpenHandover} className="h-8.5 px-3.5 text-[13px] whitespace-nowrap">
+                {t("todos.hand_over")}
+              </Button>
+            )}
+            {isWorkGoalV2 && workGoalActions?.prUrl && (
+              <a
+                href={workGoalActions.prUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="todo-open-pr"
+                className="inline-flex h-8.5 items-center gap-1.5 rounded-control border border-line bg-surface px-3.5 text-meta font-medium whitespace-nowrap text-ink transition-colors hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                <Icon name="external" size={13} stroke={2} />
+                <span>{t("todos.detail_open_pr")}</span>
+              </a>
+            )}
+          </>
         )}
         <Button tone="secondary" icon="check" onClick={() => onToggleDone(open)} className="h-8.5 px-3 text-[13px] whitespace-nowrap">
           {open ? t("todos.complete") : t("todos.reopen")}

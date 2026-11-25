@@ -68,10 +68,35 @@ var standardStatusKeys = map[int]string{
 	http.StatusGatewayTimeout:        "http-status.timeout",
 }
 
+// WriteBody writes body, an error, with status, and notes it on w (NoteError).
 func WriteBody(w http.ResponseWriter, status int, body map[string]any) {
+	NoteError(w, status, body)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// ErrorNoter is a ResponseWriter that takes note of the error bodies written to it with WriteBody: the hub's request
+// log says a server error's code and words from them (#14490). A body passed on as bytes, such as another service's
+// answer through a reverse proxy, is never noted.
+type ErrorNoter interface {
+	NoteError(status int, body map[string]any)
+}
+
+// NoteError tells the first writer in w's Unwrap chain that takes note of errors (ErrorNoter) that body goes out with
+// status. For a body the caller built itself and writes as bytes; WriteBody notes its own.
+func NoteError(w http.ResponseWriter, status int, body map[string]any) {
+	for range 16 {
+		if n, ok := w.(ErrorNoter); ok {
+			n.NoteError(status, body)
+			return
+		}
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return
+		}
+		w = u.Unwrap()
+	}
 }
 
 func Body(status int, code string, err error) map[string]any {
@@ -258,9 +283,10 @@ var rpcFailureKeys = map[string]string{
 	proto.CodeTurnOverBackground: "rpc-errors.turn_over_background", // a Stop that found the turn over (#10828)
 	"dialog_open":                "rpc-errors.dialog_open",
 	// an owner's message to an Agent with older messages held for it (devices held.go, #10661)
-	"held_ahead":    "rpc-errors.held_ahead",
-	"held_not_kept": "rpc-errors.held_not_kept",
-	"held_full":     "rpc-errors.held_full",
+	"held_ahead":      "rpc-errors.held_ahead",
+	"held_not_kept":   "rpc-errors.held_not_kept",
+	"held_full":       "rpc-errors.held_full",
+	"held_start_full": "rpc-errors.held_start_full",
 	// the first message to a Codex opened with no first message (node/codex_waiting.go, #4961)
 	"codex_not_ready":          "rpc-errors.codex_not_ready",
 	"codex_first_text":         "rpc-errors.codex_first_text",
@@ -273,6 +299,8 @@ var rpcFailureKeys = map[string]string{
 	"prompt_changed":           "rpc-errors.prompt_changed",
 	"attach_busy":              "rpc-errors.attach_busy",
 	proto.CodeTerminalNotReady: "rpc-errors.terminal_not_ready",
+	// a start that named the Antigravity companion while it is not connected (node/starthost.go, #13447)
+	proto.CodeAgyCompanionOffline: "rpc-errors.agy_companion_offline",
 	// a start's new tab stopped on its shell (node/shellsettle.go, #2570)
 	proto.CodeShellWaiting:      "rpc-errors.shell_waiting",
 	proto.CodeStartLineRejected: "rpc-errors.start_line_rejected",
@@ -283,6 +311,7 @@ var rpcFailureKeys = map[string]string{
 	"node_outdated":             "rpc-errors.node_outdated",
 	// A private-profile switch is refused before any message reaches the CLI.
 	"assistant_launcher_profile_switch":  "rpc-errors.assistant_launcher_profile_switch",
+	"assistant_model_unresolved":         "rpc-errors.assistant_model_unresolved",
 	"assistant_service_tier_start_only":  "rpc-errors.assistant_service_tier_start_only",
 	"assistant_service_tier_unsupported": "rpc-errors.assistant_service_tier_unsupported",
 	"assistant_service_tier_refused":     "rpc-errors.assistant_service_tier_refused",
@@ -343,6 +372,8 @@ var rpcFailureKeys = map[string]string{
 	"resume_not_allowed": "rpc-errors.resume_not_allowed",
 	"stop_not_saved":     "rpc-errors.stop_not_saved",
 	"omp_options":        "rpc-errors.omp_options",
+	// a call that would drive an agy conversation an agy in a terminal has open (node/agypresence.go, #13603)
+	"agy_in_terminal": "rpc-errors.agy_in_terminal",
 	// a message to an omp session the node cannot resume: no usable session file (node/ompresume.go)
 	"omp_resume_unknown": "rpc-errors.omp_resume_unknown",
 	// a resume of a conversation the computer has nothing of (node/control.go resumeKnown, #10941)
@@ -398,6 +429,15 @@ func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 	code, _ := body["code"].(string)
 	key := rpcFailureKeys[code]
 	args := i18n.Args{"reason": original}
+	if code == "assistant_model_unresolved" {
+		model, _ := body["model"].(string)
+		launcher, _ := body["launcher"].(string)
+		if model != "" && launcher != "" {
+			args["model"], args["launcher"] = model, launcher
+		} else {
+			key = ""
+		}
+	}
 	if code == "assistant_supervision_runtime" {
 		var names []string
 		if values, ok := body["launchers"].([]any); ok {
@@ -445,7 +485,7 @@ func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 	// a summary that names {reason} carries the original words (git's, for a failed pull or push)
 	body["error"] = i18n.T(l, key, args)
 	switch code {
-	case "assistant_launcher_profile_switch", "assistant_service_tier_start_only", "assistant_service_tier_unsupported", "assistant_service_tier_refused":
+	case "assistant_launcher_profile_switch", "assistant_model_unresolved", "assistant_service_tier_start_only", "assistant_service_tier_unsupported", "assistant_service_tier_refused":
 		// The native diagnostic is not a person-facing instruction; the stable, translated refusal says what to do.
 		return
 	}
@@ -566,7 +606,7 @@ func Summary(l i18n.Lang, code string, data map[string]any) string {
 // file the launchers are listed in (launcher_shell, rc_file). What a 409 says, and a session's start_error.
 func Sentence(l i18n.Lang, code string, data map[string]any) string {
 	switch code {
-	case "readonly_unsupported", proto.CodeDirectoryUntypable, "omp_options": // refusal needs no request parameters
+	case "readonly_unsupported", proto.CodeDirectoryUntypable, "omp_options", proto.CodeAgyCompanionOffline: // refusal needs no request parameters
 		return i18n.T(l, rpcFailureKeys[code])
 	}
 	if code == proto.CodeShellWaiting || code == proto.CodeStartLineRejected { // a start's new tab (node/shellsettle.go, #2570)

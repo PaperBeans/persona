@@ -1,6 +1,7 @@
 package persona.core.designsystem
 
 import androidx.compose.runtime.compositionLocalOf
+import persona.core.contracts.ImageLimitsTable
 import persona.core.contracts.LarkFeatures
 
 /**
@@ -14,3 +15,9 @@ val LocalLarkFeatures = compositionLocalOf { LarkFeatures.All }
  * (`assistant_compact`, `assistant_main_new`). Empty until a hello says otherwise, and in the demo.
  */
 val LocalHubFeatures = compositionLocalOf { emptySet<String>() }
+
+/**
+ * The selected hub's image limits (its hello's `image_limits`, docs/protocol/protocol.md "Pictures in a message").
+ * Standard defaults until a hello says otherwise, and in the demo.
+ */
+val LocalHubImageLimits = compositionLocalOf { ImageLimitsTable.Standard }

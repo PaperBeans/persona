@@ -3,11 +3,12 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { initI18n } from "../../i18n";
-import type { HubUpdateStatus } from "../../lib/hub-update";
+import type { HubUpdateRecord, HubUpdateStatus } from "../../lib/hub-update";
 import type { ManagerList } from "../../lib/managers";
 import type { Machine } from "../../lib/types";
 
 let status: HubUpdateStatus;
+let history: HubUpdateRecord[] = [];
 let machines: Machine[] = [];
 let roster: ManagerList | null = null;
 const saved: unknown[] = [];
@@ -15,9 +16,19 @@ let backupReads = 0;
 let updateReads = 0;
 let readUpdate: (() => Promise<HubUpdateStatus>) | undefined;
 const events = new Map<string, (message: { update?: HubUpdateStatus }) => void>();
+const installedAt = "2026-11-13T00:23:47Z";
+const latestAt = "2026-11-14T10:24:58+08:00";
+const backupCommitAt = "2026-11-12T10:25:11Z";
+const backupCreatedAt = "2026-11-13T10:26:35.123Z";
+const localTime = new Intl.DateTimeFormat("sv-SE", { dateStyle: "short", timeStyle: "medium", hourCycle: "h23" });
 vi.mock("../../lib/hub-update", async (original) => ({
   ...await original<typeof import("../../lib/hub-update")>(),
   hubUpdate: async () => { updateReads++; return readUpdate ? readUpdate() : status; },
+  startHubUpdate: async (now: boolean) => {
+    saved.push({ now });
+    status = { ...status, state: "restarting", busy: [] };
+    return status;
+  },
   setHubUpdateSettings: async (input: { source?: "release" | "beta" | "web-dev"; development_backup_directory?: string }) => {
     saved.push(input);
     status = { ...status, ...input, auto: false };
@@ -39,9 +50,9 @@ vi.mock("../../lib/hub-update", async (original) => ({
 }));
 vi.mock("../../lib/hub-update-settings", async (original) => ({
   ...await original<typeof import("../../lib/hub-update-settings")>(),
-  hubUpdateHistory: async () => [],
+  hubUpdateHistory: async () => history,
   hubUpdateBackups: async () => { backupReads++; return [{ id: "snapshot-fixture", version: "web-dev-backup", build: 202611120001,
-    commit: "c".repeat(40), updated_at: "2026-11-12T10:00:00Z", created_at: "2026-11-13T10:00:00Z" }]; },
+    commit: "c".repeat(40), updated_at: backupCommitAt, created_at: backupCreatedAt }]; },
   applyHubUpdateBackup: async (id: string) => {
     saved.push({ backup: id });
     status = { ...status, state: "applying_backup", auto: false };
@@ -65,7 +76,7 @@ let root: ReturnType<typeof createRoot> | undefined;
 let host: HTMLDivElement;
 afterEach(() => {
   act(() => root?.unmount()); host?.remove();
-  saved.length = 0; machines = []; roster = null; backupReads = 0; events.clear();
+  saved.length = 0; history = []; machines = []; roster = null; backupReads = 0; events.clear();
   updateReads = 0; readUpdate = undefined; vi.useRealTimers();
 });
 
@@ -74,11 +85,11 @@ async function mount(state = "available", overrides: Partial<HubUpdateStatus> = 
   status = {
     version: "web-dev-old", build: 202611130000, channel: "release", source: "web-dev", can_update: true,
     state, busy: [], auto: false, auto_notice: false, confirmed: true, auto_update_nodes: false,
-    development: { configured: true, branch: "main", current_commit: "a".repeat(40), current_updated_at: "2026-11-13T10:00:00Z",
+    development: { configured: true, branch: "main", current_commit: "a".repeat(40), current_updated_at: installedAt,
       backup_directory: "/var/snapshots", backup_default_directory: "/home/persona/.persona/update/development-backups",
       backup_directory_is_default: false, backup_retain: 3, builtin_quiesce: true },
     latest: { version: "web-dev-new", build: 202611130001, newer: true, bad: false, commit: "b".repeat(40), branch: "main",
-      updated_at: "2026-11-14T10:00:00Z",
+      updated_at: latestAt,
       backup_id: state === "applying_backup" ? "snapshot-fixture" : undefined },
     backup: { id: "snapshot-fixture", retained: 3, pruned: ["snapshot-old"] },
     ...overrides,
@@ -87,41 +98,141 @@ async function mount(state = "available", overrides: Partial<HubUpdateStatus> = 
   await act(async () => root!.render(<HubSettings />));
 }
 
+function pipelineNodes(list: "Update stages" | "Phase steps") {
+  return [...host.querySelectorAll<HTMLLIElement>(`ol[aria-label="${list}"] > li`)]
+    .map(el => [el.dataset.stage ?? el.dataset.step, el.dataset.state]);
+}
+
+async function pushUpdate(next: Partial<HubUpdateStatus>) {
+  status = { ...status, ...next };
+  await act(async () => events.get("hub_update")!({ update: status }));
+}
+
 it("polls active development phases and replaces the step and metrics", async () => {
   vi.useFakeTimers();
   await mount("building", { development_progress: {
     phase: "building", step: "npm_install", step_index: 2, step_total: 6, elapsed_seconds: 10,
   } });
-  expect(host.textContent).toContain("2/6 · Install Web dependencies");
+  expect(pipelineNodes("Update stages")).toEqual([
+    ["building", "active"], ["backing_up", "pending"], ["waiting_idle", "pending"], ["restarting", "pending"],
+  ]);
+  expect(pipelineNodes("Phase steps")).toEqual([
+    ["fetch", "done"], ["npm_install", "active"], ["web_build", "pending"], ["runtime_packages", "pending"],
+    ["go_build", "pending"], ["manifest", "pending"],
+  ]);
+  const announcement = host.querySelector('section[aria-label="Update pipeline"] [role="status"]');
+  expect(announcement?.textContent).toContain("Install Web dependencies");
+  expect(host.querySelector('section[aria-label="Update pipeline"] header')?.textContent).toContain("b".repeat(12));
+  expect(host.textContent).toContain("Elapsed 10 sec");
   expect(host.querySelector('[role="progressbar"]')).toBeNull();
 
   status = { ...status, state: "backing_up", development_progress: {
-    phase: "backing_up", step: "archive_files", step_index: 3, step_total: 5, elapsed_seconds: 24,
+    phase: "backing_up", step: "archive_files", step_index: 3, step_total: 5, elapsed_seconds: 1,
     bytes_done: 182 * 1024 ** 2, bytes_total: 460 * 1024 ** 2, bytes_per_second: 21.5 * 1024 ** 2, percent: 39,
     item_done: 20, item_total: 45,
   } };
   await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(announcement?.textContent).toContain("Archive history files");
   expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("39");
   expect(host.textContent).toContain("182 MB / 460 MB");
   expect(host.textContent).toContain("21.5 MB/s");
   expect(host.textContent).toContain("Files 20/45");
-  expect(host.textContent).toContain("Elapsed 24 sec");
+  expect(host.textContent).toContain("Elapsed 11 sec");
+  expect(pipelineNodes("Update stages")).toEqual([
+    ["building", "done"], ["backing_up", "active"], ["waiting_idle", "done"], ["restarting", "pending"],
+  ]);
+  expect(pipelineNodes("Phase steps")).toEqual([
+    ["quiesce", "done"], ["database_dump", "done"], ["archive_files", "active"], ["archive_programs", "pending"], ["verify_snapshot", "pending"],
+  ]);
 
-  status = { ...status, state: "applying_backup", development_progress: {
-    phase: "applying_backup", step: "prepare_artifacts", step_index: 2, step_total: 2, elapsed_seconds: 32,
-    item_done: 0, item_total: 2, percent: 0,
-  } };
+  status = { ...status, state: "confirming", development_progress: undefined };
   await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-  expect(host.textContent).toContain("Stage programs and computer packages");
-  expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("0");
-
-  status = { ...status, state: "downloading", progress: "hub 75%" };
-  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-  expect(host.textContent).toContain("hub 75%");
-  expect(host.textContent).not.toContain("Stage programs and computer packages");
+  expect(pipelineNodes("Phase steps")).toEqual([]);
+  expect(pipelineNodes("Update stages")).toEqual([
+    ["building", "done"], ["backing_up", "done"], ["waiting_idle", "done"], ["restarting", "active"],
+  ]);
+  expect(host.textContent).toContain("Confirming");
   const reads = updateReads;
   await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
   expect(updateReads).toBe(reads);
+});
+
+it.each([
+  { step: "database_dump", stepIndex: 2, stepTotal: 6, builtinQuiesce: undefined },
+  { step: "resume_writers", stepIndex: 5, stepTotal: 5, builtinQuiesce: true },
+  { step: "database_dump", stepIndex: 2, stepTotal: 5, builtinQuiesce: false },
+])("shows external quiesce's resume step with $step at $stepIndex/$stepTotal ($builtinQuiesce)", async ({ step, stepIndex, stepTotal, builtinQuiesce }) => {
+  await mount("backing_up", { development: { configured: true, branch: "main", builtin_quiesce: builtinQuiesce },
+    development_progress: { phase: "backing_up", step, step_index: stepIndex, step_total: stepTotal,
+      elapsed_seconds: 24, item_done: 1, item_total: 2 } });
+  expect(pipelineNodes("Phase steps").map(([name]) => name)).toEqual([
+    "quiesce", "database_dump", "archive_files", "archive_programs", "resume_writers", "verify_snapshot",
+  ]);
+  expect(host.querySelector('ol[aria-label="Phase steps"] [aria-current="step"]')?.getAttribute("data-step")).toBe(step);
+  expect(host.textContent).toContain("Phase elapsed 24 sec");
+  if (step === "database_dump") expect(host.textContent).toContain("Databases 1/2");
+});
+
+it("uses the named node before the index and keeps telemetry for an unknown step", async () => {
+  const p = { phase: "building", step: "go_build", step_index: 1, step_total: 6, elapsed_seconds: 5,
+    item_label: "personad (linux-amd64)", percent: 75, item_done: 3, item_total: 4 } as const;
+  await mount("building", { development_progress: p });
+  expect(host.querySelector('ol[aria-label="Phase steps"] [aria-current="step"]')?.getAttribute("data-step")).toBe("go_build");
+  expect(host.textContent).toContain("personad (linux-amd64)");
+  expect(host.textContent).toContain("Items 3/4");
+
+  await pushUpdate({ development_progress: { ...p, step: "sign_artifacts", step_index: 3, step_total: 7, percent: 0 } });
+  expect(pipelineNodes("Phase steps")).toEqual([
+    ["fetch", "done"], ["npm_install", "done"], ["sign_artifacts", "active"], ["web_build", "pending"],
+    ["runtime_packages", "pending"], ["go_build", "pending"], ["manifest", "pending"],
+  ]);
+  const bar = host.querySelector('[role="progressbar"]');
+  expect(bar?.getAttribute("aria-label")).toMatch(/sign artifacts/i);
+  expect(bar?.getAttribute("aria-valuenow")).toBe("0");
+});
+
+it("keeps the backup target and stages through preparation, idle wait and reconnect", async () => {
+  await mount("applying_backup", { development_progress: { phase: "applying_backup", step: "prepare_artifacts",
+    step_index: 2, step_total: 2, elapsed_seconds: 6, item_done: 0, item_total: 2, percent: 0 } });
+  expect(pipelineNodes("Update stages")).toEqual([
+    ["backing_up", "pending"], ["applying_backup", "active"], ["waiting_idle", "pending"], ["restarting", "pending"],
+  ]);
+  expect(pipelineNodes("Phase steps")).toEqual([["verify_snapshot", "done"], ["prepare_artifacts", "active"]]);
+  expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("0");
+
+  await pushUpdate({ state: "waiting_idle", busy: [{ title: "Writing a summary", machine: "Desk computer", machine_id: "desk" }] });
+  expect(pipelineNodes("Update stages")).toEqual([
+    ["backing_up", "pending"], ["applying_backup", "done"], ["waiting_idle", "active"], ["restarting", "pending"],
+  ]);
+  expect(pipelineNodes("Phase steps")).toEqual([]);
+  const pipeline = host.querySelector('section[aria-label="Update pipeline"]')!;
+  expect(pipeline.textContent).toContain("Writing a summary");
+  expect(pipeline.textContent).toContain("Desk computer");
+  const now = [...pipeline.querySelectorAll("button")].find(b => b.textContent === "Update now…")!;
+  await act(async () => now.click());
+  expect(saved).toEqual([]);
+  const dialog = document.querySelector('[role="dialog"]')!;
+  await act(async () => [...dialog.querySelectorAll("button")].find(b => b.textContent === "Update now")!.click());
+  expect(saved).toEqual([{ now: true }]);
+  await pushUpdate({ state: "confirming", latest: undefined });
+  expect(pipelineNodes("Update stages")).toEqual([
+    ["backing_up", "done"], ["applying_backup", "done"], ["waiting_idle", "done"], ["restarting", "active"],
+  ]);
+  expect(pipeline.querySelector("header")?.textContent).toContain("b".repeat(12));
+});
+
+it.each(["release", "beta"] as const)("shows download progress and the restart stages for %s", async source => {
+  await mount("downloading", { source, progress: "hub 75%", latest: { version: "v2.0", build: 2, newer: true, bad: false } });
+  expect(pipelineNodes("Update stages")).toEqual([["downloading", "active"], ["waiting_idle", "pending"], ["restarting", "pending"]]);
+  expect(host.textContent).toContain("hub 75%");
+  expect(host.querySelector('section[aria-label="Update pipeline"] header')?.textContent).toContain("v2.0");
+  for (const state of ["installing", "restarting", "confirming"]) {
+    await pushUpdate({ state });
+    expect(pipelineNodes("Update stages")).toEqual([["downloading", "done"], ["waiting_idle", "done"], ["restarting", "active"]]);
+    expect(host.textContent).not.toContain("hub 75%");
+  }
+  await pushUpdate({ state: "updated", latest: undefined });
+  expect(host.querySelector('section[aria-label="Update pipeline"]')).toBeNull();
 });
 
 it("ignores a delayed poll after a newer state push", async () => {
@@ -217,15 +328,45 @@ it("offers beta as an explicit reversible source without enabling it by default"
   expect(host.textContent).not.toContain("Choose Release to return to stable updates");
 });
 
-it("puts historical program versions in the development update selector and hides them on release", async () => {
+it("shows second-level local times on commits, version options, backup details and history", async () => {
+  history = [{ from_version: "previous", to_version: "current", to_build: 123, result: "updated", auto: false,
+    source: "web-dev", commit: "d".repeat(40), started: backupCreatedAt, ended: installedAt },
+  { from_version: "older", to_version: "previous", to_build: 122, result: "updated", auto: false, started: backupCommitAt }];
   await mount();
-  expect(host.textContent).toContain("a".repeat(12));
-  expect(host.textContent).toContain("b".repeat(12));
   const versionGroup = host.querySelector('[data-settings-group="hub-version"]')!;
-  expect(versionGroup.textContent).toContain(`Installed commit2026-11-13 · ${"a".repeat(12)}`);
-  expect(versionGroup.textContent).toContain(`Latest commit2026-11-14 · ${"b".repeat(12)}`);
+  const installed = localTime.format(new Date(installedAt));
+  const latest = localTime.format(new Date(latestAt));
+  const backup = localTime.format(new Date(backupCommitAt));
+  const created = localTime.format(new Date(backupCreatedAt));
+  expect(versionGroup.textContent).toContain(`Installed commit${installed} · ${"a".repeat(12)}`);
+  expect(versionGroup.textContent).toContain(`Latest commit${latest} · ${"b".repeat(12)}`);
   expect(versionGroup.textContent).not.toContain("Updated at");
-  expect(host.querySelector('select[aria-label="Update version"]')?.textContent).toContain("c".repeat(12));
+  const version = host.querySelector<HTMLSelectElement>('select[aria-label="Update version"]')!;
+  expect(version.options[0].textContent).toContain(`${latest} · ${"b".repeat(12)}`);
+  expect(version.options[1].textContent).toContain(`${backup} · ${"c".repeat(12)}`);
+  expect(version.classList.contains("tabular-nums")).toBe(true);
+  await act(async () => { version.value = "snapshot-fixture"; version.dispatchEvent(new Event("change", { bubbles: true })); });
+  expect(host.textContent).toContain(`Target commit${backup} · ${"c".repeat(12)}`);
+  expect(host.textContent).toContain(`Backed up at${created}`);
+  const historyGroup = [...host.querySelectorAll("section")].find(s => s.querySelector("h2")?.textContent === "Update history")!;
+  expect([...historyGroup.querySelectorAll(".tabular-nums")].map(el => el.textContent)).toEqual([
+    installed, `${installed} · ${"d".repeat(12)}`, backup,
+  ]);
+});
+
+it.each(["invalid", "2026-02-30T10:00:00Z", "2026-11-14"])("shows Unknown for omitted timestamps and %s", async updatedAt => {
+  history = [{ from_version: "previous", to_version: "current", to_build: 123, result: "updated", auto: false }];
+  await mount("available", { development: { configured: true, branch: "main", current_commit: "a".repeat(40) },
+    latest: { version: "web-dev-new", build: 123, newer: true, bad: false, commit: "b".repeat(40), updated_at: updatedAt } });
+  expect(host.textContent).toContain(`Installed commitUnknown · ${"a".repeat(12)}`);
+  expect(host.textContent).toContain(`Latest commitUnknown · ${"b".repeat(12)}`);
+  const version = host.querySelector<HTMLSelectElement>('select[aria-label="Update version"]')!;
+  expect(version.options[0].textContent).toContain(`Unknown · ${"b".repeat(12)}`);
+  expect(host.textContent).toContain("Update historyUpdatedUnknown");
+});
+
+it("hides backup versions when switching to the release source", async () => {
+  await mount();
   const automatic = host.querySelector('[role="switch"]') as HTMLButtonElement;
   expect(automatic.getAttribute("aria-checked")).toBe("false");
   const source = host.querySelector('select[aria-label="Update source"]') as HTMLSelectElement;
@@ -233,6 +374,41 @@ it("puts historical program versions in the development update selector and hide
   expect(saved).toEqual([{ source: "release" }]);
   expect(host.textContent).not.toContain("snapshot-fixture");
   expect(host.querySelector('select[aria-label="Update version"]')).toBeNull();
+});
+
+it.each([
+  { version: "web-dev-running", channel: "release", source: "web-dev", match: true },
+  { version: "v1.0", channel: "release", source: undefined, match: true },
+  { version: "v1.0-beta.1", channel: "beta", source: "beta", match: true },
+  { version: "web-dev-running", channel: "release", source: "release", match: false, running: "Web development" },
+  { version: "v1.0-beta.1", channel: "beta", source: "release", match: false, running: "Beta (prereleases)" },
+] as const)("keeps the channel search anchor with $version and source $source", async ({ match, running, ...s }) => {
+  await mount("idle", s);
+  const source = host.querySelector<HTMLSelectElement>('select[aria-label="Update source"]')!;
+  expect(source.disabled).toBe(false);
+  expect(source.value).toBe(s.source ?? "release");
+  const anchors = host.querySelectorAll('[data-settings-row="hub-channel"]');
+  expect(anchors).toHaveLength(1);
+  if (match) expect(anchors[0].contains(source)).toBe(true);
+  else expect(anchors[0].textContent).toBe(`Channel${running}`);
+});
+
+it.each(["release", "docker"])("keeps the Channel row on a %s hub without source selection", async channel => {
+  await mount("idle", { version: "v1.0", channel, source: undefined, development: undefined });
+  expect(host.querySelector('[data-settings-row="hub-channel"]')?.textContent).toBe(`Channel${channel === "docker" ? "Docker" : "Release"}`);
+  expect(host.querySelector('select[aria-label="Update source"]')).toBeNull();
+});
+
+it.each(["web-dev", "release", "beta"] as const)("shows target notes and warnings with the %s source", async source => {
+  await mount("available", { source, latest: { version: "fixture-target", commit: "b".repeat(40), build: 123,
+    newer: true, bad: false, held: "Test update required", notes: "A note from the source." }, auto: true });
+  const update = host.querySelector('[data-settings-group="hub-update"]')!;
+  expect(update.textContent).toContain("A note from the source.");
+  expect(update.textContent).toContain("Test update required");
+  if (source === "web-dev") {
+    expect(update.querySelector('select[aria-label="Update version"]')).not.toBeNull();
+    expect(update.textContent).not.toContain("New version fixture-target");
+  } else expect(update.textContent).toContain("New version fixture-target");
 });
 
 it("confirms program-only restoration and applies the selected backup", async () => {

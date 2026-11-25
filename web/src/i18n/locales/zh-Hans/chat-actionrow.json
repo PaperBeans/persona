@@ -38,5 +38,6 @@
   "status_running": "进行中",
   "status_error": "出错",
   "status_done": "完成",
-  "no_content": "没有内容"
+  "no_content": "没有内容",
+  "diff_skipped_other": "省略 {count} 行"
 }

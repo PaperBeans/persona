@@ -280,6 +280,7 @@ struct WorkspaceAgentRow: View {
     var session: Session
     var time: AgentTime?
     var muted: Bool
+    var preferHerdrTabName = false
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
             title
@@ -299,9 +300,12 @@ struct WorkspaceAgentRow: View {
             ThemedIcon(Theme.Icon.success).font(Theme.WorkspaceSidebar.meta).foregroundStyle(Theme.WorkspaceSidebar.success)
         } else { StatusDot(state: session.state, size: Theme.Size.dotS) }
         AgentMark(session, side: Theme.Size.markXS)
-        Text(session.displayTitle).font(session.state == .unread ? Theme.Font.labelStrong : Theme.WorkspaceSidebar.agent)
+        Text(session.displayTitle(preferTab: preferHerdrTabName)).font(session.state == .unread ? Theme.Font.labelStrong : Theme.WorkspaceSidebar.agent)
             .foregroundStyle(session.state == .unread ? Theme.WorkspaceSidebar.foreground : Theme.WorkspaceSidebar.muted)
             .lineLimit(1).layoutPriority(1)
+        if let detail = session.displayTitleDetail(preferTab: preferHerdrTabName) {
+            Text(detail).font(Theme.WorkspaceSidebar.meta).foregroundStyle(Theme.WorkspaceSidebar.muted).lineLimit(1)
+        }
     }
 
     @ViewBuilder private var metadata: some View {

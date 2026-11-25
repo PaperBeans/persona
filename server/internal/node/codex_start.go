@@ -20,6 +20,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/extension/sandbox"
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/osproc"
@@ -218,18 +219,60 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 	if err := n.checkCodexWritableSymlinks(ctx, launch, launcher, argv, cwd); err != nil {
 		return nil, err
 	}
-	if n.codexOnSharedDaemon(argv) {
-		if err := codexDaemonSocketGone(n.codexHome()); err != nil {
-			return nil, err // a new tab would only show Codex failing to connect after the startup wait
-		}
-	}
 	key := cwd + "\x00" + launcher
 	if err := n.closeAbandonedCodex(ctx, key); err != nil {
 		return nil, err
 	}
-	if codexOnRemote(argv) {
-		// A launcher on an explicit app-server (--remote) sends no directory unless told one.
-		argv = append(argv, "-C", cwd)
+	runs := n.codexOwnEffort(ctx, argv, codexPaneEnv(launch), cwd, execution)
+	var prepared *codexPreparedThread
+	dedicatedInstructions := execution.TaskInstructions != "" && slices.Contains(argv, codexTaskConfig(execution.TaskInstructions))
+	if execution.CodexEffortFallback == proto.CodexFallbackAnnounced {
+		runs.Effort = execution.Effort
+	} else if runs.Effort != "" {
+		var err error
+		prepared, err = n.prepareCodexEffort(ctx, launch, argv, cwd, execution)
+		if err != nil {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
+			if prepared != nil {
+				prepared.discard()
+			}
+			return nil, err
+		}
+		if prepared == nil && execution.CodexEffortFallback == proto.CodexFallbackNotify && !codexOnRemote(argv) {
+			return nil, refusal(proto.CodeCodexEffortTerminal, i18n.T(i18n.From(ctx), "assistant-tasks.codex_effort_terminal"), nil)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		prompt = strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(inertControls(prompt))
+	}
+	filePrompt := prompt
+	keep := false
+	if prepared != nil {
+		noAltScreen := slices.Contains(argv, "--no-alt-screen")
+		defer func() {
+			if !keep {
+				prepared.discard()
+			}
+		}()
+		argv = []string{argv[0], "--remote", prepared.server.spec.Endpoint}
+		if noAltScreen {
+			argv = append(argv, "--no-alt-screen")
+		}
+		argv = append(argv, "resume", prepared.raw)
+		filePrompt = ""
+	} else {
+		argv = codexExecutionArgs(argv, runs)
+		if n.codexOnSharedDaemon(argv) {
+			if err := codexDaemonSocketGone(n.codexHome()); err != nil {
+				return nil, err // a new tab would only show Codex failing to connect after the startup wait
+			}
+		}
+		if codexOnRemote(argv) {
+			// A launcher on an explicit app-server (--remote) sends no directory unless told one.
+			argv = append(argv, "-C", cwd)
+		}
 	}
 	dir, err := os.MkdirTemp(n.dir, "codex-start-")
 	if err != nil {
@@ -239,10 +282,7 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 	file := filepath.Join(dir, "start.json")
 	owner, _ := launch.(interface{ Kind() string })
 	isolateHooks := owner != nil && owner.Kind() == host.Orca
-	if runtime.GOOS == "windows" {
-		prompt = strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(inertControls(prompt))
-	}
-	b, _ := json.Marshal(codexStartFile{Source: execution.Source, SourceHosts: sourceHostsFor(execution.Source), Argv: argv, Prompt: prompt, Agent: herdrAgentFor(launch, "codex"), IsolateHooks: isolateHooks, Dir: cwd})
+	b, _ := json.Marshal(codexStartFile{Source: execution.Source, SourceHosts: sourceHostsFor(execution.Source), Argv: argv, Prompt: filePrompt, Agent: herdrAgentFor(launch, "codex"), IsolateHooks: isolateHooks, Dir: cwd})
 	if err := os.WriteFile(file, b, 0o600); err != nil {
 		return nil, err
 	}
@@ -270,15 +310,19 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 	}
 	done, err := n.runAgentCommand(ctx, launch, created, ws, "", cmd, shells...) // typedstart.go
 	if err != nil {
-		if adoptedPane(ctx) != nil && prompt != "" && n.codexMessageMayHaveGone(ctx, pane, file) {
+		if adoptedPane(ctx) != nil && filePrompt != "" && n.codexMessageMayHaveGone(ctx, pane, file) {
 			return nil, unconfirmedStart(err) // a switch's message may be in it (engine_switch.go)
 		}
 		return nil, err
 	}
 	defer done()
+	exited := paneStartExit{file: file}
 	var id string
-	if waiting {
-		err = n.waitCodexBox(ctx, pane, codexStartWait)
+	if prepared != nil {
+		id = prepared.raw
+		err = n.waitCodexBox(ctx, pane, codexStartWait, &exited)
+	} else if waiting {
+		err = n.waitCodexBox(ctx, pane, codexStartWait, &exited)
 		if errors.Is(err, errCodexBoxLate) {
 			// Codex runs but its box has not come up yet: the row all the same, and its tab stays. Nothing is queued in it
 			// that could run later; the first message waits for the box itself (codexBoxFor).
@@ -286,14 +330,14 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 			err = nil
 		}
 	} else {
-		id, err = n.waitCodexThread(ctx, pane, cwd, prompt, began)
+		id, err = n.waitCodexThread(ctx, pane, cwd, prompt, began, &exited)
 	}
 	if err != nil {
 		shown, _ := n.readPane(ctx, pane, "recent-unwrapped", 30)
 		if strings.TrimSpace(shown) == "" { // a screen Codex draws from the top of a tall pane: the bottom rows are blank
 			shown, _ = n.readPane(ctx, pane, "visible", 30)
 		}
-		if adoptedPane(ctx) != nil && prompt != "" && n.codexMessageMayHaveGone(ctx, pane, file) {
+		if adoptedPane(ctx) != nil && filePrompt != "" && n.codexMessageMayHaveGone(ctx, pane, file) {
 			// A switch's message (engine_switch.go) may be in the Codex the line started: no other start may get it too.
 			return nil, unconfirmedStart(fmt.Errorf("%v\n%s", err, lastLines(shown, 12)))
 		}
@@ -302,10 +346,15 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 		// A pane it did not open (a switch from Claude Code, engine_switch.go) is the user's terminal and is never
 		// closed: the switch quits what the start left in it (clearPane).
 		if adoptedPane(ctx) == nil {
-			identify, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-			start.session = n.failedCodexSession(identify, pane, began)
-			cancel()
+			if prepared == nil {
+				identify, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+				start.session = n.failedCodexSession(identify, pane, began)
+				cancel()
+			}
 			cleanupErr = n.closeFailedCodexStart(ctx, start)
+		}
+		if prepared != nil && (cleanupErr != nil || adoptedPane(ctx) != nil) {
+			prepared.path = "" // the pane may still be using it
 		}
 		if cleanupErr != nil {
 			n.mu.Lock()
@@ -325,15 +374,19 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 		}
 		return nil, fmt.Errorf("%w\n%s", err, lastLines(shown, 12))
 	}
-	if waiting {
+	if waiting && prepared == nil {
 		return n.openCodexWait(ctx, pane, cwd, launcher, mode, execution, began), nil
 	}
-	defer n.unclaimCodexThread(id)
-	id = n.codexPublicID(n.codexPaneHome(pane), id)
+	if prepared != nil {
+		id = prepared.public
+	} else {
+		defer n.unclaimCodexThread(id)
+		id = n.codexPublicID(n.codexPaneHome(pane), id)
+	}
 	n.bindPane(pane, id)
 	n.namePersonaTab(ctx, pane, id) // the tab was marked before the thread was known (personatab.go)
 	st := sessionState{ModelSource: execution.Source, Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: began.UTC(), Model: execution.Model, ModelEffort: execution.Effort, TaskInstructions: execution.TaskInstructions}
-	if st.TaskInstructions != "" && slices.Contains(argv, codexTaskConfig(st.TaskInstructions)) {
+	if dedicatedInstructions {
 		st.TaskInstructionChannel = "codex"
 	}
 	if mode == "plan" {
@@ -345,12 +398,24 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 	n.putAgentState(ctx, launch, id, st)
 	_ = n.refreshHosts(ctx)
 	n.joinCodexPanes(ctx)
+	if prepared != nil {
+		keep = true
+		if prompt != "" {
+			if err := n.sendCodex(ctx, id, prompt, nil); err != nil {
+				return nil, err
+			}
+		}
+	}
 	a, ok := n.agent(id)
 	if !ok {
 		a = host.Agent{Agent: "codex", PaneID: pane, Cwd: cwd, AgentStatus: proto.StatusWorking}
 	}
 	s := n.sessionFor(id, a)
 	s.Agent = "codex"
+	if host.ParsePane(pane).Kind != host.Botmux {
+		s.CodexRoute, s.CodexRouteNote = n.codexRoute(id)
+		n.codexPaneControls(s, n.metaOf(id))
+	}
 	return s, nil
 }
 
@@ -401,7 +466,7 @@ func (n *Node) unclaimCodexThread(id string) {
 // the shell's resolved working directory, or -C as given), begun after the launch, whose first user message is the
 // prompt. Codex's own dialogs on the way are answered as the user would for a start they asked
 // for: the folder is trusted (they chose it), an update is skipped. A launcher that fails ends the wait at once.
-func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, began time.Time) (string, error) {
+func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, began time.Time, exit ...*paneStartExit) (string, error) {
 	poll := n.readinessPoll()
 	maxWait := codexStartWait
 	deadline := time.Now().Add(maxWait)
@@ -441,8 +506,8 @@ func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, be
 		if err != nil {
 			continue
 		}
-		if i := strings.LastIndex(text, codexStartError); i >= 0 {
-			return "", errors.New(strings.TrimSpace(strings.SplitN(text[i:], "\n", 2)[0]))
+		if err := n.codexStartupFailure(ctx, pane, text, exit); err != nil {
+			return "", err
 		}
 		if keys := codexTrustKeys(text); keys != nil {
 			_ = n.sendKeys(ctx, pane, keys...)
@@ -570,12 +635,30 @@ type codexStartFile struct {
 	Dir string `json:"dir,omitempty"`
 }
 
+const codexStartMarker = "PERSONA_CODEX_START=1"
+
 // CodexStart is `personad codex-start <file>`: it claims a codexStartFile (renames it away, then reads and removes
 // it), changes to its directory, then runs its words with any message as one more argument after "--", in place of
 // itself. Neither is parsed as shell code. Claimed by a rename, the file is either this process's or withdrawn by the node (a
 // switch whose start gave up on it, codexMessageMayHaveGone): never both. The file's agent replaces a HERDR_AGENT the
 // shell had: appended, the inherited one would come first, and that is the one getenv and herdr read.
 func CodexStart(args []string) error {
+	if len(args) >= 2 && args[0] == "--herdr-resume" {
+		f, err := herdrCodexRestore(args[1:])
+		if err != nil {
+			return err
+		}
+		return runStartFile(f, true)
+	}
+	return startFromFile(args, true)
+}
+
+// TabStart resumes a runtime-provided command, such as pi, in a new tab.
+func TabStart(args []string) error {
+	return startFromFile(args, false)
+}
+
+func startFromFile(args []string, codex bool) error {
 	if len(args) != 1 {
 		return errors.New(codexStartError + " usage: personad codex-start <file>")
 	}
@@ -587,6 +670,10 @@ func CodexStart(args []string) error {
 	if err != nil {
 		return fmt.Errorf("%s the first message is gone: %v", codexStartError, err)
 	}
+	return runStartFile(f, codex)
+}
+
+func runStartFile(f codexStartFile, codex bool) error {
 	words := f.Argv
 	env := os.Environ()
 	var explicit []string
@@ -623,6 +710,11 @@ func CodexStart(args []string) error {
 	}
 	if len(words) == 0 {
 		return errors.New(codexStartError + " no command")
+	}
+	if codex {
+		// Set it before rc files choose a launcher, even if the pane or alias supplied a stale value.
+		env = append(withoutEnv(env, []string{"PERSONA_CODEX_START"}), codexStartMarker)
+		explicit = append(explicit, codexStartMarker)
 	}
 	path, err := exec.LookPath(words[0])
 	if err != nil && words[0] == "codex" && runtime.GOOS != "windows" {

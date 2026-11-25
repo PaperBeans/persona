@@ -133,7 +133,7 @@ function SuggestionPill({ text, onFill, onSend }: SuggestionProps) {
           title={t("chat-composer.suggestion_send")}
           className="touch-hit flex size-7 shrink-0 items-center justify-center rounded-full text-ink-3 transition-[background-color,color,transform] duration-150 hover:bg-hover hover:text-ink active:scale-[0.94]"
         >
-          <Icon name="send" size={14} stroke={2} />
+          <Icon name="up" size={15} stroke={2.4} />
         </button>
       )}
     </div>

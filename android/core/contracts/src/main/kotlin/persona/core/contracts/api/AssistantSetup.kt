@@ -37,6 +37,8 @@ data class AssistantConfig(
     @SerialName("notes_effective") val notesEffective: String = "",
     /** The main conversation's session id; it lives on [machineId]. */
     val main: String? = null,
+    /** Leader (direction) conversation ids; empty when none or omitted by an older hub. */
+    val leaders: List<String> = emptyList(),
     /**
      * "Notify only in the main chat": tasks the main conversation sends out stay out of pushes and the badge (the main conversation
      * tells you instead); null from a hub without the setting.
@@ -78,6 +80,11 @@ data class AssistantConfig(
     @SerialName("owner_reply_approval_phrases") val ownerReplyApprovalPhrases: List<String>? = null,
     /** Saved ordinary-conversation order; null or empty means activity time. Unknown ids stay for clients that know them. */
     @SerialName("conversation_order") val conversationOrder: List<String>? = null,
+    /**
+     * "Let Persona make dashboards" (#15017): the assistant may draft pages the owner keeps in the sidebar. Off by default;
+     * absent is off too. The switch shows only on a hub that says [AssistantPagesFeature].
+     */
+    val dashboards: Boolean? = null,
 ) {
     /** Whether the main conversation folds its background rounds: on unless turned off, also on a hub that omits it. */
     val backgroundFolded: Boolean get() = mainBackgroundFolded ?: true
@@ -123,11 +130,20 @@ data class AssistantConfigUpdate(
     @SerialName("owner_reply_approval_phrases") val ownerReplyApprovalPhrases: List<String>? = null,
     /** Non-null writes the saved order; [] resets to activity time. Null leaves the setting unchanged. */
     @SerialName("conversation_order") val conversationOrder: List<String>? = null,
+    /** Dashboards on or off (#15017); the hub takes it from a full-role device only. */
+    val dashboards: Boolean? = null,
 ) {
     companion object {
         const val CLEAR_MAIN = "-"
     }
 }
+
+/**
+ * The hub's hello feature for Dashboards (#15017, docs/protocol/protocol.md): the default manager keeps pages the owner
+ * opens from the sidebar, `GET` / `PUT /api/v1/assistant` carry its switch ([AssistantConfig.dashboards]) and the hub
+ * sends `assistant_pages` when the places change. Only while the default manager says it.
+ */
+const val AssistantPagesFeature = "assistant_pages"
 
 /**
  * The hub's exact tag-filter preference (#12018). Absent is [Unsupported], explicit JSON null is supported automatic

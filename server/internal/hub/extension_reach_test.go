@@ -129,6 +129,10 @@ func TestAnExtensionsTokenActsOnlyAsItsManager(t *testing.T) {
 		{"the sessions of ma (query)", "GET", "/api/v1/sessions?machine_id=ma", "", nil},
 		{"the paged sessions of ma (query)", "GET", "/api/v1/sessions?limit=10&machine_id=ma", "", nil},
 		{"a notification on A's session (body)", "POST", "/api/v1/notify", `{"title":"t","body":"b","machine_id":"ma","session_id":"s3"}`, nil},
+		{"names A: push grading layer GET", "GET", "/api/v1/push/grading/layer", "", namesA},
+		{"names A by query: push grading layer PUT", "PUT", "/api/v1/push/grading/layer?manager=assistant", `{"grading_enabled":true}`, nil},
+		{"names A: push grading layer DELETE", "DELETE", "/api/v1/push/grading/layer", "", namesA},
+		{"names A: push grading preview", "POST", "/api/v1/push/grading/preview", `{"notification":{"level":"P1"}}`, namesA},
 	}
 	for _, c := range refused {
 		before := len(reached(a))
@@ -160,6 +164,8 @@ func TestAnExtensionsTokenActsOnlyAsItsManager(t *testing.T) {
 		{"POST", "/api/v1/assistant/workspace-naming/preview?manager=m-0b0b0b", `{"machine_id":"mb","layout":"root"}`},
 		{"GET", "/api/v1/inbox/done", ""},
 		{"POST", "/api/v1/notify", `{"title":"t","body":"b","machine_id":"mb","session_id":"b1"}`},
+		{"GET", "/api/v1/push/grading/layer", ""},
+		{"POST", "/api/v1/push/grading/preview", `{"notification":{"kind":"assistant","level":"P1"}}`},
 	} {
 		if code, out := extDo(t, url, c.method, c.path, c.body, nil); code != http.StatusOK {
 			t.Errorf("%s %s: %d %s", c.method, c.path, code, clip(out, 200))
@@ -286,6 +292,67 @@ func TestTodoViewRoutesStayOnTheirManager(t *testing.T) {
 	}
 }
 
+func TestSpacesRoutesStayOnTheirManager(t *testing.T) {
+	h, url, a, b := reachHub(t)
+	var snapshot assistantwire.SnapshotResult
+	if err := b.call(t, assistantwire.MethodSnapshot, assistantwire.Snapshot{Epoch: "b", Seq: 1,
+		Sessions: []assistantwire.SessionView{{MachineID: "mb", SessionID: "conv-b"}}}, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, 5*time.Second, "the two conversation owners", func() bool {
+		return h.conversationOwner("conv-a") == assistantwire.AssistantID && h.conversationOwner("conv-b") == "m-0b0b0b"
+	})
+	for _, route := range []struct{ method, path, body string }{
+		{"GET", "/api/v1/assistant/tracks", ""},
+		{"POST", "/api/v1/assistant/tracks", `{}`},
+		{"PUT", "/api/v1/assistant/tracks/example", `{}`},
+		{"GET", "/api/v1/assistant/track-kinds", ""},
+		{"GET", "/api/v1/assistant/tracks/example/space-md", ""},
+		{"PUT", "/api/v1/assistant/tracks/example/space-md", `{}`},
+		{"GET", "/api/v1/assistant/conversations/conv-b/categories", ""},
+		{"PUT", "/api/v1/assistant/conversations/conv-b/categories", `{}`},
+	} {
+		beforeA, beforeB := len(reached(a)), len(reached(b))
+		// Track and kind routes go to the token's manager. The category route additionally checks its conversation's
+		// owner, so the same request against A's conversation is refused before any manager sees it.
+		crossPath := route.path
+		if strings.Contains(crossPath, "/conversations/") {
+			crossPath = "/api/v1/assistant/conversations/conv-a/categories"
+		}
+		for _, request := range []struct {
+			path   string
+			header map[string]string
+		}{
+			{route.path, map[string]string{ManagerHeader: assistantwire.AssistantID}},
+			{route.path + "?manager=assistant", nil},
+			{crossPath, nil},
+		} {
+			if crossPath == route.path && request.header == nil {
+				continue // the token manager's own request is the successful case below
+			}
+			if code, out := extDo(t, url, route.method, request.path, route.body, request.header); code != http.StatusForbidden || !strings.Contains(out, codeOtherManager) {
+				t.Errorf("%s %s: another manager: %d %s", route.method, request.path, code, clip(out, 200))
+			}
+		}
+		if got := len(reached(a)); got != beforeA {
+			t.Errorf("%s %s: A was reached: %v", route.method, route.path, reached(a)[beforeA:])
+		}
+		if got := len(reached(b)); got != beforeB {
+			t.Errorf("%s %s: a refused request reached B: %v", route.method, route.path, reached(b)[beforeB:])
+		}
+		if code, out := extDo(t, url, route.method, route.path, route.body, nil); code != http.StatusOK {
+			t.Errorf("%s %s: own manager: %d %s", route.method, route.path, code, clip(out, 200))
+		}
+		calls := reached(b)[beforeB:]
+		if len(calls) != 1 || !strings.HasPrefix(calls[0], assistantwire.MethodHTTP+" ") || !strings.Contains(calls[0], route.path) {
+			t.Errorf("%s %s: did not reach only the token manager: %v", route.method, route.path, calls)
+		}
+		if got := len(reached(a)); got != beforeA {
+			t.Errorf("%s %s: own request reached A: %v", route.method, route.path, reached(a)[beforeA:])
+		}
+	}
+}
+
 // The literal self-refresh route has no object id to route by. The authenticated extension token alone chooses its
 // manager; explicitly naming another manager is not an alternate path to that manager's markets.
 func TestExtensionSelfMarketRefreshStaysOnTokenManager(t *testing.T) {
@@ -395,6 +462,10 @@ func TestEveryExtensionRouteIsBounded(t *testing.T) {
 		"GET /api/v1/push/intercepts":                      "manager", // only entries with its manager (pushGradingRoutes, TestPushGradingInterceptsHeldToManager)
 		"GET /api/v1/push/ln-mode":                         "own",     // the hub-wide switch state, no manager's data in the answer
 		"GET /api/v1/push/grading":                         "own",     // alias of the hub-wide switch state, same answer and authorization
+		"GET /api/v1/push/grading/layer":                   "manager", // only the calling extension's own layer on its manager (pushGradingLayerRoutes)
+		"PUT /api/v1/push/grading/layer":                   "manager", // writes only the calling extension's own layer on its manager (pushGradingLayerRoutes)
+		"DELETE /api/v1/push/grading/layer":                "manager", // deletes only the calling extension's own layer on its manager (pushGradingLayerRoutes)
+		"POST /api/v1/push/grading/preview":                "manager", // read-only preview bounded to the calling extension's manager (pushGradingLayerRoutes)
 		"GET /api/v1/push/stats/daily":                     "manager", // only its manager's counts (pushGradingRoutes, TestPushDailyStatsHeldToManager)
 		"GET /api/v1/assistant":                            "manager",
 		"GET /api/v1/assistant/capabilities":               "manager",
@@ -402,19 +473,25 @@ func TestEveryExtensionRouteIsBounded(t *testing.T) {
 		"POST /api/v1/assistant/conversations":             "manager",
 		"GET /api/v1/assistant/conversations/{id}/feed":    "path",
 		"POST /api/v1/assistant/conversations/{id}/stop":   "path",
-		"GET /api/v1/assistant/reporters":                  "manager",
-		"GET /api/v1/assistant/leaders":                    "manager",
-		"POST /api/v1/assistant/directions":                "manager", // create validates an optional body Agent against this manager
-		"POST /api/v1/assistant/directions/{id}/progress":  "manager", // current-direction membership is manager-owned
-		"GET /api/v1/assistant/dispatch-policy":            "manager",
-		"PUT /api/v1/assistant/dispatch-policy":            "manager",
-		"GET /api/v1/assistant/dispatch-guard":             "manager",
-		"PUT /api/v1/assistant/dispatch-guard":             "manager",
-		"GET /api/v1/assistant/worker-presets":             "manager",
-		"GET /api/v1/assistant/start-defaults":             "manager",
-		"PUT /api/v1/assistant/start-defaults":             "manager",
-		"POST /api/v1/assistant/start-defaults/preview":    "manager",
-		"GET /api/v1/todos":                                "manager", "GET /api/v1/todos/{id}/decisions": "manager",
+		// The token manager owns the Spaces routes; category routes additionally follow the conversation in their path.
+		"GET /api/v1/assistant/tracks": "manager", "POST /api/v1/assistant/tracks": "manager",
+		"PUT /api/v1/assistant/tracks/{slug}": "manager", "GET /api/v1/assistant/track-kinds": "manager",
+		"GET /api/v1/assistant/tracks/{slug}/space-md": "manager", "PUT /api/v1/assistant/tracks/{slug}/space-md": "manager",
+		"GET /api/v1/assistant/conversations/{id}/categories": "path",
+		"PUT /api/v1/assistant/conversations/{id}/categories": "path",
+		"GET /api/v1/assistant/reporters":                     "manager",
+		"GET /api/v1/assistant/leaders":                       "manager",
+		"POST /api/v1/assistant/directions":                   "manager", // create validates an optional body Agent against this manager
+		"POST /api/v1/assistant/directions/{id}/progress":     "manager", // current-direction membership is manager-owned
+		"GET /api/v1/assistant/dispatch-policy":               "manager",
+		"PUT /api/v1/assistant/dispatch-policy":               "manager",
+		"GET /api/v1/assistant/dispatch-guard":                "manager",
+		"PUT /api/v1/assistant/dispatch-guard":                "manager",
+		"GET /api/v1/assistant/worker-presets":                "manager",
+		"GET /api/v1/assistant/start-defaults":                "manager",
+		"PUT /api/v1/assistant/start-defaults":                "manager",
+		"POST /api/v1/assistant/start-defaults/preview":       "manager",
+		"GET /api/v1/todos":                                   "manager", "GET /api/v1/todos/{id}/decisions": "manager",
 		"GET /api/v1/todos/{id}": "manager", "GET /api/v1/todos/places": "manager", // TestTodoViewRoutesStayOnTheirManager
 		"GET /api/v1/todos/{id}/timeline":                     "manager", // TestTodoViewRoutesStayOnTheirManager
 		"GET /api/v1/todos/{id}/repositories":                 "manager", // associations stay with the todo's manager

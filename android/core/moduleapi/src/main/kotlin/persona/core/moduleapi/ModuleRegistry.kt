@@ -6,18 +6,13 @@ package persona.core.moduleapi
  * ([moduleFeature]); everything else is absent. Every
  * carried module gets its [PersonaModule.services] for a pairing, active or not, since a hub can start offering a feature
  * later; its pages and actions come only while it is active, and the shell shows its unavailable page for a module page
- * left open when the module turns inactive. Contributions the Android shell does not serve yet are reported to [warn].
+ * left open when the module turns inactive.
  */
-class ModuleRegistry(val modules: List<PersonaModule>, warn: (String) -> Unit = ::logWarning) {
+class ModuleRegistry(val modules: List<PersonaModule>) {
     init {
         modules.forEach { require(it.id.matches(ModuleId)) { "Module id '${it.id}' is not lower-case and hyphenated" } }
         val repeated = modules.groupBy { it.id }.filterValues { it.size > 1 }.keys
         require(repeated.isEmpty()) { "Modules listed twice: $repeated" }
-        // Declared but not yet served on Android (docs/android/android.md "Modules"): said loudly, never dropped quietly.
-        modules.forEach { module ->
-            if (module.audioUses.isNotEmpty())
-                warn("Module '${module.id}' declares audio uses, but the shell has no audio broker yet; nothing arbitrates them")
-        }
     }
 
     /**

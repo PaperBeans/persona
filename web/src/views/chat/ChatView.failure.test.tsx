@@ -1514,7 +1514,12 @@ describe("a message to an Agent whose computer is away", () => {
     captured.machines = [laptop];
     captured.features = ["agent_message_hold"];
     await shown();
-    expect(captured.composer?.placeholder).toBe(await awayLine());
+    const expectedPlaceholder = await awayLine();
+    // The placeholder arrives through a lazy import after the generic flush; wait for that rendered value itself.
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      expect(captured.composer?.placeholder).toBe(expectedPlaceholder);
+    }, { timeout: 5000, interval: 20 });
     expect(captured.composer?.disabled).toBe(false);
     // back online, in the same open chat: the box says what it said before
     captured.machines = [{ ...laptop, online: true }];

@@ -116,10 +116,10 @@ func TestRegistrySnapshotKeepsProcessState(t *testing.T) {
 }
 
 // A token of every scope leaves out scopes whose authority the owner must approve by name (agents.permission_mode,
-// assistant.start_defaults, decisions.raise, dispatch.guard and market.refresh_own); the install screen still lists each.
+// push.grading, assistant.start_defaults, decisions.raise, dispatch.guard and market.refresh_own); the install screen still lists each.
 func TestEveryScopeLeavesOutThePermissionMode(t *testing.T) {
 	every := EveryScope()
-	excluded := []string{ScopeAgentsPermissionMode, ScopeAssistantStartDefaults, ScopeDecisionsRaise, ScopeDispatchGuard, ScopeMachinesPair, ScopeBrowserRun, ScopeMarketRefreshOwn}
+	excluded := []string{ScopeAgentsPermissionMode, ScopePushGrading, ScopeAssistantStartDefaults, ScopeDecisionsRaise, ScopeDispatchGuard, ScopeMachinesPair, ScopeBrowserRun, ScopeMarketRefreshOwn, ScopeSpaces}
 	for _, named := range excluded {
 		if slices.Contains(every, named) || !slices.Contains(HubScopes, named) || InEveryScope(named) {
 			t.Fatalf("every scope has %s: %v", named, every)
@@ -140,6 +140,7 @@ func TestFullHubGrantLeavesOutThePermissionMode(t *testing.T) {
 	for id, grant := range map[string]Permissions{
 		"legacy":  {HubAPI: true},
 		"named":   {Hub: []string{ScopeAgentsPermissionMode}},
+		"grading": {Hub: []string{ScopePushGrading}},
 		"refresh": {Hub: []string{ScopeMarketRefreshOwn}},
 	} {
 		m := &Manifest{ID: id, Version: "1.0.0", Permissions: grant,
@@ -157,6 +158,9 @@ func TestFullHubGrantLeavesOutThePermissionMode(t *testing.T) {
 	}
 	if r.HubScopeAllowed("legacy", ScopeMarketRefreshOwn) || !r.HubScopeAllowed("refresh", ScopeMarketRefreshOwn) {
 		t.Fatal("the full-hub grant and own-market refresh")
+	}
+	if r.HubScopeAllowed("legacy", ScopePushGrading) || !r.HubScopeAllowed("grading", ScopePushGrading) {
+		t.Fatal("the full-hub grant and push grading")
 	}
 	if ids := r.EventSubscribers("agent.finished", ScopeAgentsPermissionMode); !reflect.DeepEqual(ids, []string{"named"}) {
 		t.Fatalf("permission mode subscribers: %v", ids)
@@ -219,5 +223,27 @@ func TestUpgradeAddingMarketRefreshOwnNeedsConsent(t *testing.T) {
 	installed = &Extension{Record: Record{Granted: current.Permissions, GrantedDigest: Digest(current)}, Manifest: current, Full: current}
 	if MorePermissions(installed, upgrade) {
 		t.Fatal("keeping an explicitly granted own-market refresh needs no new consent")
+	}
+}
+
+// A legacy full-hub install does not silently gain push.grading authority: upgrading to a manifest that names
+// push.grading requires owner consent and lists the scope as added. Keeping an explicit grant needs no new consent.
+func TestUpgradeAddingPushGradingNeedsConsent(t *testing.T) {
+	legacy := &Manifest{ID: "example", Version: "1.0.0", Permissions: Permissions{HubAPI: true}}
+	installed := &Extension{Record: Record{Granted: legacy.Permissions, GrantedDigest: Digest(legacy)}, Manifest: legacy, Full: legacy}
+	upgrade := &Manifest{ID: "example", Version: "1.1.0", Permissions: Permissions{Hub: []string{ScopePushGrading}}}
+	if !MorePermissions(installed, upgrade) {
+		t.Fatal("adding push.grading to a legacy full-hub grant needs consent")
+	}
+	title, _ := ScopeTitleIn(i18n.Default, ScopePushGrading)
+	if !slices.ContainsFunc(Added(legacy, upgrade), func(l PermissionLine) bool {
+		return l.Key == "hub" && strings.Contains(l.Detail, title)
+	}) {
+		t.Fatalf("push.grading is not listed as added: %+v", Added(legacy, upgrade))
+	}
+	current := &Manifest{ID: "example", Version: "1.0.0", Permissions: upgrade.Permissions}
+	installed = &Extension{Record: Record{Granted: current.Permissions, GrantedDigest: Digest(current)}, Manifest: current, Full: current}
+	if MorePermissions(installed, upgrade) {
+		t.Fatal("keeping an explicitly granted push.grading scope needs no new consent")
 	}
 }

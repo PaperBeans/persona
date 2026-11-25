@@ -10,6 +10,8 @@
 //
 // It is pure, as todo/projection is: no IO and no clock, and it imports only the standard library, proto (the
 // sessions as the apps get them) and assistantwire (the wire types). The manager's adapter reads the stores.
+//
+//persona:layer core
 package timeline
 
 import (

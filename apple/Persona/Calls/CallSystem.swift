@@ -294,7 +294,7 @@ nonisolated enum CallPlatform {
     func activateAudio() async -> Bool {
         await Task.detached {
             do {
-                try AVAudioSession.sharedInstance().setActive(true)
+                try AudioSessionBroker.shared.setActive(true)
                 return true
             } catch {
                 Logger(subsystem: "persona", category: "call").notice("call: activating the audio session failed: \(error.localizedDescription, privacy: .public)")
@@ -553,7 +553,7 @@ nonisolated final class PersonaCallsLCKDelegate: ConversationManagerDelegate, @u
     private static func setActive(_ on: Bool) async -> Bool {
         await Task.detached {
             do {
-                try AVAudioSession.sharedInstance().setActive(on, options: on ? [] : .notifyOthersOnDeactivation)
+                try AudioSessionBroker.shared.setActive(on, options: on ? [] : .notifyOthersOnDeactivation)
                 return true
             } catch {
                 Logger(subsystem: "persona", category: "call").notice("call: the stand-in could not \(on ? "activate" : "deactivate", privacy: .public) the audio session: \(error.localizedDescription, privacy: .public)")

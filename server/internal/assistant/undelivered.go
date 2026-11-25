@@ -434,6 +434,35 @@ func (s *Service) undeliveredSeen(d DeviceSessions) {
 	}
 }
 
+// wakeUndeliveredFor moves waiting kept messages for (machine, sid) forward to now
+// so they drain immediately after a cross-machine failover rebind.
+func (s *Service) wakeUndeliveredFor(machine, sid string) {
+	b := &s.undelivered
+	b.mu.Lock()
+	if !s.undeliveredLocked(context.Background()) {
+		b.mu.Unlock()
+		return
+	}
+	q := b.st[sid]
+	if len(q) == 0 {
+		b.mu.Unlock()
+		return
+	}
+	now := time.Now().UTC()
+	woke := false
+	for i := range q {
+		if q[i].State == proto.UndeliveredWaiting && !q[i].inDoubt() && (machine == "" || q[i].Machine == machine) {
+			q[i].NextAt = now
+			q[i].WaitIdle = false
+			woke = true
+		}
+	}
+	b.mu.Unlock()
+	if woke {
+		s.wakeUndelivered()
+	}
+}
+
 // undeliveredPass tries, for each conversation, its oldest kept message that is due, and the next ones after it while
 // they go in. One pass per conversation at a time.
 func (s *Service) undeliveredPass(ctx context.Context, now time.Time) {

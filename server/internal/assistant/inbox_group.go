@@ -163,7 +163,12 @@ type plannedEvent struct {
 
 // relateBatch relates one batch: by the model, else by the connector's fallback; then has each event written.
 func (s *Service) relateBatch(ctx context.Context, c assistantwire.InboxSource, t connector.InboxThing) {
-	events := s.groupEvents(c.ID, t.Thread, "")
+	fullCfg, allowed := s.inboxVisibilityBatchAllowed(ctx, c.ID, t)
+	if !allowed {
+		s.noteGroupWhy(c.ID, "chat visibility or its configuration withheld this batch before any model or connector read")
+		return
+	}
+	events := s.groupEventsWithVisibility(c.ID, t.Thread, "", fullCfg.Visibility)
 	plan, why := s.askGroup(ctx, c, t, events)
 	if plan == nil {
 		var err error
@@ -219,6 +224,12 @@ func (s *Service) noteGroupWhy(id, why string) {
 // own quota; query keeps those whose title, summary or meta has it before either cap. Hidden members of merged rows are
 // never candidates.
 func (s *Service) groupEvents(connectorID, thread, query string) []groupEvent {
+	return s.groupEventsWithVisibility(connectorID, thread, query, nil)
+}
+
+// groupEventsWithVisibility keeps persistently quarantined rows out of every caller, and also applies the fresh
+// configuration snapshot used to authorize a pre-admission batch. The old wrapper retains the legacy signature.
+func (s *Service) groupEventsWithVisibility(connectorID, thread, query string, visibility *assistantwire.InboxVisibilityConfig) []groupEvent {
 	b := &s.inbox
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -226,7 +237,8 @@ func (s *Service) groupEvents(connectorID, thread, query string) []groupEvent {
 	q := strings.ToLower(strings.TrimSpace(query))
 	var open, done []*InboxItem
 	for _, it := range b.items {
-		if it.Group == nil || it.Group.Connector != connectorID || !sameConversation(it.Group.Thread, thread) || it.MergedInto != "" {
+		if it.Group == nil || it.Group.Connector != connectorID || !sameConversation(it.Group.Thread, thread) || it.MergedInto != "" ||
+			inboxVisibilityWithMembersExcludedLocked(b, it, visibility) {
 			continue
 		}
 		isOpen := it.DoneAt == nil // merged members, the other way open() is false, are skipped above
@@ -385,18 +397,25 @@ func groupJSONProblem(err error) bool {
 // groupTool runs one tool for the model: events here, the conversation's through the connector (at the hub). A
 // failure is the tool's answer ({"error": …}), the call counted.
 func (s *Service) groupTool(ctx context.Context, connectorID, thread, name string, args json.RawMessage, seen map[string]groupEvent) string {
+	fullCfg, configErr := s.inboxConfigFresh(ctx)
+	if configErr != nil {
+		return jsonText(map[string]string{"error": "Inbox visibility configuration is unavailable; no conversation read was performed"})
+	}
 	switch name {
 	case "events":
 		var a struct {
 			Query string `json:"query"`
 		}
 		_ = json.Unmarshal(args, &a)
-		events := s.groupEvents(connectorID, thread, a.Query)
+		events := s.groupEventsWithVisibility(connectorID, thread, a.Query, fullCfg.Visibility)
 		for _, e := range events {
 			seen[e.ID] = e
 		}
 		return jsonText(events)
 	case connector.GroupMessagesBefore, connector.GroupMessagesAround, connector.GroupSearch:
+		if inboxVisibilityExcluded(inboxVisibilityThingItem(connectorID, connector.InboxThing{Thread: thread}), fullCfg.Visibility) {
+			return jsonText(map[string]string{"error": "This chat is excluded from AI conversation reads"})
+		}
 		if len(args) == 0 || string(args) == "null" {
 			args = json.RawMessage(`{}`)
 		}

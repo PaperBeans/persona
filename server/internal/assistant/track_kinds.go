@@ -18,9 +18,12 @@ import (
 // only). The built-in kinds are the manager's; the user's are rows (assistant_track_kinds). Nothing branches on a
 // kind's name: every decision reads a field of the track's effective config (its kind's, with what the track sets).
 
-// trackKindOrchestration is the built-in kind of the main chat's way of working (trackKindSpace, a domain space's, is
-// the other).
-const trackKindOrchestration = "orchestration"
+// The core owns orchestration and the headless health policy. Domain-space
+// kinds are declarative extension contributions.
+const (
+	trackKindOrchestration = "orchestration"
+	trackKindHealth        = "health"
+)
 
 // The options of each field.
 var (
@@ -49,30 +52,33 @@ const trackKindAll = "*"
 // Kind warnings: what a kind asks that this manager does not do yet.
 const trackWarnSupervisionLeaders = "supervision_leaders" // leaders review the main chat only (a later step)
 
-// builtinKindConfigs are the built-in kinds' configs: the main chat's way (orchestration) and a domain space's.
+// builtinKindConfigs contains only the core orchestration kind. Health keeps
+// its own headless policy kind. Domain-space kinds come from enabled extensions.
 func builtinKindConfigs() map[string]assistantwire.TrackKindConfig {
 	attention := assistantwire.TrackAttention{PushCap: assistantwire.LevelP0, DeepDefault: "quick", EnterMode: "none"}
 	return map[string]assistantwire.TrackKindConfig{
 		trackKindOrchestration: {Schema: assistantwire.TrackKindSchema, Template: trackTemplateAssistant, Context: "engineering",
 			DefaultCategories: []string{}, TagFocus: []string{}, Rhythms: []assistantwire.TrackRhythm{}, Attention: attention,
 			Supervision: "leaders", Usage: []assistantwire.TrackUsageRule{}, Assembly: "assistant", Channels: []string{}},
-		trackKindSpace: {Schema: assistantwire.TrackKindSchema, Template: trackTemplateSpace, UserInstructions: "space_md", Context: "track",
-			DefaultCategories: []string{}, TagFocus: []string{}, Rhythms: []assistantwire.TrackRhythm{}, Attention: attention,
-			Supervision: "none", Usage: []assistantwire.TrackUsageRule{}, Assembly: "track", CaptureTarget: true,
-			Channels: []string{"topics", "single"}, Sidebar: assistantwire.TrackSidebar{Group: "spaces"}},
+		trackKindHealth: {Schema: assistantwire.TrackKindSchema, Template: trackTemplateHealth, Context: "track",
+			DefaultCategories: []string{categoryHealth}, TagFocus: []string{categoryHealth}, Rhythms: []assistantwire.TrackRhythm{}, Attention: attention,
+			Supervision: "none", Usage: []assistantwire.TrackUsageRule{}, Assembly: "track", Channels: []string{}},
 	}
 }
 
-// builtinKindOrder lists the built-in kinds in the order the apps show them.
-var builtinKindOrder = []string{trackKindOrchestration, trackKindSpace}
+// builtinKindOrder lists the headless kinds the core owns.
+var builtinKindOrder = []string{trackKindOrchestration, trackKindHealth}
 
 // kindEntry is one kind: built in, or the user's (a row).
 type kindEntry struct {
-	Slug     string
-	Title    string
-	Config   assistantwire.TrackKindConfig
-	Builtin  bool
-	Revision int64
+	Slug    string
+	Title   string
+	Config  assistantwire.TrackKindConfig
+	Builtin bool
+	// Extension marks a declarative contribution: like a built-in, it cannot be
+	// replaced through the user's custom-kind API.
+	Extension bool
+	Revision  int64
 	// Disabled says why the kind is not enabled (kindDisabledSchema, kindDisabledInvalid); its tracks are left out.
 	Disabled string
 }
@@ -91,7 +97,7 @@ func validTrackIcon(icon string) bool { return icon == "" || trackIconPattern.Ma
 
 // validKindSlug: slug may name a user's kind (a track's slug's rules, and not a built-in kind's).
 func validKindSlug(slug string) bool {
-	return identity.ValidTrackSlug(slug) && !slices.Contains(builtinKindOrder, slug)
+	return identity.ValidTrackSlug(slug) && slug != trackKindOrchestration && slug != trackKindHealth
 }
 
 // errKindSchema is a kind config newer than this manager knows.

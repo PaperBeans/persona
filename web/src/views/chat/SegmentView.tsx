@@ -8,13 +8,14 @@ import { withChildSessions } from "../../lib/child-cards";
 import { agentStatus, isNestedSubagentStep, nestedSubagentStatus, nestingKey, subagentFor, withNestedSubagents } from "../../lib/tasks";
 import { turnImages } from "../../lib/turn-images";
 import { TurnImages } from "./TurnImages";
+import { turnToolViews } from "../../lib/turn-tool-views";
 import { exchangeSteps, segmentIdentity, isLoopTick, isOwnMessage, toolChip, type Context, type Segment, type UserMessage } from "../../lib/turns";
 import { usageKey } from "../../lib/turn-usage";
 import type { Item } from "../../lib/types";
 import { ENGINE_SWITCH_KIND } from "../../lib/engine-switch";
 import { planCardStep, workBlocks, type ToolStep, type WorkNode } from "../../lib/work-groups";
 import { NO_WORKFLOW_CALLS } from "../../lib/workflows";
-import { channelOf, useChannels } from "../../lib/channels";
+import { channelOf, useChannels } from "../../lib/channel-source";
 import { splitQuotes } from "../../lib/drafts";
 import { EASE } from "../../ui/atoms";
 import { ChannelMark, OriginMark } from "../../ui/ChannelMark";
@@ -54,6 +55,8 @@ import { useReveal } from "./search-reveal";
 
 // a finished reply's Sources row (#9132): its chunk loads only for a turn that looked something up on the web
 const TurnSources = lazy(() => import("./TurnSources").then((m) => ({ default: m.TurnSources })));
+// Out-of-band tool views (UI v12 route maps, etc.): lazy-loaded only when a turn carries Fold.tool_views or tool_result.tool_views
+const ToolViews = lazy(() => import("./ToolViews").then((m) => ({ default: m.ToolViews })));
 
 /** A message longer than this many lines folds to ten of them (FOLDED), with "Expand" under it (the reference client's UserMessage). */
 export const BUBBLE_MAX_LINES = 14;
@@ -77,13 +80,15 @@ export const MODEL_DIVIDER_HEIGHT = 42.5;
  *  same padding, border and 16.5 px line; its 12 px icons are shorter than the line). The handoff opened adds its own
  *  once drawn. */
 export const ENGINE_DIVIDER_HEIGHT = MODEL_DIVIDER_HEIGHT;
+/** Compact tool view card height estimate before a deferred turn mounts. */
+export const TOOL_VIEW_HEIGHT = 244;
 
 /** A finished exchange's height in px before it is first drawn (content-visibility, docs/web/web.md "Long chats"), by
  *  its text the way bubbleLines counts it: its bubble (folded past BUBBLE_MAX_LINES), its words at 2.5 times the
  *  bubble's characters to a line (the column is wider, and Markdown's short and blank lines take less than a line), a
  *  row for each other block, and the model change divider when it has one (`modelChange`), the engine switch divider
  *  folded likewise (`engineSwitch`). Once drawn it keeps its own height. */
-export function segmentHeight(user: UserMessage | undefined, nodes: WorkNode[], modelChange = false, engineSwitch = false): number {
+export function segmentHeight(user: UserMessage | undefined, nodes: WorkNode[], modelChange = false, engineSwitch = false, toolViews = 0): number {
   // gap: the exchange's blocks stand 14 px apart (`gap-3.5`, cindy's msg-stream-items)
   const line = 24, gap = 14, row = 28;
   const lines = user ? bubbleLines(user.text) : 0;
@@ -91,7 +96,8 @@ export function segmentHeight(user: UserMessage | undefined, nodes: WorkNode[], 
   for (const n of nodes) h += n.kind === "step" && n.step.kind === "text" ? bubbleLines(n.step.item.text ?? "", CHARS_PER_LINE * 2.5) * line : row;
   if (modelChange) h += MODEL_DIVIDER_HEIGHT;
   if (engineSwitch) h += ENGINE_DIVIDER_HEIGHT;
-  return Math.round(h + gap * Math.max(0, nodes.length + (user ? 1 : 0) + (modelChange ? 1 : 0) + (engineSwitch ? 1 : 0) - 1));
+  if (toolViews > 0) h += toolViews * TOOL_VIEW_HEIGHT + Math.max(0, toolViews - 1) * 8;
+  return Math.round(h + gap * Math.max(0, nodes.length + (user ? 1 : 0) + (modelChange ? 1 : 0) + (engineSwitch ? 1 : 0) + (toolViews > 0 ? 1 : 0) - 1));
 }
 
 /** `sendState`: a message not in the transcript yet (a sending bubble, the outbox's), marked for the sync scenarios
@@ -177,7 +183,7 @@ function BubbleText({ text: full, blocks, ts, mid, sid, own, pending }: { text: 
     <div
       ref={ref}
       {...fold}
-      className={`text-[length:var(--chat-body)] leading-[1.6] whitespace-pre-wrap [overflow-wrap:anywhere] ${folded ? FOLDED : ""}`}
+      className={`text-[length:var(--chat-body)] leading-[1.6] whitespace-pre-wrap [overflow-wrap:anywhere] ${folded ? `${FOLDED} user-bubble-fade` : ""}`}
       data-folded={folded || undefined}
       data-bubble-text
     >
@@ -429,8 +435,9 @@ export const SegmentView = memo(function SegmentView({
   const usage = !live && !trace ? usageKey(seg.usage) : undefined;
   const groups = usage ? nodes.filter((n) => n.kind === "group") : [];
   const usageMs = groups.length === 1 ? groups[0].durationMs : undefined;
+  const toolViews = useMemo(() => (trace ? [] : turnToolViews(own, mid, sid)), [trace, own, mid, sid]);
   const switched = Boolean(seg.engineSwitch);
-  const guess = useMemo(() => (offscreen ? ({ "--seg-est": `${segmentHeight(seg.user, nodes, divided, switched) + (changes ? 12 + turnChangesHeight(changes) : 0) + (sourced ? 14 + SOURCES_HEIGHT : 0)}px` } as CSSProperties) : undefined), [offscreen, seg.user, nodes, divided, switched, changes, sourced]);
+  const guess = useMemo(() => (offscreen ? ({ "--seg-est": `${segmentHeight(seg.user, nodes, divided, switched, toolViews.length) + (changes ? 12 + turnChangesHeight(changes) : 0) + (sourced ? 14 + SOURCES_HEIGHT : 0)}px` } as CSSProperties) : undefined), [offscreen, seg.user, nodes, divided, switched, toolViews.length, changes, sourced]);
   // Native browser find can still land on the raw words (content-visibility keeps them searchable); the observer then
   // mounts their rich representation. In-chat search uses `revealed` above and goes straight to the exact item instead.
   // The placeholder holds the section's estimate too: otherwise Chrome caches its shorter raw-text height in
@@ -453,6 +460,7 @@ export const SegmentView = memo(function SegmentView({
       <WorkNodes nodes={nodes.slice(0, cut)} p={p} live={live} fade />
       {liveRow}
       {imageStrip}
+      {!trace && toolViews.length > 0 && <Suspense key="tool-views" fallback={null}><ToolViews views={toolViews} /></Suspense>}
       {!live && <Fragment key="before-words">{beforeWords}</Fragment>}
       {(latestItem || streaming !== undefined) && <Suspense key="latest-text" fallback={null}><LatestAnswer item={streaming === undefined ? latestItem : undefined} streaming={streaming} mid={mid} sid={sid} noCloseout={noCloseout || undefined} done={(!live && !busy) || undefined} cut={(!live && seg.cut) || undefined} usage={usage} usageMs={usageMs} ttftMs={!live && !trace ? seg.ttftMs : undefined} /></Suspense>}
       {sourced && <Suspense key="turn-sources" fallback={null}><TurnSources steps={own} /></Suspense>}

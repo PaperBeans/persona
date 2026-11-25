@@ -82,6 +82,7 @@ export function eventItems(ev, seq, images) {
       break
     case 'agent.tool_result':
     case 'agent.mcp_tool_result':
+    case 'user.tool_result':
       push(0, { role: 'user', kind: 'tool_result', tool_use_id: ev.tool_use_id ?? ev.mcp_tool_use_id, text: textOf(ev.content), is_error: ev.is_error === true })
       break
     case 'user.custom_tool_result':

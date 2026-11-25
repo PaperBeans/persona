@@ -12,7 +12,7 @@ import { api, errorText, sessionHistoryNotFound, sessionPath } from "../../lib/a
 import { planStretches, sameItems, splitStretches, stretchWindows, type StretchSource } from "../../lib/engine-stretches";
 import { sessionLoadError } from "../../lib/session-link";
 import { buildTaskIndex } from "../../lib/tasks";
-import { chatLines, mergeItems, type ChatLine } from "../../lib/turns";
+import { chatLines, insideFold, mergeItems, type ChatLine } from "../../lib/turns";
 import type { Item, ItemsPage } from "../../lib/types";
 import { NO_WORKFLOW_CALLS } from "../../lib/workflows";
 import { Button } from "../../ui/atoms";
@@ -111,10 +111,11 @@ export default memo(function EarlierStretches({ mid, sid, scope, history, live, 
         if (!p.more || !p.items?.length) break;
         from = p.items[p.items.length - 1].seq + 1;
       }
+      const scoped = out.filter((i) => insideFold(i, fold));
       setState((st) => {
         const base = st.scope === scope ? st.stores : NO_STORES;
         const cur = base[s];
-        return cur ? { scope, stores: { ...base, [s]: { ...cur, items: mergeItems(cur.items, out) } } } : st;
+        return cur ? { scope, stores: { ...base, [s]: { ...cur, items: mergeItems(cur.items, scoped) } } } : st;
       });
     },
     [mid, scope],

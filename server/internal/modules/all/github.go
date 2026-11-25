@@ -11,5 +11,5 @@ import (
 // (docs/architecture/core-and-modules.md "Provider seams"); it registers nothing with the kernel yet.
 func init() {
 	modules = append(modules, github.Module{})
-	githubport.Provide(github.Provider)
+	githubport.Provide(github.Module{}.Info().ID, github.Provider)
 }

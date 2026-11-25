@@ -69,6 +69,9 @@ func (p *Pusher) resumeWrites() {
 		p.gradingWriting = true
 		go p.saveIntercepts()
 	}
+	if p.store != nil && !p.gradingLayersWriting && p.gradingLayersDirty {
+		p.startGradingLayersFlushLocked()
+	}
 	p.gradingMu.Unlock()
 	if len(forgets) > 0 {
 		go func() {

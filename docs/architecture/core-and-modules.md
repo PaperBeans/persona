@@ -130,7 +130,7 @@ Because a missing flag means off, every flag a client gates on has to be announc
 - **Every built-in module declares `feature`** (`module.<id>`), also one that registers nothing with the kernel
   (`voice`, `volc`, `mail`): `TestEveryBuiltinModuleAnnouncesItsFlag` in `server/internal/modules/all`. Built out or
   switched off, its flag is gone and the clients hide their half.
-- **Client-only modules** (`modapi.ClientModules`: `glasses`, `health`, `knowledge-ui`, `screen-share`)
+- **Client-only modules** (`modapi.ClientModules`: `glasses`)
   have no server half, so the manager announces their flags itself. The `modules` settings row switches one off the
   same way (`{"disabled": ["health"]}`), which is how the owner turns a client module off from the hub without a new
   build. An id leaves the list in the PR that gives the module a server half (`TestNoBuiltinModuleIsListedAsClientOnly`).
@@ -153,8 +153,73 @@ Because a missing flag means off, every flag a client gates on has to be announc
   or duplicate ids (compiled-in modules and the client-only ones of `modapi.ClientModules`) before showing the existing owner approval card; `null` or an empty disabled list
   restores the default. The manager reads the row once where it starts (`server/internal/assistant/main.go`,
   `ReadModuleSwitch`) and hands it to `assistant.New` as `Options.ModulesOff`, so the saved change takes effect at the
-  next manager start, never as a hot switch in the running process. A built-in module switched off is absent exactly as one left
-  out of the build; a client-only one loses its hub flag, so the clients hide it. There is no settings screen yet; the settings registry of #13395 remains its intended UI home.
+  next manager start, never as a hot switch in the running process. The manager reads it before it makes the extension
+  manager, and the kernel and every provider seam get the same list (below). A built-in module switched off is absent
+  exactly as one left out of the build; a client-only one loses its hub flag, so the clients hide it. There is no settings screen yet; the settings registry of #13395 remains its intended UI home.
+- **One predicate for the seams** (#14405): `server/internal/moduleswitch`. A module that reaches the core through a
+  provider seam (a port its file in a composition root fills in `init`, "Provider seams" below) is switched off by that
+  port: the port is a `moduleswitch.Port`, which keeps the provider under the module's id and hands it out (`Get`)
+  only to a caller whose `moduleswitch.Set` has the module on (`Set.On`). The `Set` is a value each manager carries
+  (`extmgr.Options.Modules`), never process state: one process can run several managers (`internal/manager`). A node
+  has no settings row; it reads the switch from the hub's features it gets in `node.configure` (`hub_features`), by
+  the clients' rule (`moduleswitch.FromFeatures`: with the `modules` marker, a module whose `module.<id>` flag is
+  missing is off), and keeps it for the process (a node serves one hub). Before its first `node.configure`, or from a
+  hub without the marker, every module is on.
+- **Tested for every module**: `TestEverySeamFollowsTheSwitch` in `server/internal/modules/all` and in
+  `server/internal/modules/all/node` runs `server/internal/moduleswitch/switchtest` over the root: every seam each
+  module of the build recorded must hand out its provider with the module on and nothing with it switched off, and every
+  call the root's `init` makes must be such a seam. The only calls allowed otherwise are the root's own
+  (`kernel.Provide`) and the binary-only ones below; an entry no longer called fails.
+- **Checked on a running hub**: `python3 scripts/ci/core-only-smoke.py --switched-off <ids>` builds by default, starts
+  a hub on a disposable Postgres, writes the row, restarts and checks the ids are gone (the manager's loaded modules,
+  their flags, programs' extensions, connectors, routes) while every other module stays, then clears the row,
+  restarts and checks they return.
+
+What switched off means, by seam (each port follows `Set.On`; a build without the module provides nothing at all):
+
+| Seam | Module | Switched off at the next manager start |
+| --- | --- | --- |
+| Kernel slots (`settings`, `feature`, `hub_routes`, `mcp_tools`, `background_jobs`, schedule facts) | every module | Not loaded: no setting, route, tool or job, and its `module.<id>` flag is gone from the hello |
+| `server/internal/extmgr/githubport` | `github` | No built-in GitHub connector: not registered, listed or polled; `/api/v1/connectors/github/auth` answers 404 |
+| `server/internal/extmgr/imessageport` | `imessage` | No Messages connector or built-in `imessage` extension; `/api/v1/imessage` answers that it is not configured |
+| `server/internal/extmgr/mailport` | `mail` | Mail is not opened: the mail routes answer 404, no `mail_*` tool or mail connector, no `mail.accounts` setting |
+| `server/internal/builtinext` (`ProvideVolc`, `ProvideVoice`) | `volc`, `voice` | The built-in extension is not registered or started; no meeting transcribes with it |
+| `server/internal/builtinext` (`AddProgram`) | `volc`, `voice` | The extension host starts no `personad volc` / `personad voice`, a `hub.json` entry's included (`ProgramOff`: it fails as the unknown subcommand would). The subcommand stays in the binary |
+| `server/internal/botport` | `lark` | No bot client is made: the bot cannot be bound, registered or started |
+| `server/internal/cliport` | `lark` | `lark.cli` is not read (logged at start) and the extension host's lark-cli integration is off |
+| `server/internal/larkhost` | `lark` | The outbound channel port is `larkhost.None`, as without the module |
+| `server/internal/knowledgeuihost` | `knowledge-ui` | No layer: no `kb_history_*` tool or import, the selection page's chat list answers as a source without history, days carry no sent marks |
+| `server/internal/healthhost` | `health` | No layer: the intake and items routes answer 404, no `health_intake` tool, no `health_intake` or `health_items` capability, no water reminders |
+| `server/internal/recordinghost` | `recording` | No layer: the recording routes answer 404, no audio socket, room tools, final passes or meeting capabilities |
+| `server/internal/node/imessageport` | `imessage` | The node answers as a computer without Messages; the manager sends it no `connector.*` call and drops `imessage` from the node's built-in programs |
+| `server/internal/node/iphoneport` | `phone-extra` | The node lists no `iphone` program and has none of its methods; the manager drops `iphone` from the node's built-in programs, so it offers and calls no phone control |
+| `server/internal/node/screenport` | `screen-share` | The node offers no screen session: a live screen is the plain relayed stream; the clients hide screen sharing (flag gone) |
+| `server/internal/nodecmd/commandport` (`AddCommand`) | `office`, `phone-extra` | **Binary-only**: `personad office` / `personad iphone` run as their own process with no hub, so they stay until a build without the module. The `persona-office` skill still ships to agents, as it does in a build without `office` |
+
+A node learns the switch at its next `node.configure` (on every connection): its first `node.info` is answered before
+that, which is why the manager filters the node's built-in programs itself. Client-only modules (`modapi.ClientModules`)
+have no seam; their flag goes and the clients hide them.
+
+### A module that is off keeps what the user has
+
+Switching a module off, at run time or by leaving it out of the build, **must not hide or change data the user already
+has** (the owner's rule for every module move, #13430). "Absent" above is about the module's routes, tools, jobs and
+entries, never about what it wrote earlier:
+
+- **Reading existing data is Core.** Listing, opening and searching what is on disk or in the database keeps working
+  with the module off, and the search index keeps indexing those files. The read path never goes through a module's
+  provider.
+- **The write side is the module's.** Creating, uploading, transcribing, summarising, the background rounds and the
+  entry points go with the module: with it off they do nothing, and no stored file is touched.
+- **Off never deletes and never rewrites.** Deleting stays the user's explicit action, and the retention the user
+  configured stays the user's setting: neither is a side effect of the switch. State that was in flight when the
+  module went is shown as stored and marked in the response only (below), so the module takes it up from the same
+  stored fields when it is back.
+- **A reviewer checks the off case for "old data still there, unchanged"**, not only "entry gone":
+  `scripts/ci/core-only-smoke.py` and `scripts/ci/module-e2e.py` start their hubs on a knowledge base that already
+  holds recordings and check exactly that ("Recording" below).
+
+Recordings are the first application ("Recording" below, `docs/plans/plan-kb-recording-port.md`).
 
 ### How to build and run the core alone
 
@@ -173,6 +238,11 @@ Persona Core is a product on its own: a hub built without any module starts, ser
   `/api/v1/extensions` and `/api/v1/extensions/<id>/-/assistant-data` answers 404, and a clean SIGTERM shutdown, then
   prints one PASS / FAIL / TIMEOUT line. `--full` runs the same on a default build and expects the opposite. `DOCKER`
   names another Docker client.
+- **End-to-end gate**: `python3 scripts/ci/module-e2e.py --modules <ids>` switches the modules off and on at run time
+  (the `modules` row) on a test hub started the same way, with a default build and the real web app in headless
+  Chrome: flags, the manager's list, the module's routes, extensions and connectors, its web entry and chunks, and the
+  core's pages in every phase, plus the mock hub as an older hub. A module move merges only after it passes on its
+  branch (docs/operations/testing.md "Module e2e gate", #14417).
 - **Tests**: `GOFLAGS="-trimpath -tags=persona_core_only" python3 scripts/ci/server-shards.py <node|managers|other>
   --database-file <file with database_url>` runs a shard's every package without modules; a test of a module's own
   behaviour skips without it (`needsBriefingModule`, `needsVoiceModule`, `needsVolcModule`). Locally the `other` shard
@@ -184,7 +254,10 @@ Persona Core is a product on its own: a hub built without any module starts, ser
   about 5.5 minutes, managers about 6, other about 3.5.
   The per-module steps ('Builds without the … module(s)', 'Core-only and module-less builds') run in the `node`,
   `managers`, `core-node` and `core-other` lanes, one or two each, not in `build`: together they outgrow a hosted job's
-  20 minutes.
+  20 minutes. Each runs only its own `persona_without_<id>` tests (#14412): the module's `go build ./...` and the module
+  list and guard tests are 'Builds without each module', and every package's tests with `persona_core_only` are the
+  core lanes' (the node step keeps the one `persona_core_only` build, Windows' node included). Where a module section
+  below names `persona_core_only` among a step's tags, the core lanes run those tests.
 - **Size**: `python3 scripts/diag/core_size.py [--no-build] [--json] <ref> …` prints the core's non-test Go lines (every
   `*.go` under `server/` that is not `_test.go`, `server/internal/modules/` left out), each module's lines, and the
   stripped sizes of `personad`, `persona-hub` and `persona-manager` built by default and with `persona_core_only`
@@ -225,8 +298,8 @@ The port is a package of its own so the composition root need not import `extmgr
 (`persona_without_mail`, `persona_core_only`) nothing is provided and the manager runs as with a mail service that
 failed to open: the mail routes answer 404, no `mail_*` tool or mail connector is offered, `persona_settings` has no
 `mail.accounts`, and everything else runs (`TestManagerWithoutMail`). The module registers nothing with the kernel and
-its `module.json` declares no slot; the run-time switch (the `modules` row) does not cover it until the kernel serves
-`hub_routes` and `mcp_tools` (#13844). Its prompts (`server/internal/prompts/mcp/mail`) and locales (`mail-*`) stay in
+its `module.json` declares no slot; the run-time switch (the `modules` row) covers it through `mailport` ("The
+switch"). Its prompts (`server/internal/prompts/mcp/mail`) and locales (`mail-*`) stay in
 the core's trees until `prompt_sections` and `i18n_namespaces` are served. `scripts/ci/server.sh build` builds and
 tests the core, the modules, the guards and the manager's mail, inbox, connector and settings tests with
 `persona_core_only` and with `persona_without_mail`.
@@ -244,9 +317,9 @@ an extension's GitHub connector can still take the id (`TestManagerWithoutGitHub
 (`server/internal/prompts/mcp/github`, `prompts/inbox/kinds/github.md`) stay in the core's trees as mail's do.
 `scripts/ci/server.sh build` runs "Builds without the connector modules" with both tags, and
 `scripts/ci/core-only-smoke.py` checks that a core-only hub lists no GitHub connector.
-Its `module.json` declares `feature` = `module.github`, so a hub whose manager loaded the module announces it. The
-run-time `modules` switch drops the flag, but the extension manager still registers the connector until it reads the
-switch too (only a build without the module leaves the connector out today).
+Its `module.json` declares `feature` = `module.github`, so a hub whose manager loaded the module announces it.
+Switched off in the `modules` row, `githubport` hands the manager no factory, so the connector is absent as in a build
+without it (`TestManagerWithoutGitHub` runs both ways).
 
 The iMessage connector (`server/internal/modules/imessage`, #13936) is the same kind of connector, with a second side:
 the reader of a Mac's Messages runs in that Mac's node. The manager reaches the connector through the contract
@@ -259,7 +332,9 @@ list), so `personad node`, persona-node and the manager's local node all have it
 of the manager. With the module left out (`persona_without_imessage`, `persona_core_only`) the manager has no Messages
 connector or built-in Messages extension, `/api/v1/imessage` answers that it is not configured
 (`TestManagerWithoutIMessage`), and the node answers as a computer without Messages does. Its `module.json` declares
-`feature` = `module.imessage`, with the same caveat on the run-time switch as GitHub's. "Builds without the connector
+`feature` = `module.imessage`. Switched off in the `modules` row, both ports hand out nothing: the manager registers no
+Messages connector or extension (`TestManagerWithoutIMessage` runs both ways), so it sends the node no `connector.*`
+call, and a node whose hub announces no `module.imessage` answers as a computer without Messages. "Builds without the connector
 modules" in `scripts/ci/server.sh` runs with `persona_without_imessage` too, and `scripts/ci/core-only-smoke.py`
 checks that a core-only hub has no `imessage` extension.
 
@@ -301,7 +376,9 @@ the node's root imports, so the manager does not link it. With the module left o
 unknown and missing from the usage (`TestOfficeFollowsTheBuildTags` in the node's root), and
 `scripts/ci/core-only-smoke.py` builds `persona-node` as well and checks that a core-only `personad` and `persona-node`
 lack every command the node's root provides. `scripts/ci/server.sh build` runs "Builds without the node modules" with
-each such module's tag and `persona_core_only`, Windows' node included.
+each such module's tag and `persona_core_only`, Windows' node included. Switched off in the `modules` row, the node's
+ports hand out nothing once the node has the hub's features, and the manager drops the module's built-in programs
+from the node's info; a device command stays in the binary ("The switch").
 
 The modules of this kind:
 
@@ -337,9 +414,10 @@ platform compiles cannot hide a violation (`TestModuleGuardsSeeEveryBuild` prove
   Known exceptions are debt in `testdata/module_services.txt`, which only shrinks (a stale line fails): `<module id>
   <core package>` for any of the module's files, `<module id> (test) <core package>` for its tests only, no wildcards.
   The lines are the GitHub and iMessage connectors' tests, which run them through the connector registry and gate, the
-  conformance suite and the subscription service with the modules' own fixtures, and `recording internal/kb`: the recordings'
+  conformance suite and the subscription service with the modules' own fixtures, the Health module's water import
+  test on the real SQL (`health (test) internal/db`), `recording internal/kb`: the recordings'
   storage (the `kb.Recording` model with its `Engine` and `Store`) stays in the knowledge base until it offers a
-  recording port. A declared core-service dependency is a known debt, not a precedent: the assistant, the hub and the
+  recording port, and `knowledge-ui internal/kb`: the history import writes into the knowledge base, the core's memory. A declared core-service dependency is a known debt, not a precedent: the assistant, the hub and the
   extension host are never listed.
 - **`TestLibrariesAreLeaves`**: the leaf libraries (`testdata/libraries.txt`) are the core's packages a module may use
   that hold no state and own no feature (localization, the extension SDK, small helpers). Each depends only on the
@@ -428,7 +506,117 @@ manifest declares `feature: module.recording`, which the kernel announces while 
 - **With the module absent** (`persona_without_recording`, `persona_core_only`, or switched off) the recording routes
   answer 404, the audio socket is unknown, the hello names none of the nine meeting and recording capabilities (so
   the hub announces none of their feature flags), no room tool is offered and no final pass or attending feeder runs
-  (`TestRecordingFollowsItsModule`). The recordings already stored stay in the knowledge base.
+  (`TestRecordingFollowsItsModule`). The recordings already stored stay in the knowledge base, **listed, readable
+  and searchable, byte for byte unchanged** ("A module that is off keeps what the user has" above):
+
+  | With the module off | What happens |
+  | --- | --- |
+  | The knowledge list (`GET /api/v1/kb/recordings`, `kb_list`) | Works: every stored recording, as before |
+  | A recording's detail (`GET /api/v1/kb/recordings/{id}`, `kb_get`): transcript, minutes, day recap, photo texts | Works, the same response as with the module |
+  | Search (`GET /api/v1/kb-search`, `kb_search`) and the search index | Works: transcripts, minutes, recaps and photo texts stay indexed |
+  | Tags, pinned facts and projects of a recording (`PUT /api/v1/kb/recordings/{id}`, `kb_update`) | Works: the knowledge base's generic edit |
+  | Delete (`DELETE /api/v1/kb/recordings/{id}`) | Works: the knowledge base's own route, always there |
+  | Retention (`recording_days`, `minutes_days`) | Runs as configured (`kb.RetentionWithoutRecordingModule`, the one decision point) |
+  | Crash recovery of an interrupted upload | Runs when the store opens, as ever |
+  | New recordings, uploads, appends, the audio socket, photos, rename, the minutes and recap routes | Gone: the module's routes answer 404 |
+  | The minutes, titles and recap lanes, summaries, the sweep of hub transcripts after a prune | Run and do nothing: no model call, no file written |
+  | Photo images and stored audio (`GET /api/v1/recordings/{id}/photos/…`, the audio routes) | Not reachable: they are the module's routes; the files stay on disk |
+
+- **Reader, kept writes and writers** (`docs/plans/plan-kb-recording-port.md`, PR 2): in `server/internal/kb` every
+  recording file is split by what its code is. `<file>_read.go` is the read path (list, get, the transcript of
+  record, minutes and recap readers, the search view with the undo-journal overlay) and `<file>_keep.go` the writes
+  that exist without the module (delete, retention with the trim, the undo-journal commit and the recovery in
+  `NewStore`, the `meeting.json` update primitive, the photo book the trim needs): both are Core. `<file>.go` keeps
+  the writers (uploads, appends, audio, photos, live log, meeting writers, transcription, minutes, recaps, titles,
+  summaries), which later PRs move into the module. Reads, delete, retention and recovery call no writer.
+- **The write side is a provider** (`recordingwire.Provider`): the four background rounds (`WriteMinutes`,
+  `TitleRecordings`, `WriteDayRecaps`, `SummarizeRecordings`), `AfterPrune` (the module's part of the retention round)
+  and the audio writers' two touch points with delete and retention (`AudioDropped`, `AudioClosed`). The module's
+  `Hook` gives it to the knowledge base (`kb.Engine.SetRecordingProvider`); without the module the knowledge base
+  holds `recordingwire.NoProvider`, a value whose methods do nothing, so no call site checks for the module. The
+  assistant's lanes and its retention tick call the rounds through `kb.Engine.RecordingProvider()`
+  (`internal/assistant/kb_lanes.go`, `kb.go`). Before this split the lanes ran whether or not the module was loaded;
+  they now stop with it.
+- **In flight when the module goes**: an upload not complete, minutes or a day recap still `pending`, a hub
+  transcription `live` or `finishing` stay as stored. The knowledge base's responses carry a derived
+  `paused: "module_off"` for such a recording (`Detail.Paused`, `Entry.Paused`; `kb.Engine.recordingPaused`), computed
+  when read and never written, so the files do not change and the module resumes from the stored state.
+- **Checked** by `TestRecordingsStayReadableWithoutTheModule`, `TestRecordingInFlightIsPausedWithoutTheModule` and
+  `TestRecordingDeleteAndRetentionWithoutTheModule` (`internal/kb`), `TestStoredRecordingsOutliveTheirModule`
+  (`internal/assistant`, in every build), and on running hubs by the two gates above, which compare every file under
+  `recordings/` before and after the module is off.
+
+### Health
+
+`health` (`server/internal/modules/health`, #14406) is the manager's Health intake (docs/assistant/health.md "Water
+and protein"): the `/api/v1/assistant/health/intake…`, `…/items` and `…/water/reminder` routes, the water reminders, the intake
+page, the legacy water extension's import and the `health_intake` tool. Its manifest declares `feature: module.health`,
+which the kernel announces while it is loaded (it left `modapi.ClientModules` with this move).
+
+- **The seam**: `server/internal/healthhost`, in recording's shape: `Layer` (core -> module: `Routes`, `Tool`,
+  `ReminderLoop`, `Items`, `CardAction`, `WorkoutReceived`, `WorkoutReport`) and `Host` (module -> core: the settings rows, the intake store, the water extension's migration, the
+  apps' events, the language and time zone, standby and quiet push, the push with its card, and the extension page's
+  fitting). The module declares its own `Host` with the same methods and types (`server/internal/modules/health/host.go`),
+  so it imports no core service; `server/internal/modules/all/health.go` provides its layer under
+  `!persona_without_health && !persona_core_only`; its port is a `moduleswitch.Port`, so the `modules` row switches it
+  off as the other seams. The assistant makes the layer where it registered the routes before
+  (`server/internal/assistant/health_layer.go`), so routes, the tool's place in the list and the hello stay as they were.
+- **Shared with the core**: the entry's type is a contract (`assistantwire.HealthIntakeRow`, which `db.HealthIntakeRow`
+  aliases); the `health_intake` table and its SQL stay in `internal/db`; the tool's description stays in
+  `server/internal/prompts/mcp/health`. The Health *space* (its conversations' directory, policies and outbound
+  confirmation, `server/internal/assistant/health.go`) is core: every core tool's space check reads it.
+  Tell Health (#14714, `server/internal/assistant/health_tell.go`) also belongs to the core, alongside workout uploads:
+  it stores receipts and controls Health conversations, their delivery and their training-chat pointer. Its route
+  and `health_tell` capability remain available when the Health data module is absent or switched off.
+- **Tests**: the module's tests run on a fake core (`fakecore_test.go`); the water import's acceptance also runs on the
+  real SQL (`health (test) internal/db` in `module_services.txt`). The core's tests of how the module meets the rest of
+  the manager (the tool's space guard, the intake page fitted for older apps, the push outbox, the module's absence)
+  stay in `server/internal/assistant/health_module_test.go` and skip without the module (`needsHealthModule`).
+- **With the module absent** (`persona_without_health`, `persona_core_only`, or switched off in the `modules` row) the
+  nine routes (including health items GET/PUT) answer 404, the hello names neither `health_items` nor `health_intake`
+  (so the hub announces neither feature), the `health_intake` tool is not listed and refuses, and no
+  water reminder runs (`TestHealthFollowsItsModule`). The entries already stored stay in the database.
+  Health chat retains phone-data guidance but omits intake-item instructions. The `Items` seam reads the ordered
+  `health.items` setting (or computed defaults); item saves, tool logging and reminder planning share the module lock.
+  Strength training (#14713) adds `StrengthStore`, `CardShown`, `CardChanged` and `PageLink` to Host. Its contract types
+  live in `assistantwire`; the four strength tables and atomic draft/card changes remain in `internal/db`. The module
+  owns `health_strength`, its managed `health-strength-` cards and `strength.*` states under `-health-intake`.
+  The core dispatches reserved card actions before its generic outbox, persists strength workout windows through
+  `WorkoutReceived` before upload acknowledgment, and asks `WorkoutReport` for current inputs inside `runTask`.
+  `WorkoutReport` returns `assistantwire.StrengthReportPrompt` (the prompt and workout start time) so a successful
+  strength report can continue the training chat for the workout's local start day. Without the module, Tell Health
+  still opens Health conversations, but reports do not select training chats and instructions omit strength guidance.
+  No module, no added strength item, an unknown window or assembly errors keep the stored task prompt; other workouts
+  remain byte-identical. Module absence also removes `health_strength` from hello and refuses its card buttons, while
+  retaining all stored strength data. No additional page route or hub business logic is introduced.
+
+### Knowledge UI
+
+`knowledge-ui` (`server/internal/modules/knowledge-ui`, Go package `knowledgeui`, #14407) is the knowledge pages'
+pipelines that are not the core's memory (#13430 section 2): the import of the connectors' older chat history
+(`kbhistory`: the `kb_history_plan`, `kb_history_status`, `kb_history_stop` and `kb_history_resume` tools, the driver
+its loop runs, the chat lists of the selection page) and the marks of the lines a knowledge base day shows that the
+owner sent from Persona (`kbsent`, by the sent-as-user ledger). Its manifest declares `feature: module.knowledge-ui`,
+so the flag the clients gate the knowledge pages on is the kernel's to announce, no longer `modapi.ClientModules`'.
+
+- **The seam**: `server/internal/knowledgeuihost`, as recording's (`Layer`: core -> module; `Host`: module -> core,
+  in the standard library's, the knowledge base's and the contracts' types). `server/internal/modules/all/knowledgeui.go`
+  provides it under `!persona_without_knowledge_ui && !persona_core_only`, through a `moduleswitch.Port`; the assistant makes one layer per manager
+  (`internal/assistant/knowledge_ui.go`, `loadKnowledgeUI`) unless the `modules` row switches it off. The layer keeps
+  the import's shared state (one call in flight, the source running, the process's instance); the core keeps the
+  loop that wakes it on the knowledge base's schedule (`kbhistory_service.go`), the selection itself and its
+  candidates route, which asks the layer for the chats and what each would be read as.
+- **Shared with the core**: the knowledge base (`knowledge-ui internal/kb`, "Guards" above) and the sent-as-user row,
+  `connectorwire.SentAsUser` (`db.SentAsUser` is an alias). Prompts (`mcp/kb_history_*`) and strings stay where
+  they were.
+- **Tests**: the import's and the marks' own tests moved with them (`kbhistory`, `kbsent`); the assistant's tests of
+  the tools, the candidates route and the marked days through the Service stay in `internal/assistant`, read the
+  import's files from the knowledge base's directory and skip without the module (`needsKnowledgeUIModule`).
+- **With the module absent** (`persona_without_knowledge_ui`, `persona_core_only`, or switched off) the four
+  `kb_history_*` tools are not offered and answer as unknown, no import runs, `GET /api/v1/kb/selection/candidates`
+  answers that the source has no history (404) without asking it, a knowledge base day comes without sent marks
+  (`sent_origin` "unavailable"), and `module.knowledge-ui` is not announced (`TestKnowledgeUIFollowsItsModule`). What
+  an import wrote stays in the knowledge base.
 
 ### Lark
 
@@ -445,28 +633,76 @@ workbench, topics and pushes, about 10k lines) is moving into the `lark` module 
   with the same methods (`server/internal/modules/lark/layer.go`), so it imports no core service, and
   `server/internal/modules/all/lark.go` provides its layer under `!persona_without_lark && !persona_core_only`.
 - **The core asks the port**, `s.chat()` (`server/internal/assistant/lark.go`), never a `feishu*.go` function: a
-  core file that posts to the chat calls the port. The implementation still lives in `feishu*.go` and is served to the
-  module through the host under the port's names; each move takes code into the module and drops the host methods
-  it no longer needs, so the host only shrinks.
+  core file that posts to the chat calls the port. The transport that posts and edits cards (`feishu_transport.go`) still
+  lives in the core, because the cards, pushes, board and workbench pin that call it are still the core's, and it is
+  served to the module through the host under the port's names (the reply, reaction and message reads moved into the
+  module); each move takes code into the module and drops the host methods it no longer needs.
 - **The Feishu turns are the module's** (`server/internal/modules/lark/turn.go`, `cot.go`, `cot_worker.go`,
   `stream.go`): a Feishu run's progress card and CardKit entity, its agent message and the worker that writes it, and
   its answer. The channels' pipeline (the runs, their lock, finishing, folding and dropping them) stays in the core,
   which reaches the turns through `larkhost.Turns` (the core's `feishuSink` forwards to it). The module keeps its own
   state of each live run in the core's `chanLive.sink` (`Host.RunState`), which the core asks to `Abort` when it drops
   the run and to forget a held run's turn (`NextTurn`). What the turns read of the core is the host's second group of
-  methods: the channels' runs and their values under their lock, the hub's `feishu.*` transport, and what the core
-  still draws (the progress card's content, the answer's cards and the process panel, `feishu_progress.go` and
-  `feishu_answer.go`, which the core's own cards use too). The module's times (`timings.go`) come through
+  methods: the channels' runs and their values under their lock, the hub's `feishu.*` transport, and the run's live
+  notes (`Host.RunProgress`, `assistantwire.RunProgress`). The progress card, the folded process panel, the pieces note
+  and the answer's cards are the module's (`progress.go`, `answer.go`); the core's pushes and mirrors ask the layer for
+  the answer's cards and the note (`larkhost.Cards`: none without the module). The module's times (`timings.go`) come through
   `Host.Timings` from `assistant.Options.LarkTimings` and `LarkTimingLists`, a test and tuning knob as recording's;
   `Layer.Wait` waits for the agent messages' workers (the service waits for them when its connection ends).
+- **The workbench is the module's** (`server/internal/modules/lark/workbench.go`): `/home`, `/today` and `/inbox`,
+  their buttons and the home card, reached through `larkhost.Workbench`. The core gives it what it shows, in the
+  contract's terms (`assistantwire.WorkbenchItem`, `WorkbenchCounts`, `WorkbenchAgent`, `WorkbenchBoardRow`,
+  `WorkbenchCompanion`, `WorkbenchMeeting`; the Today card's JSON as stored), and does what its buttons ask (file or
+  mute an Inbox item, draft and send a reply, switch the chat's target, the other cards). The Inbox item a button names
+  is read by the Inbox core (`server/internal/assistant/inbox_workbench.go`); the counts by
+  `server/internal/assistant/workbench_view.go`.
+- **A to-do's topic lines are the module's** (`server/internal/modules/lark/thread_posts.go`): the queue (a line a
+  minute at most, what came meanwhile joined), the wording and the post under the topic's latest message. The module
+  implements the port's `ThreadPost`, so the host no longer serves it. It reads the to-do's Feishu thread, the bot's
+  status, the topic anchors (kept with the chat's state, `server/internal/modules/lark/chat_state.go`),
+  the to-do's link, and the core's clock and timer (`PostNow`, `PostLater`, which a to-do's source report waits on
+  too).
+- **The chat is the module's** (`server/internal/modules/lark/chat_state.go`, `message.go`, `commands.go`,
+  `card_actions.go`, `text_answer.go`, `read.go`, `models.go`, `elsewhere.go`, `thread.go`, `thread_open.go`,
+  `nudge.go`): its state (the settings row `bots.feishu.state`, read and written through the host's `Setting` and
+  `PutSetting`, with unchanged bytes: the values both sides name are `assistantwire.ChatTarget`, `ChatCard`,
+  `ChatCardRef`, `ChatBoardRef` and `CompanionBot`), the owner's messages and presses, the commands, the nudges, the
+  topics' messages and the to-dos they open. The core reaches it through `larkhost.Chat`: the hub's events
+  (`Message`, `Action`, `Owner`, `Recalled`, `View`, which the Service's `Feishu*` methods pass on), what the core asks
+  (`StatusKept`, `Route`, `SetTarget`, `RememberThread`, `Send`, `CardsWaiting`, `CardNudged`, `TopicAnchor`,
+  `LegacyRuns`, `NudgeTick`, which the core's nudge sweep runs once a minute) and `Book`, which runs a function on the
+  chat's records under its lock for the core's standing board, workbench pin and companion bots (it shrinks as they
+  move).
+  What the chat asks of the core is the host's chat group: where a target is and the run a message starts
+  (`feishu_route.go`, which other channels use too), an interaction answered or closed, an acceptance pressed, the
+  main conversation's model, and the to-do, decision and question ledgers of a topic (`TodoOfThread`, `ThreadRoutes`,
+  `TopicDecision`, `OpenTodo`), which stay in the core. The chat's times are module timings (`turn_wait`,
+  `topic_lookup_wait`, `card_answer_wait`, `start_card_window`, `form_window`), its clock the core's per-instance knob;
+  `Layer.Wait` also waits for the chat's messages being handled and the agents and forms a press starts.
+- **The agents' cards are the module's** (`server/internal/modules/lark/asks.go`, `ask_cards.go`): the card of a
+  question, a permission, a plan or a terminal dialog, where it goes, the card it becomes once over, and the cards
+  closed while their node is away. The core tells the chat through the interaction port, `larkhost.Asks`
+  (`AskAnnounced`, `AskPost`, `AskWanted`, `AskEnded`, `AskDetached`, `AskBack`, `AsksCatchUp`: nothing, and no card
+  wanted, without the module), next to the generic channels' own fan-out (`channelInteraction`). What a card says of
+  the core crosses as data, one value per question: `Host.AskView` (`assistantwire.AskView`: who asks, the task and
+  its direction, the conversation's page, the core's wording of the interaction; built in
+  `server/internal/assistant/ask_view.go`), `Host.AskRoute` (`assistantwire.AskRoute`: the runs of the chat on the
+  conversation, from the channels' runs), `Host.AskSensitive` (the exit policy of its words, asked only for a card the
+  chat does not drive with "all cards" on, since it may wait for the text to be tagged) and `Host.AskState` (the
+  core's live record: ended, still up). The module reads nothing else of the core for a card.
 - **Tests**: the turns' own tests run in the module on a fake core (`server/internal/modules/lark/service_test.go`:
-  the channels' runs, their finishing, folding and dropping, and the hub's transport); the assistant's tests of the
-  turns through the channels' pipeline stay in `internal/assistant` and skip without the module (`needsLarkLayer`).
+  the channels' runs, their finishing, folding and dropping, and the hub's transport; `chat_fake_test.go`: the chat's
+  host methods as the core answers the plain case); the assistant's tests of the turns through the channels' pipeline
+  stay in `internal/assistant` and skip without the module (`needsLarkLayer`), and its tests of the chat hand it the
+  owner's messages and presses as the hub does (`server/internal/assistant/lark_chat_test.go`); its tests of the
+  agents' cards drive the interaction port with the real core behind it
+  (`server/internal/assistant/lark_asks_test.go`).
 - **With the module absent** (`persona_without_lark`, `persona_core_only`) the port is `larkhost.None`, a bot switched
   off: its status reads without an error as neither on nor ready (so an acceptance ask is card-less and a briefing
   goes out by push, as with the bot off), it supports nothing, a post or a reply answers `larkhost.ErrNoChannel`, and
-  notes and thread lines are dropped.
-  The run-time `modules` switch does not cover it yet, as for mail.
+  notes and thread lines are dropped; the chat takes nothing, nothing waits in it, and its records are empty.
+  Switched off in the `modules` row it is the same: `larkhost`, `botport` and `cliport` all follow the switch ("The
+  switch").
 
 ### How to add a module
 
@@ -492,7 +728,14 @@ Each client documents its side in its own platform doc; these are pointers only.
   `docs/apple/ios.md`, "Modules" (#13849).
 - **Android** (#13433): `:core:moduleapi` and `:module:<id>`. See `docs/android/` (written with #13433).
 - **Web** (#13434, #13846): the module host `web/src/core/module-host.ts` and `web/src/modules/<id>/`, serving routes,
-  sidebar entries, chat slots, Settings categories and card renderers. See `docs/web/web.md` ("Modules").
+  sidebar entries, chat slots, Settings categories and card renderers. Shipped module switches are lasting browser
+  preferences in Settings › General › Optional features. The form reads the registry and the browser stores disabled
+  module ids in `persona.modules.off`. A core-only build has no module switches. See `docs/web/web.md` ("Modules").
+
+Web Labs admits temporary trials or a choice between stable and new implementations of one capability. A trial keeps
+the stable default and a lossless rollback, and links a tracking issue with a plan to graduate or remove it. Put
+permanent browser and advanced preferences in their owning Settings category. Keep irreversible changes, internal
+debug controls and placeholder demos out of Labs. See `docs/web/web.md` ("Labs").
 
 **Hub flags.** Every client switches modules on the hub's hello the same way (agreed on #13844): a module's `feature`
 is `module.<id>`; a hub that publishes module flags also announces the marker `modules`; a module with a `feature` is

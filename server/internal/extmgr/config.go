@@ -138,7 +138,7 @@ func loadConfig(dir, file string) (*Config, error) {
 		cfg.warnings = append(cfg.warnings, err.Error()+": lark is not read")
 		cfg.Lark = lark.Config{}
 	}
-	if cfg.Lark.CLI != nil && !cliport.Available() { // a build without the lark module (persona_without_lark)
+	if cfg.Lark.CLI != nil && !cliport.InBuild() { // a build without the lark module (persona_without_lark)
 		cfg.warnings = append(cfg.warnings, "lark.cli is not read: "+cliport.ErrUnavailable.Error())
 		cfg.Lark.CLI = nil
 	}

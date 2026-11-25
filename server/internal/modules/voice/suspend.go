@@ -184,6 +184,7 @@ func (c *conversation) pause(now time.Time) {
 	}
 	c.closeAsst()
 	c.closeUser()
+	c.closeReply(true)
 	c.owed = owedAnswer{} // nothing is owed by a session that is gone after a minute's quiet (nudge.go)
 	c.sendApp(map[string]any{"type": "link", "state": linkPaused})
 	if s.onHold {

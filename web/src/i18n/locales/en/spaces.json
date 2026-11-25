@@ -1,5 +1,8 @@
 {
   "sidebar": "Sidebar",
+  "extension_required_title": "Space Conversations isn't installed",
+  "extension_required_body": "Your existing spaces and conversations are kept. Install or enable Space Conversations to manage spaces here.",
+  "extension_install": "Open Extensions",
   "actions": "Space actions",
   "refresh": "Refresh",
   "history": "Past conversations",

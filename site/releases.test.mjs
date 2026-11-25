@@ -161,6 +161,27 @@ test("/releases/data.json reads GitHub once while fresh and serves only metadata
   assert.equal(edge.calls[0].init.headers["user-agent"], "persona-site");
 });
 
+test("/releases/data.json falls back to visible fixes after filtering feature notes", async (t) => {
+  const body = [
+    "* feat(ci): record phase timings",
+    "* fix(build): preserve the manifest",
+    "* fix(web): keep history after reconnect by @example in https://example.com/pull/1",
+  ].join("\n");
+  const edge = fakeEdge(() => Response.json([
+    release("v0.3.0", { body }),
+    release("v0.2.0", { body: body + "\n* feat(android): open the new board" }),
+  ]));
+  t.after(edge.restore);
+  const response = await get();
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  const fallback = data.releases.find((item) => item.tag === "v0.3.0");
+  assert.deepEqual(fallback.counts, { features: 1, fixes: 2, other: 0 });
+  assert.deepEqual(fallback.highlights, [{ scope: "web", title: "Keep history after reconnect" }]);
+  const withFeature = data.releases.find((item) => item.tag === "v0.2.0");
+  assert.deepEqual(withFeature.highlights, [{ scope: "android", title: "Open the new board" }]);
+});
+
 test("a stale copy outlives GitHub, marked; with no copy the route answers 503", async (t) => {
   let up = true;
   const edge = fakeEdge(() => (up ? Response.json([release("v0.3.0")]) : new Response("down", { status: 502 })));

@@ -355,7 +355,7 @@ func TestLarkSaysTheRecommendationMayHaveArrived(t *testing.T) {
 	inDoubt := i18n.T(s.botLang(ctx), answerInDoubtKeys["unknown"])
 	press := &botcard.CardAction{}
 	press.Action.Value = map[string]any{"a": "accept", "id": todo.ID}
-	if r := s.botCardAction(ctx, press, ""); r == nil || r.Toast == nil || r.Toast.Type != "error" || r.Toast.Content != inDoubt {
+	if r := s.larkModule().Action(ctx, press, ""); r == nil || r.Toast == nil || r.Toast.Type != "error" || r.Toast.Content != inDoubt {
 		t.Fatalf("the Lark button: %+v", r)
 	}
 	s.acceptReply(ctx, "om_ok", "OK", false, a.MessageID)

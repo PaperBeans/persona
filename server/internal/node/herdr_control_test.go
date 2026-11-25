@@ -157,8 +157,8 @@ func TestHerdrStartInTheProjectsWorkspace(t *testing.T) {
 		readVisible("w1:p2"), agentGet("w1:p2"), // ready once…
 		readVisible("w1:p2"), agentGet("w1:p2"), // …and twice
 		call("agent.rename", map[string]any{"target": "w1:p2", "name": "j-0e0000"}),
-		resumeHeld("w1:p2", startID, resumeCmd("claude", "--resume "+startID, personaDir(home)))[0],
-		resumeHeld("w1:p2", startID, resumeCmd("claude", "--resume "+startID, personaDir(home)))[1],
+		resumeHeld("w1:p2", startID, resumeCmd("claude", "--resume "+startID+" --effort high", personaDir(home)))[0],
+		resumeHeld("w1:p2", startID, resumeCmd("claude", "--resume "+startID+" --effort high", personaDir(home)))[1],
 		call("agent.prompt", map[string]any{"target": "w1:p2", "text": "fix the build"}),
 		call("session.snapshot", nil), // sessionFor
 	})

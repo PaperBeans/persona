@@ -47,7 +47,11 @@ const settle = async () => {
   for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 };
 const iso = (agoMs: number) => new Date(Date.now() - agoMs).toISOString();
-const todo = (id: string, title: string): Todo => ({ id, title, created_at: iso(7_200_000), updated_at: iso(3_600_000), agents: [] }) as unknown as Todo;
+const todo = (id: string, title: string): Todo => ({
+  id, title, created_at: iso(7_200_000),
+  // Make recency deterministic: constructing later rows with a fresh Date.now() can otherwise make b newer than a.
+  updated_at: iso(3_600_000 + (id.charCodeAt(0) - 97) * 1000), agents: [],
+}) as unknown as Todo;
 const todos = [todo("a", "Book the dentist"), todo("b", "Renew the passport"), todo("c", "Water the plants"), todo("d", "Pay the rent")];
 const seed = (patch: Record<string, unknown>) => Object.assign(getState() as unknown as Record<string, unknown>, patch);
 const before = { ...getState() };
@@ -166,8 +170,11 @@ describe("side by side", () => {
   it("still shows the first row's page beside the list", async () => {
     screen.width = 1280;
     await mount("/todos");
-    expect(current()).toEqual(["a"]);
-    // its page reads them once it has drawn, which a loaded machine can take past settle()
-    await vi.waitFor(() => expect(loaded()).toEqual(["a"]), { timeout: 5000 });
+    // Selection and its page reads can settle after the fixed loop on a loaded machine. Observe both under one
+    // deadline: two sequential 5 s waits would exceed Vitest's unchanged 5 s whole-test budget.
+    await vi.waitFor(() => {
+      expect(current()).toEqual(["a"]);
+      expect(loaded()).toEqual(["a"]);
+    }, { timeout: 4500 });
   });
 });

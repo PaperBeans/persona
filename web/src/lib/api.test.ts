@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initI18n, t } from "../i18n";
-import { api, apiBlob, ApiError, errorText, isTransient } from "./api";
+import { api, apiBlob, ApiError, CLIENT_FEATURES, errorText, isTransient } from "./api";
 import { isOfflineError } from "./feedback";
 import { sessionLoadError } from "./session-link";
 
@@ -56,6 +56,16 @@ describe("readable hub errors", () => {
   ])("explains missing content or an unsupported endpoint: %s", (error) => {
     expect(errorText(error)).toBe(t("lib-api.not_found", { detail: `HTTP ${error.status}: ${error.message}` }));
     expect(errorText(error)).toContain(error.message);
+  });
+
+  it("declares client features including tool_views on REST requests unless overridden", async () => {
+    expect(CLIENT_FEATURES).toContain("tool_views");
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response("{}", { status: 200 })));
+    vi.stubGlobal("fetch", fetch);
+    await api("/sessions/m/s/items", { token: "test-token" });
+    expect(new Headers(fetch.mock.calls[0][1].headers).get("X-Persona-Features")).toContain("tool_views");
+    await api("/sessions/m/s/messages", { token: "test-token", headers: { "X-Persona-Features": "agent_message_hold" } });
+    expect(new Headers(fetch.mock.calls[1][1].headers).get("X-Persona-Features")).toBe("agent_message_hold");
   });
 
   it.each([500, 501, 505, 599])("explains HTTP %s without discarding the server's reason", (status) => {

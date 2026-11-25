@@ -97,6 +97,96 @@ func idleCompactAwait(t *testing.T, done <-chan error) {
 	}
 }
 
+const emptyCompactionResult = `{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["Error during compaction: summarization produced empty response"]}`
+
+func TestMainIdleReleaseCompactionReportsEmptySummary(t *testing.T) {
+	n, p, sink := idleCompactFixture(t)
+	previous, _ := n.state.get(p.id)
+	p.lastActive = time.Now().Add(-time.Hour)
+	p.compactIdleAt = p.context
+	n.sweepAssistants()
+	st, _ := n.state.get(p.id)
+	if st.Compaction == nil || st.Compaction.State != proto.CompactionRunning || !strings.Contains(sink.String(), `"/compact"`) {
+		t.Fatalf("release did not report its compaction: %+v", st.Compaction)
+	}
+	idleCompactStream(n, p, emptyCompactionResult)
+	n.state.put(p.id, previous)
+	st, _ = n.state.get(p.id)
+	if st.Compaction == nil || st.Compaction.State != proto.CompactionFailed || !strings.Contains(st.Compaction.Error, "summarization produced empty response") {
+		t.Fatalf("release lost the provider's reason: %+v", st.Compaction)
+	}
+	p.lastActive = time.Now().Add(-time.Hour)
+	n.sweepAssistants()
+	if got := strings.Count(sink.String(), `"/compact"`); got != 1 {
+		t.Fatalf("the reaper repeated /compact %d times", got)
+	}
+}
+
+func TestEmptyIdleCompactionRetriesOnceOnALaterDelivery(t *testing.T) {
+	n, p, sink := idleCompactFixture(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	source := &proto.MessageSource{Kind: proto.SourceSupervision}
+	deliver := func() error { return idleCompactCall(ctx, n, p, idleCompactPolicy, source) }
+	failAttempt := func() {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() { done <- deliver() }()
+		select {
+		case <-sink.compact:
+		case <-time.After(3 * time.Second):
+			t.Fatal("eligible delivery did not start /compact")
+		}
+		idleCompactStream(n, p, emptyCompactionResult)
+		idleCompactAwait(t, done)
+		idleCompactStream(n, p, `{"type":"result","subtype":"success"}`)
+	}
+	ageAndRestore := func() {
+		t.Helper()
+		st, _ := n.state.get(p.id)
+		if st.Compaction == nil || st.Compaction.State != proto.CompactionFailed {
+			t.Fatalf("compaction outcome was not saved: %+v", st.Compaction)
+		}
+		finished := time.Now().Add(-10 * time.Minute)
+		run, idle := *st.Compaction, *st.IdleCompaction
+		run.StartedAt, run.FinishedAt = finished.Add(-time.Second), &finished
+		idle.AttemptStartedAt = run.StartedAt
+		st.Compaction, st.IdleCompaction = &run, &idle
+		raw, err := json.Marshal(st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored sessionState
+		if err := json.Unmarshal(raw, &restored); err != nil {
+			t.Fatal(err)
+		}
+		n.state.update(p.id, func(st *sessionState) bool {
+			*st = restored
+			return true
+		})
+	}
+	failAttempt()
+	if err := deliver(); err != nil {
+		t.Fatal(err)
+	}
+	idleCompactStream(n, p, `{"type":"result","subtype":"success"}`)
+	if got := strings.Count(sink.String(), `"/compact"`); got != 1 {
+		t.Fatalf("retried before the delay: %d", got)
+	}
+	ageAndRestore()
+	failAttempt()
+	ageAndRestore()
+	if err := deliver(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(sink.String(), `"/compact"`); got != 2 {
+		t.Fatalf("bounded recovery issued %d compactions, want 2", got)
+	}
+	if got := strings.Count(sink.String(), "background wake"); got != 4 {
+		t.Fatalf("delivered %d of 4 unattended messages", got)
+	}
+}
+
 // This exercises assistant.send all the way to Claude's stdin, not just the
 // policy helper: removing the send hook makes it fail waiting for /compact.
 func TestIdleCompactionBeforeUnattendedDelivery(t *testing.T) {

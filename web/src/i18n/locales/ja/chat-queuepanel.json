@@ -6,6 +6,7 @@
   "relayed_from": "別の会話",
   "relayed_from_chat": "「{chat}」から",
   "relayed_note": "この会話が空いたら届きます",
+  "relayed_note_no_wake": "次のメッセージと一緒に届きます",
   "relayed_summary_other": "別の会話からのメッセージ {count} 件",
   "drag": "キューの{n}件目をドラッグして並べ替え",
   "send_now": "今すぐ送信",

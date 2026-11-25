@@ -78,6 +78,7 @@ func (s *Service) queueAdmissionRefusal(planID string, i int, t PlanTask, err er
 	if perr := s.patchPlanTask(ctx, planID, i, func(pt *PlanTask) {
 		q := admissionQueueEntry(now, reason, key, retry, pt.Queue)
 		pt.Queue = &q
+		pt.Placement = queuedPlacement(t, &q)
 		pt.Error = ""
 		pt.ErrorCode, pt.ErrorArgs = "", nil
 	}); perr != nil {

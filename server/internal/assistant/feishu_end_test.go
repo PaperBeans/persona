@@ -191,6 +191,7 @@ func TestFeishuHeldRunQuietEndWithoutItsCard(t *testing.T) {
 // An unrelated user turn ends the held wait without an answer or a quiet-ending card, even while background work
 // remains. Reaction cleanup still uses the normal sink; no conversation content is posted back to the chat.
 func TestFeishuHeldRunUnrelatedUserTurnSaysNothing(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, r, posts := heldRunWithoutCard(t)
 	sess := proto.Session{Status: proto.StatusDone, State: proto.StateIdle, MachineID: "server", SessionID: "c1",
 		Background: []proto.BackgroundTask{{ID: "background-work", Kind: "shell"}}}
@@ -324,6 +325,7 @@ func cardFooters(t *testing.T, card string) int {
 
 // A quiet ending is not always one to report: a message the owner recalled says nothing, with a card or without one.
 func TestFeishuRecalledEndWithoutItsCardSaysNothing(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, _, r, posts := endHub(t)
 	s.chans.mu.Lock()
 	delete(r.Ext, "card") // recalled before its first progress card
@@ -339,6 +341,7 @@ func TestFeishuRecalledEndWithoutItsCardSaysNothing(t *testing.T) {
 // A recalled message whose progress card cannot be written any more says nothing too: the ending is not posted as a
 // card of its own.
 func TestFeishuRecalledEndWithARefusedCardSaysNothing(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, r, posts := endHub(t)
 	f.answerApp(AppFeishu, FeishuUpdateCard, func(json.RawMessage) (any, error) {
 		return nil, errors.New("feishu update card: 230025 card is not a card")

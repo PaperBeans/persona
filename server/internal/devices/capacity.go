@@ -141,3 +141,12 @@ func (d *Devices) CapacitySnapshot(ctx context.Context) proto.CapacitySnapshot {
 	accounts := d.usageWin.poll(ctx, d.usageSources(), now)
 	return buildCapacitySnapshot(inventory, accounts, now)
 }
+
+// UsageAccounts is the merged usage accounts with their windows (what GET /api/v1/usage/windows lists before display
+// filtering), for the hub's own pace-based headroom (assistant candidate_headroom.go). Like CapacitySnapshot it reads
+// through usageWin.poll's short single-flight cache and never causes an upstream gateway read. The caller owns the
+// slice; its rows' Windows are shared and must not be written into.
+func (d *Devices) UsageAccounts(ctx context.Context) []proto.UsageAccount {
+	accounts := d.usageWin.poll(ctx, d.usageSources(), time.Now())
+	return append([]proto.UsageAccount(nil), accounts...)
+}

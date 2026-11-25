@@ -89,6 +89,8 @@ Broadcast `assistant_view` with payload `{conversation, view: {id, version, view
 
 At most 64 KB per card, 200 cards per chat. Persist content first; push events are limited to once per second per card. Coalesce only notifications, never merely queue unsaved content in memory. Creation and updates do not send separate notifications; the assistant uses notify_user when the user needs reminding.
 
+A live card is for this conversation: its progress, a choice, a form. What the owner comes back to over days (a streak, a reading list, a weekly watch) is a dashboard instead: the `page` tool drafts a page with the same View, offered on a preview card made through `view_show`'s path, and kept in the sidebar once the owner taps Keep on it ([dashboards.md](dashboards.md)). That preview card is the hub's: `view_update` refuses it, and `page update` redraws it while the page is a draft.
+
 ## Free-form HTML rendering
 
 Add an `html` component to the schema: `{type: "html", html, height?, title?}`, self-contained HTML, at most 64 KB, height 160–640 (default 320). This is assistant-only and does not execute in extensions. On the web the frame shrinks to shorter content, so `height` is the most it takes there.

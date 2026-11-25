@@ -55,7 +55,6 @@ var inboxBookReaders = map[string]struct {
 	seam  string
 }{
 	"context.go":               {3, "followingInboxItems: the Reader's following items"},
-	"feishu_workbench.go":      {1, "workbenchItem: the Reader's item copy, and Actions for the workbench's writes"},
 	"origins.go":               {1, "gatherOriginEvidence: the Reader's origin evidence"},
 	"service.go":               {2, "the inbox field, and s.inbox.lang until the #8584 repair PRs land (step S4)"},
 	"tasks_draft_decisions.go": {5, "the Reader's card-send lock and item copy (deferred from step S3)"},

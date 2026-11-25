@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -117,6 +118,7 @@ internal suspend fun extensionNotificationLockedAfterUnlockSettles(
 fun ExtensionUiPage(extensions: ExtensionManagement?, extensionId: String, uiId: String, title: String, onBack: () -> Unit,
                     initialState: String? = null, depth: Int = 0, shown: Boolean = true, availableAdapter: NativeExtensionStreamAdapter? = null,
                     onPush: (ExtensionUiRoute) -> Unit = {}, manager: String? = null, onAsk: ((String) -> Unit)? = null,
+                    onConversation: ((String, String) -> Unit)? = null,
                     notificationActionToken: String? = null,
                     notificationIntent: Intent? = null,
                     notificationStore: ExtensionNotificationActionStore = ExtensionNotificationActionStore.shared,
@@ -171,14 +173,15 @@ fun ExtensionUiPage(extensions: ExtensionManagement?, extensionId: String, uiId:
     val pageManager = notification?.record?.scope?.manager ?: manager
     val pageState = notification?.record?.state ?: initialState
     val requiresHttp = notification?.requiresHttp == true
-    // The source subscription pages (#2041) and foreground notification actions are drawn over HTTP only.
+    // The source subscription pages (#2041), foreground notification actions and the hub's own ids ("-pages", #15017) are
+    // drawn over HTTP only.
     val defaultBinding = extensions?.nativeStream?.collectAsState(initial = null)?.value
-        ?.takeUnless { extensionId == SUBSCRIPTIONS_UI || requiresHttp }
+        ?.takeUnless { extensionId == SUBSCRIPTIONS_UI || requiresHttp || DashboardPages.httpOnly(extensionId) }
     val binding = remember(defaultBinding, pageManager) { nativePageBinding(defaultBinding, pageManager) }
     val owned = if (availableAdapter == null && binding != null && !requiresHttp) androidx.lifecycle.viewmodel.compose.viewModel(
         key = "native-extension:${binding.group}:${binding.owner}:${binding.manager}:${System.identityHashCode(binding.connection)}:$extensionId:$uiId:$depth",
         initializer = { ExtensionUIStreamController(binding, extensionId, uiId, pageState.orEmpty()) }) else null
-    val adapter = if (requiresHttp) null else availableAdapter ?: owned?.adapter
+    val adapter = if (requiresHttp || DashboardPages.httpOnly(extensionId)) null else availableAdapter ?: owned?.adapter
     if (owned != null) SideEffect { owned.adapter.shown = shown }
     val nativeState = adapter?.session?.state?.collectAsState()?.value
     val nativeNotice = nativeState?.unsupported?.isNotEmpty() == true
@@ -212,12 +215,18 @@ fun ExtensionUiPage(extensions: ExtensionManagement?, extensionId: String, uiId:
     val scope = rememberCoroutineScope()
     val ask = onAsk
     val handle = rememberExtensionView(model, appLink = { url ->
+        val conversation = if (extensionId == "space-conversations") ExtensionViewText.spaceConversation(url) else null
+        if (conversation != null && onConversation != null) {
+            onConversation(conversation.first, conversation.second)
+            true
+        } else {
         // Set Up with … is only answered here, and only from these pages. Close the page, then hand the text on.
         val text = ExtensionViewText.askFrom(extensionId, url) ?: return@rememberExtensionView false
         val send = ask ?: return@rememberExtensionView false
         onBack()
         send(text)
         true
+        }
     }, onPush = { push ->
         ExtensionViewText.pushed(extensionId, uiId, title, depth, push, pageManager)?.let { model.covered(); onPush(it) }
     }, onPop = onBack)
@@ -235,10 +244,13 @@ fun ExtensionUiPage(extensions: ExtensionManagement?, extensionId: String, uiId:
     // one the extension invalidated (ui.invalidate) at once or when it shows again, and one back from a page pushed on it.
     KeepFresh(model, extensions.uiEvents)
     val view = state.view
+    val placeName = stringResource(R.string.settings_dashboards_title)
+    val header = DashboardPages.headerTitle(extensionId, uiId, view?.title, title) { placeName }
     // UI version 8: a columns view takes the pane's whole width, as many columns of cards as it has room for
     ExtensionPageWidth(view) { columns, fullWidth ->
-        JListPage(title = view?.title?.takeIf { it.isNotBlank() } ?: title, onBack = barBack, largeTitle = false,
+        JListPage(title = header, onBack = barBack, largeTitle = false,
             refreshing = state.loading && view != null, onRefresh = { scope.launch { model.load() } }, fullWidth = fullWidth) {
+            if (DashboardPages.showsOwner(extensionId, uiId)) item("page-owner") { DashboardOwnerLine() }
             if (nativeNotice) item("native-unsupported") { JNotice(stringResource(R.string.settings_ext_native_unsupported)) }
             viewStatus("page", state, onRetry = { scope.launch { model.load() } })
             if (view != null && view.sections.none { it.items.any(ExtensionViewText::drawable) }) item("page-empty") {
@@ -248,6 +260,16 @@ fun ExtensionUiPage(extensions: ExtensionManagement?, extensionId: String, uiId:
             item("page-end") { Spacer(Tokens.Space.xl) }
         }
     }
+}
+
+/**
+ * Who keeps a Dashboards page (#15017), one line under its header at every width: the app's own words, so a page the
+ * assistant drew cannot pass for one of the app's own screens.
+ */
+@Composable
+private fun DashboardOwnerLine() {
+    Text(stringResource(R.string.settings_dashboards_owner), Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.xs, vertical = Tokens.Space.xs),
+        style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)
 }
 
 /** Loading, an error with "Retry" when there is nothing to show yet, or the error above what is shown. */

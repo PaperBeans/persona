@@ -53,5 +53,15 @@
   "file_waiting": "Waiting",
   "file_failed": "Failed · click to retry",
   "file_cancel": "Cancel upload of {name}",
-  "file_retry": "Retry {name}"
+  "file_retry": "Retry {name}",
+  "confirm_run_title": "Run {word}?",
+  "confirm_ok": "Confirm",
+  "confirm_cancel": "Cancel",
+  "drop_here": "Drop images or files here",
+  "pasted_preview_hint": "Click to preview or expand into input",
+  "pasted_chip_one": "Pasted text · {count} char",
+  "pasted_chip_other": "Pasted text · {count} chars",
+  "pasted_remove": "Remove pasted text",
+  "pasted_stats": "{lines} lines · {chars} chars",
+  "pasted_expand": "Expand into input"
 }

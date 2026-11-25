@@ -76,6 +76,7 @@ struct AgentsListMenu: View {
     private var shownGrouping: DevGrouping { DevGrouping.resolvedNow(grouping) }
     private var groupingChoice: Binding<DevGrouping> { Binding(get: { shownGrouping }, set: { grouping = $0 }) }
     @StoredValue("dev.sort") private var sort: AgentSort = .state
+    @StoredValue("dev.showEmptyWorkspaces") private var showEmptyWorkspaces = false
     #if os(iOS)
     /// The rows' style or Compact List (#2530), as Settings › Appearance › Layout sets it.
     private let display = AgentListDisplayChoice()
@@ -151,6 +152,11 @@ struct AgentsListMenu: View {
                     ForEach(model.groupIDs, id: \.self) { g in
                         Label(model.groupName(g), systemImage: Theme.Icon.hubGroup).tag(HubFilter.value(g))
                     }
+                }
+            }
+            if shownGrouping == .repo {
+                Toggle(isOn: $showEmptyWorkspaces) {
+                    Label("Show empty workspaces", systemImage: Theme.Icon.folder)
                 }
             }
             Button(actions.showingHidden ? String(localized: "Hide directory matches") : String(localized: "Show hidden sessions")) {

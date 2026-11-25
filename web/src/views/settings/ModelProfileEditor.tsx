@@ -3,14 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { api } from "../../lib/api";
+import { launcherBindingState, useCanonicalLauncherBinding } from "../../lib/launcher-model-binding";
+import { takesEffort } from "../../lib/launcher-models";
 import { MANAGER_HEADER } from "../../lib/manager-choice";
 import { providerAgent, type ModelBinding, type ModelProvider, type ModelPurpose } from "../../lib/model-config";
-import { chooseProvider, effortOffered, modelConfiguration, permissionModesForLauncher, permissionModesForProvider } from "../../lib/model-config-execution";
+import { chooseProvider, effortOffered, modelConfiguration, permissionModesForLauncher, permissionModesForProvider, supportsField } from "../../lib/model-config-execution";
 import {
   draftToProfileInput,
   isProfileDraftDirty,
   profileDraftProblems,
   profileToDraft,
+  type CandidateDraftEntry,
   type LauncherDraftEntry,
   type ProfileDraft,
   type PurposeDraftEntry,
@@ -21,9 +24,13 @@ import {
   MAX_MODEL_TIERS,
   MAX_PROFILE_DESCRIPTION,
   MAX_PROFILE_NAME,
+  MAX_TIER_CANDIDATES,
   MAX_TIER_DESCRIPTION,
+  modelProfileCandidates,
   type LauncherModelField,
   type ModelProfile,
+  type ModelProfileCandidates,
+  type ModelProfileCandidateStatus,
   type ModelProfileSaveInput,
 } from "../../lib/model-profiles";
 import { namedLauncher, namesFromProviders, providerIdNote, providerLabel, providerTitle, type Named } from "../../lib/provider-names";
@@ -80,30 +87,39 @@ export function ModelProfileEditor({
   manager,
   profile,
   revision,
+  syncKey = 0,
   purposes: propPurposes,
   providers: propProviders,
   busy,
+  saving,
+  capturing,
   error,
   conflict,
   onSave,
+  onCapture,
   onReload,
   onCancel,
 }: {
   manager: string;
   profile: ModelProfile;
   revision: number;
+  syncKey?: number;
   purposes?: ModelPurpose[];
   providers?: ModelProvider[];
   busy: boolean;
+  saving?: boolean;
+  capturing?: boolean;
   error: string;
   conflict: boolean;
   onSave: (input: ModelProfileSaveInput) => Promise<void>;
+  onCapture?: () => Promise<void>;
   onReload: () => Promise<void>;
   onCancel: () => void;
 }) {
   const [fetchedPurposes, setFetchedPurposes] = useState<ModelPurpose[] | undefined>(undefined);
   const [fetchedProviders, setFetchedProviders] = useState<ModelProvider[] | undefined>(undefined);
   const [managedLaunchers, setManagedLaunchers] = useState<ManagedLauncherInfo[]>([]);
+  const [candidateStatus, setCandidateStatus] = useState<ModelProfileCandidates | null>(null);
   const [addingLauncher, setAddingLauncher] = useState("");
   const tierCounter = useRef(0);
 
@@ -142,12 +158,25 @@ export function ModelProfileEditor({
     return () => controller.abort();
   }, [manager]);
 
+  // Fetch per-candidate headroom and recent efficiency stats; hidden cleanly when an older hub returns 404.
+  useEffect(() => {
+    const controller = new AbortController();
+    modelProfileCandidates(profile.id, manager, { signal: controller.signal })
+      .then((res) => {
+        if (!controller.signal.aborted) setCandidateStatus(res);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCandidateStatus(null);
+      });
+    return () => controller.abort();
+  }, [profile.id, manager]);
+
   const catalogIds = useMemo(() => purposes.map((p) => p.id), [purposes]);
-  const initialDraft = useMemo(() => profileToDraft(profile, catalogIds), [profile, revision]);
+  const loadedKey = `${profile.id}:${revision}:${syncKey}`;
+  const initialDraft = useMemo(() => profileToDraft(profile, catalogIds), [profile, loadedKey]);
   const [draft, setDraft] = useState<ProfileDraft>(() => initialDraft);
 
-  // Reset the draft only when opening a different profile or after an explicit reload bumps revision.
-  const loadedKey = `${profile.id}:${revision}`;
+  // Reset the draft only when opening a different profile or after an explicit reload/capture bumps revision/syncKey.
   const prevKey = useRef(loadedKey);
   useEffect(() => {
     if (prevKey.current !== loadedKey) {
@@ -254,12 +283,27 @@ export function ModelProfileEditor({
       launcherProviders[0]?.id.slice("launcher.".length) ??
       managedLaunchers.find((l) => l.kind !== "api")?.name ??
       "claude";
-    const key = `new-tier-${++tierCounter.current}`;
+    const id = ++tierCounter.current;
+    const key = `new-tier-${id}`;
     setDraft((prev) => ({
       ...prev,
       tiers: [
         ...prev.tiers,
-        { key, name: "", launcher: defaultLauncher, model: "", effort: "", permission_mode: "", speed: "", description: "" },
+        {
+          key,
+          name: "",
+          description: "",
+          candidates: [
+            {
+              key: `${key}-cand-0`,
+              launcher: defaultLauncher,
+              model: "",
+              effort: "",
+              permission_mode: "",
+              speed: "",
+            },
+          ],
+        },
       ],
     }));
   };
@@ -284,16 +328,35 @@ export function ModelProfileEditor({
   };
 
   const chatEffortKnown = providers.some((p) => p.chat_effort === true);
+  const launcherPurposes = purposes.filter((p) => p.kind === "launcher" && Array.isArray(p.fields));
+  // Hide permission_mode on empty tiers when the hub's launcher purposes omit permission_mode (cross-version hubs).
+  const hubSupportsPermissionMode = launcherPurposes.length === 0 || launcherPurposes.some((p) => supportsField(p, "permission_mode"));
   const purposeIds = Object.keys(draft.purposes);
   const launcherNames = Object.keys(draft.launchers).sort((a, b) => a.localeCompare(b));
 
   return (
     <div data-testid="model-profile-editor" className="flex flex-col gap-5">
-      <p className="rounded-control bg-inset px-3 py-2 text-label leading-relaxed text-ink-2">
-        {profile.active
-          ? t("settings-modelprofiles.save_note_active")
-          : t("settings-modelprofiles.save_note_inactive")}
-      </p>
+      <div className="flex flex-col gap-2 rounded-control bg-inset px-3 py-2.5 text-label leading-relaxed text-ink-2">
+        <p>
+          {profile.active
+            ? t("settings-modelprofiles.save_note_active")
+            : t("settings-modelprofiles.save_note_inactive")}
+        </p>
+        {onCapture && (
+          <div>
+            <Button
+              tone="secondary"
+              size="sm"
+              testId="profile-editor-capture-button"
+              busy={capturing}
+              disabled={busy}
+              onClick={() => void onCapture()}
+            >
+              {t("settings-modelprofiles.capture_from_current")}
+            </Button>
+          </div>
+        )}
+      </div>
 
       {/* Profile identity */}
       <div className="flex flex-col gap-3">
@@ -339,6 +402,7 @@ export function ModelProfileEditor({
                 id={id}
                 title={categoryTitle(id, purposes)}
                 purpose={catalogPurpose}
+                parent={purposes.find((p) => p.id === catalogPurpose.parent)?.effective}
                 providers={providers}
                 chatEffortKnown={chatEffortKnown}
                 manager={manager}
@@ -424,6 +488,7 @@ export function ModelProfileEditor({
           <Button
             tone="secondary"
             size="sm"
+            className="whitespace-nowrap"
             disabled={busy || draft.tiers.length >= MAX_MODEL_TIERS}
             onClick={addTier}
           >
@@ -441,7 +506,9 @@ export function ModelProfileEditor({
                 providers={providers}
                 launcherProviders={launcherProviders}
                 providerNames={providerNames}
+                candidateStatus={candidateStatus}
                 manager={manager}
+                hubSupportsPermissionMode={hubSupportsPermissionMode}
                 busy={busy}
                 onChange={(patch) => updateTier(tier.key, patch)}
                 onRemove={() => removeTier(tier.key)}
@@ -451,38 +518,41 @@ export function ModelProfileEditor({
         )}
       </section>
 
-      {/* Inline validation problems */}
-      {problems.length > 0 && (
-        <ul role="alert" data-testid="profile-editor-problems" className="flex flex-col gap-1 rounded-control bg-field px-3 py-2 text-label text-red">
-          {problems.map((msg, i) => (
-            <li key={i}>{msg}</li>
-          ))}
-        </ul>
-      )}
-
-      {/* Server/action error and 409 reload */}
-      {error && <p role="alert" className="text-label text-red">{error}</p>}
-      {conflict && (
-        <div>
-          <Button tone="secondary" disabled={busy} onClick={() => void onReload()}>
-            {t("settings-modelprofiles.reload_discard")}
+      {/* Sticky save bar: keeps Save and any validation/save/409 errors adjacent and always visible on long forms. */}
+      <div
+        data-testid="profile-editor-save-bar"
+        className="sticky bottom-0 z-10 -mx-4 -mb-4 flex flex-col gap-2 border-t border-line bg-inset px-4 py-2.5 max-sm:pb-[calc(10px+env(safe-area-inset-bottom))]"
+      >
+        {problems.length > 0 && (
+          <ul role="alert" data-testid="profile-editor-problems" className="flex max-h-24 flex-col gap-1 overflow-y-auto rounded-control bg-field px-3 py-2 text-label text-red">
+            {problems.map((msg, i) => (
+              <li key={i}>{msg}</li>
+            ))}
+          </ul>
+        )}
+        {error && (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p role="alert" data-testid="profile-save-error" className="min-w-0 flex-1 text-label text-red">{error}</p>
+            {conflict && (
+              <Button tone="secondary" size="sm" disabled={busy} onClick={() => void onReload()}>
+                {t("settings-modelprofiles.reload_discard")}
+              </Button>
+            )}
+          </div>
+        )}
+        <div className="flex items-center justify-end gap-2">
+          <Button tone="quiet" disabled={busy} onClick={onCancel}>
+            {t("common.cancel")}
+          </Button>
+          <Button
+            tone="primary"
+            busy={saving ?? busy}
+            disabled={!canSave || (!dirty && !conflict)}
+            onClick={handleSave}
+          >
+            {t("settings-modelprofiles.save")}
           </Button>
         </div>
-      )}
-
-      {/* Footer actions inside editor */}
-      <div className="flex items-center justify-end gap-2 border-t border-line pt-3">
-        <Button tone="quiet" disabled={busy} onClick={onCancel}>
-          {t("common.cancel")}
-        </Button>
-        <Button
-          tone="primary"
-          busy={busy}
-          disabled={!canSave || (!dirty && !conflict)}
-          onClick={handleSave}
-        >
-          {t("settings-modelprofiles.save")}
-        </Button>
       </div>
     </div>
   );
@@ -492,6 +562,7 @@ function PurposeBindingCard({
   id,
   title,
   purpose,
+  parent,
   providers,
   chatEffortKnown,
   manager,
@@ -502,6 +573,7 @@ function PurposeBindingCard({
   id: string;
   title: string;
   purpose: ModelPurpose;
+  parent?: ModelBinding;
   providers: ModelProvider[];
   chatEffortKnown: boolean;
   manager: string;
@@ -510,11 +582,12 @@ function PurposeBindingCard({
   onChange: (patch: Partial<PurposeDraftEntry>) => void;
 }) {
   const [expanded, setExpanded] = useState(entry.included);
-  const runsOn = entry.provider || purpose.effective?.provider || "";
+  const inherited = parent ?? purpose.effective;
+  const runsOn = entry.provider || inherited?.provider || "";
   const chosen = providers.find((v) => v.id === runsOn);
   const effectiveProvider = providers.find((v) => v.id === purpose.effective?.provider);
   const isDirectApi = chosen?.kind === "api";
-  const listProvider = entry.included && expanded && chosen?.kind === "launcher" ? chosen.id : "";
+  const listProvider = entry.included && chosen?.kind === "launcher" ? chosen.id : "";
   const { list: launcherList, reload: reloadLauncher, hasPicker } = useLauncherModels(listProvider, {
     manager,
     machine: purpose.machine_id,
@@ -523,7 +596,16 @@ function PurposeBindingCard({
   const effortAllowed = effortOffered(purpose, chosen, effectiveProvider, false, chatEffortKnown);
   const chosenAgent = launcherList.list?.agent || providerAgent(chosen, runsOn);
   const permissionModes = !isDirectApi ? permissionModesForProvider(purpose, chosen, chosenAgent) : [];
-  const followed: ModelBinding = !entry.provider && purpose.effective?.model ? { model: purpose.effective.model } : {};
+  const followed: ModelBinding = {
+    model: (runsOn === inherited.provider ? inherited.model : undefined) || chosen?.model,
+    effort: runsOn === inherited.provider ? inherited.effort : chosen?.effort,
+  };
+  const allowOff = purpose.kind === "api" || id === "inbox.triage";
+  const binding = launcherBindingState(launcherList.list, entry, followed, {
+    allowed: allowOff ? ["off", ...EFFORT_LEVELS] : EFFORT_LEVELS,
+    allowUnknown: allowOff || takesEffort(chosenAgent, chosen) || chosenAgent === "codex",
+  });
+  useCanonicalLauncherBinding(binding.legacy, onChange);
 
   const summary = !entry.included
     ? t("settings-modelprofiles.purpose_unchanged")
@@ -531,8 +613,8 @@ function PurposeBindingCard({
         entry.provider
           ? (providers.find((v) => v.id === entry.provider)?.name ?? entry.provider)
           : t("settings-modelprofiles.purpose_follow_default"),
-        entry.model,
-        entry.effort && effortTitle(entry.effort),
+        binding.model,
+        binding.value && effortTitle(binding.value),
         entry.permission_mode && modeTitle(entry.permission_mode),
       ]
         .filter(Boolean)
@@ -604,8 +686,9 @@ function PurposeBindingCard({
                 models={launcherList}
                 hasPicker={hasPicker}
                 onReload={reloadLauncher}
-                model={entry.model}
+                model={binding.model}
                 followed={followed}
+                defaultLabel={t("settings-modelconfiguration.follow_default")}
                 disabled={busy}
                 ariaLabel={`${title} ${t("settings-modelconfiguration.specific_model")}`}
                 placeholder={chosen?.model || purpose.effective?.model || t("settings-modelconfiguration.follow_default")}
@@ -616,7 +699,7 @@ function PurposeBindingCard({
                       ? t("settings-modelconfiguration.picker_hint_provider")
                       : t("settings-modelconfiguration.picker_hint_inherit")
                 }
-                onChange={(model) => onChange({ model })}
+                onChange={(model) => onChange(binding.pickModel(model))}
               />
             </div>
           )}
@@ -624,15 +707,14 @@ function PurposeBindingCard({
           {effortAllowed && (
             <ProfileEffortSelect
               chosen={chosen}
-              kind={purpose.kind === "api" ? "api" : "launcher"}
-              launcherList={launcherList}
+              launcherBinding={binding}
               discoveredModels={apiModels.models}
               model={entry.model}
               followed={followed}
               value={entry.effort}
-              disabled={busy}
-              allowOff={purpose.kind === "api" || id === "inbox.triage"}
-              onChange={(effort) => onChange({ effort })}
+              disabled={busy || launcherList.status === "loading"}
+              allowOff={allowOff}
+              onChange={(effort) => onChange(binding.pickEffort(effort))}
             />
           )}
 
@@ -720,7 +802,10 @@ function LauncherOverrideCard({
     onChange(next);
   };
 
-  const effortValue = entry.effort === undefined ? UNSET_EFFORT : entry.effort;
+  const binding = launcherBindingState(launcherList.list, entry, { model: managed?.model || provider?.model });
+  useCanonicalLauncherBinding(binding.legacy, (patch) => onChange({ ...entry, ...patch }));
+  const explicitVariant = Boolean(entry.model && binding.folded);
+  const effortValue = !explicitVariant && entry.effort === undefined ? UNSET_EFFORT : binding.value;
 
   return (
     <div data-testid={`profile-launcher-${name}`} className="flex flex-col gap-3 rounded-control bg-field p-3 shadow-hairline">
@@ -761,12 +846,17 @@ function LauncherOverrideCard({
               models={launcherList}
               hasPicker={hasPicker}
               onReload={reloadLauncher}
-              model={entry.model ?? ""}
+              model={binding.model}
+              followed={{ model: managed?.model || provider?.model }}
               defaultLabel={t("settings-modelprofiles.leave_unchanged")}
               disabled={busy}
               ariaLabel={`${name} ${t("settings-modelprofiles.field_model")}`}
               placeholder={managed?.model || provider?.model || t("settings-modelprofiles.leave_unchanged")}
-              onChange={(value) => setField("model", value.trim() ? value : undefined)}
+              onChange={(value) => {
+                const patch = binding.pickModel(value);
+                if (patch.effort === "") onChange({ ...entry, ...patch });
+                else setField("model", value.trim() ? value : undefined);
+              }}
             />
           </div>
 
@@ -778,23 +868,25 @@ function LauncherOverrideCard({
               aria-label={`${name} ${t("settings-modelprofiles.field_effort")}`}
               className={pickerInputClass}
               value={effortValue}
-              disabled={busy}
+              disabled={busy || launcherList.status === "loading" || (!binding.choices.length && entry.effort === undefined)}
               onChange={(e) => {
                 const v = e.target.value;
-                setField("effort", v === UNSET_EFFORT ? undefined : v);
+                if (v === UNSET_EFFORT) setField("effort", undefined);
+                else onChange({ ...entry, ...binding.pickEffort(v) });
               }}
             >
-              <option value={UNSET_EFFORT}>{t("settings-modelprofiles.leave_unchanged")}</option>
-              <option value="">{t("settings-modelprofiles.clear_on_switch")}</option>
-              {entry.effort && !EFFORT_LEVELS.includes(entry.effort) && (
-                <option value={entry.effort}>{t("settings-modelconfiguration.model_current", { id: effortTitle(entry.effort) })}</option>
+              {!explicitVariant && <option value={UNSET_EFFORT}>{t("settings-modelprofiles.leave_unchanged")}</option>}
+              <option value="">{t("settings-modelprofiles.clear_on_switch")}{explicitVariant && binding.defaultEffort ? ` · ${effortTitle(binding.defaultEffort)}` : ""}</option>
+              {binding.value && !binding.choices.includes(binding.value) && (
+                <option value={binding.value}>{t("settings-modelconfiguration.model_current", { id: effortTitle(binding.value) })}</option>
               )}
-              {EFFORT_LEVELS.map((level) => (
+              {binding.choices.map((level) => (
                 <option key={level} value={level}>
                   {effortTitle(level)}
                 </option>
               ))}
             </select>
+            {!binding.choices.length && <span className="mt-1 block text-submeta text-ink-3">{t("settings-modelconfiguration.api_effort_unsupported")}</span>}
           </label>
 
           <details open={hasExtraFields}>
@@ -837,6 +929,7 @@ function LauncherOverrideCard({
                         defaultLabel={t("settings-modelprofiles.leave_unchanged")}
                         disabled={busy}
                         ariaLabel={`${name} ${label}`}
+                        foldVariants={false}
                         placeholder={t("settings-modelprofiles.leave_unchanged")}
                         onChange={(next) => setField(field, next.trim() ? next : undefined)}
                       />
@@ -852,12 +945,34 @@ function LauncherOverrideCard({
   );
 }
 
+function formatCandidateMinutes(minutes?: number): string {
+  if (minutes === undefined || !Number.isFinite(minutes)) return "—";
+  const rounded = Math.round(minutes * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+function matchCandidateStatus(
+  tierStatuses: ModelProfileCandidateStatus[] | undefined,
+  candidate: CandidateDraftEntry,
+  index: number,
+): ModelProfileCandidateStatus | undefined {
+  if (!tierStatuses?.length) return undefined;
+  const launcher = candidate.launcher.trim();
+  const model = candidate.model.trim();
+  return (
+    tierStatuses.find((s) => s.launcher === launcher && (s.model ?? "") === model) ??
+    tierStatuses.find((s) => s.index === index)
+  );
+}
+
 function TierEditorCard({
   tier,
   providers,
   launcherProviders,
   providerNames,
+  candidateStatus,
   manager,
+  hubSupportsPermissionMode,
   busy,
   onChange,
   onRemove,
@@ -866,14 +981,14 @@ function TierEditorCard({
   providers: ModelProvider[];
   launcherProviders: ModelProvider[];
   providerNames: Named[];
+  candidateStatus: ModelProfileCandidates | null;
   manager: string;
+  hubSupportsPermissionMode: boolean;
   busy: boolean;
   onChange: (patch: Partial<TierDraftEntry>) => void;
   onRemove: () => void;
 }) {
-  const providerId = tier.launcher.trim() ? `launcher.${tier.launcher.trim()}` : "";
-  const chosenProvider = providers.find((p) => p.id === providerId);
-  const { list: launcherList, reload: reloadLauncher, hasPicker } = useLauncherModels(providerId, { manager });
+  const candidateCounter = useRef(0);
 
   const launcherOptions = useMemo(() => {
     const opts = launcherProviders.map((p) => {
@@ -887,15 +1002,41 @@ function TierEditorCard({
     return opts;
   }, [launcherProviders, providers, providerNames]);
 
-  const speedLabel = (speed: string) =>
-    speed === "fast"
-      ? t("settings-modelprofiles.tier_speed_fast")
-      : speed === "ultrafast"
-        ? t("settings-modelprofiles.tier_speed_ultrafast")
-        : t("settings-modelprofiles.tier_speed_default");
+  const tierStatuses = candidateStatus
+    ? (candidateStatus.tiers[tier.originalName ?? tier.name] ?? candidateStatus.tiers[tier.name])
+    : undefined;
 
-  const chosenAgent = launcherList.list?.agent || providerAgent(chosenProvider, providerId);
-  const permissionModes = permissionModesForLauncher(chosenProvider, chosenAgent);
+  const updateCandidate = (key: string, patch: Partial<CandidateDraftEntry>) => {
+    onChange({
+      candidates: tier.candidates.map((c) => (c.key === key ? { ...c, ...patch } : c)),
+    });
+  };
+
+  const addCandidate = () => {
+    if (tier.candidates.length >= MAX_TIER_CANDIDATES) return;
+    const defaultLauncher = launcherOptions[0]?.id ?? "claude";
+    const key = `${tier.key}-cand-new-${++candidateCounter.current}`;
+    onChange({
+      candidates: [
+        ...tier.candidates,
+        { key, launcher: defaultLauncher, model: "", effort: "", permission_mode: "", speed: "" },
+      ],
+    });
+  };
+
+  const removeCandidate = (key: string) => {
+    if (tier.candidates.length <= 1) return;
+    onChange({ candidates: tier.candidates.filter((c) => c.key !== key) });
+  };
+
+  const moveCandidate = (index: number, delta: -1 | 1) => {
+    const nextIndex = index + delta;
+    if (nextIndex < 0 || nextIndex >= tier.candidates.length) return;
+    const next = [...tier.candidates];
+    const [moved] = next.splice(index, 1);
+    next.splice(nextIndex, 0, moved);
+    onChange({ candidates: next });
+  };
 
   return (
     <div data-testid={`profile-tier-edit-${tier.name || tier.key}`} className="flex flex-col gap-3 rounded-control bg-field p-3 shadow-hairline">
@@ -915,10 +1056,209 @@ function TierEditorCard({
             onChange={(e) => onChange({ name: e.target.value })}
           />
         </label>
-        <Button tone="quiet" size="sm" disabled={busy} onClick={onRemove}>
+        <Button tone="quiet" size="sm" className="whitespace-nowrap" disabled={busy} onClick={onRemove}>
           {t("settings-modelprofiles.remove")}
         </Button>
       </div>
+
+      {tier.aliases && tier.aliases.length > 0 && (
+        <div data-testid="tier-aliases" className="flex flex-wrap items-center gap-1.5 text-submeta text-ink-3">
+          <span>{t("settings-modelprofiles.tier_aliases")}</span>
+          {tier.aliases.map((alias) => (
+            <span key={alias} className="rounded-control bg-inset px-1.5 py-0.5 font-mono text-ink-2">
+              {alias}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-label font-medium text-ink-2">
+            {t("settings-modelprofiles.tier_candidates")} ({tier.candidates.length}/{MAX_TIER_CANDIDATES})
+          </span>
+          <Button
+            tone="secondary"
+            size="sm"
+            className="whitespace-nowrap"
+            disabled={busy || tier.candidates.length >= MAX_TIER_CANDIDATES}
+            onClick={addCandidate}
+          >
+            {t("settings-modelprofiles.add_candidate")}
+          </Button>
+        </div>
+
+        <div className="flex flex-col gap-2.5">
+          {tier.candidates.map((candidate, index) => (
+            <TierCandidateCard
+              key={candidate.key}
+              tierLabel={tier.name || tier.key}
+              candidate={candidate}
+              index={index}
+              total={tier.candidates.length}
+              providers={providers}
+              launcherOptions={launcherOptions}
+              providerNames={providerNames}
+              statusDays={candidateStatus?.days}
+              status={candidateStatus ? matchCandidateStatus(tierStatuses, candidate, index) : undefined}
+              showStatus={candidateStatus !== null}
+              manager={manager}
+              hubSupportsPermissionMode={hubSupportsPermissionMode}
+              busy={busy}
+              onChange={(patch) => updateCandidate(candidate.key, patch)}
+              onMoveUp={() => moveCandidate(index, -1)}
+              onMoveDown={() => moveCandidate(index, 1)}
+              onRemove={() => removeCandidate(candidate.key)}
+            />
+          ))}
+        </div>
+      </div>
+
+      <label className="block">
+        <span className="mb-1 block text-label font-medium text-ink-2">
+          {t("settings-modelprofiles.tier_description")}
+        </span>
+        <input
+          aria-label={t("settings-modelprofiles.tier_description")}
+          className={pickerInputClass}
+          value={tier.description}
+          maxLength={MAX_TIER_DESCRIPTION}
+          disabled={busy}
+          placeholder={t("settings-modelprofiles.tier_description_placeholder")}
+          onChange={(e) => onChange({ description: e.target.value })}
+        />
+      </label>
+    </div>
+  );
+}
+
+function TierCandidateCard({
+  tierLabel,
+  candidate,
+  index,
+  total,
+  providers,
+  launcherOptions,
+  providerNames,
+  statusDays,
+  status,
+  showStatus,
+  manager,
+  hubSupportsPermissionMode,
+  busy,
+  onChange,
+  onMoveUp,
+  onMoveDown,
+  onRemove,
+}: {
+  tierLabel: string;
+  candidate: CandidateDraftEntry;
+  index: number;
+  total: number;
+  providers: ModelProvider[];
+  launcherOptions: { id: string; label: string }[];
+  providerNames: Named[];
+  statusDays?: number;
+  status?: ModelProfileCandidateStatus;
+  showStatus: boolean;
+  manager: string;
+  hubSupportsPermissionMode: boolean;
+  busy: boolean;
+  onChange: (patch: Partial<CandidateDraftEntry>) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemove: () => void;
+}) {
+  const providerId = candidate.launcher.trim() ? `launcher.${candidate.launcher.trim()}` : "";
+  const chosenProvider = providers.find((p) => p.id === providerId);
+  const { list: launcherList, reload: reloadLauncher, hasPicker } = useLauncherModels(providerId, { manager });
+
+  const speedLabel = (speed: string) =>
+    speed === "fast"
+      ? t("settings-modelprofiles.tier_speed_fast")
+      : speed === "ultrafast"
+        ? t("settings-modelprofiles.tier_speed_ultrafast")
+        : t("settings-modelprofiles.tier_speed_default");
+
+  const chosenAgent = launcherList.list?.agent || providerAgent(chosenProvider, providerId);
+  const permissionModes = permissionModesForLauncher(chosenProvider, chosenAgent);
+  const followed = { model: chosenProvider?.model, effort: chosenProvider?.effort };
+  const binding = launcherBindingState(launcherList.list, candidate, followed, {
+    allowUnknown: takesEffort(chosenAgent, chosenProvider) || chosenAgent === "codex",
+  });
+  useCanonicalLauncherBinding(binding.legacy, onChange);
+
+  const headroom = status?.headroom;
+  const stats = status?.stats;
+
+  return (
+    <div
+      data-testid={`tier-candidate-${index}`}
+      className="flex flex-col gap-3 rounded-control border border-line bg-surface p-3"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-label font-medium text-ink">
+          {t("settings-modelprofiles.tier_candidate_index", { index: index + 1 })}
+        </span>
+        <div className="flex items-center gap-1">
+          <Button
+            tone="quiet"
+            size="sm"
+            className="whitespace-nowrap"
+            disabled={busy || index === 0}
+            aria-label={t("settings-modelprofiles.candidate_move_up_aria", { index: index + 1 })}
+            onClick={onMoveUp}
+          >
+            {t("settings-modelprofiles.candidate_move_up")}
+          </Button>
+          <Button
+            tone="quiet"
+            size="sm"
+            className="whitespace-nowrap"
+            disabled={busy || index === total - 1}
+            aria-label={t("settings-modelprofiles.candidate_move_down_aria", { index: index + 1 })}
+            onClick={onMoveDown}
+          >
+            {t("settings-modelprofiles.candidate_move_down")}
+          </Button>
+          {total > 1 && (
+            <Button
+              tone="quiet"
+              size="sm"
+              className="whitespace-nowrap"
+              disabled={busy}
+              aria-label={t("settings-modelprofiles.candidate_remove_aria", { index: index + 1 })}
+              onClick={onRemove}
+            >
+              {t("settings-modelprofiles.remove")}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {showStatus && (
+        <div
+          data-testid={`tier-candidate-status-${index}`}
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-control bg-inset px-2.5 py-1.5 text-submeta text-ink-3"
+        >
+          <span className={cx(headroom?.stale && "opacity-60")}>
+            {headroom?.known
+              ? t("settings-modelprofiles.candidate_headroom", { percent: Math.round(headroom.percent ?? 0) })
+              : t("settings-modelprofiles.candidate_headroom_unknown")}
+            {headroom?.known && headroom.stale && ` · ${t("settings-modelprofiles.candidate_stale")}`}
+          </span>
+          <span>
+            {stats && stats.n > 0
+              ? t("settings-modelprofiles.candidate_stats", {
+                  days: statusDays ?? 14,
+                  minutes: formatCandidateMinutes(stats.minutes_p50),
+                  first_pass: Math.round((stats.first_pass ?? 0) * 100),
+                  n: stats.n,
+                })
+              : t("settings-modelprofiles.candidate_no_data")}
+          </span>
+        </div>
+      )}
 
       <label className="block">
         <span className="mb-1 block text-label font-medium text-ink-2">
@@ -927,17 +1267,17 @@ function TierEditorCard({
         <select
           aria-label={t("settings-modelprofiles.tier_launcher")}
           className={pickerInputClass}
-          value={tier.launcher}
+          value={candidate.launcher}
           disabled={busy}
           onChange={(e) => {
             const nextLauncher = e.target.value;
-            if (nextLauncher === tier.launcher) return;
+            if (nextLauncher === candidate.launcher) return;
             onChange({ launcher: nextLauncher, model: "", effort: "", permission_mode: "" });
           }}
         >
           <option value="">{t("settings-modelprofiles.tier_launcher_placeholder")}</option>
-          {tier.launcher && !launcherOptions.some((o) => o.id === tier.launcher) && (
-            <option value={tier.launcher}>{providerLabel(namedLauncher(tier.launcher, providerNames))}</option>
+          {candidate.launcher && !launcherOptions.some((o) => o.id === candidate.launcher) && (
+            <option value={candidate.launcher}>{providerLabel(namedLauncher(candidate.launcher, providerNames))}</option>
           )}
           {launcherOptions.map((o) => (
             <option key={o.id} value={o.id}>
@@ -955,23 +1295,24 @@ function TierEditorCard({
           models={launcherList}
           hasPicker={hasPicker}
           onReload={reloadLauncher}
-          model={tier.model}
+          model={binding.model}
+          followed={followed}
           disabled={busy}
-          ariaLabel={`${tier.name || tier.key} ${t("settings-modelconfiguration.specific_model")}`}
+          ariaLabel={`${tierLabel} #${index + 1} ${t("settings-modelconfiguration.specific_model")}`}
           placeholder={chosenProvider?.model || t("settings-modelconfiguration.provider_default")}
-          onChange={(model) => onChange({ model })}
+          onChange={(model) => onChange(binding.pickModel(model))}
         />
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <ProfileEffortSelect
           chosen={chosenProvider}
-          kind="launcher"
-          launcherList={launcherList}
-          model={tier.model}
-          value={tier.effort}
-          disabled={busy}
-          onChange={(effort) => onChange({ effort })}
+          launcherBinding={binding}
+          model={candidate.model}
+          followed={followed}
+          value={candidate.effort}
+          disabled={busy || launcherList.status === "loading"}
+          onChange={(effort) => onChange(binding.pickEffort(effort))}
         />
 
         <label className="block">
@@ -981,8 +1322,8 @@ function TierEditorCard({
           <select
             aria-label={t("settings-modelprofiles.tier_speed")}
             className={pickerInputClass}
-            value={tier.speed === "standard" ? "" : tier.speed}
-            disabled={busy || (chosenAgent !== "claude" && chosenAgent !== "codex" && !tier.speed)}
+            value={candidate.speed === "standard" ? "" : candidate.speed}
+            disabled={busy || (chosenAgent !== "claude" && chosenAgent !== "codex" && !candidate.speed)}
             onChange={(e) => onChange({ speed: e.target.value })}
           >
             <option value="">{speedLabel("")}</option>
@@ -992,7 +1333,7 @@ function TierEditorCard({
         </label>
       </div>
 
-      {permissionModes.length > 0 && (
+      {permissionModes.length > 0 && (hubSupportsPermissionMode || !!candidate.permission_mode) && (
         <label className="block">
           <span className="mb-1 block text-label font-medium text-ink-2">
             {t("settings-modelconfiguration.permission_mode")}
@@ -1001,13 +1342,13 @@ function TierEditorCard({
             data-permission-mode-select
             aria-label={t("settings-modelconfiguration.permission_mode")}
             className={pickerInputClass}
-            value={tier.permission_mode}
+            value={candidate.permission_mode}
             disabled={busy}
             onChange={(e) => onChange({ permission_mode: e.target.value })}
           >
             <option value="">{t("settings-modelconfiguration.follow_default")}</option>
-            {tier.permission_mode && !permissionModes.some((m) => m.id === tier.permission_mode) && (
-              <option value={tier.permission_mode}>{modeTitle(tier.permission_mode)}</option>
+            {candidate.permission_mode && !permissionModes.some((m) => m.id === candidate.permission_mode) && (
+              <option value={candidate.permission_mode}>{modeTitle(candidate.permission_mode)}</option>
             )}
             {permissionModes.map((m) => (
               <option key={m.id} value={m.id}>
@@ -1015,28 +1356,13 @@ function TierEditorCard({
               </option>
             ))}
           </select>
-          <span className={`mt-1 block text-submeta ${tier.permission_mode === BYPASS_MODE ? "text-red" : "text-ink-3"}`}>
-            {tier.permission_mode === BYPASS_MODE
+          <span className={`mt-1 block text-submeta ${candidate.permission_mode === BYPASS_MODE ? "text-red" : "text-ink-3"}`}>
+            {candidate.permission_mode === BYPASS_MODE
               ? BYPASS_WARNING
-              : permissionModes.find((m) => m.id === tier.permission_mode)?.detail ?? t("settings-modelconfiguration.permission_mode_hint")}
+              : permissionModes.find((m) => m.id === candidate.permission_mode)?.detail ?? t("settings-modelconfiguration.permission_mode_hint")}
           </span>
         </label>
       )}
-
-      <label className="block">
-        <span className="mb-1 block text-label font-medium text-ink-2">
-          {t("settings-modelprofiles.tier_description")}
-        </span>
-        <input
-          aria-label={t("settings-modelprofiles.tier_description")}
-          className={pickerInputClass}
-          value={tier.description}
-          maxLength={MAX_TIER_DESCRIPTION}
-          disabled={busy}
-          placeholder={t("settings-modelprofiles.tier_description_placeholder")}
-          onChange={(e) => onChange({ description: e.target.value })}
-        />
-      </label>
     </div>
   );
 }

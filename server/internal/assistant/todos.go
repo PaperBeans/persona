@@ -16,6 +16,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/assistant/todo/projection"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
@@ -110,6 +111,12 @@ type Todo struct {
 	// Responsible: an external responsible party that is not a Persona-started agent (#12712, todo_responsible.go):
 	// a long-running session or a person; nil while none is set.
 	Responsible *TodoResponsible `json:"responsible,omitempty"`
+	// Audience: optional routing hint distinguishing human-facing deliverables ("human") from autonomous engineering
+	// tasks ("autonomous"); omitted when unset (#14619).
+	Audience string `json:"audience,omitempty"`
+	// DirectionID: optional organizational direction membership, decoupled from runtime supervision.supervisor and
+	// origin; omitted when unset (#14660).
+	DirectionID string `json:"direction_id,omitempty"`
 	// When it is due (DueAt a moment, DueDate a day "2006-01-02" in the user's time zone; at most one), when the phone
 	// is reminded of it and whether it was, and its priority ("" normal, high, low): #1683, todo_plan.go. Clients that do
 	// not know them show the todo as ever.
@@ -127,6 +134,9 @@ type Todo struct {
 	// SeenAt: when the owner last looked at it in Just finished, by Got it or by opening it (#5707, todo_seen.go); a to-do
 	// seen since it got there is filed under Done (todo_triage.go). Absent when never seen.
 	SeenAt *time.Time `json:"seen_at,omitempty"`
+	// AutoSeenUndone: internal undo guard set when the owner explicitly calls DELETE /api/v1/todos/{id}/seen (#14639).
+	// Never emitted on the wire.
+	AutoSeenUndone bool `json:"-"`
 	// RestoredAt: when the owner last brought it back from Inactive; SomedayUntil: when a to-do the owner put off to
 	// Someday comes back, the year 9999 for no date (#10226, todo_marks.go). Absent when never restored, and while not
 	// put off. Clients that do not know them show the to-do as ever.
@@ -160,6 +170,7 @@ type todoStore interface {
 	UpdateTodo(ctx context.Context, id string, title *string, notes *string, done *bool, updatedAt time.Time) (*db.TodoRow, error)
 	EditTodo(ctx context.Context, id string, e db.TodoEdit, updatedAt time.Time) (*db.TodoRow, error)
 	SeeTodo(ctx context.Context, id string, at *time.Time) (*db.TodoRow, error)
+	AutoSeeTodo(ctx context.Context, id string, at time.Time) (*db.TodoRow, bool, error)
 	RestoreTodo(ctx context.Context, id string, at time.Time) (*db.TodoRow, error)
 	SetTodoSomeday(ctx context.Context, id string, until *time.Time) (*db.TodoRow, error)
 	ClaimTodoReminder(ctx context.Context, id string, remindAt, now time.Time) (bool, error)
@@ -548,7 +559,7 @@ func (s *Service) quietTask(ctx context.Context, origin string) bool {
 
 // removeTodo deletes todo id from the store and from memory (its agents' and spaces' links with it) and tells the
 // apps; db.ErrTodoNotFound when it is not there. The DELETE route and the code that must take back a todo it just
-// made (a topic that turned out to be taken, feishu_thread_open.go) both go through it.
+// made (a topic that turned out to be taken, the lark module's thread_open.go) both go through it.
 func (s *Service) removeTodo(ctx context.Context, id string) error {
 	s.todos.writing.Lock()
 	if st := s.todoDB(); st != nil {
@@ -593,13 +604,13 @@ func (s *Service) createTodo(ctx context.Context, title, notes, origin, planID s
 
 // createTaskTodo is createTodo for a plan's task, in the knowledge-base project the task names (a slug; "" for none).
 func (s *Service) createTaskTodo(ctx context.Context, title, notes, origin, planID, project string) (Todo, error) {
-	return s.createTaskTodoAs(ctx, "todo_"+randomHex(8), title, notes, origin, planID, project, "")
+	return s.createTaskTodoAs(ctx, "todo_"+randomHex(8), title, notes, origin, planID, project, "", "", "")
 }
 
-func (s *Service) createTaskTodoAs(ctx context.Context, id, title, notes, origin, planID, project, inboxItem string) (Todo, error) {
+func (s *Service) createTaskTodoAs(ctx context.Context, id, title, notes, origin, planID, project, inboxItem, audience, directionID string) (Todo, error) {
 	now := time.Now().UTC()
 	return s.insertTodo(ctx, db.TodoRow{ID: id, Title: title, Notes: notes, CreatedAt: now, UpdatedAt: now,
-		Origin: origin, PlanID: planID, Quiet: s.quietTask(ctx, origin), Project: project, InboxItem: inboxItem})
+		Origin: origin, PlanID: planID, Quiet: s.quietTask(ctx, origin), Project: project, InboxItem: inboxItem, Audience: audience, DirectionID: strings.TrimSpace(directionID)})
 }
 
 // newTodo is createTodo, quiet or not as given (a launcher repair's has no conversation and is quiet,
@@ -652,6 +663,10 @@ func (s *Service) insertPiece(ctx context.Context, row db.TodoRow, bindings ...*
 
 // putNewTodo is insertTodo's store write and memory, without telling anyone.
 func (s *Service) putNewTodo(ctx context.Context, row db.TodoRow, bindings ...*repository.CreateBindings) (Todo, error) {
+	if err := db.ValidateTodoAudience(row.Audience); err != nil {
+		return Todo{}, err
+	}
+	row.DirectionID = strings.TrimSpace(row.DirectionID)
 	if len(bindings) > 0 && bindings[0] != nil {
 		st, ok := s.store().(todoRepositoryStore)
 		if !ok {
@@ -995,6 +1010,7 @@ func (s *Service) todoRoutes() {
 	s.todoSeenRoutes()
 	s.todoMarkRoutes()
 	s.todoRetitleRoute()
+	s.todoReorganizeRoute()
 	s.todoImportRoutes()
 	s.todoViewRoutes()
 	s.todoAskRoutes()
@@ -1002,20 +1018,39 @@ func (s *Service) todoRoutes() {
 	// GET /api/v1/todos: list all todos (newest created_at first), agents sorted (active first, then released); a todo
 	// waiting for the owner carries its ask (todo_ask.go), an open one nobody works on why (tasks_orphan.go); each its
 	// view, and the list its counts (todo_view_routes.go); to an extension's token without the to-dos it is not shown
-	// (todo_scope.go)
+	// (todo_scope.go). With ?limit or ?cursor it answers one page and how to read the next (todo_pagination.go); no
+	// parameter keeps the complete answer, its fields and its revision header unchanged.
 	s.handle("GET /api/v1/todos", func(w http.ResponseWriter, r *http.Request) {
+		limit, after, paged, err := todoListPageQuery(r.URL.Query())
+		if err != nil {
+			code := "invalid_todo_limit"
+			if errors.Is(err, errTodoPageCursor) {
+				code = "invalid_todo_cursor"
+			}
+			apierr.WriteCode(w, http.StatusBadRequest, code, err)
+			return
+		}
 		writes := s.trevision.writes.Load()
 		list, p, err := s.todosViewed(r.Context(), true)
 		if err != nil {
 			apierr.Write(w, http.StatusServiceUnavailable, errTodosUnavailable)
 			return
 		}
-		if r.Header.Get(RoleHeader) == roleExtension {
+		isExtension := r.Header.Get(RoleHeader) == roleExtension
+		if isExtension {
 			list = s.extensionRows(r.Context(), list, p)
-		} else {
+		} else if !paged {
 			s.tagTodoRevision(w, writes, p)
 		}
-		apierr.WriteJSON(w, todosList{Todos: list, Counts: p.counts()})
+		var sharedBlockers []projection.SharedBlocker
+		if !isExtension {
+			sharedBlockers = p.sharedBlockers()
+		}
+		if paged {
+			writeTodoPage(w, list, p, sharedBlockers, limit, after)
+			return
+		}
+		apierr.WriteJSON(w, todosList{Todos: list, Counts: p.counts(), SharedBlockers: sharedBlockers})
 	})
 	s.handle("GET /api/v1/todos/revision", s.todoRevisionRead)
 
@@ -2140,6 +2175,7 @@ func (s *Service) reopenFailedTodo(ctx context.Context, id string) (Todo, bool, 
 	}
 	s.resetTodoReadyWake(ctx, id)
 	s.resetParentCloseoutWake(ctx, id)
+	s.resolveCard(taskFailedCardID(id)) // started again: the failure's push is over
 	return out, true, nil
 }
 

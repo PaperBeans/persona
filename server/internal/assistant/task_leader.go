@@ -539,6 +539,11 @@ func (s *Service) deliverToLeaderAgent(ctx context.Context, lead TodoAgent, list
 		return false
 	}
 	if err := s.sendToLeader(ctx, lead, text, batch, kept, holds, delivered); err != nil {
+		if relaySuppressed(err) {
+			rollback() // not delivered, not retried and not escalated: the withdrawal owns what is left
+			s.ackSupervisePending(batch)
+			return false
+		}
 		var escalated leaderEscalated
 		if errors.As(err, &escalated) {
 			// The current process's escalation/retry owns this message. Do not restore its pending entry and escalate it
@@ -585,6 +590,9 @@ func (e leaderEscalated) Unwrap() error { return e.err }
 // batch, including members suppressed by delivered dedup history (#5732). sent determines the text actually carried;
 // receipts includes the filtered members whose turn receipts close on delivery.
 func (s *Service) sendToLeader(ctx context.Context, lead TodoAgent, text string, all, sent, receipts []superviseSignal, delivered func(context.Context)) error {
+	if !s.autoSupervisionOn(ctx) {
+		return errSupervisionSuppressed // the last look before the send (supervise_switch.go)
+	}
 	ctx = supervisionSourceContext(ctx, sent)
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
 	defer cancel()
@@ -611,6 +619,9 @@ func (s *Service) resumeLeaderForSupervision(lead TodoAgent, text string, all, s
 		ctx := context.Background()
 		err := s.sendToLeaderNow(ctx, lead, text, sent)
 		completed(ctx, err)
+		if relaySuppressed(err) {
+			return
+		}
 		if err != nil {
 			s.logf("task leader %s: resume: %v", short(lead.SessionID), err)
 			s.escalateLeaderMessage(lead, all, sent, receipts, text, nodeMayHaveTaken(err), delivered)
@@ -637,6 +648,9 @@ func (s *Service) leaderDelivered(ctx context.Context, lead TodoAgent, entries [
 // sendToLeaderNow is one attempt to put text into the leader's session, resuming it if closed; it waits up to
 // leaderResumeTime. Each attempt has its own time, so it can be called from a goroutine that outlives any request.
 func (s *Service) sendToLeaderNow(ctx context.Context, lead TodoAgent, text string, kept []superviseSignal) error {
+	if !s.autoSupervisionOn(ctx) {
+		return errSupervisionSuppressed // also a retry or resume that was already running
+	}
 	ctx = supervisionSourceContext(ctx, kept)
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.leaderResumeTime())
 	defer cancel()
@@ -651,6 +665,9 @@ func (s *Service) sendToLeaderNow(ctx context.Context, lead TodoAgent, text stri
 // acknowledges the complete original batch, including filtered members (#5732, #9607).
 func (s *Service) escalateLeaderMessage(lead TodoAgent, all, sent, receipts []superviseSignal, text string, uncertain bool, delivered func(context.Context)) {
 	ctx := context.Background()
+	if !s.autoSupervisionOn(ctx) {
+		return // automatic supervision messages are off: no escalation and no retry loop
+	}
 	for _, g := range sent {
 		if w, ok := s.todoNow(g.Todo); ok {
 			if esc := s.escalateLeaderSignalAs(ctx, g, uncertain); esc.Todo != "" {
@@ -668,7 +685,11 @@ func (s *Service) escalateLeaderMessage(lead TodoAgent, all, sent, receipts []su
 				return // the leader's task is closed: its workers were rehomed, nobody is left to tell
 			}
 			s.logf("task leader %s: trying the undelivered supervision message again", short(lead.SessionID))
-			if err := s.sendToLeaderNow(ctx, lead, text, sent); err == nil {
+			err := s.sendToLeaderNow(ctx, lead, text, sent)
+			if relaySuppressed(err) {
+				return // switched off while this retry waited
+			}
+			if err == nil {
 				if delivered != nil {
 					delivered(ctx)
 				} else {
@@ -802,7 +823,7 @@ func (s *Service) leaderReview(ctx context.Context, lead TodoAgent, args json.Ra
 	b.mu.Lock()
 	b.init()
 	var keys []string
-	for _, k := range []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigNoProgress, sigTimedOut, sigOrphaned, sigEstimateDue} {
+	for _, k := range []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigNoProgress, sigTimedOut, sigOrphaned, sigRecovered, sigEstimateDue} {
 		key := t.ID + "|" + k
 		delete(b.pending, key) // reviewed: what waited is answered
 		keys = append(keys, key)

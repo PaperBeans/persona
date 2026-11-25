@@ -37,8 +37,14 @@ internal fun SpaceScreen(
     loaded: Boolean = true,
     /** Opens a computer's projects (iOS `MachineSpacesView`), from the computer at the top of the cards. */
     onMachine: ((String) -> Unit)? = null,
+    /** All raw sessions on this hub, so parent rows can name unread folded side sessions (#13524). */
+    sessions: List<Session> = emptyList(),
+    /** Opens an unread folded side session directly in one tap (#13524). */
+    onOpenSide: ((AgentSession, SessionKey) -> Unit)? = null,
 ) {
     val cards = remember(pending) { pending.firstBySession() }
+    val visibleSessions = remember(sessions, preferences) { sessions.map { it.listSession(preferences).session } }
+    val visibleSessionsByKey = remember(visibleSessions) { visibleSessions.associateBy { it.key } }
     val grid = AgentSpaceLayout.cards
     val machine = machines.firstOrNull { it.id == space?.machineId }
     Box(Modifier.fillMaxSize()) {
@@ -64,6 +70,7 @@ internal fun SpaceScreen(
                     val card = cards[row.session.key]
                     val tab = row.session.tabKey?.let(tabs::get)
                     val branch = tab?.isBranch(row) == true
+                    val sideUnread = unreadSideSummary(row.session, visibleSessionsByKey[row.session.key], visibleSessions)
                     SlotRow(row, machines.firstOrNull { it.id == row.session.machineId }?.displayName,
                         AgentRowMetadata(), now, false, row.id in preferences.pins.sessions, preferences.mutes.mutes(row),
                         depth = if (branch) 1 else 0, position = GroupPosition.of(index, space.members.size), located = false,
@@ -72,7 +79,8 @@ internal fun SpaceScreen(
                         slotLabel = row.session.slotName?.takeIf { it.isNotBlank() && it != row.session.displayTitle }
                             // herdr's default tab names are numbers; a bare "1" reads as a count, so say #1.
                             ?.let { if (it.all(Char::isDigit)) "#$it" else it }
-                            ?: stringResource(R.string.agents_space_tab, row.session.slotIndex ?: 0), requestCount = requests, onClose = onClose(row), card = card)
+                            ?: stringResource(R.string.agents_space_tab, row.session.slotIndex ?: 0), requestCount = requests, onClose = onClose(row), card = card,
+                        sideUnread = sideUnread, onOpenSide = onOpenSide?.let { cb -> { side -> cb(row, side) } })
                 }
                 if (canStart) item("new-tab") {
                     JButton(stringResource(R.string.agents_space_new_tab), { onNewTab(space) }, Modifier.fillMaxWidth().padding(top = 16.dp.dense), enabled = !busy, icon = PhIcons.Plus)

@@ -1,7 +1,6 @@
 package assistant
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -39,6 +38,7 @@ func addActiveTodo(s *Service, td Todo, sessions ...[2]string) {
 
 // /tasks and both aliases post one display-only card with both sections, the pending links and a hand-made todo.
 func TestTasksCommandShowsOverviewCard(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, cmd := range []string{"/tasks", "/进展", "/总览"} {
 		t.Run(cmd, func(t *testing.T) {
 			s, d, posts := overviewHub(t, "https://hub.example.com")
@@ -48,8 +48,11 @@ func TestTasksCommandShowsOverviewCard(t *testing.T) {
 			addPending(s, "ixA", "server", "asm", "主对话的问题")
 			addPending(s, "ixB", "server", "pane", "Agent 的问题")
 			addActiveTodo(s, Todo{ID: "todo_1", Title: "手工建的任务"}, [2]string{"server", "s1"}) // Origin ""
-			if h, rest := s.botCommand(context.Background(), FeishuFeatures{}, "om", cmd, "", ""); !h || rest != "" {
-				t.Fatalf("botCommand(%q) = %v, %q", cmd, h, rest)
+			f := s.hub.(*fakeHub)
+			before := len(sendOnces(f))
+			feishuSay(t, s, f, nil, p2pText("om", cmd, "", ""), "")
+			if sent := len(sendOnces(f)) - before; sent != 0 { // handled: a card, nothing sent on
+				t.Fatalf("%s went on into a conversation", cmd)
 			}
 			if len(*posts) != 1 {
 				t.Fatalf("posted %d cards, want 1", len(*posts))
@@ -74,10 +77,11 @@ func TestTasksCommandShowsOverviewCard(t *testing.T) {
 // Empty sections show their empty text on one unnumbered card (done todo hidden); with no public URL rows still
 // render but carry no link.
 func TestTasksOverviewEmptyAndNoLinks(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	doneAt, _ := time.Parse(time.RFC3339, "2026-11-06T10:00:00Z")
 	s, _, posts := overviewHub(t, "https://hub.example.com")
 	addActiveTodo(s, Todo{ID: "finished", Title: "做完的任务", Origin: "c2", DoneAt: &doneAt}, [2]string{"server", "s9"})
-	s.botCommand(context.Background(), FeishuFeatures{}, "om", "/tasks", "", "")
+	feishuSay(t, s, s.hub.(*fakeHub), nil, p2pText("om", "/tasks", "", ""), "")
 	card := (*posts)[0]["card"].(string)
 	for _, want := range []string{"暂时没有等你拍板的事。", "暂时没有在途任务。"} {
 		if !strings.Contains(card, want) {
@@ -90,7 +94,7 @@ func TestTasksOverviewEmptyAndNoLinks(t *testing.T) {
 	s2, _, posts2 := overviewHub(t, "")
 	addPending(s2, "ix1", "server", "s1", "要发布吗？")
 	addActiveTodo(s2, Todo{ID: "todo_1", Title: "没有网页版地址的任务"}, [2]string{"server", "s1"})
-	s2.botCommand(context.Background(), FeishuFeatures{}, "om", "/tasks", "", "")
+	feishuSay(t, s2, s2.hub.(*fakeHub), nil, p2pText("om", "/tasks", "", ""), "")
 	card = (*posts2)[0]["card"].(string)
 	if strings.Contains(card, "default_url") {
 		t.Fatalf("card links despite an empty public_url:\n%s", card)
@@ -102,6 +106,7 @@ func TestTasksOverviewEmptyAndNoLinks(t *testing.T) {
 
 // Many heavy todos split into numbered cards, each inside the byte/element budget, each with a fallback.
 func TestTasksOverviewPaginatesWithinBudget(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, _, posts := overviewHub(t, "https://hub.example.com")
 	for i := 0; i < 25; i++ {
 		id := fmt.Sprintf("todo_%02d", i)
@@ -109,7 +114,7 @@ func TestTasksOverviewPaginatesWithinBudget(t *testing.T) {
 			Title: fmt.Sprintf("第%02d件在途任务标题", i), PRURL: fmt.Sprintf("https://git.example.com/team/repo/pull/%02d", i)},
 			[2]string{"server", id})
 	}
-	s.botCommand(context.Background(), FeishuFeatures{}, "om", "/tasks", "", "")
+	feishuSay(t, s, s.hub.(*fakeHub), nil, p2pText("om", "/tasks", "", ""), "")
 	if len(*posts) < 2 {
 		t.Fatalf("wanted several cards, got %d", len(*posts))
 	}
@@ -136,13 +141,14 @@ func TestTasksOverviewPaginatesWithinBudget(t *testing.T) {
 // Manual todos (Origin "") bound to no working session are absent from todoReport's links, yet they must be listed;
 // a done manual todo stays hidden and a session-bound todo keeps its Agent link (the manual one has none).
 func TestTasksOverviewListsManualTodos(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, d, posts := overviewHub(t, "https://hub.example.com")
 	d.setSessions("server", []proto.Session{{SessionID: "pane", Cwd: "/code", PaneID: "%1"}})
 	s.todos.todos["todo_manual"] = &Todo{ID: "todo_manual", Title: "随手记下的手工任务"}
 	doneAt, _ := time.Parse(time.RFC3339, "2026-11-06T10:00:00Z")
 	s.todos.todos["todo_done"] = &Todo{ID: "todo_done", Title: "做完的手工任务", DoneAt: &doneAt}
 	addActiveTodo(s, Todo{ID: "todo_agent", Title: "Agent 在做的任务"}, [2]string{"server", "pane"})
-	s.botCommand(context.Background(), FeishuFeatures{}, "om", "/tasks", "", "")
+	feishuSay(t, s, s.hub.(*fakeHub), nil, p2pText("om", "/tasks", "", ""), "")
 	card := (*posts)[0]["card"].(string)
 	for _, want := range []string{"随手记下的手工任务", "Agent 在做的任务",
 		`"default_url":"https://hub.example.com/todos/todo_manual"`,
@@ -164,10 +170,11 @@ func TestTasksOverviewListsManualTodos(t *testing.T) {
 // A public_url without a scheme is a dirty value: rows still render, but no open_url button goes out on either a
 // pending row or a todo row.
 func TestTasksOverviewDirtyPublicURLHasNoButtons(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, _, posts := overviewHub(t, "hub.example.com")
 	addPending(s, "ix1", "server", "pane", "要发布吗？")
 	s.todos.todos["todo_1"] = &Todo{ID: "todo_1", Title: "脏地址的任务"}
-	s.botCommand(context.Background(), FeishuFeatures{}, "om", "/tasks", "", "")
+	feishuSay(t, s, s.hub.(*fakeHub), nil, p2pText("om", "/tasks", "", ""), "")
 	card := (*posts)[0]["card"].(string)
 	if strings.Contains(card, "default_url") {
 		t.Fatalf("card carries link buttons with a scheme-less public_url:\n%s", card)

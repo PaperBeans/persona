@@ -163,7 +163,7 @@ func (n *Node) recordEngineStart(h *runtimeConn, s *proto.Session, cwd string) {
 	if _, ok := n.state.get(s.SessionID); ok {
 		return
 	}
-	n.state.put(s.SessionID, sessionState{Launcher: s.Launcher, Cwd: cmp.Or(s.Cwd, cwd), StartedAt: time.Now().UTC(), EngineRuntime: h.id()})
+	n.state.put(s.SessionID, sessionState{Launcher: s.Launcher, Cwd: cmp.Or(s.Cwd, cwd), StartedAt: time.Now().UTC(), EngineRuntime: h.id(), RemoteAgent: h.remoteAgent()})
 }
 
 // listStarted lists a session h just started right away, before the runtime's next runtime.sessions, so the chat
@@ -199,9 +199,14 @@ func (n *Node) listStarted(h *runtimeConn, started proto.Session, transcript str
 	}
 	h.mu.Unlock()
 	b.recomputeOwners()
+	h.mu.Lock()
+	if h.hello.Caps.Assistant && h.hello.Caps.RemoteAgent {
+		b.markRemoteLocked(s.SessionID)
+	}
 	if startedHere(s) { // not while it is only starting: a takeover that fails leaves the session this machine's (#8130)
 		b.remember(h, s.SessionID, time.Now())
 	}
+	h.mu.Unlock()
 	b.noteStarted(h, s.SessionID, time.Now())
 	var tell *runtimeConn // runs it already, and is to hear that the hub started it (runtime.driven)
 	if o := b.owner[s.SessionID]; o != nil && o != h {

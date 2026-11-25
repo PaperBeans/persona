@@ -155,6 +155,8 @@ type memoryExtensionEntry struct {
 	// Categories are the names in categories (health, finance, relationships, emotion, legal_id); none: general.
 	Categories []string
 	Tags       []string
+	// Facet is the extension's grouping, used only by explicit recall queries.
+	Facet string
 	// Standing is the extension's standing flag: it kept the entry in every conversation (always in context). Only
 	// a standing entry goes to a standing channel (memoryExtensionBatch.standingOnly); the others come in by relevance
 	// (their subjects or text) in a recall, a hand-off or the Inbox.

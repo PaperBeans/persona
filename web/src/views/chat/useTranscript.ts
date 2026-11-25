@@ -5,7 +5,7 @@ import { api, ApiError, errorText, isAbort, READ_TIMEOUT_MS, sessionHistoryNotFo
 import { sessionLoadError } from "../../lib/session-link";
 import { getState, listenSession, markConversationDeleted, send, type ItemsEvent } from "../../lib/store";
 import { afterPull, afterPush, FRESH_TALLY, newestItemAt, notLive as tallyNotLive, RevWatch, shouldPull, type StaleTally } from "../../lib/stale-page";
-import { mergeItems, withoutFolded } from "../../lib/turns";
+import { insideFold, mergeItems, withoutFolded } from "../../lib/turns";
 import { chosenManager } from "../../lib/manager-choice";
 import { discardFeedCache, discardMemoryPage, feedCacheScope, readFeedCache, readMemoryPage, writeFeedCache, writeMemoryPage, type FeedCache } from "../../lib/feed-cache";
 import type { Item, ItemsPage } from "../../lib/types";
@@ -728,7 +728,8 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
         from = batch[batch.length - 1].seq + 1;
       }
       if (complete) expanded.current.set(fold.id, fold.fold);
-      apply(out);
+      // from_seq..through_seq is line-granular, so boundary lines can carry blocks of an adjacent fold (#13859).
+      apply(out.filter((i) => insideFold(i, fold)));
       // The closeout's evidence reader needs to know a capped or superseded read; existing fold UI keeps the partial steps.
       return complete;
     },

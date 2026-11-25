@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -38,6 +39,9 @@ type RuntimeHost struct {
 	path    string
 	version string
 	logger  *log.Logger
+	// pipe is the named pipe runtimes the node starts dial on Windows (runtimepipe_windows.go); "" elsewhere, or
+	// when it could not be made. Set by Listen before any runtime starts, then fixed.
+	pipe string
 
 	mu   sync.Mutex
 	node *Node // the Node serving a hub connection now; nil between connections
@@ -126,6 +130,7 @@ func (rh *RuntimeHost) Listen(ctx context.Context) error {
 	if _, err := rh.listenOnce(ctx); err != nil {
 		return err
 	}
+	rh.listenPipe(ctx)
 	rh.ctx = ctx
 	rh.startDaemons(ctx)
 	if rh.autoCompanions {
@@ -150,6 +155,21 @@ func (rh *RuntimeHost) Listen(ctx context.Context) error {
 		}
 	}()
 	return nil
+}
+
+// dialPath is where a runtime the node starts connects: the named pipe on Windows, whose Node.js cannot reach a Unix
+// socket (runtimepipe_windows.go), else the socket.
+func (rh *RuntimeHost) dialPath() string {
+	if rh.pipe != "" {
+		return rh.pipe
+	}
+	return rh.path
+}
+
+// mcpConfig is the node's mcp.json, beside the runtime socket. It follows rh.path, never dialPath: on Windows that is
+// a pipe name, whose directory is \\.\pipe.
+func (rh *RuntimeHost) mcpConfig() string {
+	return filepath.Join(filepath.Dir(rh.path), "mcp.json")
 }
 
 func (rh *RuntimeHost) listenOnce(ctx context.Context) (net.Listener, error) {
@@ -361,7 +381,7 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		// (runtimeworkspaces.go).
 		features := []string{"prefer_running", "resume_argv", "handover", "transcript", "launchers", "start_params", "modes", "resume", "codex_thread", "unlisted_transcripts", "workspaces", "usage"}
 		if !h.isDaemon() {
-			features = append(features, "usage_windows", "leader_tools", "supervision_policy", "a2a_mcp")
+			features = append(features, "usage_windows", "leader_tools", "supervision_policy", "a2a_mcp", "remote_agent", "memory_tools")
 			if hello.Caps.Assistant {
 				features = append(features, "assistant_pids")
 			}
@@ -415,6 +435,13 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		}
 		if assistant && !p.LeaderOnly {
 			res.Tools = append(res.Tools, n.gateTools()...)
+			if h.remoteAgent() {
+				if p.SessionID == "" {
+					res.Tools = append(res.Tools, n.memoryTools()...)
+				} else if _, ok := n.sessionAllowsMemoryTools(p.SessionID); ok {
+					res.Tools = append(res.Tools, n.memoryTools()...)
+				}
+			}
 		}
 		if h.isDaemon() {
 			res.Tools = slices.DeleteFunc(res.Tools, func(tool proto.Tool) bool { return !assistantwire.IsA2ATool(tool.Name) })
@@ -449,7 +476,17 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 			return n.saveMailAttachment(ctx, p.Args, p.SessionID, assistant, n.guestOf(p.SessionID) != nil), nil
 		}
 		if g := n.gateTool(p.Name); assistant && g != nil {
+			if h.remoteAgent() {
+				rh.reg.markRemote(p.SessionID)
+				n.gates().markRemote(p.SessionID)
+			}
 			return n.assistantGateTool(ctx, g, p.SessionID, p.Args), nil
+		}
+		if isMemoryTool(p.Name) {
+			if !h.remoteAgent() || !assistant {
+				return proto.TextResult("Memory tools require a remote assistant session", true), nil
+			}
+			return n.assistantMemoryTool(ctx, p.Name, p.SessionID, p.Args), nil
 		}
 		var res json.RawMessage
 		params := map[string]any{"name": p.Name, "args": p.Args, "session_id": p.SessionID, "assistant": assistant, "guest": n.guestOf(p.SessionID) != nil}
@@ -457,6 +494,9 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 			params["origin"] = origin
 		}
 		err := n.peer.Call(ctx, "mcp.call", params, &res)
+		if err == nil {
+			res = n.toolViews.stripRaw(p.SessionID, p.Name, res)
+		}
 		return res, err
 	}
 	return nil, fmt.Errorf("unknown method %s", method)

@@ -174,7 +174,7 @@ func TestTaskReviewDismissalAnswerDelivery(t *testing.T) {
 					e.s.reviewDismissals.loaded = false
 					st.failKey(taskReviewDismissalsKey, errors.New("read failed"))
 				case "dismissal write":
-					st.failPut = errors.New("write failed")
+					st.setFailPut(errors.New("write failed"))
 				case "delivery":
 					e.f.failSend = errors.New("send refused")
 				}
@@ -184,7 +184,7 @@ func TestTaskReviewDismissalAnswerDelivery(t *testing.T) {
 						t.Fatalf("failed answer: %v, %v", ok, err)
 					}
 					st.failKey(taskReviewDismissalsKey, nil)
-					st.failPut = nil
+					st.setFailPut(nil)
 					assertAnswerDismissal(t, e.s, st, "task", before)
 					if len(sentToAgent(e.f)) != 0 {
 						t.Fatal("a failed answer was delivered")

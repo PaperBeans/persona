@@ -107,6 +107,17 @@ import Testing
         #expect(needsRows.last?.cards.map(\.id) == ["ix-orphan"])
     }
 
+    /// A runtime's subagent that names its parent stays for the list to nest under the parent (#14502); one the hub
+    /// places itself (an A2A child whose parent is not listed) or one naming no parent is still left out (#14379).
+    @Test func runtimeSubtasksStayWhileHubPlacedAndOrphanSubagentsGo() throws {
+        let nested = try sessionRow("nested", extra: ["source_kind": "runtime", "is_subagent": true, "parent_session_id": "lead"])
+        let a2a = try sessionRow("a2a", machine: "box-b", extra: ["source_kind": "runtime", "is_subagent": true,
+                                                                  "parent_session_id": "lead", "parent_machine_id": "box-a",
+                                                                  "subagent_origin": "a2a", "a2a_task_id": "task-1"])
+        let orphan = try sessionRow("orphan", extra: ["source_kind": "runtime", "is_subagent": true])
+        #expect(ChildSessions.fold([nested, a2a, orphan]).map(\.sessionID) == ["nested"])
+    }
+
     @Test func childRollupPrefersNeedsYouThenRunningThenQuiet() throws {
         let needs = try sessionRow("p1", extra: ["running_subagents": 2, "children": ["total": 3, "working": 2, "needs_you": 1]])
         #expect(needs.childRollup.kind == .needsYou(1))

@@ -15,6 +15,21 @@ var (
 		// time moves every few seconds, new steps or not: a long turn must not look stuck.
 		"progress_after": time.Second,
 		"progress_idle":  3 * time.Second,
+		// turn_wait is how long a message of the chat waits for the one before it (feishuTurnWait).
+		"turn_wait": feishuTurnWait,
+		// topic_lookup_wait is how long the topic of a message just sent waits between two reads of it
+		// (topicLookupWait).
+		"topic_lookup_wait": topicLookupWait,
+		// card_answer_wait is how long a press waits for its answer to go through before it says "Processing…"
+		// (cardAnswerWait).
+		"card_answer_wait": cardAnswerWait,
+		// start_card_window and form_window: how long a repeat press of the same /start card, and of a card's "Start
+		// new agent" button, is ignored (botStartCardWindow, botFormWindow).
+		"start_card_window": botStartCardWindow,
+		"form_window":       botFormWindow,
+		// card_recheck is how long after a reconnection the cards that may still be waiting are looked at again (the
+		// manager restores its interactions meanwhile; closeEndedBotCards).
+		"card_recheck": 90 * time.Second,
 	}
 	defaultTimingLists = map[string][]time.Duration{
 		// cot_end_tries are the waits between tries of cotEnd (a rate limit that hit the end likely hits the first

@@ -27,6 +27,8 @@ var startWrappers = map[string]string{
 	"startTaskAgent": "a planned task's agent start (tasks_placement.go), called by runPlanTaskStart",
 	// The same supervised start into a prepared backend workspace (#11687), called only by startTaskAgent.
 	"startBackendTask": "a planned task's prepared-backend agent start (tasks_backend_launch.go), called by startTaskAgent",
+	// Captures the legacy authorization tuple before forwarding to the policy-authorized start below.
+	"startInboxAgent": "an inbox event's authorization-capturing wrapper, forwarding to startInboxAgentAuthorized",
 }
 
 // supervisedStarts are the entry points that give their work a ledger, and the function that does it: it must call
@@ -54,9 +56,9 @@ var startOptOuts = map[string]string{
 	"channelForwardInGeneration": "a channel's message opening a conversation: the user's own conversation",
 	"request":                    "the hub bus's assistant.start: an app opening a conversation for the user",
 	"startRoutes":                "the apps' POST /api/v1/sessions: the user started it by hand (assistant.agent_tasks makes it a task when on)",
-	"botStartAgent":              "the Lark bot's start card: the user started the Agent by hand in the chat",
+	"startChatAgent":             "the Lark bot's start card: the user started the Agent by hand in the chat",
 	"sendHandoff":                "the inbox's hand-off into the main conversation: the main conversation is the supervisor",
-	"startInboxAgent":            "an inbox event's agent: its result is the draft in the inbox, which the user reviews",
+	"startInboxAgentAuthorized":  "an inbox event's policy-authorized agent: its result is the draft in the inbox, which the user reviews",
 	"runTask":                    "a scheduled task's own conversation: its runs report through notify_user, and the schedule follows them",
 	"runAutoReview":              "an independent reviewer of a supervised task: the review is part of that task's supervision",
 	"startSessionReview":         "an explicit independent reviewer: its source session's owner asked for it and answers its result card",

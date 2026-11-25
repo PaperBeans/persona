@@ -103,7 +103,7 @@ function onNotification(msg) {
 }
 
 if (ignoreTerm) {
-  process.on('SIGTERM', () => {})
+  process.on('SIGTERM', () => record({ term: process.pid }))
   setInterval(() => {}, 60_000)
 }
 record({

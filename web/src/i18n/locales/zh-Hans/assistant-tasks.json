@@ -141,6 +141,9 @@
   "review_missing": "缺口",
   "review_note": "督办说明：{note}",
   "review_expect": "预计 {minutes} 分钟",
+  "evidence_author_supervisor": "主管",
+  "evidence_author_agent": "Agent",
+  "evidence_author_reviewer": "评审",
   "dock_task_asks": "{title}：{ask}",
   "dock_agent": "Agent {title}，{state}",
   "report_question": "问 Persona：{text}",
@@ -181,5 +184,16 @@
   "start_cause_not_allowed": "这台电脑没有允许",
   "start_cause_needs_update": "这台电脑上的 Persona 需要更新",
   "start_failed_short": "没开起来",
-  "start_failed_details": "没开起来，点开看详情"
+  "start_failed_details": "没开起来，点开看详情",
+  "dispatch_reason_first": "按预设 {tier} 的第 {candidate} 个候选",
+  "dispatch_reason_score": "预设 {tier} 的第 {candidate} 个候选：近两周用时 {minutes} 分、一次过 {first_pass}%，余量 {headroom}%",
+  "dispatch_reason_score_short": "按效率与余量选用预设 {tier} 的第 {candidate} 个候选",
+  "dispatch_reason_quota": "靠前候选余量不足，改用第 {candidate} 个",
+  "dispatch_reason_quota_detail": "靠前候选余量不足（{detail}），改用第 {candidate} 个",
+  "dispatch_reason_unavailable": "靠前候选在这台机器上不可用，改用第 {candidate} 个",
+  "dispatch_reason_kept": "沿用上一个 Agent 的候选",
+  "dispatch_reason_switched": "已从上一个候选切换为第 {candidate} 个",
+  "dispatch_reason_switched_detail": "上一个候选触发切换（{detail}），改用第 {candidate} 个",
+  "dispatch_reason_over_pace": "所有候选都超配速，按顺序用第 {candidate} 个",
+  "dispatch_reason_fallback": "预设 {tier} 第 {candidate} 个候选（{reason}）"
 }

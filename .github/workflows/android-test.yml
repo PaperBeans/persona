@@ -73,6 +73,7 @@ jobs:
           path: |
             ~/.m2/repository/org/robolectric/android-all
             ~/.m2/repository/org/robolectric/android-all-instrumented
+            ~/.m2/repository/org/robolectric/nativeruntime-dist-compat
           key: ${{ runner.os }}-robolectric-v1-${{ matrix.lane }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/libs.versions.toml', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           # Another lane's entry, or one saved under an old lane name, holds the same public jars: better than a download.
           restore-keys: |
@@ -87,6 +88,7 @@ jobs:
           path: |
             ~/.m2/repository/org/robolectric/android-all
             ~/.m2/repository/org/robolectric/android-all-instrumented
+            ~/.m2/repository/org/robolectric/nativeruntime-dist-compat
           key: ${{ steps.robolectric.outputs.cache-primary-key }}
       - name: Upload the exact-source test evidence
         if: always()

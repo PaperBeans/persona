@@ -99,7 +99,7 @@ func (r *spaceRig) processNamed(cwd string) (env []string, name func(id string))
 
 // open is openIn for a process outside the health space, for the tests that are not about the space.
 func (p *gateProxy) open(command, session string) (base string, release func(), err error) {
-	return p.openIn(command, session, false)
+	return p.openIn(command, session, false, false)
 }
 
 // cards is how many cards the phone was asked.
@@ -518,6 +518,14 @@ func TestFakeCodexAppServer(t *testing.T) {
 			continue // a notification, or the node answering a request of ours
 		}
 		var result any = map[string]any{}
+		if dir := os.Getenv("PERSONA_FAKE_CODEX_TRACE"); dir != "" {
+			method := strings.ReplaceAll(m.Method, "/", "-")
+			if err := os.WriteFile(filepath.Join(dir, method), sc.Bytes(), 0o600); err != nil {
+				b, _ := json.Marshal(map[string]any{"id": m.ID, "error": map[string]any{"code": -32603, "message": "write failed"}})
+				fmt.Println(string(b))
+				continue
+			}
+		}
 		if m.Method == "thread/start" {
 			if record := os.Getenv("PERSONA_FAKE_CODEX_START"); record != "" {
 				_ = os.WriteFile(record, append([]byte(nil), sc.Bytes()...), 0o600)

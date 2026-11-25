@@ -2,6 +2,7 @@ package persona.core.domain.lines
 
 import persona.core.contracts.CoreText.Key
 import persona.core.contracts.CoreText
+import persona.core.contracts.stripToolResultTimestampHeaders
 import kotlinx.serialization.json.*
 
 enum class TaskProgressStatus { Pending, InProgress, Completed, Unknown }
@@ -48,7 +49,7 @@ internal fun rebuildTaskProgress(items: List<LineItem>): List<TaskProgressItem> 
         // Only these tools change the list (the `when` below): any other result, a file or shell output, is not parsed.
         if (use.item.toolName !in progressTools) continue
         val input = use.item.toolInput as? JsonObject ?: JsonObject(emptyMap())
-        val output = item.text?.trim().orEmpty()
+        val output = stripToolResultTimestampHeaders(item.text.orEmpty()).trim()
         val result = runCatching { Json.parseToJsonElement(output) }.getOrNull()
         val obj = result as? JsonObject
         if (obj?.get("success") == JsonPrimitive(false) || obj?.get("error")?.let { it != JsonNull } == true) continue

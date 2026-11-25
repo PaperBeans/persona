@@ -22,9 +22,18 @@ import (
 // OpenCode live ACP tool-call normalization (#14130) adds 383 B on main (254,092 B).
 // The dedicated-Assistant environment handoff (#14068) adds 114 B (254,206 B).
 // Claude Code plugin 0.3.0 permission / question / plan approval bridging (#14214) adds 6,363 B (260,569 B).
+// Antigravity multi-instance companion flags and --agy-dir env propagation (#14483) add 373 B (260,942 B).
+// An Antigravity CLI without session/set_mode: checks skip the switch and starts say to update agy (#14533), 149 B (261,091 B).
+// Antigravity Gemini API-key gateway model discovery routes through HTTP(S)_PROXY and honors NO_PROXY (#14552), 1,497 B (262,588 B).
+// Keeping Antigravity steps at a reused lower index when the export goes on past them, dropping them again once the run re-covers them (#14626), adds 230 B (262,818 B).
+// Antigravity native error backfill at every unexported index, loading conversations another agy process created, with read failures in the history token (#14627), 427 B (263,245 B).
+// Antigravity subagent reports and background task results as task notices, invoke_subagent Role / Prompt (#14625), 749 B (263,994 B).
+// Untitled Antigravity conversations take a short title from their first prompt line (#14629), 218 B (264,212 B).
+// An API error agy streams as message text becomes the turn's error, kept in history and settled idle (#14628), 231 B (264,443 B).
+// Antigravity GENERIC timestamp header stripping (#13662) adds 176 B (264,619 B).
 // Raise the budget only for code a runtime needs, never to embed the packages raw again.
 func TestDistBudget(t *testing.T) {
-	const budget = 260_569
+	const budget = 264_619
 	_, out := generateIntegrations(t)
 	entries, err := os.ReadDir(out)
 	if err != nil {

@@ -394,7 +394,7 @@ struct RecordingCaptureControls: View {
         controls
             .task { // the Microphone picker shows only while a Bluetooth device (glasses, headset) is on the route
                 refreshBluetooth()
-                for await _ in NotificationCenter.default.notifications(named: AVAudioSession.routeChangeNotification) { refreshBluetooth() }
+                for await _ in AudioSessionBroker.shared.routeChangeNotifications() { refreshBluetooth() }
             }
             .task(id: capture.state == .idle) {
                 while capture.state == .idle, !Task.isCancelled {

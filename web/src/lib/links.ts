@@ -23,7 +23,7 @@ import { navigate, parse as parseRoute } from "./router";
 import { BASE, stripBase } from "./base";
 import { contextXML } from "./context-xml";
 import { otherManager } from "./manager-choice";
-import { localhostLink, PREVIEW_FEATURE } from "./preview";
+import { localhostLink, PREVIEW_FEATURE } from "./preview-link";
 import type { PortLink } from "./port-links";
 import { getSession, getState, hubHas, larkOn, onHubEvent } from "./store";
 import { mediaMatches, NARROW } from "./viewport";

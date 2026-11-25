@@ -1,0 +1,43 @@
+# Imports outside the domain rules, frozen by name (docs/server/architecture.md "Domain model"): "<pkg> imports
+# <path>", the legacy cores' own imports outside core-import and the imports of them by the hub and db that path-no-core
+# refuses ("(test)" for test files). server/internal/archguard's TestDomainLayers fails on any other such import; one
+# that no longer happens prints a notice, and its line can go. Add none: with a base, the test fails on a line the
+# merge base's list lacks, unless a frozen import's package or path moved (python3 scripts/test/name_freezes.py moves
+# writes those).
+#
+# These packages predate the rules; their counts only fall; do not copy their shapes. Copy server/internal/domainkit,
+# server/internal/agentref and its adapter, and the compliant twins in
+# server/internal/archguard/testdata/domainrules/planted (assistant/fleetcount and its adapter), or start with
+# python3 scripts/new_domain_slice.py. assistant/chatsearch depends on impure packages (prompts, transcript, lazyre, compat, proto, the
+# SDK's wire and golang.org/x/text): its imports stay frozen here until it is converted.
+internal/assistant/chatsearch imports github.com/nwverse/persona/sdk/go/wire
+internal/assistant/chatsearch imports golang.org/x/text/unicode/norm
+internal/assistant/chatsearch imports internal/compat
+internal/assistant/chatsearch imports internal/lazyre
+internal/assistant/chatsearch imports internal/prompts
+internal/assistant/chatsearch imports internal/proto
+internal/assistant/chatsearch imports internal/transcript
+internal/assistant/chatsearch imports unicode/utf16
+internal/assistant/todo/timeline imports encoding/json
+internal/assistant/todo/timeline imports internal/assistantwire
+internal/assistant/todo/timeline imports internal/proto
+internal/assistant/todo/timeline imports time
+internal/conversationlog imports encoding/json
+internal/conversationlog imports errors
+internal/conversationlog imports github.com/nwverse/persona/sdk/go/wire
+internal/conversationlog imports internal/proto
+internal/db (test) imports internal/conversationlog
+internal/db imports internal/conversationlog
+internal/db imports internal/tokenuse
+internal/hub (test) imports internal/conversationlog
+internal/hub (test) imports internal/sessionhistory
+internal/hub imports internal/sessionhistory
+internal/sessionhistory imports context
+internal/sessionhistory imports encoding/base64
+internal/sessionhistory imports encoding/json
+internal/sessionhistory imports errors
+internal/sessionhistory imports internal/proto
+internal/sessionhistory imports time
+internal/tokenuse imports encoding/json
+internal/tokenuse imports internal/proto
+internal/tokenuse imports time

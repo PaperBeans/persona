@@ -2,6 +2,7 @@ package lark
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -16,16 +17,6 @@ type outboundHost struct {
 	calls []any
 }
 
-func (h *outboundHost) Status(context.Context) (assistantwire.FeishuStatus, error) {
-	h.calls = append(h.calls, "status")
-	return assistantwire.FeishuStatus{Ready: true, Owner: "ou_1"}, nil
-}
-
-func (h *outboundHost) Features(context.Context) (assistantwire.FeishuFeatures, bool) {
-	h.calls = append(h.calls, "features")
-	return assistantwire.FeishuFeatures{Reports: true}, true
-}
-
 func (h *outboundHost) Post(_ context.Context, to assistantwire.ChannelTarget, replyTo string, card *botcard.Card, fallback, key string) (string, error) {
 	h.calls = append(h.calls, []any{"post", to, replyTo, card, fallback, key})
 	return "om_1", nil
@@ -35,23 +26,21 @@ func (h *outboundHost) Note(_ context.Context, to assistantwire.ChannelTarget, r
 	h.calls = append(h.calls, []any{"note", to, replyTo, text})
 }
 
-func (h *outboundHost) Reply(_ context.Context, to assistantwire.ChannelTarget, replyTo, text, key string, full bool) error {
-	h.calls = append(h.calls, []any{"reply", to, replyTo, text, key, full})
-	return errors.New("refused")
-}
-
 func (h *outboundHost) UpdateCard(_ context.Context, messageID string, card *botcard.Card) error {
 	h.calls = append(h.calls, []any{"update", messageID, card})
 	return nil
 }
 
-func (h *outboundHost) ThreadPost(todoID string, ev assistantwire.ThreadEvent) {
-	h.calls = append(h.calls, []any{"thread", todoID, ev})
-}
-
-// The layer's outbound port hands each call to the core's host unchanged and gives back what it answers.
+// The layer's outbound port hands each send to the core's host unchanged and gives back what it answers; the bot's
+// status and switches are the chat's own, read from the hub (a to-do's topic lines are the module's own too,
+// thread_posts_test.go).
 func TestLayerForwardsTheOutboundPort(t *testing.T) {
-	h := &outboundHost{Service: newTestService(t, newFakeHub())}
+	f := newFakeHub()
+	f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) {
+		return assistantwire.FeishuStatus{Ready: true, Owner: "ou_1", Features: assistantwire.FeishuFeatures{Reports: true}}, nil
+	})
+	f.answerApp(AppFeishu, FeishuText, func(json.RawMessage) (any, error) { return nil, errors.New("refused") })
+	h := &outboundHost{Service: newTestService(t, f)}
 	l := New(h)
 	ctx := context.Background()
 	card := &botcard.Card{}
@@ -69,13 +58,19 @@ func TestLayerForwardsTheOutboundPort(t *testing.T) {
 	if err := l.Reply(ctx, to, "om_3", "a reply", "k2", true); err == nil || err.Error() != "refused" {
 		t.Fatalf("reply %v", err)
 	}
+	got := f.appParams(AppFeishu, FeishuText)
+	if len(got) != 1 || got[0]["reply_to"] != "om_3" || got[0]["text"] != "a reply" || got[0]["uuid"] != "k2" || got[0]["full_answer"] != true ||
+		got[0]["chat_id"] != "oc_1" || got[0]["in_thread"] != true || got[0]["no_detour"] != true {
+		t.Fatalf("the reply went to the hub as %v", got)
+	}
 	if err := l.UpdateCard(ctx, "om_4", card); err != nil {
 		t.Fatal(err)
 	}
-	ev := assistantwire.ThreadEvent{Kind: assistantwire.ThreadTodoDone, Text: "done"}
-	l.ThreadPost("todo_1", ev)
-	want := []any{"status", "features", []any{"post", to, "om_0", card, "fb", "k1"}, []any{"note", to, "om_2", "a note"},
-		[]any{"reply", to, "om_3", "a reply", "k2", true}, []any{"update", "om_4", card}, []any{"thread", "todo_1", ev}}
+	if n := len(f.appParams(AppFeishu, FeishuStatusGet)); n != 2 {
+		t.Fatalf("the status was read %d times from the hub, want 2", n)
+	}
+	want := []any{[]any{"post", to, "om_0", card, "fb", "k1"}, []any{"note", to, "om_2", "a note"},
+		[]any{"update", "om_4", card}}
 	if !reflect.DeepEqual(h.calls, want) {
 		t.Fatalf("calls %v, want %v", h.calls, want)
 	}

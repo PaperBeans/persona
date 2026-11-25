@@ -228,6 +228,100 @@ struct VoiceConversationTests {
         #expect(socket.frames.last?["text"] as? String == "顺便把 lint 也修了")
     }
 
+    /// #14933: the extension's reply edges reach the audio in order with the voice, so its jitter buffer holds through a
+    /// slow reply's pauses and plays what it holds as the reply ends.
+    @Test func replyEdgesReachTheAudio() async {
+        let rig = VoiceRig()
+        let (call, socket) = await live(rig)
+        socket.deliver(#"{"type":"reply","state":"start"}"#)
+        socket.deliver(data: .pcm(240))
+        socket.deliver(data: .pcm(240))
+        socket.deliver(#"{"type":"reply","state":"end"}"#)
+        socket.deliver(#"{"type":"reply","state":"later"}"#)
+        #expect(rig.audio.replies == [true, false], "an edge this app does not know is ignored")
+        #expect(rig.audio.played == [.pcm(240), .pcm(240)])
+        #expect(call.phase == .live(.listening))
+    }
+
+    /// An extension from before `reply` (#14932) sends no edges: the audio is never told one, and plays as before.
+    @Test func anExtensionWithoutReplyEdgesLeavesTheAudioToTheSilences() async {
+        let rig = VoiceRig()
+        let (call, socket) = await live(rig)
+        #expect(!call.features.contains("reply"))
+        socket.deliver(data: .pcm(240))
+        socket.deliver(#"{"type":"clear"}"#)
+        socket.deliver(data: .pcm(240))
+        #expect(rig.audio.replies.isEmpty)
+        #expect(rig.audio.played == [.pcm(240), .pcm(240)])
+        #expect(rig.audio.clears == 1)
+    }
+
+    // MARK: The voice's lead (#14933)
+
+    /// A voice that came slower than it plays starts its next call with the lead it reached, for a day; a call that
+    /// measured nothing leaves that as it was, and one whose replies kept up forgets it.
+    @Test func aSlowVoiceStartsItsNextCallWithTheLeadItReached() async {
+        let rig = VoiceRig()
+        let key = VoiceLeadMemory.key(group: rig.key.group, extensionID: "voice", voice: "marin")
+        defer { rig.leads.defaults.removeObject(forKey: key) }
+        let first = rig.call()
+        await first.begin()
+        #expect(rig.audio.startedLeads == [0], "never measured: the first lead")
+        rig.audio.lead = VoiceLead(level: 4, slow: true)
+        first.end(.user)
+
+        let second = rig.call()
+        await second.begin()
+        #expect(rig.audio.startedLeads.last == 4)
+        rig.audio.lead = VoiceLead(level: 4, slow: nil) // one short reply, too quick to measure
+        second.end(.user)
+        rig.clock.advance(VoiceLeadMemory.keep - 60)
+        let third = rig.call()
+        await third.begin()
+        #expect(rig.audio.startedLeads.last == 4, "nothing measured: the day counts on from the call that found it slow")
+        rig.audio.lead = VoiceLead()
+        third.end(.user)
+        rig.clock.advance(120)
+        let fourth = rig.call()
+        await fourth.begin()
+        #expect(rig.audio.startedLeads.last == 0, "a day later the voice starts at 200 ms again")
+        fourth.end(.user)
+
+        rig.leads.remember(VoiceLead(level: 3, slow: true), group: rig.key.group, extensionID: "voice", voice: "marin", now: rig.clock.now)
+        let fifth = rig.call()
+        await fifth.begin()
+        #expect(rig.audio.startedLeads.last == 3)
+        rig.audio.lead = VoiceLead(level: 3, slow: false) // its replies all kept up
+        fifth.end(.user)
+        let sixth = rig.call()
+        await sixth.begin()
+        #expect(rig.audio.startedLeads.last == 0, "a voice that kept up is forgotten")
+        sixth.end(.user)
+    }
+
+    /// Changing the voice mid-call: the old voice's lead is remembered, the new one starts where its own calls left it
+    /// (a fast voice at 200 ms, with no lead it never needed).
+    @Test func anotherVoiceStartsFromItsOwnLead() async {
+        let rig = VoiceRig()
+        let marin = VoiceLeadMemory.key(group: rig.key.group, extensionID: "voice", voice: "marin")
+        let cedar = VoiceLeadMemory.key(group: rig.key.group, extensionID: "voice", voice: "cedar")
+        defer {
+            rig.leads.defaults.removeObject(forKey: marin)
+            rig.leads.defaults.removeObject(forKey: cedar)
+        }
+        let (call, _) = await live(rig)
+        #expect(rig.audio.startedLeads == [0])
+        rig.audio.lead = VoiceLead(level: 4, slow: true)
+        call.change(voice: "cedar")
+        #expect(rig.audio.startedLeads == [0, 0], "another voice: the first lead")
+        #expect(rig.leads.level(group: rig.key.group, extensionID: "voice", voice: "marin", now: rig.clock.now) == 4)
+        rig.audio.lead = VoiceLead(level: 1, slow: false)
+        call.change(voice: "marin")
+        #expect(rig.audio.startedLeads == [0, 0, 4], "back to the slow voice: its lead")
+        #expect(rig.leads.level(group: rig.key.group, extensionID: "voice", voice: "cedar", now: rig.clock.now) == 0)
+        call.end(.user)
+    }
+
     @Test func phaseFollowsTheVoiceAndTheUsersCaption() async {
         let rig = VoiceRig()
         let (call, socket) = await live(rig)

@@ -72,6 +72,19 @@ func (s *Service) recheckInboxTask(ctx context.Context, id string) (inboxTaskLin
 	}
 	snapshot := *it
 	b.mu.Unlock()
+	allowed, visibilityErr := s.inboxVisibilityModelAllowed(ctx, &snapshot)
+	if visibilityErr != nil {
+		return out, http.StatusServiceUnavailable, visibilityErr
+	}
+	if !allowed {
+		out.Status, out.Method = "excluded", "visibility"
+		b.mu.Lock()
+		if b.items[id] == it {
+			out.Item = it.listed()
+		}
+		b.mu.Unlock()
+		return out, http.StatusOK, nil
+	}
 	if !s.inboxConfig(ctx).Agent.Enabled {
 		out.Status = "disabled"
 		return out, http.StatusConflict, nil

@@ -122,6 +122,7 @@ struct ReadinessSheets: ViewModifier {
             NavigationStack {
                 MachinesView()
                     .navigationDestination(for: MachineDetailRoute.self) { MachineDetailView(ref: $0.ref) }
+                    .navigationDestination(for: MachineUsageMapRoute.self) { UsageMapView(route: $0) }
                     .navigationDestination(for: TerminalsRoute.self) { TerminalsView(only: $0.machine) }
                     .toolbar { SheetClose { route = nil } }
             }

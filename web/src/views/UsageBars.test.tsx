@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { initI18n } from "../i18n";
 import { onDraftEvent, type DraftEvent } from "../lib/drafts";
-import { PINNED_USAGE_ACCOUNTS_KEY, resetPinnedUsageAccounts, timelinePosition, type UsageAccount } from "../lib/usage-windows";
+import { PINNED_USAGE_ACCOUNTS_KEY, remainingTone, resetPinnedUsageAccounts, timelinePosition, type UsageAccount } from "../lib/usage-windows";
 import { UsageBars } from "./UsageBars";
-import { compactResetText, providerHue, UsagePopover, usageTier, visibleTimelineTickHours } from "./UsagePopover";
+import { compactResetText, computeUsagePopoverLayout, packedColumnHeight, POPOVER_HYSTERESIS_PX, providerHue, UsagePopover, visibleTimelineTickHours } from "./UsagePopover";
 import { unconnectedUsageProviders } from "./UsageUnconnected";
 
 const NOW = new Date(2026, 10, 5, 10, 0, 0).getTime();
@@ -40,15 +42,44 @@ describe("the sidebar's usage strip", () => {
     // all samples older than three days
     expect(renderToStaticMarkup(<UsageBars accounts={[account("a", 10, 10, { sampled_at: iso(-80 * H) })]} now={NOW} />)).toBe("");
   });
-  it("shows the two fullest accounts as bars, the caution colour from 80%", () => {
-    const html = renderToStaticMarkup(<UsageBars accounts={[account("a", 10, 20), account("b", 85, 30), account("c", 50, 60)]} now={NOW} />);
+  it("shows the two lowest-headroom accounts with remaining width, remainingTone color, and explicit remaining prefix", () => {
+    // a: r=80 (green), b: r=15 (orange), c: r=40 (green), d: r=98 used -> r=2 (red)
+    const html = renderToStaticMarkup(<UsageBars accounts={[account("a", 10, 20), account("b", 85, 30), account("c", 50, 60), account("d", 98, 10)]} now={NOW} />);
     expect(html.match(/role="progressbar"/g)).toHaveLength(2);
+    expect(html).toContain("账号 d");
     expect(html).toContain("账号 b");
-    expect(html).toContain("账号 c");
     expect(html).not.toContain("账号 a");
-    expect(html).toMatch(/bg-orange[^>]*style="width:85%/);
-    expect(html).toMatch(/bg-accent[^>]*style="width:60%/);
+    expect(html).not.toContain("账号 c");
+    expect(html).toContain("剩 2%");
+    expect(html).toContain("剩 15%");
+    expect(html).toMatch(/bg-red[^>]*style="width:2%/);
+    expect(html).toMatch(/bg-orange[^>]*style="width:15%/);
     expect(html).toContain('aria-expanded="false"');
+  });
+  it("ranks protected accounts by headroom h = r - R and localizes collapsed remaining prefixes across zh-Hans, en, ja", async () => {
+    const prot = account("prot", 70, 20, { name: "Protected seat" });
+    prot.windows[0].protect_percent = 80; // r=30, R=20, h=10 -> orange
+    const low = account("low", 85, 10, { name: "Raw low" }); // r=15, R=0, h=15 -> orange
+    const comfy = account("ok", 10, 20, { name: "Comfy" }); // r=80, R=0, h=80 -> green
+    for (const [lang, wantProt, wantLow] of [
+      ["zh-Hans", "剩 30%", "剩 15%"],
+      ["en", "30% left", "15% left"],
+      ["ja", "残り 30%", "残り 15%"],
+    ] as const) {
+      await initI18n(lang);
+      try {
+        const html = renderToStaticMarkup(<UsageBars accounts={[comfy, low, prot]} now={NOW} />);
+        expect(html).toContain("Protected seat");
+        expect(html).toContain("Raw low");
+        expect(html).not.toContain("Comfy");
+        expect(html.indexOf("Protected seat")).toBeLessThan(html.indexOf("Raw low"));
+        expect(html).toContain(wantProt);
+        expect(html).toContain(wantLow);
+        expect(html).toMatch(/bg-orange[^>]*style="width:30%/);
+      } finally {
+        await initI18n("zh-Hans");
+      }
+    }
   });
   it("shows Antigravity and Codex by default when the hub has reconciled the quota windows", () => {
     const html = renderToStaticMarkup(<UsageBars accounts={[
@@ -61,19 +92,31 @@ describe("the sidebar's usage strip", () => {
     expect(html).toContain("Codex Pro");
     expect(html).not.toContain("Antigravity · Claude/GPT");
   });
-  it("opens its details on intent, including the gateway's retained-number warning", async () => {
+  it("opens a portaled popover on intent, keeps it open on inside clicks, and plays the close transition before unmounting", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
     try {
       await act(async () => root.render(<UsageBars accounts={[account("a", 10, 20, { problem: "unreachable" })]} now={NOW} />));
-      expect(host.querySelector("[role=dialog]")).toBeNull();
+      expect(document.querySelector("[role=dialog]")).toBeNull();
       await act(async () => host.querySelector<HTMLButtonElement>("[data-usage-bars] > button")!.click());
-      await vi.waitFor(() => expect(host.querySelector("[role=dialog]")?.textContent).toContain("5h"));
-      const dialog = host.querySelector("[role=dialog]");
-      expect(dialog?.textContent).toContain("网关暂时读不到，显示的是上次的数字");
+      await vi.waitFor(() => expect(document.querySelector("[role=dialog]")?.textContent).toContain("5h"));
+      const dialog = document.querySelector<HTMLElement>("[role=dialog]")!;
+      expect(dialog.parentElement).toBe(document.body);
+      expect(dialog.getAttribute("data-state")).toBe("open");
+      expect(dialog.textContent).toContain("网关暂时读不到，显示的是上次的数字");
+
+      // Clicking inside the portaled dialog must not dismiss it
+      await act(async () => {
+        dialog.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      });
+      expect(document.querySelector<HTMLElement>("[role=dialog]")?.getAttribute("data-state")).toBe("open");
+
+      // Toggling the trigger starts the 160ms closing animation and unmounts once animation finishes
       await act(async () => host.querySelector<HTMLButtonElement>("[data-usage-bars] > button")!.click());
-      expect(host.querySelector("[role=dialog]")).toBeNull();
+      const closing = document.querySelector<HTMLElement>("[data-usage-popover]");
+      expect(closing?.getAttribute("data-state")).toBe("closing");
+      await vi.waitFor(() => expect(document.querySelector("[role=dialog]")).toBeNull(), { timeout: 500 });
     } finally {
       await act(async () => root.unmount());
       host.remove();
@@ -90,7 +133,7 @@ describe("the sidebar's usage strip", () => {
 });
 
 describe("a prepaid balance in the sidebar (#11825)", () => {
-  it("shows the amount and currency beside the two fullest window accounts", () => {
+  it("shows the amount and currency beside the two lowest-headroom window accounts", () => {
     const html = renderToStaticMarkup(<UsageBars accounts={[balanceAccount("ds", "12.34"), account("a", 10, 20), account("b", 85, 30), account("c", 50, 60)]} now={NOW} />);
     expect(html).toContain("CNY 12.34");
     expect(html.match(/role="progressbar"/g)).toHaveLength(2); // the balance takes no bar
@@ -111,15 +154,15 @@ describe("a prepaid balance in the sidebar (#11825)", () => {
     expect(html).toContain("账号 a");
     expect(html.match(/role="progressbar"/g)).toHaveLength(1);
     expect(html).toContain("opacity-60");
-    // the words behind it are the popover's (it is not first-screen code)
     expect(renderToStaticMarkup(<UsagePopover accounts={[failed]} now={NOW} />)).toContain("余额无法读取");
   });
-  it("shows the amount, the sample age and both kinds of account in the popover", () => {
+  it("shows the amount, the sample age and both kinds of account in the popover (remaining percentages)", () => {
     const html = renderToStaticMarkup(<UsagePopover accounts={[balanceAccount("ds", "12.34"), account("a", 70, 10)]} now={NOW} />);
     expect(html).toContain("预付余额");
     expect(html).toContain("CNY 12.34");
     expect(html).toContain("5h");
-    expect(html).toContain("70%");
+    expect(html).toContain("30%"); // 100 - 70 = 30% remaining
+    expect(html).toContain("90%"); // 100 - 10 = 90% remaining
     expect(html.match(/role="progressbar"/g)).toHaveLength(2); // only the window account's bars
   });
   it("says in the popover why a balance is unavailable or is the last one", () => {
@@ -145,17 +188,21 @@ describe("the popover", () => {
     expect(html).toContain('data-usage-provider="antigravity" aria-label="Antigravity"');
     expect(html).toContain("Antigravity · Claude/GPT");
   });
-  it("lists every window in a single-line grid with tiered colors, 1px pace tick, countdown, and sample age", () => {
-    // 5h window: 70% (mid tier -> orange), 2h elapsed = 40% expected; 7d window: 10% (low tier -> green), 5d elapsed (~71%); 30d: 85% (high tier -> red)
-    const a = account("a", 70, 10);
-    a.windows.push({ label: "30d", window_minutes: 43200, used_percent: 85, resets_at: iso(10 * 24 * H) });
+  it("lists every window on the remaining-quota scale with remainingTone colors and mirrored expected-remaining pace ticks", () => {
+    // 5h: used 85% -> remaining 15% (orange: 5<=h<20), 2h elapsed -> expectedUsed=40% -> expectedRemaining=60%
+    // 7d: used 10% -> remaining 90% (green: h>=20), 5d elapsed -> expectedUsed~71% -> expectedRemaining~29%
+    // 30d: used 97% -> remaining 3% (red: h<5)
+    const a = account("a", 85, 10);
+    a.windows.push({ label: "30d", window_minutes: 43200, used_percent: 97, resets_at: iso(10 * 24 * H) });
     const host = document.createElement("div");
     host.innerHTML = renderToStaticMarkup(<UsagePopover accounts={[a]} now={NOW} />);
     const html = host.innerHTML;
     expect(html).toContain("12秒钟前");
     expect(html).toContain("5h");
     expect(html).toContain("7d");
-    expect(html).toContain("70%");
+    expect(html).toContain("15%");
+    expect(html).toContain("90%");
+    expect(html).toContain("3%");
     expect(html).toContain("13:00 重置");
     expect(html).toContain("2 天 3 小时后重置");
 
@@ -163,27 +210,34 @@ describe("the popover", () => {
     const row7 = host.querySelector('[data-window-row="7d"]')!;
     const row30 = host.querySelector('[data-window-row="30d"]')!;
     expect(row5.classList.contains("grid")).toBe(true);
+    expect(row5.querySelector("[data-usage-percent]")?.textContent).toBe("15%");
     expect(row5.querySelector("[data-usage-percent]")?.classList.contains("text-orange")).toBe(true);
-    expect(row5.querySelector('[role="progressbar"] > div')?.classList.contains("bg-orange")).toBe(true);
+    expect(row5.querySelector<HTMLElement>('[role="progressbar"] > div')?.classList.contains("bg-orange")).toBe(true);
+    expect(row5.querySelector<HTMLElement>('[role="progressbar"] > div')?.style.width).toBe("15%");
+    expect(row7.querySelector("[data-usage-percent]")?.textContent).toBe("90%");
     expect(row7.querySelector("[data-usage-percent]")?.classList.contains("text-green")).toBe(true);
-    expect(row7.querySelector('[role="progressbar"] > div')?.classList.contains("bg-green")).toBe(true);
+    expect(row7.querySelector<HTMLElement>('[role="progressbar"] > div')?.classList.contains("bg-green")).toBe(true);
+    expect(row7.querySelector<HTMLElement>('[role="progressbar"] > div')?.style.width).toBe("90%");
+    expect(row30.querySelector("[data-usage-percent]")?.textContent).toBe("3%");
     expect(row30.querySelector("[data-usage-percent]")?.classList.contains("text-red")).toBe(true);
-    expect(row30.querySelector('[role="progressbar"] > div')?.classList.contains("bg-red")).toBe(true);
-    expect(row5.querySelector("[data-usage-percent]")?.classList.contains("whitespace-nowrap")).toBe(true);
-    expect(row5.querySelector("[data-usage-percent]")?.classList.contains("tabular-nums")).toBe(true);
+    expect(row30.querySelector<HTMLElement>('[role="progressbar"] > div')?.classList.contains("bg-red")).toBe(true);
+    expect(row30.querySelector<HTMLElement>('[role="progressbar"] > div')?.style.width).toBe("3%");
 
-    // 1px ink-3 expected pace ticks
-    const ticks = [...host.querySelectorAll("[data-pace-tick]")];
-    expect(ticks).toHaveLength(3);
-    for (const tick of ticks) {
-      expect(tick.classList.contains("w-px")).toBe(true);
-      expect(tick.classList.contains("bg-ink-3")).toBe(true);
-    }
+    // Expected-pace tick is mirrored to x = 100 - expectedUsed (5h has 40% elapsed -> tick at 60%)
+    const tick5 = row5.querySelector<HTMLElement>("[data-pace-tick]")!;
+    expect(tick5.style.left).toBe("60%");
+    expect(tick5.classList.contains("w-px")).toBe(true);
+    expect(tick5.classList.contains("bg-ink-3")).toBe(true);
 
-    // Tier boundaries: <50 green, 50-80 orange, >=80 red
-    expect([0, 49.9, 50, 79.9, 80, 100].map(usageTier)).toEqual(["low", "low", "mid", "mid", "high", "high"]);
+    // Bar shorter than tick (5h: 15% < 60%) -> running fast ("用得偏快"); bar longer than tick (7d: 90% > ~29%) -> no prompt
+    expect(row5.getAttribute("aria-label")).toContain("用得偏快");
+    expect(row7.getAttribute("aria-label")).not.toContain("用得偏快");
+    expect(row7.getAttribute("aria-label")).not.toContain("用得偏慢");
+
+    // Shared remainingTone thresholds match 20 and 5
+    expect([100, 20, 19.9, 5, 4.9, 0].map((r) => remainingTone(r, 0))).toEqual(["green", "green", "orange", "orange", "red", "red"]);
   });
-  it("draws no pace hint in the first 5% of a window, keeps focus across pace transitions, and discloses details on tap/keyboard activation", async () => {
+  it("draws no pace hint in the first 5% of a window, keeps focus across pace transitions, and discloses details via Collapse", async () => {
     const a = account("a", 90, 90);
     a.windows[0].resets_at = iso(4.9 * H + 0.05 * H); // 5h window just started
     const host = document.createElement("div");
@@ -205,7 +259,6 @@ describe("the popover", () => {
 
       row7.focus();
       expect(document.activeElement).toBe(row7);
-      // Pace transitions to on-pace: same <button> stays mounted and retains keyboard focus
       const onPace = account("a", 90, 71);
       onPace.windows[0].resets_at = iso(4.9 * H + 0.05 * H);
       await act(async () => root.render(<UsagePopover accounts={[onPace]} now={NOW} />));
@@ -221,28 +274,25 @@ describe("the popover", () => {
 
       await act(async () => row7.click());
       expect(row7.getAttribute("aria-expanded")).toBe("false");
-      expect(host.querySelector("[data-usage-pace-detail]")).toBeNull();
     } finally {
       await act(async () => root.unmount());
       host.remove();
     }
   });
-  it("keeps an out-of-date account's numbers and reset with readable neutral percentage, no pace, and no tick (#12411)", () => {
+  it("keeps an out-of-date account's remaining numbers and reset with readable neutral percentage, no pace, and no tick (#12411)", () => {
     const host = document.createElement("div");
     host.innerHTML = renderToStaticMarkup(<UsagePopover accounts={[account("a", 70, 10, { stale: true })]} now={NOW} />);
     const html = host.innerHTML;
     expect(html).toContain("已过期");
-    expect(html).toContain("70%");
+    expect(html).toContain("30%");
     expect(html).toContain("2 天 3 小时后重置");
     expect(html).not.toContain("用得偏快");
-    expect(html).not.toContain("用得偏慢");
     expect(html).not.toContain("data-pace-tick");
-    // Stale percentage uses full-opacity neutral text-ink-2 (>=4.5:1) rather than faded green/orange/red
     const staleSection = host.querySelector('[data-usage-stale="true"]')!;
     expect(staleSection.classList.contains("opacity-70")).toBe(false);
     const pct = host.querySelector('[data-window-row="5h"] [data-usage-percent]')!;
     expect(pct.classList.contains("text-ink-2")).toBe(true);
-    expect(pct.classList.contains("text-orange")).toBe(false);
+    expect(pct.classList.contains("text-green")).toBe(false);
     expect(pct.closest(".opacity-70")).toBeNull();
   });
   it("is a labelled dialog", () => {
@@ -260,15 +310,15 @@ describe("where the numbers came from (#2595)", () => {
   it("names the sources of each account in the popover, the computers first", () => {
     const html = renderToStaticMarkup(<UsagePopover accounts={mixed()} now={NOW} />);
     expect(html).toContain("MacBook · Relay");
-    expect(html).toContain(">电脑<"); // an account an older hub only marks local
+    expect(html).toContain(">电脑<");
     expect(html).toContain("Relay · Team pool");
-    expect(html.match(/data-usage-source/g)).toHaveLength(4); // every account has a source line (the plan or the sources)
+    expect(html.match(/data-usage-source/g)).toHaveLength(4);
   });
   it("writes the plan beside the name unless the name already says it", () => {
     const html = renderToStaticMarkup(<UsagePopover accounts={mixed()} now={NOW} />);
     expect(html).toContain(">Max<");
     expect(html).toContain(">Plus<");
-    expect(html).not.toContain(">pro<"); // "Codex Pro" says it already
+    expect(html).not.toContain(">pro<");
   });
   it("says when the gateway could not be read and these are its last numbers", () => {
     const html = renderToStaticMarkup(<UsagePopover accounts={mixed()} now={NOW} />);
@@ -281,16 +331,16 @@ describe("where the numbers came from (#2595)", () => {
     expect(one("rejected")).not.toContain("网关暂时读不到");
     expect(one("failed")).toContain("读网关出错，显示的是上次的数字");
     expect(one("error")).toContain("网关读这个账号失败");
-    expect(one("something-newer")).not.toContain("text-orange"); // a reason this build doesn't know: no words, still faded
+    expect(one("something-newer")).not.toContain("text-orange");
     expect(one("something-newer")).toContain("opacity-70");
   });
-  it("labels a per-model window by its model, and keeps it apart from the plan's own", () => {
+  it("labels a per-model window by its model with remaining aria-label", () => {
     const a = account("m", 10, 20, { name: "claude-seat", sources: ["Relay"] });
     a.windows.push({ label: "7d", window_minutes: 10080, used_percent: 100, resets_at: iso(2 * 24 * H + 3 * H), model: "Fable" });
     const html = renderToStaticMarkup(<UsagePopover accounts={[a]} now={NOW} />);
     expect(html).toContain("data-usage-model");
     expect(html).toContain(">Fable<");
-    expect(html).toContain("claude-seat 7d（Fable）：100%已用");
+    expect(html).toContain("claude-seat 7d（Fable）：剩余 0%");
     expect(html.match(/role="progressbar"/g)).toHaveLength(3);
   });
   it("puts the sources in the tooltip of a sidebar bar", () => {
@@ -317,7 +367,7 @@ describe("where the numbers came from (#2595)", () => {
     expect(unconnected).toEqual([]);
     const strip = renderToStaticMarkup(<UsageBars accounts={live} unconnected={unconnected} now={NOW} />);
     expect(strip).toContain("Antigravity");
-    expect(strip).toContain("75%");
+    expect(strip).toContain("剩 25%");
     expect(strip).not.toContain("未接额度数据");
   });
   it.each(["agy", "antigravity"])("matches %s usage and visibility for either Antigravity launcher alias", (provider) => {
@@ -344,20 +394,15 @@ describe("where the numbers came from (#2595)", () => {
     );
     expect(html).toContain("还没读到 Claude Code 的额度");
     expect(html).toContain("还没读到 Antigravity 的额度");
-    // a launcher run through Claude Code against another provider is not Claude's subscription
     expect(html.match(/还没读到 Claude Code/g)).toHaveLength(1);
     expect(html).toContain("不能直接读这家服务商的额度");
     expect(html).not.toMatch(/statusLine|网关/);
   });
   it("leaves out a provider the owner hid from the bars, as a row too (#13179)", () => {
     const launchers = [{ name: "claude" }, { name: "codex", agent: "codex" }, { name: "agy", agent: "agy" }, { name: "deepseek", display_name: "DeepSeek", agent: "claude", base_url: "https://relay.example.com" }];
-    // nothing hidden: the rows are what they were
     expect(unconnectedUsageProviders(launchers, [], []).map((p) => p.id)).toEqual(["claude", "codex", "agy", "deepseek"]);
-    // Claude hidden: no "Claude Code" row, but a launcher that runs through Claude Code against another service stays
     expect(unconnectedUsageProviders(launchers, [], ["claude"]).map((p) => p.id)).toEqual(["codex", "agy", "deepseek"]);
-    // Codex hidden but not Claude: only Claude's row (and the others) remain
     expect(unconnectedUsageProviders(launchers, [], ["codex"]).map((p) => p.id)).toEqual(["claude", "agy", "deepseek"]);
-    // hidden by the launcher's own name, and "antigravity" is agy
     expect(unconnectedUsageProviders(launchers, [], ["deepseek", "agy"]).map((p) => p.id)).toEqual(["claude", "codex"]);
     expect(unconnectedUsageProviders([{ name: "ag", agent: "antigravity" }], [], ["agy"])).toEqual([]);
   });
@@ -426,35 +471,35 @@ describe("user-selected pinned usage accounts (#12418)", () => {
       await act(async () => root.render(<UsageBars accounts={sampleAccounts()} unconnected={sampleUnconnected} now={NOW} />));
       const stripBtn = () => host.querySelector<HTMLButtonElement>("[data-usage-bars] > button")!;
 
-      // Default: top 2 window accounts (Codex Pro, Claude Max) + DeepSeek balance + unconnected row
+      // Default: lowest-headroom 2 window accounts (Codex Pro, Claude Max) + DeepSeek balance + unconnected row
       expect(stripBtn().textContent).toContain("Codex Pro");
       expect(stripBtn().textContent).toContain("Claude Max");
       expect(stripBtn().textContent).not.toContain("Antigravity");
       expect(stripBtn().textContent).toContain("CNY 12.34");
       expect(stripBtn().textContent).toContain("Kimi");
 
-      // Open popover: all 4 accounts listed, none pinned, no reset bar
+      // Open portaled popover: all 4 accounts listed, none pinned, no reset bar
       await act(async () => stripBtn().click());
-      await vi.waitFor(() => expect(host.querySelector("[data-usage-pin=agy]")).not.toBeNull());
-      expect(host.querySelector("[data-usage-reset-pins]")).toBeNull();
-      expect(host.querySelectorAll("[data-usage-pin]")).toHaveLength(4);
-      expect(host.querySelector("[data-usage-pin=agy]")?.getAttribute("aria-pressed")).toBe("false");
+      await vi.waitFor(() => expect(document.querySelector("[data-usage-pin=agy]")).not.toBeNull());
+      expect(document.querySelector("[data-usage-reset-pins]")).toBeNull();
+      expect(document.querySelectorAll("[data-usage-pin]")).toHaveLength(4);
+      expect(document.querySelector("[data-usage-pin=agy]")?.getAttribute("aria-pressed")).toBe("false");
 
-      // Pin Antigravity only: collapsed strip shows Antigravity + unconnected row; popover still lists all 4 live + 1 unconnected
-      await act(async () => host.querySelector<HTMLButtonElement>("[data-usage-pin=agy]")!.click());
+      // Pin Antigravity only
+      await act(async () => document.querySelector<HTMLButtonElement>("[data-usage-pin=agy]")!.click());
       expect(localStorage.getItem(PINNED_USAGE_ACCOUNTS_KEY)).toBe('["agy"]');
-      expect(host.querySelector("[data-usage-pin=agy]")?.getAttribute("aria-pressed")).toBe("true");
-      expect(host.querySelector("[data-usage-reset-pins]")).not.toBeNull();
+      expect(document.querySelector("[data-usage-pin=agy]")?.getAttribute("aria-pressed")).toBe("true");
+      expect(document.querySelector("[data-usage-reset-pins]")).not.toBeNull();
       expect(stripBtn().textContent).toContain("Antigravity");
       expect(stripBtn().textContent).not.toContain("Codex Pro");
       expect(stripBtn().textContent).not.toContain("Claude Max");
       expect(stripBtn().textContent).toContain("Kimi");
-      expect(host.querySelectorAll("[data-usage-pin]")).toHaveLength(4);
-      expect(host.querySelectorAll("[data-usage-connect]")).toHaveLength(1);
+      expect(document.querySelectorAll("[data-usage-pin]")).toHaveLength(4);
+      expect(document.querySelectorAll("[data-usage-connect]")).toHaveLength(1);
 
       // Also pin Codex Pro and DeepSeek balance
-      await act(async () => host.querySelector<HTMLButtonElement>("[data-usage-pin=codex]")!.click());
-      await act(async () => host.querySelector<HTMLButtonElement>("[data-usage-pin=ds]")!.click());
+      await act(async () => document.querySelector<HTMLButtonElement>("[data-usage-pin=codex]")!.click());
+      await act(async () => document.querySelector<HTMLButtonElement>("[data-usage-pin=ds]")!.click());
       expect(localStorage.getItem(PINNED_USAGE_ACCOUNTS_KEY)).toBe('["agy","codex","ds"]');
       expect(stripBtn().textContent).toContain("Antigravity");
       expect(stripBtn().textContent).toContain("Codex Pro");
@@ -462,16 +507,16 @@ describe("user-selected pinned usage accounts (#12418)", () => {
       expect(stripBtn().textContent).not.toContain("Claude Max");
 
       // Unpin Antigravity
-      await act(async () => host.querySelector<HTMLButtonElement>("[data-usage-pin=agy]")!.click());
+      await act(async () => document.querySelector<HTMLButtonElement>("[data-usage-pin=agy]")!.click());
       expect(localStorage.getItem(PINNED_USAGE_ACCOUNTS_KEY)).toBe('["codex","ds"]');
       expect(stripBtn().textContent).not.toContain("Antigravity");
       expect(stripBtn().textContent).toContain("Codex Pro");
       expect(stripBtn().textContent).toContain("CNY 12.34");
 
       // Reset to automatic
-      await act(async () => host.querySelector<HTMLButtonElement>("[data-usage-reset-pins]")!.click());
+      await act(async () => document.querySelector<HTMLButtonElement>("[data-usage-reset-pins]")!.click());
       expect(localStorage.getItem(PINNED_USAGE_ACCOUNTS_KEY)).toBeNull();
-      expect(host.querySelector("[data-usage-reset-pins]")).toBeNull();
+      expect(document.querySelector("[data-usage-reset-pins]")).toBeNull();
       expect(stripBtn().textContent).toContain("Codex Pro");
       expect(stripBtn().textContent).toContain("Claude Max");
       expect(stripBtn().textContent).toContain("CNY 12.34");
@@ -499,7 +544,6 @@ describe("user-selected pinned usage accounts (#12418)", () => {
       expect(stripBtn().textContent).toContain("Antigravity");
       expect(stripBtn().textContent).not.toContain("Codex Pro");
 
-      // Simulate another tab changing the pinned selection
       await act(async () => {
         localStorage.setItem(PINNED_USAGE_ACCOUNTS_KEY, '["claude"]');
         window.dispatchEvent(new StorageEvent("storage", { key: PINNED_USAGE_ACCOUNTS_KEY, newValue: '["claude"]' }));
@@ -548,37 +592,90 @@ describe("user-selected pinned usage accounts (#12418)", () => {
   });
 });
 
-describe("provider cards with a reset timeline (#13173)", () => {
-  it("draws one card per provider with every account, 5h before 7d, and a timeline under each account", () => {
-    const claude = (id: string, name: string, h7: number): UsageAccount => ({
-      ...account(id, 10, 20, { provider: "claude", name }),
+describe("provider cards and single unified reset timeline (V2)", () => {
+  it("renders a single unified timeline at the bottom across all provider cards with provider dividers, stripped prefixes, and multi-model merging", () => {
+    const claude = (id: string, name: string, h7: number, paused = false): UsageAccount => ({
+      ...account(id, 10, paused ? 96 : 20, { provider: "claude", name, plan: "Max" }),
       windows: [
-        { label: "7d", window_minutes: 10080, used_percent: 20, resets_at: iso(h7 * H) },
+        { label: "7d", window_minutes: 10080, used_percent: paused ? 96 : 20, resets_at: iso(h7 * H), ...(paused ? { protect_percent: 95 } : {}) },
         { label: "5h", window_minutes: 300, used_percent: 10, resets_at: iso(3 * H) },
       ],
     });
-    const html = renderToStaticMarkup(<UsagePopover accounts={[claude("1", "Later", 100), claude("2", "Sooner", 30), account("3", 1, 1)]} now={NOW} />);
-    expect(html.match(/data-usage-provider="/g)).toHaveLength(2);
-    expect(html).toContain("2 个账号");
-    expect(html.indexOf("Sooner")).toBeLessThan(html.indexOf("Later"));
-    expect(html.match(/data-usage-timeline/g)).toHaveLength(2); // one chart per card, not per account
-    expect(html.match(/data-timeline-row="/g)).toHaveLength(3);
-    const first = html.slice(html.indexOf("Sooner"));
-    expect(first.indexOf(">5h<")).toBeLessThan(first.indexOf(">7d<"));
-    expect(html).toContain("额度重置时间线");
-    // the chart's rows follow the quota list's order
-    const chart = html.slice(html.indexOf('data-timeline-row="2"'));
-    expect(chart.indexOf('data-timeline-row="2"')).toBeLessThan(chart.indexOf('data-timeline-row="1"'));
+    const agy: UsageAccount = {
+      id: "ag1",
+      provider: "antigravity",
+      name: "Antigravity · Main",
+      plan: "Ultra",
+      sampled_at: iso(-12_000),
+      windows: [
+        { label: "5h", window_minutes: 300, used_percent: 25, resets_at: iso(4 * H), model: "Claude" },
+        { label: "5h", window_minutes: 300, used_percent: 40, resets_at: iso(2 * H), model: "Gemini Pro" },
+      ],
+    };
+    const codex = account("c1", 10, 20, { provider: "codex", name: "Codex #alpha", plan: "Plus" });
+
+    const host = document.createElement("div");
+    host.innerHTML = renderToStaticMarkup(<UsagePopover accounts={[claude("1", "Claude #later", 100), claude("2", "Claude #sooner", 30, true), agy, codex]} now={NOW} />);
+
+    // 3 provider cards, NONE containing a timeline; exactly 1 unified timeline at bottom with column-span: all class
+    const cards = [...host.querySelectorAll("[data-usage-provider]")];
+    expect(cards).toHaveLength(3);
+    for (const card of cards) {
+      expect(card.querySelector("[data-usage-timeline]")).toBeNull();
+      expect(card.classList.contains("usage-popover-card")).toBe(true);
+    }
+    const timelines = [...host.querySelectorAll("[data-usage-timeline]")];
+    expect(timelines).toHaveLength(1);
+    expect(timelines[0].classList.contains("usage-popover-span")).toBe(true);
+
+    // Row order: claude(2 sooner), claude(1 later), agy(ag1), codex(c1)
+    const rows = [...timelines[0].querySelectorAll("[data-timeline-row]")];
+    expect(rows.map((r) => r.getAttribute("data-timeline-row"))).toEqual(["2", "1", "ag1", "c1"]);
+
+    // Hairline provider dividers ONLY when provider changes (indices 2 and 3, not 0 or 1)
+    expect(rows[0].querySelector("[data-timeline-provider-divider]")).toBeNull();
+    expect(rows[1].querySelector("[data-timeline-provider-divider]")).toBeNull();
+    expect(rows[2].querySelector("[data-timeline-provider-divider]")).not.toBeNull();
+    expect(rows[3].querySelector("[data-timeline-provider-divider]")).not.toBeNull();
+
+    // Name column: 6px provider dot + stripped prefix + plan subtitle
+    expect(rows[0].querySelector("[data-timeline-account-name]")?.textContent).toBe("#sooner");
+    expect(rows[1].querySelector("[data-timeline-account-name]")?.textContent).toBe("#later");
+    expect(rows[2].querySelector("[data-timeline-account-name]")?.textContent).toBe("Main");
+    expect(rows[3].querySelector("[data-timeline-account-name]")?.textContent).toBe("#alpha");
+    expect(rows[3].querySelector<HTMLElement>('[data-timeline-provider-dot="codex"]')?.classList.contains("size-1.5")).toBe(true);
+    expect(rows[3].querySelector<HTMLElement>('[data-timeline-provider-dot="codex"]')?.style.background).toBe("var(--hue-green)");
+
+    // Multi-model Antigravity row: merged into 1 5h lane taking earliest reset (2h) and listing both models in tooltip
+    const agyLanes = [...rows[2].querySelectorAll("[data-timeline-lane]")];
+    expect(agyLanes).toHaveLength(1);
+    expect(agyLanes[0].getAttribute("data-timeline-lane")).toBe("5h");
+    expect(agyLanes[0].querySelector("[data-timeline-remaining]")?.textContent).toBe("2 小时");
+    expect(rows[2].getAttribute("title")).toContain("Gemini Pro");
+    expect(rows[2].getAttribute("title")).toContain("Claude");
+
+    // Paused end dot is per lane: account "2" has its 7d at the protection line, its 5h is healthy (teal)
+    const lanes0 = [...rows[0].querySelectorAll<HTMLElement>("[data-timeline-lane]")];
+    expect(lanes0.map((l) => l.getAttribute("data-timeline-lane"))).toEqual(["5h", "7d"]);
+    const dot5 = lanes0[0].querySelector<HTMLElement>("[data-timeline-dot]")!;
+    const dot7 = lanes0[1].querySelector<HTMLElement>("[data-timeline-dot]")!;
+    expect(dot5.getAttribute("data-timeline-dot")).toBe("active");
+    expect(dot5.style.borderColor).toBe("var(--hue-teal)");
+    expect(dot7.getAttribute("data-timeline-dot")).toBe("paused");
+    expect(dot7.style.borderColor).toBe("var(--orange)");
+    expect(rows[0].getAttribute("aria-label")).toContain("7d · 已暂停");
+    expect(rows[0].getAttribute("aria-label")).not.toContain("5h · 已暂停");
+    expect(rows[1].querySelector('[data-timeline-dot="paused"]')).toBeNull();
   });
 
   it.each([
-    ["zh-Hans", "额度（按 7d 重置时间，近的在前）", ["现在", "6h", "12h", "1d", "3d", "5d", "7d"], ["4.4 小时", "4 天 16 小时", "6 天 24 小时"], ["5h 窗口恢复", "7d 窗口恢复", "30d 窗口恢复", "现在", "保护线"], "到此自动暂停调度"],
-    ["en", "Quota (by 7d reset, soonest first)", ["Now", "6h", "12h", "1d", "3d", "5d", "7d"], ["4.4h", "4d 16h", "6d 24h"], ["5h window resets", "7d window resets", "30d window resets", "Now", "Protection line"], "Scheduling pauses automatically at this limit"],
-    ["ja", "利用枠（7d リセットが早い順）", ["今", "6h", "12h", "1d", "3d", "5d", "7d"], ["4.4時間", "4日16時間", "6日24時間"], ["5h 枠リセット", "7d 枠リセット", "30d 枠リセット", "今", "保護ライン"], "この上限に達すると自動で一時停止します"],
-  ])("renders card header dot, sort subtitle, short-unit ticks and dynamic legend in %s", async (lang, subtitle, ticks, countdowns, legendLabels, protectTitle) => {
+    ["zh-Hans", "剩余额度（按 7d 重置时间，近的在前）", ["现在", "6h", "12h", "1d", "3d", "5d", "7d"], ["4.4 小时", "4 天 16 小时", "6 天 24 小时"], ["5h 窗口恢复", "7d 窗口恢复", "30d 窗口恢复", "现在", "保护线"], "到此自动暂停调度"],
+    ["en", "Remaining (by 7d reset, soonest first)", ["Now", "6h", "12h", "1d", "3d", "5d", "7d"], ["4.4h", "4d 16h", "6d 24h"], ["5h window resets", "7d window resets", "30d window resets", "Now", "Protection line"], "Scheduling pauses automatically at this limit"],
+    ["ja", "残り（7d リセットが早い順）", ["今", "6h", "12h", "1d", "3d", "5d", "7d"], ["4.4時間", "4日16時間", "6日24時間"], ["5h 枠リセット", "7d 枠リセット", "30d 枠リセット", "今", "保護ライン"], "この上限に達すると自動で一時停止します"],
+  ])("renders card header dot, remaining sort subtitle, short-unit ticks and dynamic legend in %s", async (lang, subtitle, ticks, countdowns, legendLabels, protectTitle) => {
     await initI18n(lang);
     try {
-      const a = account("a", 10, 20, { provider: "claude", name: "Codex Pro team account", plan: "Team" });
+      const a = account("a", 10, 20, { provider: "claude", name: "Team alpha account", plan: "Team" });
       a.windows[0].resets_at = iso(4.4 * H);
       a.windows[1].resets_at = iso(112 * H);
       a.windows.push({ label: "30d", window_minutes: 43200, used_percent: 10, resets_at: iso(167.75 * H) });
@@ -602,10 +699,9 @@ describe("provider cards with a reset timeline (#13173)", () => {
       for (const tick of tickEls) expect(tick.classList.contains("whitespace-nowrap")).toBe(true);
 
       const row = host.querySelector("[data-timeline-row]")!;
-      const name = row.querySelector("[title='Codex Pro team account']")!;
+      const name = row.querySelector("[data-timeline-account-name]")!;
       expect(name.textContent).toBe(a.name);
       expect(name.classList.contains("truncate")).toBe(true);
-      expect(name.parentElement!.classList.contains("pr-2")).toBe(true);
       expect(row.getAttribute("aria-label")).toContain(a.name);
 
       const lanes = [...row.querySelectorAll("[data-timeline-lane]")];
@@ -634,22 +730,24 @@ describe("provider cards with a reset timeline (#13173)", () => {
     expect(visibleTimelineTickHours(null)).toEqual([0, 6, 12, 24, 72, 120, 168]);
     expect(visibleTimelineTickHours(360)).toEqual([0, 6, 12, 24, 72, 120, 168]);
     expect(visibleTimelineTickHours(200)).toEqual([0, 12, 24, 72, 120, 168]);
-    // 284px sidebar (~146px axis): Now and 12h must never collide
     expect(visibleTimelineTickHours(146)).toEqual([0, 24, 72, 168]);
-    // 240px minimum sidebar (~102px axis): hides 6h, 5d, 12h, 3d with zero overlap
     expect(visibleTimelineTickHours(102)).toEqual([0, 24, 168]);
 
-    let observerCb: ((entries: { contentRect: { width: number } }[]) => void) | undefined;
-    let observedCount = 0;
+    let axisCb: ((entries: { contentRect: { width: number } }[]) => void) | undefined;
+    let axisObserved = 0;
     const origRO = globalThis.ResizeObserver;
     vi.stubGlobal(
       "ResizeObserver",
       class {
+        private cb: (entries: { contentRect: { width: number } }[]) => void;
         constructor(cb: (entries: { contentRect: { width: number } }[]) => void) {
-          observerCb = cb;
+          this.cb = cb;
         }
-        observe() {
-          observedCount++;
+        observe(el: Element) {
+          if (el.hasAttribute("data-timeline-axis")) {
+            axisObserved++;
+            axisCb = this.cb;
+          }
         }
         disconnect() {}
       },
@@ -658,28 +756,27 @@ describe("provider cards with a reset timeline (#13173)", () => {
     document.body.appendChild(host);
     const root = createRoot(host);
     try {
-      // Mount without reset times first (no timeline), then update with reset times while popover stays open
       const noReset = account("a", 10, 20);
       noReset.windows.forEach((w) => delete w.resets_at);
       await act(async () => root.render(<UsagePopover accounts={[noReset]} now={NOW} />));
       expect(host.querySelector("[data-timeline-axis]")).toBeNull();
-      expect(observedCount).toBe(0);
+      expect(axisObserved).toBe(0);
 
       await act(async () => root.render(<UsagePopover accounts={[account("a", 10, 20)]} now={NOW} />));
-      expect(observedCount).toBe(1);
+      expect(axisObserved).toBe(1);
       const ticks = () => [...host.querySelectorAll("[data-timeline-tick]")].map((el) => el.textContent);
       expect(ticks()).toEqual(["现在", "6h", "12h", "1d", "3d", "5d", "7d"]);
 
-      await act(async () => observerCb?.([{ contentRect: { width: 200 } }]));
+      await act(async () => axisCb?.([{ contentRect: { width: 200 } }]));
       expect(ticks()).toEqual(["现在", "12h", "1d", "3d", "5d", "7d"]);
 
-      await act(async () => observerCb?.([{ contentRect: { width: 146 } }]));
+      await act(async () => axisCb?.([{ contentRect: { width: 146 } }]));
       expect(ticks()).toEqual(["现在", "1d", "3d", "7d"]);
 
-      await act(async () => observerCb?.([{ contentRect: { width: 102 } }]));
+      await act(async () => axisCb?.([{ contentRect: { width: 102 } }]));
       expect(ticks()).toEqual(["现在", "1d", "7d"]);
 
-      await act(async () => observerCb?.([{ contentRect: { width: 360 } }]));
+      await act(async () => axisCb?.([{ contentRect: { width: 360 } }]));
       expect(ticks()).toEqual(["现在", "6h", "12h", "1d", "3d", "5d", "7d"]);
     } finally {
       await act(async () => root.unmount());
@@ -725,25 +822,56 @@ describe("provider cards with a reset timeline (#13173)", () => {
     expect(short.textContent).toBe("1.5h");
   });
 
-  it("draws no timeline for a card whose accounts have no reset time", () => {
+  it("draws no unified timeline when no account has any reset time", () => {
     const a = account("a", 1, 1);
     a.windows.forEach((w) => delete w.resets_at);
     expect(renderToStaticMarkup(<UsagePopover accounts={[a]} now={NOW} />)).not.toContain("data-usage-timeline");
   });
-  it("draws a protection line, flag and zone and reserves mt-3.5 only on windows with protect_percent", () => {
-    const a = account("a", 10, 20);
-    a.windows[1].protect_percent = 95;
-    const host = document.createElement("div");
-    host.innerHTML = renderToStaticMarkup(<UsagePopover accounts={[a]} now={NOW} />);
-    const html = host.innerHTML;
-    expect(html.match(/data-protect-line/g)).toHaveLength(1);
-    expect(html).toContain("保护 95%");
-    expect(html).toContain("data-protect-zone");
-    expect(html).toContain("保护线在 95%");
-    expect(host.querySelector('[data-window-row="5h"]')?.classList.contains("mt-3.5")).toBe(false);
-    expect(host.querySelector('[data-window-row="7d"]')?.classList.contains("mt-3.5")).toBe(true);
-    expect(renderToStaticMarkup(<UsagePopover accounts={[account("b", 10, 20)]} now={NOW} />)).not.toContain("data-protect");
+
+  it.each([
+    ["zh-Hans", "保护 5%", "剩余 5% 时暂停调度", "已暂停"],
+    ["en", "Keep 5%", "pauses scheduling at 5% remaining", "Paused"],
+    ["ja", "確保 5%", "残り 5% で自動一時停止", "一時停止"],
+  ])("draws left-side [0, R] protection zone, reserve flag, aria-label, and paused state in %s", async (lang, flagText, ariaProtect, pausedText) => {
+    await initI18n(lang);
+    try {
+      // 5h: unprotected (r=90), 7d: protected R=5 (used 96% -> r=4 <= 5 -> paused & red)
+      const a = account("a", 10, 96);
+      a.windows[1].protect_percent = 95;
+      const host = document.createElement("div");
+      host.innerHTML = renderToStaticMarkup(<UsagePopover accounts={[a]} now={NOW} />);
+
+      const row5 = host.querySelector('[data-window-row="5h"]')!;
+      const row7 = host.querySelector('[data-window-row="7d"]')!;
+      expect(row5.classList.contains("mt-3.5")).toBe(false);
+      expect(row7.classList.contains("mt-3.5")).toBe(true);
+      expect(row7.getAttribute("data-window-paused")).toBe("true");
+
+      // Zone at left [0, 5%], vertical line at 5%, flag shows R=5%
+      const zone = row7.querySelector<HTMLElement>("[data-protect-zone]")!;
+      const line = row7.querySelector<HTMLElement>("[data-protect-line]")!;
+      const flag = row7.querySelector<HTMLElement>("[data-protect-flag]")!;
+      expect(zone.classList.contains("left-0")).toBe(true);
+      expect(zone.style.width).toBe("5%");
+      expect(line.style.left).toBe("5%");
+      expect(flag.textContent).toBe(flagText);
+      expect(flag.classList.contains("left-0")).toBe(true); // left-aligned at small R so it never overlaps "7d"
+
+      // Bar is red at width 4% (inside [0, 5%]), reset text starts with Paused ·
+      const bar = row7.querySelector<HTMLElement>('[role="progressbar"] > div')!;
+      expect(bar.classList.contains("bg-red")).toBe(true);
+      expect(bar.style.width).toBe("4%");
+      const progress = row7.querySelector('[role="progressbar"]')!;
+      expect(progress.getAttribute("aria-valuenow")).toBe("4");
+      expect(progress.getAttribute("aria-label")).toContain(ariaProtect);
+      const resetEl = row7.querySelector("[data-usage-reset]")!;
+      expect(resetEl.getAttribute("data-usage-paused")).toBe("true");
+      expect(resetEl.textContent).toContain(pausedText);
+    } finally {
+      await initI18n("zh-Hans");
+    }
   });
+
   it("renders usage bars and popover typography with named text tokens instead of hard-coded pixel classes (#13211)", () => {
     const a = account("a", 40, 65, {
       provider: "claude",
@@ -764,6 +892,7 @@ describe("provider cards with a reset timeline (#13173)", () => {
     expect(popoverHtml).toContain("text-label");
     expect(popoverHtml).toContain("text-submeta");
   });
+
   it("keeps and renders extension accounts that carry notice or headline with or without windows", () => {
     const noticeOnly: UsageAccount = {
       id: "cool-1",
@@ -787,7 +916,6 @@ describe("provider cards with a reset timeline (#13173)", () => {
     expect(popOnly).not.toContain("data-usage-timeline");
     expect(popOnly).not.toContain("data-usage-pin=");
 
-    // If a previously pinned ID becomes notice-only, pinned summary reflects fallback and unpinning stays available
     localStorage.setItem(PINNED_USAGE_ACCOUNTS_KEY, '["cool-1"]');
     try {
       const host = document.createElement("div");
@@ -813,6 +941,298 @@ describe("provider cards with a reset timeline (#13173)", () => {
     expect(popBoth).toContain("data-usage-notice");
     expect(popBoth).toContain("Rate limited · resumes in 15m");
     expect(popBoth).toContain("data-usage-sort-subtitle");
-    expect(popBoth).toContain("data-window-row=\"5h\"");
+    expect(popBoth).toContain('data-window-row="5h"');
+  });
+});
+
+describe("height-first adaptive multi-column layout, hysteresis, scroll fallback, and reduced motion", () => {
+  it("stays single-column without scrollbar when single-column height fits, aligned above trigger", () => {
+    const layout = computeUsagePopoverLayout({
+      naturalHeight: 520,
+      viewportWidth: 1440,
+      viewportHeight: 900,
+      anchorRect: { left: 10, top: 800, bottom: 880 },
+      prevCols: null,
+      providerCount: 3,
+    });
+    expect(layout.cols).toBe(1);
+    expect(layout.width).toBe(344);
+    expect(layout.left).toBe(10);
+    expect(layout.bottom).toBe(108); // 900 - 800 + 8
+    expect(layout.availH).toBe(776); // min(900 - 32, 800 - 24)
+    expect(layout.availW).toBe(1414); // 1440 - 16 - 10
+  });
+
+  it("expands to 2 or 3 columns on wide viewports when height overflows availH, capped at 3 and providerCount", () => {
+    const twoCols = computeUsagePopoverLayout({
+      naturalHeight: 1100,
+      viewportWidth: 1440,
+      viewportHeight: 900,
+      anchorRect: { left: 10, top: 800 },
+      prevCols: null,
+      providerCount: 3,
+    });
+    expect(twoCols.cols).toBe(2);
+    expect(twoCols.width).toBe(676);
+    expect(twoCols.colWidth).toBe(320);
+
+    const threeCols = computeUsagePopoverLayout({
+      naturalHeight: 1700,
+      viewportWidth: 1440,
+      viewportHeight: 900,
+      anchorRect: { left: 10, top: 800 },
+      prevCols: null,
+      providerCount: 3,
+    });
+    expect(threeCols.cols).toBe(3);
+    expect(threeCols.width).toBe(1008);
+
+    // Even if height is huge, capped at 3 columns max
+    const cappedAt3 = computeUsagePopoverLayout({
+      naturalHeight: 4000,
+      viewportWidth: 2560,
+      viewportHeight: 900,
+      anchorRect: { left: 10, top: 800 },
+      prevCols: null,
+      providerCount: 5,
+    });
+    expect(cappedAt3.cols).toBe(3);
+
+    // Never creates empty columns beyond providerCount
+    const cappedByProviders = computeUsagePopoverLayout({
+      naturalHeight: 1800,
+      viewportWidth: 1600,
+      viewportHeight: 700,
+      anchorRect: { left: 10, top: 620 },
+      prevCols: null,
+      providerCount: 2,
+    });
+    expect(cappedByProviders.cols).toBe(2);
+  });
+
+  it("applies 24px hysteresis in both height and width to avoid column-count flicker", () => {
+    expect(POPOVER_HYSTERESIS_PX).toBe(24);
+    // Currently 2 cols; availH = 600, H = 590 (only 10px under availH, < 24px deadband) -> stays at 2 cols
+    const stayTwo = computeUsagePopoverLayout({
+      naturalHeight: 590,
+      viewportWidth: 1440,
+      viewportHeight: 700,
+      anchorRect: { left: 10, top: 624 }, // availH = 600
+      prevCols: 2,
+      providerCount: 3,
+    });
+    expect(stayTwo.cols).toBe(2);
+
+    // Once H <= availH - 24 (576), collapses cleanly to 1 col
+    const dropToOne = computeUsagePopoverLayout({
+      naturalHeight: 576,
+      viewportWidth: 1440,
+      viewportHeight: 700,
+      anchorRect: { left: 10, top: 624 },
+      prevCols: 2,
+      providerCount: 3,
+    });
+    expect(dropToOne.cols).toBe(1);
+
+    // Width hysteresis: at prevCols = 1, availW = 674 (past 664 by only 10px, < 24px) -> stays at 1 col
+    const stayOneNarrow = computeUsagePopoverLayout({
+      naturalHeight: 900,
+      viewportWidth: 700, // availW = 700 - 16 - 10 = 674
+      viewportHeight: 700,
+      anchorRect: { left: 10, top: 624 },
+      prevCols: 1,
+      providerCount: 3,
+    });
+    expect(stayOneNarrow.cols).toBe(1);
+
+    // Once availW >= 2*332 + 24 = 688, expands cleanly to 2 cols
+    const expandToTwo = computeUsagePopoverLayout({
+      naturalHeight: 900,
+      viewportWidth: 714, // availW = 714 - 16 - 10 = 688
+      viewportHeight: 700,
+      anchorRect: { left: 10, top: 624 },
+      prevCols: 1,
+      providerCount: 3,
+    });
+    expect(expandToTwo.cols).toBe(2);
+
+    // If viewport narrows below 2*332 = 664 while at 2 cols, shrinks immediately so it never clips horizontally
+    const immediateShrink = computeUsagePopoverLayout({
+      naturalHeight: 900,
+      viewportWidth: 680, // availW = 654 < 664
+      viewportHeight: 700,
+      anchorRect: { left: 10, top: 624 },
+      prevCols: 2,
+      providerCount: 3,
+    });
+    expect(immediateShrink.cols).toBe(1);
+  });
+
+  it("falls back to single-column scrollable layout with fade masks on narrow & short viewports", async () => {
+    const narrowLayout = computeUsagePopoverLayout({
+      naturalHeight: 900,
+      viewportWidth: 420,
+      viewportHeight: 460,
+      anchorRect: { left: 10, top: 380 },
+      prevCols: null,
+      providerCount: 3,
+    });
+    expect(narrowLayout.cols).toBe(1);
+    expect(narrowLayout.availH).toBe(356);
+    expect(narrowLayout.width).toBe(344);
+    expect(narrowLayout.left + narrowLayout.width).toBeLessThanOrEqual(420 - 16);
+
+    // Verify scroll-edge fade attributes in the DOM when scrollHeight exceeds availH
+    const origIH = window.innerHeight;
+    const origIW = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 420 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 460 });
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<UsagePopover accounts={[account("a", 20, 40), account("b", 50, 60, { provider: "claude" })]} now={NOW} />));
+      const scrollEl = host.querySelector<HTMLElement>("[data-usage-scroll]")!;
+      Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 900 });
+      Object.defineProperty(scrollEl, "clientHeight", { configurable: true, value: 428 });
+      Object.defineProperty(scrollEl, "scrollTop", { configurable: true, writable: true, value: 0 });
+      await act(async () => {
+        window.dispatchEvent(new Event("resize"));
+      });
+      expect(scrollEl.getAttribute("data-scrollable")).toBe("true");
+      expect(scrollEl.getAttribute("data-fade-top")).toBe("false");
+      expect(scrollEl.getAttribute("data-fade-bottom")).toBe("true");
+
+      scrollEl.scrollTop = 120;
+      await act(async () => {
+        scrollEl.dispatchEvent(new Event("scroll"));
+      });
+      expect(scrollEl.getAttribute("data-fade-top")).toBe("true");
+      expect(scrollEl.getAttribute("data-fade-bottom")).toBe("true");
+
+      scrollEl.scrollTop = 472;
+      await act(async () => {
+        scrollEl.dispatchEvent(new Event("scroll"));
+      });
+      expect(scrollEl.getAttribute("data-fade-top")).toBe("true");
+      expect(scrollEl.getAttribute("data-fade-bottom")).toBe("false");
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: origIW });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: origIH });
+    }
+  });
+
+  it("counts full-width blocks and unsplittable cards when choosing columns, picking 3 where whole-height math says 2", () => {
+    expect(packedColumnHeight([400, 380, 360], 1)).toBe(1164);
+    expect(packedColumnHeight([400, 380, 360], 2)).toBe(752);
+    expect(packedColumnHeight([400, 380, 360], 3)).toBe(400);
+    expect(packedColumnHeight([400, 380], 3)).toBe(400); // never more columns than cards
+    expect(packedColumnHeight([], 2)).toBe(0);
+
+    // 1440x990, trigger at y=900: availH = 876. Cards 400/380/360 plus a 400px full-width timeline.
+    const base = { viewportWidth: 1440, viewportHeight: 990, anchorRect: { left: 10, top: 900 }, prevCols: null };
+    const natural = 24 + 400 + 1164; // 1588: ceil(1588 / 876) = 2, but 2 columns are 24 + 400 + 752 = 1176 > 876
+    expect(computeUsagePopoverLayout({ ...base, naturalHeight: natural, providerCount: 3 }).cols).toBe(2);
+    const packed = computeUsagePopoverLayout({ ...base, naturalHeight: natural, cardHeights: [400, 380, 360], spanHeight: 400 });
+    expect(packed.availH).toBe(876);
+    expect(packed.cols).toBe(3); // 24 + 400 + 400 = 824 fits without a scrollbar
+
+    // Fits in one column: stays one column
+    expect(computeUsagePopoverLayout({ ...base, cardHeights: [200, 180], spanHeight: 300 }).cols).toBe(1);
+    // Nothing fits even in 3 columns: widest the viewport allows, scroll fallback
+    expect(computeUsagePopoverLayout({ ...base, cardHeights: [900, 900, 900], spanHeight: 100 }).cols).toBe(3);
+    // Hysteresis with packing: at 3 columns, 2 would fit by only 10px (< 24px): stay at 3
+    const twoFitsBarely = { ...base, cardHeights: [500, 300, 180], spanHeight: 342 }; // 2 cols: 24 + 342 + 500 = 866 <= 876
+    expect(computeUsagePopoverLayout({ ...twoFitsBarely, prevCols: 3 }).cols).toBe(3);
+    expect(computeUsagePopoverLayout({ ...twoFitsBarely, prevCols: null }).cols).toBe(2);
+  });
+
+  it("keeps pure CSS transitions in the lazy stylesheet and honors prefers-reduced-motion with 120ms opacity-only fade", () => {
+    const css = readFileSync(join(__dirname, "usage-popover.css"), "utf8");
+    expect(css).toContain("translateY(6px) scale(0.98)");
+    expect(css).toContain("240ms");
+    expect(css).toContain("translateY(4px)");
+    expect(css).toContain("160ms");
+    expect(css).toContain("width 300ms");
+    expect(css).toContain("150ms");
+    expect(css).toContain("column-span: all");
+    expect(css).toContain("break-inside: avoid");
+    expect(css).toContain("prefers-reduced-motion: reduce");
+    expect(css).toContain("120ms !important");
+    expect(css).not.toMatch(/font-size\s*:\s*\d+(?:\.\d+)?px/);
+  });
+});
+
+describe("popover keyboard focus, Back on narrow screens, and a fresh clock on reopen", () => {
+  it("moves keyboard focus into the popover on open and back to the trigger on Escape", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<UsageBars accounts={[account("a", 10, 20)]} now={NOW} />));
+      const trigger = host.querySelector<HTMLButtonElement>("[data-usage-bars] > button")!;
+      trigger.focus();
+      await act(async () => trigger.click());
+      await vi.waitFor(() => expect(document.querySelector("[role=dialog]")).not.toBeNull());
+      const dialog = document.querySelector<HTMLElement>("[role=dialog]")!;
+      expect(dialog.getAttribute("tabindex")).toBe("-1");
+      expect(dialog.contains(document.activeElement)).toBe(true);
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      });
+      expect(document.querySelector("[data-usage-popover]")?.getAttribute("data-state")).toBe("closing");
+      expect(document.activeElement).toBe(trigger);
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("closes the popover on Back before anything under it on a narrow screen", async () => {
+    const narrow = { matches: true, media: "(max-width: 1023px)", addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} };
+    vi.stubGlobal("matchMedia", (q: string) => (q === narrow.media ? narrow : { ...narrow, matches: false, media: q }));
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<UsageBars accounts={[account("a", 10, 20)]} now={NOW} />));
+      await act(async () => host.querySelector<HTMLButtonElement>("[data-usage-bars] > button")!.click());
+      await vi.waitFor(() => expect(document.querySelector("[role=dialog]")).not.toBeNull());
+      expect((history.state as Record<string, unknown> | null)?.personaOverlay).toEqual(expect.any(String));
+      await act(async () => {
+        history.back();
+      });
+      await vi.waitFor(() => expect(document.querySelector("[data-usage-popover]")?.getAttribute("data-state") ?? "closed").not.toBe("open"));
+      expect(host.querySelector("[data-usage-bars] > button")?.getAttribute("aria-expanded")).toBe("false");
+    } finally {
+      narrow.matches = false;
+      await act(async () => root.unmount());
+      host.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("draws countdowns and sample ages from the moment it reopens, not from when it last closed", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const accounts = [account("a", 10, 20)];
+    try {
+      await act(async () => root.render(<UsagePopover open accounts={accounts} onClose={() => {}} />));
+      expect(host.textContent).toContain("12秒钟前");
+      await act(async () => root.render(<UsagePopover open={false} accounts={accounts} onClose={() => {}} />));
+      vi.setSystemTime(NOW + 60_000);
+      await act(async () => root.render(<UsagePopover open accounts={accounts} onClose={() => {}} />));
+      expect(host.textContent).toContain("1分钟前");
+      expect(host.textContent).not.toContain("12秒钟前");
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.useRealTimers();
+    }
   });
 });

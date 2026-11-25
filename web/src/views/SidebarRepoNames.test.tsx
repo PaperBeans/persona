@@ -25,7 +25,10 @@ const herdr = (id: string, cwd: string, patch: Partial<HostWorkspace> = {}): Hos
 const agent = (id: string, title: string, workspace: string, cwd: string, patch: Partial<Session> = {}): Session => ({ machine_id: machine.id, session_id: id, title, cwd, space_kind: "herdr", workspace_id: workspace, status: "idle", state: "idle", ...patch });
 let host: HTMLDivElement, root: Root;
 let inventory: HostWorkspace[], sessions: Session[];
-const flush = async () => { for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
+const flush = async () => {
+  await act(async () => { await vi.dynamicImportSettled(); });
+  for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
+};
 const render = async (actions?: WorkspaceTreeActions) => {
   await act(() => refresh());
   act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} workspaceActions={actions} />));
@@ -35,7 +38,8 @@ const row = (id: string) => host.querySelector<HTMLAnchorElement>(`a[href="/s/${
 const sectionOf = (id: string) => row(id).closest("[data-sidebar-group]")!;
 const headingOf = (id: string) => sectionOf(id).querySelector<HTMLElement>("[data-sidebar-group-heading]")!;
 const words = (el: Element) => `${el.textContent ?? ""}\n${el.getAttribute("title") ?? ""}`;
-let home = "";
+const hasIcon = (el: Element, icon: string) => [...el.firstElementChild!.querySelectorAll("svg")].some((svg) => svg.innerHTML === icon);
+let home = "", branch = "";
 
 beforeEach(() => {
   localStorage.clear(); reset(); setToken("repo-names-fixture");
@@ -52,9 +56,11 @@ beforeEach(() => {
   }));
   history.replaceState(null, "", "/");
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  // The home mark as Icon draws it, to find it in a row.
+  // The main and non-main marks as Icon draws them, to find them in their rows.
   const icon = document.createElement("div"); const iconRoot = createRoot(icon);
-  act(() => iconRoot.render(<Icon name="home" />)); home = icon.querySelector("svg")!.innerHTML; act(() => iconRoot.unmount());
+  act(() => iconRoot.render(<><Icon name="home" /><Icon name="branch" /></>));
+  const marks = icon.querySelectorAll("svg"); home = marks[0]!.innerHTML; branch = marks[1]!.innerHTML;
+  act(() => iconRoot.unmount());
 });
 afterEach(() => {
   act(() => root.unmount()); host.remove(); reset(); setToken(""); vi.unstubAllGlobals();
@@ -103,14 +109,43 @@ describe("By repo says a repository's name once", () => {
     }
   });
 
-  it("lists the main checkout herdr does not name first, with the home mark", async () => {
-    inventory = [herdr("w-alpha", "/code/zeta/.worktrees/alpha"), herdr("w-zeta", "/code/zeta")];
+  it("keeps the main checkout's home mark and labels only a known non-main worktree", async () => {
+    inventory = [herdr("w-alpha", "/code/zeta/.worktrees/alpha", { is_main: false, workspace_kind: "worktree" }),
+      herdr("w-zeta", "/code/zeta", { is_main: true, workspace_kind: "worktree" })];
     sessions = [agent("lead", "Plan the release", "w-zeta", "/code/zeta", { repo_root: "/code/zeta", worktree: "/code/zeta" }),
       agent("fix", "Fix the login", "w-alpha", "/code/zeta/.worktrees/alpha", { repo_root: "/code/zeta", worktree: "/code/zeta/.worktrees/alpha", branch: "alpha" })];
     await render();
     const rows = [...host.querySelectorAll("[data-workspace-key]")];
     expect(rows.map((el) => JSON.parse(el.getAttribute("data-workspace-key")!)[4])).toEqual(["w-zeta", "w-alpha"]);
-    const hasHome = (el: Element) => [...el.firstElementChild!.querySelectorAll("svg")].some((svg) => svg.innerHTML === home);
-    expect(rows.map(hasHome)).toEqual([true, false]);
+    expect(rows.map((el) => hasIcon(el, home))).toEqual([true, false]);
+    expect(rows.map((el) => hasIcon(el, branch))).toEqual([false, true]);
+    expect(rows.map((el) => el.textContent?.includes(t("workspace-tree.worktree_kind")))).toEqual([false, true]);
+  });
+
+  it("does not label a catalog folder or a workspace whose is_main is unknown", async () => {
+    inventory = [herdr("w-main", "/code/zeta", { is_main: true, workspace_kind: "worktree" }),
+      herdr("w-folder", "/code/zeta/folder", { workspace_kind: "folder" }),
+      herdr("w-unknown", "/code/zeta/unknown")];
+    sessions = [agent("main-session", "Main", "w-main", "/code/zeta", { repo_root: "/code/zeta", worktree: "/code/zeta" }),
+      agent("folder-session", "Folder", "w-folder", "/code/zeta/folder", { repo_root: "/code/zeta", worktree: "/code/zeta/folder" }),
+      agent("unknown-session", "Unknown", "w-unknown", "/code/zeta/unknown", { repo_root: "/code/zeta", worktree: "/code/zeta/unknown" })];
+    await render();
+    const byId = (id: string) => [...host.querySelectorAll("[data-workspace-key]")].find((el) => JSON.parse(el.getAttribute("data-workspace-key")!)[4] === id)!;
+    expect(hasIcon(byId("w-main"), home)).toBe(true);
+    for (const id of ["w-folder", "w-unknown"]) {
+      expect(hasIcon(byId(id), home)).toBe(false);
+      expect(hasIcon(byId(id), branch)).toBe(false);
+      expect(byId(id).textContent).not.toContain(t("workspace-tree.worktree_kind"));
+    }
+  });
+
+  it("keeps the label on a legacy session-only worktree path", async () => {
+    sessions = [agent("lead", "Plan the release", "", "/code/zeta", { workspace_id: undefined, repo_root: "/code/zeta", worktree: "/code/zeta" }),
+      agent("fix", "Fix the login", "", "/code/zeta/.worktrees/alpha", { workspace_id: undefined, repo_root: "/code/zeta", worktree: "/code/zeta/.worktrees/alpha", branch: "alpha" })];
+    await render();
+    const legacyRow = (name: string) => host.querySelector(`button[aria-label="${t("workspace-tree.disclosure", { name })}"]`)!.closest(".group\\/sec")!.parentElement!;
+    expect(hasIcon(legacyRow("zeta"), home)).toBe(true);
+    expect(hasIcon(legacyRow("alpha"), branch)).toBe(true);
+    expect(legacyRow("alpha").textContent).toContain(t("workspace-tree.worktree_kind"));
   });
 });

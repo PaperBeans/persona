@@ -66,7 +66,7 @@ var relayBusyCodes = []string{"busy", "adapter_busy", "compacting", "runtime_awa
 // (relayAdapterSetupCodes).
 var relaySetupCodes = append([]string{proto.CodeClaudeMissing, proto.CodeLauncherMissing, assistantwire.CodeNoDevice,
 	proto.CodeNodeOutdated, proto.CodeLauncherOutOfScope, proto.CodeLauncherOwnService, assistantwire.CodeLauncherOtherKind,
-	"assistant_launcher_profile_switch"}, relayAdapterSetupCodes...)
+	"assistant_launcher_profile_switch", "assistant_model_unresolved"}, relayAdapterSetupCodes...)
 
 // relayAdapterSetupCodes are an external launcher's refusals (node/external_assistant.go externalStderrCode) that its
 // connection's setup ends: the owner enables, signs in, reconfigures, updates or restores the connection, or picks

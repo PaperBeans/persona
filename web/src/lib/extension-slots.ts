@@ -1,8 +1,8 @@
 // The extensions' places outside their settings (docs/extensions/extensions.md "UI slots"): entries on the sidebar (nav_page), cards on
 // "Overview" (overview_card), sections on a machine's page (machine_section), inbox items' pages (inbox_item: the list is
 // cached here, so opening an item asks nothing). One list for the whole web, asked for once
-// (GET /api/v1/extensions/-/ui without a placement) and again on reconnect, when an extension changes here, and when the tab
-// comes back after a while; a nav_page's badge changes in place on the extension_ui event (plugin_ui from an older
+// (GET /api/v1/extensions/-/ui without a placement) and again on reconnect, when an extension changes here, on
+// assistant_pages (Dashboards' places changed, #15017), and when the tab comes back after a while; a nav_page's badge changes in place on the extension_ui event (plugin_ui from an older
 // hub). Only on a hub with UI slots (extension_ui_slots, or plugin_ui_slots): an older one is never asked (it would answer an empty list anyway).
 // The list this browser was last given is kept (docs/web/web.md "Extension pages on reload"): drawn from the first paint,
 // before the hello, and replaced by the hub's answer.
@@ -124,6 +124,9 @@ function start() {
   };
   onHubEvent("extension_ui", badge(false));
   onHubEvent("plugin_ui", badge(true));
+  // Dashboards (#15017): a page kept, pinned, unpinned, renamed, removed or restored, or the switch turned, changes the
+  // places the default manager lists after the extensions' (`-pages`): the list is asked for again
+  onHubEvent("assistant_pages", () => refreshExtensionPlaces());
   // the default became known or moved: its places and badges are read again (those left out before), and the others';
   // a list kept under another default is not its
   onDefaultManager(() => {

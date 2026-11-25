@@ -55,7 +55,10 @@ func (n *Node) assistantCompactRuntime(ctx context.Context, id string, onlyRunni
 	var reply struct {
 		Queued bool `json:"queued"`
 	}
-	if err := host.peer.Call(callCtx, "session.send", params, &reply); err != nil {
+	finishAgy := n.runtimes.agyWorkBegin(host, "session.send", id)
+	err = host.peer.Call(callCtx, "session.send", params, &reply)
+	finishAgy(err, false)
+	if err != nil {
 		n.finishRuntimeCompaction(id, compaction, err.Error())
 		return err
 	}

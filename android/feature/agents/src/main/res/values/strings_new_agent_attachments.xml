@@ -8,5 +8,5 @@
     <string name="agents_attach_moved">The files uploaded to “%1$s” were removed. Add them again for this computer.</string>
     <string name="agents_attach_remove">Remove %1$s</string>
     <string name="agents_attach_upload_failed">Couldn\'t send “%1$s”: %2$s</string>
-    <string name="agents_attach_photo_limit">Up to 4 at a time</string>
+    <string name="agents_attach_photo_limit">Up to %1$d at a time</string>
 </resources>

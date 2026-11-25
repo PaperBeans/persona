@@ -121,8 +121,10 @@ internal suspend fun createChatWiring(
         files = HubSessionFiles(connection),
         ports = HubPortOpener(connection),
         agentShares = ChatWiringModule.agentShares(connection, ::current),
-        worktrees = { connection.route.value?.let { route -> persona.core.hub.HttpAgentCreationService(data.scope.path, route.endpoint.url,
-            connection.token, connection.http.client, isCurrent = { current() && connection.route.value == route }) } },
+        worktrees = cachedAgentCreation({ connection.route.value }) { route ->
+            HttpAgentCreationService(data.scope.path, route.endpoint.url, connection.token, connection.http.client,
+                isCurrent = { current() && connection.route.value == route })
+        },
         usage = { persona.core.hub.HttpMachineManagement(connection).usageWindows() },
         // Recent targets of Forward live in the pairing's own preferences, erased with it (#3901).
         forwardMemory = PreferencesForwardMemory(data.listPreferences),
@@ -160,6 +162,9 @@ private class RoutedAssistantManagement(
     override suspend fun launcherModels(machineId: String, launcher: String) = api().launcherModels(machineId, launcher)
     override suspend fun setModelPick(session: SessionKey, pick: persona.core.contracts.ModelPick) = api().setModelPick(session, pick)
     override suspend fun clearModelPick(session: SessionKey) = api().clearModelPick(session)
+    override suspend fun conversationSwitchState(session: SessionKey) = api().conversationSwitchState(session)
+    override suspend fun submitConversationSwitch(session: SessionKey, request: ConversationSwitchRequest) =
+        api().submitConversationSwitch(session, request)
     override suspend fun endConversation(session: SessionKey) = api().endConversation(session)
     override suspend fun compactConversation(session: SessionKey) = api().compactConversation(session)
     override suspend fun archiveConversation(session: SessionKey) = api().archiveConversation(session)

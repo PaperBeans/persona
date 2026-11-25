@@ -13,9 +13,14 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
+
+// resolvedTaskCwdWait bounds resolvedTaskCwd's one call: the node that just prepared the directory answers it at once,
+// and a node that does not leaves the run its prepared path.
+const resolvedTaskCwdWait = 10 * time.Second
 
 func writeTaskExecutionError(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
@@ -42,7 +47,14 @@ type TaskExecution struct {
 }
 
 func (s *Service) taskMachine(ctx context.Context, t Task) string {
-	return cmp.Or(t.ExecutionMachineID, s.settings(ctx).MachineID)
+	if t.ExecutionMachineID != "" {
+		return t.ExecutionMachineID
+	}
+	def := s.settings(ctx).MachineID
+	if t.Cwd == "" && !t.continuesSource() {
+		return s.machineFallbackScheduleMachine(ctx, def, time.Now())
+	}
+	return def
 }
 
 func (t Task) startsFresh() bool {
@@ -98,6 +110,27 @@ func (s *Service) taskSourceCwd(ctx context.Context, t Task) (string, bool) {
 	}
 	cwd, err := s.prepareSpace(ctx, t.MachineID, t.Space)
 	return cwd, err == nil && cwd != "" && c.Cwd == cwd
+}
+
+// resolvedTaskCwd is the prepared default (or space) directory a task without a directory of its own runs in, as the
+// node resolves it (assistant.directory): the form preview and save gave the task's selections
+// (taskInputDefaultDirectory). A skill's id includes the cwd and a file selection names it, so a symlink in the node's
+// home or data directory path must not give the run another form of the same directory (#15004). When the node does
+// not resolve it (an error, no answer, an older node), the run keeps the prepared path, as before: the call never waits
+// for a node update as the run's own task-execution calls do (callDevice), and is bounded by resolvedTaskCwdWait.
+func (s *Service) resolvedTaskCwd(ctx context.Context, machine, cwd string) string {
+	if cwd == "" {
+		return cwd
+	}
+	ctx, cancel := context.WithTimeout(devicewire.WithoutTaskExecutionWait(ctx), resolvedTaskCwdWait)
+	defer cancel()
+	var result struct {
+		Cwd string `json:"cwd"`
+	}
+	if s.call(ctx, machine, assistantwire.DeviceAssistantDirectory, map[string]any{"path": cwd}, &result) != nil || result.Cwd == "" {
+		return cwd
+	}
+	return result.Cwd
 }
 
 func (s *Service) taskExecution(ctx context.Context, t Task, validate bool, binding ...ModelBinding) (TaskExecution, error) {

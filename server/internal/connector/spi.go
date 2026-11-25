@@ -106,6 +106,7 @@ const (
 	CapFallback        = connectorwire.CapFallback
 	CapMachines        = connectorwire.CapMachines
 	CapRecall          = connectorwire.CapRecall
+	CapInboxVisibility = connectorwire.CapInboxVisibility
 	CapHistory         = connectorwire.CapHistory
 	CapHistoryAnchors  = connectorwire.CapHistoryAnchors
 )

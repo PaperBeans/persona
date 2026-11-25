@@ -17,11 +17,11 @@
       },
       "due": {
         "type": "string",
-        "description": "Day only: YYYY-MM-DD; otherwise YYYY-MM-DD HH:MM (user time zone) or RFC3339. Relative 2h/3d accepted."
+        "description": "YYYY-MM-DD, YYYY-MM-DD HH:MM (local), RFC3339, or 2h/3d."
       },
       "remind": {
         "type": "string",
-        "description": "Future reminder (user time zone/RFC3339 or relative 30m/2h/1d). Only if requested or deadline close and important."
+        "description": "Future reminder (local/RFC3339 or 30m/2h/1d). Only if asked or urgent."
       },
       "priority": {
         "type": "string",
@@ -38,11 +38,23 @@
           "todo",
           "concern"
         ],
-        "description": "todo (default); concern (main chat only) tracks a user-raised matter until concern_report reports its outcome; other completion tools cannot close it."
+        "description": "todo (default); concern (main chat only) closes only via concern_report."
+      },
+      "audience": {
+        "type": "string",
+        "enum": [
+          "human",
+          "autonomous"
+        ],
+        "description": "Optional: human or autonomous."
+      },
+      "direction_id": {
+        "type": "string",
+        "description": "Optional direction id."
       },
       "project": {
         "type": "string",
-        "description": "Existing kb_list project slug/name; prefer long-term work. Only when clear; no near-duplicates."
+        "description": "Existing kb_list project slug/name; only when clear, no near-duplicates."
       },
       "part_of": {
         "type": "string",

@@ -173,7 +173,7 @@ func (s *Service) createScreenInteraction(machine string, sess proto.Session) {
 	if back || d == nil {
 		s.show(ix) // back: pushed before the node's connection ended (#4252); no dialog: the real card rings later (#4450)
 		if back {
-			go s.feishuCardBack(ix)
+			go s.larkModule().AskBack(ix, resumeGrace)
 		}
 	} else {
 		s.announce(ix)

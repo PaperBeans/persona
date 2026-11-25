@@ -3,14 +3,16 @@
 // for them); Redeploy behind a confirmation, then a stepper the machine's pushed `deploy_phase` drives (waiting for
 // idle → transferring → restarting → confirming → done) ending in the build the node reports, or the error and Try
 // again. Where the hub cannot update it (`can_deploy` false), the hub's reason instead.
-import { useEffect, useRef, useState } from "react";
-import { formatDate, t } from "../../i18n";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { formatDate, formatList, t } from "../../i18n";
 import { stateOf } from "../../lib/format";
 import { buildGap, buildTime, gapText } from "../../lib/machine-alerts";
+import { hostedManagersForMachine, useRoster } from "../../lib/managers";
 import { useStore } from "../../lib/store";
 import type { Machine, Session } from "../../lib/types";
 import { Button, Dialog } from "../../ui/atoms";
 import { Steps } from "../../ui/Steps";
+import { HostedManagersList } from "./HostedManagersList";
 import { useDeploy } from "./MachineDeploy";
 import { SheetPart } from "./AlertParts";
 
@@ -54,6 +56,10 @@ export function deployProgress(m: Machine, started: boolean, sawBusy: boolean, f
 
 export function DeploySection({ machine, agents }: { machine: Machine; agents: readonly Session[] }) {
   const hubVersion = useStore((s) => s.version);
+  const roster = useRoster();
+  const hostedManagers = useMemo(() => hostedManagersForMachine(roster, machine), [roster, machine]);
+  const hostedNames = hostedManagers.length ? formatList(hostedManagers.map((m) => m.name)) : "";
+  const pendingRestartNames = formatList(hostedManagers.filter((m) => m.pending_restart).map((m) => m.name));
   const { deployment, pending, deploy, error } = useDeploy(machine);
   const [asking, setAsking] = useState(false);
   const [started, setStarted] = useState(false);
@@ -97,13 +103,32 @@ export function DeploySection({ machine, agents }: { machine: Machine; agents: r
             : t("machines-alerts.build_same_time")}
         </p>
         {machine.deploy_error && progress.outcome !== "running" && <p className="mt-1 break-words text-meta text-red" data-testid="deploy-error">{t("lib-machine-deploy.last_failed", { error: machine.deploy_error })}</p>}
+        <HostedManagersList
+          managers={hostedManagers}
+          nodeVersion={nodeVersion}
+          compact
+          className="mt-3 rounded-control bg-field p-2.5"
+          testId="deploy-hosted-managers"
+        />
       </SheetPart>
       <SheetPart part="why">
         {progress.outcome === "done" ? (
-          <p className="text-meta leading-relaxed text-ink-2">{t("machines-alerts.mismatch_resolved")}</p>
+          <>
+            <p className="text-meta leading-relaxed text-ink-2">{t("machines-alerts.mismatch_resolved")}</p>
+            {pendingRestartNames && (
+              <p className="mt-1 text-meta leading-relaxed text-orange" data-testid="deploy-done-pending-restart">
+                {t("machines-alerts.deploy_done_pending_restart", { names: pendingRestartNames })}
+              </p>
+            )}
+          </>
         ) : (
           <>
             <p className="text-meta leading-relaxed text-ink-2">{t("machines-alerts.mismatch_why")}</p>
+            {hostedNames && (
+              <p className="mt-1 text-meta leading-relaxed text-ink-2" data-testid="deploy-hosted-why">
+                {t("machines-alerts.mismatch_hosted_managers", { names: hostedNames })}
+              </p>
+            )}
             <p className="mt-1 text-meta text-ink-2" data-testid="working-count">{working ? t("machines-alerts.mismatch_working", { count: working }) : t("machines-alerts.mismatch_none_working")}</p>
           </>
         )}
@@ -143,6 +168,11 @@ export function DeploySection({ machine, agents }: { machine: Machine; agents: r
         }
       >
         <p className="text-meta leading-relaxed text-ink-2">{t("machines-alerts.redeploy_confirm_body", { machine: machine.name })}</p>
+        {hostedNames && (
+          <p className="mt-2 text-meta leading-relaxed text-ink-2" data-testid="redeploy-confirm-managers">
+            {t("machines-alerts.redeploy_confirm_managers", { names: hostedNames })}
+          </p>
+        )}
         <p className="mt-2 text-meta leading-relaxed text-ink-2">{working ? t("machines-alerts.redeploy_confirm_working", { count: working }) : t("machines-alerts.redeploy_confirm_idle")}</p>
       </Dialog>
     </>

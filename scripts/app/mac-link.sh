@@ -1,6 +1,10 @@
 #!/bin/bash
-# Independently installable Persona Link: persona-link, persona-node, Persona Screen and Persona Input, no desktop UI
-# required.
+# Independently installable Persona Link: the menu bar App "Persona Link" (apple/PersonaLink/App: the connection and
+# pairing, the Windows tray's counterpart; docs/operations/link.md "Tray and menu bar App") around persona-link,
+# persona-node, Persona Screen and Persona Input. The App only shows and pairs: launchd runs the connector
+# (persona-link install), so quitting the App leaves the connection up.
+#   ./scripts/app/mac-link.sh build|install|snapshot <dir>|verify-screen|verify-input
+#   snapshot <dir>: the menu in every state, the pairing and rename windows and the icons, light and dark, as PNGs
 # The bundle id is PERSONA_LINK_BUNDLE_ID, else mac.link_bundle_id in ~/.config/persona/config.json, else the app's
 # registered identity (PERSONA_BUNDLE_ID, else app.bundle_id) + ".link". Never a placeholder: macOS keeps Persona
 # Screen's Screen Recording grant per bundle id, so a later build with another id has to be allowed again (#7569).
@@ -20,6 +24,7 @@ link_id() {
 PKG="$ROOT/apple/PersonaLink"
 OUT="$PKG/build"
 APP="$OUT/Persona Link.app"
+APP_PKG="$PKG/App"
 
 # Persona Screen (#3954) and Persona Input (#7775, docs/extensions/computer-use.md "Pixel scrolling"): helper apps of
 # their own, whose Screen Recording and Accessibility permissions macOS ties to their code while they are signed ad hoc.
@@ -120,6 +125,38 @@ verify_helper() {
   fi
 }
 
+# menu_app <archs…>: the menu bar App's executable, resources and Info.plist in $APP (its helpers come after).
+menu_app() {
+  # xcodebuild builds the Swift package (swift build's default backend can't find the developer directory everywhere).
+  (cd "$APP_PKG" && xcodebuild -quiet -scheme PersonaLink -configuration Release -derivedDataPath "$OUT/dd"     -destination 'generic/platform=macOS' ARCHS="$*" ONLY_ACTIVE_ARCH=NO build)
+  local products="$OUT/dd/Build/Products/Release"
+  mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+  cp "$products/PersonaLink" "$APP/Contents/MacOS/PersonaLink"
+  # The String Catalog's and icons' resource bundle (Package.swift), in Contents/Resources where Bundle.module looks.
+  cp -R "$products/PersonaLink_PersonaLink.bundle" "$APP/Contents/Resources/"
+  # xcodebuild links the package with the SDK version left at the deployment target (vtool -show-build: sdk 15.0),
+  # and macOS keeps an app linked against an old SDK in the old look: a square, bordered menu bar panel instead of
+  # the system's own on macOS 26 and later (docs/lessons/macos.md). Record the SDK it was really built against.
+  local minos sdk
+  minos=$(/usr/libexec/PlistBuddy -c 'Print LSMinimumSystemVersion' "$APP_PKG/Info.plist")
+  sdk=$(xcrun --sdk macosx --show-sdk-version)
+  vtool -set-build-version macos "$minos" "$sdk" -replace -output "$APP/Contents/MacOS/PersonaLink" "$APP/Contents/MacOS/PersonaLink" 2>/dev/null
+  if vtool -show-build "$APP/Contents/MacOS/PersonaLink" | awk '$1 == "sdk" { print $2 }' | grep -qvx "$sdk"; then
+    echo "PersonaLink: the SDK version is not $sdk after vtool" >&2; exit 1
+  fi
+  sed -e "s/__BUNDLE_ID__/$ID/" -e "s/__BUILD__/$(date +%Y%m%d%H%M)/" "$APP_PKG/Info.plist" > "$APP/Contents/Info.plist"
+  # Finder's icon: the Mac icon (scripts/assets/make_icon.py link) at the sizes an .icns holds.
+  local set="$OUT/AppIcon.iconset"
+  rm -rf "$set"
+  mkdir -p "$set"
+  for s in 16 32 128 256; do
+    sips -z $s $s "$APP_PKG/AppIcon.png" --out "$set/icon_${s}x${s}.png" >/dev/null
+    sips -z $((s * 2)) $((s * 2)) "$APP_PKG/AppIcon.png" --out "$set/icon_${s}x${s}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$set" -o "$APP/Contents/Resources/AppIcon.icns"
+  rm -rf "$set"
+}
+
 build() {
   local version archs=() helpers=() nodes=()
   link_id
@@ -141,6 +178,7 @@ build() {
     nodes+=("$OUT/persona-node-$a")
   done
   rm -rf "$APP"
+  menu_app "${archs[@]}"
   mkdir -p "$APP/Contents/Helpers"
   lipo -create "${helpers[@]}" -output "$APP/Contents/Helpers/persona-link"
   lipo -create "${nodes[@]}" -output "$APP/Contents/Helpers/persona-node"
@@ -154,8 +192,10 @@ build() {
   identity=$(signing_identity)
   screen_bundle "$screen" "$(screen_binary "${archs[@]}")" "$ID.screen" "$identity"
   input_bundle "$input" "$(input_binary "${archs[@]}")" "$ID.input" "$identity"
-  codesign --verify --strict "$APP/Contents/Helpers/persona-link" "$APP/Contents/Helpers/persona-node" "$screen" "$input"
-  echo "built $APP ($ID, persona-link $version, no menu bar UI)"
+  # The App last, sealing the helpers as they are (no --deep: Persona Screen's and Persona Input's own signatures stay).
+  codesign --force --sign - --identifier "$ID" "$APP"
+  codesign --verify --strict "$APP/Contents/Helpers/persona-link" "$APP/Contents/Helpers/persona-node" "$screen" "$input" "$APP"
+  echo "built $APP ($ID, persona-link $version)"
 }
 
 # install_bridge: the iPhone helper (persona-iphone-bridge, docs/extensions/iphone-bridge.md "Releases") built for this
@@ -183,14 +223,21 @@ case "${1:-build}" in
   build) build ;;
   install)
     build
+    pkill -x PersonaLink 2>/dev/null && sleep 1 || true
     rm -rf "/Applications/Persona Link.app"
     ditto "$APP" "/Applications/Persona Link.app"
-    # The helpers have stable paths for the node's Persona Screen lookup and the desktop's separately installed Link.
-    # The bundle is an install location, not a launchable UI: launchd owns the connector and its login startup.
-    "$APP/Contents/Helpers/persona-link" install --node-bin "$APP/Contents/Helpers/persona-node"
-    echo "installed independent Persona Link at ~/.persona/bin/persona-link (launchd com.persona.link; no menu bar UI)"
+    # The helpers have stable paths for the node's Persona Screen lookup. launchd owns the connector and its login
+    # startup; the menu bar App only shows and pairs it, and starts at login when its menu says so.
+    "/Applications/Persona Link.app/Contents/Helpers/persona-link" install --node-bin "/Applications/Persona Link.app/Contents/Helpers/persona-node"
+    open "/Applications/Persona Link.app"
+    echo "installed Persona Link: /Applications/Persona Link.app (menu bar) and ~/.persona/bin/persona-link (launchd com.persona.link)"
     install_bridge ;;
+  snapshot)
+    [ -n "${2:-}" ] || { echo "usage: $0 snapshot <dir>" >&2; exit 2; }
+    build
+    "$APP/Contents/MacOS/PersonaLink" --snapshot "$2"
+    ls "$2" ;;
   verify-screen) verify_helper screen ;;
   verify-input) verify_helper input ;;
-  *) echo "usage: $0 [build|install|verify-screen|verify-input]" >&2; exit 2 ;;
+  *) echo "usage: $0 [build|install|snapshot <dir>|verify-screen|verify-input]" >&2; exit 2 ;;
 esac

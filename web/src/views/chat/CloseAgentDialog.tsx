@@ -63,7 +63,7 @@ export function CloseAgentDialog({ open, onClose, onClosed, session, machineName
   };
   const row = live ?? session;
   const detail = shown.offer === "archive"
-    ? t("close-agent.archive_close_detail", { title: sessionTitle(row), machine: machineName })
+    ? archiveCloseText(row, machineName)
     : t(row.source_kind === "runtime" ? "close-agent.close_runtime_detail" : "close-agent.close_agent_detail", { machine: machineName, title: sessionTitle(row), where: [row.space_name, tabLabel(row)].filter(Boolean).join(" › ") || sessionTitle(row) });
   return (
     <Dialog
@@ -88,6 +88,15 @@ export function CloseAgentDialog({ open, onClose, onClosed, session, machineName
       {wt && shown.offer !== "busy" && <WorktreeCleanup st={wt} value={cleanup} onChange={setCleanup} />}
     </Dialog>
   );
+}
+
+/** What archiving and closing row does, in the dialog's words. An Antigravity CLI conversation (#14520) is closed, from
+ *  its own row (the companion's), or loses the pane it runs in, and a message brings it back from Archived agents; any
+ *  other agent's tab and process close, and it comes back with Resume on its terminal page. */
+function archiveCloseText(row: Session, machine: string): string {
+  const title = sessionTitle(row);
+  if (row.agent !== "agy") return t("close-agent.archive_close_detail", { title, machine });
+  return row.source_kind ? t("close-agent.archive_close_agy_detail", { title, machine }) : t("close-agent.archive_close_agy_pane_detail", { title, machine });
 }
 
 /** What closing a busy agent interrupts, in the dialog's words. */

@@ -217,7 +217,7 @@ func TestSupervisedTaskRound(t *testing.T) {
 	agentTurn(s, f, proto.StatusDone, "两种走法：A 先灰度，B 直接全量。你选一个？", 0)
 	waitFor(t, "the message", func() bool { return len(f.notices()) == 1 })
 	n := f.notices()[0]
-	for _, want := range []string{"📋 督办", "Agent 停下了，但没做完（要用户决定：问用两种部署走法里的哪一种；用户还没收到", "task_review needs_user", "验收标准：PR 合并到 master；浅色 / 深色截图贴进 PR",
+	for _, want := range []string{"📋 督办", "Agent 停下了，但没做完（要用户决定：问用两种部署走法里的哪一种；用户还没收到", "task_review needs_user", "验收标准用 todo_get 取原文",
 		"A 先灰度，B 直接全量", "signal=idle"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("message lacks %q:\n%s", want, n)

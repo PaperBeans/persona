@@ -67,6 +67,9 @@ class ExtensionWireTest {
         "UIStreamClientEnvelope" to ExtensionUIStreamClientEnvelope.serializer(),
         "UIStreamServerEnvelope" to ExtensionUIStreamServerEnvelope.serializer(),
         "UIPageSnapshot" to ExtensionUIPageSnapshot.serializer(),
+        "OffloadRunResult" to ExtensionOffloadRunResult.serializer(),
+        "OffloadInventory" to ExtensionOffloadInventory.serializer(),
+        "OffloadJob" to ExtensionOffloadJob.serializer(),
     )
 
     @Suppress("UNCHECKED_CAST")
@@ -74,7 +77,8 @@ class ExtensionWireTest {
         val files = examples.listFiles { f -> f.isFile && f.name.endsWith(".json") }.orEmpty()
         assertTrue("no examples in ${examples.absolutePath}", files.size > 10)
         for (f in files) {
-            val serializer = types[f.name.substringBefore(".")] as KSerializer<Any?>? ?: fail("no type for ${f.name}") as Nothing
+            val type = f.name.substringBefore(".")
+            val serializer = types[type] as KSerializer<Any?>? ?: fail("no type for ${f.name}") as Nothing
             val raw = json.parseToJsonElement(f.readText())
             val back = json.encodeToJsonElement(serializer, json.decodeFromJsonElement(serializer, raw))
             assertTrue("${f.name} round trip differs:\n$raw\n$back", same(raw, back))

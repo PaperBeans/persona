@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/assistant/todo/projection"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -24,10 +25,12 @@ import (
 // the same bytes and the list's ETag (#9590) holds while nothing changes. The manager names CapabilityTodoView and
 // CapabilityTodoPlaces in its hello; the hub adds the counts and places of several managers up.
 
-// todosList is GET /api/v1/todos's answer: the rows, each with its view, and the list's counts.
+// todosList is GET /api/v1/todos's answer: the rows, each with its view, the list's counts,
+// and optional todos_v2 shared external blockers.
 type todosList struct {
-	Todos  []listedTodo             `json:"todos"`
-	Counts assistantwire.TodoCounts `json:"counts"`
+	Todos          []listedTodo               `json:"todos"`
+	Counts         assistantwire.TodoCounts   `json:"counts"`
+	SharedBlockers []projection.SharedBlocker `json:"shared_blockers,omitempty"`
 }
 
 // listedTodos are the to-dos as GET /api/v1/todos lists them, newest created first: each formatted, with its decision

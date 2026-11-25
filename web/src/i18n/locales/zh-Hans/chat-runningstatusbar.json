@@ -22,5 +22,11 @@
   "more_workflows_other": "还有 {count} 个",
   "more_waits_other": "还有 {count} 个",
   "background_subtasks": "后台子任务运行中，模型用量仍在消耗…",
-  "retrying": "正在重试（{attempt}/{max}）· {reason}…"
+  "retrying": "正在重试（{attempt}/{max}）· {reason}…",
+  "every_minutes": "每 {count} 分钟",
+  "every_hours": "每 {count} 小时",
+  "hourly": "每小时",
+  "daily_at": "每天 {time}",
+  "interrupt": "中断",
+  "interrupt_hint": "中断（Esc）"
 }

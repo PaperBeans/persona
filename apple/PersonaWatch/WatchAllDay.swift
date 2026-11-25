@@ -415,7 +415,7 @@ final class WatchAllDay {
     /// recording, as on the iPhone), unless the call's audio still holds the session; then what a link or a
     /// notification asked for runs.
     func becameActive() {
-        if pending == nil, capture.interrupted, capture.state == .paused, !AVAudioSession.sharedInstance().isOtherAudioPlaying {
+        if pending == nil, capture.interrupted, capture.state == .paused, !AudioSessionBroker.shared.isOtherAudioPlaying {
             capture.resumeAfterInterruption()
         }
         runPending()

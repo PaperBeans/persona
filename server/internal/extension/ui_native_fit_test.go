@@ -29,7 +29,7 @@ func fitNativeOracle(raw []byte, slot UISlot, version int, lang i18n.Lang) (json
 	if err != nil {
 		return nil, err
 	}
-	if _, err = fit(&view, slot, version, true, lang); err != nil {
+	if _, err = fit(&view, slot, version, nil, true, lang); err != nil {
 		return nil, err
 	}
 	after, err := json.Marshal(view)
@@ -125,4 +125,33 @@ func canonicalOf(t *testing.T, raw []byte) string {
 	}
 	out, _ := json.Marshal(v)
 	return string(out)
+}
+
+func TestFitNativeForUnsupportedFeatures(t *testing.T) {
+	page, _ := Slot("nav_page")
+	sceneRaw := []byte(`{"sections":[{"key":"s","items":[{"key":"k","type":"scene","alt":"Living room","shapes":[{"kind":"box","center":[0,0],"size":[4,3],"bottom":0,"top":2}]}]}]}`)
+	got, err := FitNativeFor(sceneRaw, page, UIVersion, []string{wire.ComponentScene}, i18n.En)
+	if err != nil {
+		t.Fatalf("FitNativeFor scene unsupported: %v", err)
+	}
+	if !strings.Contains(string(got), "Living room") || strings.Contains(string(got), `"type":"scene"`) {
+		t.Fatalf("expected scene downgrade when unsupported, got %s", got)
+	}
+
+	mapRaw := []byte(`{"sections":[{"key":"s","items":[{"key":"k","type":"map","alt":"Route","routes":[{"id":"r1","points":[{"lat":39.9,"lon":116.3},{"lat":39.95,"lon":116.4}]}]}]}]}`)
+	got, err = FitNativeFor(mapRaw, page, UIVersion, []string{wire.ComponentMap}, i18n.En)
+	if err != nil {
+		t.Fatalf("FitNativeFor map unsupported: %v", err)
+	}
+	if !strings.Contains(string(got), `"type":"row"`) || strings.Contains(string(got), `"type":"map"`) {
+		t.Fatalf("expected map downgrade when unsupported, got %s", got)
+	}
+
+	kept, err := FitNativeFor(mapRaw, page, UIVersion, []string{wire.ComponentScene}, i18n.En)
+	if err != nil {
+		t.Fatalf("FitNativeFor map supported: %v", err)
+	}
+	if !strings.Contains(string(kept), `"type":"map"`) {
+		t.Fatalf("expected native map preserved when only scene is unsupported, got %s", kept)
+	}
 }

@@ -4,43 +4,55 @@
 // session is watched, and asks the phone what the agent waits on a person for.
 
 import { readFile, writeFile, mkdir, rename, stat } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createRuntime, interactionId, light, page, RpcError } from '../../runtime-sdk/index.js'
 import { ApiError, createClient } from './client.js'
-import { DEFAULT_CONFIG, loadConfig } from './config.js'
+import { defaultConfigPath, loadConfig, RUNTIME_ID, RUNTIME_NAME } from './config.js'
 import { answerOf, cardOf, deltaText, eventItems, lastText, logStatus, pendingAsks } from './map.js'
 import { createSecrets } from './secrets.js'
 
 const LIST_EVERY_MS = 30_000
 const CONFIG_EVERY_MS = 10_000
 const KEEP_STARTED = 200
+const SYNC_CONCURRENCY = 4
 
 /**
  * @param {object} o
- * @param {string} [o.configPath] the config file (default ~/.persona/managed-agents.json)
+ * @param {string} [o.configPath] the config file (default $PERSONA_HOME/managed-agents.json or ~/.persona/managed-agents.json)
  * @param {object} [o.config] a parsed config instead of the file (tests)
  * @param {string} [o.statePath] where the ids of sessions started from Persona are kept (no keys, no content)
  * @param {Function} [o.fetch] fetch for the REST calls (tests)
  * @param {object} [o.env] the environment key references read (env:, extension:)
  * @param {Function} [o.log]
+ * @param {number} [o.syncConcurrency] max concurrent /events sync calls (default 4)
  * Other options go to createRuntime (socketPath, listen, retryMs, answerFirst…).
  */
 export function createManagedAgentsRuntime(o = {}) {
-  const log = o.log ?? (() => {})
-  const secrets = createSecrets({ env: o.env ?? process.env, log, run: o.run, platform: o.platform })
-  const say = (m) => log(secrets.redact(m))
-  const configPath = o.configPath ?? DEFAULT_CONFIG
-  const statePath = o.statePath ?? `${dirname(configPath)}/managed-agents-state.json`
+  const env = o.env ?? process.env
+  const rawLog = o.log ?? o.runtimeOptions?.log ?? (() => {})
+  const secrets = createSecrets({ env, log: rawLog, run: o.run, platform: o.platform })
+  const say = (m) => rawLog(secrets.redact(m))
+  const configPath = o.configPath ?? (o.config ? undefined : defaultConfigPath(undefined, env))
+  const statePath = o.statePath ?? join(dirname(configPath ?? defaultConfigPath(undefined, env)), 'managed-agents-state.json')
   const pollScale = o.pollScale ?? 1
+  const syncConcurrency = Math.max(1, o.syncConcurrency ?? SYNC_CONCURRENCY)
 
-  let config = o.config ?? { runtime: 'managed-agents', name: 'Managed Agents', profiles: [], problems: [] }
+  let config = {
+    runtime: o.config?.runtime || RUNTIME_ID,
+    name: o.config?.name || RUNTIME_NAME,
+    profiles: o.config?.profiles ?? [],
+    problems: o.config?.problems ?? [],
+  }
   let configStamp = ''
-  const profiles = new Map() // id -> { profile, client, listUnsupported, rows: Map(maId -> session) }
+  const profiles = new Map() // id -> { profile, client, listUnsupported, rows: Map(maId -> session), polling }
   const sessions = new Map() // key -> session state
   let started = [] // [{profile, id}] started from Persona: listed even where the server has no list route
   const warned = new Set()
   const timers = new Set()
+  const pollTimers = new Map() // pid -> { ms, timer }
   let stopped = false
+  let loopsRunning = false
+  let rtStarted = false
   let rt
 
   const warnOnce = (key, msg) => {
@@ -51,44 +63,96 @@ export function createManagedAgentsRuntime(o = {}) {
   const keyOf = (pid, maId) => `${pid}.${maId}`
   const history = (s) => `ma:${s.key}`
 
-  function applyConfig(c) {
-    config = c
-    for (const p of c.problems ?? []) warnOnce(`problem:${p}`, `config: ${p}`)
-    const want = new Set(c.profiles.map((p) => p.id))
-    for (const id of profiles.keys()) {
-      if (!want.has(id)) {
-        profiles.delete(id)
-        for (const [k, s] of sessions) if (s.pid === id) dropSession(k)
-      }
-    }
-    for (const p of c.profiles) {
-      const had = profiles.get(p.id)
-      if (had && JSON.stringify(had.profile) === JSON.stringify(p)) continue
-      profiles.set(p.id, { profile: p, client: createClient(p, secrets, { fetch: o.fetch }), listUnsupported: false, rows: had?.rows ?? new Map() })
-      for (const s of sessions.values()) if (s.pid === p.id) s.client = profiles.get(p.id).client
-    }
-    rt?.launchersChanged(launchers())
-    rt?.sessionsChanged(0)
+  const sdkOptions = {
+    runtime: o.runtimeOptions?.runtime ?? config.runtime,
+    name: o.runtimeOptions?.name ?? config.name,
+    launchers: [],
+    launcher: undefined,
   }
 
   function launchers() {
     return config.profiles.filter((p) => p.start).map((p) => ({ name: p.start.launcher, display_name: p.start.label ?? p.name, agent: config.runtime, model: '' }))
   }
 
+  function makeRuntime() {
+    return createRuntime(driver, {
+      ...o.runtimeOptions,
+      runtime: sdkOptions.runtime,
+      name: sdkOptions.name,
+      version: o.runtimeOptions?.version ?? '0.1.0',
+      launchers: sdkOptions.launchers,
+      // A daemon's link passes one launcher on, named by daemons.json: the first profile that starts sessions.
+      launcher: sdkOptions.launcher,
+      log: say,
+      onHub: (connected) => {
+        if (rt?.connected) for (const s of sessions.values()) if (s.loaded) reconcileAsks(s)
+        o.runtimeOptions?.onHub?.(connected)
+      },
+    })
+  }
+
+  function applyConfig(c) {
+    const prevRuntime = sdkOptions.runtime
+    const prevName = sdkOptions.name
+    config = {
+      runtime: c?.runtime || RUNTIME_ID,
+      name: c?.name || RUNTIME_NAME,
+      profiles: c?.profiles ?? [],
+      problems: c?.problems ?? [],
+    }
+    for (const p of config.problems) warnOnce(`problem:${p}`, `config: ${p}`)
+    const want = new Set(config.profiles.map((p) => p.id))
+    for (const id of profiles.keys()) {
+      if (!want.has(id)) {
+        profiles.delete(id)
+        for (const [k, s] of sessions) if (s.pid === id) dropSession(k)
+      }
+    }
+    for (const p of config.profiles) {
+      const had = profiles.get(p.id)
+      if (had && JSON.stringify(had.profile) === JSON.stringify(p)) continue
+      profiles.set(p.id, { profile: p, client: createClient(p, secrets, { fetch: o.fetch }), listUnsupported: false, rows: had?.rows ?? new Map(), polling: false })
+      for (const s of sessions.values()) if (s.pid === p.id) s.client = profiles.get(p.id).client
+    }
+    const nextRuntime = o.runtimeOptions?.runtime ?? config.runtime
+    const nextName = o.runtimeOptions?.name ?? config.name
+    const identityChanged = nextRuntime !== prevRuntime || nextName !== prevName
+    sdkOptions.runtime = nextRuntime
+    sdkOptions.name = nextName
+    sdkOptions.launchers = launchers()
+    sdkOptions.launcher = sdkOptions.launchers[0]?.name
+    syncPollTimers()
+    if (!rtStarted) {
+      rt = makeRuntime()
+    } else if (identityChanged) {
+      for (const s of sessions.values()) {
+        for (const ctl of s.asking.values()) ctl.abort()
+        s.asking.clear()
+      }
+      rt.stop()
+      rt = makeRuntime()
+      if (!stopped) void rt.start().catch((err) => say(`reconnect: ${err.message}`))
+    } else {
+      rt?.launchersChanged(sdkOptions.launchers)
+      rt?.sessionsChanged(0)
+    }
+  }
+
   async function reloadConfig() {
     if (o.config) return
     let st
     try {
-      st = await stat(configPath)
+      st = await stat(configPath, { bigint: true })
     } catch {
       st = undefined
     }
-    const stamp = st ? `${st.mtimeMs}:${st.size}` : 'none'
+    const stamp = st ? `${st.ino}:${st.mtimeNs}:${st.size}` : 'none'
     if (stamp === configStamp) return
     configStamp = stamp
     try {
       applyConfig(await loadConfig(configPath, { log: say }))
       say(`config: ${config.profiles.length} profile(s) from ${configPath}`)
+      if (loopsRunning && !stopped) void refreshList().catch((err) => say(err.message))
     } catch (err) {
       say(`config: ${err.message}`)
     }
@@ -181,13 +245,13 @@ export function createManagedAgentsRuntime(o = {}) {
     const wasLoaded = s.loaded
     s.loaded = true
     if (fresh.length > 0 || !wasLoaded) {
-      rt.append(s.key, { items: added.map(light), fromSeq: from, toSeq: s.events.length, history: history(s) })
-      if (fresh.some((e) => e.type.startsWith('session.status') || e.type === 'agent.message' || e.type === 'user.message')) s.active = Date.now()
-      rt.sessionsChanged(fresh.length > 0 ? 0 : 300)
+      rt?.append(s.key, { items: added.map(light), fromSeq: from, toSeq: s.events.length, history: history(s) })
+      if (wasLoaded && fresh.some((e) => e.type.startsWith('session.status') || e.type === 'agent.message' || e.type === 'user.message')) s.active = Date.now()
+      rt?.sessionsChanged(fresh.length > 0 ? 0 : 300)
     }
     if (logStatus(s.events) !== 'working' && s.deltas.size > 0) {
       s.deltas.clear()
-      rt.streamEnd(s.key)
+      rt?.streamEnd(s.key)
     }
     reconcileAsks(s)
   }
@@ -203,6 +267,7 @@ export function createManagedAgentsRuntime(o = {}) {
         s.asking.delete(id)
       }
     }
+    if (!rt?.connected) return
     for (const ask of pending) {
       const id = ask.event.id
       if (s.asking.has(id) || s.dismissed.has(id)) continue
@@ -249,7 +314,8 @@ export function createManagedAgentsRuntime(o = {}) {
     const s = sessions.get(keyOf(pr.profile.id, meta.id))
     const many = config.profiles.length > 1
     const agentName = meta.agentName || meta.agentId || 'Managed Agents'
-    const updated = s?.events.at(-1)?.processed_at ?? meta.updatedAt
+    const lastEvent = s?.events.at(-1)
+    const updated = lastEvent?.processed_at ?? lastEvent?.created_at ?? meta.updatedAt
     return {
       session_id: keyOf(pr.profile.id, meta.id),
       title: meta.title || agentName,
@@ -301,20 +367,36 @@ export function createManagedAgentsRuntime(o = {}) {
     rt.sessionsChanged(0)
   }
 
-  /** Sessions whose log is followed now: watched, running, waiting on someone, or busy in the last minutes. */
-  function followed() {
+  /** Sessions of one profile whose log is followed now: watched, running, waiting on someone, or busy in the last minutes. */
+  function followedFor(pr) {
     const out = []
+    const seen = new Set()
     const now = Date.now()
-    for (const pr of profiles.values()) {
-      for (const meta of pr.rows.values()) {
-        const s = sessions.get(keyOf(pr.profile.id, meta.id))
-        const recentMs = pr.profile.recentMinutes * 60_000
-        const st = statusOf(s, meta)
-        const recent = now - (Date.parse(meta.updatedAt) || 0) < recentMs || (s && now - s.active < recentMs)
-        if (s?.watched || st === 'working' || st === 'blocked' || recent) out.push(s ?? sessionFor(pr.profile.id, meta.id))
+    const recentMs = pr.profile.recentMinutes * 60_000
+    for (const meta of pr.rows.values()) {
+      const s = sessions.get(keyOf(pr.profile.id, meta.id))
+      const st = statusOf(s, meta)
+      const recent = now - (Date.parse(meta.updatedAt) || 0) < recentMs || (s && now - s.active < recentMs)
+      if (s?.watched || st === 'working' || st === 'blocked' || recent) {
+        const sess = s ?? sessionFor(pr.profile.id, meta.id)
+        if (sess && !seen.has(sess.key)) {
+          seen.add(sess.key)
+          out.push(sess)
+        }
       }
     }
-    for (const s of sessions.values()) if (s.watched && !out.includes(s)) out.push(s)
+    for (const s of sessions.values()) {
+      if (s.pid === pr.profile.id && s.watched && !seen.has(s.key)) {
+        seen.add(s.key)
+        out.push(s)
+      }
+    }
+    return out
+  }
+
+  function followed() {
+    const out = []
+    for (const pr of profiles.values()) out.push(...followedFor(pr))
     return out
   }
 
@@ -324,15 +406,61 @@ export function createManagedAgentsRuntime(o = {}) {
     timers.add(t)
   }
 
-  let pollBusy = false
-  async function poll() {
-    if (pollBusy || stopped) return
-    pollBusy = true
+  let activeSyncs = 0
+  const syncQueue = []
+  function runBounded(fn) {
+    return new Promise((resolve, reject) => {
+      const run = () => {
+        activeSyncs++
+        Promise.resolve().then(fn).then(resolve, reject).finally(() => {
+          activeSyncs--
+          if (syncQueue.length > 0) syncQueue.shift()()
+        })
+      }
+      if (activeSyncs < syncConcurrency) run()
+      else syncQueue.push(run)
+    })
+  }
+
+  async function syncSessions(list) {
+    await Promise.all(list.map((s) => runBounded(() => (stopped ? undefined : sync(s).catch((err) => warnOnce(`sync:${s.key}:${err.code ?? err.message}`, `${s.key}: ${err.message}`))))))
+  }
+
+  async function pollProfile(pr) {
+    if (pr.polling || stopped) return
+    pr.polling = true
     try {
-      await Promise.all(followed().map((s) => sync(s).catch((err) => warnOnce(`sync:${s.key}:${err.code ?? err.message}`, `${s.key}: ${err.message}`))))
+      await syncSessions(followedFor(pr))
     } finally {
-      pollBusy = false
+      pr.polling = false
     }
+  }
+
+  function syncPollTimers() {
+    if (!loopsRunning || stopped) return
+    for (const [pid, entry] of pollTimers) {
+      const pr = profiles.get(pid)
+      const wantMs = pr ? Math.max(20, Math.round(pr.profile.pollMs * pollScale)) : undefined
+      if (!pr || entry.ms !== wantMs) {
+        clearInterval(entry.timer)
+        pollTimers.delete(pid)
+      }
+    }
+    for (const [pid, pr] of profiles) {
+      if (pollTimers.has(pid)) continue
+      const ms = Math.max(20, Math.round(pr.profile.pollMs * pollScale))
+      const timer = setInterval(() => {
+        const cur = profiles.get(pid)
+        if (cur) void pollProfile(cur).catch((err) => say(err.message))
+      }, ms)
+      timer.unref?.()
+      pollTimers.set(pid, { ms, timer })
+    }
+  }
+
+  async function poll() {
+    if (stopped) return
+    await syncSessions(followed())
   }
 
   // --- live text -------------------------------------------------------------------------------------------------
@@ -435,12 +563,12 @@ export function createManagedAgentsRuntime(o = {}) {
     async interrupt(params) {
       const s = sessionByKey(params.session_id)
       await s.client.sendEvents(s.maId, [{ type: 'user.interrupt' }])
-      for (const ctl of s.asking.values()) ctl.abort()
       s.active = Date.now()
       const until = Date.now() + 10_000 * pollScale
-      while (Date.now() < until) {
+      while (Date.now() < until && !stopped) {
         await sync(s).catch(() => {})
-        if (logStatus(s.events) !== 'working') {
+        const st = s.loaded ? logStatus(s.events) : 'unknown'
+        if (st === 'done' || st === 'terminated') {
           rt.streamEnd(s.key)
           return { settled: true }
         }
@@ -488,44 +616,47 @@ export function createManagedAgentsRuntime(o = {}) {
     },
   }
 
-  rt = createRuntime(driver, {
-    runtime: config.runtime,
-    name: config.name,
-    version: '0.1.0',
-    launchers: launchers(),
-    // A daemon's link passes one launcher on, named by daemons.json: the first profile that starts sessions.
-    launcher: launchers()[0]?.name,
-    log: say,
-    ...o.runtimeOptions,
-  })
+  sdkOptions.launchers = launchers()
+  sdkOptions.launcher = sdkOptions.launchers[0]?.name
+  rt = makeRuntime()
 
   return {
-    runtime: rt,
+    get runtime() { return rt },
     sessions,
     profiles,
-    /** Reads the config and state, starts the loops, and connects (or listens, as a daemon). */
+    /** Reads the config and state, reconciles followed sessions, starts the loops, and connects (or listens, as a daemon). */
     async start() {
       stopped = false
+      loopsRunning = false
+      rtStarted = false
       await loadState()
       if (o.config) applyConfig(o.config)
       else await reloadConfig()
-      if (!o.config) every(CONFIG_EVERY_MS, reloadConfig)
-      every(LIST_EVERY_MS * pollScale, refreshList)
-      const tick = Math.min(...config.profiles.map((p) => p.pollMs), 3000) * pollScale
-      every(Math.max(50, tick), poll)
       await refreshList().catch((err) => say(err.message))
+      await poll().catch((err) => say(err.message))
+      if (stopped) return undefined
+      loopsRunning = true
+      if (!o.config) every(CONFIG_EVERY_MS * pollScale, reloadConfig)
+      every(LIST_EVERY_MS * pollScale, refreshList)
+      syncPollTimers()
+      rtStarted = true
       return rt.start()
     },
     async stop() {
       stopped = true
+      loopsRunning = false
+      rtStarted = false
       for (const t of timers) clearInterval(t)
       timers.clear()
+      for (const entry of pollTimers.values()) clearInterval(entry.timer)
+      pollTimers.clear()
       for (const key of [...sessions.keys()]) dropSession(key)
-      rt.stop()
+      rt?.stop()
     },
     /** Lists again now (tests; a config change). */
     refresh: () => refreshList(),
     poll: () => poll(),
+    reload: () => reloadConfig(),
     secrets,
   }
 }

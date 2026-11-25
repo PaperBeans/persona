@@ -108,7 +108,11 @@ export function showsScreen(m: { online: boolean; computer?: ScreenStatus; brows
   return !!on?.screen_sharing;
 }
 
-/** The web's live screen of the machine (web/src/screen): a signed-in browser opens it with its own token. */
+/** The live screen's address segment: the screen-share module's page of its own (web/src/modules/screen-share). */
+export const SCREEN_PAGE = "screen";
+
+/** The web's live screen of the machine: a signed-in browser opens it with its own token. Shown only while a module
+ *  draws it (core/module-host.ts standaloneOn(SCREEN_PAGE)). */
 export function screenPath(mid: string): string {
-  return `${BASE}/screen/${encodeURIComponent(mid)}`;
+  return `${BASE}/${SCREEN_PAGE}/${encodeURIComponent(mid)}`;
 }

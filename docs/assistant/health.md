@@ -3,6 +3,41 @@
 Health-related chats are split out of the assistant's main chat into a separate **Health** space: its own entry point, its own chat directory, its own memory.
 The first version is modeled on ChatGPT Health and starts with the hub and the web (#2789); the iOS and Mac entry points then reuse the same APIs (#2901). Android has a minimal entry (#4329): its health chats and a new health chat page.
 
+## Health items
+
+Who it serves: everyday people choosing what Health tracks for them (#14711).
+The Health module keeps one ordered list in the manager setting `health.items`, with a revision.
+Its catalog contains water and protein (`persona`), Activity rings and trends (`apple_health`).
+Clients provide the titles. The hub forwards GET and PUT requests from full-access devices;
+watch answer tokens and extensions cannot change the list. Hello advertises `health_items` only when
+the default manager names it. See `docs/protocol/protocol.md` ("Health items") for the wire contract.
+
+Before a first save, reads compute defaults without saving: Activity rings and trends; water
+and protein too if intake entries (including undone entries), an intake setting, or a pending
+water extension import exists. A fresh owner gets only Activity rings and trends. Each save
+replaces the entire ordered list at the revision read; stale writes return 409 and the current
+state. Clients preserve items they do not display. Removing an item keeps its records; adding
+it again makes them available. A successful save increments once and sends one `health_items` event, which also
+refreshes the default manager's watch complications and widgets through the intake wake path.
+
+Reads show recognized IDs once each, in stored order. If a newer hub saved IDs this version
+does not recognize, reads omit them without changing the setting. PUT and `add_item` saves
+keep those IDs at the end in their original order, including repeated unknown IDs. This lets
+an older hub change known items without erasing newer ones. Unknown or duplicate IDs in a
+PUT request are still rejected. An unknown-only saved list stays saved and reads as empty.
+
+The Health chat includes recording guidance only for added water/protein items, while phone
+health summaries and workouts remain available. Logging an absent item says to ask the owner
+whether to add it. Only after `ask_user` consent does the chat call `health_intake` with
+`action:add_item` and `item`, then records the entry. The item is appended after the other
+recognized items, before any preserved unknown IDs. Adding an existing item is idempotent;
+list and delete remain available. Without the module, the chat has no intake-item guidance.
+
+Water reminders stop while water is absent. GET intake includes the ordered `items` so watch
+complications and Log Water can ask the owner to add Water in Health. Intake HTTP writes and
+imports still accept absent items for older clients; Apple Health sync follows all records
+and undo markers regardless of the list. This server change does not add client screens.
+
 ## Why split it out
 
 Health information is more private than work information, and longer-lived: allergies, medications, checkup results need to stay useful once recorded, but they should not show up in the context of work chats,
@@ -83,7 +118,7 @@ Information whose categories are not known yet (not tagged, tagging failed or ti
 Which categories a use reads depends on the scene:
 
 - **A text leaving Persona** (scenes 3, 4, 5 and 7: a push or `notify_user`, `phone_notify`, `urgent_call`, a to-do reminder, a scheduled task's failure notice, a decision's push, "all cards" and "all questions" on Lark and the plugin channels, `agent_send`, `agent_start`, `agent_switch`, an A2A message or task from an assistant conversation, a task plan, `kb_update`) carries the categories tagged of its own words, within 800 ms, and its track's default categories (`exitPolicy` in `server/internal/assistant/info_use.go`). Never its conversation's accumulated ones: the main chat would soon carry every category and have everything confirmed. A track sensitive by default asks no model. When the words cannot be tagged in time (a timeout, a paused model, an error), the conversation's categories stand in when it was tagged and no turn of it waits to be tagged; otherwise the text is taken for sensitive. With no model set up for `info.tag`, a text carries its track's default categories, as before tagging.
-- **A conversation as a whole** (scenes 6 and 2: an extension listing or reading it, a recall elsewhere) carries its accumulated categories (`conversationPolicy`); while a turn of it waits to be tagged they are not known. An extension reading the assistant's conversations (`assistant.conversations`, `assistant.messages`) is shown each by its categories; its other reads in the manager (the feed, card history, archived agents, memory) go by the track's default categories and its grant. To-dos, and every control (starting a conversation in a track, taking a run onto a to-do), keep the track's rule whatever the extension's trust or grants: trust widens reads only. The hub still hides every track from extensions on its own routes (session lists, transcripts, cards) for now.
+- **A conversation as a whole** (scenes 6 and 2: an extension listing or reading it, a recall elsewhere) carries its accumulated categories (`conversationPolicy`); while a turn of it waits to be tagged they are not known. An extension reading the assistant's conversations (`assistant.conversations`, `assistant.messages`) is shown each by its categories, and an extension reading the assistant's entries (`assistant.entries.list`, `GET /api/v1/assistant/entries`) is shown each by its origin space's default categories, its own categories, and its source track's usage rules (#13548); its other reads in the manager (the feed, card history, archived agents, memory) go by the track's default categories and its grant. To-dos, and every control (starting a conversation in a track, taking a run onto a to-do), keep the track's rule whatever the extension's trust or grants: trust widens reads only. The hub still hides every track from extensions on its own routes (session lists, transcripts, cards) for now.
 - **Extension trust and grants** (scene 6, `server/internal/assistant/extension_trust.go`): an extension the user marked as their own (`trust: owner`, such as their memory extension) reads everything; any other is a third party's and reads sensitive information only of the categories the user granted it, each one (`assistant_extension_trust`, `assistant_extension_grants`). The extension manager names the reading extension (`assistant.extension_read`); a read that names none is a third party's with no grant. When an extension is removed, its trust and grants go with it (`assistant.extension_trust_forget`): installed again it starts as a third party's. With no grants given, every extension sees what it saw before, except that conversations of a track with no sensitive default category, and their memory, are no longer kept from it, and a main conversation tagged with a sensitive category is.
 - **Only the user changes it** (`GET /api/v1/assistant/extension-trust`, `PUT /api/v1/assistant/extension-trust/{id}`, `GET` / `PUT /api/v1/assistant/conversations/{id}/categories`): a full-access client only; an extension's token or a scoped device gets 403, and agents have no tool for it. A track's own categories cannot be taken away (409); a category the user took away stays away until the user adds it back.
 - A redacted push outside the health space says only that there is news (`assistant-health.sensitive_notice_*`), and a confirmation card says the content may be personal (`assistant-health.sensitive_outbound`); a track whose default categories carry health keeps the health space's words.
@@ -106,7 +141,8 @@ The memory ledger's entries (`assistant_entries`, `server/internal/assistant/ent
 
 A track is of a kind (#13472): a config whose every field picks one of the options the manager defines (`server/internal/assistant/track_kinds.go`). A new option is a code change; a new combination of options is a new kind, config only. Nothing branches on a kind's name: every decision reads a field of the track's effective config, which is its kind's with what the track sets.
 
-- **Built-in kinds** (the manager's, never rows): `orchestration` (the main chat's way: template `assistant`, the engineering context, leaders' supervision, the assistant's memory assembly, no capture, no channels) and `space` (a domain space: template `space`, a `SPACE.md` the user writes, the track's own context and memory, no supervision, a capture target, topic and single-chat channels, listed under spaces). Both cap pushes at P0, default cards to quick, and suggest no mode on entry. The health space is a track of kind `space` with the health template and the health category.
+- **Built-in kinds** (the manager's, never rows): `orchestration` (the main chat's way: template `assistant`, the engineering context, leaders' supervision, the assistant's memory assembly, no capture, no channels) and `health` (the health space's headless policy: health template, health categories, track context and memory, no channels). The `space` kind is a declarative contribution of the optional `space-conversations` extension, not a built-in product feature: template `space`, user-written `SPACE.md`, track context and memory, no supervision, capture target, topic and single-chat channels, listed under spaces. Its tracks and their data remain in the same tables and directories when the extension is disabled or uninstalled; a kind with no enabled provider is left out and its conversations get the strictest policy. An extension-provided kind is read-only through the custom-kind API, as a built-in one is.
+- **Extension installation on upgrade** (#14574): when the extension registry is ready, `extmgr` checks for existing non-health track records. If at least one exists and `space-conversations` is not installed, it downloads that exact extension from the verified, signed official marketplace and starts it. A fresh or unused installation is marked `not_needed` and receives no extension or Spaces navigation. An already installed extension, including a disabled one, always wins over migration; disabling or uninstalling it never causes a background reinstall. A failed download or start remains a retryable extension operation and is retried by the migration loop. The market's signature is never bypassed, including when a network read fails.
 - **The user's kinds** are rows of `assistant_track_kinds`, their config a JSON object with `schema: 1`. A kind whose `schema` is newer than the manager, or whose config is not valid here, is listed as disabled (`disabled: schema` or `invalid`) and its tracks are left out (their conversations get the strictest policy) until the assistant is updated or the kind fixed. A kind asking for leaders' supervision gets the warning `supervision_leaders`: leaders review the main chat only for now.
 - **Fields and options**: `template` (`assistant`, `space`, `health`), `user_instructions` (`space_md` or none), `context` (`engineering`, `track`, `none`), `default_categories` and `tag_focus` (information categories), `rhythms` (scheduled tasks a new track gets: title, five-field cron, optional IANA zone, prompt, `topic_policy` `new` or `continue`), `attention` (`push_cap` P0–P2, see below; `deep_default` `quick` or `deep`; `enter_mode` `none` or `immersive`, never switched to on its own; the attention modes themselves are in `docs/server/server.md` "Attention modes"), `supervision` (`leaders`, `routine`, `none`), `usage`, `assembly` (`assistant`, `track`), `capture_target`, `channels` (`topics`, `single`) and `sidebar` (group, order, icon token).
 - **Usage only tightens**: each `usage` rule names a scene (`source_track`, `elsewhere`, `hand_off`, `lock_screen`, `others`, `extension`, `kb_write`), a category (or `*` for all, general and unknown information included) and a rule (`allow`, `relevant`, `minimal`, `redact`, `confirm`, `deny`). A rule looser than what `usage` itself gives that category in that scene is refused (400); for `*`, it is compared with the strictest category.
@@ -122,8 +158,8 @@ A track is of a kind (#13472): a config whose every field picks one of the optio
 - **Scheduled tasks in a track** (#13501): a task carries `space`, the track it runs in. One set up from a conversation takes that conversation's track (`schedule_routine`, `schedule_followup`); the owner may also put a task into a track, or take it out, with `space` on `POST` / `PUT /api/v1/assistant/tasks` (full credentials only, 403 otherwise; the assistant's own `""`, `health`, or a track with a directory here, 400 otherwise; a body without `space` keeps it). Moving a task leaves the conversation it came from and its own conversation behind. A task of a track never has a working directory of its own (400): it runs in the track's directory, its conversation is one of the track's (that is where its result is delivered), and what reaches the phone follows the track's policy (`server/internal/assistant/schedule_space.go`). `topic_policy` (`new` or `continue`, as a kind's `rhythms` name it) is the same choice as `fresh_each_run`: `new` starts a conversation for every run, `continue` keeps one; views carry `fresh_each_run`.
 - **Recordings in a track** (#13501): a recording upload with `space` (`PUT /api/v1/recordings/{id}`, `docs/protocol/protocol.md` "Recording sync") goes to that track instead of the knowledge base. The manager renders its transcript as `recordings/<day>-<id>.md` (front matter with the recording and the track's default categories, then one timed line per sentence) and has the assistant's machine write it there (`assistant.space_recording`, capability `track_recordings_v1`; `server/internal/node/assistant_space_recordings.go`); `assistant_space_recordings` keeps its revision and tombstone. Such a recording is never in the knowledge base (`kb_list`, `kb_search`, summaries, minutes): the track's conversations read the file. Once in a track a recording stays there, whatever a later upload names, and one the knowledge base holds stays in it (409 `recording_in_kb`); an all-day recording cannot go to a track (400). `recording_days` applies to it too: past it, or when deleted, its file is removed (later, when the computer was away) and a tombstone kept until the window ends (`server/internal/assistant/space_recordings.go`).
 - **Reading and writing SPACE.md**: the apps read a track's `SPACE.md` with `GET /api/v1/assistant/tracks/{slug}/space-md` and the user saves it with `PUT` (`content` and the `base_digest` it was read at; a stale one is refused, so two edits never overwrite each other). The user's write may change anything but the blocks between `persona:managed` markers and the markers themselves, compared byte for byte. The track's own conversations, and only they (`spaceTools` in `server/internal/assistant/track_space_md.go`; the main chat's and the health space's tool lists are unchanged), get the MCP tool `space_state_update {text}`, which replaces the text of the state block alone, at most 2048 bytes; the model never edits that block itself. Both go to the node on the assistant's computer (`assistant.space_md`, capability `track_space_md_v1`, `server/internal/node/assistant_space_md.go`), which reads the file without following a link, keeps the file it replaces in `.space/history/` (the latest 20) and writes atomically. After the user's write the track's `CLAUDE.md` and `AGENTS.md` are written again at once; after the state's, at the next refresh.
-- **Who changes them**: `GET` / `POST /api/v1/assistant/tracks`, `PUT /api/v1/assistant/tracks/{slug}`, `GET` / `POST /api/v1/assistant/track-kinds` and `PUT /api/v1/assistant/track-kinds/{slug}` are for full-access clients only; writes check that the caller is the user (403 otherwise), and a built-in track or kind is never changed (403). A change names the revision it was made against (409 when another came first), and a kind change that would leave one of its tracks invalid is refused (409).
-- **In the apps**: the web lists the tracks of the `spaces` sidebar group in a Spaces section, opens each at `/tracks/<slug>`, edits its `SPACE.md` and creates and archives spaces (`docs/web/web.md`, "Domain spaces"); the iOS and iPadOS app does the same from its sidebar and drawer, and sets which personal information an extension may read on its page (`docs/apple/ios.md`, "Domain spaces"). Android does the same in the drawer's Spaces section (`docs/android/android.md`, "Domain spaces (#13500)"). The health space keeps its own entry and pages.
+- **Who changes them**: full-access clients can use the track and kind routes. An extension with the explicit `spaces` scope can list and create tracks, change a track and its `SPACE.md`, and read or change a visible conversation's categories. The legacy every-scope grant does not include it. An extension-provided or built-in kind is never changed through the custom-kind API. Every write names the revision it was made against (409 when another came first), and a kind change that would leave one of its tracks invalid is refused (409). Sensitive tracks remain hidden according to their extension policy, and `track-kinds` writes are not part of that scope.
+- **In the apps**: no default navigation or creation surface for domain Spaces remains in Core. Installing and enabling `space-conversations` supplies the extension page and the `space` kind. Web opens its list, creation and SPACE.md pages through the extension; existing `/tracks/<slug>/<conversation>` links still open the ordinary conversation host, and `/tracks/new` and space-home links go to the extension when installed or to extension settings when not. iOS / iPadOS and Android show their existing native space surface only while that extension's navigation contribution is enabled. The health space keeps its own entry and pages and is not part of the extension's surface.
 
 ## Quick capture
 
@@ -138,10 +174,47 @@ What the user jots down in passing (the share sheet, the watch, Siri, the web; #
 
 ## API
 
+### Tell Health
+
+Tell Health (#14714) is for people who want to speak or send a sentence to Health from their phone or watch.
+`POST /api/v1/assistant/health/tell` stores `{client_id,text}` and immediately returns a receipt, before model work.
+A retry with the same client ID keeps the first sentence. The receipt means received; delivery and the answer follow.
+
+The first Tell Health message or strength workout report starts the local day's **training chat**. Later sentences,
+the strength workout report and its plan stay in that chat. Saying that strength training has started asks Health
+to review the last session and prepare a plan draft for confirmation. Only these two entry points select the
+training chat; an ordinary Health conversation does not become it. The target is always Health, even if extra
+request fields name a different space or chat. A gone, deleted or invalid chat is replaced. An offline computer waits
+in receipt order; the original sentence stays in storage until delivery is confirmed. Each sentence's failed attempts
+are at least 30 seconds apart, even when a new receipt wakes the worker; later sentences wait behind it.
+
+Before continuing a chat, the sentence's destination is saved. An uncertain continuation retries only that original
+computer and chat with the same once-only key, even if the training-chat pointer changes, a lookup fails or the
+manager restarts. Only a definite refusal before delivery, including a deleted chat, permits a new Health chat.
+The hub's lookup does not expose whether the current connection's session list is complete. A transient lookup
+failure before a sentence is bound to a chat can therefore replace the pointer and split one day's training across
+chats; it does not redirect a sentence already bound for continuation.
+
+The day uses the owner's time zone. Sentences use receipt time; reports use workout start time. A workout begun
+at 23:30 and reported at 00:40 continues the previous day's chat unless a sentence after midnight has already opened
+the new day's chat. A sentence received at 00:10 starts the new day; if it has done so, the late previous-day report
+opens a separate chat.
+Only the latest day's chat pointer is retained; late older reports cannot take it over. Simultaneous first
+sentences and reports can start separate chats. Shortcuts actions and automation setup are client features.
+
+Replies use the Health space's fixed notification text, even when answered quickly. After 24 hours or five failed
+attempts, a fixed notification says delivery could not be confirmed; at most one notice is sent per worker round for
+newly failed sentences. It includes no sentence content and the stored originals are retained. Claude Code starts
+can reuse a reserved conversation ID after a restart. Other launchers may choose their own IDs: a reported uncertain
+start is abandoned, but a manager restart after the chat starts and before delivery is recorded can repeat the sentence
+once. Tell Health remains available when the Health data module is absent or off, including the
+`health_tell` capability; the strength report and plan guidance require the module and an added strength item.
+
 For the exact protocol, see the "Assistant" table in `docs/protocol/protocol.md`.
 
 | Endpoint | How the Health space uses it |
 | --- | --- |
+| `POST /api/v1/assistant/health/tell` | `{client_id,text}` → stored receipt, then today's training chat. Full or watch answer role; Health only. See "Tell Health" and `docs/protocol/protocol.md` for states and limits. |
 | `POST /api/v1/assistant/conversations` | With `"space":"health"`, starts a new chat in the health directory (writing the health CLAUDE.md first). Combined with `"main":true` it returns 400 (the Health space has no main chat); an unknown `space` returns 400 |
 | `GET /api/v1/assistant?space=health` | Lists the Health space's chats; `cwd` is the health directory. Without `space` it lists only the assistant's own chats, and health chats no longer appear. `?archived=1` works the same; an unknown `space` returns 400 |
 | `GET /api/v1/assistant/memory?space=health` | The Health space's memory `{"files":[…],"dir"}` |
@@ -160,7 +233,7 @@ The `conversation*` tools in a chat only see chats in the same space (`server/in
 - Calls not made from a chat (no caller session id) count as the assistant's own space.
 
 - `kb_update` from a health chat fails outright: health information does not go into the knowledge base (`assistant/tools.go` `runTool`). Knowledge base reads (`kb_search` etc.) work as usual.
-- `health_intake` logs, lists and deletes only in a known Health conversation. `runTool` checks `agentCallerSpace` using the caller's machine and session, including Health subdirectories; main-space and unknown callers are refused before storage access. Health chats on another computer work too. The tool appears in both spaces' discovery lists, but discovery grants no access.
+- `health_intake` logs, lists and deletes only in a known Health conversation. `runTool` checks `agentCallerSpace` using the caller's machine and session, including Health subdirectories; main-space and unknown callers are refused before storage access. Health chats on another computer work too. `health_intake` and `health_strength` are listed only in Health conversations by both node `mcp.tools` and targeted hub `ToolsFor`, while the Health module is available. Discovery grants no access by itself. The first list before a session snapshot requires the node's attested `caller_cwd` (#14855); without directory evidence (older nodes, Windows or runtime-hosted sessions), the next discovery heartbeat, within 30 seconds after the snapshot arrives, adds the tools. The cursor includes the effective space, so an earlier list without Health tools cannot stay cached.
 - Scheduled follow-ups and scheduled tasks created in a health chat (`schedule_followup`, `schedule_routine`) record their space (`Task.space`); when one fires and needs a new chat, it opens in the Health space.
   The space owns the task's working directory: a nonempty task `cwd` is rejected when saving and before dispatch,
   including an older stored override. Clear it to restore the canonical Health directory. Launcher, model, effort
@@ -184,7 +257,7 @@ In the health space the decision always depends on the chat's space (the trusted
 | Push: turn ended, `notify_user`, plan waiting for you to start, scheduled task failed | Only says "New in your health space. Open Persona to see it.", without the body, chat title or task name | `hub/machine.go` `doneAlert`, `assistant/tools.go`, `tasks.go`, `schedule.go` |
 | Phone local notification: `phone_notify` | The hub replaces the title and body with the same localized notice as `notify_user` before forwarding to the phone; no health content reaches the notification | `assistant/fleet_tools.go` `mcpCall`, `assistant/health.go` `spaceNotice` |
 | Push for question / authorization cards | The lock screen likewise only says **Health**; the card content is viewed in the App. A card is judged by its chat's directory: the node and then the manager place a card of an assistant chat in the chat's directory, not the hook's after a `cd` (`identity.CardCwd`, the manager's `placeCard` covers older nodes), and any directory inside a health space counts as health (`identity.InHealthSpace`, #2368) | `hub/push_payload.go` `interactionPayloadIn` (looks at `ix.Cwd`), `assistant/fleet_machines.go` `placeCard` |
-| Lark bot, plugin channels | Forwarded `notify_user` only says there is a new message; health to-do reminders keep the generic notice without a specific to-do URL or ID in the card or a to-do reply binding (ordinary reminders retain their detail button, notes and reply context); answers in a scheduled task's chat are not mirrored; "all cards" and "all questions" exclude health chat cards (the chat the channel itself is driving works as usual) | `assistant/feishu_cards.go`, `feishu_push.go`, `channels_plugin.go` |
+| Lark bot, plugin channels | Forwarded `notify_user` only says there is a new message; health to-do reminders keep the generic notice without a specific to-do URL or ID in the card or a to-do reply binding (ordinary reminders retain their detail button, notes and reply context); answers in a scheduled task's chat are not mirrored; "all cards" and "all questions" exclude health chat cards (the chat the channel itself is driving works as usual) | `assistant/ask_view.go` (`ixSensitive`), `modules/lark/asks.go`, `feishu_push.go`, `channels_plugin.go` |
 | `agent_send` / `agent_start` | Confirmed on the phone every time. `agent_send` accepts targets in the conversation’s own space. The card explains that the Agent keeps its copy after the health chat is deleted | `assistant/health.go` `confirmOutbound` |
 | `task_plan` | Never starts automatically; always waits for the user to tap start on the plan card | `assistant/tasks.go` |
 | `mail_send` and connector write operations | Confirmed on the phone every time; gate allow rules do not let it through (deny still rejects) | `connector.ConfirmEach`, `callConnector` in `extmgr/connectors.go` |
@@ -211,9 +284,82 @@ The original rule from #4329 (implemented in #4385) resumed the latest health ch
 | iOS (iPhone and iPad) | the sidebar's **Health** opens the home, with all open health conversations listed newest first. `AssistantView.enterHealth()` synchronously returns to the root and presents the home; the embedded Sidebar layout selects Health as its page root. Entry does not wait for the conversation list. **New Chat** in a health conversation still returns to the home (`HealthModel.newOpensHealth`); the first message in its composer starts a new health conversation. `-openAssistantPage health` / `-openShellPage health` still open the home. Tests: `HealthModelTests`, `HealthEntryUITests`, the Health upload case in `TreeSwapFoldTests` |
 | Android | the assistant sidebar's **Health** opens the home immediately (`AssistantScreen.openHealth`); `HealthEntry.history` keeps its chat list ordered. See "Android entry point" below |
 
+## Strength training
+
+Who this serves: people keeping gym sets, including people who recognize a machine without knowing its name.
+Adding **Strength training** enables writing through `health_strength`; it adds no setup to other Health items.
+The model matches exercise names and aliases before creating an exercise, asks once how a new machine's weight is
+counted, and never invents weights or reps. A machine photo is conversation input, not an exercise photo archive.
+Both Health tools are listed only in known Health conversations, including a new conversation's first list when
+the node supplies attested directory evidence (#14855). Execution independently enforces the same caller boundary.
+
+`health_strength history` groups sets by owner-local day over `days` (default 30, range 1–366). With an exercise `id`,
+it retains that exercise's full history in the range. Without `id`, it returns up to the 500 most recent sets across
+all exercises. Use `history` to check an uncertain log before retrying it.
+
+The manager stores four tables in Postgres:
+
+| Table | Meaning |
+| --- | --- |
+| `health_strength_exercises` | Name, aliases, primary/secondary muscles, equipment, weight rule and seat/settings note. Another machine is another exercise. Deleted exercises retain a tombstone. |
+| `health_strength_sets` | Confirmed exercise, kg, reps, warm-up flag, time and optional workout/draft. Idempotent IDs, undo tombstones and commit-ordered sequence numbers follow intake's rules. |
+| `health_strength_drafts` | Unconfirmed sets or a day's plan, revision, status and the current conversation/card/version. Drafts never count as sets. |
+| `health_strength_workouts` | Uploaded strength workout UUID, start/end and aggregate measurements. Other activities never enter this table. |
+
+When a strength workout arrives, unassigned sets from 30 minutes before its start to three hours after its end join
+it; existing assignments remain. Sets logged later use the latest matching strength window, so locker-room logging
+can still count. Upload and logging both use the same inclusive boundaries and serialized transaction. Duplicate
+uploads use the persisted window. Confirming a plan uses the latest-starting strength workout on its `plan_day`
+in the owner's time zone, even if confirmation arrives hours later or the next day. Its sets use that workout's start
+time and the usual window matching; with no workout on that day they use the confirmation time. Undo advances the
+set's sequence; a repeated undo does not.
+
+A multi-set interpretation or plan creates a managed conversation card: **Save**, **Don't save**, **Adjust**, or
+**Done as planned** for a plan. Only Save confirms the sets, in one transaction with the card. A repeated click adds
+nothing twice. These buttons are handled by Health without a model round or notification. Models cannot rewrite
+the reserved `health-strength-` cards. Adjust opens the working copy; saving that page updates the draft and card,
+not the set table. A stale edit reloads the newer draft; Cancel keeps the stored draft. If a card settles while its
+editor is open, Save, stepper and add/remove actions redraw a read-only page and explain whether it was saved or
+discarded. Below UI version 6 these edit actions retain the existing 400 response. Other invalid strength page
+actions use strength-specific copy. A duplicate exercise name shows a toast and keeps the entered name for correction.
+If an exercise on an open card was deleted, Save returns a definite 400 with guidance to discard or edit the draft;
+no sets are written and Don't save remains available.
+Deleting an exercise confirms its name and active set count, then tombstones it and undoes all its sets atomically.
+
+The server draws the following pages with existing declarative components, under Health's shared reserved
+`-health-intake` page id (`docs/protocol/protocol.md`, "Strength training"):
+
+- Overview puts pending drafts first, followed by exercises with last/best, this week's sets per primary muscle
+  (excluding warm-ups), the latest session and the latest open plan. Management exposes name, settings and weight rule.
+- An exercise shows its seat note, weight rule, daily best weight or estimated one-rep max, and each set with its own
+  weight and reps, including warm-up and drop sets. History ranges are 30/90/365 days; Undo only accepts a listed set.
+- Adjust has kg steppers (2.5 per tap), reps steppers, an exercise choice, warm-up switch and add/remove controls for
+  up to 40 sets. Below UI version 6 it displays a read-only list and an update hint.
+- Home shows today's or the latest session, a bar chart of working sets over the last seven owner-local days
+  including today (excluding warm-ups and undone sets, with zero bars on empty days), and up to three records in the last 30 days.
+  A record requires an earlier non-warm-up set and exceeds its best weight or estimated one-rep max
+  (`weight × (1 + reps / 30)`).
+
+`health_strength` broadcasts contain no health data and make open pages refresh. Removing the item retains its data
+and pages and permits existing cards to settle; new tool writes ask to add the item again. Workout reports fall back
+to their existing behavior when strength is not added. Building or switching out Health removes the capability,
+pages and tool handler, disables card buttons, and leaves stored data intact.
+
+Strength reports assemble **when the task runs**, including sets logged after upload: this workout's sets grouped by
+exercise, the previous day's sets before the workout, previous non-warm-up best weight/estimated max, explicit record
+flags, the latest open plan for the workout's local day, measurements and the owner's language. A report record
+requires a non-warm-up baseline before this workout. Plan sets carry exercise names (including deleted exercises),
+weight, reps and warm-up flags, without draft timestamps or exercise UUIDs. They do not request
+other Health data. With sets, the report lists and compares them; with a plan but no sets it asks `health_strength show`
+to place the Done as planned card in the report's actual conversation. With neither it gives one line about logging
+with a sentence or a machine photo. A failed assembly uses the stored prompt. Other activities retain the exact
+existing report prompt. Three scenarios in English, Simplified Chinese and Japanese have caller-level goldens.
+
 ## Water and protein
 
 Persona keeps water and protein entries in the default assistant manager's database (#13175).
+The server half is the Health module (`server/internal/modules/health`, docs/architecture/core-and-modules.md
+"Health"); a hub built or switched without it serves none of the routes below and announces no `health_intake`.
 These are Persona's own records, counted independently of other apps' dietary samples below.
 An entry has a UUID, kind, amount (ml or g), measurement time and optional food note. Recording
 the same UUID again returns the original. Delete marks an entry as undone; it never revives on
@@ -602,6 +748,9 @@ Since #2526's second step, a report also carries:
 - the elevation gain;
 - the heart rate's average and maximum;
 - per-kilometre splits for runs, walks, hikes and rides, with pauses left out.
+
+Strength training instead uses the execution-time assembly described in "Strength training" above, when that item
+is added and its uploaded window is stored. Other activities retain the following comparison behavior.
 
 The report then draws a pace chart from the splits, and compares the workout with the
 user's recent ones of the same activity through `phone_workouts_recent`. When the tool

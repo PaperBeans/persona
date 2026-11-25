@@ -83,3 +83,21 @@ func (m *Machine) callBuiltinProgram(ctx context.Context, id, method string, par
 	}
 	return m.call(ctx, "plugin.node.call", proto.PluginNodeCall{ID: id, Method: method, Params: raw}, out)
 }
+
+// builtinProgramModules are the built-in node programs a module provides (internal/modules/all/node): the program's id
+// in node.info's builtin_programs and the module's id. cua and ego are the core's.
+var builtinProgramModules = map[string]string{iphoneExtensionID: "phone-extra", imessageExtensionID: "imessage"}
+
+// switchedInfo is a node's node.info as the manager uses it: without the built-in programs of the modules its
+// `modules` setting switched off (moduleswitch), so it offers and calls none of them, as for a node built without
+// them. The node learns the switch too (from the hub's features), but only at its next node.configure, after its
+// first node.info.
+func (h *Manager) switchedInfo(info proto.NodeInfo) proto.NodeInfo {
+	s := h.modules()
+	off := func(id string) bool { m, ok := builtinProgramModules[id]; return ok && !s.On(m) }
+	if !slices.ContainsFunc(info.BuiltinPrograms, off) {
+		return info
+	}
+	info.BuiltinPrograms = slices.DeleteFunc(slices.Clone(info.BuiltinPrograms), off)
+	return info
+}

@@ -16,8 +16,10 @@ import persona.core.contracts.Session
 import persona.core.contracts.PlanTask
 import persona.core.contracts.TaskPlan
 import persona.core.contracts.Todo
+import persona.core.contracts.canonicalMcpToolName
 import persona.core.contracts.draftPlaceholder
 import persona.core.contracts.parseTime
+import persona.core.contracts.stripToolResultTimestampHeaders
 import persona.core.domain.lines.ApiErrorInfo
 import persona.core.domain.lines.ChatLine
 import persona.core.domain.lines.ToolCall
@@ -141,7 +143,7 @@ data class QuickResult(
 ) {
     companion object {
         fun of(call: ToolCall): QuickResult? {
-            val short = call.name.substringAfterLast("__")
+            val short = canonicalMcpToolName(call.name).substringAfterLast("__")
             val reminder = when (short) {
                 "phone_reminders_create" -> true
                 "phone_calendar_create_event" -> false
@@ -149,7 +151,9 @@ data class QuickResult(
             }
             val result = call.result?.item ?: return null
             if (result.isError == true) return null
-            val o = runCatching { JsonCodec.parseToJsonElement(result.text.orEmpty()) as? JsonObject }.getOrNull() ?: return null
+            val o = runCatching {
+                JsonCodec.parseToJsonElement(stripToolResultTimestampHeaders(result.text.orEmpty())) as? JsonObject
+            }.getOrNull() ?: return null
             fun s(k: String) = (o[k] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
             fun nonBlank(k: String) = s(k)?.trim()?.takeIf { it.isNotEmpty() }
             // No card without an id (iOS QuickResult.init), so an old or broken result says nothing it cannot back.

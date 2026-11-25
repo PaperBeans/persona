@@ -39,7 +39,7 @@ struct MachineMetricsTests {
         s.cpu = 40; s.memUsed = 50; s.load = 4
         #expect(MetricAlert.of(s, cores: 16).isEmpty)
         s.diskUsed = 92
-        #expect(MetricAlert.of(s, cores: nil) == [MetricAlert(label: "磁盘快满", level: .critical)])
+        #expect(MetricAlert.of(s, cores: nil) == [MetricAlert(label: "磁盘快满", level: .critical, kind: .disk)])
     }
 
     @Test func formats() {

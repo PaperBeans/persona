@@ -32,6 +32,7 @@ import { SourcesUI } from "./subscriptions/SourcesUI";
 import { useInboxSourcesShown } from "../lib/subscriptions";
 import { ModelConfiguration } from "./settings/ModelConfiguration";
 import { HiddenAgentDirs } from "./settings/HiddenAgentDirs";
+import { HerdrSessions } from "./settings/HerdrSessions";
 import { AgentSettings } from "./settings/AgentSettings";
 import { SidebarPagesGroup } from "./settings/SidebarPages";
 import { StartPageGroup } from "./settings/StartPage";
@@ -49,7 +50,7 @@ import { ChannelList, ChannelPage } from "./settings/Channels";
 import { ConnectDevice } from "./settings/ConnectDevice";
 import { settingsTarget } from "../lib/channels";
 import { extensionsRoute, routeSub } from "../lib/extension-market";
-import { otherManager, ownedSub, parseOwnedSub, pinManagerAt, useChosenManager } from "../lib/manager-choice";
+import { otherManager, ownedSub, parseOwnedSub, pinManagerAt, sameManager, useChosenManager } from "../lib/manager-choice";
 import { HubSettings } from "./settings/HubSettings";
 import { ManagersSettings } from "./settings/ManagersSettings";
 import { LauncherQuota } from "./settings/LauncherQuota";
@@ -66,7 +67,9 @@ import { ProviderLinkCopy } from "./settings/ProviderLinkCopy";
 import { builtinRows, loadLaunchers, rcFilesOf, rcGroups, syncStateText, type LauncherSync } from "../lib/launcher-list";
 import { TerminalModeRow } from "./settings/TerminalModeSetting";
 import { AgentOpenRow } from "./settings/AgentOpenSetting";
-import { AGENT_KINDS, ASSISTANT_TABS, categoryState, FROM_LIST, isCoreTab, isModuleTab, itemIsPage, itemState, navGroups, openedFromSub, redirectLegacySettings, settingsAt, settingsHref, SENT_SUB, stepsToList, tabInfo, TAB_INFO, type AgentTab, type SettingsSection, type Tab } from "./settings/nav";
+import { AGENT_KINDS, ASSISTANT_TABS, categoryState, FROM_LIST, isCoreTab, isModuleTab, itemIsPage, itemState, navGroups, openedFromSub, redirectLegacySettings, resolveSettingsTarget, settingsAt, settingsHref, SENT_SUB, stepsToList, tabInfo, TAB_INFO, type AgentTab, type SettingsSection, type Tab } from "./settings/nav";
+import { formatIntegrationsSub, isIntegrationDetailRoute, isLegacyIntegrationTab, normalizeIntegrationFilter, parseIntegrationsSub } from "./settings/integrations-route";
+import { moduleFeaturesSource } from "../core/module-features";
 import { useModuleStates } from "../core/module-host";
 import { ModuleSettingsPage } from "../core/ModuleSettingsPage";
 import { searchSettings, type SearchGroup } from "./settings/search";
@@ -153,14 +156,16 @@ export function tokens(n: number): string {
 // the sidebar (NavRow). Every other category draws with the Settings chunk as before.
 const Extensions = lazyPage(() => import("./settings/Extensions").then((m) => m.Extensions));
 const Connectors = lazyPage(() => import("./settings/Connectors").then((m) => m.Connectors));
-// Labs and its configuration form come with their own chunk, on first open (src/startup-preload.ts FIRST_SCREEN_BUDGET)
+const Integrations = lazyPage(() => import("./settings/Integrations").then((m) => m.Integrations));
+// Labs and the shared configuration form load on first use.
 const LabsSettings = lazyPage(() => import("./settings/Labs").then((m) => m.LabsSettings));
-const TAB_PAGES: Partial<Record<Tab, { preload: () => Promise<unknown> }>> = { extensions: Extensions, connectors: Connectors };
+const ModuleFeaturesForm = lazyPage(() => import("./settings/configuration/ConfigurationForm").then((m) => m.ConfigurationForm));
+const TAB_PAGES: Partial<Record<Tab, { preload: () => Promise<unknown> }>> = { extensions: Extensions, connectors: Connectors, integrations: Integrations };
 // a failed load is not kept (lazyPage): opening the page asks again, and PageBoundary shows the failure then
 const preloadTab = (k: Tab) => void TAB_PAGES[k]?.preload().catch(() => {});
 
-function readSettingsLocation() {
-  const redirect = redirectLegacySettings(location.search, location.hash, stripBase(location.pathname));
+function readSettingsLocation(integrationsV2: boolean | "loading") {
+  const redirect = redirectLegacySettings(location.search, location.hash, stripBase(location.pathname), integrationsV2);
   if (redirect) history.replaceState(history.state, "", BASE + redirect);
   return settingsAt(location.search, location.hash);
 }
@@ -169,16 +174,34 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   // a module switched on or off adds or takes away its categories (core/module-host.ts settingsTabs)
   useModuleStates();
   const phone = useMedia(SHEET_QUERY);
-  // list pages (channels / connectors / extensions) keep their list beside the open item from this width
+  // list pages (channels / connectors / extensions / integrations) keep their list beside the open item from this width
   const twoCol = useMedia("(min-width: 900px)");
+  // The current assistant's group (docs/assistant/managers.md "The current assistant"): its pages read and write that
+  // assistant only. Their merged lists are filtered by it, its configuration editors name it, and what else they ask of
+  // its manager (ASSISTANT_PREFIXES) names it while the page is open.
+  const picked = useChosenManager();
+  const integrationsV2 = useStore((s) => s.assistant?.integrations_v2 === true && (!picked || !s.assistant?.manager || sameManager(s.assistant.manager, picked)));
+  const integrationsKnown = useStore((s) => s.loaded !== false || s.assistant != null);
+  const integrationsMode: boolean | "loading" = integrationsKnown ? integrationsV2 : "loading";
+  const integrationsModeRef = useRef<boolean | "loading">(integrationsMode);
+  integrationsModeRef.current = integrationsMode;
   // The category (null: none named, the phone's list) and the purpose (model configuration) or extension ("Extensions") it has open.
-  const [at, setAt] = useState(readSettingsLocation);
+  const [at, setAt] = useState(() => readSettingsLocation(integrationsMode));
+  // Reconcile bidirectional redirects whenever integrations_v2 flips or hub assistant state finishes loading.
+  useLayoutEffect(() => {
+    if (integrationsMode === "loading") return;
+    const redirect = redirectLegacySettings(location.search, location.hash, stripBase(location.pathname), integrationsMode);
+    if (!redirect) return;
+    history.replaceState(history.state, "", BASE + redirect);
+    const now = settingsAt(location.search, location.hash);
+    setAt((was) => (was.tab === now.tab && was.sub === now.sub && was.section === now.section ? was : now));
+  }, [integrationsMode, at.tab, at.sub]);
   // Back from a category opened from the list: the URL went back, the page follows it.
   useEffect(() => {
     const back = () => {
       const path = stripBase(location.pathname);
-      if (path !== "/settings" && path !== "/settings/sent" && path !== "/settings/sent/") return;
-      const now = readSettingsLocation();
+      if (path !== "/settings" && !path.startsWith("/settings/")) return;
+      const now = readSettingsLocation(integrationsModeRef.current);
       setAt((was) => (was.tab === now.tab && was.sub === now.sub && was.section === now.section ? was : now));
     };
     addEventListener("popstate", back);
@@ -192,10 +215,6 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const scroller = useRef<HTMLDivElement>(null);
   useScrollMemory(scroller, listed ? "settings" : `settings/${tab}/${itemIsPage(tab) ? (at.sub ?? "") : ""}`);
   const { sub } = at;
-  // The current assistant's group (docs/assistant/managers.md "The current assistant"): its pages read and write that
-  // assistant only. Their merged lists are filtered by it, its configuration editors name it, and what else they ask of
-  // its manager (ASSISTANT_PREFIXES) names it while the page is open.
-  const picked = useChosenManager();
   useLayoutEffect(() => (ASSISTANT_TABS.has(tab) ? pinManagerAt(ASSISTANT_PREFIXES, otherManager(picked ?? undefined)) : undefined), [tab, picked]);
   // Another assistant made current with one of the group's items open (a connector, an extension, a channel, a model
   // purpose): that item is the last assistant's, so the page goes back to its list, which then lists the new one's.
@@ -225,12 +244,22 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const hasChannels = useStore((s) => s.features.includes("channels"));
   // Inbox Sources (#5278) only with a manager that draws them; a link to it still opens it
   const hasSources = useInboxSourcesShown();
-  const shown = (k: Tab) => (k !== "extensions" || hasExtensions || tab === "extensions") && (k !== "channels" || hasChannels || tab === "channels") &&
-    (k !== "sources" || hasSources || tab === "sources");
+  const shown = (k: Tab) => {
+    if (integrationsV2) {
+      if (isLegacyIntegrationTab(k)) return false;
+      return k !== "sources" || hasSources || tab === "sources";
+    }
+    if (k === "integrations") return false;
+    return (k !== "extensions" || hasExtensions || tab === "extensions") && (k !== "channels" || hasChannels || tab === "channels") &&
+      (k !== "sources" || hasSources || tab === "sources");
+  };
   const contentId = useId();
   const configurationOwner = useRef<string | null>(new URLSearchParams(location.search).get("manager"));
-  const pick = (k: Tab, id: string | null = null, section?: SettingsSection) => {
+  const pick = (rawTab: Tab, rawId: string | null = null, section?: SettingsSection) => {
     configurationOwner.current = new URLSearchParams(location.search).get("manager") ?? configurationOwner.current;
+    const resolved = resolveSettingsTarget(rawTab, rawId, integrationsV2);
+    const k = resolved.tab;
+    const id = resolved.sub;
     const state: unknown = history.state;
     // Out of an item's page opened on its category's page: back to that page's entry, as Back does, so neither a copy of
     // it nor the item is left to go back to. A sheet open over the item has an entry of its own on top: off with both,
@@ -243,7 +272,10 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
     }
     setAt({ tab: k, sub: id, section: section ?? null });
     // the hub's page keeps its own choice of manager (the download mirrors); the current assistant's pages follow the pick
-    const to = settingsHref(k, id, phone, k === "hub" ? configurationOwner.current : null, section);
+    let to = settingsHref(k, id, phone, k === "hub" ? configurationOwner.current : null, section);
+    if (k === "integrations" && !id && resolved.filter && resolved.filter !== "all") {
+      to += `${to.includes("?") ? "&" : "?"}filter=${encodeURIComponent(resolved.filter)}`;
+    }
     // from the phone's list the category goes on top of it, and an item's page on top of its category's page, so Back
     // returns to each; another item of the category keeps the entry's way back, another category only the way to the list
     if (listed) history.pushState({ [FROM_LIST]: true }, "", BASE + to);
@@ -268,7 +300,7 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   // Settings search: filters the sidebar categories, and jumps to a group or a setting's row inside a page (scroll +
   // brief highlight).
   const [query, setQuery] = useState("");
-  const search = searchSettings(query);
+  const search = searchSettings(query, integrationsV2);
   // Inbox Sources' relationship view (#5741) takes the wide page while it is shown; the list keeps its width.
   const [sourcesGraph, setSourcesGraph] = useState(false);
   const [scrollAnchor, setScrollAnchor] = useState<string | null>(null);
@@ -318,9 +350,17 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const goGroup = (g: SearchGroup) => {
     setQuery("");
     const agent = g.tab === "agents" ? AGENT_KINDS.find((id) => g.anchor === `settings-${id}`) : undefined;
-    pick(g.tab, null, agent);
+    pick(g.tab, g.sub ?? null, agent);
     setScrollAnchor(g.anchor);
   };
+  const integrationsSplit =
+    !listed &&
+    !phone &&
+    twoCol &&
+    tab === "integrations" &&
+    integrationsKnown &&
+    integrationsV2 &&
+    isIntegrationDetailRoute(parseIntegrationsSub(sub));
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-line px-3 py-2 sm:px-4">
@@ -338,16 +378,36 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
       </header>
       <div className="flex min-h-0 min-w-0 flex-1">
         {!phone && (
-          <SettingsNav tab={tab} query={query} onQuery={setQuery} search={search} shown={shown} onPick={pick} onGroup={goGroup} contentId={contentId} />
+          <SettingsNav tab={tab} query={query} onQuery={setQuery} search={search} shown={shown} integrationsV2={integrationsV2} onPick={pick} onGroup={goGroup} contentId={contentId} />
         )}
-        <div ref={scroller} id={contentId} role={listed ? undefined : "region"} aria-label={listed ? undefined : tabInfo(tab).label} tabIndex={0} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+        <div
+          ref={scroller}
+          id={contentId}
+          role={listed ? undefined : "region"}
+          aria-label={listed ? undefined : tabInfo(tab).label}
+          tabIndex={0}
+          data-integrations-split-host={integrationsSplit ? "" : undefined}
+          className={cx(
+            "min-h-0 min-w-0 flex-1 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
+            integrationsSplit ? "flex h-full overflow-hidden" : "overflow-y-auto overscroll-contain",
+          )}
+        >
           {listed ? (
             <div className="px-4 py-5" style={{ animation: `fade-up 320ms ${EASE} both` }}>
-              <SettingsList shown={shown} onPick={pick} />
+              <SettingsList shown={shown} integrationsV2={integrationsV2} onPick={pick} />
             </div>
           ) : (
-            <div key={ASSISTANT_TABS.has(tab) ? `${tab}@${picked ?? ""}` : tab} className={cx("mx-auto px-5 py-6 sm:px-8", tab === "channels" || tab === "connectors" || tab === "extensions" || (tab === "sources" && sourcesGraph) ? "max-w-[1120px]" : "max-w-[760px]")} style={{ animation: `fade-up 320ms ${EASE} both` }}>
+            <div
+              key={ASSISTANT_TABS.has(tab) ? `${tab}@${picked ?? ""}` : tab}
+              className={
+                integrationsSplit
+                  ? "flex h-full min-h-0 min-w-0 flex-1 overflow-hidden"
+                  : cx("mx-auto px-5 py-6 sm:px-8", tab === "integrations" || tab === "channels" || tab === "connectors" || tab === "extensions" || (tab === "sources" && sourcesGraph) ? "max-w-[1120px]" : "max-w-[760px]")
+              }
+              style={{ animation: `fade-up 320ms ${EASE} both` }}
+            >
               {tab === "general" && <General onModel={() => pick("models", "translate", "model-config")} />}
+              {tab === "advanced" && <Advanced />}
               {tab === "persona" && <AssistantProfile onTriageModel={() => pick("models", "agent.triage", "model-config")} />}
               {tab === "avatar" && (
                 <Group title={t("settings.avatar")} footer={t("settings.avatar_footer")} anchor="avatar">
@@ -372,6 +432,23 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
                 <Group title={t("settings.agent_preferences")} anchor="agents-display"><AgentsDisplayRow /></Group>
                 <AgentSections section={at.section} />
               </>}
+              {tab === "integrations" && (integrationsKnown ? (
+                <Suspense fallback={integrationsSplit ? <div className="p-6"><Loading /></div> : <Loading />}>
+                  <Integrations
+                    open={sub}
+                    twoCol={twoCol}
+                    headerBack={phone}
+                    initialFilter={normalizeIntegrationFilter(new URLSearchParams(location.search).get("filter"))}
+                    onOpen={(id) => pick("integrations", id)}
+                    onSettings={(url) => {
+                      const target = settingsTarget(url);
+                      if (target && (isCoreTab(target.tab) || isModuleTab(target.tab))) pick(target.tab as Tab, target.sub);
+                    }}
+                  />
+                </Suspense>
+              ) : (
+                <Loading />
+              ))}
               {tab === "channels" && (sub ? (twoCol ? (
                 <div className="flex gap-6">
                   <div className="w-[300px] shrink-0"><ChannelList openBeside={sub} onOpen={(id) => pick("channels", id)} onMarketItem={(market, id) => pick("extensions", routeSub({ kind: "item", market, id }))} /></div>
@@ -431,6 +508,11 @@ function itemParent(tab: Tab, sub: string): { sub: string | null; label: string 
     if (r.kind === "page" || (r.kind === "item" && r.manager)) return { sub: routeSub({ kind: "extension", id: r.id, manager: r.manager }), label: t("settings-extensionview.back") };
     if (r.kind === "item" || r.kind === "markets") return { sub: routeSub({ kind: "catalog" }), label: t("settings.back_to", { name: t("settings-extensionmarket.market_title") }) };
   }
+  if (tab === "integrations") {
+    const r = parseIntegrationsSub(sub);
+    if (r.kind === "page" || (r.kind === "item" && r.manager)) return { sub: formatIntegrationsSub({ kind: "extension", id: r.id, manager: r.manager }), label: t("settings-extensionview.back") };
+    if (r.kind === "item" || r.kind === "markets") return { sub: formatIntegrationsSub({ kind: "catalog" }), label: t("settings.back_to", { name: t("settings-extensionmarket.market_title") }) };
+  }
   return { sub: null, label: t("settings.back_to", { name: tabInfo(tab).label }) };
 }
 
@@ -463,6 +545,7 @@ function AgentSections({ section }: { section: SettingsSection | null }) {
   return (
     <>
       <HiddenAgentDirs />
+      <HerdrSessions />
       {AGENT_KINDS.map((id) => {
         const shown = !closed.has(id);
         return (
@@ -489,12 +572,13 @@ function AgentSections({ section }: { section: SettingsSection | null }) {
 }
 
 /** The desktop left sidebar: a sticky "Settings" title and search box, then the grouped categories. */
-function SettingsNav({ tab, query, onQuery, search, shown, onPick, onGroup, contentId }: {
+function SettingsNav({ tab, query, onQuery, search, shown, integrationsV2, onPick, onGroup, contentId }: {
   tab: Tab;
   query: string;
   onQuery: (q: string) => void;
   search: ReturnType<typeof searchSettings>;
   shown: (k: Tab) => boolean;
+  integrationsV2: boolean;
   onPick: (k: Tab) => void;
   onGroup: (g: SearchGroup) => void;
   contentId: string;
@@ -545,7 +629,7 @@ function SettingsNav({ tab, query, onQuery, search, shown, onPick, onGroup, cont
             {none && <p className="px-3 py-3 text-[12.5px] leading-relaxed text-ink-3">{t("settings.search_no_results")}</p>}
           </>
         ) : (
-          navGroups().map((g) => {
+          navGroups(integrationsV2).map((g) => {
             const its = g.tabs.filter(shown);
             if (!its.length) return null;
             return (
@@ -601,10 +685,10 @@ function GroupResult({ g, onGroup }: { g: SearchGroup; onGroup: (g: SearchGroup)
 }
 
 /** The phone's first page of Settings: the categories in grouped cards, each opening its page (as on iOS). */
-function SettingsList({ shown, onPick }: { shown: (k: Tab) => boolean; onPick: (k: Tab) => void }) {
+function SettingsList({ shown, integrationsV2, onPick }: { shown: (k: Tab) => boolean; integrationsV2: boolean; onPick: (k: Tab) => void }) {
   return (
     <nav aria-label={t("settings.categories")}>
-      {navGroups().map((g) => {
+      {navGroups(integrationsV2).map((g) => {
         const tabs = g.tabs.filter(shown);
         if (!tabs.length) return null;
         return (
@@ -627,6 +711,7 @@ function General({ onModel }: { onModel: () => void }) {
   const theme = useTheme();
   const replyMotion = useReplyMotionSetting();
   const starred = useStarredSetting();
+  const features = moduleFeaturesSource();
 
   const themes: { k: Theme; label: string; icon: IconName }[] = [
     { k: "system", label: t("language.system"), icon: "monitor" },
@@ -654,10 +739,7 @@ function General({ onModel }: { onModel: () => void }) {
             </button>
           ))}
         </div>
-        <ThemeColorPicker />
-        <ExtensionThemePicker />
         <TextSizeRow />
-        <FontRows />
         <LanguageRow />
         <Row label={t("settings.reply_motion")} hint={t("settings.reply_motion_hint")} wrapHint anchor="reply-motion">
           <Switch on={replyMotion} onChange={setReplyMotionEnabled} label={t("settings.reply_motion")} />
@@ -666,13 +748,17 @@ function General({ onModel }: { onModel: () => void }) {
         <Row label={t("settings.starred_messages")} hint={t("settings.starred_messages_hint")} wrapHint anchor="starred-messages">
           <Switch on={starred} onChange={setStarredEnabled} label={t("settings.starred_messages")} />
         </Row>
-        <SidebarIconsRow />
         <SidebarUsageRow />
       </Group>
 
       <DesktopSettings />
       <StartPageGroup />
       <SidebarPagesGroup />
+      {features && (
+        <div className="mb-6">
+          <Suspense fallback={<Loading />}><ModuleFeaturesForm source={features} /></Suspense>
+        </div>
+      )}
 
       <section id="settings-translation" className="scroll-mt-4">
         <TranslationSettings onConfigure={onModel} />
@@ -690,6 +776,21 @@ function General({ onModel }: { onModel: () => void }) {
         <DevModeRows />
       </Group>
     </>
+  );
+}
+
+/** Settings › Advanced › Appearance (#13398): the non-default looks — theme color, extension theme, interface/code
+ *  fonts and colored sidebar icons. General keeps the default appearance (Match system / Light / Dark), text size,
+ *  language and behavior rows. These are the same components reading the same browser storage as before, so an
+ *  existing choice and the untouched default look are unchanged. */
+function Advanced() {
+  return (
+    <Group title={t("settings.appearance")} anchor="appearance">
+      <ThemeColorPicker />
+      <ExtensionThemePicker />
+      <FontRows />
+      <SidebarIconsRow />
+    </Group>
   );
 }
 

@@ -135,6 +135,111 @@ func TestLogicalConversationFirstTurnRejectionRestoresSourceAtNewEpoch(t *testin
 	}
 }
 
+// An idle acceptance keeps the prepared handoff for the conversation's next input, which no queued input carried; that
+// input's acceptance uses it up, and a later switch's acceptance discards one still kept (#14488).
+func TestLogicalConversationIdleAcceptanceKeepsHandoffForNextInput(t *testing.T) {
+	d, _ := historyDB(t)
+	op := prepareLogicalSwitch(t, d)
+	ctx := t.Context()
+	pending := func(segment string) string {
+		t.Helper()
+		raw, err := d.ConversationPendingHandoff(ctx, "root-machine", "root-chat", segment)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if raw == nil {
+			return ""
+		}
+		var h struct {
+			Summary string `json:"summary"`
+		}
+		if err := json.Unmarshal(raw, &h); err != nil {
+			t.Fatal(err)
+		}
+		return h.Summary
+	}
+	if err := d.ActivateConversationSegment(ctx, "root-machine", "root-chat", op.OperationID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := pending("second"); got != "" {
+		t.Fatalf("kept before the switch was accepted: %q", got)
+	}
+	if accepted, err := d.AcceptIdleConversationSwitch(ctx, "root-machine", "root-chat", op.OperationID, 1); err != nil || !accepted {
+		t.Fatalf("idle acceptance: %v %v", accepted, err)
+	}
+	c, err := d.LogicalConversation(ctx, "root-machine", "root-chat")
+	if err != nil || c.Switch != nil || c.Epoch != 2 || !c.Segments[0].ClosePending {
+		t.Fatalf("idle acceptance did not settle the switch: %+v %v", c, err)
+	}
+	if got := pending("second"); got != "fake compaction result" {
+		t.Fatalf("the handoff was not kept for the next input: %q", got)
+	}
+	if got := pending("first"); got != "" {
+		t.Fatalf("kept for a retired segment: %q", got)
+	}
+
+	// The next input carries it; accepting that input uses it up.
+	if err := d.EnqueueConversationInput(ctx, "root-machine", "root-chat", "next-input", 2, json.RawMessage(`{"text":"next words"}`)); err != nil {
+		t.Fatal(err)
+	}
+	row, err := d.ClaimConversationInput(ctx, "root-machine", "root-chat", 2)
+	if err != nil || row == nil || row.ClientMsgID != "next-input" {
+		t.Fatalf("claim: %+v %v", row, err)
+	}
+	if got := pending("second"); got == "" {
+		t.Fatal("discarded before the input was accepted")
+	}
+	if err := d.ResolveConversationDelivery(ctx, "root-machine", "root-chat", "next-input", 2, "", "accepted"); err != nil {
+		t.Fatal(err)
+	}
+	if got := pending("second"); got != "" {
+		t.Fatalf("kept after the input that carried it: %q", got)
+	}
+
+	// One kept by an idle acceptance and never used goes with the next switch's acceptance.
+	next := ConversationSwitch{OperationID: "switch-two", ExpectedEpoch: 2, SourceSegment: "second", Request: json.RawMessage(`{"launcher":"fake-other"}`)}
+	if err := d.BeginConversationSwitch(ctx, "root-machine", "root-chat", next); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.PutConversationHandoff(ctx, "root-machine", "root-chat", next.OperationID, json.RawMessage(`{"summary":"second summary"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.PrepareConversationSegment(ctx, "root-machine", "root-chat", next.OperationID, conversationlog.Segment{ID: "third", MachineID: "target-machine", SessionID: "third-chat", Engine: "claude"}, 120); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.ActivateConversationSegment(ctx, "root-machine", "root-chat", next.OperationID, 2); err != nil {
+		t.Fatal(err)
+	}
+	if accepted, err := d.AcceptIdleConversationSwitch(ctx, "root-machine", "root-chat", next.OperationID, 2); err != nil || !accepted {
+		t.Fatalf("second idle acceptance: %v %v", accepted, err)
+	}
+	if got := pending("third"); got != "second summary" {
+		t.Fatalf("second handoff: %q", got)
+	}
+	last := ConversationSwitch{OperationID: "switch-three", ExpectedEpoch: 3, SourceSegment: "third", Request: json.RawMessage(`{"launcher":"fake-last"}`)}
+	if err := d.BeginConversationSwitch(ctx, "root-machine", "root-chat", last); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.PutConversationHandoff(ctx, "root-machine", "root-chat", last.OperationID, json.RawMessage(`{"summary":"third summary"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.PrepareConversationSegment(ctx, "root-machine", "root-chat", last.OperationID, conversationlog.Segment{ID: "fourth", MachineID: "target-machine", SessionID: "fourth-chat", Engine: "codex"}, 130); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.ActivateConversationSegment(ctx, "root-machine", "root-chat", last.OperationID, 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.ResolveConversationSwitch(ctx, "root-machine", "root-chat", last.OperationID, "accepted", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := pending("third"); got != "" {
+		t.Fatalf("a retired target kept its handoff: %q", got)
+	}
+	if got := pending("fourth"); got != "" {
+		t.Fatalf("a switch accepted with its first input kept its handoff: %q", got)
+	}
+}
+
 func TestLogicalConversationQueueRetainsInputIdentityAndInDoubtFence(t *testing.T) {
 	d, url := historyDB(t)
 	op := prepareLogicalSwitch(t, d)

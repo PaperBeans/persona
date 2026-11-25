@@ -17,6 +17,10 @@ func TestBackendWorkspaceLaunchAndRepositoryRouting(t *testing.T) {
 	for _, layout := range []repository.Layout{repository.LayoutRoot, repository.LayoutContainer} {
 		t.Run(string(layout), func(t *testing.T) {
 			n, f, home, runtimeHost := piHerdrNode(t)
+			// A workspace root may not pass through a symlink (workspaceNoLinks), and macOS keeps t.TempDir() behind
+			// /var: take the home resolved, as workspaceTemp does for the other backend workspace tests.
+			home = resolved(t, home)
+			n.home, n.dir = home, filepath.Join(home, ".persona")
 			urls := []string{workspaceRemote(t, "trunk")}
 			if layout == repository.LayoutContainer {
 				urls = append(urls, workspaceRemote(t, "develop"))

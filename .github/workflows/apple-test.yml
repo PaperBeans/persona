@@ -12,7 +12,7 @@ on:
       lane:
         description: Apple platform lane
         type: choice
-        options: [ios, ios18, ios-build, packages, ios-focused, ios-regressions, ios-model-picker, ios-ipad-diagnostic]
+        options: [ios, ios18, ios-build, ios-core-only, packages, ios-focused, ios-regressions, ios-model-picker, ios-ipad-diagnostic]
         default: ios
         required: true
 permissions:
@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   apple:
-    if: inputs.lane != 'ios18'
+    if: inputs.lane != 'ios18' && inputs.lane != 'ios-core-only'
     name: ${{ inputs.lane == 'packages' && 'Native package tests (Xcode 26.0)' || inputs.lane == 'ios-build' && 'Unsigned iOS and Watch build (Xcode 26.0)' || inputs.lane == 'ios-focused' && 'Focused iOS and About tests (Xcode 26.0)' || inputs.lane == 'ios-regressions' && 'iOS stack and Live Activity regressions (Xcode 26.0)' || inputs.lane == 'ios-model-picker' && 'iOS Assistant model picker regressions (Xcode 26.0)' || inputs.lane == 'ios-ipad-diagnostic' && 'Regular iPad app-host launch diagnostics (Xcode 26.0)' || 'iOS, Watch and HTML tests (Xcode 26.0)' }}
     runs-on: macos-26
     timeout-minutes: 120
@@ -70,6 +70,49 @@ jobs:
         with:
           name: apple-${{ inputs.lane }}-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/persona-apple-diagnostics-${{ inputs.lane }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 7
+  ios-core-only:
+    if: inputs.lane == 'ios' || inputs.lane == 'ios-core-only'
+    name: Core-only iOS build (Xcode 26.0)
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
+      CI_SPM_CACHE: ${{ github.workspace }}/.ci-cache/spm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Initialize pinned Xcode
+        run: |
+          source scripts/ci/common.sh
+          # Background platform services use the system selection, not just this shell's environment.
+          ci_run 'Select system Xcode 26.0' 60 sudo xcode-select --switch "$DEVELOPER_DIR"
+          ci_run 'Initialize Xcode 26.0 platform services' 900 sudo env DEVELOPER_DIR="$DEVELOPER_DIR" xcodebuild -runFirstLaunch
+          ci_run 'Verify system Xcode selection' 60 xcode-select --print-path
+      - name: Install project generation tools
+        run: brew install xcodegen
+      - name: Restore SwiftPM cache
+        # Read-only restore so a faster core-only job never writes a partial .ci-cache/spm under the full lane's key.
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-cache/spm
+          key: spm-${{ runner.os }}-${{ runner.arch }}-xcode-26.0-${{ hashFiles('apple/**/Package.resolved', 'apple/**/Package.swift', 'apple/project.yml', 'scripts/test/isolation-lint/Package.resolved', 'scripts/test/isolation-lint/Package.swift') }}
+          restore-keys: spm-${{ runner.os }}-${{ runner.arch }}-xcode-26.0-
+      - name: Core-only Apple checks
+        env:
+          CI_APPLE_DIAGNOSTICS: ${{ runner.temp }}/persona-apple-diagnostics-ios-core-only-${{ github.run_id }}-${{ github.run_attempt }}
+        run: scripts/ci/apple.sh ios-core-only
+      - name: Upload Apple failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-ios-core-only-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/persona-apple-diagnostics-ios-core-only-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
           retention-days: 7
   ios18:

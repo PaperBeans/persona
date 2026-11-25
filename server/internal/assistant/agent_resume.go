@@ -258,6 +258,9 @@ func (s *Service) resumeAndSend(ctx context.Context, self string, am Device, c p
 	} else if id, ok := params["client_msg_id"]; ok {
 		startParams["client_msg_id"] = id
 	}
+	if task != nil {
+		sctx = context.WithValue(sctx, placementTaskKey{}, task.todo.ID)
+	}
 	err = s.call(sctx, am.ID, DeviceSessionStart, startParams, &res)
 	if err != nil {
 		if full && sendUnknown(err) {

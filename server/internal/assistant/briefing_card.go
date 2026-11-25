@@ -53,7 +53,7 @@ func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header strin
 	}
 	c := botcard.NewCard(title, color, subtitle)
 	if answer = strings.TrimSpace(answer); answer != "" {
-		// Charts become text first, as the bot's answers do (feishu_answer.go): clipMarkdown drops a persona-card block
+		// Charts become text first, as the bot's answers do (the lark module's answer.go): clipMarkdown drops a persona-card block
 		// it cannot draw down to its title, so a chart on a long answer would lose its numbers.
 		c.Markdown(botcard.CardMarkdown(clipMarkdown(botcard.PersonaCards(answer), briefAnswerRunes)))
 		plain = append(plain, clip(answer, briefAnswerRunes))
@@ -121,8 +121,8 @@ func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header strin
 		md := boardRowMarkdown(l, i+1, r)
 		btnLabel := i18n.T(l, "assistant-reports.accept_pass")
 		a, asked := f.Asks[r.id]
-		if asked && !a.Conclusion { // a conclusion's row says its verdict already (boardRows); deployed work's says it here (#1226)
-			md += "\n" + botcard.EscapeMarkdown(verdictText(l, &a))
+		if asked && !a.Conclusion { // a conclusion's row says its verdict already (boardRows); verification work says it here (#1226)
+			md += "\n" + botcard.EscapeMarkdown(verdictText(l, &a, f.Deliveries[r.id]))
 		}
 		if ch := f.Changed[r.id]; ch != "" {
 			md += "\n" + botcard.EscapeMarkdown(clip(oneLine(ch), 80))

@@ -78,6 +78,24 @@
    "index": "Open the map"
   },
   {
+   "name": "page_tap",
+   "description": "A tap on a kept page (Dashboards, #15017) carries the same tag, its view naming the reserved extension and the page (-pages/pg_…): hidden and left out of the index the same way.",
+   "item": {
+    "id": "u19#0",
+    "seq": 19,
+    "role": "user",
+    "kind": "text",
+    "text": "Done today\n分钟：32\n<persona-action view=\"-pages/pg_3f9a1c0d5e7b2a41\" action=\"done_today\">{\"values\":{\"minutes\":\"32\"}}</persona-action>"
+   },
+   "fields": [
+    [
+     "text",
+     "Done today\n分钟：32"
+    ]
+   ],
+   "index": "Done today\n分钟：32"
+  },
+  {
    "name": "view_errors",
    "description": "The node's persona-view-errors feedback is never shown.",
    "item": {

@@ -104,7 +104,7 @@ func Run(ctx context.Context, stop func(), args []string, b Build) (handled bool
 	case "codex-start": // a Codex launcher with the phone's first message, read from a file (node/codex_start.go)
 		return true, node.CodexStart(rest)
 	case "tab-start": // a command a runtime gave to resume its session in a new tab (`pi --session …`, node/pi.go)
-		return true, node.CodexStart(rest)
+		return true, node.TabStart(rest)
 	case "mcp":
 		return true, mcpserver.Serve(ctx, b.Version, os.Stdin, os.Stdout)
 	case "tool": // a connector's tools and command line from the assistant's shell (internal/toolcli)

@@ -31,10 +31,10 @@ import os
     nonisolated private static let log = Logger(subsystem: "persona", category: "call")
 
     /// Where the sound goes now, and whether another way is there: read off the main actor (the session's own queue).
-    nonisolated static func read(_ session: AVAudioSession) -> (Output, Bool) {
-        let now = output(session.currentRoute)
+    nonisolated static func read(_ broker: AudioSessionBroker = .shared) -> (Output, Bool) {
+        let now = output(broker.currentRoute)
         let builtIn: Set<AVAudioSession.Port> = [.builtInMic, .builtInReceiver, .builtInSpeaker]
-        let other = (session.availableInputs ?? []).contains { !builtIn.contains($0.portType) }
+        let other = broker.availableInputs.contains { !builtIn.contains($0.portType) }
         return (now, other || ![.receiver, .speaker].contains(now))
     }
 
@@ -59,22 +59,21 @@ import os
     func watch() {
         guard observer == nil else { return }
         // Read where the session posts it, off the main actor; only the answer comes over.
-        observer = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil,
-                                                          queue: nil) { @Sendable [weak self] _ in
-            let (now, external) = Self.read(AVAudioSession.sharedInstance())
+        observer = AudioSessionBroker.shared.observeRouteChanges(queue: nil) { @Sendable [weak self] _ in
+            let (now, external) = Self.read()
             Task { @MainActor in self?.set(now, external: external) }
         }
         // The read runs detached and captures nothing of this object; only its answer comes back to the main actor
         // (Swift 6.2 refuses to send `self` into a detached task: "sending 'self' risks causing data races").
         Task { [weak self] in
-            let (now, external) = await Task.detached { Self.read(AVAudioSession.sharedInstance()) }.value
+            let (now, external) = await Task.detached { Self.read() }.value
             self?.set(now, external: external)
         }
     }
 
     /// The last call ended: the speaker given back (the next recording or dictation starts from the system's route).
     func unwatch() {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
+        if let observer { AudioSessionBroker.shared.removeObserver(observer) }
         observer = nil
         if overrode { setSpeaker(false) }
     }
@@ -84,7 +83,7 @@ import os
         overrode = on
         Task.detached {
             do {
-                try AVAudioSession.sharedInstance().overrideOutputAudioPort(on ? .speaker : .none)
+                try AudioSessionBroker.shared.overrideOutputAudioPort(on ? .speaker : .none)
             } catch {
                 Self.log.notice("call: could not \(on ? "turn the speaker on" : "turn the speaker off", privacy: .public): \(error.localizedDescription, privacy: .public)")
             }

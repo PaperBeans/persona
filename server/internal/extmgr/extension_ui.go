@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/sdk/go/wire"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/connector/proc"
 	"github.com/nwverse/persona/server/internal/extension"
@@ -193,6 +194,8 @@ type uiRequest struct {
 		Size     string `json:"size,omitempty"`
 		// UIVersion is the UI version the app draws: 1 (the first eight items) when it says nothing.
 		UIVersion int `json:"ui_version,omitempty"`
+		// Unsupported lists component types this client cannot render even within UIVersion (e.g. ["scene"]).
+		Unsupported []string `json:"unsupported,omitempty"`
 		// Assistant is the name the app shows for the assistant (its "Ask {name}…"), sent only to the manager's own
 		// pages (subscriptions_ui.go), which name it; never handed to an extension (uiParams). Sent at all (even ""),
 		// it says the app opens their Set Up with … (#5661).
@@ -334,7 +337,24 @@ func (h *Manager) withUI(ctx context.Context, id, uiID string, in uiRequest, cal
 	return call(p, hp, *item, slot, params)
 }
 
+func sanitizeUnsupported(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var out []string
+	for _, c := range raw {
+		if _, ok := wire.ComponentSince[c]; ok && !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func (h *Manager) uiCall(ctx context.Context, id, uiID string, in uiRequest) (extension.ActionResult, error) {
+	unsupported := sanitizeUnsupported(in.Context.Unsupported)
 	return h.withUI(ctx, id, uiID, in, func(p *extension.Extension, hp *hubExtension, item extension.UIItem, slot extension.UISlot, params extension.UIParams) (extension.ActionResult, error) {
 		var res extension.ActionResult
 		if result, handled, err := h.pageLegacy(ctx, p, hp, item, slot, params, in); handled {
@@ -358,7 +378,7 @@ func (h *Manager) uiCall(ctx context.Context, id, uiID string, in uiRequest) (ex
 			return res, err
 		}
 		fit := func(v *extension.View) error {
-			dropped, err := extension.Fit(v, slot, params.UIVersion, h.uiFallbackLang(ctx, params.Locale))
+			dropped, err := extension.FitFor(v, slot, params.UIVersion, unsupported, h.uiFallbackLang(ctx, params.Locale))
 			if len(dropped) > 0 && params.UIVersion == extension.UIVersion {
 				h.extensions.logf("plugin %s: ui %s drew items this hub does not know (%s): left out", id, uiID, strings.Join(dropped, ", "))
 			}
@@ -392,7 +412,7 @@ func (h *Manager) uiCall(ctx context.Context, id, uiID string, in uiRequest) (ex
 				return extension.ActionResult{}, err
 			}
 		}
-		if err := extension.FitResult(&res, slot, params.UIVersion, h.uiFallbackLang(ctx, params.Locale)); err != nil {
+		if err := extension.FitResultFor(&res, slot, params.UIVersion, unsupported, h.uiFallbackLang(ctx, params.Locale)); err != nil {
 			return extension.ActionResult{}, i18n.Err("hub-extension_ui.view_unsupported", i18n.Args{"err": err.Error()})
 		}
 		if err := checkPushes(p.Manifest, item, &extension.View{Sections: []extension.Section{{Items: res.Items}}}, nil); err != nil {
@@ -492,11 +512,17 @@ func (h *Manager) extensionUIRoutes(api *http.ServeMux) {
 				base = gw.base
 			}
 		}
-		writeJSON(w, map[string]any{"ui": uiPlacesOut(r, h.extensions.localizeUI(h.requestLang(r), h.extensions.uiPlaces(placement, base)))})
+		places := h.extensions.localizeUI(h.requestLang(r), h.extensions.uiPlaces(placement, base))
+		places = append(places, h.pagesPlaces(r, placement)...) // the assistant's pages, after the extensions' own (pages_hook.go)
+		writeJSON(w, map[string]any{"ui": uiPlacesOut(r, places)})
 	})
 	api.HandleFunc("POST /api/v1/extensions/{id}/-/ui/{ui}", func(w http.ResponseWriter, r *http.Request) {
 		if principalOf(r.Context()).Role != roleFull {
 			writeExtensionResponseErr(w, r, http.StatusForbidden, i18n.ErrEnglish("extension-status.read_only_device"))
+			return
+		}
+		if r.PathValue("id") == PagesExtension {
+			h.pagesUI(w, r) // the assistant's pages, never an extension's process
 			return
 		}
 		var in uiRequest

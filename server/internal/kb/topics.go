@@ -74,7 +74,7 @@ func (s *Store) Topic(slug string) (*Topic, bool) {
 	if !ok || err != nil || t.Slug == "" {
 		return nil, false
 	}
-	t.persisted = true
+	t.Persisted = true
 	return &t, true
 }
 

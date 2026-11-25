@@ -15,6 +15,7 @@ import (
 
 // A message the owner recalled before it went into its conversation is not sent, and its OnIt reaction goes.
 func TestFeishuRecalledMessageIsNotSent(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	f, _ := feishuHub("ou_a", time.Unix(100, 0))
 	f.settings = &Settings{MachineID: "server", Main: "m1"}
 	f.setSessions("server", proto.Session{SessionID: "m1", Assistant: true})
@@ -26,7 +27,7 @@ func TestFeishuRecalledMessageIsNotSent(t *testing.T) {
 	ev.Message.MessageID, ev.Message.ChatType, ev.Message.MessageType, ev.Message.Content = "om_x", "p2p", "text", `{"text":"发错了"}`
 
 	s.FeishuRecalled(FeishuRecalled{MessageID: "om_x"})
-	s.feishuMessage(ev, FeishuStatus{Ready: true, Features: FeishuFeatures{Main: true}}, "")
+	feishuSay(t, s, f, withFeatures(f, FeishuFeatures{Main: true}), ev, "")
 	if text := sendOnceText(f); text != "" {
 		t.Fatalf("a recalled message was sent: %q", text)
 	}
@@ -34,7 +35,7 @@ func TestFeishuRecalledMessageIsNotSent(t *testing.T) {
 	ev.Message.MessageID = "om_y"
 	content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
 	s.FeishuRecalled(FeishuRecalled{MessageID: "om_y"})
-	if err := s.botSend(context.Background(), &ev, content, botTarget{Kind: targetMain}); err != nil {
+	if err := s.larkModule().Send(context.Background(), &ev, content, botTarget{Kind: targetMain}); err != nil {
 		t.Fatal(err)
 	}
 	if text := sendOnceText(f); text != "" || unreacted != 1 {
@@ -42,7 +43,7 @@ func TestFeishuRecalledMessageIsNotSent(t *testing.T) {
 	}
 	// Another message goes as before.
 	ev.Message.MessageID = "om_z"
-	if err := s.botSend(context.Background(), &ev, content, botTarget{Kind: targetMain}); err != nil || sendOnceText(f) == "" {
+	if err := s.larkModule().Send(context.Background(), &ev, content, botTarget{Kind: targetMain}); err != nil || sendOnceText(f) == "" {
 		t.Fatalf("an ordinary message: %v", err)
 	}
 }
@@ -158,6 +159,7 @@ func TestFeishuRecallOfAFoldedMessageKeepsTheTurn(t *testing.T) {
 
 // Recalled after its answer went out: nothing changes.
 func TestFeishuRecallAfterTheAnswerChangesNothing(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, r, prog, posts, reacts, unreacts := recallHub(t)
 	prog.from = 3
 	s.finishChannelRun(r, &channel.Result{Answer: "结论在这里"})

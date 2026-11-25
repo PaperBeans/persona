@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"path"
@@ -11,7 +12,9 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/compat"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
 // ---- checking ----
@@ -49,7 +52,12 @@ func (s *Service) healthLaunchers(ctx context.Context, machine string) (names []
 	if err != nil {
 		return nil, nil, err
 	}
-	var runtimes []string
+	names, whileFailing, _ = s.healthLaunchersOf(ctx, list)
+	return names, whileFailing, nil
+}
+
+// healthLaunchersOf is healthLaunchers from the machine's list as read; runtimes are all its runtimes' launchers.
+func (s *Service) healthLaunchersOf(ctx context.Context, list []proto.Launcher) (names []string, whileFailing map[string]bool, runtimes []string) {
 	for _, l := range list {
 		switch {
 		case startableLauncher(l):
@@ -71,7 +79,7 @@ func (s *Service) healthLaunchers(ctx context.Context, machine string) (names []
 			whileFailing[name] = true
 		}
 	}
-	return names, whileFailing, nil
+	return names, whileFailing, runtimes
 }
 
 // runtimeLauncher: l is a runtime's launcher (DSH, Paseo, agy…: its source is the runtime's id), which the node checks
@@ -138,8 +146,8 @@ func (s *Service) healthRound(ctx context.Context, wait bool) {
 				case <-time.After(left):
 				}
 			}
-			s.checkMachine(ctx, d, cfg, cameOnline, "")
-			s.repairMachine(ctx, d, cfg)
+			_, eligible := s.checkMachine(ctx, d, cfg, cameOnline, "")
+			s.repairMachine(ctx, d, cfg, eligible)
 		}()
 	}
 	if wait {
@@ -149,17 +157,30 @@ func (s *Service) healthRound(ctx context.Context, wait bool) {
 }
 
 // checkMachine checks machine d's launchers that are due (only: one by that name, at once); the records of launchers
-// it no longer has go.
-func (s *Service) checkMachine(ctx context.Context, d Device, cfg healthConfig, cameOnline bool, only string) []LauncherHealth {
-	names, whileFailing, err := s.healthLaunchers(ctx, d.ID)
+// it no longer has go. It returns the results and the launchers in scope for this check.
+func (s *Service) checkMachine(ctx context.Context, d Device, cfg healthConfig, cameOnline bool, only string) ([]LauncherHealth, []string) {
+	list, err := s.machineLaunchers(ctx, d.ID)
 	if err != nil {
 		s.logf("launcher health: %s: launchers: %v", d.ID, err)
-		return nil
+		return nil, nil
+	}
+	names, whileFailing, runtimes := s.healthLaunchersOf(ctx, list)
+	// "Test again" of one runtime launcher the machine lists (#14534): a person asked for this check, so it runs
+	// whatever the launcher's record says, though rounds check a runtime's launcher only as whileFailing allows.
+	asked := only != "" && slices.Contains(runtimes, only)
+	if asked && !slices.Contains(names, only) {
+		names = append(names, only)
+	}
+	// A record goes with its launcher: one the machine no longer lists, not one this run merely does not check (a
+	// runtime's launcher nobody runs on keeps the record a failed start left, #14534).
+	listed := slices.Clone(names)
+	for _, l := range list {
+		listed = append(listed, l.Name)
 	}
 	b := &s.health
 	b.mu.Lock()
 	for key, r := range b.recs {
-		if r.Machine == d.ID && !slices.Contains(names, r.Launcher) {
+		if r.Machine == d.ID && !slices.Contains(listed, r.Launcher) {
 			delete(b.recs, key)
 			delete(b.recheckAt, key)
 		}
@@ -174,7 +195,7 @@ func (s *Service) checkMachine(ctx context.Context, d Device, cfg healthConfig, 
 			continue
 		}
 		r, ok := s.launcherHealth(ctx, d.ID, name)
-		if whileFailing[name] && !(ok && r.unusable()) {
+		if whileFailing[name] && !(ok && r.unusable()) && !(asked && name == only) {
 			continue // a runtime's launcher that works, or was never seen failing here: nothing to recheck (#10369)
 		}
 		if only == "" {
@@ -197,7 +218,7 @@ func (s *Service) checkMachine(ctx context.Context, d Device, cfg healthConfig, 
 			out = append(out, s.recordHealth(ctx, d.ID, name, res))
 		}
 	}
-	return out
+	return out, names
 }
 
 // probeLauncherWithRetry is probeLauncherHealth, asked once more right away when the first check timed out: only a
@@ -224,18 +245,34 @@ func (s *Service) probeLauncherWithRetry(ctx context.Context, machine, launcher 
 func (s *Service) healthyMachine(ctx context.Context, launcher, except string, suitable ...func(Device) bool) (Device, bool) {
 	best, rank := Device{}, 3
 	for _, d := range s.devices(ctx) {
-		if d.ID == except || !d.Reachable {
+		if d.ID == except {
+			continue
+		}
+		p := placementOf(ctx)
+		if p != nil {
+			p.candidate(d.ID)
+		}
+		if !d.Reachable {
+			p.hit(d.ID, "offline", nil)
 			continue
 		}
 		r, ok := s.launcherHealth(ctx, d.ID, launcher)
 		n := 1
 		switch {
 		case ok && r.unusable():
+			p.hit(d.ID, "launcher_unhealthy", i18n.Args{"kind": r.Kind})
 			continue
 		case ok && r.State == healthOK:
 			n = 0
 		}
-		if n >= rank || !s.launcherOn(ctx, d.ID, launcher) {
+		if p != nil {
+			p.candidate(d.ID).HealthRank = &n
+		}
+		if n >= rank {
+			continue
+		}
+		if !s.launcherOn(ctx, d.ID, launcher) {
+			p.hit(d.ID, "launcher_missing", nil)
 			continue
 		}
 		if slices.ContainsFunc(suitable, func(accept func(Device) bool) bool { return !accept(d) }) {
@@ -361,7 +398,11 @@ func (s *Service) healthDetour(ctx context.Context, m Device, launcher string, s
 	if !bad {
 		return m, "", false
 	}
+	placementOf(ctx).hit(m.ID, "launcher_unhealthy", i18n.Args{"launcher": launcher, "kind": r.Kind})
 	alt, moved := s.healthyMachine(ctx, launcher, m.ID, suitable...)
+	if p := placementOf(ctx); p != nil && moved {
+		p.ReasonKey = "healthy_launcher"
+	}
 	// The pool is provider-level: resolve it once from the failed machine. Missing or stale data gives no note, and
 	// a pool with any schedulable account stays quiet too. Read only after the on-the-spot recheck, since a passing
 	// probe returns above without any detour line.
@@ -424,12 +465,13 @@ type launcherHealthView struct {
 // hiding it would leave no way to make that start) and keep, the launcher the configuration runs with no pick. That one
 // will be used by the next start, so the form must be able to say why it may fail (clients mark the Default row and its
 // line); hiding it would fail the start with no warning at all.
-func (s *Service) withHealth(ctx context.Context, machine string, list []ConfiguredLauncher, keep string) []launcherWithHealth {
-	out := make([]launcherWithHealth, 0, len(list))
+func (s *Service) withHealth(ctx context.Context, machine string, list []ConfiguredLauncher, keep string) (out []launcherWithHealth, left []unhealthyLauncher) {
+	out = make([]launcherWithHealth, 0, len(list))
 	for _, l := range list {
 		v := launcherWithHealth{ConfiguredLauncher: l}
 		if r, ok := s.launcherHealth(ctx, machine, l.Name); ok {
 			if r.unusable() && r.Kind != errKindNotInTerminal && l.Name != keep {
+				left = append(left, unhealthyLauncher{ConfiguredLauncher: l, record: r})
 				continue
 			}
 			if r.State == healthOK || r.unusable() { // not a failure too old to count
@@ -441,5 +483,51 @@ func (s *Service) withHealth(ctx context.Context, machine string, list []Configu
 		}
 		out = append(out, v)
 	}
+	return out, left
+}
+
+// unhealthyLauncher is a launcher withHealth left out of a picker, with the record that says why.
+type unhealthyLauncher struct {
+	ConfiguredLauncher
+	record LauncherHealth
+}
+
+// unhealthyUnavailable lists the launchers withHealth left out as New Agent's unavailable ones (#14535): listed off,
+// with why in lang, rather than missing, so the person can tell a failing launcher from one the computer does not have.
+// The reason is the failure's class on where, then the record's own line when it has one.
+func unhealthyUnavailable(lang i18n.Lang, where string, left []unhealthyLauncher) []unavailableLauncher {
+	out := make([]unavailableLauncher, 0, len(left))
+	for _, l := range left {
+		reason := i18n.T(lang, unhealthyReasonKey(l.record.Kind), i18n.Args{"machine": where})
+		if line := textfmt.Clip(textfmt.OneLine(l.record.Error), unhealthyLineMax); line != "" {
+			reason = i18n.T(lang, "assistant-model_pick.unhealthy_with_error", i18n.Args{"reason": reason, "error": line})
+		}
+		out = append(out, unavailableLauncher{Name: l.Name, DisplayName: l.DisplayName, Kind: "launcher",
+			Agent: cmp.Or(l.AgentType, l.Agent), Code: unavailableUnhealthy, Reason: reason})
+	}
 	return out
+}
+
+// unhealthyLineMax bounds the record's line in a picker row's reason; the record keeps the whole of it.
+const unhealthyLineMax = 160
+
+// unhealthyReasonKey is the catalog key that words a failure class in a picker row; an unknown class is "other".
+func unhealthyReasonKey(kind string) string {
+	switch kind {
+	case errKindAuth:
+		return "assistant-model_pick.unhealthy_auth"
+	case errKindModelRoute:
+		return "assistant-model_pick.unhealthy_model_route"
+	case errKindCLIOutdated:
+		return "assistant-model_pick.unhealthy_cli_outdated"
+	case errKindTimeout:
+		return "assistant-model_pick.unhealthy_timeout"
+	case errKindUsageLimit:
+		return "assistant-model_pick.unhealthy_usage_limit"
+	case errKindUpstream:
+		return "assistant-model_pick.unhealthy_upstream"
+	case errKindOnboarding:
+		return "assistant-model_pick.unhealthy_onboarding"
+	}
+	return "assistant-model_pick.unhealthy_other"
 }

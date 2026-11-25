@@ -1,6 +1,6 @@
 import { pendingPlanCounts } from "../lib/pending-plan-counts";
 import { loadFeed, useFeed } from "../lib/feed";
-import { useAgentsDisplay, useBotmuxHidden, useShowFilter, useSortByActivity } from "../lib/agents-display";
+import { saveAgentsDisplay, useAgentsDisplay, useBotmuxHidden, useShowFilter, useSortByActivity, type AgentsDisplay, type DisplayChange } from "../lib/agents-display";
 import { activityOrder, useActivityDates } from "../lib/agent-sort";
 import { useSidebarEngaged } from "../lib/sidebar-engaged";
 import { setChatList, useChatList } from "../lib/agent-chat-list";
@@ -19,7 +19,8 @@ import { applyDimensionFilters, buildAgentFacets, DEFAULT_DIMENSION_FILTERS, has
 import { pagedFilterOf, resetAgentListFilters, setAgentListFilters, useAgentListFilters } from "../lib/agent-list-filters";
 import { AgentChatListRow, AgentFilterButton, AgentFilterChips } from "./agents/AgentChatListControls";
 import { agentGrouping, AGENT_GROUPINGS, type AgentGrouping, buildAgentGroups, buildSpaces, hostsOf, isQuiet, sessionHost, splitAgentSessions, type AgentGroup, type Space } from "../lib/agent-groups";
-import { buildRepoMachineTree, hasWorkspacePin } from "../lib/agent-repos";
+import { reportBoundary } from "../lib/error-reports";
+import { isChunkError, reloadForStaleChunk, reloadPage } from "./PageBoundary";
 import { useWorkspaceCatalog } from "../lib/workspace-catalog";
 import { keyedRefs } from "../lib/keyed-refs";
 import { buildMachineTree, machineSessionOrder, machineSessionPresentation } from "../lib/herdr-tree";
@@ -35,23 +36,22 @@ import { setRecentMore, useRecentCount, useRecentMore } from "../lib/sidebar-rec
 import { countsLabel, directionExternal, directionLabel, totalCounts, useDirectionNames, useLeaderCounts } from "../lib/direction-names";
 import type { ExternalDirection } from "../lib/direction-tree";
 import { SidebarDirectionRow } from "./SidebarDirections";
-import { SidebarSpaces } from "./SidebarSpaces";
 import { conversationPage } from "../lib/conversation-page";
 import { href, navigate, onLinkClick, showsSession, type Route } from "../lib/router";
 import { useScrollMemory } from "../lib/scroll-memory";
 import { retryFullAgentSessions, useAgentSessions, useFullAgentSessions } from "../lib/sessions";
+import { heldAsWorking, rowCards } from "../lib/supervisor-held";
 import { isInFlightLaunch } from "../lib/launch-handoff";
 import { getState, refresh, refreshTodos, useHubUnreachable, useStore } from "../lib/store";
 import { SESSIONS_SIDE_FOLD_FEATURE } from "../lib/side-fold";
 import { conversationTitle, mergeConversations } from "./assistant/conversations";
-import { useShownManager } from "../lib/manager-choice";
+import { sameManager, useShownManager } from "../lib/manager-choice";
 import { agentGroupLabel, agentTreeState, buildTodoTree, shareTree, worstTreeState, type TodoTree } from "../lib/todo-tree";
 import { openTodoFromTag, sortTodos, TODO_STATUS_INFO, type TodoStatus } from "../lib/todos";
 import type { Machine, Session } from "../lib/types";
 import { Collapse, cx, EASE, Kbd, Menu, sidebarFoldMotion, useMenu, useNow, type MenuItem } from "../ui/atoms";
 import { StatusMark } from "../ui/StatusMark";
 import { Icon } from "../ui/icons";
-import { HerdrNotices as HerdrNoticesContent } from "./agents/HerdrNotices";
 import { HubNoticeLine as HubNoticeLineContent } from "./agents/HubNoticeRow";
 import { DeleteSessionDialog, RenameDialog, RenameSpaceDialog } from "./chat/SessionDialogs";
 import { AGENT_ARCHIVES_FEATURE } from "../lib/agent-archives";
@@ -67,6 +67,7 @@ import { usePanes } from "../lib/terminal-panes";
 import { buildTerminalTree, shellsOnly, type TermSpace } from "../lib/terminals";
 import type { LinkTargetSpace } from "./LinkTodoDialog";
 import { lazyDialog } from "./LazyOverlay";
+import { lazyPage } from "../lib/lazy-page";
 import { FoldScope, useFolded } from "../lib/use-folded";
 import { clipsOverflow, glideBox, glideStyle, sameBox, type GlideBox, type Span } from "../lib/glide";
 import { AGENTS_FOLD, onGrouping, pagedAgentList } from "../lib/sidebar-api";
@@ -97,8 +98,28 @@ export { useNavPages, type NavPage } from "./SidebarParts";
 export { AgentRow, PersonaRow, SessionRow } from "./SidebarRows";
 export { SidebarRail } from "./SidebarRail";
 
+// The "herdr isn't running" rows (#1916) draw nothing until a computer's herdr is read as stopped, so their code, its
+// polling and their words are off the first screen and load with the sidebar's first render (#14339). Drawn only once
+// the chunk is in, never suspending: a Suspense here would hold the sidebar's other updates (a navigation) while it
+// loads. A chunk that will not load is reported, and the next mount asks again.
+const HerdrNoticesContent = lazyPage(() => import("./agents/HerdrNotices").then((m) => m.HerdrNotices));
+export const HerdrNotices = memo(function HerdrNotices() {
+  const [ready, setReady] = useState(HerdrNoticesContent.ready);
+  useEffect(() => {
+    if (ready) return;
+    let live = true;
+    HerdrNoticesContent.preload().then(
+      () => live && setReady(true),
+      (error: unknown) => reportBoundary(error, "herdr_notices", isChunkError(error)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [ready]);
+  return ready ? <HerdrNoticesContent /> : null;
+});
+
 // Skip parent pushes with unchanged props; each leaf still receives its own state and subscription updates.
-const HerdrNotices = memo(HerdrNoticesContent);
 const HubNoticeLine = memo(HubNoticeLineContent);
 const NodePrompt = memo(NodePromptContent);
 const SidebarUsage = memo(SidebarUsageContent);
@@ -417,8 +438,6 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
         {sections
           .filter((g) => (g.id ? g.pages.length > 0 : !narrow))
           .map((g, i) => <PageGroup key={g.id || "pages"} group={g} more={g.id ? [] : more} first={i === 0 && !narrow} reg={reg} hover={hover} activeKey={activeKey} go={go} />)}
-        {/* the user's domain spaces (#13500), under the pages and their Health */}
-        {chats && <SidebarSpaces reg={reg} hover={hover} activeKey={activeKey} go={go} />}
 
         {chats && (
           <Section
@@ -659,7 +678,7 @@ function MorePages({ more, reg, hover, activeKey, go }: { more: NavPage[]; reg: 
 /** The sidebar's "Agents": grouping, the quick filter, "Pinned", "Starting", the groups (spaces, machines, repositories,
  *  states or todos) and "Recent". The drawer and the phone's Agents page both show it. `add`: the title row's "+". */
 /** What Settings › Agents turned on and what the Filter holds, read once by AgentsBlock for whichever list it draws. */
-type AgentsDisplayProps = { showFilter: boolean; dimFilters: AgentDimensionFilters; chatList: boolean };
+type AgentsDisplayProps = { showFilter: boolean; dimFilters: AgentDimensionFilters; chatList: boolean; /** the hub's display settings, for the ⋯ menu's switches (null: an older hub, or not read yet) */ displayValue: AgentsDisplay | null };
 type AgentsBlockProps = { workspaceActions?: WorkspaceTreeActions; reg: RegFn; hover: (k: string | null) => void; activeKey: string; go: GoFn; onNewAgent: () => void; onNavigate?: () => void; add?: boolean; foldable?: boolean; chooseGrouping?: (g: AgentGrouping) => void };
 
 /** The to-dos could not be read and none are known (audit item 27): By to-do has nothing to group by, so it shows By
@@ -686,6 +705,7 @@ function AgentsBlock(props: AgentsBlockProps) {
   const pins = useStore((s) => s.pins);
   // The Filter is a Settings switch (hub-synced, default off): off, it is not drawn and what it held is not applied
   const showFilter = useShowFilter();
+  const displayValue = useAgentsDisplay().value;
   const displayLoaded = useAgentsDisplay().value !== null;
   const storedFilters = useAgentListFilters();
   const dimFilters = showFilter ? storedFilters : DEFAULT_DIMENSION_FILTERS;
@@ -705,7 +725,7 @@ function AgentsBlock(props: AgentsBlockProps) {
   // A filter or view the hub's paged list cannot ask for (model, pinned, search scope, several computers, the chat list…)
   // is answered by the complete list, which has every one of them: never a filter that half works
   const paged = pagedAgentList({ bounded, byTodo, todosSupported, pins, stored, several }) && !chatList && pagedFilterOf(dimFilters) !== null;
-  const display: AgentsDisplayProps = { showFilter, dimFilters, chatList };
+  const display: AgentsDisplayProps = { showFilter, dimFilters, chatList, displayValue };
   const chooseGrouping = useCallback((g: AgentGrouping) => {
     storeValue("persona.agentGrouping", g);
     setGrouping(g);
@@ -737,10 +757,25 @@ function ListMenuButton({ open, onClick }: { open: boolean; onClick: React.Mouse
   );
 }
 
+/** What the ⋯ switches show: the hub's answer (null when unread or an older hub) and the two effective values. */
+type ListDisplay = { value: AgentsDisplay | null; sort: boolean; filter: boolean };
+/** Local-only By repo switch (#14607): off by default, persisted in this browser. */
+type EmptyWorkspacesOption = { show: boolean; onToggle: () => void };
+
 /** The ⋯'s items, the paged list's as the complete list's (#6662). Collapse all / Expand all are the title row's button
- *  alone (#6447). */
-function agentListItems({ archives, hover, onNavigate }: { archives: boolean; hover: (k: string | null) => void; onNavigate?: () => void }): MenuItem[] {
-  return archives ? [{ key: "archived", label: t("agentmenus.archived_agents"), icon: "archive" as const, onSelect: () => { navigate({ name: "agent-archives" }); onNavigate?.(); hover(null); } }] : [];
+ *  alone (#6447). The two display choices (#13727) are switches here, writing the same hub setting Settings › Agents
+ *  holds, so a click shows on every device and that page follows; an older hub has neither field and gets no item. */
+function agentListItems({ archives, hover, onNavigate, display, emptyWorkspaces }: { archives: boolean; hover: (k: string | null) => void; onNavigate?: () => void; display: ListDisplay; emptyWorkspaces?: EmptyWorkspacesOption }): MenuItem[] {
+  const set = (change: DisplayChange) => { void saveAgentsDisplay(change); hover(null); };
+  const sortable = display.value?.sort_by_activity !== undefined;
+  const filterable = display.value?.show_filter !== undefined;
+  const hasDisplay = sortable || filterable || Boolean(emptyWorkspaces);
+  return [
+    ...(sortable ? [{ key: "sort-activity", label: t("sidebar.sort_activity"), icon: "clock" as const, checked: display.sort, keepOpen: true, divider: true, onSelect: () => set({ sort_by_activity: !display.sort }) }] : []),
+    ...(filterable ? [{ key: "show-filter", label: t("sidebar.show_list_filter"), icon: "filter" as const, checked: display.filter, keepOpen: true, divider: !sortable, onSelect: () => set({ show_filter: !display.filter }) }] : []),
+    ...(emptyWorkspaces ? [{ key: "show-empty-workspaces", label: t("sidebar.show_empty_workspaces"), icon: "folder" as const, checked: emptyWorkspaces.show, keepOpen: true, divider: !sortable && !filterable, onSelect: () => { emptyWorkspaces.onToggle(); hover(null); } }] : []),
+    ...(archives ? [{ key: "archived", label: t("agentmenus.archived_agents"), icon: "archive" as const, divider: hasDisplay, onSelect: () => { navigate({ name: "agent-archives" }); onNavigate?.(); hover(null); } }] : []),
+  ];
 }
 
 /** The groupings this hub offers: By to-do only where it has to-dos. */
@@ -792,7 +827,7 @@ function PagedFilterChips({ filters, machines }: { filters: AgentDimensionFilter
   return <AgentFilterChips filters={filters} onChange={setAgentListFilters} facets={facets} />;
 }
 
-function BoundedAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, add = true, grouping, todosUnread = false, chooseGrouping, showFilter, dimFilters, chatList }: AgentsBlockProps & AgentsDisplayProps & { grouping: Exclude<AgentGrouping, "repo">; /** By to-do shown by status: its to-dos cannot be read */ todosUnread?: boolean; chooseGrouping: (g: AgentGrouping) => void }) {
+function BoundedAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, add = true, grouping, todosUnread = false, chooseGrouping, showFilter, dimFilters, chatList, displayValue }: AgentsBlockProps & AgentsDisplayProps & { grouping: Exclude<AgentGrouping, "repo">; /** By to-do shown by status: its to-dos cannot be read */ todosUnread?: boolean; chooseGrouping: (g: AgentGrouping) => void }) {
   const machines = useStore(selectSidebarMachines);
   const allLaunches = useStore((s) => s.launches);
   const launches = useMemo(() => Object.values(allLaunches).filter((launch) => launch.phase !== "ready"), [allLaunches]);
@@ -870,7 +905,8 @@ function BoundedAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate,
   const listMenu = useMenu();
   const machineOrder = useMemo(() => machines.map((m) => m.id), [machines]);
   const rowOrder = useMemo(() => machineSessionPresentation(machines), [machines]);
-  const listItems = agentListItems({ archives, hover, onNavigate });
+  const rowNeedsYou = useCallback((s: Session) => runtimeNeedsYou(s) && !rowCards(getState().interactions, s.machine_id, s.session_id).heldOnly, []);
+  const listItems = agentListItems({ archives, hover, onNavigate, display: { value: displayValue, sort: sortByActivity, filter: showFilter } });
   const pagedGrouping = useMemo(() => ({
     dimension: PAGED_DIMENSION[grouping],
     label: AGENT_GROUPINGS.find((g) => g.key === grouping)?.label ?? "",
@@ -903,7 +939,7 @@ function BoundedAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate,
       {launches.map((launch) => <NavRow key={launch.id} k={`s:${launch.machineId}/${launch.id}`} reg={reg} hover={hover} active={activeKey === `s:${launch.machineId}/${launch.id}`} to={{ name: "session", mid: launch.machineId, sid: launch.id }} go={go} icon={launch.phase === "failed" ? "retry" : "agent"} agent={launch.phase === "failed" ? undefined : launchDisplayEngine(launch)} label={launch.text || baseName(launch.cwd) || t("sidebar.launch_untitled")} hint={launch.phase === "failed" ? t("sidebar.launch_failed") : t("sidebar.launch_background")} />)}
     </Section>}
     <PagedSessionList root={runtimeAgents} path={RUNTIME_AGENTS_PATH} identity={runtimeIdentity} compare={runtimeOrder} removeIdentity={runtimeRemoval} parentOf={sideFold ? undefined : runtimeParentIdentity} excludeIdentities={inFlightLaunchIds} event="sessions_list" grouping={pagedGrouping}
-      activeAt={runtimeActiveAt} needsYou={runtimeNeedsYou} isOpen={(s) => activeKey === `s:${s.machine_id}/${s.session_id}`}
+      activeAt={runtimeActiveAt} needsYou={rowNeedsYou} isOpen={(s) => activeKey === `s:${s.machine_id}/${s.session_id}`}
       catalog={catalog} justFinished={justFinished} placeOf={runtimePlace} failureText={agentsReadFailed} holdCounts={holdCounts}
       machineOrder={machineOrder} label={(dimension, id) => dimension === "machine" ? machineWithHub(id, machines) : id}
       renderRow={(s, within) => {
@@ -923,6 +959,71 @@ function BoundedAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate,
 // Tab-scoped UI memory: a reload presents the same active/Idle membership, but a new tab starts from current activity.
 // Undefined means no stored membership; a stored empty set is a deliberate all-Idle layout, not a new browser tab.
 const ACTIVE_SPACES_KEY = "persona.agentActiveSpaces";
+const SHOW_EMPTY_WORKSPACES_KEY = "persona.showEmptyWorkspaces";
+const emptyWorkspaceListeners = new Set<() => void>();
+let emptyWorkspacesFallback: boolean | null = null;
+function readShowEmptyWorkspaces(): boolean {
+  try {
+    const stored = localStorage.getItem(SHOW_EMPTY_WORKSPACES_KEY);
+    if (stored !== null) return stored === "1";
+    return emptyWorkspacesFallback ?? false;
+  } catch { return emptyWorkspacesFallback ?? false; }
+}
+function toggleShowEmptyWorkspacesPref() {
+  const next = !readShowEmptyWorkspaces();
+  try {
+    localStorage.setItem(SHOW_EMPTY_WORKSPACES_KEY, next ? "1" : "0");
+    emptyWorkspacesFallback = null;
+  } catch {
+    emptyWorkspacesFallback = next;
+  }
+  emptyWorkspaceListeners.forEach((fn) => fn());
+}
+function subscribeShowEmptyWorkspaces(listener: () => void): () => void {
+  emptyWorkspaceListeners.add(listener);
+  const onStorage = (e: StorageEvent) => { if (e.key === SHOW_EMPTY_WORKSPACES_KEY || e.key === null) listener(); };
+  window.addEventListener("storage", onStorage);
+  return () => { emptyWorkspaceListeners.delete(listener); window.removeEventListener("storage", onStorage); };
+}
+function useShowEmptyWorkspaces(): boolean {
+  return useSyncExternalStore(subscribeShowEmptyWorkspaces, readShowEmptyWorkspaces, () => false);
+}
+// By repo's catalog projection lives in its own chunk so cold first screens (which default to By to-do) do not pay for
+// it. Loaded once on demand without Suspense; stale-hash chunk failures reload once via PageBoundary's recovery and offer
+// Reload on repeat failure instead of retrying a deleted hash forever.
+type AgentReposMod = typeof import("../lib/agent-repos");
+let agentReposLoader: () => Promise<AgentReposMod> = () => import("../lib/agent-repos");
+let loadedAgentRepos: AgentReposMod | null = null;
+let loadingAgentRepos: Promise<AgentReposMod> | null = null;
+/** Tests: override the dynamic chunk loader and reset its cache. */
+export function setAgentReposLoaderForTest(loader: (() => Promise<AgentReposMod>) | null) {
+  agentReposLoader = loader ?? (() => import("../lib/agent-repos"));
+  loadedAgentRepos = null;
+  loadingAgentRepos = null;
+}
+function useAgentReposModule(enabled: boolean): { mod: AgentReposMod | null; error: { message: string; chunk: boolean } | null; retry: () => void } {
+  const [mod, setMod] = useState<AgentReposMod | null>(() => loadedAgentRepos);
+  const [error, setError] = useState<{ message: string; chunk: boolean } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    if (!enabled || mod) return;
+    let live = true;
+    const req = (loadingAgentRepos ??= agentReposLoader().then((m) => { loadedAgentRepos = m; return m; }));
+    req.then(
+      (m) => { if (live) { setError(null); setMod(m); } },
+      (err: unknown) => {
+        if (loadingAgentRepos === req) loadingAgentRepos = null;
+        if (reloadForStaleChunk(err)) return;
+        const chunk = isChunkError(err);
+        reportBoundary(err, "sidebar_agent_repos", chunk);
+        if (live) setError({ message: err instanceof Error ? err.message : String(err), chunk });
+      },
+    );
+    return () => { live = false; };
+  }, [enabled, mod, attempt]);
+  const retry = useCallback(() => { setError(null); setAttempt((n) => n + 1); }, []);
+  return enabled ? { mod, error, retry } : { mod: null, error: null, retry };
+}
 function retainedActiveSpaces(): ReadonlySet<string> | undefined {
   try {
     const stored = sessionStorage.getItem(ACTIVE_SPACES_KEY);
@@ -934,7 +1035,7 @@ function retainedActiveSpaces(): ReadonlySet<string> | undefined {
   }
 }
 
-function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, workspaceActions, add = true, foldable = false, grouping, hubUnreachable, chooseGrouping, showFilter, dimFilters, chatList }: AgentsBlockProps & AgentsDisplayProps & { grouping: AgentGrouping; /** useHubUnreachable */ hubUnreachable: boolean; chooseGrouping: (g: AgentGrouping) => void }) {
+function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, workspaceActions, add = true, foldable = false, grouping, hubUnreachable, chooseGrouping, showFilter, dimFilters, chatList, displayValue }: AgentsBlockProps & AgentsDisplayProps & { grouping: AgentGrouping; /** useHubUnreachable */ hubUnreachable: boolean; chooseGrouping: (g: AgentGrouping) => void }) {
   // the current assistant's computers, agents and to-dos (all of them with one assistant)
   const scope = useScope();
   const sidebarMachines = useStore(selectSidebarMachines);
@@ -974,6 +1075,8 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
   const todosSupported = useStore((s) => s.todosSupported);
   const todosLoaded = useStore((s) => s.todosLoaded);
   const todosUnread = useTodosUnread();
+  const shownManagerName = useShownManager();
+  const todosV2 = useStore((s) => Boolean(s.assistant && sameManager(s.assistant.manager ?? shownManagerName, shownManagerName) && s.assistant.todos_v2 === true));
   // the Filter menu's choices and the words ⌘K's "Filter Agents list" put on it (#6589): the list has no field of its own
   // (both come from AgentsBlock: off in Settings › Agents, the Filter is not drawn and holds nothing)
   const setDimFilters = setAgentListFilters;
@@ -993,6 +1096,7 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
   const todosFailed = !chatList && todosUnread && grouping === "todo" && todosSupported !== false;
   const shownGrouping = todosSupported === false && grouping === "todo" ? "machine" : todosFailed ? "state" : grouping;
   const catalog = useWorkspaceCatalog(shownGrouping === "repo");
+  const agentRepos = useAgentReposModule(shownGrouping === "repo");
   const availableGroupings = useGroupings();
   // the title row's ⋯ (#2812): the archived Agents
 
@@ -1000,6 +1104,7 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
   // the quick filter ("All" / "Needs you" / "Unread" / "Working"), stacked on any grouping; what it showed when chosen stays (`kept`)
   const [savedFilter, setFilter] = useState(() => agentFilter(storedValue("persona.agentFilter")));
   const [kept, setKept] = useState<ReadonlySet<string>>(() => new Set());
+  const showEmptyWorkspaces = useShowEmptyWorkspaces();
   const botmuxHidden = useBotmuxHidden();
   // The activity order (Settings › Agents), held still while the pointer or the keyboard is in the sidebar; off, the
   // stable structural order of #11801. By status keeps its own order either way.
@@ -1010,7 +1115,7 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
   const activityDates = useActivityDates(agents, engaged);
   const activity = useMemo(() => activityOrder(activityDates), [activityDates]);
   const rowOrder = byUpdate ? activity.byUpdated : structuralOrder;
-  const listed = useMemo(() => withoutBotmux(all, botmuxHidden), [all, botmuxHidden]);
+  const listed = useMemo(() => heldAsWorking(withoutBotmux(all, botmuxHidden), interactions), [all, botmuxHidden, interactions]);
   const previewListed = useMemo(() => [...withoutBotmux(previewAll, botmuxHidden)].sort(rowOrder), [previewAll, botmuxHidden, rowOrder]);
   const facets = useMemo(() => buildAgentFacets(listed, machines, pins), [listed, machines, pins]);
   const dimActive = hasActiveDimensionFilters(dimFilters);
@@ -1022,8 +1127,8 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
   );
   // A host pin keeps its saved conversations in the repository tree, including ones older than Recent's 40 rows.
   const { live, recent: offline } = useMemo(() => splitAgentSessions(dimFiltered, machines,
-    shownGrouping === "repo" && !chatList ? (s) => hasWorkspacePin(s, catalog.workspaces, catalog.manager) : undefined),
-  [dimFiltered, machines, shownGrouping, chatList, catalog]);
+    shownGrouping === "repo" && !chatList && agentRepos.mod ? (s) => agentRepos.mod!.hasWorkspacePin(s, catalog.workspaces, catalog.manager) : undefined),
+  [dimFiltered, machines, shownGrouping, chatList, catalog, agentRepos.mod]);
   const filter = savedFilter === "feishu" && !live.some((s) => matchesFilter(s, "feishu", mutes)) ? "all" : savedFilter;
   const seeded = useRef(false);
   useEffect(() => {
@@ -1066,7 +1171,12 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
   // can already be shown while the first GET /sessions is still in flight (#2812).
   const listNote = hubUnreachable ? <p className="px-2 py-1 text-xs leading-normal text-ink-3">{t("sidebar.agents_offline")}</p>
     : !loaded && listError ? <ListError text={agentsReadFailed(listError)} onRetry={retryFullAgentSessions} />
-    : todosPending || (!loaded && every.length === 0) ? <p className="px-2 py-1 text-[12px] text-ink-3">{t("sidebar.loading")}</p>
+    : shownGrouping === "repo" && !chatList && agentRepos.error ? (
+      agentRepos.error.chunk
+        ? <ListError text={t("pageboundary.chunk_title")} action={t("pageboundary.reload")} onRetry={reloadPage} />
+        : <ListError text={agentsReadFailed(agentRepos.error.message)} onRetry={agentRepos.retry} />
+    )
+    : todosPending || (shownGrouping === "repo" && !chatList && !agentRepos.mod) || (!loaded && every.length === 0) ? <p className="px-2 py-1 text-[12px] text-ink-3">{t("sidebar.loading")}</p>
     : null;
   // Only inputs the tree reads rebuild it; unchanged nodes keep their objects so their rows' memo holds.
   const lastTodoTree = useRef<TodoTree | undefined>(undefined);
@@ -1075,15 +1185,15 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
   const keepEmptyGroups = !filtered && live.length + offline.length > 0;
   const todoTree = useMemo(() => {
     if (shownGrouping !== "todo" || !todosLoaded) return undefined;
-    const built = buildTodoTree(unpinned, machines, todos, mutes, Date.now(), { keepEmpty: keepEmptyGroups, compareSessions: rowOrder });
+    const built = buildTodoTree(unpinned, machines, todos, mutes, Date.now(), { keepEmpty: keepEmptyGroups, compareSessions: rowOrder, todosV2 });
     return shareTree(lastTodoTree.current, byUpdate ? activity.todoTreeByUpdate(built) : built);
-  }, [unpinned, machines, shownGrouping, mutes, todos, todosLoaded, keepEmptyGroups, rowOrder, byUpdate, activity]);
+  }, [unpinned, machines, shownGrouping, mutes, todos, todosLoaded, keepEmptyGroups, rowOrder, byUpdate, activity, todosV2]);
   lastTodoTree.current = todoTree;
   const repoMachines = useMemo(() => {
-    if (shownGrouping !== "repo") return [];
-    const built = buildRepoMachineTree(unpinned, machines, { ...catalog, hiddenSources: botmuxHidden ? ["botmux"] : undefined, navigationSessions: [...shown, ...pinnedAgents.filter((p) => !shown.includes(p))], hideEmpty: filtered, compareSessions: rowOrder });
+    if (shownGrouping !== "repo" || !agentRepos.mod) return [];
+    const built = agentRepos.mod.buildRepoMachineTree(unpinned, machines, { ...catalog, hiddenSources: botmuxHidden ? ["botmux"] : undefined, navigationSessions: [...shown, ...pinnedAgents.filter((p) => !shown.includes(p))], hideEmpty: filtered, showEmptyWorkspaces, compareSessions: rowOrder });
     return byUpdate ? activity.repoMachinesByUpdate(built) : built;
-  }, [unpinned, machines, shownGrouping, catalog, shown, pinnedAgents, filtered, botmuxHidden, rowOrder, byUpdate, activity]);
+  }, [unpinned, machines, shownGrouping, agentRepos.mod, catalog, shown, pinnedAgents, filtered, showEmptyWorkspaces, botmuxHidden, rowOrder, byUpdate, activity]);
   const machineTree = useMemo(() => {
     if (shownGrouping !== "machine") return [];
     const built = buildMachineTree(machines, unpinned, { pins, hideEmpty: filtered });
@@ -1179,7 +1289,11 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
   const tree = { machines, reg, hover, activeKey, go, mutes, onSpaceMenu, onRowMenu, onNodeMenu, onNavigate };
 
   // the list menu, the paged list's too (agentListItems); with nothing in it the menu's button goes
-  const listItems = agentListItems({ archives, hover, onNavigate });
+  const listItems = agentListItems({
+    archives, hover, onNavigate,
+    display: { value: displayValue, sort: sortByActivity, filter: showFilter },
+    emptyWorkspaces: shownGrouping === "repo" && !chatList ? { show: showEmptyWorkspaces, onToggle: toggleShowEmptyWorkspacesPref } : undefined,
+  });
 
   return (
     <div data-sidebar-agents ref={groupsRef}>

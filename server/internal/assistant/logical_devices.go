@@ -43,6 +43,7 @@ type logicalSwitchStore interface {
 	logicalConversationStore
 	PutConversationHandoff(context.Context, string, string, string, json.RawMessage) error
 	ConversationPreparation(context.Context, string, string, string) (json.RawMessage, bool, error)
+	ConversationPendingHandoff(context.Context, string, string, string) (json.RawMessage, error)
 	ClaimConversationPreparation(context.Context, string, string, string) (bool, error)
 	ConversationUnresolvedInput(context.Context, string, string) (*db.ConversationInput, error)
 	ConversationInputPending(context.Context, string, string) (bool, error)
@@ -259,7 +260,7 @@ func (d *logicalDevices) Session(machine, session string) (proto.Session, bool) 
 		if a, ok := c.Active(); ok {
 			row, found := d.Devices.Session(a.MachineID, a.SessionID)
 			if !found {
-				row = proto.Session{Status: proto.StatusOffline, Assistant: true}
+				row = proto.Session{Status: proto.StatusOffline, Assistant: true, LogicalPlaceholder: true}
 			}
 			row.MachineID, row.SessionID = c.MachineID, c.SessionID
 			if c.Epoch > 1 {

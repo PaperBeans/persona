@@ -21,8 +21,11 @@ func (s *Recordings) Routes(engine func(http.ResponseWriter, *http.Request) *kb.
 func (s *Recordings) AudioSocket(w http.ResponseWriter, r *http.Request) { s.audioSocket(w, r) }
 
 // Hook gives knowledge base e the module's callbacks: the minutes' push, the live log's and meeting.json's changes,
-// the day recordings' names and the day's push.
+// the day recordings' names and the day's push; and the recordings' write side (recordingwire.Provider: the minutes,
+// title, recap and summary rounds, the sweep after a prune, the audio writers), which a knowledge base has only with
+// this module. The writers are still kb's own code (kb.RecordingWriters) until they move here.
 func (s *Recordings) Hook(e *kb.Engine) {
+	e.SetRecordingProvider(kb.RecordingWriters(e))
 	e.MinutesWritten, e.LiveChanged, e.MeetingChanged, e.DayRecordingName = s.minutesWritten, s.meetingKick, s.meetingLiveChanged, s.dayRecordingName
 	e.DayRecapWritten = func(ctx context.Context, r kb.Recording, d kb.DayRecap) ([]string, error) {
 		return s.dayRecapWritten(ctx, e, r, d)

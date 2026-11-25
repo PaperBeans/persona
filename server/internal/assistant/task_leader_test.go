@@ -1179,7 +1179,7 @@ func TestWorkerAutomaticSignalsGoToLeader(t *testing.T) {
 				stall := proto.Session{SessionID: w.Agents[0].SessionID, MachineID: "box", Cwd: "/code/app", Agent: "claude",
 					Status: proto.StatusWorking, State: proto.StateWorking, UpdatedAt: time.Now().Add(-superviseStallMin - time.Minute)}
 				f.setSessions("box", proto.Session{SessionID: "s1", MachineID: "box", Agent: "claude", Status: proto.StatusIdle}, stall)
-				f.hello.Locale = "en"
+				f.setLocale("en")
 				s.superviseWatch(ctx, time.Now().Add(11*time.Minute))
 				due := gotMessage(t, f, "Persona · supervision", "改登录页", "automatic estimate reached")
 				if !strings.Contains(due, "not an overdue judgment") {
@@ -1727,18 +1727,18 @@ func TestLeaderRestartedOnAnotherComputerIsStillReached(t *testing.T) {
 func TestTaskLeaderRefusedOnWorkTrustMachine(t *testing.T) {
 	s, f := newQuietService(t)
 	ctx := context.Background()
-	f.hello.Assistant.WorkMachines = []string{"box"}
+	f.setHello(func(h *Hello) { h.Assistant.WorkMachines = []string{"box"} })
 	args := leaderPlanArgs("leader")
 	if _, err := s.toolTaskPlan(ctx, "conv1", args); err == nil || !strings.Contains(err.Error(), "work-trust computer") {
 		t.Fatalf("planning a leader on a work-trust computer: %v", err)
 	}
 	// A saved plan that names one is held at Start too.
-	f.hello.Assistant.WorkMachines = nil
+	f.setHello(func(h *Hello) { h.Assistant.WorkMachines = nil })
 	res, err := s.toolTaskPlan(ctx, "conv1", args)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.hello.Assistant.WorkMachines = []string{"box"}
+	f.setHello(func(h *Hello) { h.Assistant.WorkMachines = []string{"box"} })
 	_, err = s.startPlan(ctx, planIDRe.FindString(res), nil, false)
 	var invalid planInvalid
 	if !errors.As(err, &invalid) || !strings.Contains(err.Error(), "work-trust computer") {
@@ -1754,7 +1754,7 @@ func TestTaskLeaderRefusedOnWorkTrustMachine(t *testing.T) {
 func TestTaskLeaderNeverLandsOnWorkTrustMachine(t *testing.T) {
 	s, f := newQuietService(t)
 	ctx := context.Background()
-	f.hello.Assistant.WorkMachines = []string{"box"}
+	f.setHello(func(h *Hello) { h.Assistant.WorkMachines = []string{"box"} })
 	_, _, err := s.startTaskAgent(ctx, &PlanTask{Title: "L", Prompt: "p", Machine: "box", Cwd: "/code/app", Role: roleLeader, Permission: "bypassPermissions"}, true)
 	if err == nil || !strings.Contains(err.Error(), "work-trust computer") {
 		t.Fatalf("starting a task leader on a work-trust computer: %v", err)
@@ -1766,7 +1766,7 @@ func TestTaskLeaderNeverLandsOnWorkTrustMachine(t *testing.T) {
 		t.Fatalf("a start went out: %v", f.starts)
 	}
 	// Retry of a saved leader plan on a computer that is work-trust now.
-	f.hello.Assistant.WorkMachines = nil
+	f.setHello(func(h *Hello) { h.Assistant.WorkMachines = nil })
 	res, err := s.toolTaskPlan(ctx, "conv1", leaderPlanArgs("leader"))
 	if err != nil {
 		t.Fatal(err)
@@ -1782,7 +1782,7 @@ func TestTaskLeaderNeverLandsOnWorkTrustMachine(t *testing.T) {
 	if err := s.failTodo(ctx, todo, "did not start"); err != nil {
 		t.Fatal(err)
 	}
-	f.hello.Assistant.WorkMachines = []string{"box"}
+	f.setHello(func(h *Hello) { h.Assistant.WorkMachines = []string{"box"} })
 	if _, err := s.retryTask(ctx, todo); err == nil || !strings.Contains(err.Error(), "work-trust computer") {
 		t.Fatalf("retrying a leader plan on a work-trust computer: %v", err)
 	}
@@ -1791,7 +1791,7 @@ func TestTaskLeaderNeverLandsOnWorkTrustMachine(t *testing.T) {
 // healthyPlace never moves a flexible task leader to a work-trust computer, while an ordinary task may go there.
 func TestHealthDetourSkipsWorkTrustForTaskLeaders(t *testing.T) {
 	s, f := rerouteHub(t)
-	f.hello.Assistant.WorkMachines = []string{"box"}
+	f.setHello(func(h *Hello) { h.Assistant.WorkMachines = []string{"box"} })
 	blockWorkLauncher(s, "l4")
 	failWorkLauncherCheck(s, "server") // box is the only healthy alternative
 	ctx := context.Background()

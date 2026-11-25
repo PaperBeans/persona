@@ -95,5 +95,10 @@ private fun MachineSpacesPage(route: MachineSpacesRoute, model: AgentsViewModel,
             model.opened(row)
             navigator.navigate(ChatRoute(row.session.machineId, row.session.sessionId))
         },
+        sessions = page.sessions,
+        onOpenSide = { row, side ->
+            model.opened(row)
+            navigator.navigate(ChatRoute(side.machineId, side.sessionId))
+        },
     )
 }

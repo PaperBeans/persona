@@ -141,6 +141,44 @@ nonisolated enum VoiceTimbre {
     }
 }
 
+/// How far a voice's jitter buffer grew on this device (#14933), per group, extension and voice, for a day: a voice that
+/// came slower than it plays, or ran dry mid-reply, starts its next call with that lead in hand instead of stalling through
+/// its first reply again. One whose measured replies all kept up is forgotten, and any other voice starts at 200 ms.
+/// Written at most once as a call ends or changes voice.
+nonisolated struct VoiceLeadMemory {
+    /// How long a slow voice is remembered.
+    static let keep: TimeInterval = 24 * 60 * 60
+
+    var defaults: UserDefaults = .standard
+
+    static func key(group: String, extensionID: String, voice: String?) -> String {
+        "voice.lead." + (group.isEmpty ? "-" : group) + "." + extensionID + "." + (voice.flatMap { $0.isEmpty ? nil : $0 } ?? "-")
+    }
+
+    /// The level a call of the voice starts at: 0 unless one ended slow less than `keep` ago.
+    func level(group: String, extensionID: String, voice: String?, now: Date) -> Int {
+        guard let saved = defaults.dictionary(forKey: Self.key(group: group, extensionID: extensionID, voice: voice)),
+              let level = saved["level"] as? Int, let at = saved["at"] as? Double
+        else { return 0 }
+        let age = now.timeIntervalSince1970 - at
+        return age < Self.keep && age > -Self.keep ? max(0, level) : 0
+    }
+
+    /// What a call of the voice learned: slow, its lead from now on; kept up, forgotten; nothing measured, as it was (the
+    /// day counts on from the call that found it slow).
+    func remember(_ lead: VoiceLead, group: String, extensionID: String, voice: String?, now: Date) {
+        let key = Self.key(group: group, extensionID: extensionID, voice: voice)
+        switch lead.slow {
+        case true? where lead.level > 0:
+            defaults.set(["level": lead.level, "at": now.timeIntervalSince1970] as [String: Any], forKey: key)
+        case false?:
+            if defaults.object(forKey: key) != nil { defaults.removeObject(forKey: key) }
+        default:
+            break
+        }
+    }
+}
+
 /// A meeting call (#3862 phase 4, docs/assistant/meeting-minutes.md「Phase 4: realtime voice in the meeting」): bound to the
 /// recording's room, on the recorder's capture, hearing only Talk spans. It is not a phone call: the recording holds the
 /// microphone (the call never claims it), the screen may lock, it never ends after idle minutes, and after the three
@@ -213,6 +251,8 @@ struct VoiceDeps {
     /// A system call's manager (`PersonaCalls`): it hears the call connect, end, be interrupted and be muted on the page.
     /// nil for every other call.
     var callEvents: (@MainActor (VoiceCallEvent) -> Void)? = nil
+    /// Where a call of the group's extension and voice starts its jitter buffer, and what it learned as it ended.
+    var leads = VoiceLeadMemory()
 
     /// A system call to Persona (#9290): the system's audio session (`audio`, which its manager activates and
     /// deactivates as the system does), and its manager told what happens (`events`).
@@ -448,6 +488,7 @@ struct VoiceDeps {
             resolved = true
         }
         speechGate = deps.speechGate(key.group, extensionID)
+        startLead()
         // A meeting call never ends after idle minutes: it runs for the whole meeting (decision 7).
         if meeting == nil { watchIdle(epoch) }
         connect()
@@ -472,6 +513,7 @@ struct VoiceDeps {
         socket?.close()
         socket = nil
         uplink.close()
+        rememberLead()
         audio?.stop()
         audio = nil
         deps.microphone.release(microphoneOwner)
@@ -614,11 +656,25 @@ struct VoiceDeps {
         return true
     }
 
-    /// Another voice: a new connection that picks the call up where it was.
+    /// Another voice: a new connection that picks the call up where it was. Its jitter buffer starts where that voice's
+    /// last calls left it (#14933): another voice's raised lead says nothing of this one.
     func change(voice: String?) {
         guard voice != self.voice else { return }
+        rememberLead()
         self.voice = voice
+        startLead()
         reopen()
+    }
+
+    /// The jitter buffer starts where the last calls of this voice left it (`VoiceLeadMemory`).
+    private func startLead() {
+        audio?.startLead(at: deps.leads.level(group: key.group, extensionID: extensionID, voice: voice, now: deps.clock.now))
+    }
+
+    /// What this call's replies said of its voice's pace, for the voice's next call.
+    private func rememberLead() {
+        guard let audio else { return }
+        deps.leads.remember(audio.lead, group: key.group, extensionID: extensionID, voice: voice, now: deps.clock.now)
     }
 
     /// Only Send What I Just Said turned on or off on the settings page while the call ran: a new connection that
@@ -822,6 +878,14 @@ struct VoiceDeps {
             }
         case .link(let state):
             if link != state { link = state }
+        case .reply(let edge):
+            // The extension's word on where the voice's replies begin and end (#14933); without it the jitter buffer
+            // tells by the silences, as with an extension from before `reply`.
+            switch edge {
+            case .start: audio?.reply(true)
+            case .end: audio?.reply(false)
+            case .other: break
+            }
         case .error(let failure):
             if failure.fatal {
                 end(.failed(code: failure.code, message: failure.message))

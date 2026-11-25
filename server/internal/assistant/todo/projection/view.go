@@ -365,7 +365,7 @@ func (r *reading) ownAsk() (assistantwire.OwnerAsk, *Ask) {
 	round := listed(a.AskedAt)
 	out := assistantwire.OwnerAsk{ID: DecisionAskID(a.AskedAt), Kind: assistantwire.OwnerAskKindDecision,
 		Home: assistantwire.OwnerAskHomeTodo, Round: round, Text: a.Question, Recommend: a.Recommend,
-		Options: a.Options, CanWait: canWaitDecision(a)}
+		Options: a.Options, CanWait: r.canWaitAsk(a)}
 	if a.Default == defaultTaken && a.Deadline != nil {
 		out.DefaultAt = utc(*a.Deadline)
 	}
@@ -374,6 +374,23 @@ func (r *reading) ownAsk() (assistantwire.OwnerAsk, *Ask) {
 
 // canWaitDecision: a decision that can wait for the briefing.
 func canWaitDecision(a *Ask) bool { return a.Outcome == outcomeDecide && a.ForBriefing }
+
+// canWaitAsk reports whether decision ask a stays in the Can wait fold at r.now.
+// Under todos_v2, non-critical can_wait decisions age into active Needs you after 48 hours.
+func (r *reading) canWaitAsk(a *Ask) bool {
+	if !canWaitDecision(a) {
+		return false
+	}
+	if r.f.TodosV2 && !a.AskedAt.IsZero() && !r.now.Before(a.AskedAt.Add(canWaitEscalateAfter)) {
+		return false
+	}
+	return true
+}
+
+// pendingReviewWaiting reports whether f is in pending_review without an open owner ask under todos_v2.
+func (r *reading) pendingReviewWaiting() bool {
+	return r.f.TodosV2 && reviewState(r.f) == reviewPending && !r.settled() && openAsk(r.f) == nil
+}
 
 // ---- row 3: the owner decides ----
 
@@ -389,8 +406,14 @@ func (r *reading) ownerDecides() (placement, bool) {
 			p.Line, p.Since = line(assistantwire.TodoLineKeyDecision, "text", d.Gate), utc(d.At)
 			return p, true
 		}
+		if r.pendingReviewWaiting() {
+			if since := pendingReviewSince(r.f); !since.IsZero() && !r.now.Before(since.Add(pendingReviewEscalateAfter)) {
+				p.Line, p.Since = line(assistantwire.TodoLineKeyDecision), utc(since)
+				return p, true
+			}
+		}
 		return placement{}, false
-	case a != nil && canWaitDecision(a): // row 4
+	case a != nil && r.canWaitAsk(a): // row 4
 		return placement{}, false
 	}
 	switch {
@@ -468,6 +491,11 @@ func (r *reading) working() (placement, bool) {
 			p.Line, p.Since = line(k.key, "run", rn.title()), utc(rn.since())
 			return p, true
 		}
+	}
+	if r.pendingReviewWaiting() {
+		p := r.at(assistantwire.TodoPhaseWorking, assistantwire.TodoListSectionWorking, assistantwire.TodoReasonPersonaWorking)
+		p.Line, p.Since = line(assistantwire.TodoLineKeyPersonaWorking), utc(pendingReviewSince(r.f))
+		return p, true
 	}
 	return placement{}, false
 }
@@ -669,8 +697,14 @@ func (r *reading) withSteps(own placement) placement {
 		if s.closed() {
 			own.Steps.Done++
 		} else if !f.closed() {
-			sr := read(s, r.now)
-			steps = append(steps, part{placement: sr.place(), step: s, last: sr.last})
+			step := s
+			if r.f.TodosV2 && !s.TodosV2 {
+				cp := *s
+				cp.TodosV2 = true
+				step = &cp
+			}
+			sr := read(step, r.now)
+			steps = append(steps, part{placement: sr.place(), step: step, last: sr.last})
 		}
 	}
 	// The parts on the row: the one that leads it, then, on a row that lists asks, the others that are in Needs you or
@@ -823,8 +857,24 @@ func moments(f *Facts, now time.Time) []time.Time {
 	if due, ok := dueEnd(f); ok {
 		add(due)
 	}
+	if f.TodosV2 {
+		if reviewState(f) == reviewPending {
+			if since := pendingReviewSince(f); !since.IsZero() {
+				add(since.Add(pendingReviewEscalateAfter))
+			}
+		}
+		if a := openAsk(f); a != nil && canWaitDecision(a) && !a.AskedAt.IsZero() {
+			add(a.AskedAt.Add(canWaitEscalateAfter))
+		}
+	}
 	for i := range f.Steps {
-		out = append(out, moments(&f.Steps[i], now)...)
+		if f.TodosV2 && !f.Steps[i].TodosV2 {
+			cp := f.Steps[i]
+			cp.TodosV2 = true
+			out = append(out, moments(&cp, now)...)
+		} else {
+			out = append(out, moments(&f.Steps[i], now)...)
+		}
 	}
 	return out
 }

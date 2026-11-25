@@ -372,7 +372,7 @@ struct ExtensionDetailView: View {
 
     private func hasConfiguration(_ d: HubExtensionDetail) -> Bool {
         auth != nil || !d.ui.isEmpty || !connectorInbox.connectors.isEmpty || d.readOnly || !d.form.isEmpty || !d.secrets.isEmpty
-            || VoiceTimbreSection.shows(d.plugin, manager: page.manager)
+            || (AppModel.shared.voice?.showsExtensionSettings(d.plugin, manager: page.manager) ?? false)
     }
 
     @ViewBuilder private func configuration(_ d: HubExtensionDetail) -> some View {
@@ -380,8 +380,8 @@ struct ExtensionDetailView: View {
             ExtensionAuthSection(auth: auth, enabled: d.plugin.enabled ?? true, model: signIn)
         }
         // The voice extension: the voice this device's calls speak with (#2411), whoever's settings the rest are.
-        if VoiceTimbreSection.shows(d.plugin, manager: page.manager) {
-            VoiceTimbreSection(extensionID: d.plugin.id, group: AppModel.shared.api?.group ?? "")
+        if let voice = AppModel.shared.voice, voice.showsExtensionSettings(d.plugin, manager: page.manager) {
+            voice.extensionSettings(extensionID: d.plugin.id, group: AppModel.shared.api?.group ?? "")
         }
         if d.readOnly {
             Section {
@@ -420,7 +420,7 @@ struct ExtensionDetailView: View {
         let ui = auth?.page.map { page in d.ui.filter { $0.id != page } } ?? d.ui
         if !ui.isEmpty {
             Section {
-                ForEach(ui) { place in
+                ForEach(ui, id: \.scopedID) { place in
                     NavigationLink(value: SettingsPage.pluginPage(plugin: d.plugin.id, ui: place.id, title: place.title, manager: page.manager)) {
                         Label { Text(place.title).lineLimit(1) } icon: { ThemedIcon(Theme.Icon.pluginPage) }
                     }

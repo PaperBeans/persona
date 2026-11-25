@@ -49,6 +49,26 @@ func handlingItem(h *inboxHub, id string) *InboxItem {
 	return it
 }
 
+// Runtime-only authorization fields are not part of the persisted snapshot. Rollback must leave them alone rather
+// than reflecting their unexported values, which panics while the inbox lock is held.
+func TestInboxRollbackIgnoresReplyPolicyRuntimeFields(t *testing.T) {
+	b := &inboxBook{}
+	it := &InboxItem{ID: "event", Title: "stored", replyClassifySerial: 4, receivedInCollection: true}
+	w := beginWrite(it)
+	it.Title = "changed"
+	it.replyClassifySerial = 5
+	it.receivedInCollection = false
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("rollback panicked on runtime-only fields: %v", r)
+		}
+	}()
+	b.restore(w)
+	if it.Title != "stored" || it.replyClassifySerial != 5 || it.receivedInCollection {
+		t.Fatalf("rollback runtime fields: title=%q serial=%d received=%v", it.Title, it.replyClassifySerial, it.receivedInCollection)
+	}
+}
+
 // Every pass that writes inbox rows (#4366): with the store down the item gets back what its row holds (chain,
 // handling, suggestion and filing included), no change event goes out, and the next pass converges once the store is
 // back. The start is the exception: its conversation is live on a machine.

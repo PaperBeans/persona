@@ -58,6 +58,7 @@ repository_add
 view_show
 view_update
 view_get
+page
 conversations_list
 conversations_switch
 conversation_read
@@ -92,7 +93,6 @@ direction_name
 leader_progress
 decision_record
 decisions_query
-health_intake
 subscription_list
 subscription_get
 subscription_sources

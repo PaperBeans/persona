@@ -9,6 +9,7 @@ nonisolated struct ToolCall: Identifiable, Hashable, Sendable {
     var images: [ImagePayload] = []
     var results: [Item] = []
     var agentStatus: String?
+    var toolViews: [ExtensionView] = []
 
     var id: String { use.id }
     var name: String { use.toolName ?? "tool" }
@@ -1237,6 +1238,7 @@ final class ChatStore {
                 var call = ToolCall(use: it, result: deliveries.last, results: agent ? deliveries : [],
                                     agentStatus: deliveries.last(where: { $0.task?.kind == "agent" }).map { $0.task?.status ?? "" })
                 call.images = it.toolUseID.flatMap { images[$0] } ?? []
+                call.toolViews = deliveries.flatMap { $0.toolViews ?? [] }
                 run.append(.call(call))
             case .thinking:
                 pendingThoughts.append(it)
@@ -1548,8 +1550,9 @@ nonisolated enum ChatCache {
     /// v21: pages retain silent finish receipts, and narration stays distinguishable from a final reply.
     /// v22: replies retain the model that wrote each assistant item; older copies could not mark model changes.
     /// v23: Codex image generation completions are Read items; older copies keep their notices without the image strip.
+    /// v24: tool_result and fold items carry out-of-band tool_views (interactive maps, etc.); older copies omit them.
     /// Bump it whenever the item structure or the text the hub gives an item changes.
-    static let folder = "chats-v23"
+    static let folder = "chats-v24"
 
     /// Once per launch, before the first copy is read or written (a static let runs once, on whichever thread asks first).
     private static let dropOlder: Void = {

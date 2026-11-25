@@ -13,5 +13,14 @@
   "unavailable_api_chat": "通过 Chat Completions API 接入。助手对话需要 Claude Code 或 Messages API 接入",
   "unavailable_api_other": "通过 {api} API 接入。助手对话需要 Claude Code 或 Messages API 接入",
   "err_invalid_id": "这不是一个对话 ID",
-  "err_unreadable": "读不到各对话选的模型，请稍后再试。"
+  "err_unreadable": "读不到各对话选的模型，请稍后再试。",
+  "unhealthy_auth": "在 {machine} 上的上次检查里，Key 或登录被拒绝了",
+  "unhealthy_model_route": "在 {machine} 上的上次检查里，网关用不了这个模型",
+  "unhealthy_cli_outdated": "{machine} 上的命令行工具版本太旧，更新后再测一次",
+  "unhealthy_timeout": "在 {machine} 上的上次检查里没有响应",
+  "unhealthy_usage_limit": "在 {machine} 上已经用到订阅的用量上限",
+  "unhealthy_upstream": "在 {machine} 上的上次检查里，网关没有空闲的账号",
+  "unhealthy_onboarding": "{machine} 上还没完成首次设置",
+  "unhealthy_other": "在 {machine} 上的上次检查没通过",
+  "unhealthy_with_error": "{reason}：{error}"
 }

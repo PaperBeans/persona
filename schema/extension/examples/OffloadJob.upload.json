@@ -1,0 +1,7 @@
+{
+  "state": "running",
+  "phase": "upload",
+  "done_bytes": 1200000000,
+  "total_bytes": 9100000000,
+  "items": [{"path": "/Users/me/Movies/Raw footage 2024", "status": "running", "bytes": 9100000000}]
+}

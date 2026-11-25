@@ -53,6 +53,15 @@ class ConcurrencyTests(unittest.TestCase):
         self.assertIn('workflow_call', workflow('apple-test.yml')['on'])
         self.assertIn('workflow_dispatch', workflow('apple-test.yml')['on'])
 
+    def test_web_matrix_shards_full_and_core_only_suites(self):
+        job = workflow('web-test.yml')['jobs']['web']
+        self.assertIn('strategy', job)
+        strategy = job['strategy']
+        self.assertEqual(int(strategy['max-parallel']), 2)
+        self.assertEqual(strategy['fail-fast'], 'false')
+        self.assertEqual(strategy['matrix']['shard'], ['1/2', '2/2'])
+        self.assertEqual(job['env']['PERSONA_WEB_TEST_SHARD'], '${{ matrix.shard }}')
+
     def test_heavy_matrices_keep_all_shards_with_bounded_parallelism(self):
         for filename, job, maximum, size in [('server-test.yml', 'server', 2, 7),
                                               ('android-test.yml', 'android', 2, 2),

@@ -99,5 +99,6 @@
   "start_link_lost": "The connection to “{machine}” dropped, and after it reconnected the task had not started: {reason}",
   "start_machine_busy": "“{machine}” stayed connected but did not answer in time (it may be too busy): {reason}",
   "start_link_down": "The connection to “{machine}” dropped and did not come back in time: {reason}",
+  "codex_effort_terminal": "Codex will start in the terminal to use the requested reasoning effort. Approvals and questions will use the terminal screen.",
   "start_goal_skipped": "started without a start goal: {reason}"
 }

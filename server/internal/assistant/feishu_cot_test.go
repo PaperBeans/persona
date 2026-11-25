@@ -11,7 +11,6 @@ import (
 
 	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -348,69 +347,6 @@ func TestFeishuProgressCardThrottled(t *testing.T) {
 	sink.progress(ctx, r, 11*time.Second, steps, "")
 	if len(*posts) != 5 || (*posts)[4]["update"] == true || r.Ext["card"] != "om_card" {
 		t.Fatalf("no new card: %v", *posts)
-	}
-}
-
-func TestClipPanelLine(t *testing.T) {
-	cases := []struct{ name, in, want string }{
-		{"ascii", strings.Repeat("a", 300), strings.Repeat("a", 120) + "…"},
-		{"runes", strings.Repeat("字", 200), strings.Repeat("字", 120) + "…"},
-		{"entity whole", strings.Repeat("a", 114) + "&#124;bbb", strings.Repeat("a", 114) + "&#124;…"},
-		{"entity split", strings.Repeat("a", 115) + "&#124;bbb", strings.Repeat("a", 115) + "…"},
-		{"literal ampersand", strings.Repeat("a", 116) + "Q&A" + strings.Repeat("b", 100), strings.Repeat("a", 116) + "Q&Ab…"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := clipPanelLine(tc.in, 120); got != tc.want {
-				t.Fatalf("got %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// pathologicalSteps builds n botStep-like lines made of card-escape entities (pathological raw parameters).
-func pathologicalSteps(n int) []string {
-	steps := make([]string, n)
-	for i := range steps {
-		steps[i] = fmt.Sprintf("运行%02d %s", i, strings.Repeat("&#124;", 49))
-	}
-	return steps
-}
-
-// Ordinary short steps render verbatim (41 steps: the newest 40 show, one hidden).
-func TestProcessPanelShortUnchanged(t *testing.T) {
-	var steps []string
-	for i := 0; i < 41; i++ {
-		steps = append(steps, fmt.Sprintf("运行 `cmd%02d`", i))
-	}
-	c := botcard.NewCard("", "", "")
-	processPanel(i18n.ZhHans, c, steps)
-	js := c.JSON()
-	for _, want := range []string{"已调用 41 次工具", "…前面还有 1 步", "- 运行 `cmd40`"} {
-		if !strings.Contains(js, want) {
-			t.Fatalf("missing %q in %s", want, js)
-		}
-	}
-	if strings.Contains(js, "cmd00") || strings.Count(js, "collapsible_panel") != 1 {
-		t.Fatalf("oldest step or panel count wrong: %s", js)
-	}
-}
-
-// A pathological panel bounds itself: the oldest calls hide first, the newest stay.
-func TestProcessPanelPathologicalBounded(t *testing.T) {
-	c := botcard.NewCard("", "", "")
-	processPanel(i18n.ZhHans, c, pathologicalSteps(40))
-	js := c.JSON()
-	if got := len(js) - len(botcard.NewCard("", "", "").JSON()); got > processPanelMaxBytes {
-		t.Fatalf("panel is %d JSON bytes, want <= %d", got, processPanelMaxBytes)
-	}
-	for _, want := range []string{"已调用 40 次工具", "…前面还有 20 步", "运行20", "运行39"} {
-		if !strings.Contains(js, want) {
-			t.Fatalf("missing %q in %s", want, js)
-		}
-	}
-	if strings.Contains(js, "运行19") {
-		t.Fatalf("an oldest step was kept: %s", js)
 	}
 }
 

@@ -6,7 +6,9 @@
 // The core declares here what it needs, never a module's types; the composition root (internal/modules/all) provides
 // it in the init of the module's file, under the module's build constraint. With the module left out of the build
 // nothing is provided: the subcommand is unknown and the extension host registers no such extension, exactly as
-// before the extension existed.
+// before the extension existed. Switched off in the `modules` setting (moduleswitch), the extension host gets nothing
+// either (VolcSpeech, VoiceExtension), so it registers and starts no such extension; the program stays a subcommand
+// of the binary, which only a build without the module removes, and nothing in the manager runs it.
 //
 // Everything is provided while the program initializes, before main runs, and only read afterwards.
 package builtinext
@@ -19,6 +21,8 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 )
 
 // Program is a module's built-in extension program, run as a subcommand of the binaries that link the modules.
@@ -27,16 +31,28 @@ type Program func(ctx context.Context, version string) error
 type program struct {
 	run     Program
 	summary string
+	module  string
 }
 
 var programs = map[string]program{}
 
-// AddProgram provides the program the subcommand name runs and its line in personad's usage (init only).
-func AddProgram(name, summary string, run Program) {
+// AddProgram provides the module's program, the one the subcommand name runs, and its line in personad's usage (init
+// only). It stays a subcommand of the binary whatever the switch; the extension host asks ProgramOff before it starts
+// one.
+func AddProgram(module, name, summary string, run Program) {
 	if _, dup := programs[name]; dup {
 		panic("builtinext: program " + name + " provided twice")
 	}
-	programs[name] = program{run, summary}
+	programs[name] = program{run, summary, module}
+	moduleswitch.Provided("builtinext.AddProgram", module, func(s moduleswitch.Set) bool { return !ProgramOff(s, name) })
+}
+
+// ProgramOff reports whether name is a module's program and s has that module switched off: the extension host
+// starts no such program (a hub.json entry or a built-in extension that runs it), as in a build without the module,
+// where the subcommand is unknown. A name no module provides (a core subcommand) is never off.
+func ProgramOff(s moduleswitch.Set, name string) bool {
+	p, ok := programs[name]
+	return ok && !s.On(p.module)
 }
 
 // LookupProgram is the program the subcommand name runs, if a module in this build provides one.
@@ -70,18 +86,14 @@ type Volc struct {
 	Voices, ASRModels []string
 }
 
-var volc *Volc
+var volc = moduleswitch.NewPort[Volc]("builtinext.ProvideVolc")
 
-// ProvideVolc provides the Volcengine speech extension (init only).
-func ProvideVolc(v Volc) { volc = &v }
+// ProvideVolc provides the Volcengine speech extension under its module's id (init only).
+func ProvideVolc(module string, v Volc) { volc.Provide(module, v) }
 
-// VolcSpeech is the Volcengine speech extension, if its module is in this build.
-func VolcSpeech() (Volc, bool) {
-	if volc == nil {
-		return Volc{}, false
-	}
-	return *volc, true
-}
+// VolcSpeech is the Volcengine speech extension, if its module is in this build and s has it on (the `modules`
+// setting the manager started with): switched off, the extension host registers no such extension.
+func VolcSpeech(s moduleswitch.Set) (Volc, bool) { return volc.Get(s) }
 
 // Voice is what the extension host needs of the built-in voice extension (internal/modules/voice, `personad voice`,
 // docs/assistant/voice.md): the id of its transcription contribution, the meeting transcription a hub without a
@@ -111,15 +123,12 @@ type VoiceSources struct {
 	HubJSON, Gateway json.RawMessage
 }
 
-var voice *Voice
+var voice = moduleswitch.NewPort[Voice]("builtinext.ProvideVoice")
 
-// ProvideVoice provides the voice extension (init only).
-func ProvideVoice(v Voice) { voice = &v }
+// ProvideVoice provides the voice extension under its module's id (init only).
+func ProvideVoice(module string, v Voice) { voice.Provide(module, v) }
 
-// VoiceExtension is the voice extension, if its module is in this build.
-func VoiceExtension() (Voice, bool) {
-	if voice == nil {
-		return Voice{}, false
-	}
-	return *voice, true
-}
+// VoiceExtension is the voice extension, if its module is in this build and s has it on (the `modules` setting the
+// manager started with): switched off, the extension host registers no such extension and no meeting transcribes
+// with it.
+func VoiceExtension(s moduleswitch.Set) (Voice, bool) { return voice.Get(s) }

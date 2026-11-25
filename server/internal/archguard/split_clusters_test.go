@@ -25,9 +25,9 @@ var movedClusters = []struct {
 	{"node", "node/nodekit", nil},                                  // helpers shared by the clusters: no file prefix, names only
 	{"assistant", "assistant/chatsearch", []string{"search_text"}},
 	{"assistant", "assistant/saved", []string{"saved_"}},
-	{"assistant", "assistant/kbhistory", []string{"kb_history"}},
+	{"assistant", "modules/knowledge-ui/kbhistory", []string{"kb_history"}}, // moved on into the knowledge-ui module (#14407)
 	{"assistant", "assistant/archiverecovery", []string{"kb_archive_recovery"}},
-	{"assistant", "assistant/kbsent", []string{"kb_sent"}},
+	{"assistant", "modules/knowledge-ui/kbsent", []string{"kb_sent"}}, // moved on into the knowledge-ui module (#14407)
 	{"db", "assistant/repositorystore", []string{"todo_repositories", "workspace_naming", "task_workspaces"}},
 }
 

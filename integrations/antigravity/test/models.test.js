@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,21 +9,29 @@ import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { createAgyRuntime } from '../lib/runtime.js'
 import { mapModels } from '../lib/models.js'
 
-const entries = ['medium', 'high', 'low'].map((level) => ({ modelId: `gemini-future-${level}`, name: `Gemini Future (${level})` }))
+const entries = ['medium', 'high', 'low', 'xhigh', 'max'].map((level) => ({ modelId: `gemini-future-${level}`, name: `Gemini Future (${level})` }))
 const AUTO_REFUSAL_NOTICE = 'agy 拒绝了 Auto 模式，已改由 Persona 自动批准权限请求'
 
 test('native catalog preserves new IDs, defaults and only advertised thinking variants', () => {
   const models = mapModels([...entries, entries[0], { modelId: 'single', name: 'Single' }], entries[1].name)
-  assert.equal(models.length, 4)
+  assert.equal(models.length, 6)
   assert.equal(models[1].default, true)
-  assert.deepEqual(models[0].efforts, ['low', 'medium', 'high'])
-  assert.deepEqual(models[3].efforts, [])
-  assert.equal(models[0].default_effort, 'medium')
+  for (const model of models.slice(0, -1)) {
+    assert.deepEqual(model.efforts, ['low', 'medium', 'high', 'xhigh', 'max'])
+    assert.equal(model.default_effort, model.id.split('-').at(-1))
+  }
+  assert.deepEqual(models.at(-1).efforts, [])
+  assert.equal(models.at(-1).default_effort, undefined)
 })
 
 async function fixture(t, options = {}) {
   const home = mkdtempSync(join(tmpdir(), 'agy-models-'))
-  const catalog = (value) => writeFileSync(join(home, 'catalog.json'), JSON.stringify(value))
+  const catalog = (value) => {
+    // The fake agy reads this from its fallback timer, in another process. Never expose a truncated document.
+    const file = join(home, 'catalog.json')
+    writeFileSync(`${file}.next`, JSON.stringify(value))
+    renameSync(`${file}.next`, file)
+  }
   catalog({ models: entries })
   const agyDir = join(home, 'settings')
   mkdirSync(agyDir)
@@ -32,9 +41,10 @@ async function fixture(t, options = {}) {
   const fake = fileURLToPath(new URL('./fake-acp-models.mjs', import.meta.url))
   writeFileSync(bin, `#!/bin/sh\nexec '${process.execPath}' '${fake}' '${home}' "$@"\n`)
   chmodSync(bin, 0o755)
+  if (options.modelsTimeoutMs) execFileSync(bin, ['--warm'])
   const n = await startFakeNode(t)
   const runtime = createAgyRuntime({ home, agyDir, agyBin: bin, checkTimeoutMs: options.checkTimeoutMs, personadBin: '/missing', socketPath: n.path, log: () => {},
-    modelsTimeoutMs: options.modelsTimeoutMs, catalogEveryMs: options.catalogEveryMs, catalogMaxMs: options.catalogMaxMs })
+    modelsTimeoutMs: options.modelsTimeoutMs, catalogEveryMs: options.catalogEveryMs, catalogTtlMs: options.catalogTtlMs, catalogMaxMs: options.catalogMaxMs })
   t.after(async () => { await runtime.stop(); rmSync(home, { recursive: true, force: true }) })
   runtime.start()
   await n.ready
@@ -94,10 +104,42 @@ test('session controls confirm native state and preserve acknowledged fields on 
   assert.equal(row().model, entries[1].modelId)
   await n.peer.call('session.modes', { session_id: sessionId, effort: 'low' })
   await until('native configuration', () => row()?.model === entries[2].modelId && row()?.effort === 'low')
-  await assert.rejects(n.peer.call('session.modes', { session_id: sessionId, model: entries[1].modelId, effort: 'max' }), /Thinking level unavailable/)
+  await assert.rejects(n.peer.call('session.modes', { session_id: sessionId, model: entries[1].modelId, effort: 'ultra' }), /Thinking level unavailable/)
   await until('native configuration', () => row()?.model === entries[1].modelId && row()?.effort === 'high')
   await n.peer.call('session.modes', { session_id: sessionId, permission_mode: 'bypassPermissions' })
   await until('native configuration', () => row()?.permission_mode === 'bypassPermissions')
+})
+
+test('a model pick or a thought-level switch applies the advertised native variant', async (t) => {
+  const { n, sessionId, row, calls } = await fixture(t)
+  const advertised = await n.peer.call('launchers.models', {})
+  assert.deepEqual(advertised.models.find((model) => model.id === 'gemini-future-xhigh')?.efforts, ['low', 'medium', 'high', 'xhigh', 'max'])
+  for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
+    const model = `gemini-future-${effort}`
+    await n.peer.call('session.modes', { session_id: sessionId, model })
+    await until(`ACP selected ${model}`, () => row()?.model === model && row()?.effort === effort)
+    assert.equal(calls().filter((call) => call.method === 'session/set_model').at(-1)?.params.modelId, model)
+  }
+  for (const effort of ['xhigh', 'max', 'medium']) {
+    await n.peer.call('session.modes', { session_id: sessionId, effort })
+    await until(`ACP selected ${effort}`, () => row()?.model === `gemini-future-${effort}` && row()?.effort === effort)
+  }
+})
+
+test('uses the ACP session window until the transcript reports its own', async (t) => {
+  const { n, home, catalog } = await fixture(t, { noStart: true })
+  catalog({ models: entries, windows: { [entries[0].modelId]: 524288, [entries[2].modelId]: 131072 } })
+  const { session } = await n.peer.call('session.start', { cwd: home })
+  const row = () => n.last('runtime.sessions')?.sessions.find((entry) => entry.session_id === session.session_id)
+  await until('initial ACP window', () => row()?.context_window === 524288)
+  await n.peer.call('session.modes', { session_id: session.session_id, model: entries[2].modelId })
+  await until('new model window', () => row()?.context_window === 131072)
+  const logs = join(home, 'settings', 'brain', session.session_id.slice(4), '.system_generated', 'logs')
+  mkdirSync(logs, { recursive: true })
+  writeFileSync(join(logs, 'transcript.jsonl'), JSON.stringify({ step_index: 0, type: 'PLANNER_RESPONSE',
+    model: entries[2].modelId.toUpperCase(), content: 'Done', input_tokens: 8000, context_window: 64000 }) + '\n')
+  await n.peer.call('session.rename', { session_id: session.session_id, title: 'Recorded usage' })
+  await until('transcript window overrides ACP', () => row()?.context_tokens === 8000 && row()?.context_window === 64000)
 })
 
 test('a rejected startup configuration closes the newly created native session', async (t) => {
@@ -120,6 +162,31 @@ test('availability checks use native ACP and deny tools without phone cards', as
   assert.equal(calls().find((call) => call.id === 'check-permission')?.result?.outcome?.outcome, 'cancelled')
   assert.equal(calls().filter((call) => call.method === 'session/close').length, 1)
   assert.equal(n.last('runtime.sessions')?.sessions.length ?? 0, 0)
+})
+
+// An Antigravity CLI without session/set_mode (#14533): a check needs no mode switch, so it passes; a start that asks
+// for a mode other than the default says the CLI is too old, and one that asks for the default starts.
+test('availability checks and default-mode starts work on a CLI without session/set_mode', async (t) => {
+  const { n, home, catalog, settings, calls } = await fixture(t, { noStart: true })
+  catalog({ models: entries, noSetMode: true })
+  settings({ model: entries[1].name, agentMode: 'default' })
+  const result = await n.peer.call('launchers.check', { cwd: home, prompt: 'Reply with OK' })
+  assert.equal(result.ok, true)
+  assert.equal(result.answer, 'OK')
+  assert.equal(calls().filter((call) => call.method === 'session/close').length, 1)
+  await assert.rejects(n.peer.call('session.start', { cwd: home, permission_mode: 'acceptEdits' }), /too old to switch to the "accept-edits" mode.*Please update agy/)
+  const { session } = await n.peer.call('session.start', { cwd: home, permission_mode: 'default' })
+  assert.ok(session.session_id)
+})
+
+test('availability checks switch to the default mode only where the CLI lists one', async (t) => {
+  const { n, home, catalog, calls } = await fixture(t, { noStart: true })
+  catalog({ models: entries, availableModes: [{ id: 'accept-edits' }, { id: 'plan' }] })
+  assert.equal((await n.peer.call('launchers.check', { cwd: home, prompt: 'Reply with OK' })).ok, true)
+  assert.equal(calls().filter((call) => call.method === 'session/set_mode').length, 0)
+  catalog({ models: entries, availableModes: [{ id: 'default' }, { id: 'plan' }] })
+  assert.equal((await n.peer.call('launchers.check', { cwd: home, prompt: 'Reply with OK' })).ok, true)
+  assert.deepEqual(calls().filter((call) => call.method === 'session/set_mode').map((call) => call.params.modeId), ['default'])
 })
 
 test('failed availability inference closes the check session and propagates the native error', async (t) => {
@@ -386,4 +453,35 @@ test('periodic discovery backs off while it keeps timing out', { timeout: 30_000
   await until('the usual pace again', () => modelsCalls().length >= before + 2, 20_000)
   const after = modelsCalls()
   assert.ok(after.at(-1) - after.at(-2) < 1000, `back to every 250 ms: ${after.at(-1) - after.at(-2)} ms`)
+})
+
+test('default runtime discovers models once at startup and refreshes on demand without periodic background polling', async (t) => {
+  const { n, modelsCalls } = await fixture(t, { noStart: true, catalogTtlMs: 200 })
+  await until('startup discovery finishes', () => modelsCalls().length === 1 && n.last('runtime.launchers')?.launchers[0].models.length === entries.length)
+  await n.peer.call('launchers.models', {})
+  assert.equal(modelsCalls().length, 1, 'cached catalog reused within TTL')
+  await new Promise((resolve) => setTimeout(resolve, 320))
+  assert.equal(modelsCalls().length, 1, 'no periodic background polling runs while idle')
+  await n.peer.call('launchers.models', {})
+  assert.equal(modelsCalls().length, 2, 'expired TTL refreshes on demand')
+})
+
+test('on-demand discovery backs off unforced lookups after a sign-in timeout while explicit refresh retries immediately', async (t) => {
+  const { n, catalog, modelsCalls } = await fixture(t, { noStart: true, modelsTimeoutMs: 250, catalogTtlMs: 500, catalogMaxMs: 10_000 })
+  await until('startup discovery finishes', () => modelsCalls().length === 1 && n.last('runtime.launchers')?.launchers[0].models.length === entries.length)
+  catalog({ hang: true })
+  await new Promise((resolve) => setTimeout(resolve, 550))
+  await assert.rejects(n.peer.call('launchers.models', {}), /sign-in may have expired/)
+  assert.equal(modelsCalls().length, 2)
+
+  catalog({ models: entries })
+  await assert.rejects(n.peer.call('launchers.models', {}), /sign-in may have expired/)
+  assert.equal(modelsCalls().length, 2, 'unforced lookup during backoff window does not spawn agy models')
+
+  const refreshed = await n.peer.call('launchers.models', { refresh: true })
+  assert.equal(refreshed.models.length, entries.length)
+  assert.equal(modelsCalls().length, 3, 'explicit refresh bypasses backoff and clears it')
+  const cached = await n.peer.call('launchers.models', {})
+  assert.equal(cached.models.length, entries.length)
+  assert.equal(modelsCalls().length, 3)
 })

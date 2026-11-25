@@ -16,12 +16,33 @@ import { deleteTodo, type Todo, type TodoAsk } from "./todos";
 import { getInbox, itemPath } from "./inbox";
 import { closePanel, getPanel } from "./panel";
 import { BUILTIN_MANAGER, conversationManager, defaultManager, itemHeaders, MANAGER_HEADER, managerHeaderFor, noteConversation, routedConversationManager } from "./manager-choice";
-import type { ChatLine } from "./turns";
+import { canonicalMcpToolName, stripToolResultTimestampHeaders, type ChatLine } from "./turns";
 import type { Item } from "./types";
 import { upsertTaskCards, type TaskCardMetadata } from "./task-cards";
 
 export type TaskWorkspace = "new" | "none" | { existing: string } | { new: { branch?: string } };
 export interface TaskWorkspaceResolved { machine: string; path: string; branch?: string; workspace_id?: string; created?: boolean }
+
+export type PlanTaskDispatchReason =
+  | "only"
+  | "first"
+  | "score"
+  | "quota"
+  | "unavailable"
+  | "kept"
+  | "switched"
+  | "over_pace"
+  | (string & {});
+
+export interface PlanTaskDispatch {
+  tier?: string;
+  candidate?: number;
+  of?: number;
+  launcher?: string;
+  model?: string;
+  reason: PlanTaskDispatchReason;
+  args?: Record<string, string | number | boolean>;
+}
 
 export interface PlanTask {
   title: string;
@@ -61,6 +82,8 @@ export interface PlanTask {
    *  kind of task by itself next time. Every task of such a plan carries the same; absent everywhere else. */
   schedule?: string;
   schedule_title?: string;
+  /** Hub-owned candidate selection metadata for multi-candidate tiers; absent on older hubs. */
+  dispatch?: PlanTaskDispatch;
 }
 
 export interface TaskPlan {
@@ -984,11 +1007,11 @@ function lineTime(l: DisplayLine): number | undefined {
 
 /** A reminder or an event the assistant added on the phone, from its tool call. */
 export function quickResult(use: Item, result?: Item): QuickResult | undefined {
-  const short = (use.tool_name ?? "").split("__").at(-1);
+  const short = (canonicalMcpToolName(use.tool_name) ?? "").split("__").at(-1);
   const kind = short === "phone_reminders_create" ? "reminder" : short === "phone_calendar_create_event" ? "event" : undefined;
   if (!kind || !result || result.is_error || !result.text) return undefined;
   try {
-    const o = JSON.parse(result.text) as Record<string, unknown>;
+    const o = JSON.parse(stripToolResultTimestampHeaders(result.text)) as Record<string, unknown>;
     if (typeof o.id !== "string" || !o.id) return undefined;
     const when = kind === "reminder" ? o.due : o.start;
     const place = kind === "reminder" ? o.list : o.calendar;

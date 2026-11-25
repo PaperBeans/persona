@@ -59,6 +59,24 @@ type InboxSuggestion struct {
 	// Owner and SourceOf bind an unsent reply to its author and source snapshot; persisted, not listed.
 	Owner    *SessionRef `json:"owner,omitempty"`
 	SourceOf string      `json:"source_of,omitempty"`
+	// Reply policy fields are copied from the item by the server, never supplied by the drafting model.
+	ReplyCategory     string `json:"reply_category,omitempty"`
+	ReplyMode         string `json:"reply_mode,omitempty"`
+	ReplyClassifiedOf string `json:"reply_classified_of,omitempty"`
+	ReplyPolicyRev    string `json:"reply_policy_rev,omitempty"`
+	ReplyReviewed     bool   `json:"reply_reviewed,omitempty"`
+	// ReplyInstruction is the owner rewrite instruction whose generated replacement was already classified. It is
+	// internal authorization provenance, not part of the physical send identity and not listed to clients.
+	ReplyInstruction string `json:"reply_instruction,omitempty"`
+	// ReplyPublicationFailed keeps a draft whose only publication write failed from becoming an owner-authored direct
+	// reply after the store recovers. It is an internal fail-closed marker, never listed to clients.
+	ReplyPublicationFailed bool `json:"reply_publication_failed,omitempty"`
+	// OnDemand identifies model text returned by /draft. ReplyPublicationPending remains true in the first persisted
+	// row and is cleared only by a separate successful commit, so a restart in the publication gap fails closed.
+	OnDemand                bool `json:"on_demand,omitempty"`
+	ReplyPublicationPending bool `json:"reply_publication_pending,omitempty"`
+	// ReplyPolicy binds an accepted reply suggestion to the compiled upstream policy snapshot; persisted, not listed.
+	ReplyPolicy *InboxReplyPolicySnapshot `json:"reply_policy,omitempty"`
 }
 
 // InboxHandoff is one hand-off of the event to Persona's main conversation (POST /api/v1/inbox/{id}/handoff): that

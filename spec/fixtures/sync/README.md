@@ -131,7 +131,7 @@ For runs against the real apps (#1073 step 4), `MOCK_SYNC_CASE=<file>#<name>` ma
   - `drop` closes the device's socket. New sockets from that device then wait for the `open` step, whose hello says `resumed` or not; the step's frames follow the snapshot.
   - `hold` arms the device's next read of the path; it is answered with the state it read at the `release`.
 - `GET /mock/case` shows where the case is and, per device, its socket, the requests it made (`seen`) and its writes in flight. `POST /mock/case/load {"case": …}` plays another case in the same mock.
-- The cases' times are in January 2026, and the web's runners pin their clock there (2026-01-02T03:05:00Z). An app on the real clock (the iOS simulator) loads with `"now": true`: every time in the case moves by the same amount so that clock reads the present. Otherwise each line is months older than the messages the app sends, and iOS takes a line without `client_msg_id` for a bubble only when it was written after it.
+- The cases' times are in January 2026, and the web's runners pin their clock there (2026-01-02T03:05:00Z). An app on the real clock (the iOS simulator) loads with `"now": true` to shift fixture timestamps to the present. For a new chat, the mock dates each transcript item when it is appended and uses that timestamp for both reads and pushes. This lets an app match a line without `client_msg_id` to the first message even after a slow simulator launch.
 
 `scripts/mock/test_sync_case_mock.py` plays every case's hub side with a scripted device per case device (a socket and HTTP, no app):
 

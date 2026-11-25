@@ -7,6 +7,7 @@
   "relayed_from": "Another chat",
   "relayed_from_chat": "From {chat}",
   "relayed_note": "Arrives when this chat is free",
+  "relayed_note_no_wake": "Arrives with the next message",
   "relayed_summary_one": "{count} message from another chat",
   "relayed_summary_other": "{count} messages from other chats",
   "drag": "Drag queued message {n} to reorder",

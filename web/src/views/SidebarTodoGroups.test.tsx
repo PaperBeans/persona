@@ -164,3 +164,46 @@ describe("Section", () => {
     expect(host.querySelectorAll("p")).toHaveLength(0);
   });
 });
+
+describe("By to-do under todos_v2 (#14831)", () => {
+  const goalTodos: Todo[] = [
+    { id: "goal", title: "Ship v2", created_at: at, updated_at: at },
+    { id: "done-sub", title: "Done sub", part_of: "goal", done_at: at, created_at: at, updated_at: at },
+    { id: "sub-work", title: "Build feature", part_of: "goal", created_at: at, updated_at: at, agents: [link("a")] },
+    { id: "sub-block", title: "Approve migration", part_of: "goal", created_at: at, updated_at: at, agents: [link("b")] },
+  ];
+  const goalSessions = [
+    s("a", "working", "/code/weather"),
+    s("b", "needs_you", "/code/weather"),
+  ];
+
+  it("folds non-urgent subtasks under their parent goal with compact progress and surfaces needs_you blockers at the top, reverting losslessly when off", () => {
+    // todos_v2 = false (default): flat branches, no goal progress badge
+    const flatTree = buildTodoTree(goalSessions, machines, goalTodos, { spaces: [], sessions: [] }, Date.now(), { todosV2: false });
+    show(<TodoTreeView tree={flatTree} machines={machines} activeKey="" {...stable} />);
+    const flatKeys = [...host.querySelectorAll("[data-tree-branch]")].map((el) => el.getAttribute("data-tree-branch"));
+    expect(flatKeys).toEqual(["todo:sub-block", "todo:sub-work"]);
+    expect(host.querySelector("[data-goal-progress]")).toBeNull();
+
+    // todos_v2 = true: needs_you child surfaces first, non-urgent child folds under parent goal with 1/3 progress
+    const v2Tree = buildTodoTree(goalSessions, machines, goalTodos, { spaces: [], sessions: [] }, Date.now(), { todosV2: true });
+    show(<TodoTreeView tree={v2Tree} machines={machines} activeKey="" {...stable} />);
+    const v2Keys = [...host.querySelectorAll("[data-tree-branch]")].map((el) => el.getAttribute("data-tree-branch"));
+    expect(v2Keys).toEqual(["todo:sub-block", "todo:goal"]);
+    const progress = row("todo:goal").querySelector<HTMLElement>("[data-goal-progress]")!;
+    expect(progress).not.toBeNull();
+    expect(progress.getAttribute("data-goal-progress")).toBe("1/3");
+    expect(progress.className).toContain("text-ink-3");
+    expect(progress.className).toContain("tabular-nums");
+    expect(chevron("todo:goal").getAttribute("aria-expanded")).toBe("true");
+    // parent goal remains interactive (can fold/unfold its folded subtasks' agents)
+    act(() => chevron("todo:goal").click());
+    expect(chevron("todo:goal").getAttribute("aria-expanded")).toBe("false");
+
+    // turning todos_v2 back off immediately restores the exact flat DOM
+    show(<TodoTreeView tree={flatTree} machines={machines} activeKey="" {...stable} />);
+    const revertedKeys = [...host.querySelectorAll("[data-tree-branch]")].map((el) => el.getAttribute("data-tree-branch"));
+    expect(revertedKeys).toEqual(flatKeys);
+    expect(host.querySelector("[data-goal-progress]")).toBeNull();
+  });
+});

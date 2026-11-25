@@ -49,12 +49,19 @@ func nodeUpdateHandoffGraceOf(h Hello) time.Duration {
 // (model preparation, origin decisions and conversation bookkeeping) happens once, with the same request bytes.
 func (s *Service) callDevice(ctx context.Context, call DeviceCall) (json.RawMessage, error) {
 	once := func() (json.RawMessage, error) {
+		var finish func(json.RawMessage)
+		if devicewire.IsSessionStart(call.Method) {
+			finish = s.beginPlacementBind(ctx, call.Device, call.Params)
+		}
 		res, ok, err := s.logicalCall(ctx, call.Device, call.Method, call.Params)
 		if !ok {
 			res, ok, err = s.localFleetDeviceCall(ctx, call)
 		}
 		if !ok {
 			res, err = s.hub.DeviceCall(ctx, call)
+		}
+		if finish != nil {
+			finish(res)
 		}
 		return res, err
 	}

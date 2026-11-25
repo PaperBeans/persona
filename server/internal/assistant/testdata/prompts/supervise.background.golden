@@ -9,6 +9,6 @@ Question routing: timeout_minutes=5, low_distraction=false.
      用哪个分支？
 
 2. 任务「修登录崩溃」（t1，signal=review）：待逐项复核，不代表完成；在 Mac session_id=a1b2c3d4
-   验收标准：PR 合并到 main
+   验收标准用 todo_get 取原文
    Agent 最后说的：
    做完了，PR 已合并

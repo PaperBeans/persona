@@ -1,3 +1,4 @@
+import { SocketReceiveBuffer } from '../core/SocketReceiveBuffer';
 import { legacyClientHeader, legacyOperationHeader } from '../core/WireCompatibility';
 import { clientLocale } from '../core/ClientLocale';
 import { bundleManager } from '@kit.AbilityKit';
@@ -13,7 +14,9 @@ import { url, util } from '@kit.ArkTS';
 
 const MAX_HTTP_BYTES: number = 4 * 1024 * 1024;
 const MAX_BINARY_BYTES: number = 32 * 1024 * 1024;
+// Port relays and outgoing messages stay bounded separately from the Hub's fleet snapshots.
 const MAX_FRAME_BYTES: number = 1024 * 1024;
+const MAX_HUB_EVENT_BYTES: number = 64 * 1024 * 1024;
 const MAX_HEADER_BYTES: number = 16 * 1024;
 const REQUEST_TIMEOUT_MS: number = 15000;
 const NEXT_ADDRESS_TIMEOUT_MS: number = 2500;
@@ -162,13 +165,6 @@ function utf8String(value: Uint8Array, fatal: boolean = true): string {
   return util.TextDecoder.create('utf-8', { fatal: fatal }).decodeToString(value);
 }
 
-function appendBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
-  const merged = new Uint8Array(left.length + right.length);
-  merged.set(left, 0);
-  merged.set(right, left.length);
-  return merged;
-}
-
 function arrayBufferBytes(value: ArrayBuffer): Uint8Array { return new Uint8Array(value); }
 
 function toArrayBuffer(value: Uint8Array): ArrayBuffer {
@@ -246,11 +242,12 @@ export class HubTransport {
   private tcpSocket: socket.TCPSocket | undefined;
   private messageCallback: ((payload: string) => void) | undefined;
   private binaryCallback: ((payload: ArrayBuffer) => void) | undefined;
-  private stateCallback: ((state: string) => void) | undefined;
+  private stateCallback: ((state: string, cause?: Error) => void) | undefined;
   private socketMessageListener: ((info: socket.SocketMessageInfo) => void) | undefined;
   private socketErrorListener: ((error: Error) => void) | undefined;
   private socketCloseListener: (() => void) | undefined;
-  private rx: Uint8Array = new Uint8Array(0);
+  private rx = new SocketReceiveBuffer();
+  private readonly inboundLimit: number;
   private upgraded: boolean = false;
   private socketTrusted: boolean = false;
   private upgradeRequested: boolean = false;
@@ -266,6 +263,7 @@ export class HubTransport {
     this.hubId = config.hubId;
     this.token = config.token;
     this.pin = config.pin;
+    this.inboundLimit = streamPath === '/api/v1/ws' ? MAX_HUB_EVENT_BYTES : MAX_FRAME_BYTES;
     this.managerId = config.managerId; this.streamPath = streamPath; routePath(this.endpoint, streamPath);
     this.proxy = config.proxy;
     if (this.proxy && (this.endpoint.scheme !== 'https' || this.proxy.host !== '127.0.0.1' || !this.pin)) throw new Error('ssh_invalid_config');
@@ -376,7 +374,8 @@ export class HubTransport {
 
   async request(path: string, method: string = 'GET', body: string = '', opId: string = ''): Promise<string> {
     if (utf8(body).length > MAX_HTTP_BYTES) throw new HttpFailure(0, 'request_too_large');
-    const response = await this.requestData(path, method, body || undefined, 'application/json', MAX_HTTP_BYTES, opId);
+    const limit = method.toUpperCase() === 'GET' && path.split('?')[0] === '/api/v1/sessions' ? MAX_HUB_EVENT_BYTES : MAX_HTTP_BYTES;
+    const response = await this.requestData(path, method, body || undefined, 'application/json', limit, opId);
     try { return utf8String(new Uint8Array(response.data), true); }
     catch (_) { throw new HttpFailure(0, 'response_invalid', !['GET', 'HEAD'].includes(method.toUpperCase())); }
   }
@@ -402,7 +401,7 @@ export class HubTransport {
     } finally { if (timer !== -1) clearTimeout(timer); }
   }
 
-  async connect(onMessage: (payload: string) => void, onState?: (state: string) => void,
+  async connect(onMessage: (payload: string) => void, onState?: (state: string, cause?: Error) => void,
     onBinary?: (payload: ArrayBuffer) => void): Promise<void> {
     this.assertLive(this.generation);
     if (this.connectionStage !== 'idle') throw new Error('already_connecting');
@@ -598,23 +597,28 @@ export class HubTransport {
     if (this.closed || this.closing) return;
     if (!this.socketTrusted || !this.upgradeRequested || this.expectedAccept.length !== 28) { this.failSocket(new Error('unsolicited_data')); return; }
     const bytes = arrayBufferBytes(buffer);
-    if (this.rx.length + bytes.length > MAX_FRAME_BYTES + MAX_HEADER_BYTES + 14) {
-      this.failSocket(new Error('frame_too_large')); return;
+    let pos = 0;
+    while (pos < bytes.length && !this.closed && !this.closing) {
+      const limit = this.upgraded ? this.inboundLimit + 10 : MAX_HEADER_BYTES + 4;
+      const take = Math.min(bytes.length - pos, limit - this.rx.length);
+      if (take <= 0) { this.failSocket(new Error(this.upgraded ? 'frame_too_large' : 'invalid_upgrade')); return; }
+      this.rx.append(bytes.subarray(pos, pos + take), limit);
+      pos += take;
+      if (!this.upgraded) this.processUpgradeResponse();
+      if (this.upgraded) this.processFrames();
     }
-    this.rx = appendBytes(this.rx, bytes);
-    if (!this.upgraded) this.processUpgradeResponse();
-    if (this.upgraded) this.processFrames();
   }
 
   private processUpgradeResponse(): void {
-    const end = this.headerEnd(this.rx);
+    const received = this.rx.view();
+    const end = this.headerEnd(received);
     if (end < 0) {
-      if (this.rx.length > MAX_HEADER_BYTES) this.failSocket(new Error('invalid_upgrade'));
+      if (received.length === MAX_HEADER_BYTES + 4) this.failSocket(new Error('invalid_upgrade'));
       return;
     }
     if (end > MAX_HEADER_BYTES) { this.failSocket(new Error('invalid_upgrade')); return; }
     let header: string;
-    try { header = utf8String(this.rx.slice(0, end), true); } catch (_) { this.failSocket(new Error('invalid_upgrade')); return; }
+    try { header = utf8String(received.subarray(0, end), true); } catch (_) { this.failSocket(new Error('invalid_upgrade')); return; }
     const lines = header.split('\r\n');
     if (!/^HTTP\/1\.[01] 101(?: |$)/.test(lines[0])) {
       const status = Number((lines[0].split(' ')[1] || '0')); this.failSocket(new HttpFailure(status, 'upgrade_rejected') as Error); return;
@@ -633,7 +637,7 @@ export class HubTransport {
     if (!accept || !this.socketTrusted || !this.upgradeRequested || !upgrade.includes('websocket') || !connection.includes('upgrade') || !constantTimeEqual(accept, this.expectedAccept)) {
       this.failSocket(new Error('invalid_upgrade')); return;
     }
-    this.rx = this.rx.slice(end + 4);
+    this.rx.consume(end + 4);
     this.upgraded = true;
     this.openResolve?.();
   }
@@ -646,31 +650,33 @@ export class HubTransport {
 
   private processFrames(): void {
     while (!this.closed && !this.closing && this.rx.length >= 2) {
-      const first = this.rx[0], second = this.rx[1];
+      const received = this.rx.view();
+      const first = received[0], second = received[1];
       const fin = (first & 0x80) !== 0, rsv = first & 0x70, opcode = first & 0x0f;
       const masked = (second & 0x80) !== 0;
       let length = second & 0x7f, offset = 2;
       if (rsv !== 0 || masked) { this.failSocket(new Error('invalid_frame')); return; }
       if (length === 126) {
-        if (this.rx.length < 4) return;
-        length = readU16(this.rx, 2); offset = 4;
+        if (received.length < 4) return;
+        length = readU16(received, 2); offset = 4;
       } else if (length === 127) {
-        if (this.rx.length < 10) return;
-        if ((this.rx[2] & 0x80) !== 0) { this.failSocket(new Error('invalid_frame')); return; }
-        const high = readU16(this.rx, 2) * 65536 + readU16(this.rx, 4);
-        const low = readU16(this.rx, 6) * 65536 + readU16(this.rx, 8);
-        if (high !== 0 || low > MAX_FRAME_BYTES) { this.failSocket(new Error('frame_too_large')); return; }
+        if (received.length < 10) return;
+        if ((received[2] & 0x80) !== 0) { this.failSocket(new Error('invalid_frame')); return; }
+        const high = readU16(received, 2) * 65536 + readU16(received, 4);
+        const low = readU16(received, 6) * 65536 + readU16(received, 8);
+        if (high !== 0 || low > this.inboundLimit) { this.failSocket(new Error('frame_too_large')); return; }
         length = low; offset = 10;
       }
-      if (length > MAX_FRAME_BYTES) { this.failSocket(new Error('frame_too_large')); return; }
+      if (length > this.inboundLimit) { this.failSocket(new Error('frame_too_large')); return; }
       const control = opcode >= 8;
       if (control && (!fin || length > 125 || (opcode !== 8 && opcode !== 9 && opcode !== 10))) {
         this.failSocket(new Error('invalid_control_frame')); return;
       }
       if (opcode !== 0 && opcode !== 1 && opcode !== 2 && !control) { this.failSocket(new Error('invalid_frame')); return; }
-      if (this.rx.length < offset + length) return;
-      const payload = this.rx.slice(offset, offset + length);
-      this.rx = this.rx.slice(offset + length);
+      if (opcode === 0 && this.fragmentSize + length > this.inboundLimit) { this.failSocket(new Error('message_too_large')); return; }
+      if (received.length < offset + length) return;
+      const payload = received.slice(offset, offset + length);
+      this.rx.consume(offset + length);
       if (control) { this.processControl(opcode, payload); continue; }
       if (opcode === 0) {
         if (!this.fragmentOpcode) { this.failSocket(new Error('unexpected_continuation')); return; }
@@ -680,9 +686,9 @@ export class HubTransport {
         this.fragmentOpcode = opcode;
         this.fragmentParts = [payload]; this.fragmentSize = payload.length;
       }
-      if (this.fragmentSize > MAX_FRAME_BYTES || this.fragmentParts.length > 1024) { this.failSocket(new Error('message_too_large')); return; }
+      if (this.fragmentSize > this.inboundLimit || this.fragmentParts.length > 1024) { this.failSocket(new Error('message_too_large')); return; }
       if (fin) {
-        const message = concatArrays(this.fragmentParts);
+        const message = this.fragmentParts.length === 1 ? this.fragmentParts[0] : concatArrays(this.fragmentParts);
         const messageOpcode = this.fragmentOpcode;
         this.fragmentOpcode = 0; this.fragmentParts = []; this.fragmentSize = 0;
         if (messageOpcode === 1) {
@@ -800,8 +806,8 @@ export class HubTransport {
     try { this.tlsSocket?.close().catch(() => undefined); } catch (_) { }
     try { this.tcpSocket?.close().catch(() => undefined); } catch (_) { }
     this.tlsSocket = undefined; this.tcpSocket = undefined;
-    this.rx = new Uint8Array(0); this.fragmentParts = []; this.fragmentSize = 0;
-    this.stateCallback?.(state);
+    this.rx = new SocketReceiveBuffer(); this.fragmentParts = []; this.fragmentSize = 0;
+    this.stateCallback?.(state, _error);
   }
 
   close(): void {

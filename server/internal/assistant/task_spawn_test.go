@@ -84,7 +84,7 @@ func spawnKBFixture(t *testing.T) (*Service, *fakeHub, Todo) {
 	s := withSettings(t, f, New(Options{Hub: f, Logf: testLogf(t), KB: &KBOptions{Dir: t.TempDir()}}))
 	t.Cleanup(s.kbEnd)
 	shortSupervise(t, s)
-	f.hello.Assistant.MachineID = "server"
+	f.setHello(func(h *Hello) { h.Assistant.MachineID = "server" })
 	setSettings(t, s, func(v *Settings) { v.Main = "conv1" })
 	f.known["conv1"] = true
 	f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
@@ -145,7 +145,7 @@ func TestTaskSpawnExplicitProjectAndDirectionBeatForeignCwd(t *testing.T) {
 				s.directions.m["conv1"] = &direction{Project: "explicit", By: directionByUser}
 				s.directions.mu.Unlock()
 			}
-			f.hello.Locale = "en"
+			f.setLocale("en")
 			res := s.mcpCall(ctx, "box", "s1", "task_spawn", json.RawMessage(spawnArgs), false)
 			if res.IsError {
 				t.Fatal(res.Content)

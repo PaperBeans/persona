@@ -9,10 +9,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -676,6 +679,137 @@ func TestStartTakesAModelAndKeepsThePick(t *testing.T) {
 			t.Fatalf("kept: %v", picks)
 		}
 	})
+	t.Run("pinning the displayed default model holds across later config changes (#13567)", func(t *testing.T) {
+		s, f := pickFixture(t)
+		setModel(t, s, "assistant", ModelBinding{Provider: "launcher.claude", Model: "opus", Effort: "high"})
+		code, got := start(t, s, `{"prompt":"hi","main":true,"launcher":"claude","model":"opus","effort":"high"}`)
+		want := proto.ModelPick{Launcher: "claude", Model: "opus", Effort: "high"}
+		if code != 200 || got["pick"] != want {
+			t.Fatalf("%d %v", code, got)
+		}
+		if p := f.lastSend(t); p["launcher"] != "claude" || p["model"] != "opus" || p["effort"] != "high" {
+			t.Fatalf("first message: %v", p)
+		}
+		// Changing global Model configuration does not override the pinned conversation pick on turn 2.
+		setModel(t, s, "assistant", ModelBinding{Provider: "launcher.gw", Model: "fable"})
+		sid := got["sid"].(string)
+		f.setSessions("server", proto.Session{SessionID: sid, Assistant: true, Launcher: "claude"})
+		if p, err := send(t, s, sid, map[string]any{}); err != nil || p["launcher"] != "claude" || p["model"] != "opus" || p["effort"] != "high" {
+			t.Fatalf("turn 2: %v %v", p, err)
+		}
+	})
+}
+
+// An unreadable persisted model-pick book or logical-conversation store read stops delivery with the localized
+// assistant-model_pick.err_unreadable error rather than falling back to the global default or leaking a raw DB error
+// (#13567).
+func TestSendRefusesWhenModelPickBookCannotBeRead(t *testing.T) {
+	wantEn := i18n.T(i18n.En, "assistant-model_pick.err_unreadable")
+	wantZh := i18n.T(i18n.ZhHans, "assistant-model_pick.err_unreadable")
+
+	t.Run("pick book setting unreadable", func(t *testing.T) {
+		s, f := pickFixture(t)
+		again := newServiceOn(t, f, unreadablePickStore{Store: s.store()})
+		f.setSessions("server", proto.Session{SessionID: "main", Assistant: true, Launcher: "claude"})
+		_, err := send(t, again, "main", map[string]any{})
+		if err == nil {
+			t.Fatal("expected unreadable model picks to stop delivery")
+		}
+		if err.Error() != wantEn || strings.Contains(err.Error(), "db unavailable") {
+			t.Fatalf("err = %q, want localized %q without raw DB error", err.Error(), wantEn)
+		}
+		if len(f.sends) != 0 {
+			t.Fatalf("reached node despite unreadable pick book: %v", f.sends)
+		}
+	})
+
+	for _, tc := range []struct {
+		name      string
+		failAfter int
+		lang      string
+		want      string
+	}{
+		{"logicalSendModel read error (en)", 0, "en", wantEn},
+		{"logicalSendModel read error (zh-Hans)", 0, "zh-Hans", wantZh},
+		{"logicalPickConversation read error (en)", 1, "en", wantEn},
+		{"logicalPickConversation read error (zh-Hans)", 1, "zh-Hans", wantZh},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f := pickFixture(t)
+			rawErr := errors.New("postgres connection reset")
+			st := &unreadableLogicalPickStore{Store: s.store(), failAfter: tc.failAfter, err: rawErr}
+			again := newServiceOn(t, f, st)
+			f.setSessions("server", proto.Session{SessionID: "main", Assistant: true, Launcher: "claude"})
+			_, err := again.SendParams(context.Background(), SendParams{
+				MachineID: "server", SessionID: "main", Lang: tc.lang, Params: map[string]any{"text": "hi"},
+			})
+			if err == nil {
+				t.Fatal("expected logical conversation read error to stop delivery")
+			}
+			if err.Error() != tc.want || strings.Contains(err.Error(), rawErr.Error()) {
+				t.Fatalf("err = %q, want localized %q without raw DB error", err.Error(), tc.want)
+			}
+			if len(f.sends) != 0 {
+				t.Fatalf("reached node despite logical read error: %v", f.sends)
+			}
+			if got := st.callCount(); got != tc.failAfter+1 {
+				t.Fatalf("LogicalConversation calls = %d, want %d", got, tc.failAfter+1)
+			}
+		})
+	}
+
+	t.Run("readModelPick wraps logicalPickConversation error", func(t *testing.T) {
+		s, f := pickFixture(t)
+		rawErr := errors.New("postgres connection reset")
+		st := &unreadableLogicalPickStore{Store: s.store(), failAfter: 0, err: rawErr}
+		again := newServiceOn(t, f, st)
+		_, _, err := again.readModelPick(context.Background(), "server", "main")
+		if err == nil {
+			t.Fatal("expected readModelPick error")
+		}
+		if got := i18n.Localize(err, i18n.En); got != wantEn || strings.Contains(err.Error(), rawErr.Error()) {
+			t.Fatalf("readModelPick err = %q (en=%q), want %q without raw DB error", err.Error(), got, wantEn)
+		}
+	})
+}
+
+type unreadablePickStore struct{ Store }
+
+func (u unreadablePickStore) Setting(ctx context.Context, key string, dst any) (bool, error) {
+	if key == modelPicksKey {
+		return false, errors.New("db unavailable")
+	}
+	return u.Store.Setting(ctx, key, dst)
+}
+
+type unreadableLogicalPickStore struct {
+	Store
+	logicalConversationStore
+	mu        sync.Mutex
+	failAfter int
+	calls     int
+	err       error
+}
+
+func (u *unreadableLogicalPickStore) LogicalConversation(context.Context, string, string) (*db.LogicalConversation, error) {
+	u.mu.Lock()
+	u.calls++
+	n := u.calls
+	u.mu.Unlock()
+	if n <= u.failAfter {
+		return nil, nil
+	}
+	return nil, u.err
+}
+
+func (u *unreadableLogicalPickStore) callCount() int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.calls
+}
+
+func (u *unreadableLogicalPickStore) LogicalConversations(context.Context) ([]db.LogicalConversation, error) {
+	return nil, nil
 }
 
 // The hub's own messages to a conversation (supervision, notices, another conversation's) run on its pick like the

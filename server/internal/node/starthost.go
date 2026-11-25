@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -56,10 +57,16 @@ func (n *Node) withResumeHost(ctx context.Context, id string) context.Context {
 }
 
 // checkStartHost refuses a start naming a host the machine does not enable, or one that cannot start sessions; nothing
-// is started. "" is the default host, always fine here (the empty set is refused later).
+// is started. "" is the default host, always fine here (the empty set is refused later). agy, the Antigravity
+// companion's terminal-less sessions (runtimeOfIn), is no engine host: a start naming it while no companion is
+// connected is refused with agy_companion_offline, which a start the hub sent there by default takes as its cue to
+// start again in the default host (#13447).
 func (n *Node) checkStartHost(kind string) error {
 	if kind == "" {
 		return nil
+	}
+	if kind == proto.HostAgy && !n.agyRuntimeConnected() {
+		return refusal(proto.CodeAgyCompanionOffline, i18n.T(i18n.Default, "rpc-errors."+proto.CodeAgyCompanionOffline), nil)
 	}
 	if !proto.IsEngineHost(kind) {
 		return fmt.Errorf("unknown host %q", kind)

@@ -9,8 +9,8 @@ import apple_resolved
 
 ROOT = Path(__file__).resolve().parents[2]
 RESOLVED = ROOT / "apple/Packages/PersonaSSH/Package.resolved"
-TRACKED_SHA256 = "f50bac69a331777699739a95986393fa9c9a35a5b1087610b8bd4f57db961ae5"
-DEFAULT_SHA256 = "d6091eab6c13e65aa7af543970c51bfc4bc7b0f5947b3213277779842dce002b"
+TRACKED_SHA256 = "16e3c3bd49535709b1cde4faf834bd964f692481ecf08d5bcc7913ed8410b7fc"
+DEFAULT_SHA256 = "655f7e5280dd00dd342bc4205f18b47c8b50feb2d1abf7bd66e5ac5ec0a6b118"
 
 
 class AppleResolvedTests(unittest.TestCase):

@@ -33,12 +33,30 @@ type agentArchive struct {
 	wrote uint64
 }
 
-// activeAfter is the moment after which source activity restores the archived session.
+// activeAfter is the moment after which source activity restores the archived session. A row archived with no time of
+// its own (an Antigravity CLI pane's row has none, #13710) counts activity from the archive on, not from the beginning
+// of time: the conversation's own row, listed with its last change once the pane is gone, is not new activity (#14520).
 func (rec agentArchive) activeAfter() time.Time {
-	if rec.ClosedAt.After(rec.Session.UpdatedAt) {
+	at := rec.Session.UpdatedAt
+	if at.IsZero() {
+		at = rec.ChangedAt
+	}
+	if rec.ClosedAt.After(at) {
 		return rec.ClosedAt
 	}
-	return rec.Session.UpdatedAt
+	return at
+}
+
+// archiveSessionOf is the id a row's archive record is kept under, its archive key: for an Antigravity CLI pane's row,
+// the id its conversation is listed under once no pane shows it, agy-<conversation id>, which the row names first among
+// its aliases (docs/protocol/protocol.md "Agent session archives"); else its own (#14520). The archive then follows the
+// conversation to whichever row lists it next, and is not kept under a pane's id, which the engine gives to another
+// conversation later.
+func archiveSessionOf(s proto.Session) string {
+	if aliases := s.Aliases(); s.Agent == "agy" && s.PaneID != "" && len(aliases) > 0 {
+		return aliases[0]
+	}
+	return s.SessionID
 }
 
 // A just-closed confirmation can remain in a node's cached list until its next push.
@@ -277,11 +295,14 @@ func (svc *Service) applyArchives(ctx context.Context, machine string, list []pr
 	}
 	var next map[string]agentArchive
 	for _, s := range list {
-		key := runtimeListID(machine, s.SessionID)
-		rec, ok := b.records[key]
+		rec, ok := rowArchive(machine, s, b.records, nil)
 		if !ok || !rec.Archived {
 			continue
 		}
+		// The restore goes under the row's archive key, newer than the record that archived it (under that key, or
+		// under an id the row went by, which stays as it was).
+		sid := archiveSessionOf(s)
+		key := runtimeListID(machine, sid)
 		if rec.active(s, mark) {
 			b.pending[key] = true
 		}
@@ -289,7 +310,7 @@ func (svc *Service) applyArchives(ctx context.Context, machine string, list []pr
 			rec.Archived = false
 			rec.ChangedAt = nextAgentArchiveChangedAt(rec.ChangedAt)
 			rec.Session = archiveSnapshot(s)
-			rec.Session.MachineID = machine
+			rec.Session.MachineID, rec.Session.SessionID = machine, sid
 			if next == nil {
 				next = maps.Clone(b.records)
 			}
@@ -370,7 +391,8 @@ func archiveRow(rec agentArchive) proto.Session {
 	return s
 }
 
-// markAgentArchives puts the archive's marks on list's rows. It returns the keys of list's rows that have a record,
+// markAgentArchives puts the archive's marks on list's rows, each row's from the newest record among its own id and its
+// aliases (rowArchive). It returns the keys of list's rows that have a record,
 // and of the ids their conversations went by that have one (proto.Session.Aliases, #8131), in list order, one per
 // line: what the rows only the archive has depend on (tailKeys) besides the records. Paseo's conversations were
 // listed under their transcripts once, and an archive record kept then repeated the row listed under its own id
@@ -378,29 +400,50 @@ func archiveRow(rec agentArchive) proto.Session {
 func markAgentArchives(machine string, list []proto.Session, records map[string]agentArchive, pending map[string]bool, mark uint64) string {
 	var listed strings.Builder
 	for i := range list {
-		for _, alias := range list[i].Aliases() {
-			key := runtimeListID(machine, alias)
-			if _, ok := records[key]; ok {
-				listed.WriteString(key)
-				listed.WriteByte('\n')
-			}
-		}
-		key := runtimeListID(machine, list[i].SessionID)
-		rec, ok := records[key]
-		if !ok {
+		rec, ok := rowArchive(machine, list[i], records, &listed)
+		if !ok || list[i].Assistant {
 			continue
 		}
-		listed.WriteString(key)
-		listed.WriteByte('\n')
-		if !list[i].Assistant {
-			// A storage timeout must neither reveal unrelated archived rows nor hide
-			// new work. The durable restore remains pending until its write succeeds.
-			active := rec.active(list[i], mark)
-			list[i].Archived = rec.Archived && !pending[key] && !active
-			list[i].ArchiveChangedAt = archiveChangedAt(rec.ChangedAt)
-		}
+		// A storage timeout must neither reveal unrelated archived rows nor hide
+		// new work. The durable restore remains pending until its write succeeds.
+		active := rec.active(list[i], mark)
+		restoring := len(pending) > 0 && pending[runtimeListID(machine, archiveSessionOf(list[i]))] // under its archive key
+		list[i].Archived = rec.Archived && !restoring && !active
+		list[i].ArchiveChangedAt = archiveChangedAt(rec.ChangedAt)
 	}
 	return listed.String()
+}
+
+// rowArchive is the record that says whether s, listed on machine, is archived: the newest among those under its own
+// id and its aliases, its own on a tie; ok false when there is none. An archive made under an id the conversation went
+// by holds for the row listed now (#14395): an Antigravity CLI pane's row, closed since, or a pane's own id an archive
+// was kept under before #14520. Activity in the row restores it under the row's archive key (applyArchives), and a
+// record under another id stays as it was, as Paseo's do (#8131). listed, when not nil, gets the key of every record
+// found, one per line, the aliases' first.
+func rowArchive(machine string, s proto.Session, records map[string]agentArchive, listed *strings.Builder) (rec agentArchive, ok bool) {
+	for _, alias := range s.Aliases() {
+		k := runtimeListID(machine, alias)
+		if r, found := records[k]; found {
+			if listed != nil {
+				listed.WriteString(k)
+				listed.WriteByte('\n')
+			}
+			if !ok || r.ChangedAt.After(rec.ChangedAt) {
+				rec, ok = r, true
+			}
+		}
+	}
+	own := runtimeListID(machine, s.SessionID)
+	if r, found := records[own]; found {
+		if listed != nil {
+			listed.WriteString(own)
+			listed.WriteByte('\n')
+		}
+		if !ok || !rec.ChangedAt.After(r.ChangedAt) {
+			rec, ok = r, true
+		}
+	}
+	return rec, ok
 }
 
 // tailKeys are the keys of machine's records that are not among listed (markAgentArchives), sorted: stable
@@ -539,7 +582,7 @@ func (svc *Service) listArchivedSessions(w http.ResponseWriter, r *http.Request)
 		for _, row := range list {
 			if row.Archived && !row.Assistant && (!row.HiddenByDirectory() || r.URL.Query().Get("include_hidden") == "1") && !(ext && svc.extensionHides(ctx, runSpace(row))) {
 				row.Manager = svc.id
-				row.NativeArchive = svc.nativeArchiveView(m.ID, row.SessionID)
+				row.NativeArchive = svc.nativeArchiveView(m.ID, archiveSessionOf(row))
 				out = append(out, row)
 			}
 		}
@@ -647,7 +690,7 @@ func (svc *Service) setAgentSessionArchive(w http.ResponseWriter, r *http.Reques
 		svc.writeAgentArchiveError(w, err)
 		return
 	}
-	apierr.WriteJSON(w, map[string]any{"ok": true, "native": svc.nativeArchiveAwaited(r.Context(), row.MachineID, row.SessionID)}) // agent_archive_native.go
+	apierr.WriteJSON(w, map[string]any{"ok": true, "native": svc.nativeArchiveAwaited(r.Context(), row.MachineID, archiveSessionOf(row))}) // agent_archive_native.go
 }
 
 func (svc *Service) noteAgentArchive(ctx context.Context, s proto.Session, archived bool) error {
@@ -678,15 +721,17 @@ func (svc *Service) noteAgentArchiveAt(ctx context.Context, s proto.Session, arc
 	if err := svc.loadAgentArchivesLocked(ctx); err != nil {
 		return time.Time{}, err
 	}
-	key := runtimeListID(s.MachineID, s.SessionID)
+	snapshot := archiveSnapshot(s)
+	snapshot.SessionID = archiveSessionOf(s) // a pane's row: its conversation's own id
+	key := runtimeListID(s.MachineID, snapshot.SessionID)
 	next := maps.Clone(b.records)
 	changedAt := nextAgentArchiveChangedAt(b.records[key].ChangedAt)
-	next[key] = agentArchive{Session: archiveSnapshot(s), Archived: archived, ChangedAt: changedAt}
+	next[key] = agentArchive{Session: snapshot, Archived: archived, ChangedAt: changedAt}
 	if err := svc.saveAgentArchivesLocked(ctx, next); err != nil {
 		return time.Time{}, err
 	}
 	delete(b.pending, key)
-	svc.nativeArchiveWanted(s, archived) // the tool's own archive follows (agent_archive_native.go)
+	svc.nativeArchiveWanted(snapshot, archived) // the tool's own archive follows (agent_archive_native.go)
 	return changedAt, nil
 }
 

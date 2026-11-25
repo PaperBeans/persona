@@ -1,0 +1,5 @@
+{
+  "title": "ブロックした名前付き herdr セッション",
+  "block": "{machine} で名前付き herdr セッション {session} をブロック（中の Agent は Persona に表示されなくなります。herdr 自体は動作を続けます）",
+  "unblock": "{machine} で名前付き herdr セッション {session} のブロックを解除（中の Agent が Persona に再び表示されます）"
+}

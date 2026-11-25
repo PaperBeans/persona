@@ -137,7 +137,28 @@ func (b *inboxBook) chainAdd(it *InboxItem, e InboxChainEntry) {
 	e.ID = "c" + strconv.Itoa(it.ChainSeq)
 	it.Chain = append(it.Chain, e)
 	if n := len(it.Chain); n > chainMax {
-		it.Chain = slices.Clone(it.Chain[n-chainMax:])
+		start := n - chainMax
+		instruction := -1
+	scan:
+		for i := n - 1; i >= 0; i-- {
+			switch it.Chain[i].Kind {
+			case ChainConfirmed, ChainRejected:
+				break scan // a later owner decision consumed every earlier instruction
+			case ChainInstructed:
+				instruction = i
+				break scan
+			}
+		}
+		if instruction >= 0 && instruction < start {
+			// Reported progress must not evict the owner instruction that a still-current replacement relies on. Keep that
+			// one older entry plus the newest entries; a later owner decision or instruction makes it ordinary history again.
+			kept := make([]InboxChainEntry, 0, chainMax)
+			kept = append(kept, it.Chain[instruction])
+			kept = append(kept, it.Chain[n-chainMax+1:]...)
+			it.Chain = kept
+		} else {
+			it.Chain = slices.Clone(it.Chain[start:])
+		}
 	}
 }
 
@@ -272,6 +293,9 @@ func (b *inboxBook) noteReceived(it *InboxItem, prev inboxSeen, messages []Inbox
 	if it.Last == prev.last && prev.last != "" {
 		return
 	}
+	// followMerged consumes this per-round fact before the next collection. Unlike a timestamp comparison with the
+	// survivor, it proves that this member itself advanced even when its source event is older than the survivor's.
+	it.receivedInCollection = true
 	fresh := prev.last == "" && len(it.Chain) == 0
 	n := it.Count - prev.count
 	if fresh {

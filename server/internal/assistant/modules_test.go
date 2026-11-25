@@ -186,6 +186,7 @@ func assertBriefingAbsent(t *testing.T, s *Service) {
 // End to end: the morning routine with facts on runs with the module absent as a routine with facts off does: its answer
 // goes out, with no briefing rows and no brief item.
 func TestMorningRoutineRunsWithoutTheBriefingModule(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	off := briefRunEnvWith(t, true, func(e *briefRunEnv) { e.s.modules = kernel.New(nil, nil, nil) })
 	off.mirror()
 	plain := newBriefRunEnv(t, false)

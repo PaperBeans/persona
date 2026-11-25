@@ -1,0 +1,302 @@
+{
+  "view": {
+    "title": "Adjust",
+    "sections": [
+      {
+        "title": "Set 1",
+        "items": [
+          {
+            "type": "field",
+            "label": "Exercises",
+            "value": "414be15a-052b-5d21-958f-ea019279e657",
+            "name": "exercise_0",
+            "kind": "choice",
+            "choices": [
+              {
+                "value": "14e78d25-f6d8-5e35-84fc-e31bbb1b8178",
+                "title": "Bench press"
+              },
+              {
+                "value": "1a664f13-5559-5a1a-a92e-a1a9ec89441d",
+                "title": "Dumbbell shoulder press"
+              },
+              {
+                "value": "414be15a-052b-5d21-958f-ea019279e657",
+                "title": "Lat pulldown"
+              },
+              {
+                "value": "ac4326b9-d3e6-5fee-8440-e812d00d9fa2",
+                "title": "坐姿推胸"
+              },
+              {
+                "value": "8a13204f-ca7f-58bb-9548-f40fba0d0dd7",
+                "title": "深蹲"
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "key": "weight_0",
+            "title": "Weight (kg)",
+            "control": {
+              "kind": "stepper",
+              "name": "weight_0",
+              "value": 52.5,
+              "min": 0,
+              "max": 1000,
+              "step": 2.5,
+              "action": {
+                "id": "set:0",
+                "submit": true
+              }
+            }
+          },
+          {
+            "type": "row",
+            "key": "reps_0",
+            "title": "Reps",
+            "control": {
+              "kind": "stepper",
+              "name": "reps_0",
+              "value": 10,
+              "min": 1,
+              "max": 1000,
+              "step": 1,
+              "action": {
+                "id": "set:0",
+                "submit": true
+              }
+            }
+          },
+          {
+            "type": "row",
+            "key": "warmup_0",
+            "title": "Warm-up",
+            "control": {
+              "kind": "switch",
+              "name": "warmup_0",
+              "action": {
+                "id": "set:0",
+                "submit": true
+              }
+            }
+          },
+          {
+            "type": "button",
+            "title": "Remove set",
+            "action": {
+              "id": "remove:0",
+              "submit": true
+            }
+          }
+        ]
+      },
+      {
+        "title": "Set 2",
+        "items": [
+          {
+            "type": "field",
+            "label": "Exercises",
+            "value": "414be15a-052b-5d21-958f-ea019279e657",
+            "name": "exercise_1",
+            "kind": "choice",
+            "choices": [
+              {
+                "value": "14e78d25-f6d8-5e35-84fc-e31bbb1b8178",
+                "title": "Bench press"
+              },
+              {
+                "value": "1a664f13-5559-5a1a-a92e-a1a9ec89441d",
+                "title": "Dumbbell shoulder press"
+              },
+              {
+                "value": "414be15a-052b-5d21-958f-ea019279e657",
+                "title": "Lat pulldown"
+              },
+              {
+                "value": "ac4326b9-d3e6-5fee-8440-e812d00d9fa2",
+                "title": "坐姿推胸"
+              },
+              {
+                "value": "8a13204f-ca7f-58bb-9548-f40fba0d0dd7",
+                "title": "深蹲"
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "key": "weight_1",
+            "title": "Weight (kg)",
+            "control": {
+              "kind": "stepper",
+              "name": "weight_1",
+              "value": 52.5,
+              "min": 0,
+              "max": 1000,
+              "step": 2.5,
+              "action": {
+                "id": "set:1",
+                "submit": true
+              }
+            }
+          },
+          {
+            "type": "row",
+            "key": "reps_1",
+            "title": "Reps",
+            "control": {
+              "kind": "stepper",
+              "name": "reps_1",
+              "value": 10,
+              "min": 1,
+              "max": 1000,
+              "step": 1,
+              "action": {
+                "id": "set:1",
+                "submit": true
+              }
+            }
+          },
+          {
+            "type": "row",
+            "key": "warmup_1",
+            "title": "Warm-up",
+            "control": {
+              "kind": "switch",
+              "name": "warmup_1",
+              "action": {
+                "id": "set:1",
+                "submit": true
+              }
+            }
+          },
+          {
+            "type": "button",
+            "title": "Remove set",
+            "action": {
+              "id": "remove:1",
+              "submit": true
+            }
+          }
+        ]
+      },
+      {
+        "title": "Set 3",
+        "items": [
+          {
+            "type": "field",
+            "label": "Exercises",
+            "value": "8a13204f-ca7f-58bb-9548-f40fba0d0dd7",
+            "name": "exercise_2",
+            "kind": "choice",
+            "choices": [
+              {
+                "value": "14e78d25-f6d8-5e35-84fc-e31bbb1b8178",
+                "title": "Bench press"
+              },
+              {
+                "value": "1a664f13-5559-5a1a-a92e-a1a9ec89441d",
+                "title": "Dumbbell shoulder press"
+              },
+              {
+                "value": "414be15a-052b-5d21-958f-ea019279e657",
+                "title": "Lat pulldown"
+              },
+              {
+                "value": "ac4326b9-d3e6-5fee-8440-e812d00d9fa2",
+                "title": "坐姿推胸"
+              },
+              {
+                "value": "8a13204f-ca7f-58bb-9548-f40fba0d0dd7",
+                "title": "深蹲"
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "key": "weight_2",
+            "title": "Weight (kg)",
+            "control": {
+              "kind": "stepper",
+              "name": "weight_2",
+              "value": 85,
+              "min": 0,
+              "max": 1000,
+              "step": 2.5,
+              "action": {
+                "id": "set:2",
+                "submit": true
+              }
+            }
+          },
+          {
+            "type": "row",
+            "key": "reps_2",
+            "title": "Reps",
+            "control": {
+              "kind": "stepper",
+              "name": "reps_2",
+              "value": 6,
+              "min": 1,
+              "max": 1000,
+              "step": 1,
+              "action": {
+                "id": "set:2",
+                "submit": true
+              }
+            }
+          },
+          {
+            "type": "row",
+            "key": "warmup_2",
+            "title": "Warm-up",
+            "control": {
+              "kind": "switch",
+              "name": "warmup_2",
+              "action": {
+                "id": "set:2",
+                "submit": true
+              }
+            }
+          },
+          {
+            "type": "button",
+            "title": "Remove set",
+            "action": {
+              "id": "remove:2",
+              "submit": true
+            }
+          }
+        ]
+      },
+      {
+        "items": [
+          {
+            "type": "button",
+            "title": "Add a set",
+            "action": {
+              "id": "add",
+              "submit": true
+            }
+          },
+          {
+            "type": "button",
+            "title": "Cancel",
+            "action": {
+              "id": "cancel"
+            }
+          },
+          {
+            "type": "button",
+            "title": "Save",
+            "action": {
+              "id": "save",
+              "submit": true
+            }
+          }
+        ]
+      }
+    ],
+    "state": "{\"page\":\"strength.edit\",\"metric\":\"weight\",\"days\":30,\"draft\":\"f8af2ed3-552f-5821-bfa7-aa160f4b4978\",\"rev\":1,\"work\":[{\"exercise\":\"414be15a-052b-5d21-958f-ea019279e657\",\"weight\":52.5,\"reps\":10,\"at\":\"2026-11-24T19:05:45.333651869Z\"},{\"exercise\":\"414be15a-052b-5d21-958f-ea019279e657\",\"weight\":52.5,\"reps\":10,\"at\":\"2026-11-24T19:05:45.333651869Z\"},{\"exercise\":\"8a13204f-ca7f-58bb-9548-f40fba0d0dd7\",\"weight\":85,\"reps\":6,\"at\":\"2026-11-24T19:05:45.333651869Z\"}]}"
+  }
+}

@@ -165,8 +165,17 @@ func TestScheduledConfigurationFailureIsNotRetried(t *testing.T) {
 				if len(runs) != 1 || runs[0].Status != runFailed || runs[0].Retried || runs[0].SessionID != "" || f.sent() != 0 {
 					t.Fatalf("configuration failure created another attempt: runs=%+v sends=%d", runs, f.sent())
 				}
-				if got := len(f.pushed()); got != 1 {
-					t.Fatalf("failure/fallback notices=%d, want one", got)
+				if task.Facts || task.Report {
+					if got := len(f.pushed()); got != 1 {
+						t.Fatalf("briefing fallback notices=%d, want one", got)
+					}
+				} else {
+					if got := len(f.pushed()); got != 0 {
+						t.Fatalf("non-briefing schedule_failed pushed=%d, want 0", got)
+					}
+					if !hasRelayFrom(s, "main", cardScheduleFailed, "") {
+						t.Fatalf("non-briefing schedule_failed did not route to main: %+v", laterFor(s, "main"))
+					}
 				}
 			})
 		})

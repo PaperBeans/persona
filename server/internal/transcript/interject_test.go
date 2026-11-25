@@ -73,7 +73,7 @@ func TestInterjectIsNotUserContext(t *testing.T) {
 			}
 		}
 	}
-	if got := codexUserText(note + "\nSketch"); got != "Sketch" {
+	if got, _ := codexUserPart(note + "\nSketch"); got != "Sketch" {
 		t.Errorf("Codex user text: %q", got)
 	}
 	// Normal owner-picked context, even with a similar title, stays inspectable.

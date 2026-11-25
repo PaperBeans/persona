@@ -19,6 +19,7 @@ func (d *Devices) heldCredentialRevoked(id string) {
 	if d.heldLoad(ctx) {
 		d.heldFailRevoked(ctx)
 	}
+	d.heldStartCredentialRevoked(id)
 }
 
 // heldFailRevoked fails the rows that are safe to change now. The tick retries rows busy with a delivery,

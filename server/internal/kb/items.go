@@ -520,7 +520,7 @@ func (e *Engine) List(kind, tag string) []Entry {
 	case KindRecording:
 		for _, r := range e.Store.Recordings() {
 			if has(r.Tags) {
-				out = append(out, recordingEntry(r))
+				out = append(out, e.recordingEntryOf(r))
 			}
 		}
 	case KindTopic:

@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/cliport"
+
 	"github.com/coder/websocket"
 
 	"github.com/nwverse/persona/server/internal/agents"
@@ -32,6 +34,7 @@ import (
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/remoteimage"
@@ -54,6 +57,10 @@ type Devices interface {
 
 // Options are how the manager reaches what it needs.
 type Options struct {
+	// Modules is the run-time module switch the manager started with (the `modules` settings row, read before New,
+	// assistant.ReadModuleSwitch): a module it switches off gets nothing from its provider port, exactly as in a build
+	// without it (moduleswitch). The zero value has every module on.
+	Modules moduleswitch.Set
 	// Dir is the data directory (~/.persona): hub.json, extensions/ in it, and secret.key unless SecretKey says.
 	Dir string
 	// SecretKey is the manager's own key file (the built-in manager's in its directory, managerconf.OwnFile); "":
@@ -87,6 +94,8 @@ type Options struct {
 	// TranscriptionChanged invalidates the assistant's availability cache after an extension registry change.
 	// It must not block or call back into the registry; nil means no observer.
 	TranscriptionChanged func()
+	// TracksChanged invalidates the headless track registry after extension contributions change.
+	TracksChanged func()
 	// DialRelay opens the hub's relay channel with query.
 	DialRelay func(ctx context.Context, query string) (*websocket.Conn, error)
 	// Connected says whether the bus is up now (nil: always), and Connection which connection it is: a comparable
@@ -108,6 +117,9 @@ type Options struct {
 	// Lang and Timezone are the user's language and zone ("" when not known).
 	Lang     func() i18n.Lang
 	Timezone func() string
+	// Pages draws the assistant's pages (Dashboards, #15017) under the reserved extension id PagesExtension
+	// (pages_hook.go); nil: there are none (only the default manager has them).
+	Pages Pages
 }
 
 // Manager is the extensions, connectors and bots as the manager runs them.
@@ -225,6 +237,12 @@ func New(opts Options) *Manager {
 	}
 	if cfg.dir == "" {
 		cfg.dir = opts.Dir
+	}
+	if cfg.Lark.CLI != nil && !cliport.Available(opts.Modules) { // built in but switched off: as a build without it
+		opts.Logf("extensions: lark.cli is not read: the lark module is switched off in the modules setting")
+		c := *cfg
+		c.Lark.CLI = nil
+		cfg = &c
 	}
 	h := &Manager{opts: opts, cfg: cfg, version: opts.Build.Version, build: opts.Build, store: opts.Store,
 		logger: log.New(logWriter(opts.Logf), "", 0)}
@@ -469,4 +487,21 @@ func (h *Manager) secretKeyPath() string {
 		return h.opts.SecretKey
 	}
 	return filepath.Join(h.cfg.dir, secretKeyFile)
+}
+
+// modules is the run-time module switch the manager started with (Options.Modules); a nil manager (a test's) has every
+// module on.
+func (h *Manager) modules() moduleswitch.Set {
+	if h == nil {
+		return moduleswitch.Set{}
+	}
+	return h.opts.Modules
+}
+
+// modules is the manager's switch the extensions were made with, every module on without one.
+func (ps *extensions) modules() moduleswitch.Set {
+	if ps == nil {
+		return moduleswitch.Set{}
+	}
+	return ps.moduleSwitch
 }

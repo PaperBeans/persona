@@ -47,6 +47,7 @@ type report struct {
 	// Passive is passive mode's pairing, whichever mode is on.
 	Passive *passiveReport `json:"passive,omitempty"`
 	Service *serviceState  `json:"service,omitempty"`
+	Tray    *trayState     `json:"tray,omitempty"` // Windows
 	// ClaudePlugin is the Persona plugin for Claude Code as the node last checked it (persona-link plugin status checks
 	// now).
 	ClaudePlugin *proto.ClaudePlugin `json:"claude_plugin,omitempty"`
@@ -138,6 +139,7 @@ func gather(e *env) report {
 	}
 	if e.goos == "windows" {
 		r.Service = e.taskState() // winservice.go
+		r.Tray = trayStatus(e)
 	}
 	r.ClaudePlugin = e.savedPluginStatus() // plugin.go
 	return r
@@ -184,6 +186,7 @@ func (r report) text(now time.Time, user string) string {
 	if r.Mode == link.ModePassive {
 		r.passiveText(line, now, live)
 		r.serviceText(line, user)
+		r.trayText(line)
 		r.pluginText(line)
 		if live {
 			line("%s", terminalText("link-cli.process", i18n.Args{"pid": st.PID, "version": st.Version}))
@@ -319,12 +322,35 @@ func (r report) text(now time.Time, user string) string {
 		}
 	}
 	r.serviceText(line, user)
+	r.trayText(line)
 	r.pluginText(line)
 	if live {
 		line("%s", terminalText("link-cli.process", i18n.Args{"pid": st.PID, "version": st.Version}))
 	}
 	line("%s", terminalText("link-cli.log_path", i18n.Args{"path": r.Log}))
 	return b.String()
+}
+
+// trayState is the tray icon (Windows): running now, and started at sign-in.
+type trayState struct {
+	Running   bool `json:"running"`
+	Autostart bool `json:"autostart"`
+}
+
+// trayText is the report's line about the tray icon.
+func (r report) trayText(line func(string, ...any)) {
+	t := r.Tray
+	if t == nil {
+		return
+	}
+	running, at := terminalText("link-cli.tray_not_running"), terminalText("link-cli.tray_no_autostart")
+	if t.Running {
+		running = terminalText("link-cli.tray_running")
+	}
+	if t.Autostart {
+		at = terminalText("link-cli.tray_autostart")
+	}
+	line("%s", terminalText("link-cli.tray_status", i18n.Args{"running": running, "autostart": at}))
 }
 
 // pluginText is the report's line about the Claude Code plugin, when the node has checked it.

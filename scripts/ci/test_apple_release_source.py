@@ -45,7 +45,7 @@ class AppleReleaseSourceTests(unittest.TestCase):
         self.assertFalse((destination / ".ci-cache").exists())
         self.assertEqual(hashlib.sha256(self.original).hexdigest(), before)
         self.assertEqual(hashlib.sha256((destination / "apple/Packages/PersonaSSH/Package.resolved").read_bytes()).hexdigest(),
-                         "d6091eab6c13e65aa7af543970c51bfc4bc7b0f5947b3213277779842dce002b")
+                         "655f7e5280dd00dd342bc4205f18b47c8b50feb2d1abf7bd66e5ac5ec0a6b118")
         self.assertEqual(len(json.loads((destination / "apple/Packages/PersonaSSH/Package.resolved").read_text())["pins"]), 12)
         self.assertEqual((destination / "resolved-variant.txt").read_text().count("tracked_unchanged=yes"), 1)
 

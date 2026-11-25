@@ -179,6 +179,14 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "apple/PersonaLink/App/Info.plist": {
+      "reason": "Exact OS URL scheme retained for installed clients and existing pairing links.",
+      "tokens": [
+        "jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "apple/Persona/Resources/Info.plist": {
       "reason": "Exact OS URL scheme retained for installed clients and existing pairing links.",
       "tokens": [
@@ -298,6 +306,22 @@
         "JARVIS_DATABASE_URL",
         "JARVIS_DB_PASSWORD_FILE",
         "JARVIS_HOME",
+        "jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "desktop/src/connect-input.ts": {
+      "reason": "Exact legacy pairing URL scheme accepted by existing desktop sign-in input.",
+      "tokens": [
+        "jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "desktop/src/setup.js": {
+      "reason": "Exact legacy pairing URL scheme accepted by the desktop setup input compatibility parser.",
+      "tokens": [
         "jarvis"
       ],
       "path_tokens": [],
@@ -569,6 +593,7 @@
       "reason": "Dedicated adapter for a versioned runtime, protocol or persisted identity.",
       "tokens": [
         ".jarvis",
+        "jarvis-context",
         "jarvisd",
         "options.jarvisdBin"
       ],
@@ -577,6 +602,14 @@
     },
     "integrations/opencode/test/map.test.js": {
       "reason": "Exact regression fixture for stripping the legacy context marker while preserving visible text.",
+      "tokens": [
+        "jarvis-context"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "integrations/antigravity/test/status.test.js": {
+      "reason": "Preview fallback fixture retains the legacy context tag so it is never used as a title.",
       "tokens": [
         "jarvis-context"
       ],
@@ -1218,6 +1251,14 @@
         "mcp__jarvis__todo_bind_thread",
         "mcp__jarvis__todo_decision_add",
         "mcp__jarvis__todo_decisions"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "server/internal/node/session_mention_test.go": {
+      "reason": "Golden mentions retain the legacy context tag when annotating both quote forms.",
+      "tokens": [
+        "jarvis-context"
       ],
       "path_tokens": [],
       "external_refs": []

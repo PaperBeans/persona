@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { canBind, capabilityText, channelOf, channelSections, channelsSummary, channelStateText, channelSubtitle, conversationChannel, isPolled, settingsTarget, targetText, type Channel } from "./channels";
+import {
+  canBind, capabilityText, channelOf, channelSections, channelsSummary, channelStateText, channelSubtitle,
+  conversationChannel, isPolled, isValidThreadIdleHours, MAX_THREAD_IDLE_HOURS, normalizeThreadMode,
+  settingsTarget, supportsThreadRouting, targetText, type Channel,
+} from "./channels";
 
 const ch = (c: Partial<Channel> & Pick<Channel, "id">): Channel => ({
   name: c.id, kind: "im", source: "plugin", installed: true, enabled: true, state: "connected", capabilities: {}, bind: "qr", ...c,
@@ -88,5 +92,23 @@ describe("where a message came from", () => {
     expect(conversationChannel(["feishu", "wechat"], list)?.name).toBe("飞书机器人");
     expect(conversationChannel(["gone"], list)).toEqual({ id: "gone", name: "gone" });
     expect(conversationChannel([], list)).toBeUndefined();
+  });
+
+  it("normalizes thread_mode and validates thread_idle_hours for integrations_v2", () => {
+    expect(normalizeThreadMode(undefined)).toBe("channel_default");
+    expect(normalizeThreadMode("")).toBe("channel_default");
+    expect(normalizeThreadMode("future_mode")).toBe("channel_default");
+    expect(normalizeThreadMode("per_group_and_topic")).toBe("per_group_and_topic");
+    expect(normalizeThreadMode("per_topic")).toBe("per_topic");
+
+    expect(supportsThreadRouting({ thread_mode: "channel_default" })).toBe(true);
+    expect(supportsThreadRouting({ thread_mode: undefined })).toBe(false);
+
+    expect(isValidThreadIdleHours(0)).toBe(true);
+    expect(isValidThreadIdleHours(24)).toBe(true);
+    expect(isValidThreadIdleHours(MAX_THREAD_IDLE_HOURS)).toBe(true);
+    expect(isValidThreadIdleHours(-1)).toBe(false);
+    expect(isValidThreadIdleHours(1.5)).toBe(false);
+    expect(isValidThreadIdleHours(MAX_THREAD_IDLE_HOURS + 1)).toBe(false);
   });
 });

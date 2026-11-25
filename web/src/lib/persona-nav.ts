@@ -54,10 +54,10 @@ export function firstAndCurrent<T>(list: readonly T[], n: number, isCurrent: (x:
   return current ? [...first, current] : first;
 }
 
-/** The page entries under Persona, in the sidebar's order (the app's "Assistant" first, then the rest of its drawer). "Messages" shows
- * only in a browser that turned on "Show messages on home" (lark-chats.ts), on a hub with feature `lark`. The extensions' pages (nav_page) go right before "Settings".
+/** The page entries under Persona, in the sidebar's order (the app's "Assistant" first, then the rest of its drawer). "Messages" is the lark
+ * module's (src/modules/lark), right after Inbox. The extensions' pages (nav_page) go right before "Settings".
  * The enabled feature modules' pages (core/module-host.ts navItems) go right after the page each names (`after`). */
-export const NAV_PAGES = ["home", "inbox", "messages", "starred", "workspace-board", "todos", "routines", "kb", "machines", "terminal", "settings"] as const;
+export const NAV_PAGES = ["home", "inbox", "starred", "workspace-board", "todos", "routines", "kb", "machines", "terminal", "settings"] as const;
 
 /**
  * Where the page goes when another assistant becomes the current one (the sidebar's switcher): a page about one thing

@@ -133,7 +133,7 @@ setting; the 4 GB Gradle daemon and non-heap allocations are separate.
 | Platform / reusable workflow | Local entry | Checks | Hosted runner | Planning duration (warm / cold) |
 | --- | --- | --- | --- | --- |
 | Server / `.github/workflows/server-test.yml` | `scripts/ci/server.sh` | gofmt, vet, complete Go tests against disposable Postgres 18, build, Windows cross-build/vet, the programs and tunnel tests with `server/build-tags.txt`, extension schema/examples/SDK bundle, Go SDK tests; hub route/architecture, prompts and hub i18n guards are Go tests | ubuntu-latest | 8–15 / 15–30 min |
-| Web / `.github/workflows/web-test.yml` | `scripts/ci/web.sh` | npm ci, scoped ESLint, TypeScript, complete Vitest, production build and privacy | ubuntu-latest | 2–4 / 4–7 min |
+| Web / `.github/workflows/web-test.yml` | `scripts/ci/web.sh` | npm ci, scoped ESLint, TypeScript, complete Vitest in two disjoint native file shards, production build and privacy; the core-only build and suite use the same two shards | ubuntu-latest, two lanes | 2–4 / 4–7 min |
 | Android / `.github/workflows/android-test.yml` | `scripts/ci/android.sh` | i18n/token/motion checker tests, translations/literals, token and motion ratchets, all-module lint and unit-test variants, debug APK | ubuntu-latest, two lanes | 8–15 / 15–30 min (branch runs with main's caches measured 15–18 min, #3056); each shard's job timeout is 90 minutes, while individual checks retain their own timeout and final verdict |
 | Apple / `.github/workflows/apple-test.yml` | `scripts/ci/apple.sh ios` and `scripts/ci/apple.sh macos` | PersonaKit/iOS/Watch/HTML and Mac build/unit tests, and in the iOS lane the isolation lint with its own tests (`scripts/test/isolation-lint.sh`; `docs/apple/performance.md`, "Isolation lint") and the no-CallKit check of the device and simulator apps (`scripts/release/check_no_callkit.py`; `docs/operations/release.md`, "No CallKit"); synthetic configuration, no distribution signing; real results remain visible | macos-26 runners, Xcode 26.0.1 (Swift 6.2) | queue and execution measured separately |
 | iOS 18.6 compatibility / `.github/workflows/apple-test.yml` | `scripts/ci/apple.sh ios18` | offline `PersonaTests` at the deployment floor, with iPhone 16 Pro and iPad layout coverage, separate HTML batches and a test-host restart check | macos-15 (arm64), Xcode 26.3 | one runner for up to 150 minutes per manual dispatch, about 8.86 GB to download a missing runtime |
@@ -141,6 +141,13 @@ setting; the 4 GB Gradle daemon and non-heap allocations are separate.
 | Rust core / `.github/workflows/core-test.yml` | `scripts/ci/core.sh` | rustfmt, clippy, the shared core's unit tests and the fixtures it implements (directly and through its runtime), generated codecs up to date, the HarmonyOS NAPI binding linted for `aarch64-unknown-linux-ohos` with its `ohos` feature (the Rust target only, no SDK and nothing linked) and its notices, the generated ArkTS codec against the real runtime on the host (`harmony/tests/core-host/`, Node.js from the workflow) plus the two existing ArkTS core tests, release library, an independently compiled C11 client and dynamic-export check on Linux (not Swift/Apple ABI); the Android lane also builds it for `:core:rustcore`'s binding tests | ubuntu-latest | measured on the first runs |
 | Runtimes / `.github/workflows/runtimes-test.yml` | `scripts/ci/runtimes.sh` | TypeScript SDK typecheck/test/portability, every runtime integration's npm tests | ubuntu-latest | 2–4 / 4–7 min |
 | Container and Release / `.github/workflows/release.yml` | `scripts/ci/hub-image.sh` | amd64 build; isolated Compose Postgres, HTTP/TLS health, pairing, web, admin isolation, file ownership/0600; publication remains amd64+arm64, then a version-tag run creates the GitHub Release | ubuntu-latest | 8–15 / 15–30 min |
+
+Web's hosted workflow sets `PERSONA_WEB_TEST_SHARD` to `1/2` and `2/2` on two independent runners, with `fail-fast: false`.
+Vitest partitions both the ordinary and core-only test files natively, so their shard union is the complete suite and the
+partitions do not overlap. The small Node regression wrapper runs only on shard 1; local `npm test` and `npm run
+test:core-only` leave the variable unset and still run everything. An explicitly requested local shard uses the same
+contract. Each hosted lane repeats lint, typecheck and the production/core-only builds: this reduces wall-clock latency at
+the cost of repeated runner setup and compilation, not by dropping tests or raising a deadline (#14907).
 
 These planning estimates predate sharding and are not measured success claims; use job timestamps and each script's PASS/FAIL/TIMEOUT
 durations for an actual run. Parallelism reduces wall-clock latency but can increase total runner minutes through repeated setup and
@@ -156,6 +163,10 @@ tracked in #1214; cache-based test substitution is not allowed.
 
 To check the iOS deployment floor (#10261), dispatch **Apple CI** with lane **ios18**
 (`gh workflow run apple-test.yml -f lane=ios18`). The regular CI workflow continues to select `ios`.
+Selecting `lane=ios` runs both the main `apple` job (`scripts/ci/apple.sh ios`, 120-minute limit) and the parallel
+`ios-core-only` job (`scripts/ci/apple.sh ios-core-only`, 60-minute limit, building `PERSONA_CORE_ONLY=YES` without
+feature modules) under the same `apple` workflow call, so a failure in either blocks **CI required** (#14496);
+`gh workflow run apple-test.yml -f lane=ios-core-only` runs the core-only build on its own.
 The compatibility job uses the runner's installed iOS 18.6 image, or requests that exact version from Xcode.
 Each dispatch resolves packages, builds the ad-hoc test host, and runs the offline suites with the regular iOS fixture exclusions.
 The About version comparisons use their English visual configuration and disposable screenshot directories. The compact suite
@@ -203,6 +214,19 @@ runtime or the 900-second deadlines. The iPad observer starts with deterministic
 then replaces them atomically as bounded collection completes. Its separate process group gets a short bounded stop drain;
 if collection still cannot finish, the group is reaped without leaking its detached collectors. Probe and result-inspection
 deadline regressions require status and evidence to exist and every recorded watcher PID to be gone.
+The ordinary `AboutVersionRegularVisualTests` invocation has its own observation-only `live-regular-visual/` directory
+and `regular-visual-context.json`, recorded immediately before its unchanged `xcodebuild`. Its scoped stream therefore
+does not inherit the preceding readiness invocation's horizon. A 15-second sampler records only PID, parent PID, state
+and process name for the owned Persona host and a debugserver validated under it or its owned launchd_sim. A debugger
+first seen before the host remains associated with this invocation, including when absent from a later sample; matching
+`ps -M` output is bounded. One read-only `launchctl print system` after 60 seconds projects only the synthetic bundle
+ID and its allowlisted `state`, `pid`, `runs` and `last exit code` fields; raw arguments, programs, paths, environment
+and arbitrary values are never exported. The visual command tees its actual stdout/stderr to `ios-about-regular.log`
+without losing its exit status. Once that invocation has started, failure diagnostics require the log, publish an
+unavailable status and fail closed if it cannot be included rather than treating the allowlist entry as evidence.
+launch verdict; an absent process or event, a shutdown and a terminal `-308` do not establish a root cause. The whole
+observer remains inside the visual test's existing 600-second step and does not boot, shut down or otherwise manage a
+simulator. The ordinary build remains 1800 seconds and each readiness probe remains 900 seconds.
 A maintainer-approved `gh run rerun --failed` runs the original commit; it cannot acquire diagnostic code added by a later commit.
 
 Deliberate boundaries: web `compatibility.live.test.ts` needs an isolated live hub/token and explicitly skips its one probe without them.
@@ -230,6 +254,8 @@ repository runners if present. Do not uninstall machine services or delete their
 
 
 A test binary never touches the developer's real `~/.persona`: the packages that start Persona processes (`internal/hub`, `internal/assistant`) run through `testhome.Main` in their `TestMain`, with `HOME` set to an empty directory and `PERSONA_HOME` unset, and the run fails if anything created `<HOME>/.persona`. A test that needs state sets `PERSONA_HOME` (`t.Setenv`) to a directory of its own, as the two assistant-process tests in `internal/hub` do. A test started by hand with `go test` used to rewrite the real hub's assistant `manager.json` and `secret.key` (the next run's assistant then never came up); `scripts/test/test-server.sh` runs with a throw-away `HOME` already. Go tools a test starts keep the developer's Go settings and caches: `testhome` pins `GOENV`, `GOPATH`, `GOMODCACHE` and `GOCACHE` to their values under the real home (#5191).
+
+Nor does `internal/node` reach the developer's herdr or herdr-core: its `TestMain` points `HERDR_SOCKET_PATH` and `HC_SOCKET` at sockets that do not exist and unsets `HERDR_SESSION` / `HC_SESSION`, as it does for Orca and the other engines. Tests run from a herdr pane inherit the live server's `HERDR_SOCKET_PATH`, and the tests that build a node's default hosts pinged it and subscribed to its events (#13549); a test that wants a herdr gives its client the fake's socket.
 
 Server packages with database tests call `dbtest.Main` in their `TestMain`: the binary gets a database of its own next to `PERSONA_TEST_DATABASE_URL` and drops it at the end (`docs/lessons/workflow.md`). The databases `dbtest` makes commit asynchronously (`synchronous_commit = off`): a commit is visible to other sessions at once, and only a crash of that Postgres could lose the last ones, so a migration does not wait for a WAL flush per transaction. In `internal/db`, a test that needs a new database with the current schema calls `migratedDatabase(t, sets)`, which copies a template the binary migrated once per set (`dbtest.Template`, `dbtest.Clone`); a test that starts from an older state uses `freshDatabase` and migrates. `open(t)` and `db.TruncateForTest` empty everything their `TRUNCATE ... CASCADE` reaches, but truncate only the tables that have a row (`docs/lessons/testing.md`, "Test database setup"). The CI Postgres and hub databases keep their own settings.
 
@@ -286,6 +312,7 @@ repair worker may not edit baselines (`docs/operations/main-verification.md`), s
 | Web hard-coded text | CJK strings per `web/src` file | `web/src/i18n/hardcoded-baseline.json` | `web/src/i18n/catalog.test.ts` (web lane) | `UPDATE_I18N_BASELINE=1` |
 | Prompt sizes | bytes per instruction section, tool description and supervision event | `server/internal/assistant/testdata/prompt_sizes.json` | `TestPromptSizeRatchet` (server lane) | `PROMPT_SIZE_UPDATE=1` |
 | Inbox book readers | places per file that reach the Inbox's in-memory book | `inboxBookReaders` in `server/internal/archguard/inbox_slice_test.go` | `TestInboxBookStaysInTheInbox` (server lane) | by hand |
+| Domain rules | the domain rules' findings per package in server code that predates them, and the application and library packages' exported-field records, named primitive types (adapters' too), `DoneAt` / `DoneBy` writes and uses of an adapter's `Wire` (`docs/server/architecture.md` "Domain model") | `server/internal/archguard/testdata/domain_layers/baseline.txt` | `TestDomainLayers` (server lane; check-fast, with its merge base) and each declared package's `rules_test.go` | `DOMAIN_LAYERS_UPDATE=1`, which also takes an allowance whose type landed into its count; `scripts/test/name_freezes.py pending --write --only domain_layers_baseline`, on a checkout of `main`, drops one whose PRs closed; `scripts/test/name_freezes.py moves` carries a moved package's lines |
 | Android text | hard-coded Chinese / Japanese and English UI text per Kotlin file | each module's `i18n-baseline.json` and `i18n-english-baseline.json` | `scripts/app/android_i18n_check.py` (Android lane, check-fast) | `--update` |
 | Android tokens | hard-coded values and Material 3 components per file | `android/core/designsystem/tools/token-baseline.json` | `scripts/app/android_token_baseline.py` (Android lane, check-fast) | `--update-baseline` |
 | Android motion | literal animation specs per file | `android/core/designsystem/tools/motion-baseline.json` | `scripts/app/android_motion_baseline.py` (Android lane, check-fast) | `--update-baseline` |
@@ -300,13 +327,19 @@ repair worker may not edit baselines (`docs/operations/main-verification.md`), s
   has room, so the slack a fall leaves under a baseline cannot be spent by the next change. An entry the merge base's baseline does
   not have yet is the change's own (a file the web font's `--update` let take sizes that moved to it, or a raise the sleep ratchet
   refuses anyway), and only the baseline holds it. check-fast's diff mode runs the sleep ratchet with `--base` (it does not run
-  the other two), and hosted CI sets `CI_BASE_SHA`.
+  the other two), and hosted CI sets `CI_BASE_SHA` for its guards job. archguard's `TestDomainLayers` reads `CI_BASE_SHA`
+  itself and holds the domain counts more strictly: every count, one the merge base's baseline lacks included, may not
+  rise above its count at the merge base, and a name or allowance its lists add over the merge base's, or a count line
+  raised or added so that it gives more room than there, fails unless it followed code that moved
+  (`scripts/test/name_freezes.py moves`; `docs/server/architecture.md` "The rules and their checks").
+  check-fast's diff mode sets it to its merge base for the repo-wide guards, while the hosted server lane, a shallow
+  clone without it, holds them to the baseline only.
 - **With no base, only the baseline holds**, so a full-tree run on `main` checks only `count > baseline`. There is no fallback to
   the clone's `origin/main`: it is only as fresh as the last fetch, and main verification pins `HEAD` by SHA without moving it
   (`docs/operations/main-verification.md`), so right after a merge it usually names the parent and would hold the merged files to
   the parent's counts, a limit `merge-pr.sh` does not apply. A hosted run on `main` gets `origin/main` of its own fresh clone, so
   its merge base is `HEAD`. The never-raise checks on the baseline files themselves keep their defaults (the clone's default
-  branch for the sleep ratchet, `origin/main` for the prompt-language ratchet). The ratchets inside `go test`, vitest and the
+  branch for the sleep ratchet, `origin/main` for the prompt-language ratchet). The other ratchets inside `go test`, vitest and the
   Android scripts know no base and check only the baseline, as does `changed_ratchets.py` at merge time.
 - **Merge time does not hold a file to its merge-base count.** `scripts/hooks/merge-pr.sh` (through `changed_ratchets.py`, which
   covers the sleep and web font ratchets) refuses a merge that raises a count above its baseline, but one that raises a count back
@@ -461,9 +494,16 @@ example configs and services) and both watcher skills under `.claude/skills/`. T
   with `xcodegen dump`, and `scripts/ci/apple_offline_project.py` creates a separate `PersonaOfflineUnitTests.xcodeproj`
   in the disposable snapshot. Only this project omits targets the unit-test host cannot reach: Watch/Share, Vision,
   UI tests and the separate About accessibility host. It retains the real `Persona` host, Widgets, Notify, all package
-  dependencies, `PersonaTests`, and the exact `TEST_HOST` / `BUNDLE_LOADER`. It does not set `PERSONA_LEAN_DEV_BUILD`,
-  change a test selector or alter the default, UI-test or About schemes. `scripts/test/test_apple_offline_project.py`
-  generates and inspects this project when `xcodegen` is installed; the ordinary project still embeds all four targets.
+  dependencies, and the exact `TEST_HOST` / `BUNDLE_LOADER`. The ordinary `ios`, `ios18` and regression lanes compile
+  every `PersonaTests` source. The explicitly focused `ios-focused` and `ios-ipad-diagnostic` lanes instead pass a
+  named source profile: `-only-testing` restricts execution, not Swift target membership, so the generator validates
+  and includes their executed suites, the TypeScale/regular-About probes, About shared source and `FakeHub` helper.
+  The iPad diagnostic profile also retains its two later HTML batches. Missing files or moved suite declarations fail
+  generation; a reduced project is never produced silently. No profile sets `PERSONA_LEAN_DEV_BUILD`, changes a test
+  selector or alters the default, UI-test or About schemes. Device and simulator DerivedData remain separate because
+  their SDK, signing, graph and testability settings differ. `scripts/test/test_apple_offline_project.py` checks both
+  profiles and generates and inspects the full project when `xcodegen` is installed; the ordinary project still
+  embeds all four targets.
 - **A lean build says when it skipped what the branch changed.** The watch app compiles all of `apple/Shared/` and the
   `PersonaWire` package (`apple/Packages/PersonaWire/`) for watchOS 10, the share extension compiles them as an app
   extension, and no hosted CI runs on a PR, so with lean builds alone a change that breaks either would first fail on
@@ -550,7 +590,7 @@ Path mapping (a new mapping is a rule in check-fast's per-path table, `scripts/c
 | `schema/wire/**`, `spec/fixtures/**`, `scripts/gen/extension_schema.py`, `scripts/test/test_extension_schema.py` | Also `scripts/test/test_wire_schema.py`: every sample the shared fixtures keep for a wire schema holds to it at any depth, and the generated wire types are current (it imports the extension test's validator). CI's guards step always runs it |
 | `spec/fixtures/todo-detail/**`, `spec/fixtures/todo-layout/**`, `spec/fixtures/todo-view/README.md`, `spec/fixtures/agent-names/**`, `schema/wire/todo-view.schema.json`, `server/internal/assistant/todos.go`, `server/internal/assistant/todo_ask.go`, `scripts/test/test_wire_schema.py`, `scripts/test/test_extension_schema.py` | Also `scripts/test/test_todo_fixtures.py`: the to-do page and window fixtures hold to their READMEs' rules, the view schema, the todo-view line keys, the agent names and the fields the hub writes on a listed to-do (it imports the wire and extension schema tests) |
 | `scripts/test/test_external_service_refs.py`, `scripts/{gen,test}/sdk_bundle*` | The scripts' own tests |
-| `scripts/**` | Select second-scale privacy / PR / schema / refs / bundle / i18n checks by path; when uncertain run PR and schema. Also run changed `scripts/<subdirectory>/test_*.py`, and `test_<name>.py` for changed `<name>.py` / `<name>.sh` scripts (`-`→`_`; `.sh` also checks `test_<name>_sh.py`), from the test directory like CI (#3968). `scripts/hooks/**` also runs `scripts/test/test_privacy_check.py` and `scripts/test/test_check_deno_adapter_sh.py` (they run the hooks in their temp repositories; the latter also for `scripts/gen/deno_adapter.sh`); `scripts/privacy_check.py` also runs `scripts/release/test_check_bundle_privacy.py` (it imports `privacy_check`) and `scripts/test/test_merge_pr_sh.py`; `scripts/operations/pr_watch_merge.py`, `scripts/ci/changed_ratchets.py`, `scripts/ci/sleep_ratchet.py`, `scripts/ci/web_font_ratchet.py` and `scripts/ci/ratchet_base.py` also run `scripts/test/test_merge_pr_sh.py` (it copies the scripts into its temp repositories, where `merge-pr.sh` runs them, and checks the watcher's merge lock), and the two ratchets and `ratchet_base.py` also `scripts/ci/test_changed_ratchets.py` (it imports the ratchets, which import `ratchet_base.py`); `ratchet_base.py` also runs the sleep, web font and prompt-language ratchets' own suites, which load it through their ratchets or copy it, and `scripts/ci/prompt_language_ratchet.py` runs `scripts/test/test_prompt_language_ratchet.py`, which loads it by path; `scripts/test/go_trimpath.sh` also runs `scripts/ci/test_ci.py` and `scripts/test/test_check_fast_inputs.py` (they run `scripts/ci/server.sh` and `scripts/test/check-fast.sh`, whose `GOFLAGS` it composes); `scripts/heavy_slot.py` also runs `scripts/test/test_check_fast_inputs.py` and `scripts/test/test_android_sh.py` (they run `check-fast.sh` and `android.sh` with it); `check-fast.sh` and `scripts/test/test_check_fast.py` also run `scripts/test/test_check_fast_guards.py` and `scripts/test/test_check_fast_inputs.py` (check-fast's tests are three files, split so each stays well under the per-suite limit; the other two import `test_check_fast.py`'s fixtures), and `scripts/ci/check_fast_compare.py`, `scripts/test/go_test_partitioned.py` and `scripts/test/go_partitions.py` all three (they copy them into their temp repositories, where every Go group runs through the partitioned runner); `scripts/release/debug_switches.txt`, `scripts/release/debug_switches.py` and `scripts/release/release.sh` also run `scripts/release/test_debug_switches.py`, `scripts/release/test_release_debug_guard.py` and `scripts/test/test_apple_release_switch_names.py`; `scripts/ci/paths.py` also runs `scripts/ci/test_ci.py`, `scripts/test/test_check_fast_inputs.py` and `scripts/ci/test_affected_drift.py`, `scripts/test/check-fast.sh` and `scripts/operations/pr_watch_verify.py` also `scripts/ci/test_affected_drift.py`, and each `scripts/operations/pr_watch_*.py` also `scripts/operations/test_pr_watch.py`. A changed `scripts/**/<name>.py` also runs every `scripts/**/test_*.py` that imports it (`import <name>` or `from <name> import` at the start of a line) from its own directory or from a directory it names, found at run time with `git grep`; a suite a dedicated check runs (refs, bundle, extension schema, four Android checker suites) schedules that check instead |
+| `scripts/**` | Select second-scale privacy / PR / schema / refs / bundle / i18n checks by path; when uncertain run PR and schema. Also run changed `scripts/<subdirectory>/test_*.py`, and `test_<name>.py` for changed `<name>.py` / `<name>.sh` scripts (`-`→`_`; `.sh` also checks `test_<name>_sh.py`), from the test directory like CI (#3968). `scripts/hooks/**` also runs `scripts/test/test_privacy_check.py` and `scripts/test/test_check_deno_adapter_sh.py` (they run the hooks in their temp repositories; the latter also for `scripts/gen/deno_adapter.sh`); `scripts/privacy_check.py` also runs `scripts/release/test_check_bundle_privacy.py` (it imports `privacy_check`) and `scripts/test/test_merge_pr_sh.py`; `scripts/operations/pr_watch_merge.py`, `scripts/ci/changed_ratchets.py`, `scripts/ci/sleep_ratchet.py`, `scripts/ci/web_font_ratchet.py` and `scripts/ci/ratchet_base.py` also run `scripts/test/test_merge_pr_sh.py` (it copies the scripts into its temp repositories, where `merge-pr.sh` runs them, and checks the watcher's merge lock), and the two ratchets and `ratchet_base.py` also `scripts/ci/test_changed_ratchets.py` (it imports the ratchets, which import `ratchet_base.py`); `ratchet_base.py` also runs the sleep, web font and prompt-language ratchets' own suites, which load it through their ratchets or copy it, and `scripts/ci/prompt_language_ratchet.py` runs `scripts/test/test_prompt_language_ratchet.py`, which loads it by path; `scripts/test/go_trimpath.sh` also runs `scripts/ci/test_ci.py` and `scripts/test/test_check_fast_inputs.py` (they run `scripts/ci/server.sh` and `scripts/test/check-fast.sh`, whose `GOFLAGS` it composes); `scripts/heavy_slot.py` also runs `scripts/test/test_check_fast_inputs.py` and `scripts/test/test_android_sh.py` (they run `check-fast.sh` and `android.sh` with it); `check-fast.sh` and `scripts/test/test_check_fast.py` also run `scripts/test/test_check_fast_guards.py`, `scripts/test/test_check_fast_inputs.py`, `scripts/test/test_check_fast_base.py`, `scripts/test/test_check_fast_reports.py` and `scripts/test/test_check_fast_callers.py` (check-fast's tests are six files, split so each stays well under the per-suite limit; the other five import `test_check_fast.py`'s fixtures), and `scripts/ci/check_fast_compare.py`, `scripts/test/go_test_partitioned.py` and `scripts/test/go_partitions.py` all three (they copy them into their temp repositories, where every Go group runs through the partitioned runner); `scripts/release/debug_switches.txt`, `scripts/release/debug_switches.py` and `scripts/release/release.sh` also run `scripts/release/test_debug_switches.py`, `scripts/release/test_release_debug_guard.py` and `scripts/test/test_apple_release_switch_names.py`; `scripts/ci/paths.py` also runs `scripts/ci/test_ci.py`, `scripts/test/test_check_fast_inputs.py` and `scripts/ci/test_affected_drift.py`, `scripts/test/check-fast.sh`, `scripts/ci/affected_drift.py` and `scripts/operations/pr_watch_verify.py` also `scripts/ci/test_affected_drift.py`, and each `scripts/operations/pr_watch_*.py` also `scripts/operations/test_pr_watch.py`. A changed `scripts/**/<name>.py` also runs every `scripts/**/test_*.py` that imports it (`import <name>` or `from <name> import` at the start of a line) from its own directory or from a directory it names, found at run time with `git grep`; a suite a dedicated check runs (refs, bundle, extension schema, four Android checker suites) schedules that check instead |
 | `spec/tokens/**`, `apple/Shared/Design/**`, `android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt` | `scripts/assets/test_gen_tokens.py`: the token sources against the iOS values and the committed Android `Tokens.kt` |
 | `spec/icons/**`, `apple/Shared/Design/Icons.swift`, `android/core/designsystem/src/main/kotlin/persona/core/designsystem/icons/**` | `scripts/assets/test_gen_icon_meanings.py`: the icon meanings against `Theme.Icon`, the Phosphor glyphs and `PersonaIcons.kt` |
 | `docs/**`, any `*.md` | `scripts/test/test_doc_paths.py`, `scripts/test/test_doc_go_paths.py` (quoted paths and CLAUDE.md documentation index; test_doc_paths.py also fails a table that a blank line splits), `scripts/test/test_doc_sections.py` (section names quoted after a doc path match a heading, a **bold** label, an `<a id>` or a list item's opening phrase of that doc; `scripts/test/doc_sections_known.txt` lists the ones left for now and only shrinks), `scripts/test/test_doc_wire.py` (protocol.md and extensions.md list every WebSocket type, feature flag, extension point and manifest field the code has) |
@@ -656,6 +696,53 @@ Three selections decide what a change affects: `scripts/ci/paths.py` picks CI's 
 `scripts/ci/test_affected_drift.py` runs the comparison on a derived probe set (two files per CI lane pattern, the first file of each directory and of each one below it, every path check-fast names, every path that has a reader) and fails on an unlisted difference. It also takes the line each fix of #11026 added out of a real plan and checks that the comparison then fails: the Go tests reading client sources, a schema family's Go reader, a runtime package reading a fixture, a suite importing a watcher module, and the `INFO` line.
 
 What it does not see: a suite that runs or reads a script by its path instead of importing it (the suite rules of check-fast's table cover those); a Go test that builds a path from variables; and a file outside the server lane's inputs and `apple/`, `android/` that a Go test reads, such as `web/src/i18n/locales/` (`internal/kb`), which neither CI's server lane nor check-fast runs today.
+
+## Module e2e gate
+
+A module move (#13430) merges only after `scripts/ci/module-e2e.py` passes on its branch on the hub machine (#14417):
+unit tests and the core-only smoke test show each half alone, this shows the switch end to end on a real hub with the
+real web app.
+
+```bash
+DOCKER=<docker client> python3 scripts/ci/module-e2e.py --modules voice,health,recording \
+    [--checkout <dir>] [--shots ~/persona-pr-shots/<pr>] [--evidence <file>] [--strict-before-hello]
+```
+
+- **Start-up**: builds `personad`, `persona-hub`, `persona-manager` and `persona-node` (a default build) and the web app
+  (`npm run build`; `--no-build-web` serves the existing `web/dist`, `--npm-ci` installs first) from the checkout, then
+  starts a disposable `postgres:18-alpine` container on a private port and `persona-hub run` in a temporary home with
+  its own `hub.json` and token and a clean environment, as `scripts/ci/core-only-smoke.py` does (its helpers are
+  reused). The hub serves that web build. Nothing of this machine's own hub is read or touched. `DOCKER` names a wrapper
+  where the shell is not in the `docker` group (`sg docker -c "docker …"`).
+- **Phases**: `on` (default), `off` (the `modules` row `{"disabled": [ids]}` written into the disposable manager
+  database, `persona_manager.settings`, and the hub restarted), `back-on` (the row deleted, restarted), then
+  `older-hub` and `mock-flags-off`: the same web build (`vite preview`) against `scripts/mock/mock_hub.py` without the
+  `modules` marker (everything on) and with the marker and every flag but the modules' (them off). The mock hub has
+  conversations, so the composer's voice button is checked there; the test hub has no computer or model.
+- **Checks**, in each phase: the core (health, `/api/v1/managers`, the hello's `modules` marker, the main chat's
+  composer and the Agents page in Chrome, no page or console error); per module, the hello flag, the manager's
+  `modules: loaded …` line, its server-side parts (extensions, connectors, routes; table `SERVER`) and its web entry
+  (table `WEB`: a selector or text on a page, what clicking it opens, an address of its own that answers like a removed
+  page while off) in light and dark, and its chunks: none may be requested once the app has the hello. A chunk an off
+  module's page fetches during a reload, before the hello is applied, is a `WARN` (#14431); `--strict-before-hello`
+  makes it a failure.
+- **What the user already has stays** (#13430, `docs/architecture/core-and-modules.md` "A module that is off keeps
+  what the user has"): for `recording`, two recordings written by the knowledge base's own writers
+  (`TestWriteRecordingFixture` in `server/internal/kb`, run with `PERSONA_RECORDING_FIXTURE_DIR`) are in the temporary
+  home's knowledge base before the hub first starts: a meeting with its transcript and minutes, and one whose minutes
+  were still to be written. In every phase they are listed, opened and found by search through the knowledge base's
+  own routes; while off, the opened recording's detail equals the `on` phase's, the one in flight says
+  `paused: "module_off"`, and every file under `recordings/` is byte for byte what it was when the phase began.
+  `scripts/ci/core-only-smoke.py` checks the same on a core-only hub and with `--switched-off recording`. The web row
+  still expects the web app to hide a recording's entry while the module is off: that is the web app's behaviour
+  today, and its change is a client follow-up.
+- **Output**: a `PASS` / `WARN` / `FAIL` line per phase, module and check, the evidence JSON (`--evidence`, default
+  `<shots>/evidence.json`: commit, the settings row, the manager line, the hello's module flags, what the browser got and
+  requested), and screenshots `<phase>-<scheme>-<name>.png` in `--shots` (this machine's name is masked; never commit
+  or push them). The last line is the verdict (`PASS`, `FAIL` or `TIMEOUT` after `--timeout`, default 40 minutes); the
+  exit code is non-zero unless it is `PASS`. A run takes about four to six minutes after the builds.
+- **A module the tables lack** is still checked for its hello flag and the manager line, and the run says so: the PR
+  that moves a module adds its rows (what the hub has of it, what the web app shows of it).
 
 ## End-to-end (verified 2026-10-24)
 
@@ -1017,6 +1104,17 @@ does not drive the direction's running mark. It is off by default and composes w
 legacy 404 intact. `python3 -I scripts/mock/test_direction_tree_mock.py` checks the fixture and its reset behavior.
 `OutsideDirectionsUITests` uses it through `PERSONA_OUTSIDE_DIRECTIONS_HUB` for the mixed sidebar's interactions and for
 sidebar / To-dos / Agents captures in light and dark, at default and AX5 text (`PERSONA_SHOTS` saves them).
+
+`MOCK_DASHBOARDS=1|off|empty|removed|pinned` (`scripts/mock/dashboards_mock.py`, #15017) plays the default manager's
+Dashboards for the clients: the `assistant_pages` feature, the `dashboards` switch in `GET`/`PUT /api/v1/assistant`, the
+`-pages` places appended to `GET /api/v1/extensions/-/ui` (the index while a page is kept or one waits in Recently
+removed, then up to three pinned pages) and their pages over `POST /api/v1/extensions/-pages/-/ui/{index|pg_…}`. A tap on
+the running page's Done today answers the toast and a footer line "Received"; `GET /mock/dashboards?advance=1` moves it
+on to delivered, working and the page's update. Pinning, removing and the switch push `assistant_pages` and
+`extension_ui {invalidate}`. `off` keeps the pages with the switch off and `empty` has the switch on with nothing kept:
+both list nothing, for before / after captures; `removed` lists the index alone; `pinned` three pinned pages. Without
+`MOCK_EXTENSIONS=1` it also announces UI slots and lists only its own places. `python3 scripts/mock/test_dashboards_mock.py`
+checks it.
 
 **No new switch in `mock_hub.py` (#12737).** Most of what `mock_hub.py` gains comes with a new `MOCK_*` switch (89 of the 195
 commits that changed it from 2026-11-14 to 2026-11-22 added one, with 72% of its net added lines), so its switch names are

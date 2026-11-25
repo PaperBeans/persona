@@ -634,4 +634,12 @@
         <item quantity="other">%1$d 条没有截止</item>
     </plurals>
     <string name="agents_sidebar_heading">智能体</string>
+    <string name="agents_side_unread_kicker">分支新回复：%1$s</string>
+    <string name="agents_side_unread_more">+%1$d</string>
+    <string name="agents_side_unread_spoken">分支会话「%1$s」有新回复</string>
+    <string name="agents_side_unread_open">打开分支会话「%1$s」</string>
+    <string name="agents_side_unread_also">另有新回复：%1$s</string>
+    <plurals name="agents_side_unread_count">
+        <item quantity="other">%1$d 个分支会话有新回复</item>
+    </plurals>
 </resources>

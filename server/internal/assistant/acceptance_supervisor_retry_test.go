@@ -221,7 +221,7 @@ func TestSupervisorCheckedConclusionRetryExclusions(t *testing.T) {
 		Features: FeishuFeatures{Main: true, Cards: true}}
 	setStatus := func(s *Service, f *fakeHub, st FeishuStatus) {
 		f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) { return st, nil })
-		s.feishuForgetStatus()
+		s.larkModule().ForgetStatus()
 	}
 	t.Run("no card due when it was asked", func(t *testing.T) {
 		s, f, todo, _, _ := conclusionService(t, true)

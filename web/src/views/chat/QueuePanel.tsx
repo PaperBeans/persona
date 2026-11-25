@@ -6,9 +6,8 @@
 // ↑ ↓ Home End on it, re-queues them all in the new order. Four rows or fewer show in full; five or more show three
 // and "N more".
 // Messages from other conversations come last and are only shown; since #6394 they collapse into one line
-// ("N messages from other chats · Arrives when this chat is free"), opened on demand, so a backlog no longer spreads
-// over the composer. Opened, each row names the chat it came from once (the hub's 「来自「…」：」 prefix taken off) and
-// opens in place to its whole text. Only the groups that are there are drawn, with a hairline between two of them.
+// with a delivery note when all rows share one. Opened, each row names its sender once and opens in place to its whole
+// text. A mixed group shows the delivery note on each row. A hairline separates the user's rows from the relayed ones.
 // Every change goes through the hub (POST …/queue {keep}, …/queue/send-now) and the rows follow its next push; a
 // reorder keeps its new order on screen until then. Its own chunk: drawn only while something is queued
 // (QueueStrip.tsx loads it).
@@ -70,6 +69,10 @@ interface Drag {
   to: number;
 }
 
+function relayNote(noWake: boolean) {
+  return t(noWake ? "chat-queuepanel.relayed_note_no_wake" : "chat-queuepanel.relayed_note");
+}
+
 export function QueuePanel({ session, draftKey, canEdit, persona, pending = [], optimistic: local = [], memory, onAccepted, cancelQueued, compact }: QueuePanelProps) {
   const queued = useMemo(() => session.queued ?? [], [session.queued]);
   const { rows: confirmed, accepted, planEdit } = useQueueEntries(session, pending, memory, onAccepted);
@@ -123,7 +126,9 @@ export function QueuePanel({ session, draftKey, canEdit, persona, pending = [], 
   const order = drag ? (movedTo(own, drag.from, drag.to) ?? identity) : (holdOrder ?? identity);
   // Only the owner's own rows reorder and fold; the relayed ones live behind their own collapsed line (#6394).
   const ownRows = rows.filter((r) => r.own);
-  const relayedRows = rows.filter((r) => !r.own);
+  const relayedRows = useMemo(() => rows.slice(own).map((row) => ({ row, source: relayedFrom(row.raw) })), [rows, own]);
+  const noWakeCount = relayedRows.filter(({ source }) => source?.noWake).length;
+  const mixedRelays = noWakeCount > 0 && noWakeCount < relayedRows.length;
   const shown = [...order.map((i) => ownRows[i]), ...optimistic.map((p): Row => ({ ...p, i: -1, own: true }))];
   const folds = shown.length > FOLD_OVER;
   const visible = folds && !expanded ? shown.slice(0, FOLDED_ROWS) : shown;
@@ -334,14 +339,16 @@ export function QueuePanel({ session, draftKey, canEdit, persona, pending = [], 
         </span>
         <span className="min-w-0 flex-1 truncate text-left">
           <span className="font-medium text-ink-2">{t("chat-queuepanel.relayed_summary", { count: relayedRows.length })}</span>
-          <span data-queue-relayed-when> · {t("chat-queuepanel.relayed_note")}</span>
+          {!mixedRelays && <span data-queue-relayed-when> · {relayNote(noWakeCount > 0)}</span>}
         </span>
         <Icon name="chevron" size={13} className={cx("shrink-0 transition-transform duration-200", relayedOpen && "rotate-180")} />
       </button>
       {relayedOpen && (
         <div role="list" data-queue-relayed-list className="flex max-h-[196px] flex-col overflow-y-auto overscroll-contain px-1 pb-1">
-          {relayedRows.map((row, pos) => (
-            <RelayedRow key={row.id} row={row} n={own + pos + 1} mid={session.machine_id} cwd={session.cwd} />
+          {relayedRows.map(({ row, source }, pos) => (
+            <RelayedRow key={row.id} raw={source?.text ?? row.raw} from={source?.from}
+              note={relayNote(source?.noWake ?? false)} showNote={mixedRelays}
+              n={own + pos + 1} mid={session.machine_id} cwd={session.cwd} />
           ))}
         </div>
       )}
@@ -665,17 +672,17 @@ function QueueRow({ row, n, mid, sid, cwd, editable, movable, takesNow, sendNowT
 /** One message another conversation (or the system) sent in: only shown. It names the chat it came from once, then its
  *  words on one line; a line cut short opens in place to its whole text (the chevron, or a click on the row that selects
  *  nothing), so nothing it says is left to a hover tooltip, and the opened text can be selected and copied. */
-function RelayedRow({ row, n, mid, cwd }: { row: Row; n: number; mid: string; cwd?: string }) {
-  const source = useMemo(() => relayedFrom(row.raw), [row.raw]);
-  const parts = useMemo(() => parseQueued(source ? source.text : row.raw), [source, row.raw]);
+function RelayedRow({ raw, from, note, showNote, n, mid, cwd }: {
+  raw: string; from?: string; note: string; showNote: boolean; n: number; mid: string; cwd?: string;
+}) {
+  const parts = useMemo(() => parseQueued(raw), [raw]);
   const marks = queuedMarks(parts);
   const nonPhotoMarks = marks.filter((m) => m.kind !== "photo");
   const carried = marks.map((m) => markWords(m.kind, m.count)).join(t("chat-queuepanel.mark_join"));
   const words = parts.text || carried || t("chat-queuepanel.no_text");
-  const from = source?.from;
   const label = t("chat-queuepanel.row_label", {
     n,
-    text: [from ? t("chat-queuepanel.relayed_from_chat", { chat: from }) : t("chat-queuepanel.relayed_from"), words, t("chat-queuepanel.relayed_note")].join(" · "),
+    text: [from ? t("chat-queuepanel.relayed_from_chat", { chat: from }) : t("chat-queuepanel.relayed_from"), words, note].join(" · "),
   });
   const body = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
@@ -702,38 +709,41 @@ function RelayedRow({ row, n, mid, cwd }: { row: Row; n: number; mid: string; cw
       onClick={() => opens && !window.getSelection()?.toString() && toggle()}
       className={cx(
         "group flex gap-1.5 rounded-[8px] px-2 py-0.5 text-meta leading-[1.25] transition-colors",
-        open ? "items-start" : "items-center",
+        open || showNote ? "items-start" : "items-center",
         opens && "cursor-pointer hover:bg-hover focus-within:bg-hover",
       )}
     >
       <span aria-hidden className="size-5 shrink-0" />
-      <span className={cx("flex min-w-0 flex-1 gap-1.5", open ? "items-start pt-0.5" : "relative top-px items-center")}>
-        {from && (
-          <span data-queue-from className="max-w-[40%] min-w-0 shrink-0 truncate font-medium text-ink">
-            {from}
-          </span>
-        )}
-        {parts.photos.length > 0 && (
-          <QueuedPhotoThumbs paths={parts.photos} count={parts.photos.length} mid={mid} cwd={cwd} />
-        )}
-        <span
-          ref={body}
-          data-queue-row-body
-          className={cx(
-            "min-w-0 flex-1 text-ink-2 transition-colors",
-            opens && "group-hover:text-ink",
-            open ? "max-h-[132px] cursor-text overflow-y-auto overscroll-contain break-words whitespace-pre-wrap" : "truncate",
-          )}
-        >
-          {nonPhotoMarks.map((m) => (
-            <span key={m.kind} data-queue-mark={m.kind} aria-hidden className="mr-1.5 inline-flex items-center gap-0.5 align-[-2px] text-ink-3">
-              <Icon name={MARK_ICON[m.kind]} size={13} />
-              {m.count > 1 && <span className="text-submeta font-medium tabular-nums">{m.count}</span>}
+      <div className="min-w-0 flex-1">
+        <div className={cx("flex min-w-0 gap-1.5", open ? "items-start pt-0.5" : "relative top-px items-center")}>
+          {from && (
+            <span data-queue-from className="max-w-[40%] min-w-0 shrink-0 truncate font-medium text-ink">
+              {from}
             </span>
-          ))}
-          {parts.text || <span className="text-ink-3">{words}</span>}
-        </span>
-      </span>
+          )}
+          {parts.photos.length > 0 && (
+            <QueuedPhotoThumbs paths={parts.photos} count={parts.photos.length} mid={mid} cwd={cwd} />
+          )}
+          <span
+            ref={body}
+            data-queue-row-body
+            className={cx(
+              "min-w-0 flex-1 text-ink-2 transition-colors",
+              opens && "group-hover:text-ink",
+              open ? "max-h-[132px] cursor-text overflow-y-auto overscroll-contain break-words whitespace-pre-wrap" : "truncate",
+            )}
+          >
+            {nonPhotoMarks.map((m) => (
+              <span key={m.kind} data-queue-mark={m.kind} aria-hidden className="mr-1.5 inline-flex items-center gap-0.5 align-[-2px] text-ink-3">
+                <Icon name={MARK_ICON[m.kind]} size={13} />
+                {m.count > 1 && <span className="text-submeta font-medium tabular-nums">{m.count}</span>}
+              </span>
+            ))}
+            {parts.text || <span className="text-ink-3">{words}</span>}
+          </span>
+        </div>
+        {showNote && <div data-queue-note className="pt-0.5 text-submeta text-ink-3">{note}</div>}
+      </div>
       {opens && (
         <button
           type="button"

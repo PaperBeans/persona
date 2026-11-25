@@ -435,11 +435,11 @@ func TestSwitchingTheSuperviseModelChangesOnlyTheModel(t *testing.T) {
 	}
 }
 
-// The main chat's rule for a task's model (#5086) speaks of tiers and names no provider's model, and says what to do
-// when the tiers cannot be told apart.
+// The main chat's rule for a task's model (#5086) picks a preset by the kind of work, not by strength (#14700), names
+// no provider's model, and says what to do when no preset fits.
 func TestTaskModelRuleNamesNoModel(t *testing.T) {
 	md := prompts.RenderAssistantClaudeMD(prompts.AssistantClaudeMD{})
-	_, rest, ok := strings.Cut(md, "任务用哪一档模型")
+	_, rest, ok := strings.Cut(md, "任务用哪个 Agent 预设")
 	if !ok {
 		t.Fatal("CLAUDE.md has no rule for a task's model")
 	}
@@ -447,7 +447,7 @@ func TestTaskModelRuleNamesNoModel(t *testing.T) {
 	if !ok {
 		t.Fatal("the rule does not end with stating the choice in why")
 	}
-	for _, want := range []string{"低一档", "`medium`", "日常主力那一档", "最高一档", "先提高 `effort`", "`effort` 留空", "`tier`、`model`、`effort` 都留空", "而不是「模型设置」里 Agents 的默认", "永远优先"} {
+	for _, want := range []string{"按活的类型来选", "不按强弱排档", "`medium`", "先提高 `effort`", "`effort` 留空", "`tier`、`model`、`effort` 都留空", "而不是「模型设置」里 Agents 的默认", "永远优先"} {
 		if !strings.Contains(rule, want) {
 			t.Errorf("the rule lacks %q", want)
 		}

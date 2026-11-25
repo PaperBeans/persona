@@ -211,6 +211,41 @@ class HttpAssistantManagement private constructor(
         require(session.sessionId.isNotBlank())
         assistant("DELETE", "conversations", session.sessionId, "model")
     }
+    override suspend fun conversationSwitchState(session: SessionKey): ConversationSwitchState {
+        require(session.machineId.isNotBlank() && session.sessionId.isNotBlank())
+        return JsonCodec.decodeFromJsonElement(
+            request(
+                "GET",
+                listOf("api", "v1", "assistant", "conversations", session.sessionId, "segments"),
+                query = mapOf("machine_id" to session.machineId),
+            ),
+        )
+    }
+    override suspend fun submitConversationSwitch(session: SessionKey, request: ConversationSwitchRequest) {
+        require(
+            session.sessionId.isNotBlank() &&
+                request.operationId.isNotBlank() &&
+                request.expectedEpoch >= 1 &&
+                request.sourceMachineId.isNotBlank() &&
+                request.machineId.isNotBlank() &&
+                request.launcher.isNotBlank(),
+        )
+        request(
+            "POST",
+            listOf("api", "v1", "assistant", "conversations", session.sessionId, "switch"),
+            body = buildJsonObject {
+                put("operation_id", request.operationId)
+                put("expected_epoch", request.expectedEpoch)
+                put("source_machine_id", request.sourceMachineId)
+                put("machine_id", request.machineId)
+                put("launcher", request.launcher)
+                request.model?.takeIf(String::isNotBlank)?.let { put("model", it) }
+                request.effort?.takeIf(String::isNotBlank)?.let { put("effort", it) }
+                request.permissionMode?.takeIf(String::isNotBlank)?.let { put("permission_mode", it) }
+            },
+            client = compactHttp,
+        )
+    }
     override suspend fun archiveConversation(session: SessionKey) {
         require(session.sessionId.isNotBlank())
         assistant("POST", "conversations", session.sessionId, "archive", body = buildJsonObject { })

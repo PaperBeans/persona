@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The sidebar's pages as arranged in Settings › General › Sidebar pages: the order, the list and More, the defaults for new pages.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { arrangePages, EXTENSION_CAP, getSidebarPrefs, inList, movePage, ordered, parsePrefs, resetSidebarPrefs, setPageOrder, setPageShown, type SidebarPrefs } from "./sidebar-pages";
+import { arrangePages, EXTENSION_CAP, getSidebarPrefs, inList, movePage, ordered, parsePrefs, resetSidebarPrefs, setMoreShown, setPageOrder, setPageShown, type SidebarPrefs } from "./sidebar-pages";
 
 const NONE: SidebarPrefs = { order: [], shown: [], hidden: [] };
 const pages = (...ks: string[]) => ks.map((k) => ({ k }));
@@ -30,6 +30,20 @@ describe("ordered", () => {
 });
 
 describe("inList", () => {
+  it("keeps Dashboards in the list beside three extension pages: the hub put its key in shown on the first Keep (#15017)", () => {
+    const ext = ["p:example-today/today", "p:example-quota/quota", "p:example-gateway/usage"];
+    const ks = ["home", "inbox", ...ext, "p:-pages/index", "p:-pages/pg_3f9a1c0d5e7b2a41", "settings"];
+    // nothing chosen by anyone: the fourth and fifth extension pages wait under More, as any extension's would
+    expect(arrangePages(pages(...ks), NONE).more.map((p) => p.k)).toEqual(["p:-pages/index", "p:-pages/pg_3f9a1c0d5e7b2a41"]);
+    // the navigation record's shown, as the hub writes it on the first Keep and on a pin: those stay in the list, and the
+    // cap counts them first, so the extensions' later pages wait under More instead
+    const kept = { ...NONE, shown: ["p:-pages/index", "p:-pages/pg_3f9a1c0d5e7b2a41"] };
+    const { shown, more } = arrangePages(pages(...ks), kept);
+    expect(keys(shown)).toEqual(["home", "inbox", ext[0], "p:-pages/index", "p:-pages/pg_3f9a1c0d5e7b2a41", "settings"]);
+    expect(keys(more)).toEqual([ext[1], ext[2]]);
+    // only the index kept: it and two of the three extension pages
+    expect(keys(arrangePages(pages(...ks.filter((k) => !k.includes("pg_"))), { ...NONE, shown: ["p:-pages/index"] }).shown)).toEqual(["home", "inbox", ext[0], ext[1], "p:-pages/index", "settings"]);
+  });
   it("lists the built-in pages and the first extension pages, the rest wait under 更多", () => {
     const ext = Array.from({ length: EXTENSION_CAP + 2 }, (_, i) => `p:e${i}/page`);
     const listed = inList(["home", ...ext, "settings"], NONE);
@@ -50,6 +64,15 @@ describe("inList", () => {
 });
 
 describe("arrangePages", () => {
+  it("hides More without losing its pages or moving them into the sidebar", () => {
+    const prefs: SidebarPrefs = { order: [], shown: [], hidden: ["inbox", "health"], more: false };
+    const arranged = arrangePages(pages("home", "inbox", "health", "kb", "settings"), prefs);
+    expect(keys(arranged.shown)).toEqual(["home", "kb", "settings"]);
+    expect(arranged.more).toEqual([]);
+    expect(arrangePages(pages("home", "inbox", "health", "kb", "settings"), { ...prefs, more: true }).more.map((p) => p.k)).toEqual(["inbox", "health"]);
+    expect(arrangePages(pages("home", "kb", "settings"), { ...prefs, hidden: [] }).more).toEqual([]);
+  });
+
   it("splits into the list and 更多, both in the user's order", () => {
     const { shown, more } = arrangePages(pages("home", "inbox", "health", "kb", "settings"), { order: ["kb", "home"], shown: [], hidden: ["health", "inbox"] });
     expect(keys(shown)).toEqual(["kb", "home", "settings"]);
@@ -69,6 +92,19 @@ describe("the stored choices", () => {
     expect(parsePrefs("{not json")).toEqual(NONE);
     expect(parsePrefs(JSON.stringify({ order: [1, "home"], shown: "x" }))).toEqual({ order: ["home"], shown: [], hidden: [] });
   });
+  it("persists hiding More alone, round-trips the hub shape, and restores the default", () => {
+    expect(getSidebarPrefs().more).toBeUndefined();
+    setMoreShown(false);
+    expect(getSidebarPrefs()).toEqual({ order: [], shown: [], hidden: [], more: false });
+    expect(parsePrefs(localStorage.getItem("sidebar.pages")).more).toBe(false);
+    expect(parsePrefs('{"order":[],"shown":[],"hidden":[],"more":"no"}')).toEqual(NONE);
+    setMoreShown(true);
+    expect(getSidebarPrefs().more).toBe(true);
+    resetSidebarPrefs();
+    expect(getSidebarPrefs()).toEqual(NONE);
+    expect(localStorage.getItem("sidebar.pages")).toBeNull();
+  });
+
   it("ignores putting 设置 away", () => {
     setPageShown("settings", false);
     expect(getSidebarPrefs()).toEqual(NONE);

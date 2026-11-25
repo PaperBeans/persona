@@ -118,7 +118,8 @@
         {"$ref": "#/$defs/GridComponent"},
         {"$ref": "#/$defs/CarouselComponent"},
         {"$ref": "#/$defs/GraphComponent"},
-        {"$ref": "#/$defs/SceneComponent"}
+        {"$ref": "#/$defs/SceneComponent"},
+        {"$ref": "#/$defs/MapComponent"}
       ]
     },
     "TextComponent": {
@@ -677,6 +678,99 @@
       }
     },
     "SceneWarmth": {"description": "warm (the default): a lamp's yellow light; cool: a white one.", "type": "string", "enum": ["warm", "cool"]},
+    "MapComponent": {
+      "description": "An interactive native map (UI version 12): route polylines and markers (waypoints, origin, destination, pins) with distance/duration metadata and external https map links. Drawn as a snapshot preview in cards and inline tool views; tapping opens an interactive sheet unless static is true. An older app gets the caption, route summaries, marker rows and links.",
+      "type": "object", "x-since": 12,
+      "properties": {
+        "type": {"const": "map"},
+        "key": {"type": "string", "maxLength": 128, "description": "Keeps camera state across redraws of the page."},
+        "title": {"type": "string", "maxLength": 2000},
+        "alt": {"type": "string", "minLength": 1, "maxLength": 500, "description": "Read out by screen readers and shown as fallback text when the map cannot be drawn."},
+        "caption": {"type": "string", "maxLength": 2000},
+        "aspect": {"$ref": "#/$defs/ImageAspect"},
+        "viewport": {"$ref": "#/$defs/MapViewport"},
+        "markers": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/MapMarker"}},
+        "routes": {"type": "array", "maxItems": 8, "items": {"$ref": "#/$defs/MapRoute"}},
+        "links": {"type": "array", "maxItems": 6, "items": {"$ref": "#/$defs/MapLink"}},
+        "static": {"type": "boolean", "description": "When true, stays a non-interactive snapshot and does not open an interactive sheet."},
+        "show_list": {"type": "boolean", "description": "When true (or when multiple routes/stops exist without a compact override), shows a companion route/stop list beneath the map."}
+      },
+      "required": ["type", "alt"]
+    },
+    "MapTravelMode": {
+      "description": "Travel mode of a route polyline (UI version 12).",
+      "type": "string",
+      "enum": ["driving", "walking", "transit", "cycling"]
+    },
+    "MapMarkerKind": {
+      "description": "Semantic role of a marker on a map (UI version 12).",
+      "type": "string",
+      "enum": ["origin", "destination", "waypoint", "pin", "user"]
+    },
+    "MapCoordinate": {
+      "description": "A geographic point in WGS-84 (UI version 12).",
+      "type": "object",
+      "properties": {
+        "lat": {"type": "number", "minimum": -90, "maximum": 90, "x-go-pointer": true},
+        "lon": {"type": "number", "minimum": -180, "maximum": 180, "x-go-pointer": true}
+      },
+      "required": ["lat", "lon"]
+    },
+    "MapViewport": {
+      "description": "Initial map framing in WGS-84 when not auto-fitted to markers and routes (UI version 12).",
+      "type": "object",
+      "properties": {
+        "center": {"$ref": "#/$defs/MapCoordinate"},
+        "span_lat": {"type": "number", "minimum": 0.0001, "maximum": 180, "x-go-pointer": true},
+        "span_lon": {"type": "number", "minimum": 0.0001, "maximum": 360, "x-go-pointer": true}
+      },
+      "required": ["center"]
+    },
+    "MapMarker": {
+      "description": "One location pin on a map (UI version 12), in tone's role color or color's named color (never both).",
+      "type": "object",
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "lat": {"type": "number", "minimum": -90, "maximum": 90, "x-go-pointer": true},
+        "lon": {"type": "number", "minimum": -180, "maximum": 180, "x-go-pointer": true},
+        "kind": {"$ref": "#/$defs/MapMarkerKind"},
+        "label": {"type": "string", "minLength": 1, "maxLength": 200},
+        "subtitle": {"type": "string", "maxLength": 200},
+        "detail": {"type": "string", "maxLength": 2000},
+        "icon": {"$ref": "#/$defs/NavIcon"},
+        "tone": {"$ref": "#/$defs/Tone"},
+        "color": {"$ref": "#/$defs/Color"},
+        "action": {"$ref": "#/$defs/Action"}
+      },
+      "required": ["id", "lat", "lon", "label"]
+    },
+    "MapRoute": {
+      "description": "One route polyline on a map (UI version 12), in WGS-84 coordinates.",
+      "type": "object",
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "label": {"type": "string", "maxLength": 200},
+        "mode": {"$ref": "#/$defs/MapTravelMode"},
+        "distance_meters": {"type": "integer", "minimum": 0, "maximum": 100000000, "x-go-pointer": true},
+        "duration_seconds": {"type": "integer", "minimum": 0, "maximum": 100000000, "x-go-pointer": true},
+        "summary": {"type": "string", "maxLength": 200},
+        "selected": {"type": "boolean"},
+        "tone": {"$ref": "#/$defs/Tone"},
+        "color": {"$ref": "#/$defs/Color"},
+        "points": {"type": "array", "minItems": 2, "maxItems": 1000, "items": {"$ref": "#/$defs/MapCoordinate"}}
+      },
+      "required": ["id", "points"]
+    },
+    "MapLink": {
+      "description": "An https link shown beside or inside a map component (UI version 12).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "url"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1, "maxLength": 80},
+        "url": {"type": "string", "minLength": 1, "maxLength": 2000, "pattern": "^https://[^/?#]+"}
+      }
+    },
     "ImageSource": {
       "description": "Where a picture comes from (UI version 6): an https url the app loads without credentials, or a ref the extension serves itself (ui.image) through the hub; exactly one. path is written by the hub only, for a ref: its own address, which the app loads with its device credentials. An extension that writes path is refused.",
       "type": "object",

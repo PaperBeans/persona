@@ -106,7 +106,7 @@ private struct MeetingFloatContent: View {
         .buttonStyle(.plain)
         // Dark in both appearances, as the meeting room is (#8731 E1).
         .environment(\.colorScheme, .dark)
-        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
+        .onReceive(AudioSessionBroker.shared.routeChangePublisher()) { _ in
             headset = MeetingFloatHeadset.now()
         }
         .accessibilityHint(Text("Opens the meeting room. [Meeting Float]"))
@@ -235,7 +235,7 @@ private struct MeetingFloatDock: View {
 /// its wearer, so a voice is "you".
 enum MeetingFloatHeadset {
     static func now() -> Bool {
-        AVAudioSession.sharedInstance().currentRoute.inputs.contains { [.headsetMic, .bluetoothHFP].contains($0.portType) }
+        AudioSessionBroker.shared.currentRoute.inputs.contains { [.headsetMic, .bluetoothHFP].contains($0.portType) }
     }
 }
 #endif

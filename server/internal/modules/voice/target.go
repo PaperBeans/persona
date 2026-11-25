@@ -74,7 +74,8 @@ type resumeRun struct {
 // can be sent again (resend), and start takes speech_gate. meeting is the meeting call (meeting.go, #3862 phase 4). hold
 // (#9290): the app's hold frame pauses the upstream at once and nothing wakes it until the hold is off (suspend.go).
 // dictation (#2083): start mode dictation opens one unbound, text-only transcription session (dictation.go).
-var features = []string{"target", "runs", "asks", "resume", "suspend", "speak", "speech_gate", "meeting", "hold", "dictation"}
+// reply (#14932): paired reply{start/end} frames on protocol 2 calls when the upstream reports reply boundaries.
+var features = []string{"target", "runs", "asks", "resume", "suspend", "speak", "speech_gate", "meeting", "hold", "dictation", "reply"}
 
 const (
 	// snapshotWait is how long the snapshot's parts that may be left out are waited for (docs/assistant/voice.md 4.5): it is

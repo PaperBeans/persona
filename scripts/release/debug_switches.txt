@@ -198,6 +198,7 @@ openTranslationSettings
 openTriageSettings
 openUploadDemo
 openUrgentCallSettings
+openUsageMap
 openViewedImage
 openVoice
 openWelcome

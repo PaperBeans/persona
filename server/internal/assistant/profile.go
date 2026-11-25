@@ -91,9 +91,14 @@ type Settings struct {
 	MinutesDays *int `json:"minutes_days,omitempty"`
 	// KBTopics: the knowledge base organizes knowledge points by topic (#3783, kb/topics.go). nil is on (the default).
 	KBTopics *bool `json:"kb_topics,omitempty"`
+	// Dashboards: conversations may draft pages the owner keeps in the sidebar (#15017, pages_ui.go). nil is off (the
+	// default); only the owner changes it (a device with full access).
+	Dashboards *bool `json:"dashboards,omitempty"`
 	// MainBackgroundFolded: the apps fold the main conversation's background rounds (another conversation's message,
 	// a scheduled task or follow-up) into one line that opens on request (#4314). nil is on (the default).
 	MainBackgroundFolded *bool `json:"main_background_folded,omitempty"`
+	// FoldRoutineRelayReplies opts the main chat into quiet completed relay reports when its background rounds fold.
+	FoldRoutineRelayReplies *bool `json:"fold_routine_relay_replies,omitempty"`
 	// MainCompactWindow: the compaction window, in tokens, the main conversation is held to when its launcher declares a
 	// larger one (#7314, main_compact_window.go); nil is 400000, 0 follows the launcher.
 	MainCompactWindow *int `json:"main_compact_window,omitempty"`
@@ -108,6 +113,10 @@ type Settings struct {
 	// the automatic all-in-use-tag row; a non-nil empty list is a deliberately customized empty row.
 	ConversationTagFilters []string `json:"conversation_tag_filters"`
 	WorkGuide              *bool    `json:"work_guide,omitempty"`
+	// TodosV2 enables the unified experimental New To-dos & Tasks experience (#14538, #14584). nil is off (the default).
+	TodosV2 *bool `json:"todos_v2,omitempty"`
+	// IntegrationsV2 enables the unified experimental Integrations & Extensions experience (#14802, #14805). nil is off (the default).
+	IntegrationsV2 *bool `json:"integrations_v2,omitempty"`
 	// MeetingAttendanceDefault: the role a meeting recording pre-selects on the phone (off, listener, participant;
 	// docs/assistant/meeting-minutes.md "Attending a meeting"); nil is off.
 	MeetingAttendanceDefault *string `json:"meeting_attendance_default,omitempty"`
@@ -177,6 +186,17 @@ type Settings struct {
 	// Leaders are the side conversations the user made leaders (#3133, supervise_leader.go): a task one hands out with
 	// task_plan is supervised by it instead of the main conversation. Empty (the default): only the main one supervises.
 	Leaders []string `json:"leaders,omitempty"`
+	// LimitFallbacks are the launchers, first choice first, that a conversation the owner relies on goes on with when a
+	// subscription's usage limit stops it, until that limit resets (#14435, limit_fallback.go). Empty (the default):
+	// it waits for the reset as before. The assistant writes it through persona_settings; PUT /api/v1/assistant does not.
+	LimitFallbacks []string `json:"limit_fallbacks,omitempty"`
+	// MachineFallbacks are the backup computers, first choice first, that the main conversation, direction leaders, and
+	// unbound default routines fail over to when the primary computer stays offline past MachineFallbackMinutes
+	// (#15119, machine_fallback.go). Empty (the default) disables automatic cross-machine failover.
+	MachineFallbacks []string `json:"machine_fallbacks,omitempty"`
+	// MachineFallbackMinutes is how many minutes a computer must stay offline before automatic failover moves
+	// conversations or falls back default routines to MachineFallbacks (#15119). nil or 0 uses the 10-minute default.
+	MachineFallbackMinutes *int `json:"machine_fallback_minutes,omitempty"`
 	// BriefingWaits tunes only the deterministic wait rows in morning/evening facts: the briefing module's setting
 	// (internal/modules/briefing, Waits), kept here as stored, also while the module is off. Nil uses the module's
 	// defaults (the supervision thresholds); changes go through persona_settings' ordinary owner approval (modules.go),
@@ -209,6 +229,11 @@ type Settings struct {
 	// MainSupervisesOwnTasks: the main conversation follows up the tasks no leader supervises itself. nil is off (the
 	// default, #4927): the background supervisor does (supervise_background.go).
 	MainSupervisesOwnTasks *bool `json:"main_supervises_own_tasks,omitempty"`
+	// AutoSupervisionMessages: the assistant sends its automatic supervision messages (the follow-up messages that wake
+	// the main, leader or background supervisor conversation). nil is on (the default); false stops them from being
+	// made, queued or sent, and withdraws the ones still waiting (supervise_switch.go). The task ledger, the owner's own
+	// questions and acceptance, permission cards and approval answers do not depend on it.
+	AutoSupervisionMessages *bool `json:"auto_supervision_messages,omitempty"`
 	// SupervisionBatchMinutes independently batches routine supervision per final recipient, anchored at its first
 	// routine signal. Nil or 0 preserves the legacy shared gather and spacing. Immediate signals bypass the batch.
 	SupervisionBatchMinutes *int `json:"supervision_batch_minutes,omitempty"`
@@ -217,6 +242,12 @@ type Settings struct {
 	// branches). nil is off (the default): each round starts from its first turn with only that round's facts and tools
 	// (supervise_round.go).
 	BackgroundSupervisorKeepsContext *bool `json:"background_supervisor_keeps_context,omitempty"`
+	// ChatReplyRelay: after a conversation wrote into a Lark chat as the user, other people's new messages there are
+	// told to it (chat_reply.go). nil is off (the default); on while true, and turning it off drops those still queued.
+	ChatReplyRelay *bool `json:"chat_reply_relay,omitempty"`
+	// ChatReplyHinted: the one-time hint that the feature exists was given to a conversation (chat_reply.go). The
+	// assistant writes it itself; PUT /api/v1/assistant does not.
+	ChatReplyHinted bool `json:"chat_reply_hinted,omitempty"`
 	// BackgroundSupervisor is the background supervisor's conversation, on BackgroundSupervisorMachineID, started at
 	// BackgroundSupervisorAt: made on first use, "" until then. BackgroundSupervisorAnnounced: the main conversation
 	// was told once that it follows up its tasks. The assistant writes these itself; PUT /api/v1/assistant does not.
@@ -333,7 +364,16 @@ func (s *Service) updateSettingsSaveChecked(ctx context.Context, fn func(*Settin
 	return v, nil
 }
 
-func (v Settings) workGuideOn() bool { return v.WorkGuide != nil && *v.WorkGuide }
+func (v Settings) workGuideOn() bool      { return v.WorkGuide != nil && *v.WorkGuide }
+func (v Settings) todosV2On() bool        { return v.TodosV2 != nil && *v.TodosV2 }
+func (v Settings) integrationsV2On() bool { return v.IntegrationsV2 != nil && *v.IntegrationsV2 }
+
+// integrationsV2On reports whether assistant.integrations_v2 is enabled (off by default).
+// Uses settingsLastGood so hot receive/routing paths never trigger a hub hello RPC.
+func (s *Service) integrationsV2On(ctx context.Context) bool {
+	v, _ := s.settingsLastGood(ctx)
+	return v.integrationsV2On()
+}
 
 // prEventsRouteToAgentOn reports whether assistant.pr_events_route_to_agent is enabled (off by default).
 func (s *Service) prEventsRouteToAgentOn(ctx context.Context) bool {
@@ -585,6 +625,10 @@ func (s *Service) mainBackgroundFolded(ctx context.Context) bool {
 	return quietOn(s.settings(ctx).MainBackgroundFolded)
 }
 
+func (v Settings) foldRoutineRelayReplies() bool {
+	return v.FoldRoutineRelayReplies != nil && *v.FoldRoutineRelayReplies
+}
+
 // recentTaskChats: the apps' sidebar Recent lists the scheduled tasks' chats too (recent_task_chats, off by default).
 func (s *Service) recentTaskChats(ctx context.Context) bool {
 	v := s.settings(ctx).RecentTaskChats
@@ -716,6 +760,7 @@ func (s *Service) leadSessions(ctx context.Context, v Settings) []SessionRef {
 
 // settingsChanged: the hub learns them (the snapshot's profile) and the next message reads the time in the new zone.
 func (s *Service) settingsChanged(ctx context.Context) {
+	s.syncAutoSupervision(ctx)          // the automatic-supervision switch takes effect now (supervise_switch.go)
 	s.transcriptionSettingsChanged(ctx) // only another contribution chosen drops the readiness answer
 	s.ProfileChanged(ctx)
 	s.revalidateFailedStartDeferrals(ctx)
@@ -770,11 +815,16 @@ type assistantView struct {
 	MinutesDays int `json:"minutes_days"`
 	// KBTopics is in effect, like MainTasksQuiet.
 	KBTopics bool `json:"kb_topics"`
+	// Dashboards is in effect (off until the owner turns it on).
+	Dashboards bool `json:"dashboards"`
 	// MainBackgroundFolded is in effect, like MainTasksQuiet.
-	MainBackgroundFolded bool `json:"main_background_folded"`
+	MainBackgroundFolded    bool `json:"main_background_folded"`
+	FoldRoutineRelayReplies bool `json:"fold_routine_relay_replies"`
 	// RecentTaskChats is in effect, like DoneNeedsDelivery.
 	RecentTaskChats bool `json:"recent_task_chats"`
 	WorkGuide       bool `json:"work_guide"`
+	TodosV2         bool `json:"todos_v2"`
+	IntegrationsV2  bool `json:"integrations_v2"`
 	// MeetingAttendanceDefault is in effect (off until changed).
 	MeetingAttendanceDefault      string   `json:"meeting_attendance_default"`
 	MeetingTranscriptionDefault   string   `json:"meeting_transcription_default"`
@@ -816,6 +866,8 @@ type assistantView struct {
 	// the tasks no leader supervises.
 	MainSupervisesOwnTasks  bool `json:"main_supervises_own_tasks"`
 	SupervisionBatchMinutes int  `json:"supervision_batch_minutes"`
+	// AutoSupervisionMessages is in effect (true unless the owner turned the automatic supervision messages off).
+	AutoSupervisionMessages bool `json:"auto_supervision_messages"`
 }
 
 // view is GET /api/v1/assistant; withArchived lists archived conversations too (flagged `archived`). It lists the
@@ -838,12 +890,16 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 		IdleAutoCompact: s.idleAutoCompact(ctx), IdleAutoCompactMinutes: s.idleAutoCompactMinutes(ctx), IdleAutoCompactTokens: s.idleAutoCompactTokens(ctx),
 		CacheKeepalive: cacheKeepaliveOf(v).Enabled, CacheKeepaliveMinutes: cacheKeepaliveOf(v).IntervalMinutes, CacheKeepaliveMax: cacheKeepaliveOf(v).MaxRequests,
 		IdleReleaseMinutes: s.idleReleaseMinutes(ctx), MeetingAttendanceDefault: meetingAttendanceOf(v), KBTopics: quietOn(v.KBTopics),
+		Dashboards:                  v.Dashboards != nil && *v.Dashboards,
 		MeetingTranscriptionDefault: meetingTranscriptionDefaultOf(v), MeetingGlossary: meetingGlossaryOf(v),
 		MeetingTranscriptionExtension: meetingTranscriptionExtensionOf(v), MeetingTranscriptionReady: s.transcriptionReadyNow(),
 		TaskWorkspacePreference: s.taskWorkspacePreference(ctx),
 		ReadonlyMode:            readonlyModeOf(v),
 		MainBackgroundFolded:    quietOn(v.MainBackgroundFolded),
+		FoldRoutineRelayReplies: v.foldRoutineRelayReplies(),
 		WorkGuide:               v.workGuideOn(),
+		TodosV2:                 v.todosV2On(),
+		IntegrationsV2:          v.integrationsV2On(),
 		RecentTaskChats:         v.RecentTaskChats != nil && *v.RecentTaskChats,
 		DeliveryGate:            deliveryGateOf(v),
 		DoneNeedsDelivery:       deliveryGateOf(v) == deliveryGateLive, IdleCloseHours: int(s.idleCloseAfter(ctx) / time.Hour),
@@ -865,6 +921,7 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 		PREventsRouteToAgent:         v.PREventsRouteToAgent != nil && *v.PREventsRouteToAgent,
 		MainSupervisesOwnTasks:       !s.backgroundOn(v),
 		SupervisionBatchMinutes:      supervisionBatchMinutesOf(v),
+		AutoSupervisionMessages:      autoSupervisionOf(v),
 		NextSuggestions:              v.NextSuggestions != nil && *v.NextSuggestions}
 	if d, ok := s.device(ctx, v.MachineID); ok {
 		out.Cwd = s.spaceCwd(ctx, d, sp)

@@ -21,11 +21,12 @@ type channelAdmission struct {
 // admitChannelMessage claims the message, captures its binding generation and reserves its position atomically.
 // No node or channel RPC runs under the book lock. Reserve before persisting the claim so a later command cannot
 // overtake a durable receipt. A failed write rolls both changes back for redelivery.
-func (s *Service) admitChannelMessage(id string, m channel.Message) (*channelAdmission, error) {
+func (s *Service) admitChannelMessage(ctx context.Context, id string, m channel.Message) (*channelAdmission, error) {
+	v2 := s.integrationsV2On(ctx)
 	c := &s.chans
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	s.loadChannelStateLocked(context.Background())
+	s.loadChannelStateLocked(ctx)
 	if !c.stLoaded {
 		return nil, errChannelsUnread
 	}
@@ -33,7 +34,15 @@ func (s *Service) admitChannelMessage(id string, m channel.Message) (*channelAdm
 	if m.ID == "" || slices.Contains(seen, m.ID) {
 		return nil, nil
 	}
-	a := &channelAdmission{key: channelAdmissionKey{channel: id, thread: strings.TrimSpace(m.Thread), generation: c.generation[id]}}
+	thread := strings.TrimSpace(m.Thread)
+	if v2 {
+		s.loadChannelsLocked(ctx)
+		if !c.loaded {
+			return nil, errChannelsUnread
+		}
+		thread = channelRouteKey(s.channelPrefLocked(id).ThreadMode, m)
+	}
+	a := &channelAdmission{key: channelAdmissionKey{channel: id, thread: thread, generation: c.generation[id]}}
 	if a.key.thread != "" {
 		if c.receiving == nil {
 			c.receiving = map[channelAdmissionKey]chan struct{}{}

@@ -45,6 +45,7 @@ const detail = (a: boolean, b: boolean): ChannelDetail => ({
 
 let host: HTMLDivElement;
 let root: Root;
+let onSettings: ReturnType<typeof vi.fn<(url: string) => void>>;
 const settle = async () => {
   for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
 };
@@ -70,10 +71,11 @@ const puts = () => hub.asked.filter((a) => a.kind === "put");
 beforeEach(async () => {
   hub.asked = [];
   vi.mocked(toast).mockReset();
+  onSettings = vi.fn<(url: string) => void>();
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => root.render(<ChannelPage id="demo" onBack={() => {}} onSettings={() => {}} />));
+  await act(async () => root.render(<ChannelPage id="demo" onBack={() => {}} onSettings={onSettings} />));
   await answer(hub.asked.shift(), detail(false, false));
   hub.asked = [];
 });
@@ -131,6 +133,66 @@ it("displays non-502 cannot_send error messages cleanly without gateway wording"
   expect(toast).toHaveBeenCalledWith(explanation, "error");
   expect(host.querySelector('[role="alert"]')?.textContent).toBe(explanation);
   expect(host.textContent).not.toContain("502");
+});
+
+describe("ChannelPage target override hint", () => {
+  const refreshWith = async (next: ChannelDetail) => {
+    const refresh = host.querySelector<HTMLButtonElement>(`button[aria-label="${t("settings-channels.refresh")}"]`)!;
+    await act(async () => refresh.click());
+    await answer(hub.asked.shift(), next);
+  };
+
+  it("stays hidden when target_override is absent (inactive or older hub)", () => {
+    expect(host.textContent).not.toContain(t("settings-channels.target_override_topics"));
+    expect(host.textContent).not.toContain(t("settings-channels.target_override_threads"));
+    expect(host.textContent).not.toContain(t("settings-channels.target_override_generic"));
+    expect(byText(t("settings-channels.target_override_extension_settings"))).toBeUndefined();
+    expect(byText(t("settings-channels.target_override_settings"))).toBeUndefined();
+  });
+
+  it("shows the group topic routing hint with an extension settings shortcut when active", async () => {
+    await refreshWith({
+      ...detail(false, false),
+      source: "plugin",
+      plugin: "topic-ext",
+      settings_url: "settings/plugins/topic-ext",
+      target_override: { mode: "topics" },
+    });
+
+    expect(host.textContent).toContain(t("settings-channels.target_override_topics"));
+    const link = byText(t("settings-channels.target_override_extension_settings"));
+    expect(link).toBeDefined();
+    await act(async () => link.click());
+    expect(onSettings).toHaveBeenCalledWith("settings/plugins/topic-ext");
+  });
+
+  it("shows the thread routing hint without a settings link when settings_url is absent", async () => {
+    await refreshWith({
+      ...detail(false, false),
+      source: "plugin",
+      settings_url: undefined,
+      target_override: { mode: "threads" },
+    });
+
+    expect(host.textContent).toContain(t("settings-channels.target_override_threads"));
+    expect(byText(t("settings-channels.target_override_extension_settings"))).toBeUndefined();
+    expect(byText(t("settings-channels.target_override_settings"))).toBeUndefined();
+  });
+
+  it("uses the general settings label for built-in channels and falls back gracefully on unknown modes", async () => {
+    await refreshWith({
+      ...detail(false, false),
+      source: "builtin",
+      settings_url: "settings/connectors/feishu-bot",
+      target_override: { mode: "future_mode" },
+    });
+
+    expect(host.textContent).toContain(t("settings-channels.target_override_generic"));
+    const link = byText(t("settings-channels.target_override_settings"));
+    expect(link).toBeDefined();
+    await act(async () => link.click());
+    expect(onSettings).toHaveBeenCalledWith("settings/connectors/feishu-bot");
+  });
 });
 
 describe("ChannelPage saves", () => {

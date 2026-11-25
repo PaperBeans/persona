@@ -30,6 +30,9 @@ type runtimeRegistry struct {
 	// about it go to that runtime, never to the terminal host as a Claude session to resume (that sent a DSH
 	// session's message to herdr, on a machine without herdr).
 	known map[string]knownSession
+	// remoteSessions latches session IDs ever associated with a remote assistant runtime (caps.assistant &&
+	// caps.remote_agent) so disconnects or ownership changes never drop the confirm-writes posture.
+	remoteSessions map[string]struct{}
 	// unclaimed: ids no connected runtime had when asked, until when not to ask again, and what the runtime whose own
 	// id it is answered then (runtimeFor).
 	unclaimed map[string]unclaimedID
@@ -50,6 +53,9 @@ type runtimeRegistry struct {
 	// drove it (runtime.driven), so its cards go to the phone first as the starter's would.
 	started     map[string]startedSession
 	compactions map[string]*runtimeCompaction
+	// agyWork: per-conversation Antigravity companion driving state, so the non-Linux presence fallback distinguishes
+	// the companion's own turns and settling transcript exports from an external terminal agy (#14561).
+	agyWork map[string]*agyCompanionTurn
 }
 
 // startedSession is who started a session for the hub, and when (runtimeRegistry.started).
@@ -84,6 +90,7 @@ func (b *runtimeRegistry) noteStarted(h *runtimeConn, id string, now time.Time) 
 // knownSession is the runtime a session belongs to, by the runtime's id (a reconnect is the same runtime).
 type knownSession struct {
 	runtime, label string
+	remoteAgent    bool
 	at             time.Time
 }
 
@@ -99,7 +106,8 @@ const maxKnown = 8192
 
 func newRuntimeRegistry() *runtimeRegistry {
 	return &runtimeRegistry{conns: map[int]*runtimeConn{}, owner: map[string]*runtimeConn{}, watching: map[string]int{},
-		lastHistory: map[string]string{}, watchParents: map[string]context.Context{}, known: map[string]knownSession{}, unclaimed: map[string]unclaimedID{}, warned: map[string]bool{}}
+		lastHistory: map[string]string{}, watchParents: map[string]context.Context{}, known: map[string]knownSession{},
+		remoteSessions: map[string]struct{}{}, unclaimed: map[string]unclaimedID{}, warned: map[string]bool{}}
 }
 
 // setHostOff replaces how launcher ownership excludes engine runtimes the serving node does not enable.
@@ -225,13 +233,48 @@ func startedHere(s proto.Session) bool {
 	return !s.Starting && s.StartError == ""
 }
 
+// markRemoteLocked latches id (or its parent for a subagent) as having belonged to a remote assistant runtime.
+// Callers hold b.mu.
+func (b *runtimeRegistry) markRemoteLocked(id string) {
+	if id == "" {
+		return
+	}
+	if parent, _, ok := splitRuntimeChild(id); ok {
+		id = parent
+	}
+	if b.remoteSessions == nil {
+		b.remoteSessions = map[string]struct{}{}
+	}
+	b.remoteSessions[id] = struct{}{}
+	if k, ok := b.known[id]; ok {
+		k.remoteAgent = true
+		b.known[id] = k
+	}
+}
+
+func (b *runtimeRegistry) markRemote(id string) {
+	if b == nil || id == "" {
+		return
+	}
+	b.mu.Lock()
+	b.markRemoteLocked(id)
+	b.mu.Unlock()
+}
+
 // remember records that id belongs to h's runtime. Callers hold b.mu and h.mu.
 func (b *runtimeRegistry) remember(h *runtimeConn, id string, now time.Time) {
 	label := h.hello.Name
 	if label == "" {
 		label = h.hello.Runtime
 	}
-	b.known[id] = knownSession{runtime: h.hello.Runtime, label: label, at: now}
+	isRemote := b.known[id].remoteAgent || (h.hello.Caps.Assistant && h.hello.Caps.RemoteAgent)
+	if _, latched := b.remoteSessions[id]; latched {
+		isRemote = true
+	}
+	if isRemote {
+		b.markRemoteLocked(id)
+	}
+	b.known[id] = knownSession{runtime: h.hello.Runtime, label: label, remoteAgent: isRemote, at: now}
 	delete(b.unclaimed, id)
 	if len(b.known) > maxKnown {
 		oldest := make([]string, 0, len(b.known))
@@ -293,6 +336,51 @@ func (b *runtimeRegistry) belongs(id string) (h *runtimeConn, label string, know
 func (b *runtimeRegistry) owns(h *runtimeConn, id string) bool {
 	got, _, _ := b.belongs(id)
 	return got != nil && got == h
+}
+
+// isRemoteSession reports whether id (or any listing/claimed metadata for it) has been associated with a remote
+// assistant runtime, failing closed on ambiguous ownership across multiple connections.
+func (b *runtimeRegistry) isRemoteSession(id string) bool {
+	if b == nil || id == "" {
+		return false
+	}
+	if parent, _, ok := splitRuntimeChild(id); ok {
+		id = parent
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, ok := b.remoteSessions[id]; ok {
+		return true
+	}
+	if k, ok := b.known[id]; ok && k.remoteAgent {
+		return true
+	}
+	if o := b.owner[id]; o != nil && o.remoteAgent() {
+		return true
+	}
+	for _, h := range b.conns {
+		h.mu.Lock()
+		isRemoteConn := h.ready && h.hello.Caps.Assistant && h.hello.Caps.RemoteAgent
+		hasRow := false
+		if isRemoteConn {
+			for _, s := range h.sessions {
+				if s.SessionID == id {
+					hasRow = true
+					break
+				}
+			}
+		}
+		h.mu.Unlock()
+		if hasRow {
+			return true
+		}
+	}
+	if k, ok := b.known[id]; ok && !b.namesUnlisted(k.runtime, id) {
+		if h := b.byRuntime(k.runtime); h != nil && h.remoteAgent() {
+			return true
+		}
+	}
+	return false
 }
 
 // claim records that h has the session (it answered for it).
@@ -498,6 +586,7 @@ func (b *runtimeRegistry) remove(h *runtimeConn) {
 	h.mu.Unlock()
 	b.leftUnlisted(id)
 	b.leftRows(h, id)
+	b.agyWorkRemoveConnLocked(h, agyPresenceNow())
 	b.recomputeOwners()
 }
 
@@ -559,14 +648,23 @@ func (b *runtimeRegistry) setSessions(h *runtimeConn, list []proto.Session) (map
 	h.mu.Lock()
 	h.sessions = list
 	rt := h.hello.Runtime
+	agent := h.hello.Agent
+	if agent == "" {
+		agent = rt
+	}
 	h.mu.Unlock()
 	b.backAgain(rt) // its rows while it was away (runtimeaway.go): this list says what it has
 	b.recomputeOwners()
 	rewatch := map[string]runtimeWatchAttempt{}
 	var driven []string
 	now := time.Now()
+	b.agyWorkObserveSessionsLocked(h, agent, list, agyPresenceNow())
 	h.mu.Lock()
+	isRemoteConn := h.hello.Caps.Assistant && h.hello.Caps.RemoteAgent
 	for _, s := range list {
+		if isRemoteConn {
+			b.markRemoteLocked(s.SessionID)
+		}
 		if b.owner[s.SessionID] != h {
 			continue // another runtime has it running (recomputeOwners)
 		}

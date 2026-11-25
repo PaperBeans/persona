@@ -68,8 +68,9 @@ one, is more specific).
   items, `total` all of them, `current` is the first `in_progress` item's `activeForm` (else its subject) on one line,
   clipped to 120 characters. With no item in progress `current` is empty: the next pending item is not what the agent
   is doing. A list whose items are all done stays as "N/N" until the next one; an empty list is no plan. `at` moves only
-  when done, total or current change. Subagents' calls (sidechain lines) and Codex rollouts are left out (Codex's
-  `update_plan` may follow later).
+  when done, total or current change. Subagents' sidechain calls are excluded. Codex rollout parsing also accepts a native `plan_update` event or a
+  successful `update_plan` response. It emits the same todo snapshot and coalesces the two records when they describe
+  the same revision.
 - **node**: a `TodoWrite` is often far back in a long turn, so the plan is read by the same `bgScan` as the goal. Its
   markers are the call lines (`"name":"TodoWrite"`, `"TaskCreate"`, `"TaskUpdate"`, `"TaskList"`); a result line does
   not name its tool, so the scan also parses lines holding the id of a call still waiting for its result

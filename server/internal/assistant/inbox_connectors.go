@@ -115,6 +115,7 @@ func (b *inboxBook) applyConnector(id, name string, things []connector.InboxThin
 				b.roundWrite(open)
 				open.Count += moveCount(t)
 				fillConnectorItem(open, t)
+				b.replaceContextKeepingMergedMembers(open, open.Context)
 				b.noteReceived(open, prev, nil)
 				if t.Tier != "" {
 					b.noteTriaged(open)

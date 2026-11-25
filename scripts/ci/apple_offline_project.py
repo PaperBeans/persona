@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Materialize an offline-only graph from a fully resolved XcodeGen JSON spec.
 
-The ordinary project remains unchanged. This offline project keeps the real
+The ordinary project remains unchanged. The full offline project keeps the real
 Persona host and every PersonaTests source/selector, but excludes UI-test and
 unreferenced Watch/Share/Vision/About targets instead of compiling them again.
+Only explicitly focused lanes narrow test sources to their executed suites and
+reviewed shared helpers; command-line -only-testing flags alone cannot do that.
 """
 
 import argparse
 from copy import deepcopy
 import json
 from pathlib import Path
+import re
 
 
 SCHEME = "PersonaOfflineUnitTests"
@@ -33,11 +36,12 @@ PACKAGES = {
     "PersonaModuleAPI": {"path": "Packages/PersonaModuleAPI"},
     "MarqueeGlow": {"url": "https://github.com/szupzj18/MarqueeGlow", "exactVersion": "0.1.0"},
 }
-MODULE_CONDITIONS = "$(inherited) PERSONA_MODULE_SCREEN_SHARE PERSONA_MODULE_HEALTH"
+MODULE_CONDITIONS = "$(inherited) PERSONA_MODULE_SCREEN_SHARE PERSONA_MODULE_HEALTH PERSONA_MODULE_VOICE"
 SOURCES = {
     "Persona": [
         {"path": "Modules/ScreenShare", "excludes": ["**/*.md"]},
         {"path": "Modules/Health", "excludes": ["**/*.md"]},
+        {"path": "Modules/Voice", "excludes": ["**/*.md"]},
         {"path": "Persona", "excludes": ["**/*.md"]},
         {"path": "Shared"},
         {"path": "LiveActivity"},
@@ -95,6 +99,66 @@ OFFLINE_ACTION = {
     "run": {"config": "Debug"},
     "test": {"targets": ["PersonaTests"], "language": "zh-Hans", "region": "CN"},
 }
+# Execution selectors do not change Swift target membership. Keep every suite
+# these focused lanes execute, including both readiness probes and the regular
+# iPad fixture, while leaving the ordinary full-test target byte-for-byte alone.
+FOCUSED_FILES = (
+    "AboutVersionRefractSupport.swift",  # AboutVersionVisualHost's production/shared models.
+    "AboutVersionRefractTests.swift",   # Compact and regular visual suites share this file.
+    "FakeHub.swift",                    # StarredMessagesTests constructs its real API client here.
+    "LauncherModelChoiceTests.swift",
+    "OmpNewAgentTests.swift",
+    "PageSearchableTests.swift",
+    "PaseoPermissionModesTests.swift",
+    "PaseoProvidersTests.swift",
+    "StarredMessagesTests.swift",
+    "TypeScaleTests.swift",             # Both iPhone and iPad readiness probes.
+)
+FOCUSED_SUITES = {
+    "AboutVersionRefractTests.swift": (
+        "AboutVersionCompactVisualTests", "AboutVersionRegularVisualTests",
+    ),
+    **{name + "Tests.swift": (name + "Tests",) for name in (
+        "LauncherModelChoice", "OmpNewAgent", "PageSearchable",
+        "PaseoPermissionModes", "PaseoProviders", "StarredMessages", "TypeScale",
+    )},
+}
+IPAD_DIAGNOSTIC_SUITES = {
+    "AssistantHTMLCardTests.swift": ("AssistantHTMLCardTests",),
+    "AssistantHTMLSecurityTests.swift": ("AssistantHTMLSecurityTests",),
+}
+
+
+def focused_sources(project, source_root=None, html_batches=False):
+    """Resolve explicit test files and their reviewed cross-file dependencies."""
+    root = Path(source_root) if source_root is not None else Path(__file__).resolve().parents[2] / "apple" / "PersonaTests"
+    declarations = dict(FOCUSED_SUITES)
+    if html_batches:
+        # ios-ipad-diagnostic executes these existing separate batches before its
+        # regular-width probe; the focused ios lane deliberately does not.
+        declarations.update(IPAD_DIAGNOSTIC_SUITES)
+    files = list(FOCUSED_FILES)
+    if html_batches:
+        files.extend(IPAD_DIAGNOSTIC_SUITES)
+    for name in files:
+        path = root / name
+        if not path.is_file():
+            raise ValueError(f"focused test source {name} is missing; review its helpers and selectors")
+    for name, suites in declarations.items():
+        source = (root / name).read_text()
+        for suite in suites:
+            declaration = re.search(rf"\b(?:class|struct|enum|actor)\s+{re.escape(suite)}\s*\{{", source)
+            # Do not approximate Swift parsing here. Exact declarations and
+            # source existence guard graph drift; strict xcresult verification
+            # remains responsible for executed-suite and zero-test failures.
+            if not declaration:
+                raise ValueError(f"focused suite {suite} is missing from {name}; review the source list")
+    canonical = project["targets"]["PersonaTests"]["sources"]
+    source_path = canonical[0]["path"]
+    return [
+        {"path": source_path, "includes": files},
+        deepcopy(canonical[1]),
+    ]
 
 
 def _offline_action(action):
@@ -143,8 +207,10 @@ def validate_canonical_graph(project):
         raise ValueError("the canonical offline test action changed; review the offline graph")
 
 
-def filtered(project):
-    """Keep the canonical host, packages and test target; drop only offline-unused targets."""
+def filtered(project, profile="full", source_root=None):
+    """Keep the real host; narrow test sources only for an explicit focused profile."""
+    if profile not in {"full", "focused", "ipad-diagnostic"}:
+        raise ValueError(f"unknown offline test source profile {profile!r}")
     if set(project["schemes"]) != CANONICAL_SCHEMES:
         raise ValueError("the canonical project schemes changed; regenerate and review the offline graph")
     if set(project["targets"]) - set(project["schemes"]) != {
@@ -176,6 +242,15 @@ def filtered(project):
         raise ValueError("offline tests must retain the real Persona host and bundle loader")
     if "PersonaUITests" in json.dumps(result):
         raise ValueError("offline graph must not contain the UI-test target")
+    if profile != "full":
+        tests["sources"] = focused_sources(project, source_root=source_root, html_batches=profile == "ipad-diagnostic")
+        # Only the test target's source membership differs. The real host,
+        # package graph, bundle loader and every test action stay canonical.
+        comparison = deepcopy(result)
+        comparison["targets"]["PersonaTests"]["sources"] = deepcopy(SOURCES["PersonaTests"])
+        expected = filtered(project, source_root=source_root)
+        if comparison != expected:
+            raise ValueError("focused graph must differ from the full graph only in PersonaTests sources")
     return result
 
 
@@ -183,8 +258,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dump", type=Path, help="xcodegen dump --type json of the canonical whole project")
     parser.add_argument("output", type=Path)
+    parser.add_argument("--profile", choices=("full", "focused", "ipad-diagnostic"), default="full")
+    parser.add_argument("--source-root", type=Path, help="staged apple/PersonaTests source root")
     args = parser.parse_args()
-    result = filtered(json.loads(args.dump.read_text()))
+    result = filtered(json.loads(args.dump.read_text()), profile=args.profile, source_root=args.source_root)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
 

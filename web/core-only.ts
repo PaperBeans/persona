@@ -2,8 +2,9 @@
 // zero feature modules, so the core alone is a tested product. `PERSONA_WEB_MODULES=none` (npm run build:core-only,
 // npm run test:core-only, scripts/ci/web.sh) turns it on; without it this plugin does nothing.
 //
-// In that mode the module list (src/modules/index.ts) resolves to an empty one, so no module registers, and any import
-// from a file outside src/modules that lands in a module's files fails the build or the test file: the ESLint boundary
+// In that mode the module list (src/modules/index.ts, and standalone.ts, its part main.tsx imports) resolves to an
+// empty one, so no module registers, and any import from a file outside src/modules that lands in a module's files
+// fails the build or the test file: the ESLint boundary
 // catches the import paths it can read, this catches whatever reaches a module at all once the paths are resolved.
 // Module files themselves (their code and their tests) are never reached in this mode; vite.config.ts leaves their
 // tests out. The build writes to node_modules/.cache/persona-core-only: outside the folders a dev server or a browser
@@ -25,7 +26,8 @@ export function moduleFileKind(id: string, modulesDir = MODULES_DIR): "list" | "
   const file = id.split("?")[0]!;
   if (!file.startsWith(modulesDir)) return null;
   const rest = file.slice(modulesDir.length);
-  if (rest === "index.ts" || rest === "index") return "list";
+  // the list, and its part main.tsx imports (the modules with a page of their own)
+  if (rest === "index.ts" || rest === "index" || rest === "standalone.ts" || rest === "standalone") return "list";
   return "module";
 }
 
@@ -56,6 +58,8 @@ export function coreOnly(enabled = CORE_ONLY): Plugin {
       return [
         `// The module list in the core-only lane (web/core-only.ts): empty.`,
         `export const MODULES = [];`,
+        `export const STANDALONE_MODULES = [];`,
+        `export async function standalonePage() { return null; }`,
         `export function registerModules() {}`,
       ].join("\n");
     },

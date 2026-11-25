@@ -38,5 +38,7 @@
   "status_running": "In progress",
   "status_error": "Error",
   "status_done": "Done",
-  "no_content": "No content"
+  "no_content": "No content",
+  "diff_skipped_one": "{count} line omitted",
+  "diff_skipped_other": "{count} lines omitted"
 }

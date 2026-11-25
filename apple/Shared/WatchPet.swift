@@ -41,9 +41,26 @@ nonisolated enum WatchPet {
     static func status(sessions: [Session], interactions: [Interaction], unreachable: Bool, partlyUnreachable: Bool,
                        now: Date = .now, calendar: Calendar = .current) -> WatchPetStatus {
         if unreachable { return WatchPetStatus(state: .offline) }
-        let waiting = Set(interactions.map(\.sessionKey)).union(sessions.filter { $0.state == .needsYou }.map(\.key))
+        // A card its task's supervisor holds (`Interaction.supervisorHeld`) is the supervisor's, not the user's:
+        // neither the card nor a session in Needs You whose pending cards here are all held makes the frog wait
+        // (`AgentsNeedsYou.rows`, D11). That session is still working under its supervisor.
+        var held: Set<SessionKey> = []
+        var open: Set<SessionKey> = []
+        let waitingKeys = Set(sessions.filter { $0.state == .needsYou }.map(\.key))
+        for ix in interactions {
+            // A folded child's or side's card belongs to its parent row when that parent is waiting (`AgentsNeedsYou.rows`).
+            let home = SessionKey(group: ix.group, machineID: ix.machineID, sessionID: ix.requestHome)
+            let key = home != ix.sessionKey && waitingKeys.contains(home) ? home : ix.sessionKey
+            if ix.supervisorHeld {
+                if !ix.isSessionless { held.insert(key) }
+                continue
+            }
+            open.insert(key)
+        }
+        let heldOnly = held.subtracting(open)
+        let waiting = open.union(sessions.filter { $0.state == .needsYou && !heldOnly.contains($0.key) }.map(\.key))
         if !waiting.isEmpty { return WatchPetStatus(state: .needsYou, count: waiting.count) }
-        let working = sessions.filter { $0.state == .working }.count
+        let working = sessions.filter { $0.state == .working || ($0.state == .needsYou && heldOnly.contains($0.key)) }.count
         if working > 0 { return WatchPetStatus(state: .working, count: working) }
         if partlyUnreachable { return WatchPetStatus(state: .offline) }
         let finished = sessions.filter { $0.state == .unread }.count

@@ -79,5 +79,7 @@
   "move_offline": "Offline",
   "needs_update": "Needs update",
   "needs_update_note": "Its personad is older and doesn't read settings of its own (manager.json) yet, so it runs on built-in defaults. Update personad on the computer it runs on.",
+  "pending_restart": "Pending restart",
+  "pending_restart_note": "Its personad binary was updated on disk. This assistant will restart automatically once idle.",
   "machine_offline": "Its assistant “{name}” is offline. It comes back online once the assistant is back."
 }

@@ -50,9 +50,69 @@ export interface UsageAccount {
 
 /** Samples older than this are dropped (a source that went quiet for days says nothing about now). */
 export const SAMPLE_MAX_AGE_MS = 3 * 24 * 3600_000;
-/** From this used percentage a bar turns to the caution colour. */
+/** From this used percentage a bar turns to the caution colour (kept for ultracode quota warnings). */
 export const WARN_PERCENT = 80;
+/** Remaining headroom thresholds (percentage points above protection reserve R): green >= 20, orange >= 5, red < 5. */
+export const REMAINING_OK_HEADROOM = 20;
+export const REMAINING_WARN_HEADROOM = 5;
 const POLL_MS = 60_000;
+
+export type RemainingTone = "green" | "orange" | "red";
+
+const clampPercent = (p: number) => (Number.isFinite(p) ? Math.min(100, Math.max(0, p)) : 0);
+const roundPct = (p: number) => Math.round(p * 1e6) / 1e6;
+
+/** Remaining quota share `r = 100 - used`, clamped to [0, 100]. */
+export function remainingPercent(usedPercent: number): number {
+  return roundPct(100 - clampPercent(usedPercent));
+}
+
+/** Protection reserve `R = 100 - protect_percent` on the remaining-quota scale, or null when unprotected. */
+export function protectReserve(protectPercent: number | undefined): number | null {
+  if (typeof protectPercent !== "number" || !Number.isFinite(protectPercent) || protectPercent < 0 || protectPercent > 100) return null;
+  return roundPct(100 - protectPercent);
+}
+
+/** Semantic tone from remaining percentage `r` and protection reserve `R` (0 when unprotected),
+ *  classified by headroom `h = r - R`: green (--green) when h >= 20, orange (--orange) when 5 <= h < 20, red (--red) when h < 5. */
+export function remainingTone(remaining: number, reserve = 0): RemainingTone {
+  const r = Number.isFinite(remaining) ? remaining : 0;
+  const R = Number.isFinite(reserve) && reserve > 0 ? reserve : 0;
+  const h = roundPct(r - R);
+  if (h < REMAINING_WARN_HEADROOM) return "red";
+  if (h < REMAINING_OK_HEADROOM) return "orange";
+  return "green";
+}
+
+/** Distance `h = r - R` between remaining quota and protection reserve, plus pause/timeline helpers live in
+ *  `lib/usage-timeline.ts` so popover-only code stays off the first screen (FIRST_SCREEN_BUDGET). */
+
+export interface TightestWindow {
+  remaining: number;
+  reserve: number;
+  headroom: number;
+  paused: boolean;
+}
+
+/** Most constrained window of an account by headroom `h = r - R` (smallest first, then smallest `r`).
+ *  Per-model windows do not override plan windows while plan windows exist. */
+export function tightestRemaining(a: Pick<UsageAccount, "windows">): TightestWindow {
+  const plan = a.windows.filter((w) => !w.model);
+  const scope = plan.length ? plan : a.windows;
+  if (!scope.length) return { remaining: 100, reserve: 0, headroom: 100, paused: false };
+  let best: TightestWindow | null = null;
+  for (const w of scope) {
+    const remaining = remainingPercent(w.used_percent);
+    const rawReserve = protectReserve(w.protect_percent);
+    const reserve = rawReserve ?? 0;
+    const headroom = roundPct(remaining - reserve);
+    const paused = rawReserve !== null && headroom <= 0;
+    if (!best || headroom < best.headroom || (headroom === best.headroom && remaining < best.remaining)) {
+      best = { remaining, reserve, headroom, paused };
+    }
+  }
+  return best!;
+}
 
 /** The window's length in minutes from its label ("5h", "7d", "45m"); the given minutes when the label is not one. */
 export function windowMinutes(w: Pick<UsageWindow, "label" | "window_minutes">): number {
@@ -155,15 +215,20 @@ export function canonicalUsageProvider(provider: string): string {
   return id === "agy" ? "antigravity" : id;
 }
 
-/** The sidebar takes the two fullest windows, with stale accounts last. Rank whole percentages as shown on the bar
- *  so changes below the displayed precision keep the same order. Balance accounts have their own rows. */
+/** The sidebar takes the two accounts with lowest headroom `h = r - R`, with stale accounts last. Rank whole
+ *  percentages as displayed so sub-percent jitter keeps the same order. Balance accounts have their own rows. */
 export function topAccounts(accounts: UsageAccount[], n = 2): UsageAccount[] {
   return accounts
     .filter((a) => !isBalanceAccount(a) && a.windows.length > 0)
-    .sort((a, b) => Number(!!a.stale) - Number(!!b.stale)
-      || Math.round(fullest(b)) - Math.round(fullest(a))
-      || canonicalUsageProvider(a.provider).localeCompare(canonicalUsageProvider(b.provider))
-      || a.id.localeCompare(b.id))
+    .sort((a, b) => {
+      const ta = tightestRemaining(a);
+      const tb = tightestRemaining(b);
+      return Number(!!a.stale) - Number(!!b.stale)
+        || Math.round(ta.headroom) - Math.round(tb.headroom)
+        || Math.round(ta.remaining) - Math.round(tb.remaining)
+        || canonicalUsageProvider(a.provider).localeCompare(canonicalUsageProvider(b.provider))
+        || a.id.localeCompare(b.id);
+    })
     .slice(0, n);
 }
 
@@ -373,39 +438,6 @@ export const TIMELINE_TICKS_HOURS = [6, 12, 24, 72, 120, 168] as const;
 export function timelinePosition(ms: number): number {
   const h = Math.max(0, Math.min(ms, TIMELINE_CAP_MS)) / HOUR_MS;
   return h <= 24 ? (h / 24) * 0.45 : 0.45 + ((h - 24) / 144) * 0.55;
-}
-
-export interface TimelineLane {
-  key: string;
-  label: string;
-  /** A window longer than six hours (the weekly one): the blue capsule; a short one is the teal one. */
-  long: boolean;
-  /** Where the capsule ends along the axis, 0-1. */
-  end: number;
-  /** Time left, in ms (the end may be beyond the axis; `end` is then 1). */
-  remainingMs: number;
-  resetsAt: string;
-}
-export interface TimelineRow {
-  account: UsageAccount;
-  /** The plan windows with a reset time still ahead, 5h first. */
-  lanes: TimelineLane[];
-}
-
-/** The rows of one provider card's reset timeline: one per account, in the order given (the card's quota order), each
- *  with a lane per plan window that has a reset time. Accounts with no lane have no row. Pure client computation. */
-export function providerTimeline(accounts: UsageAccount[], now = Date.now()): TimelineRow[] {
-  const rows: TimelineRow[] = [];
-  for (const account of accounts) {
-    const lanes: TimelineLane[] = [];
-    for (const w of sortedWindows(account)) {
-      const at = w.resets_at ? Date.parse(w.resets_at) : NaN;
-      if (w.model || !Number.isFinite(at) || at <= now) continue;
-      lanes.push({ key: windowKey(w), label: w.label, long: windowMinutes(w) > 360, end: timelinePosition(at - now), remainingMs: at - now, resetsAt: w.resets_at as string });
-    }
-    if (lanes.length) rows.push({ account, lanes });
-  }
-  return rows;
 }
 
 /** Time left as a short label: "45m", "1.5h", "2d 3h" (each language's units). */

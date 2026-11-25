@@ -18,7 +18,6 @@
     "android/core/designsystem/src/main/kotlin/persona/core/designsystem/PageSizedSettingsSheet.kt": 2,
     "android/core/designsystem/src/main/kotlin/persona/core/designsystem/PageTransitions.kt": 1,
     "android/core/designsystem/src/main/kotlin/persona/core/designsystem/PersonaFace.kt": 2,
-    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Voice.kt": 2,
     "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Workflows.kt": 3,
     "android/feature/agents/src/main/kotlin/persona/feature/agents/AgentsScreen.kt": 1,
     "android/feature/chat/src/main/kotlin/persona/feature/chat/AssistantTasks.kt": 2,
@@ -27,7 +26,8 @@
     "android/feature/chat/src/main/kotlin/persona/feature/chat/StructuredContent.kt": 1,
     "android/feature/inbox/src/main/kotlin/persona/feature/inbox/LarkDocumentReader.kt": 4,
     "android/feature/settings/src/main/kotlin/persona/feature/settings/EndpointDrag.kt": 4,
-    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionViewContent.kt": 3
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionViewContent.kt": 3,
+    "android/module/voice/src/main/kotlin/persona/module/voice/VoiceComponents.kt": 2
   },
   "version": 1
 }

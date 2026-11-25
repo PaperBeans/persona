@@ -46,6 +46,7 @@ func inboxRetryEvent(todo, key string) superviseSignal {
 func inboxRetryService(t *testing.T, st Store) (*Service, *fakeHub, Todo) {
 	t.Helper()
 	s, f := newQuietServiceOn(t, st)
+	f.inbox = newFakeInbox()
 	turnInboxSignalsOn(t, s)
 	s.superviseTimes.gather = time.Hour
 	todo := startedTask(t, s, f)

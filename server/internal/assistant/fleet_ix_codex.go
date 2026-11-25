@@ -121,7 +121,7 @@ func (s *Service) syncCodexInteractions(machine string, params json.RawMessage) 
 		s.record(ix)
 		if quiet[ix.ID] {
 			s.show(ix)
-			go s.feishuCardBack(ix) // listed again by a reconnected node: its Feishu card asks again
+			go s.larkModule().AskBack(ix, resumeGrace) // listed again by a reconnected node: its Feishu card asks again
 		} else {
 			s.announce(ix)
 		}

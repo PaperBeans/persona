@@ -229,3 +229,17 @@ import UIKit
         current?.appInBackground(false)
     }
 }
+
+extension VoiceCalls {
+    /// The call bound to `key`, live or ended.
+    func call(on key: SessionKey) -> VoiceConversation? {
+        guard let call = current, call.key == key else { return nil }
+        return call
+    }
+
+    /// A call bound to `key` is on (not ended): the page's footer keeps out of its way.
+    func isLive(on key: SessionKey) -> Bool {
+        guard let call = call(on: key) else { return false }
+        return !call.isOver
+    }
+}

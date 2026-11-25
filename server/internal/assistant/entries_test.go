@@ -227,6 +227,11 @@ func TestEntriesHTTPPersonalGrantRevocationAndCategories(t *testing.T) {
 		_ = json.Unmarshal(w.Body.Bytes(), &out)
 		return w.Code, out
 	}
+	// The read below is of the user's own extension. Keep its real trust in the store the production filter reads;
+	// the transport grant alone cannot make a third-party extension's categories visible.
+	if err := database.SetExtensionTrust(ctx, "example-reader", assistantwire.ExtensionTrustOwner, nil, "user"); err != nil {
+		t.Fatal(err)
+	}
 	code, out := get("example-reader")
 	if code != 200 || len(out.Entries) != 4 || !reflect.DeepEqual(out.Entries[0].Category, []string{"health", "finance"}) {
 		t.Fatalf("approved cross-space personal read: %d %+v", code, out)
@@ -258,6 +263,15 @@ func TestEntriesHTTPPersonalGrantRevocationAndCategories(t *testing.T) {
 	code, out = get("example-reader")
 	if code != 200 || len(out.Entries) != 4 {
 		t.Fatalf("local alternative: %d %+v", code, out)
+	}
+	// Revoking the actual trust hides the entries even when the transport grant still answers; no local proof
+	// turns a third-party extension back into the user's own one.
+	if err := database.ForgetExtensionTrust(ctx, "example-reader"); err != nil {
+		t.Fatal(err)
+	}
+	code, out = get("example-reader")
+	if code != 200 || len(out.Entries) != 0 {
+		t.Fatalf("revoked owner trust is still visible: %d %+v", code, out)
 	}
 }
 

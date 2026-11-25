@@ -72,6 +72,7 @@ class AssistantSettingsStateTest {
                 ownerReplyApproval = update.ownerReplyApproval ?: config.ownerReplyApproval,
                 persistentOwnerActionCards = update.persistentOwnerActionCards ?: config.persistentOwnerActionCards,
                 ownerReplyApprovalPhrases = update.ownerReplyApprovalPhrases ?: config.ownerReplyApprovalPhrases,
+                dashboards = update.dashboards ?: config.dashboards,
             )
             return updateAnswer?.invoke(update) ?: config
         }
@@ -138,6 +139,24 @@ class AssistantSettingsStateTest {
         api.fail = true
         state.setMainTasksQuiet(true)
         assertEquals(false, state.state.value.config?.mainTasksQuiet)
+        assertTrue(state.state.value.notice?.error == true)
+    }
+
+    /** Dashboards (#15017): off when the hub leaves the field out; only `dashboards` is written; a failure puts it back. */
+    @Test fun dashboardsSwitchSavesOnlyItsFieldAndComesBackOnFailure() = runTest {
+        val api = FakeApi()
+        val state = AssistantSettingsState(api, Zone())
+        state.load()
+        assertNull(state.state.value.config?.dashboards)
+        // Absent is off: turning it off again writes nothing.
+        state.setDashboards(false)
+        assertTrue(api.updates.isEmpty())
+        state.setDashboards(true)
+        assertEquals(AssistantConfigUpdate(dashboards = true), api.updates.single())
+        assertEquals(true, state.state.value.config?.dashboards)
+        api.fail = true
+        state.setDashboards(false)
+        assertEquals(true, state.state.value.config?.dashboards)
         assertTrue(state.state.value.notice?.error == true)
     }
 

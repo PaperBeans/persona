@@ -81,6 +81,12 @@ const (
 	// (#6282, docs/protocol/protocol.md "Assistant chat search"). The hub lists the assistant_search feature only while
 	// the default manager names it; the apps keep filtering titles and last messages without it.
 	CapabilityAssistantSearch = "assistant_search"
+	// CapabilityAssistantPages: the manager keeps the assistant's pages (Dashboards, #15017,
+	// docs/assistant/dashboards.md): the reserved extension -pages in GET /api/v1/extensions/-/ui and its pages, the
+	// dashboards switch in GET/PUT /api/v1/assistant and the assistant_pages event. Only the built-in manager names
+	// it, the switch on or off; the hub lists the assistant_pages feature only while the default manager names it, and
+	// the apps show the switch only then.
+	CapabilityAssistantPages = "assistant_pages"
 	// CapabilityTaskInput: the manager validates and saves structured scheduled prompts.
 	CapabilityTaskInput = "task_input"
 	// CapabilityAssistantSegments promises persistent logical routing and explicit switches.
@@ -132,6 +138,11 @@ const (
 	CapabilityTodoImages = "todo_images"
 )
 
+// ManagerStatus is EventManagerStatus's params: live runtime status a connected manager reports to the hub's roster.
+type ManagerStatus struct {
+	PendingRestart bool `json:"pending_restart"`
+}
+
 // BodyStream is where MethodHTTPStreamed's body comes from: the relay the hub holds with ID (devicewire.RelayPath
 // ?id=, only the manager the request is for may take it), which carries exactly Size bytes as a body stream
 // (bus.WriteBody) and then closes normally.
@@ -140,16 +151,17 @@ type BodyStream struct {
 	Size int64  `json:"size"`
 }
 
-// The methods and events, by direction. The assistant's handshake is manager.hello {id, host, os, arch, deploy,
-// version, capabilities}; its answer is Hello (with the hub's name, role and managers besides).
+// The methods and events, by direction. The assistant's handshake is manager.hello {id, host, machine_uid?, os, arch,
+// deploy, version, pending_restart?, capabilities}; its answer is Hello (with the hub's name, role and managers besides).
 const (
 	// The assistant calls the hub (Hub).
-	MethodHello    = "manager.hello"
-	MethodDevice   = "device.call"
-	MethodApp      = "app.call"
-	MethodNotify   = "notify.request"
-	MethodSnapshot = "manager.snapshot"
-	EventBroadcast = "ws.broadcast" // one way
+	MethodHello        = "manager.hello"
+	MethodDevice       = "device.call"
+	MethodApp          = "app.call"
+	MethodNotify       = "notify.request"
+	MethodSnapshot     = "manager.snapshot"
+	EventBroadcast     = "ws.broadcast"   // one way
+	EventManagerStatus = "manager.status" // one way: ManagerStatus (live roster status, e.g. pending_restart)
 
 	// The hub calls the assistant (Handler).
 	MethodHTTP = "http.request" // HTTPRequest → HTTPResponse

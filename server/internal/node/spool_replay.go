@@ -324,6 +324,10 @@ func (n *Node) replayHook(e spoolEntry) error {
 	if json.Unmarshal(req.Input, &in) != nil {
 		return nil
 	}
+	if sess := n.paneHerdrSession(req.Pane); n.herdrSessionBlocked(sess) && !n.isAssistantSession(in.SessionID) && !n.keptSessions()[in.SessionID] {
+		n.noteHerdrSessionID(in.SessionID, sess)
+		return nil // a blocked named herdr session (herdrsessions.go): kept while the hub was away, never sent
+	}
 	if n.sessionBlocked(in.SessionID, in.Cwd) {
 		return nil // a blocked Agent folder (agentdirs.go): kept while the hub was away, never sent
 	}

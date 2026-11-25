@@ -270,6 +270,7 @@ func (s *Service) continueTimedOut(ctx context.Context, task Todo) (json.RawMess
 			Session proto.Session `json:"session"`
 		}
 		sctx, cancel := context.WithTimeout(ctx, agentStartTimeout)
+		sctx = context.WithValue(sctx, placementTaskKey{}, task.ID)
 		err := s.call(sctx, a.MachineID, DeviceSessionStart, map[string]any{
 			"resume_session_id": a.SessionID,
 			"prompt":            continueText,

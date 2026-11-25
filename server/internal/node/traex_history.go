@@ -72,6 +72,16 @@ func (n *Node) traexThread(id string) (codexAppThread, bool) {
 	return t, ok && traexConversation(t)
 }
 
+// traexRefreshHistory updates the projected transcript for a live or recently stopped paginated TRAE
+// conversation so final reply text and completion timestamps stay attached without projecting cold history.
+func (n *Node) traexRefreshHistory(id string) {
+	if !validID(id) || n.codexAppHistoryDir() == "" {
+		return
+	}
+	codexPaginatedThreadsFresh(n.traexHome())
+	_ = n.refreshCodexAppHistory(id)
+}
+
 // Keep a conversation readable and listed after its terminal exits, as for rollout-backed agents.
 func (n *Node) traexSessions(seen map[string]bool) []proto.Session {
 	var out []proto.Session
@@ -85,6 +95,9 @@ func (n *Node) traexSessions(seen map[string]bool) []proto.Session {
 			if st, err := os.Stat(p); err == nil {
 				m := n.meta(p, st)
 				s.LastText, s.Rev = snippet(m.lastText), st.Size()
+				if !m.activity.IsZero() && (s.UpdatedAt.IsZero() || m.activity.After(s.UpdatedAt)) {
+					s.UpdatedAt = m.activity.UTC()
+				}
 				m.turnErr.set(&s)
 			}
 		}

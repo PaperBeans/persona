@@ -4,6 +4,12 @@
     <string name="chat_composer_videos_only">请看视频</string>
     <string name="chat_composer_files_only">请看附件</string>
     <string name="chat_composer_file_limit">一条消息最多 10 个文件</string>
+    <string name="chat_composer_video_limit">一次最多 %1$d 个视频</string>
+    <string name="chat_composer_photos_too_large">这些图加起来太大了，没法一起发送</string>
+    <string name="chat_composer_photos_as_files_one">一条消息最多 %1$d 张图，另外 1 张作为文件发送</string>
+    <string name="chat_composer_photos_as_files_other">一条消息最多 %1$d 张图，另外 %2$d 张作为文件发送</string>
+    <string name="chat_composer_photos_bytes_as_files_one">这些图加起来太大了，其中 1 张作为文件发送</string>
+    <string name="chat_composer_photos_bytes_as_files_other">这些图加起来太大了，其中 %1$d 张作为文件发送</string>
     <string name="chat_attach_waiting">等待中</string>
     <plurals name="chat_files_more">
         <item quantity="other">还有 %1$d 个文件</item>

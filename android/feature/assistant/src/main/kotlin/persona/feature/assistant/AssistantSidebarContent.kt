@@ -107,8 +107,9 @@ fun AssistantSidebarContent(
     val management = remember(base, choice.hubId, choice.shown) { base?.forManager(choice.shown) }
     // The domain spaces (#13500): the page opens them, so they show only where the page is the real assistant's.
     val sidebarHost = LocalAssistantSidebarHost.current
+    val spacesEnabled = LocalSpaceConversationsEnabled.current?.collectAsStateWithLifecycle()?.value == true
     val spaces = rememberSpaces(choice.hubId, base,
-        enabled = !demo && sidebarHost != null && repository is persona.core.contracts.api.AssistantConversations)
+        enabled = spacesEnabled && !demo && sidebarHost != null && repository is persona.core.contracts.api.AssistantConversations)
     val conversationArranger = remember(management, repository, demo) {
         management?.takeUnless { demo }?.let { api ->
             ConversationArranger(

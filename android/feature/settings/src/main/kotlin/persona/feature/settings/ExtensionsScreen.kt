@@ -11,15 +11,19 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import android.content.res.Resources
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import persona.core.contracts.api.ConnectorsManagement
 import persona.core.contracts.api.HubConnector
@@ -36,6 +40,7 @@ import persona.core.contracts.api.ExtensionUiPlace
 import persona.core.contracts.api.ManagerPins
 import persona.core.contracts.api.pinned
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.navigation.LocalDetailKey
 import persona.core.navigation.ExtensionMarketRoute
@@ -194,7 +199,7 @@ fun ExtensionPage(
     val state by model.state.collectAsState()
     val scope = rememberCoroutineScope()
     val feedback = LocalAppFeedback.current
-    var editingSecret by remember { mutableStateOf<ExtensionSecret?>(null) }
+    var editingSecret by remember { mutableStateOf<EditingSecret?>(null) }
     var choosing by remember { mutableStateOf<Pair<ExtensionField, List<String>>?>(null) }
     var removing by remember { mutableStateOf(false) }
     var removingRule by remember { mutableStateOf<HandoffRule?>(null) }
@@ -207,7 +212,11 @@ fun ExtensionPage(
     val readLaunchers by rememberUpdatedState(launchers)
     var launcherList by remember(extensionId) { mutableStateOf<List<HubLauncher>?>(null) }
     var launchersLoading by remember(extensionId) { mutableStateOf(false) }
-    val picksLauncher = state.detail?.form.orEmpty().any { it.picksLauncher || it.fields.orEmpty().any { f -> f.picksLauncher } }
+    val picksLauncher = state.detail?.form.orEmpty().any { field ->
+        field.picksLauncher ||
+            field.fields.orEmpty().any { it.picksLauncher } ||
+            field.items?.fields.orEmpty().any { it.picksLauncher }
+    }
     LaunchedEffect(extensionId, picksLauncher, launchers != null) {
         val read = readLaunchers
         if (read == null || !picksLauncher || launcherList != null) return@LaunchedEffect
@@ -286,6 +295,7 @@ fun ExtensionPage(
         catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() } // the connector's page says what is wrong
     }
     val hasForm = detail != null && !detail.readOnly && detail.form.isNotEmpty()
+    val fixedSecrets = detail?.secrets.orEmpty().filterNot { it.isEntrySecret }
     // A form of machine lists only saves each switch at once: nothing waits for "Save".
     val waitsForSave = hasForm && detail.form.flatMap { if (it.type == "object") it.fields.orEmpty() else listOf(it) }.any { it.items?.machines != true }
     // A pack's members by their installed names, on its page and in its dialogs (#4122); read only for a pack.
@@ -316,10 +326,17 @@ fun ExtensionPage(
                         }
                     }
                 }
-                if (hasForm) form(detail, state, model, lists, onChoose = { field, path -> choosing = field to path })
-                if (!detail.readOnly && detail.secrets.isNotEmpty()) secrets(detail, state, available = referencesAllowed != null,
-                    onEdit = { secret -> scope.launch { recheckReferences(); editingSecret = secret } })
-                if (!hasForm && detail.secrets.isEmpty() && auth == null && (onPage == null || pages.isEmpty()) && hubConnectors.isEmpty() &&
+                if (hasForm) form(detail, state, model, lists, onChoose = { field, path -> choosing = field to path },
+                    onSecret = { secret, entryTitle ->
+                        scope.launch {
+                            recheckReferences()
+                            editingSecret = EditingSecret(secret, ExtensionText.secretSheetTitle(secret, entryTitle))
+                        }
+                    },
+                    secretsAvailable = referencesAllowed != null)
+                if (!detail.readOnly && fixedSecrets.isNotEmpty()) secrets(fixedSecrets, state, available = referencesAllowed != null,
+                    onEdit = { secret -> scope.launch { recheckReferences(); editingSecret = EditingSecret(secret, secret.label) } })
+                if (!hasForm && fixedSecrets.isEmpty() && auth == null && (onPage == null || pages.isEmpty()) && hubConnectors.isEmpty() &&
                     (onChannel == null || detail.extension.contributes.orEmpty()["channel"].isNullOrEmpty()))
                     item("configuration-empty") { Note(stringResource(R.string.settings_extension_empty)) }
                 if (waitsForSave) item("configuration-save") {
@@ -407,8 +424,9 @@ fun ExtensionPage(
                 JAction(label, checked = current == value, onClick = { model.edit(path, value) })
             }, { choosing = null }, title = ExtensionText.fieldTitle(res, field))
     }
-    editingSecret?.let { secret ->
-        ExtensionSecretSheet(secret, busy = state.busy, referencesAllowed = referencesAllowed == true, onDismiss = { editingSecret = null },
+    editingSecret?.let { editing ->
+        val secret = editing.secret
+        ExtensionSecretSheet(secret, title = editing.title, busy = state.busy, referencesAllowed = referencesAllowed == true, onDismiss = { editingSecret = null },
             saveValue = { value -> model.setSecret(secret.name, value) },
             saveReference = { reference -> if (recheckReferences()) model.setSecretReference(secret.name, reference) else false },
             clear = { model.clearSecret(secret.name) })
@@ -495,18 +513,27 @@ private fun LazyListScope.connectorInbox(list: List<HubConnector>, onOpen: ((Str
     }
 }
 
-private fun LazyListScope.form(detail: ExtensionDetail, state: ExtensionState, model: ExtensionModel, lists: FormLists, onChoose: (ExtensionField, List<String>) -> Unit) {
+private data class EditingSecret(val secret: ExtensionSecret, val title: String)
+
+private fun LazyListScope.form(
+    detail: ExtensionDetail, state: ExtensionState, model: ExtensionModel, lists: FormLists,
+    onChoose: (ExtensionField, List<String>) -> Unit,
+    onSecret: (ExtensionSecret, String) -> Unit,
+    secretsAvailable: Boolean,
+) {
     val plain = detail.form.filter { it.type != "object" }
     if (plain.isNotEmpty()) {
         item("form-title") { JSectionHeader(stringResource(R.string.settings_ext_settings)) }
-        plain.forEach { field -> item("field-${field.name}") { ExtensionFieldBlock(field, listOf(field.name), state, model, lists, onChoose) } }
+        plain.forEach { field ->
+            item("field-${field.name}") { ExtensionFieldBlock(field, listOf(field.name), state, model, lists, onChoose, onSecret, secretsAvailable) }
+        }
     }
-    if (ExtensionDraft.paths(detail.form).isNotEmpty() && detail.form.flatMap { if (it.type == "object") it.fields.orEmpty() else listOf(it) }.any { it.items?.machines != true })
+    if (ExtensionDraft.paths(detail.form, state.draft).isNotEmpty() && detail.form.flatMap { if (it.type == "object") it.fields.orEmpty() else listOf(it) }.any { it.items?.machines != true })
         item("form-note") { Note(stringResource(R.string.settings_ext_form_note)) }
     detail.form.filter { it.type == "object" }.forEach { group ->
         item("group-${group.name}") { JSectionHeader(group.label) }
         group.fields.orEmpty().forEach { field ->
-            item("field-${group.name}.${field.name}") { ExtensionFieldBlock(field, listOf(group.name, field.name), state, model, lists, onChoose) }
+            item("field-${group.name}.${field.name}") { ExtensionFieldBlock(field, listOf(group.name, field.name), state, model, lists, onChoose, onSecret, secretsAvailable) }
         }
         group.description?.takeIf { it.isNotBlank() }?.let { item("group-note-${group.name}") { Note(it) } }
     }
@@ -517,13 +544,16 @@ internal data class FormLists(val machines: List<ExtensionMachine>, val launcher
 
 /**
  * One field of an extension's form, by its type: a text field, a number (a whole one with a stepper), a switch, a
- * choice (the field's own, or one of the hub's machines or launchers), a list of texts or of choices. Its description
- * and the hub's word on it below.
+ * choice (the field's own, or one of the hub's machines or launchers), a list of texts or of choices, or an entry list
+ * with per-entry sealed secrets. Its description and the hub's word on it below.
  */
 @Composable
 private fun ExtensionFieldBlock(
     field: ExtensionField, path: List<String>, state: ExtensionState, model: ExtensionModel, lists: FormLists,
     onChoose: (ExtensionField, List<String>) -> Unit,
+    onSecret: (ExtensionSecret, String) -> Unit,
+    secretsAvailable: Boolean,
+    topPadding: Dp = Tokens.Space.m,
 ) {
     val res = LocalResources.current
     val picked = (state.value(path) as? JsonPrimitive)?.contentOrNull
@@ -532,7 +562,7 @@ private fun ExtensionFieldBlock(
     val error = state.fieldError(path)
     val enabled = !state.saving
     val description = field.description?.takeIf { it.isNotBlank() }
-    Column(Modifier.padding(top = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+    Column(Modifier.padding(top = topPadding), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
         when {
             field.type == "boolean" -> {
                 val on = (state.value(path) as? JsonPrimitive)?.booleanOrNull ?: (field.fallback as? JsonPrimitive)?.booleanOrNull ?: false
@@ -544,6 +574,7 @@ private fun ExtensionFieldBlock(
                 if (asking) JDialog({ asking = false }, title = stringResource(R.string.settings_ext_turn_on_title, field.label), text = field.confirm,
                     confirm = stringResource(R.string.settings_ext_turn_on) to { asking = false; model.edit(path, JsonPrimitive(true)) })
             }
+            field.isEntryList -> ExtensionEntryListField(field, title, path, state, model, lists, enabled, onChoose, onSecret, secretsAvailable)
             field.type == "array" && field.items?.machines == true -> MachineSwitches(field, title, path, state, model, lists.machines)
             field.type == "array" -> ExtensionListField(field, title, path, state, model, enabled)
             picks != null -> {
@@ -561,7 +592,7 @@ private fun ExtensionFieldBlock(
                 }
             }
             field.type == "integer" || field.type == "number" -> {
-                val key = path.joinToString(".")
+                val key = ExtensionDraft.fieldPath(path)
                 val text = state.numberText[key] ?: (state.value(path) as? JsonPrimitive)?.contentOrNull.orEmpty()
                 val integer = field.type == "integer"
                 val now = (state.value(path) as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()?.toLong()
@@ -687,10 +718,91 @@ private fun ExtensionListField(field: ExtensionField, title: String, path: List<
         trailing = { JIconButton(PhIcons.Plus, stringResource(R.string.settings_ext_add), ::add, enabled = enabled && adding.isNotBlank(), raised = false) })
 }
 
-private fun LazyListScope.secrets(detail: ExtensionDetail, state: ExtensionState, available: Boolean, onEdit: (ExtensionSecret) -> Unit) {
+/**
+ * A user-managed list of flat entries (#9504): one card per entry with its title, write-only secret button (saved
+ * entries only), remove action (confirmed), and declared flat text fields. Host-owned IDs and local keys never become
+ * editable text fields or secret inputs.
+ */
+@Composable
+private fun ExtensionEntryListField(
+    field: ExtensionField, title: String, path: List<String>, state: ExtensionState, model: ExtensionModel,
+    lists: FormLists, enabled: Boolean, onChoose: (ExtensionField, List<String>) -> Unit,
+    onSecret: (ExtensionSecret, String) -> Unit, secretsAvailable: Boolean,
+) {
+    val res = LocalResources.current
+    val entries = ExtensionDraft.entryItems(state.draft, path)
+    val maxItems = field.maxItems ?: ExtensionModel.DEFAULT_MAX_ENTRIES
+    val minItems = field.minItems ?: 0
+    val canRemove = enabled && !(field.required == true && entries.size <= minItems)
+    val clearsOnRebind = field.items?.fields.orEmpty().any { it.clearsSecret == true }
+    var removing by remember(path) { mutableStateOf<Pair<String, String>?>(null) }
+    FieldLabel(title)
+    Column(Modifier.fillMaxWidth().testTag("entry-list-${field.name}"), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+        entries.forEachIndexed { index, entry ->
+            val rowKey = state.entryKeyFor(field.name, index, entry)
+            key(rowKey) {
+                val savedId = ExtensionDraft.entryId(entry)
+                val secret = savedId?.let { id -> state.detail?.secrets?.firstOrNull { it.name == id && it.list == field.name } }
+                val entryTitle = ExtensionText.entryTitle(res, field, entry, index)
+                val secretStatus = secret?.let { ExtensionText.secretState(res, it) }
+                    ?: stringResource(R.string.settings_ext_entry_save_before_secret)
+                val referenceDetail = secret?.let(ExtensionText::secretReferenceDetail)
+                val secretNeedsAttention = secret != null && !secret.set && secret.required == true
+                JCard(Modifier.fillMaxWidth().testTag("entry-card-$rowKey"), padding = Tokens.Space.m) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
+                                Text(entryTitle, style = PersonaTheme.type.bodyStrong, color = PersonaTheme.palette.ink,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(secretStatus, style = PersonaTheme.type.caption,
+                                    color = if (secretNeedsAttention) PersonaTheme.palette.status(Status.NeedsYou).text else PersonaTheme.palette.ink3)
+                                referenceDetail?.let { detail ->
+                                    Text(detail, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)
+                                }
+                            }
+                            JIconButton(PersonaIcons.close, stringResource(R.string.settings_ext_entry_remove, entryTitle),
+                                onClick = { removing = rowKey to entryTitle }, enabled = canRemove, raised = false)
+                        }
+                        JButton(stringResource(R.string.settings_ext_entry_secret),
+                            onClick = { secret?.let { onSecret(it, entryTitle) } },
+                            kind = JButtonKind.Secondary, size = JButtonSize.Small, icon = PersonaIcons.credentials,
+                            enabled = enabled && secret != null && secretsAvailable && !state.busy)
+                        JDivider()
+                        state.fieldError(listOf(field.name, index.toString(), "_id"))?.let { FieldSupport(it, isError = true) }
+                        field.items?.fields.orEmpty().forEach { subField ->
+                            ExtensionFieldBlock(subField, path + listOf(index.toString(), subField.name), state, model, lists,
+                                onChoose, onSecret, secretsAvailable, topPadding = Tokens.Space.xs)
+                        }
+                    }
+                }
+            }
+        }
+        JButton(stringResource(R.string.settings_ext_entry_add),
+            onClick = { model.addEntry(field.name) },
+            kind = JButtonKind.Secondary, size = JButtonSize.Medium, icon = PersonaIcons.add,
+            enabled = enabled && entries.size < maxItems)
+        val editorHint = stringResource(R.string.settings_ext_entry_editor_hint)
+        val rebindHint = if (clearsOnRebind) stringResource(R.string.settings_ext_entry_rebind_hint) else null
+        FieldSupport(listOfNotNull(editorHint, rebindHint).joinToString(" "), isError = false)
+    }
+    removing?.let { (removeKey, removeTitle) ->
+        JDialog(
+            onDismiss = { removing = null },
+            title = stringResource(R.string.settings_ext_entry_remove_title, removeTitle),
+            text = stringResource(R.string.settings_ext_entry_remove_body),
+            destructive = true,
+            confirm = stringResource(R.string.settings_ext_entry_remove_confirm) to {
+                model.removeEntryByKey(field.name, removeKey, required = field.required == true)
+                removing = null
+            },
+        )
+    }
+}
+
+private fun LazyListScope.secrets(secrets: List<ExtensionSecret>, state: ExtensionState, available: Boolean, onEdit: (ExtensionSecret) -> Unit) {
     item("secrets-title") { JSectionHeader(stringResource(R.string.settings_ext_secrets)) }
-    itemsIndexed(detail.secrets, key = { _, it -> "secret-${it.name}" }) { index, secret ->
-        JGroupItem(GroupPosition.of(index, detail.secrets.size)) {
+    itemsIndexed(secrets, key = { _, it -> "secret-${it.name}" }) { index, secret ->
+        JGroupItem(GroupPosition.of(index, secrets.size)) {
             val stateText = ExtensionText.secretState(LocalResources.current, secret)
             val referenceDetail = ExtensionText.secretReferenceDetail(secret)
             JRow(secret.label, leadingIcon = PhIcons.Key, value = stateText.takeIf { secret.reference == null },
@@ -717,14 +829,19 @@ private fun LazyListScope.secretProviderDetails(
             if (user.machine.isBlank()) res.getString(R.string.settings_ext_user_launcher, name)
             else res.getString(R.string.settings_ext_user_launcher_machine, name, machineName(user.machine))
         }
-        else -> listOf(user.extensionName.ifBlank { user.extension }, user.secretTitle.ifBlank { user.secret })
-            .filter { it.isNotBlank() }.joinToString(" › ")
+        else -> {
+            val base = listOf(user.extensionName.ifBlank { user.extension }, user.secretTitle.ifBlank { user.secret })
+                .filter { it.isNotBlank() }.joinToString(" › ")
+            val entry = user.entryTitle?.takeIf { it.isNotBlank() }
+            if (entry != null) "$base ($entry)" else base
+        }
     }
     if (detail.secretUsers.isNotEmpty()) {
         item("secret-users-title") { JSectionHeader(stringResource(R.string.settings_ext_users_title)) }
         itemsIndexed(detail.secretUsers, key = { index, user -> "secret-user-$index-${user.kind}-${user.reference}" }) { index, user ->
             JGroupItem(GroupPosition.of(index, detail.secretUsers.size)) {
-                JRow(userLabel(user), subtitle = user.reference, subtitleLines = Int.MAX_VALUE, titleLines = 2, chevron = false)
+                val subtitle = user.entryTitle?.takeIf { it.isNotBlank() }?.let { "$it · ${user.reference}" } ?: user.reference
+                JRow(userLabel(user), subtitle = subtitle, subtitleLines = Int.MAX_VALUE, titleLines = 2, chevron = false)
             }
         }
         item("secret-users-note") { Note(stringResource(R.string.settings_ext_users_footer)) }
@@ -789,7 +906,7 @@ private fun LazyListScope.permissions(detail: ExtensionDetail) {
 /** Sets a secret explicitly as a value or as a reference; text that looks like a reference never chooses the mode. */
 @Composable
 private fun ExtensionSecretSheet(
-    secret: ExtensionSecret, busy: Boolean, referencesAllowed: Boolean, onDismiss: () -> Unit,
+    secret: ExtensionSecret, title: String, busy: Boolean, referencesAllowed: Boolean, onDismiss: () -> Unit,
     saveValue: suspend (String) -> Boolean, saveReference: suspend (String) -> Boolean, clear: suspend () -> Boolean,
 ) {
     var byReference by remember(secret.name) { mutableStateOf(referencesAllowed && secret.reference != null) }
@@ -805,7 +922,7 @@ private fun ExtensionSecretSheet(
     var saving by remember(secret.name) { mutableStateOf(false) }
     val working = busy || saving
     val scope = rememberCoroutineScope()
-    JSheet(onDismiss, title = secret.label, dismissible = !working) {
+    JSheet(onDismiss, title = title, dismissible = !working) {
         Column(Modifier.padding(vertical = Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
             if (referencesAllowed) JSwitchRow(stringResource(R.string.settings_ext_use_reference), byReference,
                 { on -> byReference = on; value = "" }, enabled = !working)

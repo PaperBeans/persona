@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -403,6 +405,331 @@ func TestInboxSuggestNamingItsOwnItem(t *testing.T) {
 	if it.Suggestion == nil || it.Suggestion.Conversation != nil || it.Handling.State != HandlingDone || it.Agent.Draft != "好的" {
 		t.Fatalf("%+v %+v", it.Suggestion, it.Handling)
 	}
+}
+
+// A to-do suggestion from the item's own processing conversation still works when it passes its own item id (including
+// with surrounding spaces and processing_turn), while a handed-off or unrelated conversation is refused (#13560).
+func TestInboxSuggestTodoWithItem(t *testing.T) {
+	t.Run("own processing conversation naming its own item", func(t *testing.T) {
+		h, _, it := handledHub(t)
+		h.inbox.mu.Lock()
+		it.Agent.ProcessingTurn = "turn-1"
+		h.inbox.mu.Unlock()
+		// Stale processing_turn is still rejected even when item names the conversation's own item.
+		if _, err := h.runTool(t.Context(), "server", "s1", "inbox_suggest",
+			json.RawMessage(`{"item":"lark:f1:100","kind":"todo","text":"Send the quote","due":"2026-11-15","processing_turn":"stale-turn"}`)); !errors.Is(err, errStaleInboxTurn) {
+			t.Fatalf("stale processing_turn: want errStaleInboxTurn, got %v", err)
+		}
+		// Matching item + current processing_turn succeeds as if item were omitted.
+		if _, err := suggestTool(t, h, `{"item":" lark:f1:100 ","kind":"todo","text":"Send the quote","due":"2026-11-15"}`); err != nil {
+			t.Fatalf("own item todo: %v", err)
+		}
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if it.Suggestion == nil || it.Suggestion.Kind != SuggestTodo || it.Suggestion.Text != "Send the quote" ||
+			it.Suggestion.Due != "2026-11-15" || it.Suggestion.Conversation != nil || it.Handling.State != HandlingDone {
+			t.Fatalf("unexpected item state: suggestion=%+v handling=%+v", it.Suggestion, it.Handling)
+		}
+	})
+
+	t.Run("own processing conversation with whitespace-only item", func(t *testing.T) {
+		h, _, it := handledHub(t)
+		if _, err := suggestTool(t, h, `{"item":"   ","kind":"todo","text":"Follow up"}`); err != nil {
+			t.Fatalf("whitespace-only item todo: %v", err)
+		}
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if it.Suggestion == nil || it.Suggestion.Kind != SuggestTodo || it.Suggestion.Conversation != nil {
+			t.Fatalf("unexpected suggestion: %+v", it.Suggestion)
+		}
+	})
+
+	t.Run("own processing conversation naming its own item while agent is starting", func(t *testing.T) {
+		h, _, it := handledHub(t)
+		h.inbox.mu.Lock()
+		it.Agent.State = AgentRunning
+		it.Agent.SessionID = ""
+		it.Agent.ProcessingTurn = "turn-start"
+		h.inbox.mu.Unlock()
+		timer := time.AfterFunc(30*time.Millisecond, func() {
+			h.inbox.mu.Lock()
+			it.Agent.SessionID = "s1"
+			h.inbox.mu.Unlock()
+		})
+		defer timer.Stop()
+		if _, err := h.runTool(t.Context(), "server", "s1", "inbox_suggest",
+			json.RawMessage(`{"item":"lark:f1:100","kind":"todo","text":"Send the quote","processing_turn":"turn-start"}`)); err != nil {
+			t.Fatalf("own item todo while starting: %v", err)
+		}
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if it.Suggestion == nil || it.Suggestion.Kind != SuggestTodo || it.Suggestion.Conversation != nil {
+			t.Fatalf("unexpected suggestion: %+v", it.Suggestion)
+		}
+	})
+
+	t.Run("own processing conversation naming a filed item is refused", func(t *testing.T) {
+		h, _, it := handledHub(t)
+		h.inbox.mu.Lock()
+		now := time.Now().UTC()
+		it.DoneAt, it.DoneBy = &now, "user"
+		h.inbox.mu.Unlock()
+		if _, err := suggestTool(t, h, `{"item":"lark:f1:100","kind":"todo","text":"Send the quote"}`); !errors.Is(err, errSuggestFiled) {
+			t.Fatalf("filed own item todo: want errSuggestFiled, got %v", err)
+		}
+	})
+
+	t.Run("handed-off conversation still refused for todo", func(t *testing.T) {
+		h, _, it := handoffHub(t)
+		handOff(t, h, it)
+		h.inbox.mu.Lock()
+		chainBefore := len(it.Chain)
+		recapBefore := it.Recap
+		h.inbox.mu.Unlock()
+		_, err := mainSuggest(h, "m1", `{"item":"lark:f1:100","kind":"todo","text":"Send the quote","recap":"should not save","reported":{"text":"checked","by":"assistant"}}`)
+		if err == nil || !strings.Contains(err.Error(), "not one it was handed to") {
+			t.Fatalf("handed-off todo: want hand-off refusal, got %v", err)
+		}
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if it.Suggestion != nil || len(it.Chain) != chainBefore || it.Recap != recapBefore {
+			t.Fatalf("refused handed-off todo mutated item: suggestion=%+v chain=%d->%d recap=%q", it.Suggestion, chainBefore, len(it.Chain), it.Recap)
+		}
+	})
+
+	t.Run("processing conversation naming another item handed to it is refused for todo", func(t *testing.T) {
+		h, _, _ := handledHub(t)
+		now := time.Now()
+		other := &InboxItem{ID: "lark:f2:200", Source: "lark", Kind: KindDM, Account: "feishu", AccountName: "飞书", Title: "李四", Sender: "李四",
+			Last: "200", Count: 1, StartedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute), Tier: TierAction, TriagedAt: "200",
+			Lark: &InboxLark{AccountID: 1, FeedID: "f2", StartPosition: "200"}}
+		h.inbox.mu.Lock()
+		h.inbox.items[other.ID] = other
+		h.inbox.noteHandoff(other, SessionRef{MachineID: "server", SessionID: "s1"}, "op-other", now)
+		chainBefore := len(other.Chain)
+		h.inbox.mu.Unlock()
+		_, err := suggestTool(t, h, `{"item":"lark:f2:200","kind":"todo","text":"Follow up"}`)
+		if err == nil || !strings.Contains(err.Error(), "not one it was handed to") {
+			t.Fatalf("other handed item todo: want hand-off refusal, got %v", err)
+		}
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if other.Suggestion != nil || len(other.Chain) != chainBefore {
+			t.Fatalf("refused other handed item todo mutated item: suggestion=%+v chain=%d->%d", other.Suggestion, chainBefore, len(other.Chain))
+		}
+	})
+
+	t.Run("unrelated conversation naming an item is refused", func(t *testing.T) {
+		h, _, it := handoffHub(t)
+		_, err := mainSuggest(h, "m1", `{"item":"lark:f1:100","kind":"todo","text":"Send the quote"}`)
+		if err == nil || !strings.Contains(err.Error(), "was not handed to this conversation") {
+			t.Fatalf("unrelated conversation todo: want not-handed refusal, got %v", err)
+		}
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if it.Suggestion != nil {
+			t.Fatalf("refused unrelated todo mutated item: %+v", it.Suggestion)
+		}
+	})
+}
+
+// When a starting item already has a hand-off recorded, suggestFrom treats that hand-off as provisional while
+// itemAgentStarting is true so own-item precedence is preserved once Agent.SessionID is populated (#13560).
+func TestInboxSuggestTodoStartingItemWithHandoff(t *testing.T) {
+	type toolResult struct {
+		out string
+		err error
+	}
+	awaitChan := func(t *testing.T, label string, ch <-chan struct{}, done <-chan toolResult) {
+		t.Helper()
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-ch:
+		case res := <-done:
+			t.Fatalf("%s: returned before startup settled: out=%q err=%v", label, res.out, res.err)
+		case <-timer.C:
+			t.Fatalf("%s: timed out waiting for startup hook", label)
+		}
+	}
+	awaitResult := func(t *testing.T, label string, done <-chan toolResult) toolResult {
+		t.Helper()
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
+		select {
+		case res := <-done:
+			return res
+		case <-timer.C:
+			t.Fatalf("%s: timed out waiting for inbox_suggest result", label)
+			return toolResult{}
+		}
+	}
+	installWaitHook := func(t *testing.T, h *inboxHub) (<-chan struct{}, func()) {
+		t.Helper()
+		waiting := make(chan struct{})
+		release := make(chan struct{})
+		var waitOnce, releaseOnce sync.Once
+		unlock := func() { releaseOnce.Do(func() { close(release) }) }
+		t.Cleanup(unlock)
+		h.inbox.mu.Lock()
+		h.inbox.waitHook = func() {
+			waitOnce.Do(func() { close(waiting) })
+			<-release
+		}
+		h.inbox.mu.Unlock()
+		return waiting, unlock
+	}
+
+	t.Run("handoff to future own processing session waits and succeeds", func(t *testing.T) {
+		h, _, it := handledHub(t)
+		h.inbox.mu.Lock()
+		it.Agent.State = AgentRunning
+		it.Agent.SessionID = ""
+		it.Agent.ProcessingTurn = "turn-start"
+		h.inbox.noteHandoff(it, SessionRef{MachineID: "server", SessionID: "s1"}, "op-own-handoff", time.Now())
+		h.inbox.mu.Unlock()
+		waiting, release := installWaitHook(t, h)
+
+		done := make(chan toolResult, 1)
+		go func() {
+			out, err := h.runTool(t.Context(), "server", "s1", "inbox_suggest",
+				json.RawMessage(`{"item":"lark:f1:100","kind":"todo","text":"Send the quote","due":"2026-11-15","processing_turn":"turn-start"}`))
+			done <- toolResult{out: out, err: err}
+		}()
+
+		awaitChan(t, "own-session startup wait", waiting, done)
+		h.inbox.mu.Lock()
+		it.Agent.SessionID = "s1"
+		h.inbox.mu.Unlock()
+		release()
+
+		res := awaitResult(t, "own-session todo", done)
+		if res.err != nil {
+			t.Fatalf("own item todo with prior handoff while starting: %v", res.err)
+		}
+		if strings.Contains(res.out, "shown in this chat as a card") || !strings.Contains(res.out, "End this turn") {
+			t.Fatalf("expected own processing chat response, got %q", res.out)
+		}
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if it.Suggestion == nil || it.Suggestion.Kind != SuggestTodo || it.Suggestion.Text != "Send the quote" ||
+			it.Suggestion.Due != "2026-11-15" || it.Suggestion.Conversation != nil ||
+			it.Suggestion.Owner == nil || it.Suggestion.Owner.SessionID != "s1" ||
+			it.Handling == nil || it.Handling.State != HandlingDone {
+			t.Fatalf("unexpected item state: suggestion=%+v handling=%+v", it.Suggestion, it.Handling)
+		}
+	})
+
+	t.Run("handoff to future own processing session enforces processing_turn after startup", func(t *testing.T) {
+		h, _, it := handledHub(t)
+		h.inbox.mu.Lock()
+		it.Agent.State = AgentRunning
+		it.Agent.SessionID = ""
+		it.Agent.ProcessingTurn = "turn-start"
+		h.inbox.noteHandoff(it, SessionRef{MachineID: "server", SessionID: "s1"}, "op-own-handoff-stale", time.Now())
+		h.inbox.mu.Unlock()
+		waiting, release := installWaitHook(t, h)
+
+		done := make(chan toolResult, 1)
+		go func() {
+			out, err := h.runTool(t.Context(), "server", "s1", "inbox_suggest",
+				json.RawMessage(`{"item":"lark:f1:100","kind":"todo","text":"Send the quote","processing_turn":"stale-turn"}`))
+			done <- toolResult{out: out, err: err}
+		}()
+
+		awaitChan(t, "stale-turn startup wait", waiting, done)
+		h.inbox.mu.Lock()
+		it.Agent.SessionID = "s1"
+		h.inbox.mu.Unlock()
+		release()
+
+		res := awaitResult(t, "stale-turn todo", done)
+		if !errors.Is(res.err, errStaleInboxTurn) {
+			t.Fatalf("stale processing_turn after startup: want errStaleInboxTurn, got %v", res.err)
+		}
+	})
+
+	t.Run("genuine handoff to different session is rejected after startup settles", func(t *testing.T) {
+		h, _, it := handledHub(t)
+		h.inbox.mu.Lock()
+		it.Agent.State = AgentRunning
+		it.Agent.SessionID = ""
+		it.Agent.ProcessingTurn = "turn-start"
+		h.inbox.noteHandoff(it, SessionRef{MachineID: "server", SessionID: "m1"}, "op-other-handoff", time.Now())
+		chainBefore := len(it.Chain)
+		recapBefore := it.Recap
+		h.inbox.mu.Unlock()
+		waiting, release := installWaitHook(t, h)
+
+		done := make(chan toolResult, 1)
+		go func() {
+			out, err := h.runTool(t.Context(), "server", "m1", "inbox_suggest",
+				json.RawMessage(`{"item":"lark:f1:100","kind":"todo","text":"Send the quote","recap":"should not save"}`))
+			done <- toolResult{out: out, err: err}
+		}()
+
+		awaitChan(t, "different-session startup wait", waiting, done)
+		h.inbox.mu.Lock()
+		it.Agent.SessionID = "s2"
+		h.inbox.mu.Unlock()
+		release()
+
+		res := awaitResult(t, "different-session todo", done)
+		if !errors.Is(res.err, errTodoFromHandoff) {
+			t.Fatalf("handed-off todo after startup settled to different session: want errTodoFromHandoff, got %v", res.err)
+		}
+		h.inbox.mu.Lock()
+		if it.Suggestion != nil || len(it.Chain) != chainBefore || it.Recap != recapBefore {
+			h.inbox.mu.Unlock()
+			t.Fatalf("refused handed-off todo mutated item: suggestion=%+v chain=%d->%d recap=%q", it.Suggestion, chainBefore, len(it.Chain), it.Recap)
+		}
+		// Once startup has settled (Agent.SessionID != ""), a genuine handoff is rejected without waiting.
+		var waitCalls atomic.Int32
+		h.inbox.waitHook = func() { waitCalls.Add(1) }
+		h.inbox.mu.Unlock()
+
+		_, err := h.runTool(t.Context(), "server", "m1", "inbox_suggest",
+			json.RawMessage(`{"item":"lark:f1:100","kind":"todo","text":"Send the quote"}`))
+		if !errors.Is(err, errTodoFromHandoff) {
+			t.Fatalf("handed-off todo after startup: want errTodoFromHandoff, got %v", err)
+		}
+		if waitCalls.Load() != 0 {
+			t.Fatalf("waited %d times after startup already settled", waitCalls.Load())
+		}
+	})
+
+	t.Run("genuine handoff reply still succeeds after startup settles to different session", func(t *testing.T) {
+		h, _, it := handledHub(t)
+		h.inbox.mu.Lock()
+		it.Agent.State = AgentRunning
+		it.Agent.SessionID = ""
+		h.inbox.noteHandoff(it, SessionRef{MachineID: "server", SessionID: "m1"}, "op-reply-handoff", time.Now())
+		h.inbox.mu.Unlock()
+		waiting, release := installWaitHook(t, h)
+
+		done := make(chan toolResult, 1)
+		go func() {
+			out, err := h.runTool(t.Context(), "server", "m1", "inbox_suggest",
+				json.RawMessage(`{"item":"lark:f1:100","kind":"reply","text":"周五前给到报价"}`))
+			done <- toolResult{out: out, err: err}
+		}()
+
+		awaitChan(t, "different-session reply startup wait", waiting, done)
+		h.inbox.mu.Lock()
+		it.Agent.SessionID = "s2"
+		h.inbox.mu.Unlock()
+		release()
+
+		res := awaitResult(t, "different-session reply", done)
+		if res.err != nil {
+			t.Fatalf("handed-off reply after startup settled to different session: %v", res.err)
+		}
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if it.Suggestion == nil || it.Suggestion.Kind != SuggestReply || it.Suggestion.Conversation == nil || it.Suggestion.Conversation.SessionID != "m1" {
+			t.Fatalf("unexpected handoff reply suggestion: %+v", it.Suggestion)
+		}
+	})
 }
 
 // Reject, instruct and handback on a hand-off conversation's suggestion are told there, wrapped to name the item,

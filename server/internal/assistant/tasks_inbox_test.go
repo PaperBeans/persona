@@ -46,6 +46,7 @@ func taskInboxArgs(items ...string) json.RawMessage {
 func TestTaskPlanInboxUsesTheActualHandoff(t *testing.T) {
 	ctx := context.Background()
 	s, f := newTaskService(t)
+	f.inbox = newFakeInbox()
 	f.mu.Lock()
 	f.hello.Assistant.MachineID = "box"
 	f.mu.Unlock()

@@ -1,6 +1,9 @@
 import importlib.util
+import io
 from pathlib import Path
+import sys
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -60,6 +63,56 @@ class ServerShardCommandTests(unittest.TestCase):
                 server.commands(packages, shard, "/tmp/db.json", {})
             with self.assertRaises(ValueError):
                 server.commands(packages, shard, "/tmp/db.json")
+
+    def test_partition_listing_uses_the_same_server_test_env_prefix_as_partition_runs(self):
+        db = "/tmp/db.json"
+        prefix = server.server_test_env(db)
+        for shard in (*server.SHARDS, server.AFFECTED):
+            self.assertEqual(server.go_test(shard, db)[:len(prefix)], prefix)
+        listing = "TestA\nTestB\nok  \texample/server/internal/assistant\t0.1s\n"
+        with mock.patch.object(server.go_partitions.subprocess, "check_output", return_value=listing) as listed:
+            patterns = server.list_patterns("./internal/assistant", db)
+        self.assertEqual(patterns, ["^(TestA)$", "^(TestB)$"])
+        self.assertEqual(listed.call_args.args[0], [*prefix, "go", "test", "-list", ".*", "./internal/assistant"])
+        self.assertEqual(listed.call_args.kwargs["cwd"], ROOT / "server")
+
+    def test_main_lists_partitions_through_server_test_env_before_spawning_workers(self):
+        db = "/tmp/db.json"
+        events = []
+
+        def fake_check_output(command, **kwargs):
+            if command[:2] == ["go", "list"]:
+                return "example/server/internal/assistant\nexample/server/internal/assistant/fleet\n"
+            events.append(("list", command))
+            return "TestOne\nTestTwo\nok  \texample/server/internal/assistant\t0.1s\n"
+
+        class FakeProcess:
+            def __init__(self, command, **kwargs):
+                events.append(("run", command))
+                self.stdout = io.StringIO("")
+                self.returncode = 0
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        with mock.patch.object(sys, "argv", ["server-shards.py", "managers", "--database-file", db]), \
+                mock.patch.object(server.subprocess, "check_output", side_effect=fake_check_output), \
+                mock.patch.object(server.go_partitions.subprocess, "check_output", side_effect=fake_check_output), \
+                mock.patch.object(server.subprocess, "Popen", side_effect=FakeProcess), \
+                mock.patch.object(sys, "stdout", io.StringIO()):
+            self.assertEqual(server.main(), 0)
+        list_calls = [cmd for kind, cmd in events if kind == "list"]
+        run_calls = [cmd for kind, cmd in events if kind == "run"]
+        self.assertEqual(len(list_calls), 1)
+        self.assertEqual(len(run_calls), 3)  # fleet + 2 assistant partitions
+        self.assertEqual(events[0][0], "list")
+        prefix = server.server_test_env(db)
+        self.assertEqual(list_calls[0], [*prefix, "go", "test", "-list", ".*", "./internal/assistant"])
+        for command in run_calls:
+            self.assertEqual(command[:len(prefix)], prefix)
 
 
 def output(test, *lines, package="example/server/internal/node"):

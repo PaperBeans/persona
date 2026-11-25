@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Resources
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -27,6 +28,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import persona.core.contracts.ImageLimits
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.ChatComposerService
 import persona.core.contracts.api.ComposerOperationException
@@ -36,6 +38,7 @@ import persona.core.designsystem.*
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import java.io.File
+import java.nio.ByteBuffer
 import java.util.UUID
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
@@ -60,9 +63,49 @@ class ComposerUploadLimiter {
     suspend fun <T> withSlot(upload: suspend () -> T): T = slots.withPermit { upload() }
 }
 
-/** Photos go to the computer as JPEG at this quality, the long side at most [PHOTO_MAX_SIDE] (as iOS). */
+/** Photos go to the computer as JPEG at this quality, the long side at most the hub's `max_side` (default 1600, as iOS/web). */
 internal const val PHOTO_JPEG_QUALITY = 75
-internal const val PHOTO_MAX_SIDE = 1600
+private const val PHOTO_JPEG_FALLBACK_QUALITY = 60
+private const val PHOTO_FALLBACK_MAX_SIDE = 1280
+
+/** Encodes [bitmap] as JPEG scaled to [limits.maxSide] at quality 75, stepping down if still over [limits.imageBytes]. */
+internal fun encodePhotoJpeg(bitmap: Bitmap, limits: ImageLimits = ImageLimits.Standard): ByteArray {
+    val first = bitmap.jpegBytes(limits.maxSide, PHOTO_JPEG_QUALITY)
+    if (first.size.toLong() <= limits.imageBytes) return first
+    val second = bitmap.jpegBytes(limits.maxSide, PHOTO_JPEG_FALLBACK_QUALITY)
+    if (second.size.toLong() <= limits.imageBytes) return second
+    return bitmap.jpegBytes(minOf(limits.maxSide, PHOTO_FALLBACK_MAX_SIDE), PHOTO_JPEG_FALLBACK_QUALITY)
+}
+
+/** Measures the scaled JPEG size of a picked photo URI for base64 body-budget checks; null if unreadable. Call off main thread. */
+fun measurePhotoBytes(context: Context, uri: Uri, limits: ImageLimits = ImageLimits.Standard): Long? = runCatching {
+    val bitmap = runCatching { decodePhoto(context, uri, limits.maxSide) }.getOrElse {
+        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } ?: return null
+    }
+    try {
+        encodePhotoJpeg(bitmap, limits).size.toLong()
+    } finally {
+        bitmap.recycle()
+    }
+}.getOrNull()
+
+/** Measures the scaled JPEG size of encoded image [bytes] through the same decode/encode path; null if unreadable. Call off main thread. */
+internal fun measurePhotoBytes(bytes: ByteArray, limits: ImageLimits = ImageLimits.Standard): Long? = runCatching {
+    val bitmap = runCatching {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            val scale = minOf(1.0, limits.maxSide.toDouble() / maxOf(info.size.width, info.size.height))
+            decoder.setTargetSize(maxOf(1, (info.size.width * scale).roundToInt()), maxOf(1, (info.size.height * scale).roundToInt()))
+        }
+    }.getOrElse {
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+    }
+    try {
+        encodePhotoJpeg(bitmap, limits).size.toLong()
+    } finally {
+        bitmap.recycle()
+    }
+}.getOrNull()
 
 /** Why a file cannot go to the computer at all: over the upload limit. Unknown sizes are counted while staging. */
 internal fun oversizeReason(name: String, size: Long?, resources: Resources): String? =
@@ -119,14 +162,14 @@ internal fun attachmentReadable(context: Context, attachment: ComposerAttachment
 }
 
 /** Stage provider streams locally to guarantee Content-Length and bound memory use. */
-internal fun stageAttachment(context: Context, attachment: ComposerAttachment): File {
+internal fun stageAttachment(context: Context, attachment: ComposerAttachment, limits: ImageLimits = ImageLimits.Standard): File {
     val uri = Uri.parse(attachment.uri)
     val directory = File(context.cacheDir, "chat-uploads").apply { mkdirs() }
     val file = File.createTempFile("upload-", if (attachment.image) ".jpg" else ".bin", directory)
     try {
         if (attachment.image) {
-            val bitmap = decodePhoto(context, uri)
-            try { file.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.JPEG, PHOTO_JPEG_QUALITY, it)) } }
+            val bitmap = decodePhoto(context, uri, limits.maxSide)
+            try { file.writeBytes(encodePhotoJpeg(bitmap, limits)) }
             finally { bitmap.recycle() }
         } else {
             context.contentResolver.openInputStream(uri)?.use { input ->
@@ -147,11 +190,11 @@ internal fun stageAttachment(context: Context, attachment: ComposerAttachment): 
     } catch (error: Throwable) { file.delete(); throw error }
 }
 
-/** A local photo as a software bitmap, its long side at most [PHOTO_MAX_SIDE]: what goes up, and what the editor marks up. */
-internal fun decodePhoto(context: Context, uri: Uri): Bitmap =
+/** A local photo as a software bitmap, its long side at most [maxSide]: what goes up, and what the editor marks up. */
+internal fun decodePhoto(context: Context, uri: Uri, maxSide: Int = ImageLimits.DEFAULT_MAX_SIDE): Bitmap =
     ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
         decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-        val scale = minOf(1.0, PHOTO_MAX_SIDE.toDouble() / maxOf(info.size.width, info.size.height))
+        val scale = minOf(1.0, maxSide.toDouble() / maxOf(info.size.width, info.size.height))
         decoder.setTargetSize(maxOf(1, (info.size.width * scale).roundToInt()), maxOf(1, (info.size.height * scale).roundToInt()))
     }
 
@@ -163,13 +206,14 @@ internal fun decodePhoto(context: Context, uri: Uri): Bitmap =
 suspend fun uploadAttachment(
     context: Context, service: ChatComposerService, session: SessionKey, attachment: ComposerAttachment,
     destination: String? = null,
+    limits: ImageLimits = ImageLimits.Standard,
     /** The exact staged byte count, for providers whose reported size was missing or stale. */
     onStaged: suspend (Long) -> Unit = {},
 ): String {
     (service as? MessageTransport)?.readyToSend?.let { ready ->
         withTimeoutOrNull(UPLOAD_READY_WAIT_MILLIS) { ready.first { it } }
     }
-    val staged = withContext(Dispatchers.IO) { stageAttachment(context, attachment) }
+    val staged = withContext(Dispatchers.IO) { stageAttachment(context, attachment, limits) }
     try {
         onStaged(staged.length())
         return withContext(Dispatchers.IO) {

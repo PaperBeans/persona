@@ -251,12 +251,14 @@ func TestLegacyOwnerVerificationStillEligible(t *testing.T) {
 }
 
 func TestLegacyOwnerPriorityPreservesOwnerDecisions(t *testing.T) {
+	decisionsTold := func(hub *fakeHub) int {
+		return strings.Count(strings.Join(hub.notices(), "\n"), "signal=park_decided")
+	}
 	for _, when := range []string{"before reconciliation", "after reconciliation", "stored while ledger fails"} {
 		t.Run(when, func(t *testing.T) {
 			database := &ledgerDown{DB: taskRecoveryDatabase(t)}
-			s, _, task := newSupervisedServiceOn(t, database)
-			// Nothing is told before the restart: the settle loop below counts only the restarted manager's messages.
-			// park_decided is immediate, so holdDigest alone does not keep it in (#13987).
+			s, firstHub, task := newSupervisedServiceOn(t, database)
+			// park_decided is immediate, so holdDigest alone does not keep it pending for the explicit sendDigest below (#13987).
 			quietDigest(s)
 			holdDigest(s)
 			ctx := context.Background()
@@ -268,6 +270,19 @@ func TestLegacyOwnerPriorityPreservesOwnerDecisions(t *testing.T) {
 			database.down.Store(when == "stored while ledger fails")
 			writeDecision(t, s, task.ID, "Should the update be published?", "Do not publish")
 			database.down.Store(false)
+			// A recorded decision can be delivered before restart. Finish that digest so its receipt is
+			// already durable, just as it would be after a clean shutdown of the first manager. Quiet timings
+			// above hold only the inspection of pending state; this explicit send uses the usual short interval.
+			setSuperviseTimings(s, shortSuperviseTimings)
+			s.sendDigest(ctx)
+			before := decisionsTold(firstHub)
+			wantBefore := 1
+			if when == "stored while ledger fails" {
+				wantBefore = 0
+			}
+			if before != wantBefore {
+				t.Fatalf("before restart: got %d park decision messages, want %d", before, wantBefore)
+			}
 			again, hub := restartedOn(t, database)
 			holdDigest(again)
 			if err := again.ensureTodosLoaded(ctx); err != nil {
@@ -283,19 +298,12 @@ func TestLegacyOwnerPriorityPreservesOwnerDecisions(t *testing.T) {
 			if err != nil || len(decisions) != 1 || r == nil || r.Decided != decisions[0].ID {
 				t.Fatalf("missing or duplicated owner decision: %+v, review %+v, %v", decisions, r, err)
 			}
-			// Immediate delivery can move the pending signal between two reads. Wait for one settled form in a single loop:
-			// the recovered signal is still pending, or exactly one real message carried it; never both nor neither.
-			var pending []string
-			var delivered int
-			waitFor(t, "the recovered park decision to settle", func() bool {
-				pending = pendingKinds(again, task.ID)
-				delivered = strings.Count(strings.Join(hub.notices(), "\n"), "signal=park_decided")
-				return slices.Equal(pending, []string{sigParkDecided}) && delivered == 0 || len(pending) == 0 && delivered == 1
-			})
-			if len(pending) > 0 && (!slices.Equal(pending, []string{sigParkDecided}) || delivered != 0) {
-				t.Fatalf("an answered legacy choice was restated or duplicated: pending %v, messages %q", pending, hub.notices())
-			} else if len(pending) == 0 && delivered != 1 {
-				t.Fatalf("an answered legacy choice was not told exactly once: pending %v, messages %q", pending, hub.notices())
+			again.sendDigest(ctx)
+			pending := pendingKinds(again, task.ID)
+			after := decisionsTold(hub)
+			r = todoNow(again, task.ID).Supervision.decidedPark()
+			if len(pending) != 0 || before+after != 1 || r == nil || r.DecidedTold.IsZero() {
+				t.Fatalf("park decision across restart: %d messages before, %d after, pending %v, review %+v", before, after, pending, r)
 			}
 		})
 	}

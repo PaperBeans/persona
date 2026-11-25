@@ -50,5 +50,10 @@
   "unavailable": "Unavailable",
   "provider_unavailable": "{provider} is unavailable. Its links still open; adding a new one needs it.",
   "link_pending": "Checked when you save",
-  "another_source": "Another source"
+  "another_source": "Another source",
+  "role_target": "Target Repo",
+  "role_reference": "Reference Repo",
+  "role_target_hint": "Governs delivery gate",
+  "role_reference_hint": "Read-only context, does not block closure",
+  "link_role_reference": "Reference"
 }

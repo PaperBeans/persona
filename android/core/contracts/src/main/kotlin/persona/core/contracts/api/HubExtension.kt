@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 
 /**
  * An extension of the hub (`GET /api/v1/extensions`, docs/extensions/extensions.md "Hub API"): modules look for the kinds they
- * serve (the voice module a running `kind == "voice"` one); Settings › Extensions shows them all. Hubs from before the extension base send only the first five fields.
+ * serve (a running one of their `kind`); Settings › Extensions shows them all. Hubs from before the extension base send only the first five fields.
  */
 @Serializable
 data class HubExtension(

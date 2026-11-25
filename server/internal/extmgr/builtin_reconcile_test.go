@@ -8,6 +8,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extmgr/imessageport"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 )
 
 // cua, ego and imessage are built-in programs on computers (node.command "builtin"): the hub never sends them a
@@ -16,7 +17,7 @@ import (
 func TestBuiltinExtensionsAreBuiltinNodePrograms(t *testing.T) {
 	h, _ := extensionTestHub(t)
 	ids := []string{cuaExtensionID, egoExtensionID}
-	if imessageport.Factory() != nil { // the iMessage extension is its module's: absent without it (persona_without_imessage, persona_core_only)
+	if imessageport.Factory(moduleswitch.Set{}) != nil { // the iMessage extension is its module's: absent without it (persona_without_imessage, persona_core_only)
 		ids = append(ids, imessageExtensionID)
 	}
 	for _, id := range ids {

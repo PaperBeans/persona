@@ -114,6 +114,7 @@ function ManagerRow({ m, now, onOpen }: { m: Manager; now: number; onOpen: () =>
         <div className="flex items-center gap-2">
           <span className={cx("truncate text-[13px]", m.online || m.installing ? "text-ink" : "text-ink-2")}>{m.name}</span>
           {m.default && <Pill tone="accent">{t("settings-managers.default")}</Pill>}
+          {m.pending_restart && <Pill tone="orange">{t("settings-managers.pending_restart")}</Pill>}
           {m.needs_update && <Pill tone="orange">{t("settings-managers.needs_update")}</Pill>}
         </div>
         <div className="mt-0.5 truncate text-[11.5px] text-ink-3">{[status.text, where].filter(Boolean).join(" · ")}</div>
@@ -273,6 +274,7 @@ function ManagerDetail({ m, onClose, onChanged, onCode }: { m: Manager | null; o
       <div className="flex flex-col gap-4">
         <div className="divide-y divide-line overflow-hidden rounded-card bg-inset shadow-hairline">
           <Row label={t("settings-managers.row_status")}>
+            {shownM.pending_restart && <Pill tone="orange">{t("settings-managers.pending_restart")}</Pill>}
             {shownM.needs_update && <Pill tone="orange">{t("settings-managers.needs_update")}</Pill>}
             <span aria-hidden className={cx("size-2 shrink-0 rounded-full", DOT[status.tone])} />
             <span className="truncate">{status.text}</span>
@@ -282,6 +284,7 @@ function ManagerDetail({ m, onClose, onChanged, onCode }: { m: Manager | null; o
           {shownM.online && shownM.since && <Row label={t("settings-managers.row_since")}>{ago(shownM.since)}</Row>}
           {!shownM.online && shownM.last_seen && <Row label={t("settings-managers.row_last_seen")}>{ago(shownM.last_seen)}</Row>}
         </div>
+        {shownM.pending_restart && <p className="-mt-2 px-1 text-submeta leading-snug text-orange" data-testid="pending-restart-note">{t("settings-managers.pending_restart_note")}</p>}
         {shownM.needs_update && <p className="-mt-2 px-1 text-[11.5px] leading-snug text-ink-3">{t("settings-managers.needs_update_note")}</p>}
         {!installing && <PushSwitch id={shownM.id} />}
         {shownM.builtin && !installing && <SwitcherSwitch m={shownM} ownMachines={ownMachines} onChanged={onChanged} />}

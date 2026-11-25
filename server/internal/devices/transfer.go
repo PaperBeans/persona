@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"hash"
 	"net/http"
 	"strings"
 	"sync"
@@ -166,8 +167,9 @@ func (d *Devices) startTransfer(ctx context.Context, from, to *Machine, src prot
 	d.logf("transfer %s: %s → %s, %d bytes", t.st.ID, from.cfg.ID, to.cfg.ID, info.Size)
 	d.pushTransfer(t, true)
 	reserved = false // runTransfer releases it when the transfer ends
+	initial := t.snapshot()
 	go d.runTransfer(run, t, from, to, proto.FileChunkRequest{Path: info.Path, Cwd: src.Cwd, Revision: info.Revision}, begin.UploadID)
-	return t.snapshot(), nil
+	return initial, nil
 }
 
 // transferParent is what every transfer is a child of: the manager's own context, cancelled when it stops.
@@ -203,13 +205,54 @@ type transferChunk struct {
 	err  error
 }
 
-// runTransfer sends the bytes: a reader asks the source for the next chunk while the last one is written to the
-// target. Any failure, on either side, or a cancel, aborts the upload on the target so no part file stays.
+// runTransfer sends the bytes (streamChunks), then names the file on the target. Any failure, on either side, or a
+// cancel, aborts the upload on the target so no part file stays.
 func (d *Devices) runTransfer(ctx context.Context, t *transfer, from, to *Machine, req proto.FileChunkRequest, uploadID string) {
 	defer d.transfers.releaseSlot()
 	defer close(t.done)
 	defer t.cancel()
-	total := t.st.Total
+	// The state is told first (a target that went away may hold the abort for its whole timeout); the transfer is over
+	// (done, what DELETE waits for) once the abort has been tried.
+	fail := func(err error) {
+		d.finishTransfer(t, err, "")
+		abortUpload(to, uploadID)
+	}
+	// A switch turned off mid-way stops the transfer at the next chunk (the switches are re-read every 10 s).
+	switches := func() error {
+		for _, m := range []*Machine{from, to} {
+			if !d.fileTransferOn(m.cfg.ID) {
+				return onMachine(m, &rpc.Error{Code: proto.CodeFileTransferDisabled, Message: "file transfer was turned off"})
+			}
+		}
+		return nil
+	}
+	progress := func(off int64) {
+		t.mu.Lock()
+		t.st.Bytes, t.st.UpdatedAt = off, time.Now()
+		t.mu.Unlock()
+		d.pushTransfer(t, false)
+	}
+	if err := streamChunks(ctx, from, to, req, uploadID, t.st.Total, nil, switches, progress); err != nil {
+		fail(err)
+		return
+	}
+	var out proto.UploadedFile
+	if err := callStep(ctx, to, "file.upload.end", map[string]any{"upload_id": uploadID}, &out); err != nil {
+		fail(onMachine(to, err))
+		return
+	}
+	d.finishTransfer(t, nil, out.Path)
+}
+
+// streamChunks copies total bytes of the file req names on from (file.chunk, every chunk at req's revision, checked
+// against it) into upload uploadID on to (file.upload.chunk): a reader asks the source for the next chunk while the
+// last one is written, one chunk waiting between them (transferWindow). h, when set, hashes the bytes in order; check,
+// when set, may stop it before each chunk is written; progress hears the bytes written so far. The error names the
+// machine it came from (onMachine), or is ctx's. The upload is left as it is: the caller ends or aborts it.
+func streamChunks(ctx context.Context, from, to *Machine, req proto.FileChunkRequest, uploadID string, total int64,
+	h hash.Hash, check func() error, progress func(off int64)) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel() // the reader stops with it
 	chunks := make(chan transferChunk, transferWindow)
 	go func() {
 		defer close(chunks)
@@ -232,13 +275,6 @@ func (d *Devices) runTransfer(ctx context.Context, t *transfer, from, to *Machin
 			off += int64(len(c.Data))
 		}
 	}()
-
-	// The state is told first (a target that went away may hold the abort for its whole timeout); the transfer is over
-	// (done, what DELETE waits for) once the abort has been tried.
-	fail := func(err error) {
-		d.finishTransfer(t, err, "")
-		abortUpload(to, uploadID)
-	}
 	var off int64
 	for off < total {
 		var c transferChunk
@@ -246,40 +282,31 @@ func (d *Devices) runTransfer(ctx context.Context, t *transfer, from, to *Machin
 		select {
 		case c, ok = <-chunks:
 		case <-ctx.Done():
-			fail(ctx.Err())
-			return
+			return ctx.Err()
 		}
 		if !ok { // the reader stopped for the context
-			fail(ctx.Err())
-			return
+			return ctx.Err()
 		}
 		if c.err != nil {
-			fail(onMachine(from, c.err))
-			return
+			return onMachine(from, c.err)
 		}
-		// A switch turned off mid-way stops the transfer at the next chunk (the switches are re-read every 10 s).
-		for _, m := range []*Machine{from, to} {
-			if !d.fileTransferOn(m.cfg.ID) {
-				fail(onMachine(m, &rpc.Error{Code: proto.CodeFileTransferDisabled, Message: "file transfer was turned off"}))
-				return
+		if check != nil {
+			if err := check(); err != nil {
+				return err
 			}
 		}
 		if err := callStep(ctx, to, "file.upload.chunk", map[string]any{"upload_id": uploadID, "offset": off, "data": c.data}, nil); err != nil {
-			fail(onMachine(to, err))
-			return
+			return onMachine(to, err)
+		}
+		if h != nil {
+			h.Write(c.data)
 		}
 		off += int64(len(c.data))
-		t.mu.Lock()
-		t.st.Bytes, t.st.UpdatedAt = off, time.Now()
-		t.mu.Unlock()
-		d.pushTransfer(t, false)
+		if progress != nil {
+			progress(off)
+		}
 	}
-	var out proto.UploadedFile
-	if err := callStep(ctx, to, "file.upload.end", map[string]any{"upload_id": uploadID}, &out); err != nil {
-		fail(onMachine(to, err))
-		return
-	}
-	d.finishTransfer(t, nil, out.Path)
+	return nil
 }
 
 func callStep(ctx context.Context, m *Machine, method string, params, out any) error {

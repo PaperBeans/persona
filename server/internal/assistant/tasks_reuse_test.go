@@ -56,6 +56,7 @@ func planOf(t *testing.T, s *Service, conversation string) *TaskPlan {
 // A task with todo_id runs on that todo: no todo is made, the agent is linked to it, the task card is the one the topic
 // already put in the feed (no second), the plan's task names the todo, and the task's criteria go to the supervision.
 func TestTaskPlanTodoIDRunsOnTheTopicsTodo(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newThreadEnv(t, nil)
 	todo := e.openedTodo()
 	res, err := e.s.toolTaskPlan(context.Background(), "m1", reuseArgs(true, todo.ID))
@@ -165,6 +166,7 @@ func TestTaskPlanTodoIDAllowsATodoWhoseAgentWasLetGo(t *testing.T) {
 // A plan that waits for the user's "Start" keeps the todo it names (the apps' card edits cannot change it) and runs on it
 // when started.
 func TestTaskPlanTodoIDWaitsForStart(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newThreadEnv(t, nil)
 	ctx := context.Background()
 	todo := e.openedTodo()
@@ -198,6 +200,7 @@ func TestTaskPlanTodoIDWaitsForStart(t *testing.T) {
 // The todo is looked at again when the plan starts: closed, or given an agent, since the plan was made, the task fails
 // with why and nothing starts (no todo of its own is made in its place).
 func TestTaskPlanTodoIDIsCheckedAgainOnStart(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, c := range []struct {
 		name string
 		do   func(e *threadEnv, todo Todo)
@@ -232,6 +235,7 @@ func TestTaskPlanTodoIDIsCheckedAgainOnStart(t *testing.T) {
 // Two plans cannot take one todo in the gap before the first one's agent is linked: the second is refused until the
 // first has let go (its agent linked or its start failed).
 func TestTodoTakenByAStartedPlanIsNotTakenTwice(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newThreadEnv(t, nil)
 	todo := e.openedTodo()
 	if _, err := e.s.takeTodoForTask(context.Background(), "new-plan", "m1", PlanTask{ReuseTodo: todo.ID}); err != nil {
@@ -252,6 +256,7 @@ func TestTodoTakenByAStartedPlanIsNotTakenTwice(t *testing.T) {
 // The todo a task runs on is that task, not a copy of it: the duplicate hint (two names of one issue) does not list it
 // against the task, and still lists a different todo that names the same issue.
 func TestTaskPlanTodoIDIsNotItsOwnDuplicate(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newThreadEnv(t, nil)
 	e.deliver(rootEvent("om_dup", "修 #1234 登录崩溃"))
 	todo := onlyTodo(e.s)
@@ -272,6 +277,7 @@ func TestTaskPlanTodoIDIsNotItsOwnDuplicate(t *testing.T) {
 // owner (#10365): task_plan's todo_id takes it up again, reopening it (as a Retry does), with no second to-do or task
 // card. Before, it was refused as "already done", and the assistant fell back on continues, which made a new plan.
 func TestTaskPlanTodoIDTakesAFailedStart(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newThreadEnv(t, nil)
 	ctx := context.Background()
 	todo := e.openedTodo()

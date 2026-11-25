@@ -637,3 +637,54 @@ func TestTodoFixturesListTheManagersRisk(t *testing.T) {
 		}
 	}
 }
+
+// GET /api/v1/todos exposes ask.link for valid http(s) evidence links (PRs, MRs, docs, sessions), while omitting
+// invalid schemes and redundant self-links to the to-do's own /todos/<id> page (#14659).
+func TestTodoListExposesValidAskLinkAndFiltersSelfAndUnsafeLinks(t *testing.T) {
+	s, f, todo, _, _ := conclusionService(t, false)
+	waitsForReview(t, s, f, todo.ID, "Ready for MR review.")
+	const mrURL = "https://gitlab.example.com/team/app/-/merge_requests/1468"
+	reviewTask(t, s, todo.ID, map[string]any{
+		"verdict":   "needs_user",
+		"reason":    "Approve assigning reviewers on MR !1468?",
+		"recommend": "Assign reviewers",
+		"link":      mrURL,
+	})
+	ask := listedAsk(t, s, todo.ID)
+	if ask == nil || ask["link"] != mrURL {
+		t.Fatalf("ask.link = %v, want %q", ask["link"], mrURL)
+	}
+
+	// Self-link to the to-do's own page and invalid/unsafe schemes are omitted from GET /api/v1/todos.
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"self link with webBase", "https://hub.example.com/todos/" + todo.ID, ""},
+		{"self link with trailing slash", "https://hub.example.com/todos/" + todo.ID + "/", ""},
+		{"self link on another host", "https://old.example.com/todos/" + todo.ID, ""},
+		{"other todo link kept", "https://hub.example.com/todos/todo_other", "https://hub.example.com/todos/todo_other"},
+		{"agent session link kept", "https://hub.example.com/s/box/s1", "https://hub.example.com/s/box/s1"},
+		{"github pr kept", "https://github.com/nwverse/persona/pull/14659", "https://github.com/nwverse/persona/pull/14659"},
+		{"javascript scheme rejected", "javascript:alert(1)", ""},
+		{"file scheme rejected", "file:///etc/passwd", ""},
+		{"bare scheme rejected", "https://", ""},
+		{"plain text rejected", "not a url", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s.accept.mu.Lock()
+			s.accept.asks[todo.ID].Link = tc.raw
+			s.accept.mu.Unlock()
+			gotAsk := listedAsk(t, s, todo.ID)
+			got, present := gotAsk["link"]
+			if tc.want == "" {
+				if present {
+					t.Fatalf("link %q should be omitted, got %v", tc.raw, got)
+				}
+			} else if got != tc.want {
+				t.Fatalf("link %q: got %v, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}

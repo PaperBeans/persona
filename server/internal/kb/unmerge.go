@@ -160,7 +160,7 @@ func (e *Engine) unmergeProject(drop *Project) error {
 				}
 			}
 			for list, ids := range rec.Excluded {
-				keep.include(list, ids...)
+				taggingInclude(&keep.Tagging, list, ids...)
 			}
 		} else {
 			names := map[string]bool{normName(drop.Name): true}

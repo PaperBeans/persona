@@ -39,6 +39,8 @@ import os
     nonisolated static let sessionQueue = DispatchQueue(label: "persona.audio-session")
 
     nonisolated private static let live = OSAllocatedUnfairLock(initialState: false)
+    nonisolated private struct LeaseState { var lease: AudioSessionBroker.Lease? }
+    nonisolated private static let callLease = OSAllocatedUnfairLock(initialState: LeaseState())
 
     /// `callIsLive` for code off the main actor (the session queue): the call manager sets it, on the main actor, as a
     /// call becomes live and before anything sets up the session for it.
@@ -47,5 +49,17 @@ import os
     /// The call manager says a call became live, or the last one ended (`PersonaCalls.noteLive`).
     static func callLiveChanged(_ on: Bool) {
         live.withLock { $0 = on }
+        let released = callLease.withLock { state -> AudioSessionBroker.Lease? in
+            if on {
+                if state.lease == nil {
+                    state.lease = AudioSessionBroker.shared.acquire(id: "call.system", module: "voice", kind: .call)
+                }
+                return nil
+            }
+            let old = state.lease
+            state.lease = nil
+            return old
+        }
+        released?.release()
     }
 }

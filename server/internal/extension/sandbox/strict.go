@@ -78,7 +78,7 @@ func ProbeNamespaces() error {
 	for _, d := range systemDirs {
 		args = append(args, "--ro-bind-try", d, d)
 	}
-	args = append(args, "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--remount-ro", "/", "--", "/bin/sh", "-c",
+	args = append(args, "--ro-bind", "/proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--remount-ro", "/", "--", "/bin/sh", "-c",
 		`test ! -e "$1" && test "$(readlink /proc/self/ns/net)" != "$2" && ! touch /persona-probe-write`, "probe", hidden, ns)
 	if out, err := exec.CommandContext(ctx, s.Bwrap, args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("namespace/read-only enforcement unavailable: %s", firstLine(out, err))

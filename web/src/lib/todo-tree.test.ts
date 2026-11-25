@@ -229,3 +229,112 @@ describe("waiting in the background in the tree (#6045)", () => {
     expect(todoTreeState("needs_you", [waiting])).toBe("needs_you");
   });
 });
+
+describe("todos_v2 top-level goal folding in By to-do (#14831)", () => {
+  it("keeps the tree 100% identical when todosV2 is false or omitted", () => {
+    const all = [s("a", "working", "/code/p"), s("b", "idle", "/code/p")];
+    const list: Todo[] = [
+      todo("goal", [], { title: "Launch" }),
+      todo("c1", [link("a")], { title: "API", part_of: "goal" }),
+      todo("c2", [link("b")], { title: "Docs", part_of: "goal" }),
+    ];
+    const omitted = buildTodoTree(all, machines, list, noMutes, NOW);
+    const disabled = buildTodoTree(all, machines, list, noMutes, NOW, { todosV2: false });
+    expect(disabled).toEqual(omitted);
+    expect(disabled.todos.map((td) => td.todoId)).toEqual(["c1", "c2"]);
+    expect(disabled.todos.every((td) => td.goalProgress === undefined)).toBe(true);
+  });
+
+  it("folds non-urgent part_of subtasks (including grandchildren) under their open parent goal with done/total progress", () => {
+    const all = [s("a", "working", "/code/p"), s("b", "idle", "/code/p")];
+    const list: Todo[] = [
+      todo("goal", [], { title: "Ship v2" }),
+      todo("done1", [], { title: "Spec", part_of: "goal", done_at: fresh }),
+      todo("c1", [link("a")], { title: "Backend", part_of: "goal" }),
+      todo("gc1", [link("b")], { title: "Migration", part_of: "c1" }),
+      todo("open-no-agent", [], { title: "Checklist", part_of: "goal" }),
+    ];
+    const tree = buildTodoTree(all, machines, list, noMutes, NOW, { todosV2: true });
+    expect(tree.todos.map((td) => td.todoId)).toEqual(["goal"]);
+    const goal = tree.todos[0]!;
+    expect(goal.name).toBe("Ship v2");
+    expect(goal.goalProgress).toEqual({ done: 1, total: 4 });
+    expect(goal.state).toBe("working");
+    expect(goal.sessions.map((x) => x.session_id).sort()).toEqual(["a", "b"]);
+    expect(goal.folded).toBe(false);
+  });
+
+  it("merges folded children into a parent goal that also has its own agents and updates aggregated state", () => {
+    const all = [s("p", "idle", "/code/p"), s("c", "working", "/code/p")];
+    const list: Todo[] = [
+      todo("goal", [link("p")], { title: "Main goal" }),
+      todo("c1", [link("c")], { title: "Subtask", part_of: "goal" }),
+    ];
+    const tree = buildTodoTree(all, machines, list, noMutes, NOW, { todosV2: true });
+    expect(tree.todos).toHaveLength(1);
+    const goal = tree.todos[0]!;
+    expect(goal.todoId).toBe("goal");
+    expect(goal.state).toBe("working");
+    expect(goal.statusLabel).toBeUndefined();
+    expect(goal.goalProgress).toEqual({ done: 0, total: 1 });
+    expect(goal.sessions.map((x) => x.session_id).sort()).toEqual(["c", "p"]);
+  });
+
+  it("surfaces needs_you and active-ask child blockers at the top without duplicating them in the parent fold", () => {
+    const all = [
+      s("w", "working", "/code/p"),
+      s("n", "needs_you", "/code/p"),
+      s("ask", "idle", "/code/p", { updated_at: old }),
+    ];
+    const list: Todo[] = [
+      todo("goal", [], { title: "Release" }),
+      todo("done1", [], { title: "Prep", part_of: "goal", done_at: fresh }),
+      todo("work", [link("w")], { title: "Build", part_of: "goal" }),
+      todo("blocked", [link("n")], { title: "Approve schema", part_of: "goal" }),
+      todo("asking", [link("ask")], { title: "Pick rollout", part_of: "goal", ask: { verdict: "Roll out?", outcome: "decide", asked_at: fresh } }),
+    ];
+    const tree = buildTodoTree(all, machines, list, noMutes, NOW, { todosV2: true });
+    // Surfaced blockers appear first and unfolded (in sortTodos order), followed by the folded parent goal
+    expect(tree.todos.map((td) => td.todoId)).toEqual(["asking", "blocked", "goal"]);
+    expect(tree.todos[0]!.folded).toBe(false);
+    expect(tree.todos[1]!.folded).toBe(false);
+    const goal = tree.todos[2]!;
+    expect(goal.goalProgress).toEqual({ done: 1, total: 4 });
+    expect(goal.sessions.map((x) => x.session_id)).toEqual(["w"]);
+  });
+
+  it("keeps cyclic, self-referential, orphan, and closed-parent items unfolded and never drops them", () => {
+    const all = [
+      s("a", "working", "/code/p"),
+      s("b", "working", "/code/p"),
+      s("self", "working", "/code/p"),
+      s("orphan", "working", "/code/p"),
+      s("closed-child", "working", "/code/p"),
+    ];
+    const list: Todo[] = [
+      todo("cycA", [link("a")], { part_of: "cycB" }),
+      todo("cycB", [link("b")], { part_of: "cycA" }),
+      todo("selfT", [link("self")], { part_of: "selfT" }),
+      todo("orphanT", [link("orphan")], { part_of: "missing-parent" }),
+      todo("closedGoal", [], { done_at: fresh }),
+      todo("closedChildT", [link("closed-child")], { part_of: "closedGoal" }),
+    ];
+    const tree = buildTodoTree(all, machines, list, noMutes, NOW, { todosV2: true });
+    expect(tree.todos.map((td) => td.todoId).sort()).toEqual(["closedChildT", "cycA", "cycB", "orphanT", "selfT"]);
+    expect(tree.todos.every((td) => td.goalProgress === undefined)).toBe(true);
+  });
+
+  it("reverts immediately when todosV2 switches back to false", () => {
+    const all = [s("a", "working", "/code/p"), s("b", "working", "/code/p")];
+    const list: Todo[] = [
+      todo("goal", [], { title: "Goal" }),
+      todo("c1", [link("a")], { title: "One", part_of: "goal" }),
+      todo("c2", [link("b")], { title: "Two", part_of: "goal" }),
+    ];
+    const on = buildTodoTree(all, machines, list, noMutes, NOW, { todosV2: true });
+    expect(on.todos.map((td) => td.todoId)).toEqual(["goal"]);
+    const off = buildTodoTree(all, machines, list, noMutes, NOW, { todosV2: false });
+    expect(off.todos.map((td) => td.todoId)).toEqual(["c1", "c2"]);
+    expect(off).toEqual(buildTodoTree(all, machines, list, noMutes, NOW));
+  });
+});

@@ -55,6 +55,9 @@ func TestFoldPreservesSupervisionVisibility(t *testing.T) {
 		{"agy-notification", "mcp_persona_notify_user", `{}`, "Notification sent.", false, true},
 		{"agy-scoped-notification", "mcp_persona_0c671287_notify_user", `{}`, "Notification sent.", false, true},
 		{"agy-scoped-finish", "mcp_persona_55a1c59d_supervision_finish", `{"visibility":"user"}`, `{"visibility":"user"}`, false, true},
+		{"agy-wrapped-user-finish", "mcp_persona_supervision_finish", `{"visibility":"user"}`, "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\nCreated At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n{\"visibility\":\"user\"}", false, true},
+		{"agy-wrapped-failed-silent", "mcp_persona_supervision_finish", `{"visibility":"silent"}`, "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n{\"visibility\":\"silent\"}", true, false},
+		{"plain-created-at-not-stripped", "mcp_persona_supervision_finish", `{"visibility":"user"}`, "Created At: yesterday\n{\"visibility\":\"user\"}", false, false},
 		{"agy-legacy-scoped-review", "mcp_" + compat.MCPServer + "_0c671287_task_review", `{"verdict":"accepted"}`, "Accepted.", false, true},
 		{"agy-other-server", "mcp_persona_other_notify_user", `{}`, "Not a Persona notification.", false, false},
 		{"decision-review", "task_review", `{"verdict":"needs_user"}`, "Decision card sent.", false, true},
@@ -82,14 +85,21 @@ func TestFoldPreservesSupervisionVisibility(t *testing.T) {
 }
 
 func TestFoldRetainsSilentFinishAlongsideAReply(t *testing.T) {
-	for _, tool := range []string{"mcp__persona__supervision_finish", "mcp_persona_55a1c59d_supervision_finish"} {
-		t.Run(tool, func(t *testing.T) {
+	const agyWrappedSilent = "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\nCreated At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n{\"level\":\"triage\",\"summary\":\"All quiet.\",\"visibility\":\"silent\"}"
+	for _, tc := range []struct {
+		name, tool, receipt, reply string
+	}{
+		{"canonical", "mcp__persona__supervision_finish", `{"visibility":"silent"}`, "The example build passed."},
+		{"agy-scoped", "mcp_persona_55a1c59d_supervision_finish", `{"visibility":"silent"}`, "The example build passed."},
+		{"agy-wrapped-headers", "mcp_persona_supervision_finish", agyWrappedSilent, "OK"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			items := []proto.Item{
 				{ID: "thought", Seq: 1, Kind: proto.KindThinking},
-				{ID: "call", Seq: 2, Kind: proto.KindToolUse, ToolUseID: "finish", ToolName: tool,
+				{ID: "call", Seq: 2, Kind: proto.KindToolUse, ToolUseID: "finish", ToolName: tc.tool,
 					ToolInput: json.RawMessage(`{"visibility":"user"}`)},
-				{ID: "result", Seq: 3, Kind: proto.KindToolResult, ToolUseID: "finish", Text: `{"visibility":"silent"}`},
-				{ID: "reply", Seq: 4, Kind: proto.KindText, Role: "assistant", Text: "The example build passed."},
+				{ID: "result", Seq: 3, Kind: proto.KindToolResult, ToolUseID: "finish", Text: tc.receipt},
+				{ID: "reply", Seq: 4, Kind: proto.KindText, Role: "assistant", Text: tc.reply},
 			}
 			for _, fold := range []func([]proto.Item) []proto.Item{FoldWork, FoldWorkLatest} {
 				page := fold(items)
@@ -113,6 +123,27 @@ func TestCompletedSilentSupervisionRound(t *testing.T) {
 	}{
 		{name: "successful silent", items: []proto.Item{input, finish, receipt, close}, want: true},
 		{name: "ordinary reply remains inside the quiet round", items: []proto.Item{input, finish, receipt, {Role: "assistant", Kind: proto.KindText, Text: "Notes retained in Background activity."}, close}, want: true},
+		{name: "agy wrapped silent receipt with fallback OK reply", items: []proto.Item{
+			input,
+			{Role: "assistant", Kind: proto.KindToolUse, ToolUseID: "finish", ToolName: "mcp_persona_supervision_finish"},
+			{Role: "user", Kind: proto.KindToolResult, ToolUseID: "finish", Text: "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\nCreated At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n{\"level\":\"triage\",\"summary\":\"Handled.\",\"visibility\":\"silent\"}"},
+			{Role: "assistant", Kind: proto.KindText, Text: "OK"},
+			close,
+		}, want: true},
+		{name: "agy wrapped user finish stays visible", items: []proto.Item{
+			input,
+			{Role: "assistant", Kind: proto.KindToolUse, ToolUseID: "finish", ToolName: "mcp_persona_supervision_finish"},
+			{Role: "user", Kind: proto.KindToolResult, ToolUseID: "finish", Text: "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n{\"visibility\":\"user\"}"},
+			{Role: "assistant", Kind: proto.KindText, Text: "Needs your decision."},
+			close,
+		}, want: false},
+		{name: "plain text Created At does not forge a silent receipt", items: []proto.Item{
+			input,
+			finish,
+			{Role: "user", Kind: proto.KindToolResult, ToolUseID: "finish", Text: "Created At: yesterday\n{\"visibility\":\"silent\"}"},
+			{Role: "assistant", Kind: proto.KindText, Text: "OK"},
+			close,
+		}, want: false},
 		{name: "direct user input", items: []proto.Item{{Role: "user", Kind: proto.KindText, Text: "Check the work"}, finish, receipt, close}},
 		{name: "failed receipt", items: []proto.Item{input, finish, {Role: "user", Kind: proto.KindToolResult, ToolUseID: "finish", Text: `{"visibility":"silent"}`, IsError: true}, close}},
 		{name: "malformed receipt", items: []proto.Item{input, finish, {Role: "user", Kind: proto.KindToolResult, ToolUseID: "finish", Text: `not JSON`}, close}},
@@ -151,6 +182,44 @@ func TestCompletedSilentSupervisionRound(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := CompletedSilentSupervisionRound(tc.items); got != tc.want {
 				t.Fatalf("CompletedSilentSupervisionRound = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStripToolResultTimestampHeaders(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{
+			"4-line duplicate headers",
+			"Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\nCreated At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n{\"visibility\":\"silent\"}",
+			`{"visibility":"silent"}`,
+		},
+		{
+			"2-line crlf with immediate Output",
+			"Created At: 2026-11-23T09:10:40.123Z\r\nCompleted At: 2026-11-23T09:10:44.456Z\r\nOutput:\r\n{\"visibility\":\"silent\"}",
+			`{"visibility":"silent"}`,
+		},
+		{
+			"ordinary Created At untouched",
+			"Created At: 2026-11-23\nCompleted At: 2026-11-23\nhello",
+			"Created At: 2026-11-23\nCompleted At: 2026-11-23\nhello",
+		},
+		{
+			"single Created At untouched",
+			"Created At: 2026-11-23T16:10:40+08:00\nhello",
+			"Created At: 2026-11-23T16:10:40+08:00\nhello",
+		},
+		{
+			"non-leading timestamps untouched",
+			"Note:\nCreated At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\nhello",
+			"Note:\nCreated At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\nhello",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := StripToolResultTimestampHeaders(tc.input); got != tc.want {
+				t.Fatalf("StripToolResultTimestampHeaders(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
 	}

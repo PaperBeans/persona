@@ -25,5 +25,10 @@
   "closing_price": "收盘价",
   "field_detail": "{label}（{detail}）",
   "comma_separated": "{label}（多个用逗号分隔）",
-  "image_newer": "图片：{alt}（请在新版 App 中查看）"
+  "image_newer": "图片：{alt}（请在新版 App 中查看）",
+  "map_selected": "已选",
+  "map_mode_driving": "驾车",
+  "map_mode_walking": "步行",
+  "map_mode_cycling": "骑行",
+  "map_mode_transit": "公共交通"
 }

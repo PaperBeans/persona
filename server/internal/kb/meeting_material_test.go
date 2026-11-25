@@ -233,7 +233,7 @@ func TestMeetingMaterialOnlyMeetingMaterial(t *testing.T) {
 	if got, exp := fmt.Sprintf("%+v", first.Minutes), fmt.Sprintf("%+v", want); got != exp {
 		t.Errorf("minutes\n%s\nwant\n%s", got, exp)
 	}
-	if fmt.Sprint(first.Projects) != fmt.Sprint([]EarlierProject{{"export", "Export", "active"}, {"archive", "Archive", "done"}}) {
+	if fmt.Sprint(first.Projects) != fmt.Sprint([]EarlierProject{{Slug: "export", Name: "Export", Status: "active"}, {Slug: "archive", Name: "Archive", Status: "done"}}) {
 		t.Errorf("projects %+v", first.Projects)
 	}
 	if mat.Earlier[1].Name != "Weekly sync" || len(mat.Earlier[1].Projects) != 0 {

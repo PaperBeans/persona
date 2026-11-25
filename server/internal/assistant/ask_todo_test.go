@@ -252,6 +252,7 @@ func TestAskTodoAnswerLostInARestartLetsTheNextOneGo(t *testing.T) {
 // A reply in the Lark topic the to-do is bound to is its decision too: one message to the asking conversation (the
 // bot's send, so the answer comes back into the topic), and the to-do closes.
 func TestAskTodoTopicReplyGoesBackToTheConversation(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	database := todoTestDB(t)
 	e := newAskTodoEnv(t, database)
 	e.expire()
@@ -380,6 +381,7 @@ func TestAskTodoDeletedTellsTheConversation(t *testing.T) {
 // Through the real queue: the card expires on its own, the tool gets the to-do, and its Lark card says it moved to the
 // to-dos instead of "Ended".
 func TestAskUserExpiringOnTheQueueMovesToTodos(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	old := askUserWait
 	askUserWait = 300 * time.Millisecond
 	t.Cleanup(func() { askUserWait = old })

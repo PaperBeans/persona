@@ -474,6 +474,18 @@ Tests: `node/machdiag` (stat and ps fixtures, grouping and the top-N union, the 
 in-use matching, the cleanup's guard rails on temporary home directories, the tool probe with fake commands), `node/diagnose_rpc_test.go` (dispatch),
 `devices/diagnosis_test.go` (pass-through, capability, offline, bad input, roles, node errors), `hub/diagnosis_routes_test.go` (answer-only devices and extension tokens).
 
+## Disk usage map (#14576)
+
+The diagnosis answers a fixed question; the **disk usage map** lets the user walk a computer's disk and act on it. The
+manager routes `GET /api/v1/machines/{mid}/storage/usage` and `POST …/storage/trash`, `…/trash/undo`, `…/trash/purge`
+(`devices/usagemap.go`, `full` devices only) call the node's `machine.storage.usage`, `.trash`, `.untrash` and `.purge`
+(`node/machine_storage_usage.go` over `node/diskmap/`, capability `machine_storage_usage`). The node sizes folders in
+the background, keeps them for 15 minutes, and holds every path a request names to its own protection rules (credentials,
+Agents' and Persona's data, app-managed folders and the like are never trashed); `machine.storage.check` answers those
+rules alone, for the extension manager to ask before an offload. An extension can offer to move items elsewhere through
+the generic `disk_offload` extension point. The whole contract (the tree, the rules, the routes, the extension point
+and what the apps draw) is [machine-usage-map.md](machine-usage-map.md).
+
 ## Renaming a computer
 
 A computer's name is its hub.json `name`; its id never changes. It can be renamed from the admin page, the web app's machine details (and, once PR 2 lands, the iOS / Mac / Android ones), the computer's

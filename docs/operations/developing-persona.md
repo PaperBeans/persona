@@ -149,8 +149,8 @@ asking first when something is recorded.
   (the view changes by time alone within 2 minutes); `stale_view` (a run moved since the list was read: the list is read
   again); `unsettled` (apart, until a run 10 s later still sees it); `mismatch` (apart, nothing explains it); `errors`
   (runs that failed). `todo_view_mismatch`, one per unexplained row an hour: its id, its manager's id, and both sides'
-  section and reason words. Drawing the To-dos sections from the view also needs `localStorage`
-  `persona.todos.viewDraw` = `1` (no settings row; reload the page after setting it).
+  section and reason words. The To-dos status list draws from the hub's `view` by default whenever the hub lists
+  `todo_view`; set `localStorage persona.todos.viewDraw` = `0` and reload to revert a browser to local triage.
 - `errors.jsonl`: uncaught errors, unhandled rejections and freezes of 5 s or more (`lib/freeze-watch.ts`), whether or not
   the hub takes error reports. `log.txt`: `console.error` / `console.warn` lines, scrubbed (an error a boundary caught is
   logged there too).

@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
@@ -46,20 +47,15 @@ const (
 
 var companionAppID = lazyre.New(`^cli_[A-Za-z0-9]{6,40}$`)
 
-// CompanionBot is another Lark bot the workbench links to.
-type CompanionBot struct {
-	Kind  string `json:"kind"`   // CompanionInbox, CompanionNotify or CompanionOther
-	Name  string `json:"name"`   // on its button
-	Icon  string `json:"icon"`   // an emoji before the name
-	AppID string `json:"app_id"` // its Lark app: the button opens the chat with it
-}
+// CompanionBot is another Lark bot the workbench links to (assistantwire.CompanionBot, kept in the chat's state).
+type CompanionBot = assistantwire.CompanionBot
 
-// link opens the chat with the bot in the Lark app (applink; the web client may not follow it).
-func (b CompanionBot) link() string {
+// companionLink opens the chat with the bot in the Lark app (applink; the web client may not follow it).
+func companionLink(b CompanionBot) string {
 	return "https://applink.feishu.cn/client/bot/open?appId=" + url.QueryEscape(b.AppID)
 }
 
-func (b CompanionBot) valid() bool {
+func companionValid(b CompanionBot) bool {
 	switch b.Kind {
 	case CompanionInbox, CompanionNotify, CompanionOther:
 	default:
@@ -98,11 +94,9 @@ func (c *companionState) bootLocked() string {
 
 // companionBots are the registered companions.
 func (s *Service) companionBots(ctx context.Context) []CompanionBot {
-	b := &s.fbot
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	s.loadBotLocked(ctx)
-	return append([]CompanionBot(nil), b.st.Companions...)
+	var bots []CompanionBot
+	s.larkModule().Book(ctx, func(b assistantwire.ChatBook) { bots = b.Companions() })
+	return bots
 }
 
 // noticesTaken: with the workbench on, a notifications companion is registered and polling, so it takes the notices.
@@ -220,22 +214,21 @@ func (s *Service) companionRoutes() {
 			return
 		}
 		for _, b := range in.Bots {
-			if !b.valid() {
+			if !companionValid(b) {
 				apierr.Write(w, http.StatusBadRequest, errors.New("a companion needs a known kind, a name of at most 20 characters and a cli_ app id"))
 				return
 			}
 		}
-		b := &s.fbot
-		b.mu.Lock()
-		s.loadBotLocked(r.Context())
-		if !b.loaded {
-			b.mu.Unlock()
+		saved := false
+		s.larkModule().Book(r.Context(), func(b assistantwire.ChatBook) {
+			if saved = b.Loaded(); saved {
+				b.SetCompanions(in.Bots)
+			}
+		})
+		if !saved {
 			apierr.Write(w, http.StatusServiceUnavailable, i18n.Err("http-status.unavailable"))
 			return
 		}
-		b.st.Companions = in.Bots
-		s.saveBotStateLocked()
-		b.mu.Unlock()
 		s.boardChanged() // the home card links to them
 		apierr.WriteJSON(w, map[string]any{"bots": in.Bots})
 	})
@@ -275,7 +268,7 @@ func (s *Service) companionRoutes() {
 			apierr.WriteJSON(w, toast("info", wbT(s.botLang(ctx), "answer_in_workbench")))
 			return
 		}
-		apierr.WriteJSON(w, s.botCardAction(ctx, &a, ""))
+		apierr.WriteJSON(w, s.larkModule().Action(ctx, &a, ""))
 	})
 	// POST /api/v1/assistant/feishu/workbench: bring up the workbench (as /home does). 409 with the switch off.
 	s.handle("POST /api/v1/assistant/feishu/workbench", func(w http.ResponseWriter, r *http.Request) {
@@ -284,7 +277,7 @@ func (s *Service) companionRoutes() {
 			return
 		}
 		ctx := withRequestLang(r).Context()
-		if f, ready := s.feishuFeatures(ctx); !s.workbenchOn(f, ready) {
+		if f, ready := s.chat().Features(ctx); !s.workbenchOn(f, ready) {
 			apierr.Write(w, http.StatusConflict, errors.New("the Lark bot's workbench is off"))
 			return
 		}
@@ -295,4 +288,8 @@ func (s *Service) companionRoutes() {
 		}()
 		apierr.WriteJSON(w, map[string]any{"ok": true})
 	})
+}
+
+func toast(kind, text string) *botcard.CardResponse {
+	return &botcard.CardResponse{Toast: &botcard.Toast{Type: kind, Content: text}}
 }

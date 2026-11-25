@@ -20,6 +20,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extmgr/githubport"
 	"github.com/nwverse/persona/server/internal/githubwire"
 	"github.com/nwverse/persona/server/internal/imessagewire"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -217,7 +218,7 @@ func TestConnectorsListTheSameCapabilities(t *testing.T) {
 		"github status,tools,actions,events,hosts,inbox,archive,login,options,threads hosts=[github.com] options=true",
 		"imessage status,tools,catalog,events,inbox,archive hosts=[] options=false", // catalog: inbox_things (#6317)
 	}
-	if githubport.Factory() == nil { // a build without the GitHub module has no built-in GitHub connector
+	if githubport.Factory(moduleswitch.Set{}) == nil { // a build without the GitHub module has no built-in GitHub connector
 		want = slices.DeleteFunc(want, func(s string) bool { return strings.HasPrefix(s, "github ") })
 	}
 	if !slices.Equal(got, want) {

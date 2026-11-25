@@ -166,7 +166,8 @@ struct AssistantFullSearch: View {
     private func agentRow(_ s: Session) -> some View {
         let snippet = query.isEmpty ? nil : s.evidenceSnippet(query: query)
         let machine = model.machine(s.machineRef)
-        let title = s.title.isEmpty ? URL(fileURLWithPath: s.cwd).lastPathComponent : s.title
+        let preferTab = model.prefersHerdrTabName(for: s)
+        let title = s.fullSearchTitle(preferTab: preferTab)
         return Button {
             onOpenAgent?(s.key)
         } label: {
@@ -178,7 +179,7 @@ struct AssistantFullSearch: View {
                         if let snippet, snippet.role != .title {
                             Text(snippet.before) + Text(snippet.match).bold() + Text(snippet.after)
                         } else {
-                            Text([s.countedState.label, machine?.name].compactMap { $0 }.joined(separator: " · "))
+                            Text(s.fullSearchSubtitle(stateLabel: s.countedState.label, machine: machine?.name, preferTab: preferTab))
                         }
                     }
                     .font(Theme.Font.secondary)

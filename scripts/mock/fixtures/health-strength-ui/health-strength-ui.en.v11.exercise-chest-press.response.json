@@ -1,0 +1,279 @@
+{
+  "view": {
+    "title": "坐姿推胸",
+    "sections": [
+      {
+        "title": "Seat and settings",
+        "items": [
+          {
+            "type": "text",
+            "text": "Marked stack weight"
+          },
+          {
+            "type": "text",
+            "text": "座椅 4 档"
+          }
+        ]
+      },
+      {
+        "title": "Best each day",
+        "items": [
+          {
+            "type": "segmented",
+            "value": "weight",
+            "action": {
+              "id": "metric"
+            },
+            "name": "metric",
+            "choices": [
+              {
+                "value": "weight",
+                "title": "Weight (kg)"
+              },
+              {
+                "value": "e1rm",
+                "title": "Est. max"
+              }
+            ]
+          },
+          {
+            "type": "segmented",
+            "value": "30",
+            "action": {
+              "id": "range"
+            },
+            "name": "days",
+            "choices": [
+              {
+                "value": "30",
+                "title": "30 days"
+              },
+              {
+                "value": "90",
+                "title": "90 days"
+              },
+              {
+                "value": "365",
+                "title": "365 days"
+              }
+            ]
+          },
+          {
+            "type": "chart",
+            "kind": "line",
+            "series": [
+              {
+                "name": "Weight (kg)",
+                "points": [
+                  {
+                    "label": "2026-10-27",
+                    "value": 40
+                  },
+                  {
+                    "label": "2026-11-01",
+                    "value": 42.5
+                  },
+                  {
+                    "label": "2026-11-06",
+                    "value": 45
+                  },
+                  {
+                    "label": "2026-11-10",
+                    "value": 45
+                  },
+                  {
+                    "label": "2026-11-15",
+                    "value": 47.5
+                  },
+                  {
+                    "label": "2026-11-20",
+                    "value": 50
+                  },
+                  {
+                    "label": "2026-11-24",
+                    "value": 50
+                  }
+                ]
+              }
+            ],
+            "unit": "kg"
+          }
+        ]
+      },
+      {
+        "title": "Set history",
+        "items": [
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-24 19:38 · 50 kg × 10",
+            "action": {
+              "id": "undo:7deabb7b-5021-5ee2-8678-37efe941073e"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-24 19:34 · 50 kg × 10",
+            "action": {
+              "id": "undo:d92048da-2abf-5452-8414-166977623c07"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-24 19:30 · 50 kg × 10",
+            "action": {
+              "id": "undo:ed22eac0-f0ca-5494-9c17-6f860b088c95"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-20 19:38 · 50 kg × 10",
+            "action": {
+              "id": "undo:b7152458-0272-5af0-b1b5-e112f16d9963"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-20 19:34 · 50 kg × 10",
+            "action": {
+              "id": "undo:68cb022f-57f6-5e7d-b55f-6825c6271d99"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-20 19:30 · 50 kg × 10",
+            "action": {
+              "id": "undo:d500353d-78db-5334-a8f4-ca14bfa90173"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-15 19:38 · 47.5 kg × 10",
+            "action": {
+              "id": "undo:a990359b-6758-5c7d-bd75-8858e4cf436e"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-15 19:34 · 47.5 kg × 10",
+            "action": {
+              "id": "undo:1d9d0741-30db-5772-b208-03db0314c167"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-15 19:30 · 47.5 kg × 10",
+            "action": {
+              "id": "undo:eed5ee17-b378-5a55-a9f0-c9b9b1ffdcd8"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-10 19:38 · 45 kg × 10",
+            "action": {
+              "id": "undo:c0aec991-4923-5731-8d98-7372ffd8962a"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-10 19:34 · 45 kg × 10",
+            "action": {
+              "id": "undo:fe21677e-7d46-56d5-bd32-4f3cccdce6ce"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-10 19:30 · 45 kg × 10",
+            "action": {
+              "id": "undo:e71707b8-bfe8-5313-b8d4-dbef62db8322"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-06 19:38 · 45 kg × 10",
+            "action": {
+              "id": "undo:d59a60f8-92e7-58a4-8b71-96a728ce513d"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-06 19:34 · 45 kg × 10",
+            "action": {
+              "id": "undo:a8ae9a34-7448-52db-a3a6-39b80bfe3751"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-06 19:30 · 45 kg × 10",
+            "action": {
+              "id": "undo:fc64597d-7e33-5d54-97a9-d078c707aec9"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-01 19:38 · 42.5 kg × 10",
+            "action": {
+              "id": "undo:d7ef1144-60bf-5a0e-a17b-a6e8c24dbee3"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-01 19:34 · 42.5 kg × 10",
+            "action": {
+              "id": "undo:5943e914-7d44-5bf3-81f5-1256aeb10741"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-11-01 19:30 · 42.5 kg × 10",
+            "action": {
+              "id": "undo:599457b9-f8f9-5453-a5fd-14c47f11ced4"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-10-27 19:38 · 40 kg × 10",
+            "action": {
+              "id": "undo:b574e025-029d-5d88-806a-a8c0af770fcb"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-10-27 19:34 · 40 kg × 10",
+            "action": {
+              "id": "undo:cf738e02-4b91-5ad3-8cc1-a465918d3aaa"
+            }
+          },
+          {
+            "type": "row",
+            "value": "Undo",
+            "title": "2026-10-27 19:30 · 40 kg × 10",
+            "action": {
+              "id": "undo:b5fa0850-ddc0-5224-b418-e7ab7770a9eb"
+            }
+          }
+        ]
+      }
+    ],
+    "state": "{\"page\":\"strength.exercise\",\"exercise\":\"ac4326b9-d3e6-5fee-8440-e812d00d9fa2\",\"metric\":\"weight\",\"days\":30}"
+  }
+}

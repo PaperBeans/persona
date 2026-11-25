@@ -255,7 +255,7 @@ nonisolated enum ForwardTargets {
         if !terms.isEmpty {
             let found = all.filter { s in
                 guard s.key != main, takes(s, from: from, ended: true, online: online) else { return false }
-                let hay = [s.displayTitle, detail(s, machine: s.assistant ? nil : name(s.machineRef))].joined(separator: " ").lowercased()
+                let hay = [s.displayTitle, s.slotName ?? "", detail(s, machine: s.assistant ? nil : name(s.machineRef))].joined(separator: " ").lowercased()
                 return terms.allSatisfy { hay.contains($0) }
             }
             return found.isEmpty ? [] : [Section(id: "results", kind: .results, title: "", sessions: found.sorted(by: latest))]

@@ -4,10 +4,12 @@
 // App.tsx imports it once, before the first route is read. Adding a module: docs/web/web.md "Adding a module".
 import { registerModule, registeredModules, type ModuleDescriptor } from "../core/module-host";
 import { health } from "./health/module";
+import { lark } from "./lark/module";
 import { recording } from "./recording/module";
+import { STANDALONE_MODULES } from "./standalone";
 import { voice } from "./voice/module";
 
-export const MODULES: readonly ModuleDescriptor[] = [health, voice, recording];
+export const MODULES: readonly ModuleDescriptor[] = [health, voice, recording, lark, ...STANDALONE_MODULES];
 
 /**
  * Registers each module once (a second call, a hot reload or a test importing the list again, is a no-op). This runs

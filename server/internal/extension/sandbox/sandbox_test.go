@@ -177,7 +177,7 @@ func TestProbeMountsAsStart(t *testing.T) {
 		t.Fatalf("a start's options are not the probe's:\n%v\n%v", setup, args)
 	}
 	line := strings.Join(setup, " ")
-	for _, want := range []string{"--proc /proc", "--dev /dev", "--tmpfs /tmp", "--tmpfs /run", "--ro-bind /usr/local/bin/personad " + SelfPath,
+	for _, want := range []string{"--unshare-pid", "--ro-bind /proc /proc", "--dev /dev", "--tmpfs /tmp", "--tmpfs /run", "--ro-bind /usr/local/bin/personad " + SelfPath,
 		"--remount-ro /", "--chdir /x/pkg"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("no %q in %s", want, line)
@@ -400,7 +400,8 @@ func TestBwrapProbeArgs(t *testing.T) {
 	line := strings.Join(args, " ")
 	for _, want := range []string{
 		"--die-with-parent",
-		"--proc /proc",
+		"--unshare-pid",
+		"--ro-bind /proc /proc",
 		"--dev /dev",
 		"--tmpfs /tmp",
 		"--tmpfs /run",

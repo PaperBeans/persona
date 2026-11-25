@@ -117,6 +117,10 @@ func TestInboxAgentMachineTrust(t *testing.T) {
 				}
 				delegationMachineTrust(t, h.Service, machine, trust)
 				it := actionItem("event", time.Now())
+				it.Agent = &InboxAgent{State: AgentRunning, ProcessingTurn: "machine-trust"}
+				h.inbox.mu.Lock()
+				h.inbox.items[it.ID] = it
+				h.inbox.mu.Unlock()
 				mid, sid, err := h.startInboxAgent(context.Background(), cfg, it, "Handle this message")
 				if trust == "work" {
 					if (!errors.Is(err, errWorkAssistant) && !errors.Is(err, errNoInboxMachine)) || !definiteStartError(err) || h.f.made != 0 || len(h.f.prepared) != 0 {

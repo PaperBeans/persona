@@ -4,6 +4,11 @@ import { fileURLToPath } from 'node:url'
 import { defaultStateRoot, legacyEnvName } from '../../runtime-sdk/lib/compat.js'
 import { stateDir } from '../../runtime-sdk/lib/identity.js'
 
+// The previous context tag still begins a cached preview; its literal stays in this adapter.
+export function contextOpening(text) {
+  return /^(?:<persona-context\b|<jarvis-context\b)/.test(text)
+}
+
 export function daemonCandidates(home, options) {
   // An explicit runtime home owns discovery too; an ambient PERSONA_HOME must not replace it.
   const roots = options.stateHome ? [options.stateHome] : [home ? stateDir(home, {}) : stateDir(), join(home, '.persona'), join(home, '.jarvis')]

@@ -53,6 +53,12 @@ function draw() {
 }
 const bar = () => host.querySelector<HTMLElement>("[data-side-bar]")!;
 const copy = () => host.querySelector<HTMLButtonElement>('[data-side-bar] button[aria-label="复制消息"]')!;
+// StarAvailability reports through an effect after the lazy chunk and the switch subscription update; wait for that
+// second render rather than assuming dynamicImportSettled also ran the parent's effect.
+const until = async (ok: () => boolean) => {
+  for (let i = 0; i < 400 && !ok(); i++) await act(async () => { await new Promise((r) => setTimeout(r, 5)); });
+  expect(ok()).toBe(true);
+};
 
 describe("your bubble's hover bar", () => {
   it("stays beside a bubble with room to its left", async () => {
@@ -136,6 +142,7 @@ it("offers no star action or marker while the Starred switch is off, and offers 
   expect(host.querySelector("[data-star-mark]")).toBeNull();
   expect(bar().querySelector("button[aria-haspopup=menu]")).toBeNull();
   await act(async () => { setStarredEnabled(true); await vi.dynamicImportSettled(); });
+  await until(() => host.querySelector('[data-star-mark="saved"]') !== null);
   expect(host.querySelector('[data-star-mark="saved"]')).not.toBeNull();
   expect(bar().querySelector("button[aria-haspopup=menu]")).not.toBeNull();
 });

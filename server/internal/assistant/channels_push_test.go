@@ -122,6 +122,7 @@ func TestExtensionPushMarksOnlyAfterAllPiecesSucceed(t *testing.T) {
 }
 
 func TestFailedExtensionPushKeepsItsMirrorAfterOtherChannelsSucceed(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, main := range []bool{true, false} {
 		name := "scheduled task"
 		if main {
@@ -154,6 +155,7 @@ func TestFailedExtensionPushKeepsItsMirrorAfterOtherChannelsSucceed(t *testing.T
 }
 
 func TestExtensionPushDoesNotSuppressFeishuMirrorOrRetry(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f := channelPushService(t, true)
 	enableChannelPushFeishu(f)
 	s.channelPush("server", "s1", "Status", "The notification")

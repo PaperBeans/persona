@@ -293,10 +293,14 @@ func (s *Service) resolveContainerTask(ctx context.Context, t *PlanTask) error {
 }
 
 func (s *Service) createTaskTodoWithRepositories(ctx context.Context, id, title, notes, origin, planID, project, inboxItem string, repoIDs []string) (Todo, error) {
+	return s.createTaskTodoWithRepositoriesAndAudience(ctx, id, title, notes, origin, planID, project, inboxItem, "", "", repoIDs)
+}
+
+func (s *Service) createTaskTodoWithRepositoriesAndAudience(ctx context.Context, id, title, notes, origin, planID, project, inboxItem, audience, directionID string, repoIDs []string) (Todo, error) {
 	now := time.Now().UTC()
 	row := db.TodoRow{
 		ID: id, Title: title, Notes: notes, CreatedAt: now, UpdatedAt: now,
-		Origin: origin, PlanID: planID, Quiet: s.quietTask(ctx, origin), Project: project, InboxItem: inboxItem,
+		Origin: origin, PlanID: planID, Quiet: s.quietTask(ctx, origin), Project: project, InboxItem: inboxItem, Audience: audience, DirectionID: strings.TrimSpace(directionID),
 	}
 	inputs, _ := containerMergeInputs(nil, repoIDs)
 	var lastErr error

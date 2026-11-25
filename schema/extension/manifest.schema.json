@@ -308,7 +308,7 @@
         "network": {"type": "array", "items": {"$ref": "#/$defs/NetworkEntry"}},
         "hub_api": {"type": "boolean", "description": "The old way: the hub's full token. With hub scopes, the scopes win."},
         "hub": {"type": "array", "description": "The scopes of the hub's API it calls: its token opens their routes only.",
-          "items": {"type": "string", "pattern": "^(kb\\.read|kb\\.write|sent\\.read|inbox\\.read|inbox\\.write|agents\\.read|agents\\.control|agents\\.permission_mode|machines\\.read|machines\\.pair|browser\\.run|notify|assistant\\.ask|assistant\\.read|assistant\\.memory\\.read|assistant\\.entries\\.read|todos\\.read|todos\\.write|decisions\\.raise|leaders\\.read|leaders\\.write|assistant\\.dispatch_policy|assistant\\.start_defaults|dispatch.guard|models|transcription|market\\.refresh_own|extensions\\.call:[a-z0-9][a-z0-9_-]{0,31})$"}},
+          "items": {"type": "string", "pattern": "^(kb\\.read|kb\\.write|sent\\.read|inbox\\.read|inbox\\.write|agents\\.read|agents\\.control|agents\\.permission_mode|machines\\.read|machines\\.pair|browser\\.run|notify|push\\.grading|assistant\\.ask|spaces|assistant\\.read|assistant\\.memory\\.read|assistant\\.entries\\.read|todos\\.read|todos\\.write|decisions\\.raise|leaders\\.read|leaders\\.write|assistant\\.dispatch_policy|assistant\\.start_defaults|dispatch.guard|models|transcription|market\\.refresh_own|extensions\\.call:[a-z0-9][a-z0-9_-]{0,31})$"}},
         "launcher_keys": {"type": "boolean"},
         "gh_login": {"type": "boolean", "description": "It asks the hub for the GitHub token of a computer's gh login (the one the user picks for the GitHub connector), held in its memory only."},
         "usage_gateways": {"type": "boolean", "description": "It reads the account list of the account-pool gateways in the hub's usage sources (usage.gateway_accounts): accounts, status and quota windows, never a key."},
@@ -349,6 +349,7 @@
         "assistant": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/AssistantItem"}},
         "mcp_servers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/MCPServerItem"}},
         "ui": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/UIItem"}},
+        "track_kinds": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/TrackKindItem"}},
         "agent_sources": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/AgentSourceItem"}},
         "channel": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/ChannelItem"}},
         "events": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/EventsItem"}},
@@ -365,6 +366,7 @@
         "secret_providers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/SecretProviderItem"}},
         "repository_providers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/RepositoryProviderItem"}},
         "memory_sources": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/$defs/MemorySourceItem"}},
+        "disk_offload": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/DiskOffloadItem"}},
         "messaging": {"type": "array", "minItems": 1, "items": {"$ref": "messaging.schema.json#/$defs/MessagingItem"}}
       }
     },
@@ -580,6 +582,25 @@
       },
       "required": ["id", "name", "hosts"]
     },
+    "DiskOffloadItem": {
+      "description": "A provider that moves items from a computer to storage elsewhere, lists what it already holds and brings items back (docs/server/machine-usage-map.md \"Extension point disk_offload\"): the disk usage map draws its inventory beside the computer's disk and offers Offload; the manager asks the program (offload.inventory, offload.run, offload.job, offload.cancel; offload.schema.json) after the user confirmed. Needs the program to speak the protocol.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/ID"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 40, "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*[^\\x00-\\x20\\x7f-\\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^\\x00-\\x1f\\x7f-\\x9f]*$",
+          "description": "What the map and its menus call the provider (Offload to Example Cloud). Not only spaces, no control characters."},
+        "kinds": {"type": "array", "minItems": 1, "maxItems": 3, "uniqueItems": true, "items": {"$ref": "#/$defs/DiskOffloadKind"},
+          "description": "What it takes from the map; without it, files and folders."},
+        "restore": {"type": "boolean", "description": "Items it holds can be brought back (Restore on the map's cloud side)."}
+      },
+      "required": ["id", "name"]
+    },
+    "DiskOffloadKind": {
+      "description": "What a disk_offload provider takes: file, dir (a folder) or app (a macOS app bundle).",
+      "type": "string",
+      "enum": ["file", "dir", "app"]
+    },
     "MemorySourceItem": {
       "description": "The extension's memory, read by the manager one entry at a time (memory.entries; memory.schema.json) so the hub decides which entries reach which scene (a conversation's standing context, a recall, a dispatched task, the Inbox's helper). Needs the program to speak the protocol; one per extension. Once declared, the hub stops delivering the extension's own text outlets (its assistant instructions, project context, Inbox context and its connectors' read tools in the assistant's conversations) directly.",
       "type": "object",
@@ -669,6 +690,43 @@
         "sends_as_user": {"type": "boolean", "description": "The connector sends messages in the user's name by itself, not through the hub's write gate (a read tool that also replies, say). Its program may then record each one in the sent-as-user ledger with sent.record, and the install preview says so."}
       },
       "required": ["id", "name", "capabilities"]
+    },
+    "TrackAttention": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"push_cap": {"type": "string", "enum": ["P0", "P1", "P2"]}, "deep_default": {"type": "string", "enum": ["quick", "deep"]}, "enter_mode": {"type": "string", "enum": ["none", "immersive"]}}
+    },
+    "TrackSidebar": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"group": {"type": "string", "maxLength": 40}, "order": {"type": "integer"}, "icon": {"type": "string", "pattern": "^[a-z][a-zA-Z0-9_]{0,63}$"}}
+    },
+    "TrackKindConfig": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "schema": {"type": "integer", "const": 1},
+        "template": {"type": "string", "enum": ["assistant", "space", "health"]},
+        "user_instructions": {"type": "string", "enum": ["", "space_md"]},
+        "context": {"type": "string", "enum": ["engineering", "track", "none"]},
+        "default_categories": {"type": "array", "items": {"type": "string", "enum": ["health", "finance", "relationships", "emotion", "legal_id"]}},
+        "tag_focus": {"type": "array", "items": {"type": "string", "enum": ["health", "finance", "relationships", "emotion", "legal_id"]}},
+        "rhythms": {"type": "array", "items": {"type": "object"}},
+        "attention": {"$ref": "#/$defs/TrackAttention"},
+        "supervision": {"type": "string", "enum": ["leaders", "routine", "none"]},
+        "usage": {"type": "array", "items": {"type": "object"}},
+        "assembly": {"type": "string", "enum": ["assistant", "track"]},
+        "capture_target": {"type": "boolean"},
+        "channels": {"type": "array", "items": {"type": "string", "enum": ["topics", "single"]}},
+        "sidebar": {"$ref": "#/$defs/TrackSidebar"}
+      },
+      "required": ["schema", "template", "context", "default_categories", "tag_focus", "rhythms", "attention", "supervision", "usage", "assembly", "channels", "sidebar"]
+    },
+    "TrackKindItem": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/ID"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 80},
+        "config": {"$ref": "#/$defs/TrackKindConfig"}
+      },
+      "required": ["id", "title", "config"]
     },
     "NamedItem": {
       "description": "A contribution with only an id and a name: voice, transcription, speech, computer, browser.",

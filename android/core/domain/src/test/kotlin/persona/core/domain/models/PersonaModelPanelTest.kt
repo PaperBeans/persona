@@ -14,6 +14,8 @@ import persona.core.contracts.Session
 import persona.core.contracts.api.AgentLauncher
 import persona.core.contracts.api.AgentModel
 import persona.core.contracts.api.AssistantLaunchers
+import persona.core.contracts.api.ConversationSwitchRequest
+import persona.core.contracts.api.ConversationSwitchState
 import persona.core.contracts.api.LauncherDefault
 import persona.core.contracts.api.LauncherModels
 import persona.core.contracts.api.UnavailableLauncher
@@ -199,5 +201,97 @@ class PersonaModelPanelTest {
         assertFalse(runtime.models.orEmpty().any { it.id == "默认" || it.name == "默认" })
         assertNull(panel.state.current)
         assertNull(PersonaModelPanel.pill(page, setup, sharedInfo, read("runtime")).setup.model)
+    }
+
+    @Test fun switchNeededDistinguishesSameEngineNativeFromCrossEngineAndRuntimeAdapters() {
+        val nativeSession = chat.copy(launcher = "claude", agent = "claude")
+        assertFalse(PersonaModelPanel.switchNeeded(nativeSession, AgentLauncher("claude", source = "builtin"), "claude"))
+        assertFalse(PersonaModelPanel.switchNeeded(nativeSession, AgentLauncher("team", source = "zshrc"), "claude"))
+        assertFalse(PersonaModelPanel.switchNeeded(nativeSession, AgentLauncher("managed", source = "persona"), "claude"))
+        assertTrue(PersonaModelPanel.switchNeeded(nativeSession, AgentLauncher("codex", agentType = "codex", source = "path"), "codex"))
+        assertTrue(PersonaModelPanel.switchNeeded(nativeSession, AgentLauncher("agy", agentType = "agy", source = "agy"), "agy"))
+        assertTrue(PersonaModelPanel.switchNeeded(nativeSession, AgentLauncher("hosted-claude", agentType = "claude", source = "runtime-one"), "claude"))
+        assertTrue(PersonaModelPanel.switchNeeded(nativeSession, AgentLauncher("persona_ext_custom", agentType = "claude"), "claude"))
+
+        val runtimeSession = nativeSession.copy(sourceKind = "runtime", sourceInstanceId = "runtime-one")
+        assertFalse(PersonaModelPanel.switchNeeded(runtimeSession, AgentLauncher("other", source = "runtime-one"), "claude"))
+        assertTrue(PersonaModelPanel.switchNeeded(runtimeSession, AgentLauncher("other", source = "runtime-two"), "claude"))
+        assertTrue(PersonaModelPanel.switchNeeded(runtimeSession, AgentLauncher("team", source = "zshrc"), "claude"))
+
+        // Codex threads identified via source_kind without an explicit agent field still require switching to Claude.
+        val codexAppSession = chat.copy(launcher = "codex", agent = null, sourceKind = "codex_app_server")
+        assertTrue(PersonaModelPanel.switchNeeded(codexAppSession, AgentLauncher("claude", agentType = "claude", source = "builtin"), "claude"))
+        assertFalse(PersonaModelPanel.switchNeeded(codexAppSession, AgentLauncher("codex-work", agentType = "codex", source = "path"), "codex"))
+        // Engine aliases ("claude-code", "codex-cli") normalize identically to their canonical engine IDs.
+        val aliasedClaude = chat.copy(launcher = "claude", agent = "claude-code")
+        assertFalse(PersonaModelPanel.switchNeeded(aliasedClaude, AgentLauncher("team", agentType = "claude", source = "zshrc"), "claude"))
+    }
+
+    @Test fun switchingCapabilityEnablesOtherEnginesAndSupervisionFiltersIneligibleConnections() {
+        val launchers = AssistantLaunchers(
+            launchers = listOf(
+                AgentLauncher("claude", source = "builtin"),
+                AgentLauncher("codex", agentType = "codex", source = "path"),
+                AgentLauncher("agy", agentType = "agy", displayName = "Antigravity CLI", source = "agy", assistant = true, supervisionPolicy = false),
+                AgentLauncher("opencode", agentType = "opencode", source = "opencode", assistant = true, supervisionPolicy = true),
+            ),
+            default = LauncherDefault("claude", "opus", "high"),
+        )
+        val setup = PersonaModelPanel.setup(of(chat, main = true), launchers)
+
+        val noSwitch = PersonaModelPanel.panel(setup, launchers, ::read, typed = true, running = true, switching = false)
+        assertEquals(PanelReason.OtherEngine("claude", "codex"), noSwitch.providers.single { it.id == "codex" }.unavailable)
+        assertEquals(PanelReason.OtherEngine("claude", "agy"), noSwitch.providers.single { it.id == "agy" }.unavailable)
+
+        val canSwitch = PersonaModelPanel.panel(setup, launchers, ::read, typed = true, running = true, switching = true, supervision = false)
+        assertNull(canSwitch.providers.single { it.id == "codex" }.unavailable)
+        assertNull(canSwitch.providers.single { it.id == "agy" }.unavailable)
+        assertNull(canSwitch.providers.single { it.id == "opencode" }.unavailable)
+
+        val supervised = PersonaModelPanel.panel(setup, launchers, ::read, typed = true, running = true, switching = true, supervision = true)
+        assertNull(supervised.providers.single { it.id == "claude" }.unavailable)
+        assertNull(supervised.providers.single { it.id == "codex" }.unavailable)
+        assertEquals(PanelReason.SupervisionUnavailable, supervised.providers.single { it.id == "agy" }.unavailable)
+        assertNull(supervised.providers.single { it.id == "opencode" }.unavailable)
+    }
+
+    @Test fun buildSwitchRequestValidatesSegmentsStateAndCarriesSessionFields() {
+        val session = chat.copy(permissionMode = "acceptEdits")
+        val pick = ModelPick("agy", "gemini-3", "high")
+        assertNull(PersonaModelPanel.buildSwitchRequest(session, pick, ConversationSwitchState(enabled = false, epoch = 2), "op-1"))
+        assertNull(PersonaModelPanel.buildSwitchRequest(session, pick, ConversationSwitchState(enabled = true, epoch = 0), "op-1"))
+        assertNull(PersonaModelPanel.buildSwitchRequest(session, pick, ConversationSwitchState(enabled = true, epoch = 2), ""))
+        assertEquals(
+            ConversationSwitchRequest(
+                operationId = "op-1",
+                expectedEpoch = 2,
+                sourceMachineId = "mac",
+                machineId = "mac",
+                launcher = "agy",
+                model = "gemini-3",
+                effort = "high",
+                permissionMode = "acceptEdits",
+            ),
+            PersonaModelPanel.buildSwitchRequest(session, pick, ConversationSwitchState(enabled = true, epoch = 2), "op-1"),
+        )
+    }
+
+    @Test fun mainChatAgentMismatchKeepsActualRunningLauncherUntilConfirmedSwitch() {
+        val runtimeInfo = AssistantLaunchers(
+            launchers = listOf(
+                AgentLauncher("claude", source = "builtin"),
+                AgentLauncher("hosted-claude", agentType = "claude", source = "runtime-one"),
+            ),
+            default = LauncherDefault("hosted-claude", "opus", "high"),
+        )
+        val setup = PersonaModelPanel.setup(of(chat, main = true), runtimeInfo)
+        assertEquals(PersonaModelPanel.Setup("claude", "claude-opus-5-5", "high", PersonaModelPanel.Source.Own), setup)
+    }
+
+    @Test fun leaderWithFollowsDefaultTracksDefaultWithoutAffectingOrdinaryNonMainChat() {
+        val leaderChat = PersonaModelPanel.Chat(chat, isMain = false, kept = true, config = "claude", followsDefault = true)
+        val sideChat = PersonaModelPanel.Chat(chat, isMain = false, kept = true, config = "claude", followsDefault = false)
+        assertEquals(PersonaModelPanel.Source.Default, PersonaModelPanel.setup(leaderChat, info).source)
+        assertEquals(PersonaModelPanel.Source.Own, PersonaModelPanel.setup(sideChat, info).source)
     }
 }

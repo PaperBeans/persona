@@ -104,6 +104,10 @@ func TestRoutineConversationReplyKeepsExplicitPromotion(t *testing.T) {
 		want  bool
 	}{
 		{name: "routine relay", items: []proto.Item{relayed, answer}, want: true},
+		{name: "unanswered relay after owner answer", items: []proto.Item{{Role: "user", Kind: proto.KindText, Text: "Show the result."}, answer, relayed}, want: false},
+		{name: "unanswered relay after public result", items: []proto.Item{relayed, notify, notified, answer, relayed}, want: false},
+		{name: "unanswered relay after routine result", items: []proto.Item{relayed, answer, relayed}, want: true},
+		{name: "no completed reply yet", items: []proto.Item{relayed}, want: false},
 		{name: "successful owner notification", items: []proto.Item{relayed, notify, notified, answer}, want: false},
 		{name: "failed owner notification", items: []proto.Item{relayed, notify, proto.Item{Role: "user", Kind: proto.KindToolResult, ToolUseID: "notify-1", Text: "offline", IsError: true}, answer}, want: true},
 		{name: "scheduled round", items: []proto.Item{scheduled, answer}, want: false},
@@ -112,6 +116,55 @@ func TestRoutineConversationReplyKeepsExplicitPromotion(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := RoutineConversationReply(tc.items); got != tc.want {
 				t.Fatalf("RoutineConversationReply = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFinishedRelayUsesThePreviousAnswerOnANodePage(t *testing.T) {
+	lines := &tline{}
+	lines.user("u1", "", "Show the summary.", 1)
+	lines.reply("a1", "u1", "Here is the summary.", 2)
+	relay := prompts.MessageSourceText("Send a status update.", &proto.MessageSource{Kind: proto.SourceConversation, ConversationID: "peer"})
+	lines.user("r1", "a1", relay, 3)
+	f := NewFile(writeLines(t, lines))
+	if _, err := f.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	page, _, _ := f.PageTurns(0, 2, 2000)
+	if len(page) != 3 {
+		t.Fatalf("completed pair and pending relay: %v", page)
+	}
+	for _, extra := range [][]proto.Item{
+		nil,
+		{{Kind: proto.KindNotice, TurnDuration: &proto.TurnDuration{UserItemID: page[0].ID}}},
+		{{Kind: proto.KindThinking, Role: "assistant", Text: "Checking the new item."}, {Kind: proto.KindText, Role: "assistant", Text: "Looking it up.", Narration: true}},
+	} {
+		items := append(append([]proto.Item{}, page...), extra...)
+		if BackgroundReplyMissing(items) || RoutineConversationReply(items) {
+			t.Fatal("an unanswered relay took the alert for the earlier direct reply")
+		}
+	}
+}
+
+func TestUnansweredRelayKeepsThePreviousFailureOrPromotionVisible(t *testing.T) {
+	request := proto.Item{ID: "first", Role: "user", Kind: proto.KindText, Text: "Report the result.", Source: &proto.MessageSource{Kind: proto.SourceConversation}}
+	next := request
+	next.ID = "next"
+	for _, tc := range []struct {
+		name    string
+		outcome []proto.Item
+	}{
+		{"runtime error text", []proto.Item{{Role: "assistant", Kind: proto.KindText, Text: "API Error: 529 overloaded"}}},
+		{"interruption notice", []proto.Item{{Kind: proto.KindNotice, Text: InterruptedNotice}}},
+		{"model refusal", []proto.Item{{Role: "assistant", Kind: proto.KindNotice, ModelRefusal: &proto.ModelRefusal{}}}},
+		{"promoted without further text", []proto.Item{{Kind: proto.KindToolUse, ToolName: "notify_user", ToolUseID: "notice"}, {Role: "user", Kind: proto.KindToolResult, ToolUseID: "notice", Text: "sent"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			items := append([]proto.Item{request}, tc.outcome...)
+			items = append(items, next)
+			if BackgroundReplyMissing(items) || RoutineConversationReply(items) {
+				t.Fatal("the unfinished relay hid a completed failure or an owner-visible result")
 			}
 		})
 	}

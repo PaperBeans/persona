@@ -2,5 +2,6 @@
   "missing": "未設定：{fields}",
   "list_separator": "、",
   "no_program": "{platform} 用のプログラムがありません",
+  "module_program_off": "personad {name} は起動しません：所属するモジュールが modules 設定でオフになっています",
   "socket_path_too_long": "ソケットのパス {path} は {length} バイトですが、このシステムの Unix ソケットは最大 {max} バイトです：Persona のデータディレクトリかこのアシスタントのディレクトリを短いパスへ移してください"
 }

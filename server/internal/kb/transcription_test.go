@@ -15,6 +15,7 @@ import (
 func hubEngine(t *testing.T, m Model) (*Engine, *[][]string) {
 	t.Helper()
 	e := goldenEngine(t, m)
+	e.SetRecordingProvider(RecordingWriters(e)) // hub transcription is the recording module's: retention reaches its audio and its sweep
 	e.TranscriptionReady = func() bool { return true }
 	var changed [][]string
 	e.MeetingChanged = func(_ string, parts []string) { changed = append(changed, parts) }
@@ -183,7 +184,7 @@ func TestParseTimeline(t *testing.T) {
 	}{
 		{"whole", `{"roles":[{"at":10,"attendance":"Participant"},{"at":0,"attendance":"listener"}],` +
 			`"speaking":[{"start":5,"end":6,"text":"Later."},{"start":1,"end":2,"text":"We keep the cap."},{"start":1.5,"end":3,"text":"Bo owns it."}]}`, true,
-			&Timeline{Roles: []TimelineRole{{0, AttendanceListener}, {10, AttendanceParticipant}},
+			&Timeline{Roles: []TimelineRole{{At: 0, Attendance: AttendanceListener}, {At: 10, Attendance: AttendanceParticipant}},
 				Speaking: []SpokenSpan{{Start: 1, End: 3, Text: "We keep the cap. Bo owns it."}, {Start: 5, End: 6, Text: "Later."}}}},
 		{"spans without text, or null", `{"speaking":[{"start":1,"end":2},{"start":4,"end":4,"text":null}]}`, true, &Timeline{Speaking: spk(1, 2, 4, 4)}},
 		{"text cut", `{"speaking":[{"start":0,"end":1,"text":"` + strings.Repeat("答", maxSpokenText) + `"}]}`, true,
@@ -191,14 +192,14 @@ func TestParseTimeline(t *testing.T) {
 		{"empty object", `{}`, true, &Timeline{}},
 		{"null parts", `{"roles":null,"speaking":null}`, true, &Timeline{}},
 		{"same at twice: the later", `{"roles":[{"at":1,"attendance":"listener"},{"at":1,"attendance":"off"}]}`, true,
-			&Timeline{Roles: []TimelineRole{{1, AttendanceOff}}}},
+			&Timeline{Roles: []TimelineRole{{At: 1, Attendance: AttendanceOff}}}},
 		{"absent", ``, false, nil},
 		{"null", `null`, false, nil},
 		{"not an object", `[1,2]`, false, nil},
 		{"a string", `"x"`, false, nil},
 		{"unknown role", `{"roles":[{"at":0,"attendance":"speaker"}]}`, false, nil},
 		{"notes (#8851)", `{"roles":[{"at":0,"attendance":"notes"},{"at":30,"attendance":"Listener"}]}`, true,
-			&Timeline{Roles: []TimelineRole{{0, AttendanceNotes}, {30, AttendanceListener}}}},
+			&Timeline{Roles: []TimelineRole{{At: 0, Attendance: AttendanceNotes}, {At: 30, Attendance: AttendanceListener}}}},
 		{"role without at", `{"roles":[{"attendance":"listener"}]}`, false, nil},
 		{"at a string", `{"roles":[{"at":"0","attendance":"listener"}]}`, false, nil},
 		{"negative at", `{"roles":[{"at":-1,"attendance":"listener"}]}`, false, nil},
@@ -252,14 +253,14 @@ func spk(pairs ...float64) []SpokenSpan {
 // The union: one role change per at (the later wins), spans merged when they overlap or touch; the limits apply to the
 // union (the first ones kept); RoleAt is the last change at or before a moment, the meeting's role before the first.
 func TestTimelineMergeAndRoleAt(t *testing.T) {
-	tl := Timeline{Roles: []TimelineRole{{0, AttendanceListener}, {60, AttendanceOff}}, Speaking: spk(10, 12)}
-	if tl.Merge(Timeline{Roles: []TimelineRole{{0, AttendanceListener}}, Speaking: spk(10, 12)}) {
+	tl := Timeline{Roles: []TimelineRole{{At: 0, Attendance: AttendanceListener}, {At: 60, Attendance: AttendanceOff}}, Speaking: spk(10, 12)}
+	if tl.Merge(Timeline{Roles: []TimelineRole{{At: 0, Attendance: AttendanceListener}}, Speaking: spk(10, 12)}) {
 		t.Fatal("the same timeline changed it")
 	}
-	if !tl.Merge(Timeline{Roles: []TimelineRole{{60, AttendanceParticipant}, {30, AttendanceOff}, {5, "bogus"}}, Speaking: spk(12, 15, 20, 21, 11, 11.5)}) {
+	if !tl.Merge(Timeline{Roles: []TimelineRole{{At: 60, Attendance: AttendanceParticipant}, {At: 30, Attendance: AttendanceOff}, {At: 5, Attendance: "bogus"}}, Speaking: spk(12, 15, 20, 21, 11, 11.5)}) {
 		t.Fatal("no change")
 	}
-	want := Timeline{Roles: []TimelineRole{{0, AttendanceListener}, {30, AttendanceOff}, {60, AttendanceParticipant}}, Speaking: spk(10, 15, 20, 21)}
+	want := Timeline{Roles: []TimelineRole{{At: 0, Attendance: AttendanceListener}, {At: 30, Attendance: AttendanceOff}, {At: 60, Attendance: AttendanceParticipant}}, Speaking: spk(10, 15, 20, 21)}
 	if !timelineEqual(tl, want) {
 		t.Fatalf("merged %+v", tl)
 	}
@@ -295,7 +296,7 @@ func TestTranscriptionUploadTimeline(t *testing.T) {
 	now := time.Date(2026, 11, 10, 14, 0, 0, 0, goldenZone)
 	start := now.Add(-time.Hour)
 	e, changed := hubEngine(t, nil)
-	putRecording(t, e, recID, hubUpload(1, start, false, &Timeline{Roles: []TimelineRole{{0, AttendanceListener}}}), now)
+	putRecording(t, e, recID, hubUpload(1, start, false, &Timeline{Roles: []TimelineRole{{At: 0, Attendance: AttendanceListener}}}), now)
 	if len(*changed) != 1 || !slices.Contains((*changed)[0], PartTranscription) {
 		t.Fatalf("first upload told %v", *changed)
 	}
@@ -304,7 +305,7 @@ func TestTranscriptionUploadTimeline(t *testing.T) {
 		t.Fatalf("stale %+v", put)
 	}
 	tr := transcriptionNow(t, e, recID)
-	if !timelineEqual(*tr.Timeline, Timeline{Roles: []TimelineRole{{0, AttendanceListener}}, Speaking: spk(5, 6)}) {
+	if !timelineEqual(*tr.Timeline, Timeline{Roles: []TimelineRole{{At: 0, Attendance: AttendanceListener}}, Speaking: spk(5, 6)}) {
 		t.Fatalf("union %+v", tr.Timeline)
 	}
 	if len(*changed) != 1 {
@@ -421,7 +422,7 @@ func TestTranscriptionUpdate(t *testing.T) {
 // meetingParts sees it.
 func TestMeetingCloneTranscription(t *testing.T) {
 	m := Meeting{Transcription: &MeetingTranscription{Mode: TranscriptionHub, State: TranscriptionLive, Gaps: [][2]float64{{1, 2}},
-		Timeline: &Timeline{Roles: []TimelineRole{{0, AttendanceListener}}, Speaking: spk(3, 4)}}}
+		Timeline: &Timeline{Roles: []TimelineRole{{At: 0, Attendance: AttendanceListener}}, Speaking: spk(3, 4)}}}
 	c := m.Clone()
 	c.Transcription.Gaps[0][1] = 9
 	c.Transcription.Timeline.Roles[0].Attendance = AttendanceOff

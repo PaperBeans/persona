@@ -53,7 +53,8 @@ func TestModelTierSpeedSettingRoundTrip11141(t *testing.T) {
 	if ok, err := s.store().Setting(context.Background(), modelProfilesKey, &saved); err != nil || !ok {
 		t.Fatalf("read saved tiers: ok %v err %v", ok, err)
 	}
-	if len(saved.Profiles) == 0 || saved.Profiles[0].Tiers["standard"].Speed != "fast" {
+	// stored under its kind-of-work name (#14700)
+	if len(saved.Profiles) == 0 || saved.Profiles[0].Tiers["dev"].Speed != "fast" {
 		t.Fatalf("speed did not persist through persona_settings: %+v", saved)
 	}
 	got := s.Tool(context.Background(), ToolCall{MachineID: "server", SessionID: "c1", Name: "persona_settings",

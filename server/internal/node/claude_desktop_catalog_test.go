@@ -16,7 +16,7 @@ func desktopEnvironmentFixture(id, name, cwd string, additional ...string) map[s
 }
 
 func TestClaudeNativeEnvironmentsWithoutSessions(t *testing.T) {
-	home := t.TempDir()
+	home := resolved(t, t.TempDir()) // macOS keeps t.TempDir() behind the /var symlink; the node reports folders resolved
 	profile, _ := useDesktopDirs(t)
 	root, other := filepath.Join(home, "source"), filepath.Join(home, "assets")
 	for _, dir := range []string{root, other} {
@@ -49,6 +49,8 @@ func TestClaudeNativeEnvironmentsWithoutSessions(t *testing.T) {
 
 func TestClaudeNativeEnvironmentMembershipUsesProfileAndAccount(t *testing.T) {
 	n, home := testNode(t)
+	home = resolved(t, home) // as in TestClaudeNativeEnvironmentsWithoutSessions
+	n.home = home
 	n.metas, n.bgScans = map[string]quickMeta{}, map[string]*bgScan{}
 	first, second := useDesktopDirs(t)
 	original, running := filepath.Join(home, "original"), filepath.Join(home, "worktree")
@@ -141,7 +143,7 @@ func TestClaudeNativeEnvironmentAndDirectorySessionKeepDistinctProjects(t *testi
 }
 
 func TestClaudeNativeEnvironmentFailureKeepsSessionDiscovery(t *testing.T) {
-	home := t.TempDir()
+	home := resolved(t, t.TempDir()) // as in TestClaudeNativeEnvironmentsWithoutSessions
 	profile, _ := useDesktopDirs(t)
 	root := filepath.Join(home, "project")
 	if err := os.MkdirAll(root, 0o700); err != nil {

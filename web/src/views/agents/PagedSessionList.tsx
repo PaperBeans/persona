@@ -5,6 +5,7 @@ import { t } from "../../i18n";
 import { api, errorText } from "../../lib/api";
 import { onShownHint } from "../../lib/shown-hints";
 import { filterQuery, SessionList, type ListCounts, type ListFilters } from "../../lib/session-list";
+import { boundedCounts } from "../../lib/sessions";
 import { groupMachines, holdsPlace, JUST_FINISHED_KEY, type GroupDimension, type SessionGroup, type SessionPlace, type TodoNames } from "../../lib/session-groups";
 import { SESSION_LIST_METRICS, SESSION_LIST_STYLE } from "../../ui/list-metrics";
 import { SearchField } from "../../ui/SearchField";
@@ -279,7 +280,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   // The groups of the chosen dimension, for the value pill and the sections: everything that narrows the list but the
   // group itself. Their counts follow the state tab, so a group's number is the number of rows it lists.
   const groupScope: ListFilters = useMemo(() => ({ ...facetFilters, ...chip }), [facetFilters, chip]);
-  const scopeNeeds = scopeCounts?.state?.needs_you;
+  const scopeNeeds = scopeCounts ? boundedCounts(scopeCounts, false).needs : undefined;
   // the facets' own read when the groups are drawn from them: its failure is theirs (audit item 4: the root list's read
   // failing left the sections on "Loading…" for good)
   const facetsFailure = facetScoped ? facetError : rootPage.error ?? "";
@@ -370,7 +371,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   const clock = useNow(60_000, Boolean(activeAt && win));
   const start = activeAt ? windowStart(win, clock) : null;
   // the Needs you chip's number for this scope: the server's, by the same rule as the chip
-  const needsYouTotal = chip.state ? (chip.state === "needs_you" ? visiblePageTotal : 0) : chip.pane_source ? page.counts?.state?.needs_you : scopeCounts?.state?.needs_you;
+  const needsYouTotal = chip.state ? (chip.state === "needs_you" ? visiblePageTotal : 0) : chip.pane_source ? (page.counts ? boundedCounts(page.counts, false).needs : undefined) : scopeNeeds;
   const rowNeedsYou = needsYou ?? (() => false);
   const split = activityActiveAt && start !== null
     ? splitByActivity(activityRows, activityActiveAt, start, { total: visiblePageTotal, hasMore: page.hasMore, needsYou: rowNeedsYou, needsYouTotal })
@@ -448,13 +449,14 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
     return () => parent.removeEventListener("scroll", scroll);
   }, [list, getScrollElement, sections, hasMore, page.loadingMore, page.error, margin, totalSize]);
 
-  const stateTotals = shownCounts?.state ?? {};
-  // the quick filters' numbers, as the complete list counts them: Working without the ones waiting in the background
-  const quickCounts = useMemo((): FilterCounts | undefined => {
-    if (!shownCounts) return undefined;
-    const by = shownCounts.state ?? {}, waiting = shownCounts.background_waiting ?? 0, origin = shownCounts.pane_source ?? {};
-    return { needs: by.needs_you ?? 0, unread: by.unread ?? 0, working: Math.max(0, (by.working ?? 0) - waiting), bg_waiting: waiting, feishu: origin.feishu ?? 0, terminal: origin.terminal ?? 0 };
-  }, [shownCounts]);
+  const adjusted = useMemo(() => (shownCounts ? boundedCounts(shownCounts, false) : undefined), [shownCounts]);
+  const stateTotals: Record<string, number> = adjusted ? { ...shownCounts!.state, needs_you: adjusted.needs, working: adjusted.working + adjusted.waiting } : shownCounts?.state ?? {};
+  // the quick filters' numbers, as the complete list counts them: Working without the ones waiting in the background,
+  // and agents waiting only on supervisor-held cards counted Working instead of Needs you (lib/sessions.ts boundedCounts)
+  const quickCounts = useMemo((): FilterCounts | undefined => adjusted ? {
+    needs: adjusted.needs, unread: adjusted.unread, working: adjusted.working, bg_waiting: adjusted.waiting,
+    feishu: shownCounts!.pane_source?.feishu ?? 0, terminal: shownCounts!.pane_source?.terminal ?? 0,
+  } : undefined, [shownCounts, adjusted]);
   const onQuickCounts = quick?.onCounts;
   useEffect(() => { onQuickCounts?.(quickCounts); }, [onQuickCounts, quickCounts]);
   // the fixed group order: the menu lists a bounded number of them, and the picked one whatever its place

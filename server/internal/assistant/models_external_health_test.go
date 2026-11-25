@@ -24,7 +24,7 @@ func TestExternalHistoricalHealthCannotRepairOrRelocate(t *testing.T) {
 		Kind: errKindAuth, Fails: 3, CheckedAt: time.Now(),
 	}
 	s.health.mu.Unlock()
-	s.repairMachine(ctx, d, healthConfig{})
+	s.repairMachine(ctx, d, healthConfig{}, []string{launcher.Name})
 	if record, ok := s.launcherHealth(ctx, d.ID, launcher.Name); !ok || record.State != healthFailing || record.Repairs != 0 {
 		t.Fatalf("historical external record entered automatic repair: %+v", record)
 	}

@@ -1,0 +1,55 @@
+{
+  "key": "health-strength-eab6a89c-2e1c-5369-8b38-dea38b1a90cc",
+  "version": 1,
+  "view": {
+    "title": "力量训练 · 待确认",
+    "sections": [
+      {
+        "items": [
+          {
+            "type": "row",
+            "title": "Bench press · 20 kg × 12",
+            "subtitle": "热身"
+          },
+          {
+            "type": "row",
+            "title": "Bench press · 60 kg × 8"
+          },
+          {
+            "type": "row",
+            "title": "Bench press · 60 kg × 7"
+          },
+          {
+            "type": "row",
+            "title": "坐姿推胸 · 50 kg × 10"
+          },
+          {
+            "type": "button",
+            "title": "记下",
+            "action": {
+              "id": "save",
+              "reply": "记下"
+            }
+          },
+          {
+            "type": "button",
+            "title": "不记",
+            "action": {
+              "id": "discard",
+              "reply": "不记"
+            }
+          },
+          {
+            "type": "button",
+            "title": "调整",
+            "action": {
+              "id": "adjust",
+              "open": "https://hub.example.com/extension/-health-intake/pages?state=%7B%22draft%22%3A%22eab6a89c-2e1c-5369-8b38-dea38b1a90cc%22%2C%22page%22%3A%22strength.edit%22%2C%22rev%22%3A1%7D"
+            }
+          }
+        ]
+      }
+    ],
+    "fallback": "力量训练 · 待确认"
+  }
+}

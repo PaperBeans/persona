@@ -7,26 +7,15 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/nwverse/persona/server/internal/connectorwire"
 )
 
 // The ledger of what was written as the user (migrations/0420_sent_as_user.sql, docs/extensions/connectors.md "Sent as the user").
 
-// SentAsUser is one write that went out through a connector's gate.
-type SentAsUser struct {
-	ID        int64     `json:"id"`
-	At        time.Time `json:"at"`
-	Connector string    `json:"connector"`
-	Action    string    `json:"action"`
-	// Target is where it went, by connector; Origin the conversation that asked; LetThrough how the gate let it
-	// through (all JSON objects).
-	Target     json.RawMessage `json:"target"`
-	Text       string          `json:"text"`
-	Summary    string          `json:"summary"`
-	Origin     json.RawMessage `json:"origin"`
-	LetThrough json.RawMessage `json:"let_through"`
-	MessageRef string          `json:"message_ref,omitempty"`
-	RecalledAt *time.Time      `json:"recalled_at,omitempty"`
-}
+// SentAsUser is one write that went out through a connector's gate (connectorwire.SentAsUser, which the knowledge-ui
+// module reads too).
+type SentAsUser = connectorwire.SentAsUser
 
 // How many rows one read of the ledger gives: by default, and at most.
 const (

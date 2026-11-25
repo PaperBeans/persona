@@ -30,7 +30,10 @@
   "err_tier_not_found": "the model profile in use ({profile}) has no tier {tier}; its tiers: {tiers}",
   "err_tier_model": "Tier {tier}: {model} is not a model ID. Start with a letter or digit, then use only letters, digits and . _ - / : @ [ ].",
   "err_tier_description": "The description of tier {tier} must be at most {max} characters on one line.",
-  "tier_strong": "The main chat's model when this profile was made: design, review and hard problems.",
-  "tier_standard": "The New Agent model when this profile was made: everyday coding.",
-  "err_permission_mode": "Invalid permission mode {mode} in {where}. Modes: {modes}."
+  "tier_core": "The main chat's model when this profile was made: core design and implementation, review and hard problems.",
+  "tier_dev": "The New Agent model when this profile was made: development, debugging and research.",
+  "err_permission_mode": "Invalid permission mode {mode} in {where}. Modes: {modes}.",
+  "err_tier_candidates": "Tier {tier} lists more than {max} candidates.",
+  "err_tier_alias": "Tier {tier}: {alias} cannot be an alias; it must be a tier name of its own form and not the name or alias of another tier.",
+  "err_forbidden_field": "Model profiles cannot include credential or endpoint field {field}."
 }

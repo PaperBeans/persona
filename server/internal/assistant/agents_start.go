@@ -56,7 +56,8 @@ func (s *Service) AgentStartParams(ctx context.Context, p AgentStartParams) (map
 		}
 		clearStandardSpeed(params)
 	} else {
-		own, err := s.resolveStart(ctx, params, false)
+		tierCtx, _ := withTierStart(ctx, p.MachineID)
+		own, err := s.resolveStart(tierCtx, params, false)
 		if err != nil {
 			return nil, badRequest(err, s.appLang(ctx, p.Lang)) // a typed model that is no id among them
 		}

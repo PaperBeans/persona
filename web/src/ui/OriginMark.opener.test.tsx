@@ -24,7 +24,7 @@ import { SegmentView } from "../views/chat/SegmentView";
 import { SessionRow } from "../views/Sidebar";
 import { OriginMark } from "./ChannelMark";
 
-vi.mock("../lib/channels", async (original) => ({ ...(await original<typeof import("../lib/channels")>()), useChannels: () => [] }));
+vi.mock("../lib/channel-source", async (original) => ({ ...(await original<typeof import("../lib/channel-source")>()), useChannels: () => [] }));
 
 // A conversation an extension opened is marked with that extension's own icon and named after it (#10358): a
 // third-party extension that reuses lark.agent is neither drawn nor named as Lark. Without its icon drawn (loading, none,

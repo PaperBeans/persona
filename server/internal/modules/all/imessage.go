@@ -11,5 +11,5 @@ import (
 // (docs/architecture/core-and-modules.md "Provider seams"); its node side is internal/modules/all/node's.
 func init() {
 	modules = append(modules, imessage.Module{})
-	imessageport.Provide(imessage.Provider)
+	imessageport.Provide(imessage.Module{}.Info().ID, imessage.Provider)
 }

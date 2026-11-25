@@ -400,11 +400,13 @@ class MeetingConversationMockTests(Conversation, unittest.TestCase):
 
     def test_a_trimmed_recording_without_minutes_has_nothing_to_talk_about(self):
         """A trimmed recording's material is its minutes alone (the hub's meta.json keeps `chars`): an all-day recording
-        past recording_days keeps its recap and has no minutes."""
+        past recording_days keeps its recap and has no minutes. Upload it while it is still inside the retention window."""
+        self.call("PUT", "/api/v1/assistant", {"recording_days": 30})
+        self.addCleanup(self.call, "PUT", "/api/v1/assistant", {"recording_days": 7})
         day = str(uuid.uuid4())
-        status, _ = self.upload(day, kind="day", day="2026-11-10", tz="UTC", part=1, started_at="2026-11-10T08:00:00Z", device="watch",
-                                duration=0, coverage={"to": 10000, "gaps": []}, segments=LINES, complete=True)
-        self.assertEqual(status, 200)
+        status, uploaded = self.upload(day, kind="day", day="2026-11-10", tz="UTC", part=1, started_at="2026-11-10T08:00:00Z", device="watch",
+                                       duration=0, coverage={"to": 10000, "gaps": []}, segments=LINES, complete=True)
+        self.assertEqual((status, uploaded["status"]), (200, "stored"))
         self.assertEqual(self.call("POST", "/mock/recording_trim", {"id": day})[0], 200)
         self.assertNotIn("minutes", self.call("GET", f"/api/v1/kb/recordings/{day}")[1]["detail"])
         self.assertEqual(self.call("POST", f"/api/v1/recordings/{day}/followup", {"id": str(uuid.uuid4()), "text": "x"})[1]["code"], "no_material")

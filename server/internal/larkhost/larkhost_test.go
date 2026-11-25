@@ -5,23 +5,30 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/moduleswitch"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
 )
 
-// Without a module provided there is no layer; with one, New makes it for each host; providing twice panics.
+// Without a module provided there is no layer; with one, New makes it for each host unless the switch has it off;
+// providing twice panics.
 func TestProvide(t *testing.T) {
-	saved := provided
-	t.Cleanup(func() { provided = saved })
-	provided = nil
-	if InBuild() {
+	saved := port
+	t.Cleanup(func() { port = saved })
+	port = moduleswitch.NewPort[func(Host) Layer]("larkhosttest")
+	var on moduleswitch.Set
+	if InBuild(on) {
 		t.Fatal("in the build without a module")
 	}
-	if _, ok := New(nil); ok {
+	if _, ok := New(on, nil); ok {
 		t.Fatal("a layer without a module")
 	}
 	made := 0
-	Provide(func(Host) Layer { made++; return None{} })
-	if _, ok := New(nil); !ok || made != 1 || !InBuild() {
+	Provide("rec", func(Host) Layer { made++; return None{} })
+	if _, ok := New(on, nil); !ok || made != 1 || !InBuild(on) {
+		t.Fatalf("made %d", made)
+	}
+	if _, ok := New(moduleswitch.Off("rec"), nil); ok || made != 1 || InBuild(moduleswitch.Off("rec")) {
 		t.Fatalf("made %d", made)
 	}
 	defer func() {
@@ -29,7 +36,7 @@ func TestProvide(t *testing.T) {
 			t.Fatal("provided twice without a panic")
 		}
 	}()
-	Provide(func(Host) Layer { return nil })
+	Provide("rec", func(Host) Layer { return nil })
 }
 
 // None, the port without a channel, is a bot switched off: its status reads (no error) as neither on nor ready, it

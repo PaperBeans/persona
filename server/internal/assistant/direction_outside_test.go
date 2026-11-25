@@ -213,8 +213,8 @@ func TestOutsideDirectionWriteFailuresAreNotSuccess(t *testing.T) {
 	if got := e.s.settings(context.Background()).Leaders; !slices.Equal(got, before) {
 		t.Fatalf("failed create changed leaders: %q -> %q", before, got)
 	}
-	if len(st.outside) != 1 {
-		t.Fatalf("failed create left an outside binding: %+v", st.outside)
+	if outside, err := st.OutsideDirections(context.Background()); err != nil || len(outside) != 1 {
+		t.Fatalf("failed create left an outside binding: %+v (%v)", outside, err)
 	}
 }
 

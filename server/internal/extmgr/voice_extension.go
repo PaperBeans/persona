@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/nwverse/persona/server/internal/moduleswitch"
+
 	"github.com/nwverse/persona/server/internal/builtinext"
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extension/host"
@@ -68,8 +70,8 @@ func voiceManifest(h *Manager, voice builtinext.Voice, id, name string) *extensi
 
 // takesOverVoice says whether a hub.json entry runs `personad voice`: its first such entry becomes the built-in
 // extension. Any other program (a node script) stays a hub.json extension.
-func takesOverVoice(c ExtensionConfig) bool {
-	if _, ok := builtinext.VoiceExtension(); !ok { // the module is not in this build
+func takesOverVoice(s moduleswitch.Set, c ExtensionConfig) bool {
+	if _, ok := builtinext.VoiceExtension(s); !ok { // the module is not in this build
 		return false
 	}
 	return (c.Kind == "" || c.Kind == "voice") && extension.IsBuiltinCommand(c.Command) && len(c.Args) > 0 && c.Args[0] == "voice"
@@ -81,7 +83,7 @@ func takesOverVoice(c ExtensionConfig) bool {
 // installed under that id before (it keeps the id). It never yields its id to a package installed later: that one is
 // refused as any of the same id (Preview), so no other program is handed the key set here.
 func (h *Manager) addVoiceExtension(ctx context.Context, reg *extension.Registry, store extension.Store) {
-	voice, ok := builtinext.VoiceExtension()
+	voice, ok := builtinext.VoiceExtension(h.modules())
 	if !ok { // the module is not in this build
 		return
 	}
@@ -164,7 +166,7 @@ func (ps *extensions) voiceSpec(p *extension.Extension, s *host.Spec) {
 // voiceGatewaySpec returns the serialized provider (the extension's Provider) derived from an enabled quota gateway extension's settings
 // and secret when it has a valid gateway_url and an API key.
 func (ps *extensions) voiceGatewaySpec(ctx context.Context) json.RawMessage {
-	voice, ok := builtinext.VoiceExtension()
+	voice, ok := builtinext.VoiceExtension(ps.modules())
 	if ps == nil || ps.reg == nil || !ok {
 		return nil
 	}
@@ -190,7 +192,7 @@ func (ps *extensions) voiceGatewaySpec(ctx context.Context) json.RawMessage {
 // voiceGatewayState returns a placeholder provider derived from an enabled quota gateway extension's settings
 // without unsealing the secret (only checking whether gateway_key is set).
 func (ps *extensions) voiceGatewayState(ctx context.Context) json.RawMessage {
-	voice, ok := builtinext.VoiceExtension()
+	voice, ok := builtinext.VoiceExtension(ps.modules())
 	if ps == nil || ps.reg == nil || !ok {
 		return nil
 	}
@@ -225,7 +227,7 @@ func (ps *extensions) voiceState(ctx context.Context, p *extension.Extension) (s
 	if ps.reg.SecretsSet(ctx, p)[voiceSecretKey] {
 		key = "set"
 	}
-	voice, ok := builtinext.VoiceExtension()
+	voice, ok := builtinext.VoiceExtension(ps.modules())
 	if !ok {
 		return "", nil
 	}
@@ -260,7 +262,7 @@ func (ps *extensions) voiceView(ctx context.Context, p *extension.Extension, v *
 // key before it is saved, whoever saves it, in the same registry operation a key is set in, so the key is never sent
 // as a Bearer to a host it was not given for.
 func (ps *extensions) voiceKeyFollowsURL(p *extension.Extension, old, next json.RawMessage) []string {
-	if !ps.isVoice(p) || sameOrigin(voiceURL(old), voiceURL(next)) {
+	if !ps.isVoice(p) || sameOrigin(voiceURL(ps.modules(), old), voiceURL(ps.modules(), next)) {
 		return nil
 	}
 	return []string{voiceSecretKey}
@@ -274,15 +276,15 @@ func (e keyNeedsURLError) Unwrap() error { return e.error }
 // voiceKeyNeedsURL refuses a key for the built-in voice extension while its settings have no address (the registry's
 // SecretNeeds): a key is set for an address (voiceKeyFollowsURL).
 func (ps *extensions) voiceKeyNeedsURL(p *extension.Extension, name string, config json.RawMessage) error {
-	if name != voiceSecretKey || !ps.isVoice(p) || voiceURL(config) != "" {
+	if name != voiceSecretKey || !ps.isVoice(p) || voiceURL(ps.modules(), config) != "" {
 		return nil
 	}
 	return keyNeedsURLError{i18n.Err("hub-voice_extension.key_needs_url")}
 }
 
 // voiceURL is the settings' address ("" none).
-func voiceURL(config json.RawMessage) string {
-	voice, ok := builtinext.VoiceExtension()
+func voiceURL(s moduleswitch.Set, config json.RawMessage) string {
+	voice, ok := builtinext.VoiceExtension(s)
 	if !ok {
 		return ""
 	}

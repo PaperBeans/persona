@@ -37,6 +37,9 @@ VERIFICATION_POLICY_VERSION = 3
 REVIEW_POLICY_VERSION = 3
 REPAIR_LIMIT = 3
 INFRASTRUCTURE_ATTEMPT_LIMIT = 3
+# `gh pr list` returns the newest PRs first and pages through `--limit` itself,
+# so the bound must exceed the open PRs or the oldest are never polled (#14864).
+DISCOVERY_LIMIT = 2000
 
 
 def blocking_findings(findings):
@@ -316,9 +319,12 @@ class Watcher:
         try:
             for repo, config in self.repositories.items():
                 raw = gh_json(["pr", "list", "--repo", repo, "--state", "open", "--json",
-                               "number,headRefOid,isDraft,baseRefName,mergeable", "--limit", "200"])
+                               "number,headRefOid,isDraft,baseRefName,mergeable", "--limit", str(DISCOVERY_LIMIT)])
                 if not isinstance(raw, list):
                     raise WatchError("PR discovery did not return an array")
+                if len(raw) >= DISCOVERY_LIMIT:
+                    self.log("%s: discovery reached its bound of %d open PRs; older PRs are not polled"
+                             % (repo, DISCOVERY_LIMIT))
                 for item in raw:
                     if not isinstance(item, dict) or not isinstance(item.get("number"), int):
                         raise WatchError("invalid PR discovery entry")

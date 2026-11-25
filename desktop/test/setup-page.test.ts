@@ -6,13 +6,15 @@ import { SETUP_SCHEME, SETUP_URL, setupAsset, setupFile } from "../src/setup-pag
 
 const source = (name: string) => readFile(join(import.meta.dirname, "..", "..", "src", name), "utf8");
 
-test("the setup scheme serves its page's three files with fixed content types and nothing else", () => {
+test("the setup scheme serves its page's allowlisted files with fixed content types and nothing else", () => {
   assert.equal(SETUP_SCHEME, "persona-setup");
   assert.equal(SETUP_URL, "persona-setup://app/setup.html");
   const expected: ReadonlyArray<readonly [string, string]> = [
     ["setup.html", "text/html; charset=utf-8"],
     ["setup.css", "text/css; charset=utf-8"],
     ["setup.cjs", "text/javascript; charset=utf-8"],
+    ["app-icon.png", "image/png"],
+    ["app-icon-dark.png", "image/png"],
   ];
   for (const [name, contentType] of expected) {
     const url = `persona-setup://app/${name}`;

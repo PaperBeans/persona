@@ -62,6 +62,41 @@ func requestDeclares(r *http.Request, feature string) bool {
 	return false
 }
 
+// clientItemsCompat applies cardCompatItems and strips ToolViews for clients that do not advertise
+// proto.FeatureToolViews. The node's slice is shared and never modified.
+func clientItemsCompat(l i18n.Lang, ring, markdownCloseout, toolViews bool, items []proto.Item) []proto.Item {
+	return toolViewCompatItems(toolViews, cardCompatItems(l, ring, markdownCloseout, items))
+}
+
+func toolViewCompatItems(allow bool, items []proto.Item) []proto.Item {
+	if allow {
+		return items
+	}
+	var out []proto.Item
+	for i := range items {
+		hasItemViews := len(items[i].ToolViews) > 0
+		hasFoldViews := items[i].Fold != nil && len(items[i].Fold.ToolViews) > 0
+		if !hasItemViews && !hasFoldViews {
+			continue
+		}
+		if out == nil {
+			out = append([]proto.Item(nil), items...)
+		}
+		if hasItemViews {
+			out[i].ToolViews = nil
+		}
+		if hasFoldViews {
+			f := *out[i].Fold
+			f.ToolViews = nil
+			out[i].Fold = &f
+		}
+	}
+	if out == nil {
+		return items
+	}
+	return out
+}
+
 // cardCompatItems is items as a client gets them: a copy with each assistant text's paseo-ui blocks written as cards
 // (paseoUIConverted), unsupported rings rewritten (ringCardsDowngraded), and complete Markdown reports
 // projected for older closeout cards. The node's slice is shared and never modified.

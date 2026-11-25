@@ -44,6 +44,10 @@ type Detail struct {
 	// Profiles: a person's profiles by writer ("user", "ext:<id>"), as written (Summary shows them too); none when no
 	// one wrote one.
 	Profiles map[string]ProfileRecord `json:"profiles,omitempty"`
+	// Paused: a recording whose stored state is in flight (an upload not complete, minutes or a day recap pending, a
+	// hub transcription not final) while nothing can settle it; "module_off": the recording module is off. Derived
+	// when read, never stored (docs/assistant/knowledge.md "Recordings without the recording module"). Absent otherwise.
+	Paused string `json:"paused,omitempty"`
 }
 
 // ProfileRecord is one writer's profile of a person and when it was written.
@@ -200,4 +204,6 @@ type Entry struct {
 	// MeetingID is a recording's imported meeting (#8872): the id of the meetings item it overlaps, as the meetings list
 	// has it, so a Meetings list shows the two as one row. Absent on other kinds, before a match, and from a hub before it.
 	MeetingID string `json:"meeting_id,omitempty"`
+	// Paused: as Detail.Paused, on a recording's list entry.
+	Paused string `json:"paused,omitempty"`
 }

@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -44,7 +45,7 @@ func (f *File) FoldBackgroundPlaceholders(items []proto.Item) []proto.Item {
 // BackgroundReplyMissing checks the latest verified background input and its final text. A projected placeholder
 // can already be folded as thinking, which carries the same words. A normal answer overrides earlier work.
 func BackgroundReplyMissing(items []proto.Item) bool {
-	start, background := lastBackgroundInput(items)
+	items, start, background := quietBackgroundInput(items)
 	if !background {
 		return false
 	}
@@ -70,24 +71,71 @@ func BackgroundReplyMissing(items []proto.Item) bool {
 	return true // a known background run with no written answer
 }
 
-// RoutineConversationReply reports a cross-conversation background round with no successful explicit owner-visibility
-// action. The main conversation keeps its ordinary finished push and visible reply folded; all other sources and every
-// explicit promotion keep their existing behavior. Delivery and execution are not inspected or changed here.
+// RoutineConversationReply identifies a completed relay with a substantive answer and no explicit owner action.
+// A missing, interrupted or unrecognizable answer cannot authorize silencing another runtime's finished alert.
 func RoutineConversationReply(items []proto.Item) bool {
-	start, background := lastBackgroundInput(items)
-	if !background || start < 0 {
+	items, start, background := quietBackgroundInput(items)
+	if !background {
 		return false
 	}
 	source := prompts.ItemSource(items[start])
 	if source == nil || source.Kind != proto.SourceConversation {
 		return false
 	}
-	for _, item := range items[start:] {
-		if item.SupervisionUser || item.Fold != nil && item.Fold.SupervisionUser {
+	reply := items[start+1:]
+	for i := len(reply) - 1; i >= 0; i-- {
+		it := reply[i]
+		if it.IsError || it.Wake || it.Kind == proto.KindToolUse || it.Kind == proto.KindThinking || it.Kind == proto.KindFold {
 			return false
 		}
+		if it.Role == "assistant" && it.Kind == proto.KindText && strings.TrimSpace(it.Text) != "" {
+			return !it.Narration && !it.CodexHeartbeatQuiet && (it.FullSize > 0 || !ReplyPlaceholder(it.Text))
+		}
 	}
-	return !HasUserVisibleAction(items[start+1:])
+	return false
+}
+
+// A new relay can arrive between a completion and its delayed push. Skip its preliminary work until it has
+// an outcome. Only a background round without a failure or an explicit action for the owner may go quiet.
+func quietBackgroundInput(items []proto.Item) ([]proto.Item, int, bool) {
+	for {
+		start, background := lastBackgroundInput(items)
+		if !background {
+			return items, start, false
+		}
+		turn := items[start:]
+		for _, it := range turn {
+			promoted := it.SupervisionUser || it.Fold != nil && it.Fold.SupervisionUser
+			failedNotice := it.Kind == proto.KindNotice && (it.IsError || it.Text == InterruptedNotice || strings.HasPrefix(it.Text, APIErrorPrefix))
+			failedAnswer := it.Role == "assistant" && it.Kind == proto.KindText && !it.Narration && (it.IsError || assistantwire.CutOff(it.Text))
+			if promoted || failedNotice || failedAnswer || it.ModelRefusal != nil {
+				return items, start, false
+			}
+		}
+		if HasUserVisibleAction(turn) {
+			return items, start, false
+		}
+		source := prompts.ItemSource(items[start])
+		if start == 0 || source == nil || source.Kind != proto.SourceConversation || relayOutcomeIn(turn) {
+			return items, start, background
+		}
+		items = items[:start]
+	}
+}
+
+// The runtime can acknowledge completion before it supplies the text. A duration for the previous input
+// can arrive late and cannot establish that the new relay finished.
+func relayOutcomeIn(turn []proto.Item) bool {
+	for _, it := range turn[1:] {
+		if it.TurnDuration != nil && it.TurnDuration.UserItemID != "" && it.TurnDuration.UserItemID == turn[0].ID {
+			return true
+		}
+		if it.Role == "assistant" && !it.Narration && !it.CodexHeartbeatQuiet && (it.Kind == proto.KindText && strings.TrimSpace(it.Text) != "" ||
+			it.Kind == proto.KindThinking && ReplyPlaceholder(it.Text)) {
+			return true
+		}
+	}
+	return false
 }
 
 // lastBackgroundInput stops at the last input or wake. Tool results are part of the input's turn.
@@ -125,7 +173,7 @@ func lastBackgroundInput(items []proto.Item) (int, bool) {
 			if in == nil {
 				in = prompts.ParseInjected(item.Text)
 			}
-			return i, strings.TrimSpace(source.Title) != "" && (in == nil || in.State != "limit_continue" && in.State != "wake")
+			return i, strings.TrimSpace(source.Title) != "" && !prompts.ContinuesOwnWork(in)
 		}
 		return i, false
 	}

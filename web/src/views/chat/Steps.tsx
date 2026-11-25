@@ -88,7 +88,7 @@ function Disclosure({
               },
             })}
             className={cx(
-              "inline-flex h-5.5 min-w-0 items-center truncate rounded-chip bg-hover-2 px-1.5 text-[11.5px] text-[#43464c] shadow-hairline dark:bg-field dark:text-ink-2",
+              "inline-flex h-5.5 min-w-0 items-center truncate rounded-chip bg-hover-2 px-1.5 text-[11.5px] text-ink-2 shadow-hairline dark:bg-field",
               mono && "font-mono",
               onChip && "cursor-pointer underline-offset-2 hover:text-accent-ink hover:underline dark:hover:text-accent-ink",
             )}

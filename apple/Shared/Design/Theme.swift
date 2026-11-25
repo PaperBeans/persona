@@ -643,13 +643,24 @@ nonisolated enum Theme {
         static let scenePinCharWidth: CGFloat = 9
         static let scenePinBaseWidth: CGFloat = 40
         static let scenePinHeight: CGFloat = 32
-        // A pin pill's estimated width, for keeping pins apart: its icon, the gap before its state, the widest its
+        // A pin pill's estimated width, for keeping pins apart: the gap before its state, the widest its
         // text may grow, and the width of one wide (CJK) character.
-        static let scenePinIconWidth: CGFloat = 18
         static let scenePinStateGap: CGFloat = 6
         static let scenePinTextMaxWidth: CGFloat = 180
         static let scenePinWideCharWidth: CGFloat = 13.5
         static let sceneLabelHeight: CGFloat = 22
+        // An extension's interactive map (UI version 12): page share, compact preview, inline chat tool-view height,
+        // companion list cap, route strokes and pin sizes.
+        static let mapPageShare: CGFloat = 0.56
+        static let mapPageMinHeight: CGFloat = 260
+        static let mapPageMaxHeight: CGFloat = 520
+        static let mapPreviewHeight: CGFloat = 200
+        static let mapToolHeight: CGFloat = 220
+        static let mapListMaxHeight: CGFloat = 220
+        static let mapRouteStroke: CGFloat = 5
+        static let mapRouteDimStroke: CGFloat = 3.5
+        static let mapOriginDot: CGFloat = 12
+        static let mapPinSize: CGFloat = 28
     }
 
     /// UI version 11's 3D `scene` component (#12544): calm architectural material defaults when a shape omits `color`,
@@ -708,6 +719,19 @@ nonisolated enum Theme {
         static let lampAttenuationEnd: CGFloat = 2.4
         static let maxOmniLights: Int = 8
         static let glassOpacity: CGFloat = 0.42
+        static var ground: Color { StyleSpec.current.usesGlass ? Theme.groupedCard : Theme.card }
+    }
+
+    /// UI version 12's declarative `map` component: region fitting padding, minimum span so single-point views keep
+    /// street context, unselected route dimming, and adaptive card/sheet ground.
+    enum Map {
+        static let fitPadding: Double = 1.35
+        static let minSpanDegrees: Double = 0.008
+        static let minSpanMeters: Double = 700
+        static let unselectedOpacity: Double = 0.42
+        static let gridStepFraction: CGFloat = 0.25
+        static let gridLineOpacity: Double = 0.08
+        static let vectorRouteOpacity: Double = 0.92
         static var ground: Color { StyleSpec.current.usesGlass ? Theme.groupedCard : Theme.card }
     }
 

@@ -24,5 +24,11 @@
   "more_waits_one": "{count} more",
   "more_waits_other": "{count} more",
   "background_subtasks": "Background subtasks running, still consuming model usage…",
-  "retrying": "Retrying {attempt}/{max} · {reason}…"
+  "retrying": "Retrying {attempt}/{max} · {reason}…",
+  "every_minutes": "Every {count}m",
+  "every_hours": "Every {count}h",
+  "hourly": "Hourly",
+  "daily_at": "Daily {time}",
+  "interrupt": "Interrupt",
+  "interrupt_hint": "Interrupt (Esc)"
 }

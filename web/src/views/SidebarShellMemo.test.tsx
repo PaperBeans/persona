@@ -148,7 +148,8 @@ async function mount() {
   await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
   await flush();
   expect(host.textContent).toContain("Build app");
-  expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("20");
+  // the strip reads what is left (#14690): 20% used is 80% remaining
+  expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("80");
   expect(buildTodoTree).toHaveBeenCalled();
   expect(buildTodoAgentGroups).toHaveBeenCalled();
   for (const [name, count] of shellReads()) {
@@ -287,7 +288,7 @@ describe("the sidebar shell across store pushes", () => {
     act(() => document.dispatchEvent(new Event("visibilitychange")));
     await flush();
     expect(renders.get("usage")).toBeGreaterThan(0);
-    expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("65");
+    expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("35"); // 65% used, 35% left
     expect(buildTodoTree).not.toHaveBeenCalled();
   });
 });

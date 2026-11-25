@@ -171,7 +171,8 @@ func (c *Connector) pollChat(ctx context.Context) (bool, error) {
 	}
 	c.inboxMu.Unlock()
 
-	if !seeded {
+	visibilityEnabled := c.replyVisibilityEnabled()
+	if !seeded && !visibilityEnabled {
 		// Seed the topic set from the user's own history. Search is bounded just
 		// like the live round; later rounds extend it whenever a user message or
 		// mention is observed.
@@ -192,7 +193,9 @@ func (c *Connector) pollChat(ctx context.Context) (bool, error) {
 	pageToken := state.PageToken
 	nextPageToken := ""
 	var newest time.Time
-	for pageNo := 0; pageNo < pageLimit; pageNo++ {
+	for pageNo := 0; !visibilityEnabled && pageNo < pageLimit; pageNo++ {
+		// A global message search returns bodies before metadata filtering could run. With visibility controls enabled,
+		// collection uses only named-chat history reads whose target was vetted before the body request.
 		page, err := c.runner.SearchMessages(ctx, "", adapter.SearchOptions{
 			Start: start, PageToken: pageToken, Limit: 50,
 		})
@@ -204,6 +207,10 @@ func (c *Connector) pollChat(ctx context.Context) (bool, error) {
 				newest = t
 			}
 			if message.MessageID != "" {
+				if c.replyMessageExcluded(message) {
+					c.markSeen(message.MessageID)
+					continue
+				}
 				if !conversationMessage(message) || isBoundAppMessage(message, auth.AppID) {
 					// The app bound to lark-cli is Persona's own bot in the
 					// recommended setup. Consume its messages and non-conversation
@@ -229,6 +236,10 @@ func (c *Connector) pollChat(ctx context.Context) (bool, error) {
 	// doesn't lose what search found; the round keeps it and reports the error at the end.
 	direct, directErr := c.sweepDirectChats(ctx)
 	for _, message := range direct {
+		if c.replyMessageExcluded(message) {
+			c.markSeen(message.MessageID)
+			continue
+		}
 		if !conversationMessage(message) || isBoundAppMessage(message, auth.AppID) {
 			c.markSeen(message.MessageID)
 			continue
@@ -265,10 +276,15 @@ func (c *Connector) pollChat(ctx context.Context) (bool, error) {
 		}
 		state.Cursor = candidate.Format(time.RFC3339)
 	}
-	state.PageToken = nextPageToken
+	if !visibilityEnabled {
+		// A visibility round performs no global search: leave its page and historical-seed progress untouched so
+		// restoring the legacy configuration resumes the same search instead of claiming a seed that never ran.
+		state.PageToken = nextPageToken
+		state.TopicsSeeded = true
+	}
 	c.inboxState.Cursor = state.Cursor
 	c.inboxState.PageToken = state.PageToken
-	c.inboxState.TopicsSeeded = true
+	c.inboxState.TopicsSeeded = state.TopicsSeeded
 	c.inboxCollecting = true
 	if err := c.saveInboxStateLocked(ctx); err != nil {
 		c.inboxMu.Unlock()
@@ -284,6 +300,12 @@ func (c *Connector) pollChat(ctx context.Context) (bool, error) {
 // indexing delay, so these chats are read here as well; the seen ledger drops what search already delivered. Search
 // results carry the chat's type and partner; history does not, so they are filled in from the chat list.
 func (c *Connector) sweepDirectChats(ctx context.Context) ([]adapter.Message, error) {
+	c.inboxMu.Lock()
+	allDirectExcluded := c.inboxExcludeDirectChats || c.managedInboxExcludeDirectChats || c.managedInboxVisibilityInvalid
+	c.inboxMu.Unlock()
+	if allDirectExcluded {
+		return nil, nil
+	}
 	list, err := c.runner.ListDirectChats(ctx, inboxDirectCandidates)
 	if err != nil {
 		return nil, err
@@ -293,7 +315,8 @@ func (c *Connector) sweepDirectChats(ctx context.Context) ([]adapter.Message, er
 	var out []adapter.Message
 	var chats []adapter.Chat
 	for _, chat := range list.Chats {
-		if chat.ChatID == "" || (chat.ChatMode != "p2p" && chat.ChatType != "p2p") {
+		if chat.ChatID == "" || (chat.ChatMode != "p2p" && chat.ChatType != "p2p") ||
+			c.replyChatExcluded(chat.ChatID, chat.ChatType, chat.ChatMode) {
 			continue
 		}
 		chats = append(chats, chat)
@@ -389,7 +412,9 @@ func (c *Connector) Collect(context.Context) ([]connectorwire.InboxThing, error)
 	out := make([]connectorwire.InboxThing, 0, len(c.inboxThings))
 	if c.inboxCollecting {
 		for _, thing := range c.inboxThings {
-			out = append(out, thing)
+			if !c.replyThingExcludedLocked(thing) {
+				out = append(out, thing)
+			}
 		}
 	}
 	c.inboxMu.Unlock()
@@ -693,7 +718,7 @@ func (c *Connector) groupMessages(messages []adapter.Message, me string, knownTo
 }
 
 func (c *Connector) thingForGroup(ctx context.Context, group *inboxGroup, me string) connectorwire.InboxThing {
-	if group == nil || len(group.messages) == 0 {
+	if group == nil || len(group.messages) == 0 || c.replyChatExcluded(group.chatID, group.latest.ChatType, group.latest.ChatMode) {
 		return connectorwire.InboxThing{}
 	}
 	latest := group.latest

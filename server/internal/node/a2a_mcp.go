@@ -98,5 +98,6 @@ func (n *Node) scopedA2AMCP(ctx context.Context, req sockRequest) any {
 	if err := n.peer.Call(ctx, "mcp.call", meta, &res); err != nil {
 		return proto.TextResult("A2A is temporarily unavailable", true)
 	}
+	n.toolViews.stripResult(req.SessionID, req.Name, &res)
 	return res
 }

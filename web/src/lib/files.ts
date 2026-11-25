@@ -353,7 +353,7 @@ function unquoteGitPath(path: string): string | null {
 
 /** A multi-file diff (git show) cut into one diff per file, keyed by the new path. */
 export function splitDiff(diff: string): Record<string, string> {
-  const res: Record<string, string> = {};
+  const res: Record<string, string> = Object.create(null);
   let path: string | null = null;
   let buf: string[] = [];
   let hdr = false;

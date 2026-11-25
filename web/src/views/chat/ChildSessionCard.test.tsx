@@ -77,7 +77,7 @@ describe("ChildSessionCard: the two lines", () => {
     expect(h).toContain(">Review the session handling<");
     expect(h).toContain('data-task-status="running"');
     expect(h).toContain(">Codex<");
-    expect(h).toMatch(/data-task-model[^>]*>GPT-5\.5 · 高</);
+    expect(h).toMatch(/data-task-model[^>]*>GPT-5\.5 · High</);
     expect(h).toContain("已运行 ");
     expect(h).toContain('aria-expanded="false"');
     // no tokens (a row has no usage total), no way to open it as a conversation of its own
@@ -116,13 +116,13 @@ describe("ChildSessionCard: the two lines", () => {
   });
 
   it("childMeta and the chip: each piece only when known", () => {
-    expect(childModelChip({ model: "claude-sonnet-4-5", effort: "medium" })).toBe("Sonnet 4.5 · 中");
+    expect(childModelChip({ model: "claude-sonnet-4-5", effort: "medium" })).toBe("Sonnet 4.5 · Medium");
     expect(childModelChip({ model: "gpt-5.4-mini" })).toBe("GPT-5.4 Mini");
-    expect(childModelChip({ effort: "low" })).toBe("低");
+    expect(childModelChip({ effort: "low" })).toBe("Low");
     expect(childModelChip({ model: "", effort: "turbo" })).toBe("");
     expect(childMeta(kid({ model: undefined, effort: undefined, started_at: undefined }), false)).toEqual({});
-    expect(childMeta(kid({ state: "idle", status: "idle" }), true)).toEqual({ harness: "Codex", model: "GPT-5.5 · 高", took: "1m 5s" });
-    expect(childMeta(kid(), true)).toEqual({ harness: "Codex", model: "GPT-5.5 · 高", since: T0 });
+    expect(childMeta(kid({ state: "idle", status: "idle" }), true)).toEqual({ harness: "Codex", model: "GPT-5.5 · High", took: "1m 5s" });
+    expect(childMeta(kid(), true)).toEqual({ harness: "Codex", model: "GPT-5.5 · High", since: T0 });
   });
 
   it("names a tool the way the tool rows do", () => {

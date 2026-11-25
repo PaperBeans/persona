@@ -185,6 +185,8 @@ export interface ExtensionChoice {
   title?: string;
 }
 
+export type ExtensionConfigSection = "connection" | "channel" | "inbox" | "advanced";
+
 /** One field of the form: the hub's reading of the manifest's JSON Schema subset. */
 export interface ExtensionField {
   name: string;
@@ -192,6 +194,8 @@ export interface ExtensionField {
   type: string;
   title?: string;
   description?: string;
+  /** Optional UI grouping hint from the manifest configuration schema. */
+  section?: ExtensionConfigSection;
   default?: Json;
   required?: boolean;
   enum?: ExtensionChoice[];

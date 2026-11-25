@@ -9,12 +9,37 @@ import { isOverdue, todoDueBy, todoDueDay, type SessionLookup, type Todo } from 
 
 export type TodoListFilter = "all" | "no_due" | "today" | "week" | "month";
 export type TodoListSort = "recent" | "due" | "priority";
+export type TodoKindFilter = "all" | "todos" | "tasks";
 
 export const TODO_LIST_FILTERS: readonly TodoListFilter[] = ["all", "no_due", "today", "week", "month"];
 export const TODO_LIST_SORTS: readonly TodoListSort[] = ["recent", "due", "priority"];
+export const TODO_KIND_FILTERS: readonly TodoKindFilter[] = ["all", "todos", "tasks"];
 
 export const isTodoListFilter = (v: unknown): v is TodoListFilter => TODO_LIST_FILTERS.includes(v as TodoListFilter);
 export const isTodoListSort = (v: unknown): v is TodoListSort => TODO_LIST_SORTS.includes(v as TodoListSort);
+
+/** Whether a to-do is an Agent / supervised task rather than a personal to-do (#14642).
+ *  Explicit `audience` (#14619) wins when set; otherwise falls back to legacy task signals
+ *  (linked agents, supervision, assistant conversation origin, plan/brief, or failed agent start). */
+export function isAgentTask(todo: Pick<Todo, "audience" | "agents" | "supervision" | "origin" | "plan_id" | "brief" | "start_error">): boolean {
+  if (todo.audience === "autonomous") return true;
+  if (todo.audience === "human") return false;
+  return Boolean(
+    (todo.agents && todo.agents.length > 0) ||
+    todo.supervision ||
+    todo.origin ||
+    todo.plan_id ||
+    todo.brief ||
+    todo.start_error,
+  );
+}
+
+/** Whether `todo` matches the lightweight All / To-dos / Tasks filter (#14642). */
+export function matchesKindFilter(todo: Todo, kind: TodoKindFilter): boolean {
+  if (kind === "all") return true;
+  const task = isAgentTask(todo);
+  return kind === "tasks" ? task : !task;
+}
 
 /** When a to-do is due, for the filter: its due moment, or the local midnight starting its due day. */
 export function todoDueStart(todo: Todo): number | undefined {

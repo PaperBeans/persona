@@ -97,7 +97,7 @@ func (r fieldRef) key(target fieldRef) string {
 
 // heldBy is who holds field of an entity's tagging: "" when nobody (the pipeline may write it).
 func heldBy(t *Tagging, field string) string {
-	locked := t.fieldLocked(field)
+	locked := taggingFieldLocked(t, field)
 	if field == "pinned" {
 		locked = t.Pinned != ""
 	}

@@ -123,12 +123,18 @@ func (s *Service) inboxRoutes() {
 		switch {
 		case errors.Is(err, errNoInboxItem):
 			apierr.Write(w, http.StatusNotFound, err)
+		case errors.Is(err, errReplyPolicyDenied):
+			apierr.Write(w, http.StatusForbidden, err)
+		case errors.Is(err, errSuggestionStale), errors.Is(err, errInboxItemDone):
+			apierr.Write(w, http.StatusConflict, err)
 		case modelUnconfigured(err):
 			// Nothing the hub can call is set up for drafting: a coded answer the apps can explain, not a bare 502
 			// (an internal error's text never reaches the screen).
 			apierr.WriteCode(w, http.StatusServiceUnavailable, assistantwire.CodeModelUnavailable, i18n.Err("assistant-inbox.draft_no_model"))
 		case errors.Is(err, errDraftWithheld): // the drafts kept repeating what an extension marked never to quote
 			apierr.WriteCode(w, http.StatusUnprocessableEntity, "draft_withheld", err)
+		case errors.Is(err, errReplyPolicyBlocked):
+			apierr.WriteCode(w, http.StatusUnprocessableEntity, assistantwire.CodeInboxReplyPolicyBlocked, err)
 		case err != nil:
 			apierr.Write(w, http.StatusBadGateway, err)
 		default:
@@ -159,7 +165,7 @@ func (s *Service) inboxRoutes() {
 			}
 		}
 		send := func() (InboxItem, error) {
-			return s.replyInboxChecked(r.Context(), r.PathValue("id"), strings.TrimSpace(in.Text), in.ClientID, in.Card != "", in.ExpectedUID, in.ExpectedVersion, in.Changes...)
+			return s.replyInboxCheckedRole(r.Context(), r.PathValue("id"), strings.TrimSpace(in.Text), in.ClientID, in.Card != "", fullRole(r), in.ExpectedUID, in.ExpectedVersion, in.Changes...)
 		}
 		var it InboxItem
 		var err error
@@ -177,6 +183,8 @@ func (s *Service) inboxRoutes() {
 			apierr.WriteBody(w, http.StatusConflict, map[string]any{"code": "inbox_item_done", "error": i18n.T(i18n.OfWriter(w), "assistant-inbox.item_done"), "retryable": false, "delivered": "none"})
 		case errors.Is(err, errNoInboxItem):
 			apierr.Write(w, http.StatusNotFound, err)
+		case errors.Is(err, errAnswerOnly):
+			apierr.Write(w, http.StatusForbidden, err)
 		case err != nil && s.writeInboxSendError(w, r, "reply", r.PathValue("id"), err):
 			// in doubt (delivered unknown), or why nothing was sent (#9125)
 		case err != nil:
@@ -244,7 +252,11 @@ func mailTarget(it InboxItem) *inboxMailTarget {
 // replyInboxChecked is the direct /reply route with the mail the app saw (expected_uid / expected_version), if it gave
 // one. Except for an old-App card send, a reply with a processing conversation waits for the other side.
 func (s *Service) replyInboxChecked(ctx context.Context, id, text, clientID string, fromCard bool, uid *uint32, version *string, changes ...DocChange) (InboxItem, error) {
-	return s.replyInboxCheckedDoMode(ctx, id, text, clientID, fromCard, true, true, uid, version, changes...)
+	return s.replyInboxCheckedRole(ctx, id, text, clientID, fromCard, true, uid, version, changes...)
+}
+
+func (s *Service) replyInboxCheckedRole(ctx context.Context, id, text, clientID string, fromCard, full bool, uid *uint32, version *string, changes ...DocChange) (InboxItem, error) {
+	return s.replyInboxCheckedDoModeRole(ctx, id, text, clientID, fromCard, true, true, full, uid, version, changes...)
 }
 
 // replyInboxCheckedDo also serves a confirmed suggestion (file false): the target was bound when the suggestion was
@@ -254,8 +266,17 @@ func (s *Service) replyInboxCheckedDo(ctx context.Context, id, text, clientID st
 }
 
 func (s *Service) replyInboxCheckedDoMode(ctx context.Context, id, text, clientID string, fromCard, file, followDirect bool, uid *uint32, version *string, changes ...DocChange) (InboxItem, error) {
+	return s.replyInboxCheckedDoModeRole(ctx, id, text, clientID, fromCard, file, followDirect, true, uid, version, changes...)
+}
+
+func (s *Service) replyInboxCheckedDoModeRole(ctx context.Context, id, text, clientID string, fromCard, file, followDirect, full bool, uid *uint32, version *string, changes ...DocChange) (InboxItem, error) {
+	// Reroute an AI mirror before taking the collection mutex: its durable-attempt send reacquires the same mutex for the
+	// frozen MailTarget. Genuine direct checked sends remain serialized with collection below.
+	if out, rerouted, err := s.routeLegacyReplyConfirmation(ctx, id, text, clientID, fromCard, followDirect, full, uid, version, 0, changes); rerouted {
+		return out, err
+	}
 	if uid == nil && version == nil {
-		return s.replyInboxDoMode(ctx, id, text, clientID, fromCard, file, followDirect, changes...)
+		return s.replyInboxDoModeDirect(ctx, id, text, clientID, fromCard, file, followDirect, 0, changes...)
 	}
 	// Collection and checked sends must not change the target between validation and sending.
 	b := &s.inbox
@@ -274,7 +295,7 @@ func (s *Service) replyInboxCheckedDoMode(ctx context.Context, id, text, clientI
 	if target == nil || uid != nil && *uid != target.UID || version != nil && *version != target.Version {
 		return InboxItem{}, errMailReplyTargetChanged
 	}
-	return s.replyInboxDoMode(ctx, id, text, clientID, fromCard, file, followDirect, changes...)
+	return s.replyInboxDoModeDirect(ctx, id, text, clientID, fromCard, file, followDirect, 0, changes...)
 }
 
 // inboxList is every open item and the newest of the recently done ones (inbox_list_done.go), newest first;

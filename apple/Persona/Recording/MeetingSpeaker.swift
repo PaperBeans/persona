@@ -275,9 +275,14 @@ extension MeetingSpeaker {
 }
 
 extension MeetingSpeaker.Deps {
+    private final class LeaseBox {
+        var lease: AudioSessionBroker.Lease?
+    }
+
     /// The app's: the hub's voice extension, the recording, the phone's audio.
     static var live: Self {
-        Self(realtime: { await MeetingVoiceRoutes.shared.route() },
+        let speakerLease = LeaseBox()
+        return Self(realtime: { await MeetingVoiceRoutes.shared.route() },
              synthesize: { route, text, lang in
                  guard let api = route.api else { throw URLError(.notConnectedToInternet) }
                  if let speech = route.speech {
@@ -294,10 +299,13 @@ extension MeetingSpeaker.Deps {
              routeToSpeaker: {
                  // A meeting recording a system call paused: the route is the call's (docs/apple/calls.md).
                  guard !LiveCallGate.callIsLive else { return false }
-                 let session = AVAudioSession.sharedInstance()
-                 guard VoiceRoute.output(PhoneVoiceAudio.snapshot(session)).speaker else { return false }
+                 let broker = AudioSessionBroker.shared
+                 guard VoiceRoute.output(PhoneVoiceAudio.snapshot(broker)).speaker else { return false }
                  do {
-                     try session.overrideOutputAudioPort(.speaker)
+                     try broker.overrideOutputAudioPort(.speaker)
+                     if speakerLease.lease == nil {
+                         speakerLease.lease = broker.acquire(id: "recording.speaker", module: "recording", kind: .playback)
+                     }
                      return true
                  } catch {
                      Logger(subsystem: "persona", category: "meeting-speaker")
@@ -306,8 +314,10 @@ extension MeetingSpeaker.Deps {
                  }
              },
              restoreOutput: {
+                 speakerLease.lease?.release()
+                 speakerLease.lease = nil
                  guard !LiveCallGate.callIsLive else { return }
-                 try? AVAudioSession.sharedInstance().overrideOutputAudioPort(.none)
+                 try? AudioSessionBroker.shared.overrideOutputAudioPort(.none)
              })
     }
 }

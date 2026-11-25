@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavKey
 import persona.core.contracts.api.HubExtension
+import persona.core.moduleapi.AudioFocus
 import persona.core.navigation.Navigator
 import kotlinx.coroutines.CancellationException
 
@@ -17,17 +18,18 @@ import kotlinx.coroutines.CancellationException
  * Registers the voice page ([VoiceRoute]) on the paired hub's [extensions]. [identity] is the pairing's (its scope path):
  * the picked voices are kept with it. [onModelConfiguration] opens the model configuration of one purpose, given its
  * id (`extension.<extension id>`, [voicePurposeId]); without it the page offers no way there and only says why the model
- * cannot be used.
+ * cannot be used. [audioFocus] is the core's audio broker as the module sees it: the conversation asks it for the audio.
  */
 fun EntryProviderScope<NavKey>.voiceEntries(
     navigator: Navigator,
     extensions: VoiceExtensions,
     identity: String,
+    audioFocus: AudioFocus,
     onModelConfiguration: ((String) -> Unit)? = null,
 ) {
     entry<VoiceRoute> { route ->
         // A new pairing is a new page: nothing of the old one's conversation carries over.
-        key(extensions, identity) { VoiceScreen(route, navigator, extensions, identity, onModelConfiguration) }
+        key(extensions, identity) { VoiceScreen(route, navigator, extensions, identity, audioFocus, onModelConfiguration) }
     }
 }
 

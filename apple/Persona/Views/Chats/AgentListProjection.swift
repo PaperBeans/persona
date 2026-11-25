@@ -220,6 +220,7 @@ nonisolated struct AgentListProjection: Sendable {
         var project = ""
         var model = ""
         var pinnedOnly = false
+        var showEmptyWorkspaces = false
         var hub = ""
         var multiHub = false
         var kept = Set<SessionKey>()
@@ -444,13 +445,18 @@ nonisolated struct AgentListProjection: Sendable {
             for group in groups { result.rows[group.id] = partition(group.sessions, settings: settings) }
             result.menuSections = result.active.map(\.id)
         } else if settings.grouping == "repo" {
-            let catalog = input.workspaces.filter { workspace in
-                input.machines.contains { $0.ref == workspace.machineRef } &&
-                    (settings.machine.isEmpty || workspace.machineRef.path == settings.machine) &&
-                    (!settings.multiHub || HubFilter.matches(settings.hub, workspace.group))
+            let catalog = input.workspaces.compactMap { workspace -> HostWorkspace? in
+                guard let machine = result.machinesByRef[workspace.machineRef],
+                      settings.machine.isEmpty || workspace.machineRef.path == settings.machine,
+                      !settings.multiHub || HubFilter.matches(settings.hub, workspace.group) else { return nil }
+                var workspace = workspace
+                if !machine.online { workspace.online = false }
+                return workspace
             }
             result.tree = RepoTree.build(result.unpinned.filter { $0.archived != true && ($0.state.isLive || inPinnedWorkspace($0)) }, machines: input.machines.map(\.ref),
-                                         workspaces: catalog, includeEmpty: settings.filter == .all, search: settings.query)
+                                         workspaces: catalog, includeEmpty: settings.filter == .all,
+                                         showEmptyWorkspaces: settings.showEmptyWorkspaces, search: settings.query,
+                                         navigationSessions: result.pinnedAgents.filter { $0.archived != true })
             result.byHost = settings.machine.isEmpty && result.tree.count > 1
             for host in result.tree {
                 for repo in host.repos {

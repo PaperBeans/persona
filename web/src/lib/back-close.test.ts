@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isOverlayEntry, onOverlayEntry, openOverlay, overlayDepth, overlayState, settleOverlayEntry, takeOverlayEntry } from "./back-close";
+import { isOverlayEntry, onOverlayEntry, openOverlay, overlayDepth, overlayState, settleOverlayEntry, takeOverlayEntry, withoutOverlayState } from "./back-close";
 import { navigate } from "./router";
 
 describe("overlay history entries", () => {
@@ -13,6 +13,11 @@ describe("overlay history entries", () => {
     expect(isOverlayEntry(null, "o1")).toBe(false);
     expect(isOverlayEntry(overlayState(null, "o2"), "o1")).toBe(false);
     expect(overlayState("x", "o3")).toEqual({ personaOverlay: "o3" });
+  });
+  it("strips overlay markers without discarding the page's own state", () => {
+    expect(withoutOverlayState(null)).toBeNull();
+    expect(withoutOverlayState({ personaOverlay: "o1", personaOverlayAt: "/a", personaOverlayDepth: 1 })).toBeNull();
+    expect(withoutOverlayState({ extPage: 2, personaOverlay: "o1", personaOverlayAt: "/a", personaOverlayDepth: 1 })).toEqual({ extPage: 2 });
   });
 });
 

@@ -63,6 +63,18 @@ const GraphCanvas = lazyPage<
   }
 >(() => import("./ViewBody10").then((m) => m.GraphCanvas));
 
+// UI version 12's interactive vector map canvas (ViewBody12.tsx) is its own lazy chunk: only loaded when an extension
+// page, card or chat tool view renders a `map` item, keeping the first screen and idle preload clear.
+const MapCanvas = lazyPage<
+  {
+    item: UIItem;
+    compact?: boolean;
+    busy: string;
+    onPress: (a: UIAction, destructive?: boolean) => void;
+    canPress?: (a: UIAction) => boolean;
+  }
+>(() => import("./ViewBody12").then((m) => m.MapCanvas));
+
 function CodeItem({ children }: { children: ReactNode }) {
   return <Suspense fallback={<Loading />}>{children}</Suspense>;
 }
@@ -432,6 +444,18 @@ function NativeItem({ item: it, compact, values, setValue, busy, onPress, onChoo
             <GraphCanvas item={it} compact={compact} busy={busy} onPress={onPress} canPress={canPress} />
           </Suspense>
         </div>
+      );
+    case "map":
+      return (
+        <Suspense
+          fallback={(
+            <div className={compact ? "px-4 py-3" : "w-full"} style={compact ? undefined : { height: "clamp(320px, 70dvh, 900px)" }} aria-hidden>
+              {compact && <div style={{ height: 200 }} />}
+            </div>
+          )}
+        >
+          <MapCanvas item={it} compact={compact} busy={busy} onPress={onPress} canPress={canPress} />
+        </Suspense>
       );
     case "stat_grid":
       return <StatGrid item={it} compact={compact} />;

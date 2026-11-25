@@ -80,6 +80,8 @@ type gateProxy struct {
 	// spaces: the conversations known to be in a space (markSpace). A conversation does not change space, so one
 	// stays in it, and only the ones in a space are kept.
 	spaces map[string]struct{}
+	// remotes latches conversations known to carry remote-runtime confirm-writes posture (markRemote).
+	remotes map[string]struct{}
 
 	// reporting holds a slot for each report to the manager in flight (gateReportsMax).
 	reporting chan struct{}
@@ -94,6 +96,8 @@ type gateKey struct {
 	// space: the process was started in a space. Decided once, from the directory the node started it in,
 	// when its address is opened: the address stays with that one process, so it never serves another space.
 	space bool
+	// remote: the conversation carries the remote-runtime confirm-writes posture.
+	remote bool
 }
 
 // gateGrant is a call larkCheck let through, to go once.
@@ -139,8 +143,9 @@ func (n *Node) gates() *gateProxy {
 
 // openIn gives one process of the assistant, the one started for session ("" when that is not known yet: nameAddr gives
 // it later), its own address for command's gate: the base to put in its BaseEnv, and release, which takes the address
-// back when the process ends. space says whether the process is in a space.
-func (p *gateProxy) openIn(command, session string, space bool) (base string, release func(), err error) {
+// back when the process ends. space says whether the process is in a space; remote says whether the session has
+// remote-runtime confirm-writes posture.
+func (p *gateProxy) openIn(command, session string, space, remote bool) (base string, release func(), err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.ln == nil {
@@ -159,7 +164,7 @@ func (p *gateProxy) openIn(command, session string, space bool) (base string, re
 		return "", nil, err
 	}
 	key := hex.EncodeToString(b)
-	p.keys[key] = gateKey{command: command, session: session, space: space}
+	p.keys[key] = gateKey{command: command, session: session, space: space, remote: remote}
 	return "http://" + p.ln.Addr().String() + "/" + key, func() {
 		p.mu.Lock()
 		delete(p.keys, key)
@@ -168,16 +173,22 @@ func (p *gateProxy) openIn(command, session string, space bool) (base string, re
 }
 
 // nameAddr says which conversation the address base stands for, when it was opened for a process that did not know its
-// conversation yet (a new Codex conversation has an id only once its thread starts). An address that has one keeps it.
-func (p *gateProxy) nameAddr(base, session string) {
-	if session == "" {
+// conversation yet (a new Codex conversation has an id only once its thread starts). An address that has one keeps it;
+// remote only latches true.
+func (p *gateProxy) nameAddr(base, session string, remote bool) {
+	if session == "" && !remote {
 		return
 	}
 	key := base[strings.LastIndex(base, "/")+1:]
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if gk, ok := p.keys[key]; ok && gk.session == "" {
-		gk.session = session
+	if gk, ok := p.keys[key]; ok {
+		if gk.session == "" && session != "" {
+			gk.session = session
+		}
+		if remote {
+			gk.remote = true
+		}
 		p.keys[key] = gk
 	}
 }
@@ -200,6 +211,27 @@ func (p *gateProxy) spaceSession(session string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	_, ok := p.spaces[session]
+	return ok && session != ""
+}
+
+// markRemote latches that session carries remote-runtime confirm-writes posture.
+func (p *gateProxy) markRemote(session string) {
+	if session == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.remotes == nil {
+		p.remotes = map[string]struct{}{}
+	}
+	p.remotes[session] = struct{}{}
+}
+
+// remoteSession reports whether session was latched with remote-runtime confirm-writes posture.
+func (p *gateProxy) remoteSession(session string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, ok := p.remotes[session]
 	return ok && session != ""
 }
 
@@ -261,7 +293,7 @@ func (p *gateProxy) take(k gateKey, method, path, query string, body []byte, isJ
 		if g.command != k.command || g.method != method || g.path != path || g.query != query {
 			continue
 		}
-		if k.space && (k.session == "" || g.session != k.session) {
+		if (k.space || k.remote) && (k.session == "" || g.session != k.session) {
 			continue
 		}
 		if g.session != "" && k.session != "" && g.session != k.session {
@@ -368,12 +400,12 @@ func (p *gateProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	session, through := gk.session, proto.LarkLetThrough{}
 	switch larkDecision(cfg, c) {
 	case "allow":
-		// A call larkCheck confirmed and a rule allows too (a space conversation confirms what a rule allows) was
-		// let through by the card: it uses up its grant, as a confirmed call does. In a space conversation a write
-		// goes only so: a rule's allow is not the phone's yes.
+		// A call larkCheck confirmed and a rule allows too (a space or remote runtime conversation confirms what a rule allows)
+		// was let through by the card: it uses up its grant, as a confirmed call does. In a space or remote runtime conversation
+		// a write goes only so: a rule's allow is not the phone's yes.
 		if gr, ok := p.take(gk, c.Method, c.Path, c.Query, body, isJSON); ok {
 			session, through = firstNonEmpty(gr.session, session), gr.through
-		} else if gk.space && !larkRead(c) {
+		} else if (gk.space || gk.remote || n.isRemoteRuntimeSession(session)) && !larkRead(c) {
 			gateNeedsPhone(w, command, c)
 			return
 		} else if rule, ok := firstLark(g.Rules, c); ok {

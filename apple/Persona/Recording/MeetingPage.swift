@@ -766,15 +766,17 @@ struct MeetingPage: View {
     /// chat's way: docs/assistant/voice.md 6.2), with the line a call that ended by itself leaves over it.
     @ViewBuilder private func afterBar(_ entry: RecordingEntry) -> some View {
         let key = conversation.followupKey(id)
-        let call = key.flatMap { key in calls.current.flatMap { $0.key == key ? $0 : nil } }
+        // The bar and the ended line are the voice module's (`ConversationVoice`); without it no call starts here.
+        let voice = model.voice
+        let inCall = key.map { voice?.isLive(on: $0) ?? false } ?? false
         VStack(spacing: Theme.Space.s) {
-            if let call, call.isOver, case .ended(let end) = call.phase, let note = VoiceEndNote.make(end, extensionID: call.extensionID) {
-                VoiceEndedStrip(call: call, note: note)
+            if let voice, let key, !inCall, voice.showsEnded(on: key) {
+                voice.endedLine(key: key)
                     .padding(.horizontal, Theme.Space.page)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            if let call, let key, !call.isOver {
-                VoiceBar(call: call, key: key, label: model.persona.name)
+            if let voice, let key, inCall {
+                voice.bar(key: key, label: model.persona.name)
                     .padding(.horizontal, Theme.Space.page)
                     .padding(.vertical, Theme.Space.s)
                     .frame(maxWidth: .infinity)
@@ -790,7 +792,7 @@ struct MeetingPage: View {
     /// Voice Chat bound to the follow-up: only once it exists (with none yet the first request is typed, so no turn runs on
     /// the meeting's material alone), while nothing records (the microphone is the recording's) and the hub has a voice.
     private func voiceStart(_ key: SessionKey?, entry: RecordingEntry) -> (() -> Void)? {
-        guard let key, capture.state == .idle, conversation.followupHold(entry) == nil,
+        guard let key, capture.state == .idle, conversation.followupHold(entry) == nil, model.voice != nil,
               VoiceSupport.shared.availability(for: model.session(key), group: key.group).isAvailable else { return nil }
         return { voiceNote = VoiceEntry.start(key, model: model) { voiceNote = $0 } }
     }

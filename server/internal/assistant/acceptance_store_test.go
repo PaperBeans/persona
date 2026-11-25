@@ -47,7 +47,7 @@ func TestAcceptStoreFailureIsNotAccepted(t *testing.T) {
 			a.Action.Value["asked_at"] = asked
 		}
 		a.Context.MessageID = "om_todo_v1"
-		return e.s.botCardAction(ctx, &a, "")
+		return e.s.larkModule().Action(ctx, &a, "")
 	}
 	asked := askOf(e.s, "todo_v1").AskedAt.Format(timeKeyLayout)
 	route := func(s *Service) int {

@@ -75,11 +75,13 @@ func (s *Service) todoFactsOf(ctx context.Context, list []listedTodo) []projecti
 	}
 	cards := s.todoRunCards(want)
 	loc := s.location(ctx)
+	todosV2 := s.settings(ctx).todosV2On()
 	facts := make([]projection.Facts, len(list))
 	for i := range list {
 		t := &list[i]
 		linked := hasParkInteractionLink(t.Supervision)
 		facts[i] = projectionFacts(*t, sessions, loc)
+		facts[i].TodosV2 = todosV2
 		if t.DoneAt != nil && t.StartError == "" {
 			continue
 		}
@@ -180,6 +182,11 @@ func (p todoProjection) byID() map[string]assistantwire.TodoSummary {
 // counts are the list's numbers.
 func (p todoProjection) counts() assistantwire.TodoCounts { return projection.Counts(p.facts, p.views) }
 
+// sharedBlockers are external blockers shared by two or more open to-dos when todos_v2 is enabled.
+func (p todoProjection) sharedBlockers() []projection.SharedBlocker {
+	return projection.SharedBlockers(p.facts, p.views)
+}
+
 // todoPlaces are the list's places, each project's titled by the knowledge base (todoProjectTitles).
 func (s *Service) todoPlaces(ctx context.Context, p todoProjection) assistantwire.TodoPlaces {
 	return projection.Places(p.facts, p.views, s.todoProjectTitles(ctx, p.facts))
@@ -213,7 +220,7 @@ func projectionFacts(t listedTodo, sessions map[[2]string]proto.Session, loc *ti
 		Origin: t.Origin, PlanID: t.PlanID, StartError: t.StartError, DoneBy: t.DoneBy, ReopenedAt: t.ReopenedAt,
 		CancelledAt: t.CancelledAt, CancelledReason: t.CancelledReason, Quiet: t.Quiet, PRURL: t.PRURL,
 		DueAt: t.DueAt, DueDate: t.DueDate, Priority: t.Priority, Project: t.Project, Kind: t.Kind, SeenAt: t.SeenAt,
-		PartOf: t.PartOf, Loc: loc}
+		PartOf: t.PartOf, After: slices.Clone(t.After), Loc: loc}
 	f.RestoredAt, f.SomedayUntil = t.RestoredAt, t.SomedayUntil // the owner's marks on the hub (todo_marks.go)
 	if t.Agents != nil {
 		f.Agents = make([]projection.Agent, len(t.Agents))
@@ -229,8 +236,13 @@ func projectionFacts(t listedTodo, sessions map[[2]string]proto.Session, loc *ti
 		f.Supervision = &projection.Supervision{State: v.State, Supervisor: v.Supervisor, PendingSince: v.PendingSince, UpdatedAt: v.UpdatedAt}
 		if p := v.Parked; p != nil {
 			parked := &projection.Parked{Reason: p.Reason, Until: p.Until, WaitingOn: p.WaitingOn}
-			if p.Evidence != nil && p.Evidence.InteractionID != "" {
-				parked.Evidence = &projection.ParkEvidence{Kind: p.Evidence.Kind, InteractionID: p.Evidence.InteractionID}
+			if p.Evidence != nil {
+				parked.Evidence = &projection.ParkEvidence{
+					Kind:          p.Evidence.Kind,
+					Target:        p.Evidence.Target,
+					URL:           p.Evidence.URL,
+					InteractionID: p.Evidence.InteractionID,
+				}
 			}
 			f.Supervision.Parked = parked
 		}

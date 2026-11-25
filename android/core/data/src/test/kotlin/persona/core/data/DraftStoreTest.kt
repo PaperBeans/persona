@@ -51,6 +51,12 @@ class DraftStoreTest {
             val manual = store.save(key, old.text, revision)
             assertFalse(manual.hasPickedSavedPrompt)
             assertEquals(manual, DraftStore(database, scope).read(key))
+
+            val photo = DraftAttachment("photo", DraftAttachmentType.Image, "content://photo", "shot.jpg",
+                size = 54321L, scaledBytes = 12345L)
+            val withPhoto = store.save(key, "see photo", manual.version, listOf(photo), null, hasPickedSavedPrompt = false)
+            assertEquals(listOf(photo), DraftStore(database, scope).read(key).attachments)
+            assertEquals(12345L, withPhoto.attachments.single().scaledBytes)
         } finally {
             database.close()
         }

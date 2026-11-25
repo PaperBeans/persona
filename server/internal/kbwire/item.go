@@ -64,6 +64,9 @@ type Tagging struct {
 	// Excluded: the links the user removed by hand, by list ("people", "chats", "projects", "items"), which automatic
 	// writes leave out (docs/assistant/knowledge.md "Removed links").
 	Excluded map[string][]string `json:"excluded,omitempty"`
+	// Persisted: the knowledge base read this from an entity's stored metadata. Set by the store only; never on the
+	// wire and never in a file.
+	Persisted bool `json:"-"`
 }
 
 // Provenance is who last wrote a locked field and from what.

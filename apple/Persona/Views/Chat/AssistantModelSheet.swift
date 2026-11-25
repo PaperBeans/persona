@@ -149,6 +149,17 @@ nonisolated enum AssistantModelChoice {
         return runtimeTarget
     }
 
+    /// Web's descriptive picker eligibility; the hub re-attests it before executing the switch. Native Claude Code and
+    /// Codex keep their existing behavior. Every other runtime needs both Assistant and explicit supervision support.
+    static func launcherSupervisionPolicy(_ target: Launcher) -> Bool {
+        guard !target.name.isEmpty, !target.name.hasPrefix("persona_ext_") else { return false }
+        let source = target.source ?? ""
+        let native = source.isEmpty || ["zshrc", "path", "builtin", "persona", LegacyNames.product].contains(source)
+        let agent = target.runtimeAgent ?? ""
+        if native { return agent.isEmpty || agent == "claude" || agent == "codex" }
+        return target.assistant == true && target.supervisionPolicy == true
+    }
+
     private static func providerAgent(_ raw: String?, provider: String) -> String? {
         raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "paseo" && !provider.isEmpty ? provider : raw
     }
@@ -257,6 +268,7 @@ final class AssistantModelPanelModel {
         var switchConversation: (_ key: SessionKey, _ request: APIClient.ConversationSwitchRequest) async throws -> Void = { _, _ in
             throw APIError(status: 409, message: String(localized: "Switching connections is unavailable. Refresh the conversation and try again."))
         }
+        var refreshAssistant: () async -> Void = {}
         static var live: Deps {
             Deps(
                 launchers: { try await AppModel.shared.assistantLaunchers($0, refresh: $1, main: true) },
@@ -277,8 +289,8 @@ final class AssistantModelPanelModel {
                         throw APIError(status: 503, message: String(localized: "Can't reach the hub"))
                     }
                     try await client.switchConversation(machine: key.machineID, conversation: key.sessionID, request: request)
-                    await AppModel.shared.refreshAssistant()
-                })
+                },
+                refreshAssistant: { await AppModel.shared.refreshAssistant() })
         }
     }
 
@@ -427,6 +439,13 @@ final class AssistantModelPanelModel {
                 guard state.enabled, state.epoch >= 1 else {
                     throw APIError(status: 409, message: String(localized: "Switching connections is unavailable. Refresh the conversation and try again."))
                 }
+                if state.supervisionRequired == true {
+                    let latest = try await deps.launchers(machine, true)
+                    guard let target = latest.launchers.first(where: { $0.name == pick.launcher }),
+                          AssistantModelChoice.launcherSupervisionPolicy(target) else {
+                        throw APIError(status: 409, message: String(localized: "This connection cannot receive separate task follow-up instructions."))
+                    }
+                }
                 preparedSwitch = APIClient.ConversationSwitchRequest(
                     operationID: UUID().uuidString.lowercased(), expectedEpoch: state.epoch,
                     sourceMachineID: session.machineID, machineID: session.machineID,
@@ -436,6 +455,7 @@ final class AssistantModelPanelModel {
             guard let request = preparedSwitch else { return false }
             submitted = true
             try await deps.switchConversation(key, request)
+            await deps.refreshAssistant()
             switchPick = nil
             switchDestination = ""
             preparedSwitch = nil

@@ -1,4 +1,4 @@
-Update supplied title, notes, due/reminder, priority, project, part_of or after immediately, including task to-dos; no confirmation. Omitted fields stay; "" clears notes/due/remind/project/part_of, [] clears after. New reminder times notify again. Completion/reopening uses todo_complete/todo_reopen.{{template "shared/mcp_language" .}}
+Update supplied fields immediately, including task to-dos; no confirmation. Omitted fields stay; "" clears notes/due/remind/project/part_of/audience/direction_id, [] clears after. New remind notifies again. Close/reopen via todo_complete/todo_reopen.{{template "shared/mcp_language" .}}
 
 ```json
 {
@@ -21,11 +21,11 @@ Update supplied title, notes, due/reminder, priority, project, part_of or after 
     },
     "due": {
       "type": "string",
-      "description": "New due date YYYY-MM-DD or datetime (user's time zone/RFC3339); \"\" clears."
+      "description": "YYYY-MM-DD or datetime (local/RFC3339); \"\" clears."
     },
     "remind": {
       "type": "string",
-      "description": "New reminder datetime (user's time zone/RFC3339) or relative 30m/2h/1d; never past. \"\" clears."
+      "description": "Future datetime (local/RFC3339) or 30m/2h/1d; \"\" clears."
     },
     "priority": {
       "type": "string",
@@ -37,7 +37,15 @@ Update supplied title, notes, due/reminder, priority, project, part_of or after 
     },
     "project": {
       "type": "string",
-      "description": "Existing knowledge-base project slug/name (kb_list projects), preferably a long-term work area. Set only when clear; do not invent near-duplicates. \"\" clears."
+      "description": "Existing kb_list project slug/name; only when clear, no near-duplicates. \"\" clears."
+    },
+    "audience": {
+      "type": "string",
+      "description": "human, autonomous, or \"\" clears."
+    },
+    "direction_id": {
+      "type": "string",
+      "description": "Direction id, or \"\" clears."
     },
     "part_of": {
       "type": "string",

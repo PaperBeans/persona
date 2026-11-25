@@ -54,7 +54,7 @@ function statusText(status: string, error?: string): string {
   }
 }
 
-export function DiskSection({ machine, metrics, redeploy }: { machine: Machine; metrics?: MachineMetrics; redeploy?: React.ReactNode }) {
+export function DiskSection({ machine, metrics, redeploy, onUsageMap }: { machine: Machine; metrics?: MachineMetrics; redeploy?: React.ReactNode; onUsageMap?: (mid: string) => void }) {
   const { read, reload } = useDiagnosis(machine.id, SECTIONS, machine.online);
   const latest = metrics?.latest;
   const data = read.state === "ok" ? read.data.disk : undefined;
@@ -112,6 +112,13 @@ export function DiskSection({ machine, metrics, redeploy }: { machine: Machine; 
         ) : (
           <div className="grid grid-cols-2 gap-3">
             <Figure label={t("machines-alerts.disk")} value={percent(diskPct)} detail={latest?.disk_total ? t("machines-alerts.disk_free", { size: bytesBin(Math.max(0, latest.disk_total - (latest.disk_used ?? 0))) }) : undefined} tone={diskPct === undefined ? undefined : diskPct >= 90 ? "critical" : diskPct >= 80 ? "warning" : undefined} />
+          </div>
+        )}
+        {onUsageMap && (
+          <div className="mt-2">
+            <Button size="sm" tone="secondary" icon="chart" onClick={() => onUsageMap(machine.id)} testId="disk-usage-map">
+              {t("machines-usagemap.reclaim_open")}
+            </Button>
           </div>
         )}
       </SheetPart>

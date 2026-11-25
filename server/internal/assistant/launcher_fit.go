@@ -60,8 +60,10 @@ type startNamed struct{ launcher, noModel, effort bool }
 // (callerPick), not what this try resolved for it from a tier, Model configuration › Agents or a start-defaults
 // policy. Those are for that one start (the Agent's session shows what it runs with, a failed start's error args its
 // launcher): kept with the task, a retry (task_retry, the card's Retry), a remedy or a queued start, which read the
-// task back from the store, would take them for the task's own choice and stay on them after the default or the
-// tier's model changed (#12618). What this try put in place of the resolved launch (startNamed) is kept, as the card
+// task back from the store, would take them for the task's own choice and stay on them after the default changed
+// (#12618). The candidate a tier gave the start is recorded apart, as the hub's Dispatch: the next Agent of the task
+// keeps it while the tier still lists it (candidate_keep.go, #14701), without it ever becoming the task's own launch,
+// so a changed tier or profile still decides once the candidate is gone. What this try put in place of the resolved launch (startNamed) is kept, as the card
 // shows it, unless a policy's preset (or, for the effort, the policy's effort) decided it. The permission mode is the
 // one this try settled, except one a policy's preset brought. CallerPermission separately drives the next start.
 func (t PlanTask) storedLaunch() startPick {
@@ -293,6 +295,7 @@ func (s *Service) fitLauncher(ctx context.Context, m Device, own startPick, para
 	if slices.ContainsFunc(list, func(l proto.Launcher) bool { return l.Name == name }) {
 		return "", agentOf(name), nil
 	}
+	placementOf(ctx).hit(m.ID, "launcher_missing", i18n.Args{"launcher": name})
 	if own.explicitLauncher() {
 		return "", startAgent{}, i18n.Err("assistant-tasks.launcher_not_on_machine", i18n.Args{
 			"machine": firstNonEmpty(m.Name, m.ID), "launcher": name, "launchers": strings.Join(launcherNamesOn(m, list), ", "),

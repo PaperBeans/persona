@@ -475,7 +475,7 @@ func (s *Service) prepareSourceReport(ctx context.Context, t Todo, st FeishuStat
 }
 
 // tellOwner writes a line of the language file where todo t is worked on: into the topic it is bound to, as a reply under the
-// latest message known there (the bot's lines to a topic, feishu_thread_posts.go), or, for a todo that has no topic (its
+// latest message known there (the bot's lines to a topic, the lark module's thread_posts.go), or, for a todo that has no topic (its
 // source has an anchor), into the owner's private chat as a reply under the anchor. key makes the same line, sent again,
 // land once. false when it could not be written.
 func (s *Service) tellOwner(ctx context.Context, t Todo, st FeishuStatus, key string, args i18n.Args, uuid string, fullReply bool) bool {
@@ -493,7 +493,7 @@ func (s *Service) tellOwner(ctx context.Context, t Todo, st FeishuStatus, key st
 	if th == nil || th.Channel != channel.Feishu || !slices.Contains(st.Chats, th.ChatID) {
 		return false
 	}
-	anchor := s.topicMessage(ctx, th.ChatID, th.ThreadID)
+	anchor := s.larkModule().TopicAnchor(ctx, th.ChatID, th.ThreadID)
 	if anchor == "" {
 		s.logf("todo %s: no message of its topic is known to reply under", t.ID)
 		return false

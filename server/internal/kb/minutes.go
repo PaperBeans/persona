@@ -18,74 +18,17 @@ import (
 	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 )
 
-// Meeting minutes (docs/assistant/meeting-minutes.md): a complete recording that is a meeting (the phone said so, the
-// user asked, or it overlaps a calendar item of the knowledge base) gets minutes.json (Minutes, what detail.minutes
-// is) and minutes.md (the same as Markdown, what the searches and kb_get read) in its directory, so a delete takes them
-// with it; the retention keeps them past the transcript, until minutes_days (recording_trim.go). The transcript goes to
-// the model as numbered lines, the meeting's photos (recording_photos.go) as lines of their own among them, by their
-// words only; the model cites line or photo numbers, which become seconds here, and an item citing no line or photo it
-// read is dropped. Long transcripts are read in chunks whose notes one more call merges.
+// MinutesItem is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type MinutesItem = recordingwire.MinutesItem
 
-// Minutes is minutes.json, and detail.minutes of GET /api/v1/kb/recordings/{id}.
-type Minutes struct {
-	Version     int             `json:"version"`  // counts the minutes written for this recording
-	Revision    int64           `json:"revision"` // the recording revision they were made from
-	GeneratedAt time.Time       `json:"generated_at"`
-	Title       string          `json:"title"`
-	When        string          `json:"when"` // Start–End in one fixed format, for older clients and the Markdown
-	Where       string          `json:"where,omitempty"`
-	Attendees   []string        `json:"attendees,omitempty"`
-	Points      []MinutesPoint  `json:"points,omitempty"`
-	Decisions   []MinutesItem   `json:"decisions,omitempty"`
-	Actions     []MinutesAction `json:"actions,omitempty"`
-	Open        []MinutesItem   `json:"open,omitempty"`
-	// Overview is the same minutes as one summary card (#6563, minutes_overview.go): only when every point and
-	// decision is a bullet of one of its topics. Minutes from before it, or from an older hub, have none.
-	Overview *MinutesOverview `json:"overview,omitempty"`
-	Partial  bool             `json:"partial,omitempty"` // the transcript's end was not read
-	// Language is what they are written in, their Markdown's headings too (language.go): an i18n code (zh-Hans, en,
-	// ja); minutes written before it was kept have none, and are Chinese.
-	Language string `json:"language,omitempty"`
-	Markdown string `json:"markdown"`
-	// Start and End are the recording's span When says, in the user's zone (#4713). Clients format them with their own
-	// localized dates and show When only without them (minutes from an older hub).
-	Start time.Time `json:"start,omitzero"`
-	End   time.Time `json:"end,omitzero"`
+// MinutesPoint is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type MinutesPoint = recordingwire.MinutesPoint
 
-	// modelTitle is the title the model wrote for them (titleLine; "" none), which settles the recording's AITitle
-	// when they are stored (#8873); never in minutes.json.
-	modelTitle string
-}
-
-// MinutesItem is a decision or an open question; At is seconds from the recording's start (a segment's start, or the
-// photo's time when it cites photo Photo).
-type MinutesItem struct {
-	Text  string  `json:"text"`
-	At    float64 `json:"at"`
-	Photo int     `json:"photo,omitempty"`
-}
-
-// MinutesPoint is a point discussed; Who only when the transcript or the calendar names the person.
-type MinutesPoint struct {
-	Text  string  `json:"text"`
-	At    float64 `json:"at"`
-	Photo int     `json:"photo,omitempty"`
-	Who   string  `json:"who,omitempty"`
-}
-
-// MinutesAction is an action item: a suggested to-do until the user confirms it (TodoID then).
-type MinutesAction struct {
-	ID      string  `json:"id"`
-	Who     string  `json:"who,omitempty"`
-	What    string  `json:"what"`
-	By      string  `json:"by,omitempty"`       // the deadline as said
-	DueDate string  `json:"due_date,omitempty"` // YYYY-MM-DD, when By is one date
-	At      float64 `json:"at"`
-	Photo   int     `json:"photo,omitempty"`
-	TodoID  string  `json:"todo_id,omitempty"`
-}
+// MinutesAction is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type MinutesAction = recordingwire.MinutesAction
 
 // PurposeMeetingMinutes is the model purpose every call of a minutes job asks for (#7980): the whole transcript, or each
 // part's notes and their merge, with the summary card in the same answers. It follows Information processing until it
@@ -108,76 +51,6 @@ var (
 	// errMinutesUnusable: the model answered, but nothing in it cites the transcript (or a photo).
 	errMinutesUnusable = errors.New("no item of the answer cites a transcript line")
 )
-
-const (
-	minutesTries         = 3      // unusable answers for one revision before the minutes are failed
-	minutesMinCalendar   = 5 * 60 // seconds: shorter recordings are not meetings just because a calendar item overlaps
-	minutesCalendarAhead = 15 * time.Minute
-	// minutesMatchWait: a recording no calendar item matched is looked at again until this long after it ended, the
-	// calendar items being collected every half hour (a meeting's video call is listed once it has been held).
-	minutesMatchWait = time.Hour
-	// minutesImportWait: a matched recording with no imported meeting yet is looked at again until this long after it
-	// ended, for one a connected app imports later (#8872).
-	minutesImportWait  = 24 * time.Hour
-	minutesOneCall     = 16000 // runes of transcript read in one call; longer ones go in chunks
-	minutesChunk       = 12000
-	minutesMaxChunks   = 40
-	minutesCallTimeout = 6 * time.Minute  // a call's at the first try, twice a summary's (minutes_timeout.go)
-	minutesJobTimeout  = 45 * time.Minute // all the calls of one recording: the knowledge-base round waits for them
-	minutesMaxItems    = 100
-	minutesTextRunes   = 400  // an item's text at most, the "…" of a cut included
-	minutesLineRunes   = 4000 // a transcript line longer than this is cut (one segment, not the whole meeting)
-	// What the merging call reads of all the parts' notes: per section, at most this many items over all parts (an
-	// equal share each, at least 2), each at most minutesNoteRunes.
-	minutesMergeItems = 60
-	minutesNoteRunes  = 160
-)
-
-// isMeeting: the recording gets minutes. A day recording never does (it gets a recap, day_recap.go).
-func (r *Recording) isMeeting() bool {
-	if r.Kind == RecordingDay {
-		return false
-	}
-	return r.Kind == RecordingMeeting || r.MinutesAsked || r.Meeting != nil && r.Duration >= minutesMinCalendar
-}
-
-// planMinutes sets MinutesState from the rest: pending until minutes of the current revision are written, failed after
-// minutesTries unusable answers for it or minutesTimeoutTries tries that ran out of time; minutes of an older revision
-// keep showing meanwhile. A meeting that completed with no text gets none ("", docs/assistant/meeting-minutes.md
-// "Attendance fields"): an attended one is uploaded before anything was said, and may end so.
-func (r *Recording) planMinutes() {
-	switch {
-	case !r.isMeeting():
-		r.MinutesState = "" // minutes made while it was one stay readable; nothing more is made
-	case r.Trimmed():
-		r.MinutesState = MinutesReady // the transcript is gone: the minutes kept are all there will be
-	case r.Complete && r.Chars == 0:
-		r.MinutesState = ""
-	case r.MinutesRev > 0 && r.MinutesRev >= r.Revision:
-		r.MinutesState = MinutesReady
-	case r.MinutesFailRev == r.Revision && (r.MinutesFails >= minutesTries || r.MinutesTimeouts >= minutesTimeoutTries):
-		r.MinutesState = MinutesFailed
-	default:
-		r.MinutesState = MinutesPending
-	}
-}
-
-// ReadMinutes is recording id's minutes, ErrNotFound when it has none (or there is no such recording).
-func (s *Store) ReadMinutes(id string) (*Minutes, error) {
-	id, ok := RecordingID(id)
-	if !ok {
-		return nil, ErrNotFound
-	}
-	raw, err := os.ReadFile(s.path(KindRecording, id, "minutes.json"))
-	if err != nil {
-		return nil, ErrNotFound
-	}
-	var m Minutes
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, err
-	}
-	return &m, nil
-}
 
 // putMinutes writes minutes.json and minutes.md of recording id, unless it was deleted meanwhile (false then). The
 // caller holds recMu.
@@ -238,22 +111,22 @@ func (e *Engine) AskMinutes(rawID string) error {
 		return ErrRecordingIncomplete
 	}
 	r.MinutesAsked, r.MatchedRev = true, 0
-	r.remakeMinutes()
+	remakeMinutes(r)
 	return st.putEntity(KindRecording, r.ID, r, &r.Tagging, false)
 }
 
 // remakeMinutes has r's minutes made again at the next round (the caller holds recMu and writes r): minutes a model
 // call running now brings don't settle it (MinutesAsks), and the minutes kept show meanwhile.
-func (r *Recording) remakeMinutes() {
+func remakeMinutes(r *Recording) {
 	r.MinutesRev = 0
-	r.clearMinutesFailures()
+	clearMinutesFailures(r)
 	r.MinutesAsks++
-	r.planMinutes()
+	planMinutes(r)
 }
 
 // quietMinutes: the minutes being made now are made again only because a photo changed: not pushed once written
 // (photosRemake).
-func (r *Recording) quietMinutes() bool { return r.MinutesQuiet > 0 && r.MinutesQuiet == r.MinutesAsks }
+func quietMinutes(r *Recording) bool { return r.MinutesQuiet > 0 && r.MinutesQuiet == r.MinutesAsks }
 
 // SetMinutesTodos records the to-dos made of actions (action id → to-do id) in version of recording id's minutes;
 // ErrNotFound without minutes. Minutes written again since get them by task instead (byTask: MinutesTaskKey → to-do
@@ -314,8 +187,8 @@ func (e *Engine) WriteMinutes(ctx context.Context, max int) int {
 	var todo []*Recording
 	for _, r := range e.Store.Recordings() {
 		// In hub mode they wait for the final transcript, at most minutesHubWait after the complete upload.
-		if r.Complete && r.Chars > 0 && r.MinutesState == MinutesPending && !r.minutesWaiting(now) && !r.Trimmed() &&
-			!r.transcriptionHolds(now) {
+		if r.Complete && r.Chars > 0 && r.MinutesState == MinutesPending && !minutesWaiting(r, now) && !r.Trimmed() &&
+			!transcriptionHolds(r, now) {
 			todo = append(todo, r)
 		}
 	}
@@ -365,10 +238,10 @@ func (e *Engine) minutesFailed(id string, rev int64) {
 		st.recMu.Unlock()
 		return
 	}
-	r.minutesFailuresFor(rev)
+	minutesFailuresFor(r, rev)
 	r.MinutesFails++
-	r.planMinutes()
-	drop := r.MinutesState == MinutesFailed && r.transcriptionDone()
+	planMinutes(r)
+	drop := r.MinutesState == MinutesFailed && transcriptionDone(r)
 	_ = st.putEntity(KindRecording, r.ID, r, &r.Tagging, false)
 	st.recMu.Unlock()
 	e.dropAudioAfterMinutes(id, drop)
@@ -425,10 +298,10 @@ func (e *Engine) matchRecordings(now time.Time) {
 				r.Items = addUnique(r.Items, it.Kind+"/"+it.ID)
 			}
 			r.ImportedMeeting = nil
-			r.linkImported(matchCalendar(r, meetings))
+			linkImported(r, matchCalendar(r, meetings))
 			r.MatchedRev = r.Revision
 			r.Name = st.recordingName(r)
-			r.planMinutes()
+			planMinutes(r)
 			if st.putEntity(KindRecording, r.ID, r, &r.Tagging, false) == nil {
 				e.index(KindRecording, r.ID, r.Name, r.Tagging, r.OneLine, r.StartedAt)
 			}
@@ -441,7 +314,7 @@ func (e *Engine) matchRecordings(now time.Time) {
 		r, ok := st.Recording(id)
 		if ok && r.Complete && r.MatchedRev >= r.Revision && r.ImportedMeeting == nil && !r.Trimmed() && r.Kind != RecordingDay {
 			if it := matchCalendar(r, meetings); it != nil {
-				r.linkImported(it)
+				linkImported(r, it)
 				if err := st.putEntity(KindRecording, r.ID, r, &r.Tagging, false); err != nil {
 					e.logf("recording %s: link the imported meeting: %v", id, err)
 				}
@@ -452,7 +325,7 @@ func (e *Engine) matchRecordings(now time.Time) {
 }
 
 // linkImported makes it (a meetings item, or nil) r's imported meeting, linked in Items.
-func (r *Recording) linkImported(it *Item) {
+func linkImported(r *Recording, it *Item) {
 	if it == nil {
 		return
 	}
@@ -484,18 +357,6 @@ func matchCalendar(r *Recording, kinds ...[]*Item) *Item {
 		}
 	}
 	return nil
-}
-
-// recordingEnd is when r ended: ended_at, else its start plus what was recorded (at least a minute).
-func recordingEnd(r *Recording) time.Time {
-	end := r.StartedAt.Add(time.Duration(r.Duration * float64(time.Second)))
-	if r.EndedAt != nil && r.EndedAt.After(end) {
-		end = *r.EndedAt
-	}
-	if !end.After(r.StartedAt.Add(time.Minute)) {
-		end = r.StartedAt.Add(time.Minute)
-	}
-	return end
 }
 
 // minutesLine is a line as the model reads it: a transcript line, N what it cites, or a photo's (Photo its number, N
@@ -597,7 +458,7 @@ func (e *Engine) writeMinutes(ctx context.Context, id string) error {
 		return err
 	}
 	r.Conv = meeting
-	if !r.Complete || r.Chars == 0 || r.MinutesState != MinutesPending || r.Trimmed() || r.transcriptionHolds(e.now()) {
+	if !r.Complete || r.Chars == 0 || r.MinutesState != MinutesPending || r.Trimmed() || transcriptionHolds(&r, e.now()) {
 		return nil
 	}
 	var device []RecordingSegment
@@ -606,7 +467,7 @@ func (e *Engine) writeMinutes(ctx context.Context, id string) error {
 	}
 	segs := TranscriptOfRecord(hubMode(meeting), device, hub.Segments)
 	// Minutes made from the final transcript take the hub's audio with them once written (storeMinutes).
-	final := r.transcriptionDone()
+	final := transcriptionDone(&r)
 	zone := e.Store.Zone()
 	lines := make([]minutesLine, 0, len(segs))
 	for i, sg := range segs {
@@ -632,7 +493,7 @@ func (e *Engine) writeMinutes(ctx context.Context, id string) error {
 	}
 	in := e.minutesInput(&r, zone)
 	model := e.modelFor(PurposeMeetingMinutes)
-	callTime := minutesCallTime(r.minutesTimeouts())
+	callTime := minutesCallTime(minutesTimeouts(&r))
 	call := func(system, user string, out *minutesAnswer) error {
 		cctx, cancel := context.WithTimeout(ctx, callTime)
 		defer cancel()
@@ -704,17 +565,6 @@ func untitledMinutes(r *Recording, zone *time.Location, lang i18n.Lang) string {
 	return i18n.T(lang, "kb-minutes.untitled", i18n.Args{"when": r.StartedAt.In(zone).Format("2006-01-02 15:04")})
 }
 
-// calendarTitle is the phone calendar's title of r, else the matched calendar item's ("" without either).
-func calendarTitle(r *Recording) string {
-	if r.Calendar != nil && r.Calendar.Title != "" {
-		return r.Calendar.Title
-	}
-	if r.Meeting != nil {
-		return r.Meeting.Name
-	}
-	return ""
-}
-
 // chunkLines cuts lines into chunks of about size runes at line boundaries: one chunk when all of them fit in one,
 // at most max chunks (partial: lines were left out).
 func chunkLines(lines []minutesLine, one, size, max int) (chunks [][]minutesLine, partial bool) {
@@ -760,10 +610,6 @@ func renderMinutesLines(lines []minutesLine, start time.Time, zone *time.Locatio
 		fmt.Fprintf(&b, "[%d] %s %s\n", l.N, clockAt(start, l.At, zone), l.Text)
 	}
 	return strings.TrimRight(b.String(), "\n")
-}
-
-func clockAt(start time.Time, sec float64, zone *time.Location) string {
-	return start.Add(time.Duration(sec * float64(time.Second))).In(zone).Format("15:04:05")
 }
 
 // notesForMerge is a chunk's notes for the merging call, keeping only items citing a line or a photo of that chunk,
@@ -878,9 +724,6 @@ func firstN[T any](s []T, n int) []T {
 
 func clipText(s string) string { return clipRunes(s, minutesTextRunes) }
 
-// clipRunes is s on one line, at most n runes ("…" marking a cut).
-func clipRunes(s string, n int) string { return clip(strings.Join(strings.Fields(s), " "), n) }
-
 // buildMinutes checks the model's answer against the lines it read: every item must cite one of them (a transcript
 // line, or a photo: its time then), a person must be named in them or in the calendar, a due date must be a real day
 // from the meeting on (within a year). A photo's words count as said. The minutes are in lang.
@@ -933,7 +776,7 @@ func (e *Engine) buildMinutes(r *Recording, a minutesAnswer, read []minutesLine,
 		return sec, 0, ok
 	}
 	m := &Minutes{Title: cmp.Or(r.Title, calendarTitle(r), plainLine(a.Title), untitledMinutes(r, zone, lang)),
-		When: minutesWhen(r, zone), Language: string(lang), modelTitle: titleLine(a.Title)}
+		When: minutesWhen(r, zone), Language: string(lang), ModelTitle: titleLine(a.Title)}
 	m.Start, m.End = minutesSpan(r, zone)
 	if r.Calendar != nil && r.Calendar.Location != "" {
 		m.Where = r.Calendar.Location
@@ -1082,41 +925,6 @@ func wordByte(text string, i int) bool {
 	}
 	c := text[i]
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
-}
-
-// minutesSpan is the recording's start and end in the user's zone, to the second: the span minutes are about.
-func minutesSpan(r *Recording, zone *time.Location) (time.Time, time.Time) {
-	return r.StartedAt.In(zone).Truncate(time.Second), recordingEnd(r).In(zone).Truncate(time.Second)
-}
-
-// spanOf fills Start and End of minutes written before they were (#4713) from their recording.
-func (m *Minutes) spanOf(r *Recording, zone *time.Location) {
-	if m.Start.IsZero() && r != nil && !r.StartedAt.IsZero() {
-		m.Start, m.End = minutesSpan(r, zone)
-	}
-}
-
-// minutesWithSpan is minutes.json as a recording's detail sends it: minutes written before Start and End were get them
-// from the recording (spanOf), every other field as stored.
-func minutesWithSpan(raw []byte, r *Recording, zone *time.Location) []byte {
-	var stored struct {
-		Start time.Time `json:"start"`
-	}
-	if json.Unmarshal(raw, &stored) != nil || !stored.Start.IsZero() || r == nil || r.StartedAt.IsZero() {
-		return raw
-	}
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(raw, &fields) != nil {
-		return raw
-	}
-	start, end := minutesSpan(r, zone)
-	fields["start"], _ = json.Marshal(start)
-	fields["end"], _ = json.Marshal(end)
-	out, err := json.Marshal(fields)
-	if err != nil {
-		return raw
-	}
-	return out
 }
 
 // minutesWhen is "2006-01-02 15:04–16:10" in the user's zone (the end's date too when it is another day).
@@ -1336,17 +1144,17 @@ func (e *Engine) storeMinutes(ctx context.Context, r *Recording, m *Minutes, fin
 		st.recMu.Unlock()
 		return err
 	}
-	quiet := cur.quietMinutes()
+	quiet := quietMinutes(cur)
 	cur.MinutesVersion = m.Version
-	if m.modelTitle != "" { // the minutes' title is the recording's from now on, unless someone named it (NameSource)
-		cur.AITitle, cur.AITitleFrom = m.modelTitle, AITitleMinutes
+	if m.ModelTitle != "" { // the minutes' title is the recording's from now on, unless someone named it (NameSource)
+		cur.AITitle, cur.AITitleFrom = m.ModelTitle, AITitleMinutes
 		cur.Name = e.recordingName(cur)
 	}
-	cur.clearMinutesFailures()
+	clearMinutesFailures(cur)
 	if cur.MinutesAsks == r.MinutesAsks { // else asked again meanwhile (the user, a photo): made again at the next round
 		cur.MinutesRev = r.Revision
 	}
-	cur.planMinutes()
+	planMinutes(cur)
 	ready := cur.MinutesState == MinutesReady
 	if ready {
 		cur.MinutesQuiet = 0 // settled: minutes of a later revision or request are pushed again
@@ -1354,7 +1162,7 @@ func (e *Engine) storeMinutes(ctx context.Context, r *Recording, m *Minutes, fin
 	drop := final && cur.MinutesAsks == r.MinutesAsks
 	err = st.putEntity(KindRecording, cur.ID, cur, &cur.Tagging, false)
 	st.notify(KindRecording, cur.ID, "summary")
-	if err == nil && m.modelTitle != "" {
+	if err == nil && m.ModelTitle != "" {
 		st.notify(KindRecording, cur.ID, "metadata")
 		e.index(KindRecording, cur.ID, cur.Name, cur.Tagging, cur.OneLine, cur.StartedAt)
 	}

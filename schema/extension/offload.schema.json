@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "offload.schema.json",
+  "title": "Disk offload provider protocol",
+  "description": "The disk_offload extension point's calls (version 1, #14576; docs/server/machine-usage-map.md \"Extension point disk_offload\"): the manager asks a provider's program what it already holds of a computer (offload.inventory), to move items there or bring them back (offload.run, only after the user confirmed, and after the node's protection rules agreed to every path), how a job goes (offload.job) and to stop one (offload.cancel, optional: unknown_method means it cannot be canceled). Every params object carries contribution (the disk_offload item's id), locale (the caller's language: words the program writes, tool.source and detail, are in it) and machine (the computer, as a machine_section gets it). The apps read the inventory, the jobs and the manager's routes' answers (OffloadProviders, OffloadRunRequest, OffloadStarted, OffloadError) through the manager.",
+  "x-methods": {
+    "offload.inventory": {"from": "hub", "params": "OffloadInventoryParams", "result": "OffloadInventory"},
+    "offload.run": {"from": "hub", "params": "OffloadRunParams", "result": "OffloadRunResult"},
+    "offload.job": {"from": "hub", "params": "OffloadJobParams", "result": "OffloadJob"},
+    "offload.cancel": {"from": "hub", "params": "OffloadJobParams", "result": "Empty"}
+  },
+  "$defs": {
+    "OffloadState": {
+      "description": "Whether the provider can work on this computer: ready; needs_install (its tool is not on the computer: the first offload asks to install it, OffloadTool); needs_setup (the user has to set it up first, in the extension's settings: detail says what); unavailable (detail says why).",
+      "type": "string",
+      "enum": ["ready", "needs_install", "needs_setup", "unavailable"]
+    },
+    "OffloadItemKind": {
+      "description": "What an offloaded item was: a file, a dir (folder), an app, an app's data (app_data), a bundle of items moved together, a session archive, or other.",
+      "type": "string",
+      "enum": ["file", "dir", "app", "app_data", "bundle", "session", "other"]
+    },
+    "OffloadAction": {
+      "description": "What offload.run does: offload (move paths away) or restore (bring items back by id).",
+      "type": "string",
+      "enum": ["offload", "restore"]
+    },
+    "OffloadRunStatus": {
+      "description": "offload.run's answer: started (a job runs: job), needs_install (the tool is missing and install was not given: nothing happened; tool), refused (nothing happened; items say why), ok (a dry run's answer: items).",
+      "type": "string",
+      "enum": ["started", "needs_install", "refused", "ok"]
+    },
+    "OffloadJobState": {
+      "description": "A job: running, done, failed (error says why) or canceled.",
+      "type": "string",
+      "enum": ["running", "done", "failed", "canceled"]
+    },
+    "OffloadPhase": {
+      "description": "What a running job does now: install (its tool), check, upload, verify, cleanup (removing the originals), download (a restore).",
+      "type": "string",
+      "enum": ["install", "check", "upload", "verify", "cleanup", "download"]
+    },
+    "OffloadJobItemStatus": {
+      "description": "One item of a job: pending, running, done, failed or skipped.",
+      "type": "string",
+      "enum": ["pending", "running", "done", "failed", "skipped"]
+    },
+    "OffloadTool": {
+      "description": "The program the provider needs on the computer. source is one sentence in the caller's language saying where it comes from and where it is installed; the install confirmation shows it.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 80},
+        "title": {"type": "string", "maxLength": 80},
+        "version": {"type": "string", "maxLength": 40},
+        "installed": {"type": "boolean"},
+        "source": {"type": "string", "maxLength": 300},
+        "detail": {"type": "string", "maxLength": 300}
+      },
+      "required": ["name", "installed"]
+    },
+    "OffloadItem": {
+      "description": "One item the provider holds of this computer. bytes is the size it had on disk, what the map draws so both sides share one scale; stored_bytes what it takes where it is stored; origin_path where it was and where a restore puts it; stub_path the placeholder left behind, if any; local_bytes what of it is still on the computer (a cache). Times are Unix seconds.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 200},
+        "name": {"type": "string", "minLength": 1, "maxLength": 200},
+        "kind": {"$ref": "#/$defs/OffloadItemKind"},
+        "bytes": {"type": "integer", "minimum": 0, "x-go-type": "int64"},
+        "stored_bytes": {"type": "integer", "minimum": 0, "x-go-type": "int64"},
+        "origin_path": {"type": "string", "maxLength": 4096},
+        "stub_path": {"type": "string", "maxLength": 4096},
+        "local_bytes": {"type": "integer", "minimum": 0, "x-go-type": "int64"},
+        "offloaded_at": {"type": "integer", "minimum": 0, "x-go-type": "int64"},
+        "used_at": {"type": "integer", "minimum": 0, "x-go-type": "int64"},
+        "group": {"type": "string", "maxLength": 200, "description": "Items moved together share a group (an app and its data)."},
+        "restorable": {"type": "boolean"}
+      },
+      "required": ["id", "name", "kind", "bytes", "restorable"]
+    },
+    "OffloadMore": {
+      "description": "What the inventory left out past its 500 largest items.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "count": {"type": "integer", "minimum": 0},
+        "bytes": {"type": "integer", "minimum": 0, "x-go-type": "int64"}
+      },
+      "required": ["count", "bytes"]
+    },
+    "OffloadInventoryParams": {
+      "description": "offload.inventory: what the provider holds of machine. refresh asks it not to answer from its own cache.",
+      "type": "object",
+      "properties": {
+        "contribution": {"$ref": "manifest.schema.json#/$defs/ID"},
+        "locale": {"type": "string"},
+        "machine": {"$ref": "protocol.schema.json#/$defs/UIMachine"},
+        "refresh": {"type": "boolean"}
+      },
+      "required": ["contribution", "locale", "machine"]
+    },
+    "OffloadInventory": {
+      "description": "What the provider holds of the computer, largest first, at most 500 items (the rest summed in more). at is when it was read (Unix seconds); total_bytes the items' bytes together, stored_bytes what they take where they are stored; partial when the list may be incomplete. items may be left out when there are none; the manager's answer to the apps always has it.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {"$ref": "#/$defs/OffloadState"},
+        "detail": {"type": "string", "maxLength": 300},
+        "tool": {"$ref": "#/$defs/OffloadTool"},
+        "at": {"type": "integer", "minimum": 0, "x-go-type": "int64"},
+        "total_bytes": {"type": "integer", "minimum": 0, "x-go-type": "int64"},
+        "stored_bytes": {"type": "integer", "minimum": 0, "x-go-type": "int64"},
+        "partial": {"type": "boolean"},
+        "items": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/OffloadItem"}},
+        "more": {"$ref": "#/$defs/OffloadMore"}
+      },
+      "required": ["state", "at", "total_bytes"]
+    },
+    "OffloadRunParams": {
+      "description": "offload.run: offload paths (absolute, on machine, each already agreed by the node's protection rules) or restore items (ids of the inventory), at most 50. dry_run only checks and answers status ok with each item; install lets the job install the tool first (the user agreed to that too). request_id is the same for a retry of the same request.",
+      "type": "object",
+      "properties": {
+        "contribution": {"$ref": "manifest.schema.json#/$defs/ID"},
+        "locale": {"type": "string"},
+        "machine": {"$ref": "protocol.schema.json#/$defs/UIMachine"},
+        "action": {"$ref": "#/$defs/OffloadAction"},
+        "paths": {"type": "array", "maxItems": 50, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+        "items": {"type": "array", "maxItems": 50, "items": {"type": "string", "minLength": 1, "maxLength": 200}},
+        "dry_run": {"type": "boolean"},
+        "install": {"type": "boolean"},
+        "request_id": {"type": "string", "minLength": 1, "maxLength": 64}
+      },
+      "required": ["contribution", "locale", "machine", "action", "request_id"]
+    },
+    "OffloadRunItem": {
+      "description": "One path or item of a run's answer: why it is refused (reason, in the caller's language), or a dry run's verdict (ok, bytes). refusal is set only by the manager, when the computer's own protection rules refused the path before the program was asked (a machine.storage.check refusal code: credentials, app_managed, ...).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string", "maxLength": 4096},
+        "id": {"type": "string", "maxLength": 200},
+        "ok": {"type": "boolean"},
+        "reason": {"type": "string", "maxLength": 300},
+        "refusal": {"type": "string", "pattern": "^[a-z_]{1,40}$"},
+        "bytes": {"type": "integer", "minimum": 0, "x-go-type": "int64"}
+      }
+    },
+    "OffloadRunResult": {
+      "description": "offload.run's answer (OffloadRunStatus).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {"$ref": "#/$defs/OffloadRunStatus"},
+        "job": {"type": "string", "minLength": 1, "maxLength": 128},
+        "tool": {"$ref": "#/$defs/OffloadTool"},
+        "items": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/OffloadRunItem"}}
+      },
+      "required": ["status"]
+    },
+    "OffloadJobParams": {
+      "description": "offload.job and offload.cancel: the job offload.run started.",
+      "type": "object",
+      "properties": {
+        "contribution": {"$ref": "manifest.schema.json#/$defs/ID"},
+        "locale": {"type": "string"},
+        "machine": {"$ref": "protocol.schema.json#/$defs/UIMachine"},
+        "job": {"type": "string", "minLength": 1, "maxLength": 128}
+      },
+      "required": ["contribution", "locale", "machine", "job"]
+    },
+    "OffloadJobItem": {
+      "description": "One path (offload) or item (restore) of a job.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string", "maxLength": 4096},
+        "id": {"type": "string", "maxLength": 200},
+        "status": {"$ref": "#/$defs/OffloadJobItemStatus"},
+        "error": {"type": "string", "maxLength": 300},
+        "bytes": {"type": "integer", "minimum": 0, "x-go-type": "int64"}
+      },
+      "required": ["status"]
+    },
+    "OffloadJob": {
+      "description": "How a job goes. A job belongs to the extension: a client that lost track asks the inventory again. items may be left out; the manager's answer to the apps always has it.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {"$ref": "#/$defs/OffloadJobState"},
+        "phase": {"$ref": "#/$defs/OffloadPhase"},
+        "done_bytes": {"type": "integer", "minimum": 0, "x-go-type": "int64"},
+        "total_bytes": {"type": "integer", "minimum": 0, "x-go-type": "int64"},
+        "freed_bytes": {"type": "integer", "minimum": 0, "x-go-type": "int64"},
+        "error": {"type": "string", "maxLength": 300},
+        "items": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/OffloadJobItem"}}
+      },
+      "required": ["state", "done_bytes", "total_bytes"]
+    },
+    "OffloadProvider": {
+      "description": "One enabled disk_offload contribution, as GET /api/v1/extensions/-/offload lists it for the apps.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "extension": {"type": "string"},
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "kinds": {"type": "array", "items": {"$ref": "manifest.schema.json#/$defs/DiskOffloadKind"}},
+        "restore": {"type": "boolean"}
+      },
+      "required": ["extension", "id", "name", "kinds", "restore"]
+    },
+    "OffloadProviders": {
+      "description": "GET /api/v1/extensions/-/offload?machine=: the providers the map can offer on that computer.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "providers": {"type": "array", "items": {"$ref": "#/$defs/OffloadProvider"}}
+      },
+      "required": ["providers"]
+    },
+    "OffloadRunRequest": {
+      "description": "POST /api/v1/extensions/{id}/-/offload/{cid}/run, an app's request: without dry_run or confirm it is refused (confirmation_required); install only after the user agreed to the tool's install confirmation.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "machine": {"type": "string", "minLength": 1},
+        "action": {"$ref": "#/$defs/OffloadAction"},
+        "paths": {"type": "array", "maxItems": 50, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+        "items": {"type": "array", "maxItems": 50, "items": {"type": "string", "minLength": 1, "maxLength": 200}},
+        "dry_run": {"type": "boolean"},
+        "confirm": {"type": "boolean"},
+        "install": {"type": "boolean"}
+      },
+      "required": ["machine", "action"]
+    },
+    "OffloadStarted": {
+      "description": "The run route's 202 answer: the job to follow with GET …/jobs/{job}.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "job": {"type": "string", "minLength": 1}
+      },
+      "required": ["job"]
+    },
+    "OffloadError": {
+      "description": "An offload route's error: error in the reader's language and a code (bad_request, confirmation_required, read_only, not_found, machine_offline, node_outdated, tool_install_required with tool, offload_refused with items, plugin_failed (detail: the provider's own words, one line), usage_failed, deadline).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "error": {"type": "string"},
+        "code": {"type": "string"},
+        "tool": {"$ref": "#/$defs/OffloadTool"},
+        "detail": {"type": "string", "maxLength": 300},
+        "items": {"type": "array", "items": {"$ref": "#/$defs/OffloadRunItem"}}
+      },
+      "required": ["error", "code"]
+    }
+  }
+}

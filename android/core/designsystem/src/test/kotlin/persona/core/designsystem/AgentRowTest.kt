@@ -16,6 +16,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.dp
+import persona.core.domain.sort.AgentRowStyle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -84,6 +85,43 @@ class AgentRowTest {
             val probes = if (style == AppStyle.Board) listOf(4 to bitmap.height / 2, 30 to bitmap.height / 2) else listOf(120 to 0)
             probes.forEach { (x, y) -> assertNotEquals("unmuted $tag draws at ($x, $y)", Backdrop.toArgb(), bitmap.getPixel(x, y)) }
             assertTrue("unmuted $tag draws as before", before.getValue(tag).contentEquals(pixels(tag)))
+        }
+    }
+
+    /** Rows with sideUnread cleared draw pixel-identically to rows that never had one, across every style and theme. */
+    @Test fun rowWithoutUnreadSideDrawsPixelIdenticallyAndShowsAcrossAllRowStyles() {
+        var sideUnread by mutableStateOf<RowSideUnread?>(null)
+        rows { style, dark ->
+            Column {
+                AgentRow(
+                    "Review PR", Status.Unread, onClick = {}, Modifier.testTag("$style dark=$dark").width(320.dp),
+                    preview = "Parent summary", time = "2m", sideUnread = sideUnread,
+                )
+                if (style == AppStyle.Glass && !dark) {
+                    for (rowStyle in AgentRowStyle.entries) {
+                        AgentRow(
+                            "Review $rowStyle", Status.Unread, onClick = {}, Modifier.testTag("glass-$rowStyle").width(320.dp),
+                            style = rowStyle, sideUnread = sideUnread,
+                        )
+                    }
+                }
+            }
+        }
+        val baseline = tags.associate { (_, tag) -> tag to pixels(tag) }
+        val glassBaseline = AgentRowStyle.entries.associateWith { pixels("glass-$it") }
+
+        sideUnread = RowSideUnread(label = "New side reply: Side chat", more = "+1", onClick = {})
+        rule.waitForIdle()
+        tags.forEach { (_, tag) -> assertFalse("with sideUnread $tag changes", baseline.getValue(tag).contentEquals(pixels(tag))) }
+        AgentRowStyle.entries.forEach { rowStyle ->
+            assertFalse("with sideUnread Glass $rowStyle changes", glassBaseline.getValue(rowStyle).contentEquals(pixels("glass-$rowStyle")))
+        }
+
+        sideUnread = null
+        rule.waitForIdle()
+        tags.forEach { (_, tag) -> assertTrue("cleared $tag is pixel-identical", baseline.getValue(tag).contentEquals(pixels(tag))) }
+        AgentRowStyle.entries.forEach { rowStyle ->
+            assertTrue("cleared Glass $rowStyle is pixel-identical", glassBaseline.getValue(rowStyle).contentEquals(pixels("glass-$rowStyle")))
         }
     }
 

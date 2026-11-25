@@ -4,7 +4,7 @@
 import type { SettingsSection, Tab } from "./nav";
 
 // The tab whose page opens one of its items, and the query parameter that names it.
-export const SUB: Partial<Record<Tab, string>> = { models: "purpose", channels: "channel", extensions: "extension", connectors: "connector" };
+export const SUB: Partial<Record<Tab, string>> = { models: "purpose", channels: "channel", extensions: "extension", connectors: "connector", integrations: "integration" };
 
 /** The URL of a category (and its open item). "General" is plain /settings on a wide screen, where that opens it; on a
  *  phone /settings is the list, so it is named. */

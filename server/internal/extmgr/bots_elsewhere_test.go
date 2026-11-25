@@ -127,7 +127,7 @@ func TestAIElsewhereEverythingElseIsDroppedSilently(t *testing.T) {
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
-	w.botInfoRead(t)
+	w.botStarted(t)
 	total := w.api.total()
 	otherAt := []map[string]any{{"key": "@_user_1", "id": map[string]any{"open_id": "ou_someone"}, "name": "Someone"}}
 	for _, c := range []struct {

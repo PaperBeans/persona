@@ -310,7 +310,7 @@ func fieldItems(e UIElem, l i18n.Lang) []UIElem {
 			wire.FieldKindDatetime: "YYYY-MM-DDTHH:MM"}[e.Kind]
 		e.Kind, e.Label = "text", label
 		return []UIElem{e}
-	case wire.FieldKindMultiline:
+	case wire.FieldKindMultiline, wire.FieldKindText, "":
 		e.Kind, e.Label = "text", label
 		return []UIElem{e}
 	case wire.FieldKindMultichoice:

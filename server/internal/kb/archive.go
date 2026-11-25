@@ -15,6 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kbwire"
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 )
 
 // Defined in the contract package kbwire (docs/server/architecture.md "Contract packages"); the old names stay.
@@ -139,6 +140,9 @@ type Engine struct {
 
 	// clock is what the day recordings take for now (tests); nil: time.Now.
 	clock func() time.Time
+	// recordings is the recording module's write side (recording_port.go: RecordingProvider, SetRecordingProvider); nil
+	// without the module.
+	recordings recordingwire.Provider
 	// jobLeft is how long a recap job has left (tests); nil: until its context's deadline.
 	jobLeft func(ctx context.Context) time.Duration
 	// minutesCall and minutesPart are the transcript runes the minutes read in one call and in one part of a long
@@ -619,7 +623,7 @@ func (e *Engine) notePerson(c *Chat, source string, m SourceMessage) {
 		}
 		e.addHandles(pid, m.SenderHandles)
 		// Only write when something a reader cares about changed (not on every message of a busy group).
-		return !p.persisted || attributed || len(p.Chats) != before || p.LastSeen.Sub(seen) > time.Hour
+		return !p.Persisted || attributed || len(p.Chats) != before || p.LastSeen.Sub(seen) > time.Hour
 	})
 	if linked {
 		c.People = addUnique(c.People, pid)

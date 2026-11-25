@@ -71,8 +71,8 @@ func TestGoldenAssistantViewRepair(t *testing.T) {
 func TestAssistantRichViewPromptExamplesAreValid(t *testing.T) {
 	text := prompts.RenderAssistantClaudeMD(prompts.AssistantClaudeMD{})
 	blocks := wire.AssistantViewBlocks(text)
-	if len(blocks) != 2 {
-		t.Fatalf("prompt has %d examples, want 2", len(blocks))
+	if len(blocks) != 1 { // one card that chooses, opens a detail page and submits a form (#15017 merged the two)
+		t.Fatalf("prompt has %d examples, want 1", len(blocks))
 	}
 	for _, block := range blocks {
 		if _, err := block.Parse(); err != nil {

@@ -32,7 +32,7 @@ export const DEEP_KB_KINDS = ["projects", "topics", "chats", "people", "docs", "
  *  the two the same). */
 export const DEEP_SETTINGS_TABS: Record<string, string | null> = {
   general: null, persona: null, prompts: null, notifications: null, models: "purpose", agents: null, channels: "channel",
-  connectors: "connector", sources: null, extensions: "extension", shortcuts: null, devices: null, hub: null,
+  connectors: "connector", sources: null, extensions: "extension", integrations: "integration", shortcuts: null, advanced: null, devices: null, hub: null,
   managers: null, knowledge: null, avatar: null, labs: null,
 };
 

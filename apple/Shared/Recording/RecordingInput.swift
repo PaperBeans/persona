@@ -32,7 +32,7 @@ nonisolated enum RecordingInput: String, CaseIterable, Sendable {
     #if os(iOS)
     /// True when a Bluetooth audio device (headset or glasses) is part of the current route.
     static var bluetoothConnected: Bool {
-        let route = AVAudioSession.sharedInstance().currentRoute
+        let route = AudioSessionBroker.shared.currentRoute
         let types: Set<AVAudioSession.Port> = [.bluetoothHFP, .bluetoothA2DP, .bluetoothLE]
         return (route.inputs + route.outputs).contains { types.contains($0.portType) }
     }

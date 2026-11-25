@@ -283,7 +283,7 @@ func (s *Service) supervisedWorking(ctx context.Context, t Todo) {
 	}
 	b := &s.supervise
 	b.mu.Lock()
-	keys := []string{t.ID + "|" + sigReview, t.ID + "|" + sigTimedOut, t.ID + "|" + sigParkedDue, t.ID + "|" + sigEstimateDue}
+	keys := []string{t.ID + "|" + sigReview, t.ID + "|" + sigReviewNudge, t.ID + "|" + sigTimedOut, t.ID + "|" + sigParkedDue, t.ID + "|" + sigEstimateDue}
 	for _, key := range keys {
 		delete(b.pending, key)
 	}
@@ -343,6 +343,7 @@ func (s *Service) notifyTaskFailed(ctx context.Context, t Todo, machine, reason 
 		sub = "Persona"
 	}
 	s.push(withCard(ctx, cardTaskFailed), Notification{
+		CardID:    taskFailedCardID(t.ID), // started again (reopenFailedTodo): the push leaves the phone
 		Subtitle:  sub,
 		DeviceID:  here,
 		SessionID: t.Origin,

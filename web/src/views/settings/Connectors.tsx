@@ -13,13 +13,14 @@ import { api, ApiError, enc, errorText } from "../../lib/api";
 import { listConnectors, setConnector, type HubConnector } from "../../lib/connectors";
 import { ago } from "../../lib/format";
 import { accountTitle, type LarkAccount, type LarkAccountList } from "../../lib/lark-accounts";
+import { hubServes, moduleFeature } from "../../core/module-host";
 import { useLarkOn, useStore } from "../../lib/store";
 import { Button, copyText, cx, Dialog, IconButton, Loading, Spinner, toast } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
 import { Count, LarkAvatar } from "../inbox/InboxParts";
 import { ConnectorDetail, ConnectorList } from "./HubConnector";
 import { LarkDisplaySettings } from "./LarkDisplaySettings";
-import { LarkHomeSwitch } from "./LarkHomeSwitch";
+import { SettingsRows } from "../../core/SettingsRows";
 import { Group, Pill, Row, RowConfirm, Switch } from "./SettingsParts";
 import { SentSettings } from "./SentSettings";
 import { SENT_SUB } from "./nav";
@@ -38,6 +39,8 @@ interface LarkStatus {
 export function Connectors({ open, onOpen, onChannel, headerBack, openBeside }: { open: string | null; onOpen: (id: string | null) => void; onChannel?: (id: string, manager?: string) => void; headerBack?: boolean; openBeside?: string | null }) {
   // An older hub has no connectors API (feature "connectors"): only mail and Feishu, as before.
   const hasConnectors = useStore((s) => s.features.includes("connectors"));
+  // Mail only on a hub that has the mail module (its flag module.mail; an older hub without module flags has it).
+  const mail = useStore((s) => hubServes(moduleFeature("mail"), s));
   // Lark (the Lark gateway through /api/v1/lark/…) only on a hub that has it (feature `lark`); "Lark bot" is the hub's own.
   const lark = useLarkOn();
   const picked = useChosenManager();
@@ -61,7 +64,7 @@ export function Connectors({ open, onOpen, onChannel, headerBack, openBeside }: 
       <p className="mb-5 px-1 text-[12.5px] leading-relaxed text-ink-3">
         {t("settings-connectors.intro")}
       </p>
-      <Mail />
+      {mail && <Mail />}
       {lark && <Feishu />}
       <FeishuBot onChannel={onChannel} larkcli={larkcli} onOpen={onOpen} />
       {hasConnectors && <ConnectorList onOpen={onOpen} onLarkCli={setLarkcli} openBeside={openBeside} />}
@@ -74,7 +77,7 @@ export function Connectors({ open, onOpen, onChannel, headerBack, openBeside }: 
 
 // ── Mail ────────────────────────────────────────────────
 
-function Mail() {
+export function Mail({ hideInboxSwitch = false }: { hideInboxSwitch?: boolean } = {}) {
   const [accounts, setAccounts] = useState<MailAccount[] | null>(null);
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
@@ -150,7 +153,7 @@ function Mail() {
             />
           </div>
         ))}
-        {accounts && accounts.length > 0 && <MailInboxSwitch />}
+        {!hideInboxSwitch && accounts && accounts.length > 0 && <MailInboxSwitch />}
       </Group>
       <AddMail
         open={adding}
@@ -167,7 +170,7 @@ function Mail() {
 
 /** Mail's Add to Inbox (#5307): the same switch as Settings › Inbox Sources' mail page; off, no account's mail comes into
  *  the Inbox (search, replies and the knowledge base go on). Only a hub that has the switch lists it (`inbox`). */
-function MailInboxSwitch() {
+export function MailInboxSwitch() {
   const [on, setOn] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -503,7 +506,7 @@ function LarkAccountRow({ a, isDefault }: { a: LarkAccount; isDefault: boolean }
   );
 }
 
-function Feishu() {
+export function Feishu() {
   const [st, setSt] = useState<LarkStatus | null>(null);
   const [accounts, setAccounts] = useState<LarkAccountList | null>(null);
   const [error, setError] = useState("");
@@ -558,7 +561,8 @@ function Feishu() {
           <p className="px-4 pt-1 pb-2.5 text-[11.5px] leading-snug text-ink-3">{t("settings-connectors.accounts_note")}</p>
         </>
       )}
-      <LarkHomeSwitch />
+      {/* the lark module's rows (Show messages on home, #13404): core/module-host.ts `settingsRows` */}
+      <SettingsRows place="connectors.lark" />
       {!absent && <LarkDisplaySettings />}
       <div className="px-4 pt-2.5 pb-1 text-[11.5px] font-medium text-ink-3">{t("settings-connectors.lark_uses")}</div>
       {USES.map((u) => (

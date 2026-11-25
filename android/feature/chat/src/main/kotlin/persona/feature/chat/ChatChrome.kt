@@ -280,7 +280,7 @@ internal fun ChatHeader(
         session?.takeIf { it.canAttach }?.let { target ->
             add(JAction(stringResource(R.string.chat_chrome_attach), PhIcons.PlugsConnected, enabled = canAct) { state.run(target, ChatAction.Attach) })
         }
-        add(JAction(pluralStringResource(R.plurals.chat_chrome_peers, peers.size, peers.size), enabled = session != null) { dialog = "peers" })
+        add(JAction(pluralStringResource(R.plurals.chat_chrome_peers, peers.size, peers.size), PersonaIcons.agents, enabled = session != null) { dialog = "peers" })
         if (sideRollup.count > 0 && onOpenSide != null) add(JAction(stringResource(R.string.chat_side_sessions_count, sideRollup.count),
             PersonaIcons.sideSessions, subtitle = if (sideRollup.needsYou) stringResource(R.string.chat_side_sessions_needs_you) else null) {
             dialog = "sides"
@@ -295,7 +295,6 @@ internal fun ChatHeader(
                 onClick = onForkSession,
             ))
         }
-        add(JAction(stringResource(R.string.chat_chrome_switch_session), enabled = session != null) { dialog = "peers" })
         if (linkTitle != null) add(JAction(linkTitle) { dialog = "connection" })
         add(JAction(stringResource(R.string.chat_chrome_interrupt), enabled = canAct && session?.status in listOf("working", "blocked") && session?.canInterrupt != false) {
             state.run(session!!, ChatAction.Interrupt)

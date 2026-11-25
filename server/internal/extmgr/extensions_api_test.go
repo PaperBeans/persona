@@ -209,7 +209,7 @@ func startTestExtensions(t *testing.T, h *Manager, cfgs ...ExtensionConfig) {
 	// removed ("TempDir RemoveAll cleanup: … directory not empty", #4104).
 	_ = t.TempDir()
 	h.connectors = connector.NewRegistry(nil)
-	h.extensions = newExtensions(h.cfg.dir, cfgs, h.logf)
+	h.extensions = newExtensionsWith(h.cfg.dir, cfgs, h.logf, h.modules())
 	h.extensions.sandboxes.noDefault = true // test programs live outside their packages (extension_sandbox_test.go)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() {

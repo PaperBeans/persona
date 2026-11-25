@@ -238,7 +238,7 @@ func TestDayRecapWritten(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rc.Version != 1 || rc.Revision != 1 || rc.Day != "2026-11-11" || rc.Final || rc.Partial || rc.Summary != "评审了导出的上限。" ||
-		rc.Covers != (RecapSpan{0, 3600}) {
+		rc.Covers != (RecapSpan{From: 0, To: 3600}) {
 		t.Errorf("recap head %+v", rc)
 	}
 	// Line 1 only starts an entry of the notes, which cite nothing there: the second entry has no point left, and
@@ -865,7 +865,7 @@ func TestDayRecapMergeChecks(t *testing.T) {
 	if second.Kind != RecapMeeting || second.Meeting == nil || second.Meeting.ID != "e1" || second.Meeting.Kind != KindEvent {
 		t.Errorf("matched by number: %+v", second)
 	}
-	if rc.Covers.To != 5*3600 || !slices.Equal(rc.Gaps, []CoverageGap{{600, 900, GapInterrupted}}) {
+	if rc.Covers.To != 5*3600 || !slices.Equal(rc.Gaps, []CoverageGap{{From: 600, To: 900, Reason: GapInterrupted}}) {
 		t.Errorf("covers %+v gaps %+v", rc.Covers, rc.Gaps)
 	}
 	if !strings.Contains(rc.Markdown, "## 会议\n\n- 09:01–09:03 设计评审") || !strings.Contains(rc.Markdown, "- 没有录到：08:10–08:15（被打断）") {
@@ -1004,7 +1004,7 @@ func TestDayRecapRepair(t *testing.T) {
 	if len(rc.Actions) != 0 {
 		t.Errorf("actions whose line is gone kept: %+v", rc.Actions)
 	}
-	if rc.Version != 2 || !slices.Equal(rc.Gaps, []CoverageGap{{170, 200, GapErased}}) {
+	if rc.Version != 2 || !slices.Equal(rc.Gaps, []CoverageGap{{From: 170, To: 200, Reason: GapErased}}) {
 		t.Errorf("version %d gaps %+v", rc.Version, rc.Gaps)
 	}
 	if _, err := os.Stat(e.Store.Path(KindRecording, dayID, "summary.md")); !os.IsNotExist(err) {
@@ -1124,7 +1124,7 @@ func TestDayRecordingNeverMeeting(t *testing.T) {
 	if r.Meeting != nil || r.MinutesState != "" || r.Name != "全天录音 2026-11-11" || r.MinutesAsked || len(r.Items) != 0 {
 		t.Errorf("a meeting: %+v", r)
 	}
-	if r.isMeeting() || r.IsMeeting() {
+	if isMeeting(r) || r.IsMeeting() {
 		t.Error("a meeting by isMeeting or IsMeeting")
 	}
 	if notes, merges := f.counts(); notes != 0 || merges != 0 {

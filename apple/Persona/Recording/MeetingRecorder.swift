@@ -56,7 +56,7 @@ import UserNotifications
         // (a VoIP call without CallKit, still going) holds the route: taking the session would cut into that call.
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { @Sendable _ in
             Task { @MainActor in
-                guard !AVAudioSession.sharedInstance().isOtherAudioPlaying else { return }
+                guard !AudioSessionBroker.shared.isOtherAudioPlaying else { return }
                 RecordingCapture.shared.resumeAfterInterruption()
             }
         }

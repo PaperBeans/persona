@@ -43,7 +43,7 @@ func (p *Pusher) sendLocalizedQuietTo(build localized, collapseID string, wants 
 // and to an open desktop. Returns the selected count and the reachable count before preferences are applied. Such a
 // push defaults to P1 for grading; callers that know its urgency use sendFromPolicy.
 func (p *Pusher) sendFrom(manager string, build localized, collapseID string, wants func(NotifyPrefs) bool, rule quietRule, sent func(Device)) (selected, reachable int) {
-	selected, reachable, _ = p.sendFromPolicy(manager, pushPolicy{level: assistantwire.LevelP1, manager: manager}, build, collapseID, wants, rule, nil, sent)
+	selected, reachable, _ = p.sendFromPolicy(manager, pushPolicy{kind: kindAlert, level: assistantwire.LevelP1, manager: manager}, build, collapseID, wants, rule, nil, sent)
 	return selected, reachable
 }
 
@@ -72,7 +72,7 @@ func (p *Pusher) sendFromPolicy(manager string, policy pushPolicy, build localiz
 	if p == nil {
 		return 0, 0, ""
 	}
-	if p.filtering() { // off (and no attention mode): nothing below runs and the push goes exactly as before
+	if p.filteringFor(manager) { // off (and no attention mode or active extension layer): nothing below runs and the push goes exactly as before
 		policy.manager = manager
 		payload := build(i18n.Default)
 		policy = pushPolicyWithSource(policy, payload)

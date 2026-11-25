@@ -6,9 +6,16 @@ permissions:
   contents: read
 jobs:
   web:
-    name: Web lint, tests and build
+    name: Web lint, tests and build (${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: ["1/2", "2/2"]
+    env:
+      PERSONA_WEB_TEST_SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v4
         with:

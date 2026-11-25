@@ -28,5 +28,10 @@
   "closing_price": "Close",
   "field_detail": "{label} ({detail})",
   "comma_separated": "{label} (separate several with commas)",
-  "image_newer": "Image: {alt} (view it in a newer app version)"
+  "image_newer": "Image: {alt} (view it in a newer app version)",
+  "map_selected": "Selected",
+  "map_mode_driving": "Driving",
+  "map_mode_walking": "Walking",
+  "map_mode_cycling": "Cycling",
+  "map_mode_transit": "Transit"
 }

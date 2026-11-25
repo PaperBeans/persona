@@ -218,6 +218,8 @@ data class AgentLauncher(
     @SerialName("permission_modes") val permissionModes: List<String>? = null,
     /** Where the computer found the launcher, for example path, zshrc, or a managed provider. */
     val source: String? = null,
+    /** Whether a runtime launcher can receive separate task follow-up supervision instructions. */
+    @SerialName("supervision_policy") val supervisionPolicy: Boolean = false,
 ) {
     /** What people read for it: its display name, else its startup name (the web's `providerTitle`). */
     val title: String get() = launcherTitle(name, agentType, displayName?.trim()?.takeIf(String::isNotEmpty), baseUrl, source)

@@ -13,6 +13,7 @@ public struct ModuleRegistrar<Host: ModuleHost> {
     var settingsEntries: [ModuleSettingsEntry<Host>] = []
     var shellPages: [ModuleShellPage<Host>] = []
     var capabilities: [ObjectIdentifier: Any] = [:]
+    var audioLeases: [ModuleAudioLease] = []
     var problems: [String] = []
 
     init(module: ModuleDescriptor) { self.module = module }
@@ -76,6 +77,13 @@ public struct ModuleRegistrar<Host: ModuleHost> {
         guard allows(.capabilities) else { return }
         capabilities[ObjectIdentifier(type)] = value
     }
+
+    /// Declares a lease on the shared audio session (`ModuleSlot.audioLeases`), ranked by `kind` for the core's
+    /// `AudioSessionBroker` (#13849, #13431).
+    public mutating func audioLease(id: String, kind: AudioLeaseKind) {
+        guard allows(.audioLeases) else { return }
+        audioLeases.append(ModuleAudioLease(id: id, module: module.id, kind: kind))
+    }
 }
 
 /// The active modules and their entries, built from the app's module list. A module is active when it is in the list,
@@ -101,6 +109,8 @@ public struct ModuleRegistry<Host: ModuleHost> {
     public let settingsEntries: [ModuleSettingsEntry<Host>]
     /// Every shell page of the active modules, in list order.
     public let shellPages: [ModuleShellPage<Host>]
+    /// Every audio-session lease declared by the active modules, in list order, then registration order.
+    public let audioLeases: [ModuleAudioLease]
     private let launchHooks: [(ModuleID, () -> Void)]
     private let urlHandlers: [(URL) -> Bool]
     private let placeViews: [Host.Place: [ModuleView<Host>]]
@@ -129,6 +139,8 @@ public struct ModuleRegistry<Host: ModuleHost> {
         var shellPages: [ModuleShellPage<Host>] = []
         var shellIDs = Set<String>()
         var capabilities: [ObjectIdentifier: Any] = [:]
+        var audioLeases: [ModuleAudioLease] = []
+        var audioLeaseIDs = Set<String>()
         var seen = Set<ModuleID>()
         var actionIDs = Set<String>()
         for module in modules {
@@ -179,6 +191,15 @@ public struct ModuleRegistry<Host: ModuleHost> {
                     problems.append("\(descriptor.id): provides a capability another module provides")
                 }
             }
+            for lease in registrar.audioLeases {
+                if lease.id.isEmpty {
+                    problems.append("\(descriptor.id): audio lease id is empty")
+                } else if audioLeaseIDs.insert(lease.id).inserted {
+                    audioLeases.append(lease)
+                } else {
+                    problems.append("\(descriptor.id): audio lease \(lease.id) is already taken")
+                }
+            }
             active.append(descriptor)
         }
         self.active = active
@@ -191,6 +212,7 @@ public struct ModuleRegistry<Host: ModuleHost> {
         self.placeViews = placeViews
         self.settingsEntries = settings
         self.shellPages = shellPages
+        self.audioLeases = audioLeases
         self.capabilities = capabilities
         self.modules = modules
         self.isEnabled = isEnabled
@@ -236,4 +258,10 @@ public struct ModuleRegistry<Host: ModuleHost> {
     public func capability<Capability>(_ type: Capability.Type) -> Capability? {
         capabilities[ObjectIdentifier(type)] as? Capability
     }
+
+    /// The declared audio lease with this id, nil when no active module declares it.
+    public func audioLease(id: String) -> ModuleAudioLease? { audioLeases.first { $0.id == id } }
+
+    /// The active modules' declared audio leases of `kind`, in list order.
+    public func audioLeases(of kind: AudioLeaseKind) -> [ModuleAudioLease] { audioLeases.filter { $0.kind == kind } }
 }

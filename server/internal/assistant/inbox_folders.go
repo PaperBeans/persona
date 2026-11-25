@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
@@ -144,10 +145,21 @@ func (s *Service) setFolderConfig(ctx context.Context, enabled *bool, rules *str
 // folders are the folders the items of the list's window are filed in (open, or done within inboxKeepDone, though the
 // list carries only the newest of those; connectors' only when all), most used first.
 func (b *inboxBook) folders(all bool) []InboxFolder {
+	return b.folderAggregate(all, nil, false)
+}
+
+// foldersWithVisibility aggregates only items authorized for an AI prompt or tool response. Filtering item rows after
+// aggregation would still disclose an excluded item's folder path and its contribution to folder counts.
+func (b *inboxBook) foldersWithVisibility(all bool, visibility *assistantwire.InboxVisibilityConfig) []InboxFolder {
+	return b.folderAggregate(all, visibility, true)
+}
+
+func (b *inboxBook) folderAggregate(all bool, visibility *assistantwire.InboxVisibilityConfig, filter bool) []InboxFolder {
 	cutoff := time.Now().Add(-inboxKeepDone)
 	by := map[string]*InboxFolder{}
 	for _, it := range b.items {
-		if it.Folder == "" || it.DoneAt != nil && it.DoneAt.Before(cutoff) || !all && it.Connector != nil {
+		if it.Folder == "" || it.DoneAt != nil && it.DoneAt.Before(cutoff) || !all && it.Connector != nil ||
+			filter && inboxVisibilityWithMembersExcludedLocked(b, it, visibility) {
 			continue
 		}
 		f := by[it.Folder]
@@ -207,7 +219,7 @@ func (s *Service) fileFolders(ctx context.Context) {
 	cutoff := time.Now().Add(-inboxKeepDone)
 	var todo []*InboxItem
 	for _, it := range b.items {
-		if it.unfiled() && (it.DoneAt == nil || !it.DoneAt.Before(cutoff)) {
+		if !it.VisibilityExcluded && it.unfiled() && (it.DoneAt == nil || !it.DoneAt.Before(cutoff)) {
 			todo = append(todo, it)
 		}
 	}
@@ -234,13 +246,18 @@ func (s *Service) fileFolders(ctx context.Context) {
 // fileBatch asks the model about one batch and files what it answered; an item it gave no usable folder is marked
 // as asked (FolderOf) so the same content is not asked about again.
 func (s *Service) fileBatch(ctx context.Context, batch []*InboxItem) error {
+	fullCfg, err := s.inboxConfigFresh(ctx)
+	if err != nil {
+		return err
+	}
+	s.quarantineInboxVisibility(ctx, fullCfg.Visibility)
 	b := &s.inbox
 	b.mu.Lock()
 	cfg := b.folderCfg
-	in := prompts.InboxFoldersInput{Folders: b.folderLines(), Examples: b.folderExamples()}
+	in := prompts.InboxFoldersInput{Folders: b.folderLinesWithVisibility(fullCfg.Visibility), Examples: b.folderExamples(fullCfg.Visibility)}
 	asked := make(map[string]string, len(batch))
 	for _, it := range batch {
-		if !it.unfiled() || b.items[it.ID] != it {
+		if inboxVisibilityWithMembersExcludedLocked(b, it, fullCfg.Visibility) || !it.unfiled() || b.items[it.ID] != it {
 			continue
 		}
 		asked[it.ID] = it.Last
@@ -254,12 +271,12 @@ func (s *Service) fileBatch(ctx context.Context, batch []*InboxItem) error {
 	hello := s.hello(ctx)
 	in.Language = answerLanguage(hello.Locale)
 	system := prompts.RenderInboxFolders(prompts.InboxFolders{Owner: hello.Owner, FolderRules: cfg.Rules,
-		Rules: s.inboxConfig(ctx).Rules, Language: answerLanguage(hello.Locale), MaxDepth: 4})
+		Rules: fullCfg.Rules, Language: answerLanguage(hello.Locale), MaxDepth: 4})
 	var out struct {
 		Folders map[string]string `json:"folders"`
 	}
 	cctx, cancel := context.WithTimeout(ctx, folderWait)
-	err := s.inboxModelJSON(cctx, purposeTriage, system, prompts.RenderInboxFoldersInput(in), 0, &out)
+	err = s.inboxModelJSON(cctx, purposeTriage, system, prompts.RenderInboxFoldersInput(in), 0, &out)
 	cancel()
 	if err != nil {
 		return err
@@ -286,7 +303,14 @@ func (s *Service) fileBatch(ctx context.Context, batch []*InboxItem) error {
 
 // folderLines are the folders in use as the model is shown them, most used first. Under b.mu.
 func (b *inboxBook) folderLines() []prompts.InboxFolderUse {
-	all := b.folders(true)
+	return folderLinesOf(b.folders(true))
+}
+
+func (b *inboxBook) folderLinesWithVisibility(visibility *assistantwire.InboxVisibilityConfig) []prompts.InboxFolderUse {
+	return folderLinesOf(b.foldersWithVisibility(true, visibility))
+}
+
+func folderLinesOf(all []InboxFolder) []prompts.InboxFolderUse {
 	if len(all) > folderShown {
 		all = all[:folderShown]
 	}
@@ -297,11 +321,13 @@ func (b *inboxBook) folderLines() []prompts.InboxFolderUse {
 	return out
 }
 
-// folderExamples are the items the user filed by hand, newest first: the model follows their habits. Under b.mu.
-func (b *inboxBook) folderExamples() []prompts.InboxFolderExample {
+// folderExamples are the visible items the user filed by hand, newest first: the model follows their habits. Both the
+// current configuration and the persistent quarantine marker apply; an excluded example must not accompany an allowed
+// item's classification prompt. Under b.mu.
+func (b *inboxBook) folderExamples(visibility *assistantwire.InboxVisibilityConfig) []prompts.InboxFolderExample {
 	var mine []*InboxItem
 	for _, it := range b.items {
-		if it.FolderBy == FolderByUser && it.Folder != "" {
+		if it.FolderBy == FolderByUser && it.Folder != "" && !inboxVisibilityWithMembersExcludedLocked(b, it, visibility) {
 			mine = append(mine, it)
 		}
 	}
@@ -372,6 +398,10 @@ func (s *Service) toolInboxFolders(ctx context.Context, args json.RawMessage) (s
 	if f == "" && strings.TrimSpace(a.Folder) != "" {
 		return "", fmt.Errorf("folder %q has no name between the slashes", a.Folder)
 	}
+	fullCfg, configErr := s.inboxConfigFresh(ctx)
+	if configErr != nil {
+		return "", configErr
+	}
 	if err := s.inboxReady(ctx); err != nil {
 		return "", err
 	}
@@ -384,7 +414,7 @@ func (s *Service) toolInboxFolders(ctx context.Context, args json.RawMessage) (s
 	} else {
 		out.WriteString("Automatic filing is off: only moves by the user (or inbox_move) file items.\n")
 	}
-	folders := b.folders(true)
+	folders := b.foldersWithVisibility(true, fullCfg.Visibility)
 	if len(folders) == 0 {
 		out.WriteString("No folders in use.\n")
 	} else {
@@ -399,6 +429,9 @@ func (s *Service) toolInboxFolders(ctx context.Context, args json.RawMessage) (s
 	cutoff := time.Now().Add(-inboxKeepDone)
 	var items []*InboxItem
 	for _, it := range b.items {
+		if inboxVisibilityWithMembersExcludedLocked(b, it, fullCfg.Visibility) {
+			continue
+		}
 		if it.DoneAt != nil && it.DoneAt.Before(cutoff) {
 			continue
 		}

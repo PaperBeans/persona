@@ -9,15 +9,22 @@ import { describe, expect, it } from "vitest";
 const root = new URL("../../", import.meta.url);
 // each module, and the modules allowed to import it statically (admin/ is an entry of its own)
 const pages: Record<string, string[]> = {
-  Extensions: [],
-  Connectors: [],
-  ExtensionMarket: ["views/settings/Extensions.tsx", "admin/pages/Extensions.tsx"],
-  ExtensionAuth: ["views/settings/Extensions.tsx"],
-  ExtensionSettingsPage: ["views/settings/Extensions.tsx"],
+  Extensions: ["views/settings/IntegrationDetail.tsx"],
+  Connectors: ["views/settings/IntegrationDetail.tsx"],
+  IntegrationDetail: ["views/settings/Integrations.tsx"],
+  Integrations: [],
+  ExtensionMarket: ["views/settings/Extensions.tsx", "views/settings/IntegrationDetail.tsx", "views/settings/Integrations.tsx", "admin/pages/Extensions.tsx"],
+  ExtensionAuth: ["views/settings/Extensions.tsx", "views/settings/IntegrationDetail.tsx"],
+  ExtensionSettingsPage: ["views/settings/Extensions.tsx", "views/settings/IntegrationDetail.tsx"],
   ExtensionOperation: ["views/settings/ExtensionMarket.tsx"],
-  HubConnector: ["views/settings/Extensions.tsx", "views/settings/Connectors.tsx", "views/settings/FeishuBot.tsx"],
-  FeishuBot: ["views/settings/Connectors.tsx"],
-  SentSettings: ["views/settings/Connectors.tsx"],
+  HubConnector: [
+    "views/settings/Extensions.tsx",
+    "views/settings/Connectors.tsx",
+    "views/settings/FeishuBot.tsx",
+    "views/settings/integrations/ConnectorSection.tsx",
+  ],
+  FeishuBot: ["views/settings/Connectors.tsx", "views/settings/integrations/FeishuBotSection.tsx"],
+  SentSettings: ["views/settings/Connectors.tsx", "views/settings/Integrations.tsx"],
   SentChatRules: ["views/settings/SentSettings.tsx"],
 };
 
@@ -47,6 +54,7 @@ describe("the Extensions and Connectors pages boundary", () => {
     const settings = readFileSync(new URL("../Settings.tsx", import.meta.url), "utf8");
     expect(settings).toMatch(/const Extensions = lazyPage\(\(\) => import\("\.\/settings\/Extensions"\)\.then\(\(m\) => m\.Extensions\)\)/);
     expect(settings).toMatch(/const Connectors = lazyPage\(\(\) => import\("\.\/settings\/Connectors"\)\.then\(\(m\) => m\.Connectors\)\)/);
+    expect(settings).toMatch(/const Integrations = lazyPage\(\(\) => import\("\.\/settings\/Integrations"\)\.then\(\(m\) => m\.Integrations\)\)/);
     // the pages render through these in Settings.navigation / Settings.groups tests (loadPages)
   });
 });

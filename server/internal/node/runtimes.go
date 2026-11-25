@@ -75,6 +75,9 @@ type runtimeHello struct {
 		QueueSendNow bool `json:"queue_send_now"`
 		// Assistant: its launcher may run the Persona assistant (assistant_runtime.go; docs/integrations/runtimes.md "Assistant").
 		Assistant bool `json:"assistant"`
+		// RemoteAgent: the assistant runtime runs remotely (e.g. cloud API / extension backend) without local
+		// filesystem tools; node exposes memory_read/memory_write MCP tools and enforces confirm-writes posture.
+		RemoteAgent bool `json:"remote_agent"`
 		// SupervisionPolicy: the runtime carries manager-owned supervision_instructions on its own authoritative
 		// policy channel (separate from user messages) on session.start and session.send, and fails closed
 		// (assistant_supervision_runtime) when a nonempty policy cannot be applied (#11173).
@@ -200,6 +203,53 @@ func (h *runtimeConn) assistant() bool {
 	return h.hello.Caps.Assistant
 }
 
+// remoteAgent: the runtime runs assistant conversations remotely without local filesystem access (caps.assistant && caps.remote_agent).
+func (h *runtimeConn) remoteAgent() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.hello.Caps.Assistant && h.hello.Caps.RemoteAgent
+}
+
+// isRemoteRuntimeSession reports whether session carries the remote-assistant confirm-writes posture, using durable
+// session state, gateProxy marks, and registry records (including ambiguous ownership and startup state load) so
+// disconnects or ownership changes never clear the boundary.
+func (n *Node) isRemoteRuntimeSession(session string) bool {
+	if n == nil || session == "" {
+		return false
+	}
+	id := session
+	if parent, _, ok := splitRuntimeChild(session); ok {
+		id = parent
+	}
+	if n.gates().remoteSession(id) || (id != session && n.gates().remoteSession(session)) {
+		return true
+	}
+	if n.state != nil {
+		for _, candidate := range []string{id, session} {
+			if st, ok := n.state.get(candidate); ok {
+				if st.RemoteAgent {
+					return true
+				}
+				if st.Launcher != "" {
+					if h := n.assistantRuntime(st.Launcher); h != nil && h.remoteAgent() {
+						return true
+					}
+				}
+			}
+			if candidate == session {
+				break
+			}
+		}
+	}
+	if n.runtimes != nil && n.runtimes.isRemoteSession(session) {
+		return true
+	}
+	if n.state != nil && n.state.isLoading() && runtimeSessionID(id) {
+		return true
+	}
+	return false
+}
+
 // supervisionPolicy: the runtime runs assistant conversations and accepts supervision_instructions on its own policy
 // channel (caps.assistant && caps.supervision_policy).
 func (h *runtimeConn) supervisionPolicy() bool {
@@ -209,11 +259,12 @@ func (h *runtimeConn) supervisionPolicy() bool {
 }
 
 // assistantEnvironment permits local, dedicated-worker runtimes to opt into the generic non-proxied environment.
-// A daemon can be on another computer, where local command paths and credentials must not be sent.
+// A daemon or remote-agent runtime can run off-machine or without local filesystem access, where local command
+// paths and non-proxied credentials must not be sent.
 func (h *runtimeConn) assistantEnvironment() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.hello.Caps.Assistant && h.hello.Caps.AssistantEnvironment && h.daemon == ""
+	return h.hello.Caps.Assistant && h.hello.Caps.AssistantEnvironment && !h.hello.Caps.RemoteAgent && h.daemon == ""
 }
 
 // label is what the apps call the runtime.

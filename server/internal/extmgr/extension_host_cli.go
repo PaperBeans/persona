@@ -86,7 +86,7 @@ func (h *Manager) hostCLI(ctx context.Context, id string, spec extension.HostInt
 	if err != nil {
 		return nil, publicHostCLIError(err)
 	}
-	if !cliport.Available() { // a build without the lark module: as if lark-cli were not installed
+	if !cliport.Available(h.modules()) { // a build without the lark module: as if lark-cli were not installed
 		return nil, publicHostCLIError(cliwire.NewError(cliwire.KindNotInstalled, cliport.ErrUnavailable))
 	}
 	h.hostCLIMu.Lock()

@@ -310,6 +310,30 @@ struct AssistantModelChoiceTests {
             session: runtime, target: Launcher(name: "hosted-elsewhere", model: nil, agent: "claude", source: "runtime-two")))
     }
 
+    @Test func supervisionEligibilityRequiresACapableRuntimeWithoutChangingNativeClaudeOrCodex() {
+        #expect(AssistantModelChoice.launcherSupervisionPolicy(Launcher(name: "claude")))
+        #expect(AssistantModelChoice.launcherSupervisionPolicy(
+            Launcher(name: "codex", agent: "codex", source: "path")))
+        #expect(AssistantModelChoice.launcherSupervisionPolicy(
+            Launcher(name: "managed", agent: "claude", source: "persona")))
+        #expect(AssistantModelChoice.launcherSupervisionPolicy(
+            Launcher(name: "legacy-managed", agent: "codex", source: LegacyNames.product)))
+        #expect(!AssistantModelChoice.launcherSupervisionPolicy(
+            Launcher(name: "persona_ext_runtime", agent: "claude", assistant: true, supervisionPolicy: true, source: "persona")))
+        #expect(!AssistantModelChoice.launcherSupervisionPolicy(
+            Launcher(name: "agy", agent: "antigravity", assistant: true, source: "agy")))
+        #expect(!AssistantModelChoice.launcherSupervisionPolicy(
+            Launcher(name: "agy", agent: "antigravity", assistant: true, source: "path")))
+        #expect(!AssistantModelChoice.launcherSupervisionPolicy(
+            Launcher(name: "agy", agent: "antigravity", assistant: true, supervisionPolicy: true, source: "path")))
+        #expect(!AssistantModelChoice.launcherSupervisionPolicy(
+            Launcher(name: "managed-agy", agent: "antigravity", assistant: true, supervisionPolicy: true, source: "persona")))
+        #expect(!AssistantModelChoice.launcherSupervisionPolicy(
+            Launcher(name: "ordinary", agent: "antigravity", supervisionPolicy: true, source: "agy")))
+        #expect(AssistantModelChoice.launcherSupervisionPolicy(
+            Launcher(name: "agy", agent: "antigravity", assistant: true, supervisionPolicy: true, source: "agy")))
+    }
+
     @Test func explicitSwitchUsesPaseoProvidersAndExtensionConnectionIDs() throws {
         let paseo = try JSON.decoder.decode(Session.self, from: Data(
             #"{"machine_id":"box","session_id":"s3","launcher":"grok","agent":"paseo"}"#.utf8))
@@ -389,15 +413,18 @@ struct AssistantModelChoiceTests {
 
     @Test func launcherDecodesFriendlyNameAndRuntimeKind() throws {
         let json = """
-        {"name":"team-api","display_name":"Team API","model":"claude-sonnet-5-5","agent_type":"claude"}
+        {"name":"team-api","display_name":"Team API","model":"claude-sonnet-5-5","agent_type":"claude",
+         "assistant":true,"supervision_policy":true}
         """.data(using: .utf8)!
         let launcher = try JSON.decoder.decode(Launcher.self, from: json)
         #expect(launcher.displayName == "Team API")
         #expect(launcher.agentType == "claude")
         #expect(launcher.runtimeAgent == "claude")
+        #expect(launcher.assistant == true && launcher.supervisionPolicy == true)
 
         let fallback = try JSON.decoder.decode(Launcher.self, from: Data(#"{"name":"cx","agent_type":"","agent":"codex"}"#.utf8))
         #expect(fallback.runtimeAgent == "codex")
+        #expect(fallback.supervisionPolicy == nil)
 
         let odd = try JSON.decoder.decode(Launcher.self, from: Data(#"{"name":"cx","display_name":{},"agent_type":123,"agent":"codex"}"#.utf8))
         #expect(odd.name == "cx")
@@ -498,7 +525,12 @@ struct AssistantModelChoiceTests {
         #expect(Launcher(name: "shell-codex", agent: "codex", source: "path").runsAssistant)
         #expect(Launcher(name: "shell-claude", agent: "claude", source: "zshrc").runsAssistant)
         #expect(Launcher(name: "managed-claude", agent: "claude", source: "persona").runsAssistant)
-        #expect(!Launcher(name: "managed-codex", agent: "codex", source: "persona").runsAssistant)
+        // Managed Codex runs the assistant as the hub and the web have it since #12569.
+        #expect(Launcher(name: "managed-codex", agent: "codex", source: "persona").runsAssistant)
+        #expect(Launcher(name: "managed-codex", agent: "codex", source: "jarvis").runsAssistant)
+        // The hub's configured kind wins over the node's agent, as the web's `agent_type || agent`.
+        #expect(!Launcher(name: "provider", agent: "claude", agentType: "unknown", source: "persona").runsAssistant)
+        #expect(Launcher(name: "provider", agentType: "codex", source: "persona").runsAssistant)
         #expect(!Launcher(name: "agy", agent: "agy", source: "zshrc").runsAssistant)
         #expect(Launcher(name: "agy", agent: "agy", assistant: true, source: "agy").runsAssistant)
         #expect(!Launcher(name: "runtime-codex", agent: "codex", source: "paseo").runsAssistant)

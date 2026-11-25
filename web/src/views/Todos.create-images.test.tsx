@@ -321,6 +321,9 @@ describe("New to-do images over 1 MiB (#13797)", () => {
     const small = file("small.png");
     await pickNow([png("screenshot.png", 2880, 1800, 3 * MiB), small]);
     expect(preparing()?.textContent).toBe(t("todos.images_preparing", { count: 2 }));
+    // The status commits before the preparation chunk starts its first decode. Keep the original state and Create
+    // assertions, then wait for the decoder this test deliberately holds instead of assuming eight flushes load it.
+    await until(() => decodes.length === 1);
     expect(createButton().disabled).toBe(true);
     await submitForm();
     await flush();
@@ -371,6 +374,8 @@ describe("New to-do images over 1 MiB (#13797)", () => {
     await openNew();
     await pickNow([png("first.png", 3000, 2000, 2 * MiB), png("second.png", 3000, 2000, 2 * MiB), file("third.png")]);
     expect(preparing()?.textContent).toBe(t("todos.images_preparing", { count: 3 }));
+    await until(() => decodes.length === 1);
+    expect(decodes[0].name).toBe("first.png");
     await act(async () => removeButton("first.png").click());
     await act(async () => removeButton("second.png").click());
     expect(preparing()?.textContent).toBe(t("todos.images_preparing", { count: 1 }));
@@ -393,6 +398,8 @@ describe("New to-do images over 1 MiB (#13797)", () => {
     holdDecodes = true;
     await openNew();
     await pickNow([png("late.png", 3000, 2000, 2 * MiB)]);
+    await until(() => decodes.length === 1);
+    expect(decodes[0].name).toBe("late.png");
     await act(async () => button(t("common.cancel"), dialog())!.click());
     await flush();
     expect(document.querySelector("[role=dialog]")).toBeNull();

@@ -157,14 +157,16 @@ type busConn struct {
 
 // busPresence is a connected identity as the roster has it: who, and where its handshake says it runs.
 type busPresence struct {
-	ID      string `json:"id"`
-	Role    string `json:"role"`
-	Name    string `json:"name"`
-	Host    string `json:"host,omitempty"`
-	OS      string `json:"os,omitempty"`
-	Arch    string `json:"arch,omitempty"`
-	Deploy  string `json:"deploy,omitempty"`
-	Version string `json:"version,omitempty"`
+	ID             string `json:"id"`
+	Role           string `json:"role"`
+	Name           string `json:"name"`
+	Host           string `json:"host,omitempty"`
+	MachineUID     string `json:"machine_uid,omitempty"`
+	OS             string `json:"os,omitempty"`
+	Arch           string `json:"arch,omitempty"`
+	Deploy         string `json:"deploy,omitempty"`
+	Version        string `json:"version,omitempty"`
+	PendingRestart bool   `json:"pending_restart,omitempty"`
 	// Capabilities are what its manager.hello names (assistantwire.Capability*).
 	Capabilities []string `json:"capabilities,omitempty"`
 	// Features are the loaded built-in modules' flags to expose through the hub hello.
@@ -377,14 +379,16 @@ func (c *busConn) refuse(h *Hub, err error) (any, error) {
 // busManagerHello is what manager.hello says that the hub keeps for now; the rest (apps, the machine's summary) is
 // the follow-up's.
 type busManagerHello struct {
-	ID           string   `json:"id"`
-	Host         string   `json:"host"`
-	OS           string   `json:"os"`
-	Arch         string   `json:"arch"`
-	Deploy       string   `json:"deploy"`
-	Version      string   `json:"version"`
-	Capabilities []string `json:"capabilities"`
-	Features     []string `json:"features"`
+	ID             string   `json:"id"`
+	Host           string   `json:"host"`
+	MachineUID     string   `json:"machine_uid,omitempty"`
+	OS             string   `json:"os"`
+	Arch           string   `json:"arch"`
+	Deploy         string   `json:"deploy"`
+	Version        string   `json:"version"`
+	PendingRestart bool     `json:"pending_restart,omitempty"`
+	Capabilities   []string `json:"capabilities"`
+	Features       []string `json:"features"`
 }
 
 // busHelloReply is manager.hello's answer: who the hub knows the service as, the managers, and the assistant's hello
@@ -413,8 +417,9 @@ func (h *Hub) managerHello(ctx context.Context, c *busConn, params json.RawMessa
 	if p.ID != c.ident.ID {
 		return c.refuse(h, fmt.Errorf("manager.hello says %q but the token is %q's", clip(p.ID, 64), c.ident.ID))
 	}
-	if err := h.busAccept(ctx, c, busPresence{Host: clip(p.Host, 200), OS: clip(p.OS, 40), Arch: clip(p.Arch, 40),
-		Deploy: clip(p.Deploy, 40), Version: clip(p.Version, 80), Capabilities: capabilityList(p.Capabilities), Features: capabilityList(p.Features)}); err != nil {
+	if err := h.busAccept(ctx, c, busPresence{Host: clip(p.Host, 200), MachineUID: clip(strings.TrimSpace(p.MachineUID), 80),
+		OS: clip(p.OS, 40), Arch: clip(p.Arch, 40), Deploy: clip(p.Deploy, 40), Version: clip(p.Version, 80),
+		PendingRestart: p.PendingRestart, Capabilities: capabilityList(p.Capabilities), Features: capabilityList(p.Features)}); err != nil {
 		return nil, err
 	}
 	if c.ident.Role == bus.RoleManager && !slices.Contains(p.Capabilities, assistantwire.CapabilityConfigOwn) {
@@ -462,6 +467,11 @@ func (h *Hub) busAccept(ctx context.Context, c *busConn, p busPresence) error {
 		h.bus.current = map[string]*busConn{}
 	}
 	old := h.bus.current[c.ident.ID]
+	var prevPresence busPresence
+	if old == c {
+		prevPresence = c.presence
+		p.Since = prevPresence.Since
+	}
 	h.bus.current[c.ident.ID] = c
 	c.presence = p
 	if old != nil && old != c {
@@ -470,13 +480,19 @@ func (h *Hub) busAccept(ctx context.Context, c *busConn, p busPresence) error {
 	h.bus.mu.Unlock()
 	c.once.Do(func() { close(c.helloed) })
 	if old == c {
+		if prevPresence.Host != p.Host || prevPresence.MachineUID != p.MachineUID || prevPresence.OS != p.OS ||
+			prevPresence.Arch != p.Arch || prevPresence.Deploy != p.Deploy || prevPresence.Version != p.Version {
+			h.busSeen(ctx, c.ident.ID, &db.BusIdentity{Host: p.Host, MachineUID: p.MachineUID, OS: p.OS, Arch: p.Arch, Deploy: p.Deploy, Version: p.Version})
+		} else if prevPresence.PendingRestart != p.PendingRestart || !slices.Equal(prevPresence.Capabilities, p.Capabilities) {
+			h.tellManagers()
+		}
 		return nil // a second handshake on the same connection
 	}
 	if old != nil {
 		old.close(bus.CloseReplaced, "replaced by a newer connection")
 	}
 	h.logf("bus: [%s] connected: host %q %s/%s, version %q", p.ID, p.Host, p.OS, p.Arch, p.Version)
-	h.busSeen(ctx, c.ident.ID, &db.BusIdentity{Host: p.Host, OS: p.OS, Arch: p.Arch, Deploy: p.Deploy, Version: p.Version})
+	h.busSeen(ctx, c.ident.ID, &db.BusIdentity{Host: p.Host, MachineUID: p.MachineUID, OS: p.OS, Arch: p.Arch, Deploy: p.Deploy, Version: p.Version})
 	h.busRosterChanged(ctx, c)
 	if c.ident.ID == assistantwire.AssistantID {
 		go h.assistantConnected()

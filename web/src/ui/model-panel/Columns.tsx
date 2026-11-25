@@ -97,9 +97,9 @@ export function LevelColumn({ row, disabled, onLevel }: {
             onClick={() => onLevel(e)}
             className={cx(ENTRY, "disabled:opacity-50")}
           >
-            <span className="min-w-0 flex-1 truncate">{effortTitle(e)}</span>
-            {e === model.defaultEffort && !model.variants && <span className="shrink-0 text-submeta text-ink-3">{t("ui-modelpanel.recommended")}</span>}
-            {e === now && <Icon name="check" size={13} stroke={2.5} className="shrink-0 text-ink" />}
+            <span className="shrink-0">{effortTitle(e)}</span>
+            {e === model.defaultEffort && !model.variants && <span title={t("ui-modelpanel.recommended")} className="ml-auto truncate text-submeta text-ink-3">{t("ui-modelpanel.recommended")}</span>}
+            {e === now && <Icon name="check" size={13} stroke={2.5} className="ml-auto shrink-0 text-ink" />}
           </button>
         ))}
       {model && !levels.length && !note && <p className="px-2.5 text-label leading-[1.4] text-ink-3">{t("ui-modelpanel.no_levels")}</p>}

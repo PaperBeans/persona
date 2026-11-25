@@ -55,8 +55,8 @@ describe("a parked task in the Assistant's entries", () => {
     agents: [{ machine_id: "box", session_id: "s1", linked_at: at }],
     supervision: { supervisor: "main", state, ...(state === "parked" ? { parked } : {}), reviews: [], updated_at: at },
   } as unknown as Todo);
-  const entries = (t: Todo, at: string) => assistantEntries({
-    conversation: "main", main: "main", todos: [t], sessions: [], interactions: [], plans: {}, feed: [], now,
+  const entries = (t: Todo, at: string, sessions: Session[] = []) => assistantEntries({
+    conversation: "main", main: "main", todos: [t], sessions, interactions: [], plans: {}, feed: [], now,
     cards: [{ id: "plan:plan_1:0", todo_id: t.id, plan_id: "plan_1", index: 0, at, updated_at: at, state: "working" }],
   });
   const keys = (got: ReturnType<typeof assistantEntries>) => ({ needsYou: got.needsYou.map((i) => i.key), running: got.running.map((i) => i.key), parked: got.parked.map((i) => i.key), shelved: got.shelved.map((i) => i.key) });
@@ -72,6 +72,15 @@ describe("a parked task in the Assistant's entries", () => {
     const at = "2026-11-05T08:00:00Z";
     expect(keys(entries(todo("parked", at), at))).toEqual({ needsYou: [], running: [], parked: ["task:todo_1"], shelved: [] });
     expect(keys(entries(todo("", at), at)).running).toEqual([]);
+  });
+
+  it("keeps a timed recheck with background work in In progress", () => {
+    const at = "2026-11-10T08:00:00Z";
+    const task = todo("parked", at);
+    task.supervision!.parked = { reason: "Check background work", until: "2026-11-10T09:00:00Z", waiting_on: "date", count: 1 };
+    const session = { machine_id: "box", session_id: "s1", title: "Review", cwd: "/work", state: "idle", status: "idle", updated_at: at,
+      background_working: true, background_tasks_count: 1 } as Session;
+    expect(keys(entries(task, at, [session]))).toEqual({ needsYou: [], running: ["task:todo_1"], parked: [], shelved: [] });
   });
 });
 

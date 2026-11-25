@@ -121,6 +121,8 @@ class AppServices @Inject constructor(
         localize = { it.resolve(app) })
     var automation = false
         set(value) { field = value; if (value) mutableSession.value?.phone?.close() }
+    /** The core's audio broker over Android's audio focus (#13847): who owns the microphone and the speaker. */
+    val audioFocus = persona.core.moduleapi.AudioBroker(persona.android.platform.AndroidAudioFocus(app))
     /** Debug captures only: a pretend fold posture (see LaunchInput.posture). */
     val posture = androidx.compose.runtime.mutableStateOf<String?>(null)
 

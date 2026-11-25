@@ -25,6 +25,8 @@ const moduleCatalogs: Record<string, Record<string, () => Promise<Catalog>>> = {
   health: import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=module-health" }),
   voice: import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=module-voice" }),
   recording: import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=module-recording" }),
+  lark: import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=module-lark" }),
+  "screen-share": import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=module-screen-share" }),
 };
 /** flatten() over a language's namespace files of one kind, keyed like the import form's entries. The files are read
  *  from disk, not through an eager import.meta.glob: that made ~900 JSON modules, the slowest import of the suite. */

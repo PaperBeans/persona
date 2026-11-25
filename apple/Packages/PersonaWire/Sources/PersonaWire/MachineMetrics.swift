@@ -215,25 +215,30 @@ public nonisolated enum MetricLevel: Int, Comparable, Sendable {
 /// What the dashboard calls out on a machine, worst first: CPU ≥ 75 / 90 %, memory ≥ 80 / 90 %, disk ≥ 80 / 90 %,
 /// load ≥ 1 / 2 per core (docs/server/machines.md「Alerts」).
 public nonisolated struct MetricAlert: Hashable, Sendable {
+    /// Which value is high: a disk alert opens the usage map (#14576).
+    public enum Kind: Sendable { case cpu, memory, disk, load, other }
+
     public var label: String
     public var level: MetricLevel
+    public var kind: Kind
 
-    public init(label: String, level: MetricLevel) {
+    public init(label: String, level: MetricLevel, kind: Kind = .other) {
         self.label = label
         self.level = level
+        self.kind = kind
     }
 
     public static func of(_ s: MetricSample, cores: Int?) -> [MetricAlert] {
         var out: [MetricAlert] = []
         let cpu = MetricLevel.of(s.cpu, warn: 75, crit: 90)
-        if cpu > .normal { out.append(.init(label: String(localized: "High CPU"), level: cpu)) }
+        if cpu > .normal { out.append(.init(label: String(localized: "High CPU"), level: cpu, kind: .cpu)) }
         let mem = MetricLevel.of(s.memPercent, warn: 80, crit: 90)
-        if mem > .normal { out.append(.init(label: String(localized: "Low memory"), level: mem)) }
+        if mem > .normal { out.append(.init(label: String(localized: "Low memory"), level: mem, kind: .memory)) }
         let disk = MetricLevel.of(s.diskPercent, warn: 80, crit: 90)
-        if disk > .normal { out.append(.init(label: String(localized: "Disk almost full"), level: disk)) }
+        if disk > .normal { out.append(.init(label: String(localized: "Disk almost full"), level: disk, kind: .disk)) }
         if let load = s.load, let cores, cores > 0 {
             let l = MetricLevel.of(load / Double(cores), warn: 1, crit: 2)
-            if l > .normal { out.append(.init(label: String(localized: "High load"), level: l)) }
+            if l > .normal { out.append(.init(label: String(localized: "High load"), level: l, kind: .load)) }
         }
         return out.sorted { $0.level > $1.level }
     }

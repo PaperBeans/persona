@@ -117,6 +117,7 @@ func TestAssistantFollowupKeepsModelFromAssistantCatalog(t *testing.T) {
 }
 
 func TestAssistantBotModelMenuUsesAssistantCatalog(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f := pickFixture(t)
 	f.answerNode(assistantwire.DeviceLaunchersModels, func(_ string, raw json.RawMessage) (any, error) {
 		var p struct{ Purpose string }
@@ -134,8 +135,8 @@ func TestAssistantBotModelMenuUsesAssistantCatalog(t *testing.T) {
 		note = p.Text
 		return map[string]any{}, nil
 	})
-	s.setBotCurrent(botTarget{Kind: targetMain})
-	s.botModels(context.Background(), FeishuFeatures{Main: true}, "message", "/modellist", "", "", "")
+	s.larkModule().SetTarget(botTarget{Kind: targetMain})
+	botSay(t, s, f, FeishuFeatures{Main: true}, "message", "/modellist", "", "")
 	if !strings.Contains(note, "shell-model") || strings.Contains(note, "engine-model") {
 		t.Fatalf("assistant bot listed the Agent catalog: %q", note)
 	}

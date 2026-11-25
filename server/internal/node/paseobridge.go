@@ -480,8 +480,8 @@ var paseoBridgeCommand = func(ctx context.Context, rh *RuntimeHost) (*exec.Cmd, 
 		return nil, err
 	}
 	rh.logger.Printf("paseo bridge: Node.js %s, %s: %s", js.Version, js.From, js.Path)
-	cmd := exec.Command(js.Path, paseoBridgeArgs(dir, rh.path, home)...)
-	cmd.Env = js.env(append(os.Environ(), "PERSONA_RUNTIME_SOCKET="+rh.path))
+	cmd := exec.Command(js.Path, paseoBridgeArgs(dir, rh.dialPath(), rh.mcpConfig(), home)...)
+	cmd.Env = js.env(append(os.Environ(), "PERSONA_RUNTIME_SOCKET="+rh.dialPath()))
 	cmd.Dir = dir
 	return cmd, nil
 }
@@ -489,9 +489,9 @@ var paseoBridgeCommand = func(ctx context.Context, rh *RuntimeHost) (*exec.Cmd, 
 // paseoBridgeArgs is the bridge's command line after the JavaScript runtime. The node's mcp.json (beside the runtime
 // socket) is what the bridge gives each new Agent as its Persona tools, and of those the Agent's own run without a card
 // (--allow-tools: agentAllowedTools without the office rule, which the bridge's Agents do not get).
-func paseoBridgeArgs(dir, socket, home string) []string {
+func paseoBridgeArgs(dir, socket, mcpConfig, home string) []string {
 	return []string{filepath.Join(dir, "paseo", "bridge.mjs"), "--socket", socket, "--paseo-home", home,
-		"--mcp-config", filepath.Join(filepath.Dir(socket), "mcp.json"),
+		"--mcp-config", mcpConfig,
 		"--allow-tools", strings.Join(compat.MCPAllowedToolNames(assistantwire.AgentOwnTools, true), ",")}
 }
 

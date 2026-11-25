@@ -1,0 +1,5 @@
+{
+  "title": "Blocked named herdr sessions",
+  "block": "Block named herdr session {session} on {machine} (its Agents leave Persona; herdr keeps running)",
+  "unblock": "Unblock named herdr session {session} on {machine} (its Agents show in Persona again)"
+}

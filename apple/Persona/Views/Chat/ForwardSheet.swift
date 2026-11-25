@@ -183,6 +183,7 @@ struct ForwardFixedRow: View {
 /// A chat's row in Forward To and Send To: its mark, title, who answers there (and its computer where rows mix them),
 /// and an Agent's state.
 struct ForwardSessionRow: View {
+    @Environment(AppModel.self) private var model
     let session: Session
     /// The computer's name, where the rows of several computers mix.
     let machine: String?
@@ -190,11 +191,14 @@ struct ForwardSessionRow: View {
 
     var body: some View {
         let s = session
+        let preferTab = model.prefersHerdrTabName(for: s)
+        let detail = [s.displayTitleDetail(preferTab: preferTab), ForwardTargets.detail(s, machine: machine)]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         HStack(spacing: Theme.Space.m) {
             if s.assistant { IconTile(Theme.Icon.persona, tint: Theme.accent) } else { AgentMark(s, side: Theme.Size.wellM) }
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                Text(s.displayTitle).foregroundStyle(.primary).lineLimit(1)
-                Text(ForwardTargets.detail(s, machine: machine)).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
+                Text(s.displayTitle(preferTab: preferTab)).foregroundStyle(.primary).lineLimit(1)
+                Text(detail).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: Theme.Space.s)
             if busy {

@@ -3,10 +3,10 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, type Logger, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { brotliCopies, firstScreenBytes, firstScreenOverBudget, firstScreenRoom, gzipBytes, IDLE_TIER_BUDGET, idleImports, localeDirs, preloadScript, startupGaps } from "./src/startup-preload";
+import { brotliCopies, firstScreenBytes, firstScreenOverBudget, firstScreenRoom, gzipBytes, IDLE_TIER_BUDGET, idleImports, localeDirs, preloadScript, standalonePages, startupGaps } from "./src/startup-preload";
 import { textScale } from "./src/lib/text-scale";
 import { classicWorkerProblem } from "./src/sw-entry-check";
-import { clientKeys, i18nCatalogs, startupEntries } from "./i18n-catalogs";
+import { clientKeys, i18nCatalogs, moduleIds, namespaceModule, startupEntries } from "./i18n-catalogs";
 import { pageTokensPlugin } from "./page-tokens";
 import { thirdPartyLicenses } from "./third-party-licenses";
 import { compatBootstrap } from "./compat-bootstrap";
@@ -70,8 +70,8 @@ const showcaseImages: Plugin = {
 // the one before is in, so a cold first load waits for them one after another. This lets the client page's <head>
 // start fetching all of them at once (modulepreload fetches and parses, it does not run them: App still runs after
 // the catalog is set). The catalog is the preferred language's, picked like i18n/index.ts preferredLanguage (the
-// script is src/startup-preload.ts, tested against it); the live screen (/screen/<machine>, screen/screen.ts) never
-// loads App, so it gets only the catalog.
+// script is src/startup-preload.ts, tested against it); a module's page of its own (core/module-host.ts
+// `standalonePages`, the live screen's /screen/<machine>) never loads App, so it gets the catalog and its standalone.tsx.
 //
 // The catalog is the first screen's part of it (client-startup, web/i18n-catalogs.ts): the rest loads once the page
 // has started (i18n/index.ts startI18n), and holdLazyImports makes every other module wait for it. So the first
@@ -169,18 +169,24 @@ function startupPreload(): Plugin {
         const files = {
           shared,
           app: page(["/src/ui/ExtensionThemePicker.tsx", "/src/App.tsx"]),
-          screen: page(["/src/screen/ScreenView.tsx"]),
+          // the modules with such pages, which main.tsx reads first, then the page's own code; the core-only lane builds
+          // no module, so it has none of their pages
+          standalone: Object.fromEntries((CORE_ONLY ? [] : standalonePages()).map(({ base, module }) => [base, { module, files: page(["/src/modules/standalone.ts", `/src/modules/${module}/standalone.tsx`]) }])),
           catalogs: catalogs("client-startup"),
           matches: Object.fromEntries(Object.entries(langs).flatMap(([lang, ms]) => ms.map((m) => [m.toLowerCase(), lang]))),
         };
         const script = preloadScript(files);
         // What runs before the rest of the catalog is in: the groups, and main.tsx's other imports (not preloaded).
-        const first = new Set([...entry, ...shared, ...files.app, ...files.screen, ...group(["/src/lib/back-close.ts", "/src/lib/error-reports-start.ts"].map(find), new Set())]);
-        const gaps = startupGaps(chunks.filter((c) => first.has(c.fileName)).map((c) => c.code), clientKeys(meta("en")), startupEntries(meta("en")));
+        const own = Object.values(files.standalone).flatMap((p) => p.files);
+        const first = new Set([...entry, ...shared, ...files.app, ...own, ...group(["/src/lib/back-close.ts", "/src/lib/error-reports-start.ts"].map(find), new Set())]);
+        // a module's own strings load with its code (core/module-host.ts loadModule), before a page of its own draws
+        const modules = moduleIds(meta("en"));
+        const keys = clientKeys(meta("en")).filter((key) => !namespaceModule(key.slice(0, key.indexOf(".")), modules));
+        const gaps = startupGaps(chunks.filter((c) => first.has(c.fileName)).map((c) => c.code), keys, startupEntries(meta("en")));
         if (gaps.length) {
           throw new Error(`startup-preload: the first screen's code names ${gaps.join(", ")}, which the page reads before the rest of the catalog is in: add them to src/i18n/startup-namespaces.json (a key there takes every key that begins with it, a namespace all of it; list a namespace whole only when the first screen reads most of it)`);
         }
-        startup = [...new Set([...entry, ...shared, ...files.app, ...files.screen, ...Object.values(files.catalogs), ...Object.values(catalogs("client-rest"))])];
+        startup = [...new Set([...entry, ...shared, ...files.app, ...own, ...Object.values(files.catalogs), ...Object.values(catalogs("client-rest"))])];
         if (!idle.size) throw new Error("startup-preload: no lazyPage(…, { idle: true }) was found, so the idle tier's budget would check nothing");
         idleFiles = group([...idle].map(find), new Set([...first, ...startup]));
         screens = Object.entries(files.catalogs).map(([lang, catalog]) => [lang, [...new Set([...entry, ...shared, ...files.app, catalog])]]);
@@ -237,10 +243,19 @@ const holdLazyImports: Plugin = {
   name: "hold-lazy-imports",
   apply: "build",
   renderDynamicImport({ moduleId, targetModuleId }) {
-    if (moduleId.endsWith("/src/main.tsx") || moduleId.includes("/src/admin/") || targetModuleId?.startsWith("\0i18n-catalog:")) return null;
+    // a module's page of its own (src/modules/<id>/standalone.tsx) loads as main.tsx's imports do: core/module-host.ts
+    // `standalonePages`
+    if (moduleId.endsWith("/src/main.tsx") || moduleId.includes("/src/admin/") || targetModuleId?.startsWith("\0i18n-catalog:") || /\/src\/modules\/[^/]+\/standalone\.tsx$/.test(targetModuleId ?? "")) return null;
     return { left: "Promise.resolve(globalThis.__personaI18nRest?.()).then(()=>import(", right: "))" };
   },
 };
+
+const src = (path: string) => fileURLToPath(new URL(`./src/${path}`, import.meta.url));
+/** The files of the "modules-standalone" chunk (manualChunks below); none in the core-only lane, which builds no module. */
+const STANDALONE_CHUNK: ReadonlySet<string> = new Set(CORE_ONLY ? [] : [
+  src("modules/standalone.ts"), src("core/module-switch.ts"), src("core/module-flags.ts"),
+  ...[...new Set(standalonePages().map((p) => p.module))].map((id) => src(`modules/${id}/module.ts`)),
+]);
 
 export default defineConfig({
   plugins: [coreOnly(), testWorkerLimit(), katexFonts, i18nCatalogs, pageTokensPlugin, react(), tailwindcss(), adminFallback, showcaseImages, startupPreload(), holdLazyImports, classicWorker, buildStamp, thirdPartyLicenses,
@@ -277,6 +292,11 @@ export default defineConfig({
       output: {
         entryFileNames: (chunk) => (chunk.name === "sw" ? "sw.js" : chunk.name === "admin" ? "admin/assets/[name]-[hash].js" : "assets/[name]-[hash].js"),
         chunkFileNames: (chunk) => (adminOnly(chunk.moduleIds) ? "admin/assets/[name]-[hash].js" : "assets/[name]-[hash].js"),
+        // What main.tsx reads before App of the modules with a page of their own (src/modules/standalone.ts, the
+        // descriptors it lists, this browser's switch, the flag names) goes in one chunk: App shares all of it, and
+        // main.tsx's top-level await keeps shared code out of main's own chunk, so it would be four chunks under 1 KB,
+        // which the first screen counts uncompressed (src/startup-preload.ts firstScreenBytes).
+        manualChunks: (id) => (STANDALONE_CHUNK.has(id) ? "modules-standalone" : undefined),
         assetFileNames: (asset) => ((asset.names ?? []).some((n) => n.startsWith("admin")) ? "admin/assets/[name]-[hash][extname]" : "assets/[name]-[hash][extname]"),
       },
     },

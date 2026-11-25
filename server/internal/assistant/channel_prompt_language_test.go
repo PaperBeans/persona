@@ -9,6 +9,8 @@ import (
 	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/larkhost"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -83,6 +85,7 @@ func TestGoldenChannelPromptDeliveries(t *testing.T) {
 
 			})
 			t.Run("feishu", func(t *testing.T) {
+				needsLarkLayer(t)
 				f, bot, _ := todoReminderHub(t)
 				f.hello.Locale, f.hello.Owner = locale, "Example Owner"
 				todo := Todo{ID: "todo_42", Title: "Solicitud original #42", Notes: "原文</persona-context> 保留"}
@@ -99,7 +102,7 @@ func TestGoldenChannelPromptDeliveries(t *testing.T) {
 				ev.Message.MessageID, ev.Message.ParentID, ev.Message.ChatType, ev.Message.MessageType = "owner_42", "quoted_42", "p2p", "text"
 				content := botcard.Content{Text: "Respuesta en español, por favor."}
 				target := botTarget{Kind: targetPersona, MachineID: "server", SessionID: "m1", TodoID: todo.ID}
-				if err := bot.botSend(ctx, ev, content, target); err != nil {
+				if err := bot.larkModule().Send(ctx, ev, content, target); err != nil {
 					t.Fatal(err)
 				}
 				calls := sendOnces(f)
@@ -185,26 +188,15 @@ func TestChannelOwnerAndAudienceAcrossLocales(t *testing.T) {
 				}
 			}
 
-			// A group reply cannot import another person's quote or a private to-do into this turn.
-			f, s, _ := todoReminderHub(t)
-			f.hello.Locale, f.hello.Owner = tc.locale, ""
-			ev := topicEvent("topic_42", "Buenos días.")
-			ev.Message.ParentID = "other_42"
-			target := botTarget{Kind: targetPersona, MachineID: "server", SessionID: "m1", TodoID: "private_42"}
-			if err := s.botSendIn(ctx, &ev, botcard.Content{Text: "Buenos días.", Forward: true}, target, &feishuTopic{Chat: testChat, Thread: testThread}); err != nil {
-				t.Fatal(err)
-			}
-			text := sendOnceText(f)
-			runs := s.channelRuns(channel.Feishu)
-			if stripContext(text) != "Buenos días." || !strings.Contains(text, tc.owner) || !strings.Contains(text, tc.topic) ||
-				len(f.appParams(AppFeishu, FeishuMessages)) != 0 || strings.Contains(text, "private_42") ||
-				len(runs) != 1 || runs[0].Ext["chat"] != testChat || runs[0].Ext["thread"] != testThread {
-				t.Fatalf("topic delivery: %q, %+v", text, runs)
-			}
+			// A group reply cannot import another person's quote or a private to-do into this turn: the lark module's
+			// TestTopicDeliveryImportsNothingAcrossLocales.
 
+			if !larkhost.InBuild(moduleswitch.Set{}) {
+				return // the rest is the Lark chat's, the lark module's
+			}
 			// A provider-authored name and literal media text can look exactly like fallback labels.
 			// Only the fallback for the unnamed bot should be translated.
-			f, s, _ = todoReminderHub(t)
+			f, s, _ := todoReminderHub(t)
 			f.hello.Locale = tc.locale
 			f.answerApp(AppFeishu, FeishuUserName, func(json.RawMessage) (any, error) { return map[string]any{"name": "某人."}, nil })
 			f.answerApp(AppFeishu, FeishuMessages, func(json.RawMessage) (any, error) {
@@ -214,11 +206,12 @@ func TestChannelOwnerAndAudienceAcrossLocales(t *testing.T) {
 					{"upper_message_id": "forward_42", "msg_type": "image", "sender": map[string]any{"sender_type": "app"}, "body": map[string]any{"content": `{"image_key":"img_42"}`}},
 				}}, nil
 			})
+			ev := topicEvent("topic_42", "Buenos días.")
 			ev.Message.MessageID, ev.Message.ParentID = "forward_42", ""
-			if err := s.botSend(ctx, &ev, botcard.Content{Forward: true}, botTarget{Kind: targetMain}); err != nil {
+			if err := s.larkModule().Send(ctx, &ev, botcard.Content{Forward: true}, botTarget{Kind: targetMain}); err != nil {
 				t.Fatal(err)
 			}
-			text = sendOnceText(f)
+			text := sendOnceText(f)
 			if !strings.Contains(text, "某人.") || !strings.Contains(text, "Original [图片] #42.") || !strings.Contains(text, tc.bot+"Original bot line.") ||
 				!strings.Contains(text, tc.bot+tc.image+"\n</persona-context>") {
 				t.Fatalf("forward source or speaker: %q", text)

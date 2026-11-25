@@ -133,7 +133,7 @@ extension SlotRow {
     }
 
     @MainActor private var titleText: some View {
-        UltracodeMark.after(session.displayTitle, on: ultracodeMark)
+        UltracodeMark.after(rowTitle, on: ultracodeMark)
             .font(session.state == .unread ? Theme.Font.bodyHeavy : Theme.Font.bodyStrong)
             .lineLimit(1)
             .animation(UltracodeMark.motion, value: ultracodeMark)
@@ -228,7 +228,10 @@ extension SlotRow {
                 }
                 HStack(spacing: Theme.Space.xs) {
                     if needsYouPill { needsYouChip }
-                    let words = Text(session.listPreview(muted: muted) ?? placeString)
+                    let detailLine = session.listPreview(muted: muted).map { preview in
+                        titleDetail.map { "\($0) · \(preview)" } ?? preview
+                    } ?? placeString
+                    let words = Text(detailLine)
                     (stateWords.map { $0 + Text(verbatim: " · ") + words } ?? words)
                         .font(Theme.Font.caption)
                         .foregroundStyle(.secondary)

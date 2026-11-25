@@ -32,6 +32,8 @@ private class PinnedExtensionManagement(val source: ExtensionManagement, private
     override suspend fun themes() = withContext(pins) { source.themes() }
     override suspend fun triageTemplates() = withContext(pins) { source.triageTemplates() }
     override suspend fun setConfig(id: String, config: JsonObject) = withContext(pins) { source.setConfig(id, config) }
+    override suspend fun setConfigPreservingEntries(id: String, config: JsonObject) =
+        withContext(pins) { source.setConfigPreservingEntries(id, config) }
     override suspend fun setSecret(id: String, name: String, value: String) = withContext(pins) { source.setSecret(id, name, value) }
     override suspend fun setSecretReference(id: String, name: String, reference: String) =
         withContext(pins) { source.setSecretReference(id, name, reference) }

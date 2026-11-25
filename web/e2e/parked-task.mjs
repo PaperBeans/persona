@@ -22,8 +22,6 @@ mkdirSync(shots, { recursive: true });
 const watchdog = setTimeout(() => { console.error("TIMEOUT parked-task browser verification (180s)"); process.exit(124); }, 180_000);
 const sid = "parked-task-demo";
 const REASON = "The design team has to pick the icon set first";
-const words = { en: /^Parked until .+ · /, "zh-Hans": /^搁置到 .+ · /, ja: /^.+ まで保留 · / };
-const chip = { en: "Parked", "zh-Hans": "已搁置", ja: "保留中" };
 const group = { en: "Parked", "zh-Hans": "搁置", ja: "保留中" };
 const all = { en: "All", "zh-Hans": "全部", ja: "すべて" };
 const readings = [];
@@ -137,10 +135,16 @@ async function run(browser, size, theme, language, textSize = "standard") {
     assert.equal(await page.locator("[data-progress-shelved]").count(), 0, "a parked task is not folded under shelved");
     assert.equal(await rows.locator(".text-green").count(), 0, "an unread Agent turn does not give a parked task a green completion mark");
     assert.equal(await page.locator('[data-parked-task-row][data-counts-open="true"]').count(), 2);
-    const text = (await page.locator('[data-parked-task-row="demo-icons"]').innerText()).split("\n").map((line) => line.trim()).filter(Boolean);
-    assert(text.includes(chip[language]), `the row's state word is ${chip[language]}: ${JSON.stringify(text)}`);
-    const line = text.find((part) => part.includes(REASON));
-    assert(line && words[language].test(line), `the row says until when and why: ${JSON.stringify(text)}`);
+    const iconsWait = page.locator('[data-parked-task-row="demo-icons"] [data-task-wait-info="demo-icons"]');
+    assert.equal(await iconsWait.getAttribute("data-wait-collapsed"), "true", "parked row starts collapsed to two lines");
+    assert.equal(await iconsWait.locator("[data-wait-reason]").count(), 0, "reason is hidden until expanded");
+    await iconsWait.locator("[data-wait-toggle]").click();
+    assert.equal(await iconsWait.getAttribute("data-wait-collapsed"), "false");
+    assert((await iconsWait.locator("[data-wait-reason]").innerText()).includes(REASON), "expanding reveals the recorded wait reason");
+    const reviewsWait = page.locator('[data-pr-waiting-row="demo-reviews"] [data-task-wait-info="demo-reviews"]');
+    assert.equal(await reviewsWait.getAttribute("data-wait-collapsed"), "true");
+    assert.equal(await reviewsWait.locator("a").count(), 0, "PR links stay collapsed until expanded");
+    await reviewsWait.locator("[data-wait-toggle]").click();
     assert.deepEqual(await page.locator('[data-pr-waiting-row="demo-reviews"] a').evaluateAll((links) => links.map((a) => a.href)), [
       "https://github.com/example/demo/pull/42", "https://github.com/example/demo/pull/41",
     ]);
@@ -152,6 +156,7 @@ async function run(browser, size, theme, language, textSize = "standard") {
     assert.equal(await board.locator("h3").innerText(), `${group[language]} · 2`);
     assert((await board.innerText()).includes("Example toolbar icons"));
     assert((await board.innerText()).includes("Example schedule reviews"));
+    assert.equal(await board.locator('[data-wait-collapsed="true"]').count(), 2, "board parked rows start collapsed");
     assert.equal(await board.locator(".text-green").count(), 0);
     await noOverflow();
     await page.screenshot({ path: name("board") });
@@ -160,7 +165,9 @@ async function run(browser, size, theme, language, textSize = "standard") {
     await section.waitFor();
     assert.equal(await section.getAttribute("data-todos"), "2");
     assert.equal(await section.locator("[data-todo]").count(), 2);
+    assert.equal(await section.locator('[data-wait-collapsed="true"]').count(), 2, "To-dos parked rows start collapsed");
     assert.equal(await page.locator('[data-section="pr"]').count(), 0);
+    await section.locator('[data-todo="demo-reviews"] [data-wait-toggle]').click();
     assert.equal(await section.locator('a[href="https://github.com/example/demo/pull/42"]').count(), 1);
     if (size === "wide") {
       const empty = JSON.parse(readFileSync(new URL(`../src/i18n/locales/${language}/task-repositories.json`, import.meta.url), "utf8")).no_links;

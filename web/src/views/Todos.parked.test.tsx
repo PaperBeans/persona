@@ -136,6 +136,12 @@ describe("To-dos parked status section", () => {
     expect(parked?.querySelector('[data-todo="merge-many"]')).toBeTruthy();
     expect(parked?.querySelector('[data-todo="merge-one"]')).toBeTruthy();
     expect(parked?.querySelectorAll("[data-todo]")).toHaveLength(2);
+    expect(parked?.querySelectorAll('[data-testid="todo-status-line"]')).toHaveLength(0);
+    expect(parked?.querySelectorAll('[data-wait-collapsed="true"]')).toHaveLength(2);
+    const mergeMany = parked?.querySelector<HTMLElement>('[data-todo="merge-many"]')!;
+    expect(mergeMany.querySelectorAll("[data-pr-waiting-url]")).toHaveLength(0);
+    await act(async () => mergeMany.querySelector<HTMLButtonElement>("[data-wait-toggle]")!.click());
+    expect(mergeMany.querySelectorAll("[data-pr-waiting-url]")).toHaveLength(3);
     expect(section("pr")).toBeNull();
   });
 

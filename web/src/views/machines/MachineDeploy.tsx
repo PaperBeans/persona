@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { api, enc, errorText } from "../../lib/api";
 import { machineDeployment } from "../../lib/machine-deploy";
+import type { Manager } from "../../lib/managers";
 import { refresh } from "../../lib/store";
 import type { Machine } from "../../lib/types";
 import { Button, cx, toast } from "../../ui/atoms";
-import { t } from "../../i18n";
+import { formatList, t } from "../../i18n";
 
 /** The update action both the deployment strip and the node self-check use: the same request, the same capability checks. */
 export function useDeploy(machine: Machine) {
@@ -34,14 +35,22 @@ export function useDeploy(machine: Machine) {
 
 /** The list and detail keep the same capability checks, stages and confirmation wording. */
 /** `onDetails`: the Machines card's "Details", which opens the computer's alert sheet on the deployment. */
-export function MachineDeploy({ machine, className, onDetails }: { machine: Machine; className?: string; onDetails?: () => void }) {
+export function MachineDeploy({ machine, className, onDetails, hostedManagers }: { machine: Machine; className?: string; onDetails?: () => void; hostedManagers?: readonly Manager[] }) {
   const { deployment, pending, deploy } = useDeploy(machine);
   if (!deployment.visible) return null;
+  const coLocatedNames = hostedManagers?.length && (deployment.supported || deployment.busy)
+    ? formatList(hostedManagers.map((m) => m.name))
+    : "";
 
   return (
     <div className={cx("mx-4 flex items-center gap-2 rounded-[8px] bg-orange-tint py-1.5 pl-2.5 pr-1.5 text-[12px] text-orange", className)}>
       <div className="min-w-0 flex-1 break-words" role="status">
         {deployment.message && <p>{deployment.message}</p>}
+        {coLocatedNames && (
+          <p className="mt-0.5 text-submeta text-ink-2" data-testid="deploy-co-located-note">
+            {t("machines-machinedeploy.co_located_note", { names: coLocatedNames })}
+          </p>
+        )}
         {deployment.error && <p>{deployment.error}</p>}
         {deployment.reason && !deployment.busy && <p>{deployment.reason}</p>}
       </div>

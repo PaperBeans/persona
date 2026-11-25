@@ -1,14 +1,16 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// The usage popover (UsagePopover.tsx) opens upward from the sidebar's bottom over the rows' column. The column's own layers
-// (the sticky Persona row and group headers at z-30, segments, chips) must stay inside it, or they draw over the popover.
+// The usage popover (UsagePopover.tsx) opens as a fixed overlay portaled to document.body at z-50 above both
+// the sidebar's isolated rows column and the main workspace pane.
 const source = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 describe("sidebar layers", () => {
-  it("the rows' column is its own stacking context, under the usage popover", () => {
+  it("keeps the sidebar rows column isolated and renders the usage popover as a fixed high-z overlay", () => {
     const rows = source("./Sidebar.tsx").match(/<div ref=\{nav\} data-sidebar-rows[^\n]*?className="([^"]*)"/);
     expect(rows?.[1].split(/\s+/)).toContain("isolate");
-    expect(source("./UsagePopover.tsx")).toMatch(/role="dialog"[^\n]*?className="[^"]*\babsolute bottom-full\b[^"]*\bz-\d+/);
+    const popover = source("./UsagePopover.tsx");
+    expect(popover).toMatch(/role="dialog"[\s\S]*?className="[^"]*\bfixed\b[^"]*\bz-50\b/);
+    expect(popover).toContain("createPortal(dialog, document.body)");
   });
 });

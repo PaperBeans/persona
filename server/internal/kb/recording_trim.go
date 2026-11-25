@@ -44,7 +44,7 @@ func (s *Store) trimRecording(r *Recording, now time.Time) (changed, photos bool
 	if s.readOnly {
 		return false, false, ErrReadOnly
 	}
-	defer s.audioFileClosed(r.ID) // once recFilesMu is let go (audioRec.mu comes before it)
+	defer s.recordingAudio().AudioClosed(r.ID) // once recFilesMu is let go (audioRec.mu comes before it)
 	zone := s.Zone()
 	s.recFilesMu.Lock()
 	defer s.recFilesMu.Unlock()
@@ -59,7 +59,7 @@ func (s *Store) trimRecording(r *Recording, now time.Time) (changed, photos bool
 	}
 	// The photos the minutes cite stay; before the sweep, which leaves attachments/ to this. The audio goes with
 	// them: writes from now on are refused.
-	s.audioDroppedLocked(r.ID, ErrTranscriptExpired)
+	s.recordingAudio().AudioDropped(r.ID, ErrTranscriptExpired)
 	kept, photos, err := s.trimPhotosLocked(r, zone)
 	changed = changed || kept
 	if err != nil {
@@ -100,8 +100,8 @@ func (s *Store) putTrimmedMeta(r *Recording, now time.Time) error {
 	at := now.UTC().Truncate(time.Second)
 	r.TrimmedAt = &at
 	r.Attendance, r.AttendingSession = "", nil
-	r.planMinutes()
-	r.planRecap()
+	planMinutes(r)
+	planRecap(r)
 	raw, err := json.MarshalIndent(protectedEntity(r, &r.Tagging, current, false), "", "  ")
 	if err != nil {
 		return err

@@ -6,20 +6,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/nwverse/persona/server/internal/assistantwire"
 )
 
-// HealthIntakeRow is an immutable measurement, with a new sequence number when undone.
-// Undone rows stay indefinitely so an offline client can remove its own health samples.
-type HealthIntakeRow struct {
-	ID        string     `json:"id"`
-	Kind      string     `json:"kind"`
-	Amount    float64    `json:"amount"`
-	At        time.Time  `json:"at"`
-	Note      string     `json:"note"`
-	Seq       int64      `json:"seq"`
-	CreatedAt time.Time  `json:"created_at"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
-}
+// HealthIntakeRow is an immutable measurement, with a new sequence number when undone (assistantwire.HealthIntakeRow:
+// the Health module reads and writes it through internal/healthhost).
+type HealthIntakeRow = assistantwire.HealthIntakeRow
 
 const healthIntakeColumns = `id::text, kind, amount::double precision, at, note, seq, created_at, deleted_at`
 

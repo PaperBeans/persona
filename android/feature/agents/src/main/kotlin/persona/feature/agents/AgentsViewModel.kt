@@ -6,6 +6,7 @@ import persona.core.contracts.*
 import persona.core.contracts.api.*
 import persona.core.contracts.api.ResolveOutcome
 import persona.core.domain.answer.*
+import persona.core.domain.sort.canAnswerInteraction
 import persona.core.domain.sort.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.*
@@ -359,12 +360,15 @@ internal class AgentsViewModel(
         else {
             val counts = status.counts
             val machineCounts = status.machineCounts
+            // A parent marked seen locally stays counted Unread while a side is unread; once held sides are seen, drop immediately (#13524).
+            val clearedUnread = unreadClearedBySeen(projected.sessions, projected.sessions.map { it.listSession(projected.preferences).session })
             val quickCounts = AgentQuickFilter.entries.associateWith { filter ->
                 when (filter) {
                     // The hub counts them among working and apart too (#6045): Working leaves them out, as iOS.
                     AgentQuickFilter.Feishu -> counts.larkGroups(projected.list.counts)
                     AgentQuickFilter.BackgroundWaiting -> counts.backgroundWaiting
                     AgentQuickFilter.Working -> ((counts.state[AgentState.Working.wire] ?: 0) - counts.backgroundWaiting).coerceAtLeast(0)
+                    AgentQuickFilter.Unread -> ((counts.state[AgentState.Unread.wire] ?: 0) - clearedUnread).coerceAtLeast(0)
                     else -> filter.state?.let { counts.state[it.wire] ?: 0 }
                         ?: if (filter == AgentQuickFilter.All) counts.total else projected.list.counts[filter] ?: 0
                 }
@@ -1003,8 +1007,7 @@ internal class AgentsViewModel(
     fun answer(interaction: Interaction, action: AnswerAction, draft: AnswerDraft = AnswerDraft(), fullPlanRead: Boolean = false) {
         val latest = interactions.pending.value.firstOrNull { it.id == interaction.id } ?: return
         if (latest != interaction || latest.expired(Instant.now()) || RequestDeliveries.locks(_delivery.value[interaction.id])) return
-        // A session whose source does not approve (a Codex thread not joined live) is answered on the computer.
-        if (page.value.sessions.firstOrNull { it.key == latest.sessionKey }?.canApprove == false) {
+        if (page.value.sessions.firstOrNull { it.key == latest.sessionKey }?.canAnswerInteraction(latest) == false) {
             _notice.value = AgentText(R.string.agents_notice_approve_blocked); return
         }
         if (hubGroups.groups.value.stateFor(latest.machineId, connection.state.value) != ConnectionState.Online) {

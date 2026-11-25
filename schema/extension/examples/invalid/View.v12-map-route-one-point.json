@@ -1,0 +1,18 @@
+{
+  "sections": [
+    {
+      "items": [
+        {
+          "type": "map",
+          "alt": "Route with one point",
+          "routes": [
+            {
+              "id": "r1",
+              "points": [{"lat": 39.9, "lon": 116.3}]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

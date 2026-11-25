@@ -438,3 +438,68 @@ func TestAgyInterruptedErrorNoteIsDropped(t *testing.T) {
 		t.Fatalf("tool call pairing after interrupt = uses:%v results:%v", uses, results)
 	}
 }
+
+func TestAgyToolOutputStripsTimestampHeadersWithoutAlteringPlainText(t *testing.T) {
+	const receipt = `{"level":"triage","summary":"All checks quiet.","visibility":"silent"}`
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{
+			"duplicate_rfc3339_pairs_mcp_json",
+			"Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\nCreated At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n" + receipt,
+			receipt,
+		},
+		{
+			"single_rfc3339_pair_crlf_fractional",
+			"Created At: 2026-11-23T09:10:40.25Z\r\nCompleted At: 2026-11-23T09:10:44.50Z\r\n" + receipt,
+			receipt,
+		},
+		{
+			"rfc3339_pair_with_immediate_output_marker",
+			"Created At: 2026-11-23T09:10:40Z\nCompleted At: 2026-11-23T09:10:44Z\nOutput:\ntotal 0\n",
+			"total 0\n",
+		},
+		{
+			"rfc3339_pair_preserves_later_output_marker_in_body",
+			"Created At: 2026-11-23T09:10:40Z\nCompleted At: 2026-11-23T09:10:44Z\nShowing lines 1-3\nOutput:\nkeep me",
+			"Showing lines 1-3\nOutput:\nkeep me",
+		},
+		{
+			"legacy_created_at_output",
+			"Created At: 2026-11-01\nOutput:\nsample.txt\n",
+			"sample.txt\n",
+		},
+		{
+			"plain_text_date_only_untouched",
+			"Created At: 2026-11-23\nCompleted At: 2026-11-23\nHello",
+			"Created At: 2026-11-23\nCompleted At: 2026-11-23\nHello",
+		},
+		{
+			"plain_text_single_created_at_untouched",
+			"Created At: 2026-11-23T16:10:40+08:00\nTitle: Notes",
+			"Created At: 2026-11-23T16:10:40+08:00\nTitle: Notes",
+		},
+		{
+			"non_leading_timestamps_untouched",
+			"Prefix\nCreated At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\nBody",
+			"Prefix\nCreated At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\nBody",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := agyToolOutput(tc.input); got != tc.want {
+				t.Fatalf("agyToolOutput(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+
+	const fixture = `{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","status":"DONE","created_at":"2026-11-23T08:10:39Z","content":"Supervision check"}
+{"step_index":1,"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","created_at":"2026-11-23T08:10:40Z","tool_calls":[{"name":"mcp_persona_supervision_finish","args":{"visibility":"silent","summary":"All checks quiet."}}]}
+{"step_index":2,"type":"GENERIC","source":"MODEL","status":"DONE","created_at":"2026-11-23T08:10:44Z","content":"Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\nCreated At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n{\"level\":\"triage\",\"summary\":\"All checks quiet.\",\"visibility\":\"silent\"}"}
+{"step_index":3,"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","created_at":"2026-11-23T08:10:45Z","content":"OK"}
+`
+	steps, _ := parseAgySteps([]byte(fixture), agyTestID)
+	history := mapAgySteps(steps, time.Time{}, nil)
+	if len(history.items) != 4 || history.items[2].Kind != "tool_result" || history.items[2].Text != receipt {
+		t.Fatalf("mapped items = %+v, want stripped receipt %q", history.items, receipt)
+	}
+}

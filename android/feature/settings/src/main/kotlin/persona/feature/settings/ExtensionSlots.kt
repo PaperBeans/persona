@@ -36,7 +36,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -117,15 +119,17 @@ data class ExtensionSlotsState(
 
 /**
  * Where the selected hub's extensions draw in this app, kept for the whole shell: read when the hub (with
- * `extension_ui_slots`) is online and when the settings list shows, and the nav pages' badges changed by the hub's
- * `extension_ui` events without reading the list again.
+ * `extension_ui_slots`) is online, when the settings list shows and when the hub says the assistant's Dashboards places
+ * changed (`assistant_pages`, [placesChanged]), and the nav pages' badges changed by the hub's `extension_ui` events
+ * without reading the list again.
  */
 class ExtensionSlots internal constructor(
     internal val api: ExtensionUi,
     private val slotsAvailable: Flow<Boolean>,
     private val events: Flow<ExtensionUiEvent>,
+    private val placesChanged: Flow<Unit> = emptyFlow(),
 ) {
-    constructor(extensions: ExtensionManagement) : this(extensions, extensions.slotsAvailable, extensions.uiEvents)
+    constructor(extensions: ExtensionManagement) : this(extensions, extensions.slotsAvailable, extensions.uiEvents, extensions.placesChanged)
 
     private val mutable = MutableStateFlow(ExtensionSlotsState())
     val state: StateFlow<ExtensionSlotsState> = mutable.asStateFlow()
@@ -134,6 +138,9 @@ class ExtensionSlots internal constructor(
     /** Runs while the shell does: reads the slots whenever the hub says it has them and is online, applies badges. */
     suspend fun run(online: Flow<Boolean>) = coroutineScope {
         launch { events.collect(::badge) }
+        // Dashboards (#15017): a page kept, pinned or removed adds or takes away rows, so the list is read again; a
+        // burst of these reads it once more after the read under way, not once per event.
+        launch { placesChanged.conflate().collect { load() } }
         combine(slotsAvailable, online) { slots, up -> slots to up }.distinctUntilChanged().collectLatest { (slots, up) ->
             supported = slots
             if (!slots) mutable.value = ExtensionSlotsState()

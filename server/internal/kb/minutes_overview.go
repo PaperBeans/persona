@@ -9,6 +9,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/nwverse/persona/server/internal/recordingwire"
 )
 
 // The summary card (#6563, docs/assistant/meeting-minutes.md "Summary card (#6563)"): besides the legacy lists the
@@ -17,46 +19,20 @@ import (
 // minutes are written exactly as before); normalizeOverview keeps it whole once items leave it (a photo deleted);
 // renderOverview is its Markdown.
 
-// MinutesOverview is the minutes as one summary card: optional, present only when every point and decision is a
-// bullet of one of its topics.
-type MinutesOverview struct {
-	Headline    string              `json:"headline,omitempty"`
-	Conclusions []MinutesConclusion `json:"conclusions,omitempty"`
-	// Groups: one titled "" (no heading), or 2 to 4 with distinct titles; never empty, and no group or topic is.
-	Groups []MinutesGroup `json:"groups"`
-}
+// MinutesOverview is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type MinutesOverview = recordingwire.MinutesOverview
 
-// MinutesConclusion is a core conclusion: where the meeting landed, citing a line, or a photo a bullet cites.
-type MinutesConclusion struct {
-	Text   string   `json:"text"`
-	Strong []string `json:"strong,omitempty"`
-	At     float64  `json:"at"`
-	Photo  int      `json:"photo,omitempty"`
-}
+// MinutesConclusion is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type MinutesConclusion = recordingwire.MinutesConclusion
 
-// MinutesGroup is a heading over topics; Title is "" for the single untitled group.
-type MinutesGroup struct {
-	Title  string         `json:"title"`
-	Topics []MinutesTopic `json:"topics"`
-}
+// MinutesGroup is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type MinutesGroup = recordingwire.MinutesGroup
 
-// MinutesTopic is a topic card: Icon one of minutesTopicIcons.
-type MinutesTopic struct {
-	Title   string          `json:"title"`
-	Icon    string          `json:"icon"`
-	Bullets []MinutesBullet `json:"bullets"`
-}
+// MinutesTopic is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type MinutesTopic = recordingwire.MinutesTopic
 
-// MinutesBullet is a point (Who as the point's) or a decision (Decision) of the minutes, with the same Text, At and
-// Photo; Strong the places of Text set in bold (strongSpans).
-type MinutesBullet struct {
-	Text     string   `json:"text"`
-	Strong   []string `json:"strong,omitempty"`
-	At       float64  `json:"at"`
-	Photo    int      `json:"photo,omitempty"`
-	Who      string   `json:"who,omitempty"`
-	Decision bool     `json:"decision,omitempty"`
-}
+// MinutesBullet is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type MinutesBullet = recordingwire.MinutesBullet
 
 const (
 	minutesTopics          = 12  // topics of one overview, after same-titled ones are merged; more leaves it out
@@ -75,39 +51,6 @@ const (
 // minutesTopicIcons is what a topic's icon may be; anything else is general (clients do the same, so the list can grow).
 var minutesTopicIcons = []string{"progress", "schedule", "release", "performance", "metrics", "tooling", "quality", "design",
 	"people", "customer", "budget", "risk", "general"}
-
-// UnmarshalJSON reads Minutes with its overview decoded on its own: one this hub cannot read (another hub's shape, a
-// hand edit) or that has no bullet counts as absent, as on the clients, and never makes the rest unreadable.
-func (m *Minutes) UnmarshalJSON(data []byte) error {
-	type plain Minutes
-	var aux struct {
-		*plain
-		Overview json.RawMessage `json:"overview"` // shallower than plain's: it takes the field
-	}
-	aux.plain = (*plain)(m)
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	m.Overview = nil
-	if len(aux.Overview) > 0 {
-		var o MinutesOverview
-		if json.Unmarshal(aux.Overview, &o) == nil && o.hasBullet() {
-			m.Overview = &o
-		}
-	}
-	return nil
-}
-
-func (o *MinutesOverview) hasBullet() bool {
-	for _, g := range o.Groups {
-		for _, t := range g.Topics {
-			if len(t.Bullets) > 0 {
-				return true
-			}
-		}
-	}
-	return false
-}
 
 // modelText is a string the model wrote; anything else (a number, an object) is "" rather than an unusable answer:
 // a malformed headline or topic title costs only itself.

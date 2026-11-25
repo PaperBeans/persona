@@ -56,6 +56,13 @@ VALUE_FLAGS |= {"test." + name for name in TEST_VALUE_FLAGS}
 BOOL_FLAGS |= {"test." + name for name in TEST_BOOL_FLAGS}
 COVERPROFILE_FLAGS = {"coverprofile", "test.coverprofile"}
 RUN_FLAGS = {"run", "test.run"}
+# Build-affecting flags safe to forward to `go test -list .*` so discovery compiles with the exact same build action
+# ID and build constraints as the fanned-out partitions (warm GOCACHE, accurate tag-gated test lists).
+BUILD_VALUE_FLAGS = {
+    "asmflags", "buildmode", "compiler", "covermode", "coverpkg", "gccgoflags", "gcflags",
+    "installsuffix", "ldflags", "mod", "modfile", "overlay", "pgo", "pkgdir", "tags", "toolexec",
+}
+BUILD_BOOL_FLAGS = {"asan", "buildvcs", "cover", "linkshared", "modcacherw", "msan", "race", "trimpath"}
 
 
 class ParsedTestArgs:
@@ -165,6 +172,28 @@ def parse_test_args(args, goflags=""):
         apply_flag(parsed, name, value)
         i += 1
     return parsed
+
+
+def build_flags(flags):
+    """Build-affecting flags from parsed.flags to forward to go test -list so GOCACHE and build tags match."""
+    result = []
+    i = 0
+    while i < len(flags):
+        token = flags[i]
+        flag = flag_token(token)
+        if flag is None:
+            i += 1
+            continue
+        name, _, has_value = flag
+        if name in VALUE_FLAGS and not has_value:
+            if name in BUILD_VALUE_FLAGS and i + 1 < len(flags):
+                result.extend((token, flags[i + 1]))
+            i += 2
+            continue
+        if name in BUILD_VALUE_FLAGS or name in BUILD_BOOL_FLAGS:
+            result.append(token)
+        i += 1
+    return result
 
 
 def split(args):
@@ -292,14 +321,17 @@ def main(argv):
         return 2
     try:
         goflags = os.environ.get("GOFLAGS", "")
+        parsed = parse_test_args(argv[2:], goflags) if argv[:2] == ["go", "test"] else ParsedTestArgs()
+        discovery_flags = build_flags(parsed.flags) if parsed.valid else []
         # An explicit empty command-line profile can cancel GOFLAGS. Discovery must not recreate the canceled file:
-        # go_partitions.list_patterns runs its own go test without the caller's command-line flags.
+        # go_partitions.list_patterns runs its own go test without the caller's command-line profile flag.
         discovery_env = None
         if parse_test_args([], goflags).coverprofile:
             discovery_env = os.environ.copy()
             discovery_env["GOFLAGS"] = (goflags + " -coverprofile=").strip()
         commands = plan(argv, go_list,
-                        lambda package: go_partitions.list_patterns(os.getcwd(), package, env=discovery_env),
+                        lambda package: go_partitions.list_patterns(os.getcwd(), package, env=discovery_env,
+                                                                    flags=discovery_flags),
                         goflags=goflags)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError) as err:
         # A package does not build or list (its error is above): run the command as given, which reports it.

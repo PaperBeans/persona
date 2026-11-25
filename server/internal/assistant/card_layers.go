@@ -434,6 +434,9 @@ func cardLedgerReport(day string, rows []cardCount) string {
 		fmt.Fprintf(&b, " — %s", strings.Join(parts, ", "))
 	}
 	b.WriteString(".\nFor you, not the owner: settle what is none of the six with the supervisors or yourself, and do not pass this on to the owner.")
+	if len(t.Bugs) > 0 {
+		b.WriteString(" Each source above is a platform defect: hand each one, unless a task for it is open already, to the platform's supervisor as a task to fix where the card is made.")
+	}
 	return b.String()
 }
 
@@ -465,7 +468,11 @@ func (s *Service) reportCardLedger(ctx context.Context, now time.Time) {
 	}
 	rows := slices.Clone(b.days[day])
 	b.mu.Unlock()
-	if text := cardLedgerReport(day, rows); text != "" {
+	text := cardLedgerReport(day, rows)
+	if u := unattendedReport(s.unattendedHandedOut()); u != "" {
+		text = strings.TrimSpace(text + "\n\n" + u)
+	}
+	if text != "" {
 		if main == "" {
 			return // nobody to tell yet: tried again on the next tick
 		}

@@ -156,5 +156,8 @@
   "handoff_confirm_body_other": "把 {source} 上的 {count} 项工作交给 {target}：",
   "handoff_confirm_note": "Persona 会在主对话里处理并告诉你结果；新的 Agent 开始后才停掉 {source} 上原来的。",
   "handoff_confirm": "发给 Persona",
-  "mismatch_resolved": "这台电脑上的 Persona 现在和 hub 是同一次部署了。"
+  "mismatch_resolved": "这台电脑上的 Persona 现在和 hub 是同一次部署了。",
+  "mismatch_hosted_managers": "重新部署会更新共用的 personad 程序，同机助手（{names}）会在空闲后平滑重启。",
+  "deploy_done_pending_restart": "同机助手（{names}）当前正忙，空闲后会自动重启切换到新版本。",
+  "redeploy_confirm_managers": "同机助手（{names}）共用这台电脑上的 personad，更新后会在空闲时平滑重启。"
 }

@@ -1,0 +1,13 @@
+{
+  "sections": [
+    {
+      "items": [
+        {
+          "type": "map",
+          "alt": "Invalid latitude",
+          "markers": [{"id": "p1", "lat": 91.0, "lon": 116.3, "label": "Nowhere"}]
+        }
+      ]
+    }
+  ]
+}

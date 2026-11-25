@@ -412,7 +412,8 @@ func (h *Manager) channelsCall(ctx context.Context, method string, params json.R
 	}
 	switch method {
 	case assistantwire.ChannelsList:
-		return map[string]any{"channels": h.channelList(ctx)}, nil
+		list, overrides := h.channelListWithOverrides(ctx)
+		return map[string]any{"channels": list, "target_overrides": overrides}, nil
 	case assistantwire.ChannelsSend:
 		return h.channelSendPiece(ctx, a.Channel, a.SendParams)
 	case assistantwire.ChannelsTyping:

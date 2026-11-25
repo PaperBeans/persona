@@ -113,9 +113,13 @@ func TestHerdrCoreStatusAndAgent(t *testing.T) {
 		{"claude-code", "idle", "claude", "claude", proto.StatusIdle},
 		{"claude-code", "error", "claude", "claude", proto.StatusUnknown},
 		{"codex", "working", "codex", "codex", proto.StatusWorking},
+		{"traex", "working", "traex", traexAgent, proto.StatusWorking},
+		{"traecli", "done", "traecli", traexAgent, proto.StatusDone},
+		{"codex", "done", "traecli", traexAgent, proto.StatusDone},
 		{"grok-build", "idle", "grok", "", ""},            // not a program the node drives: left for a compatible CLI
 		{"", "", "claude", "claude", proto.StatusUnknown}, // has not reported yet
 		{"", "", "/opt/bin/codex", "codex", proto.StatusUnknown},
+		{"", "", "/opt/bin/traecli", traexAgent, proto.StatusUnknown},
 		{"", "", "zsh", "", ""},
 		{"claude-code", "done", "zsh", "", ""},      // claude exited: its last state stays on the terminal
 		{"claude-code", "done", "-zsh", "", ""},     // a login shell

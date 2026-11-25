@@ -21,7 +21,7 @@ import { Icon, type IconName } from "../../ui/icons";
 import { Group, Pill, Row, Switch, settingsInputClass } from "./SettingsParts";
 import { SignInSteps } from "./HubConnector";
 
-const SOURCE_REPORT_DELAYS = [0, 1, 2, 5, 10, 15, 30, 60];
+export const SOURCE_REPORT_DELAYS = [0, 1, 2, 5, 10, 15, 30, 60];
 
 const controlClass = "h-8 rounded-control bg-field px-2.5 text-[12.5px] text-ink shadow-inset-field outline-none focus:shadow-[inset_0_0_0_1px_var(--accent)]";
 const dotClass = { green: "bg-green", red: "bg-red", orange: "bg-orange" } as const;
@@ -57,7 +57,7 @@ function combinedLarkState(bot: FeishuBotStatus | null, loading: boolean, c: Hub
   return { label: botSummary(bot), tone: botTone(bot) };
 }
 
-const FEATURES: { key: keyof BotFeatures; icon: IconName; title: string; detail: string }[] = [
+export const FEATURES: { key: keyof BotFeatures; icon: IconName; title: string; detail: string }[] = [
   { key: "main", icon: "spark", title: t("settings-feishubot.feature_main_title"), detail: t("settings-feishubot.feature_main_detail") },
   { key: "cards", icon: "hand", title: t("settings-feishubot.feature_cards_title"), detail: t("settings-feishubot.feature_cards_detail") },
   { key: "all_cards", icon: "bell", title: t("settings-feishubot.feature_all_cards_title"), detail: t("settings-feishubot.feature_all_cards_detail") },
@@ -74,7 +74,7 @@ const FEATURES: { key: keyof BotFeatures; icon: IconName; title: string; detail:
   { key: "agents", icon: "agent", title: t("settings-feishubot.feature_agents_title"), detail: t("settings-feishubot.feature_agents_detail") },
 ];
 
-const STEPS = [
+export const STEPS = [
   t("settings-feishubot.step_create_app"),
   t("settings-feishubot.step_permissions"),
   t("settings-feishubot.step_events"),
@@ -82,7 +82,7 @@ const STEPS = [
 ];
 
 /** The bot's state, kept by whoever shows it (the row and its page share one). */
-function useBot() {
+export function useBot() {
   const [status, setStatus] = useState<FeishuBotStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -540,7 +540,7 @@ function FeishuBotDialog({ bot, larkcli, onClose, onOpen }: { bot: ReturnType<ty
   );
 }
 
-function LarkReadSection({ connector, status, waitsForApp, autoStart, reload, onOpen }: {
+export function LarkReadSection({ connector, status, waitsForApp, autoStart, reload, onOpen }: {
   connector: HubConnector;
   status: FeishuBotStatus | null;
   waitsForApp?: boolean;
@@ -691,7 +691,7 @@ function LarkReadSection({ connector, status, waitsForApp, autoStart, reload, on
 
 
 /** Group policies use the same acknowledged save as the other bot settings. */
-function TopicGroups({ status, saving, save }: { status: FeishuBotStatus; saving: boolean; save: (groups: BotTopicChat[]) => Promise<boolean> }) {
+export function TopicGroups({ status, saving, save }: { status: FeishuBotStatus; saving: boolean; save: (groups: BotTopicChat[]) => Promise<boolean> }) {
   const groups = status.topic_chats ?? [];
   const [adding, setAdding] = useState(false);
   const [chatID, setChatID] = useState("");

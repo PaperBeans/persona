@@ -15,6 +15,8 @@ export interface HostWorkspace {
   owned?: boolean;
   /** The host's workspace pin, synchronized independently of Persona's own session and project pins. */
   pinned_at?: string;
+  /** Manager-owned visibility from hidden_agent_dirs rules; sidebars drop hidden empty workspaces. */
+  hidden_by_directory?: boolean;
 }
 
 /** A valid host pin's time; an old hub or an unpinned workspace has no timestamp. */

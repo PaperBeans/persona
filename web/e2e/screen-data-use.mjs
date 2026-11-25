@@ -36,7 +36,7 @@ const fail = (why) => {
   throw new Error(why);
 };
 const mock = async () => (await fetch(`${hub}/mock/screen-video`)).json();
-const words = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/screen-video.json`, import.meta.url), "utf8"));
+const words = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/screen-share-video.json`, import.meta.url), "utf8"));
 // What a tier update looks like under each choice: Data Saver one pixel per point and at most 1.5 Mbit/s; Clearer more.
 const saver = (u) => u.scale !== undefined && u.scale <= 1 && u.max_kbps <= 1_500;
 const clearer = (u) => u.scale !== undefined && u.max_kbps > 1_500 && u.max_kbps <= 4_000;

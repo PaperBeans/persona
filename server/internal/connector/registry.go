@@ -292,6 +292,13 @@ func (r *Registry) ReadOnly(name string) bool {
 	return ok && has(t.Tools(), name)
 }
 
+// InboxVisibilityPreflight says whether the tool's provider positively declares the manager's source-visibility
+// enforcement. Absence is not evidence of enforcement: the assistant's fallback must fail closed for unverifiable reads.
+func (r *Registry) InboxVisibilityPreflight(name string) bool {
+	c := r.Owner(name)
+	return c != nil && c.Manifest().Has(CapInboxVisibility)
+}
+
 // ForAgents says whether the tool name is a connector's that the coding agents get too (Manifest.AgentTools).
 func (r *Registry) ForAgents(name string) bool {
 	c := r.Owner(name)

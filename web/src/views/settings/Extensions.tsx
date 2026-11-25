@@ -341,7 +341,7 @@ function ExtensionList({ onOpen, onMarket, onMarkets, openBeside }: { onOpen: (i
 // ── one extension ──────────────────────────────────────────
 
 /** A number field as typed, by dotted path, until it reads as one. */
-type Typed = Record<string, { text: string; integer: boolean }>;
+export type Typed = Record<string, { text: string; integer: boolean }>;
 
 /** Requests about extension id (its details, settings, models, pages) go to manager while the view is open: the same
  *  id may be installed under several managers (each one's built-ins), and the default's own keep going to it elsewhere. */
@@ -979,7 +979,7 @@ export function adminNetworkURL(id: string): string {
 
 const inputClass = "h-8 w-full rounded-control bg-field px-2.5 text-[12.5px] text-ink outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--accent)] disabled:opacity-60";
 
-interface FieldProps {
+export interface FieldProps {
   field: ExtensionField;
   path: string[];
   draft: JsonObject;
@@ -1007,7 +1007,7 @@ interface FormLaunchers {
 }
 
 /** One field of the form, by its type; its title above (or beside a switch), its description and error below. */
-function FieldRow(props: FieldProps) {
+export function FieldRow(props: FieldProps) {
   const { field: f, path, draft, errors, problems, onEdit } = props;
   const key = fieldPath(path);
   const err = errors[key] ?? problems[key];
@@ -1142,13 +1142,13 @@ function Control({ field: f, path, draft, typed, errors, problems, onEdit, onTyp
   );
 }
 
-function hasLauncherField(fields?: ExtensionField[]): boolean {
+export function hasLauncherField(fields?: ExtensionField[]): boolean {
   return !!fields?.some((f) => f.format === "launcher" || hasLauncherField(f.fields) || hasLauncherField(f.items?.fields));
 }
 
 /** The hub's launchers for the form's launcher pickers, read once while the page is open (GET /launchers asks every
  *  machine): null while they load, or when they could not be read. */
-function useFormLaunchers(on: boolean, page: string | undefined): FormLaunchers {
+export function useFormLaunchers(on: boolean, page: string | undefined): FormLaunchers {
   const [state, setState] = useState<FormLaunchers>({ list: null, loading: false });
   useEffect(() => {
     if (!on) return;
@@ -1388,7 +1388,7 @@ function ListControl({ field: f, path, draft, onEdit, id, ring }: Pick<FieldProp
 // ── a secret ────────────────────────────────────────────
 
 /** Sets one secret: typed in hidden, saved to the hub, never shown again; one that is set can be cleared. */
-function SecretDialog({ extension, secret, onClose, onStart, onDone }: { extension: string; secret: ExtensionSecret; onClose: () => void; onStart: () => number; onDone: (n: number, d: HubExtensionDetail) => void }) {
+export function SecretDialog({ extension, secret, onClose, onStart, onDone }: { extension: string; secret: ExtensionSecret; onClose: () => void; onStart: () => number; onDone: (n: number, d: HubExtensionDetail) => void }) {
   // a provider's reference in place of the value (docs/extensions/secret-providers.md), where the hub takes one
   const references = useStore((s) => hubHasExt(s.features, "secret_references"));
   const [byRef, setByRef] = useState(!!secret.reference);
@@ -1521,7 +1521,7 @@ function SecretDialog({ extension, secret, onClose, onStart, onDone }: { extensi
  * A secret provider's page (docs/extensions/secret-providers.md): the settings that hold its references, each the
  * user's standing approval, and the Always rules of hand-offs to Agents, each removable (the next hand-off asks again).
  */
-function SecretProviderGroups({ extension, users, rules, editable, onStart, onDone }: {
+export function SecretProviderGroups({ extension, users, rules, editable, onStart, onDone }: {
   extension: string;
   users?: SecretUser[];
   rules?: HandoffRule[];

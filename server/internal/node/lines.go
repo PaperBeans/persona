@@ -89,6 +89,11 @@ const backBufKeep = 1 << 20
 // still being written, as eachLine leaves it. lo must be where a line starts. Lines of maxLine bytes or more (with
 // their newline) are skipped, as eachLine skips them. A read error ends it early.
 func eachLineBack(r io.ReaderAt, lo, hi int64, maxLine int, fn func([]byte) bool) int64 {
+	return eachLineBackAt(r, lo, hi, maxLine, func(line []byte, _ int64) bool { return fn(line) })
+}
+
+// eachLineBackAt also gives the byte offset where the complete line starts.
+func eachLineBackAt(r io.ReaderAt, lo, hi int64, maxLine int, fn func([]byte, int64) bool) int64 {
 	bp := backBufs.Get().(*[]byte)
 	buf := (*bp)[:0]
 	defer func() {
@@ -126,7 +131,7 @@ func eachLineBack(r io.ReaderAt, lo, hi int64, maxLine int, fn func([]byte) bool
 			case end < 0:
 				end = pos + int64(k) + 1 // what follows is a line still being written
 			case skipping || len(line)+1 > maxLine:
-			case !fn(bytes.TrimSpace(line)):
+			case !fn(bytes.TrimSpace(line), pos+int64(k)+1):
 				return end
 			}
 			skipping = false
@@ -141,7 +146,7 @@ func eachLineBack(r io.ReaderAt, lo, hi int64, maxLine int, fn func([]byte) bool
 		return lo
 	}
 	if !skipping { // the range's first line
-		fn(bytes.TrimSpace(buf))
+		fn(bytes.TrimSpace(buf), lo)
 	}
 	return end
 }

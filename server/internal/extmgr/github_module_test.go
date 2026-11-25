@@ -8,13 +8,14 @@ import (
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/extmgr/githubport"
 	"github.com/nwverse/persona/server/internal/githubwire"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 )
 
 // needsGitHubModule is the GitHub module's factory, as the manager gets it (githubport, filled by internal/modules/all,
 // which modules_link_test.go links); the test is skipped in a build without the module.
 func needsGitHubModule(t *testing.T) githubwire.Factory {
 	t.Helper()
-	f := githubport.Factory()
+	f := githubport.Factory(moduleswitch.Set{})
 	if f == nil {
 		t.Skip("this build has no GitHub module (persona_without_github or persona_core_only)")
 	}
@@ -27,14 +28,15 @@ func newTestGitHub(t *testing.T, cfg githubwire.Config, machine string, fetch gi
 	return needsGitHubModule(t)(cfg, machine, fetch)
 }
 
-// Without the GitHub module (persona_without_github, persona_core_only) the manager registers no built-in GitHub
-// connector: none is listed, its sign-in route answers 404, and no github_* tool reaches the models. An extension's
-// GitHub connector can still take the id.
+// Without the GitHub module (persona_without_github, persona_core_only), or with it switched off in the `modules`
+// setting the manager started with, the manager registers no built-in GitHub connector: none is listed or polled, its
+// sign-in route answers 404, and no github_* tool reaches the models. An extension's GitHub connector can still take
+// the id.
 func TestManagerWithoutGitHub(t *testing.T) {
-	if githubport.Factory() != nil {
-		t.Skip("this build has the GitHub module")
-	}
 	h := newTestManager(t)
+	if githubport.Factory(moduleswitch.Set{}) != nil { // built in: switched off at run time, absent the same way
+		h.opts.Modules = moduleswitch.Off("github")
+	}
 	h.connectors = connector.NewRegistry(nil)
 	h.registerConnectors()
 	if c := h.connectors.Get(githubwire.ID); c != nil || h.githubConnector() != nil || h.ownGitHub() != nil {

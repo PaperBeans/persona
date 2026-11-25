@@ -166,7 +166,7 @@ func (s *Service) aliasUses(ctx context.Context, f importHideFacts, alias string
 			}
 		}
 		for _, tier := range slices.Sorted(maps.Keys(p.Tiers)) {
-			if p.Tiers[tier].Launcher == alias {
+			if slices.ContainsFunc(p.Tiers[tier].list(), func(c TierCandidate) bool { return c.Launcher == alias }) {
 				add(i18n.T(lang, "assistant-models_import.use_tier", i18n.Args{"tier": tier, "profile": name}))
 			}
 		}

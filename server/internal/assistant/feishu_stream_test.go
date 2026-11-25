@@ -260,19 +260,6 @@ func TestAnswerEndsTheStream(t *testing.T) {
 	}
 }
 
-// The progress card says its state with a coloured tag, not an hourglass.
-func TestProgressCardLooks(t *testing.T) {
-	c := progressCard("zh-Hans", "Persona", 12*time.Second, []string{"运行 `ls`"}, "", "", liveView{}, botTarget{Kind: targetPersona})
-	js := c.JSON()
-	if strings.Contains(js, "⏳") || !strings.Contains(js, "<text_tag color='blue'>") {
-		t.Fatalf("progress card %s", js)
-	}
-	q := progressCard("zh-Hans", "Persona", time.Second, nil, "", "queued", liveView{}, botTarget{}).JSON()
-	if !strings.Contains(q, "<text_tag color='neutral'>") {
-		t.Fatalf("queued card %s", q)
-	}
-}
-
 // answerMessages answers feishu.messages (reading the progress card's message back) with fn, counting the reads.
 func answerMessages(s *Service, fn func() (any, error)) *int {
 	n := 0

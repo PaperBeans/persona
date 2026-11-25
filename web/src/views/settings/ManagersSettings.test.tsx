@@ -350,4 +350,17 @@ describe("设置 › 助手", () => {
     await click(row("工作"));
     expect(document.body.querySelector('[aria-label="推送通知"]')).toBeNull();
   });
+
+  it("marks a manager with pending_restart in the list and its detail dialog", async () => {
+    await render();
+    await answer(0, { ...ROSTER, managers: ROSTER.managers.map((m) => (m.id === "m-1" ? { ...m, pending_restart: true } : m)) });
+    expect(row("工作")?.textContent).toContain("待空闲重启");
+    expect(row("助手")?.textContent).not.toContain("待空闲重启");
+    await click(row("工作"));
+    expect(document.body.querySelector('[data-testid="pending-restart-note"]')?.textContent).toContain("空闲后自动重启");
+    await click(button("完成"));
+    await click(row("助手"));
+    const dialog = [...document.body.querySelectorAll('[role="dialog"]')].at(-1);
+    expect(dialog?.textContent).not.toContain("待空闲重启");
+  });
 });

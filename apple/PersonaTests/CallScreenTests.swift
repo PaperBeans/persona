@@ -109,7 +109,7 @@ struct CallScreenTests {
         let call = try #require(shortcuts.range(of: "intent: CallPersonaIntent()"))
         let entry = String(shortcuts[call.upperBound...].prefix(600))
         #expect(entry.contains("systemImageName: \"\(Theme.Icon.callPersona)\""))
-        let strip = try Self.code("Persona/Views/Voice/VoiceEntry.swift")
+        let strip = try Self.code("Modules/Voice/VoiceComposer.swift")
         #expect(strip.contains("systemImage: call.surface == .call ? Theme.Icon.callPersona : Theme.Icon.voiceChannel"))
     }
 
@@ -309,7 +309,7 @@ struct CallScreenTests {
         let barWords = try #require(words.range(of: "struct CallBarWords"))
         let body = String(words[barWords.upperBound...].prefix(700))
         #expect(body.contains(".truncationMode(.middle)") && body.contains(".fixedSize()"), "the name is not cut in the middle, or the time may be cut")
-        let voice = try Self.code("Persona/Views/Voice/VoiceReturnBar.swift")
+        let voice = try Self.code("Persona/Voice/VoiceReturnBar.swift")
         #expect(voice.contains("CallBarWords(title:"), "the voice chat's bar has its own words")
         shot(window, "call-long-bar-\(type)")
     }
@@ -345,7 +345,7 @@ struct CallScreenTests {
         let bar = try Self.code("Persona/DesignSystem/ShellComposerBar.swift")
         #expect(bar.contains("ComposerVoiceButton(round: stop == nil, id: \"shell-composer-voice\", label: voiceLabel ??"))
         let chat = try Self.code("Persona/Views/Chat/ChatView.swift")
-        #expect(chat.contains("voiceLabel: VoiceEntry.iconLabel(key),"), "the composer passes no label")
+        #expect(chat.contains("voiceLabel: model.voice?.iconLabel(key),"), "the composer passes no label")
         let meeting = try Self.code("Persona/Recording/MeetingPageBar.swift")
         #expect(meeting.contains("ComposerVoiceButton(round: false, id: \"meeting-voice\") {"), "the meeting's button keeps Voice Chat")
     }
@@ -422,11 +422,11 @@ struct CallScreenTests {
     /// A system call's voice bar hangs up, mutes and expands through `PersonaCalls`; its ended line calls its conversation
     /// again (#9887).
     @Test func aSystemCallsBarAndEndedLineGoThroughPersonaCalls() throws {
-        let bar = try Self.code("Persona/Views/Voice/VoiceBar.swift")
+        let bar = try Self.code("Modules/Voice/VoiceBar.swift")
         #expect(bar.contains("if call.surface == .call { return PersonaCalls.shared.setMuted(!call.muted) }"))
         #expect(bar.contains("if call.surface == .call { return PersonaCalls.shared.hangUp() }"))
         #expect(bar.contains("PersonaCalls.shared.present()"))
-        let strip = try Self.code("Persona/Views/Voice/VoiceEntry.swift")
+        let strip = try Self.code("Modules/Voice/VoiceComposer.swift")
         #expect(strip.contains("Task { await PersonaCalls.shared.callConversation(key) }"))
     }
 

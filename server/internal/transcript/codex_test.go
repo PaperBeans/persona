@@ -76,8 +76,46 @@ func TestCodexUserMessageTags(t *testing.T) {
 	if it.Text != "done, agreed\n\n<attached_images>\n/tmp/shot.png\n</attached_images>" {
 		t.Fatalf("got %q", it.Text)
 	}
-	if got := codexUserText(`<send_user_message_question_reply>[{"question":"A?","answer":"1"},{"question":"B?","answer":"2"}]</send_user_message_question_reply>`); got != "A?：1\nB?：2" {
+	if len(it.QuestionReplies) != 1 || it.QuestionReplies[0].Question != "Accept the Xcode license?" || it.QuestionReplies[0].Answer != "" {
+		t.Fatalf("lost quote or duplicated answer: %#v", it.QuestionReplies)
+	}
+	if got, _ := codexUserPart(`<send_user_message_question_reply>[{"question":"A?","answer":"1"},{"question":"B?","answer":"2"}]</send_user_message_question_reply>`); got != "A?：1\nB?：2" {
 		t.Fatalf("several answers: %q", got)
+	}
+}
+
+func TestCodexQuotedAnswers(t *testing.T) {
+	replies := []CodexReply{{Question: "Which color?", Answer: "Red"}, {Question: "Why?", Answer: "Line one\nline two"}}
+	envelope := CodexReplyMessage(replies)
+	text, quotes := codexUserPart(envelope)
+	if text != "Which color?：Red\nWhy?：Line one\nline two" || len(quotes) != 2 || quotes[1].Question != replies[1].Question || quotes[1].Answer != replies[1].Answer {
+		t.Fatalf("%q %#v", text, quotes)
+	}
+	for _, sample := range []string{"A regular message", "The example was " + envelope, strings.Replace(envelope, "[{", "invalid[{", 1)} {
+		if _, quotes := codexUserPart(sample); len(quotes) > 0 {
+			t.Errorf("unexpected quote for %q", sample)
+		}
+	}
+}
+
+func TestLongCodexReplyQuotePagesAndExpands(t *testing.T) {
+	q := strings.Repeat("确认安装范围？", pageTextLen/4)
+	file := filepath.Join(t.TempDir(), "rollout.jsonl")
+	lines := []string{`{"type":"session_meta","payload":{"id":"preview","cwd":"/preview","cli_version":"0.163.0"}}`, userLine(CodexReplyMessage([]CodexReply{{Question: q, Answer: "同意"}}))}
+	if err := os.WriteFile(file, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := NewFile(file)
+	if _, err := f.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	page, _, _ := f.Page(0, 10)
+	if len(page) != 1 || !page[0].QuestionRepliesCut || page[0].Text != "同意" || len(page[0].QuestionReplies) != 1 || len(page[0].QuestionReplies[0].Question) > pageTextLen+100 {
+		t.Fatal("page did not bound a long quote independently of the answer")
+	}
+	full, err := f.Full(page[0].ID)
+	if err != nil || full.QuestionRepliesCut || len(full.QuestionReplies) != 1 || full.QuestionReplies[0].Question != q || full.Text != "同意" {
+		t.Fatal("full item did not restore the original question and answer", err)
 	}
 }
 
@@ -748,5 +786,25 @@ func TestCodexPendingBounded(t *testing.T) {
 	}
 	if len(meta.codexPendingIDs) != len(meta.codexPending) {
 		t.Fatalf("the queue holds %d entries for %d pending ids after completion", len(meta.codexPendingIDs), len(meta.codexPending))
+	}
+}
+
+func TestCodexAppliedSettingsDriveTheDisplayedModelAndSpeed(t *testing.T) {
+	var meta, scan Meta
+	for i, tc := range []struct {
+		model, tier string
+		changed     bool
+	}{
+		{"gpt-6.2-astra", "priority", false}, {"gpt-6.1-sol", "ultrafast", true}, {"gpt-6.1-sol", "default", false},
+	} {
+		line := []byte(fmt.Sprintf(`{"timestamp":"2026-11-23T11:32:0%dZ","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":%q,"service_tier":%q}}}`, i, tc.model, tc.tier))
+		items := ParseLine(i+1, line, &meta)
+		scan.ObserveNamingMetadata(line)
+		if meta.Model != tc.model || scan.Model != tc.model || meta.ServiceTier != tc.tier || scan.ServiceTier != tc.tier || (len(items) > 0) != tc.changed {
+			t.Fatalf("settings row %d", i)
+		}
+		if tc.changed && (items[0].Text != "gpt-6.2-astra" || items[0].Model != tc.model) {
+			t.Fatal(items)
+		}
 	}
 }

@@ -178,6 +178,12 @@ type Report struct {
 	// passes the manager's messages of those types only. An older manager's report has none: the hub cannot tell its
 	// extensions' types, and passes any type but its own from it.
 	EventsDeclared bool `json:"events_declared,omitempty"`
+	// PushGradingDeclared: PushGradingExtensions lists every enabled, compatible extension on this manager currently
+	// granted the push.grading scope. The hub prunes any stored push grading layer of this manager whose extension is
+	// absent, so disabling, uninstalling or dropping the scope restores the owner's settings. Older managers omit this
+	// flag and their layers are left untouched across rolling upgrades.
+	PushGradingDeclared   bool     `json:"push_grading_declared,omitempty"`
+	PushGradingExtensions []string `json:"push_grading_extensions,omitempty"`
 }
 
 // BotIdentity is a platform's stable identifier, not a display name or an authentication token.

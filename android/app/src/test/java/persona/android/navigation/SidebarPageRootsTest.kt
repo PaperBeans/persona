@@ -123,6 +123,18 @@ class SidebarPageRootsTest {
     }
 
     @Test
+    fun anotherConversationFromAnotherPlaceDoesNotRestoreSavedDrillDown() {
+        val roots = SidebarPageRoots()
+        roots.select(inbox, path("sub"))
+        assertTrue(roots.keeps(AssistantRoute))
+        val step = roots.select(AssistantRoute, emptyList(), contentChanged = true)
+        assertEquals(SidebarPageRoots.Move.SwitchRoot, step.move)
+        assertFalse(step.animated)
+        assertTrue(step.path.isEmpty())
+        assertFalse(roots.keeps(AssistantRoute))
+    }
+
+    @Test
     fun anotherAssistantForgetsEveryRoot() {
         val roots = SidebarPageRoots()
         roots.select(inbox, emptyList())

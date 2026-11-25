@@ -141,7 +141,7 @@ func (s *server) handle(ctx context.Context, method string, params json.RawMessa
 		ctx = p.context(ctx)
 		if it, ok := t.(connector.ImageTools); ok {
 			a, err := it.CallImages(ctx, p.Name, p.Args)
-			return CallResult{Text: a.Text, Images: a.Images}, err
+			return CallResult{Text: a.Text, Images: a.Images, Views: a.Views}, err
 		}
 		text, err := t.Call(ctx, p.Name, p.Args)
 		return CallResult{Text: text}, err

@@ -1,0 +1,151 @@
+/* Usage popover layout and CSS transitions (loaded only in the lazy UsagePopover chunk so FIRST_SCREEN_BUDGET is untouched). */
+
+@keyframes usage-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes usage-popover-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes usage-popover-reflow-a {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
+@keyframes usage-popover-reflow-b {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
+@keyframes usage-popover-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes usage-popover-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.usage-popover {
+  transform-origin: bottom left;
+}
+
+.usage-popover[data-ready="true"] {
+  transition: width 300ms var(--ease-out-strong);
+}
+
+.usage-popover[data-state="open"] {
+  animation: usage-popover-in 240ms var(--ease-out-strong) both;
+}
+
+.usage-popover[data-state="closing"] {
+  animation: usage-popover-out 160ms var(--ease-out-strong) forwards;
+  pointer-events: none;
+}
+
+.usage-popover-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.usage-popover-scroll[data-scrollable="true"] {
+  overflow-y: auto;
+}
+
+.usage-popover-scroll[data-scrollable="false"] {
+  overflow-y: visible;
+}
+
+.usage-popover-scroll[data-fade-top="true"][data-fade-bottom="false"] {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 100%);
+}
+
+.usage-popover-scroll[data-fade-top="false"][data-fade-bottom="true"] {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 18px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 18px), transparent 100%);
+}
+
+.usage-popover-scroll[data-fade-top="true"][data-fade-bottom="true"] {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
+}
+
+.usage-popover-content[data-reflow="a"] {
+  animation: usage-popover-reflow-a 150ms var(--ease-out-strong) both;
+}
+
+.usage-popover-content[data-reflow="b"] {
+  animation: usage-popover-reflow-b 150ms var(--ease-out-strong) both;
+}
+
+.usage-popover-body {
+  display: block;
+  columns: var(--usage-cols, 1) var(--usage-col-w, 320px);
+  column-gap: 12px;
+}
+
+.usage-popover-body[data-cols="1"] {
+  columns: auto;
+}
+
+.usage-popover-card {
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  margin-bottom: 12px;
+}
+
+.usage-popover-card:last-child {
+  margin-bottom: 0;
+}
+
+.usage-popover-span {
+  column-span: all;
+}
+
+.usage-popover-pinned {
+  margin-bottom: 12px;
+}
+
+.usage-popover-unconnected {
+  margin-top: 12px;
+}
+
+/* Override the global 1ms reduced-motion rule in styles.css so reduced motion keeps a 120ms opacity-only fade. */
+@media (prefers-reduced-motion: reduce) {
+  .usage-popover,
+  .usage-popover[data-ready="true"] {
+    transition: none !important;
+  }
+
+  .usage-popover[data-state="open"] {
+    animation-name: usage-popover-fade-in !important;
+    animation-duration: 120ms !important;
+  }
+
+  .usage-popover[data-state="closing"] {
+    animation-name: usage-popover-fade-out !important;
+    animation-duration: 120ms !important;
+  }
+
+  .usage-popover-content[data-reflow="a"],
+  .usage-popover-content[data-reflow="b"] {
+    animation: none !important;
+  }
+}

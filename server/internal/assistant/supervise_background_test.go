@@ -1069,7 +1069,8 @@ func TestAsksOfMainSupervisedTasksUseMainLadder(t *testing.T) {
 	}
 }
 
-// Without leader conversations a card is the user's as it comes, background supervisor or not.
+// Without leader conversations askLadder does not route to the background supervisor, while non-six-class
+// agent_permission cards still go to the task's supervisor or main conversation instead of pushing to the owner.
 func TestBackgroundSupervisorAloneDoesNotRouteAsks(t *testing.T) {
 	e := newRouteEnv(t, nil, false)
 	e.s.noBackground = false
@@ -1078,9 +1079,16 @@ func TestBackgroundSupervisorAloneDoesNotRouteAsks(t *testing.T) {
 		t.Fatal("a card is routed with no leader conversation")
 	}
 	e.raise(askPermission("ix1", "worker-1"))
-	waitFor(t, "the push", func() bool { return e.pushesOf("ix1") == 1 })
-	if e.lastShown("ix1").Delegating {
-		t.Fatal("the card is shown as delegating")
+	waitFor(t, "the non-owner permission routed to supervisor/main", func() bool {
+		for _, m := range laterFor(e.s, "conv1") {
+			if m.From == cardAgentPermission && strings.Contains(m.Text, "interaction_id=ix1") {
+				return true
+			}
+		}
+		return false
+	})
+	if !e.lastShown("ix1").Delegating || e.pushesOf("ix1") != 0 {
+		t.Fatal("non-owner permission pushed to the owner instead of routing")
 	}
 }
 

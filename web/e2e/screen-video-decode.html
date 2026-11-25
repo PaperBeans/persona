@@ -4,8 +4,8 @@
 <!-- web/e2e/screen-video-decode.mjs opens this page on the Vite dev server: the page's own wire and decoder-setup code
      (#6558) decode a whole fixture with the browser's VideoDecoder. -->
 <script type="module">
-  import { decode, VideoParser } from "/src/screen/video-wire.ts";
-  import { decoderSetup } from "/src/screen/video-bitstream.ts";
+  import { decode, VideoParser } from "/src/modules/screen-share/video-wire.ts";
+  import { decoderSetup } from "/src/modules/screen-share/video-bitstream.ts";
 
   window.decodeFixture = async (b64) => {
     const raws = new VideoParser().push(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));

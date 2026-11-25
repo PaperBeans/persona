@@ -143,20 +143,22 @@ func (s *switchShare) takeRestart(id string, now time.Time) string {
 }
 
 // settleRestart ends a try of session id's restart in mode: done or failed drops it, errRestartLater puts it off.
-func (s *switchShare) settleRestart(id, mode string, err error, now time.Time) {
+// False means the user dropped or replaced this try meanwhile; its outcome must not be reported as a completion.
+func (s *switchShare) settleRestart(id, mode string, err error, now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.restarts[id]
 	if r == nil || r.mode != mode {
-		return // dropped or replaced meanwhile
+		return false // dropped or replaced meanwhile
 	}
 	r.applying = false
 	if !errors.Is(err, errRestartLater) {
 		delete(s.restarts, id)
-		return
+		return true
 	}
 	r.delay = min(max(r.delay*2, modeRestartRetry), modeRestartMaxRetry)
 	r.retryAt = now.Add(r.delay)
+	return true
 }
 
 // needsModeRestart: mode can reach session id's running agent only by starting it again (Allow All for a claude whose
@@ -315,7 +317,9 @@ func (n *Node) tryModeRestart(id string) {
 	ctx, cancel := context.WithTimeout(context.Background(), switchProbeWait)
 	defer cancel()
 	err := n.runModeRestart(ctx, id, mode)
-	n.switches().settleRestart(id, mode, err, time.Now())
+	if !n.switches().settleRestart(id, mode, err, time.Now()) {
+		return
+	}
 	var gone restartGoneError
 	switch {
 	case err == nil:

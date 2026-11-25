@@ -458,6 +458,11 @@ func (s *Service) historyRemember(ctx context.Context, st conversationHistorySto
 	for _, it := range page.Items {
 		through = max(through, it.Seq)
 	}
+	if page.ToSeq != nil && through < from {
+		// The source ends before the reader's cursor, which is from an earlier numbering of it: what the page
+		// proves is that end. Stored at the cursor, the tail would claim lines the source does not have.
+		from = through
+	}
 	through = max(from, through)
 	expected, history := "", page.History
 	if previous != nil {
@@ -643,6 +648,7 @@ func (s *Service) historyLoop(ctx context.Context) {
 	for {
 		s.logicalSweep(ctx)
 		s.wakeConversationSwitches()
+		s.machineFallbackSweep(ctx, time.Now())
 		if st := s.historyDB(ctx); st != nil {
 			s.historySweep(ctx, st)
 		} else if st, ok := s.store().(conversationHistoryStore); ok {

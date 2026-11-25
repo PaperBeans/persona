@@ -63,7 +63,9 @@ class AppleOfflineUnitSchemeTests(unittest.TestCase):
         self.assertIn('OFFLINE_PROJECT="$SOURCE/apple/PersonaOfflineUnitTests.xcodeproj"', script)
         self.assertIn('ci_run \'Generate iPhone-only offline unit-test project\' 120 bash -c', script)
         self.assertIn('xcodegen dump --spec "$spec" --type json > "$output/Persona.whole.json"', script)
-        self.assertIn('python3 "$3" "$output/Persona.whole.json" "$output/PersonaOfflineUnitTests.json"', script)
+        self.assertIn('python3 "$3" "$output/Persona.whole.json" "$output/PersonaOfflineUnitTests.json" \\', script)
+        self.assertIn('--profile "$profile" --source-root "$tests"', script)
+        self.assertIn('"$OFFLINE_PROFILE" "$SOURCE/apple/PersonaTests"', script)
         self.assertIn('ci_run \'Generate offline unit-test Xcode project\' 120 xcodegen generate \\\n'
                       '    --spec "$OUTPUT/PersonaOfflineUnitTests.json" --project-root "$SOURCE/apple" \\\n'
                       '    --project "$SOURCE/apple"', script)
@@ -76,6 +78,35 @@ class AppleOfflineUnitSchemeTests(unittest.TestCase):
         self.assertIn('ci_run \'Unsigned iOS and embedded watch/extensions build\' 1800 "${XCODE[@]}" -scheme Persona', script)
         self.assertIn('ci_run \'Generate offline unit-test Xcode project\'', script)
         self.assertIn('xcodegen dump --spec "$spec"', script)
+
+    def test_only_focused_lanes_narrow_compiled_test_sources(self):
+        script = self.script
+        generation = script[script.index('  OFFLINE_PROFILE=full'):script.index(
+            "  ci_run 'Generate offline unit-test Xcode project'")]
+        self.assertEqual(script.count('OFFLINE_PROFILE=focused'), 1)
+        self.assertEqual(script.count('OFFLINE_PROFILE=ipad-diagnostic'), 1)
+        self.assertIn('if [ "$LANE" = ios-focused ]; then\n    OFFLINE_PROFILE=focused', generation)
+        self.assertIn('elif [ "$LANE" = ios-ipad-diagnostic ]; then\n    OFFLINE_PROFILE=ipad-diagnostic', generation)
+        self.assertIn('spec="$1"; output="$2"; profile="$4"; tests="$5"', generation)
+        self.assertIn('--profile "$profile"', generation)
+        # Full ordinary, floor and regression builds retain all test sources.
+        self.assertNotIn('ios-regressions ]; then\n    OFFLINE_PROFILE', generation)
+        self.assertNotIn('ios18 ]; then\n    OFFLINE_PROFILE', generation)
+        self.assertNotIn('LANE" = all', generation)
+        self.assertIn('BUILD_SECONDS=1800', script)
+        self.assertIn('UNIT_SECONDS=1800', script)
+        for deadline in (
+                "ci_run 'Verify hosted iOS test readiness' 900",
+                "ci_run 'Verify hosted regular iPad test readiness' 900",
+                "ci_run 'iOS regular-width About visual test on real iPad' 600",
+                "test_batch ios-html-card 'iOS HTML card tests (separate batch)' 600",
+                "test_batch ios-html-security 'iOS bounded HTML security tests (separate batch)' 600"):
+            self.assertIn(deadline, script)
+        self.assertIn('if [ "$LANE" != ios-focused ]; then', script)
+        # Device and simulator products use distinct SDKs, signing and graphs.
+        self.assertIn('-derivedDataPath "$OUTPUT/ios-device"', script)
+        self.assertIn('-derivedDataPath "$OUTPUT/ios-tests"', script)
+        self.assertNotIn('-derivedDataPath "$OUTPUT/ios-device" \\\n    -parallel-testing-enabled NO', script)
 
     def test_local_ui_test_entry_keeps_default_scheme_and_ui_target(self):
         ui_test = (ROOT / 'scripts/app/ui-test.sh').read_text()
@@ -149,15 +180,15 @@ class AppleCIPreparationTests(unittest.TestCase):
     def test_explicit_unsigned_build_lane_preserves_the_real_build_and_skips_devices(self):
         script = SCRIPT.read_text()
         workflow = (ROOT / '.github/workflows/apple-test.yml').read_text()
-        self.assertIn('options: [ios, ios18, ios-build, packages, ios-focused, ios-regressions, ios-model-picker, ios-ipad-diagnostic]', workflow)
+        self.assertIn('options: [ios, ios18, ios-build, ios-core-only, packages, ios-focused, ios-regressions, ios-model-picker, ios-ipad-diagnostic]', workflow)
         self.assertIn("inputs.lane == 'packages' && 'Native package tests (Xcode 26.0)'", workflow)
         self.assertIn("inputs.lane == 'ios-focused' && 'Focused iOS and About tests (Xcode 26.0)'", workflow)
         self.assertIn("inputs.lane == 'ios-regressions' && 'iOS stack and Live Activity regressions (Xcode 26.0)'", workflow)
         self.assertIn("inputs.lane == 'ios-model-picker' && 'iOS Assistant model picker regressions (Xcode 26.0)'", workflow)
-        self.assertIn('all|ios|ios18|packages|ios-build|ios-focused|ios-regressions|ios-model-picker|ios-ipad-diagnostic', script)
-        self.assertIn('[ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = ios-build ] || [ "$LANE" = ios-focused ] || [ "$LANE" = ios-regressions ] || [ "$LANE" = ios-model-picker ] || [ "$LANE" = ios-ipad-diagnostic ]', script)
-        self.assertIn('[ "$LANE" != packages ] && [ "$LANE" != ios-build ]', script)
-        start = script.index('if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = ios-build ] || [ "$LANE" = ios-focused ] || [ "$LANE" = ios-regressions ]')
+        self.assertIn('all|ios|ios18|packages|ios-build|ios-core-only|ios-focused|ios-regressions|ios-model-picker|ios-ipad-diagnostic', script)
+        self.assertIn('[ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = ios-build ] || [ "$LANE" = ios-core-only ] || [ "$LANE" = ios-focused ] || [ "$LANE" = ios-regressions ] || [ "$LANE" = ios-model-picker ] || [ "$LANE" = ios-ipad-diagnostic ]', script)
+        self.assertIn('[ "$LANE" != packages ] && [ "$LANE" != ios-build ] && [ "$LANE" != ios-core-only ]', script)
+        start = script.index('if [ "$LANE" = all ] || [ "$LANE" = ios ] || [ "$LANE" = ios-build ] || [ "$LANE" = ios-core-only ] || [ "$LANE" = ios-focused ] || [ "$LANE" = ios-regressions ]')
         end = script.index('if [ "$LANE" = ios18 ]; then', start)
         device = script[start:end]
         for step in ('Stage resolved packages for Meta configuration',
@@ -199,6 +230,7 @@ class AppleCIPreparationTests(unittest.TestCase):
         ordinary = yaml.safe_load(subprocess.run(
             ['git', 'show', 'af32ff9d9459e4faafbba63cd93b3901bd487534:.github/workflows/apple-test.yml'], cwd=ROOT,
             check=True, capture_output=True, text=True).stdout)
+        self.assertEqual(data['jobs']['apple']['if'], "inputs.lane != 'ios18' && inputs.lane != 'ios-core-only'")
         for lane in ('ios', 'ios-focused', 'ios-regressions'):
             current = dict(data['jobs']['apple'])
             current.pop('steps')
@@ -206,6 +238,7 @@ class AppleCIPreparationTests(unittest.TestCase):
             baseline.pop('steps')
             for item in (current, baseline):
                 item.pop('name')
+                item.pop('if')
             self.assertEqual(current, baseline)
         steps = data['jobs']['apple']['steps']
         upload = next(step for step in steps if step.get('name') == 'Upload regular iPad diagnostic evidence')
@@ -227,21 +260,32 @@ class AppleCIPreparationTests(unittest.TestCase):
         self.assertNotIn("ci_run 'Collect regular iPad diagnostic evidence'", script)
         original_script = subprocess.run(['git', 'show', 'af32ff9d9459e4faafbba63cd93b3901bd487534:scripts/ci/apple.sh'], cwd=ROOT,
                                          check=True, capture_output=True, text=True).stdout
+        current = script.replace('ci_run "Download matching $platform 26.0 simulator runtime" 1200 python3 "$CI_ROOT/scripts/ci/apple_runtime.py" --platform "$platform" --download',
+                                 'ci_run "Download matching $platform 26.0 simulator runtime" 1200 xcodebuild -downloadPlatform "$platform" -architectureVariant universal')
         # The packages lane's PersonaWire tests came later (#12734) and are pinned on their own.
         wire = script[script.index('  # The wire layer every app target links,'):script.index("  ci_run 'PersonaKit unit tests'")]
         self.assertIn("ci_run 'PersonaWire unit tests'", wire)
         # So did the module registry's package tests (#13432), pinned on their own as well.
         modules = script[script.index('  # The module contract and registry (#13432'):script.index("  ci_run 'Persona Input build'")]
         self.assertIn("ci_run 'PersonaModuleAPI unit tests'", modules)
-        # And the core-only build without the moved feature modules (#14017), pinned on its own too.
-        core_only = script[script.index('  # The app without its moved feature modules'):script.index('fi\nif [ "$LANE" = ios18 ]; then')]
+        # The restored menu bar App has its own SwiftPM tests (#15026), outside apple/project.yml.
+        link_app = script[script.index('  # The Persona Link menu bar App'):script.index("  ci_run 'Persona Screen build'")]
+        self.assertIn("ci_run 'Persona Link menu bar unit tests'", link_app)
+        self.assertIn('apple/PersonaLink/App', link_app)
+        # And the core-only build without the moved feature modules (#14017), split into its own lane in #14496.
+        core_only = script[script.index('  fi\n  if [ "$LANE" = all ] || [ "$LANE" = ios-core-only ]; then'):script.index('fi\nif [ "$LANE" = ios18 ]; then')]
         self.assertIn("ci_run 'Generate core-only Apple project' 120 env PERSONA_CORE_ONLY=YES xcodegen generate", core_only)
         self.assertIn("ci_run 'Core-only iOS build' 1800", core_only)
         self.assertIn("ci_run 'Generate Apple project again (whole)' 120 xcodegen generate", core_only)
         for lane in ('ios', 'ios-focused', 'ios-regressions'):
-            current = script.replace('      --output "$watch_log" --stop "$watch_log/stop" --seconds "$seconds" \\\n      --derived-data "$output/ios-tests" &',
+            current = script.replace('ci_run "Download matching $platform 26.0 simulator runtime" 1200 python3 "$CI_ROOT/scripts/ci/apple_runtime.py" --platform "$platform" --download',
+                                     'ci_run "Download matching $platform 26.0 simulator runtime" 1200 xcodebuild -downloadPlatform "$platform" -architectureVariant universal')
+            current = current.replace('      --output "$watch_log" --stop "$watch_log/stop" --seconds "$seconds" \\\n      --derived-data "$output/ios-tests" &',
                                      '      --output "$watch_log" --stop "$watch_log/stop" --seconds "$seconds" &')
-            offline_generation = script[script.index("  # The same real Persona test host and all of PersonaTests"):
+            current = current.replace(link_app, '''  # The independent Link package contains only Persona Screen, built as mac-link.sh builds it; PersonaScreenCore's tests
+  # cover its capture decisions. There is no menu-bar app or separate Link UI test target to build.
+''')
+            offline_generation = script[script.index('  OFFLINE_PROFILE=full'):
                                        script.index("  # A generic destination must retain the host's single runnable architecture.")]
             current = current.replace(offline_generation, '')
             current = current.replace('OFFLINE_PROJECT="$SOURCE/apple/PersonaOfflineUnitTests.xcodeproj"\n', '')
@@ -295,6 +339,10 @@ class AppleCIPreparationTests(unittest.TestCase):
         sleep 0.1
       done
       : > "$watch_log/observer.stop"
+      # This observer has its own process group, so the readiness timeout does
+      # not kill its evidence. Send the stop to that group explicitly: waiting
+      # without it would leave the observer collecting until the full horizon.
+      kill -TERM "-$watcher" 2>/dev/null || kill -TERM "$watcher" 2>/dev/null || true
       # The observer stops polling after its bounded product phase, then
       # completes final evidence. The outer 900-second deadline still owns a
       # stuck watcher; never kill it before that final collection.
@@ -341,7 +389,7 @@ class AppleCIPreparationTests(unittest.TestCase):
     fi
 '''
             current = current.replace(model_runtime, '')
-            current = current.replace('  if [ "$LANE" != ios-model-picker ]; then\n', '')
+            current = current.replace('  if [ "$LANE" != ios-model-picker ] && [ "$LANE" != ios-core-only ]; then\n', '')
             model_selection = script[script.index('  if [ "$LANE" = ios-model-picker ]; then',
                                                   script.index('  IOS_EXCLUSIONS=')):script.index(
                                                       '  if [ "$LANE" = ios-regressions ]; then',
@@ -353,6 +401,8 @@ class AppleCIPreparationTests(unittest.TestCase):
                                                    script.index('  IOS_FAILED=0'))]
             current = current.replace(model_result, '')
             current = current.replace(' && [ "$LANE" != ios-model-picker ]', '')
+            current = current.replace(' && [ "$LANE" != ios-core-only ]', '')
+            current = current.replace(' || [ "$LANE" = ios-core-only ]', '').replace('|ios-core-only', '')
             current = current.replace(' || [ "$LANE" = ios-model-picker ]', '').replace('|ios-model-picker', '')
             current = current.replace(' || [ "$LANE" = ios-ipad-diagnostic ]', '').replace('|ios-ipad-diagnostic', '')
             current = current.replace('      checker="$1"; bundle="$2"; log="$3"; watch_log="$4"; udid="$5"; ci_root="$6"; bundle_id="$7"; output="$8"; diagnostics="$9"; lane="${10}"; shift 10',
@@ -363,6 +413,9 @@ class AppleCIPreparationTests(unittest.TestCase):
           sleep 0.1
         done
         : > "$watch_log/observer.stop"
+        # Signal the independent observer group explicitly; otherwise the
+        # stop-file cannot end its polling after the readiness shell is gone.
+        kill -TERM "-$watcher" 2>/dev/null || kill -TERM "$watcher" 2>/dev/null || true
         # Let the stop-aware observer finish bounded final evidence. The
         # existing readiness deadline remains the hard outer bound.
         wait "$watcher" || true
@@ -380,6 +433,24 @@ class AppleCIPreparationTests(unittest.TestCase):
         fi
         wait "$watcher" || true
 ''')
+            current = current.replace('''      # Noninteractive Bash gives the observer a separate process group only
+      # with job control enabled. The bounded readiness runner must never kill
+      # this group while it finishes its bounded final evidence.
+      set -m
+      bash -c "exec python3 \\"\\$@\\"" -- "$ci_root/scripts/ci/apple_readiness_watch.py" \\
+        --udid "$udid" --bundle-id "$bundle_id" --scope-root "$output" \\
+        --app "$output/ios-tests/Build/Products/Debug-iphonesimulator/Persona.app/Persona" \\
+        --test-bundle "$output/ios-tests/Build/Products/Debug-iphonesimulator/Persona.app/PlugIns/PersonaTests.xctest/PersonaTests" \\
+        --output "$watch_log" --seconds 900 &
+      watcher=$!
+      set +m''', '''      # Give the observer its own group so a probe deadline cannot leave its
+      # detached collectors behind. Both steps use the unchanged budget.
+      bash -c "exec python3 \\"\\$@\\"" -- "$ci_root/scripts/ci/apple_readiness_watch.py" \\
+        --udid "$udid" --bundle-id "$bundle_id" --scope-root "$output" \\
+        --app "$output/ios-tests/Build/Products/Debug-iphonesimulator/Persona.app/Persona" \\
+        --test-bundle "$output/ios-tests/Build/Products/Debug-iphonesimulator/Persona.app/PlugIns/PersonaTests.xctest/PersonaTests" \\
+        --output "$watch_log" --seconds 900 &
+      watcher=$!''')
             current = current.replace('      "$CI_ROOT" "$CI_BUNDLE_ID" "$OUTPUT" "$DIAGNOSTICS" "$LANE" "${IOS_COMMON[@]}" \\',
                                       '      "$CI_ROOT" "$CI_BUNDLE_ID" "$OUTPUT" "${IOS_COMMON[@]}" \\')
             current = current.replace('        if [ "$lane" = ios-ipad-diagnostic ]; then\n          timeout --kill-after=5s 180s python3 "$ci_root/scripts/ci/apple_diagnostics.py" \\\n            "$output" "$diagnostics" --scope regular || true\n        fi\n', '')
@@ -387,7 +458,33 @@ class AppleCIPreparationTests(unittest.TestCase):
             current = current.replace('      "$OUTPUT" "$DIAGNOSTICS" --scope "$scope"', '      "$OUTPUT" "$DIAGNOSTICS"')
             current = current.replace('  else\n    # pipefail keeps the bounded command\'s failure status. The existing failure\n    # collector retains this allowlisted console log with its xcresult.\n    ci_run "$@" 2>&1 | tee "$OUTPUT/$name.log"\n  fi\n}', '  else\n    ci_run "$@"\n  fi\n}')
             current = current.replace('    if [ "$LANE" = ios-ipad-diagnostic ]; then\n      # A deliberate app-host diagnostic stops after its own strict probe and\n      # observer cleanup; it neither runs nor substitutes for the visual suite.\n      exit 0\n    fi\n', '')
+            # This issue intentionally replaces only the ordinary visual command
+            # with its observation-only wrapper; every other lane stays exact.
+            visual_start = current.index('    mkdir -p "$OUTPUT/regular-shots"\n    # Observe the actual visual invocation')
+            visual_end = current.index('    result ios-about-regular', visual_start)
+            original_start = original_script.index('    mkdir -p "$OUTPUT/regular-shots"',
+                                                    original_script.index('if [ "$LANE" = ios18 ]; then',
+                                                                          original_script.index('REGULAR_SIM=')))
+            original_end = original_script.index('    result ios-about-regular', original_start)
+            current = current[:visual_start] + original_script[original_start:original_end] + current[visual_end:]
             self.assertEqual(current, original_script)
+
+    def test_regular_visual_observer_wraps_only_the_existing_visual_command(self):
+        script = SCRIPT.read_text()
+        start = script.index('    # Observe the actual visual invocation')
+        end = script.index('    result ios-about-regular', start)
+        visual = script[start:end]
+        self.assertIn("ci_run 'iOS regular-width About visual test on real iPad' 600 bash -c '", visual)
+        self.assertIn('--output "$watch_log" --seconds 600 &', visual)
+        self.assertIn('--record "$output/regular-visual-context.json"', visual)
+        self.assertIn('"$OUTPUT/diagnostics/live-regular-visual" "$REGULAR_SIM" "$CI_BUNDLE_ID"', visual)
+        self.assertIn('-only-testing:PersonaTests/AboutVersionRegularVisualTests', visual)
+        self.assertIn('test-without-building', visual)
+        self.assertIn('"$@" 2>&1 | tee "$output/ios-about-regular.log" || command_status=$?', visual)
+        self.assertIn('exit "$command_status"', visual)
+        self.assertNotIn('simctl boot', visual)
+        self.assertNotIn('simctl shutdown', visual)
+        self.assertNotIn('parallel-testing', visual)
 
     def test_regression_lane_stops_after_two_strict_suites(self):
         script = SCRIPT.read_text()
@@ -434,12 +531,14 @@ class AppleCIPreparationTests(unittest.TestCase):
         self.assertNotIn('IOS_EXCLUSIONS', selection)
         self.assertIn('if [ "$LANE" = ios-model-picker ] && [ "$platform" = watchOS ]; then', script)
         resolve = script.index('  resolve Persona')
-        guard = script.index('  if [ "$LANE" != ios-model-picker ]; then', resolve)
+        guard = script.index('  if [ "$LANE" != ios-model-picker ] && [ "$LANE" != ios-core-only ]; then', resolve)
         unsigned = script.index("ci_run 'Unsigned iOS and embedded watch/extensions build'", resolve)
+        core_only_guard = script.index('  if [ "$LANE" = all ] || [ "$LANE" = ios-core-only ]; then', resolve)
         core_only = script.index("ci_run 'Core-only iOS build'", resolve)
         self.assertLess(resolve, guard)
         self.assertLess(guard, unsigned)
-        self.assertLess(unsigned, core_only)
+        self.assertLess(unsigned, core_only_guard)
+        self.assertLess(core_only_guard, core_only)
         readiness = script.index("ci_run 'Verify hosted iOS test readiness' 900")
         batch = script.index("test_batch ios-unit 'iOS offline unit and design/token tests'")
         strict = script.index('result ios-unit "$SIM" AssistantModelChoiceTests AssistantModelPanelModelTests')
@@ -700,7 +799,9 @@ class AppleCIPreparationTests(unittest.TestCase):
     def test_runtime_remains_pinned_to_minimum_compiler(self):
         script = SCRIPT.read_text()
         self.assertIn('for platform in iOS watchOS; do', script)
-        self.assertIn('xcodebuild -downloadPlatform "$platform" -architectureVariant universal', script)
+        helper = (ROOT / 'scripts/ci/apple_runtime.py').read_text()
+        self.assertIn('apple_runtime.py" --platform "$platform" --download', script)
+        self.assertIn('["xcodebuild", "-downloadPlatform", platform, "-architectureVariant", "universal"]', helper)
         self.assertIn('--platform "$platform"', script)
         self.assertNotIn("-buildVersion 26.0", script)
         self.assertIn('--profile stock --runtime "$4"', script)
@@ -810,7 +911,7 @@ class AppleFailureDiagnosticsTests(unittest.TestCase):
             result.mkdir()
             (result / 'summary.json').write_text('test results')
             (result / 'external-key').symlink_to(output / 'private.key')
-            for name in ("live-readiness", "live-regular-readiness"):
+            for name in ("live-readiness", "live-regular-readiness", "live-regular-visual"):
                 observer = output / "diagnostics" / name
                 observer.mkdir(parents=True)
                 (observer / "observer.status.txt").write_text(name)
@@ -832,13 +933,41 @@ class AppleFailureDiagnosticsTests(unittest.TestCase):
                 'simulator.log', 'simulator-boot.log', 'simulator-readiness.log', 'runtimes-iOS-before.json',
                 'regular-simulator.log', 'regular-simulator-boot.log', 'regular-readiness.log', 'native-ssh-trace.log',
                 'ios-unit.xcresult', 'simctl-list.json', 'simctl-list.stderr.txt', 'simctl-list.status.txt',
-                'live-readiness', 'live-regular-readiness',
+                'live-readiness', 'live-regular-readiness', 'live-regular-visual',
                 'disk-space.txt', 'disk-space.stderr.txt', 'disk-space.status.txt',
                 'simulator-launch.status.txt',
             })
             self.assertEqual((destination / 'ios-unit.xcresult/summary.json').read_text(), 'test results')
             self.assertEqual((destination / 'native-ssh-trace.log').read_text(), 'diagnostic fixture')
             self.assertFalse((destination / 'ios-unit.xcresult/external-key').exists())
+
+    def test_visual_console_log_is_required_when_its_result_was_attempted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'output'
+            destination = Path(directory) / 'artifacts'
+            output.mkdir()
+            (output / 'regular-visual-context.json').write_text('{"scope":"visual"}')
+            runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, '', '')
+            with self.assertRaisesRegex(RuntimeError, 'required visual console log is missing'):
+                apple_diagnostics.collect(output, destination, runner)
+            self.assertIn('not published', (destination / 'ios-about-regular.log.status.txt').read_text())
+            (output / 'ios-about-regular.log').write_text('actual xcodebuild stdout and stderr')
+            apple_diagnostics.collect(output, destination, runner)
+            self.assertEqual((destination / 'ios-about-regular.log').read_text(),
+                             'actual xcodebuild stdout and stderr')
+            self.assertIn('included', (destination / 'ios-about-regular.log.status.txt').read_text())
+
+    def test_visual_console_log_copy_failure_is_not_reported_as_included(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'output'
+            destination = Path(directory) / 'artifacts'
+            output.mkdir()
+            (output / 'regular-visual-context.json').write_text('{"scope":"visual"}')
+            (output / 'ios-about-regular.log').write_text('actual xcodebuild stdout and stderr')
+            runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, '', '')
+            with patch('apple_diagnostics.shutil.copyfile', side_effect=OSError('write failed')):
+                with self.assertRaisesRegex(RuntimeError, 'could not be included'):
+                    apple_diagnostics.collect(output, destination, runner)
 
     def test_regular_diagnostic_scope_excludes_other_suite_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -969,6 +1098,38 @@ class AppleRuntimeTests(unittest.TestCase):
         watch = self.runtime("26.0", platform="watchOS")
         self.assertEqual(apple_runtime.select([ios, watch], "watchOS"), watch["identifier"])
         self.assertIsNone(apple_runtime.select([ios], "watchOS"))
+
+    def test_runtime_download_retries_within_the_existing_budget(self):
+        calls = []
+        sleeps = []
+        now = iter([0, 0, 5, 5, 15, 15])
+        responses = iter([subprocess.CompletedProcess([], 70), subprocess.CompletedProcess([], 0)])
+        def run(command, timeout):
+            calls.append((command, timeout))
+            return next(responses)
+        self.assertEqual(apple_runtime.download("watchOS", runner=run, sleeper=sleeps.append, clock=lambda: next(now)), 0)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(sleeps, [10])
+        self.assertEqual(calls[0][0], ["xcodebuild", "-downloadPlatform", "watchOS", "-architectureVariant", "universal"])
+        self.assertEqual(calls[0][1], 1200)
+        self.assertEqual(calls[1][1], 1195)
+        self.assertEqual(apple_runtime.select([self.runtime("26.0", platform="watchOS")], "watchOS"),
+                         "com.apple.CoreSimulator.SimRuntime.watchOS-26-0")
+        self.assertIsNone(apple_runtime.select([self.runtime("26.1", platform="watchOS")], "watchOS"))
+
+    def test_runtime_download_preserves_persistent_failure_and_timeout(self):
+        calls = []
+        def fail(command, timeout):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 70)
+        self.assertEqual(apple_runtime.download("watchOS", runner=fail, sleeper=lambda _: None,
+                                                clock=iter([0, 0, 0, 0, 0, 0]).__next__), 70)
+        self.assertEqual(len(calls), 3)
+        def timeout(command, timeout):
+            raise subprocess.TimeoutExpired(command, timeout)
+        self.assertEqual(apple_runtime.download("iOS", runner=timeout, sleeper=lambda _: None,
+                                                clock=iter([0, 0]).__next__), 124)
+
         self.assertIsNone(apple_runtime.select([self.runtime("26.2", platform="watchOS")], "watchOS"))
 
     def test_highest_compatible_patch_wins_without_selecting_newer_minor(self):
@@ -1012,6 +1173,802 @@ class MacOSDeploymentFloorTests(unittest.TestCase):
                 actual = [f".{platform}({version})" for platform, version in
                           re.findall(r"\.(iOS|visionOS|watchOS|tvOS)\((\.[^)]+)\)", manifest)]
                 self.assertCountEqual(actual, expected)
+
+
+class AppleCoreOnlySplitTests(unittest.TestCase):
+    """Issue #14496: split Core-only iOS build into its own parallel job and lane."""
+
+    WORKFLOW = ROOT / ".github/workflows/apple-test.yml"
+    CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
+    PINNED_DEVELOPER_DIR = "/Applications/Xcode_26.0.1.app/Contents/Developer"
+    CORE_ONLY_STEPS = (
+        "Generate core-only Apple project",
+        "Core-only iOS build",
+        "Generate Apple project again (whole)",
+    )
+    PACKAGE_STEPS = (
+        "PersonaSSH native tunnel integration tests",
+        "PersonaCore strict-concurrency tests and C-binding fixture replay",
+        "PersonaWire unit tests",
+        "PersonaKit unit tests",
+        "PersonaScreenCore unit tests",
+        "PersonaScreenKit unit tests",
+        "PersonaInputKit unit tests",
+        "PersonaModuleAPI unit tests",
+        "Persona Input build",
+        "Persona Screen build",
+        "Stage isolation lint package",
+        "Isolation lint unit tests",
+        "Blocking calls on the main actor (isolation lint)",
+    )
+    ORDINARY_DEVICE_STEPS = (
+        "Unsigned iOS and embedded watch/extensions build",
+        "No CallKit in the device build",
+        "Debug view stack frames (device build)",
+    )
+    SIMULATOR_AND_UNIT_STEPS = (
+        "Generate iPhone-only offline unit-test project",
+        "Generate offline unit-test Xcode project",
+        "Build iOS offline unit tests",
+        "No CallKit in the simulator build",
+        "Create stock iOS 26.0 test simulator",
+        "Verify hosted iOS test readiness",
+        "Grant Reminders access to the owned test app",
+        "iOS offline unit and design/token tests",
+        "iOS HTML card tests (separate batch)",
+        "iOS bounded HTML security tests (separate batch)",
+        "Create stock regular-width About test simulator",
+        "Verify hosted regular iPad test readiness",
+        "iOS regular-width About visual test on real iPad",
+        "Verify token baseline was not rewritten",
+        "Shut down owned simulator",
+        "Delete owned simulator",
+    )
+
+    @classmethod
+    def _eval_gha_expr(cls, expr, context):
+        text = str(expr).strip()
+        if text.startswith("${{") and text.endswith("}}"):
+            text = text[3:-2].strip()
+        token_re = re.compile(
+            r"\s*(?:(\|\||&&|==|!=|[!()])|'([^']*)'|([A-Za-z_][A-Za-z0-9_.]*(?:\(\))?))"
+        )
+        tokens = []
+        pos = 0
+        while pos < len(text):
+            match = token_re.match(text, pos)
+            if not match:
+                raise AssertionError(f"Unsupported GitHub Actions expression syntax near: {text[pos:]!r}")
+            op, string_lit, ident = match.groups()
+            if op is not None:
+                tokens.append(("OP", op))
+            elif string_lit is not None:
+                tokens.append(("STR", string_lit))
+            else:
+                tokens.append(("ID", ident))
+            pos = match.end()
+        index = [0]
+
+        def peek():
+            return tokens[index[0]] if index[0] < len(tokens) else (None, None)
+
+        def consume():
+            tok = tokens[index[0]]
+            index[0] += 1
+            return tok
+
+        def parse_or():
+            left = parse_and()
+            while peek() == ("OP", "||"):
+                consume()
+                right = parse_and()
+                left = left if left else right
+            return left
+
+        def parse_and():
+            left = parse_eq()
+            while peek() == ("OP", "&&"):
+                consume()
+                right = parse_eq()
+                left = right if left else left
+            return left
+
+        def parse_eq():
+            left = parse_unary()
+            while peek()[0] == "OP" and peek()[1] in ("==", "!="):
+                op = consume()[1]
+                right = parse_unary()
+                left = (left == right) if op == "==" else (left != right)
+            return left
+
+        def parse_unary():
+            if peek() == ("OP", "!"):
+                consume()
+                return not parse_unary()
+            return parse_primary()
+
+        def parse_primary():
+            kind, value = peek()
+            if kind == "OP" and value == "(":
+                consume()
+                inner = parse_or()
+                if peek() != ("OP", ")"):
+                    raise AssertionError(f"Unclosed '(' in expression: {expr!r}")
+                consume()
+                return inner
+            if kind == "STR":
+                consume()
+                return value
+            if kind == "ID":
+                consume()
+                if value == "true":
+                    return True
+                if value == "false":
+                    return False
+                if value not in context:
+                    raise AssertionError(f"Unknown identifier {value!r} in expression: {expr!r}")
+                return context[value]
+            raise AssertionError(f"Unexpected token {(kind, value)!r} in expression: {expr!r}")
+
+        result = parse_or()
+        if index[0] != len(tokens):
+            raise AssertionError(f"Trailing tokens {tokens[index[0]:]!r} in expression: {expr!r}")
+        return result
+
+    @classmethod
+    def _eval_gha_if(cls, expr, lane, event_name="workflow_dispatch", failed=False):
+        if expr is None:
+            return not failed
+        context = {
+            "inputs.lane": lane,
+            "github.event_name": event_name,
+            "always()": True,
+            "failure()": failed,
+            "success()": not failed,
+        }
+        return bool(cls._eval_gha_expr(expr, context))
+
+    @classmethod
+    def _expand_gha_template(cls, template, context):
+        return re.sub(
+            r"\$\{\{\s*(.*?)\s*\}\}",
+            lambda m: str(cls._eval_gha_expr(m.group(1), context)),
+            str(template),
+        )
+
+    def _run_apple_lane(self, lane=None, xcode_version="Xcode 26.0.1\nBuild version 17A400\n"):
+        """Execute scripts/ci/apple.sh with stubbed tools and ci_run recording."""
+        runtimes = {
+            "runtimes": [
+                {
+                    "version": "26.0.1",
+                    "isAvailable": True,
+                    "name": "iOS 26.0.1",
+                    "identifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-0-1",
+                },
+                {
+                    "version": "26.0",
+                    "isAvailable": True,
+                    "name": "watchOS 26.0",
+                    "identifier": "com.apple.CoreSimulator.SimRuntime.watchOS-26-0",
+                },
+                {
+                    "version": "18.6",
+                    "isAvailable": True,
+                    "name": "iOS 18.6",
+                    "identifier": "com.apple.CoreSimulator.SimRuntime.iOS-18-6",
+                },
+            ]
+        }
+        with tempfile.TemporaryDirectory(prefix="persona-apple-lane-") as directory:
+            root = Path(directory)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            runner_temp = root / "runner-temp"
+            runner_temp.mkdir()
+            spm_cache = root / "spm-cache"
+            spm_cache.mkdir()
+            runtimes_json = root / "runtimes.json"
+            runtimes_json.write_text(json.dumps(runtimes))
+            step_log = root / "steps.log"
+            step_log.write_text("")
+
+            py_exec = shlex.quote(sys.executable)
+            python_shim = (
+                "#!/bin/bash\n"
+                'case "${1:-}" in\n'
+                "  */scripts/ci/run.py)\n"
+                "    shift\n"
+                '    label=""\n'
+                '    timeout=""\n'
+                '    while [ "$#" -gt 0 ]; do\n'
+                '      case "$1" in\n'
+                '        --label) label="$2"; shift 2 ;;\n'
+                '        --timeout) timeout="$2"; shift 2 ;;\n'
+                "        --) shift; break ;;\n"
+                "        *) shift ;;\n"
+                "      esac\n"
+                "    done\n"
+                '    printf \'%s\\0%s\\0%s\\0\' "$label" "$timeout" "${PERSONA_CORE_ONLY:-}" >> "$CI_STEP_LOG"\n'
+                '    for arg in "$@"; do\n'
+                '      printf \'%s\\0\' "$arg" >> "$CI_STEP_LOG"\n'
+                "    done\n"
+                "    printf '\\036' >> \"$CI_STEP_LOG\"\n"
+                '    if [ "${1:-}" = rsync ]; then\n'
+                '      dest="${!#}"\n'
+                '      case "$dest" in\n'
+                "        */source/)\n"
+                '          mkdir -p "${dest}apple/PersonaTests"\n'
+                '          printf \'{"fixture":true}\\n\' > "${dest}apple/PersonaTests/TokenBaseline.json"\n'
+                "          ;;\n"
+                "      esac\n"
+                "    fi\n"
+                '    case "$*" in\n'
+                '      *"simctl list runtimes -j"*)\n'
+                '        dest="${!#}"\n'
+                '        cp "$FAKE_RUNTIMES_JSON" "$dest"\n'
+                "        ;;\n"
+                '      *"--create-only"*"sim-boot.sh"*|*"sim-boot.sh"*"--create-only"*)\n'
+                '        for arg in "$@"; do\n'
+                '          case "$arg" in\n'
+                '            */regular-simulator.log) printf \'22222222-2222-2222-2222-222222222222\\n\' > "$arg" ;;\n'
+                '            */simulator.log) printf \'11111111-1111-1111-1111-111111111111\\n\' > "$arg" ;;\n'
+                "          esac\n"
+                "        done\n"
+                "        ;;\n"
+                "    esac\n"
+                "    exit 0\n"
+                "    ;;\n"
+                "esac\n"
+                f'exec {py_exec} "$@"\n'
+            )
+            stubs = {
+                "uname": (
+                    "#!/bin/bash\n"
+                    'if [ "${1:-}" = "-m" ]; then printf "arm64\\n"; else printf "Darwin\\n"; fi\n'
+                ),
+                "sw_vers": "#!/bin/bash\nprintf '26.0\\n'\n",
+                "xcodebuild": "#!/bin/bash\nprintf '%s' \"$FAKE_XCODE_VERSION\"\n",
+                "xcrun": "#!/bin/bash\nprintf 'Swift version 6.2\\n'\n",
+                "xcodegen": "#!/bin/bash\nprintf 'Version: 2.42.0\\n'\n",
+                "rsync": "#!/bin/bash\nexit 0\n",
+                "git": (
+                    "#!/bin/bash\n"
+                    'if [ "${1:-}" = "ls-files" ]; then\n'
+                    "  printf 'apple/PersonaTests/TokenBaseline.json\\0'\n"
+                    "  exit 0\n"
+                    "fi\n"
+                    "exit 0\n"
+                ),
+                "python3": python_shim,
+            }
+            for name, content in stubs.items():
+                path = bin_dir / name
+                path.write_text(content)
+                path.chmod(0o755)
+
+            env = {
+                k: v for k, v in os.environ.items()
+                if k != "DEVELOPER_DIR" and not k.startswith("PERSONA_")
+            }
+            env.update({
+                "PATH": str(bin_dir) + os.pathsep + env.get("PATH", ""),
+                "RUNNER_TEMP": str(runner_temp),
+                "CI_SPM_CACHE": str(spm_cache),
+                "CI_APPLE_DIAGNOSTICS": str(root / "diagnostics"),
+                "FAKE_RUNTIMES_JSON": str(runtimes_json),
+                "FAKE_XCODE_VERSION": xcode_version,
+                "CI_STEP_LOG": str(step_log),
+            })
+            cmd = ["bash", str(SCRIPT)]
+            if lane is not None:
+                cmd.append(lane)
+            result = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
+
+            steps = []
+            raw = step_log.read_bytes()
+            for record in raw.split(b"\x1e"):
+                if not record:
+                    continue
+                parts = [p.decode("utf-8", errors="replace") for p in record.split(b"\x00")]
+                if parts and parts[-1] == "":
+                    parts = parts[:-1]
+                if len(parts) < 3:
+                    continue
+                steps.append({
+                    "label": parts[0],
+                    "timeout": int(parts[1]),
+                    "persona_core_only": parts[2],
+                    "command": parts[3:],
+                })
+            return result, steps
+
+    @staticmethod
+    def _step_has_core_only(step):
+        return (
+            step["persona_core_only"] == "YES"
+            or "PERSONA_CORE_ONLY=YES" in step["command"]
+        )
+
+    @staticmethod
+    def _extract_script_budgets(text):
+        """Extract all ci_run/test_batch literal timeouts, BUILD/UNIT_SECONDS, and watcher --seconds."""
+        step_budgets = []
+        variable_steps = []
+        build_seconds = []
+        unit_seconds = []
+        watcher_seconds = []
+        for raw_line in text.splitlines():
+            stripped = raw_line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            for var_name, bucket in (("BUILD_SECONDS", build_seconds), ("UNIT_SECONDS", unit_seconds)):
+                m_var = re.match(rf"^{var_name}=(\d+)\b", stripped)
+                if m_var:
+                    bucket.append(int(m_var.group(1)))
+            for m_watch in re.finditer(r"--seconds\s+(\d+)\b", stripped):
+                watcher_seconds.append(int(m_watch.group(1)))
+            m_ci = re.search(r"""\bci_run\s+(?:'([^']+)'|"([^"]+)")\s+(\S+)""", stripped)
+            if m_ci:
+                label = m_ci.group(1) or m_ci.group(2)
+                if label == "$@":
+                    continue
+                tok = m_ci.group(3)
+                if tok.isdigit():
+                    step_budgets.append((label, int(tok)))
+                else:
+                    variable_steps.append((label, tok))
+            m_tb = re.search(r"""\btest_batch\s+\S+\s+(?:'([^']+)'|"([^"]+)")\s+(\S+)""", stripped)
+            if m_tb:
+                label = m_tb.group(1) or m_tb.group(2)
+                tok = m_tb.group(3)
+                if tok.isdigit():
+                    step_budgets.append((label, int(tok)))
+                else:
+                    variable_steps.append((label, tok))
+        return {
+            "steps": step_budgets,
+            "variable_steps": variable_steps,
+            "BUILD_SECONDS": build_seconds,
+            "UNIT_SECONDS": unit_seconds,
+            "watcher_seconds": watcher_seconds,
+        }
+
+    def test_apple_test_workflow_splits_core_only_into_parallel_job(self):
+        workflow = yaml.safe_load(self.WORKFLOW.read_text())
+        options = workflow[True]["workflow_dispatch"]["inputs"]["lane"]["options"]
+        self.assertIn("ios-core-only", options)
+
+        jobs = workflow["jobs"]
+        self.assertIn("apple", jobs)
+        self.assertIn("ios-core-only", jobs)
+        self.assertIn("ios18", jobs)
+
+        apple_job = jobs["apple"]
+        core_job = jobs["ios-core-only"]
+        ios18_job = jobs["ios18"]
+
+        # Parallel execution: neither job waits on the other.
+        self.assertFalse(core_job.get("needs"), "ios-core-only must run in parallel without needs:")
+        self.assertFalse(apple_job.get("needs"), "apple must not wait on ios-core-only")
+
+        # Runner, timeout, Xcode pin, and strict failure propagation.
+        self.assertEqual(core_job.get("runs-on"), "macos-26")
+        self.assertIsInstance(core_job.get("timeout-minutes"), int)
+        self.assertGreater(core_job["timeout-minutes"], 0)
+        self.assertLessEqual(core_job["timeout-minutes"], 60)
+        self.assertEqual(apple_job.get("timeout-minutes"), 120)
+        self.assertEqual(core_job.get("env", {}).get("DEVELOPER_DIR"), self.PINNED_DEVELOPER_DIR)
+
+        for job_name, job in (("apple", apple_job), ("ios-core-only", core_job)):
+            self.assertFalse(job.get("continue-on-error"), f"{job_name} must not set continue-on-error")
+            for step in job.get("steps", []):
+                self.assertFalse(
+                    step.get("continue-on-error"),
+                    f"step {step.get('name')!r} in {job_name} must not set continue-on-error",
+                )
+
+        # Verify ios-core-only job steps: checkout, pinned Xcode init, xcodegen, apple.sh ios-core-only, upload on failure.
+        core_steps = core_job.get("steps", [])
+        self.assertTrue(any(s.get("uses", "").startswith("actions/checkout@") for s in core_steps))
+        self.assertTrue(
+            any('xcode-select --switch "$DEVELOPER_DIR"' in s.get("run", "") for s in core_steps),
+            "ios-core-only must select pinned system Xcode",
+        )
+        self.assertTrue(
+            any("xcodebuild -runFirstLaunch" in s.get("run", "") for s in core_steps),
+            "ios-core-only must initialize pinned Xcode platform services",
+        )
+        self.assertTrue(
+            any("brew install xcodegen" in s.get("run", "") for s in core_steps),
+            "ios-core-only must install xcodegen",
+        )
+
+        run_steps = [s for s in core_steps if "scripts/ci/apple.sh" in s.get("run", "")]
+        self.assertEqual(len(run_steps), 1, "ios-core-only must invoke scripts/ci/apple.sh once")
+        run_step = run_steps[0]
+        run_cmd = run_step["run"]
+        job_lane_env = run_step.get("env", {}).get("APPLE_CI_LANE") or core_job.get("env", {}).get("APPLE_CI_LANE")
+        invokes_core_only = (
+            "scripts/ci/apple.sh ios-core-only" in run_cmd
+            or (
+                job_lane_env == "ios-core-only"
+                and 'scripts/ci/apple.sh "$APPLE_CI_LANE"' in run_cmd
+            )
+        )
+        self.assertTrue(invokes_core_only, f"expected scripts/ci/apple.sh ios-core-only, got: {run_cmd!r}")
+
+        # Failure diagnostics upload on failure() with non-colliding artifact name.
+        core_uploads = [s for s in core_steps if s.get("uses", "").startswith("actions/upload-artifact@")]
+        self.assertEqual(len(core_uploads), 1, "ios-core-only must upload failure diagnostics")
+        core_upload = core_uploads[0]
+        self.assertIn("if", core_upload, "ios-core-only diagnostics upload must be failure-gated")
+        self.assertTrue(self._eval_gha_if(core_upload["if"], lane="ios", failed=True))
+        self.assertFalse(self._eval_gha_if(core_upload["if"], lane="ios", failed=False))
+        self.assertTrue(self._eval_gha_if(core_upload["if"], lane="ios-core-only", failed=True))
+        self.assertFalse(self._eval_gha_if(core_upload["if"], lane="ios-core-only", failed=False))
+
+        apple_failure_upload = next(
+            s for s in apple_job["steps"]
+            if s.get("uses", "").startswith("actions/upload-artifact@")
+            and self._eval_gha_if(s.get("if"), lane="ios", failed=True)
+        )
+        ios18_failure_upload = next(
+            s for s in ios18_job["steps"]
+            if s.get("uses", "").startswith("actions/upload-artifact@")
+        )
+        template_ctx = {
+            "inputs.lane": "ios",
+            "github.run_id": "999",
+            "github.run_attempt": "1",
+            "runner.temp": "/tmp/runner",
+        }
+        core_artifact = self._expand_gha_template(core_upload["with"]["name"], template_ctx)
+        apple_artifact = self._expand_gha_template(apple_failure_upload["with"]["name"], template_ctx)
+        ios18_artifact = self._expand_gha_template(ios18_failure_upload["with"]["name"], template_ctx)
+        self.assertNotEqual(
+            core_artifact,
+            apple_artifact,
+            "ios-core-only artifact name must not collide with apple's when inputs.lane == 'ios'",
+        )
+        self.assertNotEqual(core_artifact, ios18_artifact)
+        core_diag_env = (
+            run_step.get("env", {}).get("CI_APPLE_DIAGNOSTICS")
+            or core_job.get("env", {}).get("CI_APPLE_DIAGNOSTICS")
+        )
+        self.assertTrue(core_diag_env, "ios-core-only run step must set CI_APPLE_DIAGNOSTICS")
+        self.assertEqual(
+            self._expand_gha_template(core_diag_env, template_ctx),
+            self._expand_gha_template(core_upload["with"]["path"], template_ctx),
+        )
+
+        # Truth table of job if: conditions across every lane option and trigger event.
+        for lane in options:
+            for event_name in ("workflow_call", "workflow_dispatch"):
+                with self.subTest(lane=lane, event=event_name):
+                    runs_apple = self._eval_gha_if(apple_job.get("if"), lane=lane, event_name=event_name)
+                    runs_core = self._eval_gha_if(core_job.get("if"), lane=lane, event_name=event_name)
+                    runs_ios18 = self._eval_gha_if(ios18_job.get("if"), lane=lane, event_name=event_name)
+                    if lane == "ios":
+                        self.assertEqual((runs_apple, runs_core, runs_ios18), (True, True, False))
+                    elif lane == "ios-core-only":
+                        self.assertEqual((runs_apple, runs_core, runs_ios18), (False, True, False))
+                    elif lane == "ios18":
+                        self.assertEqual(
+                            (runs_apple, runs_core, runs_ios18),
+                            (False, False, event_name == "workflow_dispatch"),
+                        )
+                    else:
+                        self.assertEqual((runs_apple, runs_core, runs_ios18), (True, False, False))
+
+    def test_ci_workflow_and_required_gate_aggregate_both_parallel_apple_jobs(self):
+        import required as ci_required
+
+        ci = yaml.safe_load(self.CI_WORKFLOW.read_text())
+        apple_wf = yaml.safe_load(self.WORKFLOW.read_text())
+
+        ci_apple = ci["jobs"]["apple"]
+        ci_req = ci["jobs"]["required"]
+        self.assertEqual(ci_apple.get("uses"), "./.github/workflows/apple-test.yml")
+        self.assertEqual(ci_apple.get("with", {}).get("lane"), "ios")
+        self.assertEqual(ci_apple.get("if"), "needs.changes.outputs.apple == 'true'")
+        apple_needs = ci_apple.get("needs")
+        self.assertTrue(
+            apple_needs == "changes" or (isinstance(apple_needs, list) and "changes" in apple_needs),
+            f"unexpected apple needs: {apple_needs!r}",
+        )
+        self.assertFalse(ci_apple.get("continue-on-error"))
+
+        self.assertEqual(ci_req.get("name"), "CI required")
+        self.assertIn("apple", ci_req.get("needs", []))
+        self.assertEqual(ci_req.get("if"), "always()")
+        self.assertFalse(ci_req.get("continue-on-error"))
+
+        # Confirm the lane ci.yml passes activates BOTH parallel jobs in apple-test.yml.
+        called_lane = ci_apple["with"]["lane"]
+        self.assertIn("ios-core-only", apple_wf["jobs"])
+        self.assertTrue(self._eval_gha_if(apple_wf["jobs"]["apple"].get("if"), lane=called_lane, event_name="workflow_call"))
+        self.assertTrue(self._eval_gha_if(apple_wf["jobs"]["ios-core-only"].get("if"), lane=called_lane, event_name="workflow_call"))
+        self.assertFalse(apple_wf["jobs"]["apple"].get("continue-on-error"))
+        self.assertFalse(apple_wf["jobs"]["ios-core-only"].get("continue-on-error"))
+
+        # Confirm scripts/ci/required.py fails CI required when apple fails/cancels and skips cleanly when unselected.
+        all_platforms = ("server", "web", "android", "apple", "core", "runtimes", "desktop", "scripts")
+
+        def make_needs(apple_selected, apple_result_state):
+            outputs = {p: "false" for p in all_platforms}
+            outputs["apple"] = "true" if apple_selected else "false"
+            needs = {
+                "changes": {"result": "success", "outputs": outputs},
+                "guards": {"result": "success"},
+            }
+            for p in all_platforms:
+                needs[p] = {"result": apple_result_state if p == "apple" else "skipped"}
+            return needs
+
+        self.assertEqual(ci_required.failures(make_needs(True, "success")), [])
+        for bad_state in ("failure", "cancelled", "skipped"):
+            with self.subTest(apple_selected=True, apple_result=bad_state):
+                errs = ci_required.failures(make_needs(True, bad_state))
+                self.assertEqual(errs, [f"apple: selected but {bad_state}"])
+        self.assertEqual(ci_required.failures(make_needs(False, "skipped")), [])
+        self.assertEqual(
+            ci_required.failures(make_needs(False, "failure")),
+            ["apple: not selected but failure"],
+        )
+
+    def test_ios_lane_skips_core_only_build_and_keeps_device_and_unit_tests(self):
+        result, steps = self._run_apple_lane("ios")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        labels = [step["label"] for step in steps]
+
+        for forbidden in self.CORE_ONLY_STEPS:
+            self.assertNotIn(forbidden, labels, f"ios lane must not run {forbidden!r}")
+        self.assertFalse(
+            any(self._step_has_core_only(s) for s in steps),
+            "ios lane must not invoke any step with PERSONA_CORE_ONLY=YES",
+        )
+
+        expected_in_order = [
+            "No CallKit in Apple sources and build settings",
+            "Build PersonaCore XCFramework before package resolution",
+            "Generate Apple project",
+            "PersonaSSH native tunnel integration tests",
+            "PersonaKit unit tests",
+            "Blocking calls on the main actor (isolation lint)",
+            "Resolve Swift packages (Persona)",
+            "Unsigned iOS and embedded watch/extensions build",
+            "No CallKit in the device build",
+            "Debug view stack frames (device build)",
+            "Generate iPhone-only offline unit-test project",
+            "Build iOS offline unit tests",
+            "Create stock iOS 26.0 test simulator",
+            "Verify hosted iOS test readiness",
+            "iOS offline unit and design/token tests",
+            "iOS HTML card tests (separate batch)",
+            "iOS bounded HTML security tests (separate batch)",
+            "Create stock regular-width About test simulator",
+            "iOS regular-width About visual test on real iPad",
+            "Verify token baseline was not rewritten",
+        ]
+        positions = []
+        for label in expected_in_order:
+            self.assertIn(label, labels, f"ios lane lost expected step {label!r}")
+            positions.append(labels.index(label))
+        self.assertEqual(positions, sorted(positions), "ios lane steps ran out of order")
+
+    def test_ios_core_only_lane_runs_only_core_only_build_and_its_prerequisites(self):
+        result, steps = self._run_apple_lane("ios-core-only")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        labels = [step["label"] for step in steps]
+        by_label = {step["label"]: step for step in steps}
+
+        # Required prerequisites and core-only steps.
+        required_prerequisites = (
+            "No CallKit in Apple sources and build settings",
+            "Stage resolved packages for Meta configuration",
+            "Build PersonaCore XCFramework before package resolution",
+            "Generate public unsigned Apple config",
+            "Require iphoneos SDK",
+            "Require watchos SDK",
+            "List iOS simulator runtimes",
+            "List watchOS simulator runtimes",
+            "Resolve Swift packages (Persona)",
+            "Generate core-only Apple project",
+            "Core-only iOS build",
+        )
+        for label in required_prerequisites:
+            self.assertIn(label, labels, f"ios-core-only lane missing prerequisite/step {label!r}")
+
+        core_build_idx = labels.index("Core-only iOS build")
+        self.assertLess(
+            labels.index("Build PersonaCore XCFramework before package resolution"),
+            labels.index("Resolve Swift packages (Persona)"),
+        )
+        self.assertLess(labels.index("Build PersonaCore XCFramework before package resolution"), core_build_idx)
+        self.assertLess(labels.index("List iOS simulator runtimes"), core_build_idx)
+        self.assertLess(labels.index("List watchOS simulator runtimes"), core_build_idx)
+        self.assertLess(labels.index("Resolve Swift packages (Persona)"), core_build_idx)
+        self.assertLess(labels.index("Generate core-only Apple project"), core_build_idx)
+        self.assertNotIn(
+            "--simulator",
+            by_label["Build PersonaCore XCFramework before package resolution"]["command"],
+        )
+
+        # Verify Generate core-only Apple project passes PERSONA_CORE_ONLY=YES to xcodegen generate.
+        gen_step = by_label["Generate core-only Apple project"]
+        self.assertTrue(self._step_has_core_only(gen_step), f"missing PERSONA_CORE_ONLY=YES: {gen_step}")
+        self.assertIn("xcodegen", gen_step["command"])
+        self.assertIn("generate", gen_step["command"])
+
+        # Verify Core-only iOS build uses generic/platform=iOS unsigned device build.
+        build_cmd = by_label["Core-only iOS build"]["command"]
+        self.assertEqual(build_cmd[0], "xcodebuild")
+        self.assertIn("-scheme", build_cmd)
+        self.assertEqual(build_cmd[build_cmd.index("-scheme") + 1], "Persona")
+        self.assertIn("-destination", build_cmd)
+        self.assertEqual(build_cmd[build_cmd.index("-destination") + 1], "generic/platform=iOS")
+        self.assertIn("-disableAutomaticPackageResolution", build_cmd)
+        self.assertIn("CODE_SIGNING_ALLOWED=NO", build_cmd)
+        self.assertIn("CODE_SIGNING_REQUIRED=NO", build_cmd)
+        self.assertIn("build", build_cmd)
+
+        # Must NOT run package tests, ordinary device build/checks, whole regeneration, offline unit tests, or simulators.
+        forbidden_labels = (
+            self.PACKAGE_STEPS
+            + self.ORDINARY_DEVICE_STEPS
+            + ("Generate Apple project again (whole)",)
+            + self.SIMULATOR_AND_UNIT_STEPS
+        )
+        for forbidden in forbidden_labels:
+            self.assertNotIn(forbidden, labels, f"ios-core-only must not run {forbidden!r}")
+
+        # Must not regenerate any Xcode project after Core-only iOS build or invoke any simulator/test commands.
+        for step in steps[core_build_idx + 1:]:
+            self.assertNotIn(
+                "xcodegen",
+                step["command"],
+                f"ios-core-only must not run xcodegen after Core-only iOS build: {step}",
+            )
+        for step in steps:
+            joined = " ".join(step["command"])
+            self.assertNotIn("sim-boot.sh", joined, f"ios-core-only must not touch simulators: {step}")
+            self.assertNotIn("build-for-testing", step["command"])
+            self.assertNotIn("test-without-building", step["command"])
+
+        # Must enforce Xcode 26.0.x just like the other Xcode 26.0 lanes.
+        wrong_xcode, _ = self._run_apple_lane("ios-core-only", xcode_version="Xcode 26.3\nBuild version 17E100\n")
+        self.assertNotEqual(wrong_xcode.returncode, 0)
+        self.assertIn("select Xcode 26.0.x explicitly", wrong_xcode.stderr)
+
+    def test_all_lane_still_runs_core_only_build_and_regenerates_whole_project(self):
+        for lane in ("all", None):
+            with self.subTest(lane=lane):
+                result, steps = self._run_apple_lane(lane)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                labels = [step["label"] for step in steps]
+                by_label = {step["label"]: step for step in steps}
+
+                expected_order = [
+                    "Unsigned iOS and embedded watch/extensions build",
+                    "Generate core-only Apple project",
+                    "Core-only iOS build",
+                    "Generate Apple project again (whole)",
+                    "Generate iPhone-only offline unit-test project",
+                    "Build iOS offline unit tests",
+                ]
+                positions = []
+                for label in expected_order:
+                    self.assertIn(label, labels, f"lane {lane!r} missing {label!r}")
+                    positions.append(labels.index(label))
+                self.assertEqual(positions, sorted(positions), f"lane {lane!r} core-only steps out of order")
+                self.assertTrue(self._step_has_core_only(by_label["Generate core-only Apple project"]))
+                self.assertFalse(self._step_has_core_only(by_label["Generate Apple project again (whole)"]))
+
+    def test_other_lanes_do_not_run_core_only_build(self):
+        other_lanes = (
+            "ios-build",
+            "ios-focused",
+            "ios-regressions",
+            "ios-model-picker",
+            "ios-ipad-diagnostic",
+            "packages",
+            "ios18",
+        )
+        for lane in other_lanes:
+            with self.subTest(lane=lane):
+                result, steps = self._run_apple_lane(lane)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                labels = [step["label"] for step in steps]
+                for forbidden in self.CORE_ONLY_STEPS:
+                    self.assertNotIn(forbidden, labels, f"lane {lane!r} must not run {forbidden!r}")
+                self.assertFalse(
+                    any(self._step_has_core_only(s) for s in steps),
+                    f"lane {lane!r} must not pass PERSONA_CORE_ONLY=YES",
+                )
+                if lane == "ios-build":
+                    self.assertIn("Unsigned iOS and embedded watch/extensions build", labels)
+                    self.assertNotIn("Build iOS offline unit tests", labels)
+                elif lane == "packages":
+                    self.assertIn("PersonaSSH native tunnel integration tests", labels)
+                    self.assertIn("PersonaKit unit tests", labels)
+                    self.assertNotIn("Unsigned iOS and embedded watch/extensions build", labels)
+
+    def test_no_timeout_or_budget_increased_compared_to_pre_split_baseline(self):
+        # Compare .github/workflows/apple-test.yml job timeouts and inline ci_run timeouts against the pre-#14496 commit.
+        baseline_ref = "6d8f97f71faf6e370bbbcafbbec3deece631c9d3"
+        base_wf_text = subprocess.run(
+            ["git", "show", f"{baseline_ref}:.github/workflows/apple-test.yml"],
+            cwd=ROOT, check=True, capture_output=True, text=True,
+        ).stdout
+        curr_wf_text = self.WORKFLOW.read_text()
+        base_wf = yaml.safe_load(base_wf_text)
+        curr_wf = yaml.safe_load(curr_wf_text)
+
+        for job_name, base_job in base_wf["jobs"].items():
+            self.assertIn(job_name, curr_wf["jobs"], f"existing job {job_name!r} was removed")
+            self.assertLessEqual(
+                curr_wf["jobs"][job_name]["timeout-minutes"],
+                base_job["timeout-minutes"],
+                f"timeout-minutes for workflow job {job_name!r} increased over pre-#14496 baseline",
+            )
+
+        base_wf_runs = self._extract_script_budgets(base_wf_text)["steps"]
+        curr_wf_runs = self._extract_script_budgets(curr_wf_text)["steps"]
+        base_wf_max = {}
+        for label, seconds in base_wf_runs:
+            base_wf_max[label] = max(base_wf_max.get(label, 0), seconds)
+        for label, seconds in curr_wf_runs:
+            if label in base_wf_max:
+                self.assertLessEqual(
+                    seconds,
+                    base_wf_max[label],
+                    f"workflow ci_run timeout for {label!r} increased over pre-#14496 baseline",
+                )
+
+        # Compare scripts/ci/apple.sh ci_run/test_batch timeouts and BUILD_SECONDS/UNIT_SECONDS against pre-#14496 baseline.
+        base_sh_text = subprocess.run(
+            ["git", "show", f"{baseline_ref}:scripts/ci/apple.sh"],
+            cwd=ROOT, check=True, capture_output=True, text=True,
+        ).stdout
+        curr_sh_text = SCRIPT.read_text()
+        base_budgets = self._extract_script_budgets(base_sh_text)
+        curr_budgets = self._extract_script_budgets(curr_sh_text)
+
+        self.assertGreaterEqual(len(base_budgets["steps"]), 30, "baseline ci_run parser matched too few steps")
+        base_step_max = {}
+        for label, seconds in base_budgets["steps"]:
+            base_step_max[label] = max(base_step_max.get(label, 0), seconds)
+        for label, seconds in curr_budgets["steps"]:
+            if label in base_step_max:
+                self.assertLessEqual(
+                    seconds,
+                    base_step_max[label],
+                    f"apple.sh timeout for {label!r} increased over pre-#14496 baseline ({seconds} > {base_step_max[label]})",
+                )
+
+        # Only known budget variables are allowed as non-numeric timeouts in apple.sh.
+        allowed_vars = {'"$BUILD_SECONDS"', '"$UNIT_SECONDS"'}
+        for label, tok in curr_budgets["variable_steps"]:
+            self.assertIn(tok, allowed_vars, f"unexpected variable timeout {tok!r} for {label!r}")
+
+        for var_name in ("BUILD_SECONDS", "UNIT_SECONDS"):
+            self.assertTrue(base_budgets[var_name], f"baseline {var_name} missing")
+            self.assertEqual(
+                len(curr_budgets[var_name]),
+                len(base_budgets[var_name]),
+                f"{var_name} assignment count changed",
+            )
+            for curr_val, base_val in zip(curr_budgets[var_name], base_budgets[var_name]):
+                self.assertLessEqual(
+                    curr_val,
+                    base_val,
+                    f"{var_name} increased over pre-#14496 baseline ({curr_val} > {base_val})",
+                )
+
+        self.assertEqual(len(curr_budgets["watcher_seconds"]), len(base_budgets["watcher_seconds"]))
+        for curr_val, base_val in zip(curr_budgets["watcher_seconds"], base_budgets["watcher_seconds"]):
+            self.assertLessEqual(curr_val, base_val, "watcher --seconds budget increased over pre-#14496 baseline")
 
 
 if __name__ == "__main__":

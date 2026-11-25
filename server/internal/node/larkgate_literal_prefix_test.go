@@ -330,3 +330,87 @@ func TestLarkResolvedPrefixScope(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { assertAssistantBypassClassification(t, tc.command, tc.cards) })
 	}
 }
+
+func TestLarkLiteralQuotedAndConditionalVariables(t *testing.T) {
+	gate := exampleGate("")
+	for _, tc := range []struct {
+		name, command string
+		cards         int
+	}{
+		// Positive regressions: top-level literal executable variables that are quoted, chained with &&/||, or passed read-only scalar/glob args.
+		{"double-quoted absolute executable", `V=/opt/venv/bin/python; "$V" -I -m unittest`, 0},
+		{"double-quoted braced executable", `V=/opt/venv/bin/python; "${V}" -I -m unittest`, 0},
+		{"double-quoted bare executable", `V=python3.11; "$V" -I -m unittest`, 0},
+		{"double-quoted wrapped executable", `V=/opt/venv/bin/python; timeout 30 "$V" -I -m unittest`, 0},
+		{"double-quoted home executable", `V=~/.venv/bin/python; "$V" -I -m unittest`, 0},
+		{"double-quoted repeated absolute executable", `V=/opt/venv/bin/python; "$V" -V; "$V" -I -m unittest`, 0},
+		{"assignment chained with &&", `V=/opt/venv/bin/python && $V -I -m unittest`, 0},
+		{"quoted assignment chained with &&", `V=/opt/venv/bin/python && "$V" -I -m unittest`, 0},
+		{"invocation followed by &&", `V=/opt/venv/bin/python; $V -I -m unittest && echo ok`, 0},
+		{"invocation followed by ||", `V=/opt/venv/bin/python; $V -I -m unittest || true`, 0},
+		{"cd and assignment in && chain", `cd /tmp && V=/opt/venv/bin/python && "$V" -I -m unittest`, 0},
+		{"assignment before cd && invocation", `V=/opt/venv/bin/python; cd /tmp && "$V" -I -m unittest`, 0},
+		{"repeated absolute executable in && chain", `V=/opt/venv/bin/python; "$V" -V && "$V" -I -m unittest`, 0},
+		{"bare executable followed by &&", `V=python3.11; "$V" -I -m unittest && echo ok`, 0},
+		{"fallback invocation on right of ||", `V=/opt/venv/bin/python; false || "$V" -I -m unittest`, 0},
+		{"read-only scalar arg on quoted executable", `V=/opt/venv/bin/python; "$V" -I -m unittest "$TARGET"`, 0},
+		{"read-only glob arg on executable", `V=python3.11; $V -m unittest tests/test_*.py`, 0},
+		{"nested bash -c with && and quoted executable", `bash -c 'V=/opt/venv/bin/python && "$V" -I -m unittest'`, 0},
+		{"wrapped zsh -lc with && and quoted executable", `/bin/zsh -lc 'V=/opt/venv/bin/python && "$V" -I -m unittest'`, 0},
+
+		// Adversarial security controls: every uncertain, gated, shell, wrapper, or conditional-leak shape must remain blocked (1 card).
+		{"quoted multi-word value stays unknown", `V="python3 -I"; "$V" -m unittest`, 1},
+		{"quoted empty value stays unknown", `V=""; "$V" ex POST /messages/example/recall`, 1},
+		{"quoted lark-cli write", `V=lark-cli; "$V" im +messages-send --chat-id oc_example --text hello`, 1},
+		{"quoted absolute lark-cli write", `V=/usr/local/bin/lark-cli; "$V" im +messages-send --chat-id oc_example --text hello`, 1},
+		{"quoted gated write", `V=ex; "$V" POST /messages/example/recall`, 1},
+		{"quoted shell -c write", `V=/bin/sh; "$V" -c 'lark-cli im +messages-send --chat-id oc_example --text hello'`, 1},
+		{"quoted shell -c dynamic script", `V=/bin/sh; "$V" -c "$PAYLOAD"`, 1},
+		{"quoted env wrapper hiding lark-cli", `V=/usr/bin/env; "$V" lark-cli im +messages-send --chat-id oc_example --text hello`, 1},
+		{"quoted env wrapper hiding dynamic command", `V=env; "$V" "$OTHER"`, 1},
+		{"quoted eval dynamic payload", `V=eval; "$V" "$PAYLOAD"`, 1},
+		{"quoted source dynamic payload", `V=source; "$V" "$PAYLOAD"`, 1},
+		{"&& gated write", `V=ex && "$V" POST /messages/example/recall`, 1},
+		{"|| gated write", `V=ex; false || "$V" POST /messages/example/recall`, 1},
+		{"conditional assignment in && right arm does not leak past ;", `cd /tmp && V=/opt/venv/bin/python; "$V" -I -m unittest`, 1},
+		{"false && assignment does not leak past ;", `false && V=/opt/venv/bin/python; $V -I -m unittest`, 1},
+		{"conditional reassignment in && invalidates prior binding", `V=/opt/venv/bin/python; false && V=lark-cli; "$V" im +messages-send --text hello`, 1},
+		{"conditional reassignment in || invalidates prior binding", `V=/opt/venv/bin/python; true || V=lark-cli; "$V" im +messages-send --text hello`, 1},
+		{"conditional cd in && invalidates relative path after ;", `READER=./reader.sh; true && cd /tmp; "$READER" list`, 1},
+		{"failed cd on left of || does not resolve relative path on right", `READER=./reader.sh; cd /tmp || "$READER" list`, 1},
+		{"export assignment stays opaque", `export V=/opt/venv/bin/python; "$V" -I -m unittest`, 1},
+		{"invocation before assignment stays opaque", `"$V" -V; V=/opt/venv/bin/python`, 1},
+		{"parameter assignment in argument stays blocked", `V=/opt/venv/bin/python; "$V" "${V:=lark-cli}"`, 1},
+		{"command substitution in argument stays blocked", `V=/opt/venv/bin/python; "$V" "$(choose_arg)"`, 1},
+		{"zsh subscript in argument stays blocked", `V=/opt/venv/bin/python; "$V" "$HOME[V=7]"`, 1},
+		{"zsh modifier in argument stays blocked", `V=/opt/venv/bin/python; "$V" "$HOME:F:V=7:h"`, 1},
+		{"read-only dynamic arg stops propagation to later command", `V=/opt/venv/bin/python; "$V" "$TARGET"; "$V" -V`, 1},
+		{"bare executable stops propagation in && chain", `V=python3.11; "$V" -V && "$V" -m unittest`, 1},
+		{"relative path after cd in && stays blocked", `READER=./reader.sh; cd /tmp && "$READER" list`, 1},
+		{"gated write after resolved command in && stays blocked", `V=/opt/venv/bin/python; "$V" -V && ex POST /messages/example/recall`, 1},
+		{"lark-cli read piped into quoted resolved script stays blocked", `V=/opt/venv/bin/python; lark-cli docs +fetch --doc-id example | "$V" /opt/example/reader.py`, 1},
+		{"IFS assignment in && stays blocked", `IFS=/ && V=lark-cli/im && "$V" +messages-send --text hi`, 1},
+		{"dynamic assignment in && stays blocked", `V=$(choose_py) && "$V" -V`, 1},
+		// Adversarial hardening controls: wrapper-only option mutations, left-to-right arg mutations,
+		// POSIX special builtin textVars retention, single-quote printer escape, backslash/ANSI-C decoding,
+		// wrapper flag provenance, and quoted-redirect segment position drift.
+		{"wrapper-only env -u parameter assignment stays blocked", `S=""; env -u "${S:=lark''-cli im +messages-send --chat-id oc_example --text hello}"; bash -c "$S"`, 1},
+		{"wrapper-only env -u gated write stays blocked", `S=""; env -u "${S:=e''x POST /messages/example/recall}"; bash -c "$S"`, 1},
+		{"wrapper-only env -u zsh glob qualifier stays blocked", `/bin/zsh -lc 'READER=/tmp/reader.sh; X="mp(e:READER=lark-c\li:)"; env -u /[t]$~X; $READER im +messages-send --chat-id oc_example --text hello'`, 1},
+		{"left-arg parameter mutation before bash -c stays blocked", `S=""; env X="${S:=lark''-cli im +messages-send --chat-id oc_example --text hello}" bash -c "$S"`, 1},
+		{"left-arg parameter mutation before ssh stays blocked", `S=""; ssh -l "${S:=lark''-cli im +messages-send --chat-id oc_example --text hello}" host "$S"`, 1},
+		{"POSIX colon builtin assignment clears textVars", `sh -c 'S="echo ok"; S="e\"\"x POST /messages/example/recall" :; bash -c "$S"'`, 1},
+		{"single-quote in textVars cannot escape to comment out write", `S='echo x'\'' #'\''; lark""-cli im +messages-send --chat-id oc_example --text hello'; bash -c "$S"`, 1},
+		{"double-quoted backslash hash in textVars cannot comment out write", `S="echo \#; "'lark""-cli im +messages-send --chat-id oc_example --text hello'; bash -c "$S"`, 1},
+		{"ANSI-C newline in textVars cannot comment out write", `S=$'echo #\nlark""-cli im +messages-send --chat-id oc_example --text hello'; bash -c "$S"`, 1},
+		{"wrapper option variable does not taint literal opaque script provenance", `V=--; env "$V" python3 /opt/example/reader.py; lark-cli docs +fetch --doc-id example`, 1},
+		{"quoted redirect with semicolons does not shift resolved segment provenance", "echo hi > '/tmp/a; echo 1; echo 2 #'\nREADER=echo\npython3 /opt/example/reader.py | true\n$READER list\nlark-cli docs +fetch --doc-id example", 1},
+		{"zsh GLOB_SUBST in wrapper arg before bash -c stays blocked", `/bin/zsh -lc 'A=/; S="echo ok"; X="[t]mp(e:S=lark-c\li\ im\ +messages-send\ --chat-id\ oc_example\ --text\ hello:)"; env -C $A$~X bash -c "$S"'`, 1},
+		{"zsh GLOB_SUBST in ssh arg stays blocked", `/bin/zsh -lc 'A=/; S="echo ok"; X="[t]mp(e:S=lark-c\li\ im\ +messages-send\ --chat-id\ oc_example\ --text\ hello:)"; ssh -i $A$~X host "$S"'`, 1},
+		{"zsh modifier in bash -c script arg stays blocked", `/bin/zsh -lc 'A=/tmp; S="echo ok"; bash -c "$A:F:S=lark-c\li:" "$S"'`, 1},
+		{"ANSI-C quote with trailing background suffix does not shift resolved provenance", "echo $'a\\'; echo 1; echo 2 #'\nREADER=echo\npython3 /opt/example/reader.py | true\n$READER list\nlark-cli docs +fetch --doc-id example\ntrue &", 1},
+		{"ANSI-C quote segment cancellation does not shift resolved provenance", "echo $'a\\'; echo 1; echo 2 #'\nREADER=echo\npython3 /opt/example/reader.py | true\n$READER list\nlark-cli docs +fetch --doc-id example\necho $'a\\''\necho x\necho \\'", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) { assertAssistantBypassClassification(t, tc.command, tc.cards, gate) })
+	}
+}

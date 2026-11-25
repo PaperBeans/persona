@@ -1,11 +1,16 @@
 import { join } from "node:path";
-import { BrowserWindow, Menu, app, dialog, protocol, screen, shell, powerMonitor, Notification } from "electron";
+import { BrowserWindow, Menu, app, dialog, nativeTheme, protocol, screen, shell, powerMonitor, Notification } from "electron";
 import { parseDeepLink, parseHubAddress, externalBrowserURL, inHub } from "./urls.js";
 import type { HubAddress } from "./urls.js";
 import { appPairingURL } from "./pairing.js";
+import { parseConnectInput } from "./connect-input.js";
+import { classifyConnectError } from "./connect-errors.js";
+import { allowPinnedSessionRequest, isValidPin, verifyPinnedCertificate } from "./tls-pin.js";
+import type { HubPin } from "./tls-pin.js";
 import { installDesktopIPC, DesktopNotifications } from "./ipc.js";
 import { PageRoutes } from "./page-routes.js";
 import { installSetupIPC, installSetupProtocol } from "./setup-ipc.js";
+import type { ConnectResponse } from "./setup-ipc.js";
 import { SETUP_SCHEME, SETUP_URL } from "./setup-page.js";
 import { JSONStore } from "./store.js";
 import { restoreWindow, DEFAULT_WINDOW } from "./window-state.js";
@@ -32,6 +37,9 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | undefined;
 let hub: HubAddress | undefined;
+let hubPins: Record<string, string> = {};
+const verifiedLinkPins = new Map<string, string>();
+let pendingInitialURL: { readonly origin: string; readonly href: string } | undefined;
 let connectionFailed = false;
 let quitting = false;
 let pendingDeepLink: string | undefined;
@@ -44,6 +52,37 @@ const store = () => JSONStore.inUserData(app.getPath("userData"));
 const pageRoutes = new WeakMap<BrowserWindow, PageRoutes>();
 function openRoute(window: BrowserWindow | undefined, route: string): void {
   if (window && !window.isDestroyed()) pageRoutes.get(window)?.open(route);
+}
+function activePinFor(address: HubAddress | undefined): HubPin | undefined {
+  if (!address) return undefined;
+  const fp = hubPins[address.url.origin];
+  if (!fp || !isValidPin(fp)) return undefined;
+  return { origin: address.url.origin, fp };
+}
+const windowPins = new WeakMap<BrowserWindow, string | undefined>();
+function sessionPinKey(pin: HubPin | undefined): string | undefined {
+  return pin ? `${pin.origin}#${pin.fp}` : undefined;
+}
+async function applySessionPin(window: BrowserWindow, owner: HubAddress): Promise<void> {
+  if (window.isDestroyed()) return;
+  const pin = activePinFor(owner);
+  const ses = window.webContents.session;
+  ses.webRequest.onBeforeRequest(
+    pin
+      ? (details, callback) => {
+          callback({ cancel: !allowPinnedSessionRequest(details.url, pin) });
+        }
+      : null,
+  );
+  ses.setCertificateVerifyProc((request, callback) => {
+    callback(verifyPinnedCertificate({
+      hostname: request.hostname,
+      certificateData: request.certificate.data,
+      verificationResult: request.verificationResult,
+    }, pin));
+  });
+  windowPins.set(window, sessionPinKey(pin));
+  await ses.closeAllConnections();
 }
 // The island at the MacBook notch (#7669): off until the person turns it on; a clicked row opens as a notification does.
 const island = new NotchIsland(route => {
@@ -121,10 +160,25 @@ async function showMain(): Promise<BrowserWindow | undefined> {
   const generation = hubWindow.generation;
   const owner = hub;
   if (!owner) {
+    pendingInitialURL = undefined;
     if (!setupWindow || setupWindow.isDestroyed()) await showSetup();
     return undefined;
   }
-  if (mainWindow && !mainWindow.isDestroyed()) { connectionFailed = false; mainWindow.show(); return mainWindow; }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    connectionFailed = false;
+    const initial = pendingInitialURL && pendingInitialURL.origin === owner.url.origin && inHub(owner, pendingInitialURL.href)
+      ? pendingInitialURL.href
+      : undefined;
+    pendingInitialURL = undefined;
+    if (initial || windowPins.get(mainWindow) !== sessionPinKey(activePinFor(owner))) {
+      await applySessionPin(mainWindow, owner);
+      if (quitting || owner !== hub || generation !== hubWindow.generation || mainWindow.isDestroyed()) return undefined;
+    }
+    if (initial) await mainWindow.loadURL(initial);
+    if (quitting || owner !== hub || generation !== hubWindow.generation || mainWindow.isDestroyed()) return undefined;
+    mainWindow.show();
+    return mainWindow;
+  }
   const state = restoreWindow((await store().read<{ window?: unknown }>())?.window, screen.getAllDisplays().map(d => d.workArea));
   if (owner !== hub || generation !== hubWindow.generation) return undefined;
   const current = new BrowserWindow({
@@ -133,7 +187,7 @@ async function showMain(): Promise<BrowserWindow | undefined> {
     show: false,
     title: "Persona",
     autoHideMenuBar: true,
-    backgroundColor: "#111111",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#17181a" : "#fafafb",
     webPreferences: {
       preload: join(import.meta.dirname, "preload.cjs"),
       contextIsolation: true,
@@ -219,8 +273,13 @@ async function showMain(): Promise<BrowserWindow | undefined> {
   current.webContents.on("render-process-gone", () => island.forget(page));
   current.once("closed", () => { removeIPC(); island.forget(page); if (mainWindow === current) mainWindow = undefined; });
   if (owner) {
+    await applySessionPin(current, owner);
+    const targetURL = pendingInitialURL && pendingInitialURL.origin === owner.url.origin && inHub(owner, pendingInitialURL.href)
+      ? pendingInitialURL.href
+      : owner.url.href;
+    pendingInitialURL = undefined;
     try {
-      await current.loadURL(owner.url.href);
+      await current.loadURL(targetURL);
     } catch (error) {
       removeIPC();
       if (mainWindow === current) mainWindow = undefined;
@@ -245,11 +304,20 @@ async function showMain(): Promise<BrowserWindow | undefined> {
 async function showSetup(): Promise<void> {
   if (quitting) return;
   if (setupWindow && !setupWindow.isDestroyed()) { setupWindow.show(); setupWindow.focus(); return; }
+  const isSettings = Boolean(mainWindow && !mainWindow.isDestroyed());
+  const isRecovery = !isSettings && connectionFailed && Boolean(hub);
+  const bounds = isSettings
+    ? { width: 760, height: 560, minWidth: 640, minHeight: 480 }
+    : isRecovery
+      ? { width: 460, height: 440, minWidth: 400, minHeight: 380 }
+      : { width: 480, height: 620, minWidth: 420, minHeight: 480 };
   const setup = new BrowserWindow({
-    width: 720,
-    height: 640,
-    title: "Persona setup",
+    ...bounds,
+    show: false,
+    title: isSettings ? "Persona Settings" : "Persona",
     autoHideMenuBar: true,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#17181a" : "#fafafb",
+    ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 16 } } : {}),
     webPreferences: {
       preload: join(import.meta.dirname, "setup-preload.cjs"),
       contextIsolation: true,
@@ -261,10 +329,14 @@ async function showSetup(): Promise<void> {
     },
   });
   setupWindow = setup;
+  setup.once("ready-to-show", () => {
+    if (!quitting && !setup.isDestroyed()) setup.show();
+  });
   type ConnectionAttempt = {
     generation?: number;
     next: HubAddress;
     previousHub: HubAddress | undefined;
+    previousPins: Record<string, string>;
     previousConnectionFailed: boolean;
     persisting?: boolean;
   };
@@ -276,7 +348,7 @@ async function showSetup(): Promise<void> {
   setup.once("closed", () => {
     removeIPC();
     if (setupWindow === setup) setupWindow = undefined;
-    // Quitting closes setup too; opening another window here would cancel the quit (#9458).
+    // Quitting closes setup too; closing onboarding or recovery exits cleanly instead of respawning (#9458).
     if (quitting) return;
     const attempt = activeConnection;
     if (attempt && !attempt.persisting) {
@@ -285,31 +357,64 @@ async function showSetup(): Promise<void> {
       const currentOwner = hub === attempt.next || hub === attempt.previousHub;
       if (currentGeneration && currentOwner) {
         hub = attempt.previousHub;
+        hubPins = attempt.previousPins;
         connectionFailed = attempt.previousConnectionFailed;
+        pendingInitialURL = undefined;
         hubWindow.replace();
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
+      }
+      if ((!mainWindow || mainWindow.isDestroyed()) && (!attempt.previousHub || attempt.previousConnectionFailed)) {
+        quitting = true;
+        app.quit();
       }
       return;
     }
     // Retire a pending connection when its setup closes. A late result must not reopen the last window.
     if (hubWindow.pending) {
+      pendingInitialURL = undefined;
       hubWindow.replace();
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        quitting = true;
+        app.quit();
+      }
       return;
     }
-    if (!mainWindow) void showMain().catch(() => { if (!setupWindow || setupWindow.isDestroyed()) void showSetup().catch(() => {}); });
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      quitting = true;
+      app.quit();
+    }
   });
   const removeIPC = installSetupIPC(setup, {
     hub: () => hub,
+    hasMainWindow: () => Boolean(mainWindow && !mainWindow.isDestroyed()),
     connectionFailed: () => connectionFailed,
-    connect: async (raw: string) => {
-      const next = parseHubAddress(raw);
+    onVerifiedLinkPin: pin => {
+      if (isValidPin(pin.fp)) verifiedLinkPins.set(pin.origin, pin.fp);
+    },
+    connect: async (raw: string): Promise<ConnectResponse> => {
+      const parsed = parseConnectInput(raw);
+      if (parsed.kind === "link-pair") {
+        return {
+          ok: false,
+          errorCode: "link_pair_input",
+          linkURL: parsed.linkURL,
+          ...(parsed.suggestedHub ? { suggestedHub: parsed.suggestedHub.url.href } : {}),
+          error: "This is a Persona Link pairing code for running Agents on this computer.",
+        };
+      }
+      const next = parsed.hub;
+      const verifiedPin = parsed.pin ?? (() => {
+        const fp = verifiedLinkPins.get(next.url.origin);
+        return fp && isValidPin(fp) ? { origin: next.url.origin, fp } : undefined;
+      })();
       const previous = connectQueue;
       let generation: number | undefined;
-      const run = async (): Promise<{ ok: boolean; error?: string; replaced?: boolean }> => {
+      const run = async (): Promise<ConnectResponse> => {
       if (quitting || setup.isDestroyed()) return { ok: false, replaced: true, error: "The hub connection was replaced before it finished." };
       const previousHub = hub;
-      const attempt: ConnectionAttempt = { next, previousHub, previousConnectionFailed: connectionFailed };
+      const previousPins = { ...hubPins };
+      const attempt: ConnectionAttempt = { next, previousHub, previousPins, previousConnectionFailed: connectionFailed };
       activeConnection = attempt;
       try {
         await replaceMainWindow(next, window => window.destroy());
@@ -318,6 +423,10 @@ async function showSetup(): Promise<void> {
         generation = generationValue;
         attempt.generation = generationValue;
         hub = next;
+        if (verifiedPin) {
+          hubPins = { ...hubPins, [verifiedPin.origin]: verifiedPin.fp };
+        }
+        pendingInitialURL = parsed.autoSignIn ? { origin: next.url.origin, href: parsed.initialURL } : undefined;
         const loadedWindow = await showMain();
         // An obsolete or destroyed load cannot persist or close setup.
         if (generation !== hubWindow.generation || hub?.url.href !== next.url.href ||
@@ -327,10 +436,14 @@ async function showSetup(): Promise<void> {
         try {
           attempt.persisting = true;
           await store().update({ hub: next.url.href });
+          if (verifiedPin) {
+            await store().update({ pins: hubPins });
+          }
         } catch (error) {
           // Do not leave a live window using a hub that the setup state no longer owns.
           if (generation === hubWindow.generation && hub?.url.href === next.url.href) {
             hub = undefined;
+            hubPins = previousPins;
             hubWindow.replace();
             const failedWindow = mainWindow;
             mainWindow = undefined;
@@ -357,10 +470,18 @@ async function showSetup(): Promise<void> {
           hubWindow.replace();
           failedWindow.destroy();
         }
+        const info = classifyConnectError(error, Boolean(activePinFor(next)));
         hub = previousHub;
+        hubPins = previousPins;
+        pendingInitialURL = undefined;
         connectionFailed = attempt.previousConnectionFailed;
         hubWindow.replace();
-        return { ok: false, error: error instanceof Error ? error.message : "Could not connect to the hub." };
+        return {
+          ok: false,
+          errorCode: info.code,
+          ...(info.technical ? { technical: info.technical } : {}),
+          error: error instanceof Error ? error.message : "Could not connect to the hub.",
+        };
       } finally {
         if (activeConnection === attempt) activeConnection = undefined;
       }
@@ -417,7 +538,16 @@ else {
       changed: state => { updateItems = updateMenu(state, strings); tray?.setUpdate(updateItems); },
       prepareQuit: () => { quitting = true; },
     });
-    const saved = await store().read<{ hub?: string; island?: boolean }>();
+    const saved = await store().read<{ hub?: string; island?: boolean; pins?: Record<string, string> }>();
+    if (saved?.pins && typeof saved.pins === "object" && !Array.isArray(saved.pins)) {
+      for (const [origin, fp] of Object.entries(saved.pins)) {
+        if (typeof fp === "string" && isValidPin(fp)) {
+          try {
+            hubPins[new URL(origin).origin] = fp;
+          } catch { /* ignore invalid saved pin origin */ }
+        }
+      }
+    }
     try { hub = parseHubAddress(process.env.PERSONA_HUB_URL ?? saved?.hub ?? ""); } catch { hub = undefined; }
     if (saved?.island === true) island.setEnabled(true);
     for (const scheme of ["persona", "jarvis"]) {

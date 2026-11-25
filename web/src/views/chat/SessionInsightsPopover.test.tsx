@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { formatNumber, t } from "../../i18n";
 import { COMPACT_FEATURE } from "../../lib/compaction";
 import { setRoute } from "../../lib/feed";
 import { clearRateHistories, emptyRateHistory, recordTokens, saveRateHistory } from "../../lib/token-rate";
@@ -100,6 +101,21 @@ async function waitForPopover(): Promise<HTMLElement> {
 }
 
 describe("ContextMeter + lazy SessionInsightsPopover", () => {
+  it("shows the agy window in the dialog, then just current context when the capacity disappears", async () => {
+    const agy = { ...baseSession, agent: "agy", model: "gemini-4-neon-high", context_tokens: 262_144, context_window: 1_048_576 };
+    await mount(<ContextMeter session={agy} items={sampleItems} />);
+    await act(async () => host.querySelector("button")!.click());
+    const dialog = await waitForPopover();
+    const section = () => dialog.querySelector("[data-insights-context]");
+    expect(section()?.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("25");
+    expect(section()?.textContent).toContain(t("context.summary", { used: 25, left: 75 }));
+
+    await mount(<ContextMeter session={{ ...agy, model: "custom", context_window: 0 }} items={sampleItems} />);
+    expect(section()?.textContent).toContain(t("context.current_tokens", { tokens: formatNumber(agy.context_tokens) }));
+    expect(section()?.textContent).not.toMatch(/%|\//);
+    expect(section()?.querySelector('[role="progressbar"]')).toBeNull();
+    expect(dialog.querySelector("[data-insights-tokens]")?.textContent).toContain("13.5k");
+  });
   it("opens the lazy popover on click and displays context, tokens, cache hit rate, multi-model, and speed", async () => {
     let h = emptyRateHistory();
     h = recordTokens(h, { turn: "t1", tokens: 40, at: 1000, now: 1000 });
@@ -211,6 +227,8 @@ describe("ContextMeter + lazy SessionInsightsPopover", () => {
       expect(dialog.querySelector('[data-breakdown-source="exact"]')).not.toBeNull();
       expect(dialog.querySelector('[data-breakdown-top-consumer="tool_outputs"]')).not.toBeNull();
       expect(dialog.querySelector("[data-insights-ttft]")?.textContent).toContain("350 ms");
+      expect(dialog.querySelector("[data-insights-speed-latest]")?.textContent).toBe("57.1 tok/s");
+      expect(dialog.querySelector("[data-insights-speed-peak]")).toBeNull();
 
       const compactBtn = dialog.querySelector<HTMLButtonElement>("[data-insights-compact]")!;
       expect(compactBtn).not.toBeNull();
@@ -290,7 +308,7 @@ describe("ContextMeter + lazy SessionInsightsPopover", () => {
     );
     expect(document.querySelector("[data-insights-compact]")).toBeNull();
 
-    setRoute("s1", null);
+    await act(async () => setRoute("s1", null));
     await mount(
       <SessionInsightsPopover anchor={anchor} session={baseSession} items={sampleItems} onCompact={onCompact} compactBlocked onClose={() => {}} />,
     );
@@ -384,10 +402,11 @@ describe("ContextMeter + lazy SessionInsightsPopover", () => {
     expect(dialog.querySelector("[data-insights-output]")?.textContent).toBe("700");
   });
 
-  it("renders session.context_breakdown (~estimated) and items[].ttft_ms automatically without overrides", async () => {
+  it("renders an estimated agy breakdown with labeled turn rates and observed TTFT", async () => {
     const anchor = { current: host };
     const sessionWithBreakdown: Session = {
       ...baseSession,
+      agent: "agy",
       context_tokens: 100_000,
       context_window: 200_000,
       context_breakdown: {
@@ -402,18 +421,23 @@ describe("ContextMeter + lazy SessionInsightsPopover", () => {
     };
     const itemsWithTtft: Item[] = [
       { id: "u1", seq: 1, role: "user", kind: "text", ts: "2026-11-20T10:00:00Z", text: "go" },
-      { id: "a1", seq: 2, role: "assistant", kind: "text", ts: "2026-11-20T10:00:08Z", ttft_ms: 1450 },
+      { id: "a1", seq: 2, role: "assistant", kind: "text", ts: "2026-11-20T10:00:08Z", ttft_ms: 1450, usage: [{ out: 320 }] },
     ];
     await mount(
       <SessionInsightsPopover anchor={anchor} session={sessionWithBreakdown} items={itemsWithTtft} onClose={() => {}} />,
     );
     const dialog = document.querySelector("[data-session-insights]")!;
+    expect(dialog.querySelector('[data-insights-stacked-bar] [data-breakdown-segment="tools_and_mcp"]')).not.toBeNull();
     expect(dialog.querySelector('[data-breakdown-source="estimated"]')?.textContent).toContain("~");
     expect(dialog.querySelector('[data-breakdown-row="tool_outputs"]')?.textContent).toContain("~50.0k");
     expect(dialog.querySelector('[data-breakdown-row="free"]')?.textContent).toContain("100.0k");
     expect(dialog.querySelector("[data-breakdown-auto-compact]")?.textContent).toContain("160.0k");
     expect(dialog.querySelector('[data-breakdown-top-consumer="tool_outputs"]')?.textContent).toContain("50%");
     expect(dialog.querySelector("[data-insights-ttft]")?.textContent).toBe("1.45 s");
+    expect(dialog.querySelector("[data-insights-speed-latest]")?.textContent).toBe("40 tok/s");
+    expect(dialog.querySelector("[data-insights-speed-avg]")?.textContent).toBe("40 tok/s");
+    expect(dialog.querySelector("[data-insights-speed-latest]")?.previousElementSibling?.textContent).toBe("最近有数据的回合速率");
+    expect(dialog.querySelector("[data-insights-speed-peak]")).toBeNull();
   });
 
   it("preserves observed 0 ms TTFT in the performance section", async () => {

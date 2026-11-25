@@ -11,6 +11,7 @@ import { apiOp } from "../../lib/ops";
 import { listManagers } from "../../lib/managers";
 import { confirmedDefaultManager, onDefaultManager } from "../../lib/manager-choice";
 import { uuid } from "../../lib/format";
+import { takeOverlayEntry, withoutOverlayState } from "../../lib/back-close";
 import { navigate } from "../../lib/router";
 import { openLink } from "../../lib/links";
 import { wideView } from "../../lib/code-view";
@@ -63,7 +64,11 @@ export function NativeExtensionUI(props: Props & { legacy: (props: Props) => Rea
     if (props.pages === "open") { navigate(pageHref(props.extension, p.ui || top.ui, p.state)); return; }
     const page = { ...p, ui: p.ui || top.ui, key: uuid(), legacy: legacy || top.legacy };
     const next = [...(current.length >= MAX_STACK ? current.slice(0, MAX_STACK - 1) : current), page];
-    if (historied && next.length > current.length) history.pushState({ ...(history.state ?? {}), extPage: next.length }, "", location.href);
+    if (historied && next.length > current.length) {
+      const nextState = { ...(withoutOverlayState(history.state) ?? {}), extPage: next.length };
+      if (takeOverlayEntry()) history.replaceState(nextState, "", location.href);
+      else history.pushState(nextState, "", location.href);
+    }
     stackRef.current = next; setStack(next);
   }, [props.pages, props.extension, historied]);
   const pop = useCallback((from: string) => {

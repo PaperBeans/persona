@@ -52,7 +52,7 @@ export function createGrokRuntime(options = {}) {
     tools: async (s) => { s.personaTools = await rt.tools({ assistant: s.assistant, sessionId: s.id }); return s.personaTools },
     call: async (s, name, args) => {
       if (!s.raw || !sessions.has(s.id)) throw new Error('Conversation is not available')
-      if (s.mode === 'plan' && !['a2a_get', 'a2a_report', 'a2a_sessions'].includes(name)) {
+      if (s.mode === 'plan' && !['a2a_get', 'a2a_read', 'a2a_report', 'a2a_sessions'].includes(name)) {
         return { content: [{ type: 'text', text: 'Persona tools are unavailable in read-only mode.' }], is_error: true }
       }
       return rt.callTool({ name, args, session_id: s.id, assistant: s.assistant }, { signal: s.abort?.signal })

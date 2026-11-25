@@ -99,7 +99,7 @@ func TestMemorySourceOutlets(t *testing.T) {
 	}
 	mustWrite(t, filepath.Join(h.extensions.reg.DataDir("qa-memory"), "inbox", "never_quote.txt"), "Thinks the vendor is unreliable\n")
 
-	bounds := MemoryReadBounds{PageLimit: 200, Pages: 5, Entries: 1000, CallTimeout: 5 * time.Second, AnswerMost: 1 << 20}
+	bounds := MemoryReadBounds{PageLimit: 200, ReadTimeout: 2 * time.Minute, TotalMost: 128 << 20, CallTimeout: 5 * time.Second, AnswerMost: 1 << 20}
 	var reads []MemorySourceRead
 	waitLong(t, "the memory source read", func() bool {
 		reads = h.MemorySourceReads(ctx, bounds)
@@ -161,38 +161,67 @@ func (f *fakeMemoryCaller) Call(ctx context.Context, method string, params, out 
 }
 
 func memoryTestBounds() MemoryReadBounds {
-	return MemoryReadBounds{PageLimit: 200, Pages: 5, Entries: 1000, CallTimeout: 50 * time.Millisecond, AnswerMost: 1 << 20}
+	return MemoryReadBounds{PageLimit: 200, ReadTimeout: 2 * time.Minute, TotalMost: 128 << 20, CallTimeout: 50 * time.Millisecond, AnswerMost: 1 << 20}
 }
 
-// Paging: the reads follow the cursor and stop at the last page, at has_more with an empty cursor, at a cursor answered
-// before, after the most pages, and once the most entries were read.
-func TestMemoryPagesBounds(t *testing.T) {
-	ctx := context.Background()
-	page := func(after string, more bool, n int) json.RawMessage {
-		var entries []string
-		for i := range n {
-			entries = append(entries, fmt.Sprintf(`{"id": "qa-%s-%d", "text": "qa: entry", "status": "active"}`, after, i))
+// Existing plugins still receive only contribution, limit and after. Short pages are followed too, through pools
+// larger than the old five-page limit, without treating a full prefix as the complete source.
+func TestMemoryPagesComplete(t *testing.T) {
+	f := &fakeMemoryCaller{pages: map[string]json.RawMessage{}}
+	const count = 24001
+	for start := 0; start < count; start += 137 {
+		page := wire.MemoryEntriesResult{Tagged: true}
+		for i := start; i < min(start+137, count); i++ {
+			page.Entries = append(page.Entries, wire.MemoryEntry{ID: fmt.Sprintf("qa-%d", i), Text: "qa: entry", Status: "active"})
 		}
-		return json.RawMessage(fmt.Sprintf(`{"entries": [%s], "tagged": true, "has_more": %v, "after": %q}`, strings.Join(entries, ","), more, after))
+		if start+137 < count {
+			page.HasMore, page.After = true, fmt.Sprintf("cursor-%d", start+137)
+		}
+		after := ""
+		if start > 0 {
+			after = fmt.Sprintf("cursor-%d", start)
+		}
+		f.pages[after], _ = json.Marshal(page)
 	}
-	for _, c := range []struct {
-		name  string
-		pages map[string]json.RawMessage
-		b     MemoryReadBounds
-		asked string
-	}{
-		{"to the end", map[string]json.RawMessage{"": page("a", true, 1), "a": page("b", false, 1)}, memoryTestBounds(), ",a"},
-		{"more with no cursor", map[string]json.RawMessage{"": json.RawMessage(`{"entries": [], "tagged": true, "has_more": true}`)}, memoryTestBounds(), ""},
-		{"a cursor again", map[string]json.RawMessage{"": page("a", true, 1), "a": page("a", true, 1)}, memoryTestBounds(), ",a"},
-		{"at most 5 pages", map[string]json.RawMessage{"": page("a", true, 1), "a": page("b", true, 1), "b": page("c", true, 1),
-			"c": page("d", true, 1), "d": page("e", true, 1), "e": page("f", true, 1)}, memoryTestBounds(), ",a,b,c,d"},
-		{"at most the entries", map[string]json.RawMessage{"": page("a", true, 3), "a": page("b", true, 3)},
-			MemoryReadBounds{PageLimit: 200, Pages: 5, Entries: 3, CallTimeout: time.Second, AnswerMost: 1 << 20}, ""},
-	} {
-		f := &fakeMemoryCaller{pages: c.pages}
-		if _, err := readMemoryPages(ctx, f, "memory", c.b); err != nil || strings.Join(f.asked, ",") != c.asked {
-			t.Errorf("%s: asked %q (%v), want %q", c.name, strings.Join(f.asked, ","), err, c.asked)
-		}
+	pages, err := readMemoryPages(t.Context(), f, "memory", memoryTestBounds())
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, p := range pages {
+		n += len(p.Entries)
+	}
+	if n != count || len(f.asked) != len(f.pages) || pages[len(pages)-1].Entries[0].ID != "qa-23975" {
+		t.Fatalf("read %d entries in %d pages, asked %d", n, len(pages), len(f.asked))
+	}
+}
+
+func TestMemoryPagesIncomplete(t *testing.T) {
+	first := json.RawMessage(`{"entries": [], "tagged": true, "has_more": true, "after": "next"}`)
+	last := json.RawMessage(`{"entries": [], "tagged": true, "has_more": false}`)
+	for _, name := range []string{"cursor cycle", "total bytes", "total timeout", "late page failure"} {
+		t.Run(name, func(t *testing.T) {
+			b := memoryTestBounds()
+			f := &fakeMemoryCaller{pages: map[string]json.RawMessage{"": first, "next": last}}
+			switch name {
+			case "cursor cycle":
+				f.pages["next"] = first
+			case "total bytes":
+				b.TotalMost = len(first) + len(last) - 1
+			case "total timeout":
+				b.ReadTimeout = time.Nanosecond
+			case "late page failure":
+				f.pages["next"] = json.RawMessage(`{"entries": []}`)
+			}
+			if pages, err := readMemoryPages(t.Context(), f, "memory", b); err == nil || pages != nil {
+				t.Fatalf("incomplete source cached: %d pages, error %v", len(pages), err)
+			}
+		})
+	}
+	// Retain the protocol's compatibility rule: has_more with no cursor means end of source.
+	f := &fakeMemoryCaller{pages: map[string]json.RawMessage{"": json.RawMessage(`{"entries": [], "tagged": true, "has_more": true}`)}}
+	if pages, err := readMemoryPages(t.Context(), f, "memory", memoryTestBounds()); err != nil || len(pages) != 1 {
+		t.Fatalf("legacy end: %d pages, %v", len(pages), err)
 	}
 }
 

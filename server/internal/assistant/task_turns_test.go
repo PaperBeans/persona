@@ -841,6 +841,7 @@ func TestCompletionUnheardWhileAUsageLimitIsWaitedOut(t *testing.T) {
 		t.Fatalf("the task was changed while its turn waits for the reset: start %v → %v, stage %q → %q, %+v", mark, workMark(s, todo.ID), before.Stage, now.Stage, now.Supervision)
 	}
 	// The reset passed long ago and nothing went on: the same row is now a turn that ended, cut off by the limit.
+	boxReadsBefore := itemReadsOn(f, "box")
 	f.setSessions("box", limited(time.Now().Add(-limitResumeGrace-time.Minute)))
 	sweeps(t, s, todo.ID, 4)
 	waitFor(t, "the interrupted receipt", func() bool { return len(recoveryReceipts(t, s, todo.ID)) == 1 })
@@ -852,9 +853,22 @@ func TestCompletionUnheardWhileAUsageLimitIsWaitedOut(t *testing.T) {
 	if len(receipts) != 1 || receipts[0].State != "interrupted" || f.judged != 0 {
 		t.Fatalf("after the wait: %d receipts %+v, %d judgments, want one interrupted receipt and no judgment", len(receipts), receipts, f.judged)
 	}
-	if got := reads.Load(); got < 1 || got > 2 {
+	// Count the worker agent's own transcript reads on box; direct supervision confirmation reads conv1 on server (#12567).
+	if got := itemReadsOn(f, "box") - boxReadsBefore; got < 1 || got > 2 {
 		t.Fatalf("%d transcript reads to take the turn up, want the sweep's and the end's own", got)
 	}
+}
+
+func itemReadsOn(f *fakeHub, device string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, c := range f.calls {
+		if c.Device == device && c.Method == DeviceSessionItems {
+			n++
+		}
+	}
+	return n
 }
 
 // A node that lists the session but does not answer the transcript read is not asked on every tick: the next tick,
@@ -1092,7 +1106,10 @@ func TestCompletionUnknownRowListedAgainWithALaterTime(t *testing.T) {
 	row := turnRow(proto.StatusUnknown, 3, "修好了")
 	nodeListed(s, f, row)
 	var reads atomic.Int32
-	f.hookReads(receiptHooks{before: func(int) {
+	f.hookReads(receiptHooks{beforeCall: func(call DeviceCall) {
+		if call.Device != "box" {
+			return // the main conversation's relay confirmation is not a read of this Agent's transcript
+		}
 		later := row
 		later.UpdatedAt = row.UpdatedAt.Add(time.Duration(reads.Add(1)) * 3 * time.Second) // listed again with a later time, at every read
 		f.setSessions("box", later)

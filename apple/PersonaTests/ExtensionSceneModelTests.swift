@@ -291,6 +291,31 @@ struct ExtensionSceneModelTests {
         #expect(projection.keptInside(off, anchor: CGPoint(x: -140, y: 115)) == off)
     }
 
+    @Test func pinsWithAnIconShowOnlyTheIconAndNeverChangeSizeWhileTurning() {
+        let pins = [
+            ExtensionScenePin(id: "lamp", at: [-1.9, 0.3], height: 2.35, label: "Ceiling lamp", state: "On", icon: "light"),
+            ExtensionScenePin(id: "lamp2", at: [-1.7, 0.4], height: 2.35, label: "Reading lamp", state: "Off", icon: "light"),
+            ExtensionScenePin(id: "plain", at: [2.3, 0.3], label: "Kettle", state: "Off"),
+        ]
+        let bounds = ExtensionSceneBounds.of(Self.sampleShapes())
+        let compact = Theme.Size.scenePinCompactWidth
+        var plainWidths: Set<CGFloat> = []
+        for yaw in stride(from: 0.0, to: 360, by: 15) {
+            for zoom in [0.6, 1.0, 2.5] {
+                let projection = ExtensionSceneProjection(bounds: bounds, camera: ExtensionSceneCameraState(yaw: yaw, pitch: 40, zoom: zoom),
+                                                          viewport: CGSize(width: 390, height: 600))
+                let placed = ExtensionScenePinLayout.place(pins, projection: projection, scale: 1)
+                // the two lamps stand close together: both stay the same compact pill at every angle and zoom
+                for id in ["lamp", "lamp2"] {
+                    #expect(placed[id]?.collapsed == true && placed[id]?.rect.width == compact, "\(id) at yaw \(yaw), zoom \(zoom)")
+                }
+                if let plain = placed["plain"] { plainWidths.insert(plain.rect.width) }
+            }
+        }
+        // a pin without an icon has only words to show: it keeps them when nothing nearer covers it
+        #expect(plainWidths.contains { $0 > compact })
+    }
+
     @Test func persistenceKeyScopesByNamespaceAndCoalescesWheelSaves() async throws {
         let a = ExtensionSceneModel(scene: Self.sampleScene(), namespace: "example-home/home-a", keeps: false)
         let b = ExtensionSceneModel(scene: Self.sampleScene(), namespace: "example-home/home-b", keeps: false)

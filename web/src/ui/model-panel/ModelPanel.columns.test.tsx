@@ -6,7 +6,6 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PanelModel, PanelProvider, PanelState } from "../../lib/model-panel";
-import { effortTitle } from "../../lib/session-actions";
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
@@ -99,7 +98,7 @@ describe("the model panel's columns", () => {
 
   it("shows the running model's levels and picks another level's own model", async () => {
     const { onPick } = await open({ onApplyCurrent: async () => true });
-    expect(levels().map((b) => b.textContent)).toEqual(LEVELS.map(effortTitle));
+    expect(levels().map((b) => b.textContent)).toEqual(["Low", "Medium", "High", "XHigh"]);
     expect(pressed()).toBe("xhigh");
     act(() => levels().find((b) => b.dataset.panelLevel === "low")!.click());
     await flush();

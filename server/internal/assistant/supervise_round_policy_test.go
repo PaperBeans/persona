@@ -27,9 +27,9 @@ var mainOnlySignals = []string{sigFailed, sigStarted, sigEscalated, sigLeaderStu
 
 // backgroundSignals are the signals an existing background conversation can receive for explicitly addressed legacy
 // notices. Without that explicit legacy target, all of them stay with main for new assistant-dispatched work (#5732).
-var backgroundSignals = []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigNoProgress, sigTimedOut, sigAllStopped, sigInterrupted,
-	sigPRConflict, sigDraftPR, sigPRMerged, sigReport, sigOrphaned, sigAsk, sigDecide, sigDecisionReply, sigRecheck, sigUndecidable, sigDeliveryHold, sigCardlessWait,
-	sigOwnerCannot, sigParkedDue, sigParkedSummary, sigParkDecided, sigInbox, sigNeedsUserExternalInfo, sigOverdue, sigCheck}
+var backgroundSignals = []string{sigReview, sigReviewNudge, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigNoProgress, sigTimedOut, sigAllStopped, sigInterrupted,
+	sigPRConflict, sigDraftPR, sigPRMerged, sigReport, sigOrphaned, sigRecovered, sigAsk, sigDecide, sigDecisionReply, sigRecheck, sigUndecidable, sigDeliveryHold, sigCardlessWait,
+	sigOwnerCannot, sigParkedDue, sigParkedSummary, sigParkDecided, sigInbox, sigNeedsUserExternalInfo, sigOwnerPresent, sigOverdue, sigCheck}
 
 // roundConnectorTools are the round's tools that come with the Lark extension (lark_search) or the lark-cli connector
 // (larkcli_search) rather than the assistant's own list.
@@ -179,15 +179,21 @@ func roundMessage(lang string) string {
 var roundScanTools = append(slices.Clone(toolNames), "lark_search", "larkcli_search", "urgent_call", "lark_chats", "lark_messages")
 
 // namedTools are the tools of roundScanTools text names, quoted or bare, each once in the order it first names them.
+// The page tool (pages_tool.go) is named only quoted or with one of its actions: "page" alone is an English word.
 func namedTools(text string) []string {
 	var named []string
 	for _, w := range regexp.MustCompile(`[a-z][a-z0-9_]*`).FindAllString(text, -1) {
-		if slices.Contains(roundScanTools, w) && !slices.Contains(named, w) {
+		if w != pageToolName && slices.Contains(roundScanTools, w) && !slices.Contains(named, w) {
 			named = append(named, w)
 		}
 	}
+	if pageToolMention.MatchString(text) {
+		named = append(named, pageToolName)
+	}
 	return named
 }
+
+var pageToolMention = regexp.MustCompile("`page`|\\bpage (create|update|get|list|remove)\\b")
 
 // roundPassingMentions are the tools a round does not list that what it reads besides its own message still names, by
 // where: the description (and schema) of a tool it lists, or "context", the background supervisor's <persona-context>.

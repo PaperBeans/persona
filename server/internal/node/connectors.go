@@ -10,9 +10,9 @@ import (
 
 // Connectors whose data is only on this computer (docs/plans/plan-connectors.md "Third form: node as a local `connector`"): the hub
 // asks, this node reads. For now that is Messages on a Mac, read-only: the iMessage module answers through its port
-// (imessageport). A build without it answers as a computer without Messages does.
+// (imessageport). A build without it, or a hub that switched it off (modules.go), answers as a computer without Messages does.
 func localConnector(ctx context.Context, method string, params json.RawMessage) (any, error) {
-	if serve := imessageport.Serve(); serve != nil {
+	if serve := imessageport.Serve(nodeModules()); serve != nil {
 		return serve(ctx, method, params)
 	}
 	if method == "connector.list" {

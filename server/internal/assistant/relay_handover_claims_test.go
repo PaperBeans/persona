@@ -149,7 +149,10 @@ func TestAHandoverQueuedWhileItsQueueMoves(t *testing.T) {
 			queuedUnwritten(d.s, d.bgID, relayMsg{From: d.leaderID, FromTitle: "Export lead", Tool: "conversation_send",
 				Text: "check this", At: time.Now().UTC(), Handover: id, Quote: quote})
 			to := d.mainID
-			if !moves {
+			if moves {
+				// An idle receiver drains immediately. Keep it in a turn while inspecting the moved queue.
+				d.setStatus(to, proto.StatusWorking)
+			} else {
 				to = ""
 			}
 			d.s.backgroundLost(ctx, d.bgID, to, d.s.webBase(ctx))
@@ -160,6 +163,13 @@ func TestAHandoverQueuedWhileItsQueueMoves(t *testing.T) {
 			}
 			if d.s.handoverSet(id, handoverQueued, "", nil) { // queueRelay's own write, late
 				t.Fatalf("the late queued changed it: %+v", onlyHandover(t, d.s))
+			}
+			if moves {
+				d.setStatus(to, proto.StatusIdle)
+				drainRelayTest(t, d.s, d.idle(to))
+				if state, sent := handoverState(d.s, id), d.f.sentTo(to); state != handoverDelivered || sent != 1 {
+					t.Fatalf("the moved hand-over after the late queue write: %s, %d sent", state, sent)
+				}
 			}
 		})
 	}

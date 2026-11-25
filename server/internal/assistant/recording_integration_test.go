@@ -22,6 +22,7 @@ import (
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kb"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/recordinghost"
@@ -61,7 +62,7 @@ func TestBusHelloNamesRecordingDay(t *testing.T) {
 	p, _ := b.client.HelloParams().(map[string]any)
 	caps, _ := p["capabilities"].([]string)
 	// The recording module's capabilities, only when the build has it (persona_without_recording leaves them out).
-	if on := recordinghost.InBuild(); slices.Contains(caps, assistantwire.CapabilityRecordingDay) != on ||
+	if on := recordinghost.InBuild(moduleswitch.Set{}); slices.Contains(caps, assistantwire.CapabilityRecordingDay) != on ||
 		slices.Contains(caps, assistantwire.CapabilityMeetingAttendance) != on {
 		t.Fatalf("capabilities %v (module in the build: %v)", caps, on)
 	}
@@ -95,6 +96,7 @@ func TestEveningFactsDayIsBounded(t *testing.T) {
 // which the knowledge base keeps) sends it to the others, with the same id and keys; a refusal that sending again
 // cannot help counts as taken: the hub's, a channel with nowhere to send it, a channel's own coded refusal.
 func TestDayRecapPushTakenByAll(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	d := newDayFixture(t)
 	setEvening(t, d.s, "06:30", true)
 	larkFails, chanFails := 1, 1 // the answers run under d.f.mu
@@ -208,6 +210,7 @@ func TestDayRecapPushTakenByAll(t *testing.T) {
 // After a restart the push goes only to the destinations that did not take it: the knowledge base keeps those that
 // did with the recording (the assistant keeps nothing), so the phone and a channel that took it get no second copy.
 func TestDayRecapPushAfterRestart(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	d := newDayFixture(t)
 	setEvening(t, d.s, "06:30", true)
 	larkFails := 1
@@ -1015,7 +1018,7 @@ func TestRecordingFollowsItsModule(t *testing.T) {
 		name string
 		off  []string
 		on   bool
-	}{{"build", nil, recordinghost.InBuild()}, {"switched off", []string{recordinghost.ModuleID}, false}} {
+	}{{"build", nil, recordinghost.InBuild(moduleswitch.Set{})}, {"switched off", []string{recordinghost.ModuleID}, false}} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFakeHub()
 			s := withSettings(t, f, New(Options{Hub: f, Logf: testLogf(t), ModulesOff: c.off}))

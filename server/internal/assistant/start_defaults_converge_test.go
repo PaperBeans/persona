@@ -477,7 +477,7 @@ func TestTierModelResolutionErrorsLocalized(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(t, s)
 			}
-			_, err := s.tierModel(context.Background(), tc.tier)
+			_, err := s.pickTierCandidate(context.Background(), tc.tier, tierFacts{})
 			if err == nil || err.Error() != tc.wantEN {
 				t.Fatalf("legacy error = %v, want %q", err, tc.wantEN)
 			}

@@ -71,6 +71,9 @@ type InitializeParams struct {
 	Extension ExtensionInfo `json:"extension"`
 	// Config is the plugin's configuration with the schema's defaults filled in.
 	Config json.RawMessage `json:"config,omitempty"`
+	// InboxVisibility is the manager's source-privacy boundary, sent only to an extension contributing a selected
+	// connector. It is runtime authorization input, not extension settings persisted in the extension registry.
+	InboxVisibility json.RawMessage `json:"inbox_visibility,omitempty"`
 	// Secrets are the plugin's own (declared in its manifest, filled in by the user), by name.
 	Secrets map[string]string `json:"secrets,omitempty"`
 	// Granted are the permissions the user accepted.
@@ -148,10 +151,15 @@ const (
 	// HubToolImages: a connector's tools.call answer may carry pictures for the model (images, #8484), within the
 	// limits of connector.ToolImagesMost and the rest. It is listed in HubCapabilities.
 	HubToolImages = "tool_images"
+	// HubToolViews: a connector's tools.call answer may carry out-of-band declarative views (views) rendered inline
+	// alongside assistant and agent turns without inflating model text. It is listed in HubCapabilities.
+	HubToolViews = "tool_views"
 )
 
 // HubCapabilities are this hub's.
-func HubCapabilities() []string { return []string{HubInboxGroup, HubInboxGroupState, HubToolImages} }
+func HubCapabilities() []string {
+	return []string{HubInboxGroup, HubInboxGroupState, HubToolImages, HubToolViews}
+}
 
 // ExtensionInfo is the plugin as the hub installed it.
 type ExtensionInfo struct {

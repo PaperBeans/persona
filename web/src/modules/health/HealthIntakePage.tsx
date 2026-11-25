@@ -4,7 +4,13 @@
 // second renderer. A full page at `/extension/-health-intake/pages?state=`: the route the renderer already opens its pushed
 // pages on, which Today's rings link to. The page draws again when the hub says a record was added or undone
 // (`health_intake`, ExtensionView.tsx), so a press here and a log on the phone both show.
-import { Suspense, useMemo, useState } from "react";
+//
+// The strength training pages (#14713) are the same reserved id's: the overview the home card opens, an exercise's and
+// a draft's, which a chat card's Adjust links to (`https://<hub>/extension/-health-intake/pages?state=…`, opened in the
+// app by lib/links.ts). They draw again on `health_strength`. The header says the title the hub's page gives itself, the
+// kind's name only until it does. A draft's page answers Save and Cancel by asking to be taken off: the page goes back to
+// where it was opened from (the chat), or to the Health home when it was opened on its own.
+import { Suspense, useCallback, useMemo, useState } from "react";
 import { t } from "../../i18n";
 import { ExtensionOwnerScope } from "../../lib/extension-owner";
 import { HEALTH_INTAKE_PAGE, HEALTH_INTAKE_UI, healthIntakeState, type HealthIntakeKind } from "../../lib/health-intake-ui";
@@ -24,11 +30,32 @@ export function kindOf(state: string | undefined): HealthIntakeKind {
   }
 }
 
+/** Whether a state asks for one of the strength training pages (`{"page":"strength.…"}`). */
+export function isStrength(state: string | undefined): boolean {
+  try {
+    const p = (JSON.parse(state ?? "{}") as { page?: unknown }).page;
+    return typeof p === "string" && p.startsWith("strength.");
+  } catch {
+    return false;
+  }
+}
+
+/** Taken off by the page itself (a draft saved or cancelled): back to where it was opened from, else the Health home. */
+function close() {
+  if (history.length > 1) history.back();
+  else navigate("/health/new");
+}
+
 export function HealthIntakePage({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   // the state a ring's link carries (?state=); none opens water, as the hub does
   const state = useMemo(() => new URLSearchParams(location.search).get("state") ?? healthIntakeState("water"), []);
-  const kind = kindOf(state);
-  const title = kind === "protein" ? t("health.today_protein") : t("health.today_water");
+  const strength = isStrength(state);
+  const kind = strength ? "strength" : kindOf(state);
+  // the hub's page names itself (the renderer's onTitle, each time the first page is drawn); until it has, or when it
+  // names none, the page's kind
+  const [drawn, setDrawn] = useState("");
+  const title = drawn || (kind === "strength" ? t("health.strength_title") : kind === "protein" ? t("health.today_protein") : t("health.today_water"));
+  const onTitle = useCallback((x: string | undefined) => setDrawn(x ?? ""), []);
   const [n, setN] = useState(0);
   return (
     <div className="flex h-full flex-col">
@@ -42,7 +69,7 @@ export function HealthIntakePage({ onToggleSidebar }: { onToggleSidebar: () => v
         <div className="mx-auto flex max-w-[880px] flex-col px-4 py-6 sm:px-8">
           <Suspense fallback={<Loading />}>
             <ExtensionOwnerScope owner={HEALTH_INTAKE_UI}>
-              <ExtensionUI key={`${kind}/${n}`} extension={HEALTH_INTAKE_UI} ui={HEALTH_INTAKE_PAGE} title={title} bare state={state} />
+              <ExtensionUI key={`${kind}/${n}`} extension={HEALTH_INTAKE_UI} ui={HEALTH_INTAKE_PAGE} title={title} bare state={state} onTitle={onTitle} onClose={close} />
             </ExtensionOwnerScope>
           </Suspense>
         </div>

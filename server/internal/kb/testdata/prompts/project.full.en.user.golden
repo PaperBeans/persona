@@ -13,6 +13,14 @@ Existing tags: 发布
 - 2026-10-30 10:00 · lark-f1 · 定了周五灰度
 - 2026-10-30 11:00 · lark-f2 · 提前到周四
 
+# Direction memory (newest first; source records)
+## Outcomes
+- [todo-demo/machine-demo/session-demo/3/1] 周四灰度已完成 https://example.com/pr/42 · 2026-10-30T03:00:00Z · agent_reported · not supervisor-accepted
+## Effective decisions and reasons (distinct IDs stay separate)
+- [todo-demo/machine-demo/session-demo/3/1/decision/1] 哪天灰度？ → 周四灰度; reason: 周五有冻结; result: 周四灰度已完成; source time: 2026-10-30T03:00:00Z · agent_reported · not supervisor-accepted
+## Pitfalls
+- 不要只看旧摘要 · 2026-10-30T03:00:00Z · agent_reported · not supervisor-accepted
+
 # Related chats
 
 ## lark-f1

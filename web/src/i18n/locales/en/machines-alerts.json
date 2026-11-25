@@ -169,5 +169,8 @@
   "handoff_confirm_body_other": "Move {count} pieces of work from {source} to {target}:",
   "handoff_confirm_note": "Persona handles it in the main chat and tells you how it went; the Agents on {source} stop only after the new ones have started.",
   "handoff_confirm": "Send to Persona",
-  "mismatch_resolved": "Persona on this computer is now the same deployment as the hub."
+  "mismatch_resolved": "Persona on this computer is now the same deployment as the hub.",
+  "mismatch_hosted_managers": "Redeploying updates the shared personad program; co-located assistant ({names}) will restart smoothly once idle.",
+  "deploy_done_pending_restart": "Co-located assistant ({names}) is busy and will restart automatically once idle to switch to the new build.",
+  "redeploy_confirm_managers": "Co-located assistant ({names}) shares personad on this computer and will restart smoothly once idle."
 }

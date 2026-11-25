@@ -48,6 +48,10 @@ describe("coreOnly", () => {
     const code = (coreOnly(true).load as unknown as (id: string) => string | null)("\0persona-core-only:modules");
     expect(code).toContain("export const MODULES = [];");
     expect(code).toContain("export function registerModules()");
+    // and its part main.tsx imports, the modules with a page of their own
+    expect(await resolve("./modules/standalone.ts", src + "main.tsx")).toBe("\0persona-core-only:modules");
+    expect(code).toContain("export const STANDALONE_MODULES = [];");
+    expect(code).toContain("export async function standalonePage() { return null; }");
   });
 
   it("refuses a core file that reaches a module's file, naming both", async () => {

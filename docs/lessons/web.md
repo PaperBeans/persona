@@ -1,5 +1,17 @@
 # Lessons: web UI and interactions
 
+## A folder of trees names its repository, it is not one (#13453)
+
+Path inference keys a tree in a folder kept apart from its repository (herdr's `~/.herdr/worktrees/<repository>/<tree>`)
+by that folder. Nothing is checked out there, so a Repo section keyed by it never meets the repository's own section,
+which Git keys by the main checkout. When a tree was removed after its work merged, or has not been read yet, Git places
+none of its Agents, and the repository showed as a second section with its name. Treat such a folder as naming its
+repository, and resolve it against what Git placed on the same computer: another tree of that folder, else the one
+section of that name. When either is ambiguous, keep it apart. A fixture where every session carries `repo_root` never
+reaches this fallback, so test sessions with a removed tree's bare `cwd`. Check the folder is at the computer's home: a
+cwd in a folder of a repository's own tree (`/code/app/.worktrees/feature/src`) has the same shape, and joining by the
+tree's name moved its Agent into an unrelated repository's section.
+
 ## A folded launcher must retain its identity (#10249)
 
 When replacing a launcher rail, do not promote the current launcher's models into a separate Recommended group or
@@ -216,6 +228,11 @@ screen 49 B over its budget. Words the live screen needs only once it is connect
 dynamically (`screen/DisplayMenu.tsx`, namespace `screen-displays`): the build makes that import wait for the rest of the
 catalog, so the first screen does not grow and nothing has to wait for it at run time. Gating ScreenView's own rendering
 on `i18nRest()` does not pass the build: the check reads which namespaces a chunk names, not when it reads them.
+
+Since #14404 the live screen is the screen-share module's page of its own (`web/src/modules/screen-share/standalone.tsx`):
+its namespaces (`screen-share-*`) are the module's catalog, loaded before its code, so they are in no first screen at all.
+What that file imports statically still runs without waiting for the rest of the catalog, so a core key it reads must be
+in the startup list; the build still names one that is not.
 
 ## A mouse event sent again comes out on whole pixels (#5729)
 
@@ -1540,4 +1557,5 @@ without one read `notes › Agents`; every Agent row under it then ended with `<
 the headings' names. Give both projections the same rule: a level that only repeats its heading's name is left out, and
 the heading takes the row's marks and menu. A host that does not say which workspace is the main checkout (herdr has no
 `is_main`) leaves it to the folder, the workspace at the repository's own folder, and that guess may only mark and
-order the tree: actions keep reading what the host said.
+order the tree: actions keep reading what the host said. Guess only for a host that names no project: a desktop app's
+project lists each of its folders as its own `project_path`, so the section's first folder wore the home mark (#14497).

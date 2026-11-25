@@ -179,7 +179,10 @@ func (n *Node) forkOnRuntime(ctx context.Context, h *runtimeConn, source proto.S
 			params["env"] = env
 		}
 	}
-	if err := h.peer.Call(ctx, "session.fork", params, &out); err != nil {
+	finishAgy := n.runtimes.agyWorkBegin(h, "session.fork", source.SessionID)
+	err := h.peer.Call(ctx, "session.fork", params, &out)
+	finishAgy(err, false)
+	if err != nil {
 		return "", err
 	}
 	if !runtimeIDRe.MatchString(out.ID) || out.ID == source.SessionID || out.Session != nil && out.Session.SessionID != out.ID {

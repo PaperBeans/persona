@@ -50,5 +50,10 @@
   "unavailable": "不可用",
   "provider_unavailable": "{provider} 不可用。已有链接仍可打开；添加新链接需要它。",
   "link_pending": "保存时检查",
-  "another_source": "其他来源"
+  "another_source": "其他来源",
+  "role_target": "目标仓",
+  "role_reference": "参考仓",
+  "role_target_hint": "参与交付门禁",
+  "role_reference_hint": "只读参考，不阻塞关单",
+  "link_role_reference": "只读参考"
 }

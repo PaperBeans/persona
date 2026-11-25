@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ComposerFile } from "../../lib/composer-files";
-import { FileTiles } from "./FileTiles";
+import { FileTiles } from "./FileTilesBody";
 
 // A file's ✕ on a phone (#11442): its tap area is the ✕'s column of the tile (touch-hit-corner reaching 8 px left and
 // 24 px down), not a square centred on it that took the end of a failed file's retry. The tile still clips it: reaching

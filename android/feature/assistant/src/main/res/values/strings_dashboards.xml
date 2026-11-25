@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings › Assistant's Dashboards switch (#15017), shown only by a hub that says assistant_pages. -->
+<resources>
+    <string name="assistant_settings_dashboards_header">Dashboards</string>
+    <string name="assistant_settings_dashboards">Let Persona make dashboards</string>
+    <string name="assistant_settings_dashboards_caption">When on, the assistant can draft pages you come back to; tap Keep in the chat and they appear in the sidebar.</string>
+</resources>

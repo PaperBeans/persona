@@ -1,8 +1,8 @@
 import { t } from "../i18n";
 import { splitAgentSessions, type AgentGroup, type AgentMutes } from "./agent-groups";
-import { repoOf } from "./agent-repos";
+import { repoOf } from "./agent-repos-core";
 import { backgroundWaiting, stateOf } from "./format";
-import { buildTodoAgentGroups, interruptedAgent, makeSessionLookup, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
+import { buildTodoAgentGroups, interruptedAgent, makeSessionLookup, openAsk, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 import { todoLook, waitOf, type WaitReason } from "./todo-wait-reason";
 import { usageLimitAgent } from "./usage-limit";
 import type { Machine, Session } from "./types";
@@ -46,6 +46,8 @@ export interface TreeTodo {
   state: TreeState;
   /** A task of the direction tree (#4352): its state as the hub decided it, shown in place of `state`'s word. */
   taskState?: DirectionTaskState;
+  /** Under todos_v2 (#14831): compact done/total subtask progress when non-urgent `part_of` subtasks fold under this goal. */
+  goalProgress?: { done: number; total: number };
   agents: TreeAgent[];
   sessions: Session[];
   folded: boolean;
@@ -217,7 +219,129 @@ const LOOSE_GROUPS = [
  * their order (sortTodos's, the task board's) come from buildTodoAgentGroups. `keepEmpty`: the group is listed while
  * empty (the sidebar's "By to-do" with nothing narrowing the list), its explanation inside it.
  */
-export function buildTodoTree(all: Session[], machines: Machine[], todos: Todo[], mutes?: AgentMutes, now = Date.now(), { keepEmpty = false, compareSessions }: { keepEmpty?: boolean; compareSessions?: (a: Session, b: Session) => number } = {}): TodoTree {
+/** Resolves the highest ancestor goal id present in `byId` via `part_of`.
+ *  Returns undefined for top-level items, orphan children whose parent is missing, self-references, or cycles. */
+function resolveRootGoalId(id: string, byId: ReadonlyMap<string, Todo>): string | undefined {
+  const start = byId.get(id);
+  if (!start?.part_of || start.part_of === id || !byId.has(start.part_of)) return undefined;
+  const visited = new Set<string>([id]);
+  let current = start.part_of;
+  while (current) {
+    if (visited.has(current)) return undefined;
+    visited.add(current);
+    const node = byId.get(current);
+    if (!node) return undefined;
+    const next = node.part_of;
+    if (!next || next === current || !byId.has(next)) return current;
+    current = next;
+  }
+  return undefined;
+}
+
+/** Whether a `part_of` child branch is urgent (`needs_you` or active owner ask) and must stay surfaced at the top level. */
+function isUrgentTreeChild(node: TreeTodo, todo: Todo | undefined): boolean {
+  if (node.state === "needs_you" || node.wait === "owner") return true;
+  if (todo?.view?.section === "needs_you" || todo?.view?.phase === "needs_you") return true;
+  if (todo && !todo.done_at && Boolean(openAsk(todo))) return true;
+  return false;
+}
+
+/**
+ * Under `todos_v2` (#14831): folds non-urgent `part_of` child branches under their top-level open parent goal
+ * with compact `done/total` progress, while surfacing `needs_you` / active-ask child blockers at the top.
+ */
+function foldTreeGoals(tree: TreeTodo[], todos: Todo[], byId: ReadonlyMap<string, Todo>, now: number): TreeTodo[] {
+  const progressByParent = new Map<string, { done: number; total: number }>();
+  for (const td of todos) {
+    const rootId = resolveRootGoalId(td.id, byId);
+    if (!rootId) continue;
+    const root = byId.get(rootId);
+    if (!root || root.done_at) continue;
+    const p = progressByParent.get(rootId) ?? { done: 0, total: 0 };
+    p.total += 1;
+    if (td.done_at || td.view?.section === "done") p.done += 1;
+    progressByParent.set(rootId, p);
+  }
+  if (progressByParent.size === 0) return tree;
+
+  const existingParentIds = new Set(tree.map((n) => n.todoId).filter((id): id is string => Boolean(id)));
+  const foldedByParent = new Map<string, TreeTodo[]>();
+  const surfaced: TreeTodo[] = [];
+  const slots: Array<{ kind: "node"; node: TreeTodo } | { kind: "synth"; parentId: string }> = [];
+  const synthAdded = new Set<string>();
+
+  for (const node of tree) {
+    const id = node.todoId;
+    const rootId = id ? resolveRootGoalId(id, byId) : undefined;
+    const root = rootId ? byId.get(rootId) : undefined;
+    if (!rootId || !root || root.done_at) {
+      slots.push({ kind: "node", node });
+      continue;
+    }
+    if (isUrgentTreeChild(node, byId.get(id!))) {
+      surfaced.push(node.folded ? { ...node, folded: false } : node);
+      continue;
+    }
+    const list = foldedByParent.get(rootId);
+    if (list) list.push(node);
+    else foldedByParent.set(rootId, [node]);
+    if (!existingParentIds.has(rootId) && !synthAdded.has(rootId)) {
+      synthAdded.add(rootId);
+      slots.push({ kind: "synth", parentId: rootId });
+    }
+  }
+
+  const out: TreeTodo[] = [...surfaced];
+  for (const slot of slots) {
+    if (slot.kind === "synth") {
+      const parent = byId.get(slot.parentId)!;
+      const children = foldedByParent.get(slot.parentId)!;
+      const sessions = children.flatMap((c) => c.sessions);
+      const agents = children.flatMap((c) => c.agents);
+      const state = worst(children.map((c) => c.state));
+      const progress = progressByParent.get(slot.parentId);
+      out.push({
+        key: `todo-tree:todo:${parent.id}`,
+        todoId: parent.id,
+        name: parent.title,
+        state,
+        ...(progress && { goalProgress: progress }),
+        agents,
+        sessions,
+        folded: stale(state, sessions, now),
+      });
+      continue;
+    }
+    const node = slot.node;
+    const children = node.todoId ? foldedByParent.get(node.todoId) : undefined;
+    if (!children?.length) {
+      out.push(node);
+      continue;
+    }
+    const sessions = [...node.sessions, ...children.flatMap((c) => c.sessions)];
+    const agents = [...node.agents, ...children.flatMap((c) => c.agents)];
+    const state = worst([node.state, ...children.map((c) => c.state)]);
+    const progress = progressByParent.get(node.todoId!);
+    const keepStatusLabel = state === node.state;
+    out.push({
+      key: node.key,
+      todoId: node.todoId,
+      name: node.name,
+      status: node.status,
+      ...(keepStatusLabel && node.statusLabel ? { statusLabel: node.statusLabel } : {}),
+      ...(keepStatusLabel && node.wait ? { wait: node.wait } : {}),
+      state,
+      ...(node.taskState ? { taskState: node.taskState } : {}),
+      ...(progress ? { goalProgress: progress } : {}),
+      agents,
+      sessions,
+      folded: (node.status === "done" && children.every((c) => c.status === "done")) || stale(state, sessions, now),
+    });
+  }
+  return out;
+}
+
+export function buildTodoTree(all: Session[], machines: Machine[], todos: Todo[], mutes?: AgentMutes, now = Date.now(), { keepEmpty = false, compareSessions, todosV2 = false }: { keepEmpty?: boolean; compareSessions?: (a: Session, b: Session) => number; todosV2?: boolean } = {}): TodoTree {
   const groups = buildTodoAgentGroups(all, machines, todos, mutes, compareSessions);
   // the sessions its groups' statuses were read from, for what a waiting one waits on
   const lookup = makeSessionLookup(splitAgentSessions(all, machines).live);
@@ -246,12 +370,13 @@ export function buildTodoTree(all: Session[], machines: Machine[], todos: Todo[]
       folded: status === "done" || stale(state, g.sessions, now),
     });
   }
+  const todosOut = todosV2 ? foldTreeGoals(tree, todos, byId, now) : tree;
   const rest = LOOSE_GROUPS.flatMap((def): AgentGroup[] => {
     const g = loose.get(def.key);
     if (g) return [g];
     return keepEmpty ? [{ key: def.key, name: def.name(), hint: def.hint(), sessions: [] }] : [];
   });
-  return { projects: [], todos: tree, loose: rest.map((g) => looseTree(g, tree.length > 0, now)) };
+  return { projects: [], todos: todosOut, loose: rest.map((g) => looseTree(g, todosOut.length > 0, now)) };
 }
 
 /** `next`, with every node (project, to-do, agent) and list that comes out the same as in `prev` (sameValue) replaced

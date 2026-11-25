@@ -122,6 +122,15 @@ struct VoiceWireTests {
         #expect(VoiceFrame.parse(#"{"type":"clear"}"#) == .clear)
     }
 
+    /// #14933: the extension's reply edges (feature `reply`, #14932); a state this app does not know is kept, not dropped.
+    @Test func replyEdges() {
+        #expect(VoiceFrame.parse(#"{"type":"reply","state":"start"}"#) == .reply(.start))
+        #expect(VoiceFrame.parse(#"{"type":"reply","state":"end"}"#) == .reply(.end))
+        #expect(VoiceFrame.parse(#"{"type":"reply","state":"paused"}"#) == .reply(.other("paused")))
+        #expect(VoiceFrame.parse(#"{"type":"reply"}"#) == .reply(.other("")))
+        #expect(VoiceFrame.parse(#"{"type":"reply","state":7}"#) == .reply(.other("")), "an odd field falls back, never fails")
+    }
+
     @Test func unknownFramesAndGarbage() {
         #expect(VoiceFrame.parse(#"{"type":"something_new","x":1}"#) == .other(type: "something_new"))
         #expect(VoiceFrame.parse("") == nil)

@@ -271,8 +271,8 @@ List order (the same for all three groupings): Needs you → Unread → Awaiting
   Once a list shows it recorded, the mark still holds the rows of other lists that have not read since (the web: 15 seconds), so a row does not turn Unread again until its own list reads;
   a count read with such a row leaves it out of Unread too (`web/src/lib/seen-outbox.ts`).
 - A parent and the side sessions folded into it (`docs/protocol/protocol.md` "Session hierarchy") are seen separately: the parent's row shows Unread while one of its sides is
-  (`children.sides_unread`), and viewing the parent records only the parent. The web names that side on the parent's row and opens it in one click (`docs/web/web.md`
-  "Side sessions live in their parent's chat", #13496); its own mark on the parent leaves the row Unread while a side is. iOS, Mac and Android fold the same way but do not name the side yet (#13524).
+  (`children.sides_unread`), and viewing the parent records only the parent. The web (`docs/web/web.md`
+  "Side sessions live in their parent's chat", #13496) and Android (`docs/android/android.md` "Aligning the Agents list and the Machines page (#3038)", #13524) name that side on the parent's row and open it in one tap/click; a seen mark on the parent leaves the row Unread while a side is. iOS and Mac fold the same way and do not name the side yet (#13524).
 - Rule: herdr `done` and `seen_at` earlier than the session's last conversational activity → `unread`, otherwise `idle`.
   Claude Code's trailing metadata (#5967) and a Codex command result recorded after its turn closed do not count as a new turn.
   So if it does another turn after you looked, it becomes Unread again.

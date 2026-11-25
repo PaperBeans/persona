@@ -69,6 +69,27 @@ func (s *Service) directoryHiddenSession(machine, sid string) bool {
 	return ok && s.hiddenByDirectory(machine, sess)
 }
 
+// workspaceDirHidden returns a predicate matching cwds covered by machine's enabled Agent folder rules
+// (hide or block). It fails open when rules cannot be read and returns nil when no enabled rules exist.
+func (s *Service) workspaceDirHidden(ctx context.Context, machine string) func(string) bool {
+	if s.agentDirs == nil || machine == "" {
+		return nil
+	}
+	canon := s.effectiveBoardMachine(machine)
+	rules, home, err := s.agentDirs.HiddenAgentDirs(ctx, canon)
+	patterns := proto.HiddenAgentDirPatterns(rules)
+	if err != nil || len(patterns) == 0 {
+		return nil
+	}
+	m, _ := s.fleetMachine(canon)
+	if home == "" {
+		home = m.Home
+	}
+	return func(cwd string) bool {
+		return cwd != "" && proto.DirPatternMatchedOn(cwd, home, m.HomeReal, patterns) != ""
+	}
+}
+
 func visibleDirectorySessions(list []proto.Session) []proto.Session {
 	return slices.DeleteFunc(slices.Clone(list), func(c proto.Session) bool { return c.HiddenByDirectory() })
 }

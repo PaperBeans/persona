@@ -120,7 +120,11 @@ func TestGoldenHealthClaudeMD(t *testing.T) {
 	f.hello.Owner = "示例用户"
 	f.hello.OwnerNotes = "我每天跑步。"
 	s := newTestService(t, f)
-	golden(t, "health_claude_md", s.healthClaudeMD(context.Background(), "server"))
+	name := "health_claude_md"
+	if !s.healthOn() {
+		name += ".without_module"
+	}
+	golden(t, name, s.healthClaudeMD(context.Background(), "server"))
 }
 
 func TestGoldenHealthClaudeMDLanguage(t *testing.T) {
@@ -129,7 +133,11 @@ func TestGoldenHealthClaudeMDLanguage(t *testing.T) {
 			f := healthHub()
 			f.hello.Owner, f.hello.OwnerNotes, f.hello.Locale = "Example user", "Example health notes.", lang
 			s := newTestService(t, f)
-			golden(t, "health_claude_md."+lang, s.healthClaudeMD(context.Background(), "server"))
+			name := "health_claude_md." + lang
+			if !s.healthOn() {
+				name += ".without_module"
+			}
+			golden(t, name, s.healthClaudeMD(context.Background(), "server"))
 		})
 	}
 }

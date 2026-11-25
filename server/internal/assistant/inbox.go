@@ -146,6 +146,31 @@ type InboxItem struct {
 	// TriageRev is the tier criteria's revision (inboxTriageRev) the model last sorted the item under: an open "Needs
 	// you" item sorted under older criteria is sorted again once (inbox_triage.go retriageStale).
 	TriageRev int `json:"triage_rev,omitempty"`
+	// VisibilityExcluded is a persistent quarantine marker set by the configured source visibility boundary. The
+	// message and sent-attempt history remain intact, but AI queue, suggestions and confirmation stay closed.
+	VisibilityExcluded bool `json:"visibility_excluded,omitempty"`
+	// VisibilityContentRefs follows retained contributor text through merge and Undo, when MergedFrom no longer names it.
+	// It is persisted authorization state and is never listed.
+	VisibilityContentRefs []InboxMergeRef `json:"visibility_content_refs,omitempty"`
+	// Reply policy classification is server-owned. Models supply a category candidate; only the configured route
+	// decides whether an owner draft may exist. The content and revision stamps make older drafts fail closed.
+	ReplyCategory     string `json:"reply_category,omitempty"`
+	ReplyMode         string `json:"reply_mode,omitempty"`
+	ReplyClassifiedOf string `json:"reply_classified_of,omitempty"`
+	ReplyPolicyRev    string `json:"reply_policy_rev,omitempty"`
+	ReplyReviewed     bool   `json:"reply_reviewed,omitempty"`
+	// ReplyContentSources follows member text through merge and Undo; ReplyContextTruncated records that the complete
+	// merged conversation no longer fits the classifier. Both are persisted authorization state, never listed.
+	ReplyContentSources   []string `json:"reply_content_sources,omitempty"`
+	ReplyContextTruncated bool     `json:"reply_context_truncated,omitempty"`
+	// ReplyInstruction preserves an outstanding owner rewrite instruction even when merge resequences and trims the
+	// display chain. RejectedReplyDraft is the legacy last-rejected value; RejectedReplyDrafts retains every exact
+	// rejected on-demand text so rejecting a replacement cannot make an older card sendable. None is listed.
+	ReplyInstruction     *InboxChainEntry `json:"reply_instruction,omitempty"`
+	RejectedReplyDraft   string           `json:"rejected_reply_draft,omitempty"`
+	RejectedReplyDrafts  []string         `json:"rejected_reply_drafts,omitempty"`
+	replyClassifySerial  uint64
+	receivedInCollection bool
 	// RuleOf is Last when the item's tier came from the rules because the model failed on it (an error or too slow,
 	// not a held connection or no model): TriagedAt stays behind, and later passes ask the model again, a few at a
 	// time and less often while it keeps failing, until it answers (inbox_triage.go retryRuled, #8298).
@@ -169,6 +194,10 @@ type InboxItem struct {
 	// ChainSeq numbers the chain's entries; SuggestSeq is the last suggestion's version (a new one is the next).
 	ChainSeq   int `json:"chain_seq,omitempty"`
 	SuggestSeq int `json:"suggest_seq,omitempty"`
+	// ReplyPolicy is the latest server-side reply-policy classification for this item (inbox_reply_policy.go).
+	// Persisted, never listed. MailBodyTruncated distinguishes a clipped body from formatted headers.
+	ReplyPolicy       *InboxReplyPolicySnapshot `json:"reply_policy,omitempty"`
+	MailBodyTruncated *bool                     `json:"mail_body_truncated,omitempty"`
 }
 
 type InboxLark struct {
@@ -239,9 +268,16 @@ func (it *InboxItem) listed() InboxItem {
 	c.SuggestionAttempts = listedSuggestionAttempts(it.SuggestionAttempts)
 	c.Context, c.Last, c.TriagedAt, c.BodyOf, c.JudgedAt, c.Rules, c.ArrivedOf, c.FolderOf = "", "", "", "", "", "", "", ""
 	c.TriageRev, c.SettledOf, c.RuleOf, c.RepliedOf = 0, "", "", ""
+	c.ReplyContentSources, c.ReplyContextTruncated = nil, false
+	c.VisibilityContentRefs = nil
+	c.ReplyInstruction, c.RejectedReplyDraft = nil, ""
+	c.RejectedReplyDrafts = nil
 	c.ArrivedAt = time.Time{}
 	c.Meta, c.Group = nil, nil
 	c.ChainSeq, c.SuggestSeq = 0, 0
+	c.ReplyPolicy = nil
+	c.ReplyContentSources, c.ReplyContextTruncated, c.MailBodyTruncated = nil, false, nil
+	c.ReplyInstruction, c.RejectedReplyDraft, c.RejectedReplyDrafts = nil, "", nil
 	c.Status = it.status()
 	c.Now, c.TitleBy = it.nowKey(), ""
 	c.PreMergeTitle, c.PreMergeTitleBy, c.MergeTitle = "", "", ""
@@ -260,7 +296,12 @@ func (it *InboxItem) listed() InboxItem {
 		g := *g
 		g.Changes, g.Cwd = slices.Clone(g.Changes), ""
 		g.MailTarget = nil // the reply's internal conflict check, not a client's target to choose
-		g.Owner, g.SourceOf = nil, ""
+		g.Owner, g.SourceOf, g.ReplyInstruction = nil, "", ""
+		g.ReplyPublicationFailed = false
+		g.OnDemand, g.ReplyPublicationPending = false, false
+		g.ReplyPolicy = nil
+		g.OnDemand, g.ReplyPublicationPending, g.ReplyPublicationFailed = false, false, false
+		g.ReplyInstruction = ""
 		c.Suggestion = &g
 		if c.Handling == nil && g.Conversation == nil && it.Agent != nil { // an old draft: its conversation is done with this round
 			c.Handling = &InboxHandling{Owner: HandlingOwner, State: HandlingDone, MachineID: it.Agent.MachineID, SessionID: it.Agent.SessionID}

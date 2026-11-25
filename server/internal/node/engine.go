@@ -246,6 +246,7 @@ func (n *Node) useEngineChoice(ctx context.Context, c proto.EngineChoice) error 
 	engine := proto.LegacyEngine(c)
 	n.eng.mu.Lock()
 	n.hosts.Set(nodeHostsFor(c, n.eng.botmux != nil && *n.eng.botmux, n.logf)...)
+	n.syncHerdrHostBlocked()
 	n.resetSignals()
 	n.eng.name, n.eng.set = engine, &c
 	n.mu.Lock()

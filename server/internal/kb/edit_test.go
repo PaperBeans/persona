@@ -225,7 +225,7 @@ func TestLockFalseDoesNotUnlockExistingFields(t *testing.T) {
 	no := false
 	editApply(t, e, KindPerson, "person", Update{Note: "Unconfirmed", Lock: &no})
 	p, _ := e.Store.Person("person")
-	if p.fieldLocked("note") {
+	if taggingFieldLocked(&p.Tagging, "note") {
 		t.Fatal("lock=false added lock")
 	}
 	editApply(t, e, KindPerson, "person", Update{Note: "Confirmed"})

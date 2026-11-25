@@ -70,7 +70,12 @@ internal class SidebarPageRoots {
         }
         if (path.isEmpty()) saved.remove(current) else saved[current] = path
         current = root
-        val restored = saved.remove(root) ?: emptyList()
+        val restored = if (contentChanged) {
+            saved.remove(root)
+            emptyList()
+        } else {
+            saved.remove(root) ?: emptyList()
+        }
         return Step(root, restored, Move.SwitchRoot)
     }
 

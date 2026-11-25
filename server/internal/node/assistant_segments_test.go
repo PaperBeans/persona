@@ -71,6 +71,51 @@ func TestSegmentPreparationIsEmptyAndReceiptedAndRetirementIsReversible(t *testi
 	}
 }
 
+func TestCodexSegmentRequiresDurableThreadBeforeReceipt(t *testing.T) {
+	for _, tc := range []struct {
+		name, title, wantTitle string
+		refused                bool
+	}{{"named", "Project notes", "Project notes", false}, {"older manager", "", "Persona", false}, {"write failed", "", "", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeCodexHome(t, testThread)
+			trace := t.TempDir()
+			t.Setenv("PERSONA_FAKE_CODEX_TRACE", trace)
+			record := filepath.Join(trace, "thread-name-set")
+			if tc.refused {
+				if err := os.Mkdir(record, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			n := codexTestNode(t)
+			withFakeHub(t, n)
+			t.Cleanup(func() { n.stopAssistantProcess(testThread) })
+			request := map[string]any{"operation_id": "prepare-codex", "launcher": "codex", "cwd": t.TempDir(), "title": tc.title}
+			_, err := nodeCall(t, n, "assistant.segment.prepare", request)
+			id, received := n.segmentReceipt("prepare-codex")
+			if tc.refused {
+				var refusal *rpc.Error
+				if !errors.As(err, &refusal) || refusal.Code != "missing_generation" || received {
+					t.Fatalf("failed write received a preparation receipt: %v, %v", err, received)
+				}
+			} else {
+				if err != nil || !received || id != testThread {
+					t.Fatalf("preparation receipt: %q, %v, %v", id, received, err)
+				}
+				var call struct {
+					Params struct{ ThreadID, Name string }
+				}
+				b, err := os.ReadFile(record)
+				if err != nil || json.Unmarshal(b, &call) != nil || call.Params.ThreadID != id || call.Params.Name != tc.wantTitle {
+					t.Fatalf("persisted thread name: %s, %v", b, err)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(trace, "turn-start")); !os.IsNotExist(err) {
+				t.Fatalf("preparation started a model turn: %v", err)
+			}
+		})
+	}
+}
+
 func TestSegmentRetirementWaitsForRuntimeApprovalToSettle(t *testing.T) {
 	n, hub := runtimeNode(t)
 	assistantHub(hub)

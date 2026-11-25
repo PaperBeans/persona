@@ -110,6 +110,23 @@ describe("Close…", () => {
     expect(closed).toHaveBeenCalledOnce();
   });
 
+  it("says what archiving and closing does to an Antigravity CLI conversation: no tab or terminal page (#14520)", async () => {
+    const vars = { title: "Release notes", machine: "Example computer" };
+    const pane: Session = { machine_id: "m", session_id: "agy-w1-p1", title: "Release notes", cwd: "", status: "idle", state: "idle", agent: "agy",
+      pane_id: "w1:p1", capabilities: { read: true, send: true, terminal: true } };
+    const conversation: Session = { machine_id: "m", session_id: "agy-11111111-2222-4333-8444-555555555555", title: "Release notes", cwd: "",
+      status: "done", state: "idle", agent: "agy", source_kind: "runtime", capabilities: { read: true, send: true, terminal: false, close: true } };
+    for (const [row, said] of [[pane, "close-agent.archive_close_agy_pane_detail"], [conversation, "close-agent.archive_close_agy_detail"]] as const) {
+      fetcher.mockClear();
+      await open(row);
+      expect(dialog().textContent).toContain(t(said, vars));
+      expect(dialog().textContent).not.toContain(t("close-agent.archive_close_detail", vars));
+      expect(dialog().textContent).not.toMatch(/terminal page|its tab/);
+      await act(async () => buttonNamed(t("close-agent.archive_close"))!.click());
+      expect(posted()).toEqual([`/sessions/m/${row.session_id}/archive?close=1`]);
+    }
+  });
+
   it("says what closing a busy agent interrupts, and closes it anyway without archiving", async () => {
     await open({ ...claude, status: "working", state: "working" });
     expect(dialog().querySelector("[data-close-busy]")?.textContent).toBe(t("close-agent.busy_working"));

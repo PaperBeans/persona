@@ -17,7 +17,7 @@ async function problems(file: string, code: string): Promise<number> {
 
 describe("the module boundary", () => {
   it("keeps a module from importing the module list, however it is spelled", async () => {
-    for (const spec of ["../../modules", "../../modules/", "../../modules/index", "../", "..", "../index", "../index.ts"]) {
+    for (const spec of ["../../modules", "../../modules/", "../../modules/index", "../", "..", "../index", "../index.ts", "../standalone", "../../modules/standalone"]) {
       expect(await problems("src/modules/health/Example.ts", `import x from "${spec}";\nexport { x };`), spec).toBeGreaterThan(0);
       expect(await problems("src/modules/health/Example.ts", `export const f = () => import("${spec}");`), `import(${spec})`).toBeGreaterThan(0);
     }
@@ -37,6 +37,7 @@ describe("the module boundary", () => {
       "export const f = (x: string) => import(`../mod${x}`);",
       "export const f = (x: string) => import(`../${x}`);",
       'import "../modules";',
+      'import "../modules/standalone";',
       'import "../modules/health/module";',
       'export { health } from "../modules/health/module";',
     ]) expect(await problems("src/core/Example.ts", code), code).toBeGreaterThan(0);
@@ -46,6 +47,8 @@ describe("the module boundary", () => {
   it("lets the rest of the app import the list, never a module's files", async () => {
     expect(await problems("src/App.tsx", 'import "./modules";')).toBe(0);
     expect(await problems("src/views/Example.ts", 'import "../modules/index";')).toBe(0);
+    // and its part with the modules' pages of their own, which main.tsx imports before App
+    expect(await problems("src/main.tsx", 'export const f = () => import("./modules/standalone");')).toBe(0);
     expect(await problems("src/views/Example.ts", 'import "../modules/health/Health";')).toBeGreaterThan(0);
     expect(await problems("src/views/Example.ts", "export const f = (x: string) => import(`../modules/health/${x}`);")).toBeGreaterThan(0);
     // tests may reach a module's files to test them

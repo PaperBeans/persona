@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:os";
 import { fileURLToPath } from "node:url";
+import { vitestShard } from "./test-shard.mjs";
 
 const signals = constants.signals;
 
@@ -15,9 +16,12 @@ function run(args) {
   });
 }
 
-// Keep the existing Node regression first, then run the complete Vitest suite.
+// Keep the existing Node regression first, then run Vitest. CI's native file shards run that regression only on lane 1.
 // Extra npm test arguments belong to Vitest, as they did before this supervisor.
-const node = await run(["--test", "e2e/extension-mirrors-cleanup.node-test.mjs", "scripts/process-group.node-test.mjs"]);
-const result = node.code === 0 ? await run([vitest, "run", ...process.argv.slice(2)]) : node;
+const shard = vitestShard();
+const node = shard.nodeTests
+  ? await run(["--test", "e2e/extension-mirrors-cleanup.node-test.mjs", "scripts/process-group.node-test.mjs", "scripts/test-shard.node-test.mjs"])
+  : { code: 0 };
+const result = node.code === 0 ? await run([vitest, "run", ...process.argv.slice(2), ...shard.args]) : node;
 if (result.error) console.error(result.error.message);
 process.exitCode = result.code;

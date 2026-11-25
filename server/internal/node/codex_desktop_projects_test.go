@@ -14,6 +14,9 @@ import (
 func TestCodexNativeProjectsDriveSessionCatalogAndGrouping(t *testing.T) {
 	noFakeCodexBus(t)
 	n := remoteTestNode(t)
+	// macOS keeps t.TempDir() behind the /var symlink, and the node reports project roots resolved.
+	n.home = resolved(t, n.home)
+	n.dir = filepath.Join(n.home, ".persona")
 	home := n.codexHome()
 	root, other := filepath.Join(n.home, "shared"), filepath.Join(n.home, "other")
 	for _, dir := range []string{home, root, other} {

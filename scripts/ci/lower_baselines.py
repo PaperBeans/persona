@@ -37,9 +37,10 @@ TAIL_LINES = 15  # lines of a failed update's output shown in the report
 
 
 class Ratchet:
-    """One count ratchet: its baseline files (glob patterns under the root) and the command that lowers them."""
+    """One count ratchet: its baseline files (glob patterns under the root), the command that lowers them, and how a
+    baseline file reads as counts (JSON unless it says otherwise)."""
 
-    def __init__(self, name, what, files, command, cwd=".", env=None, needs=(), timeout=600):
+    def __init__(self, name, what, files, command, cwd=".", env=None, needs=(), timeout=600, parse=json.loads):
         self.name = name
         self.what = what
         self.files = files
@@ -48,6 +49,29 @@ class Ratchet:
         self.env = env or {}
         self.needs = needs  # commands that must be on PATH, or paths (with a "/") that must exist under the root
         self.timeout = timeout
+        self.parse = parse  # bytes of a baseline file -> its counts, for only_lowers
+
+
+def domain_counts(data):
+    """The domain rules' baseline (server/internal/archguard/testdata/domain_layers/baseline.txt) as counts: each
+    count's limit, its "<key> <rule> <count>" line plus one per "<key> <rule> <Type> #PR ..." allowance, as
+    {"<key> <rule>": limit}, and each allowance as {"<key> <rule> <Type>": 1}. An allowance the count takes in (its
+    type landed) keeps the limit and removes its own entry; nothing may add one. Comments and blank lines are left out."""
+    counts = {}
+    for line in data.decode("utf-8").splitlines():
+        fields = line.split()
+        if not fields or fields[0].startswith("#"):
+            continue
+        if len(fields) == 3 and fields[2].isdigit():
+            key = " ".join(fields[:2])
+            counts[key] = counts.get(key, 0) + int(fields[2])
+        elif len(fields) > 3 and not fields[2].isdigit() and all(f.startswith("#") and f[1:].isdigit() for f in fields[3:]):
+            key = " ".join(fields[:2])
+            counts[key] = counts.get(key, 0) + 1
+            counts[" ".join(fields[:3])] = 1
+        else:
+            raise ValueError("neither <key> <rule> <count> nor <key> <rule> <Type> #PR ...: " + line)
+    return counts
 
 
 RATCHETS = (
@@ -82,6 +106,10 @@ RATCHETS = (
     Ratchet("web-hardcoded-text", "hard-coded Chinese in web/src", ["web/src/i18n/hardcoded-baseline.json"],
             ["npx", "vitest", "run", "src/i18n/catalog.test.ts"], cwd="web", env={"UPDATE_I18N_BASELINE": "1"},
             needs=("npx", "web/node_modules")),
+    Ratchet("domain-rules", "the domain rules' findings in server code that predates them",
+            ["server/internal/archguard/testdata/domain_layers/baseline.txt"],
+            ["go", "test", "-count=1", "-run", "^TestDomainLayers$", "./internal/archguard/"], cwd="server",
+            env={"DOMAIN_LAYERS_UPDATE": "1"}, needs=("go",), parse=domain_counts),
 )
 
 
@@ -194,9 +222,9 @@ def lower(root, ratchet, dry_run=False):
             problems.append(path + ": a new baseline file")
         elif old is not None and new is not None and old != new:
             try:
-                problems.extend(path + ": " + line for line in only_lowers(json.loads(old), json.loads(new)))
+                problems.extend(path + ": " + line for line in only_lowers(ratchet.parse(old), ratchet.parse(new)))
             except ValueError as error:
-                problems.append("{0}: not JSON after the update ({1})".format(path, error))
+                problems.append("{0}: does not read as counts after the update ({1})".format(path, error))
     if problems:
         restore(root, before)
         return "left alone", ("the update would raise or add, which is a change's business, not tidying; nothing "

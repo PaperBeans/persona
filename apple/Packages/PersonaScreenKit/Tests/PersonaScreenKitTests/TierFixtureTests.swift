@@ -3,7 +3,7 @@ import XCTest
 @testable import PersonaScreenKit
 
 /// The quality tiers' shared cases (spec/fixtures/screen-tiers, #6396 / #6558): the browser's port
-/// (web/src/screen/tiers/) must give exactly what these Swift types give. One scenario per file, its input and the
+/// (web/src/modules/screen-share/tiers/) must give exactly what these Swift types give. One scenario per file, its input and the
 /// expected output, no internal state. `PERSONA_WRITE_TIER_FIXTURES=1 swift test --filter TierFixtureTests` writes them;
 /// otherwise every committed file must be exactly what the scenarios write now, so a change in behaviour on either side
 /// fails until the files and the other side follow.
@@ -397,7 +397,7 @@ final class TierFixtureTests: XCTestCase {
             if write { try data.write(to: url); continue }
             let have = try Data(contentsOf: url)
             XCTAssertEqual(String(decoding: have, as: UTF8.self), String(decoding: data, as: UTF8.self),
-                           "spec/fixtures/screen-tiers/\(dir)/\(name).json is out of date: run PERSONA_WRITE_TIER_FIXTURES=1 swift test --filter TierFixtureTests, and bring web/src/screen/tiers along")
+                           "spec/fixtures/screen-tiers/\(dir)/\(name).json is out of date: run PERSONA_WRITE_TIER_FIXTURES=1 swift test --filter TierFixtureTests, and bring web/src/modules/screen-share/tiers along")
         }
         if !write {
             let stale = committed.subtracting(files.map { $0.0 + ".json" })

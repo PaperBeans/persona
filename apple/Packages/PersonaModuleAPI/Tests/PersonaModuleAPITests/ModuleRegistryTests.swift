@@ -157,10 +157,10 @@ struct ModuleRegistryTests {
 
     @Test func servedSlots() {
         #expect(ModuleSlot.allCases.filter(\.isServed) == [.launchHooks, .deepLinks, .composerActions, .shellPlaces, .settings, .chatCardKinds,
-                                                           .chatAccessories, .toolbarItems, .capabilities])
+                                                           .chatAccessories, .toolbarItems, .capabilities, .audioLeases])
         #expect(ModuleSlot.allCases.count == 16)
         // The contract's names (#13430 section 4) where it has one.
-        for name in ["shell_places", "settings", "chat_card_kinds", "composer_actions", "chat_accessories", "frame_handlers", "push_categories"] {
+        for name in ["shell_places", "settings", "chat_card_kinds", "composer_actions", "chat_accessories", "frame_handlers", "push_categories", "audio_leases"] {
             #expect(ModuleSlot(rawValue: name) != nil, "\(name)")
         }
     }

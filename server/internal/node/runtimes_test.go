@@ -194,6 +194,12 @@ func dialRuntimeAt(t *testing.T, path string, hello map[string]any) *fakeRuntime
 	if err != nil {
 		t.Fatal(err)
 	}
+	return runtimeOn(t, c, hello)
+}
+
+// runtimeOn is a fake runtime on connection c to the node's runtime host, once it has said hello.
+func runtimeOn(t *testing.T, c net.Conn, hello map[string]any) *fakeRuntime {
+	t.Helper()
 	f := &fakeRuntime{conn: c, params: map[string][]json.RawMessage{}}
 	f.peer = rpc.New("d", c)
 	f.peer.OnRequest = func(ctx context.Context, method string, params json.RawMessage) (any, error) {

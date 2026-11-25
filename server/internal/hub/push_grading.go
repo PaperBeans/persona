@@ -136,6 +136,7 @@ func sentRows(in []pushSent) []db.PushSent {
 
 // pushPolicy says how urgent one alert push is and what it belongs to. The zero value is P1 with no related key.
 type pushPolicy struct {
+	kind       string
 	level      string
 	relatedKey string
 	todoID     string
@@ -144,6 +145,7 @@ type pushPolicy struct {
 	title      string
 	body       string
 	manager    string
+	extension  string
 	// What an attention mode reads (push_attention.go): how long the owner needs for it (assistantwire.DepthDeep),
 	// the track it comes from, whether it is a finished turn, and whether it is the hub's own alert.
 	depth  string
@@ -245,10 +247,11 @@ func (p *Pusher) setPushGrading(ctx context.Context, enabled bool) error {
 	return nil
 }
 
-// applyPushGrading decides whether one alert push may go out. With the switch off it allows everything and touches nothing.
-// It runs once per push call, never per device: a held push is one intercepted entry however many devices would have
-// received it. The 12-hour check and the note of a P0 that goes out happen under one hold of gradingMu, so two pushes with
-// the same key at the same moment cannot both pass.
+// applyPushGrading decides whether one alert push may go out. With the switch off, no attention mode and no active
+// extension layer for this push's manager, it allows everything and touches nothing. It runs once per push call, never
+// per device: a held push is one intercepted entry however many devices would have received it. The dedup check and the
+// note of a P0 that goes out happen under one hold of gradingMu, so two pushes with the same key at the same moment
+// cannot both pass.
 func (p *Pusher) applyPushGrading(policy pushPolicy) (allow bool, reason string) {
 	level := policy.level
 	if level == "" {
@@ -256,12 +259,7 @@ func (p *Pusher) applyPushGrading(policy pushPolicy) (allow bool, reason string)
 	}
 	now := p.now()
 	attn := p.attentionNow()
-	if !attn.Active() && !p.pushGradingOn() {
-		// The switch is off and no attention mode is in force: every push goes out as before, and the delivery counts
-		// still remember it.
-		p.recordSent(policy, level, now)
-		return true, ""
-	}
+	ownerEnabled := p.pushGradingOn()
 	key := strings.TrimSpace(policy.relatedKey)
 	in := heldPushRecord{
 		At: now.UTC(), Level: level, Title: policy.title, Body: policy.body, RelatedKey: key, Manager: policy.manager,
@@ -272,42 +270,29 @@ func (p *Pusher) applyPushGrading(policy pushPolicy) (allow bool, reason string)
 		in.MachineID, in.SessionID = "", ""
 	}
 	p.gradingMu.Lock()
-	if attn.Active() {
-		// An attention mode reinterprets the levels whatever hub.ln_mode says (push_attention.go).
-		allow, reason = p.applyAttentionLocked(attn, policy, level, in)
-		p.gradingMu.Unlock()
-		return allow, reason
-	}
-	if level == assistantwire.LevelP0 {
-		// P0 is what the owner must do or decide themself: it always interrupts, before and whatever the 12-hour check
-		// says, so no earlier push with the same key can swallow it. Its key then keeps lower levels quiet for the window.
-		if key != "" {
-			p.noteKeyPushedLocked(key, now)
-		}
+	layers := p.activeGradingLayersLocked(policy.manager)
+	if !attn.Active() && !ownerEnabled && len(layers) == 0 {
+		// The switch is off, no attention mode is in force, and no extension layer is active for this manager:
+		// every push goes out as before, and the delivery counts still remember it.
 		p.addSentLocked(pushSent{At: now.UTC(), Level: level, RelatedKey: key, Manager: policy.manager})
 		p.gradingMu.Unlock()
 		return true, ""
 	}
-	if key != "" {
-		if last, seen := p.gradingLastAlert[key]; seen && now.Sub(last) < gradingDedupWindow {
-			in.Reason = interceptReasonDedup
-			p.addInterceptLocked(in, false)
-			p.gradingMu.Unlock()
-			return false, interceptReasonDedup
+	dec := evaluatePushGradingLocked(now, ownerEnabled, attn, layers, p.gradingLastAlert, policy, false)
+	if dec.Allow {
+		if key != "" && (dec.EffectiveLevel == assistantwire.LevelP0 || attn.Active()) {
+			p.noteKeyPushedLocked(key, now)
 		}
-	}
-	switch level {
-	case assistantwire.LevelP2:
-		in.Reason = interceptReasonP2
-		p.addInterceptLocked(in, false)
+		p.addSentLocked(pushSent{At: now.UTC(), Level: dec.EffectiveLevel, RelatedKey: key, Manager: policy.manager})
 		p.gradingMu.Unlock()
-		return false, interceptReasonP2
-	default: // P1 and anything unknown: held for the list and the briefing rather than alerted.
-		in.Level, in.Reason = assistantwire.LevelP1, interceptReasonP1
-		p.addInterceptLocked(in, true)
-		p.gradingMu.Unlock()
-		return false, interceptReasonP1
+		return true, ""
 	}
+	in.Level = dec.EffectiveLevel
+	in.Reason = dec.Reason
+	merge := !attn.Active() && dec.Reason == interceptReasonP1 && dec.EffectiveLevel == assistantwire.LevelP1
+	p.addInterceptLocked(in, merge)
+	p.gradingMu.Unlock()
+	return false, dec.Reason
 }
 
 // noteKeyPushedLocked remembers that key alerted at now, and forgets keys whose window is over (card keys are unique,
@@ -316,8 +301,9 @@ func (p *Pusher) noteKeyPushedLocked(key string, now time.Time) {
 	if p.gradingLastAlert == nil {
 		p.gradingLastAlert = map[string]time.Time{}
 	}
+	retain := max(gradingDedupWindow, p.maxDedupWindowLocked())
 	for k, at := range p.gradingLastAlert {
-		if now.Sub(at) >= gradingDedupWindow {
+		if now.Sub(at) >= retain {
 			delete(p.gradingLastAlert, k)
 		}
 	}
@@ -608,6 +594,7 @@ func (p *Pusher) loadPushGradingState() {
 	}
 
 	p.loadSent()
+	p.loadGradingLayers()
 }
 
 // loadSent reads the delivered pushes back from hub_push_sent at startup: first it adds the entries of the old
@@ -868,6 +855,7 @@ func (h *Hub) pushGradingRoutes(api *http.ServeMux) {
 	api.HandleFunc("GET /api/v1/push/grading", getSwitch)
 	api.HandleFunc("PUT /api/v1/push/ln-mode", putSwitch)
 	api.HandleFunc("PUT /api/v1/push/grading", putSwitch)
+	h.pushGradingLayerRoutes(api)
 	api.HandleFunc("GET /api/v1/push/intercepts", func(w http.ResponseWriter, r *http.Request) {
 		em := extensionManager(r)
 		if extensionToken(r) && !h.interceptReaderAllowed(r) {

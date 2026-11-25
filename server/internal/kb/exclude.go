@@ -12,8 +12,8 @@ import (
 // again by hand, or allowing it again (UserUpdate.Allow*), lifts it. A whole-list lock (locked_fields) is a separate,
 // explicit choice (UserUpdate.LockLists) and keeps its meaning, the locks written before exclusions included.
 
-// exclude records ids as links the user removed from list.
-func (t *Tagging) exclude(list string, ids ...string) {
+// taggingExclude records ids as links the user removed from list.
+func taggingExclude(t *Tagging, list string, ids ...string) {
 	for _, id := range ids {
 		if id == "" || slices.Contains(t.Excluded[list], id) {
 			continue
@@ -25,8 +25,8 @@ func (t *Tagging) exclude(list string, ids ...string) {
 	}
 }
 
-// include lifts the exclusion of ids from list.
-func (t *Tagging) include(list string, ids ...string) {
+// taggingInclude lifts the exclusion of ids from list.
+func taggingInclude(t *Tagging, list string, ids ...string) {
 	if !slices.ContainsFunc(ids, func(id string) bool { return slices.Contains(t.Excluded[list], id) }) {
 		return
 	}
@@ -39,11 +39,11 @@ func (t *Tagging) include(list string, ids ...string) {
 	}
 }
 
-// excludes: the user removed id from list.
-func (t *Tagging) excludes(list, id string) bool { return slices.Contains(t.Excluded[list], id) }
+// taggingExcludes: the user removed id from list.
+func taggingExcludes(t *Tagging, list, id string) bool { return slices.Contains(t.Excluded[list], id) }
 
-// kept is ids without those the user removed from list.
-func (t *Tagging) kept(list string, ids []string) []string {
+// taggingKept is ids without those the user removed from list.
+func taggingKept(t *Tagging, list string, ids []string) []string {
 	if len(t.Excluded[list]) == 0 {
 		return ids
 	}
@@ -97,21 +97,21 @@ func (le linkEdit) locks(u Update, field string) bool {
 // records nothing.
 func (le linkEdit) removed(t *Tagging, list string, ids ...string) {
 	if le.user {
-		t.exclude(list, ids...)
+		taggingExclude(t, list, ids...)
 	}
 }
 
 // linked lifts, for the user, the exclusion of ids in target's list (the user linked them by hand).
 func (le linkEdit) linked(t *Tagging, list string, ids ...string) {
 	if le.user {
-		t.include(list, ids...)
+		taggingInclude(t, list, ids...)
 	}
 }
 
 // allowed lifts, on the entry an update names, the exclusions the user allowed again in lists.
 func (le linkEdit) allowed(t *Tagging, lists ...string) {
 	for _, list := range lists {
-		t.include(list, le.allow[list]...)
+		taggingInclude(t, list, le.allow[list]...)
 	}
 }
 
@@ -213,11 +213,11 @@ func (e *Engine) withoutRemoved(kind, id string, u Update) (Update, []IgnoredFie
 	case KindProject:
 		u.People = drop("people", u.People, func(pid string) bool {
 			t, _ := e.Store.tagging(KindPerson, pid)
-			return self.excludes("people", pid) || t != nil && t.excludes("projects", id)
+			return taggingExcludes(self, "people", pid) || t != nil && taggingExcludes(t, "projects", id)
 		})
 		u.Chats = drop("chats", u.Chats, func(cid string) bool {
 			t, _ := e.Store.tagging(KindChat, cid)
-			return self.excludes("chats", cid) || t != nil && t.excludes("projects", id)
+			return taggingExcludes(self, "chats", cid) || t != nil && taggingExcludes(t, "projects", id)
 		})
 	case KindChat, KindPerson, KindDoc, KindMeeting, KindEvent, KindRecording:
 		list, member := kind, id // a chat in a project's chats, a person in its people
@@ -229,7 +229,7 @@ func (e *Engine) withoutRemoved(kind, id string, u Update) (Update, []IgnoredFie
 			if !ok {
 				return false
 			}
-			return self.excludes("projects", p.Slug) || p.excludes(list, member)
+			return taggingExcludes(self, "projects", p.Slug) || taggingExcludes(&p.Tagging, list, member)
 		})
 	}
 	return u, ignored

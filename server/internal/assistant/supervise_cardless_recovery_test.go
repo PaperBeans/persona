@@ -278,7 +278,8 @@ func TestCardlessClaimRecoveryRechecksRoundUnderWriteLock(t *testing.T) {
 	store.mu.Lock()
 	store.failMarker = false
 	store.mu.Unlock()
-	again, _ := restartCardlessClaim(t, store)
+	// Start the recovery attempt below after this test holds the write lock.
+	again, _ := restartCardlessClaimWithManualDigest(t, store)
 	again.supervise.writeMu.Lock()
 	done := make(chan [2]bool, 1)
 	go func() {

@@ -173,7 +173,7 @@ func TestExtensionAPI(t *testing.T) {
 		}
 	}
 	if _, out := call(t, mux, "GET", "/api/v1/examplefeed/role", master, ""); out["role"] != "center" ||
-		fmt.Sprint(out["capabilities"]) != "[inbox_group inbox_group_state tool_images]" {
+		fmt.Sprint(out["capabilities"]) != "[inbox_group inbox_group_state tool_images tool_views]" {
 		t.Fatalf("the hub's role and capabilities at initialize: %v", out)
 	}
 	// A send it declared a receipt for is kept by the hub, which relays it (hub/extensions_link.go): the report

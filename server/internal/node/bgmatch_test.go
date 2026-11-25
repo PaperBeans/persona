@@ -74,10 +74,10 @@ func FuzzBGMatch(f *testing.F) {
 	})
 }
 
-// The table stays small: byte classes instead of 256 columns per state (42 classes and 366 states, 61,488 bytes, for
-// the 28 markers; 256 columns would be 374,784). The bound is that plus 3%: a new marker that needs more says so here.
+// The table stays small: byte classes instead of 256 columns per state (42 classes and 397 states, 66,696 bytes, for
+// the 30 markers; 256 columns would be 406,528). The bound is that plus 3%: a new marker that needs more says so here.
 func TestBGMatchTableIsCompact(t *testing.T) {
-	const most = 63_333
+	const most = 68_697
 	if b := len(bgMatch().next) * 4; b > most {
 		t.Fatalf("the table takes %d bytes, want at most %d", b, most)
 	}

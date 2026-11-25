@@ -210,12 +210,12 @@ type OwnerApprovalProof struct {
 }
 
 // FeishuFromElsewhere is FeishuMessage.From of a message the hub took from a group chat that is not opted in: the owner's
-// "@bot /ai …" and nothing else. The assistant opens a to-do for it in the home topic group, or in the owner's private chat when there is none (assistant/feishu_elsewhere.go).
+// "@bot /ai …" and nothing else. The assistant opens a to-do for it in the home topic group, or in the owner's private chat when there is none (modules/lark/elsewhere.go).
 const FeishuFromElsewhere = "elsewhere"
 
 // FeishuFromRead is FeishuMessage.From of the owner's "@bot /read <task>" from a group chat, opted in or not (#11803):
 // the assistant reads the group as the owner, then does the task, and answers under that message
-// (assistant/feishu_read.go). The hub lets it through only with the read_group switch on.
+// (modules/lark/read.go). The hub lets it through only with the read_group switch on.
 const FeishuFromRead = "read"
 
 // FeishuAction is feishu.card_action's params: card.action.trigger's event as Feishu sent it (the owner's press), and

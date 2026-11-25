@@ -280,9 +280,14 @@ export function ReplyBar({ text, ts, itemId, more: actions, pinned, usage, usage
   }, [hovered]);
 
   // a pinned reply's time is on screen without the pointer, so it keeps up by itself (one reply in a chat is pinned)
+  const pinnedInit = useRef(true);
   useEffect(() => {
-    if (!pinned) return;
-    setNow(Date.now());
+    if (!pinned) {
+      pinnedInit.current = false;
+      return;
+    }
+    if (pinnedInit.current) pinnedInit.current = false;
+    else setNow(Date.now());
     const tick = window.setInterval(() => setNow(Date.now()), TIME_TICK_MS);
     return () => clearInterval(tick);
   }, [pinned]);

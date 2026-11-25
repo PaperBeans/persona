@@ -185,11 +185,11 @@ func TestAcceptanceStatusErrorIsNotNoCard(t *testing.T) {
 	t.Run("status unreadable", func(t *testing.T) {
 		s, f, posts, id := cardlessService(t, botNotSetUp)
 		f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) { return nil, errors.New("manager away") })
-		s.feishuForgetStatus()
+		s.larkModule().ForgetStatus()
 		s.askAcceptance(onlyTodo(s), "box", "s1", deployedReply)
 		waiting(t, s, id, posts)
 		f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) { return botReady, nil })
-		s.feishuForgetStatus()
+		s.larkModule().ForgetStatus()
 		s.retryAcceptance(time.Now())
 		if a := askOf(s, id); a == nil || a.MessageID == "" || countAcceptCards(posts()) != 1 {
 			t.Fatalf("the card for later did not go out: %+v, %d cards", a, countAcceptCards(posts()))
@@ -205,7 +205,7 @@ func TestCardlessAskIsNotReminded(t *testing.T) {
 	f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) { // the bot is set up later
 		return FeishuStatus{Ready: true, Enabled: true, Owner: "ou_me", PublicURL: cardlessWeb, Features: FeishuFeatures{Main: true, Cards: true, Reports: true}}, nil
 	})
-	s.feishuForgetStatus()
+	s.larkModule().ForgetStatus()
 	s.accept.mu.Lock()
 	s.accept.asks[id].AskedAt = time.Now().Add(-30 * time.Hour)
 	s.accept.mu.Unlock()

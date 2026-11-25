@@ -128,7 +128,7 @@ func ValidationNamespace(self, command string, args []string, resources []Mount)
 		return nil, err
 	}
 	ns := []string{"--die-with-parent", "--new-session", "--unshare-user", "--unshare-ipc", "--unshare-pid", "--unshare-net", "--unshare-uts", "--cap-drop", "ALL", "--clearenv",
-		"--proc", "/proc", "--dev", "/dev", "--ro-bind", self, SelfPath}
+		"--ro-bind", "/proc", "/proc", "--dev", "/dev", "--ro-bind", self, SelfPath}
 	for _, dep := range deps {
 		ns = append(ns, "--ro-bind", dep, dep)
 	}

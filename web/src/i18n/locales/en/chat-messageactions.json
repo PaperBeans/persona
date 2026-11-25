@@ -19,5 +19,6 @@
   "fork_chat": "Start a new chat",
   "cut_short": "This reply did not complete. Its content is for reference only.",
   "save_as_prompt": "Save as Prompt…",
-  "pick": "Select messages"
+  "pick": "Select messages",
+  "scroll_to_top": "Scroll to top of message"
 }

@@ -111,11 +111,24 @@ nonisolated enum VoiceCapture: Equatable, Sendable {
     /// The microphone records with echo cancellation: what the speaker plays is taken out of it. Without it the voice
     /// can come back as the user's caption, which the `start` frame tells the extension (docs/assistant/voice.md 3.2).
     var cancelsEcho: Bool { get }
+    /// The extension says one of the voice's replies began (`true`) or ended (`false`) (`reply` frames, #14933): the
+    /// jitter buffer holds through its pauses and plays what it holds as it ends (`VoicePlayout`).
+    func reply(_ open: Bool)
+    /// How far the jitter buffer grew this call and what its replies said of the voice's pace (`VoicePlayout.lead`): read
+    /// as the call ends or changes voice, for the next call of that voice (`VoiceLeadMemory`).
+    var lead: VoiceLead { get }
+    /// The jitter buffer starts at `level`: where the last calls of this voice left it, 0 for one never measured slow.
+    /// After `start` (which starts it at 0), and again when the voice changes during the call.
+    func startLead(at level: Int)
 }
 
 extension VoiceAudio {
     /// Nothing to bring back by default (the Mac's, a meeting's on the recorder's capture, the samples).
     func resume() throws {}
+    /// No jitter buffer by default (the Mac's, the samples, `-openVoice silent`).
+    func reply(_ open: Bool) {}
+    var lead: VoiceLead { VoiceLead() }
+    func startLead(at level: Int) {}
 }
 
 /// A system call's audio (#9290, a call to Persona): the system owns the audio session. It activates it for the call

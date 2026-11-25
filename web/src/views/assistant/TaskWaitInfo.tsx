@@ -6,6 +6,7 @@ import { normalizedPR, prBlockers } from "../../lib/todo-triage";
 import { href, onLinkClick } from "../../lib/router";
 import type { PRFacts, Todo } from "../../lib/todos";
 import { Button, copyText, cx, Dialog, useNow } from "../../ui/atoms";
+import { Icon } from "../../ui/icons";
 
 function elapsed(since: number | undefined, now: number, request: boolean): string {
   if (since === undefined) return t("task-wait.age_unknown");
@@ -37,64 +38,111 @@ function sourceLabel(source: string, todo: Todo): string {
 export function TaskWaitInfo({ todo, merges = [], expanded = false }: { todo: Todo; merges?: readonly PRFacts[]; expanded?: boolean }) {
   const now = useNow(60_000);
   const info = taskWait(todo, now, merges);
+  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string>();
   const draftId = useId();
+  const detailsId = useId();
   if (!info) return null;
+  const isExpanded = expanded || open;
   const contact = info.contact;
   const contactTime = contact && formatDate(contact.sent_at, { dateStyle: "medium", timeStyle: "short" });
   const age = elapsed(info.since, now, info.sinceRequest);
+  const stopControls = (event: React.MouseEvent<HTMLDivElement>) => {
+    const el = event.target;
+    // Plain waiting text still opens its task row; links, disclosure, actions and the portalled editor do not.
+    if (!(el instanceof Element) || !event.currentTarget.contains(el) || el.closest("a, button, summary, input, textarea")) event.stopPropagation();
+  };
+  const toggleButton = !expanded && (
+    <button
+      type="button"
+      data-wait-toggle
+      aria-expanded={open}
+      aria-controls={detailsId}
+      onClick={() => setOpen((was) => !was)}
+      className="touch-hit ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-ink-3 hover:text-ink-2 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+    >
+      <span>{t(open ? "task-wait.hide_details" : "task-wait.details")}</span>
+      <Icon name="chevron" size={12} className={cx("transition-transform", open && "rotate-180")} />
+    </button>
+  );
   if (info.handoff) {
     const handoff = info.handoff;
     const target = { name: "todos", id: handoff.todo_id } as const;
     return <div data-task-wait-info={todo.id} data-wait-kind={info.kind} data-wait-overdue={info.overdue ? "true" : "false"}
-      className="min-w-0 space-y-1 break-words text-xs text-ink-2">
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span>{t("task-wait.kind_todo_handoff")}</span>
-        <a data-wait-target href={href(target)} className="inline-flex items-center text-accent-ink hover:underline pointer-coarse:min-h-11 pointer-coarse:min-w-11"
-          onClick={(event) => { event.stopPropagation(); onLinkClick(event, target); }}>{handoff.title}</a>
-        <span data-wait-age className="tabular-nums">{age}</span>
-        {info.overdue && <span data-wait-due className="font-medium text-red">{t("task-wait.follow_up_due")}</span>}
+      data-wait-collapsed={isExpanded ? "false" : "true"}
+      className="min-w-0 space-y-1 text-xs text-ink-2" onClick={stopControls}>
+      <div className={cx("flex min-w-0 gap-x-2 gap-y-1", isExpanded ? "flex-wrap items-baseline" : "items-center")}>
+        {isExpanded ? (
+          <>
+            <span>{t("task-wait.kind_todo_handoff")}</span>
+            <a data-wait-target href={href(target)} className="inline-flex items-center text-accent-ink hover:underline pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+              onClick={(event) => { event.stopPropagation(); onLinkClick(event, target); }}>{handoff.title}</a>
+            <span data-wait-age className="tabular-nums">{age}</span>
+            {info.overdue && <span data-wait-due className="font-medium text-red">{t("task-wait.follow_up_due")}</span>}
+          </>
+        ) : (
+          <span className="min-w-0 flex-1 truncate">
+            <span>{t("task-wait.kind_todo_handoff")} </span>
+            <a data-wait-target href={href(target)} className="text-accent-ink hover:underline"
+              onClick={(event) => { event.stopPropagation(); onLinkClick(event, target); }}>{handoff.title}</a>
+            {" · "}
+            <span data-wait-age className="tabular-nums">{age}</span>
+            {info.overdue && <>{" · "}<span data-wait-due className="font-medium text-red">{t("task-wait.follow_up_due")}</span></>}
+          </span>
+        )}
+        {toggleButton}
       </div>
-      <p data-wait-wake>{handoff.check}</p>
-      {info.until && <p>{t("task-wait.handoff_deadline", { time: formatDate(new Date(info.until).toISOString(), { dateStyle: "medium", timeStyle: "short" }) })}</p>}
+      {isExpanded && (
+        <div id={detailsId} data-wait-details className="space-y-1 break-words">
+          <p data-wait-wake>{handoff.check}</p>
+          {info.until && <p>{t("task-wait.handoff_deadline", { time: formatDate(new Date(info.until).toISOString(), { dateStyle: "medium", timeStyle: "short" }) })}</p>}
+        </div>
+      )}
     </div>;
   }
   const target = info.target ?? t("task-wait.target_unknown");
   const contactURL = waitSource(contact?.url);
   const sourceLinks = info.sources.filter((url) => url !== contactURL || merges.some((pr) => normalizedPR(waitSource(pr.url)) === normalizedPR(url)));
-  const extra = <>
-    {info.reason && <p data-wait-reason>{info.reason}</p>}
-    {contact && <p className="whitespace-pre-wrap" data-wait-request>{t("task-wait.request", { request: contact.request })}</p>}
-    {info.until && <p>{t("task-wait.fallback", { time: formatDate(new Date(info.until).toISOString(), { dateStyle: "medium", timeStyle: "short" }) })}</p>}
-    <p className="text-ink-3">{t(todo.supervision?.parked?.evidence ? "task-wait.evidence_note" : "task-wait.missing_evidence_note")}</p>
-  </>;
   return <div data-task-wait-info={todo.id} data-wait-kind={info.kind} data-wait-overdue={info.overdue ? "true" : "false"}
-    className="min-w-0 space-y-1 text-xs text-ink-2" onClick={(event) => {
-      const target = event.target;
-      // Plain waiting text still opens its task row; links, disclosure, actions and the portalled editor do not.
-      if (!(target instanceof Element) || !event.currentTarget.contains(target) || target.closest("a, button, summary, input, textarea")) event.stopPropagation();
-    }}>
-    <div className={cx("flex flex-wrap items-baseline gap-x-2 gap-y-1", info.overdue && "text-red")}>
-      <span data-wait-target className="min-w-0 break-words">{t(`task-wait.kind_${info.kind}`)}{t("task-wait.target", { target })}</span>
-      <span data-wait-age className="min-w-0 break-words tabular-nums" title={info.since ? new Date(info.since).toISOString() : undefined}>{age}</span>
-      {info.overdue && <span data-wait-due className="font-medium">{t("task-wait.follow_up_due")}</span>}
+    data-wait-collapsed={isExpanded ? "false" : "true"}
+    className="min-w-0 space-y-1 text-xs text-ink-2" onClick={stopControls}>
+    <div className={cx("flex min-w-0 gap-x-2 gap-y-1", isExpanded ? "flex-wrap items-baseline" : "items-center", info.overdue && "text-red")}>
+      {isExpanded ? (
+        <>
+          <span data-wait-target className="min-w-0 break-words">{t(`task-wait.kind_${info.kind}`)}{t("task-wait.target", { target })}</span>
+          <span data-wait-age className="min-w-0 break-words tabular-nums" title={info.since ? new Date(info.since).toISOString() : undefined}>{age}</span>
+          {info.overdue && <span data-wait-due className="font-medium">{t("task-wait.follow_up_due")}</span>}
+        </>
+      ) : (
+        <span className="min-w-0 flex-1 truncate">
+          <span data-wait-target>{t(`task-wait.kind_${info.kind}`)}{t("task-wait.target", { target })}</span>
+          {" · "}
+          <span data-wait-age className="tabular-nums" title={info.since ? new Date(info.since).toISOString() : undefined}>{age}</span>
+          {info.overdue && <>{" · "}<span data-wait-due className="font-medium">{t("task-wait.follow_up_due")}</span></>}
+        </span>
+      )}
+      {toggleButton}
     </div>
-    {contact ? <a data-wait-contact href={contact.url} target="_blank" rel="noreferrer noopener" className="block break-words text-accent-ink hover:underline pointer-coarse:min-h-11">
-      {t("task-wait.last_contact", { sender: contact.sender, time: contactTime ?? contact.sent_at, channel: contact.channel })}
-    </a> : info.contactExpected && <p data-wait-contact-missing className="text-ink-3">{t("task-wait.contact_unknown")}</p>}
-    <p data-wait-wake className="break-words">{info.wake ? t("task-wait.wake", { wake: info.wake }) : t("task-wait.wake_unknown")}</p>
-    {sourceLinks.length > 0 && <div className="space-y-1">{sourceLinks.map((url) => {
-      const pr = merges.find((facts) => normalizedPR(waitSource(facts.url)) === normalizedPR(url));
-      return <div key={url} data-pr-waiting-url={pr ? url : undefined}>
-        {url !== contactURL && <a data-wait-source href={url} target="_blank" rel="noreferrer noopener" title={url} className="block break-all text-accent-ink hover:underline pointer-coarse:min-h-11">{sourceLabel(url, todo)}</a>}
-        {pr && <p>{prBlockers(todo, pr).map((key) => t(`assistant-tasks.pr_blocker_${key}`)).join(" · ")}</p>}
-      </div>;
-    })}</div>}
-    {expanded ? <div className="space-y-1 break-words">{extra}</div> : <details className="break-words">
-      <summary className="cursor-pointer text-ink-3 pointer-coarse:min-h-11">{t("task-wait.details")}</summary>
-      <div className="mt-1 space-y-1">{extra}</div>
-    </details>}
-    {info.canRemind && <Button testId="wait-reminder" className="pointer-coarse:min-h-11" onClick={() => setDraft((previous) => previous ?? t("task-wait.reminder", { target, title: todo.title, request: contact!.request }))}>{t("task-wait.draft_reminder")}</Button>}
+    {isExpanded && (
+      <div id={detailsId} data-wait-details className="space-y-1 break-words">
+        {contact ? <a data-wait-contact href={contact.url} target="_blank" rel="noreferrer noopener" className="block break-words text-accent-ink hover:underline pointer-coarse:min-h-11">
+          {t("task-wait.last_contact", { sender: contact.sender, time: contactTime ?? contact.sent_at, channel: contact.channel })}
+        </a> : info.contactExpected && <p data-wait-contact-missing className="text-ink-3">{t("task-wait.contact_unknown")}</p>}
+        <p data-wait-wake className="break-words">{info.wake ? t("task-wait.wake", { wake: info.wake }) : t("task-wait.wake_unknown")}</p>
+        {sourceLinks.length > 0 && <div className="space-y-1">{sourceLinks.map((url) => {
+          const pr = merges.find((facts) => normalizedPR(waitSource(facts.url)) === normalizedPR(url));
+          return <div key={url} data-pr-waiting-url={pr ? url : undefined}>
+            {url !== contactURL && <a data-wait-source href={url} target="_blank" rel="noreferrer noopener" title={url} className="block break-all text-accent-ink hover:underline pointer-coarse:min-h-11">{sourceLabel(url, todo)}</a>}
+            {pr && <p>{prBlockers(todo, pr).map((key) => t(`assistant-tasks.pr_blocker_${key}`)).join(" · ")}</p>}
+          </div>;
+        })}</div>}
+        {info.reason && <p data-wait-reason>{info.reason}</p>}
+        {contact && <p className="whitespace-pre-wrap" data-wait-request>{t("task-wait.request", { request: contact.request })}</p>}
+        {info.until && <p>{t("task-wait.fallback", { time: formatDate(new Date(info.until).toISOString(), { dateStyle: "medium", timeStyle: "short" }) })}</p>}
+        <p className="text-ink-3">{t(todo.supervision?.parked?.evidence ? "task-wait.evidence_note" : "task-wait.missing_evidence_note")}</p>
+        {info.canRemind && <Button testId="wait-reminder" className="pointer-coarse:min-h-11" onClick={() => setDraft((previous) => previous ?? t("task-wait.reminder", { target, title: todo.title, request: contact!.request }))}>{t("task-wait.draft_reminder")}</Button>}
+      </div>
+    )}
     {draft !== undefined && <Dialog open onClose={() => setDraft(undefined)} title={t("task-wait.draft_reminder")} footer={<>
       <Button className="pointer-coarse:min-h-11" onClick={() => setDraft(undefined)}>{t("common.cancel")}</Button>
       <Button className="pointer-coarse:min-h-11" tone="primary" onClick={() => {

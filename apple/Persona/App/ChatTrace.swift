@@ -107,6 +107,7 @@ final class ChatTrace {
         case .placeMap: "map"
         case .day: "day"
         case .viewed(_, let images): "viewed\(images.count)"
+        case .toolViews(_, let views): "toolViews\(views.count)"
         case .modeChange(_, let c): "mode:\(c.kind)"
         case .modelChange: "model"
         }

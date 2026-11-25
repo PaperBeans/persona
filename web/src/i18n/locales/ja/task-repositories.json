@@ -50,5 +50,10 @@
   "unavailable": "利用不可",
   "provider_unavailable": "{provider}は利用できません。既存のリンクは開けますが、新しいリンクの追加には{provider}が必要です。",
   "link_pending": "保存時に確認",
-  "another_source": "別のソース"
+  "another_source": "別のソース",
+  "role_target": "対象リポジトリ",
+  "role_reference": "参照リポジトリ",
+  "role_target_hint": "納品ゲート対象",
+  "role_reference_hint": "参照のみ・完了をブロックしない",
+  "link_role_reference": "参照のみ"
 }

@@ -66,6 +66,24 @@ func TestReferenceRolePRDoesNotBlockAcceptance(t *testing.T) {
 	}
 }
 
+func TestReferenceReportPRDoesNotBlockThroughStage(t *testing.T) {
+	s, todo, _ := linkRoleTask(t)
+	reply := "Related work: " + foreignPR
+	s.advanceTaskReply(context.Background(), todo, "box", todo.Agents[0].SessionID, reply)
+	if got := linkRoles(t, s, todo.ID)[foreignPR]; got != repository.LinkRoleReference {
+		t.Fatalf("related-work PR role = %q, want reference", got)
+	}
+	if got := todoNow(s, todo.ID).PRURL; got != foreignPR {
+		t.Fatalf("stage PR = %q, want reported reference PR %q", got, foreignPR)
+	}
+	if _, err := acceptReview(s, todo.ID, nil); err != nil {
+		t.Fatalf("a reference PR tracked by the stage blocked acceptance: %v", err)
+	}
+	if todoNow(s, todo.ID).DoneAt == nil {
+		t.Fatal("task stayed open although its only reported PR was a reference")
+	}
+}
+
 // A delivery-role PR keeps the old gate: unmerged delivery still refuses acceptance.
 func TestDeliveryRolePRStillBlocksAcceptance(t *testing.T) {
 	s, todo, _ := linkRoleTask(t)
@@ -90,6 +108,10 @@ func TestProvenForeignPRDowngradedToReference(t *testing.T) {
 	ctx := context.Background()
 	if err := s.importReportedLinks(ctx, todo.ID, []string{foreignPR}, "pull_request", nil); err != nil {
 		t.Fatal(err)
+	}
+	s.setTaskStage(ctx, todo.ID, "review", foreignPR)
+	if got := todoNow(s, todo.ID).PRURL; got != foreignPR {
+		t.Fatalf("stage PR = %q, want foreign PR %q", got, foreignPR)
 	}
 	forge.ownedPRs = map[string]bool{"o/r#6206": false} // known, opened by another author
 	if _, err := acceptReview(s, todo.ID, nil); err != nil {

@@ -90,7 +90,7 @@ func (e *Engine) WriteDayRecaps(ctx context.Context, max int) int {
 		if !ok || r.Kind != RecordingDay || r.Trimmed() {
 			continue
 		}
-		due := r.RecapDue != nil && !r.RecapDue.failed() && !r.RecapDue.waiting(now)
+		due := r.RecapDue != nil && !recapFailed(r.RecapDue) && !recapWaiting(r.RecapDue, now)
 		if due || r.Chars > 0 && r.RecapNotedText < r.TextRev {
 			todo = append(todo, job{r, due})
 		}
@@ -155,51 +155,6 @@ func (e *Engine) recapTime(day string) time.Time {
 	return time.Date(d.Year(), d.Month(), d.Day(), h, m, 0, 0, zone).Add(-recapBefore)
 }
 
-// dayStart is the start of day (YYYY-MM-DD) in zone, and of the day after.
-func dayStart(day string, zone *time.Location) (time.Time, time.Time, bool) {
-	d, err := time.ParseInLocation(time.DateOnly, day, zone)
-	if err != nil {
-		return time.Time{}, time.Time{}, false
-	}
-	return d, time.Date(d.Year(), d.Month(), d.Day()+1, 0, 0, 0, 0, zone), true
-}
-
-// daySpan is when day recording r was recorded, as far as the hub knows: from its start to where its coverage
-// reaches, or its end; one still open (no ended_at) goes on until now, within its day (the watch cuts it at midnight
-// in its zone).
-func (e *Engine) daySpan(r *Recording, now time.Time) (time.Time, time.Time) {
-	end := r.StartedAt.Add(seconds(r.coverageTo()))
-	switch {
-	case r.EndedAt != nil:
-		end = later(end, *r.EndedAt)
-	case !r.Complete:
-		if _, midnight, ok := dayStart(r.Day, e.Store.RecordingZone(r)); ok {
-			end = later(end, earlier(now, midnight))
-		}
-	}
-	return r.StartedAt, end
-}
-
-// recordedWithin: day recording r's span as of now (daySpan) overlaps from–to.
-func (e *Engine) recordedWithin(r *Recording, now, from, to time.Time) bool {
-	start, end := e.daySpan(r, now)
-	return start.Before(to) && (end.After(from) || !start.Before(from))
-}
-
-func later(a, b time.Time) time.Time {
-	if b.After(a) {
-		return b
-	}
-	return a
-}
-
-func earlier(a, b time.Time) time.Time {
-	if b.Before(a) {
-		return b
-	}
-	return a
-}
-
 // armDayRecaps makes due the recaps that became due by now (docs/assistant/day-recap.md "When a recap is due"), each
 // once and persisted with the recording: the final one of a recording that became complete, or 6 hours after its day
 // ended without (once no upload came for recapQuiet: a day uploaded long after it is recapped whole); and at the recap
@@ -244,7 +199,7 @@ func (e *Engine) recapsArmed(r *Recording, now time.Time, today string, tonight 
 	if tonight && r.RecapEvening != today {
 		r.RecapEvening, armed = today, true
 		if r.Chars > 0 && (r.RecapVersion == 0 || r.RecapText < r.TextRev) {
-			r.armRecap(RecapDueEvening, now)
+			armRecap(r, RecapDueEvening, now)
 		}
 	}
 	if r.Chars == 0 {
@@ -253,11 +208,11 @@ func (e *Engine) recapsArmed(r *Recording, now time.Time, today string, tonight 
 	switch {
 	case r.Complete && !r.RecapComplete:
 		r.RecapComplete = true
-		r.armRecap(RecapDueComplete, now)
+		armRecap(r, RecapDueComplete, now)
 		armed = true
 	case !r.Complete && !r.RecapCutoff && !now.Before(e.dayCutoff(r)) && !now.Before(r.Updated.Add(recapQuiet)):
 		r.RecapCutoff = true
-		r.armRecap(RecapDueCutoff, now)
+		armRecap(r, RecapDueCutoff, now)
 		armed = true
 	}
 	return armed
@@ -276,7 +231,7 @@ func (e *Engine) dayCutoff(r *Recording) time.Time {
 // recapLines are day recording r's lines as the model reads them: its segments with text by start, numbered by
 // position, up to how far its text reaches (to: coverage.to; without a coverage, the end of the last segment).
 func recapLines(r *Recording, segs []RecordingSegment) (lines []minutesLine, to float64) {
-	to = r.coverageTo()
+	to = coverageTo(r)
 	segs = slices.Clone(segs)
 	sortDaySegments(segs)
 	if r.Coverage == nil {
@@ -660,7 +615,7 @@ func (e *Engine) dayMeetings(r *Recording, zone *time.Location, now time.Time) [
 	var out []dayMeeting
 	from, to := e.daySpan(r, now)
 	for _, o := range e.Store.Recordings() {
-		if o.ID == r.ID || !o.isMeeting() || o.StartedAt.After(to) || !recordingEnd(o).After(from) {
+		if o.ID == r.ID || !isMeeting(o) || o.StartedAt.After(to) || !recordingEnd(o).After(from) {
 			continue
 		}
 		out = append(out, dayMeeting{Ref: MeetingRef{Kind: KindRecording, ID: o.ID, Name: o.Name}, From: o.StartedAt,
@@ -737,7 +692,7 @@ func (e *Engine) writeDayRecap(ctx context.Context, id string, now time.Time) (c
 	lines, to := recapLines(&r, segs)
 	chunks := dayChunks(lines, r.StartedAt, zone, to, e.heldGaps(&r, now))
 	target := r.RecapDue
-	due := target != nil && !target.failed() && !target.waiting(now)
+	due := target != nil && !recapFailed(target) && !recapWaiting(target, now)
 	if due && len(lines) == 0 {
 		return false, e.settleRecap(id, target.N) // no text to recap: none
 	}
@@ -1157,7 +1112,7 @@ func (e *Engine) storeDayRecap(ctx context.Context, r *Recording, target *RecapT
 	if cur.RecapDue != nil && cur.RecapDue.N == target.N {
 		cur.RecapDue = nil
 	}
-	cur.planRecap()
+	planRecap(cur)
 	err := st.putEntity(KindRecording, cur.ID, cur, &cur.Tagging, false)
 	push := cur.RecapPush
 	st.recMu.Unlock()
@@ -1188,14 +1143,14 @@ func (s *Store) dayPushAtRecapTime(r *Recording, now time.Time) {
 		return
 	}
 	if r.RecapState == MinutesReady {
-		r.dayPushDue(now)
+		dayPushDue(r, now)
 		return
 	}
 	r.RecapWait = true
 }
 
 // dayPushDue marks the day's push due on r from now, sent to none yet.
-func (r *Recording) dayPushDue(now time.Time) {
+func dayPushDue(r *Recording, now time.Time) {
 	r.RecapPush, r.RecapWait, r.RecapPushSince = true, false, now.UTC()
 	r.RecapPushTries, r.RecapPushAt, r.RecapPushTook = 0, time.Time{}, nil
 }
@@ -1211,7 +1166,7 @@ func (e *Engine) dayPushWithRecap(cur *Recording, target *RecapTarget, rc *DayRe
 	case day.pushed:
 		cur.RecapWait = false
 	case cur.RecapWait || day.waits || rc.Final && cur.RecapVersion == 0 && !day.recapped:
-		cur.dayPushDue(now)
+		dayPushDue(cur, now)
 	}
 }
 
@@ -1335,7 +1290,7 @@ func (e *Engine) recapFailed(id string, n int, timedOut bool, now time.Time) {
 		} else {
 			t.Fails++
 		}
-		r.planRecap()
+		planRecap(r)
 		return true
 	})
 }
@@ -1347,7 +1302,7 @@ func (e *Engine) settleRecap(id string, n int) error {
 			return false
 		}
 		r.RecapDue = nil
-		r.planRecap()
+		planRecap(r)
 		return true
 	})
 }

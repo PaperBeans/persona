@@ -1,0 +1,95 @@
+{
+  "sections": [
+    {
+      "title": "Route",
+      "items": [
+        {
+          "type": "map",
+          "key": "route-home-office",
+          "title": "Home to Office",
+          "alt": "Driving route from Home to Office, 14.2 km, 28 min",
+          "caption": "28 min · 14.2 km · Via North Fourth Ring",
+          "aspect": "wide",
+          "viewport": {
+            "center": {"lat": 39.965, "lon": 116.365},
+            "span_lat": 0.08,
+            "span_lon": 0.09
+          },
+          "markers": [
+            {
+              "id": "origin",
+              "lat": 39.984,
+              "lon": 116.318,
+              "kind": "origin",
+              "label": "Home",
+              "subtitle": "Haidian",
+              "icon": "home",
+              "tone": "positive"
+            },
+            {
+              "id": "stop-1",
+              "lat": 39.964,
+              "lon": 116.369,
+              "kind": "waypoint",
+              "label": "Charging Stop",
+              "subtitle": "5 min stop",
+              "detail": "Fast charger available near exit 12",
+              "icon": "bolt",
+              "color": "amber"
+            },
+            {
+              "id": "dest",
+              "lat": 39.946,
+              "lon": 116.412,
+              "kind": "destination",
+              "label": "Office",
+              "subtitle": "Chaoyang",
+              "icon": "location",
+              "tone": "danger",
+              "action": {"id": "focus", "values": {"stop": "dest"}}
+            }
+          ],
+          "routes": [
+            {
+              "id": "r-fastest",
+              "label": "Fastest",
+              "mode": "driving",
+              "distance_meters": 14200,
+              "duration_seconds": 1680,
+              "summary": "28 min · 14.2 km",
+              "selected": true,
+              "tone": "positive",
+              "points": [
+                {"lat": 39.984, "lon": 116.318},
+                {"lat": 39.974, "lon": 116.345},
+                {"lat": 39.964, "lon": 116.369},
+                {"lat": 39.946, "lon": 116.412}
+              ]
+            },
+            {
+              "id": "r-alt",
+              "label": "No highways",
+              "mode": "driving",
+              "distance_meters": 15800,
+              "duration_seconds": 2100,
+              "summary": "35 min · 15.8 km",
+              "color": "gray",
+              "points": [
+                {"lat": 39.984, "lon": 116.318},
+                {"lat": 39.958, "lon": 116.352},
+                {"lat": 39.946, "lon": 116.412}
+              ]
+            }
+          ],
+          "links": [
+            {
+              "title": "Open in Maps",
+              "url": "https://maps.example.com/dir?from=home&to=office"
+            }
+          ],
+          "show_list": true
+        }
+      ]
+    }
+  ]
+}

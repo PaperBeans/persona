@@ -271,7 +271,8 @@ func bwrapProbeArgs(pkg, data, run, trueBin string) []string {
 		args = append(args, "--ro-bind-try", d, d)
 	}
 	args = append(args,
-		"--proc", "/proc",
+		// Bind the outer procfs read-only rather than mounting another: the fresh PID namespace still controls visibility.
+		"--ro-bind", "/proc", "/proc",
 		"--dev", "/dev",
 		"--tmpfs", "/tmp",
 		"--tmpfs", "/run",
@@ -331,7 +332,7 @@ func linuxSetup(plan Plan) []string {
 	args := []string{"--die-with-parent"}
 	if plan.Strict {
 		args = append(args, "--unshare-user", "--unshare-ipc", "--unshare-pid", "--unshare-net", "--unshare-uts", "--cap-drop", "ALL",
-			"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run",
+			"--ro-bind", "/proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run",
 			"--ro-bind", plan.Self, SelfPath, "--ro-bind", plan.ProxySocket, plan.ProxySocket)
 		for _, m := range plan.ReadOnly {
 			if m.DataFD > 0 {
@@ -346,7 +347,7 @@ func linuxSetup(plan Plan) []string {
 	for _, d := range systemDirs {
 		args = append(args, "--ro-bind-try", d, d)
 	}
-	args = append(args, "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run",
+	args = append(args, "--ro-bind", "/proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run",
 		"--ro-bind", plan.Pkg, plan.Pkg,
 		"--bind", plan.Data, plan.Data,
 		"--bind", plan.Run, plan.Run,

@@ -47,6 +47,9 @@ func (s *Service) applyModelProfileLocked(ctx context.Context, id string, by Pro
 		return modelProfileSwitch{}, false, err
 	}
 	ctx = withManagedSnapshot(ctx, stored)
+	if p.Purposes, err = s.normalizeProfilePurposes(ctx, p.Purposes, map[string]modelRecord{}, stored); err != nil {
+		return modelProfileSwitch{}, false, err
+	}
 	if err := checkModelProfile(&p, stored); err != nil {
 		return modelProfileSwitch{}, false, err
 	}
@@ -101,7 +104,13 @@ func (s *Service) applyModelProfileLocked(ctx context.Context, id string, by Pro
 				return sw, false, i18n.Err("assistant-model_profiles.err_cannot_run", i18n.Args{"purpose": purpose.Name, "error": err})
 			}
 		}
-		image.Purposes[cat] = purpose.Override
+		beforeBinding := purpose.Override
+		if beforeBinding.Provider == "" && beforeBinding.Model != "" {
+			if provider := s.migratableProvider(ctx, base.Provider); provider != "" {
+				beforeBinding.Provider = provider
+			}
+		}
+		image.Purposes[cat] = beforeBinding
 		writes[modelRecordKey(cat)] = modelRecord{Revision: purpose.Revision + 1, Binding: b}
 		sw.Changed = append(sw.Changed, cat)
 	}
@@ -141,7 +150,8 @@ func (s *Service) applyModelProfileLocked(ctx context.Context, id string, by Pro
 	if changedLaunchers {
 		writes[launchersManagedKey] = stored
 	}
-	state.Active, state.At, state.By, state.Previous = id, now, by, image
+	state.Active, state.At, state.By = id, now, by
+	state.pushRollback(*image)
 	state.record(ModelProfileEvent{At: now, Action: "switch", From: sw.From, To: id, By: by, Changed: sw.Changed})
 	writes[modelProfileStateKey] = state
 	if seeded {
@@ -153,11 +163,18 @@ func (s *Service) applyModelProfileLocked(ctx context.Context, id string, by Pro
 	return sw, changedLaunchers, nil
 }
 
-// rollbackModelProfile undoes the last switch: what it replaced goes back, the profile in use before it is in use
-// again. What the rollback replaced is kept in turn, so a second rollback redoes the switch.
+// rollbackModelProfile undoes the most recent switch: what it replaced goes back, and the profile in use before it is
+// in use again. Earlier switches stay on the bounded rollback stack so a quick A -> B -> A round trip can still be
+// unwound to the pre-switch configuration; rolling back the last remaining point keeps a redo entry.
 func (s *Service) rollbackModelProfile(ctx context.Context, by ProfileActor) (modelProfileSwitch, error) {
+	return s.rollbackModelProfileTo(ctx, "", by)
+}
+
+// rollbackModelProfileTo rolls back atomically to targetID ("" for the latest rollback point), folding any intermediate
+// rollback points so the configuration matches the state before targetID's switch.
+func (s *Service) rollbackModelProfileTo(ctx context.Context, targetID string, by ProfileActor) (modelProfileSwitch, error) {
 	s.models.mu.Lock()
-	sw, pushed, err := s.rollbackModelProfileLocked(ctx, by)
+	sw, pushed, err := s.rollbackModelProfileLocked(ctx, targetID, by)
 	s.models.mu.Unlock()
 	if err == nil && (sw.From != sw.To || len(sw.Changed) > 0) {
 		s.modelProfileSwitched(ctx, sw, pushed)
@@ -165,13 +182,14 @@ func (s *Service) rollbackModelProfile(ctx context.Context, by ProfileActor) (mo
 	return sw, err
 }
 
-func (s *Service) rollbackModelProfileLocked(ctx context.Context, by ProfileActor) (modelProfileSwitch, bool, error) {
+func (s *Service) rollbackModelProfileLocked(ctx context.Context, targetID string, by ProfileActor) (modelProfileSwitch, bool, error) {
 	state, err := s.readModelProfileState(ctx)
 	if err != nil {
 		return modelProfileSwitch{}, false, err
 	}
-	prev := state.Previous
-	if prev == nil {
+	stack := state.rollbackStack()
+	idx := findRollbackIndex(stack, targetID)
+	if idx < 0 {
 		return modelProfileSwitch{}, false, errModelProfileNoRollback
 	}
 	stored, err := s.readStoredLaunchers(ctx)
@@ -179,6 +197,11 @@ func (s *Service) rollbackModelProfileLocked(ctx context.Context, by ProfileActo
 		return modelProfileSwitch{}, false, err
 	}
 	ctx = withManagedSnapshot(ctx, stored)
+	prev := composeRollbackImage(stack, idx)
+	records := map[string]modelRecord{}
+	if prev.Purposes, err = s.normalizeProfilePurposes(ctx, prev.Purposes, records, stored); err != nil {
+		return modelProfileSwitch{}, false, err
+	}
 	for name := range prev.Launchers {
 		if !slices.ContainsFunc(stored, func(l storedLauncher) bool { return l.Name == name }) {
 			return modelProfileSwitch{}, false, i18n.Err("assistant-model_profiles.err_launcher_missing", i18n.Args{"launcher": name})
@@ -207,15 +230,27 @@ func (s *Service) rollbackModelProfileLocked(ctx context.Context, by ProfileActo
 			continue
 		}
 		// Restore model choices while preserving the new conversations' profile selected since the switch.
-		r, err := s.modelRecord(ctx, cat)
-		if err != nil {
-			return sw, false, err
+		r, cached := records[cat]
+		if !cached {
+			r, err = s.modelRecord(ctx, cat)
+			if err != nil {
+				return sw, false, err
+			}
+			records[cat] = r
 		}
 		b.ConfigDir = r.Binding.ConfigDir
-		if b == r.Binding {
+		liveNormalized := r.Binding
+		if liveNormalized.Provider == "" && liveNormalized.Model != "" {
+			if provider, err := s.resolveLegacyModelProvider(ctx, cat, nil, records, stored); err != nil {
+				return sw, false, err
+			} else if provider != "" {
+				liveNormalized.Provider = provider
+			}
+		}
+		if b == liveNormalized {
 			continue
 		}
-		undo.Purposes[cat] = r.Binding
+		undo.Purposes[cat] = liveNormalized
 		writes[modelRecordKey(cat)] = modelRecord{Revision: r.Revision + 1, Binding: b}
 		sw.Changed = append(sw.Changed, cat)
 	}
@@ -245,7 +280,14 @@ func (s *Service) rollbackModelProfileLocked(ctx context.Context, by ProfileActo
 	if len(sw.Changed) == 0 && state.Active == prev.Profile {
 		return sw, false, nil
 	}
-	state.Active, state.At, state.By, state.Previous = prev.Profile, now, by, undo
+	state.Active, state.At, state.By = prev.Profile, now, by
+	if remaining := slices.Clone(stack[:idx]); len(remaining) > 0 {
+		state.setRollbacks(remaining)
+	} else {
+		undo.Redo = !prev.Redo
+		undo.ID = state.nextRollbackID()
+		state.setRollbacks([]modelProfileImage{*undo})
+	}
 	state.record(ModelProfileEvent{At: now, Action: "rollback", From: sw.From, To: sw.To, By: by, Changed: sw.Changed})
 	writes[modelProfileStateKey] = state
 	if err := s.putModelProfileSettings(ctx, writes); err != nil {

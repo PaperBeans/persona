@@ -6,10 +6,12 @@ import SwiftUI
 struct TabGroupRow: View {
     var group: TabPanes.Group
     var folded: Bool
+    var preferHerdrTabName = false
     @Environment(\.compactList) private var compact
 
     var body: some View {
         let lead = group.lead
+        let secondary = secondaryTitle(for: lead)
         HStack(spacing: compact ? CompactList.gap : Theme.Space.s) {
             StatusDot(state: lead.state, size: Theme.Size.dot, waiting: lead.waitsInBackground)
                 .scaledFrame(width: compact ? CompactList.mark : Theme.Size.iconXS)
@@ -19,10 +21,12 @@ struct TabGroupRow: View {
                     .foregroundStyle(Color.primary)
                     .lineLimit(1)
                     .layoutPriority(1)
-                Text(lead.displayTitle)
-                    .font(compact ? CompactList.meta : Theme.Font.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if let secondary {
+                    Text(secondary)
+                        .font(compact ? CompactList.meta : Theme.Font.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: Theme.Space.xs)
             Text(count)
@@ -42,4 +46,11 @@ struct TabGroupRow: View {
 
     private var name: String { group.label ?? String(localized: "Tab") }
     private var count: String { String(localized: "\(group.sessions.count) agents") }
+
+    private func secondaryTitle(for lead: Session) -> String? {
+        if preferHerdrTabName, lead.displayTabName(preferTab: true) != nil {
+            return lead.displayTitleDetail(preferTab: true)
+        }
+        return lead.displayTitle
+    }
 }

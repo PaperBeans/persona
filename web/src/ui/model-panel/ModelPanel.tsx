@@ -468,8 +468,8 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
     if (row.model.variants) return store.resetOverride(row.provider.id, row.model.variants.base);
     if (row.current && live) {
       const patch: PanelOverride = {};
-      // An agy start uses its native default when the request omits effort.
-      const d = state.starting && row.provider.engine === "agy" ? undefined : row.model.defaultEffort;
+      // An agy or codex start uses its configured default when the request omits effort.
+      const d = state.starting && (row.provider.engine === "agy" || row.provider.engine === "codex") ? undefined : row.model.defaultEffort;
       if (d && row.setup.effort && row.setup.effort !== d) patch.effort = d;
       // no default known: back to none, the model's own (an Agent not started yet; a running one sends nothing for it)
       else if (!d && row.setup.effort) patch.effort = "";

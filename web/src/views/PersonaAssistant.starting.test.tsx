@@ -6,6 +6,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getState, reset } from "../lib/store";
+import { sendDraft } from "../lib/drafts";
 import { dropPick, NEW_CONVERSATION, pickedFast, pickEffort, pickFast, pickLauncher, pickModel } from "../lib/assistant-chat";
 import { ASSISTANT_START_SERVICE_TIER_FEATURE } from "../lib/assistant-models";
 import { chooseManager } from "../lib/manager-choice";
@@ -235,5 +236,65 @@ describe("新对话页：第一条消息发出、会话还没开起来 (#1697)",
     await flush();
     expect(pickedFast()).toBe(true);
     expect(sentBody()).toHaveProperty("service_tier", "priority");
+  });
+
+  it("picking the displayed concrete default model pins it in the first request (including with an image), while Follow default clears it (#13567)", async () => {
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:test/photo");
+    URL.revokeObjectURL = vi.fn();
+    try {
+      Object.assign(getState(), {
+        assistant: { machine_id: "hub-opus", main: "c1", conversations: [{ machine_id: "hub-opus", session_id: "c1", title: "" }] },
+      });
+      const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/claude/models")) return json({ agent: "claude", models: [
+          { id: "default", name: "Default (recommended)", default: false, resolved: "claude-opus-5-5", efforts: ["low", "medium", "high"] },
+          { id: "opus", name: "Opus 5.5", default: true, resolved: "claude-opus-5-5", efforts: ["low", "medium", "high"] },
+          { id: "haiku", name: "Haiku 5.5", resolved: "claude-haiku-5-5" },
+        ] });
+        if (url.includes("/launchers?purpose=assistant")) return json({
+          launchers: [{ name: "claude", source: "builtin" }],
+          default: { provider: "claude", model: "opus", effort: "high" },
+        });
+        return json({ ok: true });
+      }));
+      await act(async () => root.render(<PersonaAssistant fresh onToggleSidebar={() => {}} />));
+      await flush();
+      const pill = host.querySelector<HTMLButtonElement>("[data-new-conversation] button[data-model-pill]")!;
+      expect(pill.textContent).toContain("Opus 5.5");
+      await act(async () => pill.click());
+      await act(async () => vi.dynamicImportSettled());
+      await flush();
+      const opusRow = [...document.querySelectorAll<HTMLElement>("[data-panel-row]")].find((r) => r.getAttribute("data-panel-row")?.includes("opus"))!;
+      expect(opusRow).toBeDefined();
+      await act(async () => opusRow.click());
+      await flush();
+      const imageData = btoa("sample-image");
+      act(() => void sendDraft("persona-new", { type: "image", image: { name: "photo.png", mime: "image/png", data: imageData } }));
+      await flush();
+      await send();
+      expect(sentBody()).toMatchObject({ launcher: "claude", model: "opus", effort: "high", images: [{ mime: "image/png", data: imageData }] });
+      // Refusing the start keeps the draft; opening the panel and clicking Follow default returns to following default.
+      await act(async () => starts[0].reject(new Error("unresolved")));
+      await flush();
+      await act(async () => host.querySelector<HTMLButtonElement>("[data-new-conversation] button[data-model-pill]")!.click());
+      await flush();
+      const followBtn = document.querySelector<HTMLButtonElement>('[data-pick-strip="pick"] button')!;
+      expect(followBtn).not.toBeNull();
+      await act(async () => followBtn.click());
+      await flush();
+      await send();
+      expect(starts).toHaveLength(2);
+      const secondBody = JSON.parse(JSON.stringify(starts[1].body)) as Record<string, unknown>;
+      expect(secondBody).not.toHaveProperty("launcher");
+      expect(secondBody).not.toHaveProperty("model");
+      expect(secondBody).not.toHaveProperty("effort");
+    } finally {
+      URL.createObjectURL = origCreate;
+      URL.revokeObjectURL = origRevoke;
+    }
   });
 });

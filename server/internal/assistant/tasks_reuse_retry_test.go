@@ -68,9 +68,11 @@ func failedDirectionTodoStart(t *testing.T, e *threadEnv, failure error) (Todo, 
 }
 
 func TestDirectionTodoFailedStartRetriesCurrentAssignment(t *testing.T) {
-	// The node never answers session.start: the start reconciles with the machine before it fails (#6540), in
-	// milliseconds here.
-	shortTaskStartReconcile(t)
+	// The fake returns DeadlineExceeded on the first start. Shorten only the search for that missing session so
+	// the healthy retry still has its normal budget for database reads and starting the agent.
+	oldWait := taskStartAdoptWait
+	taskStartAdoptWait = time.Second
+	t.Cleanup(func() { taskStartAdoptWait = oldWait })
 	for _, backend := range []string{"memory", "database"} {
 		for _, entry := range []string{"http", "mcp"} {
 			t.Run(backend+"/"+entry, func(t *testing.T) {

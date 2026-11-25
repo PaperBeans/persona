@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/herdr"
@@ -181,13 +182,21 @@ func fromHerdrAgents(session string, agents []herdr.Agent) []host.Agent {
 // session's (herdr.QualifyID), as are its tab and workspace ids.
 func fromHerdrAgent(session string, a herdr.Agent) host.Agent {
 	q := func(id string) string { return herdr.QualifyID(session, id) }
-	out := host.Agent{Agent: a.Agent, Name: a.Name, AgentStatus: a.AgentStatus, Cwd: a.Cwd, ForegroundCwd: a.ForegroundCwd,
+	out := host.Agent{Agent: normalizeHerdrAgent(a.Agent), Name: a.Name, AgentStatus: a.AgentStatus, Cwd: a.Cwd, ForegroundCwd: a.ForegroundCwd,
 		PaneID: q(a.PaneID), TabID: q(a.TabID), WorkspaceID: q(a.WorkspaceID), Title: a.Title, RawTitle: a.RawTitle, Tokens: a.Tokens}
 	if a.AgentSession != nil {
-		out.AgentSession = &host.AgentSession{Source: a.AgentSession.Source, Agent: a.AgentSession.Agent,
+		out.AgentSession = &host.AgentSession{Source: a.AgentSession.Source, Agent: normalizeHerdrAgent(a.AgentSession.Agent),
 			Kind: a.AgentSession.Kind, Value: a.AgentSession.Value}
 	}
 	return out
+}
+
+func normalizeHerdrAgent(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "traex", "traecli", "trae-cli", "trae_cli":
+		return traexAgent
+	}
+	return name
 }
 
 // directorySpaces only attributes pane directories to a workspace when they agree: herdr creates from that

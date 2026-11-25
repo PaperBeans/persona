@@ -51,14 +51,17 @@ func (w *botWorld) topicsOn(t *testing.T, chats ...string) {
 	}
 }
 
-// botInfoRead waits for the bot's start-up read of its own identity (GET /bot/v3/info, in the background after each
-// restart): a count of the calls the bot makes taken before it ends would count that read as one.
-func (w *botWorld) botInfoRead(t *testing.T) {
+// botStarted waits for the two calls each bot start makes in the background (after the pairing and each settings
+// change): the read of its own identity (GET /bot/v3/info, #14219) and the long connection's first attempt (POST
+// /callback/ws/endpoint, which fails in tests, #14986). A count of the calls the bot makes taken before they end would
+// count them as calls a message caused.
+func (w *botWorld) botStarted(t *testing.T) {
 	t.Helper()
-	eventually(t, 5*time.Second, "the bot's own identity read", func() bool {
+	eventually(t, 5*time.Second, "the bot's start-up calls", func() bool {
 		w.h.bots.mu.Lock()
-		defer w.h.bots.mu.Unlock()
-		return w.h.bots.info.OpenID != ""
+		read, conn := w.h.bots.info.OpenID != "", w.h.bots.conn
+		w.h.bots.mu.Unlock()
+		return read && conn != nil && !conn.State().Since.IsZero()
 	})
 }
 

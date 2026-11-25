@@ -1,0 +1,5 @@
+{
+  "title": "屏蔽的命名 herdr 会话",
+  "block": "在 {machine} 上屏蔽命名 herdr 会话 {session}（其中的 Agent 不再出现在 Persona，herdr 本身继续运行）",
+  "unblock": "在 {machine} 上取消屏蔽命名 herdr 会话 {session}（其中的 Agent 重新出现在 Persona）"
+}

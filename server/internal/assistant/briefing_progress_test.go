@@ -23,6 +23,7 @@ func (e *briefRunEnv) working(id, title, stage string, age time.Duration, sessio
 // Running tasks are listed last, longest running first, each with its stage bar; a task that waits for a card or is done is
 // not in the list, and past eight the rest are counted.
 func TestBriefListsWhatIsInProgress(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newBriefRunEnvWith(t, true, func(e *briefRunEnv) {
 		var sessions []proto.Session
 		for i := 0; i < 9; i++ {
@@ -65,6 +66,7 @@ func TestBriefListsWhatIsInProgress(t *testing.T) {
 
 // With nothing running the section is left out.
 func TestBriefLeavesOutAnEmptyProgressSection(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newBriefRunEnv(t, true)
 	e.mirror()
 	if card := e.cards()[0]; strings.Contains(card, "进行中") {

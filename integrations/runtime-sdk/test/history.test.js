@@ -137,3 +137,31 @@ test('historyPage windows and orders by active_at before updated_at, and leaves 
   assert.equal(page.rows[1].archived, true, 'archived ones are listed, as archived')
   assert.deepEqual([page.rows[1].origin, page.rows[1].user_messages, page.rows[0].active_at], ['automation', 0, undefined], 'rows go out as given')
 })
+
+test('historyPage preserves epoch timestamps across pages and applies timestamp precedence', () => {
+  const list = [
+    { session_id: 'old', started_at: iso(-1) },
+    { session_id: 'b', active_at: 'invalid', updated_at: iso(0), started_at: iso(-5000) },
+    { session_id: 'a', active_at: '1970-01-01T01:00:00+01:00', updated_at: iso(5000) },
+    { session_id: 'c', started_at: iso(0) },
+    { session_id: 'no-time' },
+    { session_id: 'until', active_at: iso(1) },
+  ]
+  const page = all(list, { since: iso(-1), until: iso(1), limit: 1 })
+  assert.deepEqual(page.rows.map((row) => row.session_id), ['a', 'b', 'c', 'old'])
+  assert.equal(page.pages, 4)
+})
+
+test('historyPage rejects cursor timestamps that cannot be produced by a page', () => {
+  const params = { since: iso(-1), until: iso(1) }
+  for (const exponent of ['1e400', '-1e400']) {
+    const cursor = Buffer.from(`{"t":${exponent},"k":"fixture"}`).toString('base64url')
+    assert.throws(() => historyPage([], { ...params, cursor }), /malformed cursor/)
+  }
+})
+
+test('historyPage keeps zero as the missing sentinel for custom time adapters', () => {
+  const list = [{ session_id: 'missing', time: 0 }, { session_id: 'old', time: -1 }]
+  const page = historyPage(list, { since: iso(-1), until: iso(1) }, { updatedAt: (row) => row.time })
+  assert.deepEqual(page.rows.map((row) => row.session_id), ['old'])
+})

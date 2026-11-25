@@ -12,133 +12,46 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 )
 
-// The daily recap (docs/assistant/day-recap.md "What the hub stores and returns"): a day recording's recap.json
-// (DayRecap, what detail.recap is) and recap.md (the same as Markdown with clock times, what the searches and kb_get
-// read) in its directory, beside summary.md (the recap's summary, what detail.summary shows). Like minutes they survive
-// the trim (recording_trim.go) until minutes_days; recap_notes.json, the notes the recap is merged from
-// (day_recap_write.go), is made of the transcript and goes with it. A recap becomes due for a reason (RecapTarget),
-// persisted with the recording until a recap is written or the model failed at it; recap_state says which.
-
+// Re-exported from recordingwire.
 const (
-	recapFile      = "recap.json"
-	recapMarkdown  = "recap.md"
-	recapNotesFile = "recap_notes.json"
+	RecapDueEvening  = recordingwire.RecapDueEvening
+	RecapDueComplete = recordingwire.RecapDueComplete
+	RecapDueCutoff   = recordingwire.RecapDueCutoff
+	RecapDueAsked    = recordingwire.RecapDueAsked
+	RecapDueRepair   = recordingwire.RecapDueRepair
 )
 
-// Why a recap became due (RecapTarget.Reason).
+// Re-exported from recordingwire.
 const (
-	RecapDueEvening  = "evening"  // the recap time of its day
-	RecapDueComplete = "complete" // the recording became complete: the final recap
-	RecapDueCutoff   = "cutoff"   // 6 hours after its day ended, not complete: the final recap of what arrived
-	RecapDueAsked    = "asked"    // POST …/minutes
-	RecapDueRepair   = "repair"   // a PUT set a new base while a recap existed
+	FinalComplete = recordingwire.FinalComplete
+	FinalCutoff   = recordingwire.FinalCutoff
 )
 
-// Why a final recap is final (DayRecap.FinalReason).
+// recapWaiting: a try ran out of time and the next is not due yet.
+func recapWaiting(t *RecapTarget, now time.Time) bool { return now.Before(t.RetryAt) }
+
+// RecapSpan is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type RecapSpan = recordingwire.RecapSpan
+
+// Re-exported from recordingwire.
 const (
-	FinalComplete = "complete"
-	FinalCutoff   = "cutoff"
+	RecapMeeting = recordingwire.RecapMeeting
+	RecapOutside = recordingwire.RecapOutside
 )
 
-// RecapTarget is a due recap as it became due: its number (Recording.RecapTargets then), why, the recording's base,
-// revision and coverage then, and when. Its tries are counted here, as the minutes' are for a revision: Fails unusable
-// answers, Timeouts tries that ran out of time, the next not before RetryAt (minutes_timeout.go); new text neither
-// moves nor resets it, and a PUT moves it to the new base (Base). It reads what the hub holds when it runs.
-type RecapTarget struct {
-	N        int       `json:"n"`
-	Reason   string    `json:"reason"`
-	Base     int64     `json:"base"`
-	Revision int64     `json:"revision"`
-	To       float64   `json:"to"`
-	At       time.Time `json:"at"`
-	Fails    int       `json:"fails,omitempty"`
-	Timeouts int       `json:"timeouts,omitempty"`
-	RetryAt  time.Time `json:"retry_at,omitzero"`
-}
-
-// failed: the model could not write it after the minutes' tries.
-func (t *RecapTarget) failed() bool {
-	return t.Fails >= minutesTries || t.Timeouts >= minutesTimeoutTries
-}
-
-// waiting: a try ran out of time and the next is not due yet.
-func (t *RecapTarget) waiting(now time.Time) bool { return now.Before(t.RetryAt) }
-
-// DayRecap is recap.json, and detail.recap of GET /api/v1/kb/recordings/{id}: times are seconds since the recording's
-// started_at, the clock of its segments.
-type DayRecap struct {
-	Version     int             `json:"version"`  // counts the recaps written for this recording
-	Revision    int64           `json:"revision"` // the recording revision it was made from
-	GeneratedAt time.Time       `json:"generated_at"`
-	Day         string          `json:"day"`
-	Covers      RecapSpan       `json:"covers"` // up to the end of the last chunk it read
-	Final       bool            `json:"final"`
-	FinalReason string          `json:"final_reason,omitempty"` // FinalComplete or FinalCutoff, with Final
-	Summary     string          `json:"summary"`
-	Timeline    []DayRecapEntry `json:"timeline,omitempty"`
-	Actions     []MinutesAction `json:"actions,omitempty"`
-	Gaps        []CoverageGap   `json:"gaps,omitempty"`    // the coverage's gaps inside Covers
-	Partial     bool            `json:"partial,omitempty"` // the day was too long: some of it was not read
-	// Language is what it is written in, its Markdown's headings too (language.go): an i18n code (zh-Hans, en, ja);
-	// a recap written before it was kept has none, and is Chinese.
-	Language string `json:"language,omitempty"`
-	Markdown string `json:"markdown"`
-}
-
-// RecapSpan is a stretch of the day, seconds since started_at.
-type RecapSpan struct {
-	From float64 `json:"from"`
-	To   float64 `json:"to"`
-}
-
-// Kinds of a recap's timeline entry.
-const (
-	RecapMeeting = "meeting"
-	RecapOutside = "outside"
-)
-
-// DayRecapEntry is one thing of the day's timeline: a meeting (one the hub knows of when Meeting is set) or what was
-// said outside them, with its points.
-type DayRecapEntry struct {
-	From    float64        `json:"from"`
-	To      float64        `json:"to"`
-	Kind    string         `json:"kind"`
-	Title   string         `json:"title"`
-	Meeting *MeetingRef    `json:"meeting,omitempty"`
-	Points  []MinutesPoint `json:"points"`
-}
-
-// planRecap sets a day recording's RecapState from the rest: pending while a recap is due, failed once the model could
-// not write it, ready once one was written and none is due, absent before any. A trimmed one is due no more: its
-// recap kept is all there will be.
-func (r *Recording) planRecap() {
-	if r.Kind != RecordingDay {
-		return
-	}
-	if r.Trimmed() {
-		r.RecapDue = nil
-	}
-	switch {
-	case r.RecapDue != nil && r.RecapDue.failed():
-		r.RecapState = MinutesFailed
-	case r.RecapDue != nil:
-		r.RecapState = MinutesPending
-	case r.RecapVersion > 0:
-		r.RecapState = MinutesReady
-	default:
-		r.RecapState = ""
-	}
-}
+// DayRecapEntry is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type DayRecapEntry = recordingwire.DayRecapEntry
 
 // armRecap makes a recap of r due for reason, as r is now; one still due is settled by the same recap, so it gives
 // way (the newer reason says what kind of recap it is: a final one's is complete or cutoff).
-func (r *Recording) armRecap(reason string, now time.Time) {
+func armRecap(r *Recording, reason string, now time.Time) {
 	r.RecapTargets++
-	r.RecapDue = &RecapTarget{N: r.RecapTargets, Reason: reason, Base: r.Base, Revision: r.Revision, To: r.coverageTo(),
+	r.RecapDue = &RecapTarget{N: r.RecapTargets, Reason: reason, Base: r.Base, Revision: r.Revision, To: coverageTo(r),
 		At: now.UTC()}
-	r.planRecap()
+	planRecap(r)
 }
 
 // askDayRecap is AskMinutes for day recording r (as read under recMu, which the caller holds): a recap from what the
@@ -152,36 +65,8 @@ func (e *Engine) askDayRecap(r *Recording) error {
 		return err
 	}
 	r.RecapAsks++
-	r.armRecap(RecapDueAsked, e.now())
+	armRecap(r, RecapDueAsked, e.now())
 	return e.Store.putEntity(KindRecording, r.ID, r, &r.Tagging, false)
-}
-
-// hasRecap: recording id has a recap that can be read.
-func (s *Store) hasRecap(id string) bool {
-	_, err := s.readRecap(id)
-	return err == nil
-}
-
-// readRecap is recording id's (a stored id) recap.json, ErrNotFound without one.
-func (s *Store) readRecap(id string) (*DayRecap, error) {
-	raw, err := os.ReadFile(s.path(KindRecording, id, recapFile))
-	if err != nil {
-		return nil, ErrNotFound
-	}
-	var rc DayRecap
-	if err := json.Unmarshal(raw, &rc); err != nil {
-		return nil, err
-	}
-	return &rc, nil
-}
-
-// ReadDayRecap is day recording id's recap, ErrNotFound when it has none (or there is no such recording).
-func (e *Engine) ReadDayRecap(rawID string) (*DayRecap, error) {
-	id, ok := RecordingID(rawID)
-	if !ok {
-		return nil, ErrNotFound
-	}
-	return e.Store.readRecap(id)
 }
 
 // putRecap writes recap.md of recording id, summary.md from its summary (none while it is blank), then recap.json,
@@ -251,7 +136,7 @@ func (s *Store) summaryLocked(id string) (bool, error) {
 	if _, err := readJSON(s.entityPath(KindRecording, id), &t); err != nil {
 		return false, err
 	}
-	return t.fieldLocked("summary"), nil
+	return taggingFieldLocked(&t, "summary"), nil
 }
 
 // mendRecapFiles writes recording r's recap.md and summary.md again from its recap.json when they do not say what it
@@ -331,12 +216,12 @@ func (e *Engine) repairDayRecap(r *Recording, u *RecordingUpload) (recapped bool
 // rebaseRecap is what a PUT that set a new base does to r's recap targets: one still due moves to the new base with
 // its reason and tries (it reads what the hub holds when it runs); else, when r has a recap (recapped) or a target the
 // model failed at, a repair is due at once.
-func (r *Recording) rebaseRecap(recapped bool, now time.Time) {
+func rebaseRecap(r *Recording, recapped bool, now time.Time) {
 	switch t := r.RecapDue; {
-	case t != nil && !t.failed():
+	case t != nil && !recapFailed(t):
 		t.Base = r.Base
 	case recapped || t != nil:
-		r.armRecap(RecapDueRepair, now)
+		armRecap(r, RecapDueRepair, now)
 	}
 }
 
@@ -399,13 +284,8 @@ func gapsWithin(gaps []CoverageGap, from, to float64) []CoverageGap {
 	return out
 }
 
-// RecapTodo is a to-do made of a recap's action, remembered whatever the version: the action's who and what
-// (recapTaskKey) and when it was said.
-type RecapTodo struct {
-	Task string  `json:"task"`
-	At   float64 `json:"at"`
-	Todo string  `json:"todo"`
-}
+// RecapTodo is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type RecapTodo = recordingwire.RecapTodo
 
 // recapTodoNear is how far apart in time two actions with the same who and what may be and still be one task: one
 // said again later in the day is another.
@@ -448,7 +328,7 @@ func keepRecapTodos(rc *DayRecap, todos []RecapTodo) bool {
 }
 
 // rememberTodo notes that to-do todo was made of action a.
-func (r *Recording) rememberTodo(a MinutesAction, todo string) bool {
+func rememberTodo(r *Recording, a MinutesAction, todo string) bool {
 	t := RecapTodo{Task: recapTaskKey(a.Who, a.What), At: a.At, Todo: todo}
 	if slices.Contains(r.RecapTodos, t) {
 		return false
@@ -485,7 +365,7 @@ func (e *Engine) SetDayRecapTodos(rawID string, version int, confirmed []Minutes
 		if a.TodoID == "" {
 			continue
 		}
-		remembered = r.rememberTodo(a, a.TodoID) || remembered
+		remembered = rememberTodo(r, a, a.TodoID) || remembered
 		if rc.Version != version {
 			continue
 		}
@@ -591,36 +471,4 @@ func renderDayRecap(rc *DayRecap, start time.Time, zone *time.Location) string {
 		b.WriteString("\n> " + i18n.T(l, "kb-day-recap.partial") + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
-}
-
-// dayDetail is detail.meta and detail.recap of recording id, given its meta.json: a day recording's meta always says
-// next and base (0 included, as reconciliation does), and its recap.json is read once it has one; nil for any other
-// recording.
-func (e *Engine) dayDetail(id string, meta []byte) ([]byte, []byte) {
-	var head struct {
-		Kind string           `json:"kind"`
-		Next *json.RawMessage `json:"next"`
-		Base *json.RawMessage `json:"base"`
-	}
-	if json.Unmarshal(meta, &head) != nil || head.Kind != RecordingDay {
-		return meta, nil
-	}
-	if head.Next == nil || head.Base == nil {
-		var m map[string]json.RawMessage
-		if json.Unmarshal(meta, &m) == nil && m != nil {
-			for _, k := range []string{"next", "base"} {
-				if _, ok := m[k]; !ok {
-					m[k] = json.RawMessage("0")
-				}
-			}
-			if out, err := json.Marshal(m); err == nil {
-				meta = out
-			}
-		}
-	}
-	raw, err := os.ReadFile(e.Store.path(KindRecording, id, recapFile))
-	if err != nil || !json.Valid(raw) {
-		return meta, nil
-	}
-	return meta, raw
 }

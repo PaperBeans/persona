@@ -185,7 +185,9 @@ import PersonaWire
                                  projectID: "project", projectName: "Project")
         let child = HostWorkspace(machineID: machine.id, source: "orca", sourceID: "child", title: "Child", cwd: "/code/child",
                                   parentSourceID: root.sourceID, projectID: "project", projectName: "Project")
-        var captured = AgentListProjection.Input(sessions: [], machines: [machine], settings: .init(), workspaces: [root])
+        var settings = AgentListProjection.Settings()
+        settings.showEmptyWorkspaces = true
+        var captured = AgentListProjection.Input(sessions: [], machines: [machine], settings: settings, workspaces: [root])
         var key = AgentListProjectionCache.Key(revision: 1, partitions: [], settings: captured.settings, workspaceRevision: 1)
         let cache = AgentListProjectionCache()
         func resolve() -> AgentListProjection {
@@ -255,7 +257,7 @@ import PersonaWire
         #expect(AgentListProjection.build(captured).tree.flatMap(\.sessions).isEmpty, "unpin restores the normal offline-session visibility rule")
     }
 
-    @Test func workspaceCatalogHonorsHubAndQuickFilters() throws {
+    @Test func workspaceCatalogHonorsHubQuickFiltersAndShowEmptyWorkspacesToggle() throws {
         var machine = try JSON.decoder.decode(Machine.self, from: Data(#"{"id":"fixture-box","name":"Fixture","kind":"local","online":true}"#.utf8))
         machine.group = "hub-a"
         let root = HostWorkspace(machineID: machine.id, source: "orca", sourceID: "root", title: "Root", cwd: "/code/project", group: "hub-a")
@@ -264,9 +266,23 @@ import PersonaWire
         settings.multiHub = true
         settings.hub = HubFilter.value("hub-a")
         var captured = AgentListProjection.Input(sessions: [], machines: [machine], settings: settings, workspaces: [root, other])
+        #expect(AgentListProjection.build(captured).tree.isEmpty, "unpinned empty workspaces stay hidden by default")
+        captured.settings.showEmptyWorkspaces = true
         #expect(AgentListProjection.build(captured).tree.flatMap(\.repos).flatMap(\.worktrees).map(\.workspace?.key) == [root.key])
         captured.settings.filter = .unread
         #expect(AgentListProjection.build(captured).tree.isEmpty, "empty worktrees do not populate a quick filter")
+        // Offline computers drop unpinned empty snapshots even when opted in, while preserving host-pinned non-hidden empties.
+        var offline = machine
+        offline.online = false
+        var pinned = root
+        pinned.sourceID = "pinned-root"
+        pinned.title = "Pinned"
+        pinned.pinnedAt = Date(timeIntervalSince1970: 10)
+        captured.settings.filter = .all
+        captured.machines = [offline]
+        captured.workspaces = [root, pinned]
+        #expect(AgentListProjection.build(captured).tree.flatMap(\.repos).flatMap(\.worktrees).map(\.workspace?.key) == [pinned.key],
+                "offline machine drops unpinned empties while retaining host-pinned empties")
     }
 
     @Test func emptyWorktreesOnAnotherMachineStillRequireHostHeadings() throws {
@@ -278,7 +294,9 @@ import PersonaWire
         remoteRoot.group = remote.group
         var live = try session("one")
         live.spaceKind = "orca"; live.spaceID = root.sourceID
-        var captured = AgentListProjection.Input(sessions: [live], machines: [local, remote], settings: .init(),
+        var settings = AgentListProjection.Settings()
+        settings.showEmptyWorkspaces = true
+        var captured = AgentListProjection.Input(sessions: [live], machines: [local, remote], settings: settings,
                                                  workspaces: [root, remoteRoot])
         let shown = AgentListProjection.build(captured)
         #expect(Set(shown.tree.map(\.ref)) == [local.ref, remote.ref])
@@ -289,13 +307,14 @@ import PersonaWire
         #expect(!scoped.byHost)
     }
 
-    @Test func matchingAnEmptyNestedWorktreeCountsAsASearchResult() throws {
+    @Test func matchingAnEmptyNestedWorktreeCountsAsASearchResultWhenOptedIn() throws {
         let machine = try JSON.decoder.decode(Machine.self, from: Data(#"{"id":"fixture-box","name":"Fixture","kind":"local","online":true}"#.utf8))
         let root = HostWorkspace(machineID: machine.id, source: "orca", sourceID: "root", title: "Root", cwd: "/code/project")
         let child = HostWorkspace(machineID: machine.id, source: "orca", sourceID: "child", title: "Release planning", cwd: "/code/child",
                                   parentSourceID: root.sourceID)
         var settings = AgentListProjection.Settings()
         settings.query = "Release planning"
+        settings.showEmptyWorkspaces = true
         var captured = AgentListProjection.Input(sessions: [], machines: [machine], settings: settings, workspaces: [root, child])
         let matched = AgentListProjection.build(captured)
         #expect(matched.base.isEmpty)

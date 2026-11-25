@@ -1,55 +1,31 @@
-// The sidebar's bottom (#2432, docs/server/usage-windows.md): the two fullest subscription accounts as thin bars; a click opens
-// a popover with every window of every account, its reset countdown, when it was sampled and whether use is ahead of or
-// behind an even pace. Hidden entirely while the hub has no data.
+// The sidebar's bottom (#2432, docs/server/usage-windows.md): the two accounts with lowest remaining headroom as thin bars;
+// a click opens a popover with every window of every account, its reset countdown, protection reserve, unified reset timeline,
+// and adaptive multi-column layout. Hidden entirely while the hub has no data.
 import { useSidebarUsageShown } from "../lib/sidebar-usage";
 import { type ComponentType, useEffect, useRef, useState } from "react";
 import { t as tr } from "../i18n";
-import { fullest, isBalanceAccount, isWarn, liveAccounts, selectSidebarUsageAccounts, sourceNames, usePinnedUsageAccounts, useUsageWindows, type UnconnectedProvider, type UsageAccount } from "../lib/usage-windows";
+import { isBalanceAccount, liveAccounts, remainingTone, selectSidebarUsageAccounts, sourceNames, tightestRemaining, usePinnedUsageAccounts, useUsageWindows, type RemainingTone, type UnconnectedProvider, type UsageAccount } from "../lib/usage-windows";
 import { cx } from "../ui/atoms";
-import { lazyOverlay } from "./LazyOverlay";
+import { lazyDialog } from "./LazyOverlay";
 
-const UsagePopover = lazyOverlay<{ accounts: UsageAccount[]; unconnected?: readonly UnconnectedProvider[]; onClose: () => void }>(() => import("./UsagePopover").then((m) => m.UsagePopover));
+const UsagePopover = lazyDialog<{ open: boolean; accounts: UsageAccount[]; unconnected?: readonly UnconnectedProvider[]; anchor?: HTMLElement | null; onClose: () => void }>(() => import("./UsagePopover").then((m) => m.UsagePopover));
 let LoadedUnconnected: ComponentType<{ accounts: UsageAccount[]; onChange: (next: readonly UnconnectedProvider[]) => void }> | undefined;
 
 const percent = (p: number) => Math.min(100, Math.max(0, p));
 const shown = (p: number) => `${Math.round(p)}%`;
-const fill = (p: number) => (isWarn(p) ? "bg-orange" : "bg-accent");
+export const TONE_BG: Record<RemainingTone, string> = { green: "bg-green", orange: "bg-orange", red: "bg-red" };
+export const TONE_TEXT: Record<RemainingTone, string> = { green: "text-green", orange: "text-orange", red: "text-red" };
 // The strip's row text: one place for the named secondary-meta size.
 const ROW_NAME = "min-w-0 flex-1 truncate text-submeta text-ink-3";
 const ROW_VALUE = "shrink-0 text-submeta tabular-nums";
 
-/** A bar: the track, the used part (caution colour from 80%, or a caller-chosen tier class) and, with `expected`, a 1px tick where an even pace would be. */
-export function Meter({
-  used,
-  expected,
-  protect,
-  label,
-  tall,
-  barClass,
-  reserveTop = true,
-}: {
-  used: number;
-  expected?: number;
-  protect?: number;
-  label: string;
-  tall?: boolean;
-  barClass?: string;
-  reserveTop?: boolean;
-}) {
-  const hasProtect = typeof protect === "number" && Number.isFinite(protect) && protect >= 0 && protect <= 100;
+/** Compact remaining-quota progress bar for the collapsed sidebar strip. Popover-only overlays (protection zone/line/flag
+ *  and expected-pace tick) live inside the lazy UsagePopover chunk so they add zero bytes to FIRST_SCREEN_BUDGET. */
+function StripMeter({ remaining, barClass, label }: { remaining: number; barClass: string; label: string }) {
+  const r = percent(remaining);
   return (
-    <div role="progressbar" aria-label={hasProtect ? `${label}, ${tr("usage.protect_label", { percent: Math.round(protect) })}` : label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent(used))} className={cx("relative w-full rounded-full bg-inset", tall ? "h-1.5" : "h-1", hasProtect && reserveTop && "mt-3.5")}>
-      <div className={cx("h-full rounded-full transition-[width] duration-300", barClass ?? fill(used))} style={{ width: `${percent(used)}%` }} />
-      {hasProtect && (
-        <>
-          <span aria-hidden data-protect-zone className="absolute inset-y-0 right-0 rounded-r-full" style={{ left: `${percent(protect)}%`, backgroundImage: "repeating-linear-gradient(135deg, transparent 0 2px, color-mix(in srgb, var(--orange) 45%, transparent) 2px 3px)" }} />
-          <span aria-hidden data-protect-line className="absolute -top-1 -bottom-1 w-0.5 -translate-x-1/2 rounded-full bg-orange" style={{ left: `${percent(protect)}%` }} />
-          <span aria-hidden data-protect-flag className="absolute -top-4 -translate-x-1/2 whitespace-nowrap rounded-sm bg-surface px-0.5 text-submeta font-bold leading-none text-orange" style={{ left: `${Math.min(percent(protect), 92)}%` }}>
-            {tr("usage.protect_flag", { percent: Math.round(protect) })}
-          </span>
-        </>
-      )}
-      {expected !== undefined && <span aria-hidden data-pace-tick className="absolute -top-0.5 -bottom-0.5 w-px -translate-x-1/2 rounded-full bg-ink-3" style={{ left: `${percent(expected)}%` }} />}
+    <div role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(r)} className="relative h-1 w-full rounded-full bg-inset">
+      <div className={cx("h-full rounded-full transition-[width] duration-300", barClass)} style={{ width: `${r}%` }} />
     </div>
   );
 }
@@ -60,6 +36,7 @@ const EMPTY_UNCONNECTED: readonly UnconnectedProvider[] = [];
 export function UsageBars({ accounts, unconnected = EMPTY_UNCONNECTED, now = Date.now() }: { accounts: UsageAccount[]; unconnected?: readonly UnconnectedProvider[]; now?: number }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const pinnedIds = usePinnedUsageAccounts();
   const live = liveAccounts(accounts, now);
   const { bars: top, balances } = selectSidebarUsageAccounts(live, pinnedIds);
@@ -68,7 +45,9 @@ export function UsageBars({ accounts, unconnected = EMPTY_UNCONNECTED, now = Dat
   useEffect(() => {
     if (!open) return;
     const down = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+      const target = e.target;
+      if ((target instanceof Node && ref.current?.contains(target)) || (target instanceof Element && target.closest("[data-usage-popover]"))) return;
+      setOpen(false);
     };
     const key = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     addEventListener("pointerdown", down, true);
@@ -82,8 +61,9 @@ export function UsageBars({ accounts, unconnected = EMPTY_UNCONNECTED, now = Dat
   if (!top.length && !balances.length && !notices.length && !unconnected.length) return null;
   return (
     <div ref={ref} className="relative shrink-0 px-2.5 pb-2.5 pt-1" data-usage-bars>
-      {open && <UsagePopover accounts={live} unconnected={unconnected} onClose={() => setOpen(false)} />}
+      <UsagePopover open={open} accounts={live} unconnected={unconnected} anchor={triggerRef.current} onClose={() => setOpen(false)} />
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="dialog"
@@ -92,16 +72,17 @@ export function UsageBars({ accounts, unconnected = EMPTY_UNCONNECTED, now = Dat
         className="touch-hit flex w-full flex-col gap-1.5 rounded-control px-2.5 py-2 text-left shadow-hairline transition-colors hover:bg-hover"
       >
         {top.map((a) => {
-          const used = fullest(a);
+          const { remaining, reserve } = tightestRemaining(a);
+          const tone = remainingTone(remaining, reserve);
           const from = sourceNames(a);
           const title = [from.length ? tr("usage.sources_title", { sources: from.join(" · ") }) : "", a.stale ? tr("usage.stale_title") : ""].filter(Boolean).join(" · ");
           return (
             <span key={a.id} className={cx("flex flex-col gap-1", a.stale && "opacity-60")} title={title || undefined}>
               <span className="flex items-baseline gap-2">
                 <span className={ROW_NAME}>{a.name}</span>
-                <span className={cx(ROW_VALUE, isWarn(used) ? "text-orange" : "text-ink-2")}>{shown(used)}</span>
+                <span className={cx(ROW_VALUE, a.stale ? "text-ink-2" : TONE_TEXT[tone])}>{tr("usage.left_short", { percent: shown(remaining) })}</span>
               </span>
-              <Meter used={used} label={tr("usage.used_label", { name: a.name, percent: shown(used) })} />
+              <StripMeter remaining={remaining} barClass={TONE_BG[tone]} label={tr("usage.remaining_label", { name: a.name, percent: shown(remaining) })} />
             </span>
           );
         })}
@@ -154,10 +135,12 @@ function SidebarUsageInner({ accounts }: { accounts: UsageAccount[] }) {
   const [unconnected, setUnconnected] = useState(EMPTY_UNCONNECTED);
   useEffect(() => {
     if (LoadedUnconnected) return;
+    let active = true;
     void import("./UsageUnconnected").then((m) => {
       LoadedUnconnected = m.UsageUnconnected;
-      setLoaded(true);
+      if (active) setLoaded(true);
     });
+    return () => { active = false; };
   }, []);
   return (
     <>

@@ -37,7 +37,7 @@ const fail = (why) => {
   throw new Error(why);
 };
 const mock = async (q = "") => (await fetch(`${hub}/mock/screen-video${q}`)).json();
-const words = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/screen-video.json`, import.meta.url), "utf8"));
+const words = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/screen-share-video.json`, import.meta.url), "utf8"));
 
 const browser = await chromium.launch(executable ? { executablePath: executable } : { channel: "chrome" });
 const errors = [];

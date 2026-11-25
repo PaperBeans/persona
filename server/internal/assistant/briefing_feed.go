@@ -53,17 +53,22 @@ type briefBody struct {
 	// of the last 7 days' asks or background rounds. Only on the first briefing of a week, and only when it names
 	// something; left out otherwise (a client that does not draw it skips it).
 	Setup []setupSuggestion `json:"setup,omitempty"`
-	// PRFollowups are closed to-dos whose own delivery PRs are still open and have been silent for a while, oldest
-	// first. They never reopen a to-do; older clients ignore the field.
+	// PRFollowups are closed to-dos whose own delivery PRs are unwatched (host_not_connected) or still open and
+	// silent for a while, oldest first. They never reopen a to-do; older clients ignore the field.
 	PRFollowups []briefBodyPRFollowup `json:"pr_followups,omitempty"`
 }
 
-// briefBodyPRFollowup is one stale post-closure PR subscription as the briefing shows it.
+// briefBodyPRFollowup is one stale or unwatched post-closure PR subscription as the briefing shows it.
 type briefBodyPRFollowup struct {
-	TodoID string `json:"todo_id"`
-	Title  string `json:"title"`
-	PRURL  string `json:"pr_url"`
-	State  string `json:"state,omitempty"`
+	TodoID         string     `json:"todo_id"`
+	Title          string     `json:"title"`
+	PRURL          string     `json:"pr_url"`
+	State          string     `json:"state,omitempty"`
+	WatchStatus    string     `json:"watch_status,omitempty"`
+	WatchReason    string     `json:"watch_reason,omitempty"`
+	LastObservedAt *time.Time `json:"last_observed_at,omitempty"`
+	WatchUpdatedAt *time.Time `json:"watch_updated_at,omitempty"`
+	Note           string     `json:"note,omitempty"`
 }
 
 // briefBodyNorthStar is a `brief` item's north star: the lines as the report says them, and today's and yesterday's
@@ -142,14 +147,18 @@ func (f *briefFacts) body(s *Service, title string) briefBody {
 	for _, r := range f.Accept {
 		x := row(r)
 		x.Title, x.Detail, x.AskedAt = r.id, f.Changed[r.id], r.asked
+		delivery := f.Deliveries[r.id]
+		if t, ok := s.todoNow(r.id); ok {
+			x.Title = t.Title
+			if delivery == nil {
+				delivery = currentDelivery(t)
+			}
+		}
 		if a, ok := f.Asks[r.id]; ok {
-			x.Verdict, x.Outcome = verdictText(f.l, &a), a.Outcome
+			x.Verdict, x.Outcome = verdictText(f.l, &a, delivery), a.Outcome
 			if decideAsk(&a) {
 				x.Recommend = a.Recommend
 			}
-		}
-		if t, ok := s.todoNow(r.id); ok {
-			x.Title = t.Title
 		}
 		b.Accept = append(b.Accept, x)
 	}
@@ -167,14 +176,28 @@ func (f *briefFacts) body(s *Service, title string) briefBody {
 		b.Progress = append(b.Progress, briefBodyProgress{ID: p.ID, Title: p.Title, Stage: p.Stage, StageKind: p.StageKind})
 	}
 	briefCtx, briefCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	for _, fup := range s.stalePRFollowups(briefCtx, f.At) {
-		title := fup.TodoID
-		if t, ok := s.todoNow(fup.TodoID); ok {
-			title = t.Title
+	if fups := s.stalePRFollowups(briefCtx, f.At); len(fups) > 0 {
+		_ = s.ensureTodosLoaded(briefCtx)
+		for _, fup := range fups {
+			title := fup.TodoID
+			if t, ok := s.todoNow(fup.TodoID); ok {
+				title = t.Title
+			}
+			row := briefBodyPRFollowup{
+				TodoID:         fup.TodoID,
+				Title:          title,
+				PRURL:          fup.PRURL,
+				State:          fup.State,
+				WatchStatus:    fup.EffectiveWatchStatus(),
+				WatchReason:    fup.WatchReason,
+				LastObservedAt: fup.LastObservedAt,
+				WatchUpdatedAt: fup.WatchUpdatedAt,
+			}
+			if fup.IsUnwatched() {
+				row.Note = prFollowupUnwatchedNote(f.l, fup)
+			}
+			b.PRFollowups = append(b.PRFollowups, row)
 		}
-		b.PRFollowups = append(b.PRFollowups, briefBodyPRFollowup{
-			TodoID: fup.TodoID, Title: title, PRURL: fup.PRURL, State: fup.State,
-		})
 	}
 	briefCancel()
 	return b

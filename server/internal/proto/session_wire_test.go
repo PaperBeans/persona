@@ -302,6 +302,14 @@ func TestWireStringMatchesEncodingJSON(t *testing.T) {
 	}
 }
 
+// LogicalPlaceholder is manager-internal provenance and has json:"-": neither the hand-written nor reflect encoder emits it.
+func TestLogicalPlaceholderStaysOffTheWire(t *testing.T) {
+	b, ok := AppendSession(nil, &Session{SessionID: "s1", LogicalPlaceholder: true})
+	if !ok || bytes.Contains(b, []byte("LogicalPlaceholder")) || bytes.Contains(b, []byte("logical_placeholder")) {
+		t.Fatalf("internal placeholder escaped to the wire: %s", b)
+	}
+}
+
 // background_stalled_since (#13744) goes out as RFC 3339, only when set, and reads back to the same second.
 func TestBackgroundStalledSinceWire(t *testing.T) {
 	at := time.Date(2026, 11, 23, 1, 2, 3, 0, time.UTC)

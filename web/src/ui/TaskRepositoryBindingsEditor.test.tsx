@@ -808,3 +808,127 @@ it("offers an extension's saved repository in the picker with the generic mark a
   expect(document.querySelector("[data-task-repository-editor] [data-link-pending]")).toBeTruthy();
   expect(calls).toHaveLength(1);
 });
+
+it("keeps repository detail DOM 100% pixel-identical when todosV2 is false or omitted", async () => {
+  const multiRepoSet: TaskRepositorySet = {
+    schema_version: 1,
+    manager: "assistant",
+    todo_id: "todo_example",
+    revision: 1,
+    repositories: [
+      {
+        repo_id: "docs",
+        requested_ref: { kind: "branch", value: "docs/guide" },
+        source_snapshot: { identity: other, clone_url: other.canonical_url, catalog_revision: 4, transport_origin: "canonical_default" },
+        links: [{ kind: "issue", number: "3", canonical_url: other.canonical_url + "/issues/3", title: "Spec", role: "reference" }],
+        catalog_state: "current",
+      },
+      {
+        repo_id: "web",
+        requested_ref: { kind: "tag", value: "v2.0" },
+        source_snapshot: { identity, clone_url: identity.canonical_url, catalog_revision: 4, transport_origin: "canonical_default" },
+        links: [{ kind: "pull_request", number: "7", canonical_url: identity.canonical_url + "/pull/7", title: "Ship feature", role: "delivery" }],
+        catalog_state: "current",
+      },
+    ],
+  };
+
+  await act(async () => root.render(<TodoRepositoryBindings manager="assistant" owner={credentialOwner()} todoId="todo_example" />));
+  await answer(calls[0], multiRepoSet);
+  const legacyHtml = host.querySelector("[data-todo-repositories]")!.innerHTML;
+  expect(host.querySelector("[data-repo-matrix]")).toBeNull();
+  expect(host.querySelector("[data-repo-role-badge]")).toBeNull();
+  expect(host.querySelector("[data-repo-ref]")).toBeNull();
+  // Original order preserved when todosV2 is omitted
+  expect([...host.querySelectorAll("[data-repository-row] a")].map((a) => a.getAttribute("href"))).toEqual([other.canonical_url, identity.canonical_url]);
+
+  await act(async () => root.render(<TodoRepositoryBindings manager="assistant" owner={credentialOwner()} todoId="todo_example" todosV2={false} />));
+  expect(host.querySelector("[data-todo-repositories]")!.innerHTML).toBe(legacyHtml);
+});
+
+it("renders Target Repo and Reference Repo matrix under todosV2, marks mixed reference links, keeps editing, and reverts immediately when turned off", async () => {
+  const apiIdentity = { provider: "github" as const, instance_url: "https://github.com", path: "example/api", canonical_url: "https://github.com/example/api" };
+  const multiRepoSet: TaskRepositorySet = {
+    schema_version: 1,
+    manager: "assistant",
+    todo_id: "todo_example",
+    revision: 2,
+    repositories: [
+      {
+        repo_id: "docs",
+        requested_ref: { kind: "branch", value: "docs/spec" },
+        source_snapshot: { identity: other, clone_url: other.canonical_url, catalog_revision: 4, transport_origin: "canonical_default" },
+        links: [{ kind: "issue", number: "3", canonical_url: other.canonical_url + "/issues/3", title: "Architecture spec", role: "reference" }],
+        catalog_state: "current",
+      },
+      {
+        repo_id: "web",
+        requested_ref: { kind: "tag", value: "v2.0" },
+        source_snapshot: { identity, clone_url: identity.canonical_url, catalog_revision: 4, transport_origin: "canonical_default" },
+        links: [
+          { kind: "pull_request", number: "7", canonical_url: identity.canonical_url + "/pull/7", title: "Ship UI", role: "delivery" },
+          { kind: "issue", number: "11", canonical_url: identity.canonical_url + "/issues/11", title: "Background note", role: "reference" },
+        ],
+        catalog_state: "current",
+      },
+      {
+        repo_id: "api",
+        requested_ref: { kind: "default" },
+        source_snapshot: { identity: apiIdentity, clone_url: apiIdentity.canonical_url, catalog_revision: 4, transport_origin: "canonical_default" },
+        links: [],
+        catalog_state: "current",
+      },
+    ],
+  };
+
+  await act(async () => root.render(<><TodoRepositoryBindings manager="assistant" owner={credentialOwner()} todoId="todo_example" todosV2={true} /><Toasts /></>));
+  await answer(calls[0], multiRepoSet);
+
+  const matrix = host.querySelector("[data-repo-matrix]")!;
+  expect(matrix).toBeTruthy();
+
+  // Target Repos (web, api) appear before Reference Repos (docs), keeping intra-group order stable
+  const rows = [...matrix.querySelectorAll<HTMLElement>("[data-repository-row]")];
+  expect(rows.map((r) => `${r.dataset.repoRole}:${r.querySelector("a")?.getAttribute("href")}`)).toEqual([
+    `target:${identity.canonical_url}`,
+    `target:${apiIdentity.canonical_url}`,
+    `reference:${other.canonical_url}`,
+  ]);
+
+  // Role badges and non-blocking Reference Repo hint are shown, never colliding with "Delivered"
+  expect(matrix.querySelector('[data-repo-matrix-group="target"]')?.textContent).toContain("Target Repo (2)");
+  expect(matrix.querySelector('[data-repo-matrix-group="reference"]')?.textContent).toContain("Reference Repo (1)");
+  expect(matrix.querySelector('[data-repo-matrix-group="reference"]')?.textContent).toContain("Read-only context, does not block closure");
+  expect(rows[0].querySelector('[data-repo-role-badge="target"]')?.textContent).toBe("Target Repo");
+  expect(rows[2].querySelector('[data-repo-role-badge="reference"]')?.textContent).toBe("Reference Repo");
+  expect(matrix.textContent).not.toContain("Delivered");
+
+  // Non-default requested_ref is displayed compactly; default branch stays clean
+  expect(rows[0].querySelector('[data-repo-ref="v2.0"]')?.textContent).toContain("v2.0");
+  expect(rows[1].querySelector("[data-repo-ref]")).toBeNull();
+  expect(rows[2].querySelector('[data-repo-ref="docs/spec"]')?.textContent).toContain("docs/spec");
+
+  // Mixed links in Target Repo keep reference badge on the reference link only
+  const links = [...matrix.querySelectorAll("[data-repository-link]")];
+  expect(links).toHaveLength(3);
+  expect(links[0].querySelector('[data-link-role="reference"]')).toBeNull();
+  expect(links[1].querySelector('[data-link-role="reference"]')?.textContent).toBe("Reference");
+  expect(links[2].querySelector('[data-link-role="reference"]')).toBeNull();
+
+  // Existing "Manage links" edit flow still opens cleanly
+  await click("Manage links");
+  await answerEditor(twoCatalog, multiRepoSet);
+  await settle();
+  expect(document.querySelector('[role="dialog"]')).toBeTruthy();
+  await click("Cancel");
+
+  // Switching todosV2 off reverts immediately to legacy DOM
+  await act(async () => root.render(<><TodoRepositoryBindings manager="assistant" owner={credentialOwner()} todoId="todo_example" todosV2={false} /><Toasts /></>));
+  expect(host.querySelector("[data-repo-matrix]")).toBeNull();
+  expect(host.querySelector("[data-repo-role-badge]")).toBeNull();
+  expect([...host.querySelectorAll("[data-repository-row] a")].map((a) => a.getAttribute("href"))).toEqual([
+    other.canonical_url,
+    identity.canonical_url,
+    apiIdentity.canonical_url,
+  ]);
+});

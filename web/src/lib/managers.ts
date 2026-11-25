@@ -21,6 +21,8 @@ export interface Manager {
   /** That is in effect (not the default, no computer): the switcher leaves it out. An older hub says neither. */
   hidden?: boolean;
   host?: string;
+  /** Host machine's stable UID, when reported by newer managers/hubs (#14963). */
+  machine_uid?: string;
   os?: string;
   arch?: string;
   /** How it runs, as it reported: "child" (the hub's own), "service", "docker", "external"… */
@@ -34,6 +36,8 @@ export interface Manager {
   installing?: string;
   /** Online on a build that reads no settings of its own (no `config.own`): it runs on built-in defaults until updated. */
   needs_update?: boolean;
+  /** On-disk personad binary was replaced while this manager was busy; it will restart automatically once idle (#14963). */
+  pending_restart?: boolean;
   /** Its open inbox items that need the user (the inbox page's badge). Absent: not known (offline, installing, an
    *  older hub), counted as none. The hub pushes `managers` when it changes. */
   inbox_needs_you?: number;
@@ -370,4 +374,64 @@ export function switcherLine(m: Manager, now = Date.now()): string {
 /** The current assistant's record: the one picked, else the default's; null without a roster. */
 export function managerOf(list: ManagerList | null, id: string): Manager | null {
   return list?.managers.find((m) => m.id === id) ?? null;
+}
+
+const normHost = (s: string | undefined): string => s?.trim().toLowerCase() ?? "";
+
+/** Installed managers hosted on `machine`, in display order (default first). Matches by `machine_uid` when both carry
+ *  one (never falling back to `host` when two distinct UIDs disagree), and falls back safely to case-insensitive host
+ *  matching for older managers or hubs (#14964). */
+export function hostedManagersForMachine(
+  roster: ManagerList | null,
+  machine: { id: string; hostname?: string; host?: string; machine_uid?: string },
+): Manager[] {
+  if (!roster) return [];
+  const machineUid = normHost(machine.machine_uid);
+  const machineHost = normHost(machine.hostname) || normHost(machine.host);
+  const machineId = normHost(machine.id);
+  return managerOrder(roster).filter((m) => {
+    const managerUid = normHost(m.machine_uid);
+    if (managerUid && machineUid) return managerUid === machineUid;
+    const managerHost = normHost(m.host);
+    if (!managerHost) return false;
+    return machineHost ? managerHost === machineHost : managerHost === machineId;
+  });
+}
+
+const NON_COMPARABLE_VERSION = new Set(["", "dev", "unknown"]);
+const BUILD_STAMP = /-(\d{12})$/;
+const SEMVER = /^v?(\d+)\.(\d+)\.(\d+)/;
+
+/** Whether an online hosted manager is running an older/different version behind the computer's node version.
+ *  Comparable build timestamps (`-YYYYMMDDHHMM`) and semver triples flag lag only when the manager is older. */
+export function managerVersionLag(manager: Pick<Manager, "online" | "version">, nodeVersion: string | undefined): boolean {
+  if (!manager.online) return false;
+  const mv = manager.version?.trim() ?? "";
+  const nv = nodeVersion?.trim() ?? "";
+  if (NON_COMPARABLE_VERSION.has(mv.toLowerCase()) || NON_COMPARABLE_VERSION.has(nv.toLowerCase())) return false;
+  if (mv === nv) return false;
+  const ms = BUILD_STAMP.exec(mv);
+  const ns = BUILD_STAMP.exec(nv);
+  if (ms && ns) return ms[1]! < ns[1]!;
+  const mvSem = SEMVER.exec(mv);
+  const nvSem = SEMVER.exec(nv);
+  if (mvSem && nvSem) {
+    for (let i = 1; i <= 3; i++) {
+      const diff = Number(mvSem[i]) - Number(nvSem[i]);
+      if (diff !== 0) return diff < 0;
+    }
+  }
+  return true;
+}
+
+export type HostedManagerAttention = "pending_restart" | "version_lag" | null;
+
+/** Attention state for a co-located manager: explicit `pending_restart` takes priority over version lag. */
+export function hostedManagerAttention(
+  manager: Pick<Manager, "online" | "version" | "pending_restart">,
+  nodeVersion: string | undefined,
+): HostedManagerAttention {
+  if (manager.pending_restart) return "pending_restart";
+  if (managerVersionLag(manager, nodeVersion)) return "version_lag";
+  return null;
 }

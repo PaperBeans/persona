@@ -80,11 +80,12 @@ let host: HTMLDivElement;
 let root: Root;
 let opened = "";
 let fetcher: ReturnType<typeof vi.fn>;
-// An agent's header loads its compare menu lazily (ChatView: import("../../lib/compare-runs")) and draws again when it
-// is in. Loaded here first, it is in before a test counts renders: cold, under a full parallel run, it came in during the
-// pushes and counted as one of their renders.
+// An agent's header loads its compare menu lazily (ChatView: import("../../lib/compare-runs")) and finished replies
+// load their bar lazily (MessageActions: import("./ReplyBar")), each drawing again when it arrives. Loaded here first,
+// neither arrives mid-test under a full parallel run and counts as a render caused by pushes or turn transitions.
 beforeAll(async () => {
   await import("../../lib/compare-runs");
+  await import("./ReplyBar");
 });
 
 beforeEach(() => {
@@ -204,6 +205,52 @@ it("a turn starting or ending renders the message actions of its own exchange on
   // Both ending and starting still update the current exchange; neither scales with finished history.
   for (const count of one) expect(count).toBeGreaterThan(0);
   expect(await flip("s2", 6)).toEqual(one);
+});
+
+it("a turn starting or ending leaves earlier engine stretches untouched while keeping offscreen virtualization", async () => {
+  const measure = async (sid: string, session: Session, earlierItems?: Item[]) => {
+    const liveItems = [item(0, { role: "user", text: "live ask" }), item(1, { text: "live reply" })];
+    fetcher.mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.includes("/sessions/mac/prev/items")) {
+        return Promise.resolve(new Response(JSON.stringify({ items: earlierItems ?? [], has_more: false }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      if (target.includes("/items")) {
+        return Promise.resolve(new Response(JSON.stringify({ items: liveItems, to_seq: 1, has_more: false }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200, headers: { "Content-Type": "application/json" } }));
+    });
+    await open(<ChatView mid="mac" sid={sid} inPage />, session);
+    if (earlierItems) {
+      await vi.waitFor(() => expect(host.querySelector('[data-engine-stretch="prev"]')).not.toBeNull());
+      for (let i = 0; i < 4; i++) await settle();
+    }
+    const counts: number[] = [];
+    for (const state of ["idle", "working"] as const) {
+      asks.n = 0;
+      act(() => applyCompleteSessions([{ ...session, status: state, state }]));
+      await settle();
+      counts.push(asks.n);
+    }
+    return counts;
+  };
+  const baseline = await measure("s1", row({ session_id: "s1" }));
+  for (const count of baseline) expect(count).toBeGreaterThan(0);
+  const earlierItems = [
+    item(0, { id: "p0", role: "user", text: "earlier ask 0", ts: "2026-11-05T00:00:00Z" }),
+    item(1, { id: "p1", text: "earlier reply 0", ts: "2026-11-05T00:01:00Z" }),
+    item(2, { id: "p2", role: "user", text: "earlier ask 1", ts: "2026-11-05T00:02:00Z" }),
+    item(3, { id: "p3", text: "earlier reply 1", ts: "2026-11-05T00:03:00Z" }),
+  ];
+  const switched = row({
+    session_id: "s2",
+    agent: "codex",
+    engine_history: [{ session_id: "prev", agent: "claude", until: "2026-11-05T01:00:00Z" }],
+  });
+  expect(await measure("s2", switched, earlierItems)).toEqual(baseline);
+  const earlierSections = [...host.querySelectorAll<HTMLElement>('[data-engine-stretch="prev"] section[data-segment]')];
+  expect(earlierSections).toHaveLength(2);
+  expect(earlierSections.every((s) => s.classList.contains("seg-cv"))).toBe(true);
 });
 
 it("finished exchanges before the last two skip drawing while off screen, from a guessed height", async () => {

@@ -73,6 +73,10 @@ func (b *inboxBook) restore(w *inboxWrite) {
 		case "SuggestionAttempts":
 			cur.SuggestionAttempts = restoreSuggestionAttempts(p.SuggestionAttempts, cur.SuggestionAttempts)
 		default:
+			// Unexported runtime state is absent from the JSON snapshot and cannot be interfaced.
+			if cv.Type().Field(i).PkgPath != "" {
+				continue
+			}
 			if !reflect.DeepEqual(cv.Field(i).Interface(), pv.Field(i).Interface()) {
 				cv.Field(i).Set(pv.Field(i))
 			}

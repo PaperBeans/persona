@@ -21,6 +21,9 @@ import PersonaWire
 
     /// nav_page entries, in the hub's order.
     private(set) var pages: [ExtensionUIPlace] = []
+    /// The entries Settings › Extensions lists: the extensions' own. Dashboards (#15017) are the assistant's, kept in the
+    /// sidebar and the drawer only.
+    var extensionPages: [ExtensionUIPlace] { pages.filter { !DashboardsUI.owns($0.owner) } }
     /// overview_card entries, in the hub's order.
     private(set) var cards: [ExtensionUIPlace] = []
     /// The cards' models, made when the cards are listed (the page pushes what they ask for, `extensionPushes`).
@@ -40,6 +43,10 @@ import PersonaWire
 
     /// The hub has the slots (and so the context, charts and badges).
     var available: Bool { features().hasExtensionFeature("ui_slots") }
+
+    /// The optional domain-space product surface is enabled only while its
+    /// extension contributes a running navigation page.
+    var spaceConversationsEnabled: Bool { pages.contains { $0.owner == "space-conversations" && $0.id == "home" } }
 
     /// Asks the hub again for the entries and the cards (a list that cannot be read keeps what there was).
     func reload(for hub: String? = nil) async {
@@ -199,10 +206,11 @@ struct ExtensionSlotsSettingsSection: View {
     var body: some View {
         if slots.available {
             ExtensionCardsSection(link: $link, slots: slots)
-            if !slots.pages.isEmpty {
+            let pages = slots.extensionPages
+            if !pages.isEmpty {
                 Section {
                     Group {
-                        ForEach(slots.pages, id: \.scopedID) { page in
+                        ForEach(pages, id: \.scopedID) { page in
                             NavigationLink(value: SettingsPage.pluginPage(plugin: page.owner, ui: page.id, title: page.title, manager: slots.manager)) {
                                 ExtensionNavRow(place: page)
                             }
@@ -278,7 +286,7 @@ struct ExtensionCard: View {
         model.view?.sections.contains { section in
             section.items.contains { item in
                 switch item {
-                case .graph, .scene: true
+                case .graph, .scene, .map: true
                 default: false
                 }
             }

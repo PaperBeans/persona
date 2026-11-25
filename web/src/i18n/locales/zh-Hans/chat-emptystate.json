@@ -1,0 +1,11 @@
+{
+  "agent_starter_repo": "梳理当前仓库结构",
+  "agent_starter_git": "检查 git 状态和最近改动",
+  "agent_starter_tests": "运行测试并汇报结果",
+  "assistant_starter_todos": "今天有什么待办安排",
+  "assistant_starter_messages": "汇总最近的重要消息",
+  "assistant_starter_tasks": "帮我整理当前手头任务",
+  "ask_persona": "向 {name} 提问",
+  "new_chat": "开始新对话",
+  "subtitle": "输入想法、粘贴图片，或使用 / 命令与 @ 引用文件"
+}

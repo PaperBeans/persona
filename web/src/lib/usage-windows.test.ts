@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { initI18n } from "../i18n";
 import { balanceAccounts, balanceEmpty, balanceText } from "./usage-balance";
-import { countdown, fullest, groupByProvider, isBalanceAccount, isPinnableUsageAccount, liveAccounts, parsePinnedUsageAccounts, planNote, providerTimeline, providerTitle, remainingText, resetLabel, sampleAge, selectSidebarUsageAccounts, sortedWindows, sortForCard, sourceNames, timelinePosition, topAccounts, windowKey, windowMinutes, type UsageAccount, type UsageWindow } from "./usage-windows";
+import { countdown, fullest, groupByProvider, isBalanceAccount, isPinnableUsageAccount, liveAccounts, parsePinnedUsageAccounts, planNote, protectReserve, providerTitle, remainingPercent, remainingText, remainingTone, resetLabel, sampleAge, selectSidebarUsageAccounts, sortedWindows, sortForCard, sourceNames, tightestRemaining, timelinePosition, topAccounts, windowKey, windowMinutes, type UsageAccount, type UsageWindow } from "./usage-windows";
+import { isAccountPaused, isWindowPaused, providerTimeline, stripProviderPrefix, unifiedTimeline, windowHeadroom } from "./usage-timeline";
 import { accountPace, pace } from "./usage-pace";
 
 const NOW = new Date(2026, 10, 5, 10, 0, 0).getTime(); // local time, so same-day checks do not depend on the zone
@@ -148,11 +149,24 @@ describe("which accounts show", () => {
     expect(topAccounts(got).map((a) => a.id)).toEqual(["fresh", "older"]); // stale last
     expect(liveAccounts([account("flagged", 10, { stale: true, stale_at: at(H) })], NOW)[0].stale).toBe(true);
   });
-  it("takes the two fullest, stale last", () => {
+  it("ranks by lowest headroom h = r - R (taking protection reserve into account), stale last", () => {
     const list = [account("a", 20), account("b", 90, { stale: true }), account("c", 60), account("d", 40)];
     expect(topAccounts(list).map((a) => a.id)).toEqual(["c", "d"]);
     expect(topAccounts([account("a", 20), account("b", 90, { stale: true })]).map((a) => a.id)).toEqual(["a", "b"]);
     expect(fullest({ ...account("x", 1), windows: [win("5h", 300, 30), win("7d", 10080, 70)] })).toBe(70);
+
+    // Protected account with 30% remaining and 20% reserve (h = 10) ranks ahead of unprotected 15% remaining (h = 15)
+    const protectedTight: UsageAccount = {
+      id: "prot",
+      provider: "claude",
+      name: "Protected",
+      sampled_at: at(-60_000),
+      windows: [{ ...win("7d", 10080, 70, 24 * H), protect_percent: 80 }],
+    };
+    const unprotectedHigh = account("raw", 85); // r = 15, R = 0, h = 15
+    const comfortable = account("ok", 30); // r = 70, R = 0, h = 70
+    expect(topAccounts([comfortable, unprotectedHigh, protectedTight]).map((a) => a.id)).toEqual(["prot", "raw"]);
+    expect(tightestRemaining(protectedTight)).toEqual({ remaining: 30, reserve: 20, headroom: 10, paused: false });
   });
   it("keeps tied sidebar percentages in provider and ID order across polls", () => {
     const first = [
@@ -317,9 +331,53 @@ describe("provider cards and the reset timeline (#13173)", () => {
     expect(rows[1].lanes.map((l) => [l.label, l.long, Number(l.end.toFixed(4)), l.remainingMs])).toEqual([["5h", false, 0.0375, 2 * H], ["7d", true, 0.45 + (24 / 144) * 0.55 > 0 ? Number((0.45 + (24 / 144) * 0.55).toFixed(4)) : 0, 48 * H]]);
     expect(rows[0].lanes[0].end).toBe(1); // beyond 7 days runs to the end of the axis
   });
-  it("leaves out windows without a reset time, ended ones and per-model allowances, and an account with none has no row", () => {
-    const a = acct("a", "A", "claude", [win("5h", 300, 1), win("7d", 10080, 1, -H), { ...win("7d", 10080, 1, 3 * H), model: "Fable" }]);
-    expect(providerTimeline([a], NOW)).toEqual([]);
+  it("merges multi-model windows of the same kind into one lane taking the earliest reset, while dropping missing/ended resets", () => {
+    const empty = acct("e", "Empty", "claude", [win("5h", 300, 1), win("7d", 10080, 1, -H)]);
+    expect(providerTimeline([empty], NOW)).toEqual([]);
+
+    const agy = acct("ag", "Antigravity · Main", "antigravity", [
+      { ...win("5h", 300, 30, 4 * H), model: "Claude" },
+      { ...win("5h", 300, 45, 2 * H), model: "Gemini Pro" },
+      { ...win("7d", 10080, 10, 48 * H), model: "Partner" },
+    ]);
+    const rows = providerTimeline([agy], NOW);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lanes.map((l) => [l.label, l.long, l.remainingMs, l.models.map((m) => m.model)])).toEqual([
+      ["5h", false, 2 * H, ["Gemini Pro", "Claude"]],
+      ["7d", true, 48 * H, ["Partner"]],
+    ]);
+  });
+  it("builds a single unified timeline in provider-card and account order with stripped prefixes and paused flags", () => {
+    const codex1 = acct("c1", "Codex #alpha", "codex", [
+      { ...win("5h", 300, 96, 2 * H), protect_percent: 95 }, // r=4 <= R=5 -> paused
+      win("7d", 10080, 40, 30 * H),
+    ]);
+    const codex2 = acct("c2", "Codex #beta", "codex", [win("7d", 10080, 20, 72 * H)]);
+    const claude1 = acct("cl1", "Claude #gamma", "claude", [win("7d", 10080, 15, 24 * H)]);
+    const noReset = acct("nr", "Codex #none", "codex", [win("7d", 10080, 10)]);
+    const groups = groupByProvider([codex2, codex1, noReset, claude1]);
+    const rows = unifiedTimeline(groups, NOW);
+    expect(rows.map((r) => [r.provider, r.account.id, r.displayName, r.paused])).toEqual([
+      ["codex", "c1", "#alpha", true],
+      ["codex", "c2", "#beta", false],
+      ["claude", "cl1", "#gamma", false],
+    ]);
+    // Paused is judged per lane: c1's 5h reached its reserve, its healthy 7d lane did not
+    expect(rows[0].lanes.map((l) => [l.label, l.paused])).toEqual([["5h", true], ["7d", false]]);
+    expect(rows[1].lanes.map((l) => l.paused)).toEqual([false]);
+  });
+  it("strips redundant leading provider prefixes cleanly without emptying exact matches or partial words", () => {
+    expect(stripProviderPrefix("Codex #alpha", "codex")).toBe("#alpha");
+    expect(stripProviderPrefix("Codex#alpha", "codex")).toBe("#alpha");
+    expect(stripProviderPrefix("Claude #gamma", "claude")).toBe("#gamma");
+    expect(stripProviderPrefix("Antigravity · Gemini", "antigravity")).toBe("Gemini");
+    expect(stripProviderPrefix("Antigravity · Claude/GPT", "agy")).toBe("Claude/GPT");
+    expect(stripProviderPrefix("Codex - Team", "codex")).toBe("Team");
+    expect(stripProviderPrefix("Codex Pro", "codex")).toBe("Pro");
+    expect(stripProviderPrefix("Codex", "codex")).toBe("Codex");
+    expect(stripProviderPrefix("claudette", "claude")).toBe("claudette");
+    expect(stripProviderPrefix("work-claude", "claude")).toBe("work-claude");
+    expect(stripProviderPrefix("Codex Pro team", "claude")).toBe("Codex Pro team");
   });
   it("writes the time left short, in each language's units", async () => {
     await initI18n("zh-Hans");
@@ -327,5 +385,56 @@ describe("provider cards and the reset timeline (#13173)", () => {
     expect(remainingText(1.5 * H)).toBe("1.5 小时");
     expect(remainingText(50 * H)).toBe("2 天 2 小时");
     expect(remainingText(48 * H)).toBe("2 天");
+  });
+});
+
+describe("remaining-quota math, tone thresholds, and pause detection", () => {
+  it("computes remainingPercent and protectReserve cleanly with clamping", () => {
+    expect(remainingPercent(0)).toBe(100);
+    expect(remainingPercent(35)).toBe(65);
+    expect(remainingPercent(100)).toBe(0);
+    expect(remainingPercent(-10)).toBe(100);
+    expect(remainingPercent(120)).toBe(0);
+    expect(protectReserve(undefined)).toBeNull();
+    expect(protectReserve(95)).toBe(5);
+    expect(protectReserve(80)).toBe(20);
+    expect(protectReserve(100)).toBe(0);
+    expect(protectReserve(-1)).toBeNull();
+    expect(protectReserve(101)).toBeNull();
+  });
+  it("classifies remainingTone(r, R) by headroom h = r - R at 20 and 5 boundaries", () => {
+    // Unprotected (R = 0)
+    expect(remainingTone(100, 0)).toBe("green");
+    expect(remainingTone(20, 0)).toBe("green");
+    expect(remainingTone(19.9, 0)).toBe("orange");
+    expect(remainingTone(5, 0)).toBe("orange");
+    expect(remainingTone(4.9, 0)).toBe("red");
+    expect(remainingTone(0, 0)).toBe("red");
+    // Protected (R = 5, i.e. protect_percent = 95)
+    expect(remainingTone(25, 5)).toBe("green"); // h = 20
+    expect(remainingTone(24.9, 5)).toBe("orange"); // h = 19.9
+    expect(remainingTone(10, 5)).toBe("orange"); // h = 5
+    expect(remainingTone(9.9, 5)).toBe("red"); // h = 4.9
+    expect(remainingTone(5, 5)).toBe("red"); // h = 0 (paused)
+    expect(remainingTone(2, 5)).toBe("red"); // h = -3 (paused inside zone)
+  });
+  it("detects paused scheduling only when a protection reserve is configured and r <= R", () => {
+    const unprotectedZero = win("7d", 10080, 100, 24 * H);
+    expect(isWindowPaused(unprotectedZero)).toBe(false);
+    expect(windowHeadroom(unprotectedZero)).toBe(0);
+
+    const protectedAbove = { ...win("7d", 10080, 90, 24 * H), protect_percent: 95 }; // r=10, R=5 -> h=5
+    expect(isWindowPaused(protectedAbove)).toBe(false);
+    expect(windowHeadroom(protectedAbove)).toBe(5);
+
+    const protectedExact = { ...win("7d", 10080, 95, 24 * H), protect_percent: 95 }; // r=5, R=5 -> paused
+    expect(isWindowPaused(protectedExact)).toBe(true);
+
+    const protectedInside = { ...win("7d", 10080, 98, 24 * H), protect_percent: 95 }; // r=2, R=5 -> paused
+    expect(isWindowPaused(protectedInside)).toBe(true);
+
+    expect(isAccountPaused({ windows: [protectedAbove, protectedExact] })).toBe(true);
+    expect(isAccountPaused({ windows: [protectedAbove, { ...protectedInside, model: "Sonnet" }] })).toBe(false);
+    expect(isAccountPaused({ windows: [{ ...protectedInside, model: "Gemini" }] })).toBe(true);
   });
 });

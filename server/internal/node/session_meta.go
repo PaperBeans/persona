@@ -42,10 +42,12 @@ type quickMeta struct {
 	cwd string
 	// start: the first directory the transcript's head names, where the session started ("" when the head has none:
 	// a first prompt bigger than the head read).
-	start    string
-	model    string
-	surface  string // the client it runs in (transcript.Meta.Surface)
-	lastText string
+	start         string
+	model         string
+	serviceTier   string
+	serviceTierAt time.Time
+	surface       string // the client it runs in (transcript.Meta.Surface)
+	lastText      string
 	// answer is the latest turn's answer from its first words on (transcript.Meta.TurnAnswer); "" when the tail read
 	// held none of its words.
 	answer string
@@ -242,7 +244,7 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 	// What the tail may not repeat: a rollout names its directory, version and client on its first line only, its model
 	// and effort once a turn. Nothing of the head's exchange, turn or mode.
 	tm := transcript.Meta{Codex: head.Codex, Cwd: head.Cwd, Version: head.Version, VersionAt: head.VersionAt, Surface: head.Surface,
-		Model: head.Model, Effort: head.Effort, EffortAt: head.EffortAt}
+		Model: head.Model, ModelAt: head.ModelAt, ServiceTier: head.ServiceTier, ServiceTierAt: head.ServiceTierAt, Effort: head.Effort, EffortAt: head.EffortAt}
 	if prev.titleManual && prev.size <= st.Size() {
 		tm.Title, tm.TitleManual, tm.TitleSource = prev.title, true, "manual"
 	}
@@ -253,6 +255,12 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 	if covered {
 		// All newly appended rows are in the tail, so it can invalidate the previous fallback itself.
 		tm.ModelFallback = prev.modelFallback
+		if tm.Codex && prev.modelAt.After(tm.ModelAt) {
+			tm.Model, tm.ModelAt = prev.model, prev.modelAt
+		}
+		if tm.Codex && prev.serviceTierAt.After(tm.ServiceTierAt) {
+			tm.ServiceTier, tm.ServiceTierAt = prev.serviceTier, prev.serviceTierAt
+		}
 	}
 	// The tail's lines in the transcript's tree: a turn the user went back over (a rewind in the terminal, then a recap
 	// beside it) is not where the agent's last words come from (transcript/branch.go).
@@ -344,6 +352,7 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 		m.answer = tm.TurnAnswer()
 	}
 	m.codex = tm.Codex
+	m.serviceTier, m.serviceTierAt = tm.ServiceTier, tm.ServiceTierAt
 	m.titleManual, m.titleSource = tm.TitleManual, tm.TitleSource
 	if off == 0 {
 		m.outputTokens = tm.OutputTokens // a whole-file tail; the incremental scan supplies larger files' totals
@@ -478,6 +487,9 @@ func (n *Node) mergeNamingMetadata(path string, m *quickMeta) {
 	if m.codex && sc.meta.ModelAt.After(m.modelAt) {
 		// A long tool result can push the latest turn_context out of the quick tail.
 		m.model, m.modelAt = sc.meta.Model, sc.meta.ModelAt
+	}
+	if m.codex && sc.meta.ServiceTierAt.After(m.serviceTierAt) {
+		m.serviceTier, m.serviceTierAt = sc.meta.ServiceTier, sc.meta.ServiceTierAt
 	}
 	if m.codex && sc.meta.EffortAt.After(m.effortAt) {
 		// A long tool result can push the latest turn_context out of the quick tail.

@@ -28,7 +28,7 @@ import { agentId, providerAgent } from "../lib/agent-kind";
 import { modelPurpose, modelSummary, type ModelBinding } from "../lib/model-config";
 import { formatFollowDetail, resolveFollowBinding, resolvedStartModel } from "../lib/new-agent-follow";
 import {
-  effortChoices, effortRule, fitEffort, followedBinding, inlineTextStart, launcherAgent, listedModes, machineLaunchers, nativeOmpStart, pickerLauncher, startCatalogHost, startPicks, takesEffort, tierLeftOut, type PickerTier,
+  effortChoices, effortRule, fitEffort, followedBinding, inlineTextStart, launcherAgent, listedModes, machineLaunchers, nativeOmpStart, pickerLauncher, startCatalogHost, startPicks, tierLeftOut, type PickerTier,
   type UnavailableLauncher,
 } from "../lib/launcher-models";
 import { choiceCarries, type ModelChoice } from "../lib/new-agent-panel";
@@ -566,7 +566,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
     const targetLauncher = launchers.find((l) => l.name === x.launcher);
     const targetListed = listedModes(targetLauncher);
     const targetAgent = launcherAgent(x.launcher, launchers, undefined);
-    const targetClaudeModes = takesEffort(targetAgent) && !targetListed;
+    const targetClaudeModes = effortRule(targetAgent) === "any" && !targetListed;
     if (targetListed) {
       setMode(base.mode);
       setProviderMode(x.permission_mode && targetListed.includes(x.permission_mode) ? x.permission_mode : "");
@@ -606,8 +606,8 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
     }
   }, [open, opensIn, nativeOmp, listLauncher, agent]);
   // what a start on it takes besides the model (#8261): Claude Code's modes and efforts, or the permission modes a
-  // launcher lists (Paseo's other providers) and the efforts its model lists, or neither (Codex keeps its own)
-  const claudeModes = takesEffort(agent) && !listedModes(listEntry);
+  // launcher lists (Paseo's other providers) and the efforts its model lists, or Codex's reported efforts alone
+  const claudeModes = effortRule(agent) === "any" && !listedModes(listEntry);
   const providerModes = claudeModes || nativeOmp ? undefined : listedModes(listEntry);
   // Codex CLI can omit the first message when prompt_optional is advertised. The App needs one to expose its new chat.
   const codex = agent === "codex";
@@ -709,9 +709,13 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
   const helpBlock = helpLauncher ? launcherBlock(helpLauncher) : null;
   // what a launcher ID is called (#5029): this computer's launchers first, then the model configuration's providers
   const names: Named[] = [...launchers, ...providerNames];
-  const efforts = effortChoices(models.list, model, followed, effortRule(agent, listEntry));
+  const rule = effortRule(agent, listEntry);
+  const efforts = effortChoices(models.list, model, followed, rule);
   const effortsKey = efforts.join(" ");
-  useEffect(() => { setEffort((e) => fitEffort(e, effortsKey ? effortsKey.split(" ") : [])); }, [effortsKey]);
+  const effortsSettled = rule !== "listed" || models.list !== undefined || Boolean(models.error);
+  useEffect(() => {
+    if (effortsSettled) setEffort((e) => fitEffort(e, effortsKey ? effortsKey.split(" ") : []));
+  }, [effortsKey, effortsSettled]);
   // offered with Claude Code whose effort can be set here; grayed when this computer's Claude Code is known to be too old
   const ultracodeShown = !desktopStart && !loadingModels && efforts.length > 0 && ultracodeStartOffered(features, agent);
   // what of the picked preset this launcher can't take, said once its list is in

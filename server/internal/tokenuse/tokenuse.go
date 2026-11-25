@@ -8,6 +8,8 @@
 // included), cache reads and cache writes. Their sum is every token the request used, the count the calendar and
 // today's tokens show. The 1-hour cache writes and the reasoning are parts of cache writes and output ("of which"),
 // never added to the sum again.
+//
+//persona:layer core
 package tokenuse
 
 import (

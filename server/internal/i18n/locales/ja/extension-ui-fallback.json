@@ -25,5 +25,10 @@
   "closing_price": "終値",
   "field_detail": "{label}（{detail}）",
   "comma_separated": "{label}（複数はカンマ区切り）",
-  "image_newer": "画像：{alt}（新しいバージョンのアプリで表示してください）"
+  "image_newer": "画像：{alt}（新しいバージョンのアプリで表示してください）",
+  "map_selected": "選択中",
+  "map_mode_driving": "車",
+  "map_mode_walking": "徒歩",
+  "map_mode_cycling": "自転車",
+  "map_mode_transit": "公共交通"
 }

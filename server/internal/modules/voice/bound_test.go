@@ -107,7 +107,7 @@ func TestBoundToAnAgent(t *testing.T) {
 		{"role": "assistant", "text": "登录页的测试挂了两个"}, {"role": "tool", "text": "ignored"}}}))
 	ready := a.until(ofType("ready"))
 	target, _ := ready["target"].(map[string]any)
-	if ready["protocol"] != float64(2) || fmt.Sprint(ready["features"]) != "[target runs asks resume suspend speak speech_gate meeting hold dictation]" || target["kind"] != "agent" ||
+	if ready["protocol"] != float64(2) || fmt.Sprint(ready["features"]) != "[target runs asks resume suspend speak speech_gate meeting hold dictation reply]" || target["kind"] != "agent" ||
 		target["agent_label"] != "Claude Code" || target["title"] != "修登录页的测试" || target["machine_name"] != "工作站" || target["session_id"] != "a1" {
 		t.Fatalf("ready: %v", ready)
 	}
@@ -1217,6 +1217,12 @@ func TestBoundTurnEndsBeforeTheLinkSubscribes(t *testing.T) {
 			t.Fatal("the run was never looked at")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	// Finish after the delayed subscription, not at an arbitrary point in its flight. From base 0 the empty
+	// conversation has no backlog, so this still proves that the turn's end travels over the new link.
+	hub.subscribed("a1")
+	if _, sub := hub.subscribes("a1"); sub["since_seq"] != float64(0) {
+		t.Fatalf("the new link starts at %v, want 0", sub["since_seq"])
 	}
 	hub.status("a1", "working")
 	hub.add("a1", proto.Item{Role: "assistant", Kind: proto.KindText, Text: "测试在后台跑了，单元测试都过了。"})

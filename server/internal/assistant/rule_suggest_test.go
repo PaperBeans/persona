@@ -486,12 +486,12 @@ func TestDelegateSuggestionStoresNothing(t *testing.T) {
 	if s.cardSuggestion(ctx, permission, i18n.En) != nil {
 		t.Fatal("suggested on a tool permission card")
 	}
-	before := s.store().(ruleStore).puts
+	before := s.store().(ruleStore).putCount()
 	w := ruleRequest(s, roleFull, "/api/v1/assistant/rule-suggestions/"+sg.ID+"/always")
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"setting":"agents.delegate"`) || !strings.Contains(w.Body.String(), `"creates":""`) {
 		t.Fatalf("always: %d %s", w.Code, w.Body)
 	}
-	if puts := s.store().(ruleStore).puts; puts != before+1 { // the answer to the suggestion, and nothing else
+	if puts := s.store().(ruleStore).putCount(); puts != before+1 { // the answer to the suggestion, and nothing else
 		t.Fatalf("%d settings written", puts-before)
 	}
 	if s.cardSuggestion(ctx, question, i18n.En) != nil {

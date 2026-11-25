@@ -59,7 +59,7 @@ type KBProjectChat struct {
 	State, StateAt string
 }
 
-// KBProjectInput is a project's file, timeline and chats (kb/project_input).
+// KBProjectInput is a project's file, timeline, bounded direction memory and chats (kb/project_input).
 type KBProjectInput struct {
 	Language   string // Instruction language; source fields remain unchanged.
 	Pinned     string
@@ -68,8 +68,34 @@ type KBProjectInput struct {
 	Tags       []string
 	Summary    string
 	Log        []string
+	Memory     *KBProjectMemory
 	Chats      []KBProjectChat
 	Moments    []KBMoment // Moments posts judged to be about it
+}
+
+// KBProjectMemory is the bounded, newest-first direction memory supplied to a project summary rewrite.
+type KBProjectMemory struct {
+	Outcomes  []KBProjectMemoryOutcome
+	Decisions []KBProjectMemoryDecision
+	Pitfalls  []KBProjectMemoryPitfall
+}
+
+type KBProjectMemoryOutcome struct {
+	ID, Text, When, Verification string
+	Links                        []string
+	Unaccepted                   bool
+}
+
+// KBProjectMemoryDecision carries a result only when its durable record ID identifies an outcome in the bounded input.
+type KBProjectMemoryDecision struct {
+	ID, Question, Choice, Reason, Result string
+	When, Verification                   string
+	Unaccepted                           bool
+}
+
+type KBProjectMemoryPitfall struct {
+	Text, When, Verification string
+	Unaccepted               bool
 }
 
 // KBMoment is a Moments post put before a model: who, when, how many comments, its text clipped, and (when judged

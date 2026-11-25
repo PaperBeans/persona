@@ -187,6 +187,16 @@ func goldenProject(t *testing.T, language string) {
 			_ = e.Store.PutSummary(KindProject, p.Slug, "# 示例发布\n\n## 目标\n周五灰度")
 			_ = e.Store.AppendLog(p.Slug, at, "lark-f1", "定了周五灰度")
 			_ = e.Store.AppendLog(p.Slug, at.Add(time.Hour), "lark-f2", "提前到周四")
+			if err := e.AppendProjectMemoryBatch(p.Slug, []ProjectMemoryRecord{
+				{ID: "todo-demo/machine-demo/session-demo/3/1/decision/1", Type: ProjectMemoryDecision,
+					Question: "哪天灰度？", Decision: "周四灰度", Reason: "周五有冻结", RecordedAt: "2026-10-30T03:00:00Z", Verification: ProjectMemoryAgentReported},
+				{ID: "todo-demo/machine-demo/session-demo/3/1/pitfall/1", Type: ProjectMemoryPitfall,
+					Conclusion: "不要只看旧摘要", RecordedAt: "2026-10-30T03:00:00Z", Verification: ProjectMemoryAgentReported},
+				{ID: "todo-demo/machine-demo/session-demo/3/1", Type: ProjectMemoryOutcome,
+					Conclusion: "周四灰度已完成", Links: []string{"https://example.com/pr/42"}, RecordedAt: "2026-10-30T03:00:00Z", Verification: ProjectMemoryAgentReported},
+			}); err != nil {
+				t.Fatal(err)
+			}
 		}
 		if n := e.RefreshProjects(ctx, 5); n != 1 {
 			t.Fatalf("refreshed %d", n)

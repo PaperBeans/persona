@@ -154,8 +154,8 @@ func TestMinutesTimeoutsFailAtLast(t *testing.T) {
 
 	// A new revision starts over: tried at once, with the first try's time.
 	putRecording(t, e, recID, meetingUpload(2, now.Add(-time.Minute), "卡住的一句", "又一句"), now)
-	if r := recordingNow(t, e, recID); r.MinutesState != MinutesPending || r.minutesTimeouts() != 0 || r.minutesWaiting(time.Now()) {
-		t.Fatalf("new revision: %q timeouts %d", r.MinutesState, r.minutesTimeouts())
+	if r := recordingNow(t, e, recID); r.MinutesState != MinutesPending || minutesTimeouts(r) != 0 || minutesWaiting(r, time.Now()) {
+		t.Fatalf("new revision: %q timeouts %d", r.MinutesState, minutesTimeouts(r))
 	}
 	e.WriteMinutes(ctx, 2)
 	if r := recordingNow(t, e, recID); r.MinutesTimeouts != 1 || r.MinutesFailRev != 2 {

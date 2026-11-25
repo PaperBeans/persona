@@ -2,5 +2,6 @@
   "missing": "Still needs: {fields}",
   "list_separator": ", ",
   "no_program": "No program for {platform}",
+  "module_program_off": "personad {name} does not start: its module is switched off in the modules setting",
   "socket_path_too_long": "The socket path {path} is {length} bytes, and a Unix socket on this system takes at most {max}: move Persona’s data directory or this assistant’s directory to a shorter path"
 }

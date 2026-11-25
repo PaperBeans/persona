@@ -8,7 +8,7 @@
 // is over the list or focus is in it (`useActivityDates`), so the order only moves once the person has looked away.
 import { useMemo, useRef } from "react";
 import type { Space } from "./agent-groups";
-import type { RepoMachine, RepoWorktree } from "./agent-repos";
+import type { RepoMachine, RepoWorktree } from "./agent-repos-core";
 import { stateOf } from "./format";
 import type { HerdrMachine, HerdrSpace } from "./herdr-tree";
 import type { TodoTree, TreeAgent } from "./todo-tree";

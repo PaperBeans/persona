@@ -16,7 +16,8 @@ type assistantEntriesCursor struct {
 	ID string    `json:"id"`
 }
 
-func encodeAssistantEntriesCursor(e proto.AssistantEntry) string {
+// EncodeAssistantEntriesCursor encodes an entry's stable publication position as an opaque continuation cursor.
+func EncodeAssistantEntriesCursor(e proto.AssistantEntry) string {
 	b, _ := json.Marshal(assistantEntriesCursor{At: e.At, ID: e.ID})
 	return base64.RawURLEncoding.EncodeToString(b)
 }

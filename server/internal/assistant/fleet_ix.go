@@ -77,6 +77,10 @@ type pending struct {
 	told bool
 	// route: on its way up to the user through its task's supervisors (ask_route.go); nil once it is the user's.
 	route *askRoute
+	// seenTTL and deadlineChanged govern owner-only timed cards whose short countdown starts only
+	// when the user views the card in an app (owner_card_expiry.go).
+	seenTTL         time.Duration
+	deadlineChanged chan struct{}
 }
 
 // resumeGrace is how long a resumable interaction outlives its node: a little longer than hooks keep reconnecting
@@ -129,6 +133,9 @@ func (s *Service) announce(ix proto.Interaction) {
 	}
 	if forget := s.delegable(ix); forget != nil {
 		s.delegate(ix, forget)
+		return
+	}
+	if s.handNonOwnerCard(ix) {
 		return
 	}
 	s.tell(ix)
@@ -328,6 +335,7 @@ func (s *Service) waitInteractionReady(ctx context.Context, ix proto.Interaction
 	// A Just me turn's card, the node's or the manager's own (ask_user, a confirmation): pushed without its content,
 	// never to Lark or a channel (meeting_justme.go).
 	ix.Private = ix.Private || s.justMeNow(ix.MachineID, ix.SessionID)
+	ix, seenTTL := applyOwnerCardDeadline(ix, time.Now().UTC())
 	if ix.ExpiresAt.IsZero() && !persistentOwnerProposal(ix) {
 		ix.ExpiresAt = time.Now().Add(s.notifyTimings().hookTimeout()).UTC()
 	}
@@ -399,7 +407,7 @@ func (s *Service) waitInteractionReady(ctx context.Context, ix proto.Interaction
 	if ix.Kind == proto.IxElicitation && !s.elicitationReachable(ix) {
 		return proto.Resolution{Dismiss: true}, nil
 	}
-	p := &pending{ix: ix, done: make(chan proto.Resolution, 1), prepared: prepared}
+	p := &pending{ix: ix, done: make(chan proto.Resolution, 1), prepared: prepared, seenTTL: seenTTL, deadlineChanged: make(chan struct{}, 1)}
 	var replaced *pending
 	var dropped []*pending
 	for {
@@ -494,29 +502,60 @@ func (s *Service) await(ctx context.Context, p *pending) (proto.Resolution, erro
 	if p.resolved == nil {
 		p.resolved = make(chan struct{})
 	}
+	if p.deadlineChanged == nil {
+		p.deadlineChanged = make(chan struct{}, 1)
+	}
 	resolved := p.resolved
+	deadlineChanged := p.deadlineChanged
 	id := p.ix.ID
 	expiresAt := p.ix.ExpiresAt
 	persistent := persistentOwnerProposal(p.ix)
 	s.fleet.mu.Unlock()
 	var timer *time.Timer
 	var timeout <-chan time.Time
-	if !expiresAt.IsZero() && !persistent {
-		timer = time.NewTimer(time.Until(expiresAt))
-		timeout = timer.C
-		defer timer.Stop()
+	resetTimer := func(at time.Time) {
+		if timer != nil {
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer = nil
+			timeout = nil
+		}
+		if !at.IsZero() && !persistent {
+			timer = time.NewTimer(time.Until(at))
+			timeout = timer.C
+		}
 	}
+	resetTimer(expiresAt)
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 	status := "cancelled"
-	select {
-	case <-resolved:
-		s.finishInteraction(id)
-		return *p.resolution, nil
-	case r := <-p.done:
-		s.finishInteraction(id)
-		return r, nil
-	case <-timeout:
-		status = "expired"
-	case <-ctx.Done():
+awaitLoop:
+	for {
+		select {
+		case <-resolved:
+			s.finishInteraction(id)
+			return *p.resolution, nil
+		case r := <-p.done:
+			s.finishInteraction(id)
+			return r, nil
+		case <-deadlineChanged:
+			s.fleet.mu.Lock()
+			expiresAt = p.ix.ExpiresAt
+			s.fleet.mu.Unlock()
+			resetTimer(expiresAt)
+		case <-timeout:
+			status = "expired"
+			break awaitLoop
+		case <-ctx.Done():
+			break awaitLoop
+		}
 	}
 	// Decide under the same lock as resolve: an answer already claimed must be
 	// persisted before any waiter can record a competing timeout or disconnect.
@@ -565,7 +604,11 @@ func (s *Service) await(ctx context.Context, p *pending) (proto.Resolution, erro
 	}
 	p.claimed, p.graceEnded = true, true
 	p.expired = status == "expired"
+	expiredIx := p.ix
 	s.fleet.mu.Unlock()
+	if status == "expired" && ownerOnlyTimedCard(expiredIx) {
+		s.noteOwnerActionCardExpired(expiredIx)
+	}
 	s.recordEndBy(id, status, endedByOfStatus(status), nil)
 	s.finishInteraction(id)
 	// Why nobody answered it, so that whoever waits on it never takes the end for the user's decline: its time
@@ -950,6 +993,9 @@ func (s *Service) resolveActiveAnswer(ctx context.Context, id string, r proto.Re
 		s.recordEndBy(id, status, by, &told)
 	}
 	s.channelsEnded(p.ix, &told)
+	if ownerOnlyTimedCard(p.ix) {
+		s.clearOwnerActionCardWait(p.ix)
+	}
 	go s.InteractionResolved(context.Background(), InteractionResolved{Interaction: p.ix, Resolution: told, Status: status})
 	if remember {
 		s.keepAlways(p.ix, r) // kept before the hook hears: its next card may follow at once
@@ -1464,6 +1510,7 @@ func (s *Service) keepAlways(ix proto.Interaction, r proto.Resolution) {
 // NodeDetached: a machine's node connection ended (devices.Options.Detached): the cards waiting on it that cannot be
 // claimed again end (resumable ones wait for their hook through the next connection), its list shows it.
 func (s *Service) NodeDetached(machine string) {
+	s.noteNodeOffline(machine, time.Now())
 	if !s.fleetOn() {
 		return
 	}
@@ -1493,9 +1540,32 @@ func (s *Service) cancelMachineInteractions(machineID string) {
 		}
 	}
 	s.fleet.mu.Unlock()
-	s.feishuDetach(ids)
+	s.larkModule().AskDetached(ids, resumeGrace)
 	for _, id := range ids {
 		if s.endPreparedByID(id, "cancelled", "The computer that owned this approval disconnected; nothing changed.") {
+			continue
+		}
+		s.finishInteraction(id)
+	}
+}
+
+// cancelSessionInteractions withdraws leftover approval gates and pending cards
+// for one superseded session on a returning node (node_recovery.go, #14781).
+func (s *Service) cancelSessionInteractions(machineID, sessionID string) {
+	s.fleet.mu.Lock()
+	var ids []string
+	for id, p := range s.fleet.interactions {
+		if p.ix.MachineID == machineID && p.ix.SessionID == sessionID {
+			ids = append(ids, id)
+		}
+	}
+	s.fleet.mu.Unlock()
+	if len(ids) == 0 {
+		return
+	}
+	s.larkModule().AskDetached(ids, resumeGrace)
+	for _, id := range ids {
+		if s.endPreparedByID(id, "cancelled", "The superseded Agent was released during node recovery; nothing changed.") {
 			continue
 		}
 		s.finishInteraction(id)

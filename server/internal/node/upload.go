@@ -2,10 +2,12 @@ package node
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 	"os"
@@ -63,6 +65,13 @@ type upload struct {
 	into     bool
 	shown    string
 	conflict string
+	// want: the hex SHA-256 the bytes must hash to (an Agent's transfer, docs/protocol/file-transfer.md "Agents and the
+	// assistant"), checked before the file gets its name; hash hashes them as they are written.
+	want string
+	hash hash.Hash
+	// unpack: the bytes are a zip of a folder (file.pack), unpacked under the upload's name instead of kept as a file
+	// (transfer_unpack.go).
+	unpack bool
 }
 
 // begin opens an upload into the temp directory (the chat's "Send file").
@@ -103,6 +112,25 @@ func (u *uploads) lookup(id string) *upload {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return u.open[id]
+}
+
+// expect has upload id check that its bytes hash to want (hex SHA-256) before it is given its name.
+func (u *uploads) expect(id, want string) error {
+	want = strings.ToLower(strings.TrimSpace(want))
+	if b, err := hex.DecodeString(want); err != nil || len(b) != sha256.Size {
+		return fmt.Errorf("sha256 must be 64 hex digits")
+	}
+	up := u.lookup(id)
+	if up == nil {
+		return errUploadRetired
+	}
+	up.mu.Lock()
+	defer up.mu.Unlock()
+	if up.written > 0 {
+		return fmt.Errorf("the upload has begun")
+	}
+	up.want, up.hash = want, sha256.New()
+	return nil
 }
 
 // start keeps the entry discoverable while granting exclusive file ownership.
@@ -200,6 +228,9 @@ func (u *uploads) chunk(id string, offset int64, data []byte) (got int64, err er
 	if n != len(data) {
 		return 0, io.ErrShortWrite
 	}
+	if up.hash != nil {
+		up.hash.Write(data)
+	}
 	up.written += int64(n)
 	return up.written, nil
 }
@@ -208,6 +239,13 @@ func (u *uploads) chunk(id string, offset int64, data []byte) (got int64, err er
 // copy's is when the file system cannot take it. With no conflict policy a taken name is refused here already, before
 // any byte is sent.
 func (n *Node) beginInto(dir, cwd, name, conflict string, size, limit int64) (string, error) {
+	return n.beginIntoAs(dir, cwd, name, conflict, size, limit, false)
+}
+
+// beginIntoAs is beginInto for a file, or with unpack for a folder's zip to unpack under name: a taken name is then
+// refused unless conflict says otherwise (keep: "name 2"; replace: merged into the folder of that name, never in
+// place of a file or a link).
+func (n *Node) beginIntoAs(dir, cwd, name, conflict string, size, limit int64, unpack bool) (string, error) {
 	switch conflict {
 	case "", proto.UploadConflictReplace, proto.UploadConflictKeep:
 	default:
@@ -229,8 +267,13 @@ func (n *Node) beginInto(dir, cwd, name, conflict string, size, limit int64) (st
 		return "", err
 	}
 	if st, err := os.Lstat(filepath.Join(real, clean)); err == nil {
-		if conflict == "" || (conflict == proto.UploadConflictReplace && st.IsDir()) {
+		switch {
+		case conflict == "":
 			return "", errExists(clean)
+		case conflict == proto.UploadConflictReplace && !unpack && st.IsDir():
+			return "", errExists(clean)
+		case conflict == proto.UploadConflictReplace && unpack && !st.IsDir(): // a file, or a link (Lstat: never followed)
+			return "", errNotAFolder(clean)
 		}
 	}
 	id, err := n.ups.beginIn(real, clean, size, limit, false)
@@ -239,17 +282,113 @@ func (n *Node) beginInto(dir, cwd, name, conflict string, size, limit int64) (st
 	}
 	if up := n.ups.lookup(id); up != nil {
 		up.mu.Lock()
-		up.into, up.shown, up.conflict = true, shown, conflict
+		up.into, up.shown, up.conflict, up.unpack = true, shown, conflict, unpack
 		up.mu.Unlock()
 	}
 	return id, nil
+}
+
+// errNotAFolder: a folder is to be merged into name, which is a file or a link.
+func errNotAFolder(name string) error {
+	data, _ := json.Marshal(map[string]any{"name": name})
+	return &rpc.Error{Code: proto.CodeExists, Message: fmt.Sprintf("%s already exists and is not a folder", name), Data: data}
+}
+
+// expandTarget is a target path as an upload names it ("~", "~/…" or absolute) with ~ the home, clean.
+func (n *Node) expandTarget(target string) (string, error) {
+	target = strings.TrimSpace(target)
+	if target != "~" && !strings.HasPrefix(target, "~/") && !filepath.IsAbs(target) {
+		return "", fmt.Errorf("the path must be absolute or start with ~/: %q", target)
+	}
+	if n.home == "" {
+		return "", errReadOnly(target)
+	}
+	if target == "~" || strings.HasPrefix(target, "~/") {
+		return filepath.Join(n.home, strings.TrimPrefix(target, "~")), nil
+	}
+	return filepath.Clean(target), nil
+}
+
+// makeWritableDir makes the folder want (absolute) and those missing on the way, only where a client may write:
+// checked before anything is made, with the links of the part that exists resolved (realPath answers the rest as
+// named), so a folder out of bounds is never created, not even empty.
+func (n *Node) makeWritableDir(want string) error {
+	real, err := n.realPath(want)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return explainDenied(want, n.home, err)
+	}
+	if err := n.writable(real); err != nil {
+		return err
+	}
+	return os.MkdirAll(real, 0o755)
+}
+
+// agentStartupPaths are what the shell, the desktop or git run by themselves, relative to the home (folded): an
+// Agent's transfer (dest=path) never writes one, nor a folder holding one, so a file sent to another computer does
+// not become a program that runs there. The write guard already keeps ~/.ssh, ~/Library (LaunchAgents) and Persona's
+// own folders out.
+var agentStartupPaths = []string{
+	".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile", ".zshrc", ".zshenv", ".zprofile", ".zlogin",
+	".zlogout", ".cshrc", ".tcshrc", ".login", ".logout", ".xprofile", ".xinitrc", ".xsession", ".gitconfig",
+	".config/autostart", ".config/systemd", ".config/fish", ".config/environment.d", ".config/git", ".local/share/systemd",
+	".config/powershell", "documents/powershell", "documents/windowspowershell",
+}
+
+// agentWritable refuses an Agent's transfer target (absolute, clean) that is, is in or holds one of
+// agentStartupPaths.
+func (n *Node) agentWritable(target string) error {
+	real, err := n.realPath(target)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return explainDenied(target, n.home, err)
+	}
+	for _, p := range []string{fold(target), fold(real)} {
+		rel, ok := homeRel(p, n.home)
+		if !ok {
+			continue
+		}
+		for _, s := range agentStartupPaths {
+			if rel == s || strings.HasPrefix(rel, s+"/") || strings.HasPrefix(s, rel+"/") {
+				return &rpc.Error{Code: proto.CodeReadOnly, Message: fmt.Sprintf("%s is a file the shell or the desktop runs by itself; files sent between computers do not go there", target)}
+			}
+		}
+	}
+	return nil
+}
+
+// beginAt opens an upload to the path target (dest=path, an Agent's transfer): "~/" or absolute; an existing folder
+// (or one named with a final "/") takes it under name, anything else is its new path. makeDirs makes the folders
+// missing on the way; unpack and conflict are beginIntoAs's.
+func (n *Node) beginAt(target, name, conflict string, size int64, makeDirs, unpack bool) (string, error) {
+	want, err := n.expandTarget(target)
+	if err != nil {
+		return "", err
+	}
+	folder := strings.HasSuffix(strings.TrimSpace(target), "/") || strings.TrimSpace(target) == "~"
+	if real, err := n.realPath(want); err == nil {
+		if st, err := os.Stat(real); err == nil && st.IsDir() {
+			folder = true
+		}
+	}
+	dir, base := want, name
+	if !folder {
+		dir, base = filepath.Dir(want), filepath.Base(want)
+	}
+	if err := n.agentWritable(filepath.Join(dir, cleanName(base))); err != nil {
+		return "", err
+	}
+	if makeDirs {
+		if err := n.makeWritableDir(dir); err != nil {
+			return "", err
+		}
+	}
+	return n.beginIntoAs(dir, "", base, conflict, size, proto.MaxAgentTransferBytes, unpack)
 }
 
 // beginInbox opens an upload into the machine's receive folder (dest=inbox, docs/protocol/file-transfer.md): dir is the
 // folder the hub's config names for this machine ("": proto.DefaultInboxDir), "~/" or absolute, and only a folder
 // the phone may write to (writeguard.go). It is made when missing. The file keeps its name; a taken one gets " 2",
 // " 3"… (conflict keep), so nothing there is ever replaced.
-func (n *Node) beginInbox(dir, name string, size int64) (string, error) {
+func (n *Node) beginInbox(dir, name string, size int64, unpack bool) (string, error) {
 	if strings.TrimSpace(dir) == "" {
 		dir = proto.DefaultInboxDir
 	}
@@ -260,23 +399,15 @@ func (n *Node) beginInbox(dir, name string, size int64) (string, error) {
 	if n.home == "" {
 		return "", errReadOnly(dir)
 	}
-	want := filepath.Clean(dir)
-	if dir == "~" || strings.HasPrefix(dir, "~/") {
-		want = filepath.Join(n.home, strings.TrimPrefix(dir, "~"))
-	}
-	// Checked before anything is made, with the links of the part that exists resolved (realPath answers the rest
-	// as named): a folder out of bounds is never created, not even empty. writableDir checks again once it exists.
-	real, err := n.realPath(want)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return "", explainDenied(want, n.home, err)
-	}
-	if err := n.writable(real); err != nil {
+	want, err := n.expandTarget(dir)
+	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(real, 0o755); err != nil {
+	// writableDir checks again once it exists.
+	if err := n.makeWritableDir(want); err != nil {
 		return "", err
 	}
-	return n.beginInto(want, "", name, proto.UploadConflictKeep, size, proto.MaxInboxUploadBytes)
+	return n.beginIntoAs(want, "", name, proto.UploadConflictKeep, size, proto.MaxInboxUploadBytes, unpack)
 }
 
 // attachmentDir is where a chat attachment is kept (dest=attachment): beside the pictures the chat sent that day
@@ -311,9 +442,21 @@ func (n *Node) beginAttachment(name string, size int64, now time.Time) (string, 
 
 // end checks the size and gives the file its name; it returns the absolute path.
 func (u *uploads) end(id string, now time.Time) (string, int64, error) {
+	f, err := u.endFile(id, now)
+	return f.Path, f.Size, err
+}
+
+// errChecksum: what was written does not hash to what the upload was begun with.
+func errChecksum(got, want string) error {
+	return &rpc.Error{Code: proto.CodeChecksumMismatch, Message: fmt.Sprintf("the bytes written hash to %s, not to the %s sent; nothing was kept", got, want)}
+}
+
+// endFile is end with all the answer says: for an upload begun with sha256, the bytes' hash, checked first (a
+// mismatch keeps nothing); for one begun with unpack, the folder it unpacked into and its files.
+func (u *uploads) endFile(id string, now time.Time) (proto.UploadedFile, error) {
 	up, err := u.start(id)
 	if err != nil {
-		return "", 0, err
+		return proto.UploadedFile{}, err
 	}
 	defer func() {
 		up.mu.Lock()
@@ -323,15 +466,38 @@ func (u *uploads) end(id string, now time.Time) (string, int64, error) {
 		up.discard()
 	}()
 	if err := up.close(); err != nil {
-		return "", 0, err
+		return proto.UploadedFile{}, err
 	}
 	part := up.f.Name()
 	if st, err := os.Stat(part); err != nil || st.Size() != up.size || up.written != up.size {
-		return "", 0, fmt.Errorf("got %d of %d bytes", up.written, up.size)
+		return proto.UploadedFile{}, fmt.Errorf("got %d of %d bytes", up.written, up.size)
 	}
-	if up.into {
-		return u.finishInto(id, up)
+	sum := ""
+	if up.hash != nil {
+		if sum = hex.EncodeToString(up.hash.Sum(nil)); sum != up.want {
+			return proto.UploadedFile{}, errChecksum(sum, up.want)
+		}
 	}
+	var out proto.UploadedFile
+	switch {
+	case up.unpack:
+		out, err = u.finishUnpack(id, up)
+	case up.into:
+		out.Path, out.Size, err = u.finishInto(id, up)
+	default:
+		out.Path, out.Size, err = u.finishTemp(id, up, now)
+	}
+	if err != nil {
+		return proto.UploadedFile{}, err
+	}
+	out.Name, out.SHA256 = filepath.Base(out.Path), sum
+	return out, nil
+}
+
+// finishTemp names an upload into its folder (the temp directory, the node's uploads): name-<time>.ext, or a random
+// prefix.
+func (u *uploads) finishTemp(id string, up *upload, now time.Time) (string, int64, error) {
+	part := up.f.Name()
 	reserve := reserveName
 	if up.random {
 		reserve = reserveRandomName
@@ -579,10 +745,18 @@ func (n *Node) uploadCall(method string, params json.RawMessage) (any, error) {
 		HealthDir string `json:"health_dir"`
 		Dir       string `json:"dir"`      // dest=dir: the folder, ~/ or relative to Cwd; dest=inbox: the receive folder ("": the default)
 		Cwd       string `json:"cwd"`      // dest=dir
-		Conflict  string `json:"conflict"` // dest=dir: proto.UploadConflict*
-		Size      int64  `json:"size"`
-		Offset    int64  `json:"offset"`
-		Data      []byte `json:"data"` // base64 in JSON
+		Conflict  string `json:"conflict"` // dest=dir, dest=path: proto.UploadConflict*
+		// Path: dest=path, where it goes (beginAt); MakeDirs makes the folders missing on the way.
+		Path     string `json:"path"`
+		MakeDirs bool   `json:"make_dirs"`
+		// SHA256: the hex SHA-256 the bytes must hash to, checked at the end before the file gets its name; Unpack:
+		// they are a folder's zip (file.pack) to unpack (dest=path, dir or inbox). Both are echoed, so the manager can
+		// tell a node that does not know them.
+		SHA256 string `json:"sha256"`
+		Unpack bool   `json:"unpack"`
+		Size   int64  `json:"size"`
+		Offset int64  `json:"offset"`
+		Data   []byte `json:"data"` // base64 in JSON
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("bad params: %w", err)
@@ -612,20 +786,38 @@ func (n *Node) uploadCall(method string, params json.RawMessage) (any, error) {
 				}
 			}
 		case proto.UploadDestDir:
-			id, err = n.beginInto(p.Dir, p.Cwd, p.Name, p.Conflict, p.Size, proto.MaxDirUploadBytes)
+			id, err = n.beginIntoAs(p.Dir, p.Cwd, p.Name, p.Conflict, p.Size, proto.MaxDirUploadBytes, p.Unpack)
 		case proto.UploadDestInbox:
-			id, err = n.beginInbox(p.Dir, p.Name, p.Size)
+			id, err = n.beginInbox(p.Dir, p.Name, p.Size, p.Unpack)
+		case proto.UploadDestPath:
+			id, err = n.beginAt(p.Path, p.Name, p.Conflict, p.Size, p.MakeDirs, p.Unpack)
 		case proto.UploadDestAttachment:
 			id, err = n.beginAttachment(p.Name, p.Size, time.Now())
 		default:
 			err = fmt.Errorf("unknown upload destination %q", p.Dest)
 		}
+		if err == nil && p.Unpack && p.Dest != proto.UploadDestDir && p.Dest != proto.UploadDestInbox && p.Dest != proto.UploadDestPath {
+			n.ups.abort(id)
+			err = fmt.Errorf("unpack is for dest=path, dir or inbox, not %q", p.Dest)
+		}
+		if err == nil && p.SHA256 != "" {
+			if err = n.ups.expect(id, p.SHA256); err != nil {
+				n.ups.abort(id)
+			}
+		}
 		if err != nil {
 			return nil, err
 		}
 		res := map[string]any{"upload_id": id, "chunk_bytes": proto.UploadChunkBytes}
-		if p.Dest == proto.UploadDestDir || p.Dest == proto.UploadDestInbox || p.Dest == proto.UploadDestFile || p.Dest == proto.UploadDestAttachment {
+		if p.Dest == proto.UploadDestDir || p.Dest == proto.UploadDestInbox || p.Dest == proto.UploadDestFile || p.Dest == proto.UploadDestAttachment ||
+			p.Dest == proto.UploadDestPath {
 			res["dest"] = p.Dest // the hub checks it: a node from before dest=dir would quietly use the temp directory
+		}
+		if p.SHA256 != "" {
+			res["sha256"] = true // checked at the end: a node from before would keep bytes that do not match
+		}
+		if p.Unpack {
+			res["unpack"] = true // a node from before would keep the zip as a file
 		}
 		if p.Dest == proto.UploadDestHealth && p.HealthDir != "" {
 			res["health_dir"] = p.HealthDir // the same for another manager's health space
@@ -638,12 +830,12 @@ func (n *Node) uploadCall(method string, params json.RawMessage) (any, error) {
 		}
 		return map[string]any{"received": got}, nil
 	case methodFileUploadEnd:
-		path, size, err := n.ups.end(p.UploadID, time.Now())
+		f, err := n.ups.endFile(p.UploadID, time.Now())
 		if err != nil {
 			return nil, err
 		}
-		n.logger.Printf("file from the phone: %s (%d bytes)", path, size)
-		return proto.UploadedFile{Path: path, Name: filepath.Base(path), Size: size}, nil
+		n.logger.Printf("file from the phone: %s (%d bytes)", f.Path, f.Size)
+		return f, nil
 	case methodFileUploadAbort:
 		n.ups.abort(p.UploadID)
 		return map[string]any{"ok": true}, nil

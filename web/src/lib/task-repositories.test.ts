@@ -3,7 +3,7 @@ import { expect, it, vi } from "vitest";
 import fixture from "../../../spec/fixtures/task-repositories/contract.json";
 import linkValidation from "../../../spec/fixtures/task-repositories/link-validation.json";
 import { parseRepository } from "./repository-identity";
-import { cleanRepositoryDraft, createTodoWithRepositories, repositoryDraft, repositoryDuplicateLink, repositoryLinkKindLabel, repositoryLinkTitle, repositoryLinkView, repositoryProviderName, repositoryRelativePath, repositoryRequestContext, repositorySource, validRepositoryAlias, validRepositoryDraft, validRepositoryIdentity, validRepositorySet, validRequestedRef, validTaskRepositoryLink, type RequestedRef, type TaskRepository, type TaskRepositorySet } from "./task-repositories";
+import { classifyTaskRepositoryRole, cleanRepositoryDraft, createTodoWithRepositories, formatRequestedRef, isReferenceRepositoryLink, partitionTaskRepositories, repositoryDraft, repositoryDuplicateLink, repositoryLinkKindLabel, repositoryLinkTitle, repositoryLinkView, repositoryProviderName, repositoryRelativePath, repositoryRequestContext, repositorySource, validRepositoryAlias, validRepositoryDraft, validRepositoryIdentity, validRepositorySet, validRequestedRef, validTaskRepositoryLink, type RequestedRef, type TaskRepository, type TaskRepositorySet } from "./task-repositories";
 import { credentialOwner } from "./api";
 
 it("shares alias, layout and typed-ref fixtures with the manager", () => {
@@ -358,4 +358,84 @@ it("names a source by its live name, else its saved name, never by its raw id", 
   expect(repositoryProviderName("github")).toBe("GitHub");
   expect(repositoryLinkKindLabel("pull_request", [{ kind: "pull_request", label: "MR" }])).toBe("MR");
   expect(repositoryLinkKindLabel("issue", [{ kind: "pull_request", label: "MR" }])).toBeUndefined();
+});
+
+it("classifies and partitions Target Repos before Reference Repos with stable intra-group order", () => {
+  const mkRepo = (repo_id: string, links: TaskRepository["links"]): TaskRepository => ({
+    repo_id,
+    requested_ref: { kind: "default" },
+    source_snapshot: {
+      identity: { ...github, path: `example/${repo_id}`, canonical_url: `https://github.com/example/${repo_id}` },
+      clone_url: `https://github.com/example/${repo_id}`,
+      transport_origin: "canonical_default",
+      catalog_revision: 1,
+    },
+    links,
+  });
+  const refOnlyFirst = mkRepo("docs", [
+    { kind: "issue", number: "1", canonical_url: "https://github.com/example/docs/issues/1", role: "reference" },
+  ]);
+  const noLinks = mkRepo("infra", []);
+  const explicitDelivery = mkRepo("web", [
+    { kind: "pull_request", number: "7", canonical_url: "https://github.com/example/web/pull/7", role: "delivery" },
+  ]);
+  const defaultRole = mkRepo("api", [
+    { kind: "pull_request", number: "9", canonical_url: "https://github.com/example/api/pull/9" },
+  ]);
+  const mixedLinks = mkRepo("sdk", [
+    { kind: "issue", number: "3", canonical_url: "https://github.com/example/sdk/issues/3", role: "reference" },
+    { kind: "pull_request", number: "4", canonical_url: "https://github.com/example/sdk/pull/4", role: "delivery" },
+  ]);
+  const refOnlySecond = mkRepo("handbook", [
+    { kind: "issue", number: "2", canonical_url: "https://github.com/example/handbook/issues/2", role: "reference" },
+    { kind: "pull_request", number: "5", canonical_url: "https://github.com/example/handbook/pull/5", role: "reference" },
+  ]);
+
+  expect(classifyTaskRepositoryRole(refOnlyFirst)).toBe("reference");
+  expect(classifyTaskRepositoryRole(refOnlySecond)).toBe("reference");
+  expect(classifyTaskRepositoryRole(noLinks)).toBe("target");
+  expect(classifyTaskRepositoryRole(explicitDelivery)).toBe("target");
+  expect(classifyTaskRepositoryRole(defaultRole)).toBe("target");
+  expect(classifyTaskRepositoryRole(mixedLinks)).toBe("target");
+  expect(isReferenceRepositoryLink(mixedLinks.links[0])).toBe(true);
+  expect(isReferenceRepositoryLink(mixedLinks.links[1])).toBe(false);
+
+  const partitioned = partitionTaskRepositories([refOnlyFirst, noLinks, explicitDelivery, refOnlySecond, defaultRole, mixedLinks]);
+  expect(partitioned.target.map((r) => r.repo_id)).toEqual(["infra", "web", "api", "sdk"]);
+  expect(partitioned.reference.map((r) => r.repo_id)).toEqual(["docs", "handbook"]);
+  expect(partitioned.ordered.map((e) => `${e.role}:${e.repository.repo_id}`)).toEqual([
+    "target:infra",
+    "target:web",
+    "target:api",
+    "target:sdk",
+    "reference:docs",
+    "reference:handbook",
+  ]);
+});
+
+it("formats non-default requested refs compactly and preserves link roles through draft round-trips", () => {
+  expect(formatRequestedRef(undefined)).toBeUndefined();
+  expect(formatRequestedRef({ kind: "default" })).toBeUndefined();
+  expect(formatRequestedRef({ kind: "branch", value: "release/v2" })).toBe("release/v2");
+  expect(formatRequestedRef({ kind: "tag", value: "v1.2.3" })).toBe("v1.2.3");
+  expect(formatRequestedRef({ kind: "ref", value: "refs/heads/main" })).toBe("refs/heads/main");
+  expect(formatRequestedRef({ kind: "commit", value: "abcdef1234567890abcdef1234567890abcdef12" })).toBe("abcdef1");
+
+  const row = {
+    repo_id: "web",
+    requested_ref: { kind: "default" as const },
+    links: [
+      { kind: "pull_request" as const, number: "7", canonical_url: "https://github.com/example/web/pull/7", role: "delivery" as const },
+      { kind: "issue" as const, number: "8", canonical_url: "https://github.com/example/web/issues/8", role: "reference" as const },
+    ],
+  } as TaskRepository;
+  const draft = repositoryDraft([row]);
+  expect(draft[0].links).toEqual([
+    { kind: "pull_request", number: "7", role: "delivery" },
+    { kind: "issue", number: "8", role: "reference" },
+  ]);
+  expect(cleanRepositoryDraft(draft)[0].links).toEqual([
+    { kind: "pull_request", number: "7", role: "delivery" },
+    { kind: "issue", number: "8", role: "reference" },
+  ]);
 });

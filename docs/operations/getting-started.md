@@ -132,8 +132,8 @@ To add another computer (say, your Mac laptop), do it on the web:
 3. Follow the on-screen instructions on that computer; each system is different:
    - **Linux**: copy the line on screen, open a terminal on that computer, paste, press Return. It installs Persona's background service and connects by itself.
    - **Mac**: you first need the independently installed Persona Link background service. There's no signed package yet, so you build its helpers from source: that needs Xcode and Go. Follow [persona-link-install.md](persona-link-install.md) step by step.
-     Once installed, send the pairing link to that Mac (with **Copy Pairing Link** or **Share…**) and use the optional Electron setup window or the `persona-link pair` command shown there. Link starts at login and does not need a menu bar app.
-   - **Windows**: build two programs yourself, then paste one line in PowerShell ([windows.md](windows.md)). The optional Electron desktop is separate from Link and is not required by its scheduled task.
+     Once installed, send the pairing link to that Mac (with **Copy Pairing Link** or **Share…**) and open it there: Persona Link's menu bar App (the Persona helper at the top right) shows where it connects; click **Pair**. Link starts at login.
+   - **Windows**: build two programs yourself, then paste one line in PowerShell ([windows.md](windows.md)). Persona Link then sits in the taskbar's notification area as the Persona helper: click it to see the connection, pair or reconnect.
 4. Once that computer connects, the same screen asks "A computer wants to join: <name>. Is it yours?". If it's yours click **It's mine**; if you don't recognize it click **No, remove**.
 
 Why confirm again: if someone else gets hold of the pairing link, their computer can connect too. Until you confirm, the computer gets none of your model keys and Persona won't do work on it; if it isn't confirmed within 24 hours, it's removed automatically.

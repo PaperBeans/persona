@@ -1,5 +1,8 @@
 {
   "sidebar": "侧边栏",
+  "extension_required_title": "还没有安装「空间对话」",
+  "extension_required_body": "已有的空间和对话都会保留。安装或启用「空间对话」后，就能在这里管理空间。",
+  "extension_install": "打开扩展设置",
   "actions": "空间操作",
   "refresh": "刷新",
   "history": "以前的对话",

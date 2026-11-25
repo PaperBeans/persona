@@ -11,6 +11,9 @@ FORMER = "jar" + "vis"
 # quadratic on long opaque strings such as embedded installer source or fixture payloads.
 TOKEN = re.compile(r"[A-Za-z0-9_.-]+")
 SHORT_SCHEME = re.compile(r"(?<![A-Za-z0-9_])j://", re.IGNORECASE)
+# Most repository documents cannot contain a compatibility identifier. Search the complete document first, then
+# preserve exact per-line findings only for candidates instead of tokenizing every line of every file.
+CANDIDATE = re.compile(re.escape(FORMER) + r"|(?<![A-Za-z0-9_])j://", re.IGNORECASE)
 EXTERNAL_REPOSITORY = "nwverse/" + FORMER
 
 
@@ -69,6 +72,8 @@ def registered_external_ref(path, reference, registry=None):
 def findings(path, text, registry):
     entry = registry.get(path, {})
     found = [(0, value) for value in sorted(tokens(path) - set(entry.get("path_tokens", ())))]
+    if not CANDIDATE.search(text):
+        return found
     for number, line in enumerate(text.splitlines(), 1):
         found.extend((number, value) for value in sorted(tokens(line) - set(entry.get("tokens", ()))))
     return found
@@ -103,7 +108,7 @@ def repository_findings(root=ROOT, registry=None, paths=None):
             content = file.read_bytes()
             if b"\0" not in content[:8192]:
                 text = content.decode("utf-8", errors="ignore")
-        present[name] = tokens(text)
+        present[name] = tokens(text) if CANDIDATE.search(text) else set()
         present_refs[name] = set(re.findall(r"\bnwverse/[\w.-]+", text))
         found.extend(f"{name}:{line}: unregistered compatibility identifier {value}" for line, value in findings(name, text, registry))
     for name, entry in registry.items():

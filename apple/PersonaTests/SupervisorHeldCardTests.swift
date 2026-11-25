@@ -18,7 +18,7 @@ struct SupervisorHeldCardTests {
 
     /// A card of `kind` on `session` ("" for none), created `minute` minutes past eight, `delegating` when held.
     private func card(_ id: String, session: String, kind: String, minute: Int = 0, delegating: Bool? = nil,
-                      manager: String? = nil) throws -> Interaction {
+                      muted: Bool? = nil, manager: String? = nil, foldedUnder: String? = nil) throws -> Interaction {
         var body: String
         switch kind {
         case "question": body = #","questions":[{"question":"Which port?","options":[{"label":"8080"},{"label":"9090"}]}]"#
@@ -28,7 +28,9 @@ struct SupervisorHeldCardTests {
         default: body = #","tool_name":"Bash","summary":"rmdir build""#
         }
         if let delegating { body += #","delegating":\#(delegating)"# }
+        if let muted { body += #","muted":\#(muted)"# }
         if let manager { body += #","manager":"\#(manager)""# }
+        if let foldedUnder { body += #","folded_under":"\#(foldedUnder)""# }
         let created = String(format: "2026-11-10T08:%02d:00Z", minute)
         return try JSON.decoder.decode(Interaction.self, from: Data(
             #"{"id":"\#(id)","machine_id":"studio","session_id":"\#(session)","kind":"\#(kind)","created_at":"\#(created)"\#(body)}"#.utf8))
@@ -132,5 +134,185 @@ struct SupervisorHeldCardTests {
         #expect(!NotificationActions.answerable("held", among: cards))
         #expect(NotificationActions.answerable("open", among: cards))
         #expect(NotificationActions.answerable("unknown", among: cards), "a card the app has not loaded is left to the hub")
+    }
+
+    @Test func voiceBarLeavesOutHeldCardsAndPlanFeedback() throws {
+        let heldPlan = try card("held-plan", session: "a", kind: "plan", delegating: true)
+        let openPlan = try card("open-plan", session: "a", kind: "plan", minute: 1)
+        let heldPerm = try card("held-perm", session: "a", kind: "permission", delegating: true)
+        let askingQuestion = try card("asking-q", session: "a", kind: "question", minute: 2, delegating: true)
+        let idle = try session("a", state: "idle")
+        let refused = VoiceRun(id: "voice-1", task: "skip step three", state: .refused, msgIDs: ["voice-1"], baseSeq: 1,
+                               startedAt: nil, code: "dialog_open", message: nil, draft: nil, clearable: nil)
+
+        // Held cards are neither announced as pending nor offered as Send Back as Feedback.
+        #expect(VoiceBar.answerableCards([heldPlan, openPlan, heldPerm, askingQuestion]).map(\.id) == ["open-plan", "asking-q"])
+        #expect(VoiceBar.returnablePlan(id: "held-plan", in: [heldPlan, openPlan]) == nil)
+        #expect(VoiceBar.returnablePlan(id: "open-plan", in: [heldPlan, openPlan])?.id == "open-plan")
+
+        let refusedHeldOnly = VoiceBarLine.make(phase: .live(.listening), link: .live, runs: [refused], session: idle,
+                                                cards: [heldPlan], muted: false, label: "Claude")
+        #expect(refusedHeldOnly.kind == .notSent)
+        #expect(refusedHeldOnly.actions == [.dismiss(run: "voice-1")], "held plan is never offered for feedback")
+
+        let refusedMixed = VoiceBarLine.make(phase: .live(.listening), link: .live, runs: [refused], session: idle,
+                                             cards: [openPlan, heldPlan], muted: false, label: "Claude")
+        #expect(refusedMixed.actions == [.returnPlan(card: "open-plan", feedback: "skip step three", run: "voice-1"), .dismiss(run: "voice-1")])
+
+        let steadyHeldOnly = VoiceBarLine.make(phase: .live(.listening), link: .live, runs: [], session: idle,
+                                               cards: [heldPlan, heldPerm], muted: false, asking: "held-plan", label: "Claude")
+        #expect(steadyHeldOnly.kind == .ready, "held cards do not raise needsTap or asking")
+        let steadyHeldNoAsk = VoiceBarLine.make(phase: .live(.listening), link: .live, runs: [], session: try session("a", state: "working"),
+                                                cards: [heldPlan, heldPerm], muted: false, label: "Claude")
+        #expect(steadyHeldNoAsk.kind == .working, "held cards do not override a working conversation with needsTap")
+
+        // A delegating question stays listed and answerable (D11).
+        let steadyQuestion = VoiceBarLine.make(phase: .live(.listening), link: .live, runs: [], session: idle,
+                                               cards: [heldPerm, askingQuestion], muted: false, asking: "asking-q", label: "Claude")
+        #expect(steadyQuestion.kind == .asking)
+    }
+
+    #if os(iOS)
+    private final class ScriptedUrgentOwner: UrgentCallSpeech {
+        var lines: [String]
+        var said: [String] = []
+        init(_ lines: [String]) { self.lines = lines }
+        func say(_ text: String) async { said.append(text) }
+        func listen() async -> String? { lines.isEmpty ? nil : lines.removeFirst() }
+        func stop() {}
+        func stopListening() {}
+        var canHear: Bool { true }
+    }
+
+    @Test func urgentCallLeavesOutAndNeverResolvesAHeldCard() async throws {
+        let heldPerm = try card("held-perm", session: "a", kind: "permission", delegating: true)
+        let heldPlan = try card("held-plan", session: "a", kind: "plan", minute: 1, delegating: true)
+        let heldScreen = try card("held-screen", session: "a", kind: "screen", minute: 2, delegating: true)
+        let openPlan = try card("open-plan", session: "a", kind: "plan", minute: 3)
+        let delegatingQuestion = try card("q-del", session: "a", kind: "question", minute: 4, delegating: true)
+        let all = [heldPerm, heldPlan, heldScreen, openPlan, delegatingQuestion]
+
+        #expect(UrgentCallSession.answerableCard(id: "held-perm", group: "", in: all) == nil)
+        #expect(UrgentCallSession.answerableCard(id: "held-plan", group: "", in: all) == nil)
+        #expect(UrgentCallSession.answerableCard(id: "held-screen", group: "", in: all) == nil)
+        #expect(UrgentCallSession.answerableCard(id: "open-plan", group: "", in: all)?.id == "open-plan")
+        #expect(UrgentCallSession.answerableCard(id: "q-del", group: "", in: all)?.id == "q-del")
+
+        let ring = UrgentCallRing(id: "call_held", title: "Supervisor task", manager: "", conversationID: "a", attempt: 1, group: "")
+
+        // Even if initialized with a held plan card, the session drops it, never prompts approval, and never resolves it.
+        let plainIntro = UrgentCallSession(ring: ring, voice: ScriptedUrgentOwner([]), card: nil,
+                                           resolve: { _, _ in }, ended: { _ in }).introduction()
+        let tapSession = UrgentCallSession(ring: ring, voice: ScriptedUrgentOwner([]), card: heldPlan,
+                                           resolve: { _, _ in }, ended: { _ in })
+        #expect(tapSession.card == nil)
+        #expect(tapSession.introduction() == plainIntro, "held plan card never adds an approval prompt to the call introduction")
+        tapSession.decide(allow: true)
+        #expect(tapSession.pending == nil)
+        tapSession.hangUp()
+
+        var heldResolved: [String] = []
+        let heldVoice = ScriptedUrgentOwner(["approve", "confirm", "hang up"])
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            let session = UrgentCallSession(ring: ring, voice: heldVoice, card: heldPlan,
+                                            resolve: { ix, _ in heldResolved.append(ix.id) },
+                                            ended: { _ in done.resume() })
+            #expect(session.card == nil)
+            session.start()
+        }
+        #expect(heldResolved.isEmpty)
+
+        // Contrast control: an open plan card is kept and resolved on confirmed approval.
+        var openResolved: [(String, Resolution)] = []
+        let openVoice = ScriptedUrgentOwner(["approve", "confirm", "hang up"])
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            let session = UrgentCallSession(ring: ring, voice: openVoice, card: openPlan,
+                                            resolve: { ix, r in openResolved.append((ix.id, r)) },
+                                            ended: { _ in done.resume() })
+            #expect(session.card?.id == "open-plan")
+            #expect(session.introduction() != plainIntro)
+            session.start()
+        }
+        #expect(openResolved.map(\.0) == ["open-plan"])
+        #expect(openResolved.map(\.1) == [Resolution(approve: true, mode: "acceptEdits")])
+    }
+    #endif
+
+    @Test func watchPetStatusLeavesOutHeldCardsAndHeldOnlySessions() throws {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        let noon = Date(timeIntervalSince1970: 12 * 3600)
+        func pet(_ sessions: [Session], _ cards: [Interaction]) -> WatchPetStatus {
+            WatchPet.status(sessions: sessions, interactions: cards, unreachable: false, partlyUnreachable: false,
+                            now: noon, calendar: utc)
+        }
+
+        let t = try session("t")
+        let heldScreen = try card("ix-screen", session: "t", kind: "screen", delegating: true)
+        let heldPerm = try card("ix-perm", session: "t", kind: "permission", minute: 1, delegating: true)
+        let heldPlan = try card("ix-plan", session: "t", kind: "plan", minute: 2, delegating: true)
+        // Only supervisor-held cards: not needs_you, treated as working under the supervisor (also through WatchInteractions.forPet).
+        #expect(pet([t], [heldScreen]) == WatchPetStatus(state: .working, count: 1))
+        #expect(pet([t], [heldPlan, heldPerm]) == WatchPetStatus(state: .working, count: 1))
+        #expect(pet([t], WatchInteractions.forPet([heldScreen])) == WatchPetStatus(state: .working, count: 1))
+
+        // A folded child's or side's held card keeps its waiting parent out of needs_you too.
+        let parent = try session("lead")
+        let childHeld = try card("ix-child-held", session: "worker", kind: "permission", delegating: true, foldedUnder: "lead")
+        #expect(pet([parent], [childHeld]) == WatchPetStatus(state: .working, count: 1))
+
+        // Sessionless held card or idle session with a held card: stays idle, never needs_you.
+        #expect(pet([], [try card("ix-none", session: "", kind: "permission", delegating: true)]) == WatchPetStatus(state: .idle))
+        #expect(pet([try session("i", state: "idle")], [try card("ix-idle", session: "i", kind: "plan", delegating: true)])
+                == WatchPetStatus(state: .idle))
+
+        // Handed to the user (`delegating: false`), it is needs_you again.
+        #expect(pet([t], [try card("ix-screen", session: "t", kind: "screen", delegating: false)])
+                == WatchPetStatus(state: .needsYou, count: 1))
+
+        // Mixed held + open user card (or non-muted delegating question) still counts the session as needs_you once,
+        // both directly and through `WatchInteractions.forPet` / `WatchGroupRefresh.apply` (while keeping the
+        // delegating question out of `leavingMuted` and the visible watch list).
+        let openQ = try card("ix-open", session: "t", kind: "question", minute: 3)
+        #expect(pet([t], [heldPerm, openQ]) == WatchPetStatus(state: .needsYou, count: 1))
+        let delegatingQ = try card("ix-del-q", session: "t", kind: "question", minute: 4, delegating: true)
+        #expect(pet([t], [heldPerm, delegatingQ]) == WatchPetStatus(state: .needsYou, count: 1))
+        #expect(WatchInteractions.leavingMuted([heldPerm, delegatingQ]).isEmpty)
+        #expect(WatchInteractions.forPet([heldPerm, delegatingQ]).map(\.id) == ["ix-perm", "ix-del-q"])
+        #expect(pet([t], WatchInteractions.forPet([heldPerm, delegatingQ])) == WatchPetStatus(state: .needsYou, count: 1))
+
+        // Production watch pipeline (`WatchGroupRefresh.apply` -> visible wrist list + `WatchPet.status`):
+        // a non-muted delegating question stays off the wrist list and never buzzes, yet keeps the session needs_you.
+        let appliedMixed = WatchGroupRefresh.apply(sessions: [t], interactions: [heldPerm, delegatingQ])
+        #expect(appliedMixed.interactions.isEmpty)
+        #expect(WatchGroupRefresh.newHapticUids(seen: [], current: appliedMixed.interactions).isEmpty)
+        #expect(appliedMixed.petInteractions.map(\.id) == ["ix-perm", "ix-del-q"])
+        #expect(pet(appliedMixed.sessions, appliedMixed.petInteractions) == WatchPetStatus(state: .needsYou, count: 1))
+
+        // Contrast: a muted delegating question is excluded from both `leavingMuted` and `forPet`, so a session with
+        // a supervisor-held card plus only a muted delegating question stays held-only (`.working`); without a held
+        // card the `needs_you` session itself is not misclassified as held-only.
+        let mutedDelegatingQ = try card("ix-muted-del-q", session: "t", kind: "question", minute: 5, delegating: true, muted: true)
+        #expect(WatchInteractions.leavingMuted([heldPerm, mutedDelegatingQ]).isEmpty)
+        #expect(WatchInteractions.forPet([heldPerm, mutedDelegatingQ]).map(\.id) == ["ix-perm"])
+        #expect(pet([t], WatchInteractions.forPet([heldPerm, mutedDelegatingQ])) == WatchPetStatus(state: .working, count: 1))
+        let appliedMutedDelegating = WatchGroupRefresh.apply(sessions: [t], interactions: [heldPerm, mutedDelegatingQ])
+        #expect(appliedMutedDelegating.interactions.isEmpty)
+        #expect(pet(appliedMutedDelegating.sessions, appliedMutedDelegating.petInteractions) == WatchPetStatus(state: .working, count: 1))
+        #expect(WatchInteractions.forPet([mutedDelegatingQ]).isEmpty)
+        #expect(pet([t], WatchInteractions.forPet([mutedDelegatingQ])) == WatchPetStatus(state: .needsYou, count: 1))
+
+        // Contrast through `WatchGroupRefresh.apply`: open user card is visible on the wrist and keeps pet needs_you,
+        // while a held-only session leaves the wrist list empty and reads as working under its supervisor.
+        let appliedOpen = WatchGroupRefresh.apply(sessions: [t], interactions: [heldPerm, openQ])
+        #expect(appliedOpen.interactions.map(\.id) == ["ix-open"])
+        #expect(pet(appliedOpen.sessions, appliedOpen.petInteractions) == WatchPetStatus(state: .needsYou, count: 1))
+        let appliedHeldOnly = WatchGroupRefresh.apply(sessions: [t], interactions: [heldPerm])
+        #expect(appliedHeldOnly.interactions.isEmpty)
+        #expect(pet(appliedHeldOnly.sessions, appliedHeldOnly.petInteractions) == WatchPetStatus(state: .working, count: 1))
+
+        // Another needs_you session with no card read stays counted, while the held-only session is excluded.
+        let other = try session("o")
+        #expect(pet([t, other], [heldScreen]) == WatchPetStatus(state: .needsYou, count: 1))
     }
 }

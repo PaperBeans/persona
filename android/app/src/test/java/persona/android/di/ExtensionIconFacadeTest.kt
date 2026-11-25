@@ -18,5 +18,7 @@ class ExtensionIconFacadeTest {
             facade.contains("override fun iconPath(value: String) = runCatching { api().iconPath(value) }.getOrNull()"))
         assertTrue("The admin link must use the current connection's hub address",
             facade.contains("override fun adminNetworkUrl(id: String) = runCatching { api().adminNetworkUrl(id) }.getOrNull()"))
+        assertTrue("Immediate fixed-field saves must forward preserve_entries to the current connection",
+            facade.contains("override suspend fun setConfigPreservingEntries(id: String, config: JsonObject) = api().setConfigPreservingEntries(id, config)"))
     }
 }

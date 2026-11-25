@@ -371,6 +371,7 @@ func qualifyWorkspace(machine string, w proto.Workspace) proto.Workspace {
 	}
 	sum := sha256.Sum256([]byte(identity))
 	w.ID, w.MachineID = "ws_"+hex.EncodeToString(sum[:12]), machine
+	w.HiddenByDirectory = false
 	return w
 }
 
@@ -613,6 +614,20 @@ func (s *Service) getWorkspaces(w http.ResponseWriter, r *http.Request) {
 		}
 		if !found {
 			out = append(out, proto.Workspace{ID: card.WorkspaceID, MachineID: card.MachineID, Source: card.Source, SourceID: card.SourceID, Title: card.Title, Cwd: card.Cwd, Branch: card.Branch})
+		}
+	}
+	// Decorate hidden_by_directory on the response only (after snapshots are persisted), so enabling, disabling or
+	// removing a hidden_agent_dirs rule takes effect immediately without leaving stale flags in workspace_snapshots.
+	if s.agentDirs != nil {
+		matchers := map[string]func(string) bool{}
+		for i := range out {
+			mid := out[i].MachineID
+			match, seen := matchers[mid]
+			if !seen {
+				match = s.workspaceDirHidden(r.Context(), mid)
+				matchers[mid] = match
+			}
+			out[i].HiddenByDirectory = match != nil && match(out[i].Cwd)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

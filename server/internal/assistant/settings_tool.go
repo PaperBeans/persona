@@ -99,6 +99,7 @@ func (s *Service) allOwnSettings() []ownSetting {
 	getSet := []string{"get", "set"}
 	return []ownSetting{
 		s.hiddenDirSetting(),
+		s.blockedHerdrSessionsSetting(),
 		{Setting: Setting{Key: modulesKey, Title: "Built-in modules", Actions: getSet,
 			About: "built-in feature modules switched off; a change applies when the manager next starts, not to the running process",
 			Value: `{"disabled": ["<module id>", …]}; null or an empty list restores every compiled-in module`},
@@ -195,6 +196,13 @@ func (s *Service) allOwnSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.mainBackgroundFolded(ctx)), nil },
 			set: s.setMainBackgroundFolded},
+		{Setting: Setting{Key: "assistant.fold_routine_relay_replies", Title: "Fold routine relay replies", Actions: getSet,
+			About: "off by default. When background rounds are folded in the main chat, keep routine replies from other conversations in their expandable round and skip their ordinary finished notification. Explicit owner notifications and errors retain their normal behavior.",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) {
+				return fmt.Sprint(s.settings(ctx).foldRoutineRelayReplies()), nil
+			},
+			set: s.setFoldRoutineRelayReplies},
 		{Setting: Setting{Key: "assistant.main_compact_window", Title: "Main chat compaction window", Actions: getSet,
 			About: "400000 (the default): the main conversation is compacted at about this many tokens (and sent /compact when " +
 				"idle at 75% of it) instead of its model's whole window, when it runs on a launcher Persona manages that declares " +
@@ -337,6 +345,15 @@ func (s *Service) allOwnSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.inboxSignalsOn(ctx)), nil },
 			set: s.setInboxSignals},
+		{Setting: Setting{Key: "assistant.auto_supervision_messages", Title: "Automatic supervision messages", Actions: getSet,
+			About: "on (the default): the assistant sends its follow-up messages about supervised tasks on its own (they wake the main " +
+				"conversation, a leader or the background supervisor, and each costs a model turn). off: it sends none, queues none and " +
+				"schedules none, and what was waiting is withdrawn once. Not affected: the task ledger and states, the user's own " +
+				"questions and task_review, approval and permission cards, and the safety checks. Turning it back on takes only what " +
+				"happens afterwards. Applies at once",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.autoSupervisionOn(ctx)), nil },
+			set: s.setAutoSupervisionMessages},
 		{Setting: Setting{Key: "inbox.todo_forward.enabled", Title: "Auto-forward PR/Issue Inbox events to the bound to-do's Agent", Actions: getSet,
 			About: "off (the default): Inbox ingestion performs zero automatic forwards to task Agents. on: incoming Inbox items " +
 				"with an exact canonical GitHub PR or Issue URL bound to an open to-do's pr_url or todo_repositories are " +
@@ -384,11 +401,53 @@ func (s *Service) allOwnSettings() []ownSetting {
 				return fmt.Sprint(backgroundKeepsContext(s.settings(ctx))), nil
 			},
 			set: s.setBackgroundSupervisorKeepsContext},
+		{Setting: Setting{Key: "assistant.chat_reply_relay", Title: "Tell chats where it wrote as me about new replies", Actions: getSet,
+			About: "off (the default): nothing is passed on. on: after a conversation wrote into a Lark chat as the user, other " +
+				"people's new messages in that chat are told to that conversation (once, at most every 10 minutes per chat), for all " +
+				"chats, not one by one. Turning it off drops those still waiting in a conversation's queue",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) {
+				return fmt.Sprint(chatReplyRelayOn(s.settings(ctx))), nil
+			},
+			set: s.setChatReplyRelay},
 		{Setting: Setting{Key: "assistant.launcher", Title: "Persona 的启动器", Actions: getSet,
 			About: "which launcher (model) new Persona conversations start with by default",
 			Value: "a launcher name from this setting's get"},
 			get: s.getLauncher,
 			set: s.setLauncher},
+		{Setting: Setting{Key: "assistant.limit_fallbacks", Title: "Backup launchers for a usage limit", Actions: getSet,
+			About: "[] (the default): a conversation a subscription's usage limit stops waits for the reset, and the main chat, the " +
+				"leaders and the background supervisor are continued a minute after it, as before. A list of the assistant's " +
+				"launchers, first choice first: when the limit stops the main chat, a leader, the background supervisor or a " +
+				"side chat answering the owner, and it resets 10 minutes or more later, the conversation moves to the first " +
+				"listed launcher it is not on that is not itself failing (launcher health) and that its role can run on, with " +
+				"the usual summary of what went before, and goes on with the work there; a minute after the reset it moves " +
+				"back to the launcher it was on, unless someone switched it meanwhile. Coding Agents and spaces are never " +
+				"moved; a backup that meets its own limit waits for its reset. Once moved, a conversation keeps the launcher " +
+				"and model it was moved to, as after any switch: a later change of the main chat's model setting applies to " +
+				"the next new main chat, and the chat's own model menu still changes it",
+			Value: "a JSON list of launcher names from this setting's get, at most 8; [] turns it off"},
+			get: s.getLimitFallbacks,
+			set: s.setLimitFallbacks},
+		{Setting: Setting{Key: "assistant.machine_fallbacks", Title: "Backup computers when offline", Actions: getSet,
+			About: "[] (the default): automatic cross-machine failover is off; the main chat, direction leaders and default " +
+				"scheduled routines stay on their configured computer while it is offline. An ordered list of non-work computer " +
+				"IDs, first choice first: when the computer hosting the main chat or an active direction leader stays offline " +
+				"longer than assistant.machine_fallback_minutes, Persona moves it to the first listed computer that is online, " +
+				"not a work computer, and has a healthy launcher supporting supervision policy, carrying over persisted history " +
+				"and summary and draining queued messages. Unbound default scheduled routines also fall back to the first " +
+				"eligible online backup computer. Manual conversation changes are never overwritten (epoch fenced)",
+			Value: "a JSON list of non-work computer IDs from this setting's get, at most 8; [] turns it off"},
+			get: s.getMachineFallbacks,
+			set: s.setMachineFallbacks},
+		{Setting: Setting{Key: "assistant.machine_fallback_minutes", Title: "Offline minutes before computer failover", Actions: getSet,
+			About: "how many minutes a computer must stay offline before assistant.machine_fallbacks moves the main chat, " +
+				"direction leaders or unbound default scheduled routines to a backup computer; 10 minutes by default",
+			Value: "a whole number of minutes, 1–1440"},
+			get: func(ctx context.Context) (string, error) {
+				return fmt.Sprint(machineFallbackMinutesOf(s.settings(ctx))), nil
+			},
+			set: s.setMachineFallbackMinutes},
 		{Setting: Setting{Key: "model_profiles.tiers", Title: "Agent presets (the model profiles' tiers)", Actions: getSet,
 			About: "the Agent presets: each model profile's named tiers, what agent_start / task_plan's tier and the New Agent " +
 				"form's presets run on (launcher, model, effort) and when to use each; get lists every profile's, set adds, " +
@@ -407,6 +466,13 @@ func (s *Service) allOwnSettings() []ownSetting {
 			Value: "the full AdmissionSettings JSON object from get; a nil pointer keeps the code default, every set line must be positive"},
 			get: s.getAdmission,
 			set: s.setAdmission},
+		// Dashboards (#15017, pages_tool.go): read only. The owner turns it on in Settings › Assistant; a change from
+		// here would be a phone card the card ledger counts as a bug.
+		{Setting: Setting{Key: dashboardsSettingKey, Title: i18n.T(i18n.Default, "assistant-settings_tool.title_dashboards"), Actions: []string{"get"},
+			About: "whether conversations may draft dashboards with the page tool (pages the owner keeps in the sidebar with Keep on a preview card); " +
+				"off by default; only the owner changes it, in Settings › Assistant",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.dashboardsOn(ctx)), nil }},
 		s.trustSetting(),
 		s.urgentRulesSetting(), // urgent_call_rules.go
 	}
@@ -628,16 +694,23 @@ var settingTitles = map[string]string{modulesKey: "title_modules", standingAutho
 	"assistant.idle_release_minutes":      "title_idle_release_minutes",
 	readonlyModeKey:                       "title_readonly_mode",
 	"assistant.task_workspace_preference": "title_task_workspace_preference",
-	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher",
+	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher", "assistant.limit_fallbacks": "title_limit_fallbacks",
+	"assistant.machine_fallbacks": "title_machine_fallbacks", "assistant.machine_fallback_minutes": "title_machine_fallback_minutes",
 	"assistant.recording_days": "title_recording_days", "assistant.delivery_gate": "title_delivery_gate", "assistant.done_needs_delivery": "title_done_needs_delivery",
-	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders", "assistant.briefing_waits": "title_briefing_waits", "assistant.background_supervisor_keeps_context": "title_background_supervisor_keeps_context",
-	"assistant.interject_background": "title_interject_background", "assistant.claude_interactive": "title_claude_interactive", "assistant.agent_tasks": "title_agent_tasks", "assistant.task_lessons": "title_task_lessons", "assistant.close_ended_terminals": "title_close_ended_terminals", "assistant.inbox_signals": "title_inbox_signals", "inbox.todo_forward.enabled": "title_inbox_todo_forward", "assistant.pr_events_route_to_agent": "title_pr_events_route_to_agent", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "assistant.supervision_batch_minutes": "title_supervision_batch_minutes", "model_profiles.tiers": "title_model_tiers",
+	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders", "assistant.briefing_waits": "title_briefing_waits", "assistant.background_supervisor_keeps_context": "title_background_supervisor_keeps_context", "assistant.chat_reply_relay": "title_chat_reply_relay",
+	"assistant.interject_background": "title_interject_background", "assistant.claude_interactive": "title_claude_interactive", "assistant.agent_tasks": "title_agent_tasks", "assistant.task_lessons": "title_task_lessons", "assistant.close_ended_terminals": "title_close_ended_terminals", "assistant.inbox_signals": "title_inbox_signals", "assistant.auto_supervision_messages": "title_auto_supervision_messages", "inbox.todo_forward.enabled": "title_inbox_todo_forward", "assistant.pr_events_route_to_agent": "title_pr_events_route_to_agent", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "assistant.supervision_batch_minutes": "title_supervision_batch_minutes", "model_profiles.tiers": "title_model_tiers",
 	"assistant.load_all_tools":                "title_load_all_tools",
 	"assistant.meeting_transcription_default": "title_meeting_transcription_default",
 	"assistant.meeting_attendance_default":    "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",
 	"assistant.kb_topics": "title_kb_topics", "assistant.main_background_folded": "title_main_background_folded",
-	"assistant.main_compact_window": "title_main_compact_window",
-	"assistant.recent_task_chats":   "title_recent_task_chats", admissionSettingsKey: "title_admission", trustSetting: "title_task_trust"}
+	"assistant.fold_routine_relay_replies": "title_fold_routine_relay_replies",
+	"assistant.main_compact_window":        "title_main_compact_window",
+	"assistant.recent_task_chats":          "title_recent_task_chats", admissionSettingsKey: "title_admission", trustSetting: "title_task_trust",
+	dashboardsSettingKey: "title_dashboards"}
+
+// dashboardsSettingKey is the Dashboards switch as persona_settings names it (Settings.Dashboards, `dashboards` in
+// GET/PUT /api/v1/assistant).
+const dashboardsSettingKey = "assistant.dashboards"
 
 // clipped is a value as the card shows it, in l.
 func clipped(l i18n.Lang, s string) string {
@@ -879,6 +952,12 @@ func (s *Service) setMainBackgroundFolded(ctx context.Context, v json.RawMessage
 		return i18n.T(l, "assistant-settings_tool.change_main_background_folded", i18n.Args{"before": before, "after": after})
 	}, func(v *Settings) **bool { return &v.MainBackgroundFolded },
 		"assistant.main_background_folded is %v; the apps redraw the main conversation with it.")
+}
+
+func (s *Service) setFoldRoutineRelayReplies(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	return s.setBoolSetting(ctx, v, func(ctx context.Context) bool { return s.settings(ctx).foldRoutineRelayReplies() }, "assistant.fold_routine_relay_replies is unchanged", func(l i18n.Lang, before, after string) string {
+		return i18n.T(l, "assistant-settings_tool.change_fold_routine_relay_replies", i18n.Args{"before": before, "after": after})
+	}, func(v *Settings) **bool { return &v.FoldRoutineRelayReplies }, "assistant.fold_routine_relay_replies is %v for routine reports in the main conversation.")
 }
 
 func (s *Service) setRecentTaskChats(ctx context.Context, v json.RawMessage) (*ownChange, error) {
@@ -1133,6 +1212,13 @@ func (s *Service) setInboxSignals(ctx context.Context, v json.RawMessage) (*ownC
 		"assistant.inbox_signals is %v from the next new Inbox message on (signals already waiting go out only while it is on).")
 }
 
+func (s *Service) setAutoSupervisionMessages(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	return s.setBoolSetting(ctx, v, s.autoSupervisionOn, "assistant.auto_supervision_messages is unchanged", func(l i18n.Lang, before, after string) string {
+		return i18n.T(l, "assistant-settings_tool.change_auto_supervision_messages", i18n.Args{"before": before, "after": after})
+	}, func(v *Settings) **bool { return &v.AutoSupervisionMessages },
+		"assistant.auto_supervision_messages is %v now (settingsChanged applies the switch at once; turning it off withdraws what waited, turning it on replays nothing).")
+}
+
 func (s *Service) setInboxTodoForward(ctx context.Context, v json.RawMessage) (*ownChange, error) {
 	return s.setBoolSetting(ctx, v, s.inboxTodoForwardOn, "inbox.todo_forward.enabled is unchanged", func(l i18n.Lang, before, after string) string {
 		return i18n.T(l, "assistant-settings_tool.change_inbox_todo_forward", i18n.Args{"before": before, "after": after})
@@ -1162,6 +1248,26 @@ func (s *Service) setBackgroundSupervisorKeepsContext(ctx context.Context, v jso
 		}, func(v *Settings) **bool { return &v.BackgroundSupervisorKeepsContext },
 		"assistant.background_supervisor_keeps_context is %v from the background supervisor's next round (one running now "+
 			"finishes as it is).")
+}
+
+func (s *Service) setChatReplyRelay(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	ch, err := s.setBoolSetting(ctx, v, func(ctx context.Context) bool { return chatReplyRelayOn(s.settings(ctx)) },
+		"assistant.chat_reply_relay is unchanged", func(l i18n.Lang, before, after string) string {
+			return i18n.T(l, "assistant-settings_tool.change_chat_reply_relay", i18n.Args{"before": before, "after": after})
+		}, func(v *Settings) **bool { return &v.ChatReplyRelay },
+		"assistant.chat_reply_relay is %v from now on.")
+	if err != nil || ch == nil || ch.apply == nil {
+		return ch, err
+	}
+	apply := ch.apply
+	ch.apply = func(ctx context.Context) (string, error) {
+		out, err := apply(ctx)
+		if err == nil && !chatReplyRelayOn(s.settings(ctx)) {
+			s.dropQueuedChatReplies(ctx)
+		}
+		return out, err
+	}
+	return ch, nil
 }
 
 // launchers are the launchers of the assistant's machine, as the apps list them.

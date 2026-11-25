@@ -84,7 +84,7 @@ type sessionState struct {
 	DesktopPendingEffort string `json:"desktop_pending_effort,omitempty"`
 	// Tasks: the assistant conversation's background tasks and monitors running right now (node/assistant.go).
 	Tasks []string `json:"tasks,omitempty"`
-	// Compaction: the last compaction the user asked for (assistant_compact.go).
+	// Compaction: the latest reported manual or idle compaction (assistant_compact.go).
 	Compaction *proto.Compaction `json:"compaction,omitempty"`
 	// RecoveryPending survives restarts until an input carrying this checkpoint is delivered.
 	RecoveryPending     string `json:"recovery_pending,omitempty"`
@@ -127,10 +127,17 @@ type sessionState struct {
 	// extension's resume of a conversation its computer does not list passes on such a record alone, with no transcript
 	// (resumeOutsideHealth, #10941).
 	EngineRuntime string `json:"engine_runtime,omitempty"`
+	// RemoteAgent latches true when the session has been associated with a remote assistant runtime
+	// (caps.assistant && caps.remote_agent). Once latched, writes always require fresh confirmation across
+	// disconnects, ownership changes, and restarts.
+	RemoteAgent bool `json:"remote_agent,omitempty"`
 	// RoundForkOf names the base background supervisor session when a supervision round's process forked a separate
 	// Claude session id (assistant_round.go). Forked round branches inherit assistant identity and stay hidden from
 	// the ordinary Agents list across node restarts.
 	RoundForkOf string `json:"round_fork_of,omitempty"`
+	// StartOpID is the X-Persona-Op-Id that started this session, kept so reconnect reconciliation after a mid-flight
+	// disconnect or node restart can prove the start already ran (#10674).
+	StartOpID string `json:"start_op_id,omitempty"`
 }
 
 func newState() *stateFile { return &stateFile{Sessions: map[string]sessionState{}} }
@@ -321,6 +328,7 @@ func (s *stateFile) adoptSwitch(id string, v sessionState) {
 		cur.Cwd, cur.StartedAt, cur.PlanThen, cur.Pane, cur.PendingSwitch = v.Cwd, v.StartedAt, v.PlanThen, v.Pane, v.PendingSwitch
 		cur.EngineHistory, cur.PendingHandoff = v.EngineHistory, v.PendingHandoff // a switch to another engine (engine_switch.go)
 		cur.EngineRuntime = v.EngineRuntime
+		cur.RemoteAgent = cur.RemoteAgent || v.RemoteAgent
 		v = cur
 	}
 	s.Sessions[id] = v
@@ -408,6 +416,26 @@ func (s *stateFile) get(id string) (sessionState, bool) {
 	return v, ok
 }
 
+// byStartOp finds the session started with opID, if any (#10674).
+func (s *stateFile) byStartOp(opID string) (string, sessionState, bool) {
+	if s == nil || opID == "" {
+		return "", sessionState{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var foundID string
+	var found sessionState
+	for id, v := range s.Sessions {
+		if v.StartOpID != opID {
+			continue
+		}
+		if foundID == "" || id < foundID {
+			foundID, found = id, v
+		}
+	}
+	return foundID, found, foundID != ""
+}
+
 // panes returns the remembered pane of every session (herdr pane ids are not reused while the server lives).
 func (s *stateFile) panes() map[string]string {
 	s.mu.Lock()
@@ -442,8 +470,9 @@ func (s *stateFile) put(id string, v sessionState) bool {
 		if old.SegmentOperation != "" {
 			v.SegmentOperation = old.SegmentOperation
 		}
-		// Owned by state.update: a send's earlier copy must not erase a user's newer arrival.
-		v.IdleCompaction = old.IdleCompaction
+		// Owned by state.update: older process snapshots cannot replace the
+		// idle clock or the latest compaction result.
+		v.IdleCompaction, v.Compaction = old.IdleCompaction, old.Compaction
 		if old.CreationID != "" {
 			v.CreationID, v.Incarnation = old.CreationID, old.Incarnation
 		}
@@ -452,6 +481,12 @@ func (s *stateFile) put(id string, v sessionState) bool {
 		}
 		if v.RanAt == 0 {
 			v.RanAt = old.RanAt // owned by recordRunning
+		}
+		if v.StartOpID == "" && old.StartOpID != "" {
+			v.StartOpID = old.StartOpID
+		}
+		if old.RemoteAgent {
+			v.RemoteAgent = true // latch-only security posture: never cleared by later writes
 		}
 	}
 	s.Sessions[id] = v

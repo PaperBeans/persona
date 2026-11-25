@@ -349,17 +349,18 @@ type statusWriter struct {
 	status          int
 	securityFailure bool
 	lang            i18n.Lang
-	errBody         []byte // the start of a server error's body, for its request line (loggedError)
+	why             string // what the hub's own server error said, for its request line (NoteError)
 }
 
 func (s *statusWriter) WriteHeader(code int) { s.status = code; s.ResponseWriter.WriteHeader(code) }
 
-// Write keeps the start of a server error's body for the request log (loggedError) and writes b.
-func (s *statusWriter) Write(b []byte) (int, error) {
-	if s.status >= 500 && len(s.errBody) < loggedErrorBody {
-		s.errBody = append(s.errBody, b[:min(len(b), loggedErrorBody-len(s.errBody))]...)
+// NoteError keeps what a server error the hub writes itself says (apierr.ErrorNoter), for its request line. Only the
+// hub's own errors are noted: the body of an answer it passes on as it is (a manager's, an extension's or a linked
+// hub's, through relayTo or setupPeerHTTP) is never read, whatever it holds (#14490).
+func (s *statusWriter) NoteError(status int, body map[string]any) {
+	if status >= 500 {
+		s.why = loggedError(body)
 	}
-	return s.ResponseWriter.Write(b)
 }
 
 // authRefusal is a request's mark that the hub's own auth layer refused it (authMarks puts it in the context).
@@ -406,7 +407,7 @@ func logRequests(h *Hub, next http.Handler) http.Handler {
 			path := loggedPath(r.URL.Path)
 			why := ""
 			if sw.status >= 500 {
-				why = loggedError(sw.errBody)
+				why = sw.why
 			}
 			if client.Platform != "" {
 				h.logf("[%s] %s %s -> %d (%s) client=%q%s", id, r.Method, path, sw.status, time.Since(start).Round(time.Millisecond), client.Platform+"/"+client.Version, why)
@@ -417,33 +418,29 @@ func logRequests(h *Hub, next http.Handler) http.Handler {
 	})
 }
 
-// loggedErrorBody bounds what a server error's body keeps for the log; loggedErrorText, the text it shows.
-const loggedErrorBody, loggedErrorText = 4096, 300
+// loggedErrorText bounds the text a server error's request line shows.
+const loggedErrorText = 300
 
-// loggedError is what a server error's request line adds, from the hub's JSON error body (apierr): ` code=<code>`,
-// then ` detail="<detail>"`, the technical words a localized failure keeps apart from its generic error
-// (rpc-errors.failed), else ` error="<error>"`; one line, quoted, clipped. "" for any other body: nothing else of a
-// response is logged.
-func loggedError(body []byte) string {
-	var e struct {
-		Code   string `json:"code"`
-		Error  string `json:"error"`
-		Detail any    `json:"detail"`
-	}
-	if json.Unmarshal(body, &e) != nil || e.Code == "" && e.Error == "" {
+// loggedError is what a server error's request line adds, from the error body the hub wrote (apierr, NoteError):
+// ` code=<code>`, then ` detail="<detail>"`, the technical words a localized failure keeps apart from its generic error
+// (rpc-errors.failed), else ` error="<error>"`; one line, quoted, clipped. "" when it has neither code nor error.
+func loggedError(body map[string]any) string {
+	code, _ := body["code"].(string)
+	text, _ := body["error"].(string)
+	if code == "" && text == "" {
 		return ""
 	}
 	var b strings.Builder
-	if e.Code != "" {
+	if code != "" {
 		b.WriteString(" code=")
-		if strings.Trim(e.Code, "abcdefghijklmnopqrstuvwxyz0123456789_.-") == "" {
-			b.WriteString(e.Code)
+		if strings.Trim(code, "abcdefghijklmnopqrstuvwxyz0123456789_.-") == "" {
+			b.WriteString(code)
 		} else {
-			b.WriteString(strconv.Quote(textfmt.Clip(e.Code, 40)))
+			b.WriteString(strconv.Quote(textfmt.Clip(code, 40)))
 		}
 	}
 	quoted := func(s string) string { return strconv.Quote(textfmt.Clip(textfmt.OneLine(s), loggedErrorText)) }
-	switch d := e.Detail.(type) {
+	switch d := body["detail"].(type) {
 	case string:
 		if d != "" {
 			b.WriteString(" detail=" + quoted(d))
@@ -456,8 +453,8 @@ func loggedError(body []byte) string {
 			return b.String()
 		}
 	}
-	if e.Error != "" {
-		b.WriteString(" error=" + quoted(e.Error))
+	if text != "" {
+		b.WriteString(" error=" + quoted(text))
 	}
 	return b.String()
 }
@@ -678,7 +675,7 @@ func (h *Hub) sessionItems(w http.ResponseWriter, r *http.Request, m *Machine) {
 		writeErrCode(w, http.StatusConflict, proto.CodeNodeOutdated, i18n.Err("chatexport.node_version"))
 		return
 	}
-	res.Items = cardCompatItems(h.requestLang(r), h.requestWants(r, featureCardRing), h.requestWants(r, featureMarkdownCloseout), localizedItems(h.requestLang(r), h.withInjected(res.Items)))
+	res.Items = clientItemsCompat(h.requestLang(r), h.requestWants(r, featureCardRing), h.requestWants(r, featureMarkdownCloseout), h.requestWants(r, proto.FeatureToolViews), localizedItems(h.requestLang(r), h.withInjected(res.Items)))
 	// Allow binding a pending live Hub TTFT on latest-page / incremental reads while keeping historical pages read-only.
 	allowBind := atoi(q.Get("before_seq")) == 0 && atoi(q.Get("through_seq")) == 0
 	h.ttft.annotate(m.cfg.ID, r.PathValue("sid"), res.Items, allowBind)
@@ -717,7 +714,7 @@ func (h *Hub) sessionItemFull(w http.ResponseWriter, r *http.Request, m *Machine
 		h.asstOf(h.sessionOwner(m.cfg.ID, r.PathValue("sid"))).notify(assistantwire.EventSessionItems, assistantwire.SessionItems{MachineID: m.cfg.ID, SessionID: r.PathValue("sid"),
 			Items: []proto.Item{it}})
 	}
-	full.Item = cardCompatItems(h.requestLang(r), h.requestWants(r, featureCardRing), h.requestWants(r, featureMarkdownCloseout), localizedItems(h.requestLang(r), h.withInjected([]proto.Item{it})))[0]
+	full.Item = clientItemsCompat(h.requestLang(r), h.requestWants(r, featureCardRing), h.requestWants(r, featureMarkdownCloseout), h.requestWants(r, proto.FeatureToolViews), localizedItems(h.requestLang(r), h.withInjected([]proto.Item{it})))[0]
 	writeItemsJSON(w, full)
 }
 
@@ -943,6 +940,8 @@ func (h *Hub) startSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Hub) startSessionWith(w http.ResponseWriter, r *http.Request, p sessionStartRequest, handoff bool) {
+	orig := p
+	replay := heldStartReplayOf(r.Context())
 	if strings.HasPrefix(p.ClientMsgID, proto.A2ADeliveryPrefix) {
 		writeErrCode(w, http.StatusBadRequest, "client_msg_id_reserved", i18n.Err("hub-send.reserved_id"))
 		return
@@ -955,7 +954,7 @@ func (h *Hub) startSessionWith(w http.ResponseWriter, r *http.Request, p session
 	if apierr.ImagesOverLimit(w, proto.HubImageLimits.For(p.AgentType), len(p.Images)) {
 		return
 	}
-	if !handoff {
+	if !handoff && replay == nil {
 		r = h.captureHumanSubmission(r, p.Prompt)
 	}
 	if p.TodoID != "" && principalOf(r.Context()).Role != roleFull {
@@ -1000,6 +999,21 @@ func (h *Hub) startSessionWith(w http.ResponseWriter, r *http.Request, p session
 	if h.machineUntrusted(m.cfg.ID) { // not confirmed yet (machine_trust.go)
 		writeErrCode(w, http.StatusConflict, "machine_pending", i18n.Err("hub-machine_trust.start_pending"))
 		return
+	}
+	if p.AgentType != "" && !agentTypeRe.MatchString(p.AgentType) {
+		writeErr(w, http.StatusBadRequest, errors.New("unsupported agent type"))
+		return
+	}
+	opID := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Persona-Op-Id")))
+	if replay != nil {
+		opID = replay.opID
+	}
+	canHold := replay == nil && !handoff && p.ResumeSessionID == "" && opID != "" &&
+		clientOpUUID.MatchString(opID) && personSent(r.Context()) && h.requestWants(r, proto.FeatureAgentStartHold)
+	if canHold && !m.isConnected() {
+		if h.tryHoldStart(r.Context(), w, r, m, orig, opID, true) {
+			return
+		}
 	}
 	decided := ""
 	var handoffImages []proto.Image
@@ -1152,7 +1166,19 @@ func (h *Hub) startSessionWith(w http.ResponseWriter, r *http.Request, p session
 	if checkedResume {
 		params["resume_outside_health"] = true // nodeproto.ResumeOutsideHealth: set after the manager's fill, never the caller's
 	}
-	if err := m.call(ctx, method, params, &res); err != nil {
+	if p.ResumeSessionID == "" && opID != "" {
+		params["op_id"] = opID // nodeproto.StartOpID: recorded by the node for reconnect reconciliation (#10674)
+	}
+	err = m.call(ctx, method, params, &res)
+	if replay != nil {
+		replay.nodeCalled, replay.nodeErr = true, err
+	}
+	if err != nil {
+		if canHold && errors.Is(err, errOffline) {
+			if h.tryHoldStart(ctx, w, r, m, orig, opID, false) {
+				return
+			}
+		}
 		h.startEnded(m.cfg.ID, p.ResumeSessionID, params, err)
 		if re := (*rpc.Error)(nil); checkedResume && errors.As(err, &re) && re.Code == proto.CodeResumeUnknown {
 			// The answer the hub gives a conversation it lists in the space or does not know: the extension is not
@@ -1495,6 +1521,7 @@ func (h *Hub) itemsToSubscribers(machineID, sessionID string, items []proto.Item
 		lazy             bool
 		markdownCloseout bool
 		ring             bool // draws ```persona-card rings (card_compat.go)
+		toolViews        bool // draws Item.ToolViews / Fold.ToolViews (proto.FeatureToolViews)
 	}
 	msgs := map[form][]byte{}
 	key := [2]string{machineID, sessionID}
@@ -1507,10 +1534,10 @@ func (h *Hub) itemsToSubscribers(machineID, sessionID string, items []proto.Item
 		if !sub {
 			continue
 		}
-		f := form{lang: c.lang(), lazy: wantsLazy, ring: c.has(featureCardRing), markdownCloseout: c.has(featureMarkdownCloseout)}
+		f := form{lang: c.lang(), lazy: wantsLazy, ring: c.has(featureCardRing), markdownCloseout: c.has(featureMarkdownCloseout), toolViews: c.has(proto.FeatureToolViews)}
 		b, ok := msgs[f]
 		if !ok {
-			its := cardCompatItems(f.lang, f.ring, f.markdownCloseout, localizedItems(f.lang, items))
+			its := clientItemsCompat(f.lang, f.ring, f.markdownCloseout, f.toolViews, localizedItems(f.lang, items))
 			if f.lazy {
 				its = proto.WithoutImageData(its)
 			}
@@ -1676,22 +1703,23 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 
 func (h *Hub) onClientMessage(ctx context.Context, c *client, data []byte) {
 	var msg struct {
-		Type       string          `json:"type"`
-		MachineID  string          `json:"machine_id"`
-		SessionID  string          `json:"session_id"`
-		SinceSeq   int             `json:"since_seq"`
-		LazyImages bool            `json:"lazy_images"`
-		FoldWork   bool            `json:"fold_work"`
-		DeviceName string          `json:"device_name"`
-		DeviceID   string          `json:"device_id"` // register_phone / register_desktop: the app's id for pushes
-		Platform   string          `json:"platform"`
-		Simulator  bool            `json:"simulator"`
-		Tools      []proto.Tool    `json:"tools"`
-		CallID     string          `json:"call_id"`
-		Content    []proto.Content `json:"content"`
-		IsError    bool            `json:"is_error"`
-		Epoch      string          `json:"epoch"`
-		AfterSeq   int             `json:"after_seq"`
+		Type          string          `json:"type"`
+		MachineID     string          `json:"machine_id"`
+		SessionID     string          `json:"session_id"`
+		InteractionID string          `json:"interaction_id"`
+		SinceSeq      int             `json:"since_seq"`
+		LazyImages    bool            `json:"lazy_images"`
+		FoldWork      bool            `json:"fold_work"`
+		DeviceName    string          `json:"device_name"`
+		DeviceID      string          `json:"device_id"` // register_phone / register_desktop: the app's id for pushes
+		Platform      string          `json:"platform"`
+		Simulator     bool            `json:"simulator"`
+		Tools         []proto.Tool    `json:"tools"`
+		CallID        string          `json:"call_id"`
+		Content       []proto.Content `json:"content"`
+		IsError       bool            `json:"is_error"`
+		Epoch         string          `json:"epoch"`
+		AfterSeq      int             `json:"after_seq"`
 		// terminal_subscribe, terminal_input: the grid the app drives the terminal at (docs/integrations/terminal.md)
 		Control  *termCtl `json:"control"`
 		Takeover bool     `json:"takeover"`
@@ -1797,6 +1825,7 @@ func (h *Hub) onClientMessage(ctx context.Context, c *client, data []byte) {
 		if !already {
 			m.watcherJoined(msg.SessionID)
 		}
+		m.replayLiveTools(c, msg.SessionID)
 		// Not in the read loop: the node may take up to watchCallTimeout to answer the watch (watcherJoined). The
 		// backlog still goes after it, so nothing falls between the two.
 		go func() {
@@ -1867,6 +1896,10 @@ func (h *Hub) onClientMessage(ctx context.Context, c *client, data []byte) {
 		if m := h.localMachine(msg.MachineID); m != nil && msg.SessionID != "" {
 			h.markSeen(m.cfg.ID, msg.SessionID)
 		}
+	case "interaction_seen":
+		if c.role == roleFull && !c.runtimeCLI && msg.InteractionID != "" {
+			h.markInteractionSeen(msg.InteractionID)
+		}
 	case "tool_result":
 		if c.role != roleFull {
 			return
@@ -1908,7 +1941,7 @@ func (h *Hub) sendBacklog(ctx context.Context, c *client, m *Machine, sid string
 			c.sendJSON(failure)
 			return
 		}
-		res.Items = cardCompatItems(c.lang(), c.has(featureCardRing), c.has(featureMarkdownCloseout), localizedItems(c.lang(), h.withInjected(res.Items)))
+		res.Items = clientItemsCompat(c.lang(), c.has(featureCardRing), c.has(featureMarkdownCloseout), c.has(proto.FeatureToolViews), localizedItems(c.lang(), h.withInjected(res.Items)))
 		if lazy {
 			res.Items = proto.WithoutImageData(res.Items)
 		}

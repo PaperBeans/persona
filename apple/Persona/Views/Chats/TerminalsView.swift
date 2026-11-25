@@ -233,6 +233,7 @@ struct TerminalsView: View {
         switch r.kind {
         case .agent:
             let s = agentSession(r, on: ref)
+            if let s, let tab = s.displayTabName(preferTab: model.prefersHerdrTabName(for: s)) { return tab }
             return s?.title.nilIfEmpty ?? r.pane.title?.nilIfEmpty ?? NodeMenu.shellTitle(r.pane, in: list)
         case .finished:
             return title(finished: r.pane.agentSession ?? "", on: ref)

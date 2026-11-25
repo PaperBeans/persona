@@ -171,6 +171,7 @@ func TestTaskWorkspaceSerialQueueParksWithoutNeedsYouError(t *testing.T) {
 			t.Fatal(err)
 		}
 		pt := saved.Tasks[0]
+		checkPlacementGolden(t, pt.Placement, "v1 enforce box ->  (workspace_occupied) | box workspace_occupied")
 		if len(f.starts) != 0 {
 			t.Fatalf("queued task must not start while workspace is occupied: starts=%v", f.starts)
 		}

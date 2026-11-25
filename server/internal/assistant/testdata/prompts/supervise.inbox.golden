@@ -3,7 +3,7 @@
 <persona-supervision level="triage" />
 
 1. 任务「修登录崩溃」（todo_1，signal=inbox）：收件箱里有别人发来的新消息说到它（3 条）；在 box session_id=s1
-   验收标准：PR 合并到 master
+   验收标准用 todo_get 取原文
    收件箱事件 lark:f1:12「客户端发版群」，最新一条是 陈晓 发的：「登录那个崩溃今天能修好吗？下午要发版」
    Agent 最后说的：
    在跑测试

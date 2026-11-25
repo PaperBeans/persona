@@ -150,8 +150,8 @@ func checkViewSemantics(v *View, hubNames bool) error {
 	}
 	for i, s := range v.Sections {
 		for j, e := range s.Items {
-			// a grid's or a carousel's tiles, a graph's nodes and a scene's pins are components of the page each
-			if n += max(1, len(e.Tiles)+len(e.Nodes)+len(e.Pins)); n > ItemsMost {
+			// a grid's or a carousel's tiles, a graph's nodes, a scene's pins and a map's markers are components of the page each
+			if n += max(1, len(e.Tiles)+len(e.Nodes)+len(e.Pins)+len(e.Markers)); n > ItemsMost {
 				return fmt.Errorf("more than %d items", ItemsMost)
 			}
 			var err error
@@ -223,6 +223,9 @@ func checkViewSemantics(v *View, hubNames bool) error {
 			}
 			if err == nil {
 				err = pc.checkV11(&e)
+			}
+			if err == nil {
+				err = pc.checkV12(&e)
 			}
 			if err == nil && code > CodeMost {
 				err = fmt.Errorf("a view carries at most %d bytes of code: page the rest (load)", CodeMost)
@@ -482,6 +485,11 @@ func Actions(v *View) []*Action {
 			for k := range e.Pins {
 				if e.Pins[k].Action != nil {
 					out = append(out, e.Pins[k].Action)
+				}
+			}
+			for k := range e.Markers {
+				if e.Markers[k].Action != nil {
+					out = append(out, e.Markers[k].Action)
 				}
 			}
 			for k := range e.Threads {

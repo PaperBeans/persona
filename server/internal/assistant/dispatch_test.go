@@ -82,7 +82,7 @@ func TestDispatchToolsAreTheAgentsWhenOn(t *testing.T) {
 // The whole way: an agent on mac hands a subtask to box, the new agent is told who handed it the task, and the
 // caller reads its state and, once it stopped, its final reply.
 func TestDispatchStartsOnAnotherComputerAndReadsTheResult(t *testing.T) {
-	s, f, _ := newDispatchService(t, true)
+	s, f, store := newDispatchService(t, true)
 	r := dispatchCall(s, "mac", "caller-0001", "dispatch_start", `{"machine":"box","cwd":"/code/app","prompt":"run the Linux tests and report failures"}`)
 	out := resultText(r)
 	if r.IsError || !strings.Contains(out, "session s1") {
@@ -109,6 +109,17 @@ func TestDispatchStartsOnAnotherComputerAndReadsTheResult(t *testing.T) {
 	// Still working: the read says so and does not pass its text off as the result.
 	if out := resultText(dispatchCall(s, "mac", "caller-0001", "dispatch_read", `{"session_id":"s1"}`)); !strings.Contains(out, ": working.") || !strings.Contains(out, "not its result yet") {
 		t.Fatalf("read while working: %q", out)
+	}
+	records, err := store.SettingsPrefix(context.Background(), "placement.")
+	if err != nil || len(records) != 1 {
+		t.Fatalf("dispatch placement count = %d, %v", len(records), err)
+	}
+	for _, raw := range records {
+		var p placement
+		if err := json.Unmarshal(raw, &p); err != nil || p.SessionID != "s1" {
+			t.Fatalf("dispatch placement %s, %v", raw, err)
+		}
+		checkPlacementGolden(t, &p, "v1 report box -> box (requested_machine) | box")
 	}
 	// It stops: its last reply comes back as the result.
 	setStatus(f, "box", "s1", proto.StatusDone)

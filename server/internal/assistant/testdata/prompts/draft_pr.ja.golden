@@ -4,4 +4,4 @@
 
 1. 任务「Example task」（todo_example，signal=draft_pr）：（関連する自分の PR https://github.com/example/app/pull/12（head head-a）はまだドラフトで、上流のレビューやマージ待ちではありません。
 ）
-   验收标准：The task PR is merged.
+   验收标准用 todo_get 取原文

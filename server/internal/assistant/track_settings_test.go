@@ -135,7 +135,7 @@ func TestPrepareNamesTrackKind(t *testing.T) {
 	ctx := context.Background()
 	s, f := spaceTrackService(t)
 	s.devs = spaceDevs{fleetDevs: newFleetDevs()}
-	for _, c := range []struct{ space, kind string }{{"", trackKindOrchestration}, {SpaceHealth, trackKindSpace}, {"qa-plain", trackKindSpace}} {
+	for _, c := range []struct{ space, kind string }{{"", trackKindOrchestration}, {SpaceHealth, trackKindHealth}, {"qa-plain", trackKindSpace}} {
 		f.prepared = nil
 		if _, err := s.prepareSpace(ctx, "server", c.space); err != nil {
 			t.Fatalf("%q: %v", c.space, err)

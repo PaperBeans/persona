@@ -482,13 +482,13 @@ func (e *Engine) refreshGaps(id string) [][2]float64 {
 	_, parts, err := e.meetingUpdateLocked(id, func(m *Meeting, _ Recording) error {
 		t := m.Transcription
 		switch {
-		case !t.hub():
-		case t.audioClosed():
+		case !t.Hub():
+		case t.AudioClosed():
 			gaps = t.Gaps
 		default:
 			t.Gaps = e.audioGaps(id, t.End)
 			gaps = t.Gaps
-			t.settle(e.now())
+			settleTranscription(t, e.now())
 		}
 		return nil
 	})
@@ -529,7 +529,7 @@ func (e *Engine) audioFor(rawID string, bad error) (string, *audioRec, error) {
 		return "", nil, ErrNotHub
 	case r.Trimmed():
 		return "", nil, ErrTranscriptExpired
-	case r.Conv.Transcription.audioClosed():
+	case r.Conv.Transcription.AudioClosed():
 		return "", nil, ErrTranscriptionFinal
 	}
 	return id, rec, nil
@@ -785,7 +785,7 @@ func (e *Engine) dropAudio(id string, why error) error {
 	}
 	now := e.now()
 	_, err = e.MeetingUpdate(id, func(m *Meeting, _ Recording) error {
-		if t := m.Transcription; t.hub() && t.AudioGoneAt.IsZero() {
+		if t := m.Transcription; t.Hub() && t.AudioGoneAt.IsZero() {
 			t.AudioGoneAt = now.UTC()
 		}
 		return nil
@@ -836,7 +836,7 @@ func (e *Engine) finalStoredLocked(id string) (drop bool, err error) {
 		return false, ErrNotHub
 	}
 	changed := e.remakeQuiet(r)
-	drop = r.transcriptionDone() && st.noMinutesComing(r)
+	drop = transcriptionDone(r) && st.noMinutesComing(r)
 	if changed {
 		err = st.putRecordingMeta(r)
 	}
@@ -861,11 +861,11 @@ func (s *Store) putRecordingMeta(r *Recording) error {
 // hub (an older manager's meeting.json after a rollback), or its final pass ran (or failed) and minutes made from that
 // transcript were written, its minutes failed, or it gets none.
 func (s *Store) audioDue(r *Recording) bool {
-	t := r.hubTranscription()
+	t := hubTranscription(r)
 	switch {
 	case t == nil:
 		return true
-	case !t.done():
+	case !t.Done():
 		return false
 	case s.noMinutesComing(r) || r.MinutesState == MinutesFailed:
 		return true
@@ -885,7 +885,7 @@ func (e *Engine) sweepTranscriptions() {
 	for _, r := range st.Recordings() {
 		_, statErr := os.Stat(st.audioPath(r.ID))
 		hasAudio := statErr == nil
-		if t := r.hubTranscription(); r.Trimmed() || !hasAudio && (t == nil || t.done() && !t.AudioGoneAt.IsZero()) {
+		if t := hubTranscription(r); r.Trimmed() || !hasAudio && (t == nil || t.Done() && !t.AudioGoneAt.IsZero()) {
 			continue // nothing of it is the sweep's (looked at again under recMu otherwise)
 		}
 		st.recMu.Lock()
@@ -912,18 +912,18 @@ func (e *Engine) sweepOneLocked(id string, hasAudio bool) (drop bool, why error,
 	if !ok || r.Trimmed() {
 		return false, nil, false
 	}
-	t := r.hubTranscription()
+	t := hubTranscription(r)
 	if t == nil {
 		return hasAudio, ErrNotHub, false
 	}
-	if t.done() && !t.AudioGoneAt.IsZero() && !hasAudio {
+	if t.Done() && !t.AudioGoneAt.IsZero() && !hasAudio {
 		return false, nil, false // settled
 	}
 	var err error
 	if changed, err = e.repairRecord(r); err != nil {
 		e.logf("recording %s: transcript of record: %v", id, err)
 	}
-	if !t.done() {
+	if !t.Done() {
 		return false, nil, changed
 	}
 	if r.MinutesState == MinutesReady {

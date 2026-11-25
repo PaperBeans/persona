@@ -31,6 +31,9 @@ type Workspace struct {
 	// Owned: an engine runtime's worktree that the runtime made and removes with the workspace (Paseo's, #6297), the
 	// only kind of its rows Delete worktree is offered for. Not set on a terminal host's rows.
 	Owned bool `json:"owned,omitempty"`
+	// HiddenByDirectory is manager-owned visibility from hidden_agent_dirs rules: explicit Workspace Board cards keep
+	// their bindings, while Agents sidebars exclude empty workspaces in hidden folders.
+	HiddenByDirectory bool `json:"hidden_by_directory,omitempty"`
 }
 
 type WorkspacesResponse struct {

@@ -53,10 +53,15 @@ Query keys not listed for a row are dropped (not passed on, not acted on). Fragm
   `/kb/meetings/<id>` and a recording `/kb/recordings/<id>`. An id that holds `/` is one escaped segment (`%2F`).
 - `at` names one message to land on (`?at=<item id>`; Claude's ids hold `#`, written `%23`).
 - Settings tabs are the web's (`web/src/views/settings/nav.ts`): `general`, `persona`, `prompts`, `notifications`,
-  `models`, `agents`, `channels`, `connectors`, `sources`, `extensions`, `shortcuts`, `devices`, `hub`, `managers`,
+  `models`, `agents`, `channels`, `connectors`, `sources`, `extensions`, `shortcuts`, `advanced`, `devices`, `hub`, `managers`,
   `knowledge`, `avatar`, `labs`. Four have an item key: `models` → `purpose`, `channels` → `channel`, `extensions` →
   `extension`, `connectors` → `connector`. An extension's settings are `/settings?tab=extensions&extension=<id>`. An
   unknown tab opens Settings. The iPhone opens the page it has for a tab, else Settings.
+- The assistant's pages (Dashboards, `docs/assistant/dashboards.md`) are an extension's pages under the reserved id
+  `-pages`: the Dashboards index is `/extension/-pages/index`, one page `/extension/-pages/pg_0123456789abcdef`
+  (`persona://open/extension/-pages/pg_0123456789abcdef`). The apps draw them over HTTP only, never the native page
+  stream, and take the header's title from the drawn page, so a page not pinned in the sidebar shows its title, not
+  its id.
 - A page the iPhone has no screen for opens in the in-app web card, as any other link to the hub does.
 - **Not in the table**: every other path on the hub (`/admin`, `/share/…`, `/screen/…`, the web's own pages such as
   `/overview` or `/history`). The iPhone and Android open them in the web card; the web and the desktop app treat them
@@ -108,6 +113,7 @@ checks; none of them is ever written by the hub's link builder.
 | `persona://ask?text=`, `persona://sources-graph` | the subscriptions pages' actions | only from those pages |
 | `persona://widget/<kind>`, `persona://record…`, `persona://allday?action=` | Home Screen widgets, Live Activities, watch complications | Persona's own surfaces |
 | `persona://inbox/<id>/source` | an extension's link back to the Inbox item it is drawn for | only that item (`checkOpenURL`) |
+| `persona://tracks/<machine>/<space>/<session>` | the `space-conversations` extension opens an existing assistant conversation | only that extension; bounded ASCII path segments, no query, fragment or credentials; Health and arbitrary internal routes refused |
 | `persona://file/<machine>/<path>` | a file in a card | cards only |
 
 ## Security
@@ -119,9 +125,9 @@ checks; none of them is ever written by the hub's link builder.
   password is an outside link (a link with a user name or password is not opened as a page at all).
 - **A malformed app link is refused**: a route that does not start with a single `/`, holds a backslash or a control
   character, or would leave the hub when resolved against it.
-- **Extensions stay limited.** An extension's `open_url` is still only https, its own settings or the Inbox item it is
-  drawn for (`docs/extensions/extensions.md`). An https link to the user's hub that is in the table opens that page in
-  the app, which only shows a page.
+- **Extensions stay limited.** An extension's `open_url` is still only https, its own settings, the Inbox item it is
+  drawn for, or the `space-conversations` extension's one narrow conversation handoff (`docs/extensions/extensions.md`).
+  An https link to the user's hub that is in the table opens that page in the app, which only shows a page.
 - **The assistant's links.** The model is told to copy the links it is given, never to build its own; an assistant
   view's `open` is still checked against https and Persona's own forms (`CheckAssistantOpen`).
 

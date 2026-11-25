@@ -121,6 +121,16 @@ class CompatibilityIdentifierTests(unittest.TestCase):
                              ["fixture.txt: stale registered token " + FORMER])
             self.assertEqual(guard.repository_findings(root, registry, []), ["fixture.txt: stale registry path"])
 
+    def test_document_prefilter_keeps_exact_registered_and_unregistered_lines(self):
+        token = FORMER.upper() + "_TOKEN"
+        scheme = "j" + "://"
+        path = "scripts/fixture.py"
+        registry = {path: entry(token)}
+        ordinary = "canonical only\n"
+        self.assertEqual(guard.findings(path, ordinary, registry), [])
+        self.assertEqual(guard.findings(path, ordinary + token + "\n", registry), [])
+        self.assertEqual(guard.findings(path, ordinary + scheme + "\n", registry), [(2, scheme)])
+
     def test_opaque_payloads_do_not_hide_an_unregistered_identifier(self):
         token = FORMER.upper() + '_UNREGISTERED'
         self.assertEqual(guard.tokens('opaque' * 20000 + ' ' + token), {token})

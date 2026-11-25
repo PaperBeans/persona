@@ -12,8 +12,12 @@ import (
 // round-trip them without one poller overwriting the other.
 type InboxOptions struct {
 	InboxAllChats []string `json:"inbox_all_chats"`
-	Documents     []string `json:"documents"`
-	WikiSpaces    []string `json:"wiki_spaces"`
+	// InboxExcludeChats and InboxExcludeDirectChats remove matching chats from AI collection and read tools. Both
+	// controls are independent, and their zero values preserve the legacy behavior.
+	InboxExcludeChats       []string `json:"inbox_exclude_chats"`
+	InboxExcludeDirectChats bool     `json:"inbox_exclude_direct_chats"`
+	Documents               []string `json:"documents"`
+	WikiSpaces              []string `json:"wiki_spaces"`
 	// OwnedAllComments: every comment on a watched document the user owns (DocumentOptions).
 	OwnedAllComments bool `json:"owned_all_comments"`
 	// TriageRules: what counts as Needs you / FYI / Collapsed for lark-cli's items, in the user's words.
@@ -27,9 +31,15 @@ func (c *Connector) Options() json.RawMessage {
 	for id := range c.inboxAllChats {
 		ids = append(ids, id)
 	}
+	excluded := make([]string, 0, len(c.inboxExcludeChats))
+	for id := range c.inboxExcludeChats {
+		excluded = append(excluded, id)
+	}
+	excludeDirect := c.inboxExcludeDirectChats
 	rules := c.triageRules
 	c.inboxMu.Unlock()
 	sort.Strings(ids)
+	sort.Strings(excluded)
 
 	c.docs.mu.Lock()
 	documents := c.docs.options.normalized()
@@ -41,19 +51,23 @@ func (c *Connector) Options() json.RawMessage {
 		documents.WikiSpaces = []string{}
 	}
 	b, _ := json.Marshal(InboxOptions{
-		InboxAllChats:    ids,
-		Documents:        documents.Documents,
-		WikiSpaces:       documents.WikiSpaces,
-		OwnedAllComments: documents.OwnedAllComments,
-		TriageRules:      rules,
+		InboxAllChats:           ids,
+		InboxExcludeChats:       excluded,
+		InboxExcludeDirectChats: excludeDirect,
+		Documents:               documents.Documents,
+		WikiSpaces:              documents.WikiSpaces,
+		OwnedAllComments:        documents.OwnedAllComments,
+		TriageRules:             rules,
 	})
 	return b
 }
 
 func (c *Connector) SetOptions(raw json.RawMessage) error {
 	var wire struct {
-		InboxAllChats json.RawMessage `json:"inbox_all_chats"`
-		TriageRules   *string         `json:"triage_rules"`
+		InboxAllChats           json.RawMessage `json:"inbox_all_chats"`
+		InboxExcludeChats       json.RawMessage `json:"inbox_exclude_chats"`
+		InboxExcludeDirectChats bool            `json:"inbox_exclude_direct_chats"`
+		TriageRules             *string         `json:"triage_rules"`
 	}
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		return fmt.Errorf("options: %v", err)
@@ -82,6 +96,10 @@ func (c *Connector) SetOptions(raw json.RawMessage) error {
 		chats[id] = struct{}{}
 	}
 
+	excluded, err := parseExcludedChatIDs(wire.InboxExcludeChats)
+	if err != nil {
+		return err
+	}
 	documents, err := parseDocumentOptions(raw)
 	if err != nil {
 		return err
@@ -96,6 +114,8 @@ func (c *Connector) SetOptions(raw json.RawMessage) error {
 	}
 	c.inboxMu.Lock()
 	c.inboxAllChats = chats
+	c.inboxExcludeChats = excluded
+	c.inboxExcludeDirectChats = wire.InboxExcludeDirectChats
 	c.triageRules = rules
 	c.inboxMu.Unlock()
 	c.docs.setOptions(documents)

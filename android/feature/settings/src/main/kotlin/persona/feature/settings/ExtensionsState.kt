@@ -213,10 +213,32 @@ internal object ExtensionText {
             return reference.title?.takeIf { it.isNotBlank() } ?: reference.reference
         }
         return when {
-            secret.set -> res.getString(R.string.settings_ext_secret_set)
+            secret.set -> secret.hint?.takeIf { it.isNotBlank() }
+                ?.let { res.getString(R.string.settings_ext_secret_set_hint, it) }
+                ?: res.getString(R.string.settings_ext_secret_set)
             secret.required == true -> res.getString(R.string.settings_ext_secret_required)
             else -> res.getString(R.string.settings_ext_not_set)
         }
+    }
+
+    /** An entry card's title: its `name`, else its first nonempty text field, else a localized numbered label. */
+    fun entryTitle(res: Resources, list: ExtensionField, entry: JsonObject, index: Int): String {
+        val fields = list.items?.fields.orEmpty()
+        for (preferred in listOf(true, false)) {
+            for (field in fields) {
+                if (preferred && field.name != "name") continue
+                val value = (entry[field.name] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()
+                if (!value.isNullOrEmpty()) return value
+            }
+        }
+        return res.getString(R.string.settings_ext_entry_untitled, index + 1)
+    }
+
+    /** The secret sheet's title: both entry and secret for a dynamic entry secret, or the secret's own label. */
+    fun secretSheetTitle(secret: persona.core.contracts.api.ExtensionSecret, fallbackEntryTitle: String? = null): String {
+        if (!secret.isEntrySecret) return secret.label
+        val entry = secret.entryTitle?.takeIf { it.isNotBlank() } ?: fallbackEntryTitle?.takeIf { it.isNotBlank() }
+        return if (entry != null) "$entry · ${secret.label}" else secret.label
     }
 
     /** The provider-described item beneath a saved reference, or its raw reference when the provider is gone. */
@@ -408,37 +430,105 @@ internal object ExtensionPickers {
     }
 }
 
-/** The configuration being edited, by dotted path ("proxy.host"); an empty group goes with its last value. */
+/** The configuration being edited, by path ("proxy.host", "accounts[0].address"); an empty group goes with its last value. */
 internal object ExtensionDraft {
+    private val ArrayIndex = Regex("0|[1-9]\\d*")
+
+    /** Dotted path with entry indexes in the hub's validation-error form: `accounts[0].address`. */
+    fun fieldPath(path: List<String>): String = buildString {
+        for (part in path) {
+            when {
+                ArrayIndex.matches(part) -> append('[').append(part).append(']')
+                isEmpty() -> append(part)
+                else -> append('.').append(part)
+            }
+        }
+    }
+
+    fun entryItems(draft: JsonObject, path: List<String>): List<JsonObject> =
+        (value(draft, path) as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+
+    fun entryId(entry: JsonObject): String? =
+        (entry["_id"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
+
     fun value(draft: JsonObject, path: List<String>): JsonElement? {
         var current: JsonElement = draft
-        for (key in path) current = (current as? JsonObject)?.get(key) ?: return null
+        for (key in path) {
+            current = when (current) {
+                is JsonArray -> {
+                    val index = key.takeIf { ArrayIndex.matches(it) }?.toIntOrNull() ?: return null
+                    current.getOrNull(index) ?: return null
+                }
+                is JsonObject -> current[key] ?: return null
+                else -> return null
+            }
+        }
         return current.takeIf { it != JsonNull }
     }
 
-    fun set(draft: JsonObject, path: List<String>, value: JsonElement?): JsonObject {
-        val key = path.firstOrNull() ?: return draft
-        val out = draft.toMutableMap()
-        val next = if (path.size == 1) value else set(draft[key] as? JsonObject ?: JsonObject(emptyMap()), path.drop(1), value).takeIf { it.isNotEmpty() }
-        if (next == null) out.remove(key) else out[key] = next
+    fun set(draft: JsonObject, path: List<String>, value: JsonElement?): JsonObject =
+        (setNested(draft, path, value) as? JsonObject) ?: JsonObject(emptyMap())
+
+    private fun setNested(current: JsonElement?, path: List<String>, value: JsonElement?): JsonElement? {
+        val key = path.firstOrNull() ?: return value
+        val rest = path.drop(1)
+        if (current is JsonArray) {
+            val index = key.takeIf { ArrayIndex.matches(it) }?.toIntOrNull() ?: return current
+            if (index !in current.indices) return current
+            val out = current.toMutableList()
+            val next = if (rest.isNotEmpty()) setNested(out[index], rest, value) else value
+            // Clearing all fields on an entry returns JsonObject(emptyMap()), never null, so rows stay until explicitly removed.
+            if (next == null) out.removeAt(index) else out[index] = next
+            return JsonArray(out)
+        }
+        val out = (current as? JsonObject)?.toMutableMap() ?: mutableMapOf()
+        if (rest.isEmpty()) {
+            if (value == null) out.remove(key) else out[key] = value
+            return JsonObject(out)
+        }
+        val existing = out[key]
+        val next = setNested(existing, rest, value)
+        if (existing is JsonArray) {
+            if (next != null) out[key] = next
+            return JsonObject(out)
+        }
+        // Only nested object groups (e.g. "proxy") collapse when emptied; entry-list arrays are never pruned here.
+        if (next == null || (next is JsonObject && next.isEmpty())) out.remove(key) else out[key] = next
         return JsonObject(out)
     }
 
-    /** Without empty strings and lists the user cleared: "not set" (the schema's default applies). */
-    fun compact(obj: JsonObject): JsonObject = JsonObject(obj.mapNotNull { (key, value) ->
+    /**
+     * Without empty strings and lists the user cleared: "not set" (the schema's default applies). A required entry list
+     * named in [requiredEntryLists] is the exception: its explicit `[]` is a present, valid value the hub must receive.
+     */
+    fun compact(obj: JsonObject, requiredEntryLists: Set<String> = emptySet()): JsonObject = JsonObject(obj.mapNotNull { (key, value) ->
         when {
             value == JsonNull -> null
             value is JsonPrimitive && value.isString && value.content.isEmpty() -> null
-            value is JsonArray && value.isEmpty() -> null
+            value is JsonArray && value.isEmpty() && key !in requiredEntryLists -> null
             value is JsonObject -> compact(value).takeIf { it.isNotEmpty() }?.let { key to it }
             else -> key to value
         }
     }.toMap())
 
-    /** The dotted path of every field the form draws (an object's fields under its name). */
-    fun paths(form: List<persona.core.contracts.api.ExtensionField>): Set<String> = form.flatMap { field ->
-        if (field.type == "object") field.fields.orEmpty().map { "${field.name}.${it.name}" } else listOf(field.name)
-    }.toSet()
+    /** The validation-error path of every field the form draws (groups, plain fields, and entry-list rows). */
+    fun paths(form: List<persona.core.contracts.api.ExtensionField>, draft: JsonObject = JsonObject(emptyMap())): Set<String> = buildSet {
+        for (field in form) {
+            when {
+                field.type == "object" -> field.fields.orEmpty().forEach { add("${field.name}.${it.name}") }
+                field.isEntryList -> {
+                    add(field.name)
+                    val entries = entryItems(draft, listOf(field.name))
+                    val subFields = field.items?.fields.orEmpty()
+                    entries.indices.forEach { index ->
+                        add("${field.name}[$index]._id")
+                        subFields.forEach { sub -> add("${field.name}[$index].${sub.name}") }
+                    }
+                }
+                else -> add(field.name)
+            }
+        }
+    }
 
     /** A number as typed: its value, or why it is not one (blank is "not set"). */
     fun number(res: Resources, text: String, integer: Boolean): Pair<JsonPrimitive?, String?> {
@@ -534,6 +624,8 @@ internal data class ExtensionState(
     val updates: ExtensionSettingsUpdates = ExtensionSettingsUpdates(),
     /** The configuration being edited; saved as a whole (PUT replaces it). */
     val draft: JsonObject = JsonObject(emptyMap()),
+    /** UI-only stable keys for each entry list's rows (saved entries use `_id`, unsaved ones a local key); never enters JSON. */
+    val entryKeys: Map<String, List<String>> = emptyMap(),
     /** What number fields hold as typed, by path, until saved. */
     val numberText: Map<String, String> = emptyMap(),
     /** Number fields typed into that do not read as one, by path. */
@@ -555,12 +647,18 @@ internal data class ExtensionState(
     val removalNotice: ExtensionRemovalNotice? = null,
 ) {
     val editable: Boolean get() = detail?.readOnly == false
-    val dirty: Boolean get() = detail != null && (draft != detail.config || numberProblems.isNotEmpty())
+    val requiredEntryLists: Set<String>
+        get() = detail?.form.orEmpty().filter { it.isEntryList && it.required == true }.mapTo(mutableSetOf()) { it.name }
+    val dirty: Boolean
+        get() = detail != null && (ExtensionDraft.compact(draft, requiredEntryLists) != ExtensionDraft.compact(detail.config, requiredEntryLists) || numberProblems.isNotEmpty())
     val canSave: Boolean get() = editable && dirty && numberProblems.isEmpty() && !saving && !busy && !loading && !loadFailed && !updates.checking
 
     fun value(path: List<String>): JsonElement? = ExtensionDraft.value(draft, path)
 
-    fun fieldError(path: List<String>): String? = path.joinToString(".").let { fieldErrors[it] ?: numberProblems[it] }
+    fun fieldError(path: List<String>): String? = ExtensionDraft.fieldPath(path).let { fieldErrors[it] ?: numberProblems[it] }
+
+    fun entryKeyFor(listName: String, index: Int, entry: JsonObject): String =
+        entryKeys[listName]?.getOrNull(index) ?: ExtensionDraft.entryId(entry) ?: "entry-$index"
 }
 
 /** The dependents named by `has_dependents`; [keepData] is the removal asked about, null switching it off. */
@@ -581,6 +679,16 @@ internal class ExtensionModel(
 ) {
     private val mutable = MutableStateFlow(ExtensionState())
     val state = mutable.asStateFlow()
+    private var nextEntryKey = 0
+
+    private fun nextLocalEntryKey(): String = "new-entry-${++nextEntryKey}"
+
+    private fun keysFor(detail: ExtensionDetail, config: JsonObject): Map<String, List<String>> =
+        detail.form.filter { it.isEntryList }.associate { field ->
+            field.name to ExtensionDraft.entryItems(config, listOf(field.name)).map { entry ->
+                ExtensionDraft.entryId(entry) ?: nextLocalEntryKey()
+            }
+        }
 
     suspend fun load() {
         if (state.value.loading) return
@@ -674,13 +782,45 @@ internal class ExtensionModel(
     }
 
     fun edit(path: List<String>, value: JsonElement?) = mutable.update {
-        val key = path.joinToString(".")
+        val key = ExtensionDraft.fieldPath(path)
         it.copy(draft = ExtensionDraft.set(it.draft, path, value), fieldErrors = it.fieldErrors - key)
+    }
+
+    /** Appends an empty unsaved entry to [listName], keeping a stable UI-only key that never enters JSON. */
+    fun addEntry(listName: String) = mutable.update {
+        val field = it.detail?.form?.firstOrNull { f -> f.name == listName && f.isEntryList } ?: return@update it
+        val entries = ExtensionDraft.entryItems(it.draft, listOf(listName))
+        val max = field.maxItems ?: DEFAULT_MAX_ENTRIES
+        if (entries.size >= max) return@update it
+        val existingKeys = it.entryKeys[listName] ?: entries.map { entry -> ExtensionDraft.entryId(entry) ?: nextLocalEntryKey() }
+        val nextEntries = JsonArray(entries + JsonObject(emptyMap()))
+        it.copy(
+            draft = ExtensionDraft.set(it.draft, listOf(listName), nextEntries),
+            entryKeys = it.entryKeys + (listName to (existingKeys + nextLocalEntryKey())),
+            fieldErrors = it.fieldErrors - listName,
+        )
+    }
+
+    /** Removes the entry identified by its stable [key] from [listName] in the draft only (saved on Save). */
+    fun removeEntryByKey(listName: String, key: String, required: Boolean) = mutable.update {
+        val entries = ExtensionDraft.entryItems(it.draft, listOf(listName))
+        val existingKeys = it.entryKeys[listName] ?: entries.mapIndexed { i, entry -> it.entryKeyFor(listName, i, entry) }
+        val index = existingKeys.indexOf(key)
+        if (index !in entries.indices) return@update it
+        val remaining = entries.filterIndexed { i, _ -> i != index }
+        val remainingKeys = existingKeys.filterIndexed { i, _ -> i != index }
+        val nextValue = if (remaining.isNotEmpty() || required) JsonArray(remaining) else null
+        val prefix = "$listName["
+        it.copy(
+            draft = ExtensionDraft.set(it.draft, listOf(listName), nextValue),
+            entryKeys = it.entryKeys + (listName to remainingKeys),
+            fieldErrors = it.fieldErrors.filterKeys { k -> k != listName && !k.startsWith(prefix) },
+        )
     }
 
     /** A number field as typed: kept as text, its value put in the draft once it reads as one. */
     fun editNumber(path: List<String>, text: String, integer: Boolean) = mutable.update {
-        val key = path.joinToString(".")
+        val key = ExtensionDraft.fieldPath(path)
         val (number, problem) = ExtensionDraft.number(res, text, integer)
         it.copy(
             draft = if (problem == null) ExtensionDraft.set(it.draft, path, number) else it.draft,
@@ -695,7 +835,8 @@ internal class ExtensionModel(
         if (!state.value.canSave) return false
         mutable.update { it.copy(saving = true, fieldErrors = emptyMap(), error = null) }
         return try {
-            run(saved = true) { api.setConfig(id, ExtensionDraft.compact(state.value.draft)) }.also { if (it) ExtensionChanges.changed(api) }
+            val payload = ExtensionDraft.compact(state.value.draft, state.value.requiredEntryLists)
+            run(saved = true) { api.setConfig(id, payload) }.also { if (it) ExtensionChanges.changed(api) }
         } finally { mutable.update { it.copy(saving = false) } }
     }
 
@@ -723,15 +864,21 @@ internal class ExtensionModel(
 
     /**
      * A switch that takes effect at once (a machine of a machine list): the saved configuration with this one value
-     * changed goes to the hub; any other edit stays in the draft, unsaved. Refused, the switch goes back.
+     * changed goes to the hub with `preserve_entries=1`, so stale immediate writes never clobber entries added
+     * elsewhere; any other edit stays in the draft, unsaved. Refused, the switch goes back.
      */
     suspend fun saveNow(path: List<String>, value: JsonElement?): Boolean {
         val saved = state.value.detail?.config ?: return false
         if (state.value.busy || state.value.saving || state.value.loading || state.value.loadFailed || state.value.updates.checking) return false
+        val requiredLists = state.value.requiredEntryLists
+        val wasDirty = state.value.dirty
         mutable.update { it.copy(busy = true, error = null, draft = ExtensionDraft.set(it.draft, path, value)) }
         return try {
-            val detail = api.setConfig(id, ExtensionDraft.compact(ExtensionDraft.set(saved, path, value)))
-            mutable.update { it.copy(detail = detail, draft = ExtensionDraft.set(it.draft, path, ExtensionDraft.value(detail.config, path))) }
+            val detail = api.setConfigPreservingEntries(id, ExtensionDraft.compact(ExtensionDraft.set(saved, path, value), requiredLists))
+            mutable.update {
+                if (wasDirty) it.copy(detail = detail, draft = ExtensionDraft.set(it.draft, path, ExtensionDraft.value(detail.config, path)))
+                else it.copy(detail = detail, draft = detail.config, entryKeys = keysFor(detail, detail.config))
+            }
             ExtensionChanges.changed(api)
             true
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -796,6 +943,7 @@ internal class ExtensionModel(
                 detail = detail, error = null,
                 updates = if (it.detail?.extension?.version != detail.extension.version) it.updates.copy(checked = false, candidate = null) else it.updates,
                 draft = if (follow) detail.config else it.draft,
+                entryKeys = if (follow) keysFor(detail, detail.config) else it.entryKeys,
                 numberText = if (follow) emptyMap() else it.numberText,
                 numberProblems = if (follow) emptyMap() else it.numberProblems,
             )
@@ -805,7 +953,7 @@ internal class ExtensionModel(
     catch (refused: ExtensionConfigRejected) {
         val reason = refused.message ?: res.getString(R.string.settings_ext_config_wrong)
         // A field the form does not draw (an older form, a whole-object rule) has nowhere to show: it goes on top.
-        val drawn = refused.field in ExtensionDraft.paths(state.value.detail?.form.orEmpty())
+        val drawn = refused.field in ExtensionDraft.paths(state.value.detail?.form.orEmpty(), state.value.draft)
         mutable.update {
             if (drawn) it.copy(fieldErrors = mapOf(refused.field to reason), error = null)
             else it.copy(fieldErrors = emptyMap(), error = res.getString(R.string.settings_ext_not_saved,
@@ -819,5 +967,9 @@ internal class ExtensionModel(
     } catch (error: Exception) {
         mutable.update { it.copy(error = res.getString(failed ?: if (it.detail == null) R.string.settings_ext_load_failed else R.string.settings_ext_not_changed, failureReasonText(error).resolve(res))) }
         false
+    }
+
+    companion object {
+        internal const val DEFAULT_MAX_ENTRIES = 32
     }
 }

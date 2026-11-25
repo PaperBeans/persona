@@ -3,6 +3,7 @@
 
 import { t } from "../i18n";
 import { useEffect, useState } from "react";
+import { hubServes, moduleFeature } from "../core/module-host";
 import { api, enc } from "./api";
 import { itemHeaders, useItemManager } from "./manager-choice";
 
@@ -197,6 +198,8 @@ const accountsKey = (manager?: string) => (itemHeaders(manager) ? manager! : "")
 /** The mail accounts of manager (none: the default's), read again on every call (calls while one is out share it);
  *  the last answer is kept. */
 export function loadMailAccounts(manager?: string): Promise<MailAccount[]> {
+  // A hub without the mail module (built out or switched off: no module.mail flag) has no mail routes: ask nothing.
+  if (!hubServes(moduleFeature("mail"))) return Promise.resolve([]);
   const key = accountsKey(manager);
   let p = inFlight.get(key);
   if (!p) {

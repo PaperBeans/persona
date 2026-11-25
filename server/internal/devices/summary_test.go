@@ -89,6 +89,32 @@ func TestSummaryIsListsEntry(t *testing.T) {
 	check("an id listed twice")
 }
 
+// The summary carries the file the node said it runs from when its connection began (#14446): the assistant names it
+// to the Agents there rather than asking the node again, which a computer with a slow login shell answered too late.
+// A node that does not say leaves it empty.
+func TestSummaryCarriesNodeExecutable(t *testing.T) {
+	d := newTestDevices(t)
+	box := summaryMachine(d, "box", "ssh", "", true)
+	box.info.Executable = "/opt/persona tools/persona-node"
+	d.addEntry(box)
+	d.addEntry(summaryMachine(d, "old", "ssh", "", true))
+	want := map[string]string{"box": "/opt/persona tools/persona-node", "old": ""}
+	for id, exe := range want {
+		if got, ok := d.Summary(id); !ok || got.Executable != exe {
+			t.Errorf("Summary(%q) = %+v, %v; want the executable %q", id, got, ok, exe)
+		}
+	}
+	listed := d.List()
+	if len(listed) != len(want) {
+		t.Fatalf("List = %+v, want %d machines", listed, len(want))
+	}
+	for _, s := range listed {
+		if s.Executable != want[s.ID] {
+			t.Errorf("List's %s has the executable %q, want %q", s.ID, s.Executable, want[s.ID])
+		}
+	}
+}
+
 // listedMachines is a manager with n computers as a running one has them: grouped, each with its own path.
 func listedMachines(tb testing.TB, n int) *Devices {
 	tb.Helper()

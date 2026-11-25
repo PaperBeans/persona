@@ -59,11 +59,13 @@ class ComposerMediaTest {
         assertFalse(state("hi", video(path = null)).ready)
     }
 
-    @Test fun photosAndVideosShareFourPlaces() {
+    @Test fun videosKeepTheirOwnFourPlacesApartFromPhotos() {
         assertTrue(video().media)
         assertTrue(photo().media)
         assertFalse(ComposerAttachment("f", "notes.txt", "content://x/notes", false, "/tmp/notes.txt").media)
-        assertEquals(4, MAX_COMPOSER_MEDIA)
+        assertEquals(4, MAX_COMPOSER_VIDEOS)
+        assertEquals(4, composerVideoRoom(List(20) { photo("p$it") }))
+        assertEquals(0, composerVideoRoom(List(4) { video("v$it") }))
     }
 
     @Test fun aStoredDraftKeepsItsVideoAndLength() {
@@ -154,7 +156,7 @@ class ComposerMediaTest {
         val shared = java.io.File(context.filesDir, "screenshot.png").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val clip = ClipData(ClipDescription("shot", arrayOf("image/png")), ClipData.Item(Uri.fromFile(shared)))
         // A copy of the app's own in cache/chat-captures, which the draft keeps and cleans up like a camera photo.
-        val copied = java.io.File(pastedImages(context, clip, MAX_COMPOSER_MEDIA) { Uri.fromFile(it) }.single().path!!)
+        val copied = java.io.File(pastedImages(context, clip, 20) { Uri.fromFile(it) }.single().path!!)
         assertEquals(java.io.File(context.cacheDir, "chat-captures").canonicalPath, copied.parentFile!!.canonicalPath)
         assertTrue(copied.name.startsWith("pasted-") && copied.name.endsWith(".png"))
         assertArrayEquals(byteArrayOf(1, 2, 3), copied.readBytes())
@@ -162,8 +164,8 @@ class ComposerMediaTest {
 
         // One the app cannot read is left out rather than attached broken.
         val missing = ClipData(ClipDescription("shot", arrayOf("image/png")), ClipData.Item(Uri.parse("content://example.com/missing.png")))
-        assertEquals(emptyList<Uri>(), pastedImages(context, missing, MAX_COMPOSER_MEDIA) { Uri.fromFile(it) })
+        assertEquals(emptyList<Uri>(), pastedImages(context, missing, 20) { Uri.fromFile(it) })
         val words = ClipData.newPlainText("words", "just words")
-        assertEquals(emptyList<Uri>(), pastedImages(context, words, MAX_COMPOSER_MEDIA) { Uri.fromFile(it) })
+        assertEquals(emptyList<Uri>(), pastedImages(context, words, 20) { Uri.fromFile(it) })
     }
 }

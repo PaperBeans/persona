@@ -61,6 +61,17 @@ func (n *Node) runtimeOfIn(ctx context.Context, name string) *runtimeConn {
 	return n.runtimeOf(name)
 }
 
+// agyRuntimeConnected: a start naming host agy has a companion to go to (runtimeOfIn's), a connected agy runtime.
+func (n *Node) agyRuntimeConnected() bool {
+	runtimes := n.runtimes
+	if runtimes == nil {
+		return false
+	}
+	runtimes.mu.Lock()
+	defer runtimes.mu.Unlock()
+	return runtimes.byRuntime(agyAgent) != nil
+}
+
 // startRuntimeIn is startRuntime for a start in ctx: the start host's exclusive engine runtime for a name it offers,
 // else what a terminal host's start would go to.
 func (n *Node) startRuntimeIn(ctx context.Context, name string) (*runtimeConn, string) {

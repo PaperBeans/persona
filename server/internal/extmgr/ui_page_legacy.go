@@ -186,7 +186,7 @@ func (h *Manager) pageLegacy(ctx context.Context, p *extension.Extension, hp *hu
 	}
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	fitted, err := extension.FitNative(s.tree.ViewJSON(), slot, params.UIVersion, h.uiFallbackLang(ctx, params.Locale))
+	fitted, err := extension.FitNativeFor(s.tree.ViewJSON(), slot, params.UIVersion, sanitizeUnsupported(in.Context.Unsupported), h.uiFallbackLang(ctx, params.Locale))
 	if err != nil {
 		return extension.ActionResult{}, true, err
 	}

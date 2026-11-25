@@ -84,11 +84,16 @@ func TestFinalPassRetriesAndFallbacks(t *testing.T) {
 		t.Fatalf("tries %d", m.Transcription.FinalTries)
 	}
 
-	h.meetingAudio(meetingOther)
+	// The complete upload kicks the running final-pass loop. Advertise the next recording's capabilities before
+	// that upload, not after it: its replay must never start with the previous recording's contribution info.
 	h.tr.set(func(f *fakeTranscriber) { f.info.Features = []string{extwire.TranscriptionLive} })
+	h.meetingAudio(meetingOther)
 	h.finalState(meetingOther, "final")
-	if got := h.hubTexts(meetingOther); !slices.Equal(got, []string{"Live one.", "Live two."}) || len(h.tr.jobsOf(extwire.TranscriptionReplay)) != 3 {
-		t.Fatalf("no replay: %q", got)
+	if got := h.hubTexts(meetingOther); !slices.Equal(got, []string{"Live one.", "Live two."}) {
+		t.Fatalf("the final transcript without replay: %q", got)
+	}
+	if n := len(h.tr.jobsOf(extwire.TranscriptionReplay)); n != 3 {
+		t.Fatalf("live-only contribution started another replay: %d total tries", n)
 	}
 
 	silent := "13131313-1313-4313-8313-131313131313"

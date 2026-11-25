@@ -14,12 +14,14 @@ import (
 
 // Windows the rules use. Each is half open: the view changes at the window's end, which next_change_at names.
 const (
-	failedStartFor  = 48 * time.Hour   // row 1: a failed start needs the owner this long after the failure
-	justFinishedFor = 24 * time.Hour   // rows 6 and 9: closed work unseen, or finished work after it was seen
-	inactiveAfter   = 48 * time.Hour   // row 13: no activity this long gets the Inactive mark
-	usageLimitGrace = 10 * time.Minute // a usage limit still holds this long past its reset
-	retryGrace      = 5 * time.Minute  // a scheduled retry still counts this long past its wake_at (the hub's wakeGrace)
-	prFreshFor      = 15 * time.Minute // PR facts count this long after they were checked
+	failedStartFor             = 48 * time.Hour   // row 1: a failed start needs the owner this long after the failure
+	justFinishedFor            = 24 * time.Hour   // rows 6 and 9: closed work unseen, or finished work after it was seen
+	inactiveAfter              = 48 * time.Hour   // row 13: no activity this long gets the Inactive mark
+	usageLimitGrace            = 10 * time.Minute // a usage limit still holds this long past its reset
+	retryGrace                 = 5 * time.Minute  // a scheduled retry still counts this long past its wake_at (the hub's wakeGrace)
+	prFreshFor                 = 15 * time.Minute // PR facts count this long after they were checked
+	pendingReviewEscalateAfter = 24 * time.Hour   // todos_v2: pending_review stays in working this long, then surfaces to needs_you
+	canWaitEscalateAfter       = 48 * time.Hour   // todos_v2: non-critical can_wait decisions age into active needs_you after this long
 )
 
 // runKind is how one linked run stands, as far as the rules care; the order is the order runReading checks them in.
@@ -391,6 +393,17 @@ func reviewState(f *Facts) string {
 		return ""
 	}
 	return st
+}
+
+// pendingReviewSince is when a pending_review task began waiting for supervisor review.
+func pendingReviewSince(f *Facts) time.Time {
+	if f.Supervision == nil {
+		return time.Time{}
+	}
+	if f.Supervision.PendingSince != nil {
+		return *f.Supervision.PendingSince
+	}
+	return f.Supervision.UpdatedAt
 }
 
 // openAsk is the to-do's own ask when a whole one waits.

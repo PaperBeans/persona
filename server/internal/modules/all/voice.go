@@ -16,9 +16,9 @@ import (
 // The voice module: its program (`personad voice`) and what the extension host needs of its extension.
 func init() {
 	modules = append(modules, voice.Module{})
-	builtinext.AddProgram("voice", `the built-in voice extension: the hub runs it (hub.json extensions, docs/extensions/extensions.md "Built-in voice extension")`,
+	builtinext.AddProgram(voice.Module{}.Info().ID, "voice", `the built-in voice extension: the hub runs it (hub.json extensions, docs/extensions/extensions.md "Built-in voice extension")`,
 		func(ctx context.Context, _ string) error { return voice.Run(ctx) })
-	builtinext.ProvideVoice(builtinext.Voice{
+	builtinext.ProvideVoice(voice.Module{}.Info().ID, builtinext.Voice{
 		TranscriptionContribution: voice.TranscriptionContribution,
 		GatewayProvider: func(config json.RawMessage, name, key string) (json.RawMessage, bool) {
 			prov, ok := voice.GatewayProviderFromConfig(config, name, key)

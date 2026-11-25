@@ -5,7 +5,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { t } from "../i18n";
 import { resolveTab } from "../lib/herdr-tree";
 import { useInboxBadge } from "../lib/inbox";
-import { useLarkHome } from "../lib/lark-chats";
 import { agentKey } from "../lib/pins";
 import { enabledNavItems, useModuleStates } from "../core/module-host";
 import { NAV_PAGES, extensionNavKey, sidebarActiveKey, sidebarRoute } from "../lib/persona-nav";
@@ -21,7 +20,7 @@ import { href, inWorkView, navigate, parse, type Route } from "../lib/router";
 import { useAgentSessions } from "../lib/sessions";
 import { scoped, useScope, useScopedCounts } from "../lib/current-assistant";
 import { useOwnerNeeds } from "../lib/todo-owner-needs";
-import { useLarkOn, useStore } from "../lib/store";
+import { useStore } from "../lib/store";
 import { connPhase } from "../lib/connection";
 import { useStarredCount } from "../lib/starred-summary";
 import { useWorkspaceBoardSetting } from "../lib/workspace-board-setting";
@@ -108,10 +107,6 @@ export function useNavPages() {
   const todosBadgeLabel = todosBadge ? t("sidebar.todos_badge_title", { count: todosBadge }) : undefined;
   const counts = useScopedCounts();
   const inbox = useInboxBadge();
-  const larkSwitch = useLarkHome();
-  const lark = useLarkOn();
-  // "Messages" needs the hub to read Feishu (feature `lark`) as well as this browser's switch
-  const larkHome = larkSwitch && lark;
   const extensionPages = useExtensionSlot("nav_page");
   // Colored sidebar icons (#10822): a built-in page's color, an extension's page the one its manifest names; none otherwise
   const colored = useSidebarIconMode() === "colored";
@@ -125,7 +120,6 @@ export function useNavPages() {
   const page: Record<(typeof NAV_PAGES)[number], NavPage | false> = {
     home: { k: "home", to: { name: "home" }, icon: "home", label: t("sidebar.nav_home"), short: t("sidebar.nav_home_short"), badge: counts.badge || undefined, badgeTone: "attention" },
     inbox: { k: "inbox", to: { name: "inbox" }, icon: "inbox", label: t("sidebar.nav_inbox"), short: t("sidebar.nav_inbox_short"), badge: inbox || undefined, badgeTone: "attention", title: inbox ? t("sidebar.inbox_badge_title", { count: inbox }) : undefined },
-    messages: larkHome && { k: "messages", to: { name: "messages" }, icon: "chat", label: t("sidebar.nav_messages") },
     starred: stars != null && { k: "starred", to: { name: "starred" }, icon: "star", label: t("starred.title"), badge: stars || undefined, badgeLabel: t("starred.count", { count: stars }) },
     "workspace-board": boardOn && { k: "workspace-board", to: { name: "workspace-board" }, icon: "layers", label: t("sidebar.nav_board"), short: t("sidebar.nav_board_short") },
     todos: todosSupported !== false && { k: "todos", to: { name: "todos" }, icon: "todo", label: t("sidebar.nav_todos"), badge: todosBadge || undefined, badgeLabel: todosBadgeLabel, title: todosBadgeLabel },

@@ -50,5 +50,8 @@
   "view_toolchain": "Toolchain",
   "battery": "Battery",
   "charging": "charging",
-  "temperature": "Temp"
+  "temperature": "Temp",
+  "hosted_assistant": "Assistant · {name}",
+  "manager_pending_restart": "Pending restart",
+  "manager_version_lag": "Older version"
 }

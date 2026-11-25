@@ -4,11 +4,11 @@ import { relayedFrom } from "./queue-relayed";
 
 describe("relayedFrom", () => {
   it("reads the title and the words of a conversation_send relay", () => {
-    expect(relayedFrom("来自「主对话」：帮我看下日程")).toEqual({ from: "主对话", text: "帮我看下日程" });
+    expect(relayedFrom("来自「主对话」：帮我看下日程")).toEqual({ from: "主对话", text: "帮我看下日程", noWake: false });
   });
 
   it("trims the title", () => {
-    expect(relayedFrom("来自「  日报  」：汇总")).toEqual({ from: "日报", text: "汇总" });
+    expect(relayedFrom("来自「  日报  」：汇总")).toEqual({ from: "日报", text: "汇总", noWake: false });
   });
 
   it("returns null for lines that are not a relay", () => {
@@ -20,17 +20,25 @@ describe("relayedFrom", () => {
   it("returns null for an empty title", () => {
     expect(relayedFrom("来自「」：内容")).toBeNull();
     expect(relayedFrom("来自「  」：内容")).toBeNull();
+    expect(relayedFrom("来自「」（不唤醒）：来自「主对话」：内容")).toBeNull();
   });
 
   it("ends the title at the first 」：, so words that open with a quoted phrase stay whole", () => {
     expect(relayedFrom("来自「主对话」：「用户追加：『看下日程』」：请处理")).toEqual({
       from: "主对话",
       text: "「用户追加：『看下日程』」：请处理",
+      noWake: false,
     });
-    expect(relayedFrom("来自「主对话」：「甲」：乙")).toEqual({ from: "主对话", text: "「甲」：乙" });
+    expect(relayedFrom("来自「主对话」：「甲」：乙")).toEqual({ from: "主对话", text: "「甲」：乙", noWake: false });
   });
 
   it("keeps newlines in the words", () => {
-    expect(relayedFrom("来自「主对话」：第一行\n第二行\n")).toEqual({ from: "主对话", text: "第一行\n第二行\n" });
+    expect(relayedFrom("来自「主对话」：第一行\n第二行\n")).toEqual({ from: "主对话", text: "第一行\n第二行\n", noWake: false });
+  });
+
+  it("reads the no-wake marker before the body and keeps later markers in the body", () => {
+    const text = "来自「另一对话」（不唤醒）：第一行\n第二行";
+    expect(relayedFrom(`来自「  日报  」（不唤醒）：${text}`)).toEqual({ from: "日报", text, noWake: true });
+    expect(relayedFrom(`来自「日报」：${text}`)).toEqual({ from: "日报", text, noWake: false });
   });
 });

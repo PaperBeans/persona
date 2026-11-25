@@ -3,6 +3,7 @@ package persona.feature.chat
 import android.view.DragEvent
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRowScope
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -33,11 +34,13 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
+import persona.core.contracts.ImageLimits
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.ChatComposerService
 import persona.core.designsystem.ComposerDropTargetFrame
 import persona.core.designsystem.ComposerHardwareActions
 import persona.core.designsystem.LocalComposerHardware
+import persona.core.designsystem.LocalHubImageLimits
 import persona.core.designsystem.LocalLargeWindowInput
 import persona.core.designsystem.ModelPillWidth
 import persona.core.designsystem.hardwareShortcutTextInput
@@ -64,6 +67,7 @@ fun LargeWindowComposer(
     placeholder: String = stringResource(R.string.chat_composer_placeholder),
     leading: (@Composable RowScope.() -> Unit)? = null,
     accessory: (@Composable ColumnScope.() -> Unit)? = null,
+    hintChips: (@Composable FlowRowScope.() -> Unit)? = null,
     modeHint: String? = null,
     onOverlay: (Boolean) -> Unit = {},
     visible: Boolean = true,
@@ -85,6 +89,7 @@ fun LargeWindowComposer(
     upload: ComposerAttachmentUpload? = null,
     wrapPlaceholder: Boolean = false,
     covered: Boolean = false,
+    imageLimits: ImageLimits = LocalHubImageLimits.current.forAgent(null),
 ) {
     val largeWindow = LocalLargeWindowInput.current
     val dictate = rememberComposerDictation(session, state, visible && enabled, onNotice)
@@ -94,10 +99,11 @@ fun LargeWindowComposer(
             session = session, state = state, working = working, sending = sending, canClear = canClear,
             service = service, uploadDestination = uploadDestination, upload = upload, onSend = onSend, onCommand = onCommand, onNotice = onNotice,
             extraContent = extraContent, assistantChat = assistantChat, enabled = enabled, placeholder = placeholder, leading = leading,
-            accessory = accessory, modeHint = modeHint, onOverlay = onOverlay, visible = visible, dictate = dictate.takeUnless { covered },
+            accessory = accessory, hintChips = hintChips, modeHint = modeHint, onOverlay = onOverlay, visible = visible, dictate = dictate.takeUnless { covered },
             agentName = agentName, canInterrupt = canInterrupt, mentions = mentions, onMention = onMention,
             onMentionTask = onMentionTask, onMentionOpen = onMentionOpen, onModel = onModel, onPermissions = onPermissions, onWorkflows = onWorkflows, loop = loop,
             blockedLabel = blockedLabel, onBlocked = onBlocked, useShellSurface = useShellSurface, modelPill = modelPill, wrapPlaceholder = wrapPlaceholder,
+            imageLimits = imageLimits,
         )
     }
 
@@ -147,9 +153,8 @@ fun LargeWindowComposer(
             scope.launch {
                 try {
                     for (uri in uris) {
-                        val mediaCount = state.attachments.count { it.media }
                         val result = withContext(NonCancellable + Dispatchers.IO) {
-                            importDroppedAttachment(context, uri, mediaCount)
+                            importDroppedAttachment(context, uri, state.attachments, limits = imageLimits, canSpill = service != null)
                         }
                         result.attachment?.let { attachment ->
                             ComposerDropCleanup.track(state, context)

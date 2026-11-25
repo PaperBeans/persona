@@ -65,7 +65,8 @@ import os
          ended: @escaping @MainActor (UrgentCallSession) -> Void) {
         self.ring = ring
         self.voice = voice
-        self.card = card
+        // A card its task's supervisor holds is the supervisor's, not the user's (`Interaction.supervisorHeld`).
+        self.card = card.flatMap { $0.answerableHere ? $0 : nil }
         self.resolve = resolve
         self.ended = ended
     }
@@ -155,7 +156,7 @@ import os
 
     /// The owner tapped an option on the call page: read back, as if said.
     func choose(_ label: String) {
-        guard let card else { return }
+        guard let card, card.answerableHere else { return }
         offer(UrgentCallReply.option(label), card: card)
         run?.cancel()
         run = Task { await confirmPending() }
@@ -163,7 +164,7 @@ import os
 
     /// The owner tapped Approve or Reject on a permission or plan card: read back, as if said.
     func decide(allow: Bool) {
-        guard let card else { return }
+        guard let card, card.answerableHere else { return }
         offer(allow ? .allow : .deny, card: card)
         run?.cancel()
         run = Task { await confirmPending() }
@@ -248,7 +249,7 @@ import os
     }
 
     private func act(_ reply: UrgentCallReply) async {
-        guard let pending, let card else { return }
+        guard let pending, let card, card.answerableHere else { return }
         self.pending = nil
         guard reply == .confirm else {
             await say(String(localized: "Okay, I didn't do it. What would you like instead?"))
@@ -263,6 +264,10 @@ import os
 
     /// Turns a reply into the pending decision for card (nil when it names none).
     private func offer(_ reply: UrgentCallReply, card: Interaction) {
+        guard card.answerableHere else {
+            pending = nil
+            return
+        }
         switch (reply, card.kind) {
         case (.option(let label), .question):
             guard let question = card.questions?.first else { return }
@@ -368,10 +373,15 @@ import os
         card.questions?.first?.options.map(\.label) ?? []
     }
 
-    /// The call's card while it is still pending in the app.
+    /// The call's pending card while it is answerable here: nil when absent or held by its task's supervisor.
+    nonisolated static func answerableCard(id: String?, group: String, in interactions: some Sequence<Interaction>) -> Interaction? {
+        guard let id, !id.isEmpty else { return nil }
+        return interactions.first { $0.id == id && $0.group == group && $0.answerableHere }
+    }
+
+    /// The call's card while it is still pending in the app and answerable by the user.
     private func currentCard() -> Interaction? {
-        guard let id = info?.interactionID, !id.isEmpty else { return nil }
-        return AppModel.shared.interactions.values.first { $0.id == id && $0.group == ring.group }
+        Self.answerableCard(id: info?.interactionID, group: ring.group, in: AppModel.shared.interactions.values)
     }
 }
 #endif

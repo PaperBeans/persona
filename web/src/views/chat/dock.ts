@@ -13,6 +13,8 @@ export function visibleShare(share: number, cap?: number): string {
 
 /** Everything under the chat on a narrow screen: at most about half of what is visible. */
 export const DOCK_MAX = visibleShare(0.55);
+/** Answer can give the existing command field room above its sticky footer. The composer keeps its place below it. */
+export const COMMAND_DOCK_MAX = visibleShare(0.72);
 /** The composer's text box: 240px, less when little is visible, so the send button stays on screen. */
 export const INPUT_MAX = visibleShare(0.35, 240);
 /** A plan card's plan (it scrolls inside). */

@@ -203,7 +203,7 @@ func TestAcceptanceRetryIsBounded(t *testing.T) {
 	t.Run("a status that cannot be read", func(t *testing.T) {
 		s, f, lark, id := retryService(t)
 		f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) { return nil, errors.New("manager away") })
-		s.feishuForgetStatus()
+		s.larkModule().ForgetStatus()
 		deployedCardless(t, s, f, id)
 		a := askOf(s, id)
 		s.retryAcceptance(a.AskedAt.Add(10 * time.Minute))
@@ -251,7 +251,7 @@ func TestAcceptanceRetryWithTheBotOffIsCardless(t *testing.T) {
 			st := c.st
 			st.PublicURL = cardlessWeb
 			f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) { return st, nil })
-			s.feishuForgetStatus()
+			s.larkModule().ForgetStatus()
 			s.retryAcceptance(time.Now())
 			if _, keys := lark.sent(); len(keys) != 1 {
 				t.Fatalf("%d sends, want only the first", len(keys))

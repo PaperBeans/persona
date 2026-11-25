@@ -29,8 +29,10 @@ import (
 // MemoryReadBounds are the bounds of reading one memory_sources contribution for an assembly; the assistant gives
 // them (memory_extension_wire.go), so they are written once.
 type MemoryReadBounds struct {
-	// PageLimit is the limit each call asks for, Pages the most calls, Entries the most entries read over all pages.
-	PageLimit, Pages, Entries int
+	// PageLimit is the limit each call asks for. ReadTimeout and TotalMost bound the complete read, never a prefix.
+	PageLimit   int
+	ReadTimeout time.Duration
+	TotalMost   int
 	// CallTimeout bounds one call; AnswerMost is the most bytes one answer may hold.
 	CallTimeout time.Duration
 	AnswerMost  int
@@ -102,31 +104,40 @@ type memoryCaller interface {
 	Call(ctx context.Context, method string, params, out any) error
 }
 
-// readMemoryPages reads contribution's entries, page after page, within b: it stops at the last page (has_more false,
-// or true with an empty after), at a cursor answered before, after b.Pages pages or once b.Entries entries were read.
-// Any failed page fails the whole read.
+// readMemoryPages follows the contribution's existing opaque cursors until the source ends. A failed page, repeated
+// cursor or exhausted resource budget fails the whole read: an incomplete prefix must never become the recall cache.
 func readMemoryPages(ctx context.Context, proc memoryCaller, contribution string, b MemoryReadBounds) ([]wire.MemoryEntriesResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, b.ReadTimeout)
+	defer cancel()
 	var pages []wire.MemoryEntriesResult
 	sent := map[string]bool{}
-	after, read := "", 0
-	for len(pages) < b.Pages && read < b.Entries {
-		page, err := memoryPage(ctx, proc, wire.MemoryEntriesParams{Contribution: contribution, Limit: b.PageLimit, After: after}, b)
+	after, total := "", 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("incomplete memory read: %w", err)
+		}
+		page, size, err := memoryPage(ctx, proc, wire.MemoryEntriesParams{Contribution: contribution, Limit: b.PageLimit, After: after}, b)
 		if err != nil {
 			return nil, err
 		}
+		total += size
+		if total > b.TotalMost {
+			return nil, fmt.Errorf("incomplete memory read: answers over %d bytes", b.TotalMost)
+		}
 		pages = append(pages, page)
-		read += len(page.Entries)
-		if !page.HasMore || page.After == "" || sent[page.After] {
-			break
+		if !page.HasMore || page.After == "" {
+			return pages, nil
+		}
+		if sent[page.After] {
+			return nil, errors.New("incomplete memory read: repeated cursor")
 		}
 		sent[page.After] = true
 		after = page.After
 	}
-	return pages, nil
 }
 
 // memoryPage is one memory.entries call within b.CallTimeout, its answer checked (memoryPageOf).
-func memoryPage(ctx context.Context, proc memoryCaller, params wire.MemoryEntriesParams, b MemoryReadBounds) (wire.MemoryEntriesResult, error) {
+func memoryPage(ctx context.Context, proc memoryCaller, params wire.MemoryEntriesParams, b MemoryReadBounds) (wire.MemoryEntriesResult, int, error) {
 	cctx, cancel := context.WithTimeout(ctx, b.CallTimeout)
 	defer cancel()
 	var raw json.RawMessage
@@ -134,15 +145,16 @@ func memoryPage(ctx context.Context, proc memoryCaller, params wire.MemoryEntrie
 		var re *rpc.Error
 		switch {
 		case ctx.Err() != nil:
-			return wire.MemoryEntriesResult{}, fmt.Errorf("canceled: %w", ctx.Err())
+			return wire.MemoryEntriesResult{}, 0, fmt.Errorf("canceled: %w", ctx.Err())
 		case cctx.Err() != nil:
-			return wire.MemoryEntriesResult{}, fmt.Errorf("no answer in %s", b.CallTimeout)
+			return wire.MemoryEntriesResult{}, 0, fmt.Errorf("no answer in %s", b.CallTimeout)
 		case errors.As(err, &re):
-			return wire.MemoryEntriesResult{}, fmt.Errorf("%s: %s", re.Code, repoWords(re.Message))
+			return wire.MemoryEntriesResult{}, 0, fmt.Errorf("%s: %s", re.Code, repoWords(re.Message))
 		}
-		return wire.MemoryEntriesResult{}, errors.New(repoWords(err.Error()))
+		return wire.MemoryEntriesResult{}, 0, errors.New(repoWords(err.Error()))
 	}
-	return memoryPageOf(raw, b.AnswerMost)
+	page, err := memoryPageOf(raw, b.AnswerMost)
+	return page, len(raw), err
 }
 
 // memoryPageShape is a page's own fields, each told missing from wrong.

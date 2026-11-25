@@ -49,7 +49,7 @@ describe("where an agent was opened, as a mark at its row's end (#2526)", () => 
     const html = render({ pane_id: "w1:p1" });
     expect(mark(html)).toMatch(/aria-label="终端"/);
     expect(mark(html)).toMatch(/title="终端"/);
-    expect(mark(html)).toContain("text-source-terminal");
+    expect(mark(html)).toContain("text-ink-3");
     expect(mark(html)).toContain("<svg");
     expect(mark(html)).not.toMatch(/>终端</); // no visible word any more
     expect(link(html)).toMatch(/title="整理文档\n终端/); // the row's tooltip names it too: the mark hides while hovered
@@ -68,6 +68,14 @@ describe("where an agent was opened, as a mark at its row's end (#2526)", () => 
     expect(linked).toMatch(/^<span data-source="feishu" role="link" tabindex="0"[^>]*aria-label="飞书群 · 在飞书里打开这个话题"/);
     expect(linked).toContain("<img");
   });
+  it("places the age before the source and keeps the pending count at the end", () => {
+    const timed = render({ pane_id: "botmux:oc_1/t1", external_url: "https://example.com/topic",
+      updated_at: "2026-11-20T08:00:00Z", pending_interactions: 2 });
+    expect(timed).toContain("data-row-age");
+    expect(timed.indexOf("data-row-age")).toBeLessThan(timed.indexOf('data-source="feishu"'));
+    expect(timed).toMatch(/data-source="feishu"[\s\S]*role="link"[\s\S]*>2<\/span><\/a>/);
+    expect(render({ pane_id: "w1:p1" })).not.toContain("data-row-age");
+  });
   it("draws none for other sources, Persona's conversations and a tab with several panes", () => {
     expect(mark(render({}))).toBeUndefined();
     expect(mark(render({ source_kind: "runtime", source_instance_id: "dsh" }))).toBeUndefined();
@@ -79,11 +87,11 @@ describe("where an agent was opened, as a mark at its row's end (#2526)", () => 
     expect(mark(render({ pane_id: "w1:p1" }))).toContain("group-hover/row:invisible");
     expect(mark(renderToStaticMarkup(<SessionRow {...rowProps} s={{ ...session, pane_id: "w1:p1" }} active />))).not.toContain("invisible");
   });
-  it("tells terminal and desktop apart by shape too: a bare prompt, and a framed window", () => {
+  it("tells terminal and desktop apart by shape too: a framed terminal prompt, and a framed window", () => {
     const svg = (html: string) => mark(html)!.match(/<svg[^>]*>(.*?)<\/svg>/)![1];
     const terminal = svg(render({ pane_id: "w1:p1" }));
     const desktop = svg(render({ space_kind: "codex_app", source_kind: "codex_history" }));
-    expect(terminal).not.toContain("<rect"); // no frame: a prompt chevron and an underscore
+    expect(terminal).toContain("<rect"); // framed terminal icon with prompt chevron and underscore
     expect(desktop).toContain("<rect");
     expect(terminal).not.toBe(desktop);
   });
@@ -126,6 +134,16 @@ describe("an agent's row with 「Agent 行显示详情」 (#2430)", () => {
     const danger = render({ ...detailed, context_tokens: 185000 });
     expect(danger).toContain("text-orange");
     expect(danger).not.toContain("text-red");
+  });
+  it("renders the agy context bar and share only with a known window", () => {
+    setAgentDetails(true);
+    const agy = { ...session, agent: "agy", model: "gemini-4-carbon-high", context_tokens: 262_144 };
+    const known = render({ ...agy, context_window: 1_048_576 });
+    expect(known).toContain('role="progressbar"');
+    expect(known).toContain('aria-valuenow="25"');
+    expect(known).toContain(t("context.label", { percent: 25 }));
+    const unknown = render({ ...agy, model: "custom", context_window: 0 });
+    expect(unknown).not.toMatch(/progressbar|%/);
   });
   it("draws no second line for a session that says nothing, or for a conversation of the assistant", () => {
     setAgentDetails(true);

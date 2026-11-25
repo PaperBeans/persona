@@ -28,7 +28,7 @@ class ModulesTest {
     private fun unregistered(registry: ModuleRegistry, keys: Collection<NavKey>): List<NavKey> {
         val missing = mutableListOf<NavKey>()
         val provider = entryProvider<NavKey>(fallback = { key -> missing += key; NavEntry(key) {} }) {
-            registry.active(emptySet()).forEach { it.navEntries(this, ModuleNavContext(navigator, null, unavailable = {})) }
+            registry.active(emptySet()).forEach { it.navEntries(this, ModuleNavContext(navigator, null, unavailable = {}, audioFocus = persona.core.moduleapi.AudioBroker.withoutSystem())) }
         }
         keys.forEach { val _ = provider(it) }
         return missing

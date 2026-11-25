@@ -48,40 +48,40 @@ func (e *Engine) commitProject(snapshot *Project, input projectInput, d projectD
 		prompts.RenderKBProjectInput(currentInput.KBProjectInput) != prompts.RenderKBProjectInput(input.KBProjectInput) {
 		return nil
 	}
-	wroteOneLine := oneLine(d.OneLine) != "" && !current.fieldLocked("one_line")
+	wroteOneLine := oneLine(d.OneLine) != "" && !taggingFieldLocked(&current.Tagging, "one_line")
 	if wroteOneLine {
 		current.OneLine = oneLine(d.OneLine)
 	}
-	if d.Goal != "" && !current.fieldLocked("goal") {
+	if d.Goal != "" && !taggingFieldLocked(&current.Tagging, "goal") {
 		current.Goal = oneLine(d.Goal)
 	}
-	if (d.Kind == "short" || d.Kind == "long") && !current.fieldLocked("project_kind") {
+	if (d.Kind == "short" || d.Kind == "long") && !taggingFieldLocked(&current.Tagging, "project_kind") {
 		current.Kind = d.Kind
 	}
 	// A finished project stays finished through a rewrite: only news revives it (evolveProject), and FinishProjects
 	// may have finished it on the sources' facts (#9427).
-	if (d.Status == "active" || d.Status == "paused" || d.Status == "done") && current.Status != "ignored" && current.Status != "done" && !current.fieldLocked("status") {
+	if (d.Status == "active" || d.Status == "paused" || d.Status == "done") && current.Status != "ignored" && current.Status != "done" && !taggingFieldLocked(&current.Tagging, "status") {
 		current.Status = d.Status
 	}
 	protected := current.Tagging
 	now := time.Now().UTC()
 	applyTags(&current.Tagging, d.Importance, int(d.Relevance), d.Tags, now)
-	if protected.fieldLocked("importance") {
+	if taggingFieldLocked(&protected, "importance") {
 		current.Importance = protected.Importance
 	}
-	if protected.fieldLocked("relevance") {
+	if taggingFieldLocked(&protected, "relevance") {
 		current.Relevance = protected.Relevance
 	}
-	if protected.fieldLocked("tags") {
+	if taggingFieldLocked(&protected, "tags") {
 		current.Tags = protected.Tags
 	}
-	if kw := cleanKeywords(d.Keywords); len(kw) > 0 && !current.fieldLocked("keywords") {
+	if kw := cleanKeywords(d.Keywords); len(kw) > 0 && !taggingFieldLocked(&current.Tagging, "keywords") {
 		current.Keywords = kw
 	}
 	current.Dirty = false
 	current.Updated = now
 	summary := input.Summary
-	if strings.TrimSpace(d.Summary) != "" && !current.fieldLocked("summary") {
+	if strings.TrimSpace(d.Summary) != "" && !taggingFieldLocked(&current.Tagging, "summary") {
 		path := s.path(KindProject, current.Slug, "summary.md")
 		next := []byte(strings.TrimSpace("# "+current.Name+"\n\n"+d.Summary) + "\n")
 		old, _ := os.ReadFile(path)

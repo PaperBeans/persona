@@ -12,13 +12,14 @@ SOURCES = ("instructions", "tool_schemas", "snapshot_or_events", "history", "cur
            "tool_results", "attachments", "other_content")
 CONTEXT = re.compile(r"<persona-context\b[^>]*>.*?</persona-context>", re.S)
 ATTACHMENTS = {"image", "input_image", "image_url", "document", "input_file", "file", "local_image"}
-TOOL_OUTPUTS = {"tool_result", "function_call_output", "custom_tool_call_output"}
+TOOL_OUTPUTS = ("tool_result", "function_call_output", "custom_tool_call_output")
 
 
 def size(value):
     """UTF-8 text bytes; structured values use deterministic compact JSON, not wire bytes."""
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return len(text.encode("utf-8"))
+    # JSON exports can contain escaped lone surrogates. Count their escaped spelling.
+    return len(text.encode("utf-8", errors="backslashreplace"))
 
 
 def counter(value):
@@ -206,7 +207,7 @@ class Breakdown:
                     identity = (msg.get("id") or entry.get("uuid")) if kind == "assistant" else None
                     for block in blocks:
                         if isinstance(identity, str) and identity:
-                            digest = hashlib.sha256(json.dumps(block, sort_keys=True, ensure_ascii=False).encode()).digest()
+                            digest = hashlib.sha256(json.dumps(block, sort_keys=True).encode()).digest()
                             key = (identity, digest)
                             if key in seen:
                                 continue

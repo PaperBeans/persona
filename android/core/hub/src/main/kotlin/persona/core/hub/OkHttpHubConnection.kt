@@ -123,6 +123,8 @@ class OkHttpHubConnection(
     override val currentHello = _currentHello.asStateFlow()
     private val _serverFeatures = MutableStateFlow<Set<String>>(emptySet())
     val serverFeatures = _serverFeatures.asStateFlow()
+    private val _imageLimits = MutableStateFlow(ImageLimitsTable.Standard)
+    val imageLimits = _imageLimits.asStateFlow()
     /** A pairing-owned consumer for phone calls, before typed event decoding. */
     @Volatile var phoneMessageHandler: ((JsonObject) -> Boolean)? = null
     private val _events = MutableSharedFlow<ServerEvent>()
@@ -929,6 +931,7 @@ class OkHttpHubConnection(
                             }
                             features = event.features.toSet()
                             _serverFeatures.value = features
+                            _imageLimits.value = event.imageLimits ?: ImageLimitsTable.Standard
                             if (!features.containsAll(config.requiredFeatures)) {
                                 throw HubFailure(HubError.Incompatible, retryable = false)
                             }

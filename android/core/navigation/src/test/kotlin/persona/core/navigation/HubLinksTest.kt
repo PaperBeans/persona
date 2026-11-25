@@ -57,6 +57,15 @@ class HubLinksTest {
         assertEquals(HubPage.Screen(MachineDetailRoute("m1")), page("$hub/machines/m1"))
     }
 
+    /** Dashboards (#15017): the reserved extension `-pages` opens as an extension page; its title comes from the page. */
+    @Test fun dashboardsPagesOpenAsExtensionPages() {
+        val page = HubPage.Screen(ExtensionUiRoute("-pages", "pg_0123456789abcdef", ""))
+        assertEquals(page, page("$hub/extension/-pages/pg_0123456789abcdef"))
+        assertEquals(HubPage.Screen(ExtensionUiRoute("-pages", "index", "")), page("$hub/extension/-pages/index"))
+        val opened = HubLinks.parse("persona://open/extension/-pages/pg_0123456789abcdef", emptyList())
+        assertEquals(page, (opened as HubLinks.Result.Page).page)
+    }
+
     @Test fun legacyAndCanonicalSentLinksOpenTheNestedLedger() {
         val sent = HubPage.Screen(SettingsPageRoute(SettingsPage.Sent))
         listOf("/settings?tab=sent", "/settings/sent", "/settings/sent/", "/settings?tab=connectors&connector=-sent").forEach {

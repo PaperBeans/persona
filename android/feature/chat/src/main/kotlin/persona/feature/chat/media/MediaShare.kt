@@ -13,9 +13,10 @@ import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
+import persona.core.contracts.ImageLimits
 import persona.core.designsystem.ImageMath
-import persona.core.designsystem.jpegBytes
 import persona.feature.chat.ComposerAttachment
+import persona.feature.chat.encodePhotoJpeg
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -89,11 +90,16 @@ object MediaShare {
     }
 
     /**
-     * A marked-up picture as a photo for the composer: long side [EditedMaxSide], JPEG [EditedQuality], written to
-     * `cache/chat-captures/` and handed out through the chat's FileProvider, which the composer reads without a grant.
+     * A marked-up picture as a photo for the composer: encoded through [encodePhotoJpeg] under [limits] (scaling to
+     * `maxSide` at quality 75 and stepping down when over `imageBytes`), written to `cache/chat-captures/` and handed
+     * out through the chat's FileProvider, which the composer reads without a grant.
      */
-    suspend fun writeEditedPhoto(context: Context, picture: Bitmap): ComposerAttachment = withContext(Dispatchers.IO) {
-        val bytes = picture.jpegBytes(EditedMaxSide, EditedQuality)
+    suspend fun writeEditedPhoto(
+        context: Context,
+        picture: Bitmap,
+        limits: ImageLimits = ImageLimits.Standard,
+    ): ComposerAttachment = withContext(Dispatchers.IO) {
+        val bytes = encodePhotoJpeg(picture, limits)
         val folder = File(context.cacheDir, "chat-captures").apply { mkdirs() }
         val file = File.createTempFile("edited-", ".jpg", folder)
         try {
@@ -103,7 +109,15 @@ object MediaShare {
             throw e
         }
         val uri = FileProvider.getUriForFile(context, authority(context), file)
-        ComposerAttachment(id = UUID.randomUUID().toString(), name = file.name, uri = uri.toString(), image = true, size = file.length())
+        val byteCount = file.length()
+        ComposerAttachment(
+            id = UUID.randomUUID().toString(),
+            name = file.name,
+            uri = uri.toString(),
+            image = true,
+            size = byteCount,
+            scaledBytes = byteCount,
+        )
     }
 
     /** [bytes] as a file in `cache/shared/` and its content URI; shared files older than a day are dropped on the way. */

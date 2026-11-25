@@ -1,0 +1,10 @@
+{
+  "manifest_version": 1,
+  "id": "example-cloud",
+  "name": "Example Cloud",
+  "version": "1.0.0",
+  "description": "Moves files, folders and apps from your computers to Example Cloud, lists what it holds, and brings them back.",
+  "engines": {"persona": ">=202611230000", "extension_protocol": 1},
+  "runtime": {"command": {"linux-amd64": "bin/example-cloud-linux-amd64", "darwin-arm64": "bin/example-cloud-darwin-arm64"}},
+  "contributes": {"disk_offload": [{"id": "cloud", "name": "Example Cloud", "kinds": ["file", "dir", "app"], "restore": true}]}
+}

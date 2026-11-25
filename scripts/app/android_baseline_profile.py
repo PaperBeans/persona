@@ -26,6 +26,7 @@ package on the phone):
 Rules are exactly what the phone saw: no whole-class wildcards, which in a measurement compiled about twice the code
 for no faster start. Dumps come in profman's text (`cmd package dump-profiles` on Android 12 based systems) or already
 as rules (`dump-profiles --dump-classes-and-methods` on newer ones); both are read.
+If conversion produces no rules, the profile and report files are left as they were.
 """
 import argparse
 import json
@@ -254,6 +255,8 @@ def rules(args):
         classes = {c for c in classes if c.startswith(prefix)}
     mapping = Mapping(Path(args.mapping).read_text(encoding='utf-8'))
     out_methods, out_classes, stats, dropped = to_rules(mapping, methods, classes)
+    if not out_methods and not out_classes:
+        raise SystemExit('no baseline profile rules produced; check the profile dumps, mapping and --only filter')
     stats['rules'] = write_rules(args.out, out_methods, out_classes)
     stats['app_rules'] = sum(1 for c in out_classes if c.startswith('Lpersona/')) + \
         sum(1 for k in out_methods if k[0].startswith('Lpersona/'))

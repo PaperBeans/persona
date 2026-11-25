@@ -39,6 +39,17 @@ internal fun ChatStatusSheet(
     JSheet(onDismiss = onDismiss, title = stringResource(R.string.chat_status_title)) {
         LazyColumn(contentPadding = PaddingValues(bottom = Tokens.Space.m),
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
+            val hasDetails = resolveStatusLine(state) != null ||
+                (recordedDuration != null && recordedDuration >= 0) ||
+                notice != null ||
+                recovery.notice != null ||
+                draftSaveError != null ||
+                state.ended || state.replaced || state.machineOffline ||
+                messages.isNotEmpty() ||
+                !session?.queued.isNullOrEmpty() ||
+                session?.loop != null ||
+                !session?.workflows.isNullOrEmpty() ||
+                !session?.backgroundTasks.isNullOrEmpty()
             item {
                 StatusLine(state)
                 recordedDuration?.takeIf { it >= 0 }?.let {
@@ -46,6 +57,16 @@ internal fun ChatStatusSheet(
                 }
                 if (notice != null) Text(notice, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
                 recovery.notice?.let { Text(it, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2) }
+            }
+            if (!hasDetails && session != null) item {
+                val sessionStatus = headerStatus(state, session)
+                JGroupItem(GroupPosition.Single) {
+                    JRow(
+                        title = session.displayTitle,
+                        subtitle = sessionStatus.localizedLabel,
+                        leading = { JStatusDot(sessionStatus) },
+                    )
+                }
             }
             if (draftSaveError != null) item {
                 JGroupItem(GroupPosition.Single) {

@@ -69,6 +69,19 @@ class SupervisionRecordTest {
             assertFalse(quiet.foreground.any { it.id == reply.id })
             if (inline) assertTrue(folds(quiet.foreground).single().lines.any { it.id == reply.id })
             else assertTrue(quiet.background.any { it.id == reply.id })
+
+            val agyFinish = use(2, "mcp_persona_supervision_finish")
+            val agyWrappedSilent = result(3, 2).copy(
+                text = "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n" +
+                    "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n" +
+                    """{"level":"triage","summary":"Handled silently.","visibility":"silent"}""",
+            )
+            val fallbackReply = reply(4, "OK")
+            val agyQuiet = project(listOf(input, agyFinish, agyWrappedSilent, fallbackReply), BackgroundFolding(), inline)
+            assertFalse("inline=$inline: fallback OK must not expand in foreground", agyQuiet.foreground.any { it.id == fallbackReply.id })
+            assertFalse("inline=$inline: supervision input must not expand in foreground", agyQuiet.foreground.any { it.id == input.id })
+            if (inline) assertTrue(folds(agyQuiet.foreground).single().lines.any { it.id == fallbackReply.id })
+            else assertTrue(agyQuiet.background.any { it.id == fallbackReply.id })
         }
     }
 

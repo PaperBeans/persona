@@ -390,6 +390,54 @@ test('permission cards use the runtime, session, kind and tool call key', async 
   assert.equal(n.asked[0].id, interactionId('agy', pid, 'permission', 'call-1'))
 })
 
+test('permission cards normalize canonical tool names before display titles', async (t) => {
+  const cases = [
+    ['_meta.toolName beats name and a raw-shell title',
+      { _meta: { toolName: 'run_command' }, name: 'view_file', kind: 'read', title: 'printf hello', rawInput: { CommandLine: 'printf hello' } },
+      'Bash', { command: 'printf hello', description: '' }, 'printf hello'],
+    ['name beats a raw-shell title',
+      { name: 'run_command', kind: 'execute', title: 'git status --short', rawInput: { command: 'git status --short' } },
+      'Bash', { command: 'git status --short', description: '' }, 'git status --short'],
+    ['name beats a File title for a write',
+      { name: 'write_to_file', kind: 'edit', title: 'File /tmp/result.txt', rawInput: { TargetFile: '/tmp/result.txt', CodeContent: 'new\n' } },
+      'Write', { file_path: '/tmp/result.txt', content: 'new\n' }, '/tmp/result.txt'],
+    ['execute kind normalizes a raw-shell title',
+      { kind: 'execute', title: 'npm test', rawInput: { command: 'npm test' } },
+      'Bash', { command: 'npm test', description: '' }, 'npm test'],
+    ['edit kind plus Content normalizes a File title to Write',
+      { kind: 'edit', title: 'File /tmp/draft.txt', rawInput: { Path: '/tmp/draft.txt', Content: 'draft', Overwrite: true } },
+      'Write', { file_path: '/tmp/draft.txt', content: 'draft' }, '/tmp/draft.txt'],
+    ['read kind remains Read',
+      { kind: 'read', title: 'File /tmp/input.txt', rawInput: { AbsolutePath: '/tmp/input.txt' } },
+      'Read', { file_path: '/tmp/input.txt' }, '/tmp/input.txt'],
+    ['command evidence cannot be downgraded by read presentation',
+      { kind: 'read', title: 'File /tmp/result.txt', rawInput: { CommandLine: 'cat /tmp/result.txt' } },
+      'Bash', { command: 'cat /tmp/result.txt', description: '' }, 'cat /tmp/result.txt'],
+    ['write evidence cannot be downgraded by read presentation',
+      { kind: 'read', title: 'File /tmp/draft.txt', rawInput: { TargetFile: '/tmp/draft.txt', Content: 'new' } },
+      'Write', { file_path: '/tmp/draft.txt', content: 'new' }, '/tmp/draft.txt'],
+    ['execute kind retains a command supplied only by the title',
+      { kind: 'execute', title: 'git diff --check', rawInput: {} },
+      'Bash', { command: 'git diff --check', description: '' }, 'git diff --check'],
+    ['edit kind retains a path supplied only by a File title',
+      { kind: 'edit', title: 'File /tmp/from-title.txt', rawInput: { Content: 'new' } },
+      'Write', { file_path: '/tmp/from-title.txt', content: 'new' }, '/tmp/from-title.txt'],
+    ['a distinct human title remains readable beside the command',
+      { name: 'run_command', kind: 'execute', title: 'Run focused tests', rawInput: { command: 'npm test' } },
+      'Bash', { command: 'npm test', description: 'Run focused tests' }, 'npm test'],
+  ]
+  for (const [name, toolCall, toolName, toolInput, summary] of cases) {
+    await t.test(name, async (t) => {
+      const { n, start } = await agyRuntime(t)
+      await start(`ask-shape ${JSON.stringify(toolCall)}`)
+      await until('permission card', () => n.asked.length === 1, SLOW)
+      assert.equal(n.asked[0].tool_name, toolName)
+      assert.deepEqual(n.asked[0].tool_input, toolInput)
+      assert.equal(n.asked[0].summary, summary)
+    })
+  }
+})
+
 
 test('cancelling before a prompt starts does not poison the next permission request', async (t) => {
   const { n, record, start } = await agyRuntime(t)

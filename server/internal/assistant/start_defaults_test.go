@@ -1240,3 +1240,91 @@ func TestDefaultGoalRefusedOn(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexTerminalFallbackPublishedBeforeStart(t *testing.T) {
+	ctx := context.Background()
+	s, f := defaultsHub(t)
+	f.zshrc["box"] = append(f.zshrc["box"], proto.Launcher{Name: "cx", Source: "zshrc", Agent: "codex"})
+	task := defaultsTask()
+	task.Launcher, task.Effort, task.TodoID = "cx", "high", "todo_effort"
+	putTodo(s, Todo{ID: task.TodoID, Origin: "owner", Supervision: &Supervision{Supervisor: "owner"}})
+
+	var checked bool
+	f.onStart = func(f *fakeHub, params map[string]any) {
+		if params["codex_effort_fallback"] == proto.CodexFallbackNotify {
+			f.failStart = &rpc.Error{Code: proto.CodeCodexEffortTerminal}
+			return
+		}
+		f.failStart = nil
+		tsk, _ := s.todoNow(task.TodoID)
+		if params["codex_effort_fallback"] != proto.CodexFallbackAnnounced || tsk.Supervision.Progress == nil || tsk.Supervision.Progress.Text == "" {
+			t.Errorf("missing pre-start card notice: %+v", tsk.Supervision)
+		}
+
+		checked = true
+	}
+	if _, _, err := s.startTaskAgent(ctx, &task, false); err != nil {
+		t.Fatal(err)
+	}
+	if !checked || len(startsOf(f)) != 2 {
+		t.Fatal("expected one preflight refusal followed by the announced start")
+	}
+}
+
+func TestAgentStartCodexFallbackKeepsPlacement(t *testing.T) {
+	s, f := launcherFitHub(t)
+	f.zshrc["box"] = append(f.zshrc["box"], proto.Launcher{Name: "cx", Source: "zshrc", Agent: "codex"})
+	f.onStart = func(f *fakeHub, params map[string]any) {
+		f.failStart = nil
+		if params["codex_effort_fallback"] == proto.CodexFallbackNotify {
+			f.failStart = &rpc.Error{Code: proto.CodeCodexEffortTerminal}
+		}
+	}
+	_, err := s.runTool(t.Context(), "server", "owner", "agent_start", json.RawMessage(
+		`{"machine":"box","cwd":"/Users/me/code","launcher":"cx","effort":"high","prompt":"Check the build"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if starts := startsOf(f); len(starts) != 2 || starts[1]["codex_effort_fallback"] != proto.CodexFallbackAnnounced {
+		t.Fatalf("expected the announced retry, got %v", starts)
+	}
+	task := onlyTodo(s)
+	p := onlyStoredPlacement(t, s.store().(settingsPrefixStore))
+	if len(task.Agents) != 1 || p.Mode != "enforce" || p.Choice != "box" || p.TaskID != task.ID || p.SessionID == "" || p.SessionID != task.Agents[0].SessionID {
+		t.Fatalf("placement %+v for task %s, agents %+v", p, task.ID, task.Agents)
+	}
+}
+
+func TestCodexFallbackReportOnTaskCard(t *testing.T) {
+	ctx := t.Context()
+	s, _ := newTaskService(t)
+	todo := Todo{ID: "todo_effort", Origin: "task_owner"}
+	putTodo(s, todo)
+	params := map[string]any{"effort": "high"}
+	calls := 0
+	err := s.startWithCodexRouteNotice(ctx, todo.ID, "codex", params, func() error {
+		calls++
+		if calls == 1 {
+			return &rpc.Error{Code: proto.CodeCodexEffortTerminal}
+		}
+		items, err := s.feedItems(ctx, todo.Origin, time.Time{})
+		if err != nil {
+			return err
+		}
+		cards, err := s.taskCards(ctx, items, nil)
+		if err != nil {
+			return err
+		}
+		if len(items) != 1 || len(cards) != 1 || cards[0].TodoID != todo.ID || cards[0].ReportID != items[0].ID {
+			t.Fatalf("published cards: %+v, feed: %+v", cards, items)
+		}
+		var report reportBody
+		if json.Unmarshal(items[0].Body, &report) != nil || report.Kind != upReportProgress || !strings.Contains(report.Text, "Codex") {
+			t.Fatalf("published report %+v", report)
+		}
+		return nil
+	})
+	if calls != 2 || err != nil {
+		t.Fatalf("starts=%d, err=%v", calls, err)
+	}
+}

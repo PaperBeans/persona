@@ -11,9 +11,9 @@ import (
 // evidence (supervise_review_delivery.go). Anything not provably a reference stays delivery, preserving the old gate.
 
 var (
-	// referenceLineRe matches a line opened by a related-work/background marker; every link on such a line is a
-	// reference. The (?m) flags anchor ^/$ to line boundaries rather than the whole report.
-	referenceLineRe = lazyre.New(`(?im)^\s*(?:[-*]\s*)?(?:related\s+(?:work|prs?|pull\s+requests?)|background|see\s+also|references?)\b`) // i18n-ignore: matches Agent report prose
+	// referenceLineRe matches a line opened by a related-work marker or an explicit "background:" marker; every link
+	// on such a line is a reference. The (?m) flags anchor ^/$ to line boundaries rather than the whole report.
+	referenceLineRe = lazyre.New(`(?im)^\s*(?:[-*]\s*)?(?:(?:related\s+(?:work|prs?|pull\s+requests?)|see\s+also|references?)\b|background\s*:)`) // i18n-ignore: matches Agent report prose
 	// referenceClauseRe matches an in-sentence disclaimer that a named PR is related work, explicitly framed as
 	// background or not this task's delivery. A bare "background" is deliberately not enough: ordinary delivery
 	// prose ("fixed the background sync worker in <PR>") must keep the delivery role. Only links inside the same

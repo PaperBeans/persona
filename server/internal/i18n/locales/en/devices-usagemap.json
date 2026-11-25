@@ -1,0 +1,11 @@
+{
+  "read_only": "This device can't look at or change what is on this computer's disk.",
+  "bad_path": "That isn't a folder or item the disk map can open.",
+  "need_paths": "Choose at least one item.",
+  "too_many": "Choose at most {most} items at a time.",
+  "confirmation_required": "Confirm first: nothing has been moved.",
+  "offline": "{name} is offline.",
+  "node_outdated": "Update Persona on this computer to see its disk map.",
+  "deadline": "{name} took too long to answer. Try again.",
+  "failed": "Couldn't get an answer from {name}."
+}

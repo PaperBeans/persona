@@ -4,6 +4,8 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,11 +29,13 @@ const (
 )
 
 type channelPrefs struct {
-	Target   *channel.Target `json:"target,omitempty"`
-	Features map[string]bool `json:"features,omitempty"`
+	Target          *channel.Target    `json:"target,omitempty"`
+	ThreadMode      channel.ThreadMode `json:"thread_mode,omitempty"`
+	ThreadIdleHours int                `json:"thread_idle_hours,omitempty"`
+	Features        map[string]bool    `json:"features,omitempty"`
 	// Recent are the conversations its messages went to lately (newest first, a few).
 	Recent []channel.Conversation `json:"recent,omitempty"`
-	// Threads are the conversations of its threads (capabilities.threads), by the thread key its messages carry.
+	// Threads are the conversations of its threads (capabilities.threads or integrations_v2 routing), by routing key.
 	Threads map[string]*channelThread `json:"threads,omitempty"`
 }
 
@@ -94,9 +98,11 @@ type channelsBook struct {
 	// generation changes on unbind so an in-flight message or question cannot restore the old binding's state.
 	generation map[string]uint64
 	// list is the hub's list of the channels, kept a moment (the runs look at it every second).
-	list   []channel.View
-	listAt time.Time
-	now    func() time.Time // tests
+	list         []channel.View
+	listAt       time.Time
+	overrides    map[string]*channel.TargetOverride
+	hasOverrides bool
+	now          func() time.Time // tests
 }
 
 func (c *channelsBook) clock() time.Time {
@@ -185,7 +191,7 @@ func (s *Service) loadChannelStateLocked(ctx context.Context) {
 		s.saveChannelStateLocked()
 		s.logf("channels: %d runs and %d asks started while the state was unreadable kept", kept, asks)
 	}
-	if old := s.takeLegacyBotRuns(ctx); len(old) > 0 {
+	if old := s.larkModule().LegacyRuns(ctx); len(old) > 0 {
 		c.st.Runs = append(c.st.Runs, old...)
 		s.saveChannelStateLocked()
 		s.logf("channels: %d waiting turns of the Feishu bot moved to the channels' runs", len(old))
@@ -245,7 +251,13 @@ func (s *Service) bindChannelThread(id, thread, machine, session string, generat
 	}
 	now := c.clock().UTC()
 	p.Threads[thread] = &channelThread{MachineID: machine, SessionID: session, At: now}
-	pruneChannelThreads(p.Threads, now)
+	keepFor := channelThreadsKeepFor
+	if p.ThreadIdleHours > 0 {
+		if custom := time.Duration(p.ThreadIdleHours) * time.Hour; custom > keepFor {
+			keepFor = custom
+		}
+	}
+	pruneChannelThreadsWithTTL(p.Threads, now, keepFor)
 	s.saveChannelsLocked()
 	return true
 }
@@ -267,14 +279,78 @@ func (s *Service) unbindChannelThread(id, thread string, generation ...uint64) {
 	s.saveChannelsLocked()
 }
 
+// channelThreadIdleTTL returns the inactivity timeout for a channel's routed thread/group/topic bindings.
+// While integrations_v2 is off (or thread_idle_hours is 0), the legacy 30-day timeout applies.
+func channelThreadIdleTTL(v2 bool, p *channelPrefs) time.Duration {
+	if v2 && p != nil && p.ThreadIdleHours > 0 {
+		return time.Duration(p.ThreadIdleHours) * time.Hour
+	}
+	return channelThreadsKeepFor
+}
+
+// channelTopicRouteKey returns a canonical, collision-free routing key for a (chat_id, topic_id) pair.
+func channelTopicRouteKey(chatID, topicID string) string {
+	return "v2:topic:" + strconv.Itoa(len(chatID)) + ":" + chatID + ":" + topicID
+}
+
+// channelGroupRouteKey returns a canonical routing key for a non-topic group chat.
+func channelGroupRouteKey(chatID string) string {
+	return "v2:group:" + chatID
+}
+
+// channelRouteKey computes the integrations_v2 conversation routing key for m under mode.
+// Empty string means the message routes to the channel's configured default target.
+func channelRouteKey(mode channel.ThreadMode, m channel.Message) string {
+	chatID := strings.TrimSpace(m.ChatID)
+	chatKind := channel.ChatKind(strings.TrimSpace(string(m.ChatKind)))
+	topicID := strings.TrimSpace(m.TopicID)
+	legacyThread := strings.TrimSpace(m.Thread)
+	hasStructured := chatID != "" || chatKind != "" || topicID != ""
+
+	switch mode.Normalized() {
+	case channel.ThreadModePerGroupAndTopic:
+		if topicID != "" {
+			return channelTopicRouteKey(chatID, topicID)
+		}
+		if chatKind == channel.ChatKindGroup && chatID != "" {
+			return channelGroupRouteKey(chatID)
+		}
+		if chatKind == channel.ChatKindDirect {
+			return ""
+		}
+		if !hasStructured {
+			return legacyThread
+		}
+		if chatKind == channel.ChatKindTopic && legacyThread != "" {
+			return legacyThread
+		}
+		return ""
+	case channel.ThreadModePerTopic:
+		if topicID != "" {
+			return channelTopicRouteKey(chatID, topicID)
+		}
+		if !hasStructured {
+			return legacyThread
+		}
+		if chatKind == channel.ChatKindTopic && legacyThread != "" {
+			return legacyThread
+		}
+		return ""
+	default:
+		return ""
+	}
+}
+
 // channelThreadOf is thread's conversation, nil when it has none (or it went quiet too long ago).
 func (s *Service) channelThreadOf(ctx context.Context, id, thread string) *channelThread {
+	v2 := s.integrationsV2On(ctx)
 	c := &s.chans
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s.loadChannelsLocked(ctx)
-	t := s.channelPrefLocked(id).Threads[thread]
-	if t == nil || c.clock().Sub(t.At) > channelThreadsKeepFor {
+	p := s.channelPrefLocked(id)
+	t := p.Threads[thread]
+	if t == nil || c.clock().Sub(t.At) > channelThreadIdleTTL(v2, p) {
 		return nil
 	}
 	cp := *t
@@ -284,8 +360,12 @@ func (s *Service) channelThreadOf(ctx context.Context, id, thread string) *chann
 // pruneChannelThreads drops the threads quiet for longer than channelThreadsKeepFor, then the oldest beyond
 // channelThreadsKeep.
 func pruneChannelThreads(threads map[string]*channelThread, now time.Time) {
+	pruneChannelThreadsWithTTL(threads, now, channelThreadsKeepFor)
+}
+
+func pruneChannelThreadsWithTTL(threads map[string]*channelThread, now time.Time, keepFor time.Duration) {
 	for key, t := range threads {
-		if t == nil || now.Sub(t.At) > channelThreadsKeepFor {
+		if t == nil || now.Sub(t.At) > keepFor {
 			delete(threads, key)
 		}
 	}

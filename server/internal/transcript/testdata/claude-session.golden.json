@@ -370,6 +370,7 @@
       "role": "assistant",
       "kind": "text",
       "text": "`git xzksc` 丁辛庚戊（86 戊辛辛辛乙 32OD）。辛丙癸辛癸壬甲辛癸乙辛丁庚丁丁，丁辛癸丁癸 git 庚己，己甲己癸丁丙丁乙甲庚，己己己乙己庚：",
+      "narration": true,
       "model": "claude-opus-5-5",
       "usage": [
         {

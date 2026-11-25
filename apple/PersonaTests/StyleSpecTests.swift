@@ -1,3 +1,4 @@
+import PersonaWire
 import SwiftUI
 import Testing
 import UIKit
@@ -72,6 +73,20 @@ struct StyleSpecTests {
     @Test func whiteOnTheAccent() {
         let found = Self.below(3.5) { (.white, $0.accent) }.filter { !$0.contains(Self.known) }
         #expect(found.isEmpty, "white on the accent under 3.5:1: \(found)")
+    }
+
+    /// The disk usage map's labels (docs/design/DESIGN_SYSTEM.md "Usage treemap"): its ink on every category and every
+    /// Last Used step, ≥ 4.5:1 in light and in dark; and the four steps get darker (light) as they get older.
+    @Test func usageMapLabelsReadOnEveryFill() {
+        let fills = StorageUsageCategory.allCases.map { ("\($0)", Theme.UsageMap.pair($0)) }
+            + Theme.UsageMap.Age.allCases.map { ("age \($0)", $0.pair) }
+        let ink = Theme.UsageMap.ink
+        for (name, f) in fills {
+            #expect(PersonaPalette.contrast(ink.light, f.light) >= 4.5, "light ink on \(name)")
+            #expect(PersonaPalette.contrast(ink.dark, f.dark) >= 4.5, "dark ink on \(name)")
+        }
+        let steps = Theme.UsageMap.Age.allCases.map { PersonaPalette.contrast($0.pair.light, 0xFFFFFF) }
+        #expect(steps == steps.sorted(), "the Last Used steps don't darken with age")
     }
 
     @Test func healthRingsHaveDistinctHuesAndReadableActivityLabels() {

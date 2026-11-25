@@ -296,7 +296,7 @@ A managed Antigravity launcher with a key (`GOOGLE_GEMINI_BASE_URL` / `GEMINI_AP
 
 **Creating one** (`POST /api/v1/launchers`, a full-device token): `{"kind": "launcher", "agent": "agy", "name": "agy-gw", "base_url": "https://<gateway address>", "api_key": "<key>", "model": "<an agy model id the gateway serves>"}`. `model` is required (it is the launcher's default; pick one from `agy models`, such as `gemini-4-neon-high`), `auth` is not used (agy sends the key in `x-goog-api-key` itself), and `name` may be left out. The key is stored sealed and never sent back. A herdr pane start or resume of that launcher types `personad launch agy-gw …`, which fetches the launcher's `GOOGLE_GEMINI_BASE_URL` / `GEMINI_API_KEY` from the node (launch key, as for a managed Claude launcher) and execs `agy --settings '{"modelProvider":"gemini"}' …`; the key is in no typed line, no argument and no resume command. An `--settings` the pane's own arguments carry is kept as it is.
 
-For herdr starts, the Antigravity model picker reads the local launcher's `models` output and uses the standard catalog cache and refresh. Picking an effort passes `--effort` with one of `low`, `medium`, `high`, `xhigh` or `max`. Leaving an override unset uses the launcher's default. pi and Cursor keep their own effort.
+For herdr starts, the Antigravity model picker reads the local launcher's `models` output and uses the standard catalog cache and refresh. Picking an effort passes `--effort` with one of `low`, `medium`, `high`, `xhigh` or `max`. When a model ID already names an effort variant, an explicit effort selects the corresponding catalog variant. Persona reports an unavailable variant before opening the pane. An effort without a model uses the launcher's default model. pi and Cursor keep their own effort.
 
 The first message is never typed into the pane:
 
@@ -308,14 +308,16 @@ Neither keeps token counts the node can read, so their usage is not on the token
 
 **Antigravity CLI conversation history and restore.** Persona's own agy hooks (installed by the node; see `personad node doctor`, line `agy-hooks`) or `herdr integration install antigravity-cli` report the pane's conversation. Once Persona verifies that conversation ID, it reads that conversation's local history. On a herdr restart, a Persona-started pane uses `agy --conversation <id>` to reopen the verified conversation and preserves the selected model. Until Persona has a verified ID, the pane restores with `agy` and the original `--model` option if set, starting a fresh conversation. The phone can still send messages, interrupt, and use the terminal while it waits for the conversation.
 
+**Where the assistant starts agy.** A New Agent with the computer's default host starts agy in a herdr pane, even while the Antigravity companion is connected (#10237): someone is at that terminal. A `task_plan` task or an `agent_start` that names no `host` starts it on the companion instead, whenever the computer's launcher list says the companion runs that launcher (its own `agy`, or a launcher kept in Persona that starts agy while the companion is listed). Nobody sits at an assistant-dispatched pane, and a companion session gives its supervisor the conversation as it goes, approval cards, Persona's tools and token usage (`server/internal/assistant/start_host.go`, #13447). `host: "agy"` asks for the companion, and `host: "herdr"` (or another engine host the computer enables) keeps the pane. A start naming `agy` while no companion is connected is refused with `agy_companion_offline` before anything opens (`server/internal/node/starthost.go`); one the hub sent there by itself then starts again in the default host, so the task still runs.
+
 **The Cursor CLI on a Mac over SSH.** `cursor-agent` keeps its sign-in in the macOS keychain. A pane opened inside an SSH session (or by a launchd job that is not the GUI user's) finds the keychain locked and asks for it, so the agent never becomes ready and the start fails. Run it in the GUI session: herdr itself started there (the node service of a logged-in user), not `ssh mac cursor-agent`. The same applies to anything else the CLI reads from the keychain.
 
 What these agents do not do here, and why:
 
 - No conversation in the app for Cursor. Herdr drives the pane, and Cursor's conversation stays in the terminal.
-- No phone approval cards for cursor and agy. pi's come from its extension; the other two have no Persona hook, so their own dialogs stay on the terminal.
+- No phone approval cards for cursor and agy in a pane. pi's come from its extension; the other two have no Persona hook, so their own dialogs stay on the terminal (agy on its companion asks through Persona's cards).
 - Supervision (`report_to_supervisor`, done checks) reaches an agent Persona can send to. pi qualifies once its extension is in; cursor and agy qualify for a message through herdr, and nothing more.
-- **No read-only start.** Claude Code runs a read-only task with `bypassPermissions` and the constraint written into its first message, and Codex with `--sandbox read-only`; these three have neither, and a prompt-only constraint would not hold an agent whose own tools write files. So a `task_plan` task with `readonly: true` for one of them is refused when it is planned (#8316, `server/internal/assistant/tasks_placement.go` `readonlyLauncherRefusal`): `readonly_unsupported`, naming that computer's Claude Code and Codex launchers, so the task can be planned writable or on one of them. Nothing is saved or started, it is never started writable, and Persona does not substitute another launcher. The same check runs before a start (a card edited to one of them, a plan saved earlier), and the node still refuses a plan-mode start of theirs that reaches it, before any pane opens (`readonly_unsupported`, `server/internal/node/control.go`).
+- **No read-only start in a pane.** Claude Code runs a read-only task with `bypassPermissions` and the constraint written into its first message, and Codex with `--sandbox read-only`; these three have neither in a terminal, and a prompt-only constraint would not hold an agent whose own tools write files. (agy on its companion has: a read-only agy task the companion runs starts there in agy's plan mode, #13464, `docs/assistant/todos.md` "Read-only planned tasks".) So a `task_plan` task with `readonly: true` for one of them is refused when it is planned (#8316, `server/internal/assistant/tasks_placement.go` `readonlyLauncherRefusal`): `readonly_unsupported`, naming that computer's Claude Code and Codex launchers, so the task can be planned writable or on one of them. Nothing is saved or started, it is never started writable, and Persona does not substitute another launcher. The same check runs before a start (a card edited to one of them, a plan saved earlier), and the node still refuses a plan-mode start of theirs that reaches it, before any pane opens (`readonly_unsupported`, `server/internal/node/control.go`).
 
 ## Speed
 
@@ -812,6 +814,17 @@ are skipped because only Codex knows whether it trusts that project configuratio
 configuration, compact `-c...` / `-p...` options and legacy administrator provider overlays are also skipped.
 Use a Persona-managed or ordinary custom Responses provider on a local CLI when attribution is required. A new Codex session's ID is allocated after startup, so its initial process may omit
 `X-Persona-Session`; a resume with a known ID can include it.
+
+Persona does not add source headers to Antigravity (`agy`) Agent requests. Managed launchers with a Gemini API key
+select `modelProvider: gemini` by default. In agy 1.5.10, both the CLI and ACP ignored `AGY_LLM_GATEWAY_HEADERS`
+when sending generation requests to `GOOGLE_GEMINI_BASE_URL`. To check attribution, inspect a
+`streamGenerateContent` POST in the gateway log. A model catalog GET can carry headers that generation omits.
+
+Antigravity's Enterprise Gateway can send operator-configured headers on generation requests. Its headers apply
+to the whole process. Persona's ACP companion shares one process across ordinary work Agents, so setting a task ID
+there would label other Agents' requests with the same ID. For a terminal Agent, an allowlist check would need
+the effective gateway destination because administrator settings can override the URL independently of the headers.
+See Google's [Enterprise Gateway configuration and precedence](https://docs.cloud.google.com/gemini/enterprise/docs/ai-developer-tools/deploy-enterprise-gateway#settings-precedence).
 
 Direct Messages, Responses and Chat Completions helpers use `background`, including helpers sent through a node.
 Cross-origin redirects strip all source fields, even when the next origin is also allowlisted. A gateway should also

@@ -63,8 +63,9 @@ go server/cmd/persona-manager core
 go server/cmd/persona-node core
 go server/cmd/persona-projects core
 go server/cmd/personad core
-go server/cmd/pushrec core
 go server/internal/acceptloop core
+go server/internal/agentref core
+go server/internal/agentref/agentrefadapt core
 go server/internal/agents core
 go server/internal/agentsend core
 go server/internal/ai core
@@ -73,6 +74,7 @@ go server/internal/apierr core
 go server/internal/apns core
 go server/internal/approval core
 go server/internal/archguard core
+go server/internal/archguard/domainrules core
 go server/internal/assistant core
 go server/internal/assistant/archiverecovery core
 go server/internal/assistant/chatsearch core
@@ -80,7 +82,10 @@ go server/internal/assistant/kernel core
 go server/internal/assistant/repository core
 go server/internal/assistant/repositorystore core
 go server/internal/assistant/saved core
+go server/internal/assistant/todo/conflict core
+go server/internal/assistant/todo/mergetrain core
 go server/internal/assistant/todo/projection core
+go server/internal/assistant/todo/stagegate core
 go server/internal/assistant/todo/timeline core
 go server/internal/assistantskills core
 go server/internal/assistantwire core
@@ -115,6 +120,15 @@ go server/internal/depguard core
 go server/internal/devices core
 go server/internal/devicewire core
 go server/internal/dialogwire core
+go server/internal/domainkit/clock core
+go server/internal/domainkit/clock/clocktest core
+go server/internal/domainkit/defect core
+go server/internal/domainkit/domaintest core
+go server/internal/domainkit/fail core
+go server/internal/domainkit/instant core
+go server/internal/domainkit/opt core
+go server/internal/domainkit/outcome core
+go server/internal/domainkit/slot core
 go server/internal/errreport core
 go server/internal/extension core
 go server/internal/extension/conformance core
@@ -132,9 +146,9 @@ go server/internal/extmgr/imessageport core
 go server/internal/extmgr/mailport core
 go server/internal/extmgr/storage core
 go server/internal/extwire core
-go server/internal/fleetsoak core
 go server/internal/githubwire core
 go server/internal/imessagewire core
+go server/internal/healthhost core
 go server/internal/herdr core
 go server/internal/herdrcore core
 go server/internal/host core
@@ -148,6 +162,7 @@ go server/internal/imageorient core
 go server/internal/jsonsubset core
 go server/internal/kb core
 go server/internal/kbwire core
+go server/internal/knowledgeuihost core
 go server/internal/larkhost core
 go server/internal/lazyre core
 go server/internal/lcuconfirm core
@@ -167,11 +182,14 @@ go server/internal/memtrim core
 go server/internal/modapi core
 go server/internal/modelhttp core
 go server/internal/modelretry core
+go server/internal/moduleswitch core
+go server/internal/moduleswitch/switchtest core
 go server/internal/netaddr core
 go server/internal/netproxy core
 go server/internal/netshape core
 go server/internal/node core
 go server/internal/node/clipshare core
+go server/internal/node/diskmap core
 go server/internal/node/imessageport core
 go server/internal/node/iphoneport core
 go server/internal/node/machdiag core
@@ -200,6 +218,7 @@ go server/internal/proto core
 go server/internal/proxyproto core
 go server/internal/pushcrypto core
 go server/internal/quota core
+go server/internal/recordingwire core
 go server/internal/recordinghost core
 go server/internal/relay core
 go server/internal/relayproto core
@@ -247,6 +266,8 @@ go server/internal/webpush/webpushtest core
 go server/internal/workspaceboard core
 go server/internal/workspacenaming core
 go server/plugins core
+go server/scripts/fleetsoak core
+go server/scripts/pushrec core
 
 # Module code still in core paths.
 go server/internal/transcribelive voice
@@ -256,8 +277,6 @@ go server/internal/protectedapps computer-use
 go server/internal/orcart/... engines-extra
 go server/internal/terncli engines-extra
 go server/internal/rexcli engines-extra
-go server/internal/assistant/kbhistory knowledge-ui
-go server/internal/assistant/kbsent knowledge-ui
 
 # --- Apple ------------------------------------------------------------------------------------------------------
 apple apple/AboutVersionAccessibilityHost core
@@ -267,8 +286,11 @@ apple apple/LiveActivity core
 apple apple/Modules core
 apple apple/Modules/Health health
 apple apple/Modules/ScreenShare screen-share
+apple apple/Modules/Voice voice
 apple apple/PersonaCallIntents voice
 apple apple/PersonaLink screen-share
+# The independent pairing/menu-bar UI belongs to the core, not the optional screen-sharing feature.
+apple apple/PersonaLink/App core
 apple apple/PersonaNotify core
 apple apple/PersonaShare core
 apple apple/PersonaTests core
@@ -301,7 +323,6 @@ apple apple/Persona/Voice voice
 apple apple/Persona/Views/Feishu lark
 apple apple/Persona/Views/Knowledge knowledge-ui
 apple apple/Persona/Views/Mail mail
-apple apple/Persona/Views/Voice voice
 
 apple apple/Packages/BeautifulUI appearance-styles
 apple apple/Packages/PersonaCore core
@@ -344,6 +365,7 @@ gradle :platform:shortcuts core
 # --- Web (web/src) ----------------------------------------------------------------------------------------------
 web web/src/admin core
 web web/src/admin/pages core
+web web/src/components core
 web web/src/core core
 web web/src/features core
 web web/src/features/todos core
@@ -353,8 +375,6 @@ web web/src/lib core
 web web/src/lib/configuration core
 web web/src/lib/html-runtime core
 web web/src/modules core
-web web/src/screen screen-share
-web web/src/screen/tiers screen-share
 web web/src/sharing core
 web web/src/showcase core
 web web/src/showcase/images core
@@ -372,7 +392,6 @@ web web/src/views/inbox core
 web web/src/views/knowledge knowledge-ui
 web web/src/views/link core
 web web/src/views/machines core
-web web/src/views/messages core
 web web/src/views/palette core
 web web/src/views/session core
 web web/src/views/settings core

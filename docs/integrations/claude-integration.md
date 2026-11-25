@@ -339,6 +339,10 @@ the Agent's own bookkeeping.
   text also names the Agent's own tools it runs (`todo_decisions`, `todo_decision_add`, `report_to_supervisor`, and a
   task leader's `task_plan` / `task_review` in the leader's note) with their arguments' shape (#12136). Unknown
   capabilities or missing metadata omit unverified entries and do not block assigned work.
+  The executable is the one the node named in the `node.info` its connection began with, which the manager keeps
+  (#14446); the node is asked again, within a second, only when the manager holds none for that computer. A fresh
+  `node.info` runs Claude Code's version in a login shell, and a computer whose shell is slow to start answered too
+  late for every handoff.
   This changes guidance only, not scoped CLI authority or the rules protecting hub credentials.
 - **The card's title**: whenever a card is shown for one of Persona's own MCP tools (the ones still asked, or any in a
   session started elsewhere), the manager titles it with the tool's name for people in the user's language

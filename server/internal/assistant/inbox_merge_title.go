@@ -51,6 +51,16 @@ func (s *Service) rewriteMergedTitle(ctx context.Context, id string) {
 		return
 	}
 	merged := len(sv.MergedFrom)
+	b.mu.Unlock()
+	allowed, visibilityErr := s.inboxVisibilityModelAllowed(ctx, sv)
+	if visibilityErr != nil || !allowed {
+		return
+	}
+	b.mu.Lock()
+	if b.items[id] != sv || len(sv.MergedFrom) != merged || sv.TitleBy == TitleByUser {
+		b.mu.Unlock()
+		return
+	}
 	in := prompts.InboxMergeTitleInput{}
 	rows := []*InboxItem{sv}
 	for _, ref := range sv.MergedFrom {

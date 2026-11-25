@@ -155,7 +155,8 @@ nonisolated struct SubagentOverview: Equatable, Sendable {
         var pendingUIDs: [String]
     }
 
-    static func inputStamp(session: Session?, children: [Session], pending: [Interaction], tasks: TaskIndex) -> InputStamp {
+    static func inputStamp(session: Session?, children: [Session], pending: [Interaction], tasks: TaskIndex,
+                           preferTab: Bool = false) -> InputStamp {
         let works = session?.state == .working || session?.state == .needsYou
         let embedded = (session?.subagents ?? []).map { agent in
             InputStamp.EmbeddedEntry(
@@ -182,7 +183,7 @@ nonisolated struct SubagentOverview: Equatable, Sendable {
                 updatedAt: row.updatedAt,
                 activity: row.activity,
                 waitLine: row.waitLine,
-                title: row.displayTitle,
+                title: row.displayTitle(preferTab: preferTab),
                 foldedUnder: row.foldedUnder,
                 foldedUnderMachineID: row.foldedUnderMachineID,
                 parentSessionID: row.parentSessionID,
@@ -224,7 +225,8 @@ nonisolated struct SubagentOverview: Equatable, Sendable {
     static func build(parent: Session?, parentKey: SessionKey, embedded: [Subagent], foldedChildren: [Session],
                       pendingInteractions: [Interaction] = [],
                       machineName: (MachineRef) -> String? = { _ in nil },
-                      agentStatuses: [String: String] = [:]) -> SubagentOverview {
+                      agentStatuses: [String: String] = [:],
+                      preferTab: Bool = false) -> SubagentOverview {
         let parentHarness = parent.map(HarnessInfo.init(session:))
             ?? HarnessInfo(agent: "claude", displayName: "Claude")
         let parentMachineTitle = machineName(parentKey.machineRef) ?? parentKey.machineID
@@ -247,7 +249,7 @@ nonisolated struct SubagentOverview: Equatable, Sendable {
             let chip = originChip(childMachineID: row.machineID, childMachineTitle: mName,
                                   childHarness: harness.displayName,
                                   parentMachineID: parentKey.machineID, parentHarness: parentHarness.displayName)
-            let rawTitle = row.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawTitle = row.displayTitle(preferTab: preferTab).trimmingCharacters(in: .whitespacesAndNewlines)
             let title = rawTitle.isEmpty ? (embeddedMatch?.title ?? String(localized: "Subagent [Session Overview]")) : rawTitle
             let toolSummary: String? = status.isRunningGroup
                 ? firstNonEmpty(row.activity, embeddedMatch?.lastTool?.summary, embeddedMatch?.lastTool?.name, row.waitLine)

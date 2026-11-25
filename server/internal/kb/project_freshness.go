@@ -8,12 +8,18 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/nwverse/persona/server/internal/kbwire"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
-const projectLogWindow = 40
+const (
+	projectLogWindow            = 40
+	projectSummaryOutcomesMost  = 5
+	projectSummaryDecisionsMost = 5
+	projectSummaryPitfallsMost  = 3
+)
 
 type projectFieldRecord struct {
 	Writer       string                `json:"writer"`
@@ -145,6 +151,26 @@ func sameProjectCutoff(a, b kbwire.ProjectCutoff) bool {
 		a.TimelineTruncated == b.TimelineTruncated && slices.EqualFunc(a.Sources, b.Sources, sameProjectEvidenceRef)
 }
 
+// projectMemoryResultID returns the outcome ID encoded by M2's typed decision IDs and M1's legacy inline-decision
+// projection. The legacy todo/agent/turn/item tuple is deliberately not a fallback: parallel items can share it.
+func projectMemoryResultID(decisionID string) string {
+	if base, ok := strings.CutSuffix(decisionID, ":legacy-decision"); ok {
+		return base
+	}
+	if i := strings.LastIndex(decisionID, "/decision/"); i >= 0 {
+		return decisionID[:i]
+	}
+	return ""
+}
+
+func projectMemoryVerification(r ProjectMemoryRecord) (string, bool) {
+	verification := r.Verification
+	if verification == "" {
+		verification = ProjectMemoryAgentReported
+	}
+	return verification, verification == ProjectMemoryAgentReported
+}
+
 // projectEvidence reads the same bounded input on the read and refresh paths.
 // Pending chat messages are reported separately because they were not in the prompt.
 func (e *Engine) projectEvidence(p *Project, timeline projectTimeline) (projectInput, []kbwire.ProjectEvidenceRef) {
@@ -195,6 +221,30 @@ func (e *Engine) projectEvidence(p *Project, timeline projectTimeline) (projectI
 	for _, moment := range in.Moments {
 		ref := "moments/posts/" + moment.ID
 		add(ref, ref, moment)
+	}
+	if memory, ok := e.ProjectMemoryForDispatch(p.Slug, projectSummaryOutcomesMost, projectSummaryDecisionsMost, projectSummaryPitfallsMost); ok {
+		in.Memory = &prompts.KBProjectMemory{}
+		results := map[string]string{}
+		for _, r := range memory.Outcomes {
+			verification, unaccepted := projectMemoryVerification(r)
+			in.Memory.Outcomes = append(in.Memory.Outcomes, prompts.KBProjectMemoryOutcome{ID: r.ID, Text: r.Conclusion,
+				Links: r.Links, When: r.RecordedAt, Verification: verification, Unaccepted: unaccepted})
+			results[r.ID] = r.Conclusion
+			add(KindProject+"/"+p.Slug+"/memory.jsonl#"+r.ID, r.ID, r)
+		}
+		for _, r := range memory.Decisions {
+			verification, unaccepted := projectMemoryVerification(r)
+			in.Memory.Decisions = append(in.Memory.Decisions, prompts.KBProjectMemoryDecision{ID: r.ID, Question: r.Question,
+				Choice: r.Decision, Reason: r.Reason, Result: results[projectMemoryResultID(r.ID)], When: r.RecordedAt,
+				Verification: verification, Unaccepted: unaccepted})
+			add(KindProject+"/"+p.Slug+"/memory.jsonl#"+r.ID, r.ID, r)
+		}
+		for _, r := range memory.Pitfalls {
+			verification, unaccepted := projectMemoryVerification(r)
+			in.Memory.Pitfalls = append(in.Memory.Pitfalls, prompts.KBProjectMemoryPitfall{Text: r.Conclusion,
+				When: r.RecordedAt, Verification: verification, Unaccepted: unaccepted})
+			add(KindProject+"/"+p.Slug+"/memory.jsonl#"+r.ID, r.ID, r)
+		}
 	}
 	return in, pending
 }

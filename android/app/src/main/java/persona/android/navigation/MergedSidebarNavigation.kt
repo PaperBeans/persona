@@ -41,3 +41,39 @@ internal fun keepMergedAgentTarget(stack: MutableList<NavKey>, requested: NavKey
         is TerminalRoute -> replaceBackStack(stack, listOf(AgentsRoute) + stack.takeLast(2).filterNot { it == AgentsRoute })
     }
 }
+
+/**
+ * Sidebar pick of an assistant conversation (Main Chat or another conversation row, #13165).
+ * Returns true when the conversation host keeps a pushed drill-down in front, so the caller does not
+ * re-request the conversation over it.
+ */
+internal fun selectSidebarConversation(
+    useRootHost: Boolean,
+    alreadyOnPersona: Boolean,
+    sameConversation: Boolean,
+    pageRoots: SidebarPageRoots,
+    hosts: SidebarRootHosts,
+    assistantStack: MutableList<NavKey>,
+    showHost: (NavKey, List<NavKey>) -> Unit,
+    assignPersona: (MutableList<NavKey>) -> Unit,
+): Boolean {
+    if (!useRootHost) {
+        hosts.showConversation()
+        while (assistantStack.size > 1) assistantStack.removeAt(assistantStack.lastIndex)
+        assignPersona(assistantStack)
+        return false
+    }
+    if (!alreadyOnPersona && sameConversation && pageRoots.current == AssistantRoute) {
+        showHost(AssistantRoute, hosts.current.toList())
+        assignPersona(hosts.current)
+        return hosts.current.size > 1
+    }
+    val step = pageRoots.select(
+        AssistantRoute,
+        hosts.current.drop(1),
+        contentChanged = !sameConversation,
+    )
+    showHost(step.root, step.stack)
+    assignPersona(hosts.current)
+    return sameConversation && step.path.isNotEmpty()
+}

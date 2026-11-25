@@ -48,9 +48,11 @@ func cachedPaneEnv(pid int) map[string]string {
 
 // pickedEnv takes the pane variables (paneEnvKeys: the engines', and tmux's) out of an environment listing (NAME=value,
 // NUL- or space-separated: /proc/<pid>/environ, ps -E).
+var observedClaudeEnvKeys = append(append([]string(nil), paneEnvKeys...), "CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+
 func pickedEnv(listing string) map[string]string {
 	out := map[string]string{}
-	for _, name := range paneEnvKeys {
+	for _, name := range observedClaudeEnvKeys {
 		re, ok := paneEnvRes.Load(name)
 		if !ok {
 			re, _ = paneEnvRes.LoadOrStore(name, paneEnvRe(name))

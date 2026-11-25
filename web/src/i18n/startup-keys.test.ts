@@ -3,6 +3,7 @@ import { startupMatcher } from "./startup-keys";
 import startup from "./startup-namespaces.json";
 import modelIdMessages from "./locales/en/lib-model-id.json";
 import emptyResponseMessages from "./locales/en/chat-empty-response.json";
+import hubSettingsMessages from "./locales/en/settings-hubsettings.json";
 
 describe("startupMatcher", () => {
   const inStartup = startupMatcher(["common", "settings.avatar", "todos.stage_"]);
@@ -29,6 +30,13 @@ describe("startupMatcher", () => {
   it("keeps empty-response copy out of the first-screen catalogs", () => {
     const configured = startupMatcher(startup);
     for (const key of Object.keys(emptyResponseMessages)) expect(configured(`chat-empty-response.${key}`), key).toBe(false);
+  });
+
+  it("loads update pipeline copy with Hub settings", () => {
+    const configured = startupMatcher(startup);
+    const pipelineKeys = Object.keys(hubSettingsMessages).filter(key => /^(pipeline|progress)_/.test(key));
+    expect(pipelineKeys).toContain("pipeline_title");
+    for (const key of pipelineKeys) expect(configured(`settings-hubsettings.${key}`), key).toBe(false);
   });
 
   it("keeps reply translation feedback eager and menu-only words in the intent-loaded catalog", () => {

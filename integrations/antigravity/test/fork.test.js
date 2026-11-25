@@ -23,7 +23,7 @@ const records = [
   { type: 'PLANNER_RESPONSE', content: 'Second answer' },
 ].map((step, step_index) => ({ ...step, step_index, status: 'DONE', created_at: '2026-01-01T00:00:00Z' }))
 
-async function fixture(t, { assistant = false, status = 'IDLE', pending = false, requireLoad = false, holdFork = false } = {}) {
+async function fixture(t, { assistant = false, status = 'IDLE', pending = false, requireLoad = false, holdFork = false, preview } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'agy-fork-'))
   const cwd = join(home, assistant ? '.persona/health' : 'Example workspace')
   const config = join(home, 'config')
@@ -44,7 +44,11 @@ async function fixture(t, { assistant = false, status = 'IDLE', pending = false,
   const db = new DatabaseSync(join(config, 'conversation_summaries.db'))
   db.exec('CREATE TABLE conversation_summaries (conversation_id TEXT, status TEXT, not_fully_idle INTEGER, killed INTEGER, step_count INTEGER, title TEXT, workspace_uris TEXT, last_modified_time TEXT)')
   db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, 0, 0, ?, ?, ?, ?)').run(
-    source, 'CASCADE_RUN_STATUS_IDLE', records.length, 'Example chat', JSON.stringify([pathToFileURL(cwd).href]), new Date().toISOString())
+    source, 'CASCADE_RUN_STATUS_IDLE', records.length, preview ? '' : 'Example chat', JSON.stringify([pathToFileURL(cwd).href]), new Date().toISOString())
+  if (preview) {
+    mkdirSync(join(config, 'cache'))
+    writeFileSync(join(config, 'cache', 'conversation_metadata.json'), JSON.stringify({ conversations: { [source]: { summary: { Title: '', Preview: preview } } } }))
+  }
   const binary = join(home, 'agy')
   writeFileSync(binary, `#!/bin/sh\nexec '${process.execPath}' '${fake}' '${home}' "$@"\n`)
   chmodSync(binary, 0o700)
@@ -84,6 +88,13 @@ test('native fork keeps the entire conversation in the same workspace', async (t
   })
   assert.deepEqual(await items(branched), await items())
   checkSource()
+})
+
+test('a fork of an untitled conversation is titled from its prompt, marked as such', async (t) => {
+  const { fork } = await fixture(t, { preview: 'First question' })
+  const { session } = await fork()
+  assert.equal(session.title, 'First question')
+  assert.equal(session.title_source, 'prompt')
 })
 
 test('forking at a reply keeps its tool results and stops before the next user message', async (t) => {
