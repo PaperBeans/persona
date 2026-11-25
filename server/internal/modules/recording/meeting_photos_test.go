@@ -1,7 +1,6 @@
 package recording
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -182,6 +181,8 @@ func (m *meetingFixture) raw(method, path string, want int) (*http.Response, []b
 // number never given again, and every refusal in the contract's order: 403, 413, 410 and 404 before the body is read,
 // 400 for what is wrong with it, then the same id (its photo, or op_id_reused), an id the owner deleted
 // (photo_deleted), not_meeting by the recording's kind.
+// The image itself (GET …/photos/{n}) is the knowledge base's own route, tested in the assistant's
+// recording_module_off_test.go beside the module off.
 func TestMeetingPhotoRoutes(t *testing.T) {
 	m := newMeetingFixture(t)
 	p := photosPath(meetingRec)
@@ -191,7 +192,6 @@ func TestMeetingPhotoRoutes(t *testing.T) {
 	wantCode(t, m.do("POST", p, "", strings.Repeat(" ", maxPhotoBody+1), http.StatusRequestEntityTooLarge), "too_large")
 	wantCode(t, m.do("POST", p, "", `{"id":`, http.StatusNotFound), codeRecordingNotFound) // the recording before the body
 	wantCode(t, m.do("GET", p, "", nil, http.StatusNotFound), codeRecordingNotFound)
-	wantCode(t, m.do("GET", p+"/1", "", nil, http.StatusNotFound), codeRecordingNotFound)
 	wantCode(t, m.do("DELETE", p+"/1", "", nil, http.StatusNotFound), codeRecordingNotFound)
 	m.upload(meetingRec, 1, map[string]any{"title": "Design review"})
 
@@ -255,17 +255,6 @@ func TestMeetingPhotoRoutes(t *testing.T) {
 		t.Fatalf("list %v", ps)
 	}
 
-	// The image, as it came, never sniffed or kept by a cache.
-	resp, body := m.raw("GET", p+"/2", http.StatusOK)
-	want, _ := base64.StdEncoding.DecodeString(two["data"].(string))
-	if !bytes.Equal(body, want) || resp.Header.Get("Content-Type") != "image/jpeg" || resp.Header.Get("X-Content-Type-Options") != "nosniff" ||
-		resp.Header.Get("Cache-Control") != "private, no-store" {
-		t.Fatalf("image: %d bytes, %v", len(body), resp.Header)
-	}
-	for _, n := range []string{"9", "0", "abc", "-1"} {
-		wantCode(t, m.do("GET", p+"/"+n, "", nil, http.StatusNotFound), codePhotoNotFound)
-	}
-
 	// Deleted: gone from the list and the images, false when deleted again, never added again under its id; its
 	// number is not given again.
 	if out := m.do("DELETE", p+"/2", "", nil, http.StatusOK); out["deleted"] != true {
@@ -275,7 +264,6 @@ func TestMeetingPhotoRoutes(t *testing.T) {
 		t.Fatalf("delete again %v", out)
 	}
 	wantCode(t, m.do("DELETE", p+"/9", "", nil, http.StatusNotFound), codePhotoNotFound)
-	wantCode(t, m.do("GET", p+"/2", "", nil, http.StatusNotFound), codePhotoNotFound)
 	wantCode(t, m.do("POST", p, "", two, http.StatusGone), codePhotoDeleted)
 	if d := m.addPhoto(meetingRec, photoBody(t, photoFour, 5, nil)); d["n"] != float64(4) {
 		t.Fatalf("a number given again: %v", d)
@@ -292,7 +280,6 @@ func TestMeetingPhotoRoutes(t *testing.T) {
 	m.do("DELETE", "/api/v1/recordings/"+meetingRec, "", nil, http.StatusOK)
 	wantCode(t, m.do("POST", p, "", `{"id":`, http.StatusGone), codeRecordingDeleted)
 	wantCode(t, m.do("GET", p, "", nil, http.StatusGone), codeRecordingDeleted)
-	wantCode(t, m.do("GET", p+"/1", "", nil, http.StatusGone), codeRecordingDeleted)
 	wantCode(t, m.do("DELETE", p+"/1", "", nil, http.StatusGone), codeRecordingDeleted)
 }
 
@@ -319,7 +306,6 @@ func TestMeetingPhotosReadOnly(t *testing.T) {
 	if ps := m.photosOf(meetingRec); len(ps) != 1 {
 		t.Fatalf("list %v", ps)
 	}
-	m.raw("GET", p+"/1", http.StatusOK)
 	wantCode(t, m.do("DELETE", p+"/9", "", nil, http.StatusNotFound), codePhotoNotFound)
 	wantCode(t, m.do("DELETE", p+"/1", "", nil, http.StatusForbidden), "kb_read_only")
 	wantCode(t, m.do("DELETE", p+"/2", "", nil, http.StatusForbidden), "kb_read_only")
@@ -334,7 +320,6 @@ func TestMeetingPhotosWithoutKnowledgeBase(t *testing.T) {
 	p := photosPath(meetingRec)
 	wantCode(t, m.do("POST", p, "", strings.Repeat(" ", maxPhotoBody+1), http.StatusServiceUnavailable), "kb_disabled")
 	wantCode(t, m.do("GET", p, "", nil, http.StatusServiceUnavailable), "kb_disabled")
-	wantCode(t, m.do("GET", p+"/1", "", nil, http.StatusServiceUnavailable), "kb_disabled")
 	wantCode(t, m.do("DELETE", p+"/1", "", nil, http.StatusServiceUnavailable), "kb_disabled")
 }
 

@@ -195,6 +195,8 @@ Each machine in `hub.json` can configure `codex_homes` (an array of directories)
 
 No application name needs hard-coding: every 30 seconds the node discovers the current user's Codex/app-server processes, `CODEX_HOME`, and enabled listen endpoints; existing official control sockets under known homes can also be discovered. Discovered directories and named instances are remembered in the hub's Postgres settings; process/connection generations are not persisted. Private paths belong only in runtime config; do not commit actual config values.
 
+An instance a runtime serves itself (an app-server-compatible daemon with its own Persona runtime companion) needs no setting here: the runtime claims it in its hello, and the node keeps no connection to it while the claim holds (`../integrations/runtimes.md`, "Claiming a Codex app-server instance (optional)"). Turning `codex_discovery` off instead would also drop every other discovered instance.
+
 The Unix socket and its immediate parent directory must belong to the current user and be inaccessible to groups/other users; WebSocket runs inside. TCP endpoints allow only literal loopback IPs, disallow external hosts, userinfo, and query credentials, and do not use the system HTTP proxy. Stdio without an endpoint is read-only; no daemon is started, no desktop app replaced, and no file permissions loosened. More limitations in `../integrations/codex-app-server.md`.
 
 ## hub runtime config (hub.json)

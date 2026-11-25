@@ -65,6 +65,7 @@ export interface Manifest {
    * executable; writes and arbitrary command lines are not part of this contract.
    */
   host_integrations?: HostIntegrationSpec[];
+  upgrade?: UpgradeSpec;
 }
 
 /**
@@ -136,6 +137,24 @@ export interface AuthSpec {
    * do leave it out of its pages.
    */
   page?: string;
+}
+
+/**
+ * What the extension asks of the hub around an automatic upgrade (docs "Backup before an upgrade"). The hub snapshots
+ * the data directory before every automatic upgrade whether or not this is there. Hubs before it refuse the manifest.
+ */
+export interface UpgradeSpec {
+  /** auto (the default): the upgrade goes ahead when the snapshot fails; required: no snapshot, no upgrade. */
+  backup?: string;
+  /**
+   * Before the snapshot the hub calls upgrade.prepare on the installed version's program; an error stops the upgrade.
+   */
+  prepare?: boolean;
+  /**
+   * Once the new version is up the hub calls its upgrade.health; an error rolls the upgrade back and restores the
+   * snapshot.
+   */
+  health_check?: boolean;
 }
 
 export interface Dependency {

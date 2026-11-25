@@ -342,6 +342,8 @@ body {
 /* ── Persona additions ──────────────────────────────────── */
 [data-terminal-scheme="light"], :root { --status-needs: var(--attention); --status-working: var(--orange); --status-waiting: color-mix(in srgb, var(--status-working) 55%, var(--ink-3)); --status-unread: var(--green); --status-idle: var(--ink-3); --user-bubble: #dceaff; --neutral-bubble: #f0f1f3; --term-magenta: #a347ba; --term-cyan: #0f8a9c; --term-bg: #1b1c1f; --term-fg: #e6e7e9; }
 [data-terminal-scheme="dark"], .dark { --user-bubble: #1d3557; --neutral-bubble: #2c2d31; --term-magenta: #c678dd; --term-cyan: #4fb6c4; --term-bg: #141517; --term-fg: #e6e7e9; }
+::highlight(persona-comment) { background-color: color-mix(in srgb, var(--accent) 20%, transparent); }
+::highlight(persona-comment-flash) { background-color: color-mix(in srgb, var(--accent) 36%, transparent); }
 /* The chat's trace (aligned with cindy's defaults, #1963): tool rows and their chevrons, the work group's rail, thought
    text, diff counts and the running status bar's accent. */
 :root { --tool-ink: #525252; --tool-rail: #ddd6cb; --thinking-ink: #a3a3a3; --diff-add-fg: #22863a; --diff-del-fg: #b31d28; --diff-add-bg: #e6ffec; --diff-del-bg: #ffebe9; --diff-add-word: #abf2bc; --diff-del-word: #ffcecb; --status-accent: var(--accent-ink); --tool-hover: #ececec; }

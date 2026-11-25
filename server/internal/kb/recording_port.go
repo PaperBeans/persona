@@ -42,9 +42,10 @@ func (s *Store) recordingAudio() recordingwire.Provider {
 
 // RetentionWithoutRecordingModule is the one place that decides whether the retention the user configured
 // (recording_days, minutes_days) keeps running when the recording module is off or left out of the build
-// (docs/plans/plan-kb-recording-port.md, section 7, question 1; section 3.2 (ii)). true: PruneRecordings runs in Core
-// as it always did, so a module switch neither triggers nor stops a deletion the user asked for. false would pause
-// retention with the module: recordings would then outlive recording_days while it is off.
+// (docs/plans/plan-kb-recording-port.md, section 7, question 1; section 3.2 (ii)). The owner decided on 2026-11-25
+// that it keeps running as configured: true, PruneRecordings runs in Core as it always did, so a module switch neither
+// triggers nor stops a deletion the user asked for. false would pause retention with the module: recordings would then
+// outlive recording_days while it is off.
 const RetentionWithoutRecordingModule = true
 
 // retentionRuns says whether this retention round runs: always with the module, and without it as

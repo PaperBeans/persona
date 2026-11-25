@@ -381,7 +381,6 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 		id = prepared.public
 	} else {
 		defer n.unclaimCodexThread(id)
-		id = n.codexPublicID(n.codexPaneHome(pane), id)
 	}
 	n.bindPane(pane, id)
 	n.namePersonaTab(ctx, pane, id) // the tab was marked before the thread was known (personatab.go)
@@ -462,7 +461,7 @@ func (n *Node) unclaimCodexThread(id string) {
 	n.mu.Unlock()
 }
 
-// waitCodexThread waits for the thread a start made: a rollout in the directory (as given, or resolved: Codex records
+// waitCodexThread claims and returns the public ID of the thread a start made: a rollout in the directory (as given, or resolved: Codex records
 // the shell's resolved working directory, or -C as given), begun after the launch, whose first user message is the
 // prompt. Codex's own dialogs on the way are answered as the user would for a start they asked
 // for: the folder is trusted (they chose it), an update is skipped. A launcher that fails ends the wait at once.
@@ -474,20 +473,15 @@ func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, be
 	if r, err := filepath.EvalSymlinks(cwd); err == nil {
 		resolved = r
 	}
-	homes := []string{n.codexHome()}
-	for _, h := range n.codexInventory().Homes {
-		if h != homes[0] {
-			homes = append(homes, h)
-		}
-	}
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case <-time.After(min(time.Until(deadline), poll)):
 		}
-		for _, home := range homes {
-			for _, r := range rollouts(home) {
+		scanBy := time.Now().Add(codexHomeListWait)
+		for _, home := range n.codexRolloutHomes(pane) {
+			for _, r := range n.firstMessageRollouts(home, scanBy) {
 				if (r.cwd != cwd && r.cwd != resolved) || r.mtime.Before(began.Add(-time.Second)) {
 					continue
 				}

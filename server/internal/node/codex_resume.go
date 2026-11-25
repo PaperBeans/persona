@@ -72,7 +72,10 @@ func (n *Node) codexResumableIn(ctx context.Context, id string, pass *codexListP
 	if o := readCodexOrigin(src.path); o.desktop || o.exec || o.sub || o.parent != "" {
 		return false
 	}
-	m := metaOf(src.home, src.path)
+	m, ok := metaOfIn(src.home, src.path, pass)
+	if !ok {
+		return false
+	}
 	return !m.sub && m.cwd != ""
 }
 

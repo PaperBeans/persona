@@ -78,6 +78,27 @@ func (n *Node) codexPaneHome(pane string) string {
 	return n.codexHome()
 }
 
+// codexRolloutHomes reads the current homes on each look: a launcher's process may reveal its CODEX_HOME
+// after the start begins. Check the pane's observed home first and include other homes for remote launchers.
+func (n *Node) codexRolloutHomes(pane string) []string {
+	local := n.codexHome()
+	homes := []string{local}
+	if r := n.codices; r != nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		observed := r.byPane[pane]
+		if observed != "" && observed != local {
+			homes = []string{observed, local}
+		}
+		for _, home := range r.config.Homes {
+			if home != local && home != observed {
+				homes = append(homes, home)
+			}
+		}
+	}
+	return homes
+}
+
 func (n *Node) codexPublicID(home, raw string) string {
 	if n.codices == nil || strings.HasPrefix(raw, "c0de-") {
 		return raw

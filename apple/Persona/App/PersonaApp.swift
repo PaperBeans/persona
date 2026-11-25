@@ -290,7 +290,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // `-openAgentsFresh YES`: the Agents list's saved look forgotten (AgentsListTests).
         if d.bool(forKey: "openAgentsFresh") {
             for k in ["dev.machineFilter", HubFilter.key, "dev.grouping", "dev.sort", "dev.compact", "dev.folded", AgentRowStyle.key,
-                      "agents.list.width", "agents.list.closed"] { d.removeObject(forKey: k) }
+                      "agents.list.width", "agents.list.closed", SeenRows.key, SeenRows.noticedKey] { d.removeObject(forKey: k) }
         }
         // `-openSplitFresh YES`: the lists beside the pages shown (SplitListTests, #2624, #4206).
         if d.bool(forKey: "openSplitFresh") {

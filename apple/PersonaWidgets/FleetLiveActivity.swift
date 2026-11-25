@@ -153,16 +153,6 @@ struct IslandWidth<Content: View>: View {
     #endif
 }
 
-struct FleetTimer: View {
-    var since: Date
-    var body: some View {
-        Text(timerInterval: since...Date.distantFuture, countsDown: false, showsHours: true)
-            .monospacedDigit()
-            .multilineTextAlignment(.trailing)
-            .lineLimit(1)
-    }
-}
-
 /// One agent: a colored dot, its name (or what kind of request, when names are hidden), what it wants.
 struct FleetRow: View {
     var item: FleetState.Item
@@ -308,29 +298,6 @@ struct FleetCounts: View {
             Text(short ? count : full).font(.subheadline.weight(.semibold)).monospacedDigit().lineLimit(1)
         }
         .fixedSize()
-    }
-}
-
-/// The numbers the device chose for its island (TPM, today's tokens, load, the assistant), right of the counts.
-struct FleetStatsLine: View {
-    var state: FleetState
-    var onDark = false
-
-    static func count(_ s: FleetState) -> Int { [s.left, s.right].filter { $0 != .status && $0 != .none }.count }
-
-    var body: some View {
-        let cells = [state.left, state.right].filter { $0 != .status && $0 != .none }.map { IslandCell.cell($0, state, status: nil) }
-        HStack(spacing: 8) {
-            ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
-                if case let .timer(since) = cell {
-                    FleetTimer(since: since).font(.caption.weight(.semibold)).foregroundStyle(onDark ? FleetPalette.working : FleetPalette.workingText)
-                        .frame(maxWidth: 52, alignment: .trailing)
-                } else if let text = FleetText.stat(cell) {
-                    Text(text).font(.caption.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
-                        .foregroundStyle(onDark ? Color.white.opacity(0.75) : Color.secondary)
-                }
-            }
-        }
     }
 }
 

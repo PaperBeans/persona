@@ -215,9 +215,16 @@ func (s *Service) fleetStats() FleetStats {
 	u := s.devs.Usage()
 	st := FleetStats{TPM: round2(u.TPM), Tokens: round2(u.Tokens), Requests: int(round2(int64(u.Requests)))}
 	for _, m := range u.Machines {
-		st.Loads = append(st.Loads, FleetLoad{ID: m.ID, Name: s.machineName(m.ID), Percent: int(math.Round(m.Load*20)) * 5})
+		st.Loads = append(st.Loads, FleetLoad{ID: m.ID, Name: s.machineName(m.ID), Percent: loadPercent(m.Load)})
 	}
 	return st
+}
+
+// loadPercent is a machine's load per core as the island's percent, rounded to the tenth of a core the apps print
+// ("1.5 per core" is 150, #12519). In steps of 5, 1.46 per core went out as 145 and showed "1.4" beside a card's
+// "1.5", and half the pushes for a 5-step change drew the same text.
+func loadPercent(perCore float64) int {
+	return int(math.Round(perCore*10)) * 10
 }
 
 // fleetInput is one agent as the fleet sees it. Session is read, never written: it points into a list the fleet's

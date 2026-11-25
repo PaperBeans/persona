@@ -79,7 +79,8 @@ struct IslandFitTests {
     @Test(arguments: counts)
     func compactSidesFit(_ n: Int) throws {
         let side = CGSize(width: IslandMetrics.compactContent, height: IslandMetrics.limited)
-        let numbers: [IslandCell] = [.tpm(n * 1000), .tokens(n * 1_000_000), .requests(n * 10), .load(name: "", percent: min(n, 100))]
+        // Load is per core ("0.1" … "12.3" … "99.9", #12519), and past 1 when threads wait: not capped at 100%.
+        let numbers: [IslandCell] = [.tpm(n * 1000), .tokens(n * 1_000_000), .requests(n * 10), .load(name: "", percent: min(n * 10, 9990))]
         for cell in Self.statusCells(n) + numbers {
             let drawn = try ink(IslandCellView(cell: cell), region: side)
             #expect(inside(drawn.rect, side), "\(cell) is wider than a compact side: \(drawn.rect)")
@@ -114,6 +115,43 @@ struct IslandFitTests {
         #expect(abs(drawn.rect.midX - offset.width) < 0.5)
         #expect(abs(abs(drawn.rect.midY) - offset.height) < 0.5)
         #expect(inside(drawn.rect, side))
+    }
+
+    /// The expanded island's top corner beside the camera, where the counts and the stats line go: about 125 pt, as the
+    /// corner the persona takes on the other side (FleetLiveActivity), less the line's 6 pt inset from the island's edge.
+    nonisolated static let expandedCorner: CGFloat = 125 - 6
+
+    /// A view's ideal width, the one `ViewThatFits` compares with the room it is offered.
+    private func idealWidth(_ view: some View) throws -> CGFloat {
+        let renderer = ImageRenderer(content: view.fixedSize())
+        renderer.scale = 2
+        let image = try #require(renderer.cgImage)
+        return CGFloat(image.width) / renderer.scale
+    }
+
+    /// The stats line's words in `language` (the test host draws zh-Hans), by `FleetText.stat`'s own keys.
+    private static func words(_ resource: LocalizedStringResource, _ language: String) -> String {
+        var resource = resource
+        resource.locale = Locale(identifier: language)
+        return String(localized: resource)
+    }
+
+    /// The numbers' line on the expanded island and the Lock Screen (#12519). A chosen machine's load in words beside
+    /// today's tokens is wider than the expanded island's corner in every language, so there the line draws load as the
+    /// CPU symbol and its figure (`FleetStatsLine`'s `ViewThatFits`), which fits whole. Measured from the line's own
+    /// pieces and spacing; the Lock Screen's row, after the persona and the counts, is wider than this corner.
+    @Test(arguments: ["en", "zh-Hans", "ja"])
+    func statsLineFitsTheExpandedCorner(_ language: String) throws {
+        let load = Self.words("\("MacBook Pro") \(FleetText.perCore(percent: 140)) per core", language)
+        let tokens = Self.words(LocalizedStringResource("\(FleetText.short(42_000_000)) today", comment: "Tokens today"), language)
+        if language == "zh-Hans" { // the words the line draws in the test host's language
+            #expect(load == FleetText.stat(.load(name: "MacBook Pro", percent: 140)))
+            #expect(tokens == FleetText.stat(.tokens(42_000_000)))
+        }
+        let words = try idealWidth(HStack(spacing: FleetStatsLine.spacing) { FleetStatText(text: load); FleetStatText(text: tokens) })
+        let figure = try idealWidth(HStack(spacing: FleetStatsLine.spacing) { FleetLoadFigure(percent: 140); FleetStatText(text: tokens) })
+        #expect(words > Self.expandedCorner, "\(language): \"\(load)\" and \"\(tokens)\" fit whole now (\(words) pt)")
+        #expect(figure <= Self.expandedCorner, "\(language): the figure beside \"\(tokens)\" takes \(figure) pt")
     }
 
     @Test func glyphLooks() {

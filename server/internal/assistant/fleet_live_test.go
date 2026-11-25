@@ -87,6 +87,16 @@ func TestRound2(t *testing.T) {
 	}
 }
 
+// The island's load is rounded to the tenth of a core the apps print (#12519): 1.46 per core is 150 ("1.5", as the
+// card shows it), not 145.
+func TestLoadPercent(t *testing.T) {
+	for in, want := range map[float64]int{0: 0, 0.04: 0, 0.06: 10, 1.44: 140, 1.46: 150, 2.01: 200, 6.53: 650} {
+		if got := loadPercent(in); got != want {
+			t.Errorf("loadPercent(%v) = %d, want %d", in, got, want)
+		}
+	}
+}
+
 // A working item whose turn ended for its background work says so, and what runs (#2935).
 func TestBuildFleetBackground(t *testing.T) {
 	run := proto.Workflow{TaskID: "w1", Name: "parity-audit", Running: true, Status: proto.WorkflowRunning, Phase: "Verify",

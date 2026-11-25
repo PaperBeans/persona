@@ -319,9 +319,12 @@ type Meta struct {
 	Updated      time.Time
 }
 
-func (m *Meta) observeCodexSettings(s codexThreadSettings, at time.Time) {
+func (m *Meta) observeCodexSettings(s CodexThreadSettings, at time.Time) {
 	if s.Model != "" && !at.Before(m.ModelAt) {
 		m.Model, m.ModelAt = s.Model, at
+	}
+	if s.ReasoningEffort != nil && *s.ReasoningEffort != "" && !at.Before(m.EffortAt) {
+		m.Effort, m.EffortAt = *s.ReasoningEffort, at
 	}
 	if len(s.ServiceTier) != 0 && !at.Before(m.ServiceTierAt) {
 		var tier string
@@ -358,11 +361,11 @@ func (m *Meta) ObserveNamingMetadata(line []byte) {
 			Usage *tokenuse.ClaudeUsage `json:"usage"`
 		} `json:"message"`
 		Payload struct {
-			Type     string              `json:"type"`
-			Model    string              `json:"model"`
-			Effort   string              `json:"effort"`
-			Settings codexThreadSettings `json:"thread_settings"`
-			Info     *tokenuse.CodexInfo `json:"info"`
+			Type           string               `json:"type"`
+			Model          string               `json:"model"`
+			Effort         string               `json:"effort"`
+			Info           *tokenuse.CodexInfo  `json:"info"`
+			ThreadSettings *CodexThreadSettings `json:"thread_settings"` // thread_settings_applied (codex.go)
 		} `json:"payload"`
 	}
 	if json.Unmarshal(line, &e) != nil {
@@ -370,7 +373,7 @@ func (m *Meta) ObserveNamingMetadata(line []byte) {
 	}
 	switch e.Type {
 	case "turn_context":
-		m.observeCodexSettings(codexThreadSettings{Model: e.Payload.Model}, e.Timestamp)
+		m.observeCodexSettings(CodexThreadSettings{Model: e.Payload.Model}, e.Timestamp)
 		if e.Payload.Effort != "" && !e.Timestamp.Before(m.EffortAt) {
 			m.Effort, m.EffortAt = e.Payload.Effort, e.Timestamp
 		}
@@ -402,7 +405,10 @@ func (m *Meta) ObserveNamingMetadata(line []byte) {
 		case "context_compacted":
 			m.restartContext.compact()
 		case "thread_settings_applied":
-			m.observeCodexSettings(e.Payload.Settings, e.Timestamp)
+			// A /model typed between turns is a small line too: a long tool result after it can push it out of the tail.
+			if e.Payload.ThreadSettings != nil {
+				m.observeCodexSettings(*e.Payload.ThreadSettings, e.Timestamp)
+			}
 		case "token_count":
 			if info := e.Payload.Info; info != nil {
 				m.OutputTokens = int(info.Total.Output)

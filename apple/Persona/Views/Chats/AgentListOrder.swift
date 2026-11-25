@@ -13,9 +13,31 @@ nonisolated struct AgentListOrder {
     var held: SessionKey? = nil
     /// The held row was Just finished when opened; its hub flag clears immediately.
     var heldJustFinished = false
+    /// The rows this visit of the list showed as Unread or Just finished (`AppModel.seenThisVisit`, #12514), by the
+    /// section each was in: one seen since (opened, marked, or seen elsewhere) keeps that place, drawn as Seen, until
+    /// the list is refreshed, as the open one does (`held`). Empty when seen rows leave with their chat (`SeenRows`).
+    var heldSeen: [SessionKey: Held] = [:]
+
+    /// Where a held row stays: the section it was shown in before it was seen.
+    enum Held: Equatable, Sendable {
+        case unread, justFinished
+    }
+
+    /// The place `s` is held in, whether or not it is seen yet; nil for a row that is not held.
+    func heldPlace(_ s: Session) -> Held? {
+        if let held, s.key == held { return heldJustFinished ? .justFinished : .unread }
+        return heldSeen[s.key]
+    }
+
+    /// A held row that is seen now and still drawn in the place it was held in (Unread, Just finished, or Muted for a
+    /// muted one): that section's count leaves it out (it counts what is still unseen) and its Clear Seen lets it go.
+    func isHeldSeen(_ s: Session) -> Bool {
+        guard s.isQuiet, !s.needsSeen(), let place = heldPlace(s) else { return false }
+        return place == .unread || justFinished(s)
+    }
 
     func justFinished(_ s: Session) -> Bool {
-        guard s.isJustFinished(muted: false) || (heldJustFinished && s.key == held && s.state == .idle) else { return false }
+        guard s.isJustFinished(muted: false) || (heldPlace(s) == .justFinished && s.state == .idle) else { return false }
         return !isMuted(s)
     }
 
@@ -29,7 +51,7 @@ nonisolated struct AgentListOrder {
     /// Rows that stay out of the idle fold: busy, pinned, waiting to be woken (`Session.isWaiting`: looping, with
     /// background work, or the hub waiting it out), or waiting on the user's reply (`awaitsReply`).
     func stays(_ s: Session) -> Bool {
-        !s.isQuiet || (!heldJustFinished && s.key == held) || isPinned(s.key) || s.isWaiting || awaitsReply(s) || justFinished(s)
+        !s.isQuiet || heldPlace(s) == .unread || isPinned(s.key) || s.isWaiting || awaitsReply(s) || justFinished(s)
     }
 
     /// One order for every grouping (inside a space, a machine, and the sections of By Status):
@@ -38,7 +60,7 @@ nonisolated struct AgentListOrder {
     /// you stays first. The index into `stateKeys`.
     func rank(_ s: Session) -> Int {
         if s.state == .needsYou { return 0 }
-        let unread = s.state == .unread || (!heldJustFinished && s.key == held && s.isQuiet)
+        let unread = s.state == .unread || (heldPlace(s) == .unread && s.isQuiet)
         let live = s.state == .working || unread || s.isWaiting
         if live && isMuted(s) { return 7 }
         if unread { return 1 }
@@ -85,9 +107,8 @@ nonisolated struct AgentListOrder {
         return (entries.filter(stays), entries.filter { !stays($0) })
     }
 
-    /// A space that folds into Idle Spaces: every agent in it quiet, none awaiting the user's reply, and not the held
-    /// one's.
-    func isQuiet(_ g: SpaceGroup) -> Bool { g.isQuiet && !g.sessions.contains { (!heldJustFinished && $0.key == held) || awaitsReply($0) || justFinished($0) } }
+    /// A space that folds into Idle Spaces: every agent in it quiet, none awaiting the user's reply, and none held.
+    func isQuiet(_ g: SpaceGroup) -> Bool { g.isQuiet && !g.sessions.contains { heldPlace($0) == .unread || awaitsReply($0) || justFinished($0) } }
     /// Newest first by `date`, then by `id` so equal times never swap between renders: spaces under a quick filter,
     /// spaces and machines under Recently Updated. `date` is a `sortDate`, so a working agent's every step does not move them.
     static func latestFirst<T>(_ items: [T], date: (T) -> Date, id: (T) -> String) -> [T] {

@@ -130,3 +130,12 @@ describe("MachineDetail chart hover", () => {
     expect(held().every((label) => label !== null)).toBe(true);
   });
 });
+
+describe("MachineDetail load (#12519)", () => {
+  it("shows the raw load with load per core under it, and says what load counts", () => {
+    // load 1.2 on 4 cores: 0.3 per core, one decimal, as the card and the chip write it
+    expect(host.textContent).toContain("1.20");
+    expect(host.textContent).toContain("每核 0.3");
+    expect(host.querySelector("[data-testid=load-definition]")?.textContent).toMatch(/^负载 = 正在运行和排队等 CPU 的线程数/);
+  });
+});

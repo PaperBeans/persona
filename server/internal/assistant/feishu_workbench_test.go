@@ -454,9 +454,8 @@ func TestWorkbenchNoticesGoToAPollingCompanion(t *testing.T) {
 		got <- out
 	}()
 	waitFor(t, "the long poll waiting", func() bool {
-		e.s.companions.mu.Lock()
-		defer e.s.companions.mu.Unlock()
-		return e.s.companions.wait != nil
+		_, waiting := e.s.boardProbe(t).NoticesState()
+		return waiting
 	})
 	e.s.feishuPush("", "", "Second", "later")
 	select {

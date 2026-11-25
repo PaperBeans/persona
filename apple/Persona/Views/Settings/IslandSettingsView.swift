@@ -126,7 +126,7 @@ struct IslandSettingsView: View {
     static func sample(needsYou: Bool) -> FleetState {
         FleetState(phase: needsYou ? .needsYou : .working, needsYou: needsYou ? 2 : 0, working: 3, unread: 1,
                    workingSince: Date.now.timeIntervalSince1970 - 754, assistant: true,
-                   stats: .init(tpm: 12000, tokens: 42_000_000, requests: 1200, loads: [.init(id: "", name: "", percent: 35)]))
+                   stats: .init(tpm: 12000, tokens: 42_000_000, requests: 1200, loads: [.init(id: "", name: "", percent: 140)]))
     }
 }
 #endif

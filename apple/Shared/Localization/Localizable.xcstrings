@@ -9049,6 +9049,29 @@
       },
       "extractionState" : "manual"
     },
+    "%@ %@ per core" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@ per core"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ コアあたり %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 每核 %2$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "%@ %@ used" : {
       "localizations" : {
         "zh-Hans" : {
@@ -11449,6 +11472,29 @@
           }
         }
       }
+    },
+    "%@ per core" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ per core"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コアあたり %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每核 %1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "%@ project" : {
       "localizations" : {
@@ -17527,13 +17573,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%1$lld under heavy load"
+                  "value" : "%1$lld with high readings"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%1$lld under heavy load"
+                  "value" : "%1$lld with high readings"
                 }
               }
             }
@@ -17542,13 +17588,13 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$lld台が高負荷"
+            "value" : "%1$lld台の指標が高め"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$lld 台负载偏高"
+            "value" : "%1$lld 台指标偏高"
           }
         }
       },
@@ -29677,6 +29723,29 @@
         }
       }
     },
+    "Agents you read stay where they were, marked as seen, until you pull down to refresh." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agents you read stay where they were, marked as seen, until you pull down to refresh."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認したエージェントは、引き下げて更新するまで、確認済みとしてその場に残ります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "看过的 Agent 会以「已看」留在原处，下拉刷新后才移走。"
+          }
+        }
+      }
+    },
     "Agents · %lld" : {
       "shouldTranslate" : true,
       "localizations" : {
@@ -33229,6 +33298,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "An agent you open or mark as seen from Unread or Just Finished keeps its place, marked as seen, until you pull down to refresh, tap Clear Seen or choose a filter. With Leave When the Chat Closes it moves to Seen as soon as you leave its chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An agent you open or mark as seen from Unread or Just Finished keeps its place, marked as seen, until you pull down to refresh, tap Clear Seen or choose a filter. With Leave When the Chat Closes it moves to Seen as soon as you leave its chat."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「未確認」や「完了したばかり」から開いたり確認済みにしたりしたエージェントは、引き下げて更新するか、「確認済みを片付ける」をタップするか、フィルタを選ぶまで、確認済みとしてその場に残ります。「チャットを閉じたら移す」では、チャットを閉じるとすぐに確認済みに移ります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从「完成未看」或「刚做完待看」打开或标为已看的 Agent，会以「已看」留在原处，直到你下拉刷新、点「清理已看」或选择筛选。选「离开就移走」时，离开对话就会移到「已看」。"
+          }
+        }
+      }
     },
     "An extension market is an index of extensions published by a repository or website. Add one to list its extensions here and install them directly." : {
       "localizations" : {
@@ -41755,6 +41847,29 @@
         }
       }
     },
+    "Change in Settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change in Settings"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定で変更"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "去设置里修改"
+          }
+        }
+      }
+    },
     "check and tick [To-dos Line]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50022,6 +50137,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Clear Seen (%lld)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear Seen (%lld)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認済みを片付ける（%lld）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清理已看（%lld）"
+          }
+        }
+      }
     },
     "Clear Sign-in for %@?" : {
       "localizations" : {
@@ -88726,7 +88864,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "CPU高負荷"
+            "value" : "CPU使用率が高い"
           }
         },
         "zh-Hans" : {
@@ -99422,6 +99560,29 @@
         }
       }
     },
+    "Leave When the Chat Closes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leave When the Chat Closes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャットを閉じたら移す"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "离开就移走"
+          }
+        }
+      }
+    },
     "Leave Worktree" : {
       "localizations" : {
         "en" : {
@@ -101416,51 +101577,28 @@
       },
       "extractionState" : "manual"
     },
-    "Load %lld%%" : {
+    "Load %@ per core" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Load %1$lld%%"
+            "value" : "Load %1$@ per core"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "負荷%1$lld%%"
+            "value" : "負荷 コアあたり %1$@"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "负载 %1$lld%%"
+            "value" : "负载 每核 %1$@"
           }
         }
       },
       "extractionState" : "manual"
-    },
-    "Load %lld%% [Home Widgets]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Load %lld%%"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "负载 %lld%%"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "負荷 %lld%%"
-          }
-        }
-      }
     },
     "Load (1 min)" : {
       "localizations" : {
@@ -101733,6 +101871,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "加载更早的回复"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Load is the number of threads running or waiting for a CPU, averaged over a minute (Linux also counts threads waiting for the disk). It isn't a percentage: above 1 per core, some threads are waiting. On a Mac, work at background priority may run on only some of the cores, so threads can wait while CPU stays low." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Load is the number of threads running or waiting for a CPU, averaged over a minute (Linux also counts threads waiting for the disk). It isn't a percentage: above 1 per core, some threads are waiting. On a Mac, work at background priority may run on only some of the cores, so threads can wait while CPU stays low."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "負荷は、実行中またはCPUを待っているスレッドの数の1分平均です（Linuxではディスクを待つスレッドも数えます）。使用率ではありません。コアあたり1を超えると、待っているスレッドがあります。Macではバックグラウンド優先度の処理が一部のコアでしか動かないことがあり、CPU使用率が低くても待ちが出ます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "负载 = 正在运行和排队等 CPU 的线程数（1 分钟平均；Linux 上也算等磁盘的线程），不是占用率；每核超过 1 表示有线程在等；Mac 上后台优先级的任务可能只用部分核心，所以 CPU 不高时也会排队。"
           }
         }
       },
@@ -157112,6 +157273,29 @@
       },
       "extractionState" : "manual"
     },
+    "Seen Agents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seen Agents"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認済みのエージェント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "看过的 Agent"
+          }
+        }
+      }
+    },
     "Seen [State Names]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -169469,6 +169653,29 @@
       },
       "extractionState" : "manual"
     },
+    "Stay Until Refresh" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stay Until Refresh"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新まで残す"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "留到刷新"
+          }
+        }
+      }
+    },
     "Step %lld of %lld" : {
       "localizations" : {
         "en" : {
@@ -174403,6 +174610,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ToDoから外しました"
+          }
+        }
+      }
+    },
+    "Takes the agents you have read out of this section." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Takes the agents you have read out of this section."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認したエージェントをこのセクションから外します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把你看过的 Agent 移出这一段。"
           }
         }
       }
@@ -221821,19 +222051,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agents list layout rows cards compact"
+            "value" : "Agents list layout rows cards compact seen agents stay refresh"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agents 列表 布局 行 卡片 紧凑"
+            "value" : "Agents 列表 布局 行 卡片 紧凑 看过的 Agent 已看 留到刷新"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agents 一覧 レイアウト 行 カード コンパクト"
+            "value" : "Agents 一覧 レイアウト 行 カード コンパクト 確認済みのエージェント 更新まで残す"
           }
         }
       }

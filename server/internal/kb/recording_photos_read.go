@@ -38,3 +38,32 @@ func (e *Engine) PhotosMarkdown(rawID string) string {
 	}
 	return string(raw)
 }
+
+// PhotoImage is photo n of recording rawID: its mime type and bytes. ErrRecordingDeleted, ErrNotFound, then
+// ErrPhotoNotFound when it is not listed (also one the owner deleted, or a trim removed).
+func (e *Engine) PhotoImage(rawID string, n int) (string, []byte, error) {
+	r, err := e.Store.photosRecording(rawID)
+	if err != nil {
+		return "", nil, err
+	}
+	st := e.Store
+	st.recFilesMu.RLock()
+	defer st.recFilesMu.RUnlock()
+	b, _, err := st.readPhotosLocked(r.ID)
+	if err != nil {
+		return "", nil, err
+	}
+	i := b.index(n)
+	if i < 0 {
+		return "", nil, ErrPhotoNotFound
+	}
+	p := b.Photos[i]
+	data, err := os.ReadFile(st.path(KindRecording, r.ID, photosDir, p.fileName()))
+	if os.IsNotExist(err) {
+		return "", nil, ErrPhotoNotFound
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	return p.Mime, data, nil
+}

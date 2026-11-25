@@ -24,6 +24,15 @@ extension View {
             bar().background { FloatingFooterBlur(page: page) }
         }
     }
+
+    /// A `floatingFooter` there only while `shown`: until then the page's foot is as it was, with no blur and no room
+    /// taken, and the rows in sight stay where they are when it comes or goes. For something said for a while over a
+    /// list (the Agents list's notice that read rows stay, #12514), not for actions that are always there.
+    func floatingFooter<Bar: View>(over page: Color, shown: Bool, @ViewBuilder _ bar: () -> Bar) -> some View {
+        safeAreaInset(edge: .bottom, spacing: 0) {
+            if shown { bar().background { FloatingFooterBlur(page: page) } }
+        }
+    }
 }
 
 private struct FloatingPill: ViewModifier {

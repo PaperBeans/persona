@@ -25,6 +25,12 @@ interface Box {
 
 const DOT = 16;
 const FLASH_MS = 1400;
+const HIGHLIGHT_NAME = "persona-comment";
+const HIGHLIGHT_FLASH_NAME = "persona-comment-flash";
+
+function supportsCustomHighlight(): boolean {
+  return typeof CSS !== "undefined" && "highlights" in CSS && typeof Highlight !== "undefined";
+}
 
 /** `jump`: brings words into view `topOffset` px from the top and keeps them there while the exchanges around them are
  *  drawn (ChatView landRow); without it, the scroller's own smooth scroll. */
@@ -134,25 +140,62 @@ export function CommentMarks({ scroller, jump }: { scroller: RefObject<HTMLDivEl
   const boxesNow = useRef(boxes);
   boxesNow.current = boxes;
   const [flash, setFlash] = useState<string | null>(null);
+  const nativeHighlight = useMemo(() => supportsCustomHighlight(), []);
+  const rangesNow = useRef(new Map<string, Range>());
+
+  const syncCustomHighlights = useCallback(
+    (activeFlash: string | null) => {
+      if (!nativeHighlight) return;
+      const base: Range[] = [];
+      const pulsed: Range[] = [];
+      for (const [id, range] of rangesNow.current) {
+        if (id === activeFlash) pulsed.push(range);
+        else base.push(range);
+      }
+      if (base.length) CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(...base));
+      else CSS.highlights.delete(HIGHLIGHT_NAME);
+      if (pulsed.length) CSS.highlights.set(HIGHLIGHT_FLASH_NAME, new Highlight(...pulsed));
+      else CSS.highlights.delete(HIGHLIGHT_FLASH_NAME);
+    },
+    [nativeHighlight],
+  );
 
   const measure = useCallback(() => {
     const el = scroller.current;
     if (!el) return;
     const base = el.getBoundingClientRect();
     const out: Box[] = [];
+    const nextRanges = new Map<string, Range>();
     for (const m of marks) {
       const range = rangeFor(el, m.anchor);
       if (!range) continue;
+      nextRanges.set(m.id, range);
       const rects = [...range.getClientRects()]
         .filter((r) => r.width > 0 && r.height > 0)
         .map((r) => ({ x: Math.round(r.left - base.left + el.scrollLeft), y: Math.round(r.top - base.top + el.scrollTop), w: Math.round(r.width), h: Math.round(r.height) }));
       if (rects.length) out.push({ id: m.id, n: m.n, rects });
     }
+    rangesNow.current = nextRanges;
+    syncCustomHighlights(flash);
     setBoxes((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out));
-  }, [marks, scroller]);
+  }, [marks, scroller, syncCustomHighlights, flash]);
+
+  useEffect(() => {
+    syncCustomHighlights(flash);
+  }, [flash, syncCustomHighlights]);
+
+  useEffect(() => {
+    if (!nativeHighlight) return;
+    return () => {
+      CSS.highlights.delete(HIGHLIGHT_NAME);
+      CSS.highlights.delete(HIGHLIGHT_FLASH_NAME);
+    };
+  }, [nativeHighlight]);
 
   useLayoutEffect(() => {
     if (!marks.length) {
+      rangesNow.current = new Map();
+      syncCustomHighlights(null);
       setBoxes((prev) => (prev.length ? [] : prev));
       return;
     }
@@ -205,13 +248,14 @@ export function CommentMarks({ scroller, jump }: { scroller: RefObject<HTMLDivEl
             const last = b.rects[b.rects.length - 1];
             return (
               <div key={b.id} data-comment-mark={b.n}>
-                {b.rects.map((r, i) => (
-                  <span
-                    key={i}
-                    className={cx("absolute rounded-[3px] bg-accent/20 transition-shadow duration-300", flash === b.id && "shadow-[0_0_0_2px_var(--accent)]")}
-                    style={{ left: r.x - 1, top: r.y, width: r.w + 2, height: r.h }}
-                  />
-                ))}
+                {!nativeHighlight &&
+                  b.rects.map((r, i) => (
+                    <span
+                      key={i}
+                      className={cx("absolute rounded-[3px] bg-accent/20 transition-shadow duration-300", flash === b.id && "shadow-[0_0_0_2px_var(--accent)]")}
+                      style={{ left: r.x - 1, top: r.y, width: r.w + 2, height: r.h }}
+                    />
+                  ))}
                 <button
                   type="button"
                   tabIndex={-1}

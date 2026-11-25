@@ -28,13 +28,7 @@ type codexLine struct {
 	Payload   json.RawMessage `json:"payload"`
 }
 
-type codexThreadSettings struct {
-	Model       string          `json:"model"`
-	ServiceTier json.RawMessage `json:"service_tier"`
-}
-
 type codexPayload struct {
-	Settings   codexThreadSettings `json:"thread_settings"`
 	Type       string              `json:"type"`
 	TurnID     string              `json:"turn_id"`
 	DurationMS json.RawMessage     `json:"duration_ms"`
@@ -58,6 +52,18 @@ type codexPayload struct {
 	Reason     string              `json:"reason"`
 	Info       *tokenuse.CodexInfo `json:"info"`        // token_count
 	RateLimits *codexRateLimits    `json:"rate_limits"` // token_count: the account's limits as the last response gave them
+	// thread_settings_applied: the settings the thread runs its next turn with, written when a turn starts and when they
+	// change during the session (the TUI's /model, thread/settings/update)
+	ThreadSettings *CodexThreadSettings `json:"thread_settings"`
+}
+
+// CodexThreadSettings is the part of a rollout's thread_settings_applied that says what the thread runs with (Codex
+// 0.169): its model, service tier, and reasoning effort, null when the model takes none (node/codex_terminal_modes.go
+// confirms a typed /model by it).
+type CodexThreadSettings struct {
+	Model           string          `json:"model"`
+	ServiceTier     json.RawMessage `json:"service_tier"`
+	ReasoningEffort *string         `json:"reasoning_effort"`
 }
 
 // codexRateLimits is a token_count's rate_limits (node/usagewindows.go reads the same for the usage windows).
@@ -326,7 +332,7 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 		return nil
 	case "turn_context":
 		if p.Model != "" {
-			meta.observeCodexSettings(codexThreadSettings{Model: p.Model}, l.Timestamp)
+			meta.observeCodexSettings(CodexThreadSettings{Model: p.Model}, l.Timestamp)
 		}
 		meta.codexTurnModel = p.Model
 		meta.PermissionMode, meta.CodexSandbox, meta.ModeAt = p.ApprovalPolicy, p.SandboxPolicy.Type, l.Timestamp
@@ -348,9 +354,15 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 	case "plan_update":
 		return meta.codexPlanEvent(seq, l.Timestamp, l.Payload)
 	case "thread_settings_applied":
+		// What the thread runs its next turn with, as soon as it changes (a /model typed mid-turn, #12572), not only at
+		// the next turn_context; the turn already running keeps its own (codexTurnModel). No effort leaves the last one,
+		// as a turn_context without one does.
+		if p.ThreadSettings == nil {
+			return nil
+		}
 		previous := meta.Model
-		meta.observeCodexSettings(p.Settings, l.Timestamp)
-		if previous != "" && p.Settings.Model != "" && previous != meta.Model {
+		meta.observeCodexSettings(*p.ThreadSettings, l.Timestamp)
+		if previous != "" && p.ThreadSettings.Model != "" && previous != meta.Model {
 			it := mk(0, "", "system", "model_change")
 			it.Text, it.Model = previous, meta.Model
 			return []proto.Item{it}

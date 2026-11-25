@@ -65,7 +65,7 @@ nonisolated struct AgentSortShadowMismatch: Error, Equatable, Sendable {
         folded = presentation.folded.count
         expandedIdle = presentation.expandedIdle.count
         expandedQuiet = presentation.expandedQuiet.count
-        hasHeld = input.settings.held != nil
+        hasHeld = input.settings.held != nil || !input.settings.heldSeen.isEmpty
     }
 }
 
@@ -437,6 +437,11 @@ nonisolated final class AgentSortShadow: @unchecked Sendable {
             report(.init(rule: "quick-filter-scope", input: input, presentation: presentation))
             return
         }
+        // The core holds one Unread row (`held`); several seen during a visit (#12514) are iOS's alone for now.
+        guard AgentSortCoreInput.coreHeld(input, settings: settings) != nil else {
+            report(.init(rule: "held-set-scope", input: input, presentation: presentation))
+            return
+        }
         lock.lock()
         compared += 1
         lock.unlock()
@@ -486,16 +491,39 @@ nonisolated private enum AgentSortCoreInput {
         }
     }
 
+    /// The held rows as the core can take them: its `held` is one Unread row, and a row held in Just finished goes as
+    /// one with the flag still on. Rows held only while they are still unseen change nothing and are left out. Nil: more
+    /// seen rows held in Unread than one (#12514), which the core has no input for.
+    static func coreHeld(_ input: AgentListProjection.Input,
+                         settings: AgentListProjection.Settings) -> (unread: SessionKey?, justFinished: Set<SessionKey>)? {
+        var unread = settings.heldJustFinished ? nil : settings.held
+        var justFinished = Set(settings.heldJustFinished ? [settings.held].compactMap { $0 } : [])
+        guard !settings.heldSeen.isEmpty else { return (unread, justFinished) }
+        let sessions = Dictionary(input.sessions.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+        for (key, place) in settings.heldSeen where key != settings.held {
+            guard let session = sessions[key], session.isQuiet, !session.needsSeen() else { continue }
+            switch place {
+            case .unread:
+                if let other = unread, other != key { return nil }
+                unread = key
+            case .justFinished:
+                justFinished.insert(key)
+            }
+        }
+        return (unread, justFinished)
+    }
+
     static func encode(_ input: AgentListProjection.Input,
                        settings: AgentListProjection.Settings? = nil,
                        presentation: AgentSortPresentation = .init(),
                        now: Date? = nil, projection: AgentListProjection? = nil) throws -> String {
         let settings = settings ?? input.settings
         let nativeProjection = projection ?? AgentListProjection.build(input, now: now)
+        let held = coreHeld(input, settings: settings) ?? (unread: nil, justFinished: [])
         func encoded(_ session: Session) throws -> [String: Any] {
             var object = try JSONSerialization.jsonObject(with: JSON.encoder.encode(session)) as? [String: Any] ?? [:]
             // The core's held key means Unread. Preserve the other held rank in its presentation input.
-            if settings.heldJustFinished, settings.held == session.key, session.state == .idle {
+            if held.justFinished.contains(session.key), session.state == .idle {
                 var work = object["work"] as? [String: Any] ?? [:]
                 work["just_finished"] = true
                 object["work"] = work
@@ -557,7 +585,7 @@ nonisolated private enum AgentSortCoreInput {
                 "expanded_idle": presentation.expandedIdle.sorted(), "expanded_quiet": presentation.expandedQuiet.sorted(),
                 "compact": presentation.compact, "presentation_rows": presentation.compact,
                 "inventory": true,
-                "held": (settings.heldJustFinished ? nil : settings.held?.path) as Any, "now": referenceTime.map(AgentSortProjectionAdapter.coreTimestamp) as Any,
+                "held": held.unread?.path as Any, "now": referenceTime.map(AgentSortProjectionAdapter.coreTimestamp) as Any,
             ],
         ]
         let data = try JSONSerialization.data(withJSONObject: object)

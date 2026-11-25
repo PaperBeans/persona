@@ -96,6 +96,11 @@ tags, pinned facts and projects can still be edited, they can still be deleted (
 "App API" below), and retention (`recording_days`, `minutes_days`) keeps its schedule. What stops is everything that
 makes new data: uploads, appends, transcription, minutes, titles, recaps and summaries.
 
+A stored photo's image is read through the same route with or without the module, `GET /api/v1/recordings/{id}/photos/{n}`:
+the knowledge base's own read-only route (`assistant/kb_recording_media.go`, full credentials only), answering as the
+module's did before it moved. Photo upload, list and delete are the module's. No route serves stored audio, with the
+module or without: the chunks of a recording in flight are the module's input and stay on disk untouched.
+
 A recording that was in flight when the module went (an upload not complete, minutes or a recap `pending`, a hub
 transcription `live` or `finishing`) is shown as stored, with `paused: "module_off"` on its list entry and its detail.
 The field is derived when the response is built and never written, so the module continues from the stored state when

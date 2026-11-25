@@ -1,3 +1,4 @@
+import { sessionModeAvailable, sessionModelLauncher, sessionModeSettingsPage } from './SessionModes';
 import { ClientModel } from './ClientModel';
 import { ResourceRow, Wire } from './Wire';
 import { HttpFailure } from '../platform/HubTransport';
@@ -233,7 +234,9 @@ export class ManagementModel {
     const generation = ++this.generation;
     this.clientGeneration = model.connectionGeneration();
     this.page = page; this.scope = scope; this.group = group; this.owner = owner; this.ownerForgetEpoch = forgetEpoch;
-    this.selectedTarget = page === 'session_permissions' || page === 'session_effort' ? model.target() : '';
+    const modePage = ['session_permissions', 'session_effort', 'session_model'].includes(page);
+    const target = modePage ? model.target() : '';
+    this.selectedTarget = target;
     this.error = ''; this.loading = true; this.saving = false; this.rows = []; this.data = {}; this.purpose = {}; this.providers = [];
     this.catalogPurposes = []; this.providerModels = []; this.selectedId = page === 'translation' ? 'kb' : '';
     this.catalogRows = []; this.catalogMarkets = []; this.preview = {}; this.operation = {}; this.extensionDetail = {}; this.extensionDetailMissing = false;
@@ -251,9 +254,17 @@ export class ManagementModel {
         const preferred = page === 'translation' ? 'kb' : 'assistant';
         const selected = this.catalogPurposes.find((row: Record<string, Object>) => Wire.text(row, 'id') === (this.selectedId || preferred)) || this.catalogPurposes[0];
         if (selected) await this.loadPurpose(model, selected, generation, scope);
-      } else if (page === 'session_permissions' || page === 'session_effort') {
-        this.data = model.selected.data();
-        this.selectedId = model.selected.id;
+      } else if (modePage) {
+        const row = model.selected;
+        this.data = row.data();
+        this.selectedId = row.session;
+        if (page === 'session_model' && this.canEditSessionMode(model, 'model')) {
+          const launcher = sessionModelLauncher(this.data);
+          const catalog = await this.read('/api/v1/machines/' + segment(row.machine) + '/launchers/' + segment(launcher) + '/models', model);
+          if (!this.active(model, generation, scope, target) || !this.canEditSessionMode(model, 'model') ||
+            sessionModelLauncher(model.selected.data()) !== launcher) return;
+          if (!Wire.text(catalog, 'locked')) this.providerModels = Wire.rows(catalog, 'models').filter((item: Record<string, Object>) => !!Wire.text(item, 'id'));
+        }
       } else if (page === 'machines') {
         const result = await this.read('/api/v1/machines', model);
         if (!this.active(model, generation, scope)) return;
@@ -322,7 +333,7 @@ export class ManagementModel {
             Wire.text(target, 'to', Wire.text(target, 'subject', Wire.text(item, 'summary'))), item);
         });
       }
-    } catch (error) { if (this.active(model, generation, scope)) this.fail(error as Error); }
+    } catch (error) { if (this.active(model, generation, scope, target)) this.fail(error as Error); }
     finally { if (this.active(model, generation, scope)) this.loading = false; }
   }
 
@@ -421,23 +432,37 @@ export class ManagementModel {
     finally { if (this.active(model, generation, scope)) this.saving = false; }
   }
 
+  canEditSessionMode(model: ClientModel, field: string): boolean {
+    const row = model.selected;
+    return model.connected && !model.demo && this.page === sessionModeSettingsPage(field) &&
+      this.selectedTarget === model.target(row) && this.selectedId === row.session && this.active(model, this.generation, this.scope, this.selectedTarget) &&
+      (!row.group || row.group === model.profile.id) && (!row.manager || row.manager === model.profile.manager) &&
+      sessionModeAvailable(row, field);
+  }
+
+  private sessionModeChoice(model: ClientModel, field: string, value: string): boolean {
+    if (!value || !this.canEditSessionMode(model, field)) return false;
+    const data = model.selected.data();
+    if (field === 'model') return sessionModelLauncher(data) === sessionModelLauncher(this.data) &&
+      this.providerModels.some((item: Record<string, Object>) => Wire.text(item, 'id') === value);
+    if (field === 'effort') return Wire.strings(data, 'efforts').includes(value);
+    return ['default', 'acceptEdits', 'plan', 'auto'].includes(value) || value === 'bypassPermissions' && Wire.bool(data, 'bypass_available');
+  }
+
   async saveMode(model: ClientModel, field: string, value: string): Promise<boolean> {
-    if (!this.active(model, this.generation, this.scope)) return false;
+    if (this.saving || this.loading || !this.sessionModeChoice(model, field, value)) return false;
     const row = model.selected, generation = this.generation, scope = model.scope(), target = model.target(row);
-    const capabilities = Wire.object(row.data(), 'capabilities');
-    if (row.kind !== 'session' || !Wire.bool(capabilities, 'modes') || !['permission_mode', 'effort'].includes(field)) return false;
-    if (field === 'effort' && !Wire.strings(row.data(), 'efforts').includes(value)) return false;
-    const allowedModes = ['default', 'acceptEdits', 'plan', 'auto'];
-    if (field === 'permission_mode' && !(allowedModes.includes(value) || value === 'bypassPermissions' && Wire.bool(row.data(), 'bypass_available'))) return false;
+    if (Wire.text(row.data(), field) === value) return false;
     this.saving = true; this.error = '';
     try {
       const body = Wire.payload([field], [value]);
-      await this.call(model, '/api/v1/sessions/' + segment(row.machine) + '/' + segment(row.session) + '/modes', 'POST', body);
+      await this.call(model, '/api/v1/sessions/' + segment(row.machine) + '/' + segment(row.session) + '/modes', 'POST', body, '',
+        (): boolean => this.active(model, generation, scope, target) && this.sessionModeChoice(model, field, value));
       if (!this.active(model, generation, scope, target)) return false;
       await model.refresh();
-      return true;
+      return this.active(model, generation, scope, target);
     } catch (error) { if (this.active(model, generation, scope, target)) this.fail(error as Error); return false; }
-    finally { if (this.active(model, generation, scope, target)) this.saving = false; }
+    finally { if (this.active(model, generation, scope)) this.saving = false; }
   }
 
   async setTriage(model: ClientModel, switches: Record<string, Object>): Promise<boolean> {

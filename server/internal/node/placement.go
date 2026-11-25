@@ -502,64 +502,32 @@ func (n *Node) setAgentsAt(agents []host.Agent, epoch uint64, heard map[string]b
 	// Codex panes: the thread named in the title (what the pane shows now: a /resume in Codex changes it), else what
 	// herdr's Codex integration or our own start said. An unidentified Codex in a herdr tab has its own waiting row.
 	var unnamed, manual []host.Agent
+	if n.codices != nil {
+		n.codices.paneReads.retain(codex)
+	}
+	paneDeadline := time.Now().Add(codexHomeListWait)
 	for _, a := range codex {
-		if w := n.codexWaitOf(a.PaneID); w != nil {
-			// Opened with no first message (codex_waiting.go): its row until its thread is attached, which only the look
-			// does. What herdr's integration and the pane's title name are noted for it, never taken as is.
-			named, titled := "", n.codexTitleThread(a)
-			if sid := a.SessionID(); sid != "" {
-				home := n.codexPaneHome(a.PaneID)
-				named = n.codexPublicID(home, mainThread(home, sid))
-			}
+		w := n.codexWaitOf(a.PaneID)
+		n.mu.Lock()
+		bound := n.panes[a.PaneID]
+		n.mu.Unlock()
+		reported := a.SessionID()
+		if w == nil && reported == "" && isCodexWaitID(bound) {
+			m[bound] = a
+			continue
+		}
+		look, ok := n.codexPaneIdentity(a, bound, w != nil, m, paneDeadline)
+		if w != nil {
 			n.mu.Lock()
-			w.herdr, w.titled = named, titled
+			w.herdr, w.titled = look.named, look.titled
 			n.mu.Unlock()
 			m[w.id] = a
 			continue
 		}
-		home := n.codexPaneHome(a.PaneID)
-		reported := a.SessionID() // what the host says the pane runs now, not what the node remembers of the pane
-		id := reported
-		if id != "" {
-			id = mainThread(home, id) // a subagent's id stands for its conversation
+		if !ok {
+			continue // an unreadable or ambiguous owner cannot drive this pane
 		}
-		sub := id != reported
-		var bound string
-		if id == "" {
-			n.mu.Lock()
-			bound = n.panes[a.PaneID]
-			n.mu.Unlock()
-			if isCodexWaitID(bound) {
-				m[bound] = a // a concurrent refresh just opened the row; its watcher identifies the thread
-				continue
-			}
-			id = bound
-			if src, ok := n.codexSource(bound); ok && src.home != "" {
-				home = src.home
-			}
-		}
-		if named, claimed := n.codexByTitle(a, id, m); named != "" {
-			id = named
-		} else if claimed {
-			id = "" // the title names another pane's thread: keeping the stale reported one would misroute this row
-		} else if _, match, ok := codexTitleName(a.Title); ok {
-			moved := false
-			if reported == "" && bound != "" && n.state != nil {
-				if st, exists := n.state.get(bound); exists && st.Pane != "" && st.Pane != a.PaneID {
-					moved = true
-				}
-			}
-			if moved || (!sub && id != "" && threadTitle(home, id) != "" && !threadFormerlyNamed(home, id, match)) {
-				// A moved pane binding or a thread the index knows under another name must not be reused on an
-				// unrecognised title (a /resume or new thread in Codex since). An uncontradicted reported thread or
-				// pane binding whose title the index lacks stands: left out, a Persona-started pane whose host omits
-				// reported IDs was dropped completely and only listed as read-only codex_history (#7538, #12389).
-				id = ""
-			}
-		}
-		if id != "" {
-			id = n.codexPublicID(home, id)
-		}
+		id := look.id
 		if _, taken := m[id]; id == "" || taken {
 			kind := host.ParsePane(a.PaneID).Kind
 			if kind == host.Herdr || kind == host.HerdrCore {

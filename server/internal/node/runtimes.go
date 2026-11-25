@@ -125,6 +125,9 @@ type runtimeHello struct {
 		// inactive ones too (sessions_history.go).
 		History bool `json:"history"`
 	} `json:"caps"`
+	// CodexClaims are the Codex app-server instances the runtime serves itself, which the node leaves to it
+	// (codex_instance_claims.go): a runtime on the socket's, never a daemon's.
+	CodexClaims []runtimeCodexClaim `json:"codex_claims,omitempty"`
 }
 
 // runtimeConn is one connected runtime.
@@ -170,6 +173,9 @@ type runtimeConn struct {
 	// a system that does not tell). A runtime running the assistant vouches for its descendants' MCP servers
 	// (mcpAssistantOf).
 	pid int
+	// superseded is true once a newer runtime.hello of the same runtime replaced this connection as stale (guarded by
+	// runtimeRegistry.mu).
+	superseded bool
 }
 
 // isDaemon: the node dialed it (a daemon in daemons.json), it did not connect to the socket.

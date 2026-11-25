@@ -93,6 +93,7 @@ data class ExtensionManifest(
      * executable; writes and arbitrary command lines are not part of this contract.
      */
     @SerialName("host_integrations") val hostIntegrations: List<ExtensionHostIntegrationSpec>? = null,
+    val upgrade: ExtensionUpgradeSpec? = null,
 )
 
 /**
@@ -184,6 +185,28 @@ data class ExtensionAuthSpec(
      * do leave it out of its pages.
      */
     val page: String? = null,
+)
+
+/**
+ * What the extension asks of the hub around an automatic upgrade (docs "Backup before an upgrade"). The hub snapshots
+ * the data directory before every automatic upgrade whether or not this is there. Hubs before it refuse the manifest.
+ */
+@Serializable
+data class ExtensionUpgradeSpec(
+    /**
+     * auto (the default): the upgrade goes ahead when the snapshot fails; required: no snapshot, no upgrade.
+     */
+    val backup: String? = null,
+    /**
+     * Before the snapshot the hub calls upgrade.prepare on the installed version's program; an error stops the
+     * upgrade.
+     */
+    val prepare: Boolean? = null,
+    /**
+     * Once the new version is up the hub calls its upgrade.health; an error rolls the upgrade back and restores the
+     * snapshot.
+     */
+    @SerialName("health_check") val healthCheck: Boolean? = null,
 )
 
 @Serializable

@@ -43,7 +43,6 @@ type Host interface {
 	Call(ctx context.Context, method string, params, out any) error
 	CallApp(ctx context.Context, app, method string, params, out any) error
 	PostContent(ctx context.Context, to assistantwire.ChannelTarget, replyTo, content, fallback, key string) (string, error)
-	WorkbenchStamp(ctx context.Context, c *botcard.Card) *botcard.Card
 	LinkNamer(ctx context.Context) func(*url.URL) string
 	OpenButton(ctx context.Context, machine, session string) botcard.Button
 	// Unreachable: the call did not reach the hub or did not come back; Offline: the hub is not connected.
@@ -74,8 +73,6 @@ type Host interface {
 	// What the workbench (workbench.go) reads of the core and asks it to do.
 	WebBase(ctx context.Context) string
 	Location(ctx context.Context) *time.Location
-	// StandingNow is the standing board's clock (the home card's "updated at").
-	StandingNow() time.Time
 	ClipFallback(text string) string
 	WorkbenchAgents(ctx context.Context, now time.Time) (assistantwire.WorkbenchCounts, []assistantwire.WorkbenchAgent)
 	WorkbenchInbox() []assistantwire.WorkbenchItem
@@ -83,12 +80,12 @@ type Host interface {
 	WorkbenchBoard(ctx context.Context, l i18n.Lang, web string, now time.Time) []assistantwire.WorkbenchBoardRow
 	SessionNames(ctx context.Context, sess proto.Session) (primary, secondary string)
 	NextMeeting(ctx context.Context, now time.Time) *assistantwire.WorkbenchMeeting
-	Companions(ctx context.Context) []assistantwire.WorkbenchCompanion
 	TodayBody(ctx context.Context) json.RawMessage
-	SummonWorkbench(ctx context.Context)
-	WorkbenchRefresh(ctx context.Context)
-	WorkbenchBringCard(ctx context.Context, id string)
 	TasksOverview(ctx context.Context) (cards []*botcard.Card, fallbacks []string)
+	// BoardCard is the waiting list as a card (the core's board_rows.go), drawn as of now; said is the card without its
+	// "updated at" note. FleetReady: the pending cards are read (before it a board would say nothing is waiting).
+	BoardCard(ctx context.Context, now time.Time) (card *botcard.Card, fallback, said string)
+	FleetReady() bool
 	// InboxDone files an item (dismissed: muted along with it); InboxMute mutes what is tagged tag = value in source.
 	InboxDone(ctx context.Context, id string, dismissed bool) error
 	InboxMute(ctx context.Context, source, tag, value, name string) error
@@ -105,8 +102,6 @@ type Host interface {
 	ChatNow() time.Time
 	ForgetTurns()
 	RecallRun(messageID string)
-	WorkbenchOn(f assistantwire.FeishuFeatures, ready bool)
-	WorkbenchActive() bool
 
 	// Where a message of the chat goes (the core's feishu_route.go): a target as it is now and what to call it,
 	// whether the bot's switches allow it, and the run that answers a message sent to it (StartRun: rt, t and the
@@ -148,7 +143,6 @@ type Host interface {
 	FeishuRuns() int
 	VisiblePending() []proto.Interaction
 	PendingQuestion(ix proto.Interaction) string
-	StandingBoardCommand(ctx context.Context) bool
 	// MainChat is the main conversation and the machine it runs on ("" without one); MainModel what it runs on now.
 	MainChat(ctx context.Context) (main, machine string)
 	MainModel(ctx context.Context, machine, main string, l i18n.Lang) (launcher, model, effort string, err error)
@@ -186,7 +180,6 @@ type Host interface {
 	// nudged, the tool a permission asks about.
 	AgentGone(ix proto.Interaction) bool
 	ApprovalNudgeDeadline(ix proto.Interaction) (time.Time, bool)
-	BoardChanged()
 	IxToolName(ix proto.Interaction) string
 
 	// The to-dos of topics and of requests from elsewhere (thread.go, thread_open.go, elsewhere.go): the core's

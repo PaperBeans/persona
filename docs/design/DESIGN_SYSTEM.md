@@ -1109,6 +1109,8 @@ A side session folded into its parent (#7944, `parent_agent_id`, with `sessions_
 
 A herdr tab's workers are the same (web, #5180; the owner asked on 2026-11-12 that this follow cindy's Team exactly). In a tab with several Agents the lead is the Agent in its first pane and the tab's other running Agents are its workers, folded under it by the hub. A worker is never a row, dock entry or count of its own; the lead's row carries it as above. The lead's chat shows no strip of pane tabs any more: its workers are in the **Team** side panel (section 3.3). A tab whose first pane is a shell has no lead, and its Agents stay rows of their own.
 
+A row read from Unread or Just finished and held in that place ("Rows read during a visit" below) does not need the user: it is drawn and counted as Seen, so it never stands in for, or hides, one that does.
+
 #### Finished work nobody has seen
 
 With Session Triage on, a turn the triage found done leaves Unread, but while it is new it is not filed with the
@@ -1120,6 +1122,40 @@ a plain dot, its state word "Just finished" (the To-dos' section word, `StateNam
 that ended minutes ago sank under sessions seen days ago. Why after the work still going: as in the To-dos' order
 above, what still runs comes before what is done. The web and Android (#9786; there the dot is Unread's, as Awaiting
 reply's) have it; Apple and HarmonyOS follow in their own issues and show these rows as Seen until then.
+
+#### Rows read during a visit
+
+Reading a queue of finished Agents is open, read, back, the next one (#12514). On iPhone and iPad every row the Agents
+list showed as Unread or Just finished during the visit keeps that place once it is seen, opened or marked there or
+seen elsewhere (`docs/protocol/agent-states.md` ("Seen")), in every grouping and under a quick filter, so the next one
+is still right below and nothing slides from under the finger. A chat that finished while it was open was never in that
+place on the list: it is held while open only, as every opened row was before.
+
+- **Look**: the row is drawn as any Seen row is (`AgentState.tone`'s gray dot, Seen's title weight `Theme.Font.bodyStrong`
+  rather than Unread's `bodyHeavy`; VoiceOver says Seen). No new style, no dimming, no movement while it is held.
+- **Counts**: a section counts what is still in its state; a held row is left out of its header, the quick filters, the
+  badge and the Live Activity, which only know the hub's state.
+- **Clear Seen (N)**: a By Status section holding such rows has a text button between its title and its chevron
+  (`FoldButton`'s `accessory`: a button of its own, the fold keeps the rest of the header), N the rows it lets go.
+- **When they go**: pull to refresh, Clear Seen, a quick filter chosen (again), another computer, hub or assistant, a
+  new launch. Going to the background is none of these: the visit lasts however long the app was away, until one of
+  them. Mark All as Seen (a section's, a space's or a repository's) takes its rows at once, those already read there
+  too: a batch says the user is done with them. A row that works, needs the user or finishes unseen again goes where
+  its state puts it.
+- **The choice**: Settings › Appearance & Display › Agents List Layout › Seen Agents, **Stay Until Refresh** (the
+  default) or **Leave When the Chat Closes**, the behavior before #12514 (only the open row holds, #2213). It is this
+  device's: a list behavior, not the assistant's (4.1.1). The first time a read row stays, a neutral `NoticeBanner` at
+  the list's foot says so once, with **Change in Settings** (the page opens at the choice) and its ✕ (Principle 1: the
+  changed default is said, and the old one is a tap away); its words say what happens, not that it changed, so they
+  hold on a new install too. It floats over the list (`floatingFooter(over:shown:)`,
+  3.12), not in it: put in at the list's top while the chat was open over it, it moved the rows on the way back.
+
+Why: one concept had two rules. The Unread filter kept a read row (`kept`) and the Assistant tray's Finished entry keeps
+a read task (#10922), but By Status moved it to the folded Seen section as soon as the chat was left, also on a tapped
+notification or a switch of tab (Principle 4). Rejected: a new filter chip (the bar is an approved layout, "List
+controls"); dimming the row (a new look); marking seen only after a delay (it still moves when the chat is left). The
+web (#12585), Android (#12584) and HarmonyOS with the shared core (#12583) keep the behavior before #12514 until then;
+the shared cases are in `spec/fixtures/sort/next/held_set.json`.
 
 #### The work-item row
 
@@ -1145,6 +1181,10 @@ A list's controls come in four kinds. Each kind looks like itself, so that narro
 | Navigation entry, such as personal Agents | opens another page | a row or the sidebar, never chip-shaped |
 
 Search may take query operators and scopes; they live inside the search field.
+
+Choosing a quick filter, the scope or the hub starts the list again: rows held after they were read ("Rows read during a
+visit" above) go where their state puts them. A section's own action on its rows (Clear Seen) is a text button in that
+section's header, not a control of the list.
 
 On the web a list keeps no standing search field of its own beside the app's one search (#6589, the web's Agents list; the native clients are left out, `docs/design/DECISIONS.md` 11-13). On iOS a list may carry the system's search field (`pageSearchable`), scoped to the list, with one row at the end of its results that takes the words to the app's search, never a hand-built field (the To-dos list, 3.4; iOS, hubs with `todo_view`, from #10465's switch-on). On the web: **Search chats** (⌘K) finds its rows with the list's operators (`machine:`, `project:`, `harness:`, `model:`, `state:`, `is:pinned`, `since:`), a match on the row's name first, then its project or computer, then what is inside it, and its **Filter Agents list** (⇧↵) puts the query on the list in place, as a filter chip whose text reopens ⌘K. ⌘K's own **Filter** button, at the end of its field, offers the list's filter choices (computer, project, status, harness, model, Pinned, updated within) and writes each into the query as its operator, the number of operators on it, so a choice stays text to read and change and no hint line has to name the operators. The list's filter button sits on the list's title row, with the list's other menu buttons, and says how many filters are on, as iOS keeps its Agents filter (the computer) in the top bar's list menu with the chosen one a chip over the list.
 
@@ -1353,7 +1393,7 @@ Android's `JMenu` takes a choice list in groups: an action can open a group with
   and does not add a page-closing Done to a navigation bar. There is no Mac toolbar.
 - Buttons side by side in equal widths go in a `StackingButtonRow` (`apple/Persona/DesignSystem/StackingButtonRow.swift`, #6151). It keeps them in one row while every label fits its share whole, and stacks them otherwise, the first on top and each across the row (rule 3 (c) in 1.2). It decides by measured width, not by text size: a short label keeps its row at sizes where a long one, or a long translation, stacks. Each label is a `Text(…).buttonLabelLine()`, one line that may shrink to 0.8 for a small overflow, which tells the row how narrow its button can be with the words whole. A button whose label isn't one is taken to fit. First used by the to-do page's bottom buttons; other rows of equal buttons move to it when they are next touched.
 - Equal columns of values or titles go in an `EqualColumns` (`apple/Persona/DesignSystem/EqualColumns.swift`). It keeps one row while every cell's content fits its share whole and drops to two columns, the rest wrapping below, when one does not; like `StackingButtonRow` it goes by measured width, not text size. First used by the Machines card's metrics and Today's Tokens, so a number is never cut to "3.85…" at a large text size.
-- Actions floating over a scrolling page's foot are pills (`.floatingPill(prominent:)`, `apple/Persona/DesignSystem/FloatingPill.swift`, #9008; a page with a foot toolbar adds through its +, as the To-dos list does (iOS, hubs with `todo_view`, from #10465's switch-on), and the pill stays where a page has none), drawn as the Sidebar layout's foot draws its own (#4206): the prominent one a capsule of `Theme.accent` with white `Theme.Font.bodyStrong` words, as the foot's New Chat; the other a capsule on `.surface(interactive: true)` (Liquid Glass in the glass styles) with words in the primary color, as its Search and Settings. At least `Theme.Size.avatarL` tall (46 pt, the foot's), apart from each other, the button `.buttonStyle(.plain)`. They go in a `floatingFooter` (3.12), nothing behind them but the page's blur; a row of them is a `StackingButtonRow`. First used by the to-do page.
+- Actions floating over a scrolling page's foot are pills (`.floatingPill(prominent:)`, `apple/Persona/DesignSystem/FloatingPill.swift`, #9008; a page with a foot toolbar adds through its +, as the To-dos list does (iOS, hubs with `todo_view`, from #10465's switch-on), and the pill stays where a page has none), drawn as the Sidebar layout's foot draws its own (#4206): the prominent one a capsule of `Theme.accent` with white `Theme.Font.bodyStrong` words, as the foot's New Chat; the other a capsule on `.surface(interactive: true)` (Liquid Glass in the glass styles) with words in the primary color, as its Search and Settings. At least `Theme.Size.avatarL` tall (46 pt, the foot's), apart from each other, the button `.buttonStyle(.plain)`. They go in a `floatingFooter` (3.12), nothing behind them but the page's blur; a row of them is a `StackingButtonRow`. First used by the to-do page. A notice said for a while over a list floats the same way: a `NoticeBanner` in a `floatingFooter(over:shown:)`, there only while it shows, so the rows in sight stay where they are (the Agents list's notice that read rows stay, 3.4).
 - Icon buttons use a 44 pt frame around a smaller visual (composer round button, viewer chrome).
 - Destructive actions use `role: .destructive`. Red is also used for risky-but-not-destructive actions (DS-24).
   A secondary button with that role is red (`Theme.danger`) in every style (#7042): `.themedButton()` reads the role, so a

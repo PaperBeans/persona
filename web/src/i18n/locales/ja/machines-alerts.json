@@ -10,7 +10,6 @@
   "load": "負荷",
   "disk": "ディスク",
   "cores_other": "{count}コア",
-  "per_core": "コアあたり {value}",
   "processes_memory": "メモリを多く使っているプログラム",
   "processes_cpu": "CPU を多く使っているプログラム",
   "processes_loading": "このコンピュータで何がリソースを使っているか確認しています…",

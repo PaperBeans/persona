@@ -478,6 +478,9 @@ for _mid in filter(None, os.environ.get("MOCK_OFFLINE_MACHINES", "").split(","))
     for _m in MACHINES:
         if _m["id"] == _mid:
             _m.update(online=False, error="ssh: connect to host %s port 22: Operation timed out" % _mid, last_seen=ago(hours=1))
+# MOCK_LOAD_QUEUE=<id>[,<id>…]: those machines' threads queue on some of their cores (#12519, docs/server/machines.md
+# "What load counts"): about 1.4 per core of load while CPU stays near 40 %, the case where load reads as a wrong number.
+LOAD_QUEUE = set(filter(None, os.environ.get("MOCK_LOAD_QUEUE", "").split(",")))
 # MOCK_LONG_OS=1: the server's OS has a long name, so its card's chips (OS, herdr, claude) do not fit on one line.
 if os.environ.get("MOCK_LONG_OS"):
     SYSTEMS["server"]["name"] = "Example GNU/Linux 2 (codename)"
@@ -546,6 +549,9 @@ def metric_at(mid, t):
     rx = max(0.0, {"server": 2.4e6, "macbook": 4.5e5, "studio": 1.2e6, "nas": 3e5}[template] * (1 + 0.6 * wave + 0.5 * h))
     tx = rx * {"server": 0.35, "macbook": 0.2, "studio": 0.6, "nas": 1.4}[template] * (0.7 + 0.6 * h)
     load = sys_["cores"] * cpu / 100 * (0.9 + 0.3 * h)
+    if mid in LOAD_QUEUE:  # threads wait on some cores while the others idle: load per core over 1, CPU moderate
+        cpu = 38 + 6 * h
+        load = sys_["cores"] * (1.36 + 0.08 * h)
     disk_frac = {"server": 0.64, "macbook": 0.71, "studio": 0.38, "nas": 0.93}[template]
     if concern_level == "critical":
         disk_frac = 0.95
@@ -865,6 +871,16 @@ SESSIONS = [
     sess("macbook", RECIPE, "菜谱网站加搜索", "/Users/me/code/recipes", "offline", "offline", "", 0, "", 0, 60 * 26,
          "搜索做好了，支持按食材和用时筛选。", space_kind=None, space_id=None, space_name=None, slot_id=None, slot_name=None),
 ]
+
+# MOCK_CODEX_ROUTE=terminal: the Codex agent is a Codex 0.169 or later in its pane, so it offers its model and thinking
+# effort as an app-server thread does (#12572, docs/integrations/codex.md "On the terminal route"): capabilities.model
+# and the efforts of the model it runs; the node types Codex's own /model to apply a pick.
+if os.environ.get("MOCK_CODEX_ROUTE") == "terminal":
+    for _s in SESSIONS:
+        if _s["session_id"] == ORDERS:
+            _s.update(launcher="codex", effort="medium", efforts=["low", "medium", "high", "xhigh"],
+                      capabilities={"read": True, "send": True, "interrupt": True, "approve": True, "terminal": True,
+                                    "modes": False, "model": True})
 
 if os.environ.get("MOCK_NEXT_SUGGESTIONS") == "1":  # see NEXT_SUGGESTIONS
     for _s in SESSIONS:

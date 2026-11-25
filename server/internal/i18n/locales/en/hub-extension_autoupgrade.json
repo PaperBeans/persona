@@ -25,5 +25,8 @@
   "rolled_back_body": "{name} {version} didn’t start, so it’s back on {from} and won’t auto-update to this version again",
   "upgraded_title": "Extension updated",
   "upgraded_body": "{name} was updated to {version}",
-  "not_from_market": "Only extensions installed from a marketplace update automatically"
+  "not_from_market": "Only extensions installed from a marketplace update automatically",
+  "prepare_failed": "The extension wasn’t ready to update: {why}",
+  "backup_failed": "Its data couldn’t be backed up, and it requires a backup before updating: {why}",
+  "not_running": "its program isn’t running"
 }

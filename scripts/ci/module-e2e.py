@@ -351,14 +351,14 @@ def server_checks(rep, phase, hub, ids, on, loaded):
             rep.add(phase, id, f"{method} {path} {'answers' if want else 'is 404'}", (status != 404) == want, f"status {status}")
 
 
-def kept_checks(rep, phase, hub, ids, on, kept):
+def kept_checks(rep, phase, hub, ids, on, kept, home):
     """What a module's users already have stays listed, opened and found in every phase; off, it is unchanged."""
     if "recording" not in ids or SERVER["recording"].get("kept") != "recordings":
         return
     want = on["recording"]
     deadline = time.monotonic() + remaining(90)  # the knowledge base opens with the manager's first use of it
     while True:
-        rows, detail = smoke.kept_recordings(hub.base, hub.token, want)
+        rows, detail = smoke.kept_recordings(hub.base, hub.token, want, home)
         if all(ok for _, ok, _ in rows) or time.monotonic() > deadline:
             break
         time.sleep(2)
@@ -503,7 +503,7 @@ def main():
                         status, text = hub.request(method, path, body)
                         smoke.check(status < 300, f"seeding {id}: {method} {path}: {status} {text[:200]}")
             server_checks(rep, phase, hub, ids, on, loaded)
-            kept_checks(rep, phase, hub, ids, on, kept)
+            kept_checks(rep, phase, hub, ids, on, kept, home)
             seen = browser(rep, phase, hub.base, token, "test", ids, on, shots, work, schemes)
             out["phases"][phase] = {"settings_row": row or None, "manager_line": f"modules: loaded {loaded}",
                                     "hello_module_flags": [f for f in hub.features() if f == "modules" or f.startswith("module.")],

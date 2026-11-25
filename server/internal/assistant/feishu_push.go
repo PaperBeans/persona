@@ -128,7 +128,7 @@ func (s *Service) feishuPushToldTodo(ctx context.Context, machine, session, titl
 	}
 	st, err := s.chat().Status(ctx)
 	ready := err == nil && st.Ready
-	s.workbenchOn(st.Features, ready) // as feishuFeatures
+	s.larkModule().WorkbenchOn(st.Features, ready) // as feishuFeatures
 	if err != nil && !answered(err) {
 		r.going()
 		return err
@@ -316,7 +316,7 @@ type mirrorSend struct {
 func (s *Service) mirrorStillDue(ctx context.Context, m *mirrorSend) (bool, error) {
 	st, err := s.chat().Status(ctx)
 	ready, f := err == nil && st.Ready, st.Features
-	s.workbenchOn(f, ready)
+	s.larkModule().WorkbenchOn(f, ready)
 	if err != nil && !answered(err) {
 		return false, err // unknown readiness is temporary, not evidence that the owner switched the channel off
 	}

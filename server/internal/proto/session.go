@@ -592,6 +592,16 @@ const (
 	// CodeModesUnsupported: an agent in a terminal whose mode, effort and model are its start's (cursor, agy).
 	CodeModesUnsupported    = "modes_unsupported"
 	CodeEffortChangePending = "effort_change_pending"
+	// A Codex on the terminal route, whose model and effort the node types as `/model <model> --reasoning=<level>`
+	// (node/codex_terminal_modes.go, #12572). CodeModesCodexVersion: a Codex older than 0.169 started the session, and
+	// its /model takes no arguments. CodeModesCodexNoRollout: the session has no rollout yet to confirm a change by.
+	// CodeModesCodexRefused: Codex answered the command with a refusal; the message is Codex's own words.
+	// CodeModesCodexUnconfirmed: the command went in, and the rollout did not record the change in time (delivered
+	// "unknown": it may still have taken).
+	CodeModesCodexVersion     = "modes_codex_version"
+	CodeModesCodexNoRollout   = "modes_codex_no_rollout"
+	CodeModesCodexRefused     = "modes_codex_refused"
+	CodeModesCodexUnconfirmed = "modes_codex_unconfirmed"
 )
 
 // CodeNotLoaded is what session.items and session.item refuse with when reading the session would start its agent: an

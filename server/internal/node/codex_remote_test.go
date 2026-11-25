@@ -52,6 +52,9 @@ type remoteFixture struct {
 	backgroundReply map[string]any
 	backgroundPages map[string]map[string]any
 	response        func(string, map[string]any) (any, bool)
+	// open: the connections being served now; accepted: every connection served so far. A connection stops counting
+	// as open only once all it carried is in got.
+	open, accepted int
 }
 
 func (f *remoteFixture) serve(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +65,14 @@ func (f *remoteFixture) serve(w http.ResponseWriter, r *http.Request) {
 	defer c.CloseNow()
 	f.mu.Lock()
 	f.socket = c
+	f.open++
+	f.accepted++
 	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.open--
+		f.mu.Unlock()
+	}()
 	for {
 		_, b, err := c.Read(r.Context())
 		if err != nil {

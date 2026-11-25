@@ -4739,6 +4739,22 @@
     {
       "name": "agent_delivery_waiting",
       "value": "Waiting for {computer}."
+    },
+    {
+      "name": "session_effort_none",
+      "value": "None"
+    },
+    {
+      "name": "session_effort_minimal",
+      "value": "Minimal"
+    },
+    {
+      "name": "session_effort_ultra",
+      "value": "Ultra"
+    },
+    {
+      "name": "session_models_empty",
+      "value": "This launcher has no models available to switch to."
     }
   ]
 }

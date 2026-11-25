@@ -108,8 +108,10 @@ openMacTodo
 openMachineClipboard
 openMachineDetail
 openMachineFiles
+openMachineMonitor
 openMachinePage
 openMachines
+openMachinesFootnote
 openMailLabel
 openMailThread
 openManagerPage

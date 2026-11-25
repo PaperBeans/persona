@@ -42,6 +42,9 @@ type runtimeRegistry struct {
 	// away: runtime id -> the rows of its last list whose conversation is a Claude transcript here, listed as not
 	// running for a while after it left (runtimeaway.go).
 	away map[string]awayOf
+	// codexClaims: runtime id -> the Codex app-server instances it serves itself, which the node does not attach to,
+	// kept for codexClaimKeep after it left (codex_instance_claims.go).
+	codexClaims map[string]codexClaimsOf
 	// logf reports what an operator should fix (a launcher two runtimes offer); nil: nowhere. warned: said once each.
 	logf   func(format string, args ...any)
 	warned map[string]bool
@@ -217,6 +220,9 @@ func (b *runtimeRegistry) hello(h *runtimeConn, hello runtimeHello, reserved fun
 				Message: fmt.Sprintf("another process is connected to this node as runtime %q", hello.Runtime)}
 		}
 		stale = append(stale, o)
+	}
+	for _, o := range stale {
+		o.superseded = true
 	}
 	h.mu.Lock()
 	h.hello, h.ready = hello, true
@@ -586,6 +592,7 @@ func (b *runtimeRegistry) remove(h *runtimeConn) {
 	h.mu.Unlock()
 	b.leftUnlisted(id)
 	b.leftRows(h, id)
+	b.leftCodexClaims(id)
 	b.agyWorkRemoveConnLocked(h, agyPresenceNow())
 	b.recomputeOwners()
 }

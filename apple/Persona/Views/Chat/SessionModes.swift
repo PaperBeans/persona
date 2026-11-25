@@ -352,11 +352,11 @@ nonisolated enum SessionModes {
         }
     }
 
-    /// The launcher whose /model list and typed IDs a session's switch offers: the session's own, plain claude when it
-    /// started without one (the web's `sessionLauncher`).
+    /// Use a named launcher's own catalog. A manually started Codex may report only its engine and surface.
     static func launcher(_ s: Session?) -> String {
-        guard let l = s?.launcher, !l.isEmpty else { return "claude" }
-        return l
+        if let launcher = s?.launcher, !launcher.isEmpty { return launcher }
+        guard let s, s.isCodex else { return "claude" }
+        return s.spaceKind == Launcher.codexAppSource || s.agentSurface == "desktop" ? "codex-app" : "codex"
     }
 
     /// What applying a model pick sends: the alias, unless the session already runs it (Default too, while it runs a

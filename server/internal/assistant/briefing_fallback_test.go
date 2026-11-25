@@ -94,7 +94,7 @@ func initBriefFallbackState(s *Service) {
 	s.accept.mu.Lock()
 	s.accept.loaded, s.accept.asks = true, map[string]*acceptAsk{}
 	s.accept.mu.Unlock()
-	s.standing.fleetUp.Store(true)
+	s.fleetUp.Store(true)
 }
 
 // One routine at one scheduled due has one receipt, independent of the run id and of the bounded display history. A

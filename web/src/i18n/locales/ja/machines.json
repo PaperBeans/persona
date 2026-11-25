@@ -35,6 +35,7 @@
   "not_connected_yet": "未接続",
   "network": "ネットワーク",
   "load_value": "負荷 {value}",
+  "load_per_core_value": "負荷 コアあたり {value}",
   "memory_last_hour": "直近1時間のメモリ",
   "network_last_hour": "直近1時間のネットワーク：ダウンロード（オレンジ）、アップロード（紫）",
   "view_label": "表示",

@@ -70,25 +70,8 @@ func (s *Recordings) meetingPhotoRoutes() {
 		}
 		apierr.WriteJSON(w, map[string]any{"photos": photos})
 	})
-	s.handle("GET /api/v1/recordings/{id}/photos/{n}", func(w http.ResponseWriter, r *http.Request) {
-		if !meetingCaller(w, r) {
-			return
-		}
-		e := s.meetingEngine(w, r)
-		if e == nil {
-			return
-		}
-		mime, data, err := e.PhotoImage(r.PathValue("id"), photoNumber(r.PathValue("n")))
-		if err != nil {
-			writeMeetingError(w, err)
-			return
-		}
-		h := w.Header()
-		h.Set("Content-Type", mime)
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Cache-Control", "private, no-store")
-		_, _ = w.Write(data)
-	})
+	// GET …/photos/{n}, the stored image, is the knowledge base's own route (assistant/kb_recording_media.go): it answers
+	// with the module off too.
 	s.handle("DELETE /api/v1/recordings/{id}/photos/{n}", func(w http.ResponseWriter, r *http.Request) {
 		if !meetingCaller(w, r) {
 			return

@@ -654,6 +654,36 @@ if [ "$1" = run ]; then exit "$FIXTURE_RUN_STATUS"; fi
                 self.assertEqual(list(fixtures.iterdir()), [])
 
 
+class ServerShardBudgetTests(unittest.TestCase):
+    def test_isolated_lanes_initialize_ordinary_and_core_budgets(self):
+        cases = [(lane, lane.removeprefix("core-"), "900" if "managers" in lane else "600", lane.startswith("core-"))
+                 for lane in ("node", "managers", "other", "core-node", "core-managers", "core-other")]
+        for lane, shard, seconds, core in cases:
+            with self.subTest(lane=lane), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                fixtures = root / "fixtures"
+                fixtures.mkdir()
+                shutil.copyfile(Path(__file__).with_name("server.sh"), root / "server.sh")
+                copy_go_trimpath(root)
+                log = root / "steps"
+                (root / "common.sh").write_text("""ci_run() {
+  printf '%s|%s|%s\n' "$1" "$2" "$GOFLAGS" >> "$FIXTURE_STEPS"
+}
+""")
+                docker = root / "docker"
+                docker.write_text("#!/bin/sh\nexit 0\n")
+                docker.chmod(0o755)
+                environment = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"],
+                                   TMPDIR=str(fixtures), FIXTURE_STEPS=str(log), GOFLAGS="-mod=readonly")
+                result = subprocess.run(["bash", str(root / "server.sh"), lane], cwd=root,
+                                        env=environment, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                label = f"Server {shard} tests with Postgres" + (", core only" if core else "")
+                steps = [line.split("|", 2) for line in log.read_text().splitlines()]
+                flags = "-mod=readonly -trimpath" + (" -tags=persona_core_only" if core else "")
+                self.assertEqual([step for step in steps if step[0] == label], [[label, seconds, flags]])
+
+
 def copy_go_trimpath(root):
     """server.sh composes GOFLAGS with scripts/test/go_trimpath.sh, relative to the repository root it runs from."""
     (root / "scripts/test").mkdir(parents=True)

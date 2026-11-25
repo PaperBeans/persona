@@ -63,6 +63,7 @@ type Manifest struct {
 	// Configured host CLI integrations the program may use through a bounded, read-only typed RPC. IDs never name an
 	// executable; writes and arbitrary command lines are not part of this contract.
 	HostIntegrations []HostIntegrationSpec `json:"host_integrations,omitempty"`
+	Upgrade          *UpgradeSpec          `json:"upgrade,omitempty"`
 }
 
 // HostIntegrationSpec: A configured CLI integration, selected by a closed ID rather than by an extension-provided
@@ -122,6 +123,19 @@ type AuthSpec struct {
 	// An extension_page (plugin_page) ui contribution: its own sign-in page for apps that do not know auth; apps that do
 	// leave it out of its pages.
 	Page string `json:"page,omitempty"`
+}
+
+// UpgradeSpec: what the extension asks of the hub around an automatic upgrade (docs "Backup before an upgrade"). The
+// hub snapshots the data directory before every automatic upgrade whether or not this is there. Hubs before it refuse
+// the manifest.
+type UpgradeSpec struct {
+	// auto (the default): the upgrade goes ahead when the snapshot fails; required: no snapshot, no upgrade.
+	Backup string `json:"backup,omitempty"`
+	// Before the snapshot the hub calls upgrade.prepare on the installed version's program; an error stops the upgrade.
+	Prepare bool `json:"prepare,omitempty"`
+	// Once the new version is up the hub calls its upgrade.health; an error rolls the upgrade back and restores the
+	// snapshot.
+	HealthCheck bool `json:"health_check,omitempty"`
 }
 
 type Dependency struct {
@@ -7768,6 +7782,7 @@ var newDef = map[string]func() any{
 	"ToolArchive":                   func() any { return new(ToolArchive) },
 	"ToolNPM":                       func() any { return new(ToolNPM) },
 	"AuthSpec":                      func() any { return new(AuthSpec) },
+	"UpgradeSpec":                   func() any { return new(UpgradeSpec) },
 	"Dependency":                    func() any { return new(Dependency) },
 	"Exports":                       func() any { return new(Exports) },
 	"ExportedPoint":                 func() any { return new(ExportedPoint) },

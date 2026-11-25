@@ -61,6 +61,7 @@ export struct SettingsPage {
   @Local purposeIndex: number = 0;
   @Local permissionMode: string = '';
   @Local effortMode: string = '';
+  @Local sessionModel: string = '';
   @Local scheduleEditOpen: boolean = false;
   @Local extensionPreviewOpen: boolean = false;
   @Local licenseNoticesOpen: boolean = false;
@@ -123,6 +124,7 @@ export struct SettingsPage {
     if (!this.mounted || !this.active) return;
     if (this.page === 'machines') { await this.loadMachineDirectory(); return; }
     const page = this.page, owner = this.model, generation = owner.connectionGeneration(), scope = owner.scope(), revision = ++this.machineRevision, target = owner.selected;
+    const sessionTarget = owner.target(target);
     const current = (): boolean => this.mounted && this.active && this.page === page && this.model === owner && revision === this.machineRevision && owner.owns(generation, scope);
     this.management.setAdmission(current);
     await this.management.load(this.basePage(), owner); if (!current()) return;
@@ -133,7 +135,9 @@ export struct SettingsPage {
     else if (page === 'extension_catalog') await this.management.loadExtensionCatalog(owner);
     if (!current()) return;
     this.purposeIndex = Math.max(0, this.management.catalogPurposes.findIndex((item: Record<string, Object>) => Wire.text(item, 'id') === this.management.selectedId));
+    if (['session_permissions', 'session_effort', 'session_model'].includes(page) && owner.target() !== sessionTarget) return;
     this.permissionMode = Wire.text(owner.selected.data(), 'permission_mode'); this.effortMode = Wire.text(owner.selected.data(), 'effort');
+    this.sessionModel = Wire.text(owner.selected.data(), 'model');
   }
   private openDetail(page: string, item?: ManagementRow): void {
     if (!this.mounted || !this.active) return;
@@ -146,7 +150,7 @@ export struct SettingsPage {
   @Monitor('active') machineVisibilityChanged(): void { this.appearanceRevision++; if (!this.active) { this.machineRevision++; if (this.page === 'appearance') this.look.bind(undefined); } else if (this.mounted) { this.loadSettingsPage(); this.loadLook(); } }
   @Monitor('model.connected') settingsConnectionChanged(): void { if (this.mounted && this.active) { if (this.model.connected) this.loadSettingsPage(); this.loadLook(); } }
   @Monitor('model.profile', 'model.forgottenEpoch', 'model.connected') scheduleOwnerChanged(): void { this.appearanceRevision++; this.syncCatalogRows(); this.syncManagementRows(); this.management.scheduleReceiptChat(this.model); this.loadLook(); }
-  @Monitor('page') settingsPageChanged(): void { this.appearanceRevision++; }
+  @Monitor('page') settingsPageChanged(): void { this.appearanceRevision++; if (this.mounted && this.active && ['session_model', 'session_effort', 'session_permissions'].includes(this.page)) this.loadSettingsPage(); }
   @Monitor('management.catalogRows') catalogRowsChanged(): void { this.syncCatalogRows(); }
 
   @Monitor('management.rows', 'management.scheduleRuns', 'management.channelDetail', 'management.selectedId', 'page', 'model.profile', 'machineOwner')
@@ -236,6 +240,7 @@ export struct SettingsPage {
     return values;
   }
   private modeOptionsFor(field: string): string[] {
+    if (field === 'model') return this.management.providerModels.map((item: Record<string, Object>) => Wire.text(item, 'id'));
     return field === 'permission_mode' ? this.modeOptions() : Wire.strings(this.model.selected.data(), 'efforts');
   }
   private modeName(field: string, value: string): string {
@@ -243,10 +248,22 @@ export struct SettingsPage {
       return ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'].includes(value)
         ? tr('assistant_feed_permission_' + value) : value;
     }
+    if (field === 'model') {
+      const item = this.management.providerModels.find((option: Record<string, Object>) => Wire.text(option, 'id') === value);
+      return item ? Wire.text(item, 'name', value) || value : value;
+    }
+    if (['none', 'minimal', 'ultra'].includes(value)) return tr('session_effort_' + value);
     return tr(value);
+  }
+  private modeLabel(field: string): string {
+    return tr(field === 'model' ? 'model' : field === 'effort' ? 'reasoning_effort' : 'permission_mode');
+  }
+  private modeDraft(field: string): string {
+    return field === 'model' ? this.sessionModel : field === 'effort' ? this.effortMode : this.permissionMode;
   }
   private currentModeName(field: string): string {
     const value = Wire.text(this.model.selected.data(), field);
+    if (!value && field === 'model') return tr('unknown');
     return value ? this.modeName(field, value) : tr('automatic');
   }
   private purposeProviders(): Record<string, Object>[] {
@@ -286,10 +303,6 @@ export struct SettingsPage {
     const values = ['default', 'acceptEdits', 'plan', 'auto'];
     if (Wire.bool(this.model.selected.data(), 'bypass_available')) values.push('bypassPermissions');
     return values;
-  }
-  private modeSupported(): boolean {
-    const capabilities = Wire.object(this.model.selected.data(), 'capabilities');
-    return this.model.selected.kind === 'session' && Wire.bool(capabilities, 'modes');
   }
   private machineRow(): ManagementRow | undefined {
     return this.management.rows.find((item: ManagementRow) => item.id === this.management.selectedId);
@@ -345,13 +358,15 @@ export struct SettingsPage {
       } } });
   }
   private saveMode(field: string): void {
-    const value = field === 'permission_mode' ? this.permissionMode : this.effortMode;
-    const row = this.model.selected, scope = this.model.scope(), target = this.model.target(row);
+    const owner = this.model, row = owner.selected, scope = owner.scope(), generation = owner.connectionGeneration(),
+      target = owner.target(row), revision = this.machineRevision, value = this.modeDraft(field);
+    if (!this.management.canEditSessionMode(owner, field) || !this.modeOptionsFor(field).includes(value)) return;
     this.getUIContext().showAlertDialog({ title: tr('confirm'),
-      message: row.title + '\n' + tr(field === 'permission_mode' ? 'permission_mode' : 'reasoning_effort') + ': ' + this.modeName(field, value),
+      message: row.title + '\n' + this.modeLabel(field) + ': ' + this.modeName(field, value),
       primaryButton: { value: tr('cancel'), action: () => {} },
       secondaryButton: { value: tr('save'), action: () => {
-        if (this.model.scope() === scope && this.model.target() === target) this.management.saveMode(this.model, field, value);
+        if (this.mounted && this.active && this.model === owner && this.machineRevision === revision &&
+          owner.owns(generation, scope) && owner.target() === target) this.management.saveMode(owner, field, value);
       } } });
   }
   private showError(): boolean { return this.management.error.length > 0; }
@@ -554,26 +569,36 @@ export struct SettingsPage {
 
   @Builder sessionModePage(field: string) {
     Column() {
-      if (!this.modeSupported() || field === 'effort' && Wire.strings(this.model.selected.data(), 'efforts').length === 0) {
+      if (!this.management.canEditSessionMode(this.model, field)) {
         Text(tr('no_capability')).padding(Tokens.page)
       } else {
         List() {
-          ListItem() { ComposeListItemV2({ contentItemV2: new ContentItemV2({ primaryText: tr(field === 'permission_mode' ? 'permission_mode' : 'reasoning_effort'),
+          ListItem() { ComposeListItemV2({ contentItemV2: new ContentItemV2({ primaryText: this.modeLabel(field),
             secondaryText: this.currentModeName(field) }) }) }
-          ListItem() {
-            Select(this.selectOptions(this.modeOptionsFor(field).map((item: string) => this.modeName(field, item)))).attributeModifier(SelectStyles.inline)
-              .value(this.currentModeName(field))
-              .onSelect((index: number) => {
-                const values = this.modeOptionsFor(field);
-                if (field === 'permission_mode') this.permissionMode = values[index]; else this.effortMode = values[index];
-              })
+          if (field === 'model' && this.modeOptionsFor(field).length === 0 && !this.management.loading && !this.management.error) {
+            ListItem() { Text(tr('session_models_empty')).padding(Tokens.inset) }
           }
+          if (this.modeOptionsFor(field).length > 0) { ListItem() {
+            Select(this.selectOptions(this.modeOptionsFor(field).map((item: string) => this.modeName(field, item)))).attributeModifier(SelectStyles.inline)
+              .selected(this.modeOptionsFor(field).indexOf(this.modeDraft(field)))
+              .value(this.modeDraft(field) ? this.modeName(field, this.modeDraft(field)) : this.currentModeName(field))
+              .onSelect((index: number) => {
+                const value = this.modeOptionsFor(field)[index];
+                if (!value) return;
+                if (field === 'permission_mode') this.permissionMode = value;
+                else if (field === 'effort') this.effortMode = value;
+                else this.sessionModel = value;
+              })
+          } }
           ListItem() { Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('save')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('save', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('save')).bindTips(tr('save')).enabled(!this.management.saving &&
-            (field === 'permission_mode' ? this.permissionMode !== Wire.text(this.model.selected.data(), field) : this.effortMode !== Wire.text(this.model.selected.data(), field)))
+            !this.management.loading && this.modeOptionsFor(field).includes(this.modeDraft(field)) && this.modeDraft(field) !== Wire.text(this.model.selected.data(), field))
             .onClick(() => this.saveMode(field)) }
         }.width('100%')
       }
       if (this.management.error) Text(tr(this.management.error)).fontColor($r('app.color.persona_danger')).padding(Tokens.inset)
+      if (field === 'model' && this.management.error && !this.management.loading && this.model.connected) {
+        Button(tr('retry')).onClick(() => this.loadSettingsPage())
+      }
     }.width('100%').height('100%')
   }
 
@@ -1235,6 +1260,7 @@ export struct SettingsPage {
       if (this.page === 'models' || this.page === 'translation') this.modelsPage()
       else if (this.page === 'session_permissions') this.sessionModePage('permission_mode')
       else if (this.page === 'session_effort') this.sessionModePage('effort')
+      else if (this.page === 'session_model') this.sessionModePage('model')
       else if (this.page === 'machines') this.machinesPage()
       else if (this.page === 'schedules') this.schedulesPage()
       else if (this.page === 'triage') this.triagePage()
@@ -1250,7 +1276,7 @@ export struct SettingsPage {
       else if (this.page === 'privacy') this.privacyPage()
       else if (this.page === 'diagnostics') this.diagnosticsPage()
       else this.delegatedPage()
-      if (this.management.error && !['models', 'session_permissions', 'session_effort', 'machines', 'schedules', 'triage', 'extensions', 'connectors', 'channels', 'ledger', 'extension_detail', 'connector_detail', 'channel_detail', 'extension_catalog'].includes(this.page))
+      if (this.management.error && !['models', 'session_permissions', 'session_effort', 'session_model', 'machines', 'schedules', 'triage', 'extensions', 'connectors', 'channels', 'ledger', 'extension_detail', 'connector_detail', 'channel_detail', 'extension_catalog'].includes(this.page))
         Text(tr(this.management.error)).fontColor($r('app.color.persona_danger')).padding(Tokens.inset)
     }.width('100%').height('100%')
       .bindSheet($$this.extensionPreviewOpen, this.extensionPreviewForm(), { title: { title: tr(Wire.bool(this.management.preview, 'upgrade') ? 'upgrade' : 'install') + ' · ' + tr('permissions') }, height: SheetSize.LARGE, showClose: true })

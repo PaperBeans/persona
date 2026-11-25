@@ -586,3 +586,130 @@ test('an extension without sign-in omits auth state without reporting a detail f
   assert.equal(!!page.error,status!==404&&status!==405);
  }
 });
+
+const {sessionModeAvailable, sessionModelLauncher} = await import('../entry/src/main/ets/models/SessionModes.ets');
+const {ResourceRow: ModeSessionRow} = await import('../entry/src/main/ets/models/Wire.ets');
+
+function sessionModeClient(call, data = {}) {
+  const client = managementClient(call);
+  client.connected = true;
+  client.demo = false;
+  client.selected = ModeSessionRow.from({
+    machine_id: 'mac / 1', session_id: 'thread/a', manager: 'personal', agent: 'codex',
+    host: 'herdr', codex_route: 'terminal', status: 'idle', state: 'idle', model: 'gpt-a',
+    capabilities: {read: true, send: true, model: true}, efforts: ['low', 'medium', 'xhigh'],
+    effort: 'low', ...data
+  }, 'session');
+  client.selected.group = client.profile.id;
+  client.target = (row = client.selected) => row.key();
+  client.refresh = async () => {};
+  return client;
+}
+
+test('a terminal Codex lists its launcher models and sends only the chosen field to the bound session', async () => {
+  const calls = [];
+  const model = sessionModeClient(async (path, method, body, _op, admit) => {
+    calls.push({path, method, body});
+    if (method === 'GET') return {models: [{id: 'gpt-a', name: 'A'}, {id: 'gateway/gpt-b', name: 'B'}]};
+    assert.equal(admit(), true);
+    return {};
+  });
+  const page = new ManagementModel();
+  assert.equal(sessionModeAvailable(model.selected, 'effort'), true);
+  assert.equal(sessionModeAvailable(model.selected, 'permission_mode'), false);
+  await page.load('session_model', model);
+  assert.deepEqual(calls[0], {path: '/api/v1/machines/mac%20%2F%201/launchers/codex/models', method: 'GET', body: {}});
+  assert.equal(await page.saveMode(model, 'model', 'invented-id'), false);
+  assert.equal(await page.saveMode(model, 'model', 'gpt-a'), false);
+  assert.equal(await page.saveMode(model, 'model', 'gateway/gpt-b'), true);
+  assert.deepEqual(calls.at(-1), {path: '/api/v1/sessions/mac%20%2F%201/thread%2Fa/modes', method: 'POST', body: {model: 'gateway/gpt-b'}});
+  await page.load('session_effort', model);
+  assert.equal(await page.saveMode(model, 'effort', 'unsupported'), false);
+  assert.equal(await page.saveMode(model, 'effort', 'xhigh'), true);
+  assert.deepEqual(calls.at(-1).body, {effort: 'xhigh'});
+  assert.equal(await page.saveMode(model, 'permission_mode', 'plan'), false);
+  assert.equal(calls.length, 3);
+  assert.equal(sessionModelLauncher({agent:'codex', space_kind:'codex_app'}), 'codex-app');
+  assert.equal(sessionModelLauncher({space_kind:'codex_app'}), 'codex-app');
+  assert.equal(sessionModelLauncher({agent:'claude', source_kind:'claude_desktop'}), 'claude-desktop');
+  assert.equal(sessionModelLauncher({agent:'claude', agent_surface:'desktop', launcher:'named'}), 'named');
+  assert.equal(sessionModelLauncher({agent:'claude', source_kind:'runtime'}), '');
+});
+
+test('model catalogs stay with the selected named launcher and unavailable choices never dispatch', async () => {
+  let release;
+  const writes = [], reads = [];
+  const model = sessionModeClient(async (path, method, body) => {
+    if (method === 'GET') { reads.push(path); return new Promise(resolve => { release = resolve; }); }
+    writes.push(body); return {};
+  }, {launcher:'team/gateway'});
+  const page = new ManagementModel();
+  let loading = page.load('session_model', model);
+  assert.equal(reads[0], '/api/v1/machines/mac%20%2F%201/launchers/team%2Fgateway/models');
+  const first = model.selected;
+  model.selected = sessionModeClient(async () => ({}), {session_id:'thread-b'}).selected;
+  release({models:[{id:'stale'}]}); await loading;
+  assert.deepEqual(page.providerModels, []);
+  assert.equal(await page.saveMode(model, 'model', 'stale'), false);
+  model.selected = first;
+  loading = page.load('session_model', model); release({locked:'pinned',models:[{id:'locked'}]}); await loading;
+  assert.deepEqual(page.providerModels, []);
+  assert.equal(await page.saveMode(model, 'model', 'locked'), false);
+  for (const update of [{capabilities:{model:true,send:false}}, {state:'offline'}, {status:'unknown'}, {read_only:true}]) {
+    model.selected=sessionModeClient(async () => ({}),update).selected;
+    await page.load('session_model',model);
+    assert.equal(await page.saveMode(model,'model','locked'),false);
+  }
+  assert.equal(reads.length,2);
+  assert.deepEqual(writes, []);
+});
+
+test('a runtime with a pinned model exposes effort alone, and disconnected, demo and stale owners cannot write', async () => {
+  const writes = [];
+  const model = sessionModeClient(async (path, method, body, _op, admit) => {
+    assert.equal(method,'POST'); assert.equal(admit(),true); writes.push(body); return {};
+  }, {source_kind:'runtime', launcher:'profile', capabilities:{send:true,modes:true,model:false}});
+  const page = new ManagementModel();
+  assert.equal(sessionModeAvailable(model.selected,'model'), false);
+  assert.equal(sessionModeAvailable(model.selected,'permission_mode'), false);
+  await page.load('session_model',model);
+  assert.equal(await page.saveMode(model,'model','gpt-b'),false);
+  await page.load('session_effort',model);
+  assert.equal(await page.saveMode(model,'effort','medium'),true);
+  model.connected=false; assert.equal(await page.saveMode(model,'effort','xhigh'),false);
+  model.connected=true; model.demo=true; assert.equal(await page.saveMode(model,'effort','xhigh'),false);
+  model.demo=false; model.selected.manager='work'; assert.equal(await page.saveMode(model,'effort','xhigh'),false);
+  model.selected.manager='personal'; model.epoch++; assert.equal(await page.saveMode(model,'effort','xhigh'),false);
+  assert.deepEqual(writes,[{effort:'medium'}]);
+});
+
+test('session mode admission is checked again when a delayed write reaches the journal', async () => {
+  let commit, entered;
+  const ready = new Promise(resolve => { entered = resolve; });
+  const writes = [];
+  const model = sessionModeClient(async (_path, method, body, _op, admit) => {
+    if (method === 'GET') return {models:[{id:'next'}]};
+    await new Promise(resolve => { commit = resolve; entered(); });
+    if (!admit()) throw new Error('stale');
+    writes.push(body); return {};
+  });
+  const page = new ManagementModel(); await page.load('session_model',model);
+  const saving = page.saveMode(model,'model','next'); await ready;
+  model.selected = sessionModeClient(async () => ({}),{session_id:'other'}).selected;
+  commit(); assert.equal(await saving,false); assert.deepEqual(writes,[]);
+});
+
+test('session permissions keep their own gate and bypass availability', async () => {
+  const sent = [];
+  const model = sessionModeClient(async (_path, method, body, _op, admit) => {
+    assert.equal(method, 'POST'); assert.equal(admit(), true); sent.push(body); return {};
+  }, {agent:'claude', capabilities:{send:true,modes:true}, permission_mode:'default'});
+  const page = new ManagementModel();
+  await page.load('session_permissions', model);
+  assert.equal(await page.saveMode(model,'permission_mode','bypassPermissions'), false);
+  assert.equal(await page.saveMode(model,'permission_mode','plan'), true);
+  assert.equal(await page.saveMode(model,'model','gpt-a'), false);
+  model.selected.session = 'replacement-session';
+  assert.equal(await page.saveMode(model,'permission_mode','acceptEdits'), false);
+  assert.deepEqual(sent, [{permission_mode:'plan'}]);
+});

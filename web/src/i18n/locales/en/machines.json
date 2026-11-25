@@ -37,6 +37,7 @@
   "not_connected_yet": "Not connected yet",
   "network": "Network",
   "load_value": "Load {value}",
+  "load_per_core_value": "Load {value} per core",
   "memory_last_hour": "Memory over the last hour",
   "network_last_hour": "Network over the last hour: download (orange), upload (purple)",
   "view_label": "View",

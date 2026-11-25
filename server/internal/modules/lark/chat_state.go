@@ -405,7 +405,7 @@ func (s core) feishuForgetStatus() {
 func (s core) feishuFeatures(ctx context.Context) (FeishuFeatures, bool) {
 	st, err := s.feishuStatus(ctx)
 	ready := err == nil && st.Ready
-	s.h.WorkbenchOn(st.Features, ready) // what the posts' workbench button follows (the core's feishu_workbench_pin.go)
+	s.workbenchOn(st.Features, ready) // what the posts' workbench button follows (workbench_pin.go)
 	return st.Features, ready
 }
 

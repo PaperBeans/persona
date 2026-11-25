@@ -213,6 +213,9 @@ type extensions struct {
 	// (extension_autoupgrade.go).
 	markets  markets
 	upgrades extensionUpgrades
+	// upgradeBackups are the snapshots of data taken before automatic upgrades, held until each one is known to stay
+	// (extension_upgrade_backup.go).
+	upgradeBackups pendingBackups
 	// ops are the installs, upgrades and uninstalls in progress or just over (extension_operations.go).
 	ops extensionOps
 	// auth is the last sign-in status of the extensions that sign in (extension_auth.go).
@@ -699,26 +702,35 @@ func (ps *extensions) changed(c extension.Change) {
 }
 
 // watchUpgrade rolls an upgraded plugin back when it does not come up (only one that runs by itself or for a
-// connector that is on: a plugin started by calls is not started for this), and says whether it did and why.
+// connector that is on: a plugin started by calls is not started for this, unless it declares upgrade.health_check),
+// or when its upgrade.health check fails, and says whether it did and why. The snapshot of its data taken before an
+// automatic upgrade goes back with the old version (extension_upgrade_backup.go).
 func (ps *extensions) watchUpgrade(ctx context.Context, id string) (rolledBack bool, why string) {
+	key := ps.reg.StorageKeyOf(id)
+	defer ps.upgradeBackups.drop(key) // kept on disk; only the hold on it for a rollback ends
 	hp := ps.get(id)
 	if hp == nil || hp.proc == nil {
 		return false, ""
 	}
 	wctx, cancel := context.WithTimeout(ctx, host.ReadyWithin+5*time.Second)
 	defer cancel()
+	checks := ps.reg.Get(id) != nil && ps.reg.Get(id).Manifest.UpgradeHealthCheck()
 	for wctx.Err() == nil {
 		state, why := hp.proc.Status()
-		switch state {
-		case host.StateRunning:
-			return false, ""
-		case host.StateError:
-			ps.logf("plugin %s: the new version does not come up (%s): back to the one before", id, why)
-			if _, err := ps.reg.Rollback(ctx, id, "hub"); err != nil {
-				ps.logf("plugin %s: rollback: %v", id, err)
+		switch {
+		case state == host.StateRunning, state == host.StateStopped && checks:
+			if !checks {
 				return false, ""
 			}
-			return true, why
+			why := ps.upgradeHealth(wctx, id, hp)
+			if why == "" {
+				return false, ""
+			}
+			ps.logf("plugin %s: the new version fails its health check (%s): back to the one before", id, why)
+			return ps.rollBackUpgrade(ctx, id, hp, why)
+		case state == host.StateError:
+			ps.logf("plugin %s: the new version does not come up (%s): back to the one before", id, why)
+			return ps.rollBackUpgrade(ctx, id, hp, why)
 		}
 		select {
 		case <-wctx.Done():

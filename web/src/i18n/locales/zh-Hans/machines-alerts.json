@@ -10,7 +10,6 @@
   "load": "负载",
   "disk": "磁盘",
   "cores_other": "{count} 核",
-  "per_core": "每核 {value}",
   "processes_memory": "占用内存最多的程序",
   "processes_cpu": "占用 CPU 最多的程序",
   "processes_loading": "正在查看是什么在占用这台电脑…",

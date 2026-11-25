@@ -141,7 +141,7 @@ export interface TargetCandidate {
 export interface RankedTarget {
   machine: Machine;
   eligible: boolean;
-  /** Why it is or is not a good place: "Offline", "Memory pressure · 91%", "Same system · 12 GB free". */
+  /** Why it is or is not a good place: "Offline", "Memory used · 91%", "Same system · 12 GB free". */
   reason: string;
   alerts: MachineAlert[];
   freeMemory?: number;

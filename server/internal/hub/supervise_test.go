@@ -156,7 +156,7 @@ func TestSupervisedTaskOverTheBus(t *testing.T) {
 	agent(proto.StatusDone, "两种走法：A 先灰度，B 直接全量。你选一个？")
 	eventually(t, 10*time.Second, "the 督办 message", func() bool { return len(digests()) == 1 })
 	if d := digests()[0]; !strings.Contains(d, "Agent 停下了，但没做完（要用户决定：问用两种部署走法里的哪一种；用户还没收到") ||
-		!strings.Contains(d, "验收标准：测试 hub 已部署并验证") || !strings.Contains(d, "A 先灰度") {
+		!strings.Contains(d, "验收标准用 todo_get 取原文") || !strings.Contains(d, "A 先灰度") {
 		t.Fatalf("message:\n%s", d)
 	}
 	eventually(t, 10*time.Second, "the transcript confirmation read", func() bool { return reads() >= 1 })

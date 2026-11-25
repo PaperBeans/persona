@@ -44,3 +44,113 @@ export function stripAnsi(s: string): string {
     .replace(ESC, "")
     .replace(CONTROLS, "");
 }
+
+export interface AnsiRun {
+  text: string;
+  fg?: string;
+  bold?: boolean;
+  dim?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+}
+
+// eslint-disable-next-line no-control-regex
+const SGR_CSI_RE = /\u001b\[([0-9;]*)([A-Za-z])/g;
+
+const FG_COLOR: Record<number, string> = {
+  30: "text-ink-3",
+  31: "text-red",
+  32: "text-green",
+  33: "text-orange",
+  34: "text-accent-ink",
+  35: "text-[var(--term-magenta)]",
+  36: "text-[var(--term-cyan)]",
+  37: "text-ink",
+  90: "text-ink-3",
+  91: "text-red",
+  92: "text-green",
+  93: "text-orange",
+  94: "text-accent-ink",
+  95: "text-[var(--term-magenta)]",
+  96: "text-[var(--term-cyan)]",
+  97: "text-ink",
+};
+
+/** Parse ANSI SGR escapes into styled runs. Returns null if `text` contains no ESC byte. */
+export function parseAnsi(text: string): AnsiRun[] | null {
+  if (!text.includes("\u001b")) return null;
+  const runs: AnsiRun[] = [];
+  let fg: string | undefined;
+  let bold = false;
+  let dim = false;
+  let italic = false;
+  let underline = false;
+
+  const push = (chunk: string) => {
+    if (!chunk) return;
+    const prev = runs[runs.length - 1];
+    if (
+      prev &&
+      prev.fg === fg &&
+      Boolean(prev.bold) === bold &&
+      Boolean(prev.dim) === dim &&
+      Boolean(prev.italic) === italic &&
+      Boolean(prev.underline) === underline
+    ) {
+      prev.text += chunk;
+    } else {
+      const run: AnsiRun = { text: chunk };
+      if (fg) run.fg = fg;
+      if (bold) run.bold = true;
+      if (dim) run.dim = true;
+      if (italic) run.italic = true;
+      if (underline) run.underline = true;
+      runs.push(run);
+    }
+  };
+
+  SGR_CSI_RE.lastIndex = 0;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = SGR_CSI_RE.exec(text)) !== null) {
+    if (m.index > last) push(text.slice(last, m.index));
+    last = SGR_CSI_RE.lastIndex;
+    if (m[2] !== "m") continue;
+    const raw = m[1];
+    const codes = raw === "" ? [0] : raw.split(";").map((s) => (s === "" ? 0 : Number(s)));
+    for (let i = 0; i < codes.length; i++) {
+      const c = codes[i];
+      if (c === 0) {
+        fg = undefined;
+        bold = false;
+        dim = false;
+        italic = false;
+        underline = false;
+      } else if (c === 1) {
+        bold = true;
+      } else if (c === 2) {
+        dim = true;
+      } else if (c === 3) {
+        italic = true;
+      } else if (c === 4) {
+        underline = true;
+      } else if (c === 22) {
+        bold = false;
+        dim = false;
+      } else if (c === 23) {
+        italic = false;
+      } else if (c === 24) {
+        underline = false;
+      } else if (c === 39) {
+        fg = undefined;
+      } else if (c === 38 || c === 48) {
+        if (codes[i + 1] === 5) i += 2;
+        else if (codes[i + 1] === 2) i += 4;
+      } else if (FG_COLOR[c]) {
+        fg = FG_COLOR[c];
+      }
+    }
+  }
+  if (last < text.length) push(text.slice(last));
+  return runs;
+}

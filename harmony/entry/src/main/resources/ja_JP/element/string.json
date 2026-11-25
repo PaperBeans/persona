@@ -4739,6 +4739,22 @@
     {
       "name": "agent_delivery_waiting",
       "value": "{computer} を待っています。"
+    },
+    {
+      "name": "session_effort_none",
+      "value": "なし"
+    },
+    {
+      "name": "session_effort_minimal",
+      "value": "最小"
+    },
+    {
+      "name": "session_effort_ultra",
+      "value": "ウルトラ"
+    },
+    {
+      "name": "session_models_empty",
+      "value": "このランチャーには切り替え可能なモデルがありません。"
     }
   ]
 }

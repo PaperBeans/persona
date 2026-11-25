@@ -24,8 +24,9 @@ import (
 // too ("Set model to `Opus 5.5` and saved as your default for new sessions", seen in local transcripts); there is no
 // session-only form of the command, and the popover says so.
 //
-// Only Claude Code's TUI sessions: a Codex thread on its app-server keeps its effort-only control (codex_effort.go),
-// a headless Persona conversation switches model in its own chip, and every other agent has no command to type.
+// Only Claude Code's TUI sessions here. A Codex thread on its app-server switches through thread/settings/update
+// (codex_effort.go), a Codex in a pane on the terminal route through Codex's own /model with arguments
+// (codex_terminal_modes.go), a headless Persona conversation in its own chip; every other agent has no command to type.
 
 // modelCommand is the line typed into Claude Code to switch the session to model: an id from the agent's own list
 // (aliases such as opus, a full id, a bracketed variant like opus[1m], a gateway's provider/model) or one the user
@@ -356,6 +357,22 @@ func (n *Node) setModelAndModes(ctx context.Context, id, model, mode, effort str
 				return false, err
 			}
 			return false, n.codexDesktopModes(ctx, id, src, model, mode, effort)
+		}
+		// A Codex in a pane on the terminal route: Codex's own /model, typed into its box (codex_terminal_modes.go).
+		if t, why, ok := n.codexOnTerminal(id); ok {
+			if err := n.switchingRefusal(id); err != nil {
+				return false, err
+			}
+			if mode != "" {
+				return false, fmt.Errorf("Codex 的会话在手机上只能改思考强度和模型，权限模式要在电脑上改")
+			}
+			if model == "" && effort == "" {
+				return false, nil
+			}
+			if why != nil {
+				return false, why
+			}
+			return false, n.setCodexTerminalSettings(ctx, id, t, model, effort)
 		}
 		if mode == "" && (model != "" || effort != "") {
 			m := strings.TrimSpace(model)

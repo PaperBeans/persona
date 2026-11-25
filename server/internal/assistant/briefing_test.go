@@ -161,7 +161,7 @@ func TestBriefDoesNotSayNothingWaitsBeforeTheCardsAreRead(t *testing.T) {
 	e := newBriefEnv(t)
 	e.card("ix_old", "box", "ag1", "旧的问题", 90*time.Minute)
 	e.verify("todo_v1", "修登录崩溃", 30*time.Hour)
-	e.s.standing.fleetUp.Store(false)
+	e.s.fleetUp.Store(false)
 
 	f := e.s.briefFactsAt(context.Background(), e.clk.Now(), "")
 	if !f.WaitingUnknown || len(f.Waiting) != 0 || len(f.Accept) != 1 {

@@ -67,7 +67,8 @@
         "host_integrations": {
           "description": "Configured host CLI integrations the program may use through a bounded, read-only typed RPC. IDs never name an executable; writes and arbitrary command lines are not part of this contract.",
           "type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/HostIntegrationSpec"}
-        }
+        },
+        "upgrade": {"$ref": "#/$defs/UpgradeSpec"}
       },
       "required": ["manifest_version", "id", "name", "version"],
       "anyOf": [
@@ -143,6 +144,16 @@
         "page": {"type": "string", "description": "An extension_page (plugin_page) ui contribution: its own sign-in page for apps that do not know auth; apps that do leave it out of its pages."}
       },
       "required": ["title"]
+    },
+    "UpgradeSpec": {
+      "description": "What the extension asks of the hub around an automatic upgrade (docs \"Backup before an upgrade\"). The hub snapshots the data directory before every automatic upgrade whether or not this is there. Hubs before it refuse the manifest.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "backup": {"type": "string", "enum": ["auto", "required"], "description": "auto (the default): the upgrade goes ahead when the snapshot fails; required: no snapshot, no upgrade."},
+        "prepare": {"type": "boolean", "description": "Before the snapshot the hub calls upgrade.prepare on the installed version's program; an error stops the upgrade."},
+        "health_check": {"type": "boolean", "description": "Once the new version is up the hub calls its upgrade.health; an error rolls the upgrade back and restores the snapshot."}
+      }
     },
     "Dependency": {
       "type": "object",

@@ -33,7 +33,7 @@ MAX_STR = 6000  # longer strings are cut (the parser's own clipping has unit tes
 ENUM_KEYS = {
     "type", "subtype", "role", "kind", "phase", "status", "level", "commandMode", "operation", "userType", "entrypoint",
     "permissionMode", "stop_reason", "stop_sequence", "media_type", "effort", "mode", "source", "hookEvent", "approval_policy",
-    "change", "channel", "cronKind", "taskKind", "stop_type", "service_tier", "action",
+    "change", "channel", "cronKind", "taskKind", "stop_type", "service_tier", "action", "reasoning_effort",
 }
 VERSION_KEYS = {"version", "cli_version"}
 MODEL_RE = re.compile(r"(claude|gpt|o\d|codex)[A-Za-z0-9._\[\]-]*")

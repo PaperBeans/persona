@@ -566,7 +566,9 @@ func clearRolloutCache(home string) {
 	rolloutCaches.Lock()
 	for h, c := range rolloutCaches.byHome {
 		if h == home || strings.HasPrefix(h, home) || strings.HasPrefix(home, h) {
+			c.mu.Lock()
 			c.at = time.Time{}
+			c.mu.Unlock()
 		}
 	}
 	rolloutCaches.Unlock()

@@ -137,6 +137,17 @@ describe("the memory sheet", () => {
     render({ kind: "cpu", alerts: [{ kind: "cpu", severity: "warning" }] });
     await flush();
     expect($$("[data-process]").map((p) => p.getAttribute("data-process"))).toEqual(["node", "claude", "herdr", "personad"]);
+    expect($("[data-testid=load-definition]")).toBeNull(); // only the load alert explains load
+  });
+
+  it("says what load counts on a load alert, with the chip's per-core figure (#12519)", async () => {
+    routes["GET /api/v1/machines/laptop/diagnosis"] = () => json({ machine_id: "laptop", at: 1, processes });
+    render({ kind: "load", alerts: [{ kind: "load", severity: "warning", value: 0.4 }] });
+    await flush();
+    // 4 over 10 cores: one decimal, as the chip and the card write it (the sheet said 0.40)
+    expect($("[data-testid=pressure-figures]")?.textContent).toContain("每核 0.4");
+    expect($("[data-testid=pressure-figures]")?.textContent).not.toContain("0.40");
+    expect($("[data-testid=load-definition]")?.textContent).toMatch(/^负载 = 正在运行和排队等 CPU 的线程数/);
   });
 
   it("stops only the idle Agents, after a confirmation that lists them, one at a time, and says how it went", async () => {

@@ -16,6 +16,9 @@ const (
 	// still to be written. scripts/ci/core-only-smoke.py names both.
 	fixtureRecording        = "6f1c2a3b-0000-4000-8000-00000000c0de"
 	fixturePendingRecording = "6f1c2a3b-0000-4000-8000-00000000beef"
+	// fixtureAudioRecording is a hub-transcribed meeting still in flight, with two seconds of audio held
+	// (attachments/audio/0.pcm); fixtureRecording holds one photo (attachments/p1.jpg).
+	fixtureAudioRecording = "6f1c2a3b-0000-4000-8000-00000000a0d1"
 )
 
 type fixtureMinutesModel struct{}
@@ -51,12 +54,31 @@ func TestWriteRecordingFixture(t *testing.T) {
 	}
 	put(fixtureRecording, "Kept recording", now.Add(-2*time.Hour), "This made-up meeting is the module gate's fixture",
 		"The quokka transcript stays readable without the module", "Stored recordings are never hidden by a switch")
+	photo := PhotoUpload{ID: "6f1c2a3b-0000-4000-8000-0000000000f1", At: 12, Mime: PhotoJPEG, Width: 1600, Height: 1200,
+		Data: []byte("\xff\xd8 the module gate's made-up photo \xff\xd9"), Text: "whiteboard", Caption: "Plan", Digest: "fixture-photo"}
+	if _, created, err := e.PhotoAdd(fixtureRecording, photo, false); err != nil || !created {
+		t.Fatalf("add the photo: %v (created %v)", err, created)
+	}
 	if n := e.RecordingProvider().WriteMinutes(context.Background(), 2); n != 1 {
 		t.Fatalf("wrote %d minutes, want 1", n)
 	}
 	put(fixturePendingRecording, "Kept recording, minutes pending", now.Add(-time.Hour), "A second made-up meeting", "Its minutes were never written")
 	if r, ok := st.Recording(fixturePendingRecording); !ok || r.MinutesState != MinutesPending {
 		t.Fatalf("the pending fixture's minutes state: %+v", r)
+	}
+	e.TranscriptionReady = func() bool { return true }
+	live := RecordingUpload{Revision: 1, StartedAt: now.Add(-30 * time.Minute), Duration: 10, Language: "en-US", Device: "phone",
+		Title: "Kept recording, audio held", Kind: RecordingMeeting, Segments: []RecordingSegment{{Start: 0, End: 9, Text: "Audio is still held"}}}
+	live.SetTranscription(TranscriptionHub, nil)
+	if p, err := e.PutRecording(fixtureAudioRecording, live, now); err != nil || p.Status != RecordingStored {
+		t.Fatalf("put the in-flight recording: %+v %v", p, err)
+	}
+	pcm := make([]byte, 4*AudioRate)
+	for i := range pcm {
+		pcm[i] = byte(i*7 + 1)
+	}
+	if _, err := e.AudioPut(fixtureAudioRecording, 0, pcm); err != nil {
+		t.Fatalf("hold the audio: %v", err)
 	}
 	if _, err := st.ReadMinutes(fixtureRecording); err != nil {
 		t.Fatal(err)

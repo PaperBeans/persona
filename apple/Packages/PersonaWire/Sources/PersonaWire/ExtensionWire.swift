@@ -69,8 +69,9 @@ public nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
     /// Configured host CLI integrations the program may use through a bounded, read-only typed RPC. IDs never name an
     /// executable; writes and arbitrary command lines are not part of this contract.
     public var hostIntegrations: [ExtensionHostIntegrationSpec]?
+    public var upgrade: ExtensionUpgradeSpec?
 
-    public init(manifestVersion: Int = 0, id: String = "", name: String = "", version: String = "", description: String? = nil, publisher: String? = nil, homepage: String? = nil, icon: String? = nil, tags: [String]? = nil, engines: ExtensionEngines? = nil, runtime: ExtensionRuntime? = nil, node: ExtensionNodeRuntime? = nil, activationEvents: [String]? = nil, contributes: ExtensionContributes? = nil, offByDefault: [String]? = nil, depends: [ExtensionDependency]? = nil, exports: ExtensionExports? = nil, extensionPack: [ExtensionPackMember]? = nil, configuration: JSONValue? = nil, secrets: [ExtensionSecretSpec]? = nil, settingsCheck: Bool? = nil, permissions: ExtensionPermissions? = nil, tools: [ExtensionToolSpec]? = nil, auth: ExtensionAuthSpec? = nil, hostIntegrations: [ExtensionHostIntegrationSpec]? = nil) {
+    public init(manifestVersion: Int = 0, id: String = "", name: String = "", version: String = "", description: String? = nil, publisher: String? = nil, homepage: String? = nil, icon: String? = nil, tags: [String]? = nil, engines: ExtensionEngines? = nil, runtime: ExtensionRuntime? = nil, node: ExtensionNodeRuntime? = nil, activationEvents: [String]? = nil, contributes: ExtensionContributes? = nil, offByDefault: [String]? = nil, depends: [ExtensionDependency]? = nil, exports: ExtensionExports? = nil, extensionPack: [ExtensionPackMember]? = nil, configuration: JSONValue? = nil, secrets: [ExtensionSecretSpec]? = nil, settingsCheck: Bool? = nil, permissions: ExtensionPermissions? = nil, tools: [ExtensionToolSpec]? = nil, auth: ExtensionAuthSpec? = nil, hostIntegrations: [ExtensionHostIntegrationSpec]? = nil, upgrade: ExtensionUpgradeSpec? = nil) {
         self.manifestVersion = manifestVersion
         self.id = id
         self.name = name
@@ -96,6 +97,7 @@ public nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
         self.tools = tools
         self.auth = auth
         self.hostIntegrations = hostIntegrations
+        self.upgrade = upgrade
     }
 
     enum CodingKeys: String, CodingKey {
@@ -124,6 +126,7 @@ public nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
         case tools
         case auth
         case hostIntegrations = "host_integrations"
+        case upgrade
     }
 
     public init(from decoder: Decoder) throws {
@@ -153,6 +156,7 @@ public nonisolated struct ExtensionManifest: Codable, Hashable, Sendable {
         self.tools = try? c.decodeIfPresent([ExtensionToolSpec].self, forKey: .tools)
         self.auth = try? c.decodeIfPresent(ExtensionAuthSpec.self, forKey: .auth)
         self.hostIntegrations = try? c.decodeIfPresent([ExtensionHostIntegrationSpec].self, forKey: .hostIntegrations)
+        self.upgrade = try? c.decodeIfPresent(ExtensionUpgradeSpec.self, forKey: .upgrade)
     }
 }
 
@@ -339,6 +343,39 @@ public nonisolated struct ExtensionAuthSpec: Codable, Hashable, Sendable {
         self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         self.description = try? c.decodeIfPresent(String.self, forKey: .description)
         self.page = try? c.decodeIfPresent(String.self, forKey: .page)
+    }
+}
+
+/// What the extension asks of the hub around an automatic upgrade (docs "Backup before an upgrade"). The hub
+/// snapshots the data directory before every automatic upgrade whether or not this is there. Hubs before it refuse
+/// the manifest.
+public nonisolated struct ExtensionUpgradeSpec: Codable, Hashable, Sendable {
+    /// auto (the default): the upgrade goes ahead when the snapshot fails; required: no snapshot, no upgrade.
+    public var backup: String?
+    /// Before the snapshot the hub calls upgrade.prepare on the installed version's program; an error stops the
+    /// upgrade.
+    public var prepare: Bool?
+    /// Once the new version is up the hub calls its upgrade.health; an error rolls the upgrade back and restores the
+    /// snapshot.
+    public var healthCheck: Bool?
+
+    public init(backup: String? = nil, prepare: Bool? = nil, healthCheck: Bool? = nil) {
+        self.backup = backup
+        self.prepare = prepare
+        self.healthCheck = healthCheck
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case backup
+        case prepare
+        case healthCheck = "health_check"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.backup = try? c.decodeIfPresent(String.self, forKey: .backup)
+        self.prepare = try? c.decodeIfPresent(Bool.self, forKey: .prepare)
+        self.healthCheck = try? c.decodeIfPresent(Bool.self, forKey: .healthCheck)
     }
 }
 

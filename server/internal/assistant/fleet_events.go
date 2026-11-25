@@ -157,6 +157,7 @@ func (s *Service) nodeRequest(ctx context.Context, machine, method string, param
 	case "interaction.create":
 		var p struct {
 			Interaction proto.Interaction `json:"interaction"`
+			Origin      string            `json:"origin"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, true, err
@@ -166,6 +167,9 @@ func (s *Service) nodeRequest(ctx context.Context, machine, method string, param
 		// A write through a skill's gated command (node/larkgate.go): its plugin names what the ids are.
 		if sum, ok := s.assistantSummary(ctx, p.Interaction.ToolName, p.Interaction.Summary); ok {
 			p.Interaction.Summary = sum
+		}
+		if p.Origin != "" {
+			ctx = withInteractionOrigin(ctx, p.Origin)
 		}
 		r, err := s.nodeInteraction(ctx, p.Interaction)
 		return r, true, err

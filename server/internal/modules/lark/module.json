@@ -4,5 +4,11 @@
   "api": 1,
   "origin": "builtin",
   "title": "Feishu / Lark",
-  "feature": "module.lark"
+  "feature": "module.lark",
+  "hub_routes": [
+    "PUT /api/v1/assistant/feishu/companions",
+    "GET /api/v1/assistant/feishu/notices",
+    "POST /api/v1/assistant/feishu/notices/action",
+    "POST /api/v1/assistant/feishu/workbench"
+  ]
 }

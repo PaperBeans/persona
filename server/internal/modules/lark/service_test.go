@@ -211,6 +211,7 @@ func newTestService(t testing.TB, f Hub) *Service {
 	s := &Service{t: t, hub: f, ctx: ctx}
 	s.chans.live = map[string]*chanLive{}
 	s.layer = New(s)
+	s.layer.turns.board.now = s.clock // the board's clock is the fake one (the home card's "updated at")
 	t.Cleanup(cancel)
 	return s
 }
@@ -517,8 +518,6 @@ func (s *Service) Call(ctx context.Context, method string, params, out any) erro
 	return s.call(ctx, method, params, out)
 }
 
-func (s *Service) WorkbenchStamp(_ context.Context, c *botcard.Card) *botcard.Card { return c }
-
 func (s *Service) LinkNamer(context.Context) func(*url.URL) string { return nil }
 
 // OpenButton is the conversation's web link when the hub has a web address: /persona/<id> as the core's for a Persona
@@ -704,20 +703,19 @@ func lastCard(t *testing.T, r *channel.Run, posts []map[string]any) string {
 
 // wbData is what the fake core gives the workbench (tests set it).
 type wbData struct {
-	web       string
-	counts    assistantwire.WorkbenchCounts
-	agents    []assistantwire.WorkbenchAgent
-	inbox     []assistantwire.WorkbenchItem
-	board     []assistantwire.WorkbenchBoardRow
-	companion []assistantwire.WorkbenchCompanion
-	today     json.RawMessage
-	target    string
-	main      *bool
-	done      []string
-	mutes     []string
-	drafts    []string
-	replies   []string
-	draft     string
+	web     string
+	counts  assistantwire.WorkbenchCounts
+	agents  []assistantwire.WorkbenchAgent
+	inbox   []assistantwire.WorkbenchItem
+	board   []assistantwire.WorkbenchBoardRow
+	today   json.RawMessage
+	target  string
+	main    *bool
+	done    []string
+	mutes   []string
+	drafts  []string
+	replies []string
+	draft   string
 }
 
 func (s *Service) wb() *wbData {
@@ -731,7 +729,6 @@ func (s *Service) wb() *wbData {
 
 func (s *Service) WebBase(context.Context) string          { return s.wb().web }
 func (s *Service) Location(context.Context) *time.Location { return time.UTC }
-func (s *Service) StandingNow() time.Time                  { return s.clock() }
 func (s *Service) ClipFallback(text string) string         { return clip(text, 1500) }
 
 func (s *Service) WorkbenchAgents(context.Context, time.Time) (assistantwire.WorkbenchCounts, []assistantwire.WorkbenchAgent) {
@@ -760,17 +757,15 @@ func (s *Service) SessionNames(_ context.Context, sess proto.Session) (string, s
 
 func (s *Service) NextMeeting(context.Context, time.Time) *assistantwire.WorkbenchMeeting { return nil }
 
-func (s *Service) Companions(context.Context) []assistantwire.WorkbenchCompanion {
-	return s.wb().companion
-}
-
 func (s *Service) TodayBody(context.Context) json.RawMessage { return s.wb().today }
 
-func (s *Service) SummonWorkbench(context.Context)            {}
-func (s *Service) WorkbenchRefresh(context.Context)           {}
-func (s *Service) WorkbenchBringCard(context.Context, string) {}
-
 func (s *Service) TasksOverview(context.Context) ([]*botcard.Card, []string) { return nil, nil }
+
+func (s *Service) BoardCard(context.Context, time.Time) (*botcard.Card, string, string) {
+	return botcard.NewCard("Board", botcard.Blue, "Board"), "board", "board"
+}
+
+func (s *Service) FleetReady() bool { return true }
 
 func (s *Service) InboxDone(_ context.Context, id string, dismissed bool) error {
 	d := s.wb()

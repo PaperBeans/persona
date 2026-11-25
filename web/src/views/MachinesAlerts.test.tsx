@@ -114,10 +114,13 @@ describe("alert chips on the Machines page", () => {
     expect(chips("Garage NAS")).toEqual(["offline:critical"]);
     const memory = card("Travel Laptop")!.querySelector("[data-alert=memory]")!;
     expect(memory.tagName).toBe("BUTTON");
-    expect(memory.getAttribute("aria-label")).toBe("严重：内存紧张 · 95%");
+    expect(memory.getAttribute("aria-label")).toBe("严重：内存占用 · 95%");
     expect(card("Garage NAS")!.querySelector("[data-alert]")?.textContent).toBe("离线 · 排查");
     // the offline card keeps its one red notice
     expect(card("Garage NAS")!.querySelectorAll(".bg-red-tint")).toHaveLength(1);
+    // what load counts, once, under the cards (#12519)
+    expect(host.querySelectorAll("[data-testid=load-definition]")).toHaveLength(1);
+    expect(host.querySelector("[data-testid=load-definition]")?.textContent).toMatch(/^负载 = /);
   });
 
   it("opens the sheet on the chip's alert and stays on the page", async () => {

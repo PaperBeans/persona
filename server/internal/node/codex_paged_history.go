@@ -69,8 +69,11 @@ func invalidateCodexPaginated(home string) {
 	delete(codexPagedDBs.byHome, home)
 	codexPagedDBs.Unlock()
 	rolloutCaches.Lock()
-	if c := rolloutCaches.byHome[home]; c != nil {
-		c.at, c.olderAt = time.Time{}, time.Time{}
-	}
+	c, ok := rolloutCaches.byHome[home]
 	rolloutCaches.Unlock()
+	if ok {
+		c.mu.Lock()
+		c.at, c.olderAt = time.Time{}, time.Time{}
+		c.mu.Unlock()
+	}
 }

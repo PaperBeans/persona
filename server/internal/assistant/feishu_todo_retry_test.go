@@ -301,7 +301,7 @@ func TestFeishuTodoReminderRetryAuthority(t *testing.T) {
 			f, s, _ := todoReminderHub(t)
 			source := &todoRetrySourceHub{fakeHub: f}
 			s.hub = source
-			s.workbenchOn(FeishuFeatures{Workbench: true}, true) // unrelated standing-card loop stays outside the virtual clock
+			s.larkModule().WorkbenchOn(FeishuFeatures{Workbench: true}, true) // unrelated standing-card loop stays outside the virtual clock
 			synctest.Test(t, func(t *testing.T) {
 				changed := false
 				var capture todoRetryPosts
@@ -319,9 +319,7 @@ func TestFeishuTodoReminderRetryAuthority(t *testing.T) {
 					s.larkModule().Book(context.Background(), func(b assistantwire.ChatBook) {
 						b.SetCompanions([]CompanionBot{{Kind: CompanionNotify, Name: "Synthetic", AppID: "cli_synthetic"}})
 					})
-					s.companions.mu.Lock()
-					s.companions.polled = time.Now()
-					s.companions.mu.Unlock()
+					s.boardProbe(t).NoticesPolled()
 				}
 				f.answerAppBlocking(AppFeishu, FeishuPost, func(raw json.RawMessage) (any, error) {
 					n, mid := capture.record(raw, change != "route refusal")
@@ -364,9 +362,7 @@ func TestFeishuTodoReminderRetryAuthority(t *testing.T) {
 				}
 				s.feishuTodoReminder("server", "m1", todo.Title, todo.Notes, todo)
 				posts, _ := capture.snapshot()
-				s.companions.mu.Lock()
-				notices := len(s.companions.list)
-				s.companions.mu.Unlock()
+				notices, _ := s.boardProbe(t).NoticesState()
 				switch change {
 				case "owner", "generation", "route refusal":
 					if len(posts) != 1 {

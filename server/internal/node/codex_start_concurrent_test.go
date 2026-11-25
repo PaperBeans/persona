@@ -15,6 +15,73 @@ import (
 	"github.com/nwverse/persona/server/internal/screen"
 )
 
+func TestCodexStartKeepsRolloutHome(t *testing.T) {
+	const rawID = "aaaaaaaa-0000-4000-8000-000000000001"
+	const prompt = "check the project"
+	for _, tc := range []struct {
+		name      string
+		alternate bool
+		paneKnown bool
+		lateHome  bool
+	}{
+		{name: "default"},
+		{name: "alternate, pane home unknown", alternate: true},
+		{name: "alternate, pane home known", alternate: true, paneKnown: true},
+		{name: "alternate discovered during start", alternate: true, lateHome: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n, f := stalledCodexNode(t)
+			codexStartWait = time.Second
+			n.codices = newCodexRegistry()
+			n.configureCodex(proto.CodexConfig{})
+			cwd := filepath.Join(n.home, "proj")
+			root := n.home
+			if tc.alternate {
+				root = t.TempDir()
+				// An independent Codex may have imported the same native thread ID.
+				otherPrompt := "another conversation"
+				if tc.paneKnown {
+					otherPrompt = prompt
+				}
+				writeThread(t, n.home, rawID, cwd, otherPrompt)
+			}
+			home := canonicalCodexHome(filepath.Join(root, ".codex"), n.home)
+			writeThread(t, root, rawID, cwd, prompt)
+			discover := func() {
+				n.configureCodex(proto.CodexConfig{Homes: []string{home}})
+				if tc.paneKnown {
+					n.codices.mu.Lock()
+					n.codices.byPane = map[string]string{"w1:p2": home}
+					n.codices.mu.Unlock()
+				}
+			}
+			if tc.lateHome {
+				var once sync.Once
+				f.after(func(c herdrCall) {
+					if c.Method == "pane.read" && c.Params["lines"] == float64(screen.DialogLines) {
+						once.Do(discover) // after the first unsuccessful rollout lookup
+					}
+				})
+			} else {
+				discover()
+			}
+
+			s, err := n.startCodex(t.Context(), n.defaultHost().(host.Launcher), cwd, "codex", []string{"codex"}, modelExecution{}, prompt, "w1", "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := codexSourceID(home, rawID, n.codexInventory().LegacyHome)
+			if s.SessionID != want || n.panes["w1:p2"] != want {
+				t.Fatalf("start returned %q, bound %q, want %q", s.SessionID, n.panes["w1:p2"], want)
+			}
+			gotHome, thread, ok := n.codexThread(s.SessionID)
+			if !ok || gotHome != home || thread != rawID {
+				t.Fatalf("start routes to (%q, %q), want (%q, %q)", gotHome, thread, home, rawID)
+			}
+		})
+	}
+}
+
 // Both requests must reach their own thread wait before either is released. A lock spanning startCodex would
 // prevent the second request from reaching this barrier until the first timed out or was cancelled.
 func TestCodexStartsInSameDirectoryRunConcurrently(t *testing.T) {
@@ -157,9 +224,7 @@ func TestCodexSamePromptStartsClaimDistinctThreads(t *testing.T) {
 
 	firstID := "aaaaaaaa-0000-4000-8000-000000000001"
 	writeThread(t, n.home, firstID, cwd, prompt)
-	rolloutCaches.Lock()
-	cacheFor(n.codexHome()).at = time.Time{} // as for the second: the cache would hide it for up to its 5 s, the wait's whole bound
-	rolloutCaches.Unlock()
+	expireRollouts(n.codexHome(), false) // as for the second: the cache would hide it for up to its 5 s, the wait's whole bound
 	var first string
 	select {
 	case first = <-ids:
@@ -177,9 +242,7 @@ func TestCodexSamePromptStartsClaimDistinctThreads(t *testing.T) {
 	}
 	secondID := "bbbbbbbb-0000-4000-8000-000000000002"
 	writeThread(t, n.home, secondID, cwd, prompt)
-	rolloutCaches.Lock()
-	cacheFor(n.codexHome()).at = time.Time{} // make the just-published second rollout visible to the next poll
-	rolloutCaches.Unlock()
+	expireRollouts(n.codexHome(), false) // make the just-published second rollout visible to the next poll
 	var second string
 	select {
 	case second = <-ids:

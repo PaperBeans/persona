@@ -248,7 +248,7 @@ func (s core) nudgeCard(ctx context.Context, id, owner string, kind nudgeKind) {
 	b.mu.Unlock()
 	err := s.botNudge(ctx, c, ix, owner, kind)
 	if err == nil {
-		s.h.BoardChanged() // its line on the waiting-for-you board says it was nudged
+		s.boardChanged() // its line on the waiting-for-you board says it was nudged
 		return
 	}
 	s.logf("bots: nudge under card %s: %v", id, err)

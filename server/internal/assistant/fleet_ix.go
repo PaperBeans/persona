@@ -271,7 +271,13 @@ func (s *Service) nodeInteraction(ctx context.Context, ix proto.Interaction) (pr
 		}
 	}
 	inAssistant := s.ixInAssistant(ctx, ix)
-	ix = nodeCard(ix, s.fleetStore() != nil, s.ixPolicy(ctx, ix).ConfirmOutbound, inAssistant)
+	inboxWholeBash := s.isInboxWholeBashAlways(ctx, ix)
+	if inboxWholeBash {
+		ix.AlwaysKeys = nil
+	}
+	confirms := s.ixPolicy(ctx, ix).ConfirmOutbound || inboxWholeBash ||
+		(ix.ToolName == "Bash" && len(ix.AlwaysKeys) == 0 && s.isInboxOrigin(ctx, ix.MachineID, ix.SessionID, false))
+	ix = nodeCard(ix, s.fleetStore() != nil, confirms, inAssistant)
 	if ix.Kind == proto.IxPermission {
 		l := s.lang(ctx)
 		ix.ToolTitle = personaToolTitle(l, ix.ToolName, ix.ToolInput)
@@ -351,6 +357,12 @@ func (s *Service) waitInteractionReady(ctx context.Context, ix proto.Interaction
 		restartPrepared := false
 		s.fleet.mu.Lock()
 		if p := s.fleet.interactions[ix.ID]; p != nil && p.local == nil {
+			if !p.claimed && len(p.ix.AlwaysKeys) > 0 && len(ix.AlwaysKeys) == 0 && ix.AlwaysHonored != nil && !*ix.AlwaysHonored {
+				// Reclaiming a resumable card after origin registration or a manager upgrade must not
+				// retain a previously stripped/disallowed Always option (#15267).
+				p.ix.AlwaysKeys = nil
+				p.ix.AlwaysHonored = ix.AlwaysHonored
+			}
 			if p.prepared != nil {
 				// The reconnecting hook is now the caller whose lifetime governs the
 				// initial wait. The disconnected context must not expire a card its
@@ -1452,10 +1464,46 @@ func alwaysCard(ix proto.Interaction) bool {
 		len(ix.AlwaysKeys) <= maxAlwaysKeys && len(ix.Fields) == 0
 }
 
+type interactionOriginKey struct{}
+
+func withInteractionOrigin(ctx context.Context, origin string) context.Context {
+	return context.WithValue(ctx, interactionOriginKey{}, origin)
+}
+
+func interactionOrigin(ctx context.Context) string {
+	origin, _ := ctx.Value(interactionOriginKey{}).(string)
+	return origin
+}
+
+// isInboxOrigin checks the node's attested interaction.create origin hint first (covering the
+// first-turn window before Start records the origin and transient store errors), then the
+// manager's origin book. When failClosed is true, an unreadable origin book is treated as Inbox.
+func (s *Service) isInboxOrigin(ctx context.Context, machine, session string, failClosed bool) bool {
+	if interactionOrigin(ctx) == OriginInbox {
+		return true
+	}
+	b := &s.origins
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !s.originsLocked(ctx) {
+		return failClosed
+	}
+	o := b.m[session]
+	return o != nil && o.Origin == OriginInbox && (o.MachineID == "" || s.sameMachine(machine, o.MachineID))
+}
+
+// isInboxWholeBashAlways reports whether ix asks for a whole-tool "tool:Bash" session grant on an
+// Inbox handling conversation. Inbox turns process untrusted external messages, so a single Always
+// click on a benign read command must never auto-approve arbitrary later shell mutations (#15267).
+func (s *Service) isInboxWholeBashAlways(ctx context.Context, ix proto.Interaction) bool {
+	return slices.Contains(ix.AlwaysKeys, "tool:Bash") &&
+		s.isInboxOrigin(ctx, ix.MachineID, ix.SessionID, true)
+}
+
 // alwaysAllowed: every key ix names was granted with "Always allow in this session" in its conversation.
 func (s *Service) alwaysAllowed(ctx context.Context, ix proto.Interaction) (proto.Resolution, bool) {
 	st := s.fleetStore()
-	if st == nil || !alwaysCard(ix) {
+	if st == nil || !alwaysCard(ix) || s.isInboxWholeBashAlways(ctx, ix) {
 		return proto.Resolution{}, false
 	}
 	ok, err := st.AlwaysAllowed(ctx, ix.SessionID, ix.AlwaysKeys)
@@ -1480,6 +1528,10 @@ func (s *Service) keepAlways(ix proto.Interaction, r proto.Resolution) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), historyTimeout)
+	if s.isInboxWholeBashAlways(ctx, ix) {
+		cancel()
+		return
+	}
 	err := st.AllowAlways(ctx, ix.SessionID, ix.ToolName, ix.AlwaysKeys)
 	cancel()
 	if err != nil {
@@ -1603,6 +1655,13 @@ func (s *Service) restoreInteractions(ctx context.Context) {
 	}
 	for _, id := range cancelled {
 		s.hub.Tell(assistantwire.EventFleetResolved, assistantwire.FleetResolved{ID: id})
+	}
+	for i := range resumable {
+		if s.isInboxWholeBashAlways(ctx, resumable[i]) {
+			resumable[i].AlwaysKeys = nil
+			notKept := false
+			resumable[i].AlwaysHonored = &notKept
+		}
 	}
 	var back []proto.Interaction
 	s.fleet.mu.Lock()

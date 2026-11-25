@@ -521,7 +521,6 @@ var Routes = []string{
 	// Its photos (meeting_photos.go there, "Phase 3: photos").
 	"POST /api/v1/recordings/{id}/photos",
 	"GET /api/v1/recordings/{id}/photos",
-	"GET /api/v1/recordings/{id}/photos/{n}",
 	"DELETE /api/v1/recordings/{id}/photos/{n}",
 	// Hub transcription's gap uploads (meeting_transcribe.go there, "Phase 5: hub transcription"); its audio socket is
 	// one of SocketRoutes.

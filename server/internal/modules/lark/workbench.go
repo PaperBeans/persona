@@ -44,7 +44,7 @@ func (s core) workbenchCommand(ctx context.Context, f assistantwire.FeishuFeatur
 	}
 	switch cmd {
 	case "/home", "/工作台", "/主页": // i18n-ignore: command aliases typed by the user; the catalogs describe them in /help
-		s.h.SummonWorkbench(ctx)
+		s.summonWorkbench(ctx)
 	case "/today", "/今日", "/今天": // i18n-ignore: command aliases typed by the user
 		reply(s.todayCard(ctx))
 	case "/inbox", "/收件箱": // i18n-ignore: command aliases typed by the user
@@ -83,7 +83,7 @@ func (s core) workbenchNav(ctx context.Context, a *botcard.CardAction) *botcard.
 		go func() {
 			cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			s.h.WorkbenchRefresh(cctx)
+			s.workbenchRefresh(cctx)
 		}()
 		return toast("success", wbT(l, "refreshed"))
 	case "ix":
@@ -91,7 +91,7 @@ func (s core) workbenchNav(ctx context.Context, a *botcard.CardAction) *botcard.
 		go func() {
 			cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			s.h.WorkbenchBringCard(cctx, id)
+			s.workbenchBringCard(cctx, id)
 		}()
 		return toast("info", wbT(l, "opening"))
 	case "today", "inbox", "tasks", "home", "list":
@@ -123,7 +123,7 @@ func (s core) workbenchNav(ctx context.Context, a *botcard.CardAction) *botcard.
 		case "inbox":
 			post(s.inboxCard(cctx))
 		case "home":
-			s.h.SummonWorkbench(cctx)
+			s.summonWorkbench(cctx)
 		}
 	}()
 	return toast("info", wbT(l, "opening"))
@@ -140,7 +140,7 @@ func wbNavButton(label, style, to string) botcard.Button {
 func (s core) homeCard(ctx context.Context, f assistantwire.FeishuFeatures) (card *botcard.Card, fallback, said string) {
 	l, web := s.botLang(ctx), s.h.WebBase(ctx)
 	loc := s.h.Location(ctx)
-	now := s.h.StandingNow()
+	now := s.t.board.clock()
 	c, busy := s.workbenchCount(ctx, now)
 	rows := s.h.WorkbenchBoard(ctx, l, web, now)
 	title := wbT(l, "home_title")
@@ -209,7 +209,7 @@ func (s core) homeCard(ctx context.Context, f assistantwire.FeishuFeatures) (car
 	fb.WriteString(strings.Join(day, "\n"))
 
 	// One row: the Inbox (filled when something there needs the owner), the tasks, and a "more" menu with the rest.
-	companions := s.h.Companions(ctx)
+	companions := s.workbenchCompanions(ctx)
 	var bs []botcard.Button
 	inboxBot := slices.IndexFunc(companions, func(b assistantwire.WorkbenchCompanion) bool { return b.Inbox })
 	if inboxBot < 0 {
@@ -297,7 +297,7 @@ func wbSource(l i18n.Lang, it assistantwire.WorkbenchItem) string {
 // todayCard is the day at a glance: the main conversation's "Today" (the one the app shows), plus what waits.
 func (s core) todayCard(ctx context.Context) (*botcard.Card, string) {
 	l, loc := s.botLang(ctx), s.h.Location(ctx)
-	now := s.h.StandingNow().In(loc)
+	now := s.t.board.clock().In(loc)
 	title := wbT(l, "today_title", i18n.Args{"date": now.Format(wbT(l, "date_layout")), "weekday": wbT(l, "weekday_"+now.Weekday().String())})
 	card := botcard.NewCard(title, botcard.Blue, title)
 	var body todayBody
@@ -418,7 +418,7 @@ func (s core) inboxCard(ctx context.Context) (*botcard.Card, string) {
 		if g := wbGist(it); g != "" {
 			line += "\n" + botcard.EscapeMarkdown(clip(g, 120))
 		}
-		line += "\n<font color='grey'>" + botcard.EscapeMarkdown(wbSource(l, it)) + " · " + wbClock(s.h.Location(ctx), it.UpdatedAt, s.h.StandingNow()) + "</font>"
+		line += "\n<font color='grey'>" + botcard.EscapeMarkdown(wbSource(l, it)) + " · " + wbClock(s.h.Location(ctx), it.UpdatedAt, s.t.board.clock()) + "</font>"
 		if i > 0 {
 			card.HR()
 		}

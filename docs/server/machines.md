@@ -181,6 +181,26 @@ Each process prints one line every 10 seconds, much cheaper than starting `vm_st
 
 Windows starts no processes: also `CGO_ENABLED=0`, but these Win32 calls work in pure Go (`golang.org/x/sys/windows`; `GetSystemTimes` and `GlobalMemoryStatusEx` directly through kernel32).
 
+### What load counts
+
+Load is the kernel's 1-minute load average: the number of threads running or waiting for a CPU, averaged over a minute. Linux also counts
+threads in uninterruptible sleep (usually waiting for the disk); macOS counts only runnable threads. It is not a percentage and is not divided
+by the cores, so it is read **per core** (load ÷ core count): at 1 per core every core has a thread, above 1 some threads wait.
+
+- **One figure everywhere** (#12519): the apps and the web show load per core with one decimal and the same words in each language,
+  "1.4 per core" (`MetricFormat.loadPerCore` and `MetricFormat.perCore`; web `perCoreText`, `perCoreLabel`). The card's line
+  under CPU says "Load 1.4 per core" (the raw value only while the core count is unknown); the machine page's Load tile keeps the raw value
+  ("25.4") with the per-core figure under it, and its chart keeps the raw value with a dashed line at the core count. The alert, the Live
+  Activity and the widgets go by the same per-core figure ("Alerts" below; `docs/apple/live-activity.md`, "Usage (tokens / TPM / load)").
+- **Said on the screen**: one sentence under the Machines cards, under a machine's charts (iOS and web) and in the web's load alert sheet
+  (`MachineCard.loadDefinition`, web `lib-machine-alerts.load_definition`): "Load is the number of threads running or waiting for a CPU,
+  averaged over a minute (Linux also counts threads waiting for the disk). It isn't a percentage: above 1 per core, some threads are waiting.
+  On a Mac, work at background priority may run on only some of the cores, so threads can wait while CPU stays low."
+- **Why load can be high while CPU is not**: CPU is the whole machine's busy share over the last 10 seconds, load counts waiting threads. On
+  a Mac a process tree started under a launchd job with `ProcessType=Background` runs at background priority and can be kept to one cluster
+  of cores, so its threads queue there while the other cores idle and the CPU average stays moderate (the node's own check for its plist is
+  `launchd-process-type`, "Doctor: what this computer can do").
+
 ### Which network interfaces count
 
 Count only traffic actually leaving the machine. Virtual interfaces are either local (lo, containers) or counted again on underlying physical interfaces (tunnels, proxies, bridges):
@@ -339,23 +359,23 @@ removing the **Machine Monitoring** name and entry point.
 
 - **Entry points** (all open `MachinesView`): **Machines** in the new shell drawer; **Settings › Machines**; **Machines** at the bottom of the Agents list's top-left menu (`MachineListRoute`, opens in the right column on iPad);
   Mac sidebar **Machines** (⌘5). Top-right ⓘ on Projects / machine projects opens machine detail (`MachineDetailRoute`).
-- **Machines page** (`MachinesView`): top line "N/M online · K under heavy load · J Agents need you". Under it **Today's Tokens** (`TodayTokensCard`, #4973): the total, every token per minute now,
+- **Machines page** (`MachinesView`): top line "N/M online · K with high readings · J Agents need you" (K counts machines with any alert, CPU, memory, disk or load, so it never says "load"; #12519). Under it **Today's Tokens** (`TodayTokensCard`, #4973): the total, every token per minute now,
   the cache hit rate, and each computer's share as a bar in shades of the text ink (not the kinds' colors). One card per machine (`MachineCard`): OS icon, name, OS · cores · memory (one line),
   online / offline (last online time and SSH error when offline); alert tags ("Alerts" below); Agent counts **Needs you / Working / Idle** (Idle = Unread + Seen + Unknown,
-  live sessions only, excluding assistant chats, matching Agents list); current CPU / memory / network values and past-hour sparklines, and **Tokens** (per minute now, today's total, the past hour) when its node reports usage; **Redeploy** when personad and hub aren't from the same deployment.
-  iPad / Mac cards form multiple columns according to width. Tap to open machine detail.
+  live sessions only, excluding assistant chats, matching Agents list); current CPU / memory / network values and past-hour sparklines, with load per core under CPU ("Load 1.4 per core", "What load counts" above), and **Tokens** (per minute now, today's total, the past hour) when its node reports usage; **Redeploy** when personad and hub aren't from the same deployment.
+  iPad / Mac cards form multiple columns according to width. Tap to open machine detail. Under the cards, the footnote says how often the numbers update and what load counts.
   Web deployment entry depends on `can_deploy`: old Link nodes prompt a one-time local upgrade; supported nodes show waiting for idle / transfer / restart / version confirmation; details in [node-update.md](../operations/node-update.md).
 - **Ordering** (`MachineConcern`): attention-needed first: offline → severe alerts → caution alerts → Agents needing you → version mismatch; within each category and for remaining machines, hub config order.
   Reorder only when something shown on the card changes, with animation.
 - **Machine detail** (`MachineDetailView`): everything on one page, common actions first. Same card at top (without metrics or the name, the title has it); when offline, next comes **Hub connects through SSH …** and **Reconnect**.
-  Then **Agents**: Needs you first, Working next, first 5 shown, **Show all N** for the rest; tap to open chat. Next **Engine** (which engine's sessions this machine shows; tap to choose, `EngineSelectionView`). Then **Token Usage** (`MachineUsageSection`, see "Token usage charts" below). Then **Monitoring**: current CPU / memory / network / load / disk / swap,
-  1 hour / 6 hours / 24 hours selector, four charts for CPU, memory, network (download + upload), load (dashed core-count line); Linux also has per-core bars.
+  Then **Agents**: Needs you first, Working next, first 5 shown, **Show all N** for the rest; tap to open chat. Next **Engine** (which engine's sessions this machine shows; tap to choose, `EngineSelectionView`). Then **Token Usage** (`MachineUsageSection`, see "Token usage charts" below). Then **Monitoring**: current CPU / memory / network / load (the raw value, load per core under it) / disk / swap,
+  1 hour / 6 hours / 24 hours selector, four charts for CPU, memory, network (download + upload), load (dashed core-count line) with what load counts under them; Linux also has per-core bars.
   Hold and drag any chart to inspect a time; all four share the selected timestamp, showing its value and time in the header. Then **What This Computer Can Do** (two rows when everything works:
   the summary and **Show All Checks**; the features show when something needs attention or after **Show All Checks**), the computer and browser sections, **System** (OS, kernel, architecture, model, processor,
   cores, memory, hostname, boot time and uptime, herdr / Claude Code / node versions), **Launchers**, and, when online, connection method and **Reconnect** last.
 - **Updates**: machine online state and Agents update live through hub pushes; numbers poll only while page is visible and App foreground: Machines every 10 seconds, detail's 1-hour range every 10 seconds, other ranges every minute;
   stops in background (`task(id: scenePhase)`). Pull to refresh (Mac ⌘R, `macRefreshes`) also reloads the machine list.
-- **Alerts** (`MetricAlert`): CPU ≥ 75% caution, ≥ 90% severe; memory ≥ 80% / 90%; disk ≥ 80% / 90%; load ≥ 1 / 2 times core count. Cards get a status-colored border,
+- **Alerts** (`MetricAlert`): CPU ≥ 75% caution, ≥ 90% severe; memory ≥ 80% / 90%; disk ≥ 80% / 90%; load per core ≥ 1 / 2 (the load average over the core count, "What load counts" above). Cards get a status-colored border,
   and tags use icon (status color) + text (body color), not color alone.
 - With old hubs lacking these endpoints (404), machine cards omit metrics (Agent counts remain), and detail monitoring says **Deploy newer hub and node versions to see this**; old nodes sending no samples show **—**.
 

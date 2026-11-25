@@ -390,16 +390,11 @@ func (n *Node) newCodexThreads(w *codexWait, held codexHeld) []newThread {
 	if r, err := filepath.EvalSymlinks(w.cwd); err == nil {
 		resolved = r
 	}
-	homes := []string{n.codexHome()}
-	for _, h := range n.codexInventory().Homes {
-		if h != homes[0] {
-			homes = append(homes, h)
-		}
-	}
 	var out []newThread
 	seen := map[string]bool{}
-	for _, home := range homes {
-		for _, r := range rollouts(home) {
+	scanBy := time.Now().Add(codexHomeListWait)
+	for _, home := range n.codexRolloutHomes(w.pane) {
+		for _, r := range n.firstMessageRollouts(home, scanBy) {
 			if r.sub || (r.cwd != w.cwd && r.cwd != resolved) || r.mtime.Before(w.began.Add(-time.Second)) {
 				continue
 			}
@@ -453,7 +448,7 @@ func (n *Node) codexWaitThread(w *codexWait, held codexHeld) (string, string) {
 // the pane's Codex home has that whole name: what a /resume in that Codex shows, which on the shared app-server no
 // process of the pane's holds (rule 1) and no new thread begins (rules 3, 4). A name cut short ("…") or shared by two
 // threads names none.
-func (n *Node) codexTitleThread(a host.Agent) string {
+func (n *Node) codexTitleThread(home string, a host.Agent) string {
 	i := strings.LastIndex(a.Title, " | ")
 	if i <= 0 {
 		return ""
@@ -464,7 +459,6 @@ func (n *Node) codexTitleThread(a host.Agent) string {
 	if name == "" || strings.HasSuffix(name, "...") || strings.HasSuffix(name, "…") {
 		return ""
 	}
-	home := n.codexPaneHome(a.PaneID)
 	var found []string
 	for _, id := range threadsNamed(home, func(t string) bool { return t == name }) {
 		if p := rolloutPath(home, id); p != "" && metaOf(home, p).sub {

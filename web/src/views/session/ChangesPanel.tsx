@@ -13,6 +13,8 @@ import { cx, Spinner } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { PanelHeader } from "../../ui/PanelHeader";
 import { t } from "../../i18n";
+import { useDiffMode } from "../../lib/code-view";
+import { useMedia } from "../../ui/media-query";
 import { DiffBlocks, diffStats, editDiffs } from "../chat/ActionRow";
 import { useSharedTranscript } from "../chat/transcript-share";
 import type { Transcript } from "../chat/useTranscript";
@@ -127,6 +129,9 @@ function ChangesPanelView({ mid, sid, opened, onClose, tr }: ChangesPanelProps &
   const turnId = called?.id ?? (call ? undefined : opened.turn ?? all.findLast((segment) => turnChanges(exchangeSteps(segment), cwd))?.id ?? all.at(-1)?.id);
   const exchange = turnId ? all.find((segment) => segment.id === turnId) : undefined;
   const [scope, setScope] = useState<Scope>("exchange");
+  const [diffMode, setDiffMode] = useDiffMode();
+  const roomy = useMedia("(min-width: 1024px)");
+  const split = diffMode === "split" && roomy;
   const shown = scope === "session" ? all : resolvingCall ? candidates : exchange ? [exchange] : [];
   const edits = useMemo(() => {
     const out: ChangeEdit[] = [];
@@ -402,6 +407,22 @@ function ChangesPanelView({ mid, sid, opened, onClose, tr }: ChangesPanelProps &
             {t("session-changes.new_changes", { count: pending.count })}
           </button>
         )}
+        {roomy && (
+          <div role="group" aria-label={t("extensions-codeviews.unified")} className={cx("flex rounded-control bg-field p-0.5", !pending.count && "ml-auto")}>
+            {(["unified", "split"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                data-change-diff-mode={m}
+                aria-pressed={diffMode === m}
+                onClick={() => setDiffMode(m)}
+                className={cx("min-h-7 rounded-[6px] px-2 text-label whitespace-nowrap", diffMode === m ? "bg-surface text-ink shadow-btn" : "text-ink-3 hover:text-ink")}
+              >
+                {m === "unified" ? t("extensions-codeviews.unified") : t("extensions-codeviews.split")}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       {scope === "session" && (tr.hasMore || tr.loadingEarlier) && (
         <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5 text-label text-ink-3" data-history-loading>
@@ -434,7 +455,7 @@ function ChangesPanelView({ mid, sid, opened, onClose, tr }: ChangesPanelProps &
           )}
           {selectedEdits.map((edit) => (
             <section key={edit.id} data-change-id={edit.id} data-change-call={edit.call} className="mb-2">
-              <DiffBlocks diffs={edit.diffs} />
+              <DiffBlocks diffs={edit.diffs} mode={split ? "split" : "unified"} />
             </section>
           ))}
           {!foldLoading && !selectedEdits.length && (

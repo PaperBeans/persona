@@ -14,9 +14,9 @@ import (
 // expireRollouts makes the next rollouts call list again as if 5 seconds (recent days) or a minute (older days too)
 // had passed.
 func expireRollouts(home string, older bool) {
-	rolloutCaches.Lock()
-	defer rolloutCaches.Unlock()
-	c := cacheFor(home)
+	c := rolloutCacheFor(home)
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.at = time.Time{}
 	if older {
 		c.olderAt = time.Time{}
@@ -381,11 +381,12 @@ func TestRolloutPathMissesNotAskedAboutAreLetGo(t *testing.T) {
 	const asked, forgotten = "22222222-2222-2222-2222-222222222222", "33333333-3333-3333-3333-333333333333"
 	rolloutPath(codex, asked)
 	rolloutPath(codex, forgotten)
+	cache := rolloutCacheFor(codex)
 	misses := func() []string {
-		rolloutCaches.Lock()
-		defer rolloutCaches.Unlock()
+		cache.mu.Lock()
+		defer cache.mu.Unlock()
 		var out []string
-		for id := range cacheFor(codex).misses {
+		for id := range cache.misses {
 			out = append(out, id)
 		}
 		slices.Sort(out)
@@ -398,11 +399,11 @@ func TestRolloutPathMissesNotAskedAboutAreLetGo(t *testing.T) {
 	if got := misses(); len(got) != 2 {
 		t.Fatalf("misses after two listings in a row = %v, want both", got)
 	}
-	rolloutCaches.Lock()
-	m := cacheFor(codex).misses[forgotten]
+	cache.mu.Lock()
+	m := cache.misses[forgotten]
 	m.asked = m.asked.Add(-missKeptFor - time.Minute)
-	cacheFor(codex).misses[forgotten] = m
-	rolloutCaches.Unlock()
+	cache.misses[forgotten] = m
+	cache.mu.Unlock()
 	expireRollouts(codex, true)
 	rollouts(codex)
 	if got := misses(); len(got) != 1 || got[0] != asked {
@@ -587,9 +588,10 @@ func TestRolloutPathNamesListedDuringAChangeAreNotKept(t *testing.T) {
 	if p := rolloutPath(codex, id); p != "" {
 		t.Fatalf("still no rollout: %q", p)
 	}
-	rolloutCaches.Lock()
-	kept := cacheFor(codex).recentStamp
-	rolloutCaches.Unlock()
+	cache := rolloutCacheFor(codex)
+	cache.mu.Lock()
+	kept := cache.recentStamp
+	cache.mu.Unlock()
 	if kept != nil {
 		t.Fatal("names listed while a directory changed were kept")
 	}
@@ -627,19 +629,20 @@ func TestRolloutPathMissAskedAgainIsKept(t *testing.T) {
 	if p := rolloutPath(codex, id); p != "" {
 		t.Fatalf("no rollout: %q", p)
 	}
-	rolloutCaches.Lock()
-	m := cacheFor(codex).misses[id]
+	cache := rolloutCacheFor(codex)
+	cache.mu.Lock()
+	m := cache.misses[id]
 	m.asked = m.asked.Add(-missKeptFor - time.Minute)
-	cacheFor(codex).misses[id] = m
-	rolloutCaches.Unlock()
+	cache.misses[id] = m
+	cache.mu.Unlock()
 	if p := rolloutPath(codex, id); p != "" { // asked about again
 		t.Fatalf("no rollout: %q", p)
 	}
 	expireRollouts(codex, true)
 	rollouts(codex)
-	rolloutCaches.Lock()
-	_, kept := cacheFor(codex).misses[id]
-	rolloutCaches.Unlock()
+	cache.mu.Lock()
+	_, kept := cache.misses[id]
+	cache.mu.Unlock()
 	if !kept {
 		t.Fatal("a miss asked about again was let go")
 	}

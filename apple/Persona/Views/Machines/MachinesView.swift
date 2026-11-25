@@ -124,13 +124,22 @@ struct MachinesView: View {
                     // A hub without machines_add: computers are added in its admin page, as before.
                     EmptyStateView(symbol: Theme.Icon.machines, title: String(localized: "No machines yet"), message: String(localized: "Once the hub is connected, the hub machine and the computers it connects to appear here."))
                 } else if !unmonitored {
-                    Text("CPU, memory and network update every 10 seconds. Charts show the last hour.")
-                        .font(Theme.Font.label).foregroundStyle(.secondary)
-                        .padding(.horizontal, Theme.Space.xs)
+                    // What load counts, under the cards that show it (#12519): the number alone read as a wrong one.
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        Text("CPU, memory and network update every 10 seconds. Charts show the last hour.")
+                        Text(MachineCard.loadDefinition)
+                    }
+                    .font(Theme.Font.label).foregroundStyle(.secondary)
+                    .padding(.horizontal, Theme.Space.xs)
+                    .accessibilityIdentifier("machines.footnote")
                 }
             }
             .padding(Theme.Space.l)
         }
+        #if DEBUG
+        // `-openMachinesFootnote YES`: the page opens at its foot, where it says what load counts (screenshots, #12519).
+        .defaultScrollAnchor(UserDefaults.standard.bool(forKey: "openMachinesFootnote") ? .bottom : nil)
+        #endif
         .themedGroupedPage()
         .navigationDestination(item: $usageMap) { UsageMapView(route: $0) }
         .navigationTitle("Machines")
@@ -234,6 +243,7 @@ struct MachinesView: View {
             if let worst = alerts.max() {
                 HStack(spacing: Theme.Space.xs) {
                     ThemedIcon(Theme.Icon.errorFilled).foregroundStyle(MetricColor.level(worst))
+                    // Machines with any alert, CPU, memory, disk or load, so it says "high readings", never "load" (#12519).
                     Text("\(alerts.count) machines running high")
                 }
             }
@@ -379,6 +389,22 @@ struct MachineCard: View {
         }
     }
 
+    /// What load counts, in one sentence wherever load is shown: the footnote of Machines and of a machine's charts
+    /// (docs/server/machines.md, "What load counts"; the web's `lib-machine-alerts.load_definition`).
+    static var loadDefinition: String {
+        String(localized: "Load is the number of threads running or waiting for a CPU, averaged over a minute (Linux also counts threads waiting for the disk). It isn't a percentage: above 1 per core, some threads are waiting. On a Mac, work at background priority may run on only some of the cores, so threads can wait while CPU stays low.")
+    }
+
+    /// The line under CPU: load per core ("Load 1.4 per core"), the figure the alerts go by; the raw load average
+    /// ("Load 25.4") only while the core count is unknown.
+    static func loadLine(_ s: MetricSample?, cores: Int?) -> String? {
+        guard let load = s?.load else { return nil }
+        if let perCore = MetricFormat.loadPerCore(load, cores: cores) {
+            return String(localized: "Load \(MetricFormat.perCore(perCore)) per core")
+        }
+        return String(localized: "Load \(MetricFormat.load(load))")
+    }
+
     /// "Ubuntu 24.04.1 LTS · 16 cores · 64.0 GB"; the host name when the machine never said what it runs.
     static func subtitle(_ m: Machine, system: MachineSystem?) -> String {
         guard let sys = system else { return m.hostname ?? m.sshHost ?? m.id }
@@ -421,7 +447,7 @@ struct MachineCard: View {
         let points = metrics?.points ?? []
         let end = Date.now
         let domain = end.addingTimeInterval(-3600)...end
-        MetricCell(title: "CPU", value: MetricFormat.percent(s?.cpu), detail: s?.load.map { String(localized: "Load \(MetricFormat.load($0))") },
+        MetricCell(title: "CPU", value: MetricFormat.percent(s?.cpu), detail: Self.loadLine(s, cores: (machine.system ?? metrics?.system)?.cores),
                    level: MetricLevel.of(s?.cpu, warn: 75, crit: 90)) {
             Sparkline(points: points, series: [ChartSeries(name: "CPU", color: MetricColor.cpu) { $0.cpu }], domain: domain, yMax: 100)
         }

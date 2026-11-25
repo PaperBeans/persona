@@ -435,16 +435,19 @@ struct ChildSpacesRow: View {
 }
 
 /// The ⋯ of a repository whose agents are in more than one space (By Repository): what applies to all of them. Equal while
-/// its unread agents are: the menu held open is not rebuilt by every push.
+/// its agents and its unread ones are: the menu held open is not rebuilt by every push.
 struct RepoMenuItems: View, Equatable {
     @Environment(AppModel.self) private var model
     nonisolated let unread: [SessionKey]
+    /// Every agent of the repository: Mark All as Seen marks the unread ones and lets the ones read during the visit and
+    /// held in place go with them (#12514).
+    nonisolated let all: [SessionKey]
 
-    nonisolated static func == (a: Self, b: Self) -> Bool { a.unread == b.unread }
+    nonisolated static func == (a: Self, b: Self) -> Bool { a.unread == b.unread && a.all == b.all }
 
     var body: some View {
         if !unread.isEmpty {
-            Button { model.markSeen(unread) } label: { Label(StateName.markAllSeen(unread.count), systemImage: Theme.Icon.success) }
+            Button { model.markSeen(all) } label: { Label(StateName.markAllSeen(unread.count), systemImage: Theme.Icon.success) }
         }
     }
 }

@@ -63,6 +63,9 @@ struct IslandPair {
     var number: Color = .white
     /// Unread's dot: a smaller symbol than the others.
     var dot = false
+    /// What VoiceOver says for the cell when the symbol and the number alone would read wrong: load's "1.1" beside the
+    /// CPU symbol is "Load 1.1 per core", not "CPU, 1.1" (#12519). Nil: the symbol and the number, as drawn.
+    var spoken: String?
 
     init?(_ cell: IslandCell) {
         switch cell {
@@ -72,17 +75,20 @@ struct IslandPair {
         case let .tpm(n): self.init(symbol: FleetSymbol.tpm, text: FleetText.short(n), tint: FleetPalette.coral)
         case let .tokens(n): self.init(symbol: FleetSymbol.tokens, text: FleetText.short(n), tint: FleetPalette.coral)
         case let .requests(n): self.init(symbol: FleetSymbol.requests, text: FleetText.short(n), tint: FleetPalette.coral)
-        case let .load(_, p): self.init(symbol: FleetSymbol.load, text: "\(p)%", tint: FleetPalette.coral)
+        // Load per core beside the CPU symbol ("1.1"), as Machines writes it: "110%" read as CPU use (#12519).
+        case let .load(_, p):
+            self.init(symbol: FleetSymbol.load, text: FleetText.perCore(percent: p), tint: FleetPalette.coral, spoken: FleetText.stat(cell))
         case .assistant, .timer, .empty: return nil
         }
     }
 
-    private init(symbol: String, text: String, tint: Color, number: Color = .white, dot: Bool = false) {
+    private init(symbol: String, text: String, tint: Color, number: Color = .white, dot: Bool = false, spoken: String? = nil) {
         self.symbol = symbol
         self.text = text
         self.tint = tint
         self.number = number
         self.dot = dot
+        self.spoken = spoken
     }
 }
 
@@ -153,12 +159,13 @@ struct IslandPairView: View {
             Image(systemName: pair.symbol)
                 .font(pair.dot ? .system(size: small ? IslandMetrics.smallDot : IslandMetrics.dot) : IslandMetrics.symbolFont(small: small))
                 .foregroundStyle(pair.tint)
+                .accessibilityHidden(pair.spoken != nil) // the spoken words say what the symbol shows
             IslandNumber(pair: pair, small: small)
         }
     }
 }
 
-/// The number, never shortened or shrunk.
+/// The number, never shortened or shrunk. VoiceOver reads the pair's words when it has them.
 struct IslandNumber: View {
     var pair: IslandPair
     var small: Bool
@@ -167,6 +174,7 @@ struct IslandNumber: View {
     var body: some View {
         Text(text ?? pair.text).font(IslandMetrics.numberFont(small: small)).monospacedDigit()
             .foregroundStyle(pair.number).lineLimit(1).fixedSize()
+            .accessibilityLabel(Text(verbatim: text ?? pair.spoken ?? pair.text))
     }
 }
 
@@ -298,5 +306,86 @@ private struct IslandCamera: View {
     var body: some View {
         Capsule().fill(FleetPalette.camera)
             .frame(width: IslandMetrics.previewCamera.width, height: IslandMetrics.previewCamera.height)
+    }
+}
+
+/// The numbers the device chose for its island (TPM, today's tokens, load, the assistant), right of the counts on the
+/// expanded island and the Lock Screen. Load in words ("Load 1.4 per core", a chosen machine's name for "Load") is about
+/// twice as wide as the percent it replaced (#12519) and, beside a second number, wider than the expanded island's
+/// corner: where the words don't fit whole, load is the compact island's CPU symbol and figure, its words still spoken
+/// (IslandFitTests.statsLineFitsTheExpandedCorner).
+struct FleetStatsLine: View {
+    var state: FleetState
+    var onDark = false
+
+    /// Between two numbers.
+    static let spacing: CGFloat = 8
+
+    static func count(_ s: FleetState) -> Int { [s.left, s.right].filter { $0 != .status && $0 != .none }.count }
+
+    var body: some View {
+        let cells = [state.left, state.right].filter { $0 != .status && $0 != .none }.map { IslandCell.cell($0, state, status: nil) }
+        ViewThatFits(in: .horizontal) {
+            row(cells, loadFigure: false)
+            row(cells, loadFigure: true)
+        }
+    }
+
+    private func row(_ cells: [IslandCell], loadFigure: Bool) -> some View {
+        HStack(spacing: Self.spacing) {
+            ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
+                if case let .timer(since) = cell {
+                    FleetTimer(since: since).font(.caption.weight(.semibold)).foregroundStyle(onDark ? FleetPalette.working : FleetPalette.workingText)
+                        .frame(maxWidth: 52, alignment: .trailing)
+                } else if loadFigure, case let .load(_, percent) = cell {
+                    FleetLoadFigure(percent: percent, spoken: FleetText.stat(cell), onDark: onDark)
+                } else if let text = FleetText.stat(cell) {
+                    FleetStatText(text: text, onDark: onDark)
+                }
+            }
+        }
+    }
+}
+
+/// One number of the stats line in words ("42M today").
+struct FleetStatText: View {
+    var text: String
+    var onDark = false
+
+    var body: some View {
+        Text(text).font(.caption.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+            .foregroundStyle(Self.ink(onDark))
+    }
+
+    static func ink(_ onDark: Bool) -> Color { onDark ? Color.white.opacity(0.75) : Color.secondary }
+}
+
+/// Load where its words don't fit the stats line: the compact island's CPU symbol and the figure per core ("1.4"),
+/// read as the words ("Load 1.4 per core").
+struct FleetLoadFigure: View {
+    var percent: Int
+    var spoken: String?
+    var onDark = false
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Image(systemName: FleetSymbol.load)
+            Text(FleetText.perCore(percent: percent)).monospacedDigit()
+        }
+        .font(.caption.weight(.semibold)).lineLimit(1)
+        .foregroundStyle(FleetStatText.ink(onDark))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: spoken ?? FleetText.perCore(percent: percent)))
+    }
+}
+
+/// How long the longest turn has run, on the stats line and the rows.
+struct FleetTimer: View {
+    var since: Date
+    var body: some View {
+        Text(timerInterval: since...Date.distantFuture, countsDown: false, showsHours: true)
+            .monospacedDigit()
+            .multilineTextAlignment(.trailing)
+            .lineLimit(1)
     }
 }

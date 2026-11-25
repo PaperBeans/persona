@@ -269,7 +269,7 @@ func (n *Node) findOwnTranscriptPath(id string, pass *codexListPass) string {
 			found = n.traexPath(id)
 		}
 		if found == "" {
-			found = n.codexPath(id)
+			found = n.codexPathIn(id, pass)
 		}
 		if found == "" && kind != traexAgent {
 			found = n.traexPath(id)
@@ -285,7 +285,7 @@ func (n *Node) findOwnTranscriptPath(id string, pass *codexListPass) string {
 	}
 	matches = newestFirst(matches)
 	if len(matches) == 0 {
-		if p := n.codexPath(id); p != "" {
+		if p := n.codexPathIn(id, pass); p != "" {
 			matches = []string{p}
 		} else if p := n.traexPath(id); p != "" {
 			matches = []string{p}

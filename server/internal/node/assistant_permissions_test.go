@@ -16,6 +16,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 func TestAssistantAlwaysRechecksHub(t *testing.T) {
@@ -202,4 +203,153 @@ func TestResetAssistantPermissionsKillsUncooperativeChild(t *testing.T) {
 	if _, err := reader.ReadByte(); err != io.EOF {
 		t.Fatalf("cached-rule child survived reset: %v", err)
 	}
+}
+
+func TestInboxBashOmitsAlwaysKeys(t *testing.T) {
+	t.Run("live inbox session omits tool:Bash always_keys", func(t *testing.T) {
+		n := codexTestNode(t)
+		fh := withFakeHub(t, n)
+		const session = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		cwd := filepath.Join(t.TempDir(), ".persona", "assistant")
+		n.procs[session] = &assistantProc{id: session, agent: "claude", origin: originInbox, cwd: cwd, exited: make(chan struct{})}
+		yes := true
+		fh.answer = func(proto.Interaction) proto.Resolution { return proto.Resolution{Allow: &yes, Always: true} }
+
+		raw, _ := json.Marshal(hookInput{HookEventName: "PermissionRequest", SessionID: session, Cwd: cwd,
+			ToolName: "Bash", ToolUseID: "bash-1", ToolInput: json.RawMessage(`{"command":"ls /tmp"}`)})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := n.handleHook(ctx, sockRequest{Input: raw, Attempt: "a1"}); err != nil {
+			t.Fatal(err)
+		}
+		cards := fh.interactions()
+		if len(cards) != 1 || len(cards[0].AlwaysKeys) != 0 {
+			t.Fatalf("inbox Bash card emitted AlwaysKeys=%q, want none", cards[0].AlwaysKeys)
+		}
+	})
+
+	t.Run("persisted inbox session omits tool:Bash always_keys after restart", func(t *testing.T) {
+		n := codexTestNode(t)
+		fh := withFakeHub(t, n)
+		const session = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+		cwd := filepath.Join(t.TempDir(), ".persona", "assistant")
+		n.state.put(session, sessionState{Launcher: "claude", Cwd: cwd, Origin: originInbox, OriginKnown: true})
+		yes := true
+		fh.answer = func(proto.Interaction) proto.Resolution { return proto.Resolution{Allow: &yes} }
+
+		raw, _ := json.Marshal(hookInput{HookEventName: "PermissionRequest", SessionID: session, Cwd: cwd,
+			ToolName: "Bash", ToolUseID: "bash-2", ToolInput: json.RawMessage(`{"command":"grep foo /tmp/a"}`)})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := n.handleHook(ctx, sockRequest{Input: raw, Attempt: "a2"}); err != nil {
+			t.Fatal(err)
+		}
+		cards := fh.interactions()
+		if len(cards) != 1 || len(cards[0].AlwaysKeys) != 0 {
+			t.Fatalf("persisted inbox Bash card emitted AlwaysKeys=%q, want none", cards[0].AlwaysKeys)
+		}
+	})
+
+	t.Run("inbox Edit retains directory-scoped always_keys", func(t *testing.T) {
+		n := codexTestNode(t)
+		fh := withFakeHub(t, n)
+		const session = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+		cwd := filepath.Join(t.TempDir(), ".persona", "assistant")
+		targetDir := filepath.Join(t.TempDir(), "notes")
+		targetFile := filepath.Join(targetDir, "draft.md")
+		n.procs[session] = &assistantProc{id: session, agent: "claude", origin: originInbox, cwd: cwd, exited: make(chan struct{})}
+		yes := true
+		fh.answer = func(proto.Interaction) proto.Resolution { return proto.Resolution{Allow: &yes} }
+
+		input, _ := json.Marshal(map[string]string{"file_path": targetFile})
+		raw, _ := json.Marshal(hookInput{HookEventName: "PermissionRequest", SessionID: session, Cwd: cwd,
+			ToolName: "Edit", ToolUseID: "edit-1", ToolInput: input})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := n.handleHook(ctx, sockRequest{Input: raw, Attempt: "a3"}); err != nil {
+			t.Fatal(err)
+		}
+		cards := fh.interactions()
+		want := []string{"tool:Edit(" + fileRuleScope("Edit", input) + ")"}
+		if len(cards) != 1 || !slices.Equal(cards[0].AlwaysKeys, want) {
+			t.Fatalf("inbox Edit card AlwaysKeys=%q, want %q", cards[0].AlwaysKeys, want)
+		}
+	})
+
+	t.Run("ordinary assistant Bash retains tool:Bash always_keys", func(t *testing.T) {
+		n := codexTestNode(t)
+		fh := withFakeHub(t, n)
+		const session = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+		cwd := filepath.Join(t.TempDir(), ".persona", "assistant")
+		n.procs[session] = &assistantProc{id: session, agent: "claude", cwd: cwd, exited: make(chan struct{})}
+		yes := true
+		fh.answer = func(proto.Interaction) proto.Resolution { return proto.Resolution{Allow: &yes} }
+
+		raw, _ := json.Marshal(hookInput{HookEventName: "PermissionRequest", SessionID: session, Cwd: cwd,
+			ToolName: "Bash", ToolUseID: "bash-3", ToolInput: json.RawMessage(`{"command":"ls /tmp"}`)})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := n.handleHook(ctx, sockRequest{Input: raw, Attempt: "a4"}); err != nil {
+			t.Fatal(err)
+		}
+		cards := fh.interactions()
+		if len(cards) != 1 || !slices.Equal(cards[0].AlwaysKeys, []string{"tool:Bash"}) {
+			t.Fatalf("ordinary Bash card AlwaysKeys=%q, want [tool:Bash]", cards[0].AlwaysKeys)
+		}
+	})
+
+	t.Run("inbox Codex Bash retains exact-command scope", func(t *testing.T) {
+		n := codexTestNode(t)
+		fh := withFakeHub(t, n)
+		p, c, f := newFakeCodex(t, n, t.TempDir())
+		p.id, p.origin, c.threadID, c.turnID = testThread, originInbox, testThread, "turn-1"
+		yes := true
+		fh.answer = func(proto.Interaction) proto.Resolution { return proto.Resolution{Allow: &yes} }
+		_ = f.request(1, "item/commandExecution/requestApproval", map[string]any{"threadId": testThread, "turnId": "turn-1", "itemId": "item-1", "command": "ls /tmp"})
+		cards := fh.interactions()
+		if len(cards) != 1 || !slices.Equal(cards[0].AlwaysKeys, []string{"codex-command:ls /tmp"}) {
+			t.Fatalf("inbox Codex Bash card AlwaysKeys=%q, want [codex-command:ls /tmp]", cards[0].AlwaysKeys)
+		}
+	})
+
+	t.Run("interaction.create carries origin=inbox hint for first-turn window", func(t *testing.T) {
+		n := codexTestNode(t)
+		const session = "88888888-8888-4888-8888-888888888885"
+		n.procs[session] = &assistantProc{id: session, agent: "claude", origin: originInbox, exited: make(chan struct{})}
+
+		n2hR, n2hW := io.Pipe()
+		h2nR, h2nW := io.Pipe()
+		t.Cleanup(func() { _ = n2hR.Close(); _ = n2hW.Close(); _ = h2nR.Close(); _ = h2nW.Close() })
+		peer := rpc.New("n", n2hW)
+		n.peer = peer
+		hub := rpc.New("h", h2nW)
+		var gotOrigin string
+		hub.OnRequest = func(_ context.Context, method string, params json.RawMessage) (any, error) {
+			if method == "interaction.create" {
+				var p struct {
+					Origin string `json:"origin"`
+				}
+				_ = json.Unmarshal(params, &p)
+				gotOrigin = p.Origin
+				yes := true
+				return proto.Resolution{Allow: &yes}, nil
+			}
+			return map[string]any{}, nil
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		go func() { _ = peer.Serve(ctx, h2nR) }()
+		go func() { _ = hub.Serve(ctx, n2hR) }()
+
+		raw, _ := json.Marshal(hookInput{HookEventName: "PermissionRequest", SessionID: session,
+			ToolName: "Bash", ToolUseID: "u-origin", ToolInput: json.RawMessage(`{"command":"ls /tmp"}`)})
+		callCtx, callCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer callCancel()
+		if _, err := n.handleHook(callCtx, sockRequest{Input: raw, Attempt: "a1"}); err != nil {
+			t.Fatal(err)
+		}
+		if gotOrigin != originInbox {
+			t.Fatalf("interaction.create origin=%q, want %q", gotOrigin, originInbox)
+		}
+	})
 }

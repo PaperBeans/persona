@@ -310,6 +310,62 @@ import PersonaWire
         #expect(AgentListOrder(isPinned: { _ in false }, isMuted: { _ in false }, held: s.key).rank(s) == 3)
     }
 
+    // MARK: Rows read during a visit (#12514)
+
+    private func visit(_ heldSeen: [String: AgentListOrder.Held], muted: Set<String> = []) -> AgentListOrder {
+        AgentListOrder(isPinned: { _ in false }, isMuted: { muted.contains($0.sessionID) },
+                       heldSeen: Dictionary(uniqueKeysWithValues: heldSeen.map { (SessionKey(machineID: "m", sessionID: $0.key), $0.value) }))
+    }
+
+    /// Several rows read from Unread stay in its place together, drawn as Seen, and leave its count; a seen row this visit
+    /// never showed as Unread folds with the other seen ones.
+    @Test func severalRowsReadDuringAVisitKeepTheUnreadPlace() {
+        let one = session("one", "idle", updated: 50), two = session("two", "idle", updated: 30)
+        let open = session("open", "unread", updated: 40), old = session("old", "idle", updated: 60)
+        let o = visit(["one": .unread, "two": .unread, "open": .unread])
+        let unread = AgentListOrder.stateKeys.firstIndex(of: "unread")
+        #expect([one, two, open].allSatisfy { o.rank($0) == unread }, "held in 完成未看")
+        #expect(o.rank(old) == AgentListOrder.stateKeys.firstIndex(of: "idle"))
+        #expect(o.ordered([one, two, open, old]).map(\.sessionID) == ["one", "open", "two", "old"], "their places: by time, as before")
+        #expect(o.isHeldSeen(one) && o.isHeldSeen(two), "drawn as Seen, not counted")
+        #expect(!o.isHeldSeen(open) && !o.isHeldSeen(old), "still unseen; never held")
+        #expect(o.stays(one) && !o.stays(old), "out of the idle folds")
+        let space = SpaceGroup(id: "s", machineID: "m", spaceID: "w1", group: "", name: "app", index: 0, sessions: [one, old])
+        #expect(!o.isQuiet(space) && order().isQuiet(space), "its space is not an idle one while it is held")
+    }
+
+    /// A row read from Just finished keeps that section, unless it is muted (a muted one is plain Seen everywhere).
+    @Test func aRowReadFromJustFinishedKeepsThatPlace() {
+        let done = session("done", "idle")
+        let justFinished = AgentListOrder.stateKeys.firstIndex(of: "just_finished")
+        #expect(visit(["done": .justFinished]).rank(done) == justFinished)
+        #expect(visit(["done": .justFinished]).isHeldSeen(done))
+        let muted = visit(["done": .justFinished], muted: ["done"])
+        #expect(muted.rank(done) == AgentListOrder.stateKeys.firstIndex(of: "idle") && !muted.isHeldSeen(done) && !muted.stays(done))
+        // A muted one read from Unread stays among the muted ones, as the open one does.
+        let mutedUnread = visit(["done": .unread], muted: ["done"])
+        #expect(mutedUnread.rank(done) == AgentListOrder.stateKeys.firstIndex(of: "muted") && mutedUnread.isHeldSeen(done))
+    }
+
+    /// What the row does next wins: working again is Working, a new turn unseen is Unread and counted again.
+    @Test func aHeldRowThatMovesOnIsNoLongerHeldSeen() {
+        let o = visit(["again": .unread])
+        let working = session("again", "working"), unseen = session("again", "unread")
+        #expect(o.rank(working) == AgentListOrder.stateKeys.firstIndex(of: "working") && !o.isHeldSeen(working))
+        #expect(o.rank(unseen) == AgentListOrder.stateKeys.firstIndex(of: "unread") && !o.isHeldSeen(unseen))
+        #expect(o.rank(session("again", "needs_you")) == 0)
+    }
+
+    /// The open one (`held`, #2213) and the rows seen during the visit are one rule: either way a row keeps its place.
+    @Test func theOpenRowAndTheVisitsRowsAreOneRule() {
+        let read = session("read", "idle")
+        let open = AgentListOrder(isPinned: { _ in false }, isMuted: { _ in false }, held: read.key)
+        let visited = visit(["read": .unread])
+        #expect(open.rank(read) == visited.rank(read) && open.stays(read) == visited.stays(read))
+        #expect(open.isHeldSeen(read) && visited.isHeldSeen(read))
+        #expect(open.heldPlace(read) == .unread && visited.heldPlace(read) == .unread && order().heldPlace(read) == nil)
+    }
+
     // MARK: The rows in order (↑ / ↓, #2213)
 
     private func rows(_ grouping: DevGrouping, folded: Set<String> = [], expandedIdle: Set<String> = [],

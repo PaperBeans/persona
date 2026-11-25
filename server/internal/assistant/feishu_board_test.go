@@ -88,8 +88,8 @@ func newBoardEnvOn(t *testing.T, st *memStore) *boardEnv {
 	e.s = withSettings(t, e.f, New(Options{Hub: e.f, Store: func() Store { return e.st }, Logf: testLogf(t), Devices: e.d}))
 	e.s.fleet.interactions = map[string]*pending{}
 	e.s.todos.loaded, e.s.todos.todos, e.s.todos.activeBySession = true, map[string]*Todo{}, map[[2]string]string{}
-	e.s.standing.now, e.s.standing.after = e.clk.Now, e.clk.After
-	e.s.standing.fleetUp.Store(true) // the fleet is up; the tests of a start before it say otherwise
+	e.s.setBoardTimer(t, e.clk.Now, e.clk.After)
+	e.s.fleetUp.Store(true) // the fleet is up; the tests of a start before it say otherwise
 	return e
 }
 
@@ -527,7 +527,7 @@ func TestBoardIsRefreshedWhenTheFleetIsUp(t *testing.T) {
 	needsLarkLayer(t) // the chat is the lark module's
 	e := newBoardEnv(t)
 	e.tasks("/tasks")
-	e.s.standing.fleetUp.Store(false) // a restart: the fleet is not up yet
+	e.s.fleetUp.Store(false) // a restart: the fleet is not up yet
 	e.clk.advance(boardSettle)
 	_, before := e.counts()
 	ix := e.card("ix1", "box", "ag1", "趁你不在来的问题", 0)
@@ -628,8 +628,8 @@ func TestBoardTakesADeployedTaskAndDropsItWhenPassed(t *testing.T) {
 	ctx := context.Background()
 	s, f, _ := acceptService(t)
 	clk := newFakeClock()
-	s.standing.now, s.standing.after = clk.Now, clk.After
-	s.standing.fleetUp.Store(true)
+	s.setBoardTimer(t, clk.Now, clk.After)
+	s.fleetUp.Store(true)
 	var mu sync.Mutex
 	var edits []string
 	f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) {
@@ -735,15 +735,16 @@ func TestBoardRefreshWaitsForAWriteInProgress(t *testing.T) {
 	e.tasks("/tasks")
 	e.card("ix1", "box", "ag1", "等一等再写", 0)
 	done := make(chan struct{})
-	e.s.standing.done = func() { close(done) }
-	e.s.standing.run.Lock() // a write in progress
-	go e.s.boardRefresh()
+	probe := e.s.boardProbe(t)
+	probe.SetBoardTimer(e.clk.Now, e.clk.After, func() { close(done) })
+	release := probe.HoldBoard() // a write in progress
+	go probe.RefreshBoard()
 	time.Sleep(100 * time.Millisecond)
 	if _, u := e.counts(); u != 0 {
-		e.s.standing.run.Unlock()
+		release()
 		t.Fatalf("the refresh wrote beside a write in progress (%d edits)", u)
 	}
-	e.s.standing.run.Unlock()
+	release()
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):

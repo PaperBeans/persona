@@ -29,7 +29,10 @@ func TestRoutesAreTheWireOnes(t *testing.T) {
 	s := newTestService(t, newFakeHub())
 	got, want := s.Routes(), slices.Concat(assistantwire.Routes, assistantwire.InboxRoutes)
 	if !s.recordingOn() { // the recording module's routes are served only with it (recording.go)
-		want = slices.DeleteFunc(want, func(r string) bool { return strings.Contains(r, " /api/v1/recordings") })
+		want = slices.DeleteFunc(want, func(r string) bool {
+			// A stored photo's image is the core's own route (kb_recording_media.go): it stays.
+			return strings.Contains(r, " /api/v1/recordings") && r != "GET /api/v1/recordings/{id}/photos/{n}"
+		})
 	}
 	if !s.healthOn() { // the Health module's routes likewise (health_layer.go); workouts stay in the core
 		want = slices.DeleteFunc(want, func(r string) bool {

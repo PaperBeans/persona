@@ -163,7 +163,7 @@ The same definition as the app, from the same code (principle 4):
 | Usage | a window's percent, reset time | `GET /api/v1/usage/windows`, the Machines page's numbers | `UsageWindowsStore` |
 | Usage | tokens today, by the hour | the island's Tokens Today; the hours from `GET /api/v1/usage`'s `hourly` (#5721) | `FleetState.stats`, the usage summary |
 | Usage | money spent today | only what a gateway reports: the `cost_usd` of the quota report's usage entries whose `period` is `day`, over the launchers with a gateway, a key two launchers share counted once (`HomeUsage.spentToday`). Never estimated from prices, never an entry known only by its label. With no gateway saying, the widget shows no money | launcher quotas (`GET /api/v1/launchers/{name}/quota`) |
-| Computers | online, load | `Machine.online`; load from `FleetState.stats.loads` | `AppModel.machines` |
+| Computers | online, load | `Machine.online`; load from `FleetState.stats.loads`, shown per core (the ring full at 1; "1.1 per core" under a computer's name on the large widget, VoiceOver "Load 1.1 per core") | `AppModel.machines` |
 | Health | steps, sleep, resting heart rate | Health's own numbers, with the user's permission | `HealthTool.daily` / `.summary` |
 | Inbox | Need You | open items the triage marks as yours, read ones included (`InboxStore.actionCount`). The snapshot also carries the unread ones among them (`InboxStore.unreadCount`, the Inbox badge's number), which no widget draws | `InboxStore` |
 
@@ -324,7 +324,8 @@ from the system, so the gallery supplies stand-ins for them. For the Home Screen
 writes the same made-up snapshot instead of the app's, so the widgets added to a simulator's Home Screen show it
 without a hub (`-showHomeWidgetSample ticked`: two to-dos just ticked, one on its way and one the hub refused); those
 shots, on each PR, are the proof (both DEBUG launch arguments, in `scripts/release/debug_switches.txt`). `-showHomeWidgets calendar:<page>`
-draws the Calendar widget's views a page at a time (`medium`, `large`, `large2`, `more`; an iPad's screen holds one).
+draws the Calendar widget's views a page at a time (`medium`, `large`, `large2`, `more`; an iPad's screen holds one), and
+`-showHomeWidgets home:<kind>[,<kind>…]` only those widgets (`home:computers`: its three sizes in one screenshot).
 
 ## Phases
 

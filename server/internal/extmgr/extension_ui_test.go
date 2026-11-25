@@ -150,6 +150,25 @@ func serveUIExtensionForTest() {
 			return nil, nil
 		},
 		Namespaces: map[string]pserve.Handler{
+			// upgrade.prepare leaves prepared-<to> in its data; upgrade.health fails with EXAMPLE_UI_UNHEALTHY
+			// (extension_upgrade_backup_test.go).
+			"upgrade": func(_ context.Context, method string, params json.RawMessage) (any, error) {
+				switch method {
+				case "prepare":
+					var in struct {
+						To      string `json:"to"`
+						DataDir string `json:"data_dir"`
+					}
+					_ = json.Unmarshal(params, &in)
+					return map[string]any{"ok": true}, os.WriteFile(filepath.Join(in.DataDir, "prepared-"+in.To), []byte("ok"), 0o600)
+				case "health":
+					if why := os.Getenv("EXAMPLE_UI_UNHEALTHY"); why != "" {
+						return map[string]any{"ok": false, "error": why}, nil
+					}
+					return map[string]any{"ok": true}, nil
+				}
+				return nil, pserve.UnknownMethod(method)
+			},
 			"ui": func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 				if method != "render" && method != "action" {
 					return nil, pserve.UnknownMethod(method)

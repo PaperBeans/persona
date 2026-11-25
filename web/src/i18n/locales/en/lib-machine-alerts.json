@@ -1,7 +1,7 @@
 {
   "offline": "Offline",
   "deploy_failed": "Update failed",
-  "memory": "Memory pressure",
+  "memory": "Memory used",
   "disk": "Disk almost full",
   "cpu": "CPU busy",
   "load": "High load",
@@ -10,6 +10,7 @@
   "updating": "Updating",
   "with_value": "{name} · {value}",
   "per_core": "{value} per core",
+  "load_definition": "Load is the number of threads running or waiting for a CPU, averaged over a minute (Linux also counts threads waiting for the disk). It isn't a percentage: above 1 per core, some threads are waiting. On a Mac, work at background priority may run on only some of the cores, so threads can wait while CPU stays low.",
   "severity_critical": "Critical",
   "severity_warning": "Warning",
   "severity_info": "Note",

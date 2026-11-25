@@ -37,6 +37,7 @@ import {
   type Level,
   type MetricRange,
 } from "../../lib/machine-detail";
+import { loadDefinition, perCoreLabel } from "../../lib/machine-alerts";
 import { hubLabel, routeText } from "../../lib/mesh";
 import { machineDeployment } from "../../lib/machine-deploy";
 import { classifyConnection } from "../../lib/node-health";
@@ -436,6 +437,8 @@ export function MachineDetail({ mid, onToggleSidebar }: { mid: string; onToggleS
         )}
         {data && failure && <p className="mt-2 px-1 text-[11.5px] text-red">{t("machines-machinedetail.refresh_failed", { error: failure })}</p>}
         <p className="mt-2 px-1 text-[11.5px] leading-relaxed text-ink-3">{t("machines-machinedetail.metrics_note")}</p>
+        {/* what load counts, under the tile and the chart that show it (#12519) */}
+        {data && <p className="mt-1 px-1 text-submeta leading-relaxed text-ink-3" data-testid="load-definition">{loadDefinition()}</p>}
       </section>
 
       {/* which engine the agents above come from (iOS engineRow) */}
@@ -651,7 +654,8 @@ function NowTiles({ s, cores, machine }: { s: NonNullable<DetailMetrics["latest"
     { label: "CPU", value: percent(s.cpu), sub: cores ? t("machines-machinedetail.cores", { count: cores }) : undefined, frac: s.cpu, lv: level(s.cpu, 75, 90) },
     { label: t("machines-machinedetail.memory"), value: percent(memPct), sub: s.mem_used !== undefined ? usedOfTotal(s.mem_used, s.mem_total) : undefined, frac: memPct, lv: level(memPct, 80, 90) },
     { label: t("machines-machinedetail.network"), value: `↓ ${rate(s.net_rx)}`, sub: `↑ ${rate(s.net_tx)}`, lv: "normal" },
-    { label: t("machines-machinedetail.load"), value: loadText(s.load), sub: cores ? t("machines-machinedetail.cores", { count: cores }) : undefined, lv: level(perCore, 1, 2) },
+    // the raw load average with load per core under it, the card's and the chip's figure (#12519); the cores are under CPU
+    { label: t("machines-machinedetail.load"), value: loadText(s.load), sub: perCore !== undefined ? perCoreLabel(perCore) : undefined, lv: level(perCore, 1, 2) },
     { label: t("machines-machinedetail.disk"), value: percent(diskPct), sub: s.disk_used !== undefined ? usedOfTotal(s.disk_used, s.disk_total) : undefined, frac: diskPct, lv: level(diskPct, 80, 90), open: machine && (() => openUsageMap(machine.id)), openLabel: machine && t("machines-usagemap.reclaim_open_tile", { machine: machine.name }) },
     { label: t("machines-machinedetail.swap"), value: s.swap_total ? bytesBin(s.swap_used) : t("machines-machinedetail.swap_off"), sub: s.swap_total ? t("machines-machinedetail.swap_total", { total: bytesBin(s.swap_total) }) : undefined, frac: swapPct, lv: "normal" },
   ];

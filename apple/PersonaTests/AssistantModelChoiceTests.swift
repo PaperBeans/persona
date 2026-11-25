@@ -527,7 +527,7 @@ struct AssistantModelChoiceTests {
         #expect(Launcher(name: "managed-claude", agent: "claude", source: "persona").runsAssistant)
         // Managed Codex runs the assistant as the hub and the web have it since #12569.
         #expect(Launcher(name: "managed-codex", agent: "codex", source: "persona").runsAssistant)
-        #expect(Launcher(name: "managed-codex", agent: "codex", source: "jarvis").runsAssistant)
+        #expect(Launcher(name: "managed-codex", agent: "codex", source: LegacyNames.product).runsAssistant)
         // The hub's configured kind wins over the node's agent, as the web's `agent_type || agent`.
         #expect(!Launcher(name: "provider", agent: "claude", agentType: "unknown", source: "persona").runsAssistant)
         #expect(Launcher(name: "provider", agentType: "codex", source: "persona").runsAssistant)

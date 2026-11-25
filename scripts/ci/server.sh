@@ -101,15 +101,15 @@ if [ "$lane" = all ] || [ "$lane" = node ] || [ "$lane" = core-node ]; then
   ci_run 'Browser runner resources' 60 bash -e -o pipefail -c 'google-chrome --version; getconf _NPROCESSORS_ONLN; free -m; df -h /dev/shm'
 fi
 for shard in node managers other; do
+  shard_budget=600
+  if [ "$shard" = managers ]; then shard_budget=900; fi
   if [ "$lane" = all ] || [ "$lane" = "$shard" ]; then
-    shard_budget=600
-    if [ "$shard" = managers ]; then shard_budget=900; fi
     ci_run "Server $shard tests with Postgres" "$shard_budget" python3 scripts/ci/server-shards.py "$shard" --database-file "$fixture/database.json"
   fi
   # Persona Core alone (#13978): the same shard's every package with every module left out (persona_core_only); tests
   # of a module's own behaviour skip without it (needsBriefingModule, needsVoiceModule, needsVolcModule).
   if [ "$lane" = all ] || [ "$lane" = "core-$shard" ]; then
-    GOFLAGS="$GOFLAGS -tags=persona_core_only" ci_run "Server $shard tests with Postgres, core only" 600 \
+    GOFLAGS="$GOFLAGS -tags=persona_core_only" ci_run "Server $shard tests with Postgres, core only" "$shard_budget" \
       python3 scripts/ci/server-shards.py "$shard" --database-file "$fixture/database.json"
   fi
 done

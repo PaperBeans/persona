@@ -27,8 +27,9 @@ import (
 //     session's effort until then. Any other failure (the connection gone, no answer in time, Codex refusing it) is
 //     the phone's error, and nothing is kept for a later turn to carry.
 //
-// Permission modes stay Claude's: a Codex thread's approvals and sandbox are not changed from the phone. Panes on the
-// terminal route, subagents, the Codex App's own chats and a compatible CLI keep refusing both (modes.go).
+// Permission modes stay Claude's: a Codex thread's approvals and sandbox are not changed from the phone. A pane on the
+// terminal route takes its model and effort as Codex's own /model typed into its box (codex_terminal_modes.go);
+// subagents and a compatible CLI keep refusing both (modes.go), and the Codex App's own chats go through the App.
 
 // codexEffortLevels are Codex's reasoning efforts, weakest first: the Codex settings page's choices (codexconfig.go)
 // and what a thread offers when its app-server's model/list does not name its model.
@@ -292,12 +293,8 @@ func (n *Node) setCodexSettings(ctx context.Context, id string, c *codexRemote, 
 	sendEffort := effort
 	clearEffort := false
 	if effort != "" {
-		levels := c.efforts(targetModel)
-		if len(levels) == 0 {
-			return fmt.Errorf("这个会话的模型不支持设置思考强度")
-		}
-		if !slices.Contains(levels, effort) {
-			return fmt.Errorf("这个会话的模型不支持思考强度 %s（可选：%s）", effort, strings.Join(levels, " / "))
+		if err := codexEffortRefusal(c.efforts(targetModel), effort); err != nil {
+			return err
 		}
 	} else if model != "" {
 		c.mu.Lock()
@@ -355,6 +352,18 @@ func (n *Node) setCodexSettings(ctx context.Context, id string, c *codexRemote, 
 		}
 	}
 	n.notifyCodex()
+	return nil
+}
+
+// codexEffortRefusal is why effort is not a level a model taking levels can be set to (empty: it takes none), nil when
+// it is one. The app-server route and the terminal route (codex_terminal_modes.go) hold a pick to the same rule.
+func codexEffortRefusal(levels []string, effort string) error {
+	if len(levels) == 0 {
+		return fmt.Errorf("这个会话的模型不支持设置思考强度")
+	}
+	if !slices.Contains(levels, effort) {
+		return fmt.Errorf("这个会话的模型不支持思考强度 %s（可选：%s）", effort, strings.Join(levels, " / "))
+	}
 	return nil
 }
 

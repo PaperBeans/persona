@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from "react";
 import { t } from "../../i18n";
+import { perCoreText } from "../../lib/machine-alerts";
 import { level, load, memPercent, percent, rate, runs, temperature, usedOfTotal, type Level } from "../../lib/machine-detail";
 import { formatTokens, totalTokens } from "../../lib/tokens";
 import type { Machine, MachineMetrics, MetricPoint } from "../../lib/types";
@@ -7,6 +8,13 @@ import { cx } from "../../ui/atoms";
 
 const known = (value: number | undefined): number | undefined => typeof value === "number" && Number.isFinite(value) ? value : undefined;
 const positive = (value: number | undefined): number | undefined => value !== undefined && value > 0 && Number.isFinite(value) ? value : undefined;
+
+/** The line under CPU (#12519): load per core, the figure the alert chip and the apps show ("Load 1.4 per core"); the
+ *  raw load average ("Load 25.4") only while the core count is unknown. */
+export function loadLine(value: number | undefined, cores: number | undefined): string {
+  if (value !== undefined && cores) return t("machines.load_per_core_value", { value: perCoreText(value / cores) });
+  return t("machines.load_value", { value: load(value) });
+}
 
 type SparkSeries = { color: string; read: (point: MetricPoint) => number | undefined };
 const CPU: SparkSeries[] = [{ color: "var(--accent)", read: (p) => p.cpu }];
@@ -36,7 +44,7 @@ export function MachineMetricsSummary({ machine, metrics }: { machine: Machine; 
   return (
     <div className="@container px-4 py-3">
       <div className={cx("grid grid-cols-2 gap-3", usage ? "@min-[26.75rem]:grid-cols-4" : "@min-[19.875rem]:grid-cols-3")} data-testid="machine-metrics-summary">
-        <MetricCell label="CPU" value={percent(cpu)} detail={t("machines.load_value", { value: load(known(latest?.load)) })} severity={level(cpu, 75, 90)}>
+        <MetricCell label="CPU" value={percent(cpu)} detail={loadLine(known(latest?.load), positive(metrics?.system?.cores) ?? positive(machine.system?.cores))} severity={level(cpu, 75, 90)}>
           <Spark points={points} end={now} />
         </MetricCell>
         <MetricCell label={t("machines.memory")} value={percent(memory)} detail={usedOfTotal(known(latest?.mem_used), total)} severity={level(memory, 80, 90)}>

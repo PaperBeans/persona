@@ -359,6 +359,7 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 			return nil, err
 		}
 		rh.logger.Printf("runtime %s %s #%d connected", hello.Runtime, hello.Version, h.serial)
+		rh.claimCodex(h, hello.CodexClaims)
 		if rh.autoCompanions && (hello.Launcher != "" || len(hello.Launchers) > 0) {
 			if n := rh.current(); n != nil && n.peer != nil {
 				_ = n.peer.Notify("launchers.changed", map[string]any{})
@@ -378,10 +379,11 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		// runtime with caps.modes; resume: a runtime with caps.resume that is the machine's engine is asked to take
 		// sessions over (runtimecontrol.go). workspaces: runtime.workspaces is kept and, for a runtime with
 		// caps.workspaces that is the machine's engine, listed as its catalog and asked to make worktrees
-		// (runtimeworkspaces.go).
+		// (runtimeworkspaces.go). codex_claims: hello's codex_claims name Codex app-server instances the node leaves
+		// to the runtime (codex_instance_claims.go), a runtime on the socket's only.
 		features := []string{"prefer_running", "resume_argv", "handover", "transcript", "launchers", "start_params", "modes", "resume", "codex_thread", "unlisted_transcripts", "workspaces", "usage"}
 		if !h.isDaemon() {
-			features = append(features, "usage_windows", "leader_tools", "supervision_policy", "a2a_mcp", "remote_agent", "memory_tools")
+			features = append(features, "usage_windows", "leader_tools", "supervision_policy", "a2a_mcp", "remote_agent", "memory_tools", "codex_claims")
 			if hello.Caps.Assistant {
 				features = append(features, "assistant_pids")
 			}

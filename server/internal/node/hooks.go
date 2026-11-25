@@ -686,7 +686,9 @@ func (n *Node) handleHook(ctx context.Context, req sockRequest) (any, error) {
 			return permissionDecision(map[string]any{"behavior": "allow", "updatedInput": input}), nil
 		}
 		rule := map[string]any{"toolName": in.ToolName}
-		if assistant {
+		// Inbox handling conversations process untrusted external input, so never offer a whole-tool
+		// Bash session grant that would auto-approve arbitrary later shell mutations (#15267).
+		if assistant && !(in.ToolName == "Bash" && n.assistantOrigin(in.SessionID) == originInbox) {
 			alwaysKey := "tool:" + in.ToolName
 			if scope := fileRuleScope(in.ToolName, in.ToolInput); scope != "" {
 				// Claude Code matches path rules on Read and Edit only; Edit(path) covers every file-editing tool,
@@ -951,7 +953,13 @@ func (n *Node) askOnce(ctx context.Context, ix proto.Interaction) (proto.Resolut
 	ctx, cancel := context.WithDeadline(ctx, ix.ExpiresAt)
 	defer cancel()
 	var res proto.Resolution
-	err := n.peer.Call(ctx, "interaction.create", map[string]any{"interaction": ix}, &res)
+	params := map[string]any{"interaction": ix}
+	if ix.SessionID != "" {
+		if origin := n.assistantOrigin(ix.SessionID); origin != "" {
+			params["origin"] = origin
+		}
+	}
+	err := n.peer.Call(ctx, "interaction.create", params, &res)
 	if err != nil {
 		select {
 		case <-n.peer.Done():

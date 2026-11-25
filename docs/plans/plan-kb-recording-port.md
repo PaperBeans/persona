@@ -22,7 +22,12 @@ from this plan, the code was followed:
 - The provider's rounds hang on the engine and its audio touch points on the store (`kb.Engine.SetRecordingProvider`
   sets both): the trim is a `Store` method, and a manager makes a new engine over the same store when its settings change.
 - Retention with the module off (section 7, question 1) is one constant, `kb.RetentionWithoutRecordingModule`
-  (`server/internal/kb/recording_port.go`), `true` as recommended; the owner's confirmation is still open.
+  (`server/internal/kb/recording_port.go`), `true`, which the owner confirmed on 2026-11-25 (decided, below).
+- PR 2 is merged (#15246). The follow-up for question 3 (stored photo images, no stored-audio route) is `GET
+  /api/v1/recordings/{id}/photos/{n}` moved to Core (section 7, question 3). Measured by `scripts/diag/core_size.py --no-build`: PR 2 added 441 non-test lines to Core
+  (829,602 to 830,043); the photo route adds 59 more (831,695 to 831,754: the route 56, the route list entries 3) and
+  takes 17 out of the module (9,386 to 9,369). The estimates in sections 1 and 7 for PRs 3 to 5 (what leaves `kb` and
+  the module) are unchanged; Core's read-side part is that much larger than the section 1 reader totals say.
 
 ## Decision (2026-11-25): a module that is off must not hide or change what the user already has
 
@@ -474,14 +479,29 @@ Risks and open questions, each with my recommendation. Dropped because this desi
 walk (risk 1), the index purge on a path class change (the search view does not change with the module), the recovery window
 (3.2 (iii)), and the hidden `kb_get` (the rule now requires the opposite).
 
-1. **Retention with the module off (open question for the owner).** Keep `PruneRecordings` running in Core, 865 lines stay
-   (3.2 (ii)). Recommend yes: the alternatives change data or leave transcripts past the user's setting.
+1. **Retention with the module off. DECIDED by the owner on 2026-11-25: retention keeps running as configured.**
+   `PruneRecordings` runs in Core, 865 lines stay (3.2 (ii)); it matches `kb.RetentionWithoutRecordingModule = true`
+   (the alternatives change data or leave transcripts past the user's setting).
 2. **Rename and other edits with the module off.** The user can read, search, delete, and edit tags and projects; not rename.
    Recommend this for PR 2; the owner's rule does not require more, but the user's wish "my old recording has a wrong title"
    is a legitimate follow-up (a Core `rename` using the same `putNamed` path would cost about 40 lines).
-3. **Photo images and audio playback with the module off.** The owner's list names photo *texts*. The images and the stored
-   audio are served by the module's routes (`PhotoImage`, `AudioRead`); they stay on disk but are not reachable with the
-   module off. Recommend: leave them as module routes and say so; ask the owner whether "readable" includes images and audio.
+3. **Photo images and audio playback with the module off. DECIDED by the supervisor (the owner's rule: what the user
+   has stays readable): photos are readable through Core's read-only route; stored audio is not applicable.**
+   - Photos, implemented: `GET /api/v1/recordings/{id}/photos/{n}` is served by Core (`assistant/kb_recording_media.go`,
+     reading `kb.Engine.PhotoImage`, now in `kb/recording_photos_read.go`) with the module on and off: the same path, full
+     credentials only, `Content-Type` of the stored file, `X-Content-Type-Options: nosniff`, `Cache-Control: private,
+     no-store`, no Range, `404 photo_not_found` for a photo that is not listed (deleted, or removed by the trim),
+     `410`/`404` for a deleted or unknown recording, the knowledge base's `503`s. It reads under `recFilesMu` (read side)
+     as `PhotoImage` always did, writes nothing and derives nothing. Adding, listing and deleting photos stay the module's
+     routes: with the module off a client can open a photo it knows the number of (the photo texts and numbers are in the
+     recording's detail), but cannot add or delete one. The module no longer registers its copy of the GET.
+   - Audio, no code: no client-facing route has ever served stored audio. `kb.AudioRead` is used only by the module's
+     final transcription pass; the chunk files (`attachments/audio/<from>.pcm`) are raw PCM16 and are deleted after the
+     final pass; the only audio routes are the phone's upload socket and the gap upload. There was nothing to keep readable,
+     and a playback route would be a new feature (a separate request). What does apply is that with the module off the
+     chunk files of a recording in flight stay on disk byte for byte untouched, and the module resumes from them when it
+     is back: asserted by `TestStoredAudioStaysUntouchedWithoutTheModule`, `scripts/ci/core-only-smoke.py` and
+     `scripts/ci/module-e2e.py`.
 4. **The retention tick and the lanes' behaviour change** (section 0): the lanes stop with the module off; today they run.
    Recommend: yes, as the rule says; document it in the PR and in `docs/architecture/core-and-modules.md`.
 5. **Whether `recording internal/kb` can reach zero** (section 6): decide in PR 5 on the measured Engine/Store tail, and

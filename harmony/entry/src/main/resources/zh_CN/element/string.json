@@ -4739,6 +4739,22 @@
     {
       "name": "agent_delivery_waiting",
       "value": "正在等待 {computer}。"
+    },
+    {
+      "name": "session_effort_none",
+      "value": "无"
+    },
+    {
+      "name": "session_effort_minimal",
+      "value": "最低"
+    },
+    {
+      "name": "session_effort_ultra",
+      "value": "超高"
+    },
+    {
+      "name": "session_models_empty",
+      "value": "此启动器没有可切换的模型。"
     }
   ]
 }

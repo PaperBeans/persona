@@ -212,7 +212,8 @@ type FleetStats struct {
 	Loads    []FleetLoad `json:"loads,omitempty"`
 }
 
-// FleetLoad is a machine's 1-minute load average over its cores, in percent (rounded to 5).
+// FleetLoad is a machine's 1-minute load average over its cores, in percent (rounded to 10: the tenth of a core the
+// apps print, so 150 is "1.5 per core").
 type FleetLoad struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`

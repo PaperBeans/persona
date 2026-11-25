@@ -504,7 +504,7 @@ manifest declares `feature: module.recording`, which the kernel announces while 
   meeting turns against tool calls, hub transcription end to end) stay in `internal/assistant` and skip without the
   module (`needsRecordingModule`).
 - **With the module absent** (`persona_without_recording`, `persona_core_only`, or switched off) the recording routes
-  answer 404, the audio socket is unknown, the hello names none of the nine meeting and recording capabilities (so
+  answer 404, the audio socket is unknown (so are the photo upload, list and delete routes), the hello names none of the nine meeting and recording capabilities (so
   the hub announces none of their feature flags), no room tool is offered and no final pass or attending feeder runs
   (`TestRecordingFollowsItsModule`). The recordings already stored stay in the knowledge base, **listed, readable
   and searchable, byte for byte unchanged** ("A module that is off keeps what the user has" above):
@@ -520,7 +520,8 @@ manifest declares `feature: module.recording`, which the kernel announces while 
   | Crash recovery of an interrupted upload | Runs when the store opens, as ever |
   | New recordings, uploads, appends, the audio socket, photos, rename, the minutes and recap routes | Gone: the module's routes answer 404 |
   | The minutes, titles and recap lanes, summaries, the sweep of hub transcripts after a prune | Run and do nothing: no model call, no file written |
-  | Photo images and stored audio (`GET /api/v1/recordings/{id}/photos/…`, the audio routes) | Not reachable: they are the module's routes; the files stay on disk |
+  | A stored photo's image (`GET /api/v1/recordings/{id}/photos/{n}`) | Works: Core's own read-only route (`assistant/kb_recording_media.go`), the same path and response with the module on or off; adding, listing and deleting photos stay the module's |
+  | Stored audio | No route has ever served it (the chunks are the final pass's input, deleted after it); the chunk files of a recording in flight stay on disk untouched and the module resumes from them |
 
 - **Reader, kept writes and writers** (`docs/plans/plan-kb-recording-port.md`, PR 2): in `server/internal/kb` every
   recording file is split by what its code is. `<file>_read.go` is the read path (list, get, the transcript of
@@ -671,8 +672,7 @@ workbench, topics and pushes, about 10k lines) is moving into the `lark` module 
   (`Message`, `Action`, `Owner`, `Recalled`, `View`, which the Service's `Feishu*` methods pass on), what the core asks
   (`StatusKept`, `Route`, `SetTarget`, `RememberThread`, `Send`, `CardsWaiting`, `CardNudged`, `TopicAnchor`,
   `LegacyRuns`, `NudgeTick`, which the core's nudge sweep runs once a minute) and `Book`, which runs a function on the
-  chat's records under its lock for the core's standing board, workbench pin and companion bots (it shrinks as they
-  move).
+  chat's records under its lock for the core's cards (`owner_action_reply.go`, `reports.go`; it goes when they move).
   What the chat asks of the core is the host's chat group: where a target is and the run a message starts
   (`feishu_route.go`, which other channels use too), an interaction answered or closed, an acceptance pressed, the
   main conversation's model, and the to-do, decision and question ledgers of a topic (`TodoOfThread`, `ThreadRoutes`,
@@ -690,6 +690,27 @@ workbench, topics and pushes, about 10k lines) is moving into the `lark` module 
   conversation, from the channels' runs), `Host.AskSensitive` (the exit policy of its words, asked only for a card the
   chat does not drive with "all cards" on, since it may wait for the text to be tagged) and `Host.AskState` (the
   core's live record: ended, still up). The module reads nothing else of the core for a card.
+- **The standing board, the pinned workbench and the companion bots are the module's**
+  (`server/internal/modules/lark/board.go`, `workbench_pin.go`, `companions.go`): when the "waiting for you" card is
+  edited (the settle timer and its lock), how it is sent and replaced, the workbench's pin, its loop and the button
+  every card carries, and the notices a notifications companion long-polls. The core tells them through
+  `larkhost.Board` (`BoardChanged`, `WorkbenchOn`, `WorkbenchStamp`, `DivertNotices`: nothing, the card unchanged and
+  `false` without the module). The rows (what waits and for how long, `board_rows.go`) and the waiting list as a card
+  stay the core's, since the briefing and the acceptance rounds read them too; the module asks for the card as of a
+  time (`Host.BoardCard`) and for whether the pending cards are read (`Host.FleetReady`). The four routes the companions
+  use (`PUT …/feishu/companions`, `GET …/feishu/notices`, `POST …/feishu/notices/action`, `POST …/feishu/workbench`)
+  are the module's `hub_routes`, served through the kernel only while it is on: with the module off or built out they
+  answer 404 (before, an off bot answered from the core). The request tells the module which manager's layer it is for
+  (`larkhost.WithLayer`, put on it where the core registers a module's routes). The stored chat state
+  (`bots.feishu.state`: the board's message, the companions) is only ever written by the module's code; switching it
+  off neither rewrites nor deletes it, and it is read again when the module comes back. Locks, the same before and after the move: the board's `run` (one send or edit at a time) is the outermost; under it
+  the board reads the chat's records (the chat's lock, through `Book`) and, through `Host.WorkbenchBoard` or
+  `Host.BoardCard`, the core's pending cards, ended set, acceptance book (`loadAcceptLocked`) and to-dos, each taken and
+  released in turn, none held across the next, so the core's locks are never taken inside the board's own. The board's
+  `mu` and the companions' `mu` and the workbench's flag are leaves, never held across a call out. A core caller of
+  `BoardChanged` may hold its own lock (`channels_handler.go`, `todos.go`): the call takes only the chat's lock and the
+  board's `mu`, as `boardChanged` did, and never waits for `run`. The acceptance rounds cross as data
+  (`Host.WorkbenchBoard`'s rows).
 - **Tests**: the turns' own tests run in the module on a fake core (`server/internal/modules/lark/service_test.go`:
   the channels' runs, their finishing, folding and dropping, and the hub's transport; `chat_fake_test.go`: the chat's
   host methods as the core answers the plain case); the assistant's tests of the turns through the channels' pipeline

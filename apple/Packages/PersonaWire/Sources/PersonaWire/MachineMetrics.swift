@@ -236,8 +236,8 @@ public nonisolated struct MetricAlert: Hashable, Sendable {
         if mem > .normal { out.append(.init(label: String(localized: "Low memory"), level: mem, kind: .memory)) }
         let disk = MetricLevel.of(s.diskPercent, warn: 80, crit: 90)
         if disk > .normal { out.append(.init(label: String(localized: "Disk almost full"), level: disk, kind: .disk)) }
-        if let load = s.load, let cores, cores > 0 {
-            let l = MetricLevel.of(load / Double(cores), warn: 1, crit: 2)
+        if let perCore = MetricFormat.loadPerCore(s.load, cores: cores) {
+            let l = MetricLevel.of(perCore, warn: 1, crit: 2)
             if l > .normal { out.append(.init(label: String(localized: "High load"), level: l, kind: .load)) }
         }
         return out.sorted { $0.level > $1.level }
@@ -267,7 +267,19 @@ public nonisolated enum MetricFormat {
         return v < 10 && v > 0 ? String(format: "%.1f%%", v) : String(format: "%.0f%%", v)
     }
 
+    /// The raw 1-minute load average, not divided by the cores: "25.4", "3.10".
     public static func load(_ v: Double?) -> String { v.map { String(format: $0 >= 10 ? "%.1f" : "%.2f", $0) } ?? "—" }
+
+    /// Load per core: the 1-minute load average over the core count, the one figure the card, the machine page, the
+    /// alerts, the Live Activity and the web go by (docs/server/machines.md, "What load counts"); nil without a load or
+    /// a core count.
+    public static func loadPerCore(_ load: Double?, cores: Int?) -> Double? {
+        guard let load, let cores, cores > 0 else { return nil }
+        return load / Double(cores)
+    }
+
+    /// Load per core as every client writes it, one decimal: "1.4" (the web's `perCoreText`).
+    public static func perCore(_ v: Double) -> String { String(format: "%.1f", v) }
 
     /// "3 d 4 hr", "5 hr 12 min", "8 min".
     public static func uptime(since boot: Date, now: Date = .now) -> String {

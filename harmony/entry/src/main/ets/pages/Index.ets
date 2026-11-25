@@ -23,6 +23,7 @@ import { DevicePage } from '../components/DevicePage';
 import { deviceFeatures } from '../models/DeviceFeatures';
 import { SessionTools } from '../components/SessionTools';
 import { SessionWorkspace } from '../models/SessionWorkspace';
+import { sessionModeAvailable } from '../models/SessionModes';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ComposeListItemV2, ContentItemV2, KeyboardAvoidMode, TextModifier, SymbolGlyphModifier, CapsuleSegmentButtonV2, SegmentButtonV2Items, ColorMetrics, LengthMetrics, uiMaterial } from '@kit.ArkUI';
 import { ConfigurationConstant } from '@kit.AbilityKit';
@@ -391,7 +392,7 @@ struct Index {
   private openSettings(page: string, contextual: boolean = false): void { if (page === 'appearance') this.ensureAgentWorkspace(); this.settingsPage = page; this.stack.pushPath({ name: 'settings', param: NavigationContext.settings(page, contextual ? this.detailModel.selected : undefined) }); this.savePath(); }
   private settingsFamily(page: string): string { return ['extension_detail', 'extension_catalog'].includes(page) ? 'extensions' : page === 'connector_detail' ? 'connectors' : page === 'channel_detail' ? 'channels' : page; }
   private isAdminPage(page: string): boolean { return ['assistant', 'memory', 'managers', 'launchers', 'engine', 'hub_update', 'node_update'].includes(page); }
-  private settingsLabel(page: string): string { return page === 'ssh' ? 'ssh_settings' : page === 'assistant' ? 'admin_identity' : page === 'memory' ? 'admin_memory' : page === 'managers' ? 'admin_managers' : page === 'launchers' ? 'admin_launchers' : page === 'engine' ? 'admin_machine_engine' : page === 'hub_update' ? 'admin_hub_update' : page === 'node_update' ? 'admin_node_update' : page; }
+  private settingsLabel(page: string): string { return page === 'session_effort' ? 'reasoning_effort' : page === 'session_model' ? 'model' : page === 'session_permissions' ? 'permission_mode' : page === 'ssh' ? 'ssh_settings' : page === 'assistant' ? 'admin_identity' : page === 'memory' ? 'admin_memory' : page === 'managers' ? 'admin_managers' : page === 'launchers' ? 'admin_launchers' : page === 'engine' ? 'admin_machine_engine' : page === 'hub_update' ? 'admin_hub_update' : page === 'node_update' ? 'admin_node_update' : page; }
   private adminMenus(name: string, param: Object): NavigationMenuItem[] { return [{ value: tr('refresh'), symbolIcon: new SymbolGlyphModifier($r('sys.symbol.arrow_clockwise')), action: () => { if (this.activeChild === this.childKey(name, param)) this.adminRefreshRevision++; } }]; }
   private settingsTitle(param: Object): string { const descriptor = NavigationContext.from('settings', param as string); return descriptor.scoped && ['extension_detail', 'connector_detail', 'channel_detail', 'extension_catalog'].includes(descriptor.page) ? descriptor.row.title : tr(this.settingsLabel(descriptor.page)); }
   private openSettingsDetail(page: string, row: ResourceRow): void { this.stack.pushPath({ name: 'settings', param: NavigationContext.settings(page, row) }); this.savePath(); }
@@ -601,12 +602,12 @@ struct Index {
     const computer = this.selectedComputer();
     if (computer) sheets.push({ title: tr('computer_screen_open'), action: () => { if (valid()) this.openComputer(computer); } });
     if (owner.selected.machine) sheets.push({ title: tr('workspace'), action: () => { if (valid()) this.openTools(); } });
-    for (const page of ['permissions', 'voice']) sheets.push({ title: tr(page), action: () => {
-      if (valid()) this.openSettings(page === 'permissions' ? 'session_permissions' : page, true);
-    } });
+    const canEdit = owner.connected && !owner.demo;
+    if (owner.selected.kind !== 'session' || canEdit && sessionModeAvailable(owner.selected, 'permission_mode')) sheets.push({ title: tr('permissions'), action: () => { if (valid()) this.openSettings('session_permissions', true); } });
+    sheets.push({ title: tr('voice'), action: () => { if (valid()) this.openSettings('voice', true); } });
+    if (canEdit && sessionModeAvailable(owner.selected, 'effort')) sheets.push({ title: tr('effort'), action: () => { if (valid()) this.openSettings('session_effort', true); } });
+    if (canEdit && sessionModeAvailable(owner.selected, 'model')) sheets.push({ title: tr('model'), action: () => { if (valid()) this.openSettings('session_model', true); } });
     const identity = JSON.stringify([owner.scope(), owner.connectionGeneration(), owner.target()]);
-    const data = owner.selected.data();
-    if (owner.selected.kind === 'session' && Wire.bool(Wire.object(data, 'capabilities'), 'modes') && Wire.strings(data, 'efforts').length) sheets.push({ title: tr('effort'), action: () => { if (valid()) this.openSettings('session_effort', true); } });
     if (owner.canStop() && this.inlineStopIdentity !== identity) sheets.push({ title: tr('stop'), action: () => { if (valid()) owner.stop(valid); } });
     this.chatMenuRevision++; this.chatMenuActions = sheets;
     const body = this.mainDestination(name, param) || this.hideChatTitle(name, param);

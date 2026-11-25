@@ -172,10 +172,6 @@ func (h larkHost) PostContent(ctx context.Context, to larkhost.Target, replyTo, 
 	return h.s.botPostContent(ctx, to, replyTo, content, fallback, key)
 }
 
-func (h larkHost) WorkbenchStamp(ctx context.Context, c *botcard.Card) *botcard.Card {
-	return h.s.workbenchStamp(ctx, c)
-}
-
 func (h larkHost) LinkNamer(ctx context.Context) func(*url.URL) string { return h.s.linkNamer(ctx) }
 
 func (h larkHost) OpenButton(ctx context.Context, machine, session string) botcard.Button {
@@ -270,7 +266,6 @@ func (s *Service) larkWait(d time.Duration) {
 
 func (h larkHost) WebBase(ctx context.Context) string          { return h.s.webBase(ctx) }
 func (h larkHost) Location(ctx context.Context) *time.Location { return h.s.location(ctx) }
-func (h larkHost) StandingNow() time.Time                      { return h.s.standing.clock() }
 func (h larkHost) ClipFallback(text string) string             { return clip(text, reportFallbackMax) }
 
 func (h larkHost) WorkbenchAgents(ctx context.Context, now time.Time) (assistantwire.WorkbenchCounts, []assistantwire.WorkbenchAgent) {
@@ -351,14 +346,6 @@ func (h larkHost) NextMeeting(ctx context.Context, now time.Time) *assistantwire
 	return &assistantwire.WorkbenchMeeting{Start: cal.Events[0].Start, Title: cal.Events[0].Title}
 }
 
-func (h larkHost) Companions(ctx context.Context) []assistantwire.WorkbenchCompanion {
-	var out []assistantwire.WorkbenchCompanion
-	for _, b := range h.s.companionBots(ctx) {
-		out = append(out, assistantwire.WorkbenchCompanion{Name: b.Name, Link: companionLink(b), Inbox: b.Kind == CompanionInbox})
-	}
-	return out
-}
-
 func (h larkHost) TodayBody(ctx context.Context) json.RawMessage {
 	main := h.s.settings(ctx).Main
 	if main == "" {
@@ -371,9 +358,11 @@ func (h larkHost) TodayBody(ctx context.Context) json.RawMessage {
 	return it.Body
 }
 
-func (h larkHost) SummonWorkbench(ctx context.Context)               { h.s.summonWorkbench(ctx) }
-func (h larkHost) WorkbenchRefresh(ctx context.Context)              { h.s.workbenchRefresh(ctx) }
-func (h larkHost) WorkbenchBringCard(ctx context.Context, id string) { h.s.workbenchBringCard(ctx, id) }
+func (h larkHost) BoardCard(ctx context.Context, now time.Time) (*botcard.Card, string, string) {
+	return h.s.boardCard(ctx, now)
+}
+
+func (h larkHost) FleetReady() bool { return h.s.fleetReady() }
 
 func (h larkHost) TasksOverview(ctx context.Context) ([]*botcard.Card, []string) {
 	var cards []*botcard.Card

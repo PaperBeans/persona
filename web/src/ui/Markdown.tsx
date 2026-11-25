@@ -698,7 +698,20 @@ export const Markdown = memo(function Markdown({ text: raw, small, compact, mid,
     <HighlightWanted.Provider value={fenced && inBlock}>
       <ReplyPicturesContext.Provider value={picturesContext}>
       <ReplyStreaming.Provider value={Boolean(streaming)}>
-      <div className={`prose-j ${small ? "prose-sm" : ""} ${compact ? "prose-compact" : ""}`}>
+      <div
+        className={`prose-j ${small ? "prose-sm" : ""} ${compact ? "prose-compact" : ""}`}
+        onClick={(e) => {
+          const el = e.target instanceof Element ? e.target.closest("code") : null;
+          if (!el || el.closest("pre, a, button")) return;
+          const sel = document.getSelection();
+          if (sel && !sel.isCollapsed) return;
+          const text = el.textContent?.trim();
+          if (!text) return;
+          void copyText(text).then((ok) => {
+            if (ok) toast(t("ui-atoms.copied"), "ok");
+          });
+        }}
+      >
         {chunks ? (
           chunks.map((c) => (
             <StreamChunk key={c.start} start={c.start} content={c.content} remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components} urlTransform={markdownUrl} fade={wordFade} plain={!streaming} wholeDocument={chunks.length === 1} />

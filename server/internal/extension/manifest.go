@@ -70,6 +70,42 @@ type Manifest struct {
 	// HostIntegrations declares typed, read-only access to a configured host
 	// CLI. Unlike Tools, it never installs a program or accepts a command line.
 	HostIntegrations []HostIntegrationSpec `json:"host_integrations,omitempty"`
+	// Upgrade is what the extension asks of the hub around an automatic upgrade: a backup it may not go without, a
+	// prepare call to the old program, a health check of the new one (docs/extensions/extensions.md "Backup before an
+	// upgrade"). Hubs before it refuse the manifest (strict).
+	Upgrade *upgradeSpec `json:"upgrade,omitempty"`
+}
+
+// upgradeSpec is a manifest's upgrade object; it is read through BackupRequired, UpgradePrepare and
+// UpgradeHealthCheck.
+type upgradeSpec struct {
+	// Backup is BackupAuto (the default: the hub snapshots the data and upgrades even when the snapshot fails) or
+	// BackupRequired (no snapshot, no upgrade).
+	Backup string `json:"backup,omitempty"`
+	// Prepare: before the snapshot the hub calls upgrade.prepare on the program of the installed version; an error
+	// stops the upgrade.
+	Prepare bool `json:"prepare,omitempty"`
+	// HealthCheck: once the new version is up the hub calls its upgrade.health; an error rolls the upgrade back.
+	HealthCheck bool `json:"health_check,omitempty"`
+}
+
+// Backup choices of a manifest's upgrade.backup.
+const (
+	BackupAuto     = "auto"
+	BackupRequired = "required"
+)
+
+// BackupRequired says whether m may not be upgraded without a snapshot of its data.
+func (m *Manifest) BackupRequired() bool {
+	return m != nil && m.Upgrade != nil && m.Upgrade.Backup == BackupRequired
+}
+
+// UpgradePrepare says whether m's program answers upgrade.prepare.
+func (m *Manifest) UpgradePrepare() bool { return m != nil && m.Upgrade != nil && m.Upgrade.Prepare }
+
+// UpgradeHealthCheck says whether m's program answers upgrade.health.
+func (m *Manifest) UpgradeHealthCheck() bool {
+	return m != nil && m.Upgrade != nil && m.Upgrade.HealthCheck
 }
 
 // Engines are what the extension runs on.

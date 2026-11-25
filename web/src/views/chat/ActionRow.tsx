@@ -13,6 +13,7 @@ import type { Item } from "../../lib/types";
 import { toolDurationLabel, toolDurationMs, type ToolStep } from "../../lib/work-groups";
 import { cx, Spinner } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
+import { parseAnsi } from "../../lib/ansi";
 import { NARROW, useMedia } from "../../ui/media-query";
 import { patchDiffs } from "../../lib/tool-detail";
 import { changePath, editLines } from "../../lib/turn-changes";
@@ -332,7 +333,7 @@ export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trac
           {output && (
             <>
               {(input || detail) && <div className="my-2 h-px bg-tool-ink/20" />}
-              <pre className={cx("m-0 whitespace-pre-wrap [overflow-wrap:anywhere]", error ? "text-red" : "text-tool-ink")}>{output}</pre>
+              <pre className={cx("m-0 whitespace-pre-wrap [overflow-wrap:anywhere]", error ? "text-red" : "text-tool-ink")}><AnsiOutput text={output} /></pre>
               {full.more}
             </>
           )}
@@ -342,6 +343,33 @@ export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trac
     </div>
   );
 });
+
+function AnsiOutput({ text }: { text: string }) {
+  const runs = useMemo(() => parseAnsi(text), [text]);
+  if (!runs) return <>{text}</>;
+  return (
+    <>
+      {runs.map((run, i) =>
+        run.fg || run.bold || run.dim || run.italic || run.underline ? (
+          <span
+            key={i}
+            className={cx(
+              run.fg,
+              run.bold && "font-semibold",
+              run.dim && "opacity-65",
+              run.italic && "italic",
+              run.underline && "underline",
+            )}
+          >
+            {run.text}
+          </span>
+        ) : (
+          <span key={i}>{run.text}</span>
+        ),
+      )}
+    </>
+  );
+}
 
 /** How many lines of a diff the phone's full-screen view shows before "Expand". */
 export const DIFF_FOLD_LINES = 40;
@@ -521,10 +549,94 @@ function buildDiffRows(diffs: Op[][]): NumberedRow[] {
   return rows;
 }
 
-export function DiffBlocks({ diffs }: { diffs: Op[][] }) {
+type SplitDiffRow = { kind: "gap"; skipped?: number } | { kind: "pair"; left?: LineRow; right?: LineRow };
+
+function toSplitDiffRows(rows: NumberedRow[]): SplitDiffRow[] {
+  const out: SplitDiffRow[] = [];
+  for (let i = 0; i < rows.length; ) {
+    const r = rows[i];
+    if (r.kind === "gap") {
+      out.push({ kind: "gap", skipped: r.skipped });
+      i++;
+      continue;
+    }
+    if (r.kind === "same") {
+      out.push({ kind: "pair", left: r, right: r });
+      i++;
+      continue;
+    }
+    const dels: LineRow[] = [];
+    const adds: LineRow[] = [];
+    while (i < rows.length && rows[i].kind === "del") dels.push(rows[i++] as LineRow);
+    while (i < rows.length && rows[i].kind === "add") adds.push(rows[i++] as LineRow);
+    const n = Math.max(dels.length, adds.length);
+    for (let k = 0; k < n; k++) out.push({ kind: "pair", left: dels[k], right: adds[k] });
+  }
+  return out;
+}
+
+function renderDiffLineText(r: LineRow) {
+  return r.segments && r.segments.length > 0
+    ? r.segments.map((seg, si) =>
+        seg.changed ? (
+          <span
+            key={si}
+            className={cx("rounded-[2px] font-medium", r.kind === "del" ? "bg-diff-del-fg/20" : "bg-diff-add-fg/20")}
+            data-diff-intraline
+          >
+            {seg.text}
+          </span>
+        ) : (
+          <span key={si}>{seg.text}</span>
+        ),
+      )
+    : r.text || " ";
+}
+
+export function DiffBlocks({ diffs, mode = "unified" }: { diffs: Op[][]; mode?: "unified" | "split" }) {
   const rows = useMemo(() => buildDiffRows(diffs), [diffs]);
+  const split = useMemo(() => (mode === "split" ? toSplitDiffRows(rows) : null), [mode, rows]);
+  if (split) {
+    return (
+      <div className="min-w-fit overflow-hidden rounded-[8px] py-1 font-mono text-xs leading-[1.6] shadow-hairline" data-diff-mode="split">
+        {split.map((row, i) =>
+          row.kind === "gap" ? (
+            <div key={i} className="flex min-w-fit items-center bg-inset/80 py-0.5 text-submeta text-ink-3 select-none" data-diff-gap>
+              <span className="w-9 shrink-0 border-r border-line/60 pr-1.5 text-right tabular-nums">⋯</span>
+              <span className="px-3 text-submeta text-ink-3">{row.skipped ? t("chat-actionrow.diff_skipped", { count: row.skipped }) : "⋯"}</span>
+            </div>
+          ) : (
+            <div key={i} className="grid min-w-full grid-cols-2" data-diff-split-row>
+              <div className={cx("flex min-w-0 border-r border-line/60 pr-2", row.left?.kind === "del" && "bg-diff-del-bg", !row.left && "bg-inset/40")} data-diff-line={row.left?.kind}>
+                <span className={cx("w-9 shrink-0 border-r border-line/60 pr-1.5 text-right text-submeta tabular-nums select-none", row.left?.kind === "del" ? "text-diff-del-fg/75" : "text-ink-3/70")}>
+                  {row.left?.oldLine ?? ""}
+                </span>
+                <span className={cx("w-5 shrink-0 text-center select-none", row.left?.kind === "del" ? "text-diff-del-fg" : "text-ink-3")}>
+                  {row.left?.kind === "del" ? "−" : " "}
+                </span>
+                <span className="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere] text-ink">
+                  {row.left ? renderDiffLineText(row.left) : " "}
+                </span>
+              </div>
+              <div className={cx("flex min-w-0 pr-2", row.right?.kind === "add" && "bg-diff-add-bg", !row.right && "bg-inset/40")} data-diff-line={row.right?.kind}>
+                <span className={cx("w-9 shrink-0 border-r border-line/60 pr-1.5 text-right text-submeta tabular-nums select-none", row.right?.kind === "add" ? "text-diff-add-fg/75" : "text-ink-3/70")}>
+                  {row.right?.newLine ?? ""}
+                </span>
+                <span className={cx("w-5 shrink-0 text-center select-none", row.right?.kind === "add" ? "text-diff-add-fg" : "text-ink-3")}>
+                  {row.right?.kind === "add" ? "+" : " "}
+                </span>
+                <span className="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere] text-ink">
+                  {row.right ? renderDiffLineText(row.right) : " "}
+                </span>
+              </div>
+            </div>
+          ),
+        )}
+      </div>
+    );
+  }
   return (
-    <div className="min-w-fit overflow-hidden rounded-[8px] py-1 font-mono text-xs leading-[1.6] shadow-hairline">
+    <div className="min-w-fit overflow-hidden rounded-[8px] py-1 font-mono text-xs leading-[1.6] shadow-hairline" data-diff-mode="unified">
       {rows.map((r, i) =>
         r.kind === "gap" ? (
           <div key={i} className="flex min-w-fit items-center bg-inset/80 py-0.5 text-submeta text-ink-3 select-none" data-diff-gap>
@@ -544,23 +656,7 @@ export function DiffBlocks({ diffs }: { diffs: Op[][] }) {
             <span className={cx("w-6 shrink-0 text-center select-none", r.kind === "add" ? "text-diff-add-fg" : r.kind === "del" ? "text-diff-del-fg" : "text-ink-3")}>
               {r.kind === "add" ? "+" : r.kind === "del" ? "−" : " "}
             </span>
-            <span className="whitespace-pre text-ink">
-              {r.segments && r.segments.length > 0
-                ? r.segments.map((seg, si) =>
-                    seg.changed ? (
-                      <span
-                        key={si}
-                        className={cx("rounded-[2px] font-medium", r.kind === "del" ? "bg-diff-del-fg/20" : "bg-diff-add-fg/20")}
-                        data-diff-intraline
-                      >
-                        {seg.text}
-                      </span>
-                    ) : (
-                      <span key={si}>{seg.text}</span>
-                    ),
-                  )
-                : r.text || " "}
-            </span>
+            <span className="whitespace-pre text-ink">{renderDiffLineText(r)}</span>
           </div>
         ),
       )}

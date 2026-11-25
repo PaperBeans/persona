@@ -17,6 +17,15 @@ import (
 
 // The rows of what waits for the owner and their wait wording, shared by the briefing, the acceptance asks and the standing board (moved out of feishu_board.go, #13404).
 
+const (
+	// boardRowsMax is the most rows one board lists (it is one card); the rest are counted.
+	boardRowsMax = 30
+	// boardSummaryRunes is how much of a card's question a row quotes.
+	boardSummaryRunes = 60
+	// boardTailBytes is kept free for the "and N more" line and the note under the rows.
+	boardTailBytes = 1500
+)
+
 // boardRow is one thing waiting for the owner.
 type boardRow struct {
 	blocking bool // an Agent (or the main conversation) is held up by it; a to-do waiting to be verified is not
@@ -195,4 +204,50 @@ func boardRowMarkdown(l i18n.Lang, n int, r boardRow) string {
 func boardLinkOK(u string) bool {
 	p, err := url.Parse(u)
 	return err == nil && u != "" && (p.Scheme == "http" || p.Scheme == "https") && p.Host != "" && !strings.ContainsAny(u, "() \t\r\n")
+}
+
+// boardCard is the board and the same as plain text (the fallback when Feishu refuses the card): one line a thing,
+// with what is waiting and a note of when it was written; when nothing is, it says so. said is the card without that
+// note, to tell an edit that would change nothing.
+func (s *Service) boardCard(ctx context.Context, now time.Time) (card *botcard.Card, fallback, said string) {
+	l, web := s.botLang(ctx), s.webBase(ctx)
+	rows := s.boardRows(ctx, l, web, now)
+	title := i18n.T(l, "assistant-feishu_cards.board_title")
+	summary := i18n.T(l, "assistant-feishu_cards.board_empty")
+	color := botcard.Green
+	if len(rows) > 0 {
+		summary = i18n.T(l, "assistant-feishu_cards.board_summary", i18n.Args{"count": len(rows)})
+		color = botcard.Blue
+		if rows[0].blocking {
+			color = botcard.Orange
+		}
+	}
+	c := botcard.NewCard(title, color, summary)
+	var plain []string
+	if len(rows) == 0 {
+		c.Markdown(i18n.T(l, "assistant-feishu_cards.board_empty"))
+		plain = append(plain, i18n.T(l, "assistant-feishu_cards.board_empty"))
+	}
+	// One card: the rows that fit its byte and element budget, the rest counted.
+	budget := reportCardMaxBytes - boardTailBytes - len(c.JSON())
+	shown := 0
+	for i, r := range rows {
+		md := boardRowMarkdown(l, i+1, r)
+		n := feishuElBytes(func(c *botcard.Card) { c.Markdown(md) })
+		if shown >= boardRowsMax || n > budget {
+			break
+		}
+		budget -= n
+		c.Markdown(md)
+		plain = append(plain, fmt.Sprintf("%d. %s · %s · %s", i+1, r.summary, i18n.T(l, "assistant-feishu_cards.board_waited", i18n.Args{"wait": boardWait(l, r.waited)}), r.from))
+		shown++
+	}
+	if more := len(rows) - shown; more > 0 {
+		line := i18n.T(l, "assistant-feishu_cards.board_more", i18n.Args{"count": more})
+		c.Markdown(botcard.EscapeMarkdown(line))
+		plain = append(plain, line)
+	}
+	said = c.JSON()
+	c.Note(i18n.T(l, "assistant-feishu_cards.board_updated", i18n.Args{"time": now.In(s.location(ctx)).Format("15:04")}))
+	return c, title + "\n" + clip(strings.Join(plain, "\n"), reportFallbackMax), said
 }
