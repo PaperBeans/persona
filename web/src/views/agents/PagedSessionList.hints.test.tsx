@@ -6,7 +6,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../lib/api";
-import { LIST_HINT_WINDOW_MS, SessionList, type ListCounts } from "../../lib/session-list";
+import { HINT_WINDOW_MS } from "../../lib/hinted-read";
+import { SessionList, type ListCounts } from "../../lib/session-list";
 import { PagedSessionList, type PagedGrouping } from "./PagedSessionList";
 
 vi.hoisted(() => {
@@ -72,7 +73,7 @@ async function showLists(n: number) {
   const list = new SessionList<Row>("/sessions", identity, compare);
   await act(async () => root.render(<>{Array.from({ length: n }, (_, i) => <PagedSessionList key={i} root={list} path="/sessions" identity={identity} compare={compare}
     event="sessions_list" grouping={grouping} renderRow={(row) => <span>{row.id}</span>} />)}</>));
-  await act(async () => { await vi.advanceTimersByTimeAsync(3 * LIST_HINT_WINDOW_MS); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(3 * HINT_WINDOW_MS); });
 }
 
 /** `m` hints `gap` ms apart, then quiet until every read is done. */
@@ -81,7 +82,7 @@ async function burst(m: number, gap: number) {
     act(() => hint());
     await act(async () => { await vi.advanceTimersByTimeAsync(gap); });
   }
-  await act(async () => { await vi.advanceTimersByTimeAsync(3 * LIST_HINT_WINDOW_MS); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(3 * HINT_WINDOW_MS); });
 }
 
 describe("paged lists in a hint burst (#15910)", () => {
@@ -93,7 +94,7 @@ describe("paged lists in a hint burst (#15910)", () => {
     await burst(M, GAP);
     const during = facetReads() - before;
     // a read per window of the burst, plus the one after its last hint; before the fix: N × M = 120
-    const bound = Math.ceil((M * GAP) / LIST_HINT_WINDOW_MS) + 1;
+    const bound = Math.ceil((M * GAP) / HINT_WINDOW_MS) + 1;
     expect(during).toBeGreaterThan(0);
     expect(during).toBeLessThanOrEqual(bound);
   });
