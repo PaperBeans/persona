@@ -95,8 +95,15 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	if slices.ContainsFunc(cfg.Gates, func(g proto.CommandGate) bool { return g.Auth != nil }) {
 		n.gates() // the proxy goes by this Node's config from now on (a resident node's next connection)
 	}
-	analysisCommand := normalizeLarkCommand(command, cwd, cfg.Gates)
-	v := classifyLarkWith(command, cfg.Gates, cwd, n.larkCLIRisk(cfg), n.larkLoginPATH)
+	inSpace := n.gates().spaceSession(session) || identity.InSpace(cwd)
+	remote := n.isRemoteRuntimeSession(session)
+	confirmWrites := inSpace || remote
+	mode, _ := n.modesOf(session)
+	bypass := !confirmWrites && mode == proto.ModeBypass && n.isAssistantSession(session) && n.guestOf(session) == nil
+	// Only bypass reads file-driven read loops and notes through path variables as what they are (#15860): every
+	// other mode keeps the usual reading and its cards.
+	analysisCommand := normalizeLarkCommandRelaxed(command, cwd, cfg.Gates, nil, bypass)
+	v := classifyLarkRelaxed(command, cfg.Gates, cwd, n.larkCLIRisk(cfg), n.larkLoginPATH, bypass)
 	origin, launchCwd := n.assistantOriginCwd(session)
 	if origin == originInbox && inboxLarkOutbound(cfg, v, analysisCommand) {
 		return "deny", inboxLarkRefusal, nil
@@ -104,11 +111,6 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	if v.deny != "" {
 		return "deny", v.deny, nil
 	}
-	inSpace := n.gates().spaceSession(session) || identity.InSpace(cwd)
-	remote := n.isRemoteRuntimeSession(session)
-	confirmWrites := inSpace || remote
-	mode, _ := n.modesOf(session)
-	bypass := !confirmWrites && mode == proto.ModeBypass && n.isAssistantSession(session) && n.guestOf(session) == nil
 	// classified: every call read off the command and nothing else in it that the gate cannot follow.
 	classified := !v.unparsed && !v.unknown && !v.unsure
 	for _, c := range v.calls {
