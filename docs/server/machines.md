@@ -321,6 +321,29 @@ machines, and one project's breakdown (`devices/usage_projects.go`, `devicewire/
   outside home as it is), or a token, `:assistant` (a Persona assistant conversation), `:temp` (a temporary folder),
   `:unknown` (a record that names no directory). The directory is part of the row's key through the minute, ten-minute
   and hour rows, the backfill and a runtime's deltas. `''` is "not split": usage stored before, or from an older node.
+- **Where a session started** (`node/usage_dirs.go`): the directory Persona started it in (its state), else the first
+  directory its records name: a Claude Code transcript's head (a subagent's or workflow agent's file takes its session's
+  own transcript), a Codex or TRAE CLI rollout's `session_meta`, a pi or omp session's header, opencode's
+  `session.directory` (read apart from the usage query, so a database without it is still metered), a runtime's row.
+  Never the latest one: Claude Code's `cwd` follows the model's `cd` (`docs/lessons/transcript.md`). Read once per file
+  (the head, at most 256 KB). The assistant's own directories are `:assistant`; the system's temp directory, `/tmp`,
+  `/var/tmp` and macOS's `/var/folders` are `:temp`.
+- **Resolving it** (`resolveUsageDir`, in the background, once per directory and connection; the meter never waits for
+  it): the nearest `.git` above it, read as git does without running git (`node/gitplace.go`: a linked worktree's
+  shared git dir, a submodule's own). Its remote is `origin`, else `upstream`, else the first one in the repository's
+  `config` (read up to 256 KB): the SSH, scp-like, HTTPS and git:// spellings of one repository give one key, the user,
+  password or token and the port are dropped, the host is lower case (`ssh.github.com`, `www.github.com` and the
+  forges' other names folded in), a trailing `.git` and empty segments go, and GitHub's, GitLab's, Bitbucket's,
+  Codeberg's, Gitee's and Azure DevOps's paths are keyed in lower case (others keep theirs; the name keeps the remote's
+  own case). A remote written as it was cloned is used as written, so a global `insteadOf` rewrite to a mirror does not
+  change the key; only a shorthand with no dotted host (`gh:owner/repo`) is asked of git (`git remote get-url`, 10
+  seconds at most). A local path, a URL with a query and anything else is no remote: then the key is the root commit
+  (`git rev-list --max-parents=0 HEAD`, 10 seconds at most), so a copy on another machine is the same project, and two
+  repositories made from one template are merged (known and accepted); with no commit yet, the folder's name
+  (`local:dir:`). Forks and mirrors with another owner stay apart. A repository at home or above it (dotfiles in git)
+  is the home folder's only, a folder in it its own; a repository whose config cannot be read, and a broken `.git`,
+  are folders; a directory that cannot be read is not looked into (a folder); one that is gone is not resolved, and the
+  manager keeps its last resolution.
 - **What a directory is**: the node sends, with the report that first names a directory on a connection, what it resolved
   it to (`dirs`, `proto.UsageDir`): the project key the manager sums by across machines, its name, the remote's host,
   the place (the working tree's top, or the folder) and whether that is a linked worktree. Keys: `git:<host>/<path>`,
@@ -340,6 +363,16 @@ machines, and one project's breakdown (`devices/usage_projects.go`, `devicewire/
   one remote in different case).
 - **Breakdown**: by computer, Agent, model, launcher and place (each working tree or folder on each computer, worktrees
   marked), the last 7 days by day and today by the hour, its share of every project's tokens, and its cache hit rate.
+- **The week before** (`node/usage_resplit.go`, `devices/usage_resplit.go`, `db.ResplitUsage`, table `usage_resplit`, migration
+  `manager/20261126162313_usage_resplit.sql`): once, a few minutes after connecting to a manager that keeps directories,
+  a node asks `usage.resplit.status`; unless done, it re-reads its transcripts from a week ago to where its live window
+  starts (the ten-minute rows the projects' week is summed from) by the ten minutes, with the live meter's rules and
+  each session's start directory, rate-limited like the backfill, and sends them with what their directories resolve to.
+  The manager splits each stored ten minutes, model, launcher and file-metered agent that has no directory in the
+  re-read shares, kind by kind (largest remainder), so every key's sums, and the calendar, stay exactly as they were.
+  Usage the transcripts no longer hold, a runtime's and an older node's stays not split; re-read usage with nothing
+  stored is left out. The manager records the last ten minutes sent and when it finished, so a cut re-split goes on
+  and one sent again changes nothing; a machine with nothing to split is done at once.
 - **Rolling upgrades**: the node splits by directory only after the manager answers `usage.features` with `dirs: true`;
   an older manager answers `unknown method`, and the node sends its buckets summed as before (there, several buckets of
   one minute, model, launcher and agent would replace each other). An older node sends no directories: its usage is

@@ -1,8 +1,9 @@
 // What the sidebar's files share: the row and menu types, a row's key, the section heading and count (SidebarSection,
 // passed on from here), the badge and dot colors, the pages hook and navigation. It imports none of them (Sidebar,
 // SidebarRows, SidebarTree, SidebarRail).
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../i18n";
+import { foldRows } from "../lib/folded-rows";
 import { resolveTab } from "../lib/herdr-tree";
 import { useInboxBadge } from "../lib/inbox";
 import { useHasUnseenLabs } from "../lib/labs-seen";
@@ -18,10 +19,9 @@ import { colorOf, hue, type UIColor } from "../lib/extension-ui-v6";
 import { BUILTIN_PAGE_COLORS, useSidebarIconMode } from "../lib/sidebar-icons";
 import { BADGE_TONE, navIcon, pageRoute } from "./extensions/ExtensionSlots";
 import { href, inWorkView, navigate, parse, type Route } from "../lib/router";
-import { useAgentSessions } from "../lib/sessions";
 import { scoped, useScope, useScopedCounts } from "../lib/current-assistant";
 import { useOwnerNeeds } from "../lib/todo-owner-needs";
-import { useStore } from "../lib/store";
+import { useStore, type State } from "../lib/store";
 import { connPhase } from "../lib/connection";
 import { useStarredCount } from "../lib/starred-summary";
 import { useWorkspaceBoardSetting } from "../lib/workspace-board-setting";
@@ -39,17 +39,29 @@ export const CURRENT_ROW = "bg-hover-2";
 /** The least an agent row's title gets behind a prefix (styles.css `--row-title-min`, about 4.5 characters). */
 export const ROW_TITLE_MIN = "min-w-(--row-title-min)";
 
+/** Machine rows available to resolve a `/t/…` route: the complete rows cached for that machine (exact lookups, clicked
+ *  rows, or a non-paging hub), followed by summary rows not already among them, folded like `useAgentSessions`. */
+function tabRows(s: Pick<State, "sessions" | "sessionSummaries">, mid: string): Session[] {
+  const complete = s.sessions[mid] ?? [];
+  const seen = new Set(complete.map((row) => row.session_id));
+  const combined = [...complete, ...s.sessionSummaries.filter((row) => row.machine_id === mid && !seen.has(row.session_id))];
+  const visible = combined.some((row) => row.hidden_by_directory) ? combined.filter((row) => !row.hidden_by_directory) : combined;
+  return foldRows(visible).filter((row) => !row.assistant);
+}
+
 /** The row a route lights up in the sidebar: a tab's page is the pane it shows (its row in the tree is the tab's). An
  *  Agent's page opened from inside another page lights that page's row (#12055): its history entry names it, and every
  *  move to another entry draws the sidebar again with the route. */
 export function useActiveKey(route: Route): string {
-  const all = useAgentSessions();
-  const assistant = useStore((s) => s.assistant);
-  const shown = inWorkView(route) ? route : sidebarRoute(route, sidebarPageOf(handoffFrom()));
-  const tabPath = shown.name === "tab" ? href(shown) : "";
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- `shown` is parsed anew each render; its path says it all
-  const tabPane = useMemo(() => (shown.name === "tab" ? resolveTab(all, shown) : undefined), [all, tabPath]);
-  return inWorkView(route) ? "terminal" : shown.name === "tab" ? (tabPane ? rowKey(tabPane) : "") : sidebarActiveKey(shown, assistant?.main);
+  const work = inWorkView(route);
+  const shown = work ? route : sidebarRoute(route, sidebarPageOf(handoffFrom()));
+  return useStore((s) => {
+    if (work) return "terminal";
+    if (shown.name !== "tab") return sidebarActiveKey(shown, s.assistant?.main);
+    const pane = resolveTab(tabRows(s, shown.mid), shown);
+    if (pane) return rowKey(pane);
+    return shown.sid ? rowKey({ machine_id: shown.mid, session_id: shown.sid }) : "";
+  });
 }
 
 // One function for the component's life, so the rows given it skip a re-render (memo); a click still calls the
@@ -83,6 +95,11 @@ export type NavPage = { k: string; to: Route; icon: IconName; label: string; sho
 /** A page's icon in its color (#10822), unless it is the open page, whose icon keeps the open row's ink; none without a
  *  color, so Monochrome draws what it always drew. */
 export const pageIconStyle = (color: UIColor | undefined, active: boolean) => (color && !active ? { color: hue(color) } : undefined);
+
+/** History's icon (the Agents' sessions that are not running, by day, #10240) wherever its row is drawn: an activity log.
+ *  Each built-in entry has a glyph of its own, outside the icons an extension's page can name (#16282): Scheduled tasks
+ *  keeps `clock`, as iOS and Android draw it; Recent has `history`; `calendar` is an extension icon. */
+export const HISTORY_ICON: IconName = "activity";
 
 /** A page's spoken name with its badge ("Inbox 3", "To-dos 2 to-dos need you"): the phone's grid, the rail and the folded
  *  titles say what the list's row says. */
@@ -121,7 +138,9 @@ export function useNavPages() {
 
   const main = assistant?.main ? assistant.conversations.find((c) => c.session_id === assistant.main) : undefined;
   const page: Record<(typeof NAV_PAGES)[number], NavPage | false> = {
-    home: { k: "home", to: { name: "home" }, icon: "home", label: t("sidebar.nav_home"), short: t("sidebar.nav_home_short"), badge: counts.badge || undefined, badgeTone: "attention" },
+    // Overview: `grid`, a dashboard of cards (its Arrange button's glyph), outside the icons an extension's page can name;
+    // `home` is the main chat's, as on iOS and Android (#16282)
+    home: { k: "home", to: { name: "home" }, icon: "grid", label: t("sidebar.nav_home"), short: t("sidebar.nav_home_short"), badge: counts.badge || undefined, badgeTone: "attention" },
     inbox: { k: "inbox", to: { name: "inbox" }, icon: "inbox", label: t("sidebar.nav_inbox"), short: t("sidebar.nav_inbox_short"), badge: inbox || undefined, badgeTone: "attention", title: inbox ? t("sidebar.inbox_badge_title", { count: inbox }) : undefined },
     starred: stars != null && { k: "starred", to: { name: "starred" }, icon: "star", label: t("starred.title"), badge: stars || undefined, badgeLabel: t("starred.count", { count: stars }) },
     "workspace-board": boardOn && { k: "workspace-board", to: { name: "workspace-board" }, icon: "layers", label: t("sidebar.nav_board"), short: t("sidebar.nav_board_short") },

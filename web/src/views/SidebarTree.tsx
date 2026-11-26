@@ -635,7 +635,7 @@ function WorkspaceBlock({ sp, ...p }: { sp: HerdrSpace } & TreeProps) {
             <span className={MENU_HIDES}>
               {folded ? <SessionTally sessions={sp.tree} folded /> : tabs > 0 && !sp.children.length && (
                 // agents, as the machine and the quick filter count them: a tab with several agents is one row (#2320)
-                <span title={t("sidebar.space_tally", { count: sp.sessions.length, tabs })} className="text-[10.5px] text-ink-3 tabular-nums">{sp.sessions.length}<span className="sr-only"> {t("sidebar.agent_suffix", { count: sp.sessions.length })}</span></span>
+                <span title={t("sidebar.space_tally", { count: sp.sessions.length, tabs })} className="inline-block min-w-4 text-right text-[10.5px] text-ink-3 tabular-nums">{sp.sessions.length}<span className="sr-only"> {t("sidebar.agent_suffix", { count: sp.sessions.length })}</span></span>
               )}
             </span>
           </span>

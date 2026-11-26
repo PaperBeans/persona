@@ -504,7 +504,7 @@ describe("stable machine, workspace and tab order (#11801)", () => {
       sessions[0]!,
       placed("b1", "beta", { state: "needs_you" }),
       placed("c1", "gamma", { work: { phase: "done", just_finished: true } }),
-      placed("d1", "delta", { status: "working", state: "working", background_waiting: true }),
+      placed("d1", "delta", { status: "working", state: "working", background_working: true, background_waiting: true }),
     ];
     act(() => sessions.slice(1).forEach((session) => upsertSession(session)));
     await flush();

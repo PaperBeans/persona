@@ -4,6 +4,8 @@
   "comment_n": "コメント {n}",
   "placeholder": "コメントを追加…",
   "note_label": "コメント {n}",
+  "add_images": "コメントに画像を追加",
+  "preparing_images": "画像を準備中…",
   "remove": "コメントを削除",
   "jump": "コメントした場所へ移動",
   "jump_text_gone": "その箇所はもう画面にありません",

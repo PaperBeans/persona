@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/wireids"
 )
 
 // ---- what the hub sends the assistant (Handler) ----
@@ -120,9 +121,9 @@ type UserSpokeParams struct {
 	Text string `json:"text,omitempty"`
 	// Source is set only with Text from authenticated owner input to an Agent: "app" for the app's message route,
 	// "terminal" for the terminal Agent-message route. It is never a runtime transcript role.
-	Source      string    `json:"source,omitempty"`
-	ClientMsgID string    `json:"client_msg_id,omitempty"`
-	At          time.Time `json:"at,omitempty"`
+	Source      string              `json:"source,omitempty"`
+	ClientMsgID wireids.ClientMsgID `json:"client_msg_id,omitempty"`
+	At          time.Time           `json:"at,omitempty"`
 }
 
 // Verified owner-input provenance carried by UserSpokeParams.

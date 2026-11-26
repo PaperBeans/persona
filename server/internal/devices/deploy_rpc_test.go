@@ -253,6 +253,37 @@ func TestLinkedDeployTransfersAndConfirms(t *testing.T) {
 	}
 }
 
+func TestFleetUpdateConvergesResidentsAcrossTransports(t *testing.T) {
+	program := updatetest.VersionedProgram(t, nodeproto.ProgramPersonad, "linux", "amd64", "new-build")
+	for _, kind := range []string{"local", kindLink, kindService, "ssh", "tailcat"} {
+		t.Run(kind, func(t *testing.T) {
+			isolateNodeBinaries(t)
+			d, m, n, _ := linkedDeployFixture(t, kind)
+			dir := nodeBinaryDir()
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			copyFile(t, program, filepath.Join(dir, "personad-linux-amd64"))
+			b, err := os.ReadFile(program)
+			if err != nil {
+				t.Fatal(err)
+			}
+			n.mu.Lock()
+			n.expected = b
+			n.mu.Unlock()
+			m.updateOnConnect(t.Context())
+			waitMachine(t, m, 5*time.Second, func(s proto.Machine) bool { return s.NodeVersion == "new-build" && !s.Deploying })
+			// The post-confirmation fleet sweep must be safe on the same connection.
+			d.updateNodes(t.Context())
+			n.mu.Lock()
+			defer n.mu.Unlock()
+			if n.begin != 1 || n.commits != 1 || n.confirms != 1 {
+				t.Fatalf("transfers %d, commits %d, confirmations %d", n.begin, n.commits, n.confirms)
+			}
+		})
+	}
+}
+
 // Redeploy sends the kind of program the node says it runs: persona-node to persona-node, personad to the rest; so
 // does an update the hub queued before it restarted, when the node comes back (nodeUpdateConnected).
 func TestRedeployBringsTheProgramTheNodeRuns(t *testing.T) {

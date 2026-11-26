@@ -1,7 +1,7 @@
 import { Suspense, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
-import type { AgentState } from "../lib/types";
+import type { StatusMarkState } from "../lib/types";
 import { Icon, type IconName } from "./icons";
 import { StatusMark } from "./StatusMark";
 import type { ToastLiftProps } from "./toast-lift";
@@ -89,10 +89,12 @@ export function Loading({ label = t("common.loading") }: { label?: string }) {
 }
 
 /** A state as a word in a pill; `awaiting`: seen and awaiting the user's reply, a quiet pending mark (#5096). */
-export function StatePill({ state, awaiting = false, waiting = false, dot = true }: { state: AgentState; awaiting?: boolean; /** working only on background commands that wait (#6045) */ waiting?: boolean; /** false beside a dot that already says the state (an Agent's header, #3956): the words alone */ dot?: boolean }) {
-  const tone: Record<AgentState, string> = {
+export function StatePill({ state, awaiting = false, waiting = false, dot = true }: { state: StatusMarkState; awaiting?: boolean; /** working only on background commands that wait (#6045) */ waiting?: boolean; /** false beside a dot that already says the state (an Agent's header, #3956): the words alone */ dot?: boolean }) {
+  const tone: Record<StatusMarkState, string> = {
     needs_you: "bg-field text-attention",
     working: "bg-field text-orange",
+    done: "bg-green-tint text-green",
+    error: "bg-danger-wash text-red",
     unread: "bg-green-tint text-green",
     idle: "bg-field text-ink-2",
     offline: "bg-field text-ink-3",

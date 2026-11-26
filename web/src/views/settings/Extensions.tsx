@@ -18,9 +18,9 @@ import {
   asksFirst, changed, checkError, choiceLabel, clearedSecrets, clearExtensionSecret, compact, configError, entryID, entryItems, entryKey, fieldLabel, fieldPath, fieldTitle, isDirty, isEntryList, listItems, listExtensionsInfo, listSummary, numberProblems,
   placeholder, extensionDetail, extensionState, extensionTone, pointText, readNumber, rebaseDraft, runNote, same, secretState, setupSecret, setAt, setContribution, setExtensionConfig, setExtensionConfigPreservingEntries, setExtensionEnabled,
   channelOf, machineStatus, nodeProgramStatus, pickerChoices, sandboxState, saveFooter, setExtensionAutoUpgrade, setExtensionSecret, sourceText, stateLine, valueAt,
-  removeHandoffRule, setExtensionSecretReference, type HandoffRule, type SecretUser,
+  removeHandoffRule, setExtensionSecretReference, permissionDetail, permissionTitle, type HandoffRule, type SecretUser,
   type HubExtension, type HubExtensionDetail, type Json, type JsonObject, type ExtensionField, type ExtensionNodeState, type ExtensionSandbox, type ExtensionSecret,
-  type PickerLauncher,
+  type ExtensionPermission, type PickerLauncher,
 } from "../../lib/extensions";
 import { loadLaunchers } from "../../lib/launcher-list";
 import { hubHasExt } from "../../lib/extension-api";
@@ -127,11 +127,12 @@ function OwnedExtension({ id: _id, manager, children }: { id: string; manager?: 
 }
 
 /** A page an extension draws (placement plugin_page), under the extension's name. `onBack`: none where the page's top
- *  bar has the way back (a phone). */
+ *  bar has the way back (a phone), or while that page has pushed one of its own: its Back returns to the page below. */
 function ExtensionPage({ id, ui, manager, onBack, onWide }: { id: string; ui: string; manager?: string; onBack?: () => void; onWide?: (wide: boolean) => void }) {
   usePinnedExtension(id, manager);
   const [d, setD] = useState<HubExtensionDetail | null>(null);
   const [n, setN] = useState(0);
+  const [depth, setDepth] = useState(1);
   useEffect(() => {
     extensionDetail(id).then(setD, () => {});
   }, [id]);
@@ -140,7 +141,7 @@ function ExtensionPage({ id, ui, manager, onBack, onWide }: { id: string; ui: st
   return (
     <>
       <div className="mb-3 flex items-center gap-2">
-        {onBack && (
+        {onBack && depth === 1 && (
           <Button tone="quiet" icon="chevronLeft" onClick={onBack} className="-ml-2">
             <span className="max-w-[240px] truncate">{d?.name ?? id}</span>
           </Button>
@@ -150,7 +151,7 @@ function ExtensionPage({ id, ui, manager, onBack, onWide }: { id: string; ui: st
       </div>
       {/* its extension id scopes what a graph's `key` keeps (lib/extension-owner.tsx) */}
       <ExtensionOwnerScope owner={id}>
-        <ExtensionUI key={n} extension={id} ui={ui} title={title} manager={manager} onWide={onWide} />
+        <ExtensionUI key={n} extension={id} ui={ui} title={title} manager={manager} onWide={onWide} onDepth={setDepth} />
       </ExtensionOwnerScope>
     </>
   );
@@ -827,9 +828,19 @@ function ExtensionDetail({ id, manager, onBack: back, headerBack, onPage, onUpgr
           )}
 
           {(p.enabled ?? true) && !!p.contributes?.connectors?.length && <ExtensionConnectorInbox ids={p.contributes.connectors} manager={manager} onOpen={onConnector} />}
-          <ConnectorExternalSourceSettings ids={[...(p.contributes?.connectors ?? []), ...(p.contributes?.channel ?? [])]} manager={manager} />
+          <ConnectorExternalSourceSettings
+            ids={[...(p.contributes?.connectors ?? []), ...(p.contributes?.channel ?? [])]}
+            manager={manager}
+            copy={{
+              channelDefaultsTitle: t("settings-extensions.source_defaults_title"),
+              channelHint: t("settings-extensions.source_defaults_hint"),
+              flowsTitle: t("settings-extensions.source_flows_title"),
+              flowsHint: t("settings-extensions.source_flows_hint"),
+              hideEmptyFlows: true,
+            }}
+          />
           {/* source subscriptions (#2041) of its connectors, the default manager's */}
-          {(p.enabled ?? true) && !manager && !!p.contributes?.connectors?.length && <SubscriptionsEntry pick={(l) => l.extension === p.id} scope={{ ext: p.id }} />}
+          {(p.enabled ?? true) && !manager && !!p.contributes?.connectors?.length && <SubscriptionsEntry pick={(l) => l.extension === p.id} scope={{ ext: p.id }} description={t("settings-extensions.subscriptions_footer")} />}
 
           {editable && fields.length > 0 && (
             <>
@@ -916,14 +927,7 @@ function ExtensionDetail({ id, manager, onBack: back, headerBack, onPage, onUpgr
           {p.sandbox && <SandboxGroup s={p.sandbox} id={p.id} name={p.name} />}
 
           {!!p.permissions?.length && (
-            <Group title={t("settings-extensions.permissions_title")} footer={t("settings-extensions.permissions_footer")}>
-              {p.permissions.map((perm) => (
-                <div key={perm.key} className="px-4 py-2.5">
-                  <div className="text-[13px] text-ink">{perm.title}</div>
-                  {perm.detail && <div className="mt-0.5 text-[11.5px] leading-snug text-ink-3">{perm.detail}</div>}
-                </div>
-              ))}
-            </Group>
+            <Permissions permissions={p.permissions} />
           )}
 
           </>}
@@ -997,6 +1001,21 @@ export function SandboxGroup({ s, id, name }: { s: ExtensionSandbox; id: string;
           </div>
         </div>
       )}
+    </Group>
+  );
+}
+
+/** What an extension may do, in user-facing terms: internal point keys and socket filenames stay behind the explanation. */
+export function Permissions({ permissions }: { permissions: ExtensionPermission[] }) {
+  return (
+    <Group title={t("settings-extensions.permissions_title")} footer={t("settings-extensions.permissions_footer")}>
+      {permissions.map((perm) => (
+        <div key={perm.key} className="px-4 py-2.5">
+          <div className="text-[13px] text-ink">{permissionTitle(perm)}</div>
+          {permissionDetail(perm) && <div className="mt-0.5 text-[11.5px] leading-snug text-ink-3">{permissionDetail(perm)}</div>}
+        </div>
+      ))}
+      {permissions.some((perm) => perm.key === "network") && <SettingsHint>{t("settings-extensions.permission_network_hint")}</SettingsHint>}
     </Group>
   );
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/wireids"
 )
 
 // Sending a message from the phone (docs/protocol/protocol.md "Sending messages"). The app sends each message with its own
@@ -341,7 +342,7 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 		}
 		if (terminal || !m.isAssistant(spokeSession)) && isText && personSent(r.Context()) {
 			spoke.Text = text
-			spoke.ClientMsgID = clientMsgID
+			spoke.ClientMsgID = wireids.ClientMsgID(clientMsgID)
 			spoke.Source = assistantwire.OwnerInputApp
 			if terminal {
 				spoke.Source = assistantwire.OwnerInputTerminal

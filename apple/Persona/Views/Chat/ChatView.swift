@@ -1162,6 +1162,9 @@ struct ChatView: View {
         switch page {
         case .todo(let id):
             guard TodosLogic.isOnTodosHub(sessionGroup: group, hubGroup: model.hub?.group) else { return false }
+            #if os(iOS)
+            if model.returnToStartIfHidden(.todos) { return true }
+            #endif
             Haptics.tap()
             linkedTodo = TodoDetailRoute(id: id)
             return true

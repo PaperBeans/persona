@@ -60,5 +60,21 @@
   "unpin_title": "Unpin from sidebar",
   "pinned_summary": "Pinned in sidebar: {count}",
   "pinned_fallback": "Pinned items unavailable · showing automatic",
-  "reset_pinned": "Reset to automatic"
+  "reset_pinned": "Reset to automatic",
+  "view_label": "Layout",
+  "view_cards": "Cards",
+  "view_table": "Table",
+  "table_account": "Account",
+  "table_other": "Other",
+  "table_plan_window": "Plan",
+  "table_sort_by": "Sort by {column}",
+  "timeline_next": "Next: {name} · {window} ({remaining})",
+  "timeline_next_prefix": "Next:",
+  "timeline_toggle_show": "Show reset timeline",
+  "timeline_toggle_hide": "Hide reset timeline",
+  "overlap_hint": "May overlap with {name}",
+  "overlap_hint_title": "This local reading shares a reset time with {name}; both sources are kept separately",
+  "overlap_stale_summary": "Out of date · may overlap with {name}",
+  "overlap_stale_show": "Show out-of-date overlapping account {name}",
+  "overlap_stale_hide": "Hide out-of-date overlapping account {name}"
 }

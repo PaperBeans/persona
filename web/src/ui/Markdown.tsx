@@ -421,7 +421,7 @@ export const markdownComponents: Components = {
 // doesn't wrap and needs no minimum width, so a column of numbers or names is as narrow as they are (audit item 77).
 // A wide character (CJK, full-width, emoji: from U+2E80 on) counts 1em, any other about half; a line break or a picture
 // never fits.
-type HastNode = { type: string; value?: string; tagName?: string; children?: HastNode[] };
+type HastNode = { type: string; value?: string; tagName?: string; properties?: Record<string, unknown>; children?: HastNode[] };
 
 export function cellFits(node: unknown): boolean {
   let em = 0;
@@ -433,6 +433,21 @@ export function cellFits(node: unknown): boolean {
     return n.tagName !== "br" && n.tagName !== "img" && (n.children ?? []).every(walk);
   };
   return Boolean(node) && walk(node as HastNode);
+}
+
+// Convert only parsed break tags in cells before ReactMarkdown escapes its remaining raw nodes.
+function rehypeTableBreaks() {
+  const walk = (node: HastNode, inCell: boolean) => {
+    const cell = inCell || node.tagName === "td" || node.tagName === "th";
+    node.children?.forEach((child, i, children) => {
+      if (cell && child.type === "raw" && /^<br(?: ?\/)?>$/.test(child.value ?? "")) {
+        children[i] = { type: "element", tagName: "br", properties: {}, children: [] };
+      } else {
+        walk(child, cell);
+      }
+    });
+  };
+  return (tree: HastNode) => walk(tree, false);
 }
 
 function handleInlineCodeCopy(e: React.MouseEvent<HTMLElement> | React.KeyboardEvent<HTMLElement>) {
@@ -678,7 +693,7 @@ export const Markdown = memo(function Markdown({ text: raw, small, compact, mid,
   const images = useReplyImages(wantsReplyImages)?.rehypeReplyImages;
   const picturesContext = useMemo(() => ({ text, ask: Boolean(askImages), mid, cwd }), [text, askImages, mid, cwd]);
   const rehypePlugins = useMemo<PluggableList>(
-    () => [...(images ? [[images, { local: Boolean(mid) }] as [typeof images, { local: boolean }]] : []), ...(katex ? [katex] : []), ...(highlight ? [highlight] : []), ...(key ? [rehypePathLinks(linkable)] : []), rehypeLinkedCode],
+    () => [...(images ? [[images, { local: Boolean(mid) }] as [typeof images, { local: boolean }]] : []), ...(katex ? [katex] : []), ...(highlight ? [highlight] : []), ...(key ? [rehypePathLinks(linkable)] : []), rehypeTableBreaks, rehypeLinkedCode],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [key, highlight, katex, images, Boolean(mid)],
   );

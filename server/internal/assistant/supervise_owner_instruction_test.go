@@ -318,9 +318,9 @@ func TestTodoSupervisionPersistsOwnerWork(t *testing.T) {
 	if err := database.CreateTodo(ctx, db.TodoRow{ID: "owner-work", Title: "Owner work", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal([]OwnerSessionWork{{
+	raw, _ := json.Marshal([]ownerSessionWork{{
 		MachineID: "box", SessionID: "s1", AssignedAt: now.Add(time.Minute),
-		Instruction: &OwnerInstruction{At: now, Source: assistantwire.OwnerInputTerminal, Excerpt: "keep this instruction", NeedsReport: true},
+		Instruction: &ownerInstruction{At: now, Source: assistantwire.OwnerInputTerminal, Excerpt: "keep this instruction", NeedsReport: true},
 	}})
 	if err := database.PutTodoSupervision(ctx, db.TodoSupervisionRow{TodoID: "owner-work", Supervisor: "conv1", Reviews: json.RawMessage("[]"), OwnerWork: raw, UpdatedAt: now}); err != nil {
 		t.Fatal(err)

@@ -113,6 +113,19 @@ func Download(ctx context.Context, client *http.Client, base string, f File, dir
 	return bin, nil
 }
 
+// DownloadBinary takes the raw bytes from an authenticated Hub package index.
+func DownloadBinary(ctx context.Context, client *http.Client, base string, f File, dir string) (string, error) {
+	if canonical, legacy := canonicalPackage(f.Name); canonical == "" || legacy || f.Size <= 0 ||
+		f.SHA256 == "" || f.SHA256 != f.BinarySHA256 {
+		return "", errors.New("invalid published package")
+	}
+	bin := filepath.Join(dir, f.Name)
+	if err := fetchFile(ctx, client, strings.TrimSuffix(base, "/")+"/"+f.Name, bin, f); err != nil {
+		return "", err
+	}
+	return bin, os.Chmod(bin, 0o755)
+}
+
 var errMismatch = errors.New("the download does not match the release's manifest")
 
 // IsMismatch: err is Download finding that what was served is not what the manifest says (sizes or sha256s; a file

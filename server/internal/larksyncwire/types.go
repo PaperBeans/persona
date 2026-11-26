@@ -426,17 +426,33 @@ type ChatID string
 // MessageID is a Feishu/Lark message_id (om_…) in the sync contract.
 type MessageID string
 
+// MessageType is a Feishu/Lark message msg_type in the sync contract (for example "text", "post", "image", "file",
+// or "interactive"). Unknown platform msg_type values pass through unchanged.
+type MessageType string
+
+// Common Feishu/Lark message types handled by user sync.
+const (
+	MessageTypeText        MessageType = "text"
+	MessageTypePost        MessageType = "post"
+	MessageTypeImage       MessageType = "image"
+	MessageTypeFile        MessageType = "file"
+	MessageTypeMedia       MessageType = "media"
+	MessageTypeAudio       MessageType = "audio"
+	MessageTypeInteractive MessageType = "interactive"
+	MessageTypeSystem      MessageType = "system"
+)
+
 // EventLarkMessages is the extension event emitted after a sync round commits new messages to the outbox.
 const EventLarkMessages = "lark.messages"
 
 // MessageEventItem is one message's metadata inside event.lark.messages: strictly no message body, display names,
 // or attachment contents; extensions read bodies within their own permissions.
 type MessageEventItem struct {
-	ChatID       ChatID    `json:"chat_id"`
-	MessageID    MessageID `json:"message_id"`
-	SenderOpenID OpenID    `json:"sender_open_id,omitempty"`
-	At           time.Time `json:"at,omitzero"`
-	Type         string    `json:"type,omitempty"`
+	ChatID       ChatID      `json:"chat_id"`
+	MessageID    MessageID   `json:"message_id"`
+	SenderOpenID OpenID      `json:"sender_open_id,omitempty"`
+	At           time.Time   `json:"at,omitzero"`
+	Type         MessageType `json:"type,omitempty"`
 }
 
 // MessagesEvent is one paginated batch of newly synced Lark message metadata emitted as event.lark.messages.

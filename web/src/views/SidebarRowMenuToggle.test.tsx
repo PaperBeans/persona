@@ -164,8 +164,8 @@ describe("a paged Agents row's ⋯", () => {
   }
 
   it("opens the row's menu and closes it on a second press", async () => {
-    // by state: a grouping the paged list draws (#6662), its Working section open on the row
-    localStorage.setItem("persona.agentGrouping", "state");
+    // By machine reads the section from the paging endpoint.
+    localStorage.setItem("persona.agentGrouping", "machine");
     localStorage.removeItem("sidebar.terminals");
     vi.stubGlobal("WebSocket", FakeSocket);
     // the list draws only the rows in view of its scroller: give it one with a size (jsdom has no layout)

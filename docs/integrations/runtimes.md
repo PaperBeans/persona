@@ -727,9 +727,10 @@ serve as an assistant backend through the optional assistant contract above. It 
 with ACP support; `--agy-bin`, `--agy-dir`, `--socket`, `--no-update` and `--parent-stdin` override the executable, CLI data
 directory, node socket, automatic updates and parent-pipe shutdown. When `--agy-dir` is passed explicitly, the companion also sets `ANTIGRAVITY_CLI_CONFIG_DIR` for its spawned `agy` child processes (`acp` and `models`) so discovery, ACP sessions, and transcript reads share the same directory.
 To run an additional companion instance alongside the default `agy` companion (for example, a wrapped `agy` executable or separate configuration directory), pass a distinct `--runtime <id>` (default `agy`), and optionally `--launcher <name>` (default `<runtime>`), `--display-name <label>` (default `Antigravity`), `--prefix <prefix>` (default `<runtime>-`), and `--assistant-for <launcher>` to point a non-assistant Agent launcher at this companion in the main-chat picker. Custom runtime IDs keep `agent: "agy"` and do not cause the node's built-in `agy` companion to yield.
-Models come from authenticated `agy models` discovery and ACP session metadata. The companion discovers the catalog once
-at startup, reuses a fresh catalog for five minutes on `models({launcher})`, and refreshes on demand when the TTL has
-elapsed or the picker requests `models({launcher, refresh: true})` (`caps.models`, `launchers.models`; #15253).
+Models come from authenticated `agy models` discovery and ACP session metadata. The companion discovers the catalog at
+startup and again every five minutes in the background, with backoff on sign-in timeouts (#15481). It reuses a fresh
+catalog on `models({launcher})` and refreshes on demand once the five-minute TTL has elapsed or the picker requests
+`models({launcher, refresh: true})` (`caps.models`, `launchers.models`; #15253).
 Discovery never sends a prompt. The native settings file determines the advertised
 default. New sessions and availability checks explicitly apply that model through ACP, since ACP may ignore the
 settings file when choosing its initial model. An explicit caller model takes precedence, and resumed sessions retain

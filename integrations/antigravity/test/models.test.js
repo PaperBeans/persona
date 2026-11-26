@@ -498,6 +498,17 @@ test('default runtime discovers models once at startup and refreshes on demand w
   assert.equal(modelsCalls().length, 2, 'expired TTL refreshes on demand')
 })
 
+test('periodic discovery publishes a changed catalog while idle, before the cached list expires', async (t) => {
+  const { n, catalog, settings } = await fixture(t, { noStart: true, catalogEveryMs: 300, catalogTtlMs: 60_000 })
+  const published = () => n.last('runtime.launchers')?.launchers[0].models
+  await until('startup catalog', () => published()?.length === entries.length)
+  catalog({ models: [{ modelId: 'new-native-model', name: 'New Native Model' }] })
+  settings({ model: 'new-native-model' })
+  await until('refreshed catalog', () => published()?.[0]?.id === 'new-native-model')
+  const { models } = await n.peer.call('launchers.models', {})
+  assert.deepEqual(models.map((model) => [model.id, model.default]), [['new-native-model', true]])
+})
+
 test('on-demand discovery backs off unforced lookups after a sign-in timeout while explicit refresh retries immediately', async (t) => {
   const { n, catalog, modelsCalls } = await fixture(t, { noStart: true, modelsTimeoutMs: 250, catalogTtlMs: 500, catalogMaxMs: 10_000 })
   await until('startup discovery finishes', () => modelsCalls().length === 1 && n.last('runtime.launchers')?.launchers[0].models.length === entries.length)

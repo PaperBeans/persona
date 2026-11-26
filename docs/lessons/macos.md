@@ -416,3 +416,18 @@ the same cause. Recheck scrolling, folding and layout separately with synthetic 
   `AXIsProcessTrusted()` read granted in a plain child and missing in a disclaimed one.
 - A cold Homebrew ffmpeg puts out its first frame after 34–37 ms (it loads many libraries; a minimal build takes
   9–16 ms). A process started earlier and left waiting takes 6–7 ms.
+
+## An Electron frameless window keeps macOS's rounded corners, and a page capture hides them (2026-11-26, #16301)
+
+- Electron (45) creates every window with `NSWindowStyleMaskTitled`: `frame: false` only hides the title bar, and
+  `transparent: true` changes nothing there. Only `roundedCorners: false` takes the titled style away. macOS rounds all
+  four corners of a titled window, so the notch island's top corners stood off the top of the screen although its CSS
+  drew them square: AppKit read `_cornerRadius` 16.0 for its panel on macOS 27.0.1 (frame view
+  `NativeWidgetMacNSWindowTitledFrame`), and 0.0 with `roundedCorners: false` (`…BorderlessFrame`).
+- `webContents.capturePage()` images the page alone, so the island's screenshots in two PRs never showed the window's
+  shape. `CGWindowListCreateImage` of the process's own window came back fully transparent from a session without
+  Screen Recording permission. What worked: read the window from inside the process, with a throw-away N-API addon
+  given `getNativeWindowHandle()` (`[[view window] styleMask]`, the private `_cornerRadius` getters behind
+  `respondsToSelector:`).
+- A `type: "panel"` window stays non-activating without the titled style: Electron's `ElectronNSPanel` adds
+  `NSWindowStyleMaskNonactivatingPanel` to every style mask it reports or is given (0x82 read back after the change).

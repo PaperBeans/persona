@@ -319,6 +319,14 @@ describe("backgroundCommandLine (#7341)", () => {
     expect(backgroundCommandLine({ ...s, background: [{ ...first, description: "Package the release" }] })).toEqual({ what: "Package the release", more: 0, since: first.started_at });
   });
 
+  it("uses the scheduled prompt as the label, including schedules with commas or multiline prompts", () => {
+    for (const description of ["Cron: 0,30 * * * *, Prompt: Check the build\nReport failures", "Cron: */30 * * * *\nPrompt: Check the build"]) {
+      expect(backgroundCommandLine({ ...s, background: [{ ...first, description }] })?.what).toBe("Check the build");
+    }
+    expect(backgroundCommandLine({ ...s, background: [{ ...first, description: "Cron: */30 * * * *" }] })?.what).toBe("");
+    expect(backgroundCommandLine({ ...s, background: [{ ...first, description: "Display the Cron: configuration" }] })?.what).toBe("Display the Cron: configuration");
+  });
+
   it("has no clock without the command's start, keeps the label without a listed command, and needs the explicit flag", () => {
     expect(backgroundCommandLine({ ...s, background: [{ ...first, started_at: undefined }] })).toEqual({ what: "make release", more: 0 });
     expect(backgroundCommandLine({ ...s, background: [] })).toEqual({ what: "", more: 0 });

@@ -317,6 +317,10 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 	}
 	vars := map[string]string{}
 	varsStable := larkVariableScopeStable(cmd, gates)
+	if !varsStable {
+		// Outside straight-line code only a variable constant over the whole command expands (#16491).
+		vars = larkLiteralConstants(cmd, gates)
+	}
 	executableEnv := false
 	// Text naming lark-cli is a call only where a program executes it (larkgate_text.go): flow notes each
 	// segment for larkTextRuns.
@@ -451,12 +455,7 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 			// variable may be a flag value of a read, never a command word, an api route or anything of a write.
 			args := make([]string, len(words)-1)
 			for i, a := range words[1:] {
-				args[i] = shellVarRef.ReplaceAllStringFunc(a, func(m string) string {
-					if val, ok := vars[strings.Trim(m, "${}")]; ok {
-						return val
-					}
-					return m
-				})
+				args[i] = expandKnownVars(a, vars)
 			}
 			dynamic := strings.ContainsAny(strings.Join(args, " "), "$`")
 			c, deny, ok := parseLarkCLI(args, risk)
@@ -873,6 +872,239 @@ func larkVariableScopeStable(cmd string, gates []proto.CommandGate) bool {
 	return stable
 }
 
+var (
+	larkConstantValue = lazyre.New(`^[A-Za-z0-9_-]+$`)
+	larkConstantName  = lazyre.New(`^(?:[a-z][A-Za-z0-9_]*|[A-Z])$`)
+	// zsh's lowercase special parameters and hook arrays: the shell sets or reads them itself (=~ fills match, cd runs
+	// chpwd_functions). bash's are all uppercase or start with "_", which larkConstantName already rules out.
+	larkShellLowercase = map[string]bool{"argv": true, "status": true, "pipestatus": true, "path": true, "cdpath": true,
+		"fpath": true, "fignore": true, "mailpath": true, "manpath": true, "module_path": true, "psvar": true, "watch": true,
+		"match": true, "mbegin": true, "mend": true, "reply": true, "signals": true, "histchars": true, "prompt": true,
+		"funcstack": true, "funcfiletrace": true, "funcsourcetrace": true, "functrace": true, "options": true,
+		"parameters": true, "commands": true, "aliases": true, "galiases": true, "saliases": true, "functions": true,
+		"builtins": true, "reswords": true, "history": true, "historywords": true, "jobdirs": true, "jobstates": true,
+		"jobtexts": true, "dirstack": true, "modules": true, "nameddirs": true, "userdirs": true, "usergroups": true,
+		"errnos": true, "sysparams": true, "termcap": true, "terminfo": true, "mapfile": true, "epochtime": true,
+		"langinfo": true, "keymaps": true, "widgets": true, "patchars": true, "words": true, "compstate": true}
+)
+
+// larkPlainTest: test / [ arguments that are only string and file tests, as in [[ ]]; zsh evaluates the operands of
+// the others (-t, -v, -eq, …) as arithmetic or a subscript. An expansion is only an operand, right after a literal
+// operator, never in an operator's place.
+func larkPlainTest(args []*syntax.Word) bool {
+	unary := []string{"-n", "-z", "-e", "-f", "-d", "-s", "-r", "-w", "-x"}
+	binary := []string{"=", "==", "!="}
+	words := make([]string, len(args))
+	dynamic := make([]bool, len(args))
+	for i, w := range args {
+		words[i], dynamic[i] = executionWord(w)
+	}
+	for i, w := range words {
+		switch {
+		case dynamic[i]:
+			prevOp := i > 0 && !dynamic[i-1] && (slices.Contains(unary, words[i-1]) || slices.Contains(binary, words[i-1]))
+			nextOp := i+1 < len(words) && !dynamic[i+1] && slices.Contains(binary, words[i+1])
+			if !prevOp && !nextOp {
+				return false
+			}
+		case strings.HasPrefix(w, "-") && !slices.Contains(unary, w) && w != "-a" && w != "-o":
+			return false
+		}
+	}
+	return true
+}
+
+// larkConstantSafeCommands: commands that cannot set a variable of the shell running them: programs that run in a
+// process of their own, and builtins that only print or test. Not printf / print (-v), read, set, or any modifier.
+var larkConstantSafeCommands = map[string]bool{"cd": true, "echo": true, "true": true, "false": true, ":": true,
+	"test": true, "[": true, "pwd": true, "cat": true, "tee": true, "ls": true, "head": true, "tail": true,
+	"grep": true, "egrep": true, "fgrep": true, "rg": true, "wc": true, "sort": true, "uniq": true, "cut": true,
+	"tr": true, "column": true, "jq": true, "awk": true, "sed": true, "paste": true, "seq": true, "date": true,
+	"sleep": true, "rm": true, "mkdir": true, "rmdir": true, "cp": true, "mv": true, "touch": true, "basename": true,
+	"dirname": true, "diff": true, "comm": true, "nl": true, "fold": true, "base64": true}
+
+// larkShellUppercase: bash's and zsh's uppercase parameters that the shell itself rewrites while a command runs (cd,
+// =~, read, getopts, every command or second). A literal binding of one says nothing about its later value.
+var larkShellUppercase = map[string]bool{"PWD": true, "OLDPWD": true, "FUNCNAME": true, "REPLY": true, "OPTARG": true,
+	"OPTIND": true, "LINENO": true, "RANDOM": true, "SRANDOM": true, "SECONDS": true, "EPOCHSECONDS": true,
+	"EPOCHREALTIME": true, "HISTCMD": true, "PIPESTATUS": true, "MATCH": true, "MBEGIN": true, "MEND": true,
+	"COPROC": true, "MAPFILE": true, "DIRSTACK": true, "GROUPS": true, "PPID": true, "UID": true, "EUID": true,
+	"SHLVL": true, "COLUMNS": true, "LINES": true, "TTYIDLE": true, "ERRNO": true}
+
+// larkShellManaged: a name bash or zsh sets or acts on by itself.
+func larkShellManaged(name string) bool {
+	return name == "_" || name == "IFS" || strings.HasPrefix(name, "BASH") || larkShellUppercase[name] ||
+		larkShellLowercase[name] || strings.HasSuffix(name, "_functions") || strings.HasPrefix(name, "zsh_") ||
+		strings.HasPrefix(name, "zle_") || strings.HasPrefix(name, "comp")
+}
+
+// larkConstantNameOK: a lowercase name or one capital letter that the shell never sets itself.
+func larkConstantNameOK(name string) bool {
+	return larkConstantName.MatchString(name) && !larkShellManaged(name)
+}
+
+// larkLiteralConstants returns the variables provably constant over the whole command, for routes in loops and lists
+// that larkVariableScopeStable rejects (#16491). A constant is assigned exactly once, as `NAME=value` on its own, by a
+// top-level statement that always runs: a `;` / newline statement, or an `&&` operand after only `true`, `:` or, in the
+// first statement, `cd /tmp`. Its value is a literal of
+// [A-Za-z0-9_-], so it cannot change which route a call reaches; its name is one the shell never sets itself
+// (larkConstantNameOK); it is not used before that statement, and no other assignment of it appears. Every command in
+// it must be one that cannot set a variable (larkConstantSafeCommands), every assignment in it must be to such a name,
+// and nothing in it may evaluate arithmetic, a subscript or a non-string test; otherwise there are no constants at all.
+func larkLiteralConstants(cmd string, gates []proto.CommandGate) map[string]string {
+	out := map[string]string{}
+	tree, err := syntax.NewParser().Parse(strings.NewReader(cmd), "")
+	if err != nil {
+		return out
+	}
+	type constant struct {
+		value string
+		at    syntax.Pos
+	}
+	candidates := map[string]constant{}
+	assigned := map[string]int{} // every assignment of each name, anywhere
+	used := map[string][]syntax.Pos{}
+	opaque := false
+	alwaysRuns := func(st *syntax.Stmt, first bool) bool {
+		call, ok := st.Cmd.(*syntax.CallExpr)
+		if !ok || st.Negated || st.Background || st.Coprocess || len(st.Redirs) > 0 || len(call.Assigns) > 0 {
+			return false
+		}
+		words := make([]string, len(call.Args))
+		for i, arg := range call.Args {
+			var dynamic bool
+			if words[i], dynamic = executionWord(arg); dynamic {
+				return false
+			}
+		}
+		switch {
+		case len(words) == 1 && (words[0] == "true" || words[0] == ":"):
+			return true
+		case len(words) == 2 && words[0] == "cd" && words[1] == "/tmp" && first:
+			// Only /tmp, as the command's first statement: every user may enter it, and nothing before it runs.
+			info, err := os.Stat("/tmp")
+			return err == nil && info.IsDir()
+		}
+		return false
+	}
+	candidate := func(st *syntax.Stmt) {
+		call, ok := st.Cmd.(*syntax.CallExpr)
+		if !ok || len(call.Args) != 0 || len(call.Assigns) != 1 || len(st.Redirs) > 0 || st.Background || st.Coprocess || st.Negated {
+			return
+		}
+		a := call.Assigns[0]
+		if a.Append || a.Index != nil || a.Array != nil || a.Naked || a.Value == nil || a.Name == nil {
+			return
+		}
+		value, dynamic := executionWord(a.Value)
+		if dynamic || !larkConstantValue.MatchString(value) || !larkConstantNameOK(a.Name.Value) {
+			return
+		}
+		candidates[a.Name.Value] = constant{value: value, at: st.Pos()}
+	}
+	for si, st := range tree.Stmts {
+		// A top-level `a && b && NAME=v` is a left-nested chain; walk it in order.
+		var chain []*syntax.Stmt
+		for cur := st; ; {
+			b, ok := cur.Cmd.(*syntax.BinaryCmd)
+			if !ok || b.Op != syntax.AndStmt || cur.Negated || cur.Background || cur.Coprocess || len(cur.Redirs) > 0 {
+				chain = append([]*syntax.Stmt{cur}, chain...)
+				break
+			}
+			chain = append([]*syntax.Stmt{b.Y}, chain...)
+			cur = b.X
+		}
+		for i, part := range chain {
+			if !slices.ContainsFunc(chain[:i], func(prev *syntax.Stmt) bool { return !alwaysRuns(prev, si == 0) }) {
+				candidate(part)
+			}
+		}
+	}
+	syntax.Walk(tree, func(node syntax.Node) bool {
+		switch n := node.(type) {
+		case *syntax.Assign:
+			opaque = opaque || n.Index != nil // a[expr]=v evaluates expr as arithmetic
+			if n.Name != nil {
+				assigned[n.Name.Value]++
+				// Only ordinary names: IFS changes how constants split, PATH what runs, and an assignment to one of zsh's
+				// integer specials (HISTSIZE=e) evaluates its value as arithmetic.
+				opaque = opaque || !larkConstantNameOK(n.Name.Value) || larkExecutableEnv[n.Name.Value]
+			}
+		case *syntax.WordIter:
+			if n.Name != nil {
+				assigned[n.Name.Value] += 2 // a loop variable is never a constant
+			}
+		case *syntax.ParamExp:
+			if n.Index != nil || n.Slice != nil {
+				opaque = true // a subscript or offset is arithmetic
+			}
+			if n.Param != nil {
+				if n.Exp != nil || n.Excl || n.Names != 0 {
+					assigned[n.Param.Value] += 2 // ${NAME:=x}, ${!NAME}: assigns or reads indirectly
+				}
+				used[n.Param.Value] = append(used[n.Param.Value], n.Pos())
+			}
+		case *syntax.ArithmCmd, *syntax.ArithmExp:
+			// Arithmetic can assign (`$((N=1))`), also through a variable whose value is an expression.
+			opaque = true
+		case *syntax.UnaryTest:
+			// Only string and file tests: zsh evaluates other operands (-t, -v, …) as arithmetic or a subscript.
+			switch n.Op {
+			case syntax.TsExists, syntax.TsRegFile, syntax.TsDirect, syntax.TsRead, syntax.TsWrite, syntax.TsExec,
+				syntax.TsNoEmpty, syntax.TsEmpStr, syntax.TsNempStr, syntax.TsNot:
+			default:
+				opaque = true
+			}
+		case *syntax.BinaryTest:
+			switch n.Op {
+			case syntax.TsMatchShort, syntax.TsMatch, syntax.TsNoMatch, syntax.AndTest, syntax.OrTest:
+			default:
+				opaque = true // -eq and the like evaluate arithmetic; =~ fills match variables
+			}
+		case *syntax.ExtGlob:
+			opaque = true // zsh glob qualifiers can run code
+		case *syntax.Lit:
+			// An unquoted or double-quoted [ is a glob or, after $name in zsh, a subscript evaluated as arithmetic; a $
+			// left in a literal is an expansion the parser did not read ($~name turns on zsh's glob qualifiers).
+			if strings.Contains(n.Value, "[") && n.Value != "[" || strings.Contains(n.Value, "$") {
+				opaque = true
+			}
+		case *syntax.FuncDecl, *syntax.DeclClause, *syntax.LetClause, *syntax.CoprocClause:
+			opaque = true
+		case *syntax.Redirect:
+			if n.N != nil && strings.Trim(n.N.Value, "0123456789") != "" {
+				opaque = true // {name}>file assigns name
+			}
+		case *syntax.CallExpr:
+			if len(n.Args) == 0 {
+				return true
+			}
+			// Only a program in a process of its own cannot set this shell's variables. bash and zsh have many builtins
+			// and precommand modifiers that can (print -v, zstyle -s, set -A, emulate -c, noglob eval, repeat, …):
+			// every command must be a gated one, lark-cli, or a name known to be one of those programs or an inert
+			// builtin; anything else leaves no constants.
+			name, dynamic := executionWord(n.Args[0])
+			if dynamic || gateOf(gates, name) < 0 && !isLarkCLI(name) && !larkConstantSafeCommands[name] {
+				opaque = true
+			}
+			if name == "test" || name == "[" {
+				opaque = opaque || !larkPlainTest(n.Args[1:])
+			}
+		}
+		return true
+	})
+	if opaque {
+		return map[string]string{}
+	}
+	for name, c := range candidates {
+		if assigned[name] != 1 || slices.ContainsFunc(used[name], func(p syntax.Pos) bool { return p.Offset() < c.at.Offset() }) {
+			continue
+		}
+		out[name] = c.value
+	}
+	return out
+}
+
 // scalarParameter is a plain quoted scalar expansion, not "$@", an array
 // expansion, or a parameter operation whose result needs further parsing.
 func scalarParameter(p *syntax.ParamExp) bool {
@@ -1007,19 +1239,42 @@ func gateUnmatchedReadQuery(args []*syntax.Word, index int) bool {
 	return err == nil && len(matches) == 0
 }
 
+// expandKnownVars replaces $NAME and ${NAME} with their values in vars. A bare $NAME followed by `:` or `[` stays: zsh
+// applies a modifier ($F:s/x/y/) or a subscript there, so the value is not what the shell would use.
+func expandKnownVars(s string, vars map[string]string) string {
+	if !strings.Contains(s, "$") {
+		return s
+	}
+	var out strings.Builder
+	last := 0
+	for _, m := range shellVarRef.FindAllStringIndex(s, -1) {
+		ref := s[m[0]:m[1]]
+		val, ok := vars[strings.Trim(ref, "${}")]
+		if bare := !strings.HasPrefix(ref, "${"); bare && m[1] < len(s) && (s[m[1]] == ':' || s[m[1]] == '[') {
+			ok = false
+		}
+		if strings.HasPrefix(ref, "${") && !strings.HasSuffix(ref, "}") {
+			ok = false // ${NAME followed by an operator, not a plain reference
+		}
+		out.WriteString(s[last:m[0]])
+		if ok {
+			out.WriteString(val)
+		} else {
+			out.WriteString(ref)
+		}
+		last = m[1]
+	}
+	out.WriteString(s[last:])
+	return out.String()
+}
+
 // parseGateCall reads `METHOD PATH [BODY] [curl flags]` after a gated command.
 func parseGateCall(g proto.CommandGate, args []string, vars map[string]string, cwd string) (larkCall, string, bool) {
 	expand := func(s string) (string, bool) {
 		if !strings.Contains(s, "$") {
 			return s, true
 		}
-		out := shellVarRef.ReplaceAllStringFunc(s, func(m string) string {
-			k := strings.Trim(m, "${}")
-			if val, ok := vars[k]; ok {
-				return val
-			}
-			return m
-		})
+		out := expandKnownVars(s, vars)
 		return out, !strings.Contains(out, "$")
 	}
 	// A literal method is part of the call's identity: even a previously

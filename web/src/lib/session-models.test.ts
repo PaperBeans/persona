@@ -291,6 +291,17 @@ describe("reading the lists", () => {
     expect(modelList("m-fail", "gateway").list).toBeUndefined();
   });
 
+  it("keeps the previous list and reports a failed manual refresh", async () => {
+    void readModels("m-refresh", "gateway");
+    await flush();
+    await answer("/machines/m-refresh/launchers/gateway/models", json(claudeList));
+
+    void readModels("m-refresh", "gateway", { refresh: true });
+    await flush();
+    await answer("/machines/m-refresh/launchers/gateway/models?refresh=1", json({ error: "offline" }, 502));
+    expect(modelList("m-refresh", "gateway")).toEqual({ list: claudeList, error: expect.stringContaining("offline") });
+  });
+
   it("keeps an assistant's shell models separate from the same named Agent provider", async () => {
     const agent = readModels("m-purpose", "shared");
     const assistant = readModels("m-purpose", "shared", { purpose: "assistant" });

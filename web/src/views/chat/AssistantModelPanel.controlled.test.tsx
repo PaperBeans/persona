@@ -570,7 +570,7 @@ describe("AssistantModelPanel default fallback compatibility", () => {
 
     // Default reload, forget error toast, and setServiceTier
     mocks.panelProps!.onReload?.("claude");
-    expect(mocks.readModels).toHaveBeenCalledWith("example-machine", "claude", { purpose: "assistant", again: true, first: false });
+    expect(mocks.readModels).toHaveBeenCalledWith("example-machine", "claude", { purpose: "assistant", refresh: true, first: false });
     mocks.panelProps!.onForget?.("claude", "vendor/x");
     await flush();
     expect(mocks.forgetModel).toHaveBeenCalledWith("example-machine", "claude", "vendor/x", "assistant");

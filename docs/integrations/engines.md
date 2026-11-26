@@ -119,7 +119,10 @@ iOS / Android have both entry points (Android Machines is under Agents: **List s
 Windows: herdr has native Windows support since 0.9.5; except live terminal, capabilities match above. Orca works too. See [windows.md](../operations/windows.md), "herdr."
 
 **Antigravity CLI panes** show chat history once the pane's conversation ID is known. Two sources report it, and either is
-enough: Persona's own hooks (below) and the hook installed by `herdr integration install antigravity-cli`. Persona reads
+enough: Persona's own hooks (below) and the hook installed by `herdr integration install antigravity-cli`. On Linux the
+node also reads it from the `presence/<conversation>.lock` the pane's foreground agy holds open, in herdr, Herdr App and
+Orca panes (#16531), so a pane is known before its first hook fires and after a node restart; a pane whose agy processes
+hold two conversations' locks stays unknown. Persona reads
 that conversation's local `transcript.jsonl` from the node's Antigravity data directory, or `transcript_full.jsonl` when
 the compact export is absent. Switching export sources resets the history cursor. The node uses the conversation ID to
 restore Persona-started panes with `agy --conversation`. The pane's row is then titled after that conversation, as the Antigravity

@@ -1116,8 +1116,9 @@ apps (`docs/apple/ios.md` "Suggested standing rule and held decisions") and the 
 #### Asks go to the supervisor first (#3589)
 
 With leaders configured (`assistant.leaders` not empty), a supervised task's questions, permissions and plans go to its
-supervisor first. Without leaders these go directly to the owner. A parsed terminal question on a supervised task goes
-to its supervising conversation in either configuration (#11195). Code: `server/internal/assistant/ask_route.go`.
+supervisor first. Without leaders, a supervised task's parsed terminal dialogs (#11195) and non-six-class agent
+permissions and questions go to its supervising conversation (the main conversation) through the same active `ask` route
+(#16291), while six-class owner cards and plans go directly to the owner. Code: `server/internal/assistant/ask_route.go`.
 
 - **What goes up**: a card raised by an agent of a supervised task (not waiting for the user, not closed): a question
   (not `ask_user`, not a form or a password card), a tool permission or a plan, and a parsed terminal dialog
@@ -1190,8 +1191,9 @@ to its supervising conversation in either configuration (#11195). Code: `server/
   must decide now. A Codex card listed again once its node reconnected is on the apps without a push too; the
   supervisor still hears of it through the task's `needs_you` signal, and `ask_escalate` takes it. A card the
   assistant is deciding on for the user (agents.delegate) is not escalated: that decision tells the user itself.
-  Without leaders a card goes to the owner as it comes, and `ask_escalate` can hand the owner a supervised terminal
-  question. Cards raised after an escalation go to the supervisor again rather than joining the escalated push.
+  Without leaders, six-class owner cards and plans go to the owner as they come, while routed supervised cards can be
+  handed to the owner with `ask_escalate`. Cards raised after an escalation go to the supervisor again rather than
+  joining the escalated push.
 
 **Directions and reports up (#3484, #3485).** Each leader has a record, `assistant.directions` (`directions.go`): the kb
 project it is filed under, who filed it, since when, and when it ended (it left `assistant.leaders`; nothing is

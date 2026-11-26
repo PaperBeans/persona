@@ -2,7 +2,7 @@
 // Imports only SidebarParts among the sidebar's files.
 import { useLayoutEffect, useRef, useState } from "react";
 import { t } from "../i18n";
-import { stateOf } from "../lib/format";
+import { activityOf } from "../lib/format";
 import { href, type Route } from "../lib/router";
 import { pickMainChat } from "../lib/handoff";
 import { useStore } from "../lib/store";
@@ -72,7 +72,7 @@ export function SidebarRail({ route, onSearch, onNewAgent }: { route: Route; onS
   const activeKey = useActiveKey(route);
   const go = useGo();
   const status = connStatus(phase, online, total);
-  const st = main ? stateOf(main) : undefined;
+  const st = main ? activityOf(main) : undefined;
   const mainWaiting = useMainWaiting(main);
   const pending = mainWaiting.count;
   // `color`: a page's icon color (NavPage.color, #10822), kept under the pointer as well

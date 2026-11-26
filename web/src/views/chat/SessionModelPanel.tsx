@@ -113,7 +113,7 @@ export function SessionModelPanel({ session, displayModel, anchor, onClose }: { 
     if (speed) steps.push(speed);
     return apply(steps);
   };
-  const onReload = (provider: string) => void readModels(mid, provider, { again: true, first: provider === own, host: provider === own ? ownHost : undefined });
+  const onReload = (provider: string) => void readModels(mid, provider, { refresh: true, first: provider === own, host: provider === own ? ownHost : undefined });
   const onForget = (provider: string, model: string) => {
     void forgetModel(mid, provider, model, undefined, provider === own ? ownHost : undefined).then((error) => error && toast(error, "error"));
   };

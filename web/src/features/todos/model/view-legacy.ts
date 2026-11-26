@@ -6,7 +6,7 @@
 import { TODO_LIST_SECTIONS, TODO_REASONS, type TodoSummary } from "../../../lib/todo-view-wire";
 import type { Triage, TriageRule, TriageSection } from "../../../lib/todo-triage";
 import type { SessionLookup, Todo } from "../../../lib/todos";
-import { stateOf } from "../../../lib/format";
+import { activityOf } from "../../../lib/format";
 import { usageLimitAgent } from "../../../lib/usage-limit";
 
 /** lib/todo-view-wire.ts TODO_PHASES, kept local so the shared first-screen todo-view-wire chunk stays unchanged
@@ -100,7 +100,7 @@ export function rowFacts(todo: Todo, lookup: SessionLookup | undefined, now: num
       continue;
     }
     if (usageLimitAgent(s, now)) out.usageLimit = true;
-    const st = stateOf(s);
+    const st = activityOf(s);
     if (s.awaits_reply && (st === "unread" || st === "idle")) out.awaitsReply = true;
     // the hub's blockedOn: what a turn that is over and not on a card ended blocked on
     const w = s.work;

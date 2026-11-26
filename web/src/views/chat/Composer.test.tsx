@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadPages } from "../../lib/lazy-page";
-import { addQuote, getQuotes, sendDraft, setQuotes } from "../../lib/drafts";
+import { addQuote, getQuotes, parseQuotes, sendDraft, setQuotes, splitQuotes, storedQuotes } from "../../lib/drafts";
 import { toast } from "../../ui/atoms";
 import { Composer, type Outgoing } from "./Composer";
 import { onPermissionPicker } from "../../lib/permissions-command";
@@ -85,6 +85,164 @@ const pickFile = (file: File) =>
   });
 
 const trayImages = () => host.querySelectorAll("img").length;
+
+describe("inline selection comment images", () => {
+  const key = "selection-comment";
+  const screenshot = (name = "detail.png") => new File(["png"], name, { type: "image/png" });
+  const comment = (text = "Selected words", body = "Keep this detail") => {
+    act(() => void addQuote(key, { text, comment: { body } }));
+  };
+  const cards = () => [...host.querySelectorAll<HTMLElement>("[data-comment-card]")];
+  const note = () => host.querySelector<HTMLTextAreaElement>("[data-comment-card] textarea")!;
+  const press = (key: string) => act(() => note().dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })));
+  const paste = (files: File[], items: { kind: string; getAsFile: () => File | null }[] = []) => {
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { files, items } });
+    act(() => note().dispatchEvent(event));
+    return event.defaultPrevented;
+  };
+  const attach = (file: File) => {
+    const input = host.querySelector<HTMLInputElement>('[data-comment-card] input[type="file"]')!;
+    const open = vi.spyOn(input, "click");
+    const button = cards().at(-1)!.querySelector<HTMLButtonElement>(`button[aria-label="${t("chat-comments.add_images")}"]`)!;
+    act(() => button.click());
+    expect(open).toHaveBeenCalledOnce();
+    Object.defineProperty(input, "files", { value: [file] });
+    act(() => input.dispatchEvent(new Event("change", { bubbles: true })));
+  };
+  const remove = (name: string) => {
+    const button = cards().at(-1)!.querySelector<HTMLButtonElement>(`button[aria-label="${t("ui-attachmenttray.remove", { name })}"]`)!;
+    act(() => button.click());
+  };
+  const send = () => act(async () => host.querySelector<HTMLButtonElement>('[data-testid="composer-send"]')!.click());
+
+  beforeEach(() => {
+    setQuotes(key, []);
+    vi.mocked(toast).mockClear();
+  });
+  afterEach(() => {
+    setPublishedImageLimits(undefined);
+    act(() => setQuotes(key, []));
+  });
+
+  it("pastes clipboard files once, falls back to file items, and leaves normal text paste alone", async () => {
+    render(key);
+    comment();
+    expect(paste([])).toBe(false);
+    const item = { kind: "file", getAsFile: vi.fn(() => screenshot("from-item.png")) };
+    expect(paste([screenshot()], [item])).toBe(true);
+    expect(item.getAsFile).not.toHaveBeenCalled();
+    await settle(0);
+    expect(paste([], [{ ...item, kind: "string" }, item])).toBe(true);
+    await settle(1);
+    expect(item.getAsFile).toHaveBeenCalledOnce();
+    expect([...cards()[0].querySelectorAll("img")].map((img) => img.alt)).toEqual(["detail.png", "from-item.png"]);
+    expect(storedQuotes(key)[0]).not.toHaveProperty("images");
+  });
+
+  it("picks an image, keeps its preview when reopening the draft, and revokes removed and cancelled previews", async () => {
+    render(key);
+    comment();
+    attach(screenshot());
+    await settle(0);
+    press("Enter");
+    act(() => cards()[0].querySelectorAll("button")[1].click());
+    expect(note().value).toBe("Keep this detail");
+    expect(create).toHaveBeenCalledTimes(1);
+    attach(screenshot("other.png"));
+    await settle(1);
+    remove("detail.png");
+    expect(revoke).toHaveBeenCalledWith("blob:test/1");
+    press("Escape");
+    expect(revoke).toHaveBeenCalledWith("blob:test/2");
+    expect(cards()[0].querySelector("img")?.alt).toBe("detail.png");
+    remove("detail.png");
+    expect(revoke).toHaveBeenCalledWith("blob:test/3");
+    expect(trayImages()).toBe(0);
+  });
+
+  it("waits for a pending image and discards its result if the new comment is cancelled", async () => {
+    const onSend = vi.fn(async () => true);
+    render(key, onSend);
+    comment();
+    paste([screenshot()]);
+    await send();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(t("chat-comments.preparing_images"));
+    press("Escape");
+    await settle(0);
+    expect(cards()).toHaveLength(0);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("sends composer images first and numbers each comment's images in payload order", async () => {
+    const onSend = vi.fn(async (_m: Outgoing) => true);
+    render(key, onSend);
+    putImage(key);
+    comment("First passage", "First note");
+    paste([screenshot()]);
+    await settle(0, { mime: "image/jpeg", data: btoa("first") });
+    press("Enter");
+    comment("Second passage", "Second note");
+    attach(screenshot("second.png"));
+    await settle(1, { mime: "image/png", data: btoa("second") });
+    await send();
+    const sent = onSend.mock.calls[0][0];
+    expect(sent.images).toEqual([
+      { mime: "image/png", data: btoa("png") },
+      { mime: "image/jpeg", data: btoa("first") },
+      { mime: "image/png", data: btoa("second") },
+    ]);
+    const blocks = splitQuotes(sent.text)!.quotes;
+    expect(blocks[0]).toContain("Comment 1\nAttached images for this comment (positions in this message): 2");
+    expect(blocks[1]).toContain("Comment 2\nAttached images for this comment (positions in this message): 3");
+    expect(parseQuotes(blocks).map((q) => [q.text, q.comment?.body])).toEqual([
+      ["First passage", "First note"], ["Second passage", "Second note"],
+    ]);
+    expect(cards()).toHaveLength(0);
+    expect(revoke).toHaveBeenCalledTimes(3);
+  });
+
+  it("shares the message image count with the composer in both directions", async () => {
+    setPublishedImageLimits({ per_message: 1 });
+    render(key);
+    putImage(key);
+    comment();
+    paste([screenshot()]);
+    expect(reads).toHaveLength(0);
+    expect(toast).toHaveBeenCalledWith(t("chat-composer.too_many_images", { max: 1 }), "error");
+    const composerRemove = host.querySelector<HTMLButtonElement>(`button[aria-label="${t("ui-attachmenttray.remove", { name: "a.png" })}"]`)!;
+    act(() => composerRemove.click());
+    paste([screenshot()]);
+    await settle(0);
+    putImage(key);
+    await act(async () => {});
+    expect(trayImages()).toBe(1);
+    expect(cards()[0].querySelector("img")?.alt).toBe("detail.png");
+  });
+
+  it("restores a refused send's images alongside a newer draft and can retry", async () => {
+    let refuse!: (ok: boolean) => void;
+    const onSend = vi.fn<(m: Outgoing) => Promise<boolean>>()
+      .mockImplementationOnce(() => new Promise((resolve) => { refuse = resolve; }))
+      .mockResolvedValue(true);
+    render(key, onSend);
+    comment();
+    paste([screenshot()]);
+    await settle(0);
+    await send();
+    expect(onSend.mock.calls[0][0].restoreCommentDraft).toBe(true);
+    expect(revoke).toHaveBeenCalledWith("blob:test/1");
+    comment("New passage", "New note");
+    await act(async () => refuse(false));
+    expect(cards()).toHaveLength(2);
+    expect(cards()[0].querySelector("img")?.src).toBe("blob:test/2");
+    expect(note().value).toBe("New note");
+    await send();
+    expect(onSend.mock.calls[1][0].images).toEqual(onSend.mock.calls[0][0].images);
+    expect(cards()).toHaveLength(0);
+  });
+});
 
 /** Waits inside act until `check` passes: the "/" palette is a lazy chunk. */
 const until = async (check: () => void) => {

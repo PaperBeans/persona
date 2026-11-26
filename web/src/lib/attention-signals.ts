@@ -5,7 +5,7 @@
 import { useEffect, useRef } from "react";
 import { attentionSoundEnabled, badgeText, onAttentionSoundChange, tabTitle } from "./attention";
 import { homeKey } from "./folded-rows";
-import { stateOf } from "./format";
+import { activityOf, stateOf } from "./format";
 import { agentKey } from "./pins";
 import { useAgentSessions, useCounts } from "./sessions";
 import { onHello, onHubEvent, sayHello, setHelloExtras, useStore } from "./store";
@@ -251,7 +251,7 @@ function recordColdSnapshot(buf: ColdBuffer | null, snap: AttentionSnapshot, now
     if (s.hidden_by_directory) continue;
     const k = agentKey(s);
     liveKeys.add(k);
-    const st = stateOf(s);
+    const st = activityOf(s);
     const prev = buf.baselineSessions.get(k);
     if (!prev) {
       buf.baselineSessions.set(k, stampWorking(s, now));
@@ -265,7 +265,7 @@ function recordColdSnapshot(buf: ColdBuffer | null, snap: AttentionSnapshot, now
         }
       }
     } else {
-      const prevSt = stateOf(prev);
+      const prevSt = activityOf(prev);
       // Preserve intermediate working/non-waiting baselines so idle -> working -> unread and
       // needs_you -> working -> needs_you transitions survive arbitrary snapshot churn before runtime loads.
       if (st === "working" && prevSt !== "working") {

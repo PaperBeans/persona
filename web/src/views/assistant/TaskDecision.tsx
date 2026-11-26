@@ -21,10 +21,11 @@ import WaitingTaskRow from "./WaitingTaskRow";
 import { FailedTaskRow } from "./FailedTaskRow";
 import RuleSuggestionLine from "./RuleSuggestionLine";
 import type { RuleCard } from "../../lib/rule-suggestion";
+import { AskAboutDecision } from "./AskAboutDecision";
 
 type Review = NonNullable<Todo["decision_review"]>;
 
-export function TaskDecision({ todo, rowKey, hideTitle = false }: { todo: Todo; rowKey?: string; hideTitle?: boolean }) {
+export function TaskDecision({ todo, rowKey, hideTitle = false, onOpenChat }: { todo: Todo; rowKey?: string; hideTitle?: boolean; onOpenChat?: () => void }) {
   const ask = openAsk(todo);
   const review = latestReview(todo.supervision);
   const round = decisionRound(todo);
@@ -90,7 +91,10 @@ export function TaskDecision({ todo, rowKey, hideTitle = false }: { todo: Todo; 
     <Button className="min-h-11" disabled={busy} onClick={defer}>{t("assistant-task-actions.later")}</Button>
     <Button className="min-h-11" disabled={busy || !round} busy={dismissing} onClick={dismiss}>{t("assistant-task-actions.dismiss_draft")}</Button>
   </>;
-  const controls = <div data-decision-actions className={`${ask && askOptions(ask).length ? "" : "sticky -bottom-2.5 "}-mx-3 -mb-2.5 mt-1 flex items-center gap-2 border-t border-line bg-field px-3 py-2.5`}>{buttons}</div>;
+  const controls = <div data-decision-actions className={`${ask && askOptions(ask).length ? "" : "sticky -bottom-2.5 "}-mx-3 -mb-2.5 mt-1 flex flex-wrap items-center gap-2 border-t border-line bg-field px-3 py-2.5`}>
+    {buttons}
+    {ask && askOptions(ask).length > 0 && <AskAboutDecision key={ask.asked_at} todo={todo} ask={ask} disabled={busy} onOpenChat={onOpenChat} />}
+  </div>;
   // a decision that offers a go-ahead the owner gave three times carries a suggested rule: its line goes under the
   // row (#5802; always mounted here), answered through the to-do's manager as the row's own answers are
   // (kept by the decision's round: what Always made is not said under the to-do's next decision)
@@ -111,8 +115,8 @@ export function TaskDecision({ todo, rowKey, hideTitle = false }: { todo: Todo; 
 }
 
 export type NeedsYouPartProps =
-  | { decision: Todo; rowKey?: string }
-  | { task: Todo; status: TodoStatus; rowKey?: string; hideTitle?: boolean; countsOpenAttr: { "data-counts-open"?: string } }
+  | { decision: Todo; rowKey?: string; hideTitle?: boolean; onOpenChat?: () => void }
+  | { task: Todo; status: TodoStatus; rowKey?: string; hideTitle?: boolean; countsOpenAttr: { "data-counts-open"?: string }; onOpenChat?: () => void }
   /** The suggested rule of a plan card or a passed-up question, under it. */
   | { rule: RuleCard };
 
@@ -120,9 +124,9 @@ export type NeedsYouPartProps =
  *  (startup-preload's budget): a decision's row, an open acceptance ask's row, a failed start's row (#10365), or a
  *  suggested rule's line (#5802). One chunk behind one component, so the first screen names one file for all. */
 export default function NeedsYouParts(props: NeedsYouPartProps) {
-  if ("decision" in props) return <TaskDecision todo={props.decision} rowKey={props.rowKey} />;
+  if ("decision" in props) return <TaskDecision todo={props.decision} rowKey={props.rowKey} hideTitle={props.hideTitle} onOpenChat={props.onOpenChat} />;
   if ("task" in props) {
-    const { task, rowKey, hideTitle, countsOpenAttr } = props;
+    const { task, rowKey, hideTitle, countsOpenAttr, onOpenChat } = props;
     const verifying = reviewState(task) === "user_check";
     const ask = verifying ? personalVerificationAsk(task) : openAsk(task);
     if (verifying && !ask) return (
@@ -134,7 +138,7 @@ export default function NeedsYouParts(props: NeedsYouPartProps) {
     );
     if (!verifying && (task.supervision?.state === "needs_user" || ask?.outcome === "decide")) {
       const round = task.supervision?.reviews?.at(-1)?.at || task.decision_review?.review_at || ask?.asked_at;
-      return <TaskDecision key={task.id + round} todo={task} rowKey={rowKey} hideTitle={hideTitle} />;
+      return <TaskDecision key={task.id + round} todo={task} rowKey={rowKey} hideTitle={hideTitle} onOpenChat={onOpenChat} />;
     }
     if (ask) return (
       <div data-needs-row={rowKey} {...countsOpenAttr} className="min-w-0 rounded-control bg-field px-3 py-2.5">

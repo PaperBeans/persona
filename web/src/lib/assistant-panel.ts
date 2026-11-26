@@ -71,10 +71,9 @@ export function assistantPanel(setup: AssistantSetup, info: AssistantLaunchers |
     const defaultRow = currentModelRow(e.list?.models ?? [], configured) ?? defaultModel(e.list?.models ?? []);
     const defaultName = defaultRow ? (defaultRow.resolved ? modelLabel(defaultRow.resolved) : modelName(defaultRow)) : configured ? modelLabel(configured) : undefined;
     const p: PanelProvider = { id: l.name, name: providerTitle(l), engine: kind, models: null, isDefault, defaultModel: defaultName };
-    if (e.list === undefined) {
-      if (e.error) p.error = e.error;
-      else p.loading = true;
-    } else {
+    if (e.error) p.error = e.error;
+    if (e.loading || (e.list === undefined && !e.error)) p.loading = true;
+    if (e.list !== undefined) {
       let models = (e.list?.models ?? []).map((m) => panelModel(m, kind, Boolean(o.starting)));
       // a launcher that fixes its own --model takes no model with a pick: what it runs by default, only
       if (e.list?.locked) models = models.filter((m) => m.id === defaultModel(e.list?.models ?? [])?.id);
@@ -93,7 +92,10 @@ export function assistantPanel(setup: AssistantSetup, info: AssistantLaunchers |
     const claude = setup.provider === "claude";
     const e = listOf(setup.provider);
     const models = e.list ? e.list.models.map((m) => panelModel(m, engine, Boolean(o.starting))) : setup.model ? [{ id: setup.model, name: modelLabel(setup.model), efforts: [] }] : [];
-    providers.unshift({ id: setup.provider, name: providerTitle({ name: setup.provider }), engine, models: claude && !e.list ? null : models, ...(claude ? (e.list ? {} : { loading: true }) : { unavailable: t("chat-modelpill.provider_gone") }) });
+    providers.unshift({
+      id: setup.provider, name: providerTitle({ name: setup.provider }), engine, models: claude && e.list === undefined && !e.error ? null : models,
+      ...(claude ? { loading: e.loading || (e.list === undefined && !e.error), error: e.error } : { unavailable: t("chat-modelpill.provider_gone") }),
+    });
   }
   // what can't run it, a Paseo provider among them: that provider is its engine, never "paseo" (#8142)
   for (const u of info?.unavailable ?? []) {

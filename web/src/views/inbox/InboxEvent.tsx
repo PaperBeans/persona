@@ -15,7 +15,7 @@ import { docChangeLine, inboxSessionRoute, openInboxConversation } from "../../l
 import { otherManager } from "../../lib/manager-choice";
 import { nowText } from "../../lib/inbox-now";
 import { connectorBrand } from "../../lib/connectors";
-import { stateOf } from "../../lib/format";
+import { activityOf } from "../../lib/format";
 import { stateName } from "../../lib/state-labels";
 import { openLink } from "../../lib/links";
 import { type Route } from "../../lib/router";
@@ -638,7 +638,7 @@ export function Chain({ item, onSource }: { item: InboxItem; onSource: (at: Sour
     const link = agentSession(e);
     if (!link || latestAgent.get(link.key) !== e.id) return undefined;
     const session = sessions[link.machine]?.find((s) => s.session_id === link.session);
-    return session ? stateName(stateOf(session)) : undefined;
+    return session ? stateName(activityOf(session)) : undefined;
   };
   return (
     <section data-event-chain>

@@ -7,7 +7,7 @@ import { defaultManager, MANAGER_HEADER, sameManager, useShownManager } from "..
 // Beautiful UI Todos View: left list (sorted by status & created_at), right detail, handover dialog.
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type InputHTMLAttributes, type ReactNode, type RefObject } from "react";
 import { api, apiBlob, credentialOwner, enc, errorText, getToken, subscribeCredentialOwner } from "../lib/api";
-import { ago, clock, sessionCan, shortPath, stateOf, tabLabel, uuid } from "../lib/format";
+import { ago, clock, sessionCan, shortPath, activityOf, tabLabel, uuid } from "../lib/format";
 import { foldedState } from "../lib/child-sessions";
 import { sessionCard } from "../lib/folded-rows";
 import { byTime } from "../lib/times";
@@ -4080,7 +4080,7 @@ function TodoDetail({
       (s) =>
         s.machine_id === mid &&
         (s.space_name || s.space_id) === spaceName &&
-        stateOf(s) !== "offline" &&
+        activityOf(s) !== "offline" &&
         machines.some((m) => m.id === mid && m.online),
     );
   };
@@ -6145,7 +6145,7 @@ export function HandoverDialog({
                 {eligibleSessions.map((s, i) => {
                   const key = `${s.machine_id}/${s.session_id}`;
                   const isSel = key === selectedKey;
-                  const st = stateOf(s);
+                  const st = activityOf(s);
                   return (
                     <button
                       type="button"

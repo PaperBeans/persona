@@ -41,9 +41,11 @@ describe("WorkGroup", () => {
     expect(html).not.toContain("data-work-detail"); // a lazy Collapse: nothing until it opens
   });
 
-  it("done: no leading layers icon, 已工作 Xs followed directly by chevron, folded", () => {
+  it("done: no leading layers icon; the completed summary's disclosure follows its label", () => {
     const html = renderToStaticMarkup(<WorkGroup g={group([tool("t1", "Bash", { command: "ls" })], false, 65_000)} p={props} />);
     expect(html).toContain(">已工作 1m 5s<");
+    expect(html).toMatch(/>已工作 1m 5s<\/span><svg/);
+    expect(html.match(/<svg/g)).toHaveLength(1);
     expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain("data-live-preview");
     // Only one svg in the completed top-level header: the disclosure chevron right after the heading (no leading layers icon, no flex-1 spacer)

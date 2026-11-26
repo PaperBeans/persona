@@ -181,8 +181,19 @@ func (m *Machine) startDeployOf(auto bool) (*deployRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	if auto && pkg.Fallback {
-		return nil, errFallbackOnRedeploy
+	if auto {
+		cfg := m.d.config()
+		if !cfg.AutoUpdateNodes {
+			return nil, errAutoNodeUpdatesDisabled
+		}
+		if pkg.Fallback || pkg.Version != cfg.HubVersion {
+			return nil, errFallbackOnRedeploy
+		}
+	}
+	// A temporary local node takes the manager's build when spawned. For a
+	// resident, never put a stand-in release into a shared local executable.
+	if m.cfg.Kind == "local" && (pkg.Fallback || pkg.Version != m.d.hubVersion()) {
+		return nil, i18n.Err("hub-machine.deploy_local")
 	}
 	if linked {
 		return m.startRPCDeploymentRun(pkg, nil)
@@ -228,10 +239,10 @@ func (m *Machine) startDeployOf(auto bool) (*deployRun, error) {
 // machine uid, so nothing is replaced and the owner updates the binary the wrapper runs.
 const deployExitWrapper = 5
 
-// deployScript is the remote command that installs the gzipped binary on stdin as bin and stops a resident node so
-// launchd restarts it. The staged binary must run `version` before it can replace the installed one or stop the node.
+// deployScript installs the gzipped binary on stdin as bin and asks a
+// legacy resident service using it to reload once idle.
+// The staged binary must run `version` before it can replace the installed one.
 // An installed file that is a script is never replaced (deployExitWrapper); one that is replaced is kept as bin.prev.
-// The pkill pattern is written so it does not match this ssh session's own command line.
 // personaNode: the binary is persona-node, which never replaces a file that is not persona-node already (a personad,
 // which may run a hub or a manager too, put there since the node said what it runs). The file says which it is in
 // node-update-check; a build that does not say is personad.
@@ -245,19 +256,44 @@ func deployScript(bin string, personaNode bool) string {
 		keep = `if [ -e "$b" ] && ! "$b" node-update-check 2>/dev/null | grep -q '"program":"persona-node"'; then rm -f "$b.new"; ` +
 			`echo "$b is personad, which may run a hub or a manager too: not replacing it with persona-node" >&2; exit 3; fi; `
 	}
-	return posixCommand("set -e; b=" + target + `; mkdir -p "$(dirname "$b")"; gzip -dc > "$b.new"; chmod 755 "$b.new"; ` + keep +
+	legacy := shellQuote(compat.DaemonBinary)
+	return posixCommand("set -e; b=" + target + `; mkdir -p "$(dirname "$b")"; d=$(cd -P "$(dirname "$b")" && pwd); b="$d/${b##*/}"; ` +
+		`if [ -L "$b" ]; then case "${b##*/}:$(readlink "$b")" in ` + legacy + `:personad|` + legacy + `:"$d/personad") b="$d/personad";; *) exit ` +
+		strconv.Itoa(deployExitWrapper) + `;; esac; fi; gzip -dc > "$b.new"; chmod 755 "$b.new"; ` + keep +
 		`if ! "$b.new" version >/dev/null; then rm -f "$b.new"; echo "$b failed its staged version check: keeping the current binary and node" >&2; exit 4; fi; ` +
 		`if [ -f "$b" ] && [ "$(head -c 2 "$b")" = '#!' ]; then rm -f "$b.new"; ` +
 		`echo "$b is a script, not personad: not replacing it (update the personad it runs instead)" >&2; exit ` + strconv.Itoa(deployExitWrapper) + `; fi; ` +
 		`if [ -f "$b" ]; then ln -f "$b" "$b.prev" 2>/dev/null || cp -p "$b" "$b.prev"; fi; ` +
-		`mv "$b.new" "$b"; pkill -f '` + residentNodePattern + `' || true`)
+		`mv "$b.new" "$b"; ` + reloadLegacyResident)
 }
 
-// residentNodePattern is what the deploy script's pkill -f looks for (an extended regular expression): a resident node's
-// command line, as persona-link's service runs it (`<data dir>/bin/personad node --attach`, or bin/persona-node on a
-// device), or an older installed service whose executable still has its original name.
-// The brackets keep it from matching the remote command itself, whose text contains the pattern.
-const residentNodePattern = compat.ResidentNodePattern
+// Capable nodes use update RPC directly. Older installations check their
+// managed services and signal only the main process using the replaced image.
+const reloadLegacyResident = `
+if [ -d /proc ] && command -v systemctl >/dev/null; then
+  for unit in personad-node.service persona-node.service ` + compat.HubService + `-node.service; do
+    pid=$(systemctl --user show --property=MainPID --value "$unit" 2>/dev/null) || continue
+    case "$pid" in ''|*[!0-9]*) continue;; esac
+    [ "$pid" -gt 1 ] || continue
+    exe=$(readlink "/proc/$pid/exe" 2>/dev/null) || continue
+    [ "$exe" = "$b (deleted)" ] || continue
+    awk '$1 == "SigCgt:" && $2 ~ /[13579bdf]$/ { ok=1 } END { exit !ok }' "/proc/$pid/status" 2>/dev/null || continue
+    kill -HUP "$pid" 2>/dev/null || true
+    break
+  done
+elif command -v launchctl >/dev/null; then
+  for label in com.persona.node ` + compat.NodeLabel + `; do
+    job=$(launchctl print "gui/$(id -u)/$label" 2>/dev/null) || continue
+    exe=$(printf '%s\n' "$job" | sed -n 's/^[[:space:]]*program = //p')
+    [ "$exe" = "$b" ] || { [ "$exe" = "$d/` + compat.DaemonBinary + `" ] && [ "$b" = "$d/personad" ]; } || continue
+    pid=$(printf '%s\n' "$job" | sed -n 's/^[[:space:]]*pid = //p')
+    case "$pid" in ''|*[!0-9]*) continue;; esac
+    [ "$pid" -gt 1 ] || continue
+    kill -HUP "$pid" 2>/dev/null || true
+    break
+  done
+fi
+`
 
 // shellQuote quotes s for a POSIX shell only (the script inside posixCommand); a remote command goes through
 // anyShellQuote.
@@ -390,28 +426,24 @@ func (d *Devices) updateNodes(ctx context.Context) {
 	}
 	for _, m := range d.machinesNow() {
 		m.mu.Lock()
-		local, online, info := m.cfg.Kind == "local", m.online, m.info
-		offlineLinked := !m.online && m.rpcDeploymentLocked()
+		temporary := m.cfg.Kind == "local" && !m.residentUpdateLocked()
+		online, info := m.online, m.info
+		offlineLinked := !online && !temporary && m.rpcDeploymentLocked()
 		m.mu.Unlock()
+		if temporary {
+			continue
+		}
 		if offlineLinked {
 			if err := m.queueOfflineNodeUpdate(ctx); err != nil {
 				d.logf("update: [%s] queue node update: %v", m.cfg.ID, err)
 			}
 			continue
 		}
-		if local || !online {
+		if !online || !buildDiffers(d.hubVersion(), info.Version) {
 			continue
 		}
-		// The build its platform resolves to (the hub's, or the newest release this manager drives); not known while
-		// the release site is away, and then left alone. A fallback build is offered, sent only on Redeploy.
-		pkg, known := d.resolvedPackageKnown(ctx, info)
-		if !known || !buildDiffers(pkg.Version, info.Version) {
-			continue
-		}
-		if pkg.Fallback {
-			d.logf("update: [%s] node %s is not build %s, a fallback (not the hub's version): sent only on Redeploy", m.cfg.ID, info.Version, pkg.Version)
-			continue
-		}
+		// An explicit package check must look beyond a cached fallback. A
+		// private publisher may have activated the exact build since then.
 		if err := m.startAutoDeploy(); err != nil {
 			d.logf("update: [%s] %v", m.cfg.ID, err)
 			continue
@@ -448,8 +480,9 @@ func (m *Machine) updateOnConnect(ctx context.Context) {
 	}
 	m.mu.Lock()
 	online, deploying, info := m.online, m.deploying, m.info
+	temporary := m.cfg.Kind == "local" && !m.residentUpdateLocked()
 	m.mu.Unlock()
-	if m.cfg.Kind == "local" || m.d.hubVersion() == "" || !online || deploying {
+	if temporary || m.d.hubVersion() == "" || !online || deploying {
 		return
 	}
 	if m.d.linkSwitchUnfinished(m.cfg.ID) { // nothing recorded: the next connection after the switch looks again

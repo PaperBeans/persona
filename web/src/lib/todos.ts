@@ -7,7 +7,7 @@ import type { TodoWait } from "./todo-wait-wire";
 import type { TodoSummary } from "./todo-view-wire";
 import { api, ApiError, enc } from "./api";
 import { parseAPIError, retryable, unrecoverableError } from "./api-errors";
-import { stateOf } from "./format";
+import { activityOf, stateOf } from "./format";
 import { foldedState } from "./child-sessions";
 import { foldRows } from "./folded-rows";
 import { splitAgentSessions, type AgentGroup, type AgentMutes } from "./agent-groups";
@@ -693,7 +693,7 @@ export function todoStatus(todo: Todo, lookup?: SessionLookup): TodoStatus {
  *  (background_working), or the hub waits out another agent, a deploy / CI / a time, or a moment's model failure
  *  for it and wakes it (work blocked on anything but the user). */
 export function agentWaits(s: Session): boolean {
-  const st = stateOf(s);
+  const st = activityOf(s);
   if (st === "working") return Boolean(s.background_working);
   const w = s.work;
   return st !== "needs_you" && st !== "unread" && w?.phase === "blocked" && (w.on === "agent" || w.on === "external" || w.on === "transient");
@@ -714,7 +714,7 @@ export function waitingLine(todo: Todo, lookup?: SessionLookup): string | undefi
 /** The agent stopped on a model API error (the hub's turn_error): cut off, not finished (#1516). */
 export function interruptedAgent(s?: Session): boolean {
   if (!s?.turn_error || usageLimitAgent(s)) return false;
-  const st = stateOf(s);
+  const st = activityOf(s);
   return st === "unread" || st === "idle";
 }
 
@@ -858,7 +858,7 @@ function byDate(a: Session, b: Session): number {
 }
 
 function sessionRank(s: Session, mutes: AgentMutes): number {
-  const state = stateOf(s);
+  const state = activityOf(s);
   const waiting = ["idle", "unknown"].includes(state) && Boolean(s.loop || s.background?.length || s.subagents?.some((a) => a.running));
   const isMuted = mutes.sessions.includes(`${s.machine_id}/${s.session_id}`) || Boolean(s.space_name && mutes.spaces.includes(`${s.machine_id}/${s.space_name}`));
   if (state === "needs_you") return 0;
@@ -1367,7 +1367,7 @@ export function dockAgents(sessions: Session[], todos: Todo[], conversation: str
   const out: DockAgent[] = [];
   for (const s of sessions) {
     if (s.assistant) continue;
-    const state = stateOf(s);
+    const state = activityOf(s);
     if (state !== "needs_you" && state !== "working") continue;
     if (taskAgents.has(`${s.machine_id}/${s.session_id}`)) continue;
     if (s.todo && !manual.has(s.todo.id)) continue;

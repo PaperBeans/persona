@@ -4,7 +4,7 @@
 // The count is the sidebar's own red "Needs you" count (stateCounts().badge in lib/sessions.ts: quiet tasks' agents are told
 // about in the main conversation, not counted), so the tab and the sidebar never disagree.
 import { useSyncExternalStore } from "react";
-import { stateOf } from "./format";
+import { activityOf, stateOf } from "./format";
 import { agentKey } from "./pins";
 import { homeKey } from "./folded-rows";
 import { isDelegating } from "./delegate";
@@ -78,7 +78,7 @@ export function detectTransitions(prev: ReadonlyMap<string, AgentState>, session
   for (const s of sessions) {
     if (s.hidden_by_directory) continue;
     const key = agentKey(s);
-    const state = stateOf(s);
+    const state = activityOf(s);
     const now = state === "needs_you" && looking.has(key) ? "working" : state;
     next.set(key, now);
     const was = prev.get(key);

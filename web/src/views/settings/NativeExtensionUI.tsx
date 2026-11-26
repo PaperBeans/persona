@@ -29,6 +29,8 @@ export function NativeExtensionUI(props: Props & { legacy: (props: Props) => Rea
   const [stack, setStack] = useState<Page[]>(() => [{ key: uuid(), ui: props.ui, state: props.state, title: props.title }]);
   const stackRef = useRef(stack); stackRef.current = stack;
   const historied = props.history ?? (props.pages !== "open");
+  // Settings draws the route back only at the first page; a pushed page's own Back replaces it.
+  useEffect(() => { props.onDepth?.(stack.length); }, [props.onDepth, stack.length]);
   useEffect(() => {
     if (manager) return;
     let live = true;
@@ -126,7 +128,7 @@ function ConnectedPage(props: Props & { legacy: (props: Props) => ReactNode; onL
   const fail = useCallback(() => setFallback(true), []);
   const error = useCallback((e: unknown) => toast(t("settings-extensionview.action_failed", { error: e instanceof Error ? e.message : String(e) }), "error"), []);
   const jump = useCallback((action: { push?: UIPush }) => { if (action.push) callbacks.current.push(action.push); }, []);
-  const legacy = props.legacy({ ...props, ui: props.page.ui, state: props.page.state, title: props.page.title,
+  const legacy = props.legacy({ ...props, onDepth: undefined, ui: props.page.ui, state: props.page.state, title: props.page.title,
     active: props.active, history: false, navigation: { push: (p) => callbacks.current.push(p, true), pop: props.pop } });
   return <>
     {props.back && <Button tone="quiet" icon="chevronLeft" onClick={props.pop}>{props.back}</Button>}

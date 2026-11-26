@@ -14,7 +14,7 @@ import type { Session } from "../lib/types";
 import { nodeActions, sessionNode, type NodeActionDeps } from "../lib/node-actions";
 import { Button, copyText, Dialog, Menu, toast, type MenuItem } from "../ui/atoms";
 import type { MenuAt } from "../ui/menu-model";
-import { NodeMenu } from "./NodeMenu";
+import type { NodeMenuProps } from "./NodeMenu";
 import { preloadSessionDialogs } from "./chat/SessionDialogs";
 import { t } from "../i18n";
 import { markAllSeenLabel } from "../lib/state-labels";
@@ -156,6 +156,13 @@ function AgentRowMenuView({ s, anchor, at, onClose, pinned, muted, features, onl
     return <Menu key={menuKey} anchor={place.anchor ?? null} point={place.point} onClose={onClose} align="right" width={224} headerAsWritten items={items} />;
   }
   return <NodeMenu key={menuKey} node={sessionNode(s, online)} at={place} onClose={onClose} before={before} omit={["node-copy-path", "node-rename"]} />;
+}
+
+// The menu of a computer, folder or Agent opens on a click: its code comes in a chunk of its own on the first one, as
+// SpaceMenu's below does, so it is not on every first screen (Sidebar, AgentRowMenu).
+const LazyNodeMenu = lazy(() => import("./NodeMenu").then((module) => ({ default: module.NodeMenu })));
+export function NodeMenu(props: NodeMenuProps) {
+  return <Suspense fallback={null}><LazyNodeMenu {...props} /></Suspense>;
 }
 
 const LazySpaceMenu = lazy(() => import("./SpaceMenu").then((module) => ({ default: module.SpaceMenu })));

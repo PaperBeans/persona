@@ -10,7 +10,7 @@ import { conversationChannel, useChannels } from "../../lib/channels";
 import { ChannelMark, OriginMark } from "../../ui/ChannelMark";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api, credentialOwner, enc, errorText, subscribeCredentialOwner } from "../../lib/api";
-import { ago, stateOf } from "../../lib/format";
+import { ago, activityOf } from "../../lib/format";
 import { plainMarkdown } from "../../lib/plain-markdown";
 import { conversationPage } from "../../lib/conversation-page";
 import { href, navigate, onLinkClick, type Route } from "../../lib/router";
@@ -446,7 +446,7 @@ function ConvRow({ s, main, now, said, fit, onRename, onArchive, onEditTags }: {
   const builtIn = useStore((x) => isBackgroundSupervisor(x.assistant, s.session_id));
   const title = main ? t("sidebar.main_chat") : builtIn ? backgroundSupervisorTitle(s) : conversationTitle(s);
   const split = builtIn ? null : splitTitle(title);
-  const st = stateOf(s);
+  const st = activityOf(s);
   const flagged = st === "needs_you" || st === "working" || st === "unread";
   const last = plainMarkdown(s.last_text);
   // opened by the hub itself (#3758, #5195): what opened it, in the channel's place, as on its sidebar row; decided as the

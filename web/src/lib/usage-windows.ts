@@ -12,6 +12,12 @@ export interface UsageWindow {
   resets_at?: string;
   /** An allowance a provider keeps for one model next to the plan's own (#2595); absent for the plan's window. */
   model?: string;
+  /** Optional group heading from a usage extension; windows sharing a group render together under one heading. */
+  group?: string;
+  /** Optional row display name from a usage extension. */
+  title?: string;
+  /** Optional short remark under the window row from a usage extension. */
+  note?: string;
   /** Where scheduling stops using this window's account, 0-100; it can differ per account and per window. Absent
    *  when the hub (older, or no such rule) does not say: nothing is drawn then (#13173). */
   protect_percent?: number;
@@ -241,7 +247,10 @@ export function sourceNames(a: UsageAccount): string[] {
   return [...machines, ...(a.sources ?? [])];
 }
 
-export const windowKey = (w: UsageWindow) => `${w.label}:${w.window_minutes}:${w.model ?? ""}`;
+export const windowKey = (w: UsageWindow) =>
+  w.group || w.title
+    ? `${w.label}:${w.window_minutes}:${w.model ?? ""}:${w.group ?? ""}:${w.title ?? ""}`
+    : `${w.label}:${w.window_minutes}:${w.model ?? ""}`;
 
 /** The usage provider ID shared by older node samples, gateways and visibility settings. */
 export function canonicalUsageProvider(provider: string): string {

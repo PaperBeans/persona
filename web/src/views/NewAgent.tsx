@@ -1,4 +1,5 @@
-// Start an agent on one of your computers: machine, folder (recent ones first), the first message, and at the right of its
+// Start an agent on one of your computers: machine, folder (browse-first breadcrumb path picker with secondary Recent view,
+// #14595), the first message, and at the right of its
 // box the model pill (#5104, as Cindy's new task: the user picks a model in the unified model panel, the launcher and its
 // engine come with it; views/NewAgentModel.tsx), where the profile's presets (#2225), the thinking effort and Claude Code's
 // ultracode switch (#3428: off each time, never remembered) also are. On top, the recent setups (#2134): a tap fills every
@@ -38,11 +39,13 @@ import {
   clearRecentSetups, forgetSetup, formHolds, loadRecentSetups, machineModel, recentCards, rememberSetup, setupKey, setupTime, type RecentCard, type RecentSetup,
 } from "../lib/recent-setups";
 import { baseName, shortPath } from "../lib/format";
+import { orderRecentFolders, pathBreadcrumbs } from "../lib/folder-picker";
 import { startingWith, typedFolder } from "../lib/typed-folder";
 import { addAgentWorktree, agentBranch, agentNameHint, suggestedPath, worktreeStatus, type WorktreeStatus } from "../lib/worktree";
 import { getState, useStore } from "../lib/store";
 import type { Launcher, Machine } from "../lib/types";
 import { Button, cx, Dialog, IconButton, Menu, Spinner, Switch, toast, useMenu } from "../ui/atoms";
+import { SegmentedTrack } from "../ui/Segmented";
 import { Pill } from "./settings/SettingsParts";
 import { startBlocked, ultracodeStartOffered } from "../lib/ultracode";
 import { UltracodeStartRow } from "./chat/Ultracode";
@@ -165,6 +168,9 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
   // the listed folder's subfolders kept: those starting with this ("": all), for a typed path naming no folder yet
   const [dirsPrefix, setDirsPrefix] = useState("");
   const [browse, setBrowse] = useState("");
+  // Browse-first path picker (#14595): Recent folders sit behind a secondary toggle rather than crowding the browser.
+  const [folderView, setFolderView] = useState<"browse" | "recent">("browse");
+  const breadcrumbRef = useRef<HTMLElement>(null);
   // The folder the list follows (#9452, lib/typed-folder.ts): the folder field's text, filled in (the last start's, a card's, a
   // recent row's) or typed once typing pauses. Browsing from the list takes over until the field changes again.
   const [follow, setFollow] = useState({ text: "", typed: false });
@@ -172,17 +178,31 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
   useEffect(() => () => clearTimeout(typing.current), []);
   const typeCwd = (text: string) => {
     pickCwd(text);
+    setFolderView("browse");
     clearTimeout(typing.current);
     typing.current = setTimeout(() => {
       setFollow({ text, typed: true });
       setBrowse("");
     }, 250);
   };
-  // the list shows a folder filled in: its subfolders, under the recent folders
+  // the list shows a folder filled in: its subfolders in Browse view
   const followFilled = (dir: string) => {
     clearTimeout(typing.current);
     setFollow({ text: dir, typed: false });
     setBrowse("");
+    setFolderView("browse");
+  };
+  // Single-state folder navigation (#14595): navigating in the picker always keeps cwd, breadcrumbs, and subfolders in lockstep.
+  const navigateFolder = (dir: string) => {
+    clearTimeout(typing.current);
+    pickCwd(dir);
+    setBrowse(dir);
+    setFolderView("browse");
+  };
+  const clearCwd = () => {
+    setCwd("");
+    setCwdPicked(false);
+    followFilled("");
   };
   const [loadingDirs, setLoadingDirs] = useState(false);
   const [prompt, setPrompt] = useState(() => localStorage.getItem("draft:new-agent") ?? "");
@@ -278,6 +298,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
     setWtBranch("");
     setWtError("");
     setRunTimes(1);
+    setFolderView("browse");
   }, [open]);
   // a worktree of its own (#6115): offered for a folder in a Git repository (what the computer says of it), off each
   // time the sheet opens
@@ -704,6 +725,14 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
     return () => controller.abort();
   }, [open, mid, listing, nearPath, nearPrefix, workspace, manager, credential]);
   useEffect(() => { if (!desktopStart) setNaming(false); }, [desktopStart]);
+  const recentFolders = useMemo(() => orderRecentFolders(dirs?.recent), [dirs?.recent]);
+  const showRecent = folderView === "recent" && recentFolders.length > 0;
+  const breadcrumbs = useMemo(() => pathBreadcrumbs(dirs?.path ?? ""), [dirs?.path]);
+  const visibleEntries = useMemo(() => startingWith(dirs?.entries, dirsPrefix), [dirs?.entries, dirsPrefix]);
+  useLayoutEffect(() => {
+    const nav = breadcrumbRef.current;
+    if (nav) nav.scrollLeft = nav.scrollWidth;
+  }, [dirs?.path, showRecent]);
   const defaultRuns = unified && launchersOf === mid ? pickerLauncher("", followedBinding("", configured)) : "";
   const defaultEntry = launchers.find((l) => l.name === defaultRuns);
   const defaultBlock = defaultRuns ? launcherBlock(defaultEntry) : null;
@@ -1003,40 +1032,136 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
           </Field>}
           <Field label={t("newagent.folder")}>
             {desktopScratch && <Suspense fallback={null}><DesktopTemporaryRow codex={codexApp} /></Suspense>}
-            <input
-              value={desktopScratch ? "" : cwd}
-              onChange={(e) => typeCwd(e.target.value)}
-              placeholder={t("newagent.folder_placeholder")}
-              spellCheck={false}
-              className="h-9 w-full rounded-control bg-inset px-3 font-mono text-[12.5px] text-ink shadow-hairline outline-none placeholder:font-sans placeholder:text-ink-3 focus:shadow-[0_0_0_1px_var(--line-strong)]"
-            />
-            <div className="mt-1.5 max-h-52 overflow-y-auto rounded-control bg-surface p-1 shadow-hairline">
-              {!browse && !(following && follow.typed) && (dirs?.recent?.length ?? 0) > 0 && (
-                <>
-                  <div className="px-2 pt-1 pb-0.5 text-[10.5px] font-medium tracking-[0.06em] text-ink-3 uppercase">{t("newagent.recent")}</div>
-                  {dirs!.recent!.slice(0, 6).map((d) => (
-                    <DirRow key={d.path} name={d.name || baseName(d.path)} path={d.path} sub={shortPath(d.path)} selected={!desktopScratch && cwd === d.path} onPick={() => { pickCwd(d.path); followFilled(d.path); }} />
-                  ))}
-                </>
-              )}
-              <div className="flex items-center gap-1 px-2 pt-1.5 pb-0.5 text-[10.5px] font-medium tracking-[0.06em] text-ink-3 uppercase">
-                {listing && dirs?.parent && (
-                  <button type="button" aria-label={t("newagent.parent_folder")} onClick={() => setBrowse(dirs!.parent!)} className="-ml-1 flex size-4.5 items-center justify-center rounded-[4px] hover:bg-hover hover:text-ink">
-                    <Icon name="chevronLeft" size={12} stroke={2.4} />
-                  </button>
+            <div className="relative">
+              <input
+                value={desktopScratch ? "" : cwd}
+                onChange={(e) => typeCwd(e.target.value)}
+                placeholder={t("newagent.folder_placeholder")}
+                spellCheck={false}
+                className={cx(
+                  "h-9 w-full rounded-control bg-inset px-3 font-mono text-[12.5px] text-ink shadow-hairline outline-none placeholder:font-sans placeholder:text-ink-3 focus:shadow-[0_0_0_1px_var(--line-strong)]",
+                  !desktopScratch && cwd && "pr-8",
                 )}
-                <span className="min-w-0 flex-1 truncate normal-case tracking-normal">{dirs?.path ? shortPath(dirs.path) : t("newagent.home_folder")}</span>
-                {loadingDirs && <Spinner size={10} />}
-                {desktopStart && dirs?.path && !naming && <Suspense fallback={null}><NewFolderButton onClick={() => setNaming(true)} /></Suspense>}
-              </div>
-              {naming && dirs?.path && (
-                <Suspense fallback={null}>
-                  <NewFolderNaming key={dirs.path} folder={dirs.path} onCancel={() => setNaming(false)} onUse={(made) => { pickCwd(made); setNaming(false); }} />
-                </Suspense>
+              />
+              {!desktopScratch && cwd && (
+                <button
+                  type="button"
+                  aria-label={t("newagent.clear_folder")}
+                  onClick={clearCwd}
+                  className="touch-hit absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-[4px] text-ink-3 hover:bg-hover hover:text-ink"
+                >
+                  <Icon name="x" size={12} stroke={2.2} />
+                </button>
               )}
-              {startingWith(dirs?.entries, dirsPrefix).map((d) => (
-                <DirRow key={d.path} name={d.name} path={d.path} git={d.is_git} selected={!desktopScratch && cwd === d.path} onPick={() => pickCwd(d.path)} onOpen={() => setBrowse(d.path)} />
-              ))}
+            </div>
+            <div className="mt-1.5 flex max-h-52 flex-col overflow-hidden rounded-control bg-surface shadow-hairline">
+              <div className="flex shrink-0 items-center gap-1.5 border-b border-line px-2 py-1">
+                {showRecent ? (
+                  <span className="min-w-0 flex-1 truncate text-submeta font-medium text-ink-3">{t("newagent.recent_folders")}</span>
+                ) : (
+                  <div className="flex min-w-0 flex-1 items-center gap-1">
+                    {dirs?.parent && dirs.parent !== dirs.path && (
+                      <button
+                        type="button"
+                        aria-label={t("newagent.parent_folder")}
+                        onClick={() => navigateFolder(dirs.parent!)}
+                        className="touch-hit -ml-1 flex size-5 shrink-0 items-center justify-center rounded-[4px] text-ink-3 hover:bg-hover hover:text-ink"
+                      >
+                        <Icon name="chevronLeft" size={12} stroke={2.4} />
+                      </button>
+                    )}
+                    {breadcrumbs.length > 0 ? (
+                      <nav ref={breadcrumbRef} aria-label={t("newagent.folder_path")} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-label">
+                        {breadcrumbs.map((seg, i) => {
+                          const last = i === breadcrumbs.length - 1;
+                          return (
+                            <span key={seg.path} className="flex shrink-0 items-center gap-0.5">
+                              {i > 0 && <span aria-hidden className="px-0.5 text-ink-3">/</span>}
+                              <button
+                                type="button"
+                                data-breadcrumb-path={seg.path}
+                                aria-current={last ? "location" : undefined}
+                                title={seg.path}
+                                onClick={() => navigateFolder(seg.path)}
+                                className={cx(
+                                  "touch-hit rounded-[4px] px-1 py-0.5 whitespace-nowrap transition-colors hover:bg-hover hover:text-ink",
+                                  last ? "font-medium text-ink" : "text-ink-2",
+                                )}
+                              >
+                                {seg.label}
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </nav>
+                    ) : (
+                      <span className="min-w-0 flex-1 truncate text-label text-ink-3">{t("newagent.home_folder")}</span>
+                    )}
+                  </div>
+                )}
+                {loadingDirs && <Spinner size={10} />}
+                {!showRecent && desktopStart && dirs?.path && !naming && <Suspense fallback={null}><NewFolderButton onClick={() => setNaming(true)} /></Suspense>}
+                {recentFolders.length > 0 && (
+                  <SegmentedTrack
+                    role="tablist"
+                    label={t("newagent.folder_view")}
+                    data-testid="folder-view-toggle"
+                    className="flex h-6 shrink-0 items-center rounded-[6px] p-0.5"
+                    thumbClassName="rounded-[4px]"
+                  >
+                    {(["browse", "recent"] as const).map((view) => {
+                      const selected = (showRecent ? "recent" : "browse") === view;
+                      return (
+                        <button
+                          key={view}
+                          type="button"
+                          role="tab"
+                          aria-selected={selected}
+                          data-selected={selected}
+                          onClick={() => setFolderView(view)}
+                          className={cx(
+                            "touch-hit relative z-[1] h-5 whitespace-nowrap rounded-[4px] px-1.5 text-submeta font-medium transition-colors duration-150",
+                            selected ? "text-ink" : "text-ink-3 hover:text-ink",
+                          )}
+                        >
+                          {t(view === "browse" ? "newagent.browse" : "newagent.recent")}
+                        </button>
+                      );
+                    })}
+                  </SegmentedTrack>
+                )}
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-1">
+                {showRecent ? (
+                  recentFolders.map((d) => (
+                    <DirRow
+                      key={d.path}
+                      name={d.name || baseName(d.path)}
+                      path={d.path}
+                      sub={shortPath(d.path)}
+                      selected={!desktopScratch && cwd === d.path}
+                      onPick={() => navigateFolder(d.path)}
+                    />
+                  ))
+                ) : (
+                  <>
+                    {naming && dirs?.path && (
+                      <Suspense fallback={null}>
+                        <NewFolderNaming key={dirs.path} folder={dirs.path} onCancel={() => setNaming(false)} onUse={(made) => { navigateFolder(made); setNaming(false); }} />
+                      </Suspense>
+                    )}
+                    {visibleEntries.length > 0 ? (
+                      visibleEntries.map((d) => (
+                        <DirRow key={d.path} name={d.name} path={d.path} git={d.is_git} selected={!desktopScratch && cwd === d.path} drillable onPick={() => navigateFolder(d.path)} />
+                      ))
+                    ) : (
+                      !loadingDirs && dirs && !naming && (
+                        <div className="px-2 py-2 text-center text-label text-ink-3">{t("newagent.no_subfolders")}</div>
+                      )
+                    )}
+                  </>
+                )}
+              </div>
             </div>
             {desktopStart && <Suspense fallback={null}><DesktopFolderNote codex={codexApp} scratch={desktopScratch} onUseTemporary={() => setCwdPicked(false)} /></Suspense>}
           </Field></>}
@@ -1392,20 +1517,23 @@ function Choice({ selected, onClick, title, radio, children }: { selected: boole
   );
 }
 
-// A folder to start in: picked with a click, opened with a double click or its chevron.
-function DirRow({ name, path, sub, git, selected, onPick, onOpen }: { name: string; path: string; sub?: string; git?: boolean; selected: boolean; onPick: () => void; onOpen?: () => void }) {
+// A folder to start in: single-click navigates into it and updates cwd in lockstep (#14595).
+function DirRow({ name, path, sub, git, selected, drillable, onPick }: { name: string; path: string; sub?: string; git?: boolean; selected: boolean; drillable?: boolean; onPick: () => void }) {
   return (
-    <div className={cx("group/dir flex h-8 items-center gap-2 rounded-[6px] px-2 transition-colors pointer-coarse:min-h-11", selected ? "bg-accent-tint" : "hover:bg-hover")}>
-      <button type="button" onClick={onPick} onDoubleClick={onOpen} className="flex min-w-0 flex-1 items-center gap-2 self-stretch text-left" title={path}>
-        <Icon name={git ? "git" : "folder"} size={13} className={selected ? "text-accent-ink" : "text-ink-3"} />
-        <span className={cx("shrink-0 truncate text-[12.5px]", selected ? "font-medium text-accent-ink" : "text-ink")}>{name}</span>
-        {sub && <span className="min-w-0 truncate font-mono text-[11px] text-ink-3">{sub}</span>}
-      </button>
-      {onOpen && (
-        <button type="button" aria-label={t("newagent.open_folder", { name })} onClick={onOpen} className="touch-hit flex size-5 items-center justify-center rounded-[4px] text-ink-3 opacity-0 transition-opacity group-hover/dir:opacity-100 hover:bg-hover-2 hover:text-ink focus-visible:opacity-100 [@media(hover:none)]:opacity-100">
-          <Icon name="chevronRight" size={12} stroke={2.4} />
-        </button>
+    <button
+      type="button"
+      data-dir-row
+      onClick={onPick}
+      title={path}
+      className={cx(
+        "group/dir flex h-8 w-full items-center gap-2 rounded-[6px] px-2 text-left transition-colors pointer-coarse:min-h-11",
+        selected ? "bg-accent-tint" : "hover:bg-hover",
       )}
-    </div>
+    >
+      <Icon name={git ? "git" : "folder"} size={13} className={cx("shrink-0", selected ? "text-accent-ink" : "text-ink-3")} />
+      <span className={cx("shrink-0 truncate text-[12.5px]", selected ? "font-medium text-accent-ink" : "text-ink")}>{name}</span>
+      {sub && <span className="min-w-0 truncate font-mono text-[11px] text-ink-3">{sub}</span>}
+      {drillable && <Icon name="chevronRight" size={12} stroke={2.4} className="ml-auto shrink-0 text-ink-3 transition-colors group-hover/dir:text-ink" />}
+    </button>
   );
 }
