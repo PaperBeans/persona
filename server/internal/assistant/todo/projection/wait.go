@@ -125,11 +125,11 @@ func buildPRWait(pr PRStatus) *assistantwire.TodoWait {
 	switch pr.Review {
 	case "changes_requested":
 		blockers = append(blockers, assistantwire.TodoWaitPRBlockerChangesRequested)
-	case "review_required":
+	case "required", "review_required":
 		blockers = append(blockers, assistantwire.TodoWaitPRBlockerReviewRequired)
 	}
 	switch pr.Checks {
-	case "failing":
+	case "failure", "failing":
 		blockers = append(blockers, assistantwire.TodoWaitPRBlockerChecksFailing)
 	case "pending":
 		blockers = append(blockers, assistantwire.TodoWaitPRBlockerChecksPending)

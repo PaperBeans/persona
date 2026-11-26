@@ -211,6 +211,29 @@ they are not listed. No relational table or connector acknowledgement protocol i
   Inbox has stay as they are (and its accounts' read errors as last read); search, replies and the knowledge base go on. Turned on again, the
   next round is a full one and reads mail at once. `mail` declares no inbox capability: `Manifest.InboxSwitch` gives it the switch.
 
+### Duplicate group mentions from Lark connectors
+
+The Inbox list shows one row when the built-in CLI connector and the Lark
+companion connector report an unambiguous copy of the same latest group mention.
+The connectors can use different message, chat, and sender IDs, so the manager
+compares the chat name, sender name, message minute, and complete message text
+from both sources. It ignores background messages and allows the known
+difference in how the sources render a trailing emoji. Short messages, clipped
+text, multiple matches, and a CLI batch with other new messages stay visible.
+
+The companion row keeps its own reply target and state, including a confirmed
+reply. When the CLI row has the only reply route, separate work, or an open
+request that the companion row would downgrade, both rows stay visible. The
+companion's related items link to the original CLI record and its history.
+Neither connector changes its collection, stored records, or sign-in. The list
+rechecks the match as each source moves. A later distinct message becomes
+visible on its own, and the original is still accessible by its ID.
+
+Different groups or people with identical display names can send identical
+text in the same minute. Without a shared upstream ID, the manager cannot tell
+these cases apart when only one candidate per source is present. The match
+therefore affects list visibility only and keeps each original record.
+
 ## Docs: mentions in sheets, bases, and documents (2026-10-31)
 
 Handled by the Lark plugin (formerly hub `inbox_docs.go`). Mentions / comments to me in Lark documents, sheets, and bases do not enter the IM chat list, only the **document notification center**

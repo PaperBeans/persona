@@ -158,6 +158,8 @@ data class AgentListGroup(
      * apart from Working, with a clock, as iOS's `StateCounts` does.
      */
     val waitingInBackground: Int = 0,
+    /** The local folder for a heading in By project, when its session rows identify one. */
+    val projectFolder: AgentProjectFolder? = null,
 )
 
 data class AgentListResult(
@@ -224,6 +226,18 @@ fun AgentListSettings.admits(s: persona.core.contracts.Session, pins: AgentPrefe
         (query.isEmpty() || s.key.path in queryAncestors ||
             AgentQuery.parse(query).admits(s, s.key.path in pins.sessions, machineNames[s.machineId], now))
 
+/** The list before the query's words: its conditions still scope it, but no word alone moves a project heading. */
+private fun AgentListSettings.scopeAdmits(s: persona.core.contracts.Session, query: AgentQuery?, pins: AgentPreferences,
+                                          machineNames: Map<String, String>, now: java.time.Instant): Boolean =
+    !s.assistant && (machineFilter.isEmpty() || machineFilter == s.machineId) &&
+        (query == null || s.key.path in queryAncestors ||
+            query.admits(s, s.key.path in pins.sessions, machineNames[s.machineId], now, words = false))
+
+private fun AgentListSettings.admitsWords(s: persona.core.contracts.Session, query: AgentQuery?, pins: AgentPreferences,
+                                          machineNames: Map<String, String>, now: java.time.Instant): Boolean =
+    query == null || s.key.path in queryAncestors ||
+        query.admits(s, s.key.path in pins.sessions, machineNames[s.machineId], now)
+
 /**
  * Whether the list of running sessions draws [row], its search, quick filter and botmux switch aside: pinned (under
  * Pinned), live, or a Codex thread of the past while those are included. [buildFlatAgentList] draws these rows, and a
@@ -276,7 +290,12 @@ fun buildFlatAgentList(
     directions: DirectionTree? = null,
 ): AgentListResult {
     val machineNames = machines.associate { it.id to it.name }
-    val base = foldRows(sessions, settings.hierarchy).filter { settings.admits(it.session, pins, machineNames, settings.now) && !(settings.hideBotmux && it.session.isBotmux) }
+    val query = settings.query.takeIf(String::isNotEmpty)?.let { AgentQuery.parse(it) }
+    val scoped = foldRows(sessions, settings.hierarchy).filter {
+        settings.scopeAdmits(it.session, query, pins, machineNames, settings.now) &&
+            !(settings.hideBotmux && it.session.isBotmux)
+    }
+    val base = scoped.filter { settings.admitsWords(it.session, query, pins, machineNames, settings.now) }
     val counts = AgentQuickFilter.entries.filter { it != AgentQuickFilter.All }
         .associateWith { filter ->
             base.count { row -> !row.isNestedSubtask && filter.matches(row) &&
@@ -397,12 +416,16 @@ fun buildFlatAgentList(
         AgentGrouping.MachineSpace -> {
             // Keep each session in a single leaf group; machine headers only reference those leaves.
             val treeRows = filtered.filter { it.isLive || settings.includeCodexHistory && it.session.isCodexTask }
+            // Quick filters and search words choose the rows; project metadata still comes from the complete scope so a
+            // minority folder cannot become the New Agent target.
+            val scopeRows = scoped.filter { it.isLive || settings.includeCodexHistory && it.session.isCodexTask }
             val known = machines + treeRows.map { it.session.machineId }.distinct()
                 .filter { id -> machines.none { it.id == id } }.map { Machine(it, "") }
             val machineGroups = known.sortedBy { !it.online }.mapNotNull { machine ->
                 val members = treeRows.filter { it.session.machineId == machine.id }
                 if (members.isEmpty()) return@mapNotNull null
-                val nested = buildFlatAgentList(members, pins = pins, mutes = mutes,
+                val scopeMembers = scopeRows.filter { it.session.machineId == machine.id }
+                val nested = buildFlatAgentList(scopeMembers, machines = listOf(machine), pins = pins, mutes = mutes,
                     settings = settings.copy(grouping = AgentGrouping.Space))
                 val machineFolded = "machine/${machine.id}" in settings.folded
                 result += nested.groups.filterNot { it.id == "pinned" }.map { group ->
@@ -554,7 +577,10 @@ fun buildFlatAgentList(
             }
         }
         AgentGrouping.Space -> {
-            val spaces = agentSpaces(live)
+            val spaces = agentSpaces(live, byProject = true)
+            // Folder metadata comes from every row the scope admits, before quick filters and pinned presentation:
+            // filtering to one minority folder must not move the heading's qualifier or New Agent target.
+            val projectFolders = projectFolders(agentSpaces(scoped, byProject = true), machines)
             fun pinnedSpace(space: AgentSpace) = space.preferenceKey in pins.spaces
             fun mutedSpace(space: AgentSpace) = space.preferenceKey in mutes.spaces
             fun leading(space: AgentSpace) = pinnedSpace(space) && !mutedSpace(space)
@@ -589,7 +615,7 @@ fun buildFlatAgentList(
                 return AgentListGroup(space.id, CoreText.plain(space.name), rows, visible, folded,
                     if (isQuiet) "quiet" else null, stateCounts, CoreText.joined(CoreText.of(Key.ListSeparator), spoken),
                     idleFold = idle.takeIf { it.isNotEmpty() }?.let { IdleFold(it, open = space.id in settings.expandedIdle) },
-                    waitingInBackground = waiting(rows))
+                    waitingInBackground = waiting(rows), projectFolder = projectFolders[space.id])
             }
             result += active.map { spaceGroup(it, false) }
             result += quiet.map { spaceGroup(it, true) }

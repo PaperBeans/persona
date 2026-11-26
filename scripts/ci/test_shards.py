@@ -365,7 +365,7 @@ class ShardTests(unittest.TestCase):
         script = (ROOT / "scripts/ci/server.sh").read_text()
         for label in ("Go formatting", "Server vet", "Server build", "Windows node build and vet", "Go SDK tests",
                       "Server programs with build-tags.txt", "Tunnel tests with build-tags.txt", "Core-only hub smoke",
-                      "Builds without each module", "Server $shard tests with Postgres, core only"):
+                      "Core-only install from packages", "Builds without each module", "Server $shard tests with Postgres, core only"):
             self.assertIn(label, script)
         self.assertIn('lane="${1:-all}"', script)
 

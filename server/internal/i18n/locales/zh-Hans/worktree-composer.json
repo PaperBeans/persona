@@ -68,5 +68,6 @@
   "runtime_git_gone": "{path} 已经不是 Git 工作树（仓库里关于它的记录没了），Persona 不删除它；请在 {engine} 里处理",
   "runtime_not_toplevel": "{path} 是工作树里的一个文件夹，不是工作树本身；Persona 只删除整个工作树",
   "runtime_folder_left": "{engine} 归档了这个工作区，但保留了它的文件夹 {path}；请在 {engine} 里或手动删除这个文件夹",
-  "runtime_remove_unanswered": "{engine} 在移除工作树时没有回应；重试前先刷新，看看它是否已经移除"
+  "runtime_remove_unanswered": "{engine} 在移除工作树时没有回应；重试前先刷新，看看它是否已经移除",
+  "orca_directory_workspace": "Orca 没有新建 Git 工作树，也没有建分支，而是在已有的检出 {path} 里建了一个目录级工作区：这个检出已经作为 Orca 工作树打开时，Orca 就会这样做。可以用 workspace \"none\" 启动任务，不建它自己的工作树"
 }

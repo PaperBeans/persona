@@ -1,7 +1,7 @@
 // Files a message carries as <persona-file> tags (docs/protocol/protocol.md "Sending videos"; iOS draws the same cards), and files an
 // answer names by path that exist on the machine: videos and audio play in place, documents are cards with their first
 // page (iOS DocumentCards), other files open in the file viewer.
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fileThumbURL } from "../../lib/api";
 import { documentKind, isDarkPage, isDocument, MAX_DOCUMENT_CARDS } from "../../lib/documents";
 import { usePathLinks, type PathStat } from "../../lib/path-presence";
@@ -43,7 +43,7 @@ export function FileCards({ files, mid, align = "end", cwd, onOpenFile, resolveD
   return (
     <div className={align === "end" ? "flex max-w-full flex-col items-end gap-1.5" : "flex max-w-full flex-col items-start gap-1.5"}>
       {shown.map((f) => (
-        <FileCard key={f.path} f={f} mid={mid} cwd={cwd} onOpenFile={onOpenFile} resolveDownloadURL={resolveDownloadURL} />
+        <FileCard key={`${mid}\0${cwd ?? ""}\0${f.path}`} f={f} mid={mid} cwd={cwd} onOpenFile={onOpenFile} resolveDownloadURL={resolveDownloadURL} />
       ))}
       {folds && (
         <button
@@ -71,18 +71,20 @@ function FileCard({
   f: AttachedFile;
   mid: string;
   cwd?: string;
-  onOpenFile?: (file: AttachedFile) => void;
-  resolveDownloadURL?: (path: string, options: { inline?: boolean }) => string;
+  onOpenFile?: FileCardsProps["onOpenFile"];
+  resolveDownloadURL?: FileCardsProps["resolveDownloadURL"];
 }) {
   const readOnly = useReadOnlyFile();
   // the length the file really has wins over the one the message says (it may be rounded, or wrong)
   const [real, setReal] = useState<number | undefined>(undefined);
+  useEffect(() => setReal(undefined), [mid, cwd, f.path, f.kind, resolveDownloadURL]);
   const duration = real ?? f.duration;
   const meta = [f.size ? bytes(f.size) : "", duration ? formatDuration(duration) : ""].filter(Boolean).join(" · ");
   if (f.kind === "video" || f.kind === "audio")
     return (
       <figure className="m-0 flex w-[min(360px,100%)] flex-col gap-1">
         <MediaPlayer
+          key={`${mid}\0${cwd ?? ""}\0${f.path}\0${f.kind}`}
           mid={mid}
           path={f.path}
           cwd={cwd}
@@ -184,7 +186,7 @@ export function DocumentCards({ files, mid, cwd, onOpenFile, resolveThumbURL }: 
       style={{ maskImage: mask, WebkitMaskImage: mask }}
     >
       {files.map((f) => (
-        <DocumentCard key={f.path} f={f} mid={mid} cwd={cwd} onOpenFile={onOpenFile} resolveThumbURL={resolveThumbURL} />
+        <DocumentCard key={`${mid}\0${cwd ?? ""}\0${f.path}`} f={f} mid={mid} cwd={cwd} onOpenFile={onOpenFile} resolveThumbURL={resolveThumbURL} />
       ))}
     </div>
   );
@@ -200,13 +202,14 @@ function DocumentCard({
   f: AttachedFile;
   mid: string;
   cwd?: string;
-  onOpenFile?: (file: AttachedFile) => void;
-  resolveThumbURL?: (path: string, size: number) => string;
+  onOpenFile?: DocumentCardsProps["onOpenFile"];
+  resolveThumbURL?: DocumentCardsProps["resolveThumbURL"];
 }) {
   const readOnly = useReadOnlyFile();
   // no thumbnail (an old hub, a machine that cannot draw it, the file gone) or a dark page (Quick Look in dark mode):
   // the file's glyph, as iOS falls back to its symbol
   const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [mid, cwd, f.path, resolveThumbURL]);
   return (
     <button
       type="button"

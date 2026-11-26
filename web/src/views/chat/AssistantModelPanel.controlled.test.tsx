@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => ({
   pickLauncher: vi.fn(),
   pickModel: vi.fn(),
   pickEffort: vi.fn(),
-  pickFast: vi.fn(),
+  pickServiceTier: vi.fn(),
   dropConversationPick: vi.fn(),
   conversationSwitchState: vi.fn(),
   prepareConversationSwitch: vi.fn(),
@@ -83,7 +83,7 @@ vi.mock("../../lib/assistant-chat", async (importOriginal) => ({
   pickLauncher: (...args: unknown[]) => mocks.pickLauncher(...args),
   pickModel: (...args: unknown[]) => mocks.pickModel(...args),
   pickEffort: (...args: unknown[]) => mocks.pickEffort(...args),
-  pickFast: (...args: unknown[]) => mocks.pickFast(...args),
+  pickServiceTier: (...args: unknown[]) => mocks.pickServiceTier(...args),
 }));
 vi.mock("../../lib/assistant-pick", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/assistant-pick")>()),
@@ -123,7 +123,7 @@ const codexList: ModelList = {
         id: "gpt-fast",
         name: "GPT Fast",
         efforts: ["low", "high"],
-        service_tiers: [{ id: "default", name: "Standard" }, { id: "priority", name: "Fast" }],
+        service_tiers: [{ id: "default", name: "Standard" }, { id: "priority", name: "Fast" }, { id: "ultrafast", name: "Ultrafast" }],
       },
     ],
   },
@@ -223,7 +223,7 @@ const expectNoDefaultSingletons = () => {
   expect(mocks.pickLauncher).not.toHaveBeenCalled();
   expect(mocks.pickModel).not.toHaveBeenCalled();
   expect(mocks.pickEffort).not.toHaveBeenCalled();
-  expect(mocks.pickFast).not.toHaveBeenCalled();
+  expect(mocks.pickServiceTier).not.toHaveBeenCalled();
   expect(mocks.dropConversationPick).not.toHaveBeenCalled();
   expect(mocks.conversationSwitchState).not.toHaveBeenCalled();
   expect(mocks.prepareConversationSwitch).not.toHaveBeenCalled();
@@ -322,19 +322,19 @@ describe("AssistantModelPanel with controlled props", () => {
     expect(onKeepPick).toHaveBeenNthCalledWith(1, session, { launcher: "claude", model: "opus", effort: "high" });
     await expect(props.onPick({ provider: "claude", model: "sonnet", effort: "low" })).resolves.toBe(false);
 
-    // Live fast toggle + effort change on current setup
-    await expect(props.onApplyCurrent?.({ fast: true })).resolves.toBe(true);
+    // Live speed change on the current setup
+    await expect(props.onApplyCurrent?.({ speed: "fast" })).resolves.toBe(true);
     expect(onSetServiceTier).toHaveBeenCalledWith(session, "priority");
 
     expectNoDefaultSingletons();
     expect(onNotice).not.toHaveBeenCalled();
   });
 
-  it("handles draft picks, start-fast pinning, older-hub effort updates, and draft reset via controlled callbacks", async () => {
+  it("handles draft picks, start speed pinning, older-hub effort updates, and draft reset via controlled callbacks", async () => {
     const draftChat = makeChat({ session: undefined, kept: true });
     const draftSetup: AssistantSetup = { provider: "codex", model: "gpt-fast", effort: "low", source: "pick" };
     const onPickDraft = vi.fn();
-    const onPickFast = vi.fn();
+    const onPickServiceTier = vi.fn();
     const onDropPick = vi.fn();
 
     await mount({
@@ -349,19 +349,22 @@ describe("AssistantModelPanel with controlled props", () => {
       quotas: {},
       getLatestSession: () => undefined,
       onPickDraft,
-      onPickFast,
+      onPickServiceTier,
       onDropPick,
     });
 
-    await expect(mocks.panelProps!.onPick({ provider: "codex", model: "gpt-fast", effort: "high", fast: true })).resolves.toBe(true);
+    await expect(mocks.panelProps!.onPick({ provider: "codex", model: "gpt-fast", effort: "high", speed: "fast" })).resolves.toBe(true);
     expect(onPickDraft).toHaveBeenCalledWith({ launcher: "codex", model: "gpt-fast", effort: "high" });
-    expect(onPickFast).toHaveBeenCalledWith(true);
+    expect(onPickServiceTier).toHaveBeenCalledWith("priority");
 
     onPickDraft.mockClear();
-    onPickFast.mockClear();
-    await expect(mocks.panelProps!.onApplyCurrent?.({ fast: true, effort: "high" })).resolves.toBe(true);
+    onPickServiceTier.mockClear();
+    await expect(mocks.panelProps!.onApplyCurrent?.({ speed: "ultrafast", effort: "high" })).resolves.toBe(true);
     expect(onPickDraft).toHaveBeenCalledWith({ launcher: "codex", model: "gpt-fast", effort: "high" });
-    expect(onPickFast).toHaveBeenCalledWith(true);
+    expect(onPickServiceTier).toHaveBeenCalledWith("ultrafast");
+
+    await expect(mocks.panelProps!.onApplyCurrent?.({ speed: "standard" })).resolves.toBe(true);
+    expect(onPickServiceTier).toHaveBeenLastCalledWith(undefined);
 
     const backBtn = host.querySelector<HTMLButtonElement>("[data-pick-strip] button")!;
     act(() => backBtn.click());
@@ -576,7 +579,7 @@ describe("AssistantModelPanel default fallback compatibility", () => {
     expect(mocks.forgetModel).toHaveBeenCalledWith("example-machine", "claude", "vendor/x", "assistant");
     expect(mocks.toast).toHaveBeenCalledWith("cannot forget", "error");
 
-    await expect(mocks.panelProps!.onApplyCurrent?.({ fast: true })).resolves.toBe(true);
+    await expect(mocks.panelProps!.onApplyCurrent?.({ speed: "fast" })).resolves.toBe(true);
     expect(mocks.setServiceTier).toHaveBeenCalledWith(session, "priority");
   });
 
@@ -585,11 +588,11 @@ describe("AssistantModelPanel default fallback compatibility", () => {
     mocks.assistantSetup.mockReturnValue({ provider: "codex", model: "gpt-fast", effort: "low", source: "default" });
     await mount({ chat: draftChat });
 
-    await expect(mocks.panelProps!.onPick({ provider: "codex", model: "gpt-fast", effort: "high", fast: true })).resolves.toBe(true);
+    await expect(mocks.panelProps!.onPick({ provider: "codex", model: "gpt-fast", effort: "high", speed: "fast" })).resolves.toBe(true);
     expect(mocks.pickLauncher).toHaveBeenCalledWith("new", "codex");
     expect(mocks.pickModel).toHaveBeenCalledWith("new", "gpt-fast");
     expect(mocks.pickEffort).toHaveBeenCalledWith("new", "high");
-    expect(mocks.pickFast).toHaveBeenCalledWith(true);
+    expect(mocks.pickServiceTier).toHaveBeenCalledWith("priority");
 
     // Default explicit switch fallback
     const session = makeSession();

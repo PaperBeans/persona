@@ -239,12 +239,13 @@ func (s *Service) allOwnSettings() []ownSetting {
 				return fmt.Sprint(s.settings(ctx).foldRoutineRelayReplies()), nil
 			},
 			set: s.setFoldRoutineRelayReplies},
-		{Setting: Setting{Key: "assistant.main_compact_window", Title: "Main chat compaction window", Actions: getSet,
-			About: "400000 (the default): the main conversation is compacted at about this many tokens (and sent /compact when " +
-				"idle at 75% of it) instead of its model's whole window, when it runs on a launcher Persona manages that declares " +
-				"a larger one; fewer tokens re-read every turn and rewritten after a long pause, while early details stay in the " +
-				"task ledger and the old conversation. 0: the launcher's window, as for every other conversation and Agent. " +
-				"Applies from the main conversation's next message while it is idle",
+		{Setting: Setting{Key: "assistant.main_compact_window", Title: "Compaction window for the main chat and leader conversations", Actions: getSet,
+			About: "400000 (the default): the main conversation and each leader conversation (a direction's lead, " +
+				"assistant.leaders) are compacted at about this many tokens (and sent /compact when idle at 75% of it) instead " +
+				"of their model's whole window, when they run on a launcher Persona manages that declares a larger one; fewer " +
+				"tokens re-read every turn and rewritten after a long pause, while early details stay in the task ledger and the " +
+				"old conversation. 0: the launcher's window, as for every other conversation and Agent. Applies from each one's " +
+				"next message while it is idle",
 			Value: "0, or a whole number of tokens, 100000–10000000"},
 			get: func(ctx context.Context) (string, error) {
 				return fmt.Sprint(mainCompactWindowOf(s.settings(ctx))), nil

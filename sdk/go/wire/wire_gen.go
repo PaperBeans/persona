@@ -2709,8 +2709,8 @@ type Action struct {
 	// Assistant only: send this text back to the same conversation. The hub reads it from the saved view, not from the
 	// client.
 	Reply string `json:"reply,omitempty"`
-	// Assistant only: an https URL or a validated persona/persona session, task, kb or file target, opened inside the
-	// app.
+	// Assistant only, except that a full extension page may open persona://session/<machine>/<session> or
+	// persona://task/<id>: an https URL or a validated persona session, task, kb or file target, opened inside the app.
 	Open string `json:"open,omitempty"`
 	// Assistant only: return one page within the card.
 	Pop bool `json:"pop,omitempty"`

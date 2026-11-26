@@ -363,7 +363,7 @@ describe("a message card's 发送 (#1519)", () => {
   it("reads sent from the card the hub keeps, with what went out (the draft for a card from before)", () => {
     expect(cardSent(card("m"))).toBeUndefined();
     expect(cardSent(card("m", { sent_at: "2026-11-04T10:23:00Z", sent: "修好了" }))).toEqual({ at: "2026-11-04T10:23:00Z", text: "修好了" });
-    expect(cardSent(card("m", { sent_at: "2026-11-04T10:23:00Z" }))?.text).toBe("在修了");
+    expect(cardSent(card("m", { sent_at: "2026-11-04T10:23:00Z" }))?.text).toBe("");
   });
 
   it("reads filed from the hub's filed_at only while the card is not sent (#4797)", () => {

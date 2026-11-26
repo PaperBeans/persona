@@ -69,7 +69,7 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
         val side = landedSide ?: return@LaunchedEffect
         if (sideShown) return@LaunchedEffect
         sideShown = true
-        val chat = ChatRoute(side.machineId, side.sessionId, ConversationKind.Agent, side = true)
+        val chat = ChatRoute(side.machineId, side.sessionId, ConversationKind.Agent, side = true, decisionSource = route.decisionSource)
         navigator.navigate(requestId?.let { InteractionRoute(chat, it) } ?: chat)
     }
     val key = home.key
@@ -142,6 +142,11 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
                     onOpenRequest = { chat, request ->
                         val target = waitingRoute(chat, request)
                         if (target.card != null) onOpenCard(target) else navigator.navigate(target.key)
+                    },
+                    decisionSource = route.decisionSource,
+                    onOpenDecisionSource = { chat, toolUseId ->
+                        navigator.navigate(ChatRoute(chat.machineId, chat.sessionId, ConversationKind.Agent, subagentDetail = true,
+                            decisionSource = DecisionSource(toolUseId)))
                     },
                     onOpenAssistant = { navigator.navigate(persona.feature.chat.conversationRoute(it, assistant = true)) },
                     onConnectionDetails = { navigator.navigate(SettingsPageRoute(SettingsPage.Diagnostics)) },

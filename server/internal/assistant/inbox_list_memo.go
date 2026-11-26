@@ -114,18 +114,24 @@ func (s *Service) inboxListBytes(shape inboxShape, withIDs bool) ([][]byte, []st
 	now := time.Now()
 	cutoff := now.Add(-inboxKeepDone)
 	cut := b.listedDoneCut(cutoff, all)
+	duplicates := b.larkDuplicates(cutoff, cut, all)
 	if m.kept == nil {
 		m.kept = make(map[string]inboxListed, len(b.items))
 	}
 	rows := make([]inboxListRow, 0, len(b.items))
 	misses := 0
 	for _, it := range b.items {
-		if !inboxShows(it, cutoff, cut, all) {
+		if duplicates.hidden[it.ID] || !inboxShows(it, cutoff, cut, all) {
 			continue
 		}
 		it.arrived(now)
 		row := inboxListRow{it: it, at: it.UpdatedAt}
-		if e := m.kept[it.ID]; e.it == it && e.raw != nil {
+		if _, linked := duplicates.related[it.ID]; linked {
+			// This copy depends on another row. Keep the ordinary memo item-local.
+			c := it.listed()
+			duplicates.link(&c)
+			row.c = &c
+		} else if e := m.kept[it.ID]; e.it == it && e.raw != nil {
 			row.raw = e.raw
 			if shape.lean {
 				row.raw = e.lean
@@ -175,7 +181,9 @@ func (s *Service) inboxListBytes(shape inboxShape, withIDs bool) ([][]byte, []st
 					return nil, nil, now, false
 				}
 			}
-			encoded = append(encoded, inboxListed{it: rows[i].it, raw: raw, lean: lean, tok: rows[i].tok})
+			if rows[i].tok != 0 {
+				encoded = append(encoded, inboxListed{it: rows[i].it, raw: raw, lean: lean, tok: rows[i].tok})
+			}
 			rows[i].raw = raw
 			if shape.lean {
 				rows[i].raw = lean

@@ -62,9 +62,9 @@ func TestOtherAgentStartCommandLineBreaks(t *testing.T) {
 // startOtherAgent builds its command for the shell of the pane it made: a zsh pane sources it from a start file, and a
 // tcsh pane (no `.`) gets it typed out with the first message on one line.
 func TestOtherAgentStartTypesForThePaneShell(t *testing.T) {
-	for shell, want := range map[string]string{
-		"/bin/zsh":  "traex 'a b\nc'",
-		"/bin/tcsh": "traex 'a b c'",
+	for shell, tc := range map[string]struct{ model, want string }{
+		"/bin/zsh":  {"", "traex 'a b\nc'"},
+		"/bin/tcsh": {"example-fast", "traex -m example-fast -- 'a b c'"},
 	} {
 		t.Run(shell, func(t *testing.T) {
 			withPaneShell(t, shell)
@@ -78,7 +78,8 @@ func TestOtherAgentStartTypesForThePaneShell(t *testing.T) {
 					cancel()
 				}
 			})
-			_, _ = n.startOtherAgent(ctx, n.hosts.Get(host.Herdr).(*herdrHost), home, traexAgent, traexAgent, "a\tb\nc", "", "w1", "")
+			_, _ = n.startOtherAgent(ctx, n.hosts.Get(host.Herdr).(*herdrHost), home, traexAgent, traexAgent, "a\tb\nc", "", "w1", "", modelExecution{Model: tc.model})
+			want := tc.want
 			if shell == "/bin/zsh" {
 				want = inAgentEnv(n.dir, want, shellQuote)
 			}
@@ -100,8 +101,8 @@ func TestOtherAgentStartTypesForThePaneShell(t *testing.T) {
 // the command is typed with the message on one line.
 func TestOtherAgentStartFlattensForAGuessedShell(t *testing.T) {
 	for shell, want := range map[string]string{
-		"/bin/zsh":  "traex 'a\nb'",
-		"/bin/tcsh": "traex 'a b'",
+		"/bin/zsh":  "traex -m example-fast -c 'model_reasoning_effort=xhigh' -- 'a\nb'",
+		"/bin/tcsh": "traex -m example-fast -c 'model_reasoning_effort=xhigh' -- 'a b'",
 	} {
 		t.Run(shell, func(t *testing.T) {
 			withPaneShell(t, shell)
@@ -112,7 +113,7 @@ func TestOtherAgentStartFlattensForAGuessedShell(t *testing.T) {
 			starts := orcaTypedStarts(o)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second) // until the agent would show up
 			defer cancel()
-			_, _ = n.start(ctx, projDir, traexAgent, "a\nb", "", "", "", "", "", "", "")
+			_, _ = n.start(ctx, projDir, traexAgent, "a\nb", "", "", "", "xhigh", "", "", "", modelExecution{Model: "example-fast"})
 			ran := starts()
 			for _, p := range o.Params("terminal.send") {
 				if text, _ := p["text"].(string); strings.Contains(text, traexAgent+" ") {

@@ -100,9 +100,11 @@ func TestConversationFeedToAnExtension(t *testing.T) {
 		feed("conv1", feedRouted, hidden, map[string]string{"text": told, "machine_id": "server", "session_id": "h1"})
 		feed("conv1", feedReceipt, hidden, map[string]string{"state": "done", "summary": summary, "machine_id": "server", "session_id": "h1"})
 		feed("conv1", feedReport, hidden, map[string]string{"kind": "progress", "text": scopeReport})
+		feed("conv1", feedNotice, hidden, noticeBody{Text: "A private task's launcher changed"})
 		feed("conv1", feedAnswered, hidden, answeredBody{Question: scopeAsk, Answer: scopeAnswer})
 		feed("conv1", feedMessage, "inbox_clinic", MessageCard{TodoID: hidden, Source: "mail", Chat: "Clinic", Text: clinicDraft, Draft: clinicDraft})
 		feed("conv1", feedRouted, shown, map[string]string{"text": renew, "machine_id": "server", "session_id": "s1"})
+		feed("conv1", feedNotice, shown, noticeBody{Text: "A shared task's launcher changed"})
 		feed("conv1", feedAnswered, shown, answeredBody{Question: "Which form do you need?", Answer: formAnswer})
 		feed("conv1", feedMessage, "inbox_office", MessageCard{TodoID: shown, Source: "mail", Chat: "Passport office", Text: officeDraft, Draft: officeDraft})
 		plan("plan_shown", PlanTask{Title: "Renew the passport", TodoID: shown, Cwd: "/home/owner/forms"})
@@ -118,7 +120,7 @@ func TestConversationFeedToAnExtension(t *testing.T) {
 		}
 
 		words := []string{told, summary, scopeReport, scopeAsk, scopeAnswer, formAnswer, clinicDraft, hidden, "Chart the readings",
-			health, "Sort the sleep diary", "plan_hidden", "plan_in_space", "routine_morning", `"today"`}
+			health, "Sort the sleep diary", "plan_hidden", "plan_in_space", "routine_morning", "A private task's launcher changed", `"today"`}
 		for _, q := range []string{"", "?paginate=1"} {
 			path := "/api/v1/assistant/conversations/conv1/feed" + q
 			device := e.must("GET", path, "").Body.Bytes()
@@ -132,7 +134,7 @@ func TestConversationFeedToAnExtension(t *testing.T) {
 				t.Fatalf("%s: %d %s", path, w.Code, w.Body)
 			}
 			noneOf(t, "an extension's "+path, w.Body.Bytes(), append(slices.Clone(words), "Sleep log")...)
-			for _, want := range []string{shown, renew, notice, "plan_shown"} {
+			for _, want := range []string{shown, renew, notice, "plan_shown", "A shared task's launcher changed"} {
 				if !bytes.Contains(w.Body.Bytes(), []byte(want)) {
 					t.Errorf("%s: an extension does not read %q: %s", path, want, w.Body)
 				}

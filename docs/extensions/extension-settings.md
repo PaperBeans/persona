@@ -8,6 +8,10 @@ The host renders every extension's settings page, including built-in, configured
 
 Lifecycle writes use the extension's owning manager and extension ID together. Two managers may have an extension with the same ID; selecting one must never read or change the other.
 
+On the web, an installed extension can need configuration before it can draw its page. Opening a link to that page
+shows the missing settings reported by its manager and an action to open that installation's settings. After saving,
+use the browser's Back button to reopen the original page.
+
 ## Sections, in order
 
 1. **Enabled** — the first control, before setup and configuration.

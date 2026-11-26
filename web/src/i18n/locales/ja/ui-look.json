@@ -41,5 +41,9 @@
   "font_unavailable": "このフォントは使えない可能性があります。選択を保持し、代替フォントを使います。",
   "font_local": "このコンピュータにあるフォントを使います。ダウンロードは行いません。",
   "sidebar_usage": "サイドバーのランチャー残量",
-  "sidebar_usage_hint": "サイドバー下部に各ランチャーの残り枠を示すカードを表示します。このブラウザにのみ保存されます。"
+  "sidebar_usage_hint": "サイドバー下部に各ランチャーの残り枠を示すカードを表示します。このブラウザにのみ保存されます。",
+  "surface_style": "ウインドウスタイル",
+  "surface_style_hint": "デフォルトは従来の不透明な表示を保ちます。Liquid Glass は半透明のすりガラス質感とデスクトップの透過を追加します。このブラウザにのみ保存されます。",
+  "surface_default": "デフォルト",
+  "surface_liquid_glass": "Liquid Glass"
 }

@@ -778,6 +778,9 @@ func (s *Service) sweepDecisionAges(now time.Time) {
 		if !decisionRecheckDue(&a, now) {
 			continue
 		}
+		if t, ok := s.todoNow(w.todo); ok && s.reporterStopped(ctx, t.Origin) {
+			continue // signal would drop it under /stop (#3308): the owner keeps the decision until they speak
+		}
 		if !s.markDecisionRecheck(ctx, w.todo, a.AskedAt, now.UTC()) {
 			continue
 		}
@@ -823,6 +826,9 @@ func (s *Service) undecidableSignal(ctx context.Context, t Todo, now time.Time) 
 		if a.AcceptedAt.IsZero() && a.Recommend != "" || !a.AcceptedAt.IsZero() && now.Sub(a.AcceptedAt) < decisionSettle {
 			return superviseSignal{}, false // answerable, or its answer is on its way to the agent
 		}
+	}
+	if s.reporterStopped(ctx, t.Origin) {
+		return superviseSignal{}, false // signal would drop it under /stop (#3308): keep it untold until the user speaks
 	}
 	_, changed, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
 		n := len(v.Reviews)

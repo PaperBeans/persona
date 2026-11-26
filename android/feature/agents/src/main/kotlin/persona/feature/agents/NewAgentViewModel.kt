@@ -14,6 +14,7 @@ import persona.core.domain.models.ModelPanel
 import persona.feature.chat.ChatLinkContext
 import persona.feature.chat.ComposerUploadLimiter
 import persona.feature.chat.ForwardMessage
+import persona.core.domain.sort.AgentProjectFolder
 import persona.feature.chat.ForwardPlacements
 import persona.feature.chat.ForwardPlacement
 import persona.feature.chat.PhotoCandidate
@@ -88,6 +89,7 @@ internal data class NewAgentModels(
 internal data class NewAgentState(
     val initialized: Boolean = false,
     val space: AgentSpacePreset? = null,
+    val project: AgentProjectFolder? = null,
     val machineId: String = "",
     val startMachine: Machine? = null,
     val selection: AgentDefaults = AgentDefaults(),
@@ -380,8 +382,10 @@ internal class NewAgentViewModel(
                         }
                         if (state.value.machineId.isEmpty() && !state.value.locked) {
                             val space = state.value.space
+                            val project = state.value.project
                             val wanted = prefill?.machineId?.takeIf { it.isNotBlank() }
-                            val pick = if (space != null) list.firstOrNull { it.id == space.machineId && it.online }
+                            val fixedMachine = space?.machineId ?: project?.machineId
+                            val pick = if (fixedMachine != null) list.firstOrNull { it.id == fixedMachine && it.online }
                                 else (wanted?.let { id -> list.firstOrNull { it.id == id && it.online } }
                                     ?: list.firstOrNull { it.id == last && it.online } ?: list.firstOrNull { it.online })
                             if (pick != null) {
@@ -397,20 +401,22 @@ internal class NewAgentViewModel(
             catch (_: Exception) { mutable.update { it.copy(error = AgentText(R.string.agents_new_error_record)) } }
         }
     }
-    /** Opens the form for a new session, or for a new tab in [space]; an unconfirmed start keeps its own form. */
-    fun startIn(space: AgentSpacePreset?) {
+    /** Opens the usual form, optionally in a space or with a project's computer and folder selected. */
+    fun startIn(space: AgentSpacePreset?, project: AgentProjectFolder? = null) {
         val current = state.value
         if (current.pending != null || current.created != null || current.starting) return
         // A provider's mode and effort are picked each time the form opens (#8261), never kept from the last one.
         mutable.update { it.copy(providerMode = "", providerEffort = "") }
-        if (current.space == space) return
+        if (project == null && current.space == space && current.project == null) return
         machineJob?.cancel()
         browseJob?.cancel()
         workspacesJob?.cancel()
-        // The space's machine is the only choice; until it is online nothing is selected and nothing can start.
-        mutable.update { it.copy(space = space, machineId = if (space != null) "" else it.machineId,
-            browsing = false, browser = null, loading = false, error = null, workspaces = emptyList(), workspace = null, folderBeforeWorkspace = "") }
-        val machine = space?.machineId ?: current.machineId
+        val target = space?.machineId ?: project?.machineId
+        mutable.update { it.copy(space = space, project = project, machineId = if (target != null) "" else it.machineId,
+            browsing = false, browser = null, loading = false, error = null, workspaces = emptyList(), workspace = null, folderBeforeWorkspace = "",
+            inWorktree = it.inWorktree && project == null, worktreeBranch = it.worktreeBranch.takeIf { project == null }.orEmpty(),
+            modelConfig = if (project != null || it.project != null) NewAgentModelConfig.Unknown else it.modelConfig) }
+        val machine = target ?: current.machineId
         if (current.initialized && machine.isNotEmpty()) selectMachine(machine)
     }
     fun selectMachine(id: String) = load(id)
@@ -439,15 +445,19 @@ internal class NewAgentViewModel(
         machineJob = viewModelScope.launch {
             try {
                 val defaults = store.defaults(service.scope, id)
-                val known = state.value.modelConfig.takeIf { it is NewAgentModelConfig.Follow || it is NewAgentModelConfig.Unsupported }
+                val project = state.value.project
+                val known = state.value.modelConfig.takeIf {
+                    project == null && (it is NewAgentModelConfig.Follow || it is NewAgentModelConfig.Unsupported)
+                }
                 val (listed, dirs, config) = coroutineScope {
                     val l = async { service.launcherList(id) }
                     val d = async { service.directories(id) }
-                    // The "New Agent" configuration is the hub's, not the machine's: read once per form.
-                    val c = async { known ?: modelConfig() }
+                    // A project may be on a different hub from the one currently selected in Agents.
+                    val c = async { known ?: modelConfig(id.takeIf { project != null }) }
                     Triple(l.await(), d.await(), c.await())
                 }
-                val prefilledCwd = prefill?.cwd?.takeIf { prefill.machineId == id && it.isNotBlank() }
+                val prefilledCwd = state.value.project?.takeIf { it.machineId == id }?.path
+                    ?: prefill?.cwd?.takeIf { prefill.machineId == id && it.isNotBlank() }
                 val launchers = listed.launchers
                 val launcher = defaultLauncher(config, defaults, launchers)
                 mutable.update { it.copy(loading = false, launchers = launchers, unavailable = listed.unavailable,
@@ -612,8 +622,9 @@ internal class NewAgentViewModel(
         mutable.update { it.copy(model = model, pickedTier = if (model == it.model) it.pickedTier else null,
             error = null, pickedSetup = null).settled() }
     }
-    private suspend fun modelConfig(): NewAgentModelConfig = try {
-        service.newAgentModel()?.let { NewAgentModelConfig.Follow(it) } ?: NewAgentModelConfig.Unsupported
+    private suspend fun modelConfig(machineId: String?): NewAgentModelConfig = try {
+        val purpose = if (machineId == null) service.newAgentModel() else service.newAgentModel(machineId)
+        purpose?.let { NewAgentModelConfig.Follow(it) } ?: NewAgentModelConfig.Unsupported
     } catch (e: CancellationException) { throw e }
     catch (error: Exception) { NewAgentModelConfig.Failed(failureReasonText(error)) }
     fun selection(value: AgentDefaults) {

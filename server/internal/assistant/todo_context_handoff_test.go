@@ -1553,3 +1553,243 @@ func TestTodoContextHandoffReviewRegressions(t *testing.T) {
 		}
 	})
 }
+
+func TestTodoContextHandoffSameEngineCrossMachineAutoStart(t *testing.T) {
+	t.Run("main_chat_explicit_same_engine_cross_machine_auto_starts_with_auditable_handoff", func(t *testing.T) {
+		e, todo, brief := setupHandoffFixture(t, nil, "claude", "claude", "default", proto.Session{
+			SessionID: "agent01",
+			Status:    proto.StatusIdle,
+			State:     proto.StateIdle,
+		})
+		ctx := context.Background()
+		e.f.devices = []Device{
+			{ID: "box", Name: "box", Online: true, Reachable: true, ClaudeVersion: "1.0"},
+			{ID: "box2", Name: "box2", Online: true, Reachable: true, ClaudeVersion: "1.0"},
+		}
+		e.sessions("box2")
+		e.s.mainPlansWait = false
+
+		args, _ := json.Marshal(map[string]any{
+			"tasks": []map[string]any{{
+				"title":          "Continue on box2 with same launcher",
+				"prompt":         "Finish auth refresh test on box2.",
+				"machine":        "box2",
+				"cwd":            "/code/app",
+				"launcher":       "claude",
+				"role":           "worker",
+				"user_requested": false,
+				"continues":      todo.ID,
+				"continues_why":  "Move task to idle owned machine on same engine",
+			}},
+		})
+		planRes, err := e.s.toolTaskPlan(ctx, "m1", args)
+		if err != nil {
+			t.Fatalf("toolTaskPlan: %v", err)
+		}
+		if strings.Contains(planRes, "nothing has started") {
+			t.Fatalf("expected same-engine cross-machine continuation from main to auto-start, got: %s", planRes)
+		}
+		waitFor(t, "replacement agent linked on box2", func() bool {
+			return len(todoNow(e.s, todo.ID).Agents) == 2 && e.s.taskStarting.Load() == 0
+		})
+
+		gotTodo := todoNow(e.s, todo.ID)
+		if gotTodo.Agents[0].ReleasedAt == nil {
+			t.Fatalf("predecessor was not released: %+v", gotTodo.Agents[0])
+		}
+		if gotTodo.Agents[1].MachineID != "box2" {
+			t.Fatalf("replacement landed on %q, want box2", gotTodo.Agents[1].MachineID)
+		}
+		if keptBrief, ok := e.s.briefOfTodo(todo.ID); !ok || keptBrief.ID != brief.ID {
+			t.Fatalf("brief not preserved: %+v", keptBrief)
+		}
+		h := e.s.latestTodoContextHandoff(ctx, todo.ID)
+		if h == nil || h.SourceMachine != "box" || h.TargetMachine != "box2" || h.TargetLauncher != "claude" {
+			t.Fatalf("expected persisted auditable handoff box->box2, got: %+v", h)
+		}
+		plan, err := e.s.loadPlan(ctx, planIDRe.FindString(planRes))
+		if err != nil {
+			t.Fatalf("loadPlan: %v", err)
+		}
+		if plan.Tasks[0].HandoffOperationID == "" || plan.Tasks[0].HandoffID == "" || plan.Tasks[0].Permission != "default" {
+			t.Fatalf("expected handoff provenance and preserved default permission, got: %+v", plan.Tasks[0])
+		}
+	})
+
+	t.Run("direction_leader_explicit_same_engine_cross_machine_auto_starts", func(t *testing.T) {
+		e, _, _ := setupHandoffFixture(t, nil, "claude", "claude", "default", proto.Session{
+			SessionID: "agent01",
+			Status:    proto.StatusIdle,
+			State:     proto.StateIdle,
+		})
+		ctx := context.Background()
+		e.f.devices = []Device{
+			{ID: "box", Name: "box", Online: true, Reachable: true, ClaudeVersion: "1.0"},
+			{ID: "box2", Name: "box2", Online: true, Reachable: true, ClaudeVersion: "1.0"},
+		}
+		e.sessions("box2")
+		setSettings(t, e.s, func(v *Settings) { v.Leaders = []string{"lead1"} })
+		e.sessions("box",
+			proto.Session{SessionID: "m1", Title: "Main", Assistant: true, Status: proto.StatusIdle},
+			proto.Session{SessionID: "lead1", Title: "Direction Lead", Assistant: true, Status: proto.StatusIdle},
+			proto.Session{SessionID: "agent02", MachineID: "box", Cwd: "/code/app", Agent: "claude", Launcher: "claude", PermissionMode: "default", Status: proto.StatusIdle, State: proto.StateIdle},
+		)
+		leadTodo, err := e.s.createTaskTodo(ctx, "Leader task", "Work.", "lead1", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.s.putTaskBrief(ctx, briefRecord{
+			StartedBy: briefByOwner, Conversation: "lead1", Goal: "Finish work", DoneWhen: []string{"tests pass"},
+		}, leadTodo.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.s.linkTodoAgent(ctx, leadTodo.ID, "box", "agent02", leadTodo.Title, "/code/app", "claude"); err != nil {
+			t.Fatal(err)
+		}
+
+		args, _ := json.Marshal(map[string]any{
+			"tasks": []map[string]any{{
+				"title":          "Leader continues on box2",
+				"prompt":         "Continue on box2.",
+				"machine":        "box2",
+				"cwd":            "/code/app",
+				"launcher":       "claude",
+				"role":           "worker",
+				"user_requested": false,
+				"continues":      leadTodo.ID,
+				"continues_why":  "Move task to healthy box2",
+			}},
+		})
+		planRes, err := e.s.toolTaskPlan(ctx, "lead1", args)
+		if err != nil {
+			t.Fatalf("toolTaskPlan: %v", err)
+		}
+		if strings.Contains(planRes, "nothing has started") {
+			t.Fatalf("expected direction leader same-engine cross-machine continuation to auto-start, got: %s", planRes)
+		}
+		waitFor(t, "leader replacement linked on box2", func() bool {
+			return len(todoNow(e.s, leadTodo.ID).Agents) == 2 && e.s.taskStarting.Load() == 0
+		})
+		if h := e.s.latestTodoContextHandoff(ctx, leadTodo.ID); h == nil || h.TargetMachine != "box2" {
+			t.Fatalf("expected auditable handoff recorded for leader continuation, got: %+v", h)
+		}
+	})
+
+	t.Run("safety_invariants_and_cross_provider_still_enforced_on_cross_machine_continuation", func(t *testing.T) {
+		e, todo, _ := setupHandoffFixture(t, nil, "claude", "claude", "default", proto.Session{
+			SessionID: "agent01",
+			Status:    proto.StatusIdle,
+			State:     proto.StateIdle,
+		})
+		ctx := context.Background()
+		e.f.devices = []Device{
+			{ID: "box", Name: "box", Online: true, Reachable: true, ClaudeVersion: "1.0"},
+			{ID: "box2", Name: "box2", Online: true, Reachable: true, ClaudeVersion: "1.0"},
+		}
+		e.sessions("box2")
+		e.s.mainPlansWait = false
+
+		// 1) Permission escalation on same-engine cross-machine move is still refused fail-closed.
+		escArgs, _ := json.Marshal(map[string]any{
+			"tasks": []map[string]any{{
+				"title":          "Escalate across machines",
+				"prompt":         "Continue with bypassPermissions",
+				"machine":        "box2",
+				"cwd":            "/code/app",
+				"launcher":       "claude",
+				"permission":     "bypassPermissions",
+				"role":           "worker",
+				"user_requested": true,
+				"continues":      todo.ID,
+				"continues_why":  "Try to raise permission on box2",
+			}},
+		})
+		if _, err := e.s.toolTaskPlan(ctx, "m1", escArgs); err == nil || !strings.Contains(err.Error(), "cannot raise permissions") {
+			t.Fatalf("expected permission escalation refusal, got: %v", err)
+		}
+
+		// 2) owner_step still requires explicit owner Start card even for same-engine cross-machine move.
+		ownerStepArgs, _ := json.Marshal(map[string]any{
+			"tasks": []map[string]any{{
+				"title":          "Outward step on box2",
+				"prompt":         "Publish update",
+				"machine":        "box2",
+				"cwd":            "/code/app",
+				"launcher":       "claude",
+				"owner_step":     "outward",
+				"role":           "worker",
+				"user_requested": true,
+				"continues":      todo.ID,
+				"continues_why":  "Continue with outward owner_step",
+			}},
+		})
+		ownerRes, err := e.s.toolTaskPlan(ctx, "m1", ownerStepArgs)
+		if err != nil {
+			t.Fatalf("toolTaskPlan owner_step: %v", err)
+		}
+		if !strings.Contains(ownerRes, "nothing has started") {
+			t.Fatalf("owner_step continuation auto-started: %s", ownerRes)
+		}
+
+		// 3) Cross-machine AND cross-provider (claude -> codex) still requires explicit owner Start card.
+		crossProvArgs, _ := json.Marshal(map[string]any{
+			"tasks": []map[string]any{{
+				"title":          "Switch to codex on box2",
+				"prompt":         "Continue with codex",
+				"machine":        "box2",
+				"cwd":            "/code/app",
+				"launcher":       "codex",
+				"role":           "worker",
+				"user_requested": true,
+				"continues":      todo.ID,
+				"continues_why":  "Switch engine and machine",
+			}},
+		})
+		crossRes, err := e.s.toolTaskPlan(ctx, "m1", crossProvArgs)
+		if err != nil {
+			t.Fatalf("toolTaskPlan cross-provider: %v", err)
+		}
+		if !strings.Contains(crossRes, "nothing has started") {
+			t.Fatalf("cross-provider cross-machine continuation auto-started: %s", crossRes)
+		}
+
+		// 4) Non-orchestrator (ordinary conversation) moving across machines on same launcher still waits for Start.
+		e.sessions("box",
+			proto.Session{SessionID: "m1", Title: "Main", Assistant: true, Status: proto.StatusIdle},
+			proto.Session{SessionID: "ord1", Title: "Ordinary", Assistant: true, Status: proto.StatusIdle},
+			proto.Session{SessionID: "agent01", MachineID: "box", Cwd: "/code/app", Agent: "claude", Launcher: "claude", PermissionMode: "default", Status: proto.StatusIdle, State: proto.StateIdle},
+		)
+		ordTodo, err := e.s.createTaskTodo(ctx, "Ordinary task", "Work.", "ord1", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.s.putTaskBrief(ctx, briefRecord{
+			StartedBy: briefByOwner, Conversation: "ord1", Goal: "Do work", DoneWhen: []string{"done"},
+		}, ordTodo.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.s.linkTodoAgent(ctx, ordTodo.ID, "box", "agent01", ordTodo.Title, "/code/app", "claude"); err != nil {
+			t.Fatal(err)
+		}
+		ordArgs, _ := json.Marshal(map[string]any{
+			"tasks": []map[string]any{{
+				"title":          "Ordinary moves to box2",
+				"prompt":         "Continue on box2",
+				"machine":        "box2",
+				"cwd":            "/code/app",
+				"launcher":       "claude",
+				"role":           "worker",
+				"user_requested": true,
+				"continues":      ordTodo.ID,
+				"continues_why":  "Move to box2",
+			}},
+		})
+		ordRes, err := e.s.toolTaskPlan(ctx, "ord1", ordArgs)
+		if err != nil {
+			t.Fatalf("toolTaskPlan ordinary: %v", err)
+		}
+		if !strings.Contains(ordRes, "nothing has started") {
+			t.Fatalf("ordinary conversation cross-machine continuation auto-started: %s", ordRes)
+		}
+	})
+}

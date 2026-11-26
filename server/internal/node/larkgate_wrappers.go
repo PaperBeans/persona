@@ -16,19 +16,22 @@ type commandWrapper struct {
 }
 
 var commandWrappers = map[string]commandWrapper{
-	"env":     {flags: "- -i --ignore-environment -0 --null -v --debug", values: "-u --unset -C --chdir --argv0", assignments: true},
-	"sudo":    {flags: "-A -b -E -H -K -k -n -P -S --askpass --background --preserve-env --set-home --reset-timestamp --non-interactive --stdin", values: "-u --user -g --group -h --host -p --prompt -C --close-from -D --chdir -R --chroot -T --command-timeout -r --role -t --type --other-user", assignments: true},
-	"nice":    {values: "-n --adjustment"},
-	"timeout": {flags: "--preserve-status --foreground -v --verbose", values: "-s --signal -k --kill-after", positional: 1},
-	"nohup":   {},
-	"command": {flags: "-p"},
-	"builtin": {},
-	"exec":    {flags: "-c -l", values: "-a"},
-	"xargs":   {flags: "-0 --null -r --no-run-if-empty -t --verbose -p --interactive -x --exit", values: "-I --replace -d --delimiter -E --eof -L --max-lines -n --max-args -P --max-procs -s --max-chars --process-slot-var"},
-	"stdbuf":  {values: "-i --input -o --output -e --error"},
-	"time":    {flags: "-p --portability -v --verbose -a --append -q --quiet", values: "-f --format -o --output"},
-	"setsid":  {flags: "-c --ctty -f --fork -w --wait"},
-	"busybox": {},
+	"env":       {flags: "- -i --ignore-environment -0 --null -v --debug", values: "-u --unset -C --chdir --argv0", assignments: true},
+	"sudo":      {flags: "-A -b -E -H -K -k -n -P -S --askpass --background --preserve-env --set-home --reset-timestamp --non-interactive --stdin", values: "-u --user -g --group -h --host -p --prompt -C --close-from -D --chdir -R --chroot -T --command-timeout -r --role -t --type --other-user", assignments: true},
+	"nice":      {values: "-n --adjustment"},
+	"timeout":   {flags: "--preserve-status --foreground -v --verbose", values: "-s --signal -k --kill-after", positional: 1},
+	"nohup":     {},
+	"command":   {flags: "-p"},
+	"builtin":   {},
+	"exec":      {flags: "-c -l", values: "-a"},
+	"xargs":     {flags: "-0 --null -r --no-run-if-empty -t --verbose -p --interactive -x --exit", values: "-I --replace -d --delimiter -E --eof -L --max-lines -n --max-args -P --max-procs -s --max-chars --process-slot-var"},
+	"stdbuf":    {values: "-i --input -o --output -e --error"},
+	"time":      {flags: "-p --portability -v --verbose -a --append -q --quiet", values: "-f --format -o --output"},
+	"setsid":    {flags: "-c --ctty -f --fork -w --wait"},
+	"busybox":   {},
+	"-":         {},
+	"noglob":    {},
+	"nocorrect": {},
 }
 
 func wrapperOption(spec commandWrapper, word string) (takes, known bool) {

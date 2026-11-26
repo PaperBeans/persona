@@ -1061,21 +1061,6 @@ func (h *Hub) startSessionWith(w http.ResponseWriter, r *http.Request, p session
 			return
 		}
 	}
-	decided := ""
-	var handoffImages []proto.Image
-	if p.TodoID != "" {
-		// The manager checks the todo (404, 409, 503 assistant_offline while it is away) and puts its decisions before
-		// the prompt, a new agent's project background before those (#1618, #2820); they go to the agent, not into
-		// its tab's name (nameFrom is taken from the prompt as sent).
-		hand := assistantwire.TodoHandoff{TodoID: p.TodoID, Text: p.Prompt}
-		if p.ResumeSessionID == "" {
-			hand.New, hand.MachineID, hand.Cwd = true, m.cfg.ID, startCwd(m, p.Cwd)
-		}
-		var ok bool
-		if decided, handoffImages, ok = h.todoHandoff(r.Context(), w, hand); !ok {
-			return
-		}
-	}
 	inferredAgentType := p.AgentType == ""
 	if p.AgentType == "" {
 		for _, launcher := range m.cfg.Launchers {
@@ -1093,12 +1078,6 @@ func (h *Hub) startSessionWith(w http.ResponseWriter, r *http.Request, p session
 	nameFrom := p.Prompt
 	if strings.TrimSpace(p.NameHint) != "" {
 		nameFrom = p.NameHint
-	}
-	if p.TodoID != "" {
-		p.Prompt = decided
-	}
-	if strings.TrimSpace(p.Prompt) != "" {
-		p.Images = append(p.Images, handoffImages...)
 	}
 	async := startsAsync(p.Async, p.ResumeSessionID, p.Launcher, p.AgentType) && !desktopStartLauncher(p.Launcher)
 	parent := r.Context()
@@ -1151,6 +1130,30 @@ func (h *Hub) startSessionWith(w http.ResponseWriter, r *http.Request, p session
 				params["agent_type"] = resolvedAgent
 				break
 			}
+		}
+	}
+	if resolvedAgent == "" && p.ResumeSessionID != "" {
+		if c, ok := m.session(p.ResumeSessionID); ok {
+			resolvedAgent = c.Agent
+		}
+	}
+	if p.TodoID != "" {
+		// The manager checks the todo (404, 409, 503 assistant_offline while it is away) and puts its decisions (and a
+		// new agent's project background) before the prompt, except after an Antigravity workflow command (#1618,
+		// #2820, #16539); they go to the agent, not into its tab's name (nameFrom is the prompt as sent).
+		hand := assistantwire.TodoHandoff{TodoID: p.TodoID, Text: p.Prompt, Agent: resolvedAgent}
+		if p.ResumeSessionID == "" {
+			hand.New, hand.MachineID, hand.Cwd = true, m.cfg.ID, startCwd(m, p.Cwd)
+		}
+		decided, handoffImages, ok := h.todoHandoff(r.Context(), w, hand)
+		if !ok {
+			return
+		}
+		p.Prompt = decided
+		params["prompt"] = decided
+		if strings.TrimSpace(decided) != "" {
+			p.Images = append(p.Images, handoffImages...)
+			mergeTodoImages(params, handoffImages)
 		}
 	}
 	if handoff {
@@ -1318,7 +1321,20 @@ func startEngine(info proto.NodeInfo) string {
 // startsAsync: a start the app asked to have answered at once is, when the node can acknowledge it before the session
 // is ready (only Claude can, and not a resume).
 func startsAsync(asked bool, resume, launcher, agentType string) bool {
-	return asked && resume == "" && (agentType == "claude" || (agentType == "" && launcher != "agy"))
+	if !asked || resume != "" {
+		return false
+	}
+	if agentType != "" {
+		return agentType == "claude"
+	}
+	// An untyped launcher is inferred as Claude unless its name identifies an agent that owns its session ID.
+	// Keep the Hub's acknowledgement and deadline aligned with the Node's launcherAgentType/workAgentKind rules.
+	switch launcher {
+	case "codex", "traex", "omp", "agy", "pi", "cursor":
+		return false
+	default:
+		return true
+	}
 }
 
 // startBudget is how long a start may take: one acknowledged before the session is ready a moment, one answered only

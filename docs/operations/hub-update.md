@@ -865,6 +865,10 @@ The binary gets three more `-X` variables (`cmd/personad`):
 }
 ```
 
+- `edition`: left out for the full release; `"core"` in the core edition's manifest, which is served as
+  `core-latest.json` beside this one with every download under `core-<name>` (each file's `served`). A build reads
+  only its own edition's manifest and refuses one of the other edition, so a core-only hub never installs the full
+  build and a full hub never the core-only one ([core-install.md](core-install.md), "Updates stay core-only").
 - `ancestors`: all commits reachable from this commit (`git rev-list <commit>`), the first 6 bytes of each, sorted, then base64 ("no regression").
 - `programs`: programs published together with personad that the hub runs alongside (`update.ProgramNames`:
   `persona-hub` and `persona-manager`, [../server/server.md](../server/server.md) ("Programs")):

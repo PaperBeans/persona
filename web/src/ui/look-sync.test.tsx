@@ -4,7 +4,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { applyLook, useAccentChoice, useTextSize } from "./look";
+import { applyLook, useAccentChoice, useSurfaceStyle, useTextSize } from "./look";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -33,10 +33,10 @@ const elsewhere = (key: string | null, value?: string) =>
   });
 
 function Picked() {
-  return <span data-accent={useAccentChoice()} data-size={useTextSize()} />;
+  return <span data-accent={useAccentChoice()} data-size={useTextSize()} data-surface={useSurfaceStyle()} />;
 }
 const shown = () => ({ ...host.querySelector("span")!.dataset });
-const page = () => ({ accent: document.documentElement.dataset.accent, size: document.documentElement.dataset.textSize });
+const page = () => ({ accent: document.documentElement.dataset.accent, size: document.documentElement.dataset.textSize, surface: document.documentElement.dataset.surfaceStyle });
 
 describe("a theme color or text size picked in another tab", () => {
   it("shows here at once, and Settings here say what the page shows", () => {
@@ -45,8 +45,9 @@ describe("a theme color or text size picked in another tab", () => {
     expect(page().accent).toBe("coral");
     expect(document.getElementById("persona-accent")!.textContent).toContain("--accent: #c9633c;");
     elsewhere("persona.text-size", "large");
-    expect(page()).toEqual({ accent: "coral", size: "large" });
-    expect(shown()).toEqual({ accent: "coral", size: "large" });
+    elsewhere("persona.surface-style", "liquid-glass");
+    expect(page()).toEqual({ accent: "coral", size: "large", surface: "liquid-glass" });
+    expect(shown()).toEqual({ accent: "coral", size: "large", surface: "liquid-glass" });
   });
 
   it("ignores other keys, and follows a cleared storage back to the defaults", () => {
@@ -57,8 +58,8 @@ describe("a theme color or text size picked in another tab", () => {
     expect(page().accent).toBe("teal");
     localStorage.clear();
     elsewhere(null);
-    expect(page()).toEqual({ accent: undefined, size: undefined });
+    expect(page()).toEqual({ accent: undefined, size: undefined, surface: undefined });
     expect(document.getElementById("persona-accent")).toBeNull();
-    expect(shown()).toEqual({ accent: "default", size: "standard" });
+    expect(shown()).toEqual({ accent: "default", size: "standard", surface: "default" });
   });
 });

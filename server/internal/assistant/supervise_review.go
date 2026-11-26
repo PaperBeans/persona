@@ -246,6 +246,11 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 				return "", err
 			}
 		}
+		if t.DoneAt == nil && !a.UserCheck {
+			if err := s.checkOwnerResultBeforeAccept(ctx, t); err != nil {
+				return "", err
+			}
+		}
 		if deliveryNote, err = s.acceptedDeliveryError(ctx, t, strings.TrimSpace(a.Link), a.Outcome); err != nil {
 			return "", err
 		}

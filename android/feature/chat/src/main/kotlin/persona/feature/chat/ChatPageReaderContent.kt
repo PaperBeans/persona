@@ -230,6 +230,7 @@ internal fun ChatPageReaderContent(
                                     line.recordedDuration(snapshot.recordedTurnDurations),
                                     onToggle, onExpand, folding, foldErrors,
                                     lastUserId = lastUserId,
+                                    showToolViews = line !is ChatLine.Step || line.groupId !in contentWorkGroups,
                                     turnFix = turnFix?.takeIf { line.contentKey == lines.firstOrNull()?.contentKey },
                                     turnLauncher = turnLauncher,
                                     onLastLine = { extent -> chatList.reportLastLine(line.contentKey, extent) }, onFullText = onFullText,

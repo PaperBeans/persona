@@ -20,6 +20,7 @@ export function readAction(raw: unknown): UIAction | undefined {
   const a: UIAction = { id: raw.id };
   if (typeof raw.confirm === "string") a.confirm = raw.confirm;
   if (raw.submit === true) a.submit = true;
+  if (typeof raw.open === "string" && raw.open) a.open = raw.open;
   const p = readPush(raw.push);
   if (p) a.push = p;
   if (isObject(raw.values)) {

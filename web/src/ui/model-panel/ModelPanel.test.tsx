@@ -7,6 +7,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PanelProvider, PanelState } from "../../lib/model-panel";
+import { t } from "../../i18n";
 import type { LauncherQuotaAnswer } from "../../lib/quota";
 import { effortTitle } from "../../lib/session-actions";
 
@@ -74,7 +75,7 @@ const codex = (over: Partial<PanelProvider> = {}): PanelProvider => ({
       id: "gpt-5.5",
       name: "GPT 5.5",
       efforts: ["low", "medium", "high"],
-      fast: true,
+      speeds: [{ id: "standard" }, { id: "fast" }],
     },
   ],
   unavailable: "需要新开对话",
@@ -109,7 +110,7 @@ interface Opts {
   providers?: PanelProvider[];
   state?: PanelState;
   onPick?: (c: unknown) => Promise<boolean>;
-  onApplyCurrent?: (p: { effort?: string; fast?: boolean }) => Promise<boolean>;
+  onApplyCurrent?: (p: { effort?: string; speed?: string }) => Promise<boolean>;
   onReload?: (p: string) => void;
   onForget?: (p: string, m: string) => void;
   quotas?: Readonly<Record<string, LauncherQuotaAnswer>>;
@@ -391,11 +392,11 @@ describe("the model panel", () => {
     await flush();
     expect(onPick).not.toHaveBeenCalled();
     expect(flyout()).not.toBeNull();
-    const fast = flyout()!.querySelector<HTMLButtonElement>("[data-fast-toggle]")!;
+    const fast = flyout()!.querySelector<HTMLButtonElement>('[data-panel-speed="fast"]')!;
     expect(fast.getAttribute("aria-pressed")).toBe("false");
     act(() => fast.click());
     await flush();
-    expect(onApplyCurrent).toHaveBeenCalledWith({ fast: true });
+    expect(onApplyCurrent).toHaveBeenCalledWith({ speed: "fast" });
   });
 
   it("the current effort-only row is not greyed out and a tap opens its working slider", async () => {
@@ -699,6 +700,25 @@ describe("launcher-first acceptance #10249", () => {
     act(() => typed[1].click());
     await flush();
     expect(onPick).toHaveBeenCalledWith({ provider: "account-1", model: "vendor/new-model" });
+  });
+
+  it("opens a favorite saved by the binary speed picker as Fast", async () => {
+    localStorage.setItem(panelStoreKey("agent", "favorites"), JSON.stringify([
+      { uid: "fast", provider: "codex", model: "gpt-5.5", fast: true },
+      { uid: "ultra", provider: "codex", model: "gpt-5.5", speed: "ultrafast", fast: false },
+    ]));
+    const current = codex({ unavailable: undefined });
+    current.models = current.models?.map((model) => ({
+      ...model,
+      speeds: [{ id: "standard" }, { id: "fast" }, { id: "ultrafast" }],
+    })) ?? null;
+    const { onPick } = await open({ providers: [current], state: { current: null, recommended: ["codex"] } });
+    const choices = [...document.querySelectorAll<HTMLElement>("[data-panel-quick] [data-panel-row]")];
+    expect(choices.map((choice) => choice.querySelector("[data-row-speed]")?.getAttribute("aria-label")))
+      .toEqual([t("ui-modelpanel.fast_short"), t("ui-modelpanel.speed_ultrafast")]);
+    act(() => choices[0].click());
+    await flush();
+    expect(onPick).toHaveBeenCalledWith({ provider: "codex", model: "gpt-5.5", speed: "fast" });
   });
 
   it("combines favorites and recent into at most three distinct one-action saved setups", async () => {

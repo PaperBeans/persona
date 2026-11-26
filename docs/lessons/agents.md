@@ -35,6 +35,9 @@
 
 ## A one-start speed must not become a resume default (#11141)
 
+- A terminal Codex speed switch uses `/model --speed=standard` to reset the speed on Codex 0.172. The native setting
+  records `default`. Confirm the switch from a new `thread_settings_applied` record because an already-running turn
+  can still write its previous speed.
 - Codex's per-start `service_tier` belongs only in the initial argv; validate it against the selected model's catalog rather than trusting Codex to refuse an unadvertised tier.
 - Claude Code fast mode needs `"fastMode": true` in the effective single `--settings` file. Give the initial command a merged copy and keep the base `claudeLaunch` spec for herdr's `resume_argv`, or an automatic resume silently inherits the billable choice. A shell function that supplies its own `--settings` cannot be merged: refuse fast mode rather than appending a fast-only file that would discard the function's credentials and model.
 - A new `session.start` field needs its own node capability: older nodes otherwise accept it and start at the launcher's speed. Faster speed on a resume or another runtime is a coded refusal before approval or launch.
@@ -381,6 +384,8 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
   Drop the reported id only when the index knows that thread under a different name, and never under a name it gave the thread before (a rename leaves the earlier line in the index, and the node keeps only the latest); a remembered pane binding is still dropped.
   Check the name of the thread herdr reported, not of the main chat a sub-Agent id was replaced with: that name says nothing about the reported thread.
   Claude panes likewise: pane bindings for Persona-started sessions live in hub's database and reload after node restart, but can be stale; `sessions/<pid>.json` takes priority.
+  Pane ids are reused too: herdr numbers its workspaces again after its server restarts, so a new tab can get the id (`wD:p1`) of a tab that closed days
+  ago, and the binding of the session that ran there comes back on every hub connection. A tab Persona opens forgets every binding of its id first (#14682).
   After changing pane identification logic, rerun verification after deployment (restart); pre- and post-restart results may differ.
 - herdr `agent.prompt` pastes, then waits about 300 ms before Enter: serialize sends to the same session, or the second screen read mistakes the first message for an input draft. Sending deduplication lives in hub Postgres (`sent_messages`):
   node's in-memory deduplication disappears on reconnect / hub restart, exactly when the App auto-retries. Full session-reading and sending verification, with per-hop timings: `docs/archive/integrations/session-verify.md`.
@@ -812,6 +817,15 @@ other engines' panes (Orca) keep their original error.
   Manually adding `enableArtifact: false` to `launcher-settings/<name>-env-settings.json` seems ineffective: node rewrites that file at every launch, losing the edit before the next Agent starts.
   Both `enableArtifact: false` in `--settings` and environment `CLAUDE_CODE_DISABLE_ARTIFACT=1` worked in tests (interactive claude in tmux, three configs compared);
   Persona-managed launchers now carry both (`docs/integrations/launchers.md` ("Running Persona-managed launchers")).
+
+## A launchd node has no `$SHELL`, and macOS's `/etc/passwd` has no users (2026-11-26, #16217)
+
+The model list failed on a Mac with `claude did not provide a model list: unexpected EOF (zsh:1: command not found: claude)` while sessions started fine.
+- A launchd agent's environment has no `SHELL` and `PATH=/usr/bin:/bin:/usr/sbin:/sbin`. The `/etc/passwd` fallback that works under systemd finds nothing on macOS, which keeps accounts in Directory Services: the node guessed zsh for a bash user.
+- Even bash would not have helped: `bash -ic` reads `~/.bashrc`, but Terminal opens login shells, so Mac setups (nvm's installer, `brew shellenv`) live in `~/.bash_profile` / `~/.zprofile`. The session worked only because herdr's tab is a login shell.
+- On macOS read the shell with `dscl . -read /Users/<user> UserShell` (the node builds with `CGO_ENABLED=0`, so no `getpwuid`; `os/user` has no shell field) and run it as `-lic`; a bash with no `~/.bash_profile`, `~/.bash_login` or `~/.profile` stays `-ic`, since a login bash would read none of the user's files.
+- `zsh -l` runs `/etc/zprofile`'s `path_helper`, which moves the system directories ahead of the inherited PATH: a test that checks an exact PATH through the login shell expects `path_helper -s`'s order. Check with the node's own environment, not your terminal's: `env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin bash -lic 'command -v claude'`.
+- A test that the node "runs the user's shell" must unset `SHELL`; a developer's terminal always has it, which hid this. The other way round, the node package's `TestMain` pins `SHELL` to zsh on macOS (`pinTestLoginShell`), so a developer whose login shell is bash runs the `~/.zshrc` fixtures in zsh.
 
 ## "the tab's shell had not run it yet (is the machine busy?)" when the launcher isn't there at all (#1642)
 
@@ -1445,6 +1459,9 @@ node RPC so an older node cannot silently ignore a billable setting in `session.
 
 Persona-owned Codex conversations use a separate stdio connection. Share catalog parsing across both transports and
 include the owned connection in session projection, setting routing and native notifications.
+
+The web composer keeps the tier ID through live updates and the new-conversation draft. A Fast boolean drops
+Ultrafast from the pill and loses the tier needed by the first request.
 
 ## Runtime assistant identity comes from persisted state (#4202)
 

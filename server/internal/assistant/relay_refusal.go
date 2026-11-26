@@ -84,7 +84,7 @@ func relayFailureOf(err error) relayFailure {
 	if strings.Contains(err.Error(), "is gone") {
 		return relayFailedGone
 	}
-	if errors.Is(err, apierr.ErrOffline) { // machine_offline as the bus gives it back (busError) or a machine of the manager's own
+	if errors.Is(err, apierr.ErrOffline) || errors.Is(err, rpc.ErrNotSent) || errors.Is(err, rpc.ErrNotWritten) { // machine_offline or transport proved nothing went out
 		return relayFailedNotNow
 	}
 	code, coded := relayErrCode(err)
@@ -129,7 +129,7 @@ func sendNotTaken(err error) bool {
 		return true
 	case relayFailedNotNow:
 		code, _ := relayErrCode(err)
-		return errors.Is(err, apierr.ErrOffline) || code == CodeMachineOffline
+		return unwritten || errors.Is(err, apierr.ErrOffline) || code == CodeMachineOffline
 	case relayFailedLocal:
 		return unwritten || !errors.Is(err, context.Canceled)
 	case relayFailedInDoubt:

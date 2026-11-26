@@ -503,6 +503,7 @@
     <string name="chat_web_download_started">Downloading %1$s</string>
     <string name="chat_web_download_opened_browser">Opened download in browser</string>
     <string name="chat_web_download_loopback_unsupported">Local forwarded port files can\'t be downloaded here</string>
+    <string name="chat_web_download_too_large">File exceeds the %1$d MB download limit</string>
     <string name="chat_web_download_failed">Couldn\'t start download</string>
     <string name="chat_file_video">Video</string>
     <string name="chat_file_audio">Recording</string>

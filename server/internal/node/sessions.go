@@ -325,6 +325,8 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		}
 		if a.Agent == "codex" {
 			n.codexPaneControls(&s, rollout)
+		} else if a.Agent == "claude" {
+			n.claudeTerminalSpeedRow(&s, rollout)
 		}
 		if piFamily(a.Agent) {
 			n.mergePiRow(&s) // its conversation is the extension's (pi.go)
@@ -381,6 +383,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 				} else {
 					n.mergeAgyTranscript(&s, agyConversations[id])
 				}
+				n.agyPaneControls(&s, id)
 				n.agyPaneTitle(&s, agyConversations[id]) // its conversation's title, not the terminal's (agytitle.go)
 				if s.Status == proto.StatusWorking || s.Status == proto.StatusBlocked {
 					liveBusyAgy[a.PaneID] = true
@@ -439,6 +442,8 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 			if m := n.assistantModeOf(s.SessionID); m != "" {
 				s.PermissionMode = m
 			}
+		} else if s.Agent == agyAgent {
+			s.PermissionMode = agyShownMode(s.PermissionMode, n.agyRuntimeMode(s.SessionID))
 		}
 		// A conversation in a Claude transcript here (runtimetranscript.go): what it says, and its own row goes. Under
 		// an id of its own, the ids it went by go too, named on the row for the manager's archive (runtimealiases.go).
@@ -535,6 +540,10 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		if s.Status == proto.StatusWorking && (s.Agent == "" || s.Agent == "claude" || s.Agent == "codex") {
 			s.ToolLoop = n.toolLoopOf(s.SessionID)
 		}
+		// The row leaves with a title it can show (#16343): whatever source named it (a Codex thread name, a runtime's
+		// own title, a terminal's) may hold a whole opening prompt, which the list would otherwise carry everywhere.
+		// Every lookup by title above has read the whole one already.
+		s.Title = transcript.ListTitle(s.Title)
 		if pass == nil || !pass.unavailable[s.SessionID] {
 			s.WorkspaceCwd = n.sessionWorkspaceCwd(s.Cwd)
 			fillGitPlace(s)            // project, worktree and branch for the apps' tree (gitplace.go)

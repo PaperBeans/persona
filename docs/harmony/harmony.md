@@ -102,6 +102,10 @@ A known acknowledgement clears only the captured draft revision. Newer edits sur
 
 Attachments remain local until explicit Send. Native photo/document pickers grant access to the user's selected files; sandbox copies have bounded size and validated decoded image content. A system photo editor receives read permission and returns a new selected attachment, preserving the original. System preview provides image zoom and supported PDF, Office, HTML and media viewing.
 
+The photo picker uses the remaining picture count for this chat's Agent. Older hubs use the protocol defaults of 20 pictures,
+a 1600 px long side and a 32 MiB message body. Photos that exceed the count or the encoded message budget go to the session's
+computer as files. The chat tells the sender which limit was reached. Documents and videos keep their separate file slots.
+
 Received images open an authenticated conversation-scoped system gallery. Editing one stages a new outgoing image in that conversation's draft. A native editor may pause the application and cause a reconnect; the stable pairing revision, Hub, manager and draft identity determine whether its result still belongs there. Forgetting, re-pairing or changing the destination rejects the result. An acknowledged draft keeps its referenced file even if navigation occurs while storage acknowledgement is returning.
 
 An outbox message carries only the selected attachment IDs and revisions for cleanup. HTTP acknowledgement, exact echo or a later receipt suppresses those revisions before fallible I/O. Failed cleanup keeps a durable obligation and blocks reuse; ordinary terminal-history pruning cannot discard it. Local storage epochs fence queued work across Forget Hub and immediate re-pairing. Successful cleanup preserves newer unsent attachment revisions.

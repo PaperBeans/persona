@@ -5,6 +5,7 @@
   "development_identity": "ビルドしたプログラムのバージョン、ビルド番号、またはコミットが確認済みの更新と一致しません。",
   "os_unknown": "このコンピューターのOSがまだ不明です。接続してから再試行してください",
   "no_binary": "ハブに{os}/{arch}用のnodeプログラムがなく、取得できるリリースもありません。開発用マシンでscripts/deploy/deploy.shを実行するか、ハブと同じバージョンの{name}をbin/nodesフォルダーに置くか、hub.jsonでnode_packagesを設定してください（docs/operations/docker.md「Node builds」）",
+  "other_edition": "このコンピュータは Persona の {edition} 版、ハブは {hub} 版のため、ハブには送信できる {os}/{arch} 用のビルドがありません。更新でコンピュータの版の種類が変わることはありません。このコンピュータに {edition} 版の {name} をインストールするか、ハブの bin/nodes に置いてください。",
   "no_package": "最新のリリース{version}には、このハブが扱える{os}/{arch}用のnodeプログラムがなく、ハブと同じバージョンのものもありません。ハブを更新するか、同じバージョンの{name}をbin/nodesフォルダーに置いてください（docs/operations/docker.md「Node builds」）",
   "no_release": "ハブと同じバージョンの{os}/{arch}用nodeプログラムがなく、nodeプログラムの取得先にもリリースがありません。同じバージョンの{name}をbin/nodesフォルダーに置くか、hub.jsonでnode_packages.urlを設定してください（docs/operations/docker.md「Node builds」）",
   "package_unreachable": "{os}/{arch}用のnodeプログラムを取得するリリースに接続できませんでした：{err}。ハブのインターネット接続かhub.jsonのnode_packages.proxyを確認するか、プログラムをbin/nodesフォルダーに置いてください（docs/operations/docker.md「Node builds」）",

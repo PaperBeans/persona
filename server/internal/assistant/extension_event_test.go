@@ -612,7 +612,7 @@ func TestExtensionEventSessionsChangedDuringPublishLeavesNoStaleFailedAt(t *test
 	}
 }
 
-// A gone main conversation drops the event immediately instead of queueing it or arming a retry timer.
+// A gone main conversation returns no_main_conversation immediately instead of queueing the event or arming a timer.
 func TestExtensionEventGoneDoesNotQueueOrArmTimer(t *testing.T) {
 	s, f := eventService(t)
 	t.Cleanup(func() { stopRelayTimer(s, "conv1") })
@@ -621,8 +621,8 @@ func TestExtensionEventGoneDoesNotQueueOrArmTimer(t *testing.T) {
 	f.mu.Unlock()
 
 	res, err := event(s, "example-monitor", `{"key":"disk","title":"Disk 92%"}`)
-	if err != nil || res.Delivery != assistantwire.EventQueued {
-		t.Fatalf("%+v %v", res, err)
+	if convCode(err) != assistantwire.CodeNoMainConversation || res.Delivery != "" {
+		t.Fatalf("got res=%+v err=%v, want %s error and empty delivery", res, err, assistantwire.CodeNoMainConversation)
 	}
 	if len(queueOf(s, "conv1")) != 0 {
 		t.Fatalf("gone conversation left queued event: %+v", queueOf(s, "conv1"))
@@ -636,7 +636,8 @@ func TestExtensionEventGoneDoesNotQueueOrArmTimer(t *testing.T) {
 	}
 }
 
-// A direct delivery failure schedules a retry timer that drains again without needing another session list event.
+// Repeated transient delivery failures keep re-arming the retry timer so the queued event delivers once the transient
+// error clears, even without an unrelated SessionsChanged event.
 func TestExtensionEventDirectFailureRetriesOnTimer(t *testing.T) {
 	s, f := eventService(t)
 	gap := relayRetryGap
@@ -647,9 +648,13 @@ func TestExtensionEventDirectFailureRetriesOnTimer(t *testing.T) {
 	var attempts int
 	f.mu.Lock()
 	f.failAssistant = errors.New("node unreachable")
-	f.onAssistantSend = func(_ *fakeHub, p map[string]any) {
+	f.onAssistantSend = func(h *fakeHub, p map[string]any) {
 		if p["session_id"] == "conv1" {
 			attempts++
+			if attempts >= 3 {
+				// Fail attempts 1 (direct) and 2 (first timer retry); clear on attempt 3 with no SessionsChanged.
+				h.failAssistant = nil
+			}
 		}
 	}
 	f.mu.Unlock()
@@ -663,9 +668,70 @@ func TestExtensionEventDirectFailureRetriesOnTimer(t *testing.T) {
 	if err != nil || res.Delivery != assistantwire.EventQueued {
 		t.Fatalf("%+v %v", res, err)
 	}
-	waitFor(t, "the retry timer to try again", func() bool { return tries() >= 2 && !drainingNow(s, "conv1") })
-	if len(queueOf(s, "conv1")) != 1 {
-		t.Fatalf("event left queue while still failing: %+v", queueOf(s, "conv1"))
+	waitFor(t, "event to recover on timer after two failures", func() bool {
+		return tries() == 3 && f.sent() == 1 && len(queueOf(s, "conv1")) == 0 && !drainingNow(s, "conv1")
+	})
+}
+
+// If an in-memory retry timer is lost, drainHeldRelays still picks up a queued extension event with failedAt recorded.
+func TestExtensionEventDrainHeldRelaysRecoversFailedEvent(t *testing.T) {
+	s, f := eventService(t)
+	gap := relayRetryGap
+	relayRetryGap = time.Hour
+	t.Cleanup(func() { relayRetryGap = gap })
+	t.Cleanup(func() { stopRelayTimer(s, "conv1") })
+
+	f.mu.Lock()
+	f.failAssistant = errors.New("node unreachable")
+	f.mu.Unlock()
+	res, err := event(s, "example-monitor", `{"key":"disk","title":"Disk 92%"}`)
+	if err != nil || res.Delivery != assistantwire.EventQueued {
+		t.Fatalf("%+v %v", res, err)
+	}
+	stopRelayTimer(s, "conv1")
+
+	f.mu.Lock()
+	f.failAssistant = nil
+	f.mu.Unlock()
+	relayRetryGap = 0
+	s.drainHeldRelays(context.Background(), time.Now())
+	waitFor(t, "drainHeldRelays to deliver failed extension event", func() bool {
+		return f.sent() == 1 && len(queueOf(s, "conv1")) == 0 && !drainingNow(s, "conv1")
+	})
+}
+
+// On a CodeConversationBusy direct refusal, roleChange records background work from a refreshed post-call session
+// snapshot rather than the pre-tryDirectRelay snapshot.
+func TestExtensionEventRoleChangeRefreshesSessionSnapshot(t *testing.T) {
+	s, f := eventService(t)
+	gap := relayRetryGap
+	relayRetryGap = time.Hour
+	t.Cleanup(func() { relayRetryGap = gap })
+	t.Cleanup(func() { stopRelayTimer(s, "conv1") })
+
+	s.hub = &gatedHub{
+		Hub: f,
+		onSend: func(_ context.Context, _ DeviceCall) (json.RawMessage, error, bool) {
+			f.setSessions("server", proto.Session{
+				SessionID: "conv1",
+				MachineID: "server",
+				Assistant: true,
+				Status:    proto.StatusIdle,
+				Subagents: []proto.Subagent{{ID: "sub1", Running: true}},
+			})
+			return nil, &rpc.Error{Code: assistantwire.CodeConversationBusy, Message: "role changed while working"}, true
+		},
+	}
+
+	res, err := event(s, "example-monitor", `{"key":"disk","title":"Disk 92%"}`)
+	if err != nil || res.Delivery != assistantwire.EventQueued {
+		t.Fatalf("%+v %v", res, err)
+	}
+	s.relays.mu.Lock()
+	sawWork, waiting := s.relays.roleChange["conv1"]
+	s.relays.mu.Unlock()
+	if !waiting || !sawWork {
+		t.Fatalf("expected roleChange[conv1]=true from refreshed session snapshot, got waiting=%v sawWork=%v", waiting, sawWork)
 	}
 }
 
@@ -759,16 +825,26 @@ func TestExtensionEventFollowsTheMainConversationToItsOwnMachine(t *testing.T) {
 	}
 }
 
-// A conversation that refuses for good (relayRefused) must not keep a place of the extension's in its queue: after a
-// run of events none waits, and the next one is told queued or delivered, never queue_full.
+// A conversation that refuses for good (relayRefused) surfaces the refusal error instead of claiming EventQueued,
+// leaves nothing in the queue, arms no timer, and never causes queue_full on subsequent events.
 func TestExtensionEventRefusedForGoodDoesNotClogTheQueue(t *testing.T) {
 	s, f := eventService(t)
+	t.Cleanup(func() { stopRelayTimer(s, "conv1") })
 	refuseSendsTo(f, "conv1", &rpc.Error{Code: "unheard_of", Message: "no"})
 	for i := range extEventQueueMost + 3 {
-		if _, err := event(s, "example-monitor", fmt.Sprintf(`{"key":"k%d","title":"Event %d"}`, i, i)); err != nil {
-			t.Fatalf("event %d: %v", i, err)
+		res, err := event(s, "example-monitor", fmt.Sprintf(`{"key":"k%d","title":"Event %d"}`, i, i))
+		if convCode(err) != "unheard_of" || res.Delivery != "" {
+			t.Fatalf("event %d: got res=%+v err=%v, want unheard_of refusal and empty delivery", i, res, err)
 		}
-		// Each one is taken off by the drain that follows it: the next goes in once that has run, whatever the machine's speed.
-		waitFor(t, "the refused event to leave the queue", func() bool { return len(queueOf(s, "conv1")) == 0 && !drainingNow(s, "conv1") })
+		if len(queueOf(s, "conv1")) != 0 || drainingNow(s, "conv1") {
+			t.Fatalf("event %d left queued or draining state: q=%d draining=%v", i, len(queueOf(s, "conv1")), drainingNow(s, "conv1"))
+		}
+	}
+	s.relays.mu.Lock()
+	hasTimer := s.relays.holds["conv1"] != nil
+	hasFailedAt := !s.relays.failedAt["conv1"].IsZero()
+	s.relays.mu.Unlock()
+	if hasTimer || hasFailedAt {
+		t.Fatalf("permanent refusal armed timer or failedAt (timer=%v, failedAt=%v)", hasTimer, hasFailedAt)
 	}
 }

@@ -200,7 +200,8 @@ describe("Mermaid blocks", () => {
   it("code and diagram buttons show without hover on a touch screen, with a finger-sized target (#1996)", async () => {
     const { renderToStaticMarkup } = await import("react-dom/server");
     const { createElement } = await import("react");
-    const { Markdown } = await import("./Markdown");
+    const { Markdown, MermaidDiagram } = await import("./Markdown");
+    await MermaidDiagram.preload(); // the diagram's component is its own chunk (Mermaid.lazy.test.tsx)
     // a code block's Copy is in its title bar, always shown (#2984); a diagram's buttons show on a touch screen
     const code = renderToStaticMarkup(createElement(Markdown, { text: "```js\nlet a = 1\n```" }));
     expect(code).toMatch(/data-code-bar[^]*aria-label="复制代码"[^>]*touch-hit/);

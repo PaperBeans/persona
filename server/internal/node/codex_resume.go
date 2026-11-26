@@ -69,7 +69,7 @@ func (n *Node) codexResumableIn(ctx context.Context, id string, pass *codexListP
 	if n.codexRemoteConnecting(src.home) { // its app-server may own the thread once it is back
 		return false
 	}
-	if o := readCodexOrigin(src.path); o.desktop || o.exec || o.sub || o.parent != "" {
+	if o := readCodexOrigin(src.path); o.exec || o.sub || o.parent != "" || o.desktopThread(src, pass) {
 		return false
 	}
 	m, ok := metaOfIn(src.home, src.path, pass)

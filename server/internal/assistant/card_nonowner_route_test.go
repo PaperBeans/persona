@@ -84,9 +84,9 @@ func TestAgentPermissionNonOwnerRoutedAndSixClassesStillPush(t *testing.T) {
 	}
 	// The six-class outward permission and the main conversation's own one count under agent_permission; the
 	// unsupervised agent's does not (handed to main), and the secret is agent_secret_form.
-	if c := cardsToday(t, e.s)[cardAgentPermission]; c.N != 2 {
-		t.Fatalf("agent_permission ledger = %+v, want the outward permission and the main conversation's own", c)
-	}
+	waitFor(t, "agent_permission ledger recorded", func() bool {
+		return cardsToday(t, e.s)[cardAgentPermission].N == 2
+	})
 
 	allow := true
 	for _, pair := range []struct {
@@ -153,6 +153,9 @@ func TestConnectorGateOutwardWritePushesToOwnerAndCountsAsCategory3(t *testing.T
 		t.Fatal("connector gate outward write was diverted from owner")
 	}
 
+	waitFor(t, "outbound_write ledger recorded", func() bool {
+		return cardsToday(t, e.s)[cardOutboundWrite].N == 2
+	})
 	today := cardsToday(t, e.s)
 	if c := today[cardOutboundWrite]; c.Category != cardCatOutward || c.N != 2 {
 		t.Fatalf("outbound_write ledger = %+v, want category %d count 2", c, cardCatOutward)
@@ -162,7 +165,7 @@ func TestConnectorGateOutwardWritePushesToOwnerAndCountsAsCategory3(t *testing.T
 	}
 	report := cardLedgerReport(time.Now().In(e.s.location(context.Background())).Format(time.DateOnly),
 		e.s.cardsOn(context.Background(), time.Now().In(e.s.location(context.Background())).Format(time.DateOnly)))
-	if !strings.Contains(report, "3 outward as the owner: 2\n") || !strings.Contains(report, "None of the six (each one a bug): 0.") {
+	if !strings.Contains(report, "3 outward as the owner: 2 — outbound_write×2\n") || !strings.Contains(report, "None of the six (each one a bug): 0.") {
 		t.Fatalf("unexpected ledger report:\n%s", report)
 	}
 
@@ -449,11 +452,11 @@ func TestExtensionApprovalNonOwnerRoutedAndSixClassesStillPush(t *testing.T) {
 	if n := e.pushesOf(extIx.ID); n != 0 {
 		t.Fatalf("non-owner extension approval pushed %d times", n)
 	}
+	waitFor(t, "outbound_write ledger recorded", func() bool {
+		return cardsToday(t, e.s)[cardOutboundWrite].N == 1
+	})
 	if c := cardsToday(t, e.s)[cardExtensionApproval]; c.N != 0 {
 		t.Fatalf("extension_approval ledger = %+v, want 0", c)
-	}
-	if c := cardsToday(t, e.s)[cardOutboundWrite]; c.N != 1 {
-		t.Fatalf("outbound_write ledger = %+v, want 1", c)
 	}
 
 	allow := true

@@ -75,6 +75,9 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	// The effort is checked against the agent this start actually dispatches: an explicit agentType wins over the
 	// launcher's name, so a Claude start refuses ultra even on a launcher named codex.
 	kind := n.startAgentType(launcher, agentType)
+	if kind == traexAgent && effort == "" {
+		effort = execution.Effort
+	}
 	if err := execution.check(kind); err != nil {
 		return nil, err
 	}
@@ -209,7 +212,11 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 		if err != nil {
 			return nil, err
 		}
-		if agent != "claude" && agent != "codex" {
+		if kind == traexAgent {
+			if agent != traexAgent || resume != "" {
+				return nil, errors.New("TRAE CLI model overrides require a new session on a TRAE CLI launcher")
+			}
+		} else if agent != "claude" && agent != "codex" {
 			return nil, errors.New("普通 Agent 的启动只支持 Claude Code 或 Codex 启动器")
 		}
 	}
@@ -292,8 +299,11 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 		return n.startWorkAgent(ctx, launch, cwd, launcher, work, execution.Model, effort, mode, prompt, ws, tabName)
 	}
 	if kind != "claude" { // start_agent.go
-		if mode != "" || effort != "" {
+		if mode != "" || (effort != "" && (kind != traexAgent || resume != "")) {
 			return nil, fmt.Errorf("permission mode and effort are only supported for Claude starts")
+		}
+		if kind == traexAgent && resume == "" {
+			execution.Effort = effort
 		}
 		return n.startOtherAgent(ctx, launch, cwd, launcher, kind, prompt, resume, ws, tabName, execution)
 	}

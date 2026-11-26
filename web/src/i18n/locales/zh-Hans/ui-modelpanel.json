@@ -10,8 +10,10 @@
   "setup_customized": "已自定义",
   "setup_saved": "收藏配置",
   "reset": "恢复推荐",
-  "fast": "Fast · 插队加速 · 用量更多",
+  "fast": "Fast · 消耗更多额度",
+  "claude_fast": "Fast 会消耗更多额度。Claude Code 也可能把这项选择保存为后续会话的默认值。",
   "fast_short": "Fast",
+  "ultrafast": "超快 · 消耗更多额度",
   "effort": "思考强度",
   "faster": "更高效",
   "smarter": "更智能",
@@ -49,5 +51,6 @@
   "launchers": "启动器",
   "speed": "速度",
   "speed_standard": "标准",
+  "speed_ultrafast": "超快",
   "no_levels": "这个模型没有可选的思考强度"
 }

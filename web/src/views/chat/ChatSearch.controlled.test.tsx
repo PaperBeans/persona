@@ -6,7 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { ChatSearchHit, ChatSearchResults } from "../../lib/chat-search";
 import type { Item } from "../../lib/types";
-import type { ChatSearchProps } from "./ChatSearch";
+import type { ChatSearchProps, LoadOutcome } from "./ChatSearch";
 
 const mocks = vi.hoisted(() => ({
   searchChat: vi.fn(),
@@ -32,6 +32,13 @@ const defaultItems: Item[] = [
   { id: "tr#1", seq: 2, role: "user", kind: "tool_result", tool_use_id: "call-1", text: "PASS parser suite" },
 ];
 
+const items: Item[] = [
+  { id: "u#0", seq: 1, role: "user", kind: "text", text: "look at the parser" },
+  { id: "a#0", seq: 2, role: "assistant", kind: "text", text: "the parser is fixed" },
+];
+const hit: ChatSearchHit = { itemId: "a#0", category: "text", snippet: "the parser is fixed", ranges: [[4, 10]] };
+const found: ChatSearchResults = { hits: [hit], truncated: false };
+
 const controlledHit: ChatSearchHit = {
   itemId: "remote#1",
   category: "text",
@@ -44,6 +51,19 @@ let root: Root;
 let onQuery: Mock<(q: string) => void>;
 let onPick: Mock<(hit: ChatSearchHit) => void>;
 let onClose: Mock<() => void>;
+
+const base = (over: Partial<ChatSearchProps> = {}): ChatSearchProps => ({
+  open: true,
+  query: "",
+  onQuery,
+  items,
+  rounds: 1,
+  hasMore: false,
+  onLoadEarlier: async () => null,
+  onPick,
+  onClose,
+  ...over,
+});
 
 const mount = (props: Partial<ChatSearchProps> = {}) => {
   const full: ChatSearchProps = {
@@ -58,6 +78,16 @@ const mount = (props: Partial<ChatSearchProps> = {}) => {
   };
   act(() => root.render(<ChatSearch {...full} />));
   return full;
+};
+
+const mountBase = async (props: ChatSearchProps) => {
+  await act(async () => root.render(<ChatSearch {...props} />));
+};
+
+const button = (label: string) => {
+  const found = [...document.body.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === label);
+  if (!found) throw new Error(`button not found: ${label}`);
+  return found;
 };
 
 const searchInput = () => document.querySelector<HTMLInputElement>("[data-chat-search] input")!;
@@ -80,6 +110,132 @@ afterEach(() => {
   host.remove();
   document.body.innerHTML = "";
   vi.useRealTimers();
+});
+
+describe("ChatSearch with controlled results and matching", () => {
+  it("renders supplied results without calling searchChat or a supplied matcher", async () => {
+    const searchItems = vi.fn(() => found);
+    await mountBase(base({ query: "parser", results: found, searching: true, searchItems }));
+
+    expect(mocks.searchChat).not.toHaveBeenCalled();
+    expect(searchItems).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("the parser is fixed");
+    expect(document.querySelectorAll("[data-search-result]")).toHaveLength(1);
+    act(() => document.querySelector<HTMLButtonElement>("[data-search-result]")!.click());
+    expect(onPick).toHaveBeenCalledWith(hit);
+  });
+
+  it("invalidates old controlled results while a new query is pending", async () => {
+    await mountBase(base({ query: "parser", results: found }));
+    expect(document.querySelectorAll("[data-search-result]")).toHaveLength(1);
+
+    // The query moved, but the parent has not supplied a new result object yet: the old hit is neither drawn nor
+    // accepted by Enter.
+    await mountBase(base({ query: "next", results: found }));
+    expect(document.body.textContent).not.toContain("the parser is fixed");
+    expect(document.querySelectorAll("[data-search-result]")).toHaveLength(0);
+    const input = document.querySelector<HTMLInputElement>("input")!;
+    await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(onPick).not.toHaveBeenCalled();
+
+    const empty: ChatSearchResults = { hits: [], truncated: false };
+    await mountBase(base({ query: "next", results: empty }));
+    expect(document.body.textContent).toContain(t("chat-chatsearch.no_hits"));
+    expect(document.body.textContent).not.toContain(t("chat-chatsearch.enter_keyword"));
+  });
+
+  it("uses a custom matcher after the configured settle time, not the default matcher", async () => {
+    vi.useFakeTimers();
+    const searchItems = vi.fn(() => found);
+    await mountBase(base({ searchItems, settleMs: 75 }));
+    searchItems.mockClear();
+    await mountBase(base({ query: "parser", searchItems, settleMs: 75 }));
+    act(() => vi.advanceTimersByTime(74));
+    expect(searchItems).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(1));
+    expect(searchItems).toHaveBeenCalledWith(items, "parser");
+    expect(mocks.searchChat).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("the parser is fixed");
+  });
+
+  it("uses controlled earlier-load state and stop callback", async () => {
+    let stopped: (() => boolean) | undefined;
+    const onLoadEarlier = vi.fn(async (_onPage: (n: number) => void, isStopped: () => boolean): Promise<LoadOutcome> => {
+      stopped = isStopped;
+      return null;
+    });
+    const onStopLoadEarlier = vi.fn();
+    const controlled = {
+      query: "parser",
+      results: found,
+      hasMore: true,
+      onLoadEarlier,
+      onStopLoadEarlier,
+      loadingEarlier: false,
+      loadedPages: 4,
+      notice: "External stop reason",
+    };
+    await mountBase(base(controlled));
+    expect(document.body.textContent).toContain("External stop reason");
+    await act(async () => button(t("chat-chatsearch.load_earlier")).click());
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1);
+    expect(stopped?.()).toBe(false);
+
+    await mountBase(base({ ...controlled, loadingEarlier: true, loadedPages: 6 }));
+    expect(document.body.textContent).toContain(t("chat-chatsearch.loading_pages", { count: 6 }));
+    act(() => button(t("chat-chatsearch.stop_loading")).click());
+    expect(stopped?.()).toBe(true);
+    expect(onStopLoadEarlier).toHaveBeenCalledTimes(1);
+  });
+
+  it("fences an earlier-load run across close/reopen and a newer run", async () => {
+    const runs: Array<{
+      onPage: (n: number) => void;
+      stopped: () => boolean;
+      resolve: (outcome: LoadOutcome) => void;
+    }> = [];
+    const onLoadEarlier = vi.fn((onPage: (n: number) => void, stopped: () => boolean) =>
+      new Promise<LoadOutcome>((resolve) => {
+        runs.push({ onPage, stopped, resolve });
+      }));
+    const onStopLoadEarlier = vi.fn();
+    const props = base({ query: "parser", results: found, hasMore: true, onLoadEarlier, onStopLoadEarlier });
+
+    await mountBase(props);
+    await act(async () => button(t("chat-chatsearch.load_earlier")).click());
+    expect(runs).toHaveLength(1);
+    act(() => runs[0].onPage(1));
+    expect(document.body.textContent).toContain(t("chat-chatsearch.loading_pages", { count: 1 }));
+
+    await mountBase({ ...props, open: false });
+    expect(runs[0].stopped()).toBe(true);
+    expect(onStopLoadEarlier).toHaveBeenCalledTimes(1);
+    await mountBase({ ...props, open: true });
+    expect(button(t("chat-chatsearch.load_earlier"))).toBeDefined();
+
+    await act(async () => button(t("chat-chatsearch.load_earlier")).click());
+    expect(runs).toHaveLength(2);
+    expect(runs[0].stopped()).toBe(true);
+    expect(runs[1].stopped()).toBe(false);
+    act(() => runs[1].onPage(2));
+    expect(document.body.textContent).toContain(t("chat-chatsearch.loading_pages", { count: 2 }));
+
+    act(() => runs[0].onPage(9));
+    await act(async () => {
+      runs[0].resolve("Stale run");
+      await Promise.resolve();
+    });
+    expect(document.body.textContent).toContain(t("chat-chatsearch.loading_pages", { count: 2 }));
+    expect(document.body.textContent).not.toContain("Stale run");
+    expect(button(t("chat-chatsearch.stop_loading"))).toBeDefined();
+
+    await act(async () => {
+      runs[1].resolve("New run finished");
+      await Promise.resolve();
+    });
+    expect(document.body.textContent).toContain("New run finished");
+    expect(button(t("chat-chatsearch.load_earlier"))).toBeDefined();
+  });
 });
 
 describe("ChatSearch with controlled search and loading props", () => {
@@ -242,6 +398,19 @@ describe("ChatSearch with controlled search and loading props", () => {
 });
 
 describe("ChatSearch default compatibility", () => {
+  it("keeps the 200 ms debounce and default searchChat matcher", async () => {
+    vi.useFakeTimers();
+    mocks.searchChat.mockImplementation((_items: Item[], query: string) => query ? found : { hits: [], truncated: false });
+    await mountBase(base());
+    mocks.searchChat.mockClear();
+    await mountBase(base({ query: "parser" }));
+    act(() => vi.advanceTimersByTime(199));
+    expect(mocks.searchChat).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(1));
+    expect(mocks.searchChat).toHaveBeenCalledWith(items, "parser");
+    expect(document.body.textContent).toContain("the parser is fixed");
+  });
+
   it("debounces query changes and runs default searchChat when controlled search props are absent", () => {
     vi.useFakeTimers();
     mount({ query: "", items: defaultItems, onLoadEarlier: async () => null });
@@ -258,6 +427,24 @@ describe("ChatSearch default compatibility", () => {
       searchInput().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     });
     expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ itemId: "tr#1", category: "tool_output" }));
+  });
+
+  it("keeps the earlier-load page and stop lifecycle", async () => {
+    mocks.searchChat.mockReturnValue(found);
+    let finish: (outcome: LoadOutcome) => void = () => {};
+    const onLoadEarlier = vi.fn((onPage: (n: number) => void, _stopped: () => boolean) => {
+      onPage(2);
+      return new Promise<LoadOutcome>((resolve) => {
+        finish = resolve;
+      });
+    });
+    await mountBase(base({ query: "parser", hasMore: true, onLoadEarlier }));
+    await act(async () => button(t("chat-chatsearch.load_earlier")).click());
+    expect(document.body.textContent).toContain(t("chat-chatsearch.loading_pages", { count: 2 }));
+    act(() => button(t("chat-chatsearch.stop_loading")).click());
+    expect(onLoadEarlier.mock.calls[0][1]()).toBe(true);
+    await act(async () => finish("Stopped by the reader"));
+    expect(document.body.textContent).toContain("Stopped by the reader");
   });
 
   it("keeps the default async onLoadEarlier lifecycle, stop flag and failure notice", async () => {

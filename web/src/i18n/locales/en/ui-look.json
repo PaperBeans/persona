@@ -41,5 +41,9 @@
   "font_unavailable": "This font may be unavailable. Your choice is kept; fallback fonts still apply.",
   "font_local": "Use one font installed on this computer. No fonts are downloaded.",
   "sidebar_usage": "Launcher quota in the sidebar",
-  "sidebar_usage_hint": "Show the usage card under the sidebar with each launcher's remaining quota. Saved in this browser only."
+  "sidebar_usage_hint": "Show the usage card under the sidebar with each launcher's remaining quota. Saved in this browser only.",
+  "surface_style": "Window style",
+  "surface_style_hint": "Default keeps the classic opaque look. Liquid Glass adds translucent frosted surfaces and desktop refraction on macOS. Saved in this browser only.",
+  "surface_default": "Default",
+  "surface_liquid_glass": "Liquid Glass"
 }

@@ -4,14 +4,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import persona.core.contracts.Todo
 import persona.core.contracts.TodoAsk
@@ -22,9 +24,22 @@ import persona.core.domain.tasks.AssistantTaskCards
 import persona.core.domain.tasks.decisionOptions
 import persona.core.domain.tasks.todoRuleCard
 
+/** Whether [TaskOwnerDecision] renders a primary action button for this task, so bottom sheet actions demote to secondary. */
+internal fun Todo.hasOwnerPrimaryAction(): Boolean {
+    val active = ask ?: return false
+    if (active.outcome == "decide") return !isDone && cancelledAt == null
+    return active.askedAt.isNotBlank() && (active.outcome != "decide" || !active.recommend.isNullOrBlank())
+}
+
+/**
+ * Suppresses stale or contradictory receipt cards inside Task Detail when the task already displays an active
+ * owner acceptance/decision card, while preserving receipt cards and navigation when no owner ask supersedes them.
+ */
+internal fun shouldShowTaskReceiptInDetail(todo: Todo): Boolean = todo.ask == null
+
 /** Acceptance carries the exact round the user read, independently of any later task refresh. */
 @Composable
-internal fun TaskOwnerDecision(todo: Todo, host: AssistantTaskHost) {
+internal fun TaskOwnerDecision(todo: Todo, host: AssistantTaskHost, prUrl: String? = null) {
     val ask = todo.ask ?: return
     if (ask.outcome == "decide") {
         TaskDecisionCard(todo, host)
@@ -32,16 +47,77 @@ internal fun TaskOwnerDecision(todo: Todo, host: AssistantTaskHost) {
     }
     val busy by host.tasks.busy.collectAsStateWithLifecycle()
     val resources = LocalResources.current
-    JCard(Modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            Text(ask.verdict, style = PersonaTheme.type.bodyStrong, color = PersonaTheme.palette.ink)
-            ask.recommend?.takeIf(String::isNotBlank)?.let { recommendation ->
-                Text(stringResource(R.string.chat_tray_recommended, recommendation), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+    val palette = PersonaTheme.palette
+    val parsed = remember(ask.verdict) { parseTaskVerdict(ask.verdict) }
+    val (icon, tint) = when {
+        parsed.tone == VerdictTone.Done || (parsed.tone == VerdictTone.Neutral && ask.outcome == "done") ->
+            PersonaIcons.success to palette.positive
+        parsed.tone == VerdictTone.Cannot || (parsed.tone == VerdictTone.Neutral && ask.outcome == "cannot") ->
+            PersonaIcons.error to palette.danger.dot
+        parsed.tone == VerdictTone.Decide -> PersonaIcons.help to palette.needsYou.dot
+        else -> PersonaIcons.info to palette.needsYou.dot
+    }
+    val pr = (todo.prUrl?.takeIf(String::isNotBlank) ?: prUrl)?.let { url -> trayPullRequestNumber(url)?.let { url to it } }
+    JCard(Modifier.fillMaxWidth().testTag("assistant-owner-decision-${todo.id}"), padding = Tokens.Space.l) {
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
+            Row(
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+            ) {
+                JIcon(
+                    icon,
+                    decorative = true,
+                    size = Tokens.Size.iconXS,
+                    tint = tint,
+                    modifier = Modifier.padding(top = Tokens.Space.xxs),
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+                    Text(parsed.text, style = PersonaTheme.type.bodyStrong, color = palette.ink)
+                    ask.recommend?.takeIf(String::isNotBlank)?.let { recommendation ->
+                        Text(
+                            stringResource(R.string.chat_tray_recommended, recommendation),
+                            style = PersonaTheme.type.caption,
+                            color = palette.ink2,
+                        )
+                    }
+                }
             }
             if (ask.askedAt.isNotBlank() && (ask.outcome != "decide" || !ask.recommend.isNullOrBlank())) {
-                JButton(stringResource(R.string.chat_tray_accept), {
-                    host.tasks.acceptTask(todo, host.onError) { host.onError(IllegalStateException(resources.getString(R.string.chat_tray_accept_changed))) }
-                }, Modifier.testTag("assistant-accept-${todo.id}"), loading = "accept:${todo.id}" in busy)
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                    JButton(
+                        stringResource(R.string.chat_tray_accept),
+                        {
+                            host.tasks.acceptTask(todo, host.onError) {
+                                host.onError(IllegalStateException(resources.getString(R.string.chat_tray_accept_changed)))
+                            }
+                        },
+                        Modifier.fillMaxWidth().testTag("assistant-accept-${todo.id}"),
+                        kind = JButtonKind.Primary,
+                        size = JButtonSize.Medium,
+                        loading = "accept:${todo.id}" in busy,
+                    )
+                    if (pr != null) {
+                        val uri = LocalUriHandler.current
+                        JButton(
+                            stringResource(R.string.chat_tray_pr_number, pr.second),
+                            { uri.openUri(pr.first) },
+                            Modifier.testTag("receipt-pr"),
+                            kind = JButtonKind.Secondary,
+                            size = JButtonSize.Small,
+                            icon = PersonaIcons.pullRequest,
+                        )
+                    }
+                }
+            } else if (pr != null) {
+                val uri = LocalUriHandler.current
+                JButton(
+                    stringResource(R.string.chat_tray_pr_number, pr.second),
+                    { uri.openUri(pr.first) },
+                    Modifier.testTag("receipt-pr"),
+                    kind = JButtonKind.Secondary,
+                    size = JButtonSize.Small,
+                    icon = PersonaIcons.pullRequest,
+                )
             }
         }
     }
@@ -84,10 +160,11 @@ private fun TaskDecisionRecommendation(todo: Todo, ask: TodoAsk, host: Assistant
     var failed by remember(todo.id, ask) { mutableStateOf(false) }
     var changed by remember(todo.id, ask) { mutableStateOf(false) }
     val onChanged = { changed = true }
-    JCard(Modifier.fillMaxWidth().testTag("assistant-task-decision-${todo.id}")) {
+    val parsed = remember(ask.verdict) { parseTaskVerdict(ask.verdict) }
+    JCard(Modifier.fillMaxWidth().testTag("assistant-task-decision-${todo.id}"), padding = Tokens.Space.l) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             if (onOpen != null) Text(todo.title, style = PersonaTheme.type.bodyStrong, color = PersonaTheme.palette.ink)
-            Text(ask.verdict, style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink)
+            Text(parsed.text, style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink)
             ask.recommend?.takeIf(String::isNotBlank)?.let {
                 Text(stringResource(R.string.chat_tray_recommended, it), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
             }
@@ -110,13 +187,35 @@ private fun TaskDecisionRecommendation(todo: Todo, ask: TodoAsk, host: Assistant
     }
 }
 
-/** The row's detail retains the current execution's receipt/PR and report without duplicating the chat entity. */
+/** The row's detail retains the current execution's receipt/PR and report without contradicting an active acceptance card. */
 @Composable
-internal fun TaskLifecycleDetails(todo: Todo, host: AssistantTaskHost) {
+internal fun TaskLifecycleDetails(
+    todo: Todo,
+    host: AssistantTaskHost,
+) {
     val feeds by host.tasks.feeds.collectAsStateWithLifecycle()
     val plans by host.tasks.plans.collectAsStateWithLifecycle()
     val cards by host.tasks.taskCards.collectAsStateWithLifecycle()
     val merged = AssistantTaskCards.merge(feeds[host.conversation].orEmpty(), plans, listOf(todo), cards[host.conversation].orEmpty())
         .firstOrNull { it.todo?.id == todo.id && (todo.planId == null || it.identity.planId == todo.planId) }
-    listOfNotNull(merged?.receipt, merged?.report).forEach { item -> AssistantExtraLine(AssistantExtra.Feed(item), host) }
+    val items = listOfNotNull(
+        merged?.receipt?.takeIf { shouldShowTaskReceiptInDetail(todo) },
+        merged?.report?.takeIf { todo.ask == null },
+    )
+    if (items.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
+        items.forEach { item -> AssistantExtraLine(AssistantExtra.Feed(item), host) }
+    }
+}
+
+/** Extracts any PR URL carried on a task's merged receipt/report so suppressed cards never drop PR access. */
+@Composable
+internal fun taskLifecyclePrUrl(todo: Todo, host: AssistantTaskHost): String? {
+    val feeds by host.tasks.feeds.collectAsStateWithLifecycle()
+    val plans by host.tasks.plans.collectAsStateWithLifecycle()
+    val cards by host.tasks.taskCards.collectAsStateWithLifecycle()
+    val merged = AssistantTaskCards.merge(feeds[host.conversation].orEmpty(), plans, listOf(todo), cards[host.conversation].orEmpty())
+        .firstOrNull { it.todo?.id == todo.id && (todo.planId == null || it.identity.planId == todo.planId) }
+    return merged?.report?.field("pr")?.takeIf(String::isNotBlank)
+        ?: merged?.receipt?.field("pr")?.takeIf(String::isNotBlank)
 }

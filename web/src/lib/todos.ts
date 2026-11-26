@@ -14,7 +14,7 @@ import { splitAgentSessions, type AgentGroup, type AgentMutes } from "./agent-gr
 import type { AgentState, Interaction, Machine, Question, Session } from "./types";
 import type { Route } from "./router";
 import { byTime } from "./times";
-import { stateName, waitName } from "./state-labels";
+import { serverWaitReason, stateName, waitName } from "./state-labels";
 import { usageLimitAgent } from "./usage-limit";
 
 export type TodoAgentSource = "manual" | "space" | "spawned" | "chat";
@@ -584,18 +584,117 @@ export function shownStatus(todo: Todo, status: TodoStatus): TodoStatus {
   return awaitsReview(todo, status) ? "unread" : status;
 }
 
+export const PR_STATUS_FRESH_MS = 15 * 60_000;
+
+export function normalizedPR(url: string | undefined): string {
+  return (url ?? "").trim().replace(/[#?].*$/, "").replace(/\/+$/, "").toLowerCase();
+}
+
+function parseTimestampMs(at: string | null | undefined): number {
+  if (!at) return 0;
+  const v = Date.parse(at);
+  return Number.isNaN(v) ? 0 : v;
+}
+
+/** Its PRs with fresh facts saying open and non-draft: the current one first, then earlier ones newest first (#7935). */
+export function openMergePRs(todo: Todo, now: number): PRFacts[] {
+  const fresh = (f: PRFacts) => {
+    const checked = parseTimestampMs(f.checked_at);
+    return !!checked && now - checked >= 0 && now - checked <= PR_STATUS_FRESH_MS && f.state === "open" && !f.draft;
+  };
+  const out: PRFacts[] = [];
+  const current = todo.pr_status;
+  if (current && todo.pr_url && normalizedPR(todo.pr_url) === normalizedPR(current.url) && fresh(current)) out.push(current);
+  for (const f of todo.other_prs ?? []) if (normalizedPR(f.url) !== normalizedPR(todo.pr_url) && fresh(f)) out.push(f);
+  return out;
+}
+
+function prBlockerLook(blockers: readonly string[] | undefined): { label: string; tone: TodoTone } | undefined {
+  if (!blockers?.length) return undefined;
+  if (blockers.includes("conflicts")) return { label: t("todos.status_pr_conflicts"), tone: "red" };
+  if (blockers.includes("changes_requested")) return { label: t("todos.status_pr_changes_requested"), tone: "amber" };
+  if (blockers.includes("checks_failing") || blockers.includes("checks_failed")) return { label: t("todos.status_pr_checks_failed"), tone: "red" };
+  if (blockers.includes("review_required")) return { label: t("todos.status_pr_in_review"), tone: "idle" };
+  if (blockers.includes("checks_pending")) return { label: t("todos.status_pr_checks_pending"), tone: "idle" };
+  return undefined;
+}
+
+function openPRFactsLook(prs: readonly PRFacts[]): { label: string; tone: TodoTone } | undefined {
+  if (!prs.length) return undefined;
+  if (prs.some((f) => f.conflicts)) return { label: t("todos.status_pr_conflicts"), tone: "red" };
+  if (prs.some((f) => f.review === "changes_requested")) return { label: t("todos.status_pr_changes_requested"), tone: "amber" };
+  if (prs.some((f) => f.checks === "failure" || (f.checks as string) === "failing")) return { label: t("todos.status_pr_checks_failed"), tone: "red" };
+  if (prs.some((f) => f.review === "required" || (f.review as string) === "review_required")) return { label: t("todos.status_pr_in_review"), tone: "idle" };
+  if (prs.some((f) => f.checks === "pending")) return { label: t("todos.status_pr_checks_pending"), tone: "idle" };
+  return { label: t("todos.status_pr_waiting_merge"), tone: "idle" };
+}
+
+function repoGatePRLook(gate: TodoRepoGate | undefined): { label: string; tone: TodoTone } | undefined {
+  if (!gate || gate.target_count <= 0 || gate.reason === "draft_pr") return undefined;
+  switch (gate.state) {
+    case "blocked_conflict":
+      return { label: t("todos.status_pr_conflicts"), tone: "red" };
+    case "blocked_changes":
+      return { label: t("todos.status_pr_changes_requested"), tone: "amber" };
+    case "blocked_ci":
+      return { label: t("todos.status_pr_checks_failed"), tone: "red" };
+    case "awaiting_review":
+      return { label: t("todos.status_pr_in_review"), tone: "idle" };
+    case "checks_pending":
+      return {
+        label: gate.reason === "checks_pending" ? t("todos.status_pr_checks_pending") : t("todos.status_pr_waiting_merge"),
+        tone: "idle",
+      };
+    default:
+      return undefined;
+  }
+}
+
+/** Accurate label and tone for an open to-do with a non-draft open PR (projected wait, fresh PR facts, or target repo gate). */
+export function openPRLook(todo: Todo, now = Date.now()): { label: string; tone: TodoTone } | undefined {
+  if (todo.done_at) return undefined;
+  if (todo.wait?.kind === "pr_merge") {
+    return prBlockerLook(todo.wait.pr_blockers) ?? openPRFactsLook(openMergePRs(todo, now)) ?? { label: t("todos.status_pr_waiting_merge"), tone: "idle" };
+  }
+  return openPRFactsLook(openMergePRs(todo, now)) ?? repoGatePRLook(todo.repo_gate);
+}
+
+/** Display label and tone when an open to-do has no active agent handling it: open non-draft PR state, parked hold,
+ *  or an open main-chat concern ("Tracking") instead of a misleading "Not started". */
+export function todoRestLook(todo: Todo, status: TodoStatus, now = Date.now()): { label: string; tone: TodoTone } | undefined {
+  if (todo.done_at || isCancelled(todo)) return undefined;
+  if (todo.supervision?.state === "user_check" || acceptedAtRest(todo, status) || waitsForOwner(todo) || awaitsReview(todo, status)) return undefined;
+  if (status !== "not_started" && status !== "follow_up") return undefined;
+  const pr = openPRLook(todo, now);
+  if (pr) return pr;
+  if (todo.supervision?.state === "parked" && !openAsk(todo)) {
+    if (todo.supervision.parked?.handoff) return { label: TODO_STATUS_INFO.waiting.label, tone: "idle" };
+    if (status === "not_started") {
+      const label = todo.supervision.parked?.evidence?.kind === "merge_review" ? t("task-wait.kind_merge_review") : t("todos.status_parked");
+      return { label, tone: "idle" };
+    }
+  }
+  if (status === "not_started" && todo.kind === "concern") {
+    return { label: t("todos.status_tracking"), tone: "idle" };
+  }
+  return undefined;
+}
+
 /** The status's label for this todo: "Auto-completed" for one the hub closed, "Accepted" for one its supervisor did
- *  (or accepted and nothing runs again). */
-export function todoStatusLabel(todo: Todo, status: TodoStatus): string {
+ *  (or accepted and nothing runs again), open PR / parked state, or "Tracking" for an open concern with no active agent. */
+export function todoStatusLabel(todo: Todo, status: TodoStatus, now = Date.now()): string {
   if (isCancelled(todo)) return t("lib-todos.review_cancelled");
   if (!todo.done_at && todo.supervision?.state === "user_check") return t("assistant-tasks.review_user_check");
   if (acceptedAtRest(todo, status)) return t("lib-todos.review_done");
   if (waitsForOwner(todo)) return t("work-entry.pending");
   if (awaitsReview(todo, status)) return t("assistant-tasks.review_pending");
   if (status === "done" && isReviewDone(todo)) return todo.supervision?.state === "cancelled" ? t("lib-todos.review_cancelled") : t("lib-todos.review_done");
-  if (status === "follow_up" && todo.supervision?.state === "parked" && todo.supervision.parked?.handoff && !openAsk(todo)) {
-    return TODO_STATUS_INFO.waiting.label;
+  if (!todo.done_at && todo.wait != null && (status === "not_started" || status === "follow_up")) {
+    if (todo.wait.kind === "pr_merge") return openPRLook(todo, now)?.label ?? t("todos.status_pr_waiting_merge");
+    return waitName(serverWaitReason(todo.wait));
   }
+  const rest = todoRestLook(todo, status, now);
+  if (rest) return rest.label;
   return status === "done" && isAutoDone(todo) ? t("lib-todos.auto_done") : TODO_STATUS_INFO[status].label;
 }
 

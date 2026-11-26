@@ -133,6 +133,7 @@
   "thread_post_needs_dm": "{who} があなたを待っています。カードは個人チャットにあります",
   "thread_post_finished_anon": "ある Agent がターンを終えました",
   "thread_open_done": "ToDo「{title}」を作り、メイン会話に渡しました。",
+  "thread_decided": "このトピックに ToDo「{title}」を作りました。",
   "thread_open_needs_text": "やりたいことを一行の文章で送ってください。ToDo を作ります。画像や転送だけでは ToDo の名前を付けられません。",
   "thread_open_failed": "このトピックの ToDo を作れませんでした：{error}",
   "thread_open_no_main": "このトピックの ToDo を作れませんでした：メイン会話がまだありません。先にアプリでメイン会話を一度開いてください。",

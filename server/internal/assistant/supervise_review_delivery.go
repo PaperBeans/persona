@@ -321,10 +321,10 @@ func (s *Service) otherHostIssueDelivery(ctx context.Context, t Todo, issueURL s
 	return "", issueOpenError(s, t, issueURL, d.State)
 }
 
-// todoLinkedDeliveryRefs reads saved repository pull_request and issue links for task id. Only delivery-role links are
-// returned for gate verification; reference links are display-only. referencePRs carries their normalized keys too, so
-// acceptance cannot re-add a reference PR from legacy stage tracking. A pull_request still stored with the default
-// delivery role that the forge can prove was opened by someone else is downgraded to reference first, so a merely
+// todoLinkedDeliveryRefs reads saved repository pull_request and issue links for task id. Only delivery-role links,
+// issues included (#14050), are returned for gate verification; reference links are display-only. referencePRs carries
+// their normalized keys too, so acceptance cannot re-add a reference PR from legacy stage tracking. A pull_request still
+// stored with the default delivery role that the forge can prove was opened by someone else is downgraded to reference first, so a merely
 // referenced foreign PR no longer blocks acceptance.
 func (s *Service) todoLinkedDeliveryRefs(ctx context.Context, id string) (prs, issues []string, referencePRs map[string]bool, err error) {
 	if _, ok := s.store().(todoRepositoryStore); !ok {
@@ -361,7 +361,9 @@ func (s *Service) todoLinkedDeliveryRefs(ctx context.Context, id string) (prs, i
 					prs = append(prs, u)
 				}
 			case "issue":
-				if l.Role == repository.LinkRoleReference {
+				// A reference issue is related work, never this task's delivery: only a delivery (or role-less) issue
+				// has to be closed (#14050).
+				if role, _ := repository.NormalizeLinkRole(l.Role); role == repository.LinkRoleReference {
 					continue
 				}
 				key := strings.ToLower(u)
@@ -490,7 +492,9 @@ func issueOpenError(s *Service, t Todo, issueURL, state string) error {
 		"tasks open until linked issues are closed. Keep it open: park it with waiting_on external_event or someone_else "+
 		"until the PR merges and closes the issue (or close the issue once verified), send what is missing to its agent "+
 		"(rework / agent_send), or cancel it if the work is dropped. If nothing could be delivered at all, accept it with "+
-		"outcome cannot", t.ID, issueURL, st)
+		"outcome cannot. If the work is delivered and only the issue was left open (a follow-up PR merged without closing "+
+		"it, or it is broader than this task), ask its maintainer to close it, or set that issue link's role to reference "+
+		"with todo_repository_links_set and accept again: a reference issue is not checked", t.ID, issueURL, st)
 }
 
 // notLiveError refuses accepting t while its PR pr is held as r says.

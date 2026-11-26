@@ -43,16 +43,17 @@ describe("a message card", () => {
     expect(html).not.toContain("稍后");
   });
 
-  it("says a card sent before the hub recorded it is sent, with its draft", () => {
+  it("keeps a recorded send without showing the draft as the sent text", () => {
     const html = renderToStaticMarkup(<MessageDraft tasks={draftTasks} item={card({ sent_at: "2026-11-04T10:23:00Z" })} />);
     expect(html).toContain("已以你的名义回复");
-    expect(html).toContain("确实是 bug，谢谢指出");
+    expect(html).not.toContain("确实是 bug，谢谢指出");
     expect(html).not.toContain("发送");
   });
 
   it("offers no 发送 or editor once the thing was handled elsewhere, and says nothing went out (#4797)", () => {
     const html = renderToStaticMarkup(<MessageDraft tasks={draftTasks} item={card({ filed_at: "2026-11-05T09:00:00Z", draft: "确实是 bug，【预计几点前】修好" })} />);
     expect(html).toContain("这件事已经处理过了，没有发出去");
+    expect(html).not.toContain("已以你的名义回复");
     expect(html).not.toContain("<textarea");
     expect(html).not.toContain("<button");
     expect(html).not.toContain("草稿里还有没填的");

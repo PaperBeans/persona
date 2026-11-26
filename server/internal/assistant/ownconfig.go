@@ -46,6 +46,8 @@ type ownConfig struct {
 		AttachmentDaysBySource map[string]int `json:"attachment_days_by_source"`
 		// History: the history import (docs/assistant/knowledge.md "History import"); missing or not enabled: off.
 		History *assistantwire.KBHistory `json:"history"`
+		// LarkMinutes: importing Lark minutes and document titles through lark-cli; missing or not enabled: off.
+		LarkMinutes *assistantwire.KBLarkMinutes `json:"lark_minutes"`
 	} `json:"kb"`
 	AI *aiwire.Config `json:"ai"`
 	// Inbox: of it the hello carried the models and the AI twin's machine, each replaced only when it is there (the
@@ -139,7 +141,8 @@ func (c ownConfig) over(h Hello) Hello {
 	}
 	if k := c.KB; k != nil {
 		h.KB = &assistantwire.KBSettings{Off: k.Enabled != nil && !*k.Enabled, ReadOnly: k.ReadOnly, TextDays: k.TextDays,
-			AttachmentDays: k.AttachmentDays, ExtraDirs: k.ExtraDirs, RemoteFolders: k.RemoteFolders, AttachmentDaysBySource: positiveDays(k.AttachmentDaysBySource), History: k.History}
+			AttachmentDays: k.AttachmentDays, ExtraDirs: k.ExtraDirs, RemoteFolders: k.RemoteFolders, AttachmentDaysBySource: positiveDays(k.AttachmentDaysBySource), History: k.History,
+			LarkMinutes: k.LarkMinutes}
 		h.Models.KBAI = k.AI
 	}
 	if c.AI != nil {

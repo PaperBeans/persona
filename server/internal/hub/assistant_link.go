@@ -182,18 +182,22 @@ type assistantLink struct{ h *Hub }
 // cards' switches and the finished push's timings (hub.json's, the hub's), the user's language. The manager's own
 // sections (owner, notes, agents, kb, models, a card's wait) are in its manager.json, not here (docs/operations/config.md
 // "manager.json").
-func (l assistantLink) Hello(context.Context) (assistantwire.Hello, error) {
+func (l assistantLink) Hello(ctx context.Context) (assistantwire.Hello, error) {
+	out := l.helloBase()
+	out.QuietPush, out.PushGradingCards = l.h.pushGradingForHello(ctx, assistantwire.AssistantID)
+	return out, nil
+}
+
+func (l assistantLink) helloBase() assistantwire.Hello {
 	h := l.h
 	// SecretHandoffGate: this hub checks who approves a hand-off card (secret_handoff.go). ArchivedApart: it takes a
 	// machine's archived rows apart from its list (fleet.archived, fleet_link.go).
-	// QuietPush: this hub's push tiering switch, which the managers follow for what is not a hub push (cards they
-	// post, cards they hand up); a change sends manager.updated.
-	out := assistantwire.Hello{Locale: string(h.userLang()), SecretHandoffGate: true, ArchivedApart: true, QuietPush: h.push.pushGradingOn()}
+	out := assistantwire.Hello{Locale: string(h.userLang()), SecretHandoffGate: true, ArchivedApart: true}
 	if m, ok := h.mutesEvent(); ok { // the hub's mutes, before the manager pushes anything (fleet_link.go)
 		out.Mutes = m.Mutes
 	}
 	if h.cfg == nil {
-		return out, nil
+		return out
 	}
 	out.Assistant = assistantwire.Placement{MachineID: h.defaultAssistantMachine(), Standby: h.isMember()}
 	out.Assistant.Machines = h.machineIDs()
@@ -208,7 +212,29 @@ func (l assistantLink) Hello(context.Context) (assistantwire.Hello, error) {
 	out.Notify = assistantwire.NotifyTimings{DoneDelayMS: taskSettleDelay(h.cfg.Notify).Milliseconds(),
 		LongTurnMS: h.cfg.Notify.longTurn().Milliseconds(), BackgroundHoldMS: h.cfg.Notify.backgroundHold().Milliseconds()}
 	out.Models = h.hubModels() // the launchers hub.json's machines add (assistant_models.go)
-	return out, nil
+	return out
+}
+
+func (h *Hub) pushGradingForHello(ctx context.Context, id string) (bool, *assistantwire.PushGradingCards) {
+	if h == nil || h.push == nil {
+		return false, nil
+	}
+	cfg, _ := h.push.effectiveGradingFor(ctx, id)
+	if !cfg.Enabled {
+		return false, nil
+	}
+	reasons := slices.Clone(cfg.Cards.EscalateReasons)
+	if reasons == nil {
+		reasons = []string{}
+	}
+	return true, &assistantwire.PushGradingCards{
+		SupervisorHold:  cfg.Cards.SupervisorHold,
+		EscalateReasons: reasons,
+		HoldConclusions: cfg.Cards.HoldConclusions,
+		HoldAcceptance:  cfg.Cards.HoldAcceptance,
+		DecisionLevel:   cfg.Cards.DecisionLevel,
+		ReportLevel:     cfg.Cards.ReportLevel,
+	}
 }
 
 // deviceCallFrom answers device.call from manager from: the machines it lists are its own (the others' are in "others":
@@ -536,10 +562,16 @@ func busCodedError(err error) error {
 	return err
 }
 
+// managerHelloFor builds manager.hello's answer for manager id with its placement and per-manager effective push grading.
+func (h *Hub) managerHelloFor(ctx context.Context, id string) assistantwire.Hello {
+	hello := h.placedFor(assistantLink{h}.helloBase(), id)
+	hello.QuietPush, hello.PushGradingCards = h.pushGradingForHello(ctx, id)
+	return hello
+}
+
 // assistantHelloFor is manager.hello's answer for manager id, kept as what it last got.
 func (h *Hub) assistantHelloFor(ctx context.Context, id string) assistantwire.Hello {
-	hello, _ := assistantLink{h}.Hello(ctx)
-	hello = h.placedFor(hello, id)
+	hello := h.managerHelloFor(ctx, id)
 	hello.Mutes = h.mutesFor(id, assistantwire.FleetMutes{Mutes: hello.Mutes}).Mutes // its own machines' only, as fleet.mutes (fleet_link.go)
 	raw, _ := json.Marshal(updatedHello(hello))
 	a := h.assistantOf(id)
@@ -632,8 +664,7 @@ func (h *Hub) managerUpdated(id string) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		hello, _ := assistantLink{h}.Hello(ctx)
-		hello = updatedHello(h.placedFor(hello, id))
+		hello := updatedHello(h.managerHelloFor(ctx, id))
 		raw, _ := json.Marshal(hello)
 		a.helloMu.Lock()
 		same := a.lastHello == string(raw)

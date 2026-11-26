@@ -120,7 +120,7 @@ func TestCodexHistoryResumesOnAStart(t *testing.T) {
 	}
 }
 
-// A Codex App thread (originator "Codex Desktop") is not resumed in a terminal: the App owns it.
+// A Codex App thread is not resumed through session.start: the App owns it.
 func TestCodexDesktopThreadIsNotResumedInATerminal(t *testing.T) {
 	n, _, home := herdrNode(t)
 	cwd := mkdir(t, filepath.Join(home, "proj"))
@@ -141,6 +141,21 @@ func TestCodexDesktopThreadIsNotResumedInATerminal(t *testing.T) {
 	_, err := request(t, n, "session.start", map[string]any{"resume_session_id": startThread})
 	if code, _ := refusalOf(t, err); code != "codex_read_only" {
 		t.Errorf("resume of a Codex App thread: %v", err)
+	}
+}
+
+func TestCodexSharedOriginDoesNotResumeInATerminal(t *testing.T) {
+	n, _, cwd := codexHistoryNode(t)
+	home := n.codexHome()
+	state := `{"projectless-thread-ids":["` + remoteOther + `"]}`
+	if err := os.WriteFile(filepath.Join(home, ".codex-global-state.json"), []byte(state), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := writeCodexTestRollout(t, home, remoteOther, cwd, "persona", "vscode", time.Now())
+	id := n.registerCodex(home, remoteOther, path)
+	_, err := request(t, n, "session.start", map[string]any{"resume_session_id": id})
+	if code, _ := refusalOf(t, err); code != "codex_read_only" {
+		t.Fatalf("resume of a sidebar-confirmed App thread = %v", err)
 	}
 }
 

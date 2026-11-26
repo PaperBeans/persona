@@ -19,6 +19,7 @@ import {
 } from "./launcher-models";
 import { canSwitchModel, isCurrentModel, namesWholeModel, rowModelIds, sessionLauncher } from "./model-switch";
 import { hasEffortOnly, hasModes } from "./session-actions";
+import { speedId } from "./session-speed";
 import type { Launcher, Session } from "./types";
 import { chosenManager, defaultKnown, defaultManager, onDefaultManager, onManagerChoice } from "./manager-choice";
 
@@ -415,7 +416,7 @@ export interface PillSetup {
   /** The model's name; absent while not known (no reply yet and no list to say what the launcher runs by default). */
   model?: string;
   effort?: string;
-  fast?: boolean;
+  speed?: string;
 }
 
 /** What the pill says: the engine, the launcher and the model the session runs (its list's name for it once read), the
@@ -460,7 +461,7 @@ export function pillView(s: Session, e: ModelList, displayModel?: string): PillV
   const out: PillView = { ...pillModel(currentModelRow(e.list?.models ?? [], active), active), engine: sessionEngine(s), provider: sessionLauncher(s), loading: e.list === undefined && Boolean(e.loading), failed: e.list === undefined && Boolean(e.error) };
   if (s.agent_label) out.engineLabel = s.agent_label;
   if (s.effort) out.effort = s.effort;
-  if (s.service_tier === "priority") out.fast = true;
+  if (s.service_tier) out.speed = speedId(s.service_tier);
   return out;
 }
 

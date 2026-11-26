@@ -6,7 +6,7 @@
 import { sameManager } from "../../lib/manager-choice";
 import { BindSteps, ChannelLink } from "./Channels";
 import { Disclosure } from "./ProviderFields";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import { errorText } from "../../lib/api";
 import { connectorState, connectorSummary, signsInHere, connectorTone, isEnabled, larkcliOptions, listConnectors, setConnector, type ConnectorTone, type HubConnector } from "../../lib/connectors";
 import { t } from "../../i18n";
@@ -14,7 +14,7 @@ import { ago } from "../../lib/format";
 import { documentPage, visiblePoll } from "../../lib/visible-poll";
 import {
   botStateText, botStatus, botSummary, botTone, credentialsChanged, credentialsOf, credentialsUpdate, DEFAULT_FEATURES, DEFAULT_NUDGE_AFTER, livePairing, nudgeChoices, nudgeLabel, pairBot, pairingLeft,
-  featureEdit, testBot, unpairBot, updateBot, type BotCredentials, type BotFeatures, type FeishuBotStatus, type BotTopicChat,
+  featureEdit, testBot, unpairBot, updateBot, type BotCredentials, type BotFeatures, type FeishuBotStatus, type BotTopicChat, type TopicTodoMode,
 } from "../../lib/feishu-bot";
 import { Button, copyText, cx, Dialog, IconButton, Spinner, toast } from "../../ui/atoms";
 import { BrandMark } from "../../ui/BrandMark";
@@ -720,12 +720,34 @@ export function TopicGroups({ status, saving, save }: { status: FeishuBotStatus;
           {groups.map((g) => <option key={g.chat_id} value={g.chat_id}>{g.name || g.chat_id}</option>)}
         </select>
       </Row>
-      {groups.map((g) => (
-        <Row key={g.chat_id} label={g.name || g.chat_id} hint={t("settings-feishubot.topic_owner_mention")} wrapHint>
-          <Switch on={g.require_owner_mention ?? false} disabled={saving} label={t("settings-feishubot.topic_mention_for", { name: g.name || g.chat_id })}
-            onChange={(required) => void save(groups.map((item) => item.chat_id === g.chat_id ? { ...item, require_owner_mention: required } : item))} />
-        </Row>
-      ))}
+      {groups.map((g) => {
+        const group = g.name || g.chat_id;
+        return (
+          <Fragment key={g.chat_id}>
+            <Row label={group} hint={t("settings-feishubot.topic_owner_mention")} wrapHint>
+              <Switch on={g.require_owner_mention ?? false} disabled={saving} label={t("settings-feishubot.topic_mention_for", { name: group })}
+                onChange={(required) => void save(groups.map((item) => item.chat_id === g.chat_id ? { ...item, require_owner_mention: required } : item))} />
+            </Row>
+            {g.todo_mode !== undefined && (
+              <Row label={t("settings-feishubot.topic_todo_for", { name: group })} wrapHint stackOnNarrow>
+                <select aria-label={t("settings-feishubot.topic_todo_for", { name: group })} className={`${settingsInputClass} min-h-11`} disabled={saving} value={g.todo_mode}
+                  onChange={(e) => {
+                    const mode = e.target.value as TopicTodoMode;
+                    void save(groups.map((item) => ({
+                      ...item,
+                      home: undefined,
+                      todo_mode: item.chat_id === g.chat_id ? mode : undefined,
+                    })));
+                  }}>
+                  <option value="answer_only">{t("settings-feishubot.topic_todo_answer_only")}</option>
+                  <option value="main_decides">{t("settings-feishubot.topic_todo_main_decides")}</option>
+                  <option value="always_todo">{t("settings-feishubot.topic_todo_always")}</option>
+                </select>
+              </Row>
+            )}
+          </Fragment>
+        );
+      })}
       {adding ? (
         <div className="space-y-3 px-4 py-3">
           <label className="block text-label text-ink">{t("settings-feishubot.topic_group_id")}<input className={settingsInputClass} value={chatID} disabled={saving} onChange={(e) => setChatID(e.target.value)} /></label>

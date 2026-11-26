@@ -22,12 +22,10 @@ import (
 // plan's own todo_id, the todo a started task became, is the hub's to set, and the shallower field wins in JSON.
 type planTaskIn struct {
 	PlanTask
-	TodoID          string   `json:"todo_id"`
-	WritePrefixes   []string `json:"write_prefixes,omitempty"`
-	ForceParallel   bool     `json:"force_parallel,omitempty"`
-	ChangedFiles    []string `json:"changed_files,omitempty"`
-	UnlockStage     string   `json:"unlock_stage,omitempty"`
-	UnlockContracts []string `json:"unlock_contracts,omitempty"`
+	TodoID        string   `json:"todo_id"`
+	WritePrefixes []string `json:"write_prefixes,omitempty"`
+	ForceParallel bool     `json:"force_parallel,omitempty"`
+	ChangedFiles  []string `json:"changed_files,omitempty"`
 }
 
 // toolTaskPlanFrom is task_plan from the conversation sessionID running on machine (where its attachments are).
@@ -44,7 +42,6 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 	}
 	var a struct{ Tasks []PlanTask }
 	var plannedScopes []plannedWriteScopeInput
-	var plannedUnlocks []todoStageUnlockSpec
 	lead := "" // optional initial leader assignment; omission keeps the planning lead or main
 	if scope != nil {
 		tasks, err := scope.workerTasks(args)
@@ -53,7 +50,6 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		}
 		a.Tasks = tasks
 		plannedScopes = make([]plannedWriteScopeInput, len(tasks))
-		plannedUnlocks = make([]todoStageUnlockSpec, len(tasks))
 	} else {
 		var in struct {
 			Tasks      []planTaskIn `json:"tasks"`
@@ -75,10 +71,6 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 				WritePrefixes: t.WritePrefixes,
 				ChangedFiles:  t.ChangedFiles,
 				ForceParallel: t.ForceParallel,
-			})
-			plannedUnlocks = append(plannedUnlocks, todoStageUnlockSpec{
-				stage:     t.UnlockStage,
-				contracts: t.UnlockContracts,
 			})
 		}
 	}
@@ -114,7 +106,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		t.RetryFromAgent, t.RetryFromAllowAll = "", false // a new plan cannot import another retry's provenance
 		t.normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
 		t.TodoID, t.Error, t.ErrorCode, t.ErrorArgs, t.RetryWith = "", "", "", nil, nil
-		t.HandoffID, t.HandoffOperationID = "", ""
+		t.HandoffID, t.HandoffOperationID, t.handoffLauncherSwitch = "", "", false
 		t.WorkspaceResolved, t.ReservedTodoID, t.WorkspaceInferred = nil, "", false
 		t.OwnerStarted = false // the hub's: only the owner's Start on the card sets it (startPlan)
 		t.MemoryTopic = nil    // the hub's: the plan's own confirmation decision sets it (below)
@@ -155,18 +147,13 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 				}
 				t.BlockedByPR = normPRs
 			}
-			if i < len(plannedUnlocks) {
-				normStage, normContracts, err := parseUnlockStageRule(plannedUnlocks[i].stage, plannedUnlocks[i].contracts)
-				if err != nil {
-					return "", fmt.Errorf("task %d: %w", i+1, err)
-				}
-				plannedUnlocks[i] = todoStageUnlockSpec{stage: normStage, contracts: normContracts}
+			t.UnlockStage, t.UnlockContracts, err = parseUnlockStageRule(t.UnlockStage, t.UnlockContracts)
+			if err != nil {
+				return "", fmt.Errorf("task %d: %w", i+1, err)
 			}
 		} else {
 			t.BlockedByPR = nil
-			if i < len(plannedUnlocks) {
-				plannedUnlocks[i] = todoStageUnlockSpec{}
-			}
+			t.UnlockStage, t.UnlockContracts = "", nil
 		}
 		if err := t.checkRole(scope != nil); err != nil {
 			return "", fmt.Errorf("task %d: %w", i+1, err)
@@ -300,7 +287,12 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		// resolved the actual landing machine and launcher (#12980).
 		if t.Continues != "" {
 			if prevTodo, ok := s.todoNow(t.Continues); ok {
-				providerSwitch := s.isProviderSwitchContinuation(ctx, prevTodo, t.Machine, resolvedLauncher)
+				targetAgent := ""
+				if fitOK {
+					targetAgent = fit.agent
+				}
+				sw := s.continuationSwitchKind(ctx, prevTodo, t.Machine, resolvedLauncher, targetAgent)
+				providerSwitch := sw.any()
 				if providerSwitch {
 					if pred, ok := s.todoPredecessor(ctx, prevTodo); ok {
 						srcPerm := cmp.Or(pred.permission(), "default")
@@ -327,6 +319,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 				}
 				if providerSwitch {
 					t.HandoffOperationID = "op_" + randomHex(12)
+					t.handoffLauncherSwitch = sw.launcherChanged
 				}
 			}
 		}
@@ -345,16 +338,17 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 					t.Permission = "bypassPermissions"
 				}
 			}
-			// traex, omp…: no mode, no effort (launcher_modes.go). One the call names is refused now, rather than by
-			// the computer once the task starts; one a tier filled in is dropped. pi, cursor: dropped either way.
+			// Check the caller's choices before saving a plan for a launcher with limited start options.
 			if takesModes = startTakesModes(fit.agent); !takesModes {
 				if err := startModesRefused(cmp.Or(t.Launcher, resolvedLauncher), fit.agent, asked, own.effort); err != nil {
 					return "", fmt.Errorf("task %d: %w", i+1, err)
 				}
-				t.Effort = ""
 				if asked != "" { // a work agent's, not refused: the card shows none, as none will run
 					t.Permission = ""
 				}
+			}
+			if !startTakesEffort(fit.agent) {
+				t.Effort = ""
 			}
 		}
 		// Unset: settled on the computer it lands on, so the card shows what will run (tasks_permission.go). An agent
@@ -479,9 +473,6 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 	if err := s.savePlan(ctx, p); err != nil {
 		return "", err
 	}
-	if s.settings(ctx).todosV2On() {
-		s.rememberPlanUnlockRules(p.ID, plannedUnlocks)
-	}
 	// The plan goes in the item's body too: a client that missed the task_plan event (or raced it) still draws the
 	// card from the conversation itself.
 	if scope == nil {
@@ -522,12 +513,21 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		granted = func() func(PlanTask) bool { return s.scheduleGrantCover(ctx, round, machine, sessionID) }
 	}
 	// Only what the owner really has to approve waits on a card: confirmed words, a request gate, a cross-provider
-	// or cross-launcher continuation handoff (#12980), an explicit owner step, and an ordinary conversation's writable
-	// work where the owner has not let such work start by itself.
+	// or cross-launcher continuation handoff (#12980), an implicit health-detour or non-orchestrator cross-machine
+	// handoff, an explicit owner step, and an ordinary conversation's writable work where the owner has not let such
+	// work start by itself. Main chat and direction leaders explicitly moving a task to another owned machine on the
+	// same engine/launcher auto-start once continuation blockers and non-escalation checks pass (still recording an
+	// auditable TodoContextHandoff).
 	step := planOwnerStep(p.Tasks)
 	needsOwner := policy.ConfirmOutbound || step != "" ||
 		slices.ContainsFunc(p.Tasks, func(task PlanTask) bool {
-			return task.RequestGate != "" || task.HandoffOperationID != ""
+			if task.RequestGate != "" {
+				return true
+			}
+			if task.HandoffOperationID == "" {
+				return false
+			}
+			return task.handoffLauncherSwitch || task.Reroute != nil || !orchestrates
 		})
 	var autoStartReasons []string
 	if !needsOwner && !orchestrates {

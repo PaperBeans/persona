@@ -98,6 +98,28 @@ Use a new path in an existing local folder that supports hard links. The documen
 read and the file write succeed, and an existing file is never replaced. On platforms with Unix file permissions the
 file is created with owner-only access. The credential is sent only to the supplied hub and never added to the export.
 
+## Find and export a recording from the terminal
+
+Search for a meeting by its title or a phrase you remember hearing, then use the recording ID from the results to
+save its notes or a subtitle track. Use the same hub address and paired-device token as for conversation export.
+
+```sh
+personad recordings list --hub '<hub URL>' --token-file '<private token file>' --query 'design review'
+personad recordings export --hub '<hub URL>' --token-file '<private token file>' \
+  --output meeting.md '<recording ID>'
+personad recordings export --hub '<hub URL>' --token-file '<private token file>' \
+  --format vtt --output meeting.vtt '<recording ID>'
+```
+
+Omit `--query` to browse all recordings. Add `--json` for a script. The command can also read the paired-device
+token from `PERSONA_RECORDINGS_TOKEN`. Markdown includes the available notes and the timestamped transcript.
+WebVTT uses elapsed time from the beginning of the recording so captions line up with playback.
+
+Omit `--output` to print the document. For a file, choose a new name in an existing directory that supports hard
+links. The command publishes the completed export with owner-only file permissions on Unix. It can read stored
+recordings while the recording module is off. If the transcript has expired and the minutes are still available,
+export them as Markdown. A subtitle export requires retained transcript lines.
+
 ## Held Agent messages from the terminal
 
 Use `personad outbox` to check and recover messages waiting for one computer, even when the computer is offline or

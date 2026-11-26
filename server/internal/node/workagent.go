@@ -560,7 +560,11 @@ func (n *Node) workAgentCalls(ctx context.Context, method, id string, a host.Age
 	case "session.interrupt":
 		return okResult(n.sendKeys(ctx, a.PaneID, "escape")), nil, true
 	case "session.modes":
-		// Its mode is its start's flags, and its model and effort too; left to the Claude Code path, shift+tab would be
+		if a.Agent == agyAgent {
+			err := n.agyPaneModesCall(ctx, id, a, params)
+			return okResult(err), err, true
+		}
+		// Cursor's mode, model and effort are fixed at start; left to the Claude Code path, shift+tab would be
 		// pressed at a TUI that is not Claude Code's and fail as a 502. A launcher switch is taken before (node.go).
 		return nil, refusal(proto.CodeModesUnsupported, i18n.T(i18n.Default, "rpc-errors.modes_unsupported"), nil), true
 	default:

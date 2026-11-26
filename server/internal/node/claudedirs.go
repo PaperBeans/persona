@@ -51,9 +51,11 @@ type claudeDirs struct {
 // procEnv is what the scan keeps from a running claude's environment: its config directory, and the API endpoint
 // and model a launcher function exported (used to tell which launcher started a claude Persona did not start).
 type procEnv struct {
-	ConfigDir string // CLAUDE_CONFIG_DIR
-	BaseURL   string // ANTHROPIC_BASE_URL
-	Model     string // ANTHROPIC_MODEL
+	ConfigDir       string // CLAUDE_CONFIG_DIR
+	BaseURL         string // ANTHROPIC_BASE_URL
+	Model           string // ANTHROPIC_MODEL
+	FastUnavailable bool   // disabled by the environment or by a provider without fast mode
+	Vertex          bool
 	// From its command line, not its environment (offlauncher.go): Cmd says it was kept (not on Windows, scanClaudeProcesses), MCPConfig
 	// is then each --mcp-config value it was started with, NUL-separated ("" for none).
 	Cmd       bool
@@ -440,7 +442,7 @@ func (n *Node) refreshClaudeDirs() {
 	runs := map[string]claudeRun{}
 	twice := map[string]bool{}
 	for pid, e := range envs {
-		launcher := e.BaseURL != "" || e.Model != ""
+		launcher := e.BaseURL != "" || e.Model != "" || e.FastUnavailable || e.Vertex
 		if !launcher && !e.Cmd {
 			continue
 		}
@@ -524,6 +526,17 @@ func envVarRe(name string) *regexp.Regexp {
 }
 
 // parseProcEnv picks the variables procEnv keeps out of an environment listing.
+var (
+	disableFastRe = envVarRe("CLAUDE_CODE_DISABLE_FAST_MODE")
+	bedrockRe     = envVarRe("CLAUDE_CODE_USE_BEDROCK")
+	foundryRe     = envVarRe("CLAUDE_CODE_USE_FOUNDRY")
+	vertexRe      = envVarRe("CLAUDE_CODE_USE_VERTEX")
+)
+
+func claudeEnvFlag(value string) bool {
+	return slices.Contains([]string{"1", "true", "yes", "on"}, strings.ToLower(value))
+}
+
 func parseProcEnv(env string) procEnv {
 	get := func(re *regexp.Regexp) string {
 		if m := re.FindStringSubmatch(env); m != nil {
@@ -531,7 +544,11 @@ func parseProcEnv(env string) procEnv {
 		}
 		return ""
 	}
-	return procEnv{ConfigDir: get(claudeConfigEnvRe), BaseURL: get(anthropicBaseRe), Model: get(anthropicModelRe)}
+	return procEnv{
+		ConfigDir: get(claudeConfigEnvRe), BaseURL: get(anthropicBaseRe), Model: get(anthropicModelRe),
+		FastUnavailable: claudeEnvFlag(get(disableFastRe)) || claudeEnvFlag(get(bedrockRe)) || claudeEnvFlag(get(foundryRe)),
+		Vertex:          claudeEnvFlag(get(vertexRe)),
+	}
 }
 
 // scanClaudeProcesses maps this user's running claude processes to the variables procEnv keeps from their

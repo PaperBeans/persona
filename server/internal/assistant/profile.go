@@ -108,8 +108,9 @@ type Settings struct {
 	MainBackgroundFolded *bool `json:"main_background_folded,omitempty"`
 	// FoldRoutineRelayReplies opts the main chat into quiet completed relay reports when its background rounds fold.
 	FoldRoutineRelayReplies *bool `json:"fold_routine_relay_replies,omitempty"`
-	// MainCompactWindow: the compaction window, in tokens, the main conversation is held to when its launcher declares a
-	// larger one (#7314, main_compact_window.go); nil is 400000, 0 follows the launcher.
+	// MainCompactWindow: the compaction window, in tokens, the main conversation and each leader conversation are held to
+	// when their launcher declares a larger one (#7314, #15318, main_compact_window.go); nil is 400000, 0 follows the
+	// launcher.
 	MainCompactWindow *int `json:"main_compact_window,omitempty"`
 	// RecentTaskChats: the apps' sidebar Recent lists the chats a scheduled task or the background supervisor started
 	// too, by last activity with the others (#8324; since #6228 they are only in All chats). Display only, one value

@@ -16,13 +16,18 @@ The configs live outside the repo: releases run in a clean worktree (`docs/opera
 
 ## Naming and configuration
 
-Persona is the only supported spelling. The canonical binary is `personad`, the connector is `persona-link`, runtime state defaults to `~/.persona`, and build/deploy configuration defaults to `~/.config/persona/config.json`. `PERSONA_HOME` and `PERSONA_CONFIG` are the only brand-prefixed overrides. No previous-brand variable, directory, command or URL aliases are read or created.
+Use Persona names for new installs. The canonical binary is `personad`, the connector is `persona-link`, runtime state defaults to `~/.persona`, and build/deploy configuration defaults to `~/.config/persona/config.json`. Use `PERSONA_HOME` and `PERSONA_CONFIG` for explicit overrides. Existing installs can keep the service names, state roots and configuration supported by the [rolling-upgrade compatibility matrix](../protocol/rolling-upgrade-compatibility.md).
 
-See [the naming contract](rename.md) and [the approval-gated cutover](persona-cutover.md). Existing installations require explicit, one-time service/config/data/MCP migration before running this version. A source merge does not change live services. Back up and identify the actual storage first; two independent stores must never be merged automatically.
+The [in-place upgrade checklist](upgrade.md#in-place-upgrade-for-existing-installs) records the supported
+compatibility path and the checks to prepare for an existing install. It does not authorize a production
+update by itself; the production-authorization boundary remains unresolved in
+[#1102](https://github.com/nwverse/persona/issues/1102). The [historical cutover](persona-cutover.md)
+describes an earlier coordinated replacement and keeps its own prohibition. Preserve the active storage and
+select the intended root explicitly if there are two independent stores.
 
-Actual registered bundle / application IDs, App Groups, iCloud containers and keychain access groups come from private configuration and stay unchanged. Naming their carrier variables `PERSONA_*` does not change their values. Other runtime contracts, caches and persisted preferences need the cutover described above. The avatar model remains `persona`: the two bundled choices are Mochi (`persona`) and Milk Frog (`nwverse`); retired choices resolve to Mochi, see [Avatars](../apple/persona.md).
+Keep the registered bundle and application IDs, App Groups, iCloud containers and keychain access groups in the private configuration. The [naming contract](rename.md) describes the native compatibility path for persisted preferences and system identities. The avatar model uses `persona`. The two bundled choices are Mochi (`persona`) and Milk Frog (`nwverse`). Retired choices resolve to Mochi, as described in [Avatars](../apple/persona.md).
 
-The role-specific root resolver reads only canonical service definitions, including HOME-only environment-file overrides; it does not execute shell configuration or expose credentials. Missing required files fail closed. Queries are read-only, and `--prepare` initializes only the selected root without compatibility links.
+The role-specific root resolver reads installed systemd units and their root overrides. For a macOS hub, use the root from its actual LaunchAgent. See [Recover the runtime directory per service](rename.md#recover-the-runtime-directory-per-service). Queries are read-only and missing required files fail closed. `--prepare` initializes the selected root and can add the current-name alias for an existing default root under the former name.
 
 ## Who owns a setting
 
@@ -425,6 +430,11 @@ A manager's own sections of the configuration are in its `manager.json`, not in 
   never reopens the knowledge base: the import reads it again before every call, so `enabled: false` stops it before its next call.
   `kb.history` keeps only the switch and the pacing: which chats are read, how much of each and how far back (`history.<source>.back_days`) are the knowledge base's
   selection, which the manager keeps in its settings table, not here,
+  `lark_minutes` (the owner's Lark minutes and document titles through lark-cli, **off unless `enabled` is `true`**; `docs/assistant/knowledge.md` "Lark minutes and documents"):
+  `{"enabled": true, "since_days": 30, "interval_minutes": 60, "binary": "lark-cli", "profile": "", "doc_search": ["<keyword>"]}`. `since_days` is how far back each run searches (default 30),
+  `interval_minutes` the least time between two runs (default 60), `binary` lark-cli's path when the manager's `PATH` cannot find it (the adapter also tries the login shell's `PATH`),
+  `profile` a lark-cli profile (empty: its default), and `doc_search` the keywords that discover documents (empty: off). The import needs the user's own `lark-cli` login on the manager's computer (minutes, docs, drive scopes);
+  a failure is logged and never stops the round. Changing it does not reopen the knowledge base: it is read again every round.
   `ai` (model for compression and tagging, same fields as `ai`; defaults to `inbox.triage_ai`, then `ai`), `extra_dirs` (note directories you maintain on the manager's machine, the hub machine for the built-in manager,
   e.g. a git repo of facts / lessons: `kb_search` also searches Markdown in these directories (read-only, skips dot directories such as `.git`), and the assistant's CLAUDE.md mentions them; `~/` is that machine's home).
   Use `remote_folders` for named sources on other connected personal computers. See [Remote knowledge folders](../assistant/knowledge.md#remote-knowledge-folders-kbremote_folders) for fields and exclusions.

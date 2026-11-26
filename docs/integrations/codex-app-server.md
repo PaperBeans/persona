@@ -9,6 +9,12 @@ The source research behind it (2026-11-01: endpoints, thread and approval semant
 - **The writer lock is not a takeover protocol.** Codex keeps one writer per thread with a file lock under `<CODEX_HOME>/thread-writer-locks/`, and the lock points to no owner endpoint. The node never deletes it, never starts another app-server to resume a thread, and sends only to the one connected instance whose `thread/loaded/list` has the thread (`codexOwner`): none or several, and the thread is view only.
 - **An observer never answers on its own.** A server request goes to every subscriber and the first answer, or error, wins. Only the user's own answer on the card is sent: requests the node cannot show, and cards that are dismissed, expire or are withdrawn, get no reply at all, not an error or a decline, so the desktop keeps its chance to answer (`codex_remote_asks.go`). `serverRequest/resolved` only takes the card away; it never means approved.
 - **Listing is not joining.** `thread/loaded/list` and `thread/read` load nothing; `thread/resume` subscribes and can start queued work, so the node resumes a thread only when the user joins it or sends to it (or joined it before), never while it lists.
+- **A shared server's rollout stamp can name its first client.** On affected Codex versions, the first client to
+  initialize a shared app-server sets the process-wide originator. If the node connects first, an App client can
+  create a thread whose `session_meta` says `originator: "persona"` and `source: "vscode"` (#10438).
+  Check the same home's sidebar membership and the connected thread owner when tracing its route. A rollout with
+  only `session_meta` records a thread without a recorded first turn. The stamp cannot identify the client that
+  requested the thread. Persona's own App launcher uses a dedicated app-server with `originator: "persona_codex_app"`.
 - **Live work outranks completed history.** A connected, unambiguous owner's cached active or waiting state prevents the stale-rollout correction from marking a pane done. Paginated history may contain only older completed turns while a continuation runs; a late join need not have observed its turn ID. Completed history still corrects stale terminal activity once the owner finishes or disconnects (#8946).
 
 ## First implementation

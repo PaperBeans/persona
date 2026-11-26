@@ -1396,6 +1396,8 @@ func (s *Service) drainRelays(machine string, list []proto.Session) {
 			}
 			if retry > 0 {
 				s.drainAfterLocked(machine, id, retry)
+			} else if err != nil && !keep && !leaves && failure != relayFailedInDoubt && msg.Tool == extensionEventTool && relayRetryGap > 0 {
+				s.drainAfterLocked(machine, id, relayRetryGap)
 			}
 			b.mu.Unlock()
 			if len(replay) > 0 {

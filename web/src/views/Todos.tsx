@@ -58,6 +58,7 @@ import {
   todoDueText,
   shownStatus,
   strikesThrough,
+  todoRestLook,
   todoStatus,
   unlinkAgentFromTodo,
   unlinkSpaceFromTodo,
@@ -2652,6 +2653,7 @@ const TodoListItem = memo(function TodoListItem({
   const openPR = todo.wait?.kind === "pr_merge" || legacyMerges.length > 0;
   // its state word and tone; a waiting one's say what it waits on, attention only on the owner (#11090)
   const look = todoLook(todo, status, view.wait);
+  const hasRestStatus = todo.wait != null || Boolean(todoRestLook(todo, status));
   // its steps as the hub counts them (#11858, lib/todo-steps.ts): in place of Not started, or after its Agent count
   const steps = goalSummary ? undefined : stepsWords(todo, status);
   const held = heldDelivery(todo);
@@ -3196,7 +3198,7 @@ const TodoListItem = memo(function TodoListItem({
             {/* its steps were handed out: what is next once they are all closed, else nothing about handing it over */}
             {!todo.done_at && activeCount === 0 && (steps?.tail !== undefined ? (
               steps.tail && <span className="truncate text-ink-3" data-testid="todo-steps-next">· {steps.tail}</span>
-            ) : !responsible ? (
+            ) : !responsible && !hasRestStatus ? (
               <span className="truncate text-ink-3">· {t("todos.not_handed")}</span>
             ) : null)}
             {(section ?? view.section) === "just_done" && seenCanFile(todo) && onSeen ? (

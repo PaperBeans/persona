@@ -68,6 +68,10 @@ func (s *Service) inboxRoutes() {
 		var c InboxItem
 		if ok {
 			c = it.shown()
+			if it.Source == "larkx" {
+				cutoff := time.Now().Add(-inboxKeepDone)
+				b.larkDuplicates(cutoff, b.listedDoneCut(cutoff, true), true).link(&c)
+			}
 		}
 		b.mu.Unlock()
 		if !ok { // a done item of the history memory no longer holds (inbox_history.go)
@@ -82,10 +86,16 @@ func (s *Service) inboxRoutes() {
 			apierr.Write(w, http.StatusNotFound, errNoInboxItem)
 			return
 		}
+		// Its knowledge base chat (kb_inbox.go), for the user's own apps.
+		var chat *inboxKBChat
+		if fullRole(r) {
+			chat = s.itemKBChat(r.Context(), &c)
+		}
 		apierr.WriteJSON(w, struct {
 			InboxItem
 			ReplyTarget *inboxMailTarget `json:"reply_target,omitempty"`
-		}{c, mailTarget(c)})
+			KBChat      *inboxKBChat     `json:"kb_chat,omitempty"`
+		}{c, mailTarget(c), chat})
 	})
 	s.handle("POST /api/v1/inbox/{id}/done", func(w http.ResponseWriter, r *http.Request) {
 		if !s.inboxUp(w, r) {
@@ -315,13 +325,16 @@ func (s *Service) inboxListAt(all bool) ([]InboxItem, time.Time) {
 	now := time.Now()
 	cutoff := now.Add(-inboxKeepDone)
 	cut := b.listedDoneCut(cutoff, all)
+	duplicates := b.larkDuplicates(cutoff, cut, all)
 	out := make([]InboxItem, 0, len(b.items))
 	for _, it := range b.items {
-		if !inboxShows(it, cutoff, cut, all) {
+		if duplicates.hidden[it.ID] || !inboxShows(it, cutoff, cut, all) {
 			continue
 		}
 		it.arrived(now)
-		out = append(out, it.listed())
+		item := it.listed()
+		duplicates.link(&item)
+		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return inboxListOrder(out[i].UpdatedAt, out[i].ID, out[j].UpdatedAt, out[j].ID) < 0

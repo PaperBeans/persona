@@ -150,6 +150,8 @@ export interface InboxItem {
   /** Only in GET /inbox/{id}, for a mail: whether the hub clipped the newest mail's text when it stored `context`.
    *  Absent: the hub does not know (or is from before it sent this). Read it through storedMailClipping (lib/mail-stored.ts). */
   mail_body_truncated?: boolean;
+  /** Only in GET /inbox/{id}: the knowledge base chat it came from, when there is one (#15356). */
+  kb_chat?: { id: string; path?: string } | null;
   agent?: InboxAgent;
   /** Deterministic PR/Issue auto-forward status and linked to-do metadata (#12492). */
   todo_forward?: InboxTodoForward;

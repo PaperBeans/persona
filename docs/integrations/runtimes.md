@@ -460,14 +460,16 @@ Lark tokens and gates. node drives it with calls the protocol already has:
 | node sends | With (all optional fields; runtimes that don't declare `caps.assistant` never receive them) |
 | --- | --- |
 | `session.start {cwd, assistant: true, supervision_instructions?}` | `cwd` is the assistant directory (`~/.persona/assistant`, containing bounded `AGENTS.md` / `CLAUDE.md` entry files, generated native rules and `.agents/skills/`); no `prompt`. The runtime reports this `cwd` for the chat's whole life (`runtime.sessions`, its cards), not where a tool's `cd` left the shell: the hub places assistant and health chats by that directory exactly (#2368). `supervision_instructions` is sent only when nonempty and the runtime also declared `caps.supervision_policy` (#11173) |
-| `session.send {session_id, text, images, client_msg_id, assistant: true, context, mode, memory_dir, supervision_instructions?}` | `context`: a `<persona-context>` block given to the model before the user's text (the live snapshot; the first message of a new chat also has memory and Lark notes), not shown in the chat, and left out of a message that is only a slash command (`/compact`, one line, no picture) so the runtime can run it: the snapshot goes with the next message, and after `/compact` in full; `mode`: Persona's permission mode (`default` / `acceptEdits` / `auto` / `plan` / `bypassPermissions`); `memory_dir`: the memory directory; `client_msg_id`: the id the message came with (the App's, a channel's), absent when it came without one: put it on the message's item, or leave the item without one, never another (`docs/protocol/protocol.md` "Matching pending messages"); `supervision_instructions`: sent only when the runtime declared `caps.supervision_policy` (always present, including explicit `""` to clear a prior role on demotion) |
+| `session.send {session_id, text, images, client_msg_id, assistant: true, context, mode, memory_dir, supervision_instructions?}` | `context`: a `<persona-context>` block given to the model (the live snapshot; the first message of a new chat also has memory and Lark notes), not shown in the chat, and left out of a message that is only a slash command (`/compact`, one line, no picture) so the runtime can run it: the snapshot goes with the next message, and after `/compact` in full. For an Antigravity native workflow command (`/boost`, `/teamwork`, `/swarm`, `/goal`, `/plan`, `/grill-me`, `/learn`, `/schedule`, `/browser`), `text` is already trimmed to start at byte 0, and the runtime puts its text block before images and the context resource last, so agy sees the command before Persona's context body. Other messages keep the context resource first; `mode`: Persona's permission mode (`default` / `acceptEdits` / `auto` / `plan` / `bypassPermissions`); `memory_dir`: the memory directory; `client_msg_id`: the id the message came with (the App's, a channel's), absent when it came without one: put it on the message's item, or leave the item without one, never another (`docs/protocol/protocol.md` "Matching pending messages"); `supervision_instructions`: sent only when the runtime declared `caps.supervision_policy` (always present, including explicit `""` to clear a prior role on demotion) |
 | `session.interrupt` | Stop on the phone; closing the assistant chat = stopping the running turn, the chat stays in the runtime |
 
 A **local** runtime can opt into `caps.assistant_environment`. Node then supplies `env` as an object mapping environment variable names to values on `session.start`, `session.send`, `session.modes`, and an assistant `session.fork`. This is the existing generic Assistant environment: the generated `assistant-bin` / `assistant-bins` command directory first on `PATH`, `PERSONA_ASSISTANT_BIN`, `PERSONA_SPACE`, non-proxied gate variables, and—for Auth-backed or relayed (`socket_env`) command gates—a session-scoped local gate proxy address in `base_env` reused idempotently per `(session, command)` across turns, mode changes, forks, interrupt-only assistant closes, and same-instance reconnects until an explicit runtime close, instance replacement, or disconnect past the reconnect grace window. It never contains Auth-held credentials, raw `socket_env` paths, a direct upstream replacing their proxy address, or raw secret references; the node's gate proxy injects credentials and enforces gate and space rules. Missing credentials stay absent rather than substituting the raw configuration. For eligible static proxy-authenticated Lark send/reply commands routed through `assistant_command_gate`, node also declares `editable_text`, applies edited Allow answers by rewriting the JSON body inside `gateProxy` (bound once to the unmodified original request), preserves detached `pending: true` dismissals so the runtime cancels the turn cleanly without executing or retrying, and returns explicit owner deny notes (without `reason: "gate_rule"`) so Antigravity can deliver them as a refusal follow-up after the turn ends.
 
 Apply a snapshot only when spawning that conversation's **dedicated Assistant worker**. Keep it with the conversation for an idle/crash replacement and use the newest supplied snapshot for the next worker; changing an already-running process's environment is neither required nor possible. Never put it on the companion, model probes, or the shared ordinary-Agent worker, and never log its values. Runtimes without the capability and daemon / remote runtimes receive no `env` field. Their wire contract and gate-only credential boundary stay unchanged.
 
-Antigravity sends `context` as an ACP embedded text resource before the separate user text block. Plain text blocks
+Antigravity sends `context` as an ACP embedded text resource before the separate user text block, except for its
+native workflow commands: there the text block comes first and the resource comes after any images and the
+refused-image notice. Plain text blocks
 are subject to native slash-command expansion, so auxiliary context must not use that channel, even in its own block.
 An explicit standalone command still uses a plain text block without context.
 Antigravity natively loads the generated flat `.agents/rules/` files with `trigger: always_on` on every turn. Other
@@ -593,17 +595,24 @@ roster to that response. A running worker in `working` or `mentions` wake mode s
 respectively. Stopped and killed workers show as Stopped. The overview shows the worker count and an expandable
 roster. The coordinator and board messages are outside that count.
 
-Assistant context remains an ACP embedded text resource followed by the user's separate text block (#12435).
-Antigravity exports that resource as a leading `Content of persona-context:///snapshot.txt:` line and context XML
-inside `USER_INPUT.content`. Both the companion and pane history readers remove the complete leading Persona resource
-envelope before projecting user text (#12813). Bare labels, other URI schemes and ordinary quoted text retain their
-existing behavior. History format versions invalidate cached items from before this cleanup; native exports and ACP
-payloads are unchanged.
+Assistant context remains an ACP embedded text resource (#12435). Antigravity exports that resource as a
+`Content of persona-context:///snapshot.txt:` line and context XML inside `USER_INPUT.content`: before the user's text
+for ordinary prompts, after it for a native workflow command. Both the companion and pane history readers remove the
+complete leading or trailing Persona resource envelope before projecting user text (#12813). A complete trailing
+envelope may contain literal `<persona-context>` tags and attributed recovery / skill-instruction blocks; malformed or
+whitespace URIs, bare labels, other URI schemes and ordinary quoted text retain their existing behavior. If ordinary
+prose follows a resource, only the envelope is removed and the prose stays. History format
+versions invalidate cached items from before this cleanup; native export contents are unchanged, while the ACP block
+order differs only for the workflow commands above.
 
 The session's `last_text` preview contains assistant response text after the latest explicit user input. A new user
 input clears the previous reply preview, including input with no visible text. Thinking and tool records leave it empty
 until the assistant writes response text. This keeps user-authored questions out of awaiting-reply detection while
 preserving genuine assistant questions. User messages and tool records remain available in the conversation items.
+
+A row may report a long `title` or `last_text` (a whole opening prompt, a whole reply): the node lists the row with the
+title cut to 256 characters and `last_text` to 200, as it cuts its own rows, after reading the question a long reply
+ends with into `asks` (#16343). The conversation items keep the whole text.
 
 agy leaves print-mode (`agy -p`) conversations untitled. Before falling back to the folder name, the session title uses
 the first non-empty line of the cached metadata `summary.Preview`, with agy's request wrapper and Persona's context
@@ -833,7 +842,9 @@ end, and following user-input count are checked against `GetCascadeTrajectory`. 
 identifies its loopback native service. `RevertToCascadeStep` receives `conversationOnly: true` and the preceding step
 index, including `-1` for an empty conversation. Native refusal propagates to the caller. The bridge uses the current
 native summary and replacement step indices to discard the abandoned export tail, then publishes a changed history
-token. This survives companion restarts without modifying native transcript files.
+token. This survives companion restarts without modifying native transcript files. When the export instead numbers
+later steps after the abandoned tail, they show behind the kept steps once `GetCascadeTrajectory` confirms them, and a
+later rewind cuts at the matching visible step (#14297).
 A reused lower index is not proof of a rewind: when the export goes past the replaced steps before the replacement run
 reaches their last index, another process wrote the same conversation. The bridge then keeps both runs, ordered by
 step index (old steps first), and changes the content revision (#14626). If the replacement run later exports an index
@@ -867,9 +878,9 @@ Daemon links allow the same event and prefix its session ID as usual. Runtime us
 
 A runtime with read-only access to a subscription's rate-limit windows calls `rt.usageWindows({provider, name, plan?, sampled_at, windows})`. Each window is `{label, window_minutes, used_percent, resets_at?, model?}`; timestamps are RFC3339, lengths are positive safe-integer minutes, percentages are finite numbers from 0 through 100, and one report has at most 32 windows. This is the same account shape that `docs/server/usage-windows.md` defines; it is separate from the per-request token counts above.
 
-The node advertises `usage_windows` only to runtimes on the local socket, not to daemons (their accounts must not be attributed to the node's machine). The SDK returns false while disconnected or with an older node and does not queue reports. A connected hub is not required because the node stores the snapshot locally. Reports replace the source named by the runtime id, so a companion restart does not duplicate its account. An older sample cannot replace a newer one; a valid empty `windows` array explicitly clears the source. The machine's existing `usage_windows` off switch rejects these reports too.
+The node advertises `usage_windows` only to runtimes on the local socket, not to daemons (their accounts must not be attributed to the node's machine). The SDK returns false while disconnected from the node or with an older node and does not queue reports. The runtime host forwards reports to the node serving the hub connection, where they are stored in memory. Reports replace the source named by the runtime id, so a companion restart does not duplicate its account. An older sample cannot replace a newer one; a valid empty `windows` array explicitly clears the source. The machine's existing `usage_windows` off switch rejects these reports too.
 
-Antigravity implements this source with a running ACP worker's native `RetrieveUserQuotaSummary` method and `forceRefresh: false`, sampling when a session opens, a turn completes, or the node reconnects while a worker is already live (#15253). It never spawns an idle `agy acp` process just to read quota, does not extend a worker's idle timer, and does not read the status-line command's account fields, invoke an account API itself, or start a model request.
+Antigravity samples quota through `RetrieveUserQuotaSummary` with `forceRefresh: false` when an ACP session opens or a turn completes. On hub connect it republishes a sample less than five minutes old or checks a live worker, then refreshes the session list. Session listing can launch a shared worker if it sees a running native conversation or one updated in the past 20 minutes and needs a fresh sample (#16118). Concurrent reads share one attempt, and failures wait five minutes before retrying. A quota read leaves the idle timer alone, and a worker launched just to read quota retires after the normal five minutes of idle time. Idle computers with no recent conversation activity keep the default of no background quota worker (#15253).
 
 ### Shared runtime behavior
 

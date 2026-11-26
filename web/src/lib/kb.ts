@@ -340,6 +340,23 @@ export interface KBDetailResponse {
   detail: KBDetail;
   agents?: Session[] | null;
   matches?: KBMatch[] | null;
+  /** chats: the chat's Inbox items (#15356, docs/assistant/knowledge.md "A chat's Inbox items"); absent: none. */
+  inbox?: KBInboxItem[] | null;
+}
+
+/** An Inbox item a chat's page lists: what its row draws, and `messages`, the rows of the page's `recent` it holds,
+ *  each by its day and its lines as written there (the hub matched them on time, sender and text). */
+export interface KBInboxItem {
+  id: string;
+  title: string;
+  tier?: string;
+  /** an open item's section (action, working, fyi, noise) as the Inbox has it */
+  status?: string;
+  summary?: string;
+  preview?: string;
+  updated_at: string;
+  done_at?: string | null;
+  messages?: { day: string; line: string }[] | null;
 }
 
 /** One entry a search found (`/kb-search?results=1`): how many lines matched and the first few. */
@@ -898,6 +915,24 @@ export function parseRecent(text?: string): RecentDay[] {
   }
   flush();
   return out.filter((d) => d.messages.length);
+}
+
+/** What a row of a chat's recent messages goes by: its day and the row as parseMessageLine reads it. */
+export function messageRowKey(day: string | null, m: MessageLine): string {
+  return [day ?? "", m.time, m.sender, m.text].join("\u0000");
+}
+
+/** The Inbox item each row of a chat's recent messages belongs to, by messageRowKey: a row an item's `messages` names,
+ *  read as parseRecent reads it (the first item naming it, the newest, when two do). */
+export function inboxOfRows(items: readonly KBInboxItem[] | null | undefined): Map<string, KBInboxItem> {
+  const out = new Map<string, KBInboxItem>();
+  for (const it of items ?? []) {
+    for (const m of it.messages ?? []) {
+      const key = messageRowKey(m.day, parseMessageLine(m.line));
+      if (!out.has(key)) out.set(key, it);
+    }
+  }
+  return out;
 }
 
 // ── Ask Persona ────────────────────────────────────────

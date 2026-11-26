@@ -56,6 +56,16 @@ function windowBackground(surface: "hub" | "setup" = "hub"): string {
   // Match the Web shell canvas and its prepaint background.
   return nativeTheme.shouldUseDarkColors ? "#0b0b0c" : "#f1f1f4";
 }
+function applySurfaceStyle(window: BrowserWindow, style: DesktopSurfaceStyle): void {
+  if (process.platform !== "darwin" || window.isDestroyed()) return;
+  if (style === "liquid-glass") {
+    window.setVibrancy("under-window");
+    window.setBackgroundColor("#00000000");
+  } else {
+    window.setVibrancy(null);
+    window.setBackgroundColor(windowBackground());
+  }
+}
 // Each hub window's routes wait until its page listens (page-routes.ts, #10282): no route is sent around them.
 const pageRoutes = new WeakMap<BrowserWindow, PageRoutes>();
 function openRoute(window: BrowserWindow | undefined, route: string): void {
@@ -196,6 +206,7 @@ async function showMain(): Promise<BrowserWindow | undefined> {
     title: "Persona",
     autoHideMenuBar: true,
     backgroundColor: windowBackground(),
+    ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 14, y: 19 } } : {}),
     webPreferences: {
       preload: join(import.meta.dirname, "preload.cjs"),
       contextIsolation: true,
@@ -213,6 +224,23 @@ async function showMain(): Promise<BrowserWindow | undefined> {
     },
   });
   mainWindow = current;
+  let surfaceStyle: DesktopSurfaceStyle = "default";
+  const readWindowChrome = (): DesktopWindowChrome => ({
+    unifiedTitlebar: process.platform === "darwin",
+    fullScreen: !current.isDestroyed() && current.isFullScreen(),
+    focused: !current.isDestroyed() && current.isFocused(),
+  });
+  const publishChrome = () => {
+    if (!current.isDestroyed()) current.webContents.send("desktop:window-chrome-changed", readWindowChrome());
+  };
+  current.on("enter-full-screen", publishChrome);
+  current.on("leave-full-screen", publishChrome);
+  current.on("focus", publishChrome);
+  current.on("blur", publishChrome);
+  const onThemeUpdated = () => {
+    if (!current.isDestroyed() && surfaceStyle === "default") current.setBackgroundColor(windowBackground());
+  };
+  nativeTheme.on("updated", onThemeUpdated);
   const routes = new PageRoutes(route => {
     if (!current.isDestroyed()) current.webContents.send("desktop:notification-open", route);
   });
@@ -257,6 +285,11 @@ async function showMain(): Promise<BrowserWindow | undefined> {
       current.focus();
       routes.open(route);
     }),
+    windowChrome: readWindowChrome,
+    setSurfaceStyle: style => {
+      surfaceStyle = style;
+      applySurfaceStyle(current, style);
+    },
   });
   const save = () => {
     if (current.isDestroyed() || current.isMinimized()) return;
@@ -279,7 +312,7 @@ async function showMain(): Promise<BrowserWindow | undefined> {
   // The island's state is this page's (#7669): once the page is gone (a hub change destroys this window, its renderer
   // crashed), the island forgets it, so nothing of this hub stays at the notch; a newer page's state stays.
   current.webContents.on("render-process-gone", () => island.forget(page));
-  current.once("closed", () => { removeIPC(); island.forget(page); if (mainWindow === current) mainWindow = undefined; });
+  current.once("closed", () => { nativeTheme.removeListener("updated", onThemeUpdated); removeIPC(); island.forget(page); if (mainWindow === current) mainWindow = undefined; });
   if (owner) {
     await applySessionPin(current, owner);
     const targetURL = pendingInitialURL && pendingInitialURL.origin === owner.url.origin && inHub(owner, pendingInitialURL.href)
@@ -586,4 +619,5 @@ app.on("window-all-closed", () => {
 
 // Developing Persona (#9675): the shell's own record while the page's switch is on (dev-diagnostics.ts).
 import { installDevDiagnostics } from "./dev-diagnostics.js";
+import type { DesktopSurfaceStyle, DesktopWindowChrome } from "../../spec/desktop-bridge.js";
 installDevDiagnostics();

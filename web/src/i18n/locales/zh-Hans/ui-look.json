@@ -41,5 +41,9 @@
   "font_unavailable": "此字体可能不可用。选择会保留，并继续使用后备字体。",
   "font_local": "使用此电脑已安装的一个字体，不会下载字体。",
   "sidebar_usage": "侧栏启动器额度",
-  "sidebar_usage_hint": "在侧栏底部显示各启动器剩余额度的卡片。仅保存在此浏览器。"
+  "sidebar_usage_hint": "在侧栏底部显示各启动器剩余额度的卡片。仅保存在此浏览器。",
+  "surface_style": "窗口外观风格",
+  "surface_style_hint": "默认保持经典实色界面；「液态玻璃」开启半透磨砂层与桌面光影折射（macOS 桌面端支持底层通透）。仅保存在此浏览器。",
+  "surface_default": "默认",
+  "surface_liquid_glass": "液态玻璃"
 }

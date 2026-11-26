@@ -477,9 +477,20 @@ func echoLiteralFits(literal string, line []proto.Item) bool {
 	return len([]rune(literal)) == echoTextLen && len(words) >= len(sent) && string(words[:len(sent)]) == string(sent)
 }
 
+// isCompactSend reports whether s is a /compact slash command (bare or with instructions), without matching
+// unrelated commands that share the prefix (such as /compact-other).
+func isCompactSend(s string) bool {
+	s = transcript.StripInterject(s)
+	for _, re := range echoDropped {
+		s = re.ReplaceAllString(s, "")
+	}
+	f := strings.Fields(s)
+	return len(f) > 0 && f[0] == "/compact"
+}
+
 // echoFits: the line's words are what was typed — the same, or for a long text the same start. A message of only
-// pictures fits a line with none; a bare command fits the command with the arguments picked for it; /compact fits the
-// notice it became.
+// pictures fits a line with none; a bare command fits the command with the arguments picked for it; /compact (with or
+// without instructions) fits the notice it became.
 func echoFits(r *echoRecord, line []proto.Item) bool {
 	if r.Literal != "" {
 		return echoLiteralFits(r.Literal, line)
@@ -503,13 +514,13 @@ func echoFits(r *echoRecord, line []proto.Item) bool {
 			words, user = append(words, echoWords(it.Text)...), true
 		case it.Role == "user" && it.Kind == proto.KindImage:
 			user = true
-		case it.Role == "system" && it.Kind == proto.KindNotice:
+		case it.Role == "system" && it.Kind == proto.KindNotice && it.Text == transcript.CompactNotice:
 			notice = true
 		}
 	}
 	sent := echoWords(r.Text)
 	if !user {
-		return notice && string(sent) == "/compact"
+		return notice && isCompactSend(r.Text)
 	}
 	if len(sent) == 0 {
 		return r.Images > 0 && len(words) == 0

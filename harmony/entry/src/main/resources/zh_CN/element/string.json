@@ -1545,6 +1545,18 @@
       "value": "无法保存附件"
     },
     {
+      "name": "chat_attachment_photos_count_as_files",
+      "value": "照片数量超过单条消息上限，部分照片已作为文件发送。"
+    },
+    {
+      "name": "chat_attachment_photos_size_as_files",
+      "value": "照片大小超过单条消息上限，部分照片已作为文件发送。"
+    },
+    {
+      "name": "chat_attachment_photos_count_size_as_files",
+      "value": "照片数量和大小超过单条消息上限，部分照片已作为文件发送。"
+    },
+    {
       "name": "chat_attachment_limit_reached",
       "value": "附件数量已达上限"
     },

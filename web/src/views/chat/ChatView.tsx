@@ -26,7 +26,7 @@ import { useRuntimeSession } from "../../lib/runtime-session";
 import { ArchivedNotice, SessionDetailNotice } from "../../ui/SessionDetailNotice";
 import { isBackgroundSupervisor } from "../../lib/background-supervisor";
 import { getSession, getState, hubHas, listenSession, refresh, refreshTodos, saveMutes, upsertSession, useStore, viewSession } from "../../lib/store";
-import { codexThreadOf, waitsForFirstMessage } from "../../lib/codex-waiting";
+import { useCodexThread, waitsForFirstMessage } from "../../lib/codex-waiting";
 import { foldRows } from "../../lib/folded-rows";
 import { PREVIEW_FEATURE } from "../../lib/preview-link";
 import { buildTaskIndex, loopCadence, loopNext, stableSubagents, STOP_LOOP_MESSAGE, subagentCall, subagentCardKey, subagentTitle, terminalCalls, type TaskIndex } from "../../lib/tasks";
@@ -434,7 +434,7 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
   useEffect(() => {
     if (waitsFirst && session) setWaitingRow(session);
   }, [waitsFirst, session]);
-  const becameThread = useStore((s) => (waitingRow && waitingRow.session_id === sid ? codexThreadOf(s.sessions[mid] ?? [], waitingRow)?.session_id : undefined));
+  const becameThread = useCodexThread(waitingRow?.session_id === sid && waitingRow.machine_id === mid ? waitingRow : undefined);
   useEffect(() => {
     if (becameThread && inPage) navigate({ name: "session", mid, sid: becameThread }, true);
   }, [becameThread, inPage, mid]);

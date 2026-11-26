@@ -5834,10 +5834,10 @@ struct Composer: View, Equatable {
         }
     }
 
-    /// /clear only for Claude in a herdr pane (the headless assistant and Codex / TRAE CLI have no such command here).
+    /// The terminal /clear command belongs to Claude Code panes.
     private var canClear: Bool {
         guard let s = model.session(key) else { return false }
-        return s.canSend && s.canTerminal && s.paneID != nil && !s.isCodex && !s.isTraex
+        return SessionModes.paneClaude(s)
     }
 
     private var allowsSend: Bool {
@@ -5883,13 +5883,12 @@ struct Composer: View, Equatable {
     /// The launcher's list behind this session's model menus once read (#3754); nil: the fixed aliases.
     private var runningModels: [AgentModel]? { RunningModelLists.shared.models(key, model.session(key)) }
 
-    /// The model menus offer models: Claude in a herdr pane (picks go as `/model`; Codex and TRAE CLI pick theirs in a
-    /// full-screen menu the phone cannot drive), and a session whose node takes the model (#6294, `capabilities.model`)
-    /// from its launcher's list once read. The "/" list's `/model` is narrower (`Session.takesModelCommand`).
+    /// An explicit model capability governs the picker (#6294). A node that takes picks offers its launcher's list once
+    /// read. Without that capability, only Claude Code panes get the terminal picker. The "/" list uses `takesModelCommand`.
     private var canPickModel: Bool {
         guard let s = model.session(key) else { return false }
         if s.capabilities?.model != nil { return SessionModes.offersModels(s, list: runningModels) }
-        return s.canSend && s.canTerminal && s.paneID != nil && !s.isCodex && !s.isTraex && !s.assistant
+        return SessionModes.paneClaude(s)
     }
 
     /// The main Persona conversation is named by the hub's assistant snapshot; leaders and other Assistant chats

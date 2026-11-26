@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { contrast, pageToken } from "./extension-theme";
 import {
   ACCENT_PRESETS, accentChoice, accentCSS, accentTokens, applyLook, personaAccent, PRESET_COLORS, savedPersonaAccent, setAccentChoice,
-  setExtensionThemeActive, setPersonaAccent, setTextSize, textSize,
+  setExtensionThemeActive, setPersonaAccent, setSurfaceStyle, setTextSize, surfaceStyle, textSize,
 } from "./look";
 
 const BACKGROUNDS = ["page", "canvas", "surface", "inset", "hover", "hover-2", "field"];
@@ -100,5 +100,25 @@ describe("字号", () => {
     setTextSize("standard");
     expect(localStorage.getItem("persona.text-size")).toBeNull();
     expect(document.documentElement.dataset.textSize).toBeUndefined();
+  });
+});
+
+describe("窗口外观风格", () => {
+  it("defaults to opaque default style and toggles opt-in liquid-glass cleanly", () => {
+    const setSurface = vi.fn();
+    Object.assign(window, { personaDesktop: { setSurfaceStyle: setSurface } });
+    expect(surfaceStyle()).toBe("default");
+    expect(document.documentElement.dataset.surfaceStyle).toBeUndefined();
+
+    setSurfaceStyle("liquid-glass");
+    expect(localStorage.getItem("persona.surface-style")).toBe("liquid-glass");
+    expect(document.documentElement.dataset.surfaceStyle).toBe("liquid-glass");
+    expect(setSurface).toHaveBeenLastCalledWith("liquid-glass");
+
+    setSurfaceStyle("default");
+    expect(localStorage.getItem("persona.surface-style")).toBeNull();
+    expect(document.documentElement.dataset.surfaceStyle).toBeUndefined();
+    expect(setSurface).toHaveBeenLastCalledWith("default");
+    delete (window as { personaDesktop?: unknown }).personaDesktop;
   });
 });

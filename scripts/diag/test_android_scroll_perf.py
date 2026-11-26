@@ -15,7 +15,7 @@ SAMPLE = 'Total frames rendered: 10\nJanky frames: 2\n90th percentile: 19ms\n'
 
 
 class AndroidScrollPerfTest(unittest.TestCase):
-    def run_scroll(self, output, *, failed_command=None, sample=SAMPLE):
+    def run_scroll(self, output, *, failed_command=None, command_exception=None, sample=SAMPLE):
         def adb(command, **kwargs):
             args = command[4:]
             stdout = ''
@@ -23,7 +23,10 @@ class AndroidScrollPerfTest(unittest.TestCase):
                 stdout = 'Physical size: 1080x2400'
             elif args[-1] == 'framestats':
                 stdout = sample
-            if failed_command and args[:len(failed_command)] == failed_command:
+            failed = failed_command is not None and args[:len(failed_command)] == failed_command
+            if command_exception is not None and (failed or failed_command is None):
+                raise command_exception
+            if failed:
                 if kwargs.get('check'):
                     raise subprocess.CalledProcessError(1, command)
                 return subprocess.CompletedProcess(command, 1, '')
@@ -74,14 +77,19 @@ class AndroidScrollPerfTest(unittest.TestCase):
             ({'failed_command': ['dumpsys', 'gfxinfo', 'test.app', 'reset']}, 'adb shell dumpsys failed'),
             ({'failed_command': ['input', 'swipe']}, 'adb shell input failed'),
             ({'failed_command': ['dumpsys', 'gfxinfo', 'test.app', 'framestats']}, 'adb shell dumpsys failed'),
+            ({'failed_command': ['dumpsys', 'gfxinfo', 'test.app', 'framestats'],
+              'command_exception': subprocess.TimeoutExpired(['adb', '-s', 'fixture'], 60)},
+             'adb shell dumpsys timed out after 60s'),
+            ({'command_exception': FileNotFoundError('adb')}, 'adb not found on PATH'),
             ({'sample': 'Total frames rendered: 0\nJanky frames: 0'}, 'gfxinfo did not report a usable frame sample'),
             ({'sample': 'Total frames rendered: 10'}, 'gfxinfo did not report a usable frame sample'),
         ):
             with self.subTest(args=args), tempfile.TemporaryDirectory() as directory:
                 output = Path(directory) / 'out.json'
                 output.write_text('existing report\n')
-                with self.assertRaisesRegex(SystemExit, error):
+                with self.assertRaisesRegex(SystemExit, error) as failure:
                     self.run_scroll(output, **args)
+                self.assertNotIn('fixture', str(failure.exception))
                 self.assertEqual(output.read_text(), 'existing report\n')
 
 

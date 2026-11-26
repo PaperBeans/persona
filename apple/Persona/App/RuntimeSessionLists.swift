@@ -156,6 +156,11 @@ import Observation
 
     func isPaged(_ group: String) -> Bool { lists[group]?.paged == true }
 
+    func hasCompleteSessions(_ group: String) -> Bool {
+        guard let list = lists[group] else { return false }
+        return list.loaded && !list.paged
+    }
+
     /// The current windows draw their own rows. An offline mark must reach them as well as the session index.
     func markSeen(_ keys: [SessionKey], model: AppModel) {
         guard !lists.isEmpty else { return }

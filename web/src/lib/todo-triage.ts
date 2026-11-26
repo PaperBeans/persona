@@ -3,7 +3,8 @@
 // never from what an agent says about itself. The rules are the SOP's table, in its order; the first that holds wins.
 
 import { acceptanceStands, decisionDismissed, latestReview, reviewState } from "./supervision";
-import { heldDelivery, isCancelled, openAsk, todoDueBy, todoStatus, waitsForOwner, type PRFacts, type SessionLookup, type Todo, type TodoStatus } from "./todos";
+import { heldDelivery, isCancelled, normalizedPR, openAsk, openMergePRs, PR_STATUS_FRESH_MS, todoDueBy, todoStatus, waitsForOwner, type PRFacts, type SessionLookup, type Todo, type TodoStatus } from "./todos";
+export { normalizedPR, openMergePRs, PR_STATUS_FRESH_MS };
 import { TODO_LIST_SECTIONS, TODO_REASONS } from "./todo-view-wire";
 
 /** Where a to-do shows: merge waits join explicit holds on the web (#9325); cancelled stays apart from Done (#5732). */
@@ -29,25 +30,6 @@ export function sectionStartsFolded(section: TriageSection, groups: readonly { l
     const outcome = group.lead.supervision?.state;
     return isCancelled(group.lead) || (group.lead.done_by !== "review" && group.lead.done_by !== "auto") || outcome === "accepted" || outcome === "cancelled";
   });
-}
-
-export const PR_STATUS_FRESH_MS = 15 * 60_000;
-
-export function normalizedPR(url: string | undefined): string {
-  return (url ?? "").trim().replace(/[#?].*$/, "").replace(/\/+$/, "").toLowerCase();
-}
-
-/** Its PRs with fresh facts saying open and non-draft: the current one first, then earlier ones newest first (#7935). */
-export function openMergePRs(todo: Todo, now: number): PRFacts[] {
-  const fresh = (f: PRFacts) => {
-    const checked = ms(f.checked_at);
-    return !!checked && now - checked >= 0 && now - checked <= PR_STATUS_FRESH_MS && f.state === "open" && !f.draft;
-  };
-  const out: PRFacts[] = [];
-  const current = todo.pr_status;
-  if (current && todo.pr_url && normalizedPR(todo.pr_url) === normalizedPR(current.url) && fresh(current)) out.push(current);
-  for (const f of todo.other_prs ?? []) if (normalizedPR(f.url) !== normalizedPR(todo.pr_url) && fresh(f)) out.push(f);
-  return out;
 }
 
 /** True only for a fresh open non-draft PR of the to-do with no active agent or owner decision. */

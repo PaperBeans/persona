@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/agentprompt"
 	"github.com/nwverse/persona/server/internal/compat"
 
 	"github.com/nwverse/persona/server/internal/apierr"
@@ -2262,14 +2263,20 @@ func (s *Service) TodoHandoff(ctx context.Context, h TodoHandoff) (TodoHandoffRe
 	}
 	text := h.Text
 	if strings.TrimSpace(text) != "" {
-		text = s.withTodoDecisions(ctx, h.TodoID, text)
+		var context []string
 		if h.New {
 			lead := ""
 			if t.Supervision != nil {
 				lead = t.Supervision.Supervisor
 			}
-			text = s.withProjectContextForTodo(ctx, h.MachineID, h.Cwd, lead, t, text) // a new agent: its project's background first
+			if background := s.projectBackgroundForTodo(ctx, h.MachineID, h.Cwd, lead, t, text); background != "" {
+				context = append(context, background)
+			}
 		}
+		if decisions := s.todoHandoffDecisionsContext(ctx, h.TodoID); decisions != "" {
+			context = append(context, decisions)
+		}
+		text = agentprompt.WithContext(h.Agent, text, strings.Join(context, "\n\n"))
 	}
 	res := TodoHandoffResult{Found: true, Title: t.Title, DoneAt: t.DoneAt, Text: text}
 	if t.DoneAt == nil && len(t.Images) > 0 {

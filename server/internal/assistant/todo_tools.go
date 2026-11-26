@@ -306,9 +306,28 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 		UnlockStage        string          `json:"unlock_stage"`
 		UnlockContracts    []string        `json:"unlock_contracts"`
 		RepositoryBindings json.RawMessage `json:"repository_bindings"`
+		TopicMessageID     string          `json:"topic_message_id"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("arguments: %w", err)
+	}
+	title := strings.TrimSpace(a.Title)
+	if title == "" {
+		return "", errors.New("title is required")
+	}
+	if a.TopicMessageID != "" {
+		if a.Due != "" || a.Remind != "" || a.Priority != "" || a.Project != "" || a.Kind != "" ||
+			a.Audience != "" || a.DirectionID != "" || a.PartOf != nil || a.After != nil || a.RepositoryBindings != nil {
+			return "", errors.New("creating a Lark topic to-do takes only title, notes and topic_message_id")
+		}
+		run, ok := s.decidingTopicRun(ctx, machine, self, a.TopicMessageID)
+		if !ok {
+			return "", errors.New("topic_message_id must identify a pending Lark topic message for this main conversation")
+		}
+		if ok, outcome, err := s.confirmOutbound(ctx, machine, self, "todo_create", "", title, args); err != nil || !ok {
+			return todoNotAllowed(outcome, err)
+		}
+		return s.larkModule().DecideTopicTodo(ctx, run, title, strings.TrimSpace(a.Notes))
 	}
 	bindings, err := parseCreateBindings(a.RepositoryBindings)
 	if err != nil {
@@ -316,10 +335,6 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 	}
 	if err := s.resolveCreateBindings(ctx, bindings); err != nil { // before the store, outside todos.writing
 		return "", s.taskRepositoryToolError(ctx, err)
-	}
-	title := strings.TrimSpace(a.Title)
-	if title == "" {
-		return "", errors.New("title is required")
 	}
 	kind, err := todoKind(a.Kind)
 	if err != nil {

@@ -217,10 +217,13 @@ func decoratedRow(t *testing.T, s *Service, row proto.Session) proto.Session {
 	return out[0]
 }
 
-// listedDecorated has the manager hear the node's row and the fake list it as the manager decorates it.
+// listedDecorated has the manager hear the node's row and the fake list it as the manager decorates it. It returns once
+// the manager has handled what the row shows: a turn that starts or ends runs on the fleet's queue after setSessions
+// returns, and a start handled after the test's next step would take back a done report made in that turn (#16579).
 func listedDecorated(t *testing.T, s *Service, f *fakeHub, row proto.Session) proto.Session {
 	t.Helper()
 	s.setSessions("box", []proto.Session{row})
+	waitFleetOrder(t, s)
 	d := decoratedRow(t, s, row)
 	f.setSessions("box", d)
 	return d

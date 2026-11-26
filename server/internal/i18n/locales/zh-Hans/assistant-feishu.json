@@ -133,6 +133,7 @@
   "thread_post_needs_dm": "{who} 需要你，已发到私聊",
   "thread_post_finished_anon": "有个 Agent 这一轮结束了",
   "thread_open_done": "已建待办「{title}」，交给主对话。",
+  "thread_decided": "已为这个话题创建待办「{title}」。",
   "thread_open_needs_text": "用一句文字说想做什么，我就给它建待办。只有图片或转发的话，没法给待办起名。",
   "thread_open_failed": "没能给这个话题建待办：{error}",
   "thread_open_no_main": "没能给这个话题建待办：主对话还不存在。先在 App 里打开一次主对话。",

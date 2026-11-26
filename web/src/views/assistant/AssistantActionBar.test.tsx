@@ -755,6 +755,34 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(entry("finished").textContent).toBe(`${label.finished}2`);
   });
 
+  it("shows the final Codex reply instead of startup progress on a finished task", async () => {
+    const startup = "Codex will start in the terminal to use the requested reasoning effort.";
+    const result = "The export now includes all rows.";
+    const delivered: Todo = {
+      id: "delivered", title: "Fix the export", origin: conversation, created_at: at, updated_at: at,
+      delivery: { state: "live", at },
+      agents: [{ machine_id: "demo", session_id: "export-worker", linked_at: at }],
+      supervision: {
+        supervisor: conversation,
+        progress: { kind: "progress", text: startup, at },
+      },
+    };
+    moreTodos = [delivered];
+    await act(async () => refreshTodos());
+    act(() => upsertSession({ machine_id: "demo", session_id: "export-worker", title: "Export worker", cwd: "/demo",
+      status: "idle", state: "unread", updated_at: at, last_text: result }));
+    act(() => entry("running").click());
+    const row = () => host.querySelector('[data-task-slot="task:delivered"]')?.textContent;
+    expect(row()).toContain(result);
+    expect(row()).not.toContain(startup);
+    act(() => putTodo({
+      ...delivered, done_at: at, supervision: { ...delivered.supervision!, state: "user_check",
+        reviews: [{ at, verdict: "accepted" }], progress: { kind: "done", text: "Verified against the source.", at } },
+    }));
+    await act(async () => entry("finished").click());
+    expect(row()).toContain("Verified against the source.");
+  });
+
   it("keeps reopened accepted work Working while its Agent runs again", () => {
     act(() => entry("running").click());
     act(() => putTodo({ ...todo, done_at: undefined, supervision: { ...todo.supervision!, state: "accepted", reviews: [{ at, verdict: "accepted" }] } }));

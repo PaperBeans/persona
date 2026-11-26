@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/nodeproto"
 )
 
 // Published is what the publisher put up, as a hub sees it. Nothing is signed (the user's call, docs/operations/hub-update.md
@@ -27,17 +29,27 @@ type Published struct {
 	Source      string
 }
 
-// Check reads latest.json from base (the publisher's dl/).
+// Check reads the full edition's latest.json from base (the publisher's dl/).
 func Check(ctx context.Context, client *http.Client, base string) (*Published, error) {
+	return CheckFeed(ctx, client, base, nodeproto.EditionFull)
+}
+
+// CheckFeed reads edition's own manifest from base (FeedName: latest.json, or the core's core-latest.json, which no
+// full install ever asks for) and takes it only when it says that edition, whatever the source serves under the name.
+func CheckFeed(ctx context.Context, client *http.Client, base string, edition nodeproto.Edition) (*Published, error) {
+	edition = edition.OrFull()
 	if base == "" {
 		return nil, errors.New("this personad has nowhere to look for releases")
 	}
-	data, err := get(ctx, client, strings.TrimSuffix(base, "/")+"/latest.json", 1<<20)
+	data, err := get(ctx, client, strings.TrimSuffix(base, "/")+"/"+FeedName(edition), 1<<20)
 	if err != nil {
 		return nil, err
 	}
 	m, err := ParseManifest(data)
 	if err != nil {
+		return nil, err
+	}
+	if err := m.ValidateEdition(edition); err != nil {
 		return nil, err
 	}
 	return &Published{Manifest: m}, nil
@@ -71,6 +83,13 @@ func Download(ctx context.Context, client *http.Client, base string, f File, dir
 	if f.Name == "" || filepath.Base(f.Name) != f.Name || strings.ContainsAny(f.Name, `/\`) {
 		return "", errors.New("invalid artifact name")
 	}
+	remotes := artifactNames(f.Name)
+	if f.Served != "" {
+		if filepath.Base(f.Served) != f.Served || strings.ContainsAny(f.Served, `/\`) {
+			return "", errors.New("invalid artifact name")
+		}
+		remotes = []string{f.Served} // an edition's own name: no older name stands in for it
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -84,7 +103,7 @@ func Download(ctx context.Context, client *http.Client, base string, f File, dir
 			case <-time.After(time.Duration(attempt) * 2 * time.Second):
 			}
 		}
-		for _, name := range artifactNames(f.Name) {
+		for _, name := range remotes {
 			err = fetchFile(ctx, client, strings.TrimSuffix(base, "/")+"/"+name, gz, f)
 			if !errors.Is(err, errNotFound) {
 				break
@@ -223,7 +242,12 @@ func CheckBinary(ctx context.Context, bin string, m *Manifest) error {
 	if want := releaseLine(m); got != want {
 		return fmt.Errorf("the new personad says %q, not %q", got, want)
 	}
-	return nil
+	// And it is the release's edition (m.Edition, which Check held to this build's own).
+	edition, ok := nodeproto.ParseEdition(m.Edition)
+	if !ok {
+		return fmt.Errorf("the release names an unknown edition %q", m.Edition)
+	}
+	return CheckEdition(bin, edition, "the new personad")
 }
 
 // versionOf is what bin's `version -v` says, trimmed.

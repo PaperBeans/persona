@@ -25,10 +25,11 @@ import (
 // older than usageHubMaxAge. Moved from the hub as it was; the hub relays the route (devicewire.UsageRoutes).
 
 const (
-	usageHubFresh      = 30 * time.Second // the merged answer stands this long for every app reading it
-	usageHubAsk        = 8 * time.Second  // per machine
-	usageHubStaleAfter = 30 * time.Minute // a sample older than this is shown as stale
-	usageHubMaxAge     = 3 * 24 * time.Hour
+	usageHubFresh           = 30 * time.Second // the merged answer stands this long for every app reading it
+	usageHubAsk             = 8 * time.Second  // per machine
+	usageHubStaleAfter      = 30 * time.Minute // a sample older than this is shown as stale
+	usageHubMaxAge          = 3 * 24 * time.Hour
+	usagePassResetTolerance = 60 * time.Second // reset-time jitter tolerance when matching a local sample to a pass-through extension row
 )
 
 // usageSource is a machine as the aggregator sees it.
@@ -197,10 +198,12 @@ func (u *usageWindowsHub) poll(ctx context.Context, sources []usageSource, now t
 // Codex samples are grouped by their account key and use the newest snapshot's windows. Samples without a key
 // stand on their own. Other providers group by a plan window length and reset second (or, for accounts with only
 // per-model windows, by model scope, window length and reset second across distinct reporting sources), except when a
-// gateway reports distinct accounts. Their windows are taken per length (and model) from the newest sample. Expired
-// windows and accounts with no live window are dropped. Samples older than usageHubMaxAge are dropped, and the
-// remaining samples are marked stale according to their source. Accounts show where they were seen and the gateway's
-// name when available. The most used accounts come first, stale ones last.
+// gateway reports distinct accounts. Pure-local samples whose active plan windows unambiguously match a pass-through
+// extension row (Pass) of the same canonical provider (except Antigravity, reconciled per window on display) are
+// folded into that extension row so the same subscription is not shown twice. Their windows are taken per length (and
+// model) from the newest sample. Expired windows and accounts with no live window are dropped. Samples older than
+// usageHubMaxAge are dropped, and the remaining samples are marked stale according to their source. Accounts show
+// where they were seen and the gateway's name when available. The most used accounts come first, stale ones last.
 func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAccount {
 	var live, passed []proto.UsageAccount
 	for _, a := range in {
@@ -435,6 +438,8 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 		out = append(out, acct)
 	}
 
+	out = mergeLocalIntoPassed(out, passed, now)
+
 	// Whatever still shares an id (two accounts with only per-model windows that reset together) is numbered in the
 	// order of where it was read, so that every id is a row of its own in the clients' lists (#1904).
 	sort.Slice(out, func(i, j int) bool {
@@ -471,6 +476,270 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 	}
 	sortUsageAccounts(out)
 	return append(out, passed...) // an extension's rows last, in the order it gave them
+}
+
+type passWindowRef struct {
+	index  int
+	resets time.Time
+}
+
+type passModelSlot struct {
+	model   string
+	minutes int
+}
+
+type passWindowIndex struct {
+	provider   string
+	plan       map[int]passWindowRef
+	multiPlan  map[int]bool
+	model      map[passModelSlot]passWindowRef
+	multiModel map[passModelSlot]bool
+}
+
+func indexPassWindows(a proto.UsageAccount, now time.Time) passWindowIndex {
+	provider := canonicalUsageProvider(a.Provider)
+	idx := passWindowIndex{provider: provider}
+	for i, w := range a.Windows {
+		if w.WindowMinutes <= 0 || w.ResetsAt == nil || !w.ResetsAt.After(now) {
+			continue
+		}
+		resets := *w.ResetsAt
+		if strings.TrimSpace(w.Model) == "" {
+			if idx.plan == nil {
+				idx.plan = make(map[int]passWindowRef, len(a.Windows))
+			}
+			if _, exists := idx.plan[w.WindowMinutes]; exists {
+				if idx.multiPlan == nil {
+					idx.multiPlan = map[int]bool{}
+				}
+				idx.multiPlan[w.WindowMinutes] = true
+				continue
+			}
+			idx.plan[w.WindowMinutes] = passWindowRef{index: i, resets: resets}
+			continue
+		}
+		if idx.model == nil {
+			idx.model = make(map[passModelSlot]passWindowRef, len(a.Windows))
+		}
+		slot := passModelSlot{model: usageWindowModelKey(provider, w.Model), minutes: w.WindowMinutes}
+		if _, exists := idx.model[slot]; exists {
+			if idx.multiModel == nil {
+				idx.multiModel = map[passModelSlot]bool{}
+			}
+			idx.multiModel[slot] = true
+			continue
+		}
+		idx.model[slot] = passWindowRef{index: i, resets: resets}
+	}
+	return idx
+}
+
+func withinPassResetTolerance(a, b time.Time) bool {
+	diff := a.Sub(b)
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff <= usagePassResetTolerance
+}
+
+func passWindowsMatch(local, pass passWindowIndex) bool {
+	if local.provider == "" || local.provider == antigravityUsageProvider || local.provider != pass.provider {
+		return false
+	}
+	if len(local.plan) == 0 || len(pass.plan) == 0 || len(local.multiPlan) > 0 || len(pass.multiPlan) > 0 {
+		return false
+	}
+	matched := false
+	for minutes, lw := range local.plan {
+		pw, ok := pass.plan[minutes]
+		if !ok {
+			continue
+		}
+		if !withinPassResetTolerance(lw.resets, pw.resets) {
+			return false
+		}
+		matched = true
+	}
+	if !matched {
+		return false
+	}
+	for slot, lw := range local.model {
+		pw, ok := pass.model[slot]
+		if !ok {
+			continue
+		}
+		if local.multiModel[slot] || pass.multiModel[slot] || !withinPassResetTolerance(lw.resets, pw.resets) {
+			return false
+		}
+	}
+	return true
+}
+
+func localPassConflict(a, b proto.UsageAccount, ia, ib passWindowIndex) bool {
+	if a.CodexAccountKey != "" && b.CodexAccountKey != "" && a.CodexAccountKey != b.CodexAccountKey {
+		return true
+	}
+	if a.Origin != "" && b.Origin != "" && sameMachineOtherOrigin(a.Origin, b.Origin) {
+		return true
+	}
+	for _, ma := range a.Machines {
+		if slices.Contains(b.Machines, ma) {
+			return true
+		}
+	}
+	for minutes, wa := range ia.plan {
+		wb, ok := ib.plan[minutes]
+		if !ok {
+			continue
+		}
+		if !withinPassResetTolerance(wa.resets, wb.resets) {
+			return true
+		}
+	}
+	for slot, wa := range ia.model {
+		wb, ok := ib.model[slot]
+		if !ok {
+			continue
+		}
+		if ia.multiModel[slot] || ib.multiModel[slot] || !withinPassResetTolerance(wa.resets, wb.resets) {
+			return true
+		}
+	}
+	return false
+}
+
+// mergeLocalIntoPassed folds pure-local accounts into matching extension pass-through rows when active plan windows
+// uniquely identify the same account. The extension row keeps its stable ID, display identity, window metadata and
+// ordering; local machines are merged into Machines (with Local set true) and the fresher non-stale reading wins, with
+// the extension winning ties. Ambiguous or conflicting matches stay separate, and Antigravity remains handled by
+// reconcileAntigravityUsage.
+func mergeLocalIntoPassed(out, passed []proto.UsageAccount, now time.Time) []proto.UsageAccount {
+	if len(out) == 0 || len(passed) == 0 {
+		return out
+	}
+	passIdx := make([]passWindowIndex, len(passed))
+	eligiblePass := false
+	for pi, p := range passed {
+		if isBalanceSample(p) || canonicalUsageProvider(p.Provider) == antigravityUsageProvider {
+			continue
+		}
+		idx := indexPassWindows(p, now)
+		if len(idx.plan) > 0 && len(idx.multiPlan) == 0 {
+			passIdx[pi] = idx
+			eligiblePass = true
+		}
+	}
+	if !eligiblePass {
+		return out
+	}
+
+	localIdx := make([]passWindowIndex, len(out))
+	passMatches := make(map[int][]int)
+	for li, a := range out {
+		if !a.Local || len(a.Sources) > 0 || isBalanceSample(a) || canonicalUsageProvider(a.Provider) == antigravityUsageProvider {
+			continue
+		}
+		idx := indexPassWindows(a, now)
+		if len(idx.plan) == 0 || len(idx.multiPlan) > 0 {
+			continue
+		}
+		localIdx[li] = idx
+		matchedPass := -1
+		ambiguous := false
+		for pi := range passed {
+			if !passWindowsMatch(idx, passIdx[pi]) {
+				continue
+			}
+			if matchedPass >= 0 {
+				ambiguous = true
+				break
+			}
+			matchedPass = pi
+		}
+		if matchedPass >= 0 && !ambiguous {
+			passMatches[matchedPass] = append(passMatches[matchedPass], li)
+		}
+	}
+	if len(passMatches) == 0 {
+		return out
+	}
+
+	consumed := make([]bool, len(out))
+	for pi, matchedLocals := range passMatches {
+		conflict := false
+		for i := 0; i < len(matchedLocals) && !conflict; i++ {
+			for j := i + 1; j < len(matchedLocals); j++ {
+				li, lj := matchedLocals[i], matchedLocals[j]
+				if localPassConflict(out[li], out[lj], localIdx[li], localIdx[lj]) {
+					conflict = true
+					break
+				}
+			}
+		}
+		if conflict {
+			continue
+		}
+		sort.SliceStable(matchedLocals, func(i, j int) bool {
+			ri := usageAccountReading(out[matchedLocals[i]], now)
+			rj := usageAccountReading(out[matchedLocals[j]], now)
+			if ri.stale != rj.stale {
+				return !ri.stale
+			}
+			if !ri.at.Equal(rj.at) {
+				return ri.at.After(rj.at)
+			}
+			return out[matchedLocals[i]].Origin < out[matchedLocals[j]].Origin
+		})
+
+		p := &passed[pi]
+		extReading := usageAccountReading(*p, now)
+		machines := slices.Clone(p.Machines)
+		for _, li := range matchedLocals {
+			consumed[li] = true
+			machines = append(machines, out[li].Machines...)
+		}
+		p.Local = true
+		p.Machines = uniqueSorted(machines)
+
+		best := out[matchedLocals[0]]
+		bestReading := usageAccountReading(best, now)
+		if bestReading.preferredTo(extReading) {
+			p.Windows = slices.Clone(p.Windows)
+			updated := make([]bool, len(p.Windows))
+			for _, li := range matchedLocals {
+				r := usageAccountReading(out[li], now)
+				if !r.preferredTo(extReading) {
+					break
+				}
+				for minutes, lw := range localIdx[li].plan {
+					if pw, ok := passIdx[pi].plan[minutes]; ok && !updated[pw.index] {
+						p.Windows[pw.index].UsedPercent = out[li].Windows[lw.index].UsedPercent
+						updated[pw.index] = true
+					}
+				}
+				for slot, lw := range localIdx[li].model {
+					if pw, ok := passIdx[pi].model[slot]; ok && !updated[pw.index] {
+						p.Windows[pw.index].UsedPercent = out[li].Windows[lw.index].UsedPercent
+						updated[pw.index] = true
+					}
+				}
+			}
+			var staleAt *time.Time
+			if best.StaleAt != nil {
+				t := *best.StaleAt
+				staleAt = &t
+			}
+			p.SampledAt, p.StaleAt, p.Stale, p.Problem = best.SampledAt, staleAt, bestReading.stale, best.Problem
+		}
+	}
+
+	kept := make([]proto.UsageAccount, 0, len(out))
+	for li, a := range out {
+		if !consumed[li] {
+			kept = append(kept, a)
+		}
+	}
+	return kept
 }
 
 func sortUsageAccounts(accounts []proto.UsageAccount) {

@@ -430,11 +430,10 @@ export function mergeInto(list: FeedItem[], items: FeedItem[]): FeedItem[] {
   return [...kept, ...fresh].sort((a, b) => (a.at === b.at ? a.id.localeCompare(b.id) : Date.parse(a.at) - Date.parse(b.at)));
 }
 
-/** A message card whose reply went out — from this card or from the inbox, on any device (the hub records it on the
- *  card): when, and what it said (a card sent before the hub recorded it: its draft). */
+/** When Persona sent a reply, and the actual text if the hub recorded it. */
 export function cardSent(it: FeedItem): { at: string; text: string } | undefined {
   const at = field(it, "sent_at");
-  return at ? { at, text: field(it, "sent") || field(it, "draft") || "" } : undefined;
+  return at ? { at, text: field(it, "sent") ?? "" } : undefined;
 }
 
 /** Handled elsewhere, not from this card (#4797): the hub's filed_at; a sent card is never filed. */

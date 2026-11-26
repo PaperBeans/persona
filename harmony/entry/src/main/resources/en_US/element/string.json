@@ -1545,6 +1545,18 @@
       "value": "Couldn’t save attachments"
     },
     {
+      "name": "chat_attachment_photos_count_as_files",
+      "value": "Some photos were sent as files because there were too many for one message."
+    },
+    {
+      "name": "chat_attachment_photos_size_as_files",
+      "value": "Some photos were sent as files because the message was too large."
+    },
+    {
+      "name": "chat_attachment_photos_count_size_as_files",
+      "value": "Some photos were sent as files because of the number and size of the photos."
+    },
+    {
       "name": "chat_attachment_limit_reached",
       "value": "Attachment limit reached"
     },

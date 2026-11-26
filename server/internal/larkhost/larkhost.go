@@ -192,6 +192,7 @@ type Layer interface {
 // apps show of it), what the core asks of it, and its records (Book), which the core's cards and the briefing's
 // waits still read.
 type Chat interface {
+	DecideTopicTodo(ctx context.Context, run channel.Run, title, notes string) (string, error)
 	// Message takes the owner's message (feishu.message); Action answers a press of one of the bot's cards
 	// (feishu.card_action, or a companion's), action being the owner's action for it; Owner is feishu.owner,
 	// Recalled feishu.recalled and View feishu.view.
@@ -467,6 +468,9 @@ func (None) AsksCatchUp(context.Context, map[string]bool)      {}
 // The chat without a channel: a bot switched off. Nothing is taken or answered, nothing waits, no target is set, and
 // its records are empty: what is kept in them is dropped.
 func (None) Message(context.Context, assistantwire.FeishuMessage) error { return nil }
+func (None) DecideTopicTodo(context.Context, channel.Run, string, string) (string, error) {
+	return "", ErrNoChannel
+}
 func (None) Action(context.Context, *botcard.CardAction, string) *botcard.CardResponse {
 	return nil
 }

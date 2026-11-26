@@ -511,7 +511,7 @@ func (h *Manager) botView(ctx context.Context) feishuBotView {
 		v.Pairing = &botPairView{Code: p.Code, ExpiresAt: p.Expires.Unix()}
 	}
 	for _, c := range s.TopicChats {
-		v.TopicChats = append(v.TopicChats, botChatView{ChatID: c.ChatID, Name: c.Name, AddedAt: c.At.Unix(), Home: c.ChatID == s.homeChat(), RequireOwnerMention: c.RequireOwnerMention})
+		v.TopicChats = append(v.TopicChats, botChatView{ChatID: c.ChatID, Name: c.Name, AddedAt: c.At.Unix(), Home: c.ChatID == s.homeChat(), RequireOwnerMention: c.RequireOwnerMention, TodoMode: c.TodoMode.Effective()})
 	}
 	botAppID := appID
 	b.mu.Unlock()
@@ -580,10 +580,11 @@ func (h *Manager) botRoutes(api *http.ServeMux) {
 			// An entry may carry home: true (the home topic group, "/topics home"); when no entry says anything about home,
 			// the one the list has stays.
 			TopicChats *[]struct {
-				ChatID              string `json:"chat_id"`
-				Name                string `json:"name"`
-				Home                *bool  `json:"home"`
-				RequireOwnerMention *bool  `json:"require_owner_mention"`
+				ChatID              string                       `json:"chat_id"`
+				Name                string                       `json:"name"`
+				Home                *bool                        `json:"home"`
+				RequireOwnerMention *bool                        `json:"require_owner_mention"`
+				TodoMode            *assistantwire.TopicTodoMode `json:"todo_mode"`
 			} `json:"topic_chats"`
 			// NudgeAfter is minutes before the one nudge under an unanswered card; 0 turns nudges off, absent leaves it.
 			// Read as raw JSON so that anything but a whole number in range gets the same answer (nudgeAfterValue).
@@ -641,7 +642,15 @@ func (h *Manager) botRoutes(api *http.ServeMux) {
 				if c.Home != nil {
 					keepHome = false
 				}
-				topics = append(topics, BotChat{ChatID: c.ChatID, Name: c.Name, Home: c.Home != nil && *c.Home})
+				chat := BotChat{ChatID: c.ChatID, Name: c.Name, Home: c.Home != nil && *c.Home}
+				if c.TodoMode != nil {
+					if !c.TodoMode.Valid() {
+						writeErr(w, http.StatusBadRequest, i18n.Err("hub-bots.topic_todo_mode_bad"))
+						return
+					}
+					chat.TodoMode = *c.TodoMode
+				}
+				topics = append(topics, chat)
 			}
 			// Everything is checked before anything is written: a list sent with a change that makes it impossible
 			// (a new App ID unpairs the owner) must not leave the rest of the request applied.

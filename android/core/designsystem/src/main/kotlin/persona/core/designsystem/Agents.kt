@@ -335,6 +335,7 @@ fun AgentSpaceHeader(
     menu: (@Composable () -> Unit)? = null,
     icon: PhIcon? = null,
     kind: String = stringResource(R.string.designsystem_space),
+    qualifier: String? = null,
 ) {
     val palette = PersonaTheme.palette
     val foldState = stringResource(if (folded) R.string.designsystem_folded else R.string.designsystem_expanded)
@@ -350,7 +351,14 @@ fun AgentSpaceHeader(
         icon?.let { JIcon(it, kind, size = Caret, tint = palette.ink2); Spacer(Modifier.width(Tokens.Space.xs)) }
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                title, style = if (quiet) type.callout else type.label, color = if (quiet) palette.ink2 else palette.ink,
+                buildAnnotatedString {
+                    append(title)
+                    if (qualifier != null) withStyle(SpanStyle(color = palette.ink3, fontWeight = FontWeight.Normal)) {
+                        append(" · ")
+                        append(qualifier)
+                    }
+                },
+                style = if (quiet) type.callout else type.label, color = if (quiet) palette.ink2 else palette.ink,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
             )
             flags.forEach { Spacer(Modifier.width(Tokens.Space.xs)); JIcon(it.icon, it.label, size = Caret, tint = palette.ink3) }

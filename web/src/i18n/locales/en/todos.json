@@ -168,7 +168,7 @@
   "thread_unbind_confirm": "Unbind the topic “{name}” from this to-do? Nothing in the topic is deleted. After this, the to-do's progress is no longer posted there, and replies there no longer reach this to-do.",
   "thread_unbound": "Topic unbound",
   "thread_unbind_failed": "Couldn't unbind: {error}",
-  "thread_empty": "No topic is bound to this to-do. Starting a topic in a group chat registered with /topics opens a new to-do and binds it; an Agent can also bind this to-do to a topic.",
+  "thread_empty": "No topic is linked to this to-do. An Agent can link it to a topic. To open a new to-do in a group registered with /topics, send /todo followed by what you want done.",
   "thread_mark": "Bound to a topic",
   "check_section": "Completion check",
   "check_action": "Check completion",
@@ -488,5 +488,13 @@
   "causal_trace_cat_blocker": "Blocker",
   "causal_trace_cat_recovery": "Recovery",
   "causal_trace_cat_review": "Review",
-  "causal_trace_cat_pr": "PR"
+  "causal_trace_cat_pr": "PR",
+  "status_pr_conflicts": "Merge conflicts",
+  "status_pr_changes_requested": "Changes requested",
+  "status_pr_checks_failed": "Checks failed",
+  "status_pr_in_review": "In review",
+  "status_pr_checks_pending": "Checks running",
+  "status_pr_waiting_merge": "Waiting to merge",
+  "status_parked": "Parked",
+  "status_tracking": "Tracking"
 }

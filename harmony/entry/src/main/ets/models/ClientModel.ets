@@ -35,7 +35,7 @@ import { HubTransport, EndpointConfig, HttpFailure } from '../platform/HubTransp
 import { CredentialVault } from '../platform/CredentialVault';
 import { LocalStore } from '../platform/LocalStore';
 import { HubRepository, segment } from './HubRepository';
-import { Wire, ResourceRow, ChatMessage, Decision, HubProfile, HeldAgentMessage } from './Wire';
+import { Wire, ResourceRow, ChatMessage, Decision, HubProfile, HeldAgentMessage, ImageLimits } from './Wire';
 import { tr, Strings } from '../design/Strings';
 import { withSourceContext, messageDisplay } from './Compatibility';
 import { MutationRecord, MutationStore } from './MutationStore';
@@ -100,6 +100,7 @@ export class ClientModel {
   @Trace managers: ResourceRow[] = [];
   @Trace rosterDefaultId: string = '';
   @Trace features: string[] = [];
+  @Trace private publishedImageLimits: Record<string, Object> = {};
   private helloHub: string = '';
   private helloScope: string = '';
   private helloGeneration: number = -1;
@@ -654,6 +655,7 @@ export class ClientModel {
     this.profile = profile; const scope = this.scope(); this.connected = false;
     this.clearPendingDecisions();
     this.unresolvedWrites = []; this.operationState = ''; this.mainId = ''; this.mainMachineId = ''; this.sidebarConfig = ''; this.features = []; this.managers = []; this.rosterDefaultId = '';
+    this.publishedImageLimits = {};
     this.demo = false; this.demoRepository = undefined; this.error = '';
     if (!keep) { this.sessionsReady = false; this.sessions = []; this.machines = []; this.conversations = []; this.todos = []; this.inbox = []; this.knowledge = []; this.messages = []; } this.selected = keep ? selection : new ResourceRow(); this.draftLoading = false;
     if (!keep && !this.detached) { this.directoryReady = false; this.directoryLoading = false; this.directoryUnavailable = 0; this.publishDirectory(); }
@@ -802,6 +804,7 @@ export class ClientModel {
       this.clearPendingDecisions();
       this.messages = []; this.draft = ''; this.sourceContext = ''; this.draftRevision = ''; this.localMessages = []; this.renderedMessages = []; this.echoedMessages.clear(); this.detail = ''; this.reply = ''; this.mainId = ''; this.mainMachineId = ''; this.sidebarConfig = '';
       this.unresolvedWrites = []; this.operationState = ''; this.notificationTarget = ''; this.draftLoading = false; this.features = []; this.error = '';
+      this.publishedImageLimits = {};
     }
     this.publishDirectory();
     try { await this.saveCleanup(); } catch (_) { this.error = 'cleanup_incomplete'; throw new Error('cleanup_incomplete'); }
@@ -843,6 +846,7 @@ export class ClientModel {
       if (type === 'tool_call') this.deviceEvent?.(payload);
       for (const listener of this.eventListeners) { try { listener(payload, type); } catch (_) {} }
       if (type === 'hello') {
+        this.publishedImageLimits = Wire.object(data, 'image_limits');
         this.features = Wire.strings(data, 'features'); this.connected = true; this.error = '';
         this.repository?.transport.hello(nativeNotifications.features(!this.detached && this.alerts));
         const generation = this.generation, scope = this.scope();
@@ -1114,6 +1118,12 @@ export class ClientModel {
   }
   private sessionRow(row: ResourceRow = this.selected): ResourceRow {
     return this.sessions.find((item: ResourceRow) => item.machine === row.machine && (item.session || item.id) === (row.session || row.id)) || row;
+  }
+  imageLimits(row: ResourceRow = this.selected): ImageLimits {
+    // A conversation carries its agent under `launcher`; with only `agent` read, an assistant conversation running
+    // codex fell back to claude's limits (review P1).
+    const data = this.sessionRow(row).data();
+    return ImageLimits.forAgent(this.publishedImageLimits, Wire.text(data, 'agent') || Wire.text(data, 'launcher'));
   }
   private heldMessages(row: ResourceRow = this.selected): HeldAgentMessage[] {
     if (row.kind !== 'session') return [];
@@ -1443,7 +1453,7 @@ export class ClientModel {
       if (admit && !admit() || !this.owns(generation, scope) || this.target() !== target || this.repository !== repo || this.draftRevision !== entry.revision || !this.canSend()) { feedback.finish(); this.feedbackChanged(); await store.settle(scope, entry.id, 'failed'); this.activeMessages.delete(entry.id); entry.state = 'failed'; if (this.owns(generation, scope) && this.target() === target) { this.operationState = 'failed'; this.error = 'request_updated'; this.publishMessages(); } return false; }
       this.localMessages = this.localMessages.concat([entry]); this.publishMessages();
       dispatched = true;
-      const reply = await repo.send(row, text, entry.id, '', images, (): boolean => (!admit || admit()) && this.owns(generation, scope) && this.target() === target && this.repository === repo && this.draftRevision === entry.revision && this.canSend());
+      const reply = await repo.send(row, text, entry.id, '', images, (): boolean => (!admit || admit()) && this.owns(generation, scope) && this.target() === target && this.repository === repo && this.draftRevision === entry.revision && !this.decision && this.canSend(), this.imageLimits(row).requestBytes);
       if (reply && Wire.text(reply,'delivered') === 'later') feedback.finish();
       else if (paired()) {
         const now = Date.now(); feedback.accept(now);
@@ -2006,6 +2016,7 @@ export class ClientModel {
   }
   useDemo(): void {
     this.ssh.stop(); this.stopReconnect(); this.cancelDraftTimer(); this.closeTranscript(); this.releaseTerminal(); this.retireViews(); this.repository?.close(); this.generation++; this.selectionGeneration++;
+    this.publishedImageLimits = {};
     this.demo = true; this.connected = true; this.profile = new HubProfile('demo', tr('local_demo')); this.profile.hubId = 'demo'; this.profile.manager = 'demo';
     this.sendAttempts.clear(); this.feedbackChanged();
     this.demoRepository = new DemoRepository(this.local); this.repository = this.demoRepository;

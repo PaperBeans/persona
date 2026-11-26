@@ -113547,6 +113547,28 @@
       },
       "extractionState": "manual"
     },
+    "New Agent in %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Agent in %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ にエージェントを作成"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在%@中新建 Agent"
+          }
+        }
+      }
+    },
     "New Agent [Mac Quick Open 0587b9]": {
       "localizations": {
         "en": {
@@ -240676,6 +240698,248 @@
           "stringUnit": {
             "state": "translated",
             "value": "收尾"
+          }
+        }
+      }
+    },
+    "kept forever": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "kept forever"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無期限に保存"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "永久保留"
+          }
+        }
+      }
+    },
+    "kept for %lld days": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "kept for %1$lld day"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "kept for %1$lld days"
+                }
+              }
+            }
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld日間保存"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留 %lld 天"
+          }
+        }
+      }
+    },
+    "This meeting's audio, Talk included, goes through your hub to %@. The hub deletes the audio once the minutes are written; the text in Knowledge is %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This meeting's audio, Talk included, goes through your hub to %1$@. The hub deletes the audio once the minutes are written; the text in Knowledge is %2$@."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この会議の音声は（「話す」を含め）ハブを経由して %1$@ に送られます。議事録ができるとハブは音声を削除します。ナレッジのテキストは%2$@されます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这场会议的音频（包括“说话”）会经你的 hub 发送到 %1$@。会议纪要写好后，hub 会删除这段音频；知识库中的文字会%2$@。"
+          }
+        }
+      }
+    },
+    "This meeting's audio, Talk included, goes through your hub to the speech service it is set up with. The hub deletes the audio once the minutes are written; the text in Knowledge is %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This meeting's audio, Talk included, goes through your hub to the speech service it is set up with. The hub deletes the audio once the minutes are written; the text in Knowledge is %@."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この会議の音声は（「話す」を含め）ハブを経由して、ハブに設定された音声サービスに送られます。議事録ができるとハブは音声を削除します。ナレッジのテキストは%@されます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这场会议的音频（包括“说话”）会经你的 hub 发送到它配置的语音服务。会议纪要写好后，hub 会删除这段音频；知识库中的文字会%@。"
+          }
+        }
+      }
+    },
+    "Audio stays on this iPhone, except while Talk is on: what is said then goes to the voice service. Its text syncs to Knowledge and is %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio stays on this iPhone, except while Talk is on: what is said then goes to the voice service. Its text syncs to Knowledge and is %@."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「話す」がオンの間、話した内容は音声サービスに送られます。それ以外の音声はこのiPhoneに残ります。テキストはナレッジに同期され、%@されます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Talk 开启时，说出的内容会发到语音服务，音频平时留在这台 iPhone 上。文字会同步到知识库，%@。"
+          }
+        }
+      }
+    },
+    "Audio stays on this device. Its text syncs to Knowledge and is %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio stays on this device. Its text syncs to Knowledge and is %@."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音声はこのデバイスに残り、テキストはナレッジに同期され、%@されます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音频保留在本机，文字会同步到知识库，%@。"
+          }
+        }
+      }
+    },
+    "This meeting's audio also went through your hub to its speech service; the hub deletes that audio once the minutes are written. Audio on this device is %@. Its text in Knowledge is %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This meeting's audio also went through your hub to its speech service; the hub deletes that audio once the minutes are written. Audio on this device is %1$@. Its text in Knowledge is %2$@."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この会議の音声はハブを経由して音声サービスにも送られました。議事録ができるとハブはその音声を削除します。このデバイスの音声は%1$@されます。ナレッジのテキストは%2$@されます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这场会议的音频也经你的 hub 发送到了它的语音服务；会议纪要写好后，hub 会删除那段音频。本机的音频会%1$@。知识库中的文字会%2$@。"
+          }
+        }
+      }
+    },
+    "Audio stays on this iPhone until 3 days after the day's final recap, 7 days at most, or the hub's audio retention when shorter. Only the text goes to Knowledge, where it is %@; the recap is kept like meeting minutes.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio stays on this iPhone until 3 days after the day's final recap, 7 days at most, or the hub's audio retention when shorter. Only the text goes to Knowledge, where it is %@; the recap is kept like meeting minutes."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音声は、その日の最終まとめから3日後、遅くとも7日後、または hub の音声保存期間が短い場合はその時点でこのiPhoneから削除されます。ナレッジに送られるのはテキストだけで、テキストは%@されます。まとめは会議の議事録と同じ期間保持されます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音频最多在这台 iPhone 上保留 7 天，即当日最终回顾生成后 3 天（以较早者为准），如果 hub 的音频保留期更短则按更短的来。只有文字会进入知识库，文字会%@；回顾的保留方式与会议纪要相同。"
+          }
+        }
+      }
+    },
+    "Only the text and timestamps go into Knowledge; the original audio isn't uploaded. Audio on this device is %@. Its text in Knowledge is %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the text and timestamps go into Knowledge; the original audio isn't uploaded. Audio on this device is %1$@. Its text in Knowledge is %2$@."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ナレッジに入るのはテキストとタイムスタンプだけです。元の音声はアップロードされません。このデバイスの音声は%1$@されます。ナレッジのテキストは%2$@されます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有文字和时间戳会进入知识库；原始音频不会上传。本机的音频会%1$@。知识库中的文字会%2$@。"
+          }
+        }
+      }
+    },
+    "The text is %@, and the day's recap is kept as long as meeting minutes, which is forever by default.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The text is %@, and the day's recap is kept as long as meeting minutes, which is forever by default."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "テキストは%@され、その日のまとめは会議の議事録と同じ期間保持されます（初期設定では無期限）。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文字会%@，当日回顾的保留时间与会议纪要相同，默认永久保留。"
           }
         }
       }

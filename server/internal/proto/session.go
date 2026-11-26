@@ -134,6 +134,12 @@ const (
 // be clipped shorter: the hub's sentence for the code (StartErrorCode) is bounded, and its remedy comes last (#1642).
 const CodedStartErrorMax = 600
 
+// TitleMax is the most runes a session's title has in a list of sessions or a session frame (#16343): the node, the
+// manager and the hub cut a longer one (transcript.ListTitle), and the list answers' rows were already cut to it. A
+// title that long is an opening prompt an agent stored as its title (a Codex thread name, a runtime's own title),
+// which no row shows; the transcript keeps the prompt whole.
+const TitleMax = 256
+
 // ToolLoop is a node-detected repetition. It contains no tool input or output.
 // Since identifies the start of this repetition within the current turn.
 type ToolLoop struct {
@@ -569,6 +575,10 @@ const (
 	// CodeAgentStartStalled: the agent opened but its session never became identifiable. This says nothing about
 	// launcher health and must not trigger an automatic retry or a health detour.
 	CodeAgentStartStalled = "agent_start_stalled"
+	// CodeCodexNotLoggedIn: a Codex start met Codex's sign-in screen (node/codex_start.go): Codex has no login on that
+	// computer, so no wait would bring its session up. The launcher's sign-in (launcher health's auth), not a stalled
+	// start; the new tab is closed, and someone runs `codex login` on that computer.
+	CodeCodexNotLoggedIn = "codex_not_logged_in"
 	// CodeShellWaiting: the new tab's shell stopped on a question of its startup files (an update prompt, [Y/n]) before
 	// the start command was typed (#2570). Nothing ran; the tab is kept a while for someone to answer (node/shellsettle.go).
 	CodeShellWaiting = "shell_waiting"
@@ -781,7 +791,7 @@ type QueueEdit struct {
 	Images [][]Image `json:"images,omitempty"`
 }
 
-// ServiceTier is a speed advertised by the native Codex model catalog.
+// ServiceTier is an advertised running-session speed or a native Codex catalog tier.
 type ServiceTier struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`

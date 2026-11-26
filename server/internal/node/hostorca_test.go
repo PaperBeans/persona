@@ -98,6 +98,10 @@ func TestMain(m *testing.M) {
 	// its own).
 	os.Setenv("T3CODE_HOME", "/tmp/persona-test-no-t3code")
 	t3codeBin = func() string { return "" }
+	// Nor the user's login shell on macOS, where the account's bash or zsh decides the node's shell (loginShellProgram,
+	// #16217): the fixtures write ~/.zshrc, so a developer whose login shell is bash would run them in a bash that
+	// never reads it. zsh, as on most Macs; a test that wants another sets SHELL, or macLoginShell for an unset one.
+	pinTestLoginShell()
 	// Nor the user's Claude config directory (claude under a profile, or these tests run from inside a Claude Code
 	// session): the node's own default is then ~/.claude of the test's home (#2140; a test that wants one sets its own).
 	os.Unsetenv("CLAUDE_CONFIG_DIR")

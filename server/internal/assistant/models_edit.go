@@ -82,6 +82,9 @@ func (s *Service) modelProviderCompatible(p ModelPurpose, v ModelProvider, store
 	if compat.Source(v.Source) == proto.SourceClaudeDesktop {
 		return p.ID == "agent.new" // a new session in Claude's desktop app: Agents' only (models_desktop.go)
 	}
+	if p.ID == purposeAgent && v.Kind == "launcher" && v.Agent == "traex" {
+		return false // Inbox execution uses assistant.send and requires origin-aware tools from process startup.
+	}
 	compatible := v.Kind == p.Kind
 	if p.Kind == "launcher" && v.Kind == "api" { // a direct Messages API provider starts Claude on its gateway (#2455)
 		compatible = messagesAPI(v.API)
@@ -180,6 +183,9 @@ func effortLevelsForKind(kind string) []string {
 // sentinel, without enabling minimal or ultra for Messages-backed HTTP launchers, Claude, Antigravity, or direct HTTP
 // API providers.
 func effortLevelsForPurpose(kind string, provider *ModelProvider, agent string) []string {
+	if kind == "launcher" && provider != nil && provider.Agent == "traex" {
+		return proto.CodexEffortLevels
+	}
 	if kind == "api" && provider != nil && provider.Kind == "launcher" && cmp.Or(agent, provider.Agent) == "codex" && (provider.Source != "persona" || !messagesAPI(provider.API)) {
 		return append(slices.Clone(proto.CodexEffortLevels), "off", "none")
 	}
@@ -443,7 +449,7 @@ func (s *Service) validateModel(ctx context.Context, p ModelPurpose, b ModelBind
 				if err := s.call(ctx, machine, assistantwire.DeviceLaunchersModelCheck, s.launcherParams(ctx, machine, strings.TrimPrefix(b.Provider, "launcher."), params), &result); err != nil {
 					return i18n.Err("assistant-models.err_check_model", i18n.Args{"error": i18n.Localize(err, s.requestCtxLang(ctx))})
 				}
-				if p.CategoryID == "agent.new" && result.Agent != "claude" && result.Agent != "codex" && result.Agent != "agy" && result.Agent != "omp" {
+				if p.CategoryID == "agent.new" && result.Agent != "claude" && result.Agent != "codex" && result.Agent != "agy" && result.Agent != "omp" && !(p.ID == "agent.new" && result.Agent == "traex") {
 					return i18n.Err("assistant-models.err_agent_launcher")
 				}
 				if p.ID == purposeMeetingRoom && result.Agent != "" && result.Agent != "claude" {

@@ -325,16 +325,21 @@ func (s *Service) fleetOn() bool { return s.devs != nil }
 // fleetStart starts the fleet's loops, once. The seen times are read again on each call until they could be: a
 // database that failed while the manager started does not leave every session the user had looked at unread.
 // restoreInteractions stays once: expiring the stale rows later would cancel the ones created since.
+//
+// ctx is the manager run's: the loops end with it. They used to run on with its cancellation taken off, so a run that
+// ended (a revoked token, a restart in place for a new binary) left them reading its closed store every 15 s and
+// telling the hub an old fleet (#16215). The one-time reads still finish when the run ends meanwhile.
 func (s *Service) fleetStart(ctx context.Context) {
 	if !s.fleetOn() {
 		return
 	}
+	once := context.WithoutCancel(ctx)
 	s.fleet.started.Do(func() {
-		s.restoreInteractions(ctx)
+		s.restoreInteractions(once)
 		go s.expireLoop(ctx)
 		go s.liveLoop(ctx)
 	})
-	s.loadSeen(ctx)
+	s.loadSeen(once)
 }
 
 // ---- the states (docs/protocol/agent-states.md) ----

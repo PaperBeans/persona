@@ -10,15 +10,15 @@ import { t } from "../../i18n";
 import { api, ApiError, errorText, sessionPath } from "../../lib/api";
 import { assistantModelHost, assistantPickKey, assistantSetup, ASSISTANT_START_SERVICE_TIER_FEATURE, canonicalLauncher, findAssistantLauncher, type AssistantChat, type AssistantSetup } from "../../lib/assistant-models";
 import { assistantPanel, assistantPickOf } from "../../lib/assistant-panel";
-import { pickEffort, pickFast, pickLauncher, pickModel } from "../../lib/assistant-chat";
+import { pickEffort, pickLauncher, pickModel, pickServiceTier } from "../../lib/assistant-chat";
 import { conversationModelPath, dropConversationPick } from "../../lib/assistant-pick";
-import { modelSupportsFast } from "../../lib/launcher-models";
 import { useChosenManager } from "../../lib/manager-choice";
-import type { PanelConfig } from "../../lib/model-panel";
+import type { PanelConfig, PanelOverride } from "../../lib/model-panel";
 import { usePanelQuotas } from "../../lib/panel-quotas";
 import { TYPED_MODELS_FEATURE } from "../../lib/model-id";
 import { providerTitle } from "../../lib/provider-names";
 import type { LauncherQuotaAnswer } from "../../lib/quota";
+import { speedOptions, startSpeedTier } from "../../lib/session-speed";
 import { speedStep } from "../../lib/session-panel";
 import { assistantLaunchers, forgetModel, modelList, readModels, useModelLists, type AssistantLaunchers, type ModelList } from "../../lib/session-models";
 import { getSession, hubHas, refreshAssistant, upsertSession, useStore } from "../../lib/store";
@@ -120,8 +120,8 @@ export interface AssistantModelPanelProps {
   onDropPick?: (session?: Session) => boolean | void | Promise<boolean | void>;
   /** Controlled page-local/draft pick writer replacing `pickLauncher` / `pickModel` / `pickEffort`. */
   onPickDraft?: (pick: ModelPick) => void;
-  /** Controlled new-conversation Fast flag writer replacing `pickFast`. */
-  onPickFast?: (fast: boolean) => void;
+  /** Controlled new-conversation service-tier writer replacing `pickServiceTier`. */
+  onPickServiceTier?: (tier: string | undefined) => void;
   /** Controlled older-hub effort writer replacing `POST .../modes { effort }` + `upsertSession`. */
   onSetEffort?: (session: Session, effort: string) => boolean | Promise<boolean>;
   /** Controlled service-tier writer replacing `setServiceTier`. */
@@ -233,7 +233,7 @@ function AssistantModelPanelView({
   onKeepPick,
   onDropPick,
   onPickDraft,
-  onPickFast,
+  onPickServiceTier,
   onSetEffort,
   onSetServiceTier,
   onReload: controlledReload,
@@ -273,14 +273,13 @@ function AssistantModelPanelView({
   const supervisionRequired = controlledSupervision ?? loadedSupervision;
   // a chat that runs keeps its engine; one whose agent isn't known is refused nothing on a guess, as on the hub
   const running = Boolean(chat.session?.agent);
-  const fast = Boolean(chat.session?.service_tiers?.some((x) => x.id === "priority"));
-  const fastOn = Boolean(setup.fast);
+  const tiers = chat.session?.service_tiers;
   const switchingMode = Boolean(canSwitch && chat.kept && chat.session);
   const startingMode = !chat.session && startServiceTier;
   const { providers, state } = useMemo(
-    () => assistantPanel(setup, info, listOf, { typed, engine, running, switching: switchingMode, supervision: supervisionRequired, starting: startingMode, fast, fastOn }),
+    () => assistantPanel(setup, info, listOf, { typed, engine, running, switching: switchingMode, supervision: supervisionRequired, starting: startingMode, speeds: speedOptions({ service_tiers: tiers }) }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `catalogVersion` stands for what was read from the default cache
-    [setup.provider, setup.model, setup.effort, setup.fast, info, listOf, typed, engine, running, fast, fastOn, switchingMode, startingMode, supervisionRequired, catalogVersion],
+    [setup.provider, setup.model, setup.effort, setup.speed, info, listOf, typed, engine, running, tiers, switchingMode, startingMode, supervisionRequired, catalogVersion],
   );
   const latest = () => (getLatestSession ? getLatestSession() : chat.session ? (getSession(chat.session.machine_id, chat.session.session_id) ?? chat.session) : undefined);
   const key = assistantPickKey(chat);
@@ -299,10 +298,7 @@ function AssistantModelPanelView({
     pickModel(key, pick.model);
     if (!chat.session) pickEffort(key, pick.effort);
   };
-  const setFastDraft = (on: boolean) => {
-    if (onPickFast) onPickFast(on);
-    else pickFast(on);
-  };
+  const setDraftServiceTier = onPickServiceTier ?? pickServiceTier;
   const apply = async (pick: ModelPick): Promise<boolean> => {
     const s = latest();
     const provider = providers.find((p) => p.id === pick.launcher);
@@ -331,31 +327,31 @@ function AssistantModelPanelView({
     }
     if (!chat.session) {
       const row = list?.models.find((m) => m.id === config.model);
-      const nextFast = Boolean(startServiceTier && config.fast && modelSupportsFast(row));
-      setFastDraft(nextFast);
+      setDraftServiceTier(startServiceTier ? startSpeedTier(row, config.speed) : undefined);
     }
     return true;
   };
-  const onApplyCurrent = async (patch: { effort?: string; fast?: boolean }) => {
+  const onApplyCurrent = async (patch: PanelOverride) => {
     const s = latest();
     const now = state.current;
-    if (!now || (patch.effort === undefined && patch.fast === undefined)) return false;
+    if (!now || (patch.effort === undefined && patch.speed === undefined)) return false;
     let effortApplied = false;
-    if (patch.fast !== undefined) {
+    if (patch.speed !== undefined) {
       if (!s) {
         const list = listOf(now.provider).list;
         const row = list?.models.find((m) => m.id === now.model);
-        if (patch.fast && (!startServiceTier || !modelSupportsFast(row))) return false;
-        if (patch.fast) {
+        const tier = startServiceTier ? startSpeedTier(row, patch.speed) : undefined;
+        if (patch.speed !== "standard" && !tier) return false;
+        if (tier) {
           // Pin every displayed start option: a cleared main must not revive its carried launcher, model or effort.
           const pick = assistantPickOf({ ...now, effort: patch.effort ?? now.effort }, list, null);
           if (!pick) return false;
           keepHere(pick);
           effortApplied = patch.effort !== undefined;
         }
-        setFastDraft(patch.fast);
+        setDraftServiceTier(tier);
       } else {
-        const speed = speedStep(s, patch.fast, true);
+        const speed = speedStep(s, patch.speed, true);
         if (!(speed && "service_tier" in speed)) return false;
         const ok = onSetServiceTier ? Boolean(await onSetServiceTier(s, speed.service_tier)) : await setServiceTier(s, speed.service_tier);
         if (!ok) return false;
@@ -379,7 +375,7 @@ function AssistantModelPanelView({
     else {
       pickLauncher(key, undefined);
       pickEffort(key, undefined);
-      pickFast(false);
+      setDraftServiceTier(undefined);
     }
   };
   const onReload = controlledReload ?? ((provider: string) => {

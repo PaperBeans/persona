@@ -244,8 +244,10 @@ func (s *Service) remindReply(machine string, sess proto.Session) error {
 	n := Notification{ID: "ntf_" + randomHex(8),
 		Kind: assistantwire.NotifyReply, DeviceID: machine, SessionID: sess.SessionID, Subtitle: s.pushPlace(machine, sess),
 		Title: head, Body: body, RelatedKey: replyRelatedKey(sess)}
-	s.noteCard(ctx, cardAgentReply, n)
-	_, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n})
+	res, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n})
+	if err == nil {
+		s.noteCardResult(ctx, cardAgentReply, n, res)
+	}
 	return err
 }
 

@@ -312,8 +312,10 @@ func (n *Node) takeOverInRuntime(ctx context.Context, h *runtimeConn, p runtimeS
 			}
 		}
 	}
-	if p.PermissionMode == "" && p.Effort == "" {
-		p.PermissionMode, p.Effort = n.modesOf(p.Resume)
+	if p.PermissionMode == "" || p.Effort == "" {
+		mode, effort := n.modesOf(p.Resume)
+		p.PermissionMode = cmp.Or(p.PermissionMode, mode)
+		p.Effort = cmp.Or(p.Effort, effort)
 	}
 	s, _, err := n.runtimeStartOn(ctx, h, p)
 	if elsewhere != nil && rpcCode(err) == openElsewhere {

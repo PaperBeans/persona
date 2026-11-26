@@ -177,13 +177,18 @@ disabling the registry takes effect when the node is restarted; it does not rewr
 
 ## Which shell
 
-The node runs the list script and shell-defined launchers in an interactive shell (`loginShellProgram`): zsh when there is one, but bash when the user's login shell is bash (`$SHELL`, or `/etc/passwd` under systemd, where it is unset) and there is no `~/.zshrc`;
-always bash without zsh (Git Bash on Windows). Bash runs as `bash -ic` and reads `~/.bashrc`, not `~/.bash_profile` / `~/.profile`: aliases kept there aren't listed.
+The node runs the list script and shell-defined launchers, and asks a launcher's CLI for its model list, in the user's shell started the way their terminal starts it (`loginShellProgram` and `shellFlag`, `node/os_other.go`; #16217):
+
+- **macOS**: the account's login shell when it is bash or zsh, whatever rc files the other shell has, run as a login, interactive shell (`-lic`), as Terminal opens every window. zsh then reads `/etc/zprofile` (`path_helper`, which puts the system directories first), `~/.zprofile` (Homebrew's `shellenv`) and `~/.zshrc`; bash reads `~/.bash_profile` (or `~/.bash_login`, `~/.profile`; not `~/.bashrc` unless one of them sources it). A bash user with none of those three files would get nothing of theirs from a login shell, so that bash runs as `-ic` and reads `~/.bashrc`. A node under launchd has no `$SHELL` and only `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, and macOS keeps accounts in Directory Services, not `/etc/passwd`, so the node asks `dscl . -read /Users/<user> UserShell` once (it builds without cgo, so no `getpwuid`).
+- **Linux**: zsh when there is one, but bash when the user's login shell is bash (`$SHELL`, or `/etc/passwd` under systemd, where it is unset) and there is no `~/.zshrc`, run interactively (`-ic`): zsh reads `~/.zshrc`, bash `~/.bashrc`, not `~/.bash_profile` / `~/.profile`, so aliases kept there aren't listed. A bash user with a `~/.zshrc` keeps zsh here: an account that can't change its login shell often starts zsh from `~/.bashrc`.
+- Always bash without zsh; Git Bash on Windows (`-ic`, `~/.bashrc`).
+
+Settings › Model providers names the file the launchers came from accordingly (`~/.zshrc`, `~/.bashrc`, or `~/.bash_profile` for a login bash on macOS).
 Bash has no zsh `(z)` / `(Q)`, and macOS's bundled bash 3.2 has no `BASH_ALIASES`, so under bash the script prints `alias -p`, and the node splits words and strips quotes by the shell's rules itself (nothing expanded or run, `node/launchers_shell.go`) before handing them to the same parser.
 
 ### The terminal's shell is another environment (#1642)
 
-The node **lists** launchers, and runs "Test availability", the launcher health checks, probes and repairs, in its own login shell (`loginShellProgram -ic`). A start **types** the launcher into a new herdr tab, whose shell is whatever herdr opens there. When the two read different startup files, a launcher the list shows does not exist where it runs:
+The node **lists** launchers, and runs "Test availability", the launcher health checks, probes and repairs, in its own login shell (`loginShellProgram`, "Which shell" above). A start **types** the launcher into a new herdr tab, whose shell is whatever herdr opens there. When the two read different startup files, a launcher the list shows does not exist where it runs:
 
 - herdr's panes run inside a container (sharing the home directory) whose `~/.bashrc` detects the container and returns early, before the launchers are defined;
 - the node lists from zsh (`~/.zshrc`, zsh installed and a `~/.zshrc` there) while the account's login shell, and so the tab, is bash;

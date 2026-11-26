@@ -230,12 +230,14 @@ fun ResolvedRoute.restore(stacks: Map<AppTab, MutableList<NavKey>>, newTodo: New
         while (stack.lastIndex > existing) stack.removeAt(stack.lastIndex)
         // Preserve the existing NavKey and its UI state when only provenance changed.
         val previous = stack[existing]
+        val withDecisionSource = if (previous is ChatRoute && key is ChatRoute)
+            previous.copy(decisionSource = key.decisionSource ?: previous.decisionSource) else previous
         if (previous == ConnectionSettingsRoute ||
             previous is ChatRoute && key is ChatRoute && previous.kind != key.kind ||
             // A notification about one request of a conversation already open: that page shows this request first.
             key is InteractionRoute && previous != key) {
             stack[existing] = key
-        }
+        } else if (withDecisionSource != previous) stack[existing] = withDecisionSource
     }
     if (parent != null && !stack.contains(parent)) stack.add(stack.lastIndex, parent)
     // Keep the serialized Sent key compatible, but make its parent explicit for links and history restores.

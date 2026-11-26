@@ -2,6 +2,7 @@ package devices
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"debug/buildinfo"
 	"encoding/json"
@@ -63,7 +64,9 @@ type nodePackage struct {
 	// Fallback: not of the hub's version (the newest release this manager drives).
 	Fallback   bool
 	goos, arch string
-	path       string // a file on this machine; "" until fetched
+	// edition is the edition a fetched release build must be (the manager's own); "" for a local or development build.
+	edition nodeproto.Edition
+	path    string // a file on this machine; "" until fetched
 	// A fetched one: <base>/<dir>/<file.Name>, of release build; dir also names its cache directory.
 	base, dir string
 	// flat: listed in <base>/latest.json, so also served at <base>/<file.Name>, where hub self-update fetches it. A
@@ -82,9 +85,14 @@ type nodePackage struct {
 
 type packageKey struct {
 	goos, arch, program, hub, base string
-	development                    devicewire.DevelopmentTarget
-	published                      devicewire.DevelopmentTarget
-	hold                           bool
+	// edition is the edition of the node the build is for (nodeproto.EditionFull or EditionCore; "" for a node that
+	// said a word this manager does not know): only a build of that edition is ever sent to it.
+	edition nodeproto.Edition
+	// own is this manager's edition (Devices.edition): the edition of every build it fetches and keeps in its cache.
+	own         nodeproto.Edition
+	development devicewire.DevelopmentTarget
+	published   devicewire.DevelopmentTarget
+	hold        bool
 }
 
 type packageResult struct {
@@ -131,11 +139,22 @@ func localNodeDirs() []string {
 var safeVersion = lazyre.New(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 func (d *Devices) packageKey(goos, arch, program string) packageKey {
+	return d.editionKey(goos, arch, program, nodeproto.EditionFull)
+}
+
+// infoKey is packageKey for the node that reported info: its platform, its kind of program and its edition (a node
+// from before editions says none and is a full build).
+func (d *Devices) infoKey(info proto.NodeInfo) packageKey {
+	edition, _ := nodeproto.ParseEdition(string(info.Edition)) // an unknown word stays "", for which there is no build
+	return d.editionKey(info.OS, info.Arch, info.Program, edition)
+}
+
+func (d *Devices) editionKey(goos, arch, program string, edition nodeproto.Edition) packageKey {
 	cfg := d.config()
 	if program != nodeproto.ProgramPersonaNode {
 		program = nodeproto.ProgramPersonad // personad, or an older node that does not say
 	}
-	key := packageKey{goos: goos, arch: arch, program: program, hub: cfg.HubVersion, base: cfg.NodePackagesURL, hold: cfg.DevelopmentHold}
+	key := packageKey{goos: goos, arch: arch, program: program, edition: edition, own: d.edition(), hub: cfg.HubVersion, base: cfg.NodePackagesURL, hold: cfg.DevelopmentHold}
 	if cfg.DevelopmentTarget != nil {
 		key.development = *cfg.DevelopmentTarget
 		key.hold = key.hold || !key.development.Valid() || key.development.Version != cfg.HubVersion
@@ -204,8 +223,16 @@ func (d *Devices) lastFound(k packageKey) (nodePackage, bool) {
 }
 
 // nodePackageFor looks the build up (manifests over the network when the hub has none of its own), and remembers it.
+// edition is the edition this manager was built as (Options.Edition; the full build when nothing says).
+func (d *Devices) edition() nodeproto.Edition { return d.opts.Edition.OrFull() }
+
 func (d *Devices) nodePackageFor(ctx context.Context, goos, arch, program string) (nodePackage, error) {
 	return d.lookupShared(ctx, d.packageKey(goos, arch, program))
+}
+
+// nodePackageForInfo is nodePackageFor for the node that reported info, of its edition (infoKey).
+func (d *Devices) nodePackageForInfo(ctx context.Context, info proto.NodeInfo) (nodePackage, error) {
+	return d.lookupShared(ctx, d.infoKey(info))
 }
 
 // lookupShared looks k up and remembers it, or waits for the lookup of k that is running already and takes its
@@ -267,7 +294,7 @@ func (d *Devices) nodeTarget(info proto.NodeInfo) string {
 	if info.OS == "" || info.Arch == "" {
 		return hub
 	}
-	k := d.packageKey(info.OS, info.Arch, info.Program)
+	k := d.infoKey(info)
 	r, fresh, ok := d.rememberedPackage(k, false)
 	if !fresh {
 		d.lookupSoon(k) // what was remembered stands until the lookup lands, so a node does not flip out of date meanwhile
@@ -292,7 +319,7 @@ func (d *Devices) resolvedPackageKnown(ctx context.Context, info proto.NodeInfo)
 	if info.OS == "" || info.Arch == "" {
 		return nodePackage{Version: d.hubVersion()}, true
 	}
-	k := d.packageKey(info.OS, info.Arch, info.Program)
+	k := d.infoKey(info)
 	r, ok := d.cachedPackage(k)
 	if !ok {
 		r.pkg, r.err = d.lookupShared(ctx, k)
@@ -315,7 +342,7 @@ func (d *Devices) packageBlocked(info proto.NodeInfo) error {
 	if info.OS == "" || info.Arch == "" {
 		return nil
 	}
-	if r, _, ok := d.rememberedPackage(d.packageKey(info.OS, info.Arch, info.Program), false); ok {
+	if r, _, ok := d.rememberedPackage(d.infoKey(info), false); ok {
 		return r.err // the last lookup's, also while a newer one runs (nodeTarget starts it)
 	}
 	return nil
@@ -360,6 +387,11 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 				d.logf("node package for %s: ignore local %s: %v", plat, local, err)
 				continue
 			}
+			// And of the node's edition: a core-only node never gets a full build, nor a full node a core-only one.
+			if err := checkPackageEdition(path, k.edition); err != nil {
+				d.logf("node package for %s: ignore local %s: %v", plat, local, err)
+				continue
+			}
 			// A build without a version file is taken for the hub's own; one that cannot be it (an older build a hub
 			// update or a deploy left in place) would only fail the node's self-check (#12958).
 			if inferred {
@@ -370,6 +402,12 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 			}
 			return nodePackage{Version: version, Program: k.program, goos: k.goos, arch: k.arch, path: path}, nil
 		}
+	}
+	if k.edition != d.edition() {
+		// The release this manager reads is of its own edition (update.FeedName): it has no build for a node of the
+		// other one, which keeps what it runs until a build of its edition is put in the node binary dir.
+		return nodePackage{}, i18n.Err("devices-deploy.other_edition", i18n.Args{"os": k.goos, "arch": k.arch, "name": name,
+			"edition": string(cmp.Or(k.edition, "unknown")), "hub": string(d.edition())})
 	}
 	if k.published.Commit != "" {
 		hosted := k
@@ -383,7 +421,7 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 		// Nowhere to fetch from (a hub built without an update URL and no node_packages.url, or "off"; a dev build).
 		return nodePackage{}, i18n.Err("devices-deploy.no_binary", i18n.Args{"os": k.goos, "arch": k.arch, "name": name})
 	}
-	m, err := d.fetchManifest(ctx, k.base+"/"+url.PathEscape(k.hub)+"/manifest.json")
+	m, err := d.fetchManifest(ctx, k.base+"/"+url.PathEscape(k.hub)+"/"+update.ReleaseManifestName(d.edition()))
 	switch {
 	case err == nil:
 		if f, ok := m.NodeFile(k.program, plat); ok && f.Name == name+".gz" {
@@ -403,7 +441,7 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 		return nodePackage{}, i18n.Err("devices-deploy.package_unreachable", i18n.Args{"os": k.goos, "arch": k.arch, "err": err.Error()})
 	}
 	// No build of the hub's version anywhere: the newest release, when this manager drives its node.
-	latest, err := d.fetchManifest(ctx, k.base+"/latest.json")
+	latest, err := d.fetchManifest(ctx, k.base+"/"+update.FeedName(d.edition()))
 	if err != nil {
 		if errors.Is(err, errNoManifest) {
 			return nodePackage{}, i18n.Err("devices-deploy.no_release", i18n.Args{"os": k.goos, "arch": k.arch, "name": name})
@@ -583,7 +621,7 @@ func fileProgram(f update.File) string {
 }
 
 func remotePackage(k packageKey, m *update.Manifest, dir string, f update.File, fallback bool) nodePackage {
-	return nodePackage{Version: m.Version, Program: fileProgram(f), Fallback: fallback, goos: k.goos, arch: k.arch,
+	return nodePackage{Version: m.Version, Program: fileProgram(f), Fallback: fallback, goos: k.goos, arch: k.arch, edition: k.own.OrFull(),
 		base: k.base, dir: dir, file: f, build: m.Build, nodeProtocol: m.NodeProtocol, nodeProtocolMin: m.NodeProtocolMin,
 		nodeCapabilities: m.NodeCapabilities}
 }
@@ -609,14 +647,22 @@ func redacted(err error, address string) error {
 	return errors.New(text)
 }
 
-// fetchManifest reads a release manifest (dl/<version>/manifest.json, dl/latest.json): errNoManifest when the site
-// has none (404).
+// fetchManifest reads a release manifest of this manager's edition (dl/<version>/manifest.json, dl/latest.json; the
+// core edition's core-manifest.json, core-latest.json): errNoManifest when the site has none (404). One of the other
+// edition, whatever name it was served under, is an error: none of its builds is sent.
 func (d *Devices) fetchManifest(ctx context.Context, u string) (*update.Manifest, error) {
 	client, err := d.packageClient(packageLookup)
 	if err != nil {
 		return nil, err
 	}
-	return readPackageManifest(ctx, client, u)
+	m, err := readPackageManifest(ctx, client, u)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.ValidateEdition(d.edition()); err != nil {
+		return nil, redacted(fmt.Errorf("%s: %w", u, err), u)
+	}
+	return m, nil
 }
 
 func readPackageManifest(ctx context.Context, client *http.Client, u string) (*update.Manifest, error) {
@@ -684,6 +730,10 @@ func readCacheEntry(k packageKey, dir string) (nodePackage, packageCacheEntry, b
 	var e packageCacheEntry
 	b, err := os.ReadFile(entryPath)
 	if err != nil || json.Unmarshal(b, &e) != nil || e.Program != k.program || e.OS != k.goos || e.Arch != k.arch || !fileExists(bin) {
+		return nodePackage{}, e, false
+	}
+	// A cache another edition of the manager filled on this data directory is not this one's.
+	if got, ok := update.EditionOf(bin); ok && got != k.own.OrFull() {
 		return nodePackage{}, e, false
 	}
 	return nodePackage{Version: e.Version, Program: e.Program, goos: k.goos, arch: k.arch, path: bin,
@@ -918,17 +968,40 @@ func checkPackagePlatform(path, goos, goarch, program string) error {
 	return nil
 }
 
+// checkPackageEdition: path is a build of edition want. Read from the Go build info, so nothing is run and any
+// platform's build is told; a file without build info was refused by checkPackagePlatform already.
+func checkPackageEdition(path string, want nodeproto.Edition) error {
+	if want == "" {
+		return errors.New("the node names an edition this manager does not know")
+	}
+	got, ok := update.EditionOf(path)
+	if !ok {
+		return errors.New("not a Go executable")
+	}
+	if got != want {
+		return fmt.Errorf("it is the %s edition, the node runs the %s edition", got, want)
+	}
+	return nil
+}
+
 // checkPackageBuild: the file is a build for p's OS and architecture of p's kind of program, and on this machine's
 // own platform it runs and says the release's version and build.
 func checkPackageBuild(ctx context.Context, path string, p nodePackage) error {
 	if err := checkPackagePlatform(path, p.goos, p.arch, p.Program); err != nil {
 		return err
 	}
+	// A fetched release build is of this manager's edition (lookupPackage fetches for no other node). A development
+	// build names none: the hub built it for the commit it confirmed.
+	if p.edition != "" {
+		if err := checkPackageEdition(path, p.edition); err != nil {
+			return err
+		}
+	}
 	if p.goos == runtime.GOOS && p.arch == runtime.GOARCH {
 		if err := os.Chmod(path, 0o755); err != nil {
 			return err
 		}
-		return update.CheckBinary(ctx, path, &update.Manifest{Version: p.Version, Build: p.build})
+		return update.CheckBinary(ctx, path, &update.Manifest{Version: p.Version, Build: p.build, Edition: p.edition.Marker()})
 	}
 	return nil
 }

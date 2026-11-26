@@ -208,6 +208,7 @@ go server/internal/node/clipshare core
 go server/internal/node/diskmap core
 go server/internal/node/imessageport core
 go server/internal/node/iphoneport core
+go server/internal/node/larkgateport core
 go server/internal/node/machdiag core
 go server/internal/node/nodekit core
 go server/internal/node/screenport core

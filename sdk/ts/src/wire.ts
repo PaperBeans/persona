@@ -2926,8 +2926,8 @@ export interface Action {
    */
   reply?: string;
   /**
-   * Assistant only: an https URL or a validated persona/persona session, task, kb or file target, opened inside the
-   * app.
+   * Assistant only, except that a full extension page may open persona://session/<machine>/<session> or
+   * persona://task/<id>: an https URL or a validated persona session, task, kb or file target, opened inside the app.
    */
   open?: string;
   /** Assistant only: return one page within the card. */

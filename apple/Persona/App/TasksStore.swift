@@ -632,7 +632,7 @@ final class TasksStore {
     nonisolated static func messageState(_ card: FeedItem, inbox item: InboxItem?, sentHere: Bool, refused: Bool) -> MessageState {
         if sentHere || card.sentAt != nil { return .sent }
         if card.dismissedAt != nil { return .dismissed }
-        if let item { return item.isDone ? (item.doneBy == "replied" ? .sent : .filed) : .open }
+        if let item { return item.isDone ? .filed : .open }
         return card.filedAt != nil || refused ? .filed : .open
     }
 

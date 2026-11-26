@@ -168,7 +168,7 @@
   "thread_unbind_confirm": "トピック「{name}」とこのToDoの紐づけを解除しますか？トピック内のメッセージは削除されません。解除後は、このToDoの進捗はトピックに投稿されず、トピックでの返信もこのToDoには届きません。",
   "thread_unbound": "トピックの紐づけを解除しました",
   "thread_unbind_failed": "紐づけを解除できませんでした：{error}",
-  "thread_empty": "このToDoにはトピックが紐づいていません。/topics で登録したグループチャットでトピックを作ると、新しいToDoが作られて紐づきます。エージェントにこのToDoをトピックに紐づけさせることもできます。",
+  "thread_empty": "このToDoにはトピックが紐づいていません。Agentに紐づけを頼めます。/topics で登録したグループで新しいToDoを作るには、トピックで /todo に続けてやりたいことを送ってください。",
   "thread_mark": "トピックに紐づいています",
   "check_section": "完了状況の確認",
   "check_action": "完了状況を確認",
@@ -476,5 +476,13 @@
   "causal_trace_cat_blocker": "ブロッカー",
   "causal_trace_cat_recovery": "復旧",
   "causal_trace_cat_review": "レビュー",
-  "causal_trace_cat_pr": "PR"
+  "causal_trace_cat_pr": "PR",
+  "status_pr_conflicts": "マージ競合あり",
+  "status_pr_changes_requested": "修正依頼あり",
+  "status_pr_checks_failed": "チェック失敗",
+  "status_pr_in_review": "レビュー待ち",
+  "status_pr_checks_pending": "チェック中",
+  "status_pr_waiting_merge": "マージ待ち",
+  "status_parked": "保留中",
+  "status_tracking": "追跡中"
 }

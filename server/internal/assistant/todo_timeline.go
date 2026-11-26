@@ -251,9 +251,11 @@ func (s *Service) todoFeed(ctx context.Context, id string, ext bool) ([]timeline
 		slices.SortFunc(items, func(a, b FeedItem) int { return cmp.Or(b.At.Compare(a.At), strings.Compare(b.ID, a.ID)) })
 		items = items[:min(len(items), todoTimelineFeedCap)]
 	}
-	out := make([]timeline.FeedItem, len(items))
-	for i, it := range items {
-		out[i] = timeline.FeedItem{ID: it.ID, At: it.At, Kind: it.Kind, Body: it.Body}
+	out := make([]timeline.FeedItem, 0, len(items))
+	for _, it := range items {
+		if readTaskNotice(it).Kind != feedNotice {
+			out = append(out, timeline.FeedItem{ID: it.ID, At: it.At, Kind: it.Kind, Body: it.Body})
+		}
 	}
 	return out, nil
 }

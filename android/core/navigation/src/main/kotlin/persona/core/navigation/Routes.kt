@@ -13,6 +13,7 @@ import kotlinx.serialization.Serializable
 @Serializable @SerialName("persona.core.navigation.SettingsRoute") data object SettingsRoute : NavKey
 @Serializable @SerialName("persona.core.navigation.ConnectionSettingsRoute") data object ConnectionSettingsRoute : NavKey
 @Serializable enum class ConversationKind { Assistant, Agent }
+@Serializable data class DecisionSource(val toolUseId: String? = null)
 
 @Serializable
 @SerialName("persona.core.navigation.RouteSource")
@@ -43,6 +44,10 @@ sealed interface RouteSource {
     @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
     val subagentDetail: Boolean = false,
+    /** A task question or approval opened over its Assistant conversation. */
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val decisionSource: DecisionSource? = null,
 ) : NavKey
 
 @Serializable @SerialName("persona.core.navigation.InboxItemRoute") data class InboxItemRoute(

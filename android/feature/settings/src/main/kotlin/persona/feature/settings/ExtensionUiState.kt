@@ -258,6 +258,7 @@ internal object ExtensionViewText {
         "grid", "carousel" -> item.tiles.orEmpty().any { it.title.isNotBlank() }
         // UI version 10 (#9727): the shared layout needs at least one node.
         "graph" -> !item.nodes.isNullOrEmpty()
+        "map" -> item.viewport != null || !item.markers.isNullOrEmpty() || !item.routes.isNullOrEmpty() || !item.alt.isNullOrBlank()
         else -> false
     }
 

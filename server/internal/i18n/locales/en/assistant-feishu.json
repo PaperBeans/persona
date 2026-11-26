@@ -133,6 +133,7 @@
   "thread_post_needs_dm": "{who} needs you, the card is in your private chat",
   "thread_post_finished_anon": "An agent finished a turn",
   "thread_open_done": "Opened the to-do \"{title}\" and handed it to the main conversation.",
+  "thread_decided": "Opened the to-do “{title}” for this topic.",
   "thread_open_needs_text": "Say what you want done in a line of text and I'll open a to-do for it. A picture or a forward alone has nothing to name it by.",
   "thread_open_failed": "Couldn't open a to-do for this topic: {error}",
   "thread_open_no_main": "Couldn't open a to-do for this topic: the main conversation doesn't exist yet. Open it once in the app first.",

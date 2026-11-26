@@ -124,7 +124,7 @@ func validModes(mode, effort string) error {
 }
 
 // validModesFor validates a start's mode / effort against the launcher it runs on: a Codex start takes Codex's own
-// effort list (ultra included, proto.CodexEffortLevels), and agy takes native levels without Claude's auto.
+// effort list (ultra included, proto.CodexEffortLevels). TRAE CLI uses the same vocabulary without auto.
 func validModesFor(launcher, mode, effort string) error {
 	if mode != "" && !slices.Contains(permissionModes, mode) {
 		return fmt.Errorf("unknown permission mode %q", mode)
@@ -133,6 +133,8 @@ func validModesFor(launcher, mode, effort string) error {
 	switch launcherAgentType(launcher) {
 	case "codex":
 		levels = append([]string{effortAuto}, proto.CodexEffortLevels...)
+	case traexAgent:
+		levels = proto.CodexEffortLevels
 	case agyAgent:
 		levels = proto.EffortLevels
 	}

@@ -222,6 +222,14 @@ describe("思考强度", () => {
 });
 
 describe("启动时发什么", () => {
+  it("sends only the model and effort offered by the TRAE CLI catalog", () => {
+    const list: LauncherModels = { agent: "traex", models: [{ id: "example-fast", name: "Example Fast", efforts: ["medium", "xhigh"] }] };
+    expect(startPicks({ agent: "traex", list, model: "example-fast", effort: "xhigh" }))
+      .toEqual({ model: "example-fast", effort: "xhigh" });
+    expect(startPicks({ agent: "traex", list, model: "example-fast", effort: "max" })).toEqual({ model: "example-fast" });
+    expect(startPicks({ agent: "traex", list, model: "", effort: "" })).toEqual({});
+  });
+
   it("sends a picked model unless it is the default or the launcher fixes its own", () => {
     expect(startPicks({ agent: "claude", list: claude, model: "opus", effort: "" })).toEqual({ model: "opus" });
     expect(startPicks({ agent: "claude", list: claude, model: "default", effort: "" })).toEqual({});

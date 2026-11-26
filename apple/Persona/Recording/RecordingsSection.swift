@@ -78,7 +78,7 @@ struct RecordingsSection: View {
                         .accessibilityIdentifier("recording-module-off")
                 }
                 #else
-                Text("Audio stays on this device. Its text syncs to Knowledge and is kept for \(sync.store.days) days.")
+                Text("Audio stays on this device. Its text syncs to Knowledge and is \(RecordingRetentionText.kept(sync.textRetentionDays)).")
                 #endif
             }
         }
@@ -209,7 +209,8 @@ extension RecordingsSection {
         let mode = meeting && MeetingAttendees.conversation(model)
             ? MeetingAttendees.startTranscription(model, picked: MeetingAttendees.offersHub(model) ? form.pickedTranscription : nil) : nil
         let talk = meeting && MeetingCallRule.talkSendsAudio(conversation: MeetingAttendees.conversation(model), role: role, voice: voice)
-        return MeetingTranscriptionWords.startPrivacy(mode, service: transcriptionService, talk: talk, days: sync.store.days)
+        return MeetingTranscriptionWords.startPrivacy(mode, service: transcriptionService, talk: talk,
+                                                       textDays: sync.textRetentionDays)
     }
 }
 
@@ -1140,7 +1141,8 @@ struct RecordingDetailView: View {
                 // A meeting whose audio went through the hub (#3862 phase 5) says so, before its `detail.meta` too.
                 if entry.attendance?.transcription != nil {
                     RecordingRetentionFooter(id: id, attendance: entry.attendance, meta: minutes.transcription,
-                                             days: sync.store.days, device: retentionFooter(entry))
+                                             audioDays: sync.audioRetentionDays, textDays: sync.textRetentionDays,
+                                             device: retentionFooter(entry))
                 } else {
                     Text(retentionFooter(entry))
                 }
@@ -1171,7 +1173,7 @@ struct RecordingDetailView: View {
         if entry.isRolling {
             return String(localized: "Rolling keeps the last \(Int(RecordingRolling.keepHours)) hours. Pull a range to transcribe it; text syncs into Knowledge. Audio stays on this device.")
         }
-        return String(localized: "Only the text and timestamps go into Knowledge; the original audio isn't uploaded. After the retention period (\(sync.store.days) days) it's cleared from this device and Knowledge.")
+        return String(localized: "Only the text and timestamps go into Knowledge; the original audio isn't uploaded. Audio on this device is \(RecordingRetentionText.kept(sync.audioRetentionDays)). Its text in Knowledge is \(RecordingRetentionText.kept(sync.textRetentionDays)).")
     }
 
     /// The transcript, a line a row with its time; a line a time in the minutes jumped to is lit.

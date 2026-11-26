@@ -370,8 +370,17 @@ func agyContextEndNames() string {
 }
 
 // Antigravity writes embedded ACP resources into USER_INPUT.content. Require the complete
-// leading Persona envelope so a quoted label or another URI scheme keeps its text.
-var agyContextResource = lazyre.New(`(?s)^(?:Content of persona-context://[^\r\n]*:\r?\n<persona-context>.*?</persona-context>` + agySpace + `*)+`)
+// Persona envelope, with a non-empty URI containing no whitespace, so a quoted label or
+// another URI scheme keeps its text. Workflow prompts carry the resource after the user
+// body. The close is found by depth, not the last close tag: literal context tags inside a
+// snapshot stay part of it, while a paragraph that starts after its first nested close is
+// kept as the user's text.
+var (
+	agyContextResourceLabel = lazyre.New(`Content of persona-context://[^\s<>]+:\r?\n`)
+	agyContextResourceOpen  = lazyre.New(`(?i)^<(?:persona|jarvis)-context\b[^>]*>`)
+	agyContextResourceTag   = lazyre.New(`(?i)<(?:persona|jarvis)-context\b[^>]*>|</(?:persona|jarvis)-context\s*>`)
+	agyViewErrorsTrailing   = lazyre.New(`(?is)(?:^|\n)<persona-view-errors\b[^>]*>.*?</persona-view-errors>` + agySpace + `*$`)
+)
 
 var agyTrimSpace = lazyre.New(`^` + agySpace + `+|` + agySpace + `+$`)
 
@@ -393,12 +402,98 @@ func agyUserText(text string) string {
 		text = m[1]
 	}
 	for {
-		clean := agyContextEnd.ReplaceAllString(agySnapshot.ReplaceAllString(agyContextResource.ReplaceAllString(text, ""), ""), "")
+		clean := agyStripContextResources(text)
+		clean = agyViewErrorsTrailing.ReplaceAllString(clean, "")
+		clean = agySnapshot.ReplaceAllString(clean, "")
+		clean = agyContextEnd.ReplaceAllString(clean, "")
 		if clean == text {
 			return agyTrimSpace.ReplaceAllString(text, "")
 		}
 		text = clean
 	}
+}
+
+func agyStripContextResources(text string) string {
+	for start := 0; start < len(text); {
+		label := agyContextResourceLabel.FindStringIndex(text[start:])
+		if label == nil {
+			break
+		}
+		at := start + label[0]
+		labelEnd := start + label[1]
+		if at > 0 && text[at-1] != '\n' {
+			start = labelEnd
+			continue
+		}
+		openAt := labelEnd
+		open := agyContextResourceOpen.FindStringIndex(text[openAt:])
+		if open == nil || open[0] != 0 {
+			start = openAt
+			continue
+		}
+		end, ok := agyContextResourceEnd(text, openAt, strings.TrimSpace(text[:at]) != "")
+		if !ok {
+			start = openAt
+			continue
+		}
+		before := strings.TrimRight(text[:at], "\r\n")
+		after := strings.TrimLeft(text[end:], "\r\n")
+		switch {
+		case before == "":
+			text = after
+		case after == "":
+			text = before
+		default:
+			text = before + "\n\n" + after
+		}
+		start = len(before)
+	}
+	return text
+}
+
+func agyContextResourceEnd(text string, open int, allowUserBoundary bool) (int, bool) {
+	depth, firstNestedClose := 0, -1
+	for _, tag := range agyContextResourceTag.FindAllStringIndex(text[open:], -1) {
+		start, end := open+tag[0], open+tag[1]
+		raw := strings.TrimSpace(text[start:end])
+		if strings.HasPrefix(raw, "</") {
+			depth--
+			if depth < 0 {
+				return 0, false
+			}
+			if depth == 1 && firstNestedClose < 0 {
+				firstNestedClose = end
+			}
+			if depth == 0 {
+				if allowUserBoundary && firstNestedClose >= 0 && agyContextResourceHasUserParagraph(text[firstNestedClose:end]) {
+					return firstNestedClose, true
+				}
+				return end, true
+			}
+		} else if !strings.HasSuffix(raw, "/>") {
+			depth++
+		}
+	}
+	return 0, false
+}
+
+// A nested close that is followed by a blank line and prose belongs to the user's own text,
+// not the snapshot: snapshots' literal context tags are tag-like or adjacent to their text.
+// Stopping at the nested close keeps ordinary prose rather than deleting it with the resource.
+func agyContextResourceHasUserParagraph(text string) bool {
+	blank := false
+	for _, line := range strings.Split(text, "\n")[1:] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			blank = true
+			continue
+		}
+		if blank && !strings.HasPrefix(trimmed, "<") {
+			return true
+		}
+		blank = false
+	}
+	return false
 }
 
 func agyToolOutput(text string) string {

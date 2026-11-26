@@ -316,6 +316,10 @@ func (it *InboxItem) listed() InboxItem {
 	c.ReplyInstruction, c.RejectedReplyDraft, c.RejectedReplyDrafts = nil, "", nil
 	c.Status = it.status()
 	c.Now, c.TitleBy = it.nowKey(), ""
+	if it.DoneBy == "replied" && it.DoneAt != nil && it.hasChainEventAt(ChainSelfReplied, *it.DoneAt) {
+		// Older clients treat "replied" as a sent receipt for every draft on the item.
+		c.done(*it.DoneAt, "source_replied")
+	}
 	c.PreMergeTitle, c.PreMergeTitleBy, c.MergeTitle = "", "", ""
 	if it.Follow != nil {
 		f := *it.Follow

@@ -140,30 +140,36 @@ func (s *Service) extensionEvent(ctx context.Context, req assistantwire.Extensio
 			return assistantwire.AssistantEventResult{Delivery: assistantwire.EventDelivered}, nil
 		}
 		if s.refusedDirect(ctx, machine, to, msg, err) {
-			return assistantwire.AssistantEventResult{Delivery: assistantwire.EventQueued}, nil
+			return assistantwire.AssistantEventResult{}, err
 		}
 		if relayFailureOf(err) == relayFailedGone {
 			s.logf("extension %s: event %q: %v; dropped", req.Extension, ev.Key, err)
-			return assistantwire.AssistantEventResult{Delivery: assistantwire.EventQueued}, nil
+			return assistantwire.AssistantEventResult{}, &rpc.Error{
+				Code:    assistantwire.CodeNoMainConversation,
+				Message: assistantwire.MethodAssistantEvent + ": " + err.Error(),
+			}
 		}
 		directFailed, directErr = true, err
 		s.logf("extension %s: event %q: %v; queued", req.Extension, ev.Key, err)
 	}
-	delivery, shouldDrain, err := s.queueExtensionEvent(machine, to, msg, ev.replace, directFailed, directErr, backgroundRunning(c))
+	bg := backgroundRunning(c)
+	if directFailed {
+		if fresh, ok := s.session(ctx, machine, to); ok {
+			c = fresh
+			idle = fresh.Status != proto.StatusWorking && !fresh.Starting
+			bg = backgroundRunning(fresh)
+		} else {
+			idle = false
+			bg = false
+		}
+	}
+	delivery, shouldDrain, err := s.queueExtensionEvent(machine, to, msg, ev.replace, directFailed, directErr, bg)
 	if err != nil {
 		return assistantwire.AssistantEventResult{}, err
 	}
 	s.publish(ctx) // shown waiting above the composer
 	if shouldDrain && idle {
-		session := c
-		if directFailed {
-			fresh, ok := s.session(ctx, machine, to)
-			if !ok || fresh.Status == proto.StatusWorking || fresh.Starting {
-				return assistantwire.AssistantEventResult{Delivery: delivery}, nil
-			}
-			session = fresh
-		}
-		s.drainRelays(machine, []proto.Session{session})
+		s.drainRelays(machine, []proto.Session{c})
 	}
 	return assistantwire.AssistantEventResult{Delivery: delivery}, nil
 }

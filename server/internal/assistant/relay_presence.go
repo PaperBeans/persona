@@ -416,7 +416,9 @@ func (s *Service) drainHeldRelays(ctx context.Context, now time.Time) {
 		if _, spoke := b.st.Spoke[id]; spoke || b.holds[id] != nil || b.draining[id] {
 			continue
 		}
-		if slices.ContainsFunc(q, func(m relayMsg) bool { return !m.Due.IsZero() || !m.TriedAt.IsZero() || m.unresolvedSupervision() }) {
+		if slices.ContainsFunc(q, func(m relayMsg) bool {
+			return !m.Due.IsZero() || !m.TriedAt.IsZero() || m.unresolvedSupervision() || (m.Tool == extensionEventTool && !b.failedAt[id].IsZero())
+		}) {
 			if i, _ := b.pickLocked(id, leads[id], now); i >= 0 {
 				due = append(due, id)
 			}

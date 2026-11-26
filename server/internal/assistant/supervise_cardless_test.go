@@ -329,6 +329,26 @@ func TestCardlessWaitRenderedForTaskLeader(t *testing.T) {
 	}
 }
 
+// A card-less review that comes due while its conversation is stopped (/stop, #3308) is not stamped as told, since
+// signal drops it then: once the user speaks again it is handed back (#13415).
+func TestReviewCardlessWaitUnderStopWaitsForTheUser(t *testing.T) {
+	s, f, todo := newSupervisedService(t)
+	holdDigest(s)
+	ctx := context.Background()
+	waitsForReview(t, s, f, todo.ID, "做完了，你看下要不要这样发布。")
+	s.markReporter(ctx, "box", todo.Origin)
+	s.setReporterStopped(ctx, todo.Origin, "app")
+	s.superviseWatch(ctx, time.Now().Add(cardlessSettle+time.Minute))
+	if todoNow(s, todo.ID).Supervision.CardlessToldAt != nil {
+		t.Fatal("the round was stamped told while stopped, though nothing was queued")
+	}
+	s.setReporterStopped(ctx, todo.Origin, "")
+	s.superviseWatch(ctx, time.Now().Add(cardlessSettle+2*time.Minute))
+	if !slices.Contains(pendingKinds(s, todo.ID), sigCardlessWait) {
+		t.Fatalf("not handed back once /stop was lifted: %v", pendingKinds(s, todo.ID))
+	}
+}
+
 // A transient acceptance-book read failure is not proof that no owner card exists. The watch must not stamp the round
 // or raise the hand-back while the ledger is unreadable, and a later pass after the book recovers still hands it back
 // in the same review round (#12648 P1).

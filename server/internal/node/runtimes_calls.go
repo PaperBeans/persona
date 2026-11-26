@@ -298,6 +298,10 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 				}
 				if p.PermissionMode != "" {
 					input["mode"] = p.PermissionMode
+				} else if h.agent() == agyAgent && !n.runtimeAssistant(p.SessionID) {
+					if mode := agySendMode(n.runtimePermissionMode(h, p.SessionID), n.agyRuntimeMode(p.SessionID)); mode != "" {
+						input["mode"] = mode
+					}
 				}
 				if p.A2AWakeOnSend {
 					input["a2a_wake_on_send"] = true
@@ -418,7 +422,11 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 		for _, s := range h.sessionsCopy() {
 			if s.SessionID == p.SessionID {
 				info["cwd"], info["model"], info["agent"], info["last_activity"] = s.Cwd, s.Model, s.Agent, s.UpdatedAt
-				info["permission_mode"], info["effort"] = s.PermissionMode, s.Effort
+				mode := s.PermissionMode
+				if h.agent() == agyAgent && !n.runtimeAssistant(p.SessionID) {
+					mode = agyShownMode(mode, n.agyRuntimeMode(p.SessionID))
+				}
+				info["permission_mode"], info["effort"] = mode, s.Effort
 				if conversation, ok := strings.CutPrefix(s.SessionID, agyAgent+"-"); h.agent() == agyAgent && ok {
 					if workers := n.agySwarmWorkers(conversation); len(workers) > 0 {
 						info["swarm_workers"] = workers
@@ -451,6 +459,15 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 			return nil, err, true
 		}
 		_, err := call("session.modes", map[string]any{"session_id": p.SessionID, "permission_mode": p.PermissionMode, "effort": p.Effort, "model": p.Model})
+		if err == nil && h.agent() == agyAgent && p.PermissionMode != "" && n.state != nil {
+			n.state.update(p.SessionID, func(st *sessionState) bool {
+				if st.AppMode == p.PermissionMode {
+					return false
+				}
+				st.AppMode = p.PermissionMode
+				return true
+			})
+		}
 		return okResult(err), err, true
 	case "session.queue.edit":
 		if !caps.QueueEdit || strings.Contains(p.SessionID, subagentSep) {
@@ -481,6 +498,58 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 		return map[string]any{"sent": true}, nil, true
 	}
 	return nil, nil, false
+}
+
+// agyRuntimeMode returns the persisted permission mode for a Persona-started non-assistant agy companion session, or ""
+// when none was recorded (settings-derived or externally started sessions).
+func (n *Node) agyRuntimeMode(id string) string {
+	if n.state == nil || id == "" {
+		return ""
+	}
+	st, ok := n.state.get(id)
+	if !ok || st.AppMode == "" {
+		return ""
+	}
+	return st.AppMode
+}
+
+// agyLiveAutoFallback reports whether a companion row is currently running under a live auto-to-bypass fallback for a
+// persisted "auto" session.
+func agyLiveAutoFallback(rowMode, savedMode string) bool {
+	return savedMode == "auto" && rowMode == proto.ModeBypass
+}
+
+// agyShownMode overlays a persisted agy permission mode onto a companion row's reported mode while preserving a live
+// auto-to-bypass fallback reported by the companion.
+func agyShownMode(rowMode, savedMode string) string {
+	if savedMode == "" {
+		return rowMode
+	}
+	if agyLiveAutoFallback(rowMode, savedMode) {
+		return rowMode
+	}
+	return savedMode
+}
+
+// agySendMode returns the persisted agy permission mode to replay on session.send, or "" when no mode should be sent
+// (unset/external sessions, or a live auto-to-bypass fallback where replaying "auto" would re-trigger the fallback).
+func agySendMode(rowMode, savedMode string) string {
+	if savedMode == "" || agyLiveAutoFallback(rowMode, savedMode) {
+		return ""
+	}
+	return savedMode
+}
+
+func (n *Node) runtimePermissionMode(h *runtimeConn, id string) string {
+	if h == nil {
+		return ""
+	}
+	for _, s := range h.sessionsCopy() {
+		if s.SessionID == id {
+			return s.PermissionMode
+		}
+	}
+	return ""
 }
 
 func (n *Node) runtimeStatus(h *runtimeConn, id string) string {

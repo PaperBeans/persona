@@ -131,7 +131,7 @@ internal class ChatWebViewPool(
     @androidx.annotation.OptIn(markerClass = [Profile.ExperimentalUrlPrefetch::class])
     fun preload(url: String) {
         // Loopback addresses (the phone's own), direct media, and direct file downloads are never preloaded in a paused background WebView.
-        if (closed || isLoopbackWebUrl(url) || isDirectMedia(url) || isDirectDownload(url) || pages.containsKey(url)) return
+        if (closed || classifyWebDownloadHost(url) != WebDownloadHostSafety.Allowed || isDirectMedia(url) || isDirectDownload(url) || pages.containsKey(url)) return
         val view = create()
         pages[url] = view
         view.needsMediaRecovery = true
@@ -159,7 +159,7 @@ internal class ChatWebViewPool(
         val entry = pages.entries.firstOrNull { it.value === view } ?: return
         val url = entry.key
         view.exitCustomView()
-        view.onPick = null; view.onExternal = null; view.onDownload = null
+        view.onPick = null; view.onExternal = null; view.onDownload = null; view.downloadGuard.clear()
         (view.parent as? ViewGroup)?.removeView(view)
         pauseView(view)
         if (active === view) active = null
@@ -207,6 +207,7 @@ internal class ChatWebViewPool(
         view.onPick = null
         view.onExternal = null
         view.onDownload = null
+        view.downloadGuard.clear()
         view.onWindowAttached = null
         (view.parent as? ViewGroup)?.removeView(view)
         view.destroy()
@@ -441,6 +442,8 @@ internal open class ChatSelectionWebView(context: Context) : WebView(context) {
     var onExternal: ((String) -> Unit)? = null
     /** A file download triggered by a foreground, mounted page; the host routes it through [ChatWebDownloader]. */
     var onDownload: ((ChatWebDownloadRequest) -> Unit)? = null
+    /** Per-view in-flight and short-cooldown deduplication guard; cleared on release and destroy. */
+    internal val downloadGuard: ChatWebDownloadGuard = ChatWebDownloadGuard()
     /** True when a background preloaded view suppressed a download so the next foreground acquire reloads cleanly. */
     internal var suppressedBackgroundDownload: Boolean = false
     /** Active fullscreen custom view requested via [WebChromeClient.onShowCustomView], if any. */

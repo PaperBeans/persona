@@ -488,6 +488,7 @@
     <string name="chat_web_download_started">开始下载 %1$s</string>
     <string name="chat_web_download_opened_browser">已在浏览器中继续下载</string>
     <string name="chat_web_download_loopback_unsupported">暂不支持在内置浏览器下载本机端口转发文件</string>
+    <string name="chat_web_download_too_large">文件超过 %1$d MB 下载上限</string>
     <string name="chat_web_download_failed">无法开始下载</string>
     <string name="chat_file_video">视频</string>
     <string name="chat_file_audio">录音</string>

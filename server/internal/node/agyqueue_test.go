@@ -21,18 +21,45 @@ func TestParseAgyQueuedLines(t *testing.T) {
 		"Also run the linter... (alt+m to send immediately)",
 		"❯ And check git diff (Alt+M to send immediately)",
 		"• Fix foo(bar) (opt+m to send immediately)",
+		"  ▸ Check the screenshot... (alt+m to send immediately)",
+		"▹ Review the logs... (alt+m to send immediately)",
+		"▶ Update the notes... (alt+m to send immediately)",
+		"‣ Compare ▸ and ▹... (alt+m to send immediately)",
 		"────────────────────────────────────────",
 	}, "\n")
 	want := []string{
 		"Also run the linter...",
 		"And check git diff",
 		"Fix foo(bar)",
+		"Check the screenshot...",
+		"Review the logs...",
+		"Update the notes...",
+		"Compare ▸ and ▹...",
 	}
 	if got := parseAgyQueuedLines(screen); !slices.Equal(got, want) {
 		t.Fatalf("parseAgyQueuedLines() = %q, want %q", got, want)
 	}
 	if got := parseAgyQueuedLines(idleScreen); len(got) != 0 {
 		t.Fatalf("idle screen parsed queued lines %q, want none", got)
+	}
+}
+
+func TestAgyQueueDeduplicatesMarkedPreview(t *testing.T) {
+	const prompt = "Check the screenshot carefully"
+	previews := parseAgyQueuedLines("▸ Check the screenshot... (alt+m to send immediately)")
+	for _, tc := range []struct {
+		name string
+		text string
+	}{
+		{"without attachment", prompt},
+		{"with attachment", "<attached_images>\n/tmp/a.png\n</attached_images>\n" + prompt},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tracked := []*agyQueuedItem{{text: tc.text}}
+			if got := combineAgyQueued(tracked, previews); !slices.Equal(got, []string{tc.text}) {
+				t.Fatalf("combineAgyQueued() = %q, want [%q]", got, tc.text)
+			}
+		})
 	}
 }
 

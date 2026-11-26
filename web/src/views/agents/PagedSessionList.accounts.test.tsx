@@ -95,9 +95,9 @@ describe("the personal list by account", () => {
     const groups = sections().map(named).sort((a, b) => a.key!.localeCompare(b.key!));
     expect(groups).toEqual([
       { key: "acct-blank", name: "Claude Duet", tip: "acct-blank", mark: "claude" }, // a blank displayName: the provider's label
-      { key: "acct-dots", name: "Dots · Example User", tip: "acct-dots", mark: "codex" }, // ChatGPT's Blossom
+      { key: "acct-dots", name: "Dots · Example User", tip: "acct-dots", mark: "letter" }, // Dots is not ChatGPT's Blossom
       { key: "acct-gone", name: "Groq", tip: "acct-gone", mark: "letter" }, // not in /agents: its sessions' provider
-      { key: "acct-grok", name: "Grok Bot", tip: "acct-grok", mark: "grok" },
+      { key: "acct-grok", name: "Grok Bot", tip: "acct-grok", mark: "letter" }, // Grok Bot is not xAI's Grok
       { key: "acct-muse", name: "Muse", tip: "acct-muse", mark: "letter" },
     ]);
     for (const s of sections()) expect(heading(s).textContent).not.toContain(s.dataset.sessionGroup!);

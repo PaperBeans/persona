@@ -330,6 +330,81 @@ func TestTodosV2AfterBlockerMirrorTaskPlanUnlockStage(t *testing.T) {
 		}
 	})
 
+	t.Run("saved_plan_keeps_its_unlock_rule_after_service_recreation", func(t *testing.T) {
+		st := newMemBlockerQueueStore()
+		f := newFakeHub().withMachine()
+		first := newServiceOn(t, f, st)
+		first.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+		setBlockersTodosV2Flag(t, first, true, false)
+
+		root, err := first.createPlainTodo(ctx, "Persisted plan root", "", db.TodoEdit{}, nil)
+		if err != nil {
+			t.Fatalf("create root: %v", err)
+		}
+		dep, err := first.createPlainTodo(ctx, "Persisted plan prereq", "", db.TodoEdit{PartOf: &root.ID}, nil)
+		if err != nil {
+			t.Fatalf("create dep: %v", err)
+		}
+		planArgs, _ := json.Marshal(map[string]any{
+			"tasks": []map[string]any{{
+				"title":            "Persisted staged task",
+				"prompt":           "build ui",
+				"machine":          "server",
+				"cwd":              "/tmp",
+				"role":             "worker",
+				"part_of":          root.ID,
+				"after":            []string{dep.ID},
+				"unlock_stage":     "pr_open",
+				"unlock_contracts": []string{"dto_v1"},
+			}},
+		})
+		if _, err := first.toolTaskPlanFrom(ctx, "server", "conv1", planArgs); err != nil {
+			t.Fatalf("toolTaskPlanFrom: %v", err)
+		}
+		var planID string
+		st.planMu.Lock()
+		for id := range st.plans {
+			planID = id
+		}
+		st.planMu.Unlock()
+		if planID == "" {
+			t.Fatal("expected saved plan")
+		}
+
+		// A fresh Service has none of first's in-memory plan unlock hooks.
+		second := newServiceOn(t, f, st)
+		second.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+		if err := second.ensureTodosLoaded(ctx); err != nil {
+			t.Fatalf("ensureTodosLoaded: %v", err)
+		}
+		persisted, err := second.loadPlan(ctx, planID)
+		if err != nil {
+			t.Fatalf("loadPlan: %v", err)
+		}
+		if len(persisted.Tasks) != 1 || persisted.Tasks[0].UnlockStage != "pr_open" ||
+			len(persisted.Tasks[0].UnlockContracts) != 1 || persisted.Tasks[0].UnlockContracts[0] != "dto_v1" {
+			t.Fatalf("saved unlock rule did not survive recreation: %+v", persisted.Tasks)
+		}
+		started, err := second.startPlan(ctx, planID, nil, false)
+		if err != nil {
+			t.Fatalf("startPlan after recreation: %v", err)
+		}
+		if len(started.Tasks) != 1 || started.Tasks[0].TodoID == "" {
+			t.Fatalf("expected started task with TodoID, got %+v", started.Tasks)
+		}
+		rows, err := st.ListTodoBlockersByTodo(ctx, started.Tasks[0].TodoID)
+		if err != nil {
+			t.Fatalf("ListTodoBlockersByTodo: %v", err)
+		}
+		if len(rows) != 1 || rows[0].Kind != todoBlockerKindTodoStage {
+			t.Fatalf("expected persisted todo_stage blocker, got %+v", rows)
+		}
+		if !strings.Contains(rows[0].ConditionJSON, `"required_stage":"pr_open"`) ||
+			!strings.Contains(rows[0].ConditionJSON, `"required_contracts":["dto_v1"]`) {
+			t.Fatalf("unexpected condition_json after recreation: %s", rows[0].ConditionJSON)
+		}
+	})
+
 	t.Run("todos_v2_off_ignores_task_plan_unlock_stage", func(t *testing.T) {
 		st := newMemBlockerQueueStore()
 		f := newFakeHub().withMachine()

@@ -29,6 +29,7 @@ func TestWholeCommandCardNamesOnlyWhatTheCommandShows(t *testing.T) {
 	} {
 		for _, mode := range []string{"default", proto.ModeBypass} {
 			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				needsLarkGateForCommand(t, tc.command)
 				n := codexTestNode(t)
 				fh := withFakeHub(t, n)
 				const sid = "22222222-2222-4222-8222-222222222222"

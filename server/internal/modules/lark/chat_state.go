@@ -358,10 +358,7 @@ func (s core) feishuStatus(ctx context.Context) (FeishuStatus, error) {
 // the state was written (the hub's feishu.owner may have come while the assistant was away): back to the main
 // conversation, no threads, no cards, nothing waiting. A state from before pairings were recorded takes the one now.
 func (s core) feishuReconcile(st FeishuStatus) {
-	key := ""
-	if st.Owner != "" {
-		key = st.Owner + "@" + strconv.FormatInt(st.PairedAt.Unix(), 10)
-	}
+	key := pairingKey(st)
 	b := s.fbot()
 	b.mu.Lock()
 	s.loadBotLocked(context.Background())
@@ -381,6 +378,13 @@ func (s core) feishuReconcile(st FeishuStatus) {
 		s.logf("bots: the bot's pairing changed: the chat starts afresh")
 		s.h.ForgetTurns()
 	}
+}
+
+func pairingKey(st FeishuStatus) string {
+	if st.Owner == "" {
+		return ""
+	}
+	return st.Owner + "@" + strconv.FormatInt(st.PairedAt.Unix(), 10)
 }
 
 // feishuStatusKept is feishuStatus kept a moment: for what looks every second (a run's sink, the cards' links).

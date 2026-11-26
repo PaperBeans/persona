@@ -259,6 +259,10 @@ Persona Core is a product on its own: a hub built without any module starts, ser
 - **Run**: the core-only `persona-hub run` (or `personad hub run`) with a `hub.json` as for any hub (docs/operations/config.md);
   keep `persona-manager` beside `persona-hub` and the hub starts it. The manager's log says `modules: loaded none`
   (a default build: `modules: loaded briefing, voice, volc`, …).
+- **Install**: a release has the core alone as install packages beside the full ones (the core edition:
+  `core-latest.json`, `core-personad-<os>-<arch>.gz`, …), `install.sh --core` installs them, and an install keeps its
+  edition through every update. [core-install.md](../operations/core-install.md) is the document;
+  `python3 scripts/ci/core-install.py` follows it in a clean container, from the packages alone.
 - **Smoke test**: `python3 scripts/ci/core-only-smoke.py` builds the three programs with `persona_core_only`, starts a
   disposable `postgres:18-alpine` container on a private port, writes a `hub.json` in a temporary home and runs
   `persona-hub run` with a clean environment (no `PERSONA_HOME` of the machine's own hub). It checks health, an
@@ -278,7 +282,7 @@ Persona Core is a product on its own: a hub built without any module starts, ser
   --database-file <file with database_url>` runs a shard's every package without modules; a test of a module's own
   behaviour skips without it (`needsBriefingModule`, `needsVoiceModule`, `needsVolcModule`). Locally the `other` shard
   needs Bun 1.4.2 on `PATH`, as in CI.
-- **CI** (`scripts/ci/server.sh`): the `build` lane runs 'Core-only hub smoke' and 'Builds without each module' (each
+- **CI** (`scripts/ci/server.sh`): the `core-other` lane runs 'Core-only install from packages'; the `build` lane runs 'Core-only hub smoke' and 'Builds without each module' (each
   `server/internal/modules/<id>/module.json`: `go build -tags persona_without_<id> ./...` and the module list and guard
   tests, so a module that moves is covered with no edit); the `core-node`, `core-managers` and `core-other` lanes (and
   `all`) run 'Server <shard> tests with Postgres, core only'. Measured on the hub machine (64 cores, shared): node

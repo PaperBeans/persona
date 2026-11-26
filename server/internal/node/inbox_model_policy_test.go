@@ -1132,6 +1132,7 @@ func TestInboxLarkOutboundDeniedOrdinaryBypassPreserved(t *testing.T) {
 		{"ordinary read", "", "lark-cli docs +fetch --doc-id example", "allow"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			needsLarkGateForCommand(t, tc.command)
 			n := codexTestNode(t)
 			fh := withFakeHub(t, n)
 			const sid = "11111111-1111-4111-8111-111111111111"

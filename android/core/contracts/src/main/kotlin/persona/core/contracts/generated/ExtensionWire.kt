@@ -4058,7 +4058,8 @@ data class ExtensionAction(
      */
     val reply: String? = null,
     /**
-     * Assistant only: an https URL or a validated persona/persona session, task, kb or file target, opened inside the
+     * Assistant only, except that a full extension page may open persona://session/<machine>/<session> or
+     * persona://task/<id>: an https URL or a validated persona session, task, kb or file target, opened inside the
      * app.
      */
     val open: String? = null,

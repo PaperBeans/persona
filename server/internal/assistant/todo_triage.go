@@ -329,6 +329,59 @@ func triageOpenPRs(t Todo, now time.Time) []TodoPRStatus {
 	return out
 }
 
+// openPRSnapshotState maps fresh open non-draft PR facts (or a non-draft target repo gate) to a snapshot status key.
+// Empty when no open non-draft PR applies.
+func openPRSnapshotState(prs []TodoPRStatus, gate *repoGate) string {
+	if len(prs) > 0 {
+		for _, p := range prs {
+			if p.Conflicts {
+				return "pr_conflicts"
+			}
+		}
+		for _, p := range prs {
+			if p.Review == "changes_requested" {
+				return "pr_changes_requested"
+			}
+		}
+		for _, p := range prs {
+			if p.Checks == "failure" || p.Checks == "failing" {
+				return "pr_checks_failed"
+			}
+		}
+		for _, p := range prs {
+			if p.Review == "required" || p.Review == "review_required" {
+				return "pr_in_review"
+			}
+		}
+		for _, p := range prs {
+			if p.Checks == "pending" {
+				return "pr_checks_pending"
+			}
+		}
+		return "pr_waiting_merge"
+	}
+	if !repoGateOpenNonDraftPR(gate) {
+		return ""
+	}
+	switch gate.State {
+	case repoGateBlockedConflict:
+		return "pr_conflicts"
+	case repoGateBlockedChanges:
+		return "pr_changes_requested"
+	case repoGateBlockedCI:
+		return "pr_checks_failed"
+	case repoGateAwaitingReview:
+		return "pr_in_review"
+	case repoGateChecksPending:
+		if strings.EqualFold(strings.TrimSpace(gate.Reason), "checks_pending") {
+			return "pr_checks_pending"
+		}
+		return "pr_waiting_merge"
+	default:
+		return ""
+	}
+}
+
 // triageWaitingForMerge requires a fresh observation of an open, non-draft PR of the task, its current one or an
 // earlier one still open (#7935). PR facts are display signals on the existing todo lifecycle: active Agents and
 // genuine owner decisions retain priority, while stale or legacy delivery/stage hints cannot claim that a PR is

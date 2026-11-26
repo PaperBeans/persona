@@ -38,7 +38,7 @@ func TestUpdateSourceFromHubJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Manifest.Build != 202611110749 || len(asked) != 1 || asked[0] != "fresh /dl/latest.json" {
+	if r.Manifest.Build != 202611110749 || len(asked) != 1 || asked[0] != "fresh "+testFeedPath() {
 		t.Fatalf("checked %v, got build %d", asked, r.Manifest.Build)
 	}
 	v := u.view()
@@ -192,11 +192,11 @@ func TestUpdateProxyOnlyForUpdates(t *testing.T) {
 	}
 	asked, auth := proxy.requests()
 	wantAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("user:s3cret"))
-	if len(asked) != 2 || !strings.HasSuffix(asked[0], "/dl/latest.json") || !strings.HasSuffix(asked[1], ".gz") || auth[0] != wantAuth || auth[1] != wantAuth {
+	if len(asked) != 2 || !strings.HasSuffix(asked[0], testFeedPath()) || !strings.HasSuffix(asked[1], ".gz") || auth[0] != wantAuth || auth[1] != wantAuth {
 		t.Fatalf("through the proxy: %v %v", asked, auth)
 	}
 	// Anything else the hub fetches goes as it did.
-	resp, err := http.Get(pub.srv.URL + "/dl/latest.json")
+	resp, err := http.Get(pub.srv.URL + testFeedPath())
 	if err != nil {
 		t.Fatal(err)
 	}

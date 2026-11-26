@@ -49,9 +49,12 @@ import (
 // Antigravity native usage account name and subscription plan enrichment via GetUserStatus (#16277) adds 286 B (279,605 B).
 // Main then measured 280,046 B (#16595): #16490 (+21 B), #15678 (+406 B) and #16027 (+22 B) grew the packages without raising
 // the budget, and #16285 adds 278 B on main (its 286 B was measured on its own branch).
+// Later runtime changes on main (#16591, #16122) bring the total to 280,892 B.
+// Following an Antigravity conversation past a rewind's abandoned export tail and rewinding a cut that hides ranges at
+// its matching visible step (#14297) add 304 B (281,196 B).
 // Raise the budget only for code a runtime needs, never to embed the packages raw again.
 func TestDistBudget(t *testing.T) {
-	const budget = 280_046
+	const budget = 281_196
 	_, out := generateIntegrations(t)
 	entries, err := os.ReadDir(out)
 	if err != nil {

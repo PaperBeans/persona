@@ -425,6 +425,8 @@ internal fun ChatLineContent(
     turnLauncher: String? = null,
     /** Opens the session's terminal: the live work line's mark on Glass ([ChatTerminalPlaces.onWorkLine]). */
     onTerminal: (() -> Unit)? = null,
+    /** A work group's attached views are already shown above its expanded steps. */
+    showToolViews: Boolean = true,
 ) {
     val res = LocalResources.current
     if (turnFix != null) {
@@ -438,7 +440,7 @@ internal fun ChatLineContent(
             return TurnErrorFixCard(turnFix, raw, turnLauncher, retry)
         }
     }
-    when (line) {
+    val content: @Composable () -> Unit = { when (line) {
         is ChatLine.Row -> when (line.row.type) {
             "user" -> line.row.item?.item?.let { item ->
                 val source = persona.core.domain.sourceOf(item)
@@ -501,7 +503,7 @@ internal fun ChatLineContent(
         is ChatLine.Work -> Column(Modifier.fillMaxWidth()) {
             // No live preview: ordinary tools, thoughts and intermediate text stay inside the expandable summary. On Glass
             // Persona's work line is the Agent chat's, ticking while it runs (iOS has one `WorkLine`, #4339 C13).
-            if (style.compactToolSummary && PersonaTheme.style != AppStyle.Glass) AssistantWorkSummary(line, onToggle)
+            if (style.compactToolSummary && PersonaTheme.style != AppStyle.Glass) AssistantWorkSummary(line, style.hidesThoughts(), onToggle)
             else {
                 // Waiting on you, the turn stays the live one (it folds and opens as while it runs), but its line says it
                 // waits: no "Working", no clock, no spinner, as the header says "Waiting for you".
@@ -521,6 +523,13 @@ internal fun ChatLineContent(
         is ChatLine.End -> TimelineMark(pluralStringResource(R.plurals.chat_content_collapse_steps, line.count, line.count),
             Modifier.heightIn(min = 44.dp.row).clickable(role = Role.Button) { onToggle(line.groupId) })
         is ChatLine.Wakes -> ChatSystemLine(pluralStringResource(R.plurals.chat_content_wakes, line.turn.wakes.size, line.turn.wakes.size))
+    } }
+    val blocks = LocalViewBlocks.current
+    val views = remember(line, showToolViews) { if (showToolViews) line.toolViews() else emptyList() }
+    if (blocks == null || views.isEmpty()) content()
+    else Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+        content()
+        for (view in views) DisableSelection { InterfaceContent { blocks.toolView(view) } }
     }
 }
 
@@ -528,9 +537,30 @@ internal fun ChatLineContent(
 @Composable
 private fun ChatRenderStyle.hidesThoughts(): Boolean = hideThoughts && PersonaTheme.style != AppStyle.Glass
 
+/**
+ * Whether a compact assistant work fold (Brief/Board) has any step that would actually render when expanded.
+ * Thoughts are hidden on Brief/Board, so a live turn that has only started thinking has zero inspectable steps.
+ */
+internal fun ChatLine.Work.hasVisibleCompactSteps(hidesThoughts: Boolean): Boolean = steps.any { step ->
+    when (step) {
+        is WorkItem.Tool, is WorkItem.Narration, is WorkItem.Folded -> true
+        is WorkItem.Thought -> !hidesThoughts || step.item.kind != "thinking"
+    }
+}
+
 @Composable
-private fun AssistantWorkSummary(line: ChatLine.Work, onToggle: (String) -> Unit) {
-    AssistantFoldLine(pluralStringResource(R.plurals.chat_assistant_checked, line.tools, line.tools), line.open) { onToggle(line.id) }
+private fun AssistantWorkSummary(line: ChatLine.Work, hidesThoughts: Boolean, onToggle: (String) -> Unit) {
+    val label = when {
+        line.tools > 0 -> pluralStringResource(R.plurals.chat_assistant_checked, line.tools, line.tools)
+        !line.hasVisibleCompactSteps(hidesThoughts) -> return
+        line.live -> stringResource(R.string.chat_work_working)
+        else -> {
+            val replies = line.steps.count { it is WorkItem.Narration }
+            if (replies > 0) stringResource(R.string.chat_work_replies, replies)
+            else stringResource(R.string.chat_work_done)
+        }
+    }
+    AssistantFoldLine(label, line.open) { onToggle(line.id) }
 }
 
 /** One muted line that opens and closes what it stands for: the work summary, a folded background round (#4314). */

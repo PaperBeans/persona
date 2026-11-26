@@ -1143,6 +1143,8 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     var sessionID: String
     var title: String
     var cwd: String
+    /// The node-verified physical directory used for workspace association.
+    var workspaceCWD: String? = nil
     var status: SessionStatus
     var paneID: String?
     var tabID: String?
@@ -1661,6 +1663,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         case listWaiting = "waiting", listBackgroundCount = "background_count", listRunningSubagents = "running_subagents", listRunningWorkflows = "running_workflows"
         case listBackgroundTasksCount = "background_tasks_count", listWorkflowProgress = "workflow_progress"
         case title, cwd, status, launcher, model, agent, effort, efforts, capabilities, attached
+        case workspaceCWD = "workspace_cwd"
         case pendingEffort = "pending_effort", effortChangeFailed = "effort_change_failed"
         case hiddenByDirectory = "hidden_by_directory"
         case serviceTier = "service_tier", serviceTiers = "service_tiers"
@@ -1702,6 +1705,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         manager = try c.decodeIfPresent(String.self, forKey: .manager)
         title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
         cwd = try c.decodeIfPresent(String.self, forKey: .cwd) ?? ""
+        workspaceCWD = try c.decodeIfPresent(String.self, forKey: .workspaceCWD)
         let rawStatus = try c.decodeIfPresent(String.self, forKey: .status)
         status = rawStatus.flatMap(SessionStatus.init(rawValue:)) ?? .unknown
         wasInterrupted = rawStatus == "interrupted"

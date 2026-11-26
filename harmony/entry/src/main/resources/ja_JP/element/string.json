@@ -1545,6 +1545,18 @@
       "value": "添付ファイルを保存できませんでした"
     },
     {
+      "name": "chat_attachment_photos_count_as_files",
+      "value": "1件のメッセージに添付できる枚数を超えたため、一部の写真をファイルとして送信しました。"
+    },
+    {
+      "name": "chat_attachment_photos_size_as_files",
+      "value": "メッセージのサイズ上限を超えたため、一部の写真をファイルとして送信しました。"
+    },
+    {
+      "name": "chat_attachment_photos_count_size_as_files",
+      "value": "写真の枚数とサイズが上限を超えたため、一部の写真をファイルとして送信しました。"
+    },
+    {
       "name": "chat_attachment_limit_reached",
       "value": "添付数の上限に達しました"
     },

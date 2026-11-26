@@ -530,6 +530,88 @@ test('native progress cannot clear a cut until the replacement export catches up
   assert.deepEqual(texts(caughtUp), replacement.map((step) => step.content))
 })
 
+// The export keeps the abandoned steps and numbers the next turn after its last line, as the fake's prompt export
+// does, while the native trajectory continues right after the steps the rewind kept (#14297).
+function proceed({ transcript, nativeFile, db }, question, answer) {
+  const index = readFileSync(transcript, 'utf8').trim().split('\n').length
+  const steps = [
+    { ...records[2], step_index: index, content: question, created_at: later },
+    { ...records[3], step_index: index + 1, content: answer, created_at: later },
+  ]
+  appendFileSync(transcript, steps.map((step) => JSON.stringify(step)).join('\n') + '\n')
+  const snapshot = JSON.parse(readFileSync(nativeFile, 'utf8'))
+  snapshot.trajectory.steps.push(...steps.map(nativeRecord))
+  writeFileSync(nativeFile, JSON.stringify(snapshot))
+  db.prepare('UPDATE conversation_summaries SET step_count = ?, last_modified_time = ?')
+    .run(snapshot.trajectory.steps.length, new Date().toISOString())
+}
+
+test('a conversation that continues after a rewind shows its new steps behind the retained prefix (#14297)', async (t) => {
+  const fx = await fixture(t)
+  const { node, rewind, calls } = fx
+  await rewind()
+  const rewound = await node.peer.call('session.items', { session_id: SESSION })
+  assert.deepEqual(texts(rewound), ['Repeat', 'First answer'])
+  assert.ok(rewound.history.endsWith(':cut:2'))
+  await node.peer.call('session.watch', { session_id: SESSION, since_seq: rewound.to_seq })
+
+  proceed(fx, 'New question', 'New answer')
+  const continued = await node.peer.call('session.items', { session_id: SESSION })
+  assert.deepEqual(texts(continued), ['Repeat', 'First answer', 'New question', 'New answer'])
+  assert.notEqual(continued.history, rewound.history, 'the page moves past the remembered cut')
+  assert.ok(continued.to_seq > rewound.to_seq)
+  await until('the continued page is pushed', () => node.all('session.items')
+    .some((batch) => batch.history === continued.history && batch.items.some((item) => item.text === 'New answer')))
+
+  proceed(fx, 'Later question', 'Later answer')
+  const appended = await node.peer.call('session.items', { session_id: SESSION })
+  assert.deepEqual(texts(appended), [...texts(continued), 'Later question', 'Later answer'])
+  assert.equal(appended.history, continued.history, 'later steps append')
+  const checks = calls().filter((call) => call.method === 'GetCascadeTrajectory').length
+  assert.deepEqual(texts(await node.peer.call('session.items', { session_id: SESSION })), texts(appended))
+  assert.equal(calls().filter((call) => call.method === 'GetCascadeTrajectory').length, checks, 'a confirmed cut is not checked again')
+})
+
+test('a rewind after the conversation continued cuts at the visible step and the conversation continues again (#14297)', async (t) => {
+  const fx = await fixture(t)
+  const { node, rewind } = fx
+  const page = () => node.peer.call('session.items', { session_id: SESSION })
+  await rewind()
+  proceed(fx, 'New question', 'New answer')
+  proceed(fx, 'Later question', 'Later answer')
+  const continued = await page()
+  assert.deepEqual(texts(continued), ['Repeat', 'First answer', 'New question', 'New answer', 'Later question', 'Later answer'])
+
+  await rewind({ prompt: 'Later question' })
+  const again = await page()
+  assert.deepEqual(texts(again), ['Repeat', 'First answer', 'New question', 'New answer'])
+  assert.notEqual(again.history, continued.history)
+  proceed(fx, 'Last question', 'Last answer')
+  const resumed = await page()
+  assert.deepEqual(texts(resumed), [...texts(again), 'Last question', 'Last answer'])
+
+  await rewind({ prompt: 'New question', prompts_after: 1 })
+  const first = await page()
+  assert.deepEqual(texts(first), ['Repeat', 'First answer'])
+  assert.notEqual(first.history, resumed.history)
+})
+
+test('a native rewind after the conversation continued hides the steps it dropped (#14297)', async (t) => {
+  const fx = await fixture(t)
+  const { node, rewind, nativeFile, db } = fx
+  await rewind()
+  proceed(fx, 'New question', 'New answer')
+  proceed(fx, 'Later question', 'Later answer')
+  const continued = await node.peer.call('session.items', { session_id: SESSION })
+  assert.equal(texts(continued).length, 6)
+  const snapshot = JSON.parse(readFileSync(nativeFile, 'utf8'))
+  writeFileSync(nativeFile, JSON.stringify({ ...snapshot, trajectory: { ...snapshot.trajectory, steps: snapshot.trajectory.steps.slice(0, 4) } }))
+  db.prepare('UPDATE conversation_summaries SET step_count = 4, last_modified_time = ?').run(new Date().toISOString())
+  const rewound = await node.peer.call('session.items', { session_id: SESSION })
+  assert.deepEqual(texts(rewound), ['Repeat', 'First answer', 'New question', 'New answer'])
+  assert.notEqual(rewound.history, continued.history)
+})
+
 test('a stale native check cannot erase a cut installed by a newer rewind', async (t) => {
   const { node, home, transcript, rewind, db, nativeFile } = await fixture(t)
   await rewind()

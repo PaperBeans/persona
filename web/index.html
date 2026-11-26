@@ -39,6 +39,8 @@
         // text size (src/ui/look.ts) too, so the first paint is at its size.
         var size = localStorage.getItem("persona.text-size");
         if (size === "small" || size === "large") document.documentElement.dataset.textSize = size;
+        // surface style (src/ui/look.ts): opt-in Liquid Glass before first paint.
+        if (localStorage.getItem("persona.surface-style") === "liquid-glass") document.documentElement.dataset.surfaceStyle = "liquid-glass";
       } catch (e) {}
     </script>
     <script>

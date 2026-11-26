@@ -107,7 +107,8 @@ describe("sidebar alignment (#14892)", () => {
       return json({});
     }));
 
-    localStorage.setItem("persona.agentGrouping", "state");
+    // By status reads the complete list for AgentView (#16330). By computer still uses the paged list.
+    localStorage.setItem("persona.agentGrouping", "machine");
     act(() => {
       connect();
       const socket = FakeSocket.all.at(-1)!;

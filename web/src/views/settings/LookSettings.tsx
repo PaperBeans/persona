@@ -8,8 +8,8 @@ import { pageToken } from "../../ui/extension-theme";
 import { useActiveExtensionTheme } from "../../ui/ExtensionThemePicker";
 import { Icon } from "../../ui/icons";
 import {
-  ACCENT_PRESETS, accentTokens, PRESET_COLORS, setAccentChoice, setTextSize, TEXT_SIZES, useAccentChoice, usePersonaAccent, useTextSize,
-  type AccentChoice, type TextSize,
+  ACCENT_PRESETS, accentTokens, PRESET_COLORS, setAccentChoice, setSurfaceStyle, setTextSize, SURFACE_STYLES, TEXT_SIZES,
+  useAccentChoice, usePersonaAccent, useSurfaceStyle, useTextSize, type AccentChoice, type SurfaceStyle, type TextSize,
 } from "../../ui/look";
 import { RECENT_COUNTS, setRecentCount, useRecentCount } from "../../lib/sidebar-recent";
 import { setSidebarUsageShown, useSidebarUsageShown } from "../../lib/sidebar-usage";
@@ -155,6 +155,17 @@ export function SidebarIconsRow() {
   return (
     <Row label={t("ui-look.sidebar_icons")} hint={t("ui-look.sidebar_icons_hint")} wrapHint stackOnNarrow anchor="sidebar-icons">
       <Segmented<SidebarIconMode> label={t("ui-look.sidebar_icons")} value={mode} options={SIDEBAR_ICON_MODES.map((v) => ({ v, label: t(`ui-look.sidebar_icons_${v}`) }))} onChange={setSidebarIconMode} />
+    </Row>
+  );
+}
+
+/** "Window style" (#16607): Default (opaque surfaces) or Liquid Glass (translucent frosted material + macOS vibrancy). */
+export function SurfaceStyleRow() {
+  const style = useSurfaceStyle();
+  const label = (v: SurfaceStyle) => (v === "liquid-glass" ? t("ui-look.surface_liquid_glass") : t("ui-look.surface_default"));
+  return (
+    <Row label={t("ui-look.surface_style")} hint={t("ui-look.surface_style_hint")} wrapHint stackOnNarrow anchor="surface-style">
+      <Segmented<SurfaceStyle> label={t("ui-look.surface_style")} value={style} options={SURFACE_STYLES.map((v) => ({ v, label: label(v) }))} onChange={setSurfaceStyle} />
     </Row>
   );
 }

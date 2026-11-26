@@ -228,6 +228,15 @@ func (n *Node) stop(ctx context.Context, id string, retire bool) (stopped bool, 
 }
 
 func (n *Node) stopWithCause(ctx context.Context, id string, retire bool, cause proto.StopCause) (stopped bool, err error) {
+	// An Antigravity companion row id agy-<conversation-uuid> resolves here first: to its one live pane
+	// row, to an authoritative not_found for an orphaned conversation, or to a hard refusal. Every other
+	// id comes back unchanged. Resolving before the recovery lock also serializes companion-id stops with
+	// pane-row stops on the same row key.
+	origID := id
+	id, err = n.resolveAgyCompanionStop(id, retire)
+	if err != nil {
+		return false, err
+	}
 	release := n.recovery.lock(id)
 	defer release()
 	if cause == proto.StopUser {
@@ -237,15 +246,38 @@ func (n *Node) stopWithCause(ctx context.Context, id string, retire bool, cause 
 		defer n.state.stopped(id, cause)
 	}
 	unlock, a, ok, err := n.stoppable(id, retire)
-	if err != nil || !ok {
+	if err != nil {
 		return false, err
 	}
+	if !ok {
+		// The routed row went away between resolution and stoppable. For a companion uuid re-check raw
+		// attribution: a refresh can have moved the conversation to another pane, and returning the
+		// idempotent (false,nil) here would otherwise make the hub release that live conversation.
+		if lerr := n.agyStopAbsentVerdict(origID, id); lerr != nil {
+			return false, lerr
+		}
+		return false, nil
+	}
 	defer unlock()
+	if conversation, isCompanion := agyConversationID(origID); isCompanion && id != origID {
+		// The routed unique pane could gain a twin or move while saveStopCause/stoppable ran; never
+		// Ctrl+C one pane while raw attribution now shows more than one.
+		if err := n.agyCompanionStopRecheck(conversation, id); err != nil {
+			return false, err
+		}
+	}
 	if cause != proto.StopUser {
 		n.state.stopped(id, proto.StopUnknown) // An unconfirmed/failed automatic stop never grants recovery.
 	}
 	stopped, err = n.quitAgent(ctx, id, a.PaneID)
 	if stopped && err == nil {
+		if conversation, isCompanion := agyConversationID(origID); isCompanion && id != origID {
+			// A twin pane can have appeared during the quit verification; quitAgent only proves the
+			// routed row left, so confirm no other pane still attributes the conversation before success.
+			if perr := n.agyCompanionStopPostQuit(conversation); perr != nil {
+				return false, perr
+			}
+		}
 		n.state.stopped(id, cause)
 	}
 	return stopped, err
@@ -255,6 +287,14 @@ func (n *Node) stopWithCause(ctx context.Context, id string, retire bool, cause 
 // (unlock releases it) when ok; ok false with no error when it is not running.
 func (n *Node) stoppable(id string, retire bool) (unlock func(), a host.Agent, ok bool, err error) {
 	if !validID(id) && !n.agyPaneRow(id) {
+		// A runtime's session (agy-b-<conversation>, its runtime id first) that no runtime lists any more reaches here:
+		// a session of a runtime that does is answered by that runtime before this (runtimeFor). Nothing runs it on this
+		// computer, so it is not running, as for a hex id with no pane; a continuation that stops its to-do's old Agent
+		// first goes on (#16376). A pane's row of another work agent (cursor) is not this: it runs, and is refused as
+		// before; so is an id of any other shape.
+		if _, running := n.agent(id); !running && runtimeIDRe.MatchString(id) {
+			return nil, a, false, nil
+		}
 		return nil, a, false, fmt.Errorf("invalid session id %q", id)
 	}
 	no := func(code, why string) (func(), host.Agent, bool, error) {
@@ -659,6 +699,7 @@ func (n *Node) newTab(ctx context.Context, launch host.Launcher, cwd, ws, tabNam
 	if err != nil {
 		return nil, fmt.Errorf("创建终端标签页失败：%w", err)
 	}
+	n.forgetPane(created.Pane.String()) // a new tab: whatever ran in a pane of its id before, nothing runs in it yet
 	ts.opened(created.SpaceID)
 	markPersonaTab(ctx, launch, created.Pane, id)
 	markTaskTerminal(ctx, launch, created.Pane)

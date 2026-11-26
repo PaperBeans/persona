@@ -23,6 +23,7 @@ import (
 	"github.com/nwverse/persona/server/internal/node"
 	"github.com/nwverse/persona/server/internal/nodeclient"
 	"github.com/nwverse/persona/server/internal/nodecmd/commandport"
+	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/nodeupdate"
 	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/procs"
@@ -34,6 +35,9 @@ import (
 type Build struct {
 	Version string
 	Program string // nodeproto.ProgramPersonad or ProgramPersonaNode: what node.info says the node runs as
+	// Edition is the edition the program was built as (update.ThisEdition), which node.info says so that an update
+	// brings the same one. The zero value is the full build.
+	Edition nodeproto.Edition
 }
 
 // Usage is the device commands' part of the usage text (the node part is NodeUsage), with the lines of the commands
@@ -205,6 +209,7 @@ func runNode(ctx context.Context, args []string, b Build) error {
 		return err
 	}
 	n.Program = b.Program
+	n.Edition = b.Edition
 	if err = n.ServeStdio(ctx); errors.Is(err, io.EOF) {
 		err = nil
 	}

@@ -129,6 +129,7 @@ func (n *Node) resumeInTerminal(ctx context.Context, cwd string, argv []string, 
 		return nil, fmt.Errorf("创建终端标签页失败：%w", err)
 	}
 	pane := created.Pane.String()
+	n.forgetPane(pane)                 // a new tab, as newTab's: no older session's binding of its id stays
 	n.bindPane(pane, id)               // the pane is this session's before herdr or the extension says so
 	time.Sleep(300 * time.Millisecond) // the fresh shell loads ~/.zshrc; typed input is buffered either way
 	shells := n.startPaneShells(ctx, launch, created)

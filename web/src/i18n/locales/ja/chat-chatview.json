@@ -117,7 +117,6 @@
   "loop_mark": "ループ",
   "agent_device": "Agent は {device} で実行中",
   "agent_device_offline": "Agent は {device} で実行中ですが、そのパソコンはオフラインです。接続されると続行します",
-  "branch_title": "ブランチ：{branch}",
   "background_running": "バックグラウンドタスク、{count} 件実行中",
   "rename_title": "名前を変更",
   "agent_device_label": "{agent}。{where}",

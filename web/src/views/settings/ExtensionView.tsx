@@ -10,6 +10,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExt
 import { ApiError, credentialOwner, errorText, getToken, onCredentialChange } from "../../lib/api";
 import { extIdOf } from "../../lib/extension-api";
 import { openLink } from "../../lib/links";
+import { openTargetOf } from "../../ui/AssistantCard";
 import {
   actUI, fieldValues, httpOnlyUI, isUnsupported, numberProblem, outcome, pushPage, refreshDelay, renderUI, submitValues, uiPlaces, UI_VERSION,
   type UIAction, type UIContext, type UIFilter, type UIItem, type UIMore, type UIPage, type UIPlace, type UIPush, type UISearch, type UITabs, type UIView,
@@ -32,6 +33,7 @@ import { PageBoundary } from "../PageBoundary";
 import { defaultKnown, defaultManager, otherManager, useKnownDefault, useLinkManager } from "../../lib/manager-choice";
 import { keepView, NATIVE_UI_VERSION, readKeptView } from "../../lib/extension-view-cache";
 import type { UIRowControl } from "../../lib/extension-ui-v6";
+import { ExtensionSetupNotice } from "./ExtensionSetupNotice";
 import { currentLanguage, t } from "../../i18n";
 import { HEALTH_INTAKE_UI, STRENGTH_EVENT } from "../../lib/health-intake-ui";
 import { SUBSCRIPTIONS_UI } from "../../lib/subscriptions-ui";
@@ -322,11 +324,13 @@ function KeptView({ view, native, compact, bare, title, onWide, onTitle }: { vie
 }
 export function LegacyExtensionUI({
   extension, ui, context, embedded, compact, bare, title, onUnsupported, onMissing, onFailed, revision, onOpenSource, pages, history: withHistory, state: firstState, onWide, onDepth, navigation, active = true, manager,
-  placeholder, onView, onTitle, openPage, onClose,
+  placeholder, onView, onTitle, openPage, onClose, setupOwner,
 }: {
   extension: string; ui: string; context?: UIContext; embedded?: boolean; compact?: boolean; bare?: boolean; title?: string;
   /** Whose extension it is (another manager's inbox item or computer, docs/assistant/managers.md "Clients"); none: the default's. */
   manager?: string;
+  /** A direct page can recover from its first 404 by opening the owning installation's settings. */
+  setupOwner?: string; // empty until the direct page's default manager is known
   onUnsupported?: () => void; onMissing?: () => void; onFailed?: (e: unknown) => void; revision?: string; onOpenSource?: () => void;
   pages?: "stack" | "open"; history?: boolean; state?: string;
   /** A native/legacy mixed stack has one history owner; HTTP entries delegate navigation. */
@@ -372,7 +376,8 @@ export function LegacyExtensionUI({
       return resolved ? { key, view: resolved } : null;
     });
   }, []);
-  const [error, setError] = useState("");
+  const [failure, setFailure] = useState<{ message: string; checkSetup: boolean; attempt: number }>();
+  const error = failure?.message;
   const [unsupported, setUnsupported] = useState(false);
   const [loading, setLoading] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -435,7 +440,7 @@ export function LegacyExtensionUI({
     // a control's choice stays only while its request is on its way: once answered, what the extension draws is shown
     setControls((c) => keepFlying(c, flight.current));
     if (!keep) setQuery(v.search?.value ?? "");
-    setError("");
+    setFailure(undefined);
     setUnsupported(false); // a view drawn is something here
     setDrawnAt(Date.now());
   };
@@ -456,7 +461,8 @@ export function LegacyExtensionUI({
         else if (onMissing && e instanceof ApiError && e.status === 404 && depth === 1) onMissing();
         else if (onFailed && !drawnRef.current) onFailed(e);
         else {
-          setError(errorText(e));
+          setFailure({ message: errorText(e), attempt: mine, checkSetup: setupOwner !== undefined && !drawnRef.current
+            && depth === 1 && !httpOnlyUI(extension) && e instanceof ApiError && e.status === 404 });
           setDrawnAt(Date.now()); // a failed refresh waits a whole interval too
         }
       })
@@ -471,7 +477,7 @@ export function LegacyExtensionUI({
     stateRef.current = top.state;
     drawnRef.current = false;
     setView(null);
-    setError("");
+    setFailure(undefined);
     setUnsupported(false); // "nothing here" was the page before's answer
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -585,6 +591,12 @@ export function LegacyExtensionUI({
 
   // resolves to whether the action was done: false when it did not go (a field not a number) or failed
   const run = async (action: UIAction, extra?: Record<string, string>): Promise<boolean> => {
+    // A full page may open an existing Persona session or to-do (#14617): route locally, like an assistant card.
+    // The hub only keeps session and task targets on extension pages; other forms still go through ui.action.
+    if (action.open) {
+      openTargetOf(action.open, linkManager);
+      return true;
+    }
     if (action.push) {
       push(action.push);
       return true;
@@ -841,16 +853,18 @@ export function LegacyExtensionUI({
         </div>
       )}
       {error && !compact && (
-        <div className={cx("flex flex-col items-center gap-2 px-6 text-center", embedded ? "rounded-control bg-inset py-4 shadow-hairline" : "rounded-card bg-surface py-8 shadow-card")}>
-          <span className="flex size-9 items-center justify-center rounded-[10px] bg-red-tint text-red">
-            <Icon name="extension" size={16} />
-          </span>
-          <p className="text-meta font-medium text-ink">{view ? t("settings-extensionview.update_failed") : t("settings-extensionview.draw_failed")}</p>
-          <p className="max-w-[420px] text-label leading-relaxed break-words text-ink-3 select-text">{error}</p>
-          <Button tone="secondary" icon="retry" busy={loading} onClick={() => load()}>
-            {t("settings-extensionview.retry")}
-          </Button>
-        </div>
+        <ExtensionSetupNotice key={JSON.stringify([failure.attempt, setupOwner])} check={failure.checkSetup} extension={extension} manager={setupOwner || undefined}>
+          <div className={cx("flex flex-col items-center gap-2 px-6 text-center", embedded ? "rounded-control bg-inset py-4 shadow-hairline" : "rounded-card bg-surface py-8 shadow-card")}>
+            <span className="flex size-9 items-center justify-center rounded-[10px] bg-red-tint text-red">
+              <Icon name="extension" size={16} />
+            </span>
+            <p className="text-meta font-medium text-ink">{view ? t("settings-extensionview.update_failed") : t("settings-extensionview.draw_failed")}</p>
+            <p className="max-w-[420px] text-label leading-relaxed break-words text-ink-3 select-text">{error}</p>
+            <Button tone="secondary" icon="retry" busy={loading} onClick={() => load()}>
+              {t("settings-extensionview.retry")}
+            </Button>
+          </div>
+        </ExtensionSetupNotice>
       )}
       {view && (
         <ReviewProvider view={isReview ? view : null} page={pageKey} fetch={fetchQuiet}>

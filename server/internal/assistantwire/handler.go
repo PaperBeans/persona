@@ -218,7 +218,7 @@ type MessageCard struct {
 	ProgressVersion string `json:"progress_version,omitempty"`
 	// SentAt: the reply to the item went out (from this card or from the inbox, on any device) and Sent is what it
 	// said; set when the inbox sent the reply (the inbox is the assistant's too), never cleared, so the card stays sent
-	// when the item opens again. A card sent before that was recorded has no Sent (the draft is what went out).
+	// when the item opens again. Older send records can lack Sent, in which case the sent text is unknown.
 	SentAt *time.Time `json:"sent_at,omitempty"`
 	Sent   string     `json:"sent,omitempty"`
 	// Dismissal is per draft card, not inbox filing or task completion. Undo

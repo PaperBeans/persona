@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -518,6 +519,54 @@ func TestPlacementAssignEnforcesHardConstraintsAdmissionAndCAS(t *testing.T) {
 	}
 }
 
+func TestPlacementAssignPreservesTraexModelAndEffort(t *testing.T) {
+	e := newPlacementTestEnv(t)
+	e.f.launcherList = append(e.f.launcherList, proto.Launcher{Name: "traex", Agent: "traex"})
+	ctx := context.Background()
+	_ = e.doReq(http.MethodGet, "/api/v1/assistant/placement/pending", roleExtension, "sched-ext", "")
+
+	res, err := e.s.toolTaskPlan(ctx, "conv_pub", json.RawMessage(`{
+		"tasks":[{
+			"title":"TRAE CLI terminal task",
+			"prompt":"Inspect the repository",
+			"cwd":"~/repo",
+			"launcher":"traex",
+			"model":"example-fast",
+			"effort":"xhigh",
+			"role":"worker",
+			"readonly":true,
+			"goal":"Check the repository",
+			"user_requested":true,
+			"why":"Use the chosen model on a Linux worker",
+			"placement_constraints":{"os":"linux"}
+		}]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := e.s.loadPlan(ctx, extractPlanID(t, res))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := e.doReq(http.MethodPost, "/api/v1/assistant/placement/"+plan.Tasks[0].TodoID+"/assign",
+		roleExtension, "sched-ext", `{"machine":"linux-idle","reason":"selected by score","version":1}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("assign = %d %s, want 200", rec.Code, rec.Body.String())
+	}
+	waitFor(t, "assigned TRAE CLI task starts", func() bool {
+		return len(taskStartMachines(e.f.fakeHub)) == 1 && e.s.taskStarting.Load() == 0
+	})
+	e.f.mu.Lock()
+	defer e.f.mu.Unlock()
+	if len(e.f.starts) != 1 || e.f.starts[0]["launcher"] != "traex" {
+		t.Fatalf("starts = %v, want one TRAE CLI start", e.f.starts)
+	}
+	start := e.f.starts[0]
+	if start["model"] != "example-fast" || start["effort"] != "xhigh" {
+		t.Fatalf("TRAE CLI start got model %q and effort %q, want example-fast and xhigh", start["model"], start["effort"])
+	}
+}
+
 func TestPlacementDeferCASAndVisibility(t *testing.T) {
 	e := newPlacementTestEnv(t)
 	ctx := context.Background()
@@ -720,4 +769,257 @@ func TestPlacementFallbackZeroSecondFifteenSecondAndTimeout(t *testing.T) {
 			t.Fatalf("todo should record StartError at 30m timeout: %+v", todo)
 		}
 	})
+}
+
+// placementAuditHitKeys returns the filter hit keys recorded on machine in the task's placement audit.
+func placementAuditHitKeys(t *testing.T, p *placement, machine string) []string {
+	t.Helper()
+	if p == nil {
+		t.Fatal("no placement audit on task")
+	}
+	for _, c := range p.Candidates {
+		if c.Machine != machine {
+			continue
+		}
+		keys := make([]string, 0, len(c.Hits))
+		for _, h := range c.Hits {
+			keys = append(keys, h.Key)
+		}
+		return keys
+	}
+	t.Fatalf("machine %s not recorded in placement audit %+v", machine, p.Candidates)
+	return nil
+}
+
+// queuedFallbackTask builds a deferred task (no machine) constrained to linux machines. fields adds caller choices
+// such as a tier; the audit and assertions stay in the test itself.
+func queuedFallbackTask(t *testing.T, fields map[string]any) json.RawMessage {
+	t.Helper()
+	task := map[string]any{
+		"title":                 "Fallback launcher check",
+		"prompt":                "Run the job",
+		"cwd":                   "~/repo",
+		"role":                  "worker",
+		"readonly":              true,
+		"goal":                  "Placement regression",
+		"user_requested":        true,
+		"why":                   "15953 regression",
+		"placement_constraints": map[string]any{"os": "linux"},
+	}
+	for k, v := range fields {
+		task[k] = v
+	}
+	raw, err := json.Marshal(map[string]any{"tasks": []map[string]any{task}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func createFallbackPlan(t *testing.T, e *placementTestEnv, args json.RawMessage) string {
+	t.Helper()
+	res, err := e.s.toolTaskPlan(context.Background(), "conv_pub", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return extractPlanID(t, res)
+}
+
+// failingUsageLimit is a fresh usage-limit health record: unusable without an on-the-spot probe, so the test stays
+// deterministic (launcherUnusableNow returns it immediately within healthRecheckThrottle).
+func failingUsageLimit(machine, launcher string) *LauncherHealth {
+	return &LauncherHealth{
+		Machine: machine, Launcher: launcher, State: healthFailing, Kind: errKindUsageLimit,
+		Error: "usage limit reached", CheckedAt: time.Now(),
+	}
+}
+
+// failingOther is a fresh non-usage-limit failure: launcherUnusableNow re-probes it on the spot, so the test can
+// exercise the stale-record recovery path deterministically through the fake node's health check answer.
+func failingOther(machine, launcher string) *LauncherHealth {
+	return &LauncherHealth{
+		Machine: machine, Launcher: launcher, State: healthFailing, Kind: errKindOther,
+		Error: "something broke", CheckedAt: time.Now(),
+	}
+}
+
+// TestPlacementFallbackChecksResolvedLauncherHealthAndPresence covers #15953: when a deferred task names no launcher,
+// the kernel fallback must resolve the effective launcher (default agent.new / claude, or the per-machine tier
+// candidate) on every candidate and enforce launcherOn + launcherUnusable there, instead of recommending a computer
+// whose launcher is missing or unhealthy and livelocking on the same failure until the 30m deadline.
+func TestPlacementFallbackChecksResolvedLauncherHealthAndPresence(t *testing.T) {
+	t.Run("unhealthy default launcher skips lowest load and picks healthy machine", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		// pt.Launcher == "" resolves to claude; the lowest-load linux-idle has it failing.
+		e.s.health.recs = map[string]*LauncherHealth{"linux-idle/claude": failingUsageLimit("linux-idle", "claude")}
+		planID := createFallbackPlan(t, e, queuedFallbackTask(t, nil))
+
+		e.s.sweepPendingPlacement(ctx)
+		waitFor(t, "fallback starts on the healthy machine", func() bool { return len(taskStartMachines(e.f.fakeHub)) == 1 })
+		if starts := taskStartMachines(e.f.fakeHub); starts[0] != "linux-heavy" {
+			t.Fatalf("fallback picked %v, want [linux-heavy]", starts)
+		}
+		p, _ := e.s.loadPlan(ctx, planID)
+		if p.Tasks[0].Queue != nil {
+			t.Fatalf("task must leave the queue, still queued: %+v", p.Tasks[0].Queue)
+		}
+		if got := placementAuditHitKeys(t, p.Tasks[0].Placement, "linux-idle"); !slices.Contains(got, "launcher_unhealthy") {
+			t.Fatalf("linux-idle audit hits = %v, want launcher_unhealthy", got)
+		}
+	})
+
+	t.Run("missing configured agent.new launcher skips lowest load and picks machine that has it", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		setModel(t, e.s, "agent.new", ModelBinding{Provider: "launcher.codex"})
+		// linux-idle no longer lists codex; the other machines still use the fixture's [codex, claude] list.
+		e.f.zshrc = map[string][]proto.Launcher{"linux-idle": {{Name: "claude"}}}
+		planID := createFallbackPlan(t, e, queuedFallbackTask(t, nil))
+
+		e.s.sweepPendingPlacement(ctx)
+		waitFor(t, "fallback starts where the default launcher exists", func() bool { return len(taskStartMachines(e.f.fakeHub)) == 1 })
+		if starts := taskStartMachines(e.f.fakeHub); starts[0] != "linux-heavy" {
+			t.Fatalf("fallback picked %v, want [linux-heavy]", starts)
+		}
+		p, _ := e.s.loadPlan(ctx, planID)
+		if got := placementAuditHitKeys(t, p.Tasks[0].Placement, "linux-idle"); !slices.Contains(got, "launcher_missing") {
+			t.Fatalf("linux-idle audit hits = %v, want launcher_missing", got)
+		}
+	})
+
+	t.Run("unhealthy tier launcher skips lowest load on the per-machine tier resolution", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		saveTier(t, e.s, "dev", ModelTier{Launcher: "codex", Model: "m1"})
+		e.s.health.recs = map[string]*LauncherHealth{"linux-idle/codex": failingUsageLimit("linux-idle", "codex")}
+		planID := createFallbackPlan(t, e, queuedFallbackTask(t, map[string]any{"tier": "dev"}))
+
+		e.s.sweepPendingPlacement(ctx)
+		waitFor(t, "fallback starts on a machine with a healthy tier launcher", func() bool { return len(taskStartMachines(e.f.fakeHub)) == 1 })
+		if starts := taskStartMachines(e.f.fakeHub); starts[0] != "linux-heavy" {
+			t.Fatalf("fallback picked %v, want [linux-heavy]", starts)
+		}
+		p, _ := e.s.loadPlan(ctx, planID)
+		if got := placementAuditHitKeys(t, p.Tasks[0].Placement, "linux-idle"); !slices.Contains(got, "launcher_unhealthy") {
+			t.Fatalf("linux-idle audit hits = %v, want launcher_unhealthy", got)
+		}
+	})
+
+	t.Run("healthy tier candidate accepted even when the default launcher is unhealthy there", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		saveTier(t, e.s, "dev", ModelTier{
+			Launcher: "codex", Model: "m1",
+			Candidates: []TierCandidate{{Launcher: "codex", Model: "m1"}, {Launcher: "claude", Model: "m2"}},
+		})
+		// The default claude launcher fails on the lowest-load machine, but the tier's first candidate codex is fine:
+		// filtering the default launcher instead of the tier-resolved one would wrongly skip this machine.
+		e.s.health.recs = map[string]*LauncherHealth{"linux-idle/claude": failingUsageLimit("linux-idle", "claude")}
+		planID := createFallbackPlan(t, e, queuedFallbackTask(t, map[string]any{"tier": "dev"}))
+
+		e.s.sweepPendingPlacement(ctx)
+		waitFor(t, "fallback starts on the lowest-load machine", func() bool { return len(taskStartMachines(e.f.fakeHub)) == 1 })
+		if starts := taskStartMachines(e.f.fakeHub); starts[0] != "linux-idle" {
+			t.Fatalf("fallback picked %v, want [linux-idle]", starts)
+		}
+		p, _ := e.s.loadPlan(ctx, planID)
+		got := placementAuditHitKeys(t, p.Tasks[0].Placement, "linux-idle")
+		if slices.Contains(got, "launcher_unhealthy") || slices.Contains(got, "launcher_missing") {
+			t.Fatalf("linux-idle audit hits = %v, want no launcher failure", got)
+		}
+	})
+
+	t.Run("missing default launcher on every machine still starts through the assignment swap", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		setModel(t, e.s, "agent.new", ModelBinding{Provider: "launcher.codex"})
+		// No candidate machine offers codex: fitLauncher swaps a missing default launcher rather than refusing, so
+		// the fallback must not starve the task at the queue deadline (it keeps preferring machines that offer it).
+		e.f.zshrc = map[string][]proto.Launcher{
+			"linux-idle":  {{Name: "claude"}},
+			"linux-heavy": {{Name: "claude"}},
+		}
+		planID := createFallbackPlan(t, e, queuedFallbackTask(t, nil))
+
+		e.s.sweepPendingPlacement(ctx)
+		waitFor(t, "task starts despite the missing default launcher", func() bool { return len(taskStartMachines(e.f.fakeHub)) == 1 })
+		if starts := taskStartMachines(e.f.fakeHub); starts[0] != "linux-idle" {
+			t.Fatalf("fallback picked %v, want [linux-idle]", starts)
+		}
+		p, _ := e.s.loadPlan(ctx, planID)
+		if p.Tasks[0].Queue != nil {
+			t.Fatalf("task must not starve in the queue: %+v", p.Tasks[0].Queue)
+		}
+	})
+
+	t.Run("stale failing launcher record is probed on the spot and cleared", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		// The fake node answers a passing launchers.check, so launcherUnusableNow clears the stale record instead of
+		// requeuing a task this healthy machine can start.
+		e.s.health.recs = map[string]*LauncherHealth{"linux-idle/claude": failingOther("linux-idle", "claude")}
+		_ = createFallbackPlan(t, e, queuedFallbackTask(t, nil))
+
+		e.s.sweepPendingPlacement(ctx)
+		waitFor(t, "fallback starts on the probed machine", func() bool { return len(taskStartMachines(e.f.fakeHub)) == 1 })
+		if starts := taskStartMachines(e.f.fakeHub); starts[0] != "linux-idle" {
+			t.Fatalf("fallback picked %v, want [linux-idle]", starts)
+		}
+		if !slices.Contains(e.f.fakeHub.checked, "linux-idle/claude") {
+			t.Fatalf("no on-the-spot health probe ran for linux-idle/claude: %v", e.f.fakeHub.checked)
+		}
+	})
+
+	t.Run("all machines unusable keeps the safe queue-and-retry behavior without starting", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		e.s.health.recs = map[string]*LauncherHealth{
+			"linux-idle/claude":  failingUsageLimit("linux-idle", "claude"),
+			"linux-heavy/claude": failingUsageLimit("linux-heavy", "claude"),
+		}
+		planID := createFallbackPlan(t, e, queuedFallbackTask(t, nil))
+
+		e.s.sweepPendingPlacement(ctx)
+		if starts := taskStartMachines(e.f.fakeHub); len(starts) != 0 {
+			t.Fatalf("no machine is usable, but started on %v", starts)
+		}
+		p, _ := e.s.loadPlan(ctx, planID)
+		if p.Tasks[0].Queue == nil || p.Tasks[0].Queue.Key != pendingPlacementQueueKey || p.Tasks[0].Queue.Attempt != 1 {
+			t.Fatalf("task with no usable machine must stay queued for retry: %+v", p.Tasks[0].Queue)
+		}
+		if p.Tasks[0].Queue.Reason == "" {
+			t.Fatal("queued task must record why no machine matched")
+		}
+		for _, machine := range []string{"linux-idle", "linux-heavy"} {
+			if got := placementAuditHitKeys(t, p.Tasks[0].Placement, machine); !slices.Contains(got, "launcher_unhealthy") {
+				t.Fatalf("%s audit hits = %v, want launcher_unhealthy", machine, got)
+			}
+		}
+	})
+}
+
+// TestPlacementAssignUnhealthyDefaultLauncherNamesResolvedLauncher pins the fixed_launcher_unhealthy wording for a
+// task without an explicit launcher: the args carry the resolved launcher name instead of an empty field.
+func TestPlacementAssignUnhealthyDefaultLauncherNamesResolvedLauncher(t *testing.T) {
+	e := newPlacementTestEnv(t)
+	ctx := context.Background()
+	_ = e.doReq(http.MethodGet, "/api/v1/assistant/placement/pending", roleExtension, "sched-ext", "")
+	planID := createFallbackPlan(t, e, queuedFallbackTask(t, nil))
+	p, _ := e.s.loadPlan(ctx, planID)
+	todoID := p.Tasks[0].TodoID
+	e.s.health.recs = map[string]*LauncherHealth{"linux-idle/claude": failingUsageLimit("linux-idle", "claude")}
+
+	rec := e.doReq(http.MethodPost, "/api/v1/assistant/placement/"+todoID+"/assign", roleExtension, "sched-ext",
+		`{"machine":"linux-idle","reason":"unhealthy default","version":1}`)
+	body := rec.Body.String()
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(body, "launcher_unavailable") {
+		t.Fatalf("assign = %d %s, want 422 launcher_unavailable", rec.Code, body)
+	}
+	if !strings.Contains(body, "claude") || strings.Contains(body, "Launcher  is") {
+		t.Fatalf("error must name the resolved claude launcher, got %q", body)
+	}
+	if starts := taskStartMachines(e.f.fakeHub); len(starts) != 0 {
+		t.Fatalf("refused assignment must not start an agent: %v", starts)
+	}
 }

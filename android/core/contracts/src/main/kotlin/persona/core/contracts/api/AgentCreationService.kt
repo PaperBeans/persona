@@ -37,6 +37,8 @@ interface AgentCreationService {
      * unified model configuration.
      */
     suspend fun newAgentModel(): ModelPurposeDetail? = null
+    /** The same purpose on the hub that owns a preselected computer. */
+    suspend fun newAgentModel(machineId: String): ModelPurposeDetail? = newAgentModel()
 
     /**
      * The models [launcher]'s agent offers in its own /model menu, for "New Agent"'s model picker: the node keeps the

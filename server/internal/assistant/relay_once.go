@@ -24,6 +24,14 @@ const (
 	relayLookLimit = 3
 )
 
+// supervisionConfirmDelays bounds brief post-send settle re-checks for a successful supervision RPC whose
+// runtime flushes transcript items asynchronously or coalesced a concurrent pre-send snapshot.
+var supervisionConfirmDelays = []time.Duration{
+	150 * time.Millisecond,
+	350 * time.Millisecond,
+	500 * time.Millisecond,
+}
+
 // relayMsgID is the once_id every try of message msg to conversation to goes under: made from the message, so
 // the same after the manager restarts and for messages queued before ids existed, and different for any other one.
 func relayMsgID(to string, msg relayMsg) string {
@@ -39,8 +47,12 @@ func relayMsgID(to string, msg relayMsg) string {
 }
 
 // relayInDoubt: the send may have gone in though no answer said so — the time ran out, or the link dropped while it
-// went. A refusal (the conversation is gone, its launcher cannot start) is no doubt: nothing went in.
+// went. A refusal (the conversation is gone, its launcher cannot start) and an explicit not-sent / not-written
+// transport error are no doubt: nothing went in.
 func relayInDoubt(err error) bool {
+	if errors.Is(err, rpc.ErrNotSent) || errors.Is(err, rpc.ErrNotWritten) {
+		return false
+	}
 	return replyInDoubt(err) || errors.Is(err, rpc.ErrClosed)
 }
 
@@ -58,11 +70,13 @@ func relayWords(s string) string {
 }
 
 // relayArrived checks the latest turns for the relay's text and source since the first try that may have gone in.
-// An error means the transcript could not be read. A successful read without a match can still miss a late write.
+// It bypasses the manager's database history cache on the active source so freshly written turns are visible before
+// debounced session revision updates arrive. An error means the transcript could not be read. A successful read
+// without a match can still miss a late write.
 func (s *Service) relayArrived(machine, to string, msg relayMsg) (bool, error) {
 	text := strings.TrimSpace(relayDeliveryText(msg))
 	want := relayWords(text)
-	ctx, cancel := context.WithTimeout(context.Background(), relayCheckWait)
+	ctx, cancel := context.WithTimeout(withLiveHistoryRead(context.Background()), relayCheckWait)
 	defer cancel()
 	var res struct {
 		Items []proto.Item `json:"items"`
@@ -130,9 +144,33 @@ func (s *Service) lookForRelay(machine, to string, msg *relayMsg) bool {
 // confirmSupervisionRelay checks the destination transcript after a supervision send, including a successful RPC
 // return (#12567). Delivery is completed only once the rendered supervision user item is confirmed present.
 func (s *Service) confirmSupervisionRelay(ctx context.Context, machine, to string, msg *relayMsg, res superviseRoundReply, round, inDoubt bool) bool {
-	landed, err := s.relayArrived(machine, to, *msg)
-	if !landed && err == nil && res.SessionID != "" && res.SessionID != to {
-		landed, err = s.relayArrived(machine, res.SessionID, *msg)
+	check := func() (bool, error) {
+		landed, err := s.relayArrived(machine, to, *msg)
+		if !landed && err == nil && res.SessionID != "" && res.SessionID != to {
+			landed, err = s.relayArrived(machine, res.SessionID, *msg)
+		}
+		return landed, err
+	}
+	landed, err := check()
+	if !landed && err == nil && !inDoubt {
+		for _, wait := range supervisionConfirmDelays {
+			if wait > 0 {
+				t := time.NewTimer(wait)
+				select {
+				case <-ctx.Done():
+					t.Stop()
+					err = ctx.Err()
+				case <-t.C:
+				}
+				if err != nil {
+					break
+				}
+			}
+			landed, err = check()
+			if landed || err != nil {
+				break
+			}
+		}
 	}
 	if landed {
 		if inDoubt {

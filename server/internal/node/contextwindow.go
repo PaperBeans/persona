@@ -346,7 +346,8 @@ func (n *Node) sessionAutoCompactThreshold(id, explicitLauncher string, window i
 	}
 	threshold := 0
 	if id != "" && n.state != nil {
-		if st, ok := n.state.get(id); ok && st.IsMain && st.MainCompactWindow > 0 {
+		// The window the manager held it to: the main conversation's or a leader conversation's (#15318).
+		if st, ok := n.state.get(id); ok && st.MainCompactWindow > 0 {
 			threshold = smallerCapacity(threshold, st.MainCompactWindow)
 		}
 	}

@@ -49,12 +49,13 @@ struct RecordingDayWireTests {
         #expect(WatchSync.phoneDayKeepDaysKey == "recording.phoneDayKeepDays")
     }
 
-    @Test func keepDaysFollowTheTranscriptRetention() {
-        #expect(RecordingDayContract.keepDays(recordingDays: nil) == 7, "7 until the phone knows")
-        #expect(RecordingDayContract.keepDays(recordingDays: 14) == 7)
-        #expect(RecordingDayContract.keepDays(recordingDays: 3) == 3)
-        #expect(RecordingDayContract.keepDays(recordingDays: 1) == 1)
-        #expect(RecordingDayContract.keepDays(recordingDays: 0) == 1 && RecordingDayContract.keepDays(recordingDays: -4) == 1)
+    @Test func keepDaysFollowTheAudioRetentionWithAForeverMaximum() {
+        #expect(RecordingDayContract.keepDays(audioDays: nil) == 7, "7 until the phone knows")
+        #expect(RecordingDayContract.keepDays(audioDays: 14) == 7)
+        #expect(RecordingDayContract.keepDays(audioDays: 3) == 3)
+        #expect(RecordingDayContract.keepDays(audioDays: 1) == 1)
+        #expect(RecordingDayContract.keepDays(audioDays: 0) == 7, "forever still keeps the watch's 7-day maximum")
+        #expect(RecordingDayContract.keepDays(audioDays: -4) == 7)
     }
 
     // MARK: Header

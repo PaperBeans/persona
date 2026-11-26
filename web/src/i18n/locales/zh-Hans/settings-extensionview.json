@@ -11,5 +11,8 @@
   "retry": "重试",
   "confirm_title": "确认",
   "ok": "确定",
-  "updating": "正在更新…"
+  "updating": "正在更新…",
+  "setup_title": "设置{name}",
+  "missing_settings": "需要填写的设置",
+  "open_settings": "打开扩展设置"
 }

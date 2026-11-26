@@ -537,12 +537,13 @@ class OutboxMessageSenderTest {
         val sender = OutboxMessageSender(scope, store, transport, backgroundScope)
         runCurrent()
 
+        // Arm the pause before the automatic attempt starts: while withContext(Dispatchers.Default) waits for a
+        // worker thread, runTest can advance virtual time past the send timeouts and review deadline. Holding the
+        // first durable Unknown write up front keeps the interleaving deterministic under scheduling delay.
+        store.interleaveManual = true
         val automatic = async { sender.retry("visible") }
         val manual = withContext(Dispatchers.Default) {
             withTimeoutOrNull(10_000) { automaticStarted.await() } ?: error("Automatic send did not start")
-            // The automatic attempt passed its active-composer check. Its durable Unknown write suspends until the
-            // composer owns the message, reproducing the interleaving of two independent store operations.
-            store.interleaveManual = true
             // Observe the automatic Queued→Sending transition itself, not an arbitrary Sending row left by a later
             // operation. Only the subsequent durable Unknown write is held for the composer claim.
             withTimeoutOrNull(10_000) { store.automaticSendingWritten.await() } ?:
@@ -563,6 +564,59 @@ class OutboxMessageSenderTest {
         assertEquals(OutboxState.Sent, store.entries.value.single().state)
         sender.close()
         runCurrent()
+    }
+
+    @Test fun reviewDeadlineDoesNotOverwriteAComposerRetryClaimedDuringWrite() = runTest {
+        val store = DeadlineInterleavedOutboxStore()
+        store.enqueue(OutboxEntry("visible", session, "hello", state = OutboxState.Unknown, createdAt = 100))
+        val sender = OutboxMessageSender(
+            scope,
+            store,
+            FakeTransport(online = false, supportsClientOps = true),
+            backgroundScope,
+            reviewTimeoutMillis = 1,
+        )
+        runCurrent()
+
+        val manual = withContext(Dispatchers.Default) {
+            withTimeoutOrNull(10_000) { store.deadlineWriteStarted.await() } ?:
+                error("Review deadline write did not start; transitions=${store.transitions}")
+            async(start = CoroutineStart.UNDISPATCHED) { sender.beginComposerRetry("visible", "manual-operation") }.also {
+                store.continueDeadline.complete(Unit)
+            }
+        }
+        withTimeoutOrNull(10_000) { manual.join() } ?:
+            error("Manual retry did not finish; transitions=${store.transitions} state=${store.entries.value}")
+        runCurrent()
+
+        val current = store.entries.value.single { it.clientMessageId == "visible" }
+        assertEquals(OutboxState.Sending, current.state)
+        assertEquals("manual-operation", current.operationId)
+        sender.recordComposerDelivery("visible", ComposerDelivery(DeliveryState.Sent), "manual-operation", MessageTransportResult.Accepted)
+        assertEquals(OutboxState.Sent, store.entries.value.single().state)
+        sender.close()
+        runCurrent()
+    }
+
+    /** Pauses the review-deadline Unknown→NeedsConfirmation write while a manual retry claims the message. */
+    private class DeadlineInterleavedOutboxStore : OutboxStore {
+        val deadlineWriteStarted = CompletableDeferred<Unit>()
+        val continueDeadline = CompletableDeferred<Unit>()
+        val transitions = mutableListOf<Pair<Set<OutboxState>, OutboxState>>()
+        private val delegate = MemoryOutboxStore()
+        override val entries = delegate.entries
+        override suspend fun enqueue(entry: OutboxEntry) = delegate.enqueue(entry)
+        override suspend fun recoverInterrupted() = delegate.recoverInterrupted()
+        override suspend fun transition(id: String, from: Set<OutboxState>, to: OutboxState, error: String?): Boolean {
+            transitions += from to to
+            if (to == OutboxState.NeedsConfirmation) {
+                deadlineWriteStarted.complete(Unit)
+                continueDeadline.await()
+            }
+            return delegate.transition(id, from, to, error)
+        }
+        override suspend fun transition(id: String, from: Set<OutboxState>, to: OutboxState, error: String?, opId: String): Boolean =
+            delegate.transition(id, from, to, error, opId)
     }
 
     @Test fun automaticImmediateRetryDoesNotOverwriteAComposerOperation() = runTest {

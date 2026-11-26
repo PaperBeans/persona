@@ -103,7 +103,7 @@ func newPostEnv(t *testing.T) *postEnv {
 	e := &postEnv{threadEnv: newThreadEnv(t, database), database: database, clk: newFakeClock(), chats: []string{"oc_private", testChat}}
 	e.f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) {
 		return FeishuStatus{Ready: true, Enabled: true, Owner: "ou_owner", PairedAt: time.Unix(100, 0), Features: e.features,
-			PublicURL: testWeb, Chats: e.chats}, nil
+			PublicURL: testWeb, Chats: e.chats, TopicTodoModes: e.topicModes}, nil
 	})
 	e.clk.install(e.s)
 	return e

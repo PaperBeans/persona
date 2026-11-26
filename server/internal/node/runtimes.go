@@ -312,6 +312,8 @@ const (
 	maxRuntimeSubagents  = 50
 	maxRuntimeBackground = 50
 	maxRuntimeTaskText   = 500
+	// maxRuntimeLastText is as much of a row's last_text as the node's own rows keep (snippet).
+	maxRuntimeLastText = 200
 )
 
 // bridgePreview shortens engine replies before they go over the local runtime connection.

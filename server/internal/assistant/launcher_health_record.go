@@ -318,7 +318,7 @@ func (s *Service) recordStartFailure(ctx context.Context, machine, launcher stri
 		s.recordHealth(ctx, machine, launcher, healthResult{err: err.Error(), source: healthSourceStart, kind: errKindNotInTerminal})
 		return
 	}
-	s.recordHealth(ctx, machine, launcher, healthResult{err: err.Error(), source: healthSourceStart})
+	s.recordHealth(ctx, machine, launcher, healthResult{err: err.Error(), source: healthSourceStart, kind: codedLauncherErrorKind(err)})
 	// Reserve before launching the goroutine: a task's immediate detour must join this check, even before it runs.
 	if rc, run := s.claimHealthRecheck(ctx, machine, launcher); run {
 		go s.runHealthRecheck(context.WithoutCancel(ctx), machine, launcher, rc, true)

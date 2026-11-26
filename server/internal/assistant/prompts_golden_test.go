@@ -246,6 +246,16 @@ func TestGoldenTodoThreadReply(t *testing.T) {
 	golden(t, "bot_message.topic", prompts.RenderBotMessage(in))
 }
 
+func TestGoldenUnboundTopicMessage(t *testing.T) {
+	for _, locale := range []string{"en", "zh-Hans", "ja"} {
+		in := prompts.BotMessage{Persona: true, Topic: true, UnboundTopic: true,
+			Language: answerLanguage(locale), Text: "Review the seed order"}
+		golden(t, "bot_message.answer_only."+locale, prompts.RenderBotMessage(in))
+		in.TopicMessageID = "om_example"
+		golden(t, "bot_message.main_decides."+locale, prompts.RenderBotMessage(in))
+	}
+}
+
 func TestGoldenStandingActions(t *testing.T) {
 	golden(t, "standing_actions.system", prompts.RenderStandingActions())
 	golden(t, "standing_actions.input", prompts.RenderStandingActionsInput(prompts.StandingActionsInput{

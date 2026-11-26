@@ -1023,3 +1023,37 @@ func TestGoldenSuperviseDecisions(t *testing.T) {
 		{ID: "todo_5", Title: "Fix the login crash", Kind: sigOwnerCannot, Response: respondExplainFirst},
 	})}))
 }
+
+// An undecidable hand-back that comes due while its conversation is stopped (/stop, #3308) is not kept on the review
+// as told, since signal drops it then: once the user speaks again it reaches the supervisor (#13415).
+func TestUndecidableUnderStopWaitsForTheUser(t *testing.T) {
+	s, f, todo := newSupervisedService(t)
+	ctx := context.Background()
+	waitsForReview(t, s, f, todo.ID, "做完了，等你看。")
+	old := time.Now().Add(-92 * time.Hour).UTC()
+	if _, _, err := s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool {
+		v.State = reviewNeedsUser
+		v.Reviews = append(v.Reviews, TaskReview{At: old, Verdict: reviewNeedsUser, Note: "草稿改动等用户看了再决定合不合"})
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.markReporter(ctx, "box", todo.Origin)
+	s.setReporterStopped(ctx, todo.Origin, "app")
+	s.superviseWatch(ctx, time.Now())
+	v := todoNow(s, todo.ID).Supervision
+	if !v.Reviews[len(v.Reviews)-1].RestateAt.IsZero() {
+		t.Fatal("kept as told while stopped, though nothing was queued")
+	}
+	s.setReporterStopped(ctx, todo.Origin, "")
+	before := len(f.notices())
+	s.superviseWatch(ctx, time.Now().Add(time.Hour))
+	waitFor(t, "the undecidable message after /stop is lifted", func() bool {
+		for _, n := range f.notices()[before:] {
+			if strings.Contains(n, "signal=undecidable") {
+				return true
+			}
+		}
+		return false
+	})
+}
