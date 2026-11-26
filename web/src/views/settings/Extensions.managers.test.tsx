@@ -13,6 +13,7 @@ vi.mock("../../lib/store", async (original) => {
 vi.mock("../../ui/atoms", async (original) => ({ ...(await original<typeof import("../../ui/atoms")>()), toast: vi.fn() }));
 
 import { t } from "../../i18n";
+import { readExternalDirections, readExternalPolicy } from "../../features/external-sources/api";
 import { chooseManager, managerHeaderFor, resetManagerChoice } from "../../lib/manager-choice";
 import { setRoster } from "../../lib/managers";
 import { ChannelPage } from "./Channels";
@@ -99,11 +100,13 @@ const button = (text: string) => [...host.querySelectorAll<HTMLElement>("button,
 describe("another manager's extension page", () => {
   it("shows and changes that manager's connector, and links to its connector and channel pages", async () => {
     setRoster(ROSTER);
+    await import("../../features/external-sources/ExternalSourceSettings");
     const onChannel = vi.fn();
     const onConnector = vi.fn();
     act(() => root.render(<Extensions open="example-wechat@m-1" onOpen={() => {}} onChannel={onChannel} onConnector={onConnector} />));
     await flush();
     expect(calls.find((c) => /example-wechat\/-\/\?entry_lists=1$/.test(c.url))?.header).toBe("m-1");
+    expect(calls.some((c) => c.url.includes("/external-source-bindings/summary") && c.header === "m-1")).toBe(true);
     // m-1's copy (inbox on), not the default's (off)
     const sw = host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="进收件箱"]')!;
     expect(sw.getAttribute("aria-checked")).toBe("true");
@@ -137,15 +140,31 @@ describe("another manager's extension page", () => {
 
   it("keeps default extension requests unscoped and stamps its external source bindings with the default owner", async () => {
     setRoster(ROSTER);
+    await import("../../features/external-sources/ExternalSourceSettings");
     act(() => root.render(<Extensions open="example-wechat" onOpen={() => {}} onChannel={() => {}} onConnector={() => {}} />));
     await flush();
+    await readExternalPolicy("assistant", { provider: "wechat" }).catch(() => {});
+    await readExternalDirections("assistant").catch(() => {});
     await act(async () => { await vi.dynamicImportSettled(); });
     const sw = host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="进收件箱"]')!;
     expect(sw.getAttribute("aria-checked")).toBe("false");
-    const named = calls.filter((c) => !c.url.endsWith("/managers") && c.header !== null);
-    expect(named.map(({ url, header }) => [url, header])).toEqual([
-      ["/api/v1/assistant/external-source-bindings/summary?provider=wechat", ROSTER.default],
-    ]);
+    expect(calls.some((c) => c.url.includes("/external-source-bindings/summary") && c.header === null)).toBe(true);
+    expect(calls.some((c) => c.url.includes("/assistant/external-source-policies") && c.header === null)).toBe(true);
+    expect(calls.some((c) => c.url.endsWith("/assistant/leaders") && c.header === null)).toBe(true);
+    expect(calls.filter((c) => !c.url.endsWith("/managers")).every((c) => c.header === null)).toBe(true);
+  });
+
+  it("pins the default assistant on external-source reads even when another assistant is chosen", async () => {
+    setRoster(ROSTER);
+    act(() => chooseManager("m-1"));
+    await import("../../features/external-sources/ExternalSourceSettings");
+    act(() => root.render(<Extensions open="example-wechat@assistant" onOpen={() => {}} onChannel={() => {}} onConnector={() => {}} />));
+    await flush();
+    await readExternalPolicy("assistant", { provider: "wechat" }).catch(() => {});
+    await readExternalDirections("assistant").catch(() => {});
+    expect(calls.find((c) => c.url.includes("/external-source-bindings/summary"))?.header).toBe("assistant");
+    expect(calls.find((c) => c.url.includes("/assistant/external-source-policies"))?.header).toBe("assistant");
+    expect(calls.find((c) => c.url.endsWith("/assistant/leaders"))?.header).toBe("assistant");
   });
 
   it("leaves out what the extension may read: extension trust is the default manager's", async () => {

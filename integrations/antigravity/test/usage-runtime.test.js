@@ -94,3 +94,66 @@ test('default runtime never spawns an idle ACP process for quota and samples fro
     try { process.kill(assistantPid, 0); return false } catch (error) { assert.equal(error.code, 'ESRCH'); return true }
   })
 })
+
+test('agy enriches usage windows with signed-in account name and plan from GetUserStatus and falls back on errors', async (t) => {
+  const { home, node, quotaFile, calls, starts } = await fixture(t, ['usage_windows', 'assistant_pids'], {
+    sharedAcpIdleMs: 250, assistantAcpIdleMs: 250,
+  })
+  const statusFile = join(home, 'user-status.json')
+  writeFileSync(statusFile, JSON.stringify({
+    userStatus: {
+      name: 'Alice Example',
+      email: 'alice@example.com',
+      planStatus: { planInfo: { teamsTier: 'TEAMS_TIER_PRO', planName: 'Pro' } },
+      userTier: { id: 'g1-ultra-tier', name: 'Google AI Ultra' },
+    },
+  }))
+
+  const { session } = await node.peer.call('session.start', { cwd: home })
+  const first = await until('session open publishes account name and plan', () => {
+    const report = node.last('usage.windows')
+    return report?.name === 'alice@example.com' ? report : undefined
+  })
+  assert.equal(first.provider, 'agy')
+  assert.equal(first.plan, 'Google AI Ultra')
+  assert.equal(first.windows[0].used_percent, 25)
+  assert.equal(starts().length, 1)
+  const sharedPid = starts()[0]
+  const statusCall = calls().find((c) => c.method === 'GetUserStatus')
+  assert.ok(statusCall, 'expected GetUserStatus call on live worker')
+  assert.deepEqual(statusCall.params, { metadata: {} })
+  assert.equal(statusCall.worker, sharedPid)
+
+  writeFileSync(quotaFile, JSON.stringify({ buckets: [
+    { bucketId: '3p-5h', window: '18000s', remainingFraction: 0.4, resetTime: '2099-01-01T00:00:00Z' },
+  ] }))
+  writeFileSync(statusFile, JSON.stringify({ httpStatus: 500, message: 'status temporarily unavailable' }))
+  await node.peer.call('session.send', { session_id: session.session_id, text: 'fallback turn' })
+  const degraded = await until('GetUserStatus failure still publishes quota with Antigravity fallback', () => {
+    const report = node.last('usage.windows')
+    return report?.windows?.[0]?.used_percent === 60 ? report : undefined
+  })
+  assert.equal(degraded.name, 'Antigravity')
+  assert.equal('plan' in degraded, false)
+
+  writeFileSync(quotaFile, JSON.stringify({ buckets: [
+    { bucketId: '3p-5h', window: '18000s', remainingFraction: 0.3, resetTime: '2099-01-01T00:00:00Z' },
+  ] }))
+  writeFileSync(statusFile, JSON.stringify({
+    userStatus: {
+      email: `${'b'.repeat(140)}@example.com`,
+      userTier: { name: 'Google AI Pro' },
+    },
+  }))
+  await node.peer.call('session.send', { session_id: session.session_id, text: 'switched account turn' })
+  const switched = await until('updated GetUserStatus passes runtime-sdk 128-byte validation', () => {
+    const report = node.last('usage.windows')
+    return report?.windows?.[0]?.used_percent === 70 ? report : undefined
+  })
+  assert.equal(switched.name, 'b'.repeat(128))
+  assert.equal(switched.plan, 'Google AI Pro')
+
+  await until('worker still retires after idle window with GetUserStatus enabled', () => {
+    try { process.kill(sharedPid, 0); return false } catch (error) { assert.equal(error.code, 'ESRCH'); return true }
+  })
+})
