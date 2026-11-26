@@ -1,5 +1,6 @@
 import SwiftUI
 import WatchKit
+import WidgetKit
 import PersonaWire
 
 @main
@@ -192,6 +193,10 @@ final class WatchModel {
             Task { await self?.fetchPet() }
         }
         WatchSync.shared.onMinutes = { [weak self] m in self?.minutes = m }
+        // The phone's word on its hub's recording module changed (#15214): the Record complication draws it.
+        WatchSync.shared.onRecordingAllowance = {
+            WidgetCenter.shared.reloadTimelines(ofKind: PhoneRecordingAllowance.recordWidgetKind)
+        }
         WatchSync.shared.onSummary = { [weak self] s in
             guard let self, WatchGroupRefresh.acceptsSummary(at: s.at, lastUpdate: self.lastUpdate) else { return }
             // Which hubs fold side sessions (#7944): the watch reads no hello, so its own reads of them fold as the phone said.
@@ -1016,6 +1021,8 @@ struct WatchPairView: View {
     @State private var allDay = WatchAllDay.shared
     /// The phone's `recordingDay`: absent from a phone that doesn't take day recordings, 0 until its user agrees.
     @AppStorage(WatchSync.phoneDayKey) private var phoneDay: Int?
+    /// The phone's word on its hub's recording module (`PhoneRecordingAllowance`, #15214); absent means allowed.
+    @AppStorage(WatchSync.phoneRecordingKey) private var phoneRecording: String?
 
     var body: some View {
         ScrollView {
@@ -1037,7 +1044,8 @@ struct WatchPairView: View {
                 .padding(.top, Theme.Space.s)
                 // Recording needs the phone, not the hub: all-day recording too, once the phone takes it (its page
                 // points to the phone's consent until the user agreed there).
-                if allDay.access(phoneDay: phoneDay) != .hidden {
+                if AllDayAlertPolicy.listed(allDay.access(phoneDay: phoneDay, recording: PhoneRecordingAllowance(wire: phoneRecording)),
+                                            state: allDay.state) {
                     NavigationLink { WatchAllDayView() } label: {
                         Label("All-Day Recording", systemImage: Theme.Icon.allDay).lineLimit(1)
                     }

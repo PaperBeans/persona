@@ -506,7 +506,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 			}
 			return fmt.Sprintf("Task %s is accepted by you and remains open awaiting the owner's verification (user_check). "+
 				"Its Agent stays available. The owner's \"Pass\" completes it; change feedback returns it to ongoing work. "+
-				"A \"Please verify\" card waits for them: don't ask them again. Terminal cleanup: skipped.", t.ID) + result.words() + deliveryNote, nil
+				"They can find the verification under Needs you in Persona. Don't ask them again. Terminal cleanup: skipped.", t.ID) + result.words() + deliveryNote, nil
 		}
 		reason := cmp.Or(clip(oneLine(note), 80), "验收通过")
 		if verdict == reviewCancelled {

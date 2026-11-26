@@ -28,14 +28,18 @@ struct MeetingThreadView: View {
     var mode: MeetingPage.Mode
     var justMe: Bool
     var exchanges: [MeetingAsk.Exchange]
+    /// Retry and Delete Photo are offered on its photos (`MeetingRoomOffers.photoDelete`): not while the hub's
+    /// recording module is off (#15214), when the photos are only looked at.
+    var photoDelete: Bool
     @Binding var shown: Shown
 
     init(entry: RecordingEntry, mode: MeetingPage.Mode, justMe: Bool, exchanges: [MeetingAsk.Exchange],
-         shown: Binding<Shown> = .constant(Shown())) {
+         photoDelete: Bool = true, shown: Binding<Shown> = .constant(Shown())) {
         self.entry = entry
         self.mode = mode
         self.justMe = justMe
         self.exchanges = exchanges
+        self.photoDelete = photoDelete
         _shown = shown
     }
 
@@ -642,7 +646,7 @@ struct MeetingThreadView: View {
     /// room's message of it, which says Photo removed once the hub's list no longer has it.
     private func photoRow(_ photoID: String, inRoom: Bool, roomReady: Bool) -> some View {
         MeetingPhotoRow(album: album, recording: entry.id, photoID: photoID, inRoom: inRoom, after: mode == .after,
-                        roomReady: roomReady, confirming: $confirming, viewing: $viewing)
+                        roomReady: roomReady, writes: photoDelete, confirming: $confirming, viewing: $viewing)
     }
 
     private var confirmingBinding: Binding<Bool> {
@@ -708,6 +712,8 @@ private struct MeetingPhotoRow: View {
     var inRoom: Bool
     var after: Bool
     var roomReady: Bool
+    /// Retry and Delete Photo are offered (not with the hub's recording module off, #15214).
+    var writes = true
     @Binding var confirming: MeetingPhotoItem?
     @Binding var viewing: MeetingPhotoItem?
 
@@ -754,11 +760,11 @@ private struct MeetingPhotoRow: View {
             .accessibilityAction { if item.hasImage { viewing = item } }
             .accessibilityActions {
                 if item.hasImage { Button("View Photo") { viewing = item } }
-                if item.retryable, !busy, let local = item.local { Button("Retry") { MeetingPhotos.shared.retry(local.id) } }
-                if item.deletable, !busy { Button("Delete Photo") { confirming = item } }
+                if writes, item.retryable, !busy, let local = item.local { Button("Retry") { MeetingPhotos.shared.retry(local.id) } }
+                if writes, item.deletable, !busy { Button("Delete Photo") { confirming = item } }
             }
             .accessibilityIdentifier(stateIdentifier(item, busy: busy))
-            if item.failed, !busy { failedControls(item) }
+            if writes, item.failed, !busy { failedControls(item) }
             if let problem {
                 Text(problem).font(Theme.Font.caption).foregroundStyle(Theme.danger)
                     .fixedSize(horizontal: false, vertical: true)
@@ -773,7 +779,7 @@ private struct MeetingPhotoRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(.rect)
         .contextMenu {
-            if item.deletable, !busy {
+            if writes, item.deletable, !busy {
                 Button(role: .destructive) { confirming = item } label: { Label("Delete Photo", systemImage: Theme.Icon.delete) }
                     .accessibilityIdentifier("meeting-photo-delete")
             }

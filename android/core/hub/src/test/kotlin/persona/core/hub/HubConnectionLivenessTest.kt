@@ -243,6 +243,35 @@ class HubConnectionLivenessTest {
         }
     }
 
+    @Test fun reconnectAndCloseReleaseLockBeforeCancellingWebSocket() = runBlocking {
+        Fixture().use { fixture ->
+            val first = fixture.start()
+            first.onCancel = {
+                // Acquiring connection.lock from another thread inside cancel() deadlocks if lock is still held.
+                val latch = java.util.concurrent.CountDownLatch(1)
+                val probe = Thread {
+                    try { fixture.connection.updateTunnels(emptyList()) } finally { latch.countDown() }
+                }
+                probe.start()
+                assertTrue("reconnect() held lock across socket.cancel()", latch.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            }
+            fixture.connection.reconnect()
+            assertTrue(first.cancelled)
+
+            val second = fixture.awaitSocket(2)
+            second.onCancel = {
+                val latch = java.util.concurrent.CountDownLatch(1)
+                val probe = Thread {
+                    try { fixture.connection.updateTunnels(emptyList()) } finally { latch.countDown() }
+                }
+                probe.start()
+                assertTrue("close() held lock across socket.cancel()", latch.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            }
+            fixture.connection.close()
+            assertTrue(second.cancelled)
+        }
+    }
+
     private class Fixture(private val appPing: Boolean = false, policy: HeartbeatPolicy = HeartbeatPolicy()) : AutoCloseable {
         val scheduler = TestCoroutineScheduler()
         private val sockets = mutableListOf<FakeSocket>()
@@ -296,12 +325,13 @@ class HubConnectionLivenessTest {
     private class FakeSocket(private val request: Request, private val listener: WebSocketListener) : WebSocket {
         val sent = mutableListOf<JsonObject>()
         var cancelled = false
+        var onCancel: (() -> Unit)? = null
         fun receive(text: String) = listener.onMessage(this, text)
         override fun request() = request
         override fun queueSize() = 0L
         override fun send(text: String): Boolean { sent += JsonCodec.parseToJsonElement(text).jsonObject; return true }
         override fun send(bytes: ByteString) = true
         override fun close(code: Int, reason: String?) = true
-        override fun cancel() { cancelled = true }
+        override fun cancel() { cancelled = true; onCancel?.invoke() }
     }
 }

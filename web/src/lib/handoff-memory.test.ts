@@ -51,4 +51,34 @@ describe("Hand to AI memory per source (#2121, spec/fixtures/inbox/handoff_memor
     forgetHandOffs(store);
     expect(handOffEntries(store)).toEqual([]);
   });
+
+  it("does not throw when storage operations or localStorage access are blocked", () => {
+    const blocked: Storage = {
+      get length(): number { throw new DOMException("blocked", "SecurityError"); },
+      clear() { throw new DOMException("blocked", "SecurityError"); },
+      getItem() { throw new DOMException("blocked", "SecurityError"); },
+      key() { throw new DOMException("blocked", "SecurityError"); },
+      removeItem() { throw new DOMException("blocked", "SecurityError"); },
+      setItem() { throw new DOMException("blocked", "SecurityError"); },
+    };
+    expect(handOffEntries(blocked)).toEqual([]);
+    expect(recallHandOff("github|repo:a/b", blocked)).toBeNull();
+    expect(() => rememberHandOff("github|repo:a/b", "main", blocked)).not.toThrow();
+    expect(() => forgetHandOffs(blocked)).not.toThrow();
+
+    const prevDesc = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() { throw new DOMException("Storage disabled", "SecurityError"); },
+    });
+    try {
+      expect(handOffEntries()).toEqual([]);
+      expect(recallHandOff("github|repo:a/b")).toBeNull();
+      expect(() => rememberHandOff("github|repo:a/b", "main")).not.toThrow();
+      expect(() => forgetHandOffs()).not.toThrow();
+    } finally {
+      if (prevDesc) Object.defineProperty(globalThis, "localStorage", prevDesc);
+      else delete (globalThis as Record<string, unknown>).localStorage;
+    }
+  });
 });

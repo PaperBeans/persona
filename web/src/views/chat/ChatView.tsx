@@ -1,7 +1,8 @@
 // One conversation: an agent in herdr on one of your computers, or a Persona assistant conversation.
 import { useAssistantIdentity } from "../../lib/assistant-identity";
 import { useAssistantTitle, useManagerOffline } from "../ManagerParts";
-import { LinkManager, useShownManager } from "../../lib/manager-choice";
+import { defaultManager, LinkManager, useShownManager } from "../../lib/manager-choice";
+import { decisionLaterKey } from "../../lib/assistant-entries";
 import { alsoOpenText } from "../../lib/engines";
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, errorText, pastHub, sessionPath } from "../../lib/api";
@@ -40,7 +41,7 @@ import { apiOp } from "../../lib/ops";
 import { beginMessageSend, observeMessageItems, settleMessageEcho, stopMessageFeedback, useMessageFeedback } from "../../lib/message-send";
 import { conversationKey, pickedLauncher, pickedModel, usePickedLauncher } from "../../lib/assistant-chat";
 import { splitSkillDraft } from "../../lib/skill-mentions";
-import { unlinkAgentFromTodo } from "../../lib/todos";
+import { openAsk, unlinkAgentFromTodo, waitsForOwner } from "../../lib/todos";
 import { t as tr } from "../../i18n";
 import { lastEditablePrompt, promptsOf, rewindBlock, rewindDone, rewindSession, rewindTarget, type RewindRestore } from "../../lib/rewind";
 import { EDIT_SEND_SETTLE_MS } from "../../lib/edit-last-key";
@@ -174,6 +175,7 @@ const InboxBack = lazy(() => import("./InboxBack").then((m) => ({ default: m.Inb
 const PlanPill = lazy(() => import("./PlanCard").then((m) => ({ default: m.PlanPill })));
 // "Wrap up: <item>" over the main conversation's composer (#5932): with the hand-off card's chunk, not the first screen's
 const LazyWrapUpChips = lazy(() => import("../assistant/HandoffCard").then((m) => ({ default: m.WrapUpChips })));
+const TaskDecision = lazy(() => import("../assistant/TaskDecision"));
 // a chat that is nowhere (a stale or mistyped link): rare, so its notice and words are a chunk of their own
 const LazyNotFoundNotice = lazy(() => import("./NotFoundNotice").then((m) => ({ default: m.NotFoundNotice })));
 const ContextRestartNotice = lazyPage(() => import("./ContextRestartNotice").then((m) => m.ContextRestartNotice));
@@ -386,6 +388,16 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
   }, [embeddedSub, embeddedParent, mid, sid]);
   const session = syntheticEmbedded ?? (detail.missing && heldSubRow ? heldSubRow : runtimeSession ?? heldSubRow);
   const known = Boolean(syntheticEmbedded) || runtimeKnown || Boolean(heldSubRow);
+  // Read the same ask as Needs you. The session's current task link wins after a move, including across managers.
+  const decisionTodo = useStore((s) => {
+    if (!inPage || assistant || embedded || !session) return undefined;
+    const manager = session.manager || defaultManager();
+    const todo = s.todos.find((todo) => !todo.done_at &&
+      (session.todo ? todo.id === session.todo.id : (todo.manager || defaultManager()) === manager) &&
+      todo.agents?.some((a) => !a.released_at && !a.dismissed_at && a.machine_id === mid && a.session_id === sid));
+    return todo && openAsk(todo)?.outcome === "decide" && !todo.ask?.questions?.length && waitsForOwner(todo) ? todo : undefined;
+  });
+  const decisionDeferred = useFeed((s) => decisionTodo ? Boolean(s.later[decisionLaterKey(decisionTodo)]) : false);
   // The main conversation is always Persona (#1313): not its first message, the node's title for it.
   const mainConversation = useStore((s) => s.assistant?.main);
   const isMain = Boolean(assistant && (mainCache || sid === mainConversation));
@@ -2866,6 +2878,11 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
           </>
         )}
         {pendingCards}
+        {decisionTodo && !decisionDeferred && (
+          <Suspense fallback={null}>
+            <TaskDecision key={`${decisionTodo.manager}/${decisionTodo.id}/${decisionTodo.ask?.asked_at}`} decision={decisionTodo} rowKey={`task:${decisionTodo.id}`} />
+          </Suspense>
+        )}
         {!assistant && session?.model_fallback && <Suspense fallback={null}><ModelFallbackCard session={session} headless={false} /></Suspense>}
         {assistant && session && <CompactionStrip session={session} />}
         {session?.context_restart_recommended && !archivedHere && (

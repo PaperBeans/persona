@@ -14,6 +14,9 @@ import SwiftUI
 struct RecordingLiveBar: View {
     var entry: RecordingEntry
     var paused: Bool
+    /// The hub's recording module (#15214), handed down by the sheet: off, the bar keeps Pause and Stop (a recording that
+    /// runs must be stoppable) and offers no question and no bookmark.
+    var recording = RecordingAllowance.on
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var capture = RecordingCapture.shared
@@ -24,7 +27,7 @@ struct RecordingLiveBar: View {
     @State private var question = ""
     @FocusState private var questionFocused: Bool
 
-    private var attends: Bool { entry.attended }
+    private var attends: Bool { entry.attended && recording.offersWrites }
     /// The question row has the keyboard: the controls it does not need make room for the timeline.
     private var writing: Bool { attends && typing && questionFocused }
     /// Send needs words, and one question at a time (as Ask Persona).
@@ -78,7 +81,7 @@ struct RecordingLiveBar: View {
             HStack(spacing: Theme.Space.m) {
                 pauseButton
                 stopButton
-                bookmarkButton
+                if recording.offersWrites { bookmarkButton }
             }
             .transition(.opacity)
         }

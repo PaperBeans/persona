@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/nwverse/persona/server/internal/prompts"
+	"github.com/nwverse/persona/server/internal/assistant/supervisionrole"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -31,6 +31,7 @@ func TestCodexAndPiAssistantConversationRoles(t *testing.T) {
 				setSettings(t, s, func(v *Settings) { v.Main = ""; v.MainSupervisesOwnTasks = &yes })
 				var id string
 				wantPolicy := true
+				policyRole := supervisionrole.RoleMain()
 				switch role {
 				case "main":
 					code, session := startConv(t, s, `{"prompt":"Check the current status.","main":true}`)
@@ -42,6 +43,7 @@ func TestCodexAndPiAssistantConversationRoles(t *testing.T) {
 						t.Fatal("main identity was not retained")
 					}
 				case "background_supervisor":
+					policyRole = supervisionrole.RoleBackground()
 					s.noBackground = false
 					if !s.backgroundOn(s.settings(ctx)) {
 						t.Fatal("background supervisor is not enabled")
@@ -55,6 +57,7 @@ func TestCodexAndPiAssistantConversationRoles(t *testing.T) {
 						t.Fatal("background role was not retained")
 					}
 				case "direction_supervisor":
+					policyRole = supervisionrole.RoleLeader()
 					code, session := startConv(t, s, `{"prompt":"Follow this direction."}`)
 					if code != http.StatusOK || session.SessionID == "" {
 						t.Fatalf("direction start refused: %d", code)
@@ -115,8 +118,8 @@ func TestCodexAndPiAssistantConversationRoles(t *testing.T) {
 				if id == "" || f.sent() == 0 {
 					t.Fatal("the hub did not deliver a conversation input")
 				}
-				if wantPolicy && p["supervision_instructions"] != prompts.RenderSupervisionInstructions() {
-					t.Fatal("authorized supervisor input did not carry the exact policy")
+				if wantPolicy && p["supervision_instructions"] != mustSupervisionRole(t, policyRole) {
+					t.Fatal("authorized supervisor input did not carry its exact role policy")
 				}
 			})
 		}

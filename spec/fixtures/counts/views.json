@@ -1,0 +1,1122 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "a_disconnect_keeps_the_number",
+      "description": "The manager's connection to the hub ends and the hub says view null: the device keeps the last view and draws it as it was, so the number does not drop to 0 or flicker while the manager reconnects (D13).",
+      "given": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          },
+          {
+            "hub": "hub-a",
+            "manager": "m-laptop",
+            "view": {
+              "epoch": "4f0d9e21",
+              "rev": 3,
+              "as_of": 1795593603000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 1,
+                  "keys": [
+                    {
+                      "id": "agent:macbook/s2"
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 1
+              }
+            }
+          }
+        ]
+      },
+      "when": {
+        "event": "arrivedEmpty",
+        "hub": "hub-a",
+        "manager": "assistant"
+      },
+      "then": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          },
+          {
+            "hub": "hub-a",
+            "manager": "m-laptop",
+            "view": {
+              "epoch": "4f0d9e21",
+              "rev": 3,
+              "as_of": 1795593603000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 1,
+                  "keys": [
+                    {
+                      "id": "agent:macbook/s2"
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 1
+              }
+            }
+          }
+        ],
+        "totals": {
+          "agents_needs_you": 3
+        }
+      }
+    },
+    {
+      "name": "going_offline_keeps_the_number",
+      "description": "The roster lists the manager offline: offline is not absence, so the device keeps the view (D10, D13).",
+      "given": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          }
+        ]
+      },
+      "when": {
+        "event": "wentOffline",
+        "hub": "hub-a",
+        "manager": "assistant"
+      },
+      "then": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          }
+        ],
+        "totals": {
+          "agents_needs_you": 2
+        }
+      }
+    },
+    {
+      "name": "a_null_view_never_kept_counts_nothing",
+      "description": "View null from a manager this device never kept a view of keeps nothing: its count stays unknown, never 0 (D13), and a surface that needs it draws its fallback (D10).",
+      "given": {
+        "kept": []
+      },
+      "when": {
+        "event": "arrivedEmpty",
+        "hub": "hub-a",
+        "manager": "m-laptop"
+      },
+      "then": {
+        "kept": [],
+        "totals": {}
+      }
+    },
+    {
+      "name": "a_removed_manager_drops_its_view",
+      "description": "The roster no longer lists the manager: its view goes, and the other managers' stay (D13).",
+      "given": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          },
+          {
+            "hub": "hub-a",
+            "manager": "m-laptop",
+            "view": {
+              "epoch": "4f0d9e21",
+              "rev": 3,
+              "as_of": 1795593603000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 1,
+                  "keys": [
+                    {
+                      "id": "agent:macbook/s2"
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 1
+              }
+            }
+          }
+        ]
+      },
+      "when": {
+        "event": "leftRoster",
+        "hub": "hub-a",
+        "manager": "m-laptop"
+      },
+      "then": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          }
+        ],
+        "totals": {
+          "agents_needs_you": 2
+        }
+      }
+    },
+    {
+      "name": "a_new_epoch_replaces_the_view",
+      "description": "A view with a new epoch (the manager restarted) replaces the kept one whatever its rev, here a lower one (D13; docs/protocol/counts.md \"The view\").",
+      "given": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          }
+        ]
+      },
+      "when": {
+        "event": "arrived",
+        "hub": "hub-a",
+        "manager": "assistant",
+        "view": {
+          "epoch": "c3a8f7d0",
+          "rev": 1,
+          "as_of": 1795593700000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 1,
+              "keys": [
+                {
+                  "id": "agent:studio/s1",
+                  "cards": [
+                    "ix-plan"
+                  ]
+                }
+              ]
+            }
+          },
+          "totals": {
+            "agents_needs_you": 1
+          }
+        }
+      },
+      "then": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "c3a8f7d0",
+              "rev": 1,
+              "as_of": 1795593700000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 1,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 1
+              }
+            }
+          }
+        ],
+        "totals": {
+          "agents_needs_you": 1
+        }
+      }
+    },
+    {
+      "name": "a_lower_rev_loses",
+      "description": "Within an epoch a view with a lower rev arrives late: the kept view stays (docs/protocol/counts.md \"The view\").",
+      "given": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          }
+        ]
+      },
+      "when": {
+        "event": "arrived",
+        "hub": "hub-a",
+        "manager": "assistant",
+        "view": {
+          "epoch": "b7e1c2a9",
+          "rev": 4,
+          "as_of": 1795593604000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 3,
+              "keys": [
+                {
+                  "id": "agent:studio/s1",
+                  "cards": [
+                    "ix-plan"
+                  ]
+                },
+                {
+                  "id": "card:ix-a",
+                  "cards": [
+                    "ix-a"
+                  ]
+                },
+                {
+                  "id": "agent:studio/s3"
+                }
+              ]
+            }
+          },
+          "totals": {
+            "agents_needs_you": 3
+          }
+        }
+      },
+      "then": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          }
+        ],
+        "totals": {
+          "agents_needs_you": 2
+        }
+      }
+    },
+    {
+      "name": "a_higher_rev_replaces_the_view",
+      "description": "Within an epoch a view with a higher rev replaces the kept one; nothing waiting is a known 0, not unknown (docs/protocol/counts.md \"The view\").",
+      "given": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          }
+        ]
+      },
+      "when": {
+        "event": "arrived",
+        "hub": "hub-a",
+        "manager": "assistant",
+        "view": {
+          "epoch": "b7e1c2a9",
+          "rev": 6,
+          "as_of": 1795593606000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 0
+            }
+          },
+          "totals": {
+            "agents_needs_you": 0
+          }
+        }
+      },
+      "then": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 6,
+              "as_of": 1795593606000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 0
+                }
+              },
+              "totals": {
+                "agents_needs_you": 0
+              }
+            }
+          }
+        ],
+        "totals": {
+          "agents_needs_you": 0
+        }
+      }
+    },
+    {
+      "name": "a_hub_restart_keeps_the_views",
+      "description": "The hub restarts (a redeploy or a blue-green switch): the socket ends and a new hello comes. The device keeps its views, so the restart stays invisible (D13).",
+      "given": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          },
+          {
+            "hub": "hub-a",
+            "manager": "m-laptop",
+            "view": {
+              "epoch": "4f0d9e21",
+              "rev": 3,
+              "as_of": 1795593603000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 1,
+                  "keys": [
+                    {
+                      "id": "agent:macbook/s2"
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 1
+              }
+            }
+          }
+        ]
+      },
+      "when": {
+        "event": "restarted",
+        "hub": "hub-a"
+      },
+      "then": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          },
+          {
+            "hub": "hub-a",
+            "manager": "m-laptop",
+            "view": {
+              "epoch": "4f0d9e21",
+              "rev": 3,
+              "as_of": 1795593603000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 1,
+                  "keys": [
+                    {
+                      "id": "agent:macbook/s2"
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 1
+              }
+            }
+          }
+        ],
+        "totals": {
+          "agents_needs_you": 3
+        }
+      }
+    },
+    {
+      "name": "a_new_device_after_a_hub_restart_shows_the_fallback",
+      "description": "A device with no kept view connects to a hub that just restarted: the hub has no view until the managers reconnect, so the device keeps none and draws the fallback (D13, D10).",
+      "given": {
+        "kept": []
+      },
+      "when": {
+        "event": "restarted",
+        "hub": "hub-a"
+      },
+      "then": {
+        "kept": [],
+        "totals": {}
+      }
+    },
+    {
+      "name": "the_managers_reconnect_after_a_hub_restart",
+      "description": "After the hub restarted, a manager connects again and tells its last view as it was: the device that had none keeps it and draws it from then on (D13).",
+      "given": {
+        "kept": []
+      },
+      "when": {
+        "event": "arrived",
+        "hub": "hub-a",
+        "manager": "assistant",
+        "view": {
+          "epoch": "b7e1c2a9",
+          "rev": 5,
+          "as_of": 1795593605000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 2,
+              "keys": [
+                {
+                  "id": "agent:studio/s1",
+                  "cards": [
+                    "ix-plan"
+                  ]
+                },
+                {
+                  "id": "card:ix-a",
+                  "cards": [
+                    "ix-a"
+                  ]
+                }
+              ]
+            }
+          },
+          "totals": {
+            "agents_needs_you": 2
+          }
+        }
+      },
+      "then": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          }
+        ],
+        "totals": {
+          "agents_needs_you": 2
+        }
+      }
+    },
+    {
+      "name": "each_hub_keeps_its_own_views",
+      "description": "The same manager id on another paired hub is another source: its view is kept beside the first hub's, and the totals add both (D10: each hub on its own).",
+      "given": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          }
+        ]
+      },
+      "when": {
+        "event": "arrived",
+        "hub": "hub-b",
+        "manager": "assistant",
+        "view": {
+          "epoch": "9d2c41e7",
+          "rev": 2,
+          "as_of": 1795593602000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 1,
+              "keys": [
+                {
+                  "id": "agent:office/s7",
+                  "cards": [
+                    "ix-b"
+                  ]
+                }
+              ]
+            }
+          },
+          "totals": {
+            "agents_needs_you": 1
+          }
+        }
+      },
+      "then": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          },
+          {
+            "hub": "hub-b",
+            "manager": "assistant",
+            "view": {
+              "epoch": "9d2c41e7",
+              "rev": 2,
+              "as_of": 1795593602000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 1,
+                  "keys": [
+                    {
+                      "id": "agent:office/s7",
+                      "cards": [
+                        "ix-b"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 1
+              }
+            }
+          }
+        ],
+        "totals": {
+          "agents_needs_you": 3
+        }
+      }
+    },
+    {
+      "name": "sign_out_drops_that_hubs_views",
+      "description": "The device signs out of a hub: every view of that hub goes, as they carry machine and session ids; another paired hub's stay (D13).",
+      "given": {
+        "kept": [
+          {
+            "hub": "hub-a",
+            "manager": "assistant",
+            "view": {
+              "epoch": "b7e1c2a9",
+              "rev": 5,
+              "as_of": 1795593605000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 2,
+                  "keys": [
+                    {
+                      "id": "agent:studio/s1",
+                      "cards": [
+                        "ix-plan"
+                      ]
+                    },
+                    {
+                      "id": "card:ix-a",
+                      "cards": [
+                        "ix-a"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 2
+              }
+            }
+          },
+          {
+            "hub": "hub-a",
+            "manager": "m-laptop",
+            "view": {
+              "epoch": "4f0d9e21",
+              "rev": 3,
+              "as_of": 1795593603000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 1,
+                  "keys": [
+                    {
+                      "id": "agent:macbook/s2"
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 1
+              }
+            }
+          },
+          {
+            "hub": "hub-b",
+            "manager": "assistant",
+            "view": {
+              "epoch": "9d2c41e7",
+              "rev": 2,
+              "as_of": 1795593602000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 1,
+                  "keys": [
+                    {
+                      "id": "agent:office/s7",
+                      "cards": [
+                        "ix-b"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 1
+              }
+            }
+          }
+        ]
+      },
+      "when": {
+        "event": "signedOut",
+        "hub": "hub-a"
+      },
+      "then": {
+        "kept": [
+          {
+            "hub": "hub-b",
+            "manager": "assistant",
+            "view": {
+              "epoch": "9d2c41e7",
+              "rev": 2,
+              "as_of": 1795593602000,
+              "build": "1.0.0",
+              "counts": {
+                "agents_needs_you": {
+                  "n": 1,
+                  "keys": [
+                    {
+                      "id": "agent:office/s7",
+                      "cards": [
+                        "ix-b"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "totals": {
+                "agents_needs_you": 1
+              }
+            }
+          }
+        ],
+        "totals": {
+          "agents_needs_you": 1
+        }
+      }
+    }
+  ]
+}

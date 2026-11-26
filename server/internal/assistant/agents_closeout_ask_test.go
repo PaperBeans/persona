@@ -43,6 +43,18 @@ func justStopped(id, last string, ago time.Duration) proto.Session {
 
 func askTick(s *Service) { s.workTick(context.Background(), time.Now().Add(time.Second)) }
 
+// askTickNoBackfill is askTick with the tick's backfill pass not due. A case that moves the session on to a later turn
+// makes that transcript look like a turn that ended unseen, so the tick also triages it in a background goroutine
+// (backfillWork); a later turn that did work and wrote no closeout is then due a status question of its own, which is
+// that pass's concern (agents_work_ci_test.go) and not the recheck this test judges. Keeping the pass out makes the
+// entry the turn that was asked, so the assertion is about it and not about whichever turn the tick happened to leave.
+func askTickNoBackfill(s *Service) {
+	s.work.mu.Lock()
+	s.work.backfillAt = time.Now() // not yet due next tick (workBackfillEvery)
+	s.work.mu.Unlock()
+	askTick(s)
+}
+
 func askEvents(s *Service) map[string]int {
 	s.work.mu.Lock()
 	defer s.work.mu.Unlock()
@@ -209,6 +221,12 @@ func TestCloseoutAskDoneWithoutEvidence(t *testing.T) {
 
 // Every recheck a wake gets holds for the question: whatever the user did meanwhile wins, and nothing is sent later
 // for that turn.
+//
+// A case that moves the session on to a later turn also makes that transcript look like a turn that ended unseen, so
+// the tick's own backfill pass (backfillWork) starts triaging the later turn in a background goroutine; a later turn
+// that did work and wrote no closeout is then due a status question of its own. That pass is not the recheck this test
+// judges, and when it lands first it replaces the entry with the later turn, so the cases skip it (askTickNoBackfill)
+// and assert on the entry for the turn that was asked (#15025).
 func TestCloseoutAskYieldsToTheUser(t *testing.T) {
 	for name, change := range map[string]func(s *Service, c *proto.Session){
 		"working":       func(_ *Service, c *proto.Session) { c.Status = proto.StatusWorking },
@@ -229,6 +247,7 @@ func TestCloseoutAskYieldsToTheUser(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s, f := askService(t)
 			c := justStopped("s1", askReply, time.Minute)
+			askedTurn := c.UpdatedAt
 			f.setSessions("box", c)
 			triage(t, s, "s1")
 			if e := entryOf(t, s, "s1"); e.Work.CloseoutAsk != closeoutAskPending {
@@ -236,11 +255,11 @@ func TestCloseoutAskYieldsToTheUser(t *testing.T) {
 			}
 			change(s, &c)
 			f.setSessions("box", c)
-			askTick(s)
+			askTickNoBackfill(s)
 			if got := f.sentToAgents(); len(got) != 0 {
 				t.Fatalf("sent %v", got)
 			}
-			if e := entryOf(t, s, "s1"); e.WakeAt != nil {
+			if e := entryOf(t, s, "s1"); e.TurnAt != askedTurn || e.WakeAt != nil {
 				t.Fatalf("still scheduled: %+v", e)
 			}
 			if ev := askEvents(s); len(ev) != 0 {

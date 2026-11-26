@@ -69,6 +69,7 @@ func (h *Hub) onClientHello(c *client, data []byte) {
 	wasElicitation := c.has("elicitation")
 	wasDesktopsLink := c.wants(featureDesktopsLink)
 	wasLiveTools := c.wants(proto.FeatureSessionLiveTools)
+	wasCounts := c.wants(proto.FeatureCountsView)
 	wasLang := c.lang()
 	c.mu.Lock()
 	hb := c.meta.heartbeat
@@ -122,6 +123,9 @@ func (h *Hub) onClientHello(c *client, data []byte) {
 			// The hello may follow a subscribe. Send the ack before replaying any current snapshots.
 			defer h.replaySubscribedLiveTools(c)
 		}
+	}
+	if !wasCounts && c.wants(proto.FeatureCountsView) {
+		defer h.sendCountsViews(c) // the views kept so far; the new ones follow (counts_view.go)
 	}
 	if updates == nil {
 		c.helloAck(hb)

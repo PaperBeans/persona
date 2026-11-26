@@ -186,7 +186,7 @@ func Call(w http.ResponseWriter, err error) {
 			status = http.StatusNotFound
 		case "conversation_protected":
 			status = http.StatusBadRequest
-		case "internal", "node_unreachable", "timeout":
+		case "internal", "node_unreachable", "timeout", "delivery_unknown":
 			status = http.StatusBadGateway
 		case proto.CodeTerminalNotReady: // the node's new tab would not take the start command; nothing ran
 			status = http.StatusServiceUnavailable
@@ -268,6 +268,73 @@ func LocalizedBody(status int, code string, err error, l i18n.Lang) map[string]a
 	return body
 }
 
+// LocalizeErrorJSON re-translates a stored JSON error body into l using its machine-readable code/reason/partial
+// fields without modifying any other fields (used when replaying stored client_ops receipts under another language).
+func LocalizeErrorJSON(l i18n.Lang, body []byte) []byte {
+	if l == "" || len(body) == 0 {
+		return body
+	}
+	var m map[string]any
+	if json.Unmarshal(body, &m) != nil || m == nil {
+		return body
+	}
+	code, _ := m["code"].(string)
+	if code == "" {
+		return body
+	}
+	var key string
+	var args i18n.Args
+	if m["partial"] == true {
+		switch code {
+		case "not_delivered":
+			if reason, _ := m["reason"].(string); reason == "terminal_finished" {
+				key = "rpc-errors.modes_partial_terminal_finished"
+			} else {
+				key = "rpc-errors.modes_partial_not_delivered"
+			}
+		case "dialog_open":
+			key = "rpc-errors.modes_partial_dialog_open"
+		case proto.CodeNodeOutdated:
+			key = "rpc-errors.modes_partial_node_outdated"
+		default:
+			key = "rpc-errors.modes_partial_failed"
+		}
+	} else {
+		switch code {
+		case "not_delivered":
+			if m["delivered"] != "unknown" {
+				reason, _ := m["reason"].(string)
+				key = notDeliveredKeys[reason]
+			}
+		case "dialog_open":
+			key = "rpc-errors.dialog_open"
+		case "delivery_unknown":
+			key = "rpc-errors.in_doubt"
+			if reason, _ := m["reason"].(string); reason == "guide_retry_refused" {
+				dialog, _ := m["dialog"].(string)
+				retryCode, _ := m["retry_code"].(string)
+				if dialog != "" && retryCode != "" {
+					key = "rpc-errors.guide_retry_refused"
+					args = i18n.Args{"dialog": dialog, "retry_code": retryCode}
+				}
+			}
+		}
+	}
+	if key == "" {
+		return body
+	}
+	translated := i18n.T(l, key, args)
+	if cur, _ := m["error"].(string); cur == translated {
+		return body
+	}
+	m["error"] = translated
+	out, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
 var rpcFailureKeys = map[string]string{
 	"rewind_busy":                "rpc-errors.rewind_busy",
 	"rewind_unsupported":         "rpc-errors.rewind_unsupported",
@@ -326,6 +393,7 @@ var rpcFailureKeys = map[string]string{
 	// words, naming the launcher, stay in detail
 	proto.CodeLauncherKindMissing: "rpc-errors.launcher_kind_missing",
 	"assistant_in_doubt":          "rpc-errors.in_doubt",
+	"delivery_unknown":            "rpc-errors.in_doubt",
 	// queued messages sent now (#6088)
 	"nothing_queued":        "rpc-errors.nothing_queued",
 	"send_now_unsupported":  "rpc-errors.send_now_unsupported",
@@ -420,6 +488,14 @@ var openElsewhereKeys = map[string]string{
 	"agents_list": "rpc-errors.open_elsewhere_agents_list",
 }
 
+// notDeliveredKeys word the node's generic not_delivered refusal by reason (node/sendsafe.go deliveryRefusal);
+// specific refusals that carry their own recovery instructions (a cut dialog, a botmux probe failure, an unread box)
+// omit reason and keep their own words.
+var notDeliveredKeys = map[string]string{
+	"terminal_refused":  "rpc-errors.not_delivered",
+	"terminal_finished": "rpc-errors.not_delivered_finished",
+}
+
 func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 	if l == "" {
 		return
@@ -475,6 +551,34 @@ func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 	if code == "open_elsewhere" {
 		where, _ := body["where"].(string)
 		key = openElsewhereKeys[where]
+	}
+	if body["partial"] == true {
+		switch code {
+		case "not_delivered":
+			if reason, _ := body["reason"].(string); reason == "terminal_finished" {
+				key = "rpc-errors.modes_partial_terminal_finished"
+			} else {
+				key = "rpc-errors.modes_partial_not_delivered"
+			}
+		case "dialog_open":
+			key = "rpc-errors.modes_partial_dialog_open"
+		case proto.CodeNodeOutdated:
+			key = "rpc-errors.modes_partial_node_outdated"
+		default:
+			key = "rpc-errors.modes_partial_failed"
+		}
+	} else if code == "not_delivered" && body["delivered"] != "unknown" {
+		reason, _ := body["reason"].(string)
+		key = notDeliveredKeys[reason]
+	} else if code == "delivery_unknown" {
+		if reason, _ := body["reason"].(string); reason == "guide_retry_refused" {
+			dialog, _ := body["dialog"].(string)
+			retryCode, _ := body["retry_code"].(string)
+			if dialog != "" && retryCode != "" {
+				key = "rpc-errors.guide_retry_refused"
+				args["dialog"], args["retry_code"] = dialog, retryCode
+			}
+		}
 	}
 	if errors.Is(err, ErrOffline) {
 		key = "rpc-errors.offline"

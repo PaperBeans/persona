@@ -234,7 +234,8 @@ export function readModels(mid: string, launcher: string, o: { again?: boolean; 
   const read = slot(Boolean(o.first)).then(async (done) => {
     try {
       if (scope.owner !== credentialOwner()) return;
-      const r = await launcherModels(mid, launcher, { purpose: o.purpose, host: o.host, manager: scope.manager });
+      // This read owns a queued generation; the per-key cache above, not an older GET, coalesces its callers.
+      const r = await launcherModels(mid, launcher, { purpose: o.purpose, host: o.host, manager: scope.manager, dedupe: false });
       for (const id of hidden) {
         if (r?.models.some((m) => m.id === id && m.custom)) {
           forgetting.get(sharedKey)?.get(id)?.restore.set(key, withoutCustom(r, id).restore);

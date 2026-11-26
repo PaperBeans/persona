@@ -136,6 +136,7 @@ func (s *Service) todosViewed(ctx context.Context, briefs bool) ([]listedTodo, t
 	if s.todoViewsSeen(gen, p, nil) {
 		s.todoViewDiffers()
 	}
+	s.todosCounted(gen, p) // the counts view's to-dos (counts_view.go)
 	return list, p, nil
 }
 

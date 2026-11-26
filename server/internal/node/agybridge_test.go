@@ -21,7 +21,132 @@ import (
 
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/runtimepkg"
 )
+
+func TestAgyBridgeCommandKeepsExternalRuntimeStore(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell script fixture")
+	}
+	dir := t.TempDir()
+	pkgRoot := filepath.Join(dir, "pkgs", agyPackage)
+	for rel, body := range map[string]string{
+		"antigravity/package.json":    `{"type":"module"}`,
+		"antigravity/companion.mjs":   "console.log('ok')\n",
+		"antigravity/desktop.mjs":     "console.log('ok')\n",
+		"antigravity/mcp-proxy.mjs":   "export {}\n",
+		"antigravity/media-guard.mjs": "export {}\n",
+		"antigravity/lib/runtime.js":  "export {}\n",
+		"runtime-sdk/package.json":    `{"type":"module"}`,
+		"runtime-sdk/index.js":        "export {}\n",
+		"runtime-sdk/lib/runtime.js":  "export {}\n",
+	} {
+		p := filepath.Join(pkgRoot, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fakeNode := filepath.Join(dir, "node-22")
+	if err := os.WriteFile(fakeNode, []byte("#!/bin/sh\nprintf 22.19.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(runtimepkg.OverrideEnv, filepath.Join(dir, "pkgs"))
+	t.Setenv("PERSONA_NODEJS", fakeNode)
+
+	externalStore := filepath.Join(dir, "state", "runtime-packages", agyPackage)
+	externalVersion := strings.Repeat("a", 64)
+	externalProxy := filepath.Join(externalStore, externalVersion, "antigravity", "mcp-proxy.mjs")
+	if err := os.MkdirAll(filepath.Dir(externalProxy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(externalProxy, []byte("external\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(externalVersion, filepath.Join(externalStore, "current")); err != nil {
+		t.Fatal(err)
+	}
+
+	builtinStore := filepath.Join(dir, "state", "runtime-packages", agyPackage+"-builtin")
+	busyVersion := strings.Repeat("b", 64)
+	busyProxy := filepath.Join(builtinStore, busyVersion, "antigravity", "mcp-proxy.mjs")
+	idleProxy := filepath.Join(builtinStore, strings.Repeat("c", 64), "antigravity", "mcp-proxy.mjs")
+	for _, path := range []string{busyProxy, idleProxy} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("builtin\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lease := filepath.Join(builtinStore, ".active", busyVersion)
+	if err := os.MkdirAll(lease, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lease, fmt.Sprintf("%d-2222222222222222", os.Getpid())), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	idleLease := filepath.Join(builtinStore, ".active", strings.Repeat("c", 64))
+	if err := os.MkdirAll(idleLease, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// This is an old node startup reservation, not a companion lease. It must not survive a same-PID exec upgrade.
+	if err := os.WriteFile(filepath.Join(idleLease, fmt.Sprintf("%d-0000000000000000", os.Getpid())), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sock := filepath.Join(dir, "state", "runtime.sock")
+	rh := NewRuntimeHost("test", sock)
+	lock := filepath.Join(builtinStore, ".install.lock")
+	if err := os.Mkdir(lock, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	owner := filepath.Join(lock, fmt.Sprintf("%d-1111111111111111", os.Getpid()))
+	if err := os.WriteFile(owner, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agyBridgeCommand(context.Background(), rh, "/usr/local/bin/agy", "builtin-agy-1-1"); err == nil {
+		t.Fatal("built-in cleanup proceeded while the runtime-sdk store lock was live")
+	}
+	if _, err := os.Stat(idleProxy); err != nil {
+		t.Fatalf("a blocked cleanup still removed an idle generation: %v", err)
+	}
+	if err := os.WriteFile(owner, []byte("not-this-process-start"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The same live PID with a different recorded start identity is a reused PID, so Go reclaims the stale lock.
+	cmd, err := agyBridgeCommand(context.Background(), rh, "/usr/local/bin/agy", "builtin-agy-1-1")
+	if err != nil {
+		t.Fatalf("agyBridgeCommand: %v", err)
+	}
+	wantPrefix := builtinStore + string(filepath.Separator)
+	if !strings.HasPrefix(cmd.Dir, wantPrefix) {
+		t.Fatalf("cmd.Dir = %q, want isolated builtin prefix %q", cmd.Dir, wantPrefix)
+	}
+	reservation := filepath.Join(builtinStore, ".active", filepath.Base(cmd.Dir), fmt.Sprintf("%d-0000000000000000", os.Getpid()))
+	if _, err := os.Stat(reservation); err != nil {
+		t.Fatalf("the launched generation has no node-owned lease before companion registration: %v", err)
+	}
+	if got, err := os.ReadFile(externalProxy); err != nil || string(got) != "external\n" {
+		t.Fatalf("external running version changed: data %q, error %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(externalStore, "current", "antigravity", "mcp-proxy.mjs")); err != nil {
+		t.Fatalf("external current is no longer usable: %v", err)
+	}
+	if _, err := os.Stat(busyProxy); err != nil {
+		t.Fatalf("built-in cleanup removed a generation with a live lease: %v", err)
+	}
+	if _, err := os.Stat(idleProxy); !os.IsNotExist(err) {
+		t.Fatalf("idle built-in generation was not reclaimed: %v", err)
+	}
+	for _, flag := range []string{"--socket", sock, "--agy-bin", "/usr/local/bin/agy", "--no-update", "--parent-stdin", "--instance", "builtin-agy-1-1"} {
+		if !slices.Contains(cmd.Args, flag) {
+			t.Fatalf("cmd.Args %v missing %q", cmd.Args, flag)
+		}
+	}
+}
 
 func TestAgyBridgeWakesOnExternalDisconnect(t *testing.T) {
 	oldFind, oldCmd, oldProbe := findAgyExecutable, agyBridgeCommand, agyBridgeProbeEvery

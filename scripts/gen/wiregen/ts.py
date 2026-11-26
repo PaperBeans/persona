@@ -169,4 +169,3 @@ def gen_ts(defs: dict[str, Def], calls: list[Call] | None = None, header: list[s
             out.append("")
     out += ts_calls(calls or [])
     return "\n".join(out)
-

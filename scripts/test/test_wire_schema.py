@@ -107,9 +107,17 @@ def item_detail(expected):
 
 
 def counts_views():
-    """(definition, sample) of every view counts/view_samples.json expects (#15512)."""
+    """(definition, sample) of every view counts/view_samples.json expects (#15512), and of every view a device keeps
+    or gets in counts/views.json (#15893)."""
     for c in cases("counts/view_samples.json"):
         yield "CountsView", f"counts/view_samples.json {c['name']}.expected.view", c["expected"]["view"]
+    for c in cases("counts/views.json"):
+        where = f"counts/views.json {c['name']}"
+        for part in ("given", "then"):
+            for i, k in enumerate(c[part]["kept"]):
+                yield "CountsView", f"{where}.{part}.kept[{i}].view", k["view"]
+        if "view" in c["when"]:
+            yield "CountsView", f"{where}.when.view", c["when"]["view"]
 
 
 def wire_ids():

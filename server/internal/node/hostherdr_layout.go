@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,111 @@ func (h *herdrHost) Snapshot(ctx context.Context) (*host.Layout, error) {
 	for _, o := range named {
 		mergeLayout(l, o)
 	}
+	return l, nil
+}
+
+// snapshotStrictAll takes a complete fresh snapshot of the own server and every running named session, failing
+// closed if any running named session is busy, times out, or errors instead of falling back to lastLayout.
+func (h *herdrHost) snapshotStrictAll(ctx context.Context) (*host.Layout, error) {
+	if h.named == nil {
+		return layoutOf(ctx, h.c, "")
+	}
+	until := time.Now().Add(namedWait)
+	sessions := h.named.running(ctx, until)
+	namedLayouts := make([]*host.Layout, 0, len(sessions))
+	for _, ns := range sessions {
+		nl, err := snapshotNamedSessionStrict(ctx, ns)
+		if err != nil {
+			return nil, err
+		}
+		namedLayouts = append(namedLayouts, nl)
+	}
+	l, err := layoutOf(ctx, h.c, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range namedLayouts {
+		mergeLayout(l, o)
+	}
+	return l, nil
+}
+
+// snapshotForPaneStrict takes a host snapshot guaranteeing a fresh (non-cached) read from the server owning
+// paneID (the own server for bare IDs, or the named herdr session for "@<session>:<id>"). If the target named
+// session is missing, busy, times out, or returns an error, it fails closed rather than falling back to lastLayout.
+func (h *herdrHost) snapshotForPaneStrict(ctx context.Context, paneID string) (*host.Layout, error) {
+	session, _ := herdr.SplitID(paneID)
+	if session == "" {
+		return h.Snapshot(ctx)
+	}
+	if h.named == nil {
+		return nil, fmt.Errorf("%w: %q (%s)", errNoSuchSession, session, paneID)
+	}
+	ns := h.named.lookup(ctx, session)
+	if ns == nil {
+		return nil, fmt.Errorf("%w: %q (%s)", errNoSuchSession, session, paneID)
+	}
+	targetLayout, err := snapshotNamedSessionStrict(ctx, ns)
+	if err != nil {
+		return nil, err
+	}
+	var otherSessions []*herdrSession
+	for _, s := range h.named.running(ctx, time.Now().Add(namedWait)) {
+		if s.name != session {
+			otherSessions = append(otherSessions, s)
+		}
+	}
+	var others func() []*host.Layout
+	if len(otherSessions) > 0 {
+		var out []*host.Layout
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			until := time.Now().Add(namedWait)
+			out = fromNamed(ctx, until, otherSessions, func(ctx context.Context, os *herdrSession) (*host.Layout, error) {
+				l, err := layoutOf(ctx, os.c, os.name)
+				if err == nil {
+					os.mu.Lock()
+					os.layout, os.spaces = l, nil
+					os.mu.Unlock()
+				}
+				return l, err
+			}, (*herdrSession).lastLayout)
+		}()
+		others = func() []*host.Layout {
+			<-done
+			return out
+		}
+	}
+	l, err := layoutOf(ctx, h.c, "")
+	var named []*host.Layout
+	if others != nil {
+		named = others()
+	}
+	if err != nil {
+		return nil, err
+	}
+	mergeLayout(l, targetLayout)
+	for _, o := range named {
+		mergeLayout(l, o)
+	}
+	return l, nil
+}
+
+func snapshotNamedSessionStrict(ctx context.Context, ns *herdrSession) (*host.Layout, error) {
+	if !ns.busy.CompareAndSwap(false, true) {
+		return nil, fmt.Errorf("herdr session %q is busy", ns.name)
+	}
+	defer ns.busy.Store(false)
+	sctx, cancel := context.WithTimeout(ctx, namedWait)
+	defer cancel()
+	l, err := layoutOf(sctx, ns.c, ns.name)
+	if err != nil {
+		return nil, fmt.Errorf("herdr session %q snapshot failed: %w", ns.name, err)
+	}
+	ns.mu.Lock()
+	ns.layout, ns.spaces = l, nil
+	ns.mu.Unlock()
 	return l, nil
 }
 

@@ -9,9 +9,12 @@ struct WatchMeetingEntries: View {
     @Environment(WatchModel.self) private var model
     @State private var capture = RecordingCapture.shared
     @State private var allDay = WatchAllDay.shared
+    /// The phone's word on its hub's recording module (`PhoneRecordingAllowance`, #15214); absent means allowed.
+    @AppStorage(WatchSync.phoneRecordingKey) private var phoneRecording: String?
 
     var body: some View {
-        if capture.allDay {
+        // No meeting mark while the hub's recording module is off (#15214); Recordings and the minutes stay.
+        if capture.allDay, WatchRecordingOffers(PhoneRecordingAllowance(wire: phoneRecording)).marks {
             Button { allDay.markMeeting() } label: {
                 VStack(alignment: .leading, spacing: Theme.Watch.lineSpacing) {
                     Label("Mark Meeting", systemImage: Theme.Icon.meetingMark).labelStyle(.watchRow)
@@ -61,7 +64,7 @@ struct WatchMinutesList: View {
                 NavigationLink { WatchMinutesView(meeting: meeting) } label: {
                     VStack(alignment: .leading, spacing: Theme.Watch.lineSpacing) {
                         Text(meeting.title).font(Theme.Font.secondaryMedium).lineLimit(2)
-                        Text("\(meeting.date.formatted(date: .abbreviated, time: .shortened)) · \(WatchMinutesView.stateText(meeting.state))")
+                        Text("\(meeting.date.formatted(date: .abbreviated, time: .shortened)) · \(WatchMinutesView.stateText(meeting))")
                             .font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
@@ -77,6 +80,12 @@ struct WatchMinutesList: View {
 struct WatchMinutesView: View {
     var meeting: WatchMinutes.Meeting
 
+    /// The list's word for a meeting: Paused for minutes the hub holds back while its recording module is off
+    /// (`WatchMinutes.Meeting.paused`, #15214), else the state's.
+    static func stateText(_ meeting: WatchMinutes.Meeting) -> String {
+        meeting.isPaused ? String(localized: "Paused") : stateText(meeting.state)
+    }
+
     static func stateText(_ state: WatchMinutes.Meeting.State) -> String {
         switch state {
         case .writing: String(localized: "Writing the minutes…")
@@ -91,6 +100,14 @@ struct WatchMinutesView: View {
                 Text(meeting.title).font(Theme.Font.heading).lineLimit(3)
                 Text(meeting.date.formatted(date: .abbreviated, time: .shortened)).font(Theme.Font.caption).foregroundStyle(.secondary)
                 switch meeting.state {
+                case .writing where meeting.isPaused:
+                    // Nothing writes them until the hub's recording module is back: no spinner, and why.
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        Label("Minutes paused", systemImage: Theme.Icon.pause).font(Theme.Font.secondaryMedium)
+                        Text("Meeting recording is off on this hub, so new minutes aren't written. What's already here stays.")
+                            .font(Theme.Font.caption).foregroundStyle(.secondary)
+                    }
+                    .accessibilityIdentifier("watch-minutes-paused")
                 case .writing:
                     HStack(spacing: Theme.Space.s) {
                         // The watch's spinner is as wide as the screen's half unless held to an icon's size.

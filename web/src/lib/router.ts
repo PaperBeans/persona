@@ -5,6 +5,7 @@ import { takeOverlayEntry } from "./back-close";
 import { BASE, stripBase } from "./base";
 import { decodeURIComponentSafe } from "./uri";
 import { moduleExtensionAt, moduleKBKindAt, modulePath, moduleRouteAt } from "../core/module-host";
+import { healthReadOnlyRoute } from "./health-archive";
 
 // Persona's main conversation is the front door (like the app, which opens on the assistant): `/` and `/persona` open it, `/persona/<id>` is
 // one conversation, `/persona/new` starts a one-off one, and "Overview" lives at `/overview`. `/extension/<id>/<ui>` is an extension's page
@@ -115,6 +116,10 @@ export function parse(path: string, search = ""): Route {
   if (p[0] === "lark-oauth" && !p[1]) return { name: "lark-oauth" };
   if (p[0] === "history") return p[1] ? { name: "history", origin: p[1] } : { name: "history" };
   const module = moduleRouteAt(p);
+  // Existing Health data has a default-panel read-only route both when its module is switched off and when a
+  // core-only build has no descriptor for it. Other absent modules keep their not-found behavior.
+  const healthArchive = healthReadOnlyRoute(p);
+  if (healthArchive) return healthArchive;
   if (module === "absent") return notFound(path, search);
   if (module) return module;
   if (p[0] === "tracks" && p[1] === "new" && !p[2]) return { name: "track-new" };

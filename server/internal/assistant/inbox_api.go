@@ -67,8 +67,7 @@ func (s *Service) inboxRoutes() {
 		}
 		var c InboxItem
 		if ok {
-			c = it.listed()
-			c.Context = it.Context
+			c = it.shown()
 		}
 		b.mu.Unlock()
 		if !ok { // a done item of the history memory no longer holds (inbox_history.go)

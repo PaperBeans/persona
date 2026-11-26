@@ -11,6 +11,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/herdr"
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/screen"
@@ -279,20 +280,27 @@ func (n *Node) checkPaneFor(ctx context.Context, pane, kind string, opts sendOpt
 	return nil
 }
 
+// errTerminalFinished marks a host refusal where the agent's terminal has already ended or disappeared (nothing typed;
+// retrying remotely cannot revive it).
+var errTerminalFinished = errors.New("terminal finished")
+
 // Refusals of a host that takes input on its own terms (herdr-core): it refused the text with nothing typed, or it
 // cannot type text without submitting it.
 const (
-	notDelivered        = "not_delivered"
-	notDeliveredMessage = "电脑上的终端这次没有收下这条消息，什么都没输入：稍后再发。"
-	botmuxDownMessage   = "这个会话在 botmux 里的机器人（%s）这次没有应答（%s），这条消息没有发出去：稍后再发。"
-	shellOnlyMessage    = "这个会话的 Agent 已经退出，终端回到了命令行，这条消息没有发出去（什么都没输入）：在电脑上重新打开它再发。"
-	cannotType          = "cannot_type"
-	cannotTypeMessage   = "电脑上的这个终端只能整条发送（粘贴后回车），不能只输入文字，这次什么都没按：在电脑上回答，或者直接发消息。"
-	unreadBoxMessage    = "读不到电脑上终端的画面，不知道刚才输入的命令是不是还停在输入框里，这条消息没有发出去（什么都没输入）：稍后再发。"
+	notDelivered      = "not_delivered"
+	botmuxDownMessage = "这个会话在 botmux 里的机器人（%s）这次没有应答（%s），这条消息没有发出去：稍后再发。"
+	shellOnlyMessage  = "这个会话的 Agent 已经退出，终端回到了命令行，这条消息没有发出去（什么都没输入）：在电脑上重新打开它再发。"
+	cannotType        = "cannot_type"
+	cannotTypeMessage = "电脑上的这个终端只能整条发送（粘贴后回车），不能只输入文字，这次什么都没按：在电脑上回答，或者直接发消息。"
+	unreadBoxMessage  = "读不到电脑上终端的画面，不知道刚才输入的命令是不是还停在输入框里，这条消息没有发出去（什么都没输入）：稍后再发。"
 )
 
-// deliveryRefusal is the refusal for a host's error that typed nothing (host.ErrNotDelivered), nil for any other.
+// deliveryRefusal is the refusal for a host's error that typed nothing (host.ErrNotDelivered, host.ErrAgentBlocked),
+// nil for any other.
 func deliveryRefusal(err error) error {
+	if errors.Is(err, host.ErrAgentBlocked) {
+		return refusal(screen.DialogOpen, dialogMessage, nil)
+	}
 	if !errors.Is(err, host.ErrNotDelivered) {
 		return nil
 	}
@@ -302,11 +310,14 @@ func deliveryRefusal(err error) error {
 	if errors.Is(err, errShellOnly) {
 		return refusal(notRunning, shellOnlyMessage, nil)
 	}
+	if errors.Is(err, errTerminalFinished) {
+		return refusal(notDelivered, i18n.T(i18n.Default, "rpc-errors.not_delivered_finished"), map[string]any{"reason": "terminal_finished"})
+	}
 	var down *botmuxDownError
 	if errors.As(err, &down) {
 		return refusal(notDelivered, fmt.Sprintf(botmuxDownMessage, down.App, down.Why), nil)
 	}
-	return refusal(notDelivered, notDeliveredMessage, nil)
+	return refusal(notDelivered, i18n.T(i18n.Default, "rpc-errors.not_delivered"), map[string]any{"reason": "terminal_refused"})
 }
 
 // typingRefusal refuses, before anything is pressed, keys that type text into a host that cannot type without

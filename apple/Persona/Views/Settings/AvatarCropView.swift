@@ -91,10 +91,9 @@ struct AvatarCropView: View {
                 }
             }
             .interactiveDismissDisabled(model.uploading)
-            .modifier(AvatarPicturePicking(choosingPhoto: $choosingPhoto, choosingFile: $choosingFile) { data in
-                guard let picture = await model.load(data) else { return }
-                model.replaceMain(picture)
-            })
+            .modifier(AvatarPicturePicking(choosingPhoto: $choosingPhoto, choosingFile: $choosingFile, picked: { data in
+                _ = await model.receiveMain(data)
+            }, failed: model.failedToRead))
             .task { await model.prepare(facePixels: Int(Theme.Size.avatarCrop * scale)) }
             #if DEBUG
             .task { debugOpen() }
@@ -110,9 +109,13 @@ struct AvatarCropView: View {
 
     /// The main picture: a new avatar's crop; an edit's face as it is, or the crop of the new picture picked for it.
     @ViewBuilder private var pictureSection: some View {
+        let canDrop = model.made == nil && !model.uploading
         if let main = model.main {
             Section {
                 AvatarCropArea(framing: main) { Task { await model.estimateColor() } }
+                    .modifier(AvatarPictureDrop(enabled: canDrop, radius: Theme.Radius.card, targetID: "main",
+                                                dropped: { _ = await model.receiveMain($0) },
+                                                failed: model.failedToRead))
                     .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
@@ -123,6 +126,9 @@ struct AvatarCropView: View {
         } else {
             Section {
                 AvatarCurrentFace(face: model.packageFace)
+                    .modifier(AvatarPictureDrop(enabled: canDrop, radius: Theme.Radius.card, targetID: "main",
+                                                dropped: { _ = await model.receiveMain($0) },
+                                                failed: model.failedToRead))
                     .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
@@ -134,10 +140,14 @@ struct AvatarCropView: View {
     /// An edit's new main picture (Photos, a file), or back to the one it has.
     private var changePicture: some View {
         Menu {
-            Button { choosingPhoto = true } label: { Label(String(localized: "Choose from Photos"), systemImage: Theme.Icon.photos) }
-            Button { choosingFile = true } label: { Label(String(localized: "Choose Image File"), systemImage: Theme.Icon.file) }
+            AvatarPictureSourceButtons(slot: .mainEdit) { source in
+                if source == .files { choosingFile = true } else { choosingPhoto = true }
+            }
             if model.main != nil {
-                Button { model.keepMain() } label: { Label(String(localized: "Keep Current Picture"), systemImage: Theme.Icon.undo) }
+                Button {
+                    model.keepMain()
+                    Task { await model.estimateColor() }
+                } label: { Label(String(localized: "Keep Current Picture"), systemImage: Theme.Icon.undo) }
             }
         } label: {
             Text("Change Picture").lineLimit(1)

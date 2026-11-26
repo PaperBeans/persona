@@ -96,6 +96,7 @@ func (s *Service) nodeEvent(machine, event string, params json.RawMessage) bool 
 					s.fleet.hooked[[2]string{machine, sid}] = true
 					s.fleet.mu.Unlock()
 				}
+				s.resetIdleObservation(machine, sid)
 				s.noteStop(machine, sid, p)
 				s.meetingTurnPrompt(machine, sid, p) // the user's own prompt to an Agent ends its meeting turn (meeting_turns.go)
 			}
@@ -163,6 +164,7 @@ func (s *Service) nodeRequest(ctx context.Context, machine, method string, param
 			return nil, true, err
 		}
 		p.Interaction.MachineID = machine
+		s.resetIdleObservation(machine, p.Interaction.SessionID)
 		s.placeCard(&p.Interaction)
 		// A write through a skill's gated command (node/larkgate.go): its plugin names what the ids are.
 		if sum, ok := s.assistantSummary(ctx, p.Interaction.ToolName, p.Interaction.Summary); ok {

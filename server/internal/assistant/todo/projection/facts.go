@@ -191,6 +191,7 @@ const (
 	reviewPending   = "pending_review"
 	reviewAccepted  = "accepted"
 	reviewNeedsUser = "needs_user"
+	reviewUserCheck = "user_check"
 	reviewCancelled = "cancelled"
 	reviewParked    = "parked"
 

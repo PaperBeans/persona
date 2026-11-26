@@ -468,11 +468,15 @@ func checkPushes(m *extension.Manifest, from extension.UIItem, v *extension.View
 // checkOpenURL holds what extension id's action opens to https; an inbox_item may also open its item's own source page
 // (extension.InboxSourceURL), that item's only, and any of its pages its own settings (extension.SettingsURL), its own
 // only.
+// space-conversations may also open one assistant conversation (spaceConversationLink).
 func checkOpenURL(id string, ui extension.UIItem, itemID, raw string) error {
 	if raw == "" || raw == extension.SettingsURL(id) {
 		return nil
 	}
 	if ui.Placement == "inbox_item" && itemID != "" && raw == extension.InboxSourceURL(itemID) {
+		return nil
+	}
+	if id == spacesMigrationID && spaceConversationLink(raw) {
 		return nil
 	}
 	if u, err := url.Parse(raw); err != nil || u.Scheme != "https" || u.Host == "" {

@@ -141,18 +141,19 @@ type turnJudged struct {
 
 // turnSignal is the supervision signal a turn's outcome raised, and when a supervision message carried it (nil: not yet).
 type turnSignal struct {
-	Kind    string     `json:"kind"`
-	Key     string     `json:"key"`
-	Machine string     `json:"machine,omitempty"`
-	Detail  string     `json:"detail,omitempty"`
-	Handoff bool       `json:"handoff,omitempty"`
-	Told    *time.Time `json:"told,omitempty"`
+	Kind      string     `json:"kind"`
+	Key       string     `json:"key"`
+	Machine   string     `json:"machine,omitempty"`
+	Recipient string     `json:"recipient,omitempty"`
+	Detail    string     `json:"detail,omitempty"`
+	Handoff   bool       `json:"handoff,omitempty"`
+	Told      *time.Time `json:"told,omitempty"`
 	// JudgeDown: superviseSignal.JudgeDown, so a replay after a restart is batched as the first telling was.
 	JudgeDown bool `json:"judge_down,omitempty"`
 }
 
 func (sig *turnSignal) matches(g superviseSignal) bool {
-	if sig == nil || sig.Kind != g.Kind {
+	if sig == nil || sig.Kind != g.Kind || sig.Recipient != g.Recipient {
 		return false
 	}
 	if sig.Key == g.Key {
@@ -195,7 +196,7 @@ func (s *Service) replayTurnSignal(todo string, expected taskTurn) {
 	}
 	// Keep the ledger lock until queued, so an obsolete replay cannot replace a newer pending signal.
 	// The digest releases its mutex before consulting or marking the turn ledger.
-	s.queueSignal(superviseSignal{Todo: todo, Kind: sig.Kind, Key: sig.Key, Machine: sig.Machine, Detail: sig.Detail, Handoff: sig.Handoff,
+	s.queueSignal(superviseSignal{Todo: todo, Kind: sig.Kind, Key: sig.Key, Machine: sig.Machine, Recipient: sig.Recipient, Detail: sig.Detail, Handoff: sig.Handoff,
 		JudgeDown: sig.JudgeDown})
 }
 
@@ -711,8 +712,9 @@ func (s *Service) turnSignalled(g superviseSignal) (told bool) {
 	defer cancel()
 	sig := e.Signal
 	match := sig.matches(g)
-	if sig != nil && sig.Kind == g.Kind && sig.Told != nil && (match || b.again[g.Todo]) {
-		if !match {
+	sameHandover := sig != nil && sig.Kind == g.Kind && g.Recipient == "" && sig.Recipient != "" && sig.Key == g.Key
+	if sig != nil && sig.Kind == g.Kind && sig.Told != nil && (match || sameHandover || b.again[g.Todo] && g.Recipient == "") {
+		if !match && !sameHandover {
 			next := *sig // a turn handed out keeps the signal it was read with
 			next.Key = g.Key
 			e.Signal = &next
@@ -721,12 +723,35 @@ func (s *Service) turnSignalled(g superviseSignal) (told bool) {
 		}
 		return true
 	}
-	if !match || sig.Handoff != g.Handoff {
-		e.Signal = &turnSignal{Kind: g.Kind, Key: g.Key, Machine: g.Machine, Detail: g.Detail, Handoff: g.Handoff, JudgeDown: g.JudgeDown}
+	if !sameHandover && (!match || sig.Handoff != g.Handoff) {
+		e.Signal = &turnSignal{Kind: g.Kind, Key: g.Key, Machine: g.Machine, Recipient: g.Recipient, Detail: g.Detail, Handoff: g.Handoff, JudgeDown: g.JudgeDown}
 		b.doc.Turns[g.Todo] = e
 		s.saveTurnsLocked(ctx)
 	}
 	return false
+}
+
+// retargetTurnSignalRecipient updates an in-flight handed-over sigReview receipt in the turn ledger when an explicit
+// transfer moves the task to a new supervisor before the earlier handover has been delivered.
+func (s *Service) retargetTurnSignalRecipient(ctx context.Context, todoID, recipient string) {
+	if todoID == "" || recipient == "" {
+		return
+	}
+	b := &s.tasks.turns
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.loaded {
+		return
+	}
+	e, ok := b.doc.Turns[todoID]
+	if !ok || e.Signal == nil || e.Signal.Kind != sigReview || e.Signal.Told != nil || e.Signal.Recipient == "" || e.Signal.Recipient == recipient {
+		return
+	}
+	next := *e.Signal
+	next.Recipient = recipient
+	e.Signal = &next
+	b.doc.Turns[todoID] = e
+	s.saveTurnsLocked(ctx)
 }
 
 // turnsTold keeps on the ledger that the turn signals in list need no telling any more: a supervision message carried

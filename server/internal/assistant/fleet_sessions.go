@@ -114,6 +114,7 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 	s.availSweep(machine, list, now) // the waits of conversations no longer listed (availability.go)
 	s.pruneGoneQuiet(machine)        // the verdicts and Stops of task Agents no longer listed (silent_turns.go)
 	s.pruneGoneUpstream(machine, list)
+	s.observeIdleSessions(machine, list, connected)
 	s.fleetKeep(machine, list, connected, unsure)
 	for _, ref := range a2aIdleRefs {
 		s.inOrder(func() { s.a2aRecipientIdle(context.Background(), ref) })

@@ -49,6 +49,16 @@ rows at the end of the assistant's group, with the module's own title and icon t
 nothing, and nothing is left greyed out (principle 2). No new component or token: rows and actions reuse `JRow` and
 `JAction`.
 
+## Stored data when its module is off (#13430, #15995)
+
+Audience: everyone on a hub whose owner turned a module off. What the user already has stays readable: the page shows the stored content with the
+module's controls left out, not greyed, and never an error or a Retry that cannot succeed. When part of the content
+is not stored (web, #15995: a mail's full body and attachments are fetched from the mail server each time), the
+stored part is followed by one plain line saying what is missing and why ("Mail is turned off on the hub machine, so
+the full message and its attachments can't be loaded…"), drawn as the page's existing quiet strip (the mail reader's
+translation strip: `bg-inset`, hairline, the `info` icon, `text-label`), neutral rather than caution: nothing went
+wrong and there is nothing for the person to do on this page.
+
 ## Product design principles
 
 The seven product design principles, with their rules, how to check each one and recent cases, live in `docs/design/PRINCIPLES.md`: 1 defaults first, 2 progressive disclosure, 3 user control, 4 consistency first, 5 model and product are separate, 6 rules are checkable, 7 fast, local-first and stateful. They decide product questions before any rule in this document applies. "Principle N" below refers to that numbering. Apple's Human Interface Guidelines are a source for this document, not its authority: what Persona takes from them is rewritten here as Persona rules (sections 2 to 6), and `docs/design/HIG_AUDIT.md` records where the code still falls short.
@@ -4582,3 +4592,32 @@ measure for a moment first, and one neutral offload provider; `-tab settings -op
   in its top leading corner: the same round `chromeSurface` button, the whole 44 pt corner answering
   (`tapTargetFrame`), and the same action named for VoiceOver (**Edit Avatar**, **Delete Avatar**). Never a context
   menu: the grid is one Form row (`docs/apple/persona.md` "Uploading an image").
+
+## Per-slot file drop targets (#15612)
+
+Audience: everyday people customizing Persona's avatar (web and iPad / Mac). Dragging is additive: the default click /
+tap path and keyboard-reachable **Choose** / **Change** buttons (on Apple, both **Choose from Photos** and **Choose
+Image File** via `AvatarPictureSourceButtons`) stay in place, each with a spoken label naming its slot (plus a localized
+VoiceOver drop hint on Apple).
+
+- **One target under the pointer**: each picture slot (main picture in new and edit flows, each of the five state rows,
+  an open state's crop box, and on the picker the Upload / New from Photo card and uploaded cards that offer Edit)
+  handles only its own drag events (`stopPropagation` on web; per-view `AvatarPictureDrop` `dropDestination` on Apple),
+  never another slot's. Built-in cards and uploaded cards without Edit do not highlight or accept drops (no
+  `dropDestination` attached on Apple).
+- **Same highlight, zero layout shift**: a targeted slot uses the existing drop-zone tokens in both light and dark,
+  without shifting layout:
+  - Web: dashed accent border and accent tint fill (`border-accent` / `outline-accent` + `bg-accent-tint`, or the crop
+    box's 2 px accent ring), with transparent resting borders or inset outlines.
+  - Apple (`AvatarPictureDrop`, `apple/Persona/Views/Settings/AvatarStatesPages.swift`): a non-hit-testing rounded
+    overlay (`Theme.Radius.card` on crop squares and picker cards, `Theme.Radius.control` on Form rows) filled with
+    `Theme.AvatarSheet.dropTint` (`Theme.accentTint`) and stroked with `Theme.AvatarSheet.dropStroke` (`Theme.accent`)
+    at `Theme.AvatarSheet.dropStrokeWidth` (`Theme.Size.rule`).
+- **Near-miss guard (web)**: while the dialog is open, a window-level guard swallows stray file drags/drops
+  (`preventDefault`, `dropEffect = "none"`), and the picker grid does the same, so a miss between slots, on the dialog's
+  title or footer, or on the backdrop never opens the file in the browser tab.
+- **Same validation and user control**: dropped files run through the exact same type/size validation and animated-image
+  decoder as chosen files (`DroppedAvatarImage` on Apple imports `.image` in its original bytes and reads off the main
+  actor so GIF, APNG and animated WebP keep all their frames). Dropping on a picker card only opens the upload or edit
+  dialog with the file ready to crop; nothing is saved until Upload / Save, and **Keep current** / **Keep Current
+  Picture** / Cancel reverts it (principle 3).

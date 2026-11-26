@@ -296,4 +296,3 @@ def gen_swift(defs: dict[str, Def], header: list[str] | None = None, prefix: str
                     "        var c = encoder.container(keyedBy: TagKey.self)",
                     f"        try c.encode({swift_ident(disc)}, forKey: .tag)", "    }", "}", ""]
     return "\n".join(out)
-

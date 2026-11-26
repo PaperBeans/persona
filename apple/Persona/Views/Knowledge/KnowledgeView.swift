@@ -287,13 +287,16 @@ struct KnowledgeView: View {
             if RecordingLibrary.shared.entry(id)?.isDay == true { RecordingDayView(id: id) } else { RecordingOpen(id: id) }
         } label: { KBRow(entry: e) }
             .accessibilityIdentifier("kb.recording")
-            // Rename (#8873): a touch and hold, and VoiceOver's actions; not a day, named by its date.
+            // Rename (#8873): a touch and hold, and VoiceOver's actions; not a day, named by its date. Not with the hub's
+            // recording module off (#15214); Delete below stays.
             .contextMenu {
-                if RecordingLibrary.shared.entry(id)?.isDay == false {
+                if RecordingLibrary.shared.entry(id)?.isDay == false, RecordingModule.allowance.offersWrites {
                     Button { renamingRecording = id } label: { Label("Rename", systemImage: Theme.Icon.edit) }
                 }
             }
-            .accessibilityAction(named: Text("Rename")) { if RecordingLibrary.shared.entry(id)?.isDay == false { renamingRecording = id } }
+            .accessibilityAction(named: Text("Rename")) {
+                if RecordingLibrary.shared.entry(id)?.isDay == false, RecordingModule.allowance.offersWrites { renamingRecording = id }
+            }
             .accessibleConfirmationDialog("Delete This Recording?", isPresented: Binding(get: { deletingRecording == id }, set: { if !$0, deletingRecording == id { deletingRecording = nil } }),
                                 titleVisibility: .visible) {
                 Button("Delete", role: .destructive) {
@@ -625,6 +628,8 @@ struct KBRow: View {
         HStack(spacing: Theme.Space.sm) {
             // Notes and all-day recordings among meetings (#8731); meetings carry none.
             if let t = entry.recordingTag { KBPill(text: t) }
+            // Its minutes or upload wait for the hub's recording module, which is off (#15214).
+            if let t = entry.pausedTag { KBPill(text: t) }
             ImportanceBadge(importance: entry.importance)
             if let n = entry.topicPoints { KBPill(text: String(localized: "\(n) knowledge points")) }
             if let k = entry.projectKind { KBPill(text: k, tint: (entry.extra ?? "").hasPrefix("long") ? Theme.Hue.blue : nil) }
@@ -817,6 +822,10 @@ struct KnowledgeDetailView: View {
             if let d = detail?.detail {
                 if let query, let matches = detail?.matches { found(matches, query: query, chat: d.kind == KBKind.chats.rawValue ? d.id : nil) }
                 if let facts = ItemFacts(kind: d.kind, meta: d.meta), !facts.isEmpty { factsSection(facts) }
+                // A recording the hub holds back while its recording module is off (#15214): said, with nothing to tap.
+                if d.kind == KBKind.recordings.rawValue, d.paused?.isModuleOff == true {
+                    Section { RecordingPausedNote() }
+                }
                 // A recording that stands for an imported meeting too (#8872): its notes in the app, opened in this one.
                 if let imported = d.importedMeeting {
                     Section {

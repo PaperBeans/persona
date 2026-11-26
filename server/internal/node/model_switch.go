@@ -341,38 +341,45 @@ func (n *Node) setModel(ctx context.Context, id, model string) error {
 
 // setModelAndModes applies a request of session.modes: the model first (the efforts a model takes depend on it),
 // then the mode and effort.
-func (n *Node) setModelAndModes(ctx context.Context, id, model, mode, effort string, queueEffort bool) (bool, error) {
+func (n *Node) setModelAndModes(ctx context.Context, id, model, mode, effort string, queueEffort bool) (pending, changed bool, err error) {
 	if !n.isAssistantSession(id) {
 		if c, t, ok := n.codexEffortThread(id); ok {
 			if err := n.switchingRefusal(id); err != nil {
-				return false, err
+				return false, false, err
 			}
 			if mode != "" {
-				return false, fmt.Errorf("Codex 的会话在手机上只能改思考强度和模型，权限模式要在电脑上改")
+				return false, false, fmt.Errorf("Codex 的会话在手机上只能改思考强度和模型，权限模式要在电脑上改")
 			}
-			return false, n.setCodexSettings(ctx, id, c, t, model, effort)
+			if err := n.setCodexSettings(ctx, id, c, t, model, effort); err != nil {
+				return false, false, err
+			}
+			return false, strings.TrimSpace(model) != "" || strings.TrimSpace(effort) != "", nil
 		}
 		if src, found := n.codexSource(id); found && codexDesktopChat(src) {
 			if err := n.switchingRefusal(id); err != nil {
-				return false, err
+				return false, false, err
 			}
-			return false, n.codexDesktopModes(ctx, id, src, model, mode, effort)
+			if err := n.codexDesktopModes(ctx, id, src, model, mode, effort); err != nil {
+				return false, false, err
+			}
+			return false, strings.TrimSpace(model) != "" || strings.TrimSpace(effort) != "", nil
 		}
 		// A Codex in a pane on the terminal route: Codex's own /model, typed into its box (codex_terminal_modes.go).
 		if t, why, ok := n.codexOnTerminalCtx(ctx, id, true); ok {
 			if err := n.switchingRefusal(id); err != nil {
-				return false, err
+				return false, false, err
 			}
 			if mode != "" {
-				return false, fmt.Errorf("Codex 的会话在手机上只能改思考强度和模型，权限模式要在电脑上改")
+				return false, false, fmt.Errorf("Codex 的会话在手机上只能改思考强度和模型，权限模式要在电脑上改")
 			}
-			if model == "" && effort == "" {
-				return false, nil
+			if strings.TrimSpace(model) == "" && strings.TrimSpace(effort) == "" {
+				return false, false, nil
 			}
 			if why != nil {
-				return false, why
+				return false, false, why
 			}
-			return false, n.setCodexTerminalSettings(ctx, id, t, model, effort)
+			changed, err := n.setCodexTerminalSettings(ctx, id, t, model, effort)
+			return false, changed, err
 		}
 		if mode == "" && (model != "" || effort != "") {
 			m := strings.TrimSpace(model)
@@ -381,15 +388,15 @@ func (n *Node) setModelAndModes(ctx context.Context, id, model, mode, effort str
 					m = cmp.Or(n.claudeModelArg(st.Launcher, m), "default")
 				}
 				if _, err := modelCommand(m); err != nil {
-					return false, err
+					return false, false, err
 				}
 			}
 			if err := validModes("", effort); err != nil {
-				return false, err
+				return false, false, err
 			}
 			if handled, err := n.ccPluginSetSettings(ctx, id, m, effort); handled {
 				if err != nil {
-					return false, err
+					return false, false, err
 				}
 				if m != "" {
 					n.noteModel(id, m, n.transcriptModel(id))
@@ -398,22 +405,27 @@ func (n *Node) setModelAndModes(ctx context.Context, id, model, mode, effort str
 					n.noteModes(id, "", effort)
 				}
 				n.notifySessions()
-				return false, nil
+				return false, true, nil
 			}
 		}
 	}
 	if model != "" {
 		if err := n.setModel(ctx, id, model); err != nil {
-			return false, err
+			return false, false, err
 		}
+		changed = true
 	}
 	if mode == "" && effort == "" {
-		return false, nil
+		return false, changed, nil
 	}
-	if !queueEffort {
-		return false, n.setModes(ctx, id, mode, effort)
+	var pendingPtr *bool
+	if queueEffort {
+		pendingPtr = &pending
 	}
-	var pending bool
-	err := n.updateModes(ctx, id, mode, effort, &pending)
-	return pending, err
+	var modesChanged bool
+	err = n.updateModes(ctx, id, mode, effort, pendingPtr, &modesChanged)
+	if err != nil && changed {
+		return pending, true, partialModesErr(err)
+	}
+	return pending, changed || modesChanged, err
 }

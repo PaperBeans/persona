@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistant/supervisionrole"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -102,7 +103,7 @@ func TestDirectionNotesRoute(t *testing.T) {
 func TestDirectionNotesReachTheLeaderPolicy(t *testing.T) {
 	s, f := notesEnv(t)
 	ctx := context.Background()
-	policy := prompts.RenderSupervisionInstructions()
+	policy := mustSupervisionRole(t, supervisionrole.RoleLeader())
 	if got := dispatchedPolicy(t, s, "conv_lead"); got != policy {
 		t.Fatal("a leader without notes has a different policy")
 	}

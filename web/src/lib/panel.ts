@@ -28,6 +28,13 @@ export function useSidePanelBack(): (() => void) | undefined {
   return useContext(SidePanelBackContext);
 }
 
+/** Forces machine-file links and cards inside a read-only archive view to open read-only file panels. */
+export const ReadOnlyFileContext = createContext(false);
+
+export function useReadOnlyFile(): boolean {
+  return useContext(ReadOnlyFileContext);
+}
+
 /** A diff opened straight at a line (a comment's card, lib/comments.ts): which diff, which file, which line. */
 export interface GitSpot {
   /** The repository-relative path git reports. */
@@ -61,8 +68,9 @@ export type Panel =
   | { kind: "review"; mid: string; sid: string; cwd: string; scope?: "uncommitted" | "branch" | "commit"; at?: ReviewSpot }
   /** The transcript's own edits, by exchange or session: `turn` scopes the exchange and `at` selects a file / call. */
   | { kind: "changes"; mid: string; sid: string; turn?: string; at?: { path: string; call?: string } }
-  /** `sid`: the session whose message box takes the comments made in it (else the one last used). */
-  | { kind: "file"; mid: string; path: string; cwd?: string; line?: number; to?: number; sid?: string }
+  /** `sid`: the session whose message box takes the comments made in it (else the one last used). `readOnly`: suppress
+   *  edit and Show-in-Files write entries (for read-only archive views such as disabled Health data). */
+  | { kind: "file"; mid: string; path: string; cwd?: string; line?: number; to?: number; sid?: string; readOnly?: boolean }
   /** `manager`: the chat's it was opened from, which reads it (none: the default's). */
   | { kind: "link"; url: string; title?: string; manager?: string }
   /** A task of a conversation, opened from it while Agents open in the side panel (lib/agent-open.ts, #5424): its
@@ -152,7 +160,7 @@ function panelTargetKey(p: Panel): string {
     case "subagent":
       return `${p.kind}:${p.mid}/${p.sid}`;
     case "file":
-      return `file:${p.mid}:${p.path}`;
+      return `file:${p.mid}:${p.path}${p.readOnly ? ":ro" : ""}`;
     case "link":
       return `link:${p.manager ?? ""}:${p.url}`;
     case "task":

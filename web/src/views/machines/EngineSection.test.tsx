@@ -280,6 +280,80 @@ describe("EngineSection (single-engine) cross-machine isolation", () => {
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(buttonByText(t("common.save"))).toBeUndefined();
   });
+
+  it("clears the edited latch when a hub push converges to the local draft so subsequent pushes follow remote updates", async () => {
+    const a1 = singleMachine("machine-a", "herdr");
+    const a2 = singleMachine("machine-a", "orca");
+    const a3 = singleMachine("machine-a", "paseo");
+
+    await render(<EngineSection machine={a1} heading={<h2>Engine</h2>} />);
+    await act(async () => radio("orca")!.click());
+    expect(radio("orca")?.getAttribute("aria-checked")).toBe("true");
+    expect(buttonByText(t("common.save"))).toBeDefined();
+
+    // Hub pushes the same engine as the unsaved draft: Save bar disappears and latch must clear.
+    await render(<EngineSection machine={a2} heading={<h2>Engine</h2>} />);
+    expect(radio("orca")?.getAttribute("aria-checked")).toBe("true");
+    expect(buttonByText(t("common.save"))).toBeUndefined();
+
+    // A later hub push to Paseo must update the selection cleanly instead of staying locked on Orca.
+    await render(<EngineSection machine={a3} heading={<h2>Engine</h2>} />);
+    expect(radio("paseo")?.getAttribute("aria-checked")).toBe("true");
+    expect(radio("orca")?.getAttribute("aria-checked")).toBe("false");
+    expect(buttonByText(t("common.save"))).toBeUndefined();
+  });
+
+  it("clears a failed save error and edited latch when a hub push converges to the failed draft", async () => {
+    const a1 = singleMachine("machine-a", "herdr");
+    const a2 = singleMachine("machine-a", "orca");
+    const a3 = singleMachine("machine-a", "tern");
+    mocks.api.mockRejectedValueOnce(new Error("timeout"));
+
+    await render(<EngineSection machine={a1} heading={<h2>Engine</h2>} />);
+    await act(async () => radio("orca")!.click());
+    await act(async () => buttonByText(t("common.save"))!.click());
+    await flush();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("timeout");
+
+    // Hub confirms Orca: stale error clears and latch unlocks.
+    await render(<EngineSection machine={a2} heading={<h2>Engine</h2>} />);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(buttonByText(t("common.save"))).toBeUndefined();
+
+    // Next push to Tern follows remote state cleanly.
+    await render(<EngineSection machine={a3} heading={<h2>Engine</h2>} />);
+    expect(radio("tern")?.getAttribute("aria-checked")).toBe("true");
+    expect(buttonByText(t("common.save"))).toBeUndefined();
+  });
+
+  it("reconciles a convergent hub push received while a save is in flight even if the PUT later fails", async () => {
+    const a1 = singleMachine("machine-a", "herdr");
+    const a2 = singleMachine("machine-a", "orca");
+    const a3 = singleMachine("machine-a", "paseo");
+    const req = deferred<Machine>();
+    mocks.api.mockReturnValueOnce(req.promise);
+
+    await render(<EngineSection machine={a1} heading={<h2>Engine</h2>} />);
+    await act(async () => radio("orca")!.click());
+    await act(async () => buttonByText(t("common.save"))!.click());
+
+    // Hub WS push arrives with Orca before the HTTP PUT settles (e.g. reportNow before response or concurrent client).
+    await render(<EngineSection machine={a2} heading={<h2>Engine</h2>} />);
+
+    // HTTP PUT fails after the hub already applied Orca: stale error and latch must clear once saving ends.
+    await act(async () => {
+      req.reject(new Error("connection lost"));
+      await Promise.resolve();
+    });
+    await flush();
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(buttonByText(t("common.save"))).toBeUndefined();
+
+    // Subsequent push to Paseo follows remote state cleanly.
+    await render(<EngineSection machine={a3} heading={<h2>Engine</h2>} />);
+    expect(radio("paseo")?.getAttribute("aria-checked")).toBe("true");
+    expect(buttonByText(t("common.save"))).toBeUndefined();
+  });
 });
 
 describe("EngineHostsSection (host sets) cross-machine isolation", () => {
@@ -403,5 +477,95 @@ describe("EngineHostsSection (host sets) cross-machine isolation", () => {
     expect(mocks.toast).toHaveBeenCalledWith(t("machines-enginesection.saved", { engine: "herdr + Orca" }), "ok");
     expect(checkbox("orca")?.disabled).toBe(false);
     expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("clears the edited latch when a hub push converges to the local host-set draft so subsequent pushes follow remote updates", async () => {
+    const a1 = hostsMachine("machine-a", ["herdr"], "herdr");
+    const a2 = hostsMachine("machine-a", ["herdr", "orca"], "herdr");
+    const a3 = hostsMachine("machine-a", ["tern"], "tern");
+
+    await render(<EngineSection machine={a1} heading={<h2>Engine</h2>} />);
+    await act(async () => checkbox("orca")!.click());
+    expect(checkbox("orca")?.getAttribute("aria-checked")).toBe("true");
+    expect(buttonByText(t("common.save"))).toBeDefined();
+
+    // Hub pushes the same host set as the unsaved draft: Save bar disappears and latch must clear.
+    await render(<EngineSection machine={a2} heading={<h2>Engine</h2>} />);
+    expect(checkbox("herdr")?.getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("orca")?.getAttribute("aria-checked")).toBe("true");
+    expect(buttonByText(t("common.save"))).toBeUndefined();
+
+    // Subsequent hub push to Tern must update the checkboxes cleanly instead of staying locked on herdr + Orca.
+    await render(<EngineSection machine={a3} heading={<h2>Engine</h2>} />);
+    expect(checkbox("tern")?.getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("herdr")?.getAttribute("aria-checked")).toBe("false");
+    expect(checkbox("orca")?.getAttribute("aria-checked")).toBe("false");
+    expect(buttonByText(t("common.save"))).toBeUndefined();
+  });
+
+  it("preserves a divergent host-set draft across pushes and clears stale error once the hub converges", async () => {
+    const a1 = hostsMachine("machine-a", ["herdr"], "herdr");
+    const a2 = hostsMachine("machine-a", ["paseo"], "paseo");
+    const a3 = hostsMachine("machine-a", ["herdr", "orca"], "herdr");
+    const a4 = hostsMachine("machine-a", ["tern"], "tern");
+    mocks.api.mockRejectedValueOnce(new Error("network"));
+
+    await render(<EngineSection machine={a1} heading={<h2>Engine</h2>} />);
+    await act(async () => checkbox("orca")!.click());
+
+    // Divergent push keeps the local draft intact.
+    await render(<EngineSection machine={a2} heading={<h2>Engine</h2>} />);
+    expect(checkbox("herdr")?.getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("orca")?.getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("paseo")?.getAttribute("aria-checked")).toBe("false");
+    expect(buttonByText(t("common.save"))).toBeDefined();
+
+    // Save fails -> error shown.
+    await act(async () => buttonByText(t("common.save"))!.click());
+    await flush();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("network");
+
+    // Hub converges to the draft -> error and latch clear.
+    await render(<EngineSection machine={a3} heading={<h2>Engine</h2>} />);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(buttonByText(t("common.save"))).toBeUndefined();
+
+    // Subsequent push follows remote state cleanly.
+    await render(<EngineSection machine={a4} heading={<h2>Engine</h2>} />);
+    expect(checkbox("tern")?.getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("herdr")?.getAttribute("aria-checked")).toBe("false");
+    expect(checkbox("orca")?.getAttribute("aria-checked")).toBe("false");
+    expect(buttonByText(t("common.save"))).toBeUndefined();
+  });
+
+  it("reconciles a convergent host-set hub push received while saving even if the PUT later fails", async () => {
+    const a1 = hostsMachine("machine-a", ["herdr"], "herdr");
+    const a2 = hostsMachine("machine-a", ["herdr", "orca"], "herdr");
+    const a3 = hostsMachine("machine-a", ["tern"], "tern");
+    const req = deferred<Machine>();
+    mocks.api.mockReturnValueOnce(req.promise);
+
+    await render(<EngineSection machine={a1} heading={<h2>Engine</h2>} />);
+    await act(async () => checkbox("orca")!.click());
+    await act(async () => buttonByText(t("common.save"))!.click());
+
+    // Hub WS push arrives with herdr + Orca while PUT is still in flight.
+    await render(<EngineSection machine={a2} heading={<h2>Engine</h2>} />);
+
+    // HTTP PUT fails after the hub already converged: stale error and latch must clear once saving ends.
+    await act(async () => {
+      req.reject(new Error("connection lost"));
+      await Promise.resolve();
+    });
+    await flush();
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(buttonByText(t("common.save"))).toBeUndefined();
+
+    // Subsequent push to Tern follows remote state cleanly.
+    await render(<EngineSection machine={a3} heading={<h2>Engine</h2>} />);
+    expect(checkbox("tern")?.getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("herdr")?.getAttribute("aria-checked")).toBe("false");
+    expect(checkbox("orca")?.getAttribute("aria-checked")).toBe("false");
+    expect(buttonByText(t("common.save"))).toBeUndefined();
   });
 });

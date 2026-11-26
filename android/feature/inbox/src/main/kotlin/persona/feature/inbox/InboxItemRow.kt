@@ -87,7 +87,7 @@ internal fun InboxItemRow(record: InboxRecord, repository: InboxRepository, navi
                     ?: record.localStatus?.let { InboxLocalStatus(it) }
                 // Meta carries a recognized shared state; without one, the old mark still has its own place below it.
                 if (nowText == null) oldMark?.let { EventRowMark(it) }
-                if (!done) AgentDraftCard(record, composers, navigator, repository = repository)
+                if (!done && LocalMailAccess.current.offersReply(record)) AgentDraftCard(record, composers, navigator, repository = repository)
             })
     }
 }

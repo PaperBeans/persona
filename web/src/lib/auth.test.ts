@@ -12,7 +12,7 @@ vi.mock("./api", () => ({
 
 import { setPairedToken } from "./api";
 import { storeCredentials } from "./compatibility";
-import { deviceName, pair, pairToken, takeToken } from "./auth";
+import { deviceName, forgetUnrevoked, keepUnrevoked, pair, pairToken, takeToken, unrevokedTokenId } from "./auth";
 
 describe("pairToken", () => {
   it("keeps bare tokens as they are", () => {
@@ -104,5 +104,36 @@ describe("takeToken", () => {
   it("leaves links without one alone, and strips an empty one", () => {
     expect(takeToken("http://hub.example:18660/settings?tab=models")).toBeNull();
     expect(takeToken("http://hub.example:18660/?token=")).toEqual({ token: "", rest: "/" });
+  });
+});
+
+describe("unrevoked token helpers under blocked storage", () => {
+  it("never throw when localStorage methods or getter are blocked", () => {
+    vi.stubGlobal("localStorage", {
+      getItem() { throw new DOMException("blocked", "SecurityError"); },
+      setItem() { throw new DOMException("blocked", "SecurityError"); },
+      removeItem() { throw new DOMException("blocked", "SecurityError"); },
+    });
+    try {
+      expect(unrevokedTokenId()).toBe("");
+      expect(() => keepUnrevoked("dev_x")).not.toThrow();
+      expect(() => forgetUnrevoked()).not.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    const prevDesc = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() { throw new DOMException("Storage disabled", "SecurityError"); },
+    });
+    try {
+      expect(unrevokedTokenId()).toBe("");
+      expect(() => keepUnrevoked("dev_x")).not.toThrow();
+      expect(() => forgetUnrevoked()).not.toThrow();
+    } finally {
+      if (prevDesc) Object.defineProperty(globalThis, "localStorage", prevDesc);
+      else delete (globalThis as Record<string, unknown>).localStorage;
+    }
   });
 });

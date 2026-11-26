@@ -60,6 +60,8 @@ SOURCES = {
             "Shared/RequestClientMetadata.swift", "Shared/ExtensionSurfaceEntities.swift",
             "Shared/ExtensionSurfaceView.swift", "Shared/ExtensionSystemWidget.swift",
             "Shared/Design/ExtensionSurfaceTokens.swift", "Shared/Design/PersonaFace.swift", "Shared/HomeWidgets",
+            # The Home Screen and Live Activity recording allowance is part of the real widget target (#15214).
+            "Shared/Recording/PhoneRecordingAllowance.swift",
             "Shared/Design/HomeWidgetTokens.swift", "Shared/Design/HealthIntakePalette.swift",
             "Shared/Localization",
         )),

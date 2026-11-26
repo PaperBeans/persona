@@ -759,6 +759,11 @@ DOCKER=<docker client> python3 scripts/ci/module-e2e.py --modules voice,health,r
   its minutes too), none of the module's controls is on that page (rename, make or regenerate minutes, hand to an Agent, the private
   mark, the questions asked in the meeting), and none of the module's chunks is requested, the detail opened inside
   the app included. `on` and `back-on` are as for every entry: present, opens, its chunk loads.
+  Mail has the same kind of row against the mock hub (#15995, the `Inbox mail item` entry): with `module.mail` off the
+  mock answers 404 on `/api/v1/mail/…` as the hub does and keeps the item's stored text on `GET /api/v1/inbox/{id}`
+  (`scripts/mock/mail_mock.py`, with `mail_body_truncated` as the text is: `MOCK_MAIL_STORED_TEXT=clipped` makes every
+  stored mail a long one cut at 3,000 characters, `=unknown` leaves the key out); the mail is still listed in the Inbox, opens with that text and the line saying mail
+  is off, and shows no reply, AI draft reply, attachment or error. On the older hub it opens the whole message.
 - **Output**: a `PASS` / `WARN` / `FAIL` line per phase, module and check, the evidence JSON (`--evidence`, default
   `<shots>/evidence.json`: commit, the settings row, the manager line, the hello's module flags, what the browser got and
   requested), and screenshots `<phase>-<scheme>-<name>.png` in `--shots` (this machine's name is masked; never commit

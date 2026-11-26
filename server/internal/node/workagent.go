@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/screen"
 )
 
 // Work agents (docs/integrations/launchers.md "Work agents"): pi, the Cursor CLI (cursor-agent) and the Antigravity
@@ -491,15 +493,24 @@ func (n *Node) workAgentCalls(ctx context.Context, method, id string, a host.Age
 		typedAt := time.Now()
 		var delivery *agySendWatch
 		beforeQueued := -1
+		var beforeScreen string
 		if a.Agent == agyAgent {
 			delivery = n.watchAgySend(id, a.PaneID, msg.Text, typedAt)
 			if a.AgentStatus == proto.StatusWorking || a.AgentStatus == proto.StatusBlocked || n.workSent.recent(a.PaneID, typedAt) {
 				if screen, err := n.readPane(ctx, a.PaneID, "visible", 80); err == nil {
+					beforeScreen = screen
 					beforeQueued = len(parseAgyQueuedLines(screen))
 				}
 			}
 		}
 		if err := n.hostPrompt(ctx, a.PaneID, msg.Text); err != nil {
+			if r := deliveryRefusal(err); r != nil {
+				if (errors.Is(err, host.ErrDialogOpen) || errors.Is(err, host.ErrAgentBlocked)) && beforeScreen != "" && screen.Choosing(beforeScreen) {
+					r = dialogRefusalOf(beforeScreen, false)
+				}
+				log.Printf("send %s: the host refused it, nothing typed: %v", id, err)
+				return nil, r, true
+			}
 			return nil, fmt.Errorf("send: %w", err), true
 		}
 		if a.Agent == agyAgent {

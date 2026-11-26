@@ -38,7 +38,7 @@ import {
   type TodayBody,
 } from "../../lib/feed";
 import { backgroundWorkLine, type BackgroundWork } from "../../lib/background-work";
-import { acceptedAtRest, dockAgents, type DockAgent, isRemovable, mostUrgentAgent, openAsk, orphanedLine, stoppedReason, taskNow, todoStatus, TODO_STATUS_INFO, waitingLine, type SessionLookup, type Todo, type TodoStatus } from "../../lib/todos";
+import { acceptedAtRest, dockAgents, type DockAgent, isRemovable, mostUrgentAgent, openAsk, orphanedLine, personalVerificationAsk, stoppedReason, taskNow, todoStatus, TODO_STATUS_INFO, waitingLine, type SessionLookup, type Todo, type TodoStatus } from "../../lib/todos";
 import { hasActiveAgentWork } from "../../lib/todo-triage";
 import { usageLimitLabel } from "../../lib/usage-limit";
 import { openAgent, openTask } from "../../lib/handoff";
@@ -70,7 +70,7 @@ const ruleLine = (of: RuleCard) => (of.suggestion || underCard.made?.has(of.id!)
 underCard.line = ruleLine;
 import { SentLine } from "./Sent";
 import { feedWake, HandoffCard, HandoffCards, TASK_LINE_SLACK_MS, taskHandoffs } from "./Handoff";
-import { acceptanceStands, latestReview, parkedLine, progressLine } from "../../lib/supervision";
+import { acceptanceStands, latestReview, parkedLine, progressLine, reviewState } from "../../lib/supervision";
 import { namedLauncher, providerIdNote, providerTitle, useProviderNames } from "../../lib/provider-names";
 import { sameManager, useChosenManager, useLinkManager, useShownManager } from "../../lib/manager-choice";
 import { AnsweredSummary, InteractionCard, underCard } from "../chat/Interactions";
@@ -971,6 +971,7 @@ function foldedRow(item: NeedsYouItem): { title: string; line?: string; kicker: 
   if (item.kind === "message") return { title: [field(item.item, "sender"), field(item.item, "chat")].filter(Boolean).join(" · ") || t("assistant-tasks.task_fallback"), line: field(item.item, "text"), kicker: stateName("needs_you") };
   if (item.kind === "agent") return item.asks.length ? { title: sessionTitle(item.session), line: cardLine(item.asks[0]), kicker: interactionKicker(item.asks[0]) } : undefined;
   if (item.asks.length) return { title: item.todo.title, line: cardLine(item.asks[0]), kicker: interactionKicker(item.asks[0]) };
+  if (reviewState(item.todo) === "user_check" && !personalVerificationAsk(item.todo)) return undefined;
   const ask = openAsk(item.todo);
   // a decision held for the briefing says so folded too (#5803): why it did not ring
   if (isDecision(item.todo) || ask) return { title: item.todo.title, line: ask?.verdict, kicker: ask?.for_briefing === true ? t("todos.ask_held") : stateName("needs_you") };
@@ -1086,7 +1087,15 @@ export function NeedsYouBody({ item, nested = false }: { item: NeedsYouItem; nes
   // Unfolded task rows carry the open flag themselves; a nested one's opened head already has it.
   const taskOpenAttr = !nested ? { "data-counts-open": item.countsOpen ? "true" : "false" } : {};
   if (asks.length) return <div data-needs-row={rowKey} {...taskOpenAttr}>{!nested && <button type="button" onClick={() => openTask(todo.id)} className="block max-w-full truncate px-1 text-left text-sm font-semibold hover:underline">{todo.title}</button>}{asks.map((ix) => <InteractionCard key={ix.id} ix={ix} />)}{nested && <OpenEntry title={todo.title} onOpen={() => openTask(todo.id)} />}</div>;
-  const ask = openAsk(todo);
+  const verifying = reviewState(todo) === "user_check";
+  const ask = verifying ? personalVerificationAsk(todo) : openAsk(todo);
+  if (verifying && !ask) return (
+    <button type="button" data-needs-row={rowKey} {...taskOpenAttr} onClick={() => openTask(todo.id)} className="flex min-w-0 items-center gap-2 rounded-control bg-field px-3 py-2 text-left text-sm hover:bg-hover">
+      <StatusMark state="needs_you" />
+      <span className="min-w-0 flex-1 truncate">{todo.title}</span>
+      <span className="shrink-0 text-xs text-ink-2">{t("assistant-tasks.review_user_check")}</span>
+    </button>
+  );
   // Both structured decisions and older review-only decisions have the same deferral controls.
   if (isDecision(todo))
     return (
@@ -1202,7 +1211,7 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
   // switch off, or every row this conversation's, the tray is as it was.
   const foldBackground = useStore((s) => s.assistant?.main_background_folded) !== false;
   const conversations = useStore((s) => s.assistant?.conversations);
-  const groups = foldBackground ? needsYouBySupervisor(waiting, conversation) : [{ supervisor: conversation, items: waiting }];
+  const groups = foldBackground ? needsYouBySupervisor(waiting, conversation, directWaiting) : [{ supervisor: conversation, items: waiting }];
   const own = groups[0].items;
   const asking = own.filter(isAsking);
   const rest = own.filter((item) => !asking.includes(item));

@@ -328,6 +328,25 @@ func (s *fakeSyncer) ResolveUserNames(ctx context.Context, b larksyncwire.Bindin
 	return nil, nil
 }
 
+func (s *fakeSyncer) ResolveNamesWithFallback(ctx context.Context, b larksyncwire.Binding, token func(context.Context) (string, error), req larksyncwire.NameResolveRequest) (larksyncwire.NameResolveResult, error) {
+	s.w.mu.Lock()
+	fn := s.w.resolveNamesWithFallback
+	legacy := s.w.resolveNames
+	s.w.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, b, token, req)
+	}
+	if legacy != nil {
+		rawIDs := make([]string, len(req.OpenIDs))
+		for i, id := range req.OpenIDs {
+			rawIDs[i] = string(id)
+		}
+		names, err := legacy(ctx, b, token, rawIDs)
+		return larksyncwire.NameResolveResult{UserNames: names}, err
+	}
+	return larksyncwire.NameResolveResult{}, nil
+}
+
 func (s *fakeSyncer) ExtractDocLinks(text string) []larksyncwire.PendingLinkCandidate {
 	s.w.mu.Lock()
 	fn := s.w.extractDocLinks
@@ -358,14 +377,15 @@ type larkWorld struct {
 	reg   *fakeRegistrar
 	mux   http.Handler
 
-	mu                sync.Mutex
-	clock             time.Time
-	runs              map[string]larkRun // "<bot>/<account id>" → what its reader does
-	resolveNames      func(ctx context.Context, b larksyncwire.Binding, token func(context.Context) (string, error), openIDs []string) (map[string]string, error)
-	extractDocLinks   func(text string) []larksyncwire.PendingLinkCandidate
-	mergePendingLinks func(existingCursor string, add []larksyncwire.PendingLinkCandidate) (string, int)
-	ran               []string
-	readers           int
+	mu                       sync.Mutex
+	clock                    time.Time
+	runs                     map[string]larkRun // "<bot>/<account id>" → what its reader does
+	resolveNames             func(ctx context.Context, b larksyncwire.Binding, token func(context.Context) (string, error), openIDs []string) (map[string]string, error)
+	resolveNamesWithFallback func(ctx context.Context, b larksyncwire.Binding, token func(context.Context) (string, error), req larksyncwire.NameResolveRequest) (larksyncwire.NameResolveResult, error)
+	extractDocLinks          func(text string) []larksyncwire.PendingLinkCandidate
+	mergePendingLinks        func(existingCursor string, add []larksyncwire.PendingLinkCandidate) (string, int)
+	ran                      []string
+	readers                  int
 }
 
 func newLarkWorld(t *testing.T) *larkWorld {

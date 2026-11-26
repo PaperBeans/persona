@@ -43,7 +43,7 @@ import { openTodoDialog } from "./InboxTodoDialog";
 import { FolderBar, FolderLine, FolderSettingsDialog, openFolderDialog, useFoldersShown } from "./InboxFolders";
 import { folderCrumbs, UNFILED } from "../../lib/inbox-folders";
 import { AgentWorking, Chip, Count, DraftCard, Glyph, ItemAvatar, Spark, StatusMenu, Tag, type GlyphName } from "./InboxParts";
-import { useLarkItemReadOnly } from "./lark-write-gate";
+import { useItemReadOnly } from "./item-write-gate";
 import { CheckMark } from "../settings/ProviderFields";
 import { barFade, InboxBar } from "./InboxBar";
 import { groupClear, type GroupClear } from "./group-clear";
@@ -910,7 +910,7 @@ export async function markFromRow(it: InboxItem, done: boolean, touch = isNoHove
  * (#2059): with `pick` the row is a checkbox that picks it instead of opening it; `off`: it cannot be picked (a done item).
  */
 const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdit, pick, picked = false, off = false }: { it: InboxItem; selected: boolean; showAccount: boolean; /** the folder picked; undefined: folders are not shown */ folder?: string; onEdit: (it: InboxItem) => void; pick?: (it: InboxItem) => void; picked?: boolean; off?: boolean }) {
-  const larkReadOnly = useLarkItemReadOnly(it);
+  const readOnly = useItemReadOnly(it);
   const to = itemRoute(it);
   const done = isDone(it);
   const label = kindLabel(it);
@@ -982,7 +982,7 @@ const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdi
               {rows.length > 1 && <span className="shrink-0 text-ink-3">{t("inbox-inboxlist.more_rows", { count: rows.length - 1 })}</span>}
             </div>
           )}
-          {draft && <DraftCard it={it} onEdit={() => onEdit(it)} onSend={(text, changes) => { if (!larkReadOnly) void sendReply(it, text, changes); }} />}
+          {draft && <DraftCard it={it} onEdit={() => onEdit(it)} onSend={(text, changes) => { if (!readOnly) void sendReply(it, text, changes); }} />}
           {working && <AgentWorking it={it} />}
           {mark}
         </div>

@@ -1,19 +1,29 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
-import { mcpServers } from '../lib/compat.js'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { installCurrent, PACKAGES, packageHash, readShipped, storeVersion } from '../../runtime-sdk/lib/package.js'
+import { mediaGuardPath, mcpServers } from '../lib/compat.js'
 
 const PROXY = fileURLToPath(new URL('../mcp-proxy.mjs', import.meta.url))
+const MEDIA_GUARD = fileURLToPath(new URL('../media-guard.mjs', import.meta.url))
 const FAKE = fileURLToPath(new URL('./fake-mcp-server.mjs', import.meta.url))
+const INTEGRATIONS = fileURLToPath(new URL('../../', import.meta.url))
+
+function storedVersion(marker) {
+  const files = readShipped(INTEGRATIONS, PACKAGES['persona-antigravity-runtime']).map((file) =>
+    file.path === 'antigravity/companion.mjs' ? { ...file, data: Buffer.concat([file.data, Buffer.from(`\n// ${marker}\n`)]) } : file,
+  )
+  return { files, hash: packageHash(files) }
+}
 
 /** The proxy in front of the fake server, with a call(method, params) that resolves to the response. */
-function proxied(t, tools, proxyArgs = []) {
+function proxied(t, tools, { proxy = PROXY, proxyArgs = [] } = {}) {
   const args = []
   if (tools) {
     const dir = mkdtempSync(join(tmpdir(), 'persona-mcp-proxy-'))
@@ -21,7 +31,7 @@ function proxied(t, tools, proxyArgs = []) {
     args.push(join(dir, 'tools.json'))
     writeFileSync(args[0], JSON.stringify(tools))
   }
-  const proc = spawn(process.execPath, [PROXY, ...proxyArgs, process.execPath, FAKE, ...args], { stdio: ['pipe', 'pipe', 'inherit'] })
+  const proc = spawn(process.execPath, [proxy, ...proxyArgs, process.execPath, FAKE, ...args], { stdio: ['pipe', 'pipe', 'inherit'] })
   t.after(() => proc.kill())
   const waiting = new Map()
   createInterface({ input: proc.stdout }).on('line', (line) => {
@@ -109,6 +119,17 @@ describe('MCP proxy (#7333)', { timeout: 15_000 }, () => {
     assert.match(list.result.content[0].text, /todo_create, agents_list/)
     const unknown = await call('tools/call', { name: 'persona_call', arguments: { name: 'nope' } })
     assert.match(unknown.error.message, /unknown tool nope/)
+  })
+
+  it('runs as a self-contained entry after its source generation loses every other file', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'persona-mcp-proxy-standalone-'))
+    t.after(() => rmSync(dir, { recursive: true, force: true }))
+    const proxy = join(dir, 'mcp-proxy.mjs')
+    writeFileSync(proxy, readFileSync(PROXY))
+    const big = { name: 'kb_search', description: 'Search the knowledge base. '.repeat(20), inputSchema: { type: 'object', properties: {} } }
+    const { call } = proxied(t, [big], { proxy })
+    const res = await call('tools/list', {})
+    assert.deepEqual(res.result.tools.map((x) => x.name), ['kb_search', 'persona_call'])
   })
 
   it('ends with its server when agy closes stdin', async (t) => {
@@ -254,6 +275,69 @@ describe('mcpServers', () => {
     assert.ok(chat[0].env.some((e) => e.name === 'PERSONA_ASSISTANT' && e.value === '1'))
     assert.ok(chat[0].env.some((e) => e.name === 'PERSONA_SESSION_ID' && e.value === 'agy-1'))
   })
+
+  it('keeps the media guard on its own path in a source checkout', () => {
+    assert.equal(mediaGuardPath(), MEDIA_GUARD)
+  })
+
+  it('prefers the stable current proxy when loaded from an installed version', async (t) => {
+    const store = mkdtempSync(join(tmpdir(), 'persona-mcp-current-'))
+    t.after(() => rmSync(store, { recursive: true, force: true }))
+    const v1 = storedVersion('prefer-current')
+    installCurrent(store, v1.hash, v1.files)
+    const compat = await import(pathToFileURL(join(store, v1.hash, 'antigravity', 'lib', 'compat.js')).href)
+    const [server] = compat.mcpServers('/bin/personad', 'agy-current', true)
+    assert.equal(server.args[0], join(realpathSync(store), 'current', 'antigravity', 'mcp-proxy.mjs'))
+    assert.ok(existsSync(server.args[0]))
+    assert.equal(compat.mediaGuardPath(), join(realpathSync(store), v1.hash, 'antigravity', 'media-guard.mjs'))
+    assert.ok(existsSync(compat.mediaGuardPath()))
+  })
+
+  it('resolves again when a later reconnect first makes current available', async (t) => {
+    const store = mkdtempSync(join(tmpdir(), 'persona-mcp-dynamic-'))
+    t.after(() => rmSync(store, { recursive: true, force: true }))
+    const [v1, v2] = ['A', 'B'].map((marker) => storedVersion(`dynamic-${marker}`))
+    storeVersion(store, v1.hash, v1.files) // A directly installed version can be loaded before current exists.
+    const compat = await import(pathToFileURL(join(store, v1.hash, 'antigravity', 'lib', 'compat.js')).href)
+    installCurrent(store, v2.hash, v2.files)
+    const [server] = compat.mcpServers('/bin/personad', 'agy-dynamic', true)
+    assert.equal(server.args[0], join(realpathSync(store), 'current', 'antigravity', 'mcp-proxy.mjs'))
+    assert.ok(existsSync(server.args[0]))
+  })
+
+  it('does not mistake a hash-named source checkout for a package store', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'persona-mcp-source-name-'))
+    t.after(() => rmSync(dir, { recursive: true, force: true }))
+    const checkout = join(dir, 'a'.repeat(64))
+    for (const file of readShipped(INTEGRATIONS, PACKAGES['persona-antigravity-runtime'])) {
+      const path = join(checkout, file.path)
+      mkdirSync(join(path, '..'), { recursive: true })
+      writeFileSync(path, file.data)
+    }
+    const unrelated = join(dir, 'current', 'antigravity', 'mcp-proxy.mjs')
+    mkdirSync(join(unrelated, '..'), { recursive: true })
+    writeFileSync(unrelated, '// unrelated\n')
+    const compat = await import(pathToFileURL(join(checkout, 'antigravity', 'lib', 'compat.js')).href)
+    const [server] = compat.mcpServers('/bin/personad', 'agy-source-name', true)
+    assert.equal(server.args[0], join(realpathSync(checkout), 'antigravity', 'mcp-proxy.mjs'))
+  })
+
+  it('re-resolves a deleted versioned proxy to current after consecutive upgrades', async (t) => {
+    const store = mkdtempSync(join(tmpdir(), 'persona-mcp-upgrade-'))
+    t.after(() => rmSync(store, { recursive: true, force: true }))
+    const [v1, v2, v3] = ['A', 'B', 'C'].map((marker) => storedVersion(`upgrade-${marker}`))
+    installCurrent(store, v1.hash, v1.files)
+    const compat = await import(pathToFileURL(join(store, v1.hash, 'antigravity', 'lib', 'compat.js')).href)
+    const original = join(store, v1.hash, 'antigravity', 'mcp-proxy.mjs')
+    installCurrent(store, v2.hash, v2.files)
+    installCurrent(store, v3.hash, v3.files)
+    // Also cover deletion by an older installer that does not retain active generations.
+    rmSync(join(store, v1.hash), { recursive: true, force: true })
+    assert.equal(existsSync(original), false)
+    const [server] = compat.mcpServers('/bin/personad', 'agy-reconnected', true)
+    assert.equal(server.args[0], join(realpathSync(store), 'current', 'antigravity', 'mcp-proxy.mjs'))
+    assert.ok(existsSync(server.args[0]))
+  })
 })
 
 describe('MCP proxy --agent mode (#15822)', { timeout: 15_000 }, () => {
@@ -298,7 +382,7 @@ describe('MCP proxy --agent mode (#15822)', { timeout: 15_000 }, () => {
 
   it('keeps leader task_plan, task_review, report_to_supervisor and task_spawn declared within budget while keeping secondary tools callable via persona_call', async (t) => {
     const catalog = [...bulkSecondary, reportTool, smallCore, bigCore, leaderPlanTool, leaderReviewTool, spawnTool]
-    const { call } = proxied(t, catalog, ['--agent'])
+    const { call } = proxied(t, catalog, { proxyArgs: ['--agent'] })
     const listed = await call('tools/list', {})
     const declared = listed.result.tools
     const names = declared.map((x) => x.name)
@@ -327,7 +411,7 @@ describe('MCP proxy --agent mode (#15822)', { timeout: 15_000 }, () => {
 
   it('never exposes task_plan, task_review or machines_list to a worker whose upstream catalog omits them', async (t) => {
     const workerCatalog = [...bulkSecondary, reportTool, smallCore, bigCore, spawnTool]
-    const { call } = proxied(t, workerCatalog, ['--agent'])
+    const { call } = proxied(t, workerCatalog, { proxyArgs: ['--agent'] })
     const listed = await call('tools/list', {})
     const declared = listed.result.tools
     const names = declared.map((x) => x.name)

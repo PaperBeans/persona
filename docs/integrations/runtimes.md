@@ -423,8 +423,8 @@ To avoid going to the computer and clicking every time, the plugin is split into
 - **Another kind of host: one that reloads by itself (pi)**: pi reads extensions from disk on reload and doesn't cache modules, so it doesn't need the loader layer. The extension is installed from a fixed path in the store,
   `<store>/current/…` (`current` is a symlink to `<hash>`, replaced by rename via `installCurrent`). On an offer it fetches the package, installs it as the new `current`,
   and when idle asks the host to reload (pi uses a command the extension registers itself); the new version's host connects to node with the same process identity (`createRuntime`'s `instance`) and replaces the old one.
-  A long-running standalone process (pi's and Antigravity's `companion.mjs`) exits once idle after installing and is brought back up by launchd / systemd (`--no-update` opts out). `selfPackage(import.meta.url, name)` tells a module which package it's running from
-  and whether it's inside the store (if not, it doesn't update). Details in `docs/integrations/pi.md` ("Automatic updates") and "Antigravity CLI" below.
+  A long-running standalone process (pi's and Antigravity's `companion.mjs`) exits once idle after installing and is brought back up by launchd / systemd (`--no-update` opts out). The installer passes its own running hash to `installCurrent`, which retains that version, `current`, the previous version and the three most recently installed other generations; older idle versions and day-old temporary files are still removed, so a busy companion survives consecutive upgrades without unbounded idle-version growth. Antigravity companions also register their hash under `<store>/.active/<hash>/` for their process lifetime, protecting every active companion when another process installs. Installation and registration share a nonblocking, crash-recoverable `.install.lock`; lock contention retries asynchronously with the already verified package and without blacklisting the offered hash. A transient package-fetch failure also remains retryable, while a hash/content mismatch is not fetched again. Every completed hello cancels an older pending retry before that hello's offer is handled, so reconnecting to a node that rolled back to the running hash cannot later publish a stale offer. Updates wait for that completed hello (`rt.ready`, rather than merely an open socket) and check that its offer is still current after every asynchronous fetch; a retry therefore cannot install or recreate itself while disconnected, negotiating a replacement hello, or after a no-offer rollback. A valid response whose package hash differs from the hello's offered hash is not installed or cached for a later retry. Process start identities detect PID reuse (Unix `ps` reads are pinned to UTC and the C locale), cleanup reclaims registrations whose process is gone, and it preserves all generations if registrations cannot be read. Reinstalling a cached generation, including a rollback, refreshes its modification time so it counts as recently used. `selfPackage(import.meta.url, name)` tells a module which package it's running from
+  and whether it's inside the store (if not, it doesn't update). The lock coordinates installers and Go built-in writers that use this SDK contract; an already-running legacy installer does not know the lock and cannot be made mutually exclusive with new cleanup in the same store. The supervisor must restart old companions once onto the fixed code, and rollback to an unlocked installer brings back its old pruning behavior. Details in `docs/integrations/pi.md` ("Automatic updates") and "Antigravity CLI" below.
 - An implementation module that can be swapped exports `api` (`LOADER_API`, currently 1) and `start(host)`, returning `{stop, busy, fetchPackage}` (the methods of the same name on `createRuntime`).
   `host` holds the loader's `context` (for DSH, `{ctx, config}`) plus the `package` and `onUpdate` to pass to `createRuntime`. To add such a runtime: register its files in both lists,
   and change the entry point the host loads to `createLoader`.
@@ -644,8 +644,9 @@ included. The CLI companion writes an agy plugin, `<agy config>/../config/plugin
 file that is no picture, gets no opinion (`ask`: agy's own permissions decide). A cut or damaged one is refused (`deny`,
 which wins over another hook's `allow`) with a reason the model passes on, and the file is left as it is. A truncated
 JPEG whose image data began also gets a terminated copy under `<agy config>/persona-media-guard/`, named in the reason,
-so the model can still look at the part that arrived. The hook answers `ask` when its script is gone (the package moved
-on), so a stale plugin never blocks agy; `--no-media-guard` keeps the companion from writing it. Pictures attached to a
+so the model can still look at the part that arrived. The companion atomically copies its `media-guard.mjs` into the plugin
+directory and the hook executes that installed copy, so later upgrades, another companion's exit or a changed `current`
+cannot strand it in a deleted generation. The installed `package.json` gives the copied `.js` decision helper an explicit ES-module scope even under a CommonJS parent. The hook answers `ask` when that copy is gone, so a stale plugin never blocks agy; `--no-media-guard` keeps the companion from writing it. Pictures attached to a
 message from Persona get the same check: a broken one is left out of the prompt with a line saying so.
 
 Native model errors can be omitted from the JSONL export even when ACP reports a completed prompt. When an idle
@@ -698,7 +699,9 @@ The CLI companion runs the **Antigravity CLI (`agy`)**. When `personad node`
 runs (`--attach` or `--stdio`), `agy` is installed, Node.js 22.5+ (`node:sqlite`) is available, and no external `agy`
 runtime is connected on `runtime.sock`, the node automatically writes out the embedded `persona-antigravity-runtime`
 package and supervises `antigravity/companion.mjs` (passing `--no-update --parent-stdin`), yielding whenever an external
-`agy` runtime connects (`server/internal/node/agybridge.go`). The node resolves `agy` when it starts the companion and
+`agy` runtime connects (`server/internal/node/agybridge.go`). The built-in package is unpacked under the separate
+`runtime-packages/persona-antigravity-runtime-builtin/<hash>/` store, so its cleanup never scans external companions'
+generations or changes their `current`. The sibling layout also keeps built-in files out of legacy external-store pruning. Go writes and pruning use the same `.install.lock` and process-start identity format as JavaScript registration, so a reused PID cannot strand a lock or inherit a lease. The node reserves the generation with its own process lease before launching the companion; a cached launch refreshes that reservation and retries cleanup. Once the companion registers its own lease, it releases the node's reservation for that generation. Reserving a newly launched generation also removes this node's reservations from other generations, which is necessary after a Unix `exec` upgrade retains both PID and start identity. This closes the window before the companion can register its own lease, while idle generations and dead-process leases remain reclaimable. The node resolves `agy` when it starts the companion and
 looks again every 30 seconds while it runs (#14533): when the path or the file there changed (replaced by an update,
 installed elsewhere, removed) and two looks in a row agree, it restarts the companion on the `agy` found now, waiting
 while one of its sessions is working or a call to it is pending (the old file keeps running until then). You can also start
@@ -764,10 +767,14 @@ declaration budget, largest first, and has no `call_mcp_tool` for servers passed
 (#7333). The proxy declares only the tools larger than `persona_call`, so it is always the smallest declared and never
 the one deferred, however many small tools connectors add (sizes are what agy declares of a tool: its name, description
 and input schema). The others stay callable through it: `persona_call` with no name lists every tool, and those left out
-with their description and arguments (#10756). For non-assistant Agent sessions (`--agent`), the proxy prioritizes core
-task, leader and supervision tools and caps secondary declarations within the eager budget so `agy` does not evict
-leader or supervision tools while keeping secondary tools reachable through `persona_call` (#15822); `persona_a2a` stays
-on its separate scoped server.
+with their description and arguments (#10756). A companion loaded from `<store>/<hash>/` resolves the proxy afresh for
+each new or resumed session, preferring `<store>/current/antigravity/mcp-proxy.mjs` whenever it exists. Consecutive
+upgrades therefore do not leave later sessions pointing into a deleted generation; source checkouts without `current`
+keep using their own `mcp-proxy.mjs`. The proxy entry is self-contained (its schema projection is inlined), so after
+Node loads it, pruning its generation cannot break a later relative import. For non-assistant Agent sessions (`--agent`),
+the proxy prioritizes core task, leader and supervision tools and caps secondary declarations within the eager budget so
+`agy` does not evict leader or supervision tools while keeping secondary tools reachable through `persona_call` (#15822);
+`persona_a2a` stays on its separate scoped server.
 A role-bearing task start targeting the Companion (including read-only and explicit `agy` host starts) uses `defer_mcp`
 as described under "What to implement": the real ACP session id exists and the task's role link is committed before the
 first MCP attach and prompt, and deferred activation preserves separate `task_instructions` and `task_attachments`, so

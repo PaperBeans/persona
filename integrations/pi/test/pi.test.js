@@ -1,10 +1,10 @@
 import { wirePackageName } from '../../runtime-sdk/lib/compat.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readlinkSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
-import { packageHash } from '../../runtime-sdk/lib/package.js'
+import { installCurrent, packageHash } from '../../runtime-sdk/lib/package.js'
 import { createPiHost, herdrPaneOf, piWebOf } from '../lib/pi.js'
 
 /** A pi session manager over entries (file order); the branch runs from the leaf back through parentId. */
@@ -738,6 +738,113 @@ test('the companion installs the node\'s version and exits for its supervisor', 
   assert.equal(readlinkSync(join(dir, 'current')), n.offer.hash)
 })
 
+test('a store lock retries the verified package without fetching it again', async (t) => {
+  const dir = store(t)
+  const exits = []
+  const logs = []
+  const n = await startFakeNode(t)
+  n.offer = offerOf('v2-locked')
+  const lock = join(dir, '.install.lock')
+  mkdirSync(lock)
+  writeFileSync(join(lock, `${process.pid}-0000000000000000`), '')
+  const host = createPiHost({ SessionManager: { listAll: async () => [], open: () => sessionManager('x', '/') }, web: { port: 1, host: '127.0.0.1' }, log: (msg) => logs.push(msg) },
+    { socketPath: n.path, retryMs: 20, listDisk: true, update: { name: PKG, hash: 'the-running-version', store: dir, exit: (h) => exits.push(h) } })
+  t.after(() => host.stop())
+  host.start()
+  await until('the package fetched once', () => n.packageCalls.length === 1)
+  await until('asynchronous lock retries', () => logs.filter((msg) => msg.includes('store is busy')).length >= 2)
+  assert.equal(n.packageCalls.length, 1, 'lock retries do not fetch again')
+  assert.throws(() => readlinkSync(join(dir, 'current')))
+  rmSync(lock, { recursive: true, force: true })
+  await until('the verified package installs after the lock is released', () => exits.length === 1)
+  assert.equal(exits[0], n.offer.hash)
+  assert.equal(n.packageCalls.length, 1)
+})
+
+test('a newer offer invalidates an older pi lock retry', async (t) => {
+  const dir = store(t)
+  const logs = []
+  const n = await startFakeNode(t)
+  const older = offerOf('v2-older')
+  const newer = offerOf('v2-newer')
+  n.offer = older
+  const lock = join(dir, '.install.lock')
+  mkdirSync(lock)
+  writeFileSync(join(lock, `${process.pid}-0000000000000000`), '')
+  const host = createPiHost({ SessionManager: { listAll: async () => [], open: () => sessionManager('x', '/') }, web: { port: 1, host: '127.0.0.1' }, log: (msg) => logs.push(msg) },
+    { socketPath: n.path, retryMs: 100, listDisk: true, update: { name: PKG, hash: 'the-running-version', store: dir } })
+  t.after(() => host.stop())
+  host.start()
+  await until('the older offer is waiting on the lock', () => logs.some((msg) => msg.includes('store is busy')))
+  n.offer = newer
+  rmSync(lock, { recursive: true, force: true })
+  n.peer.close(new Error('a newer node offer arrives'))
+  await until('the newer offer installs', () => {
+    try { return readlinkSync(join(dir, 'current')) === newer.hash } catch { return false }
+  })
+  await new Promise((r) => setTimeout(r, 160))
+  assert.equal(readlinkSync(join(dir, 'current')), newer.hash, 'the older timed retry cannot roll current back')
+  assert.equal(n.packageCalls.length, 2)
+})
+
+test('a rollback hello keeps a stale pi retry from installing while reconnecting', async (t) => {
+  const dir = store(t)
+  const logs = []
+  const n = await startFakeNode(t)
+  const running = offerOf('rollback-A')
+  const offered = offerOf('rollback-B')
+  installCurrent(dir, running.hash, running.files.map((file) => ({ path: file.path, data: Buffer.from(file.data, 'base64') })))
+  n.offer = offered
+  const lock = join(dir, '.install.lock')
+  mkdirSync(lock)
+  writeFileSync(join(lock, `${process.pid}-0000000000000000`), '')
+  const host = createPiHost({ SessionManager: { listAll: async () => [], open: () => sessionManager('x', '/') }, web: { port: 1, host: '127.0.0.1' }, log: (msg) => logs.push(msg) },
+    { socketPath: n.path, retryMs: 100, listDisk: true, update: { name: PKG, hash: running.hash, store: dir } })
+  t.after(() => {
+    rmSync(lock, { recursive: true, force: true })
+    return host.stop()
+  })
+  host.start()
+  await until('the stale offer is waiting on the lock', () => logs.some((msg) => msg.includes('store is busy')))
+  const hellos = n.hellos
+  let answerHello
+  n.holdHello = new Promise((resolve) => { answerHello = resolve })
+  t.after(() => { answerHello(); n.holdHello = undefined })
+  n.offer = running
+  rmSync(lock, { recursive: true, force: true })
+  n.peer.close(new Error('node rollback'))
+  await until('the rollback hello is negotiating', () => n.hellos > hellos)
+  await new Promise((resolve) => setTimeout(resolve, 160))
+  assert.equal(readlinkSync(join(dir, 'current')), running.hash, 'the cached package cannot install before the replacement hello')
+  n.hello = undefined
+  answerHello()
+  n.holdHello = undefined
+  await until('the rollback hello completed', () => n.hello?.package?.hash === running.hash)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(readlinkSync(join(dir, 'current')), running.hash)
+  assert.equal(n.packageCalls.length, 1)
+})
+
+test('stopping during a package fetch does not install or schedule another retry', async (t) => {
+  const dir = store(t)
+  const n = await startFakeNode(t)
+  n.offer = offerOf('v2-stopped')
+  const host = createPiHost({ SessionManager: { listAll: async () => [], open: () => sessionManager('x', '/') }, web: { port: 1, host: '127.0.0.1' } },
+    { socketPath: n.path, retryMs: 20, listDisk: true, update: { name: PKG, hash: 'the-running-version', store: dir } })
+  t.after(() => host.stop())
+  const push = n.packageCalls.push.bind(n.packageCalls)
+  n.packageCalls.push = (...args) => {
+    const result = push(...args)
+    host.stop()
+    return result
+  }
+  host.start()
+  await until('the in-flight package request stopped the host', () => n.packageCalls.length === 1)
+  await new Promise((r) => setTimeout(r, 70))
+  assert.equal(n.packageCalls.length, 1, 'the stopped host did not poll the offer again')
+  assert.throws(() => readlinkSync(join(dir, 'current')), 'the stopped host did not install the fetched package')
+})
+
 test('when the reload brings the same version back, it connects again and does not take that version again', async (t) => {
   const dir = store(t)
   const { n, host } = await setup(t, { update: { name: PKG, hash: 'the-running-version', store: dir } })
@@ -753,6 +860,30 @@ test('when the reload brings the same version back, it connects again and does n
   assert.equal(n.packageCalls.length, 1, 'the same version is not fetched again')
   assert.equal(reloads(a).length, 1)
   assert.equal(host.retired, false)
+})
+
+test('a valid package whose hash differs from the hello offer is not installed', async (t) => {
+  const dir = store(t)
+  const running = offerOf('offer-A')
+  const offered = offerOf('offer-B')
+  const replacement = offerOf('offer-C')
+  installCurrent(dir, running.hash, running.files.map((file) => ({ path: file.path, data: Buffer.from(file.data, 'base64') })))
+  const n = await startFakeNode(t)
+  n.offer = offered
+  const push = n.packageCalls.push.bind(n.packageCalls)
+  n.packageCalls.push = (...args) => {
+    const result = push(...args)
+    n.offer = replacement
+    return result
+  }
+  const host = createPiHost({ SessionManager: { listAll: async () => [], open: () => sessionManager('x', '/') }, web: { port: 1, host: '127.0.0.1' } },
+    { socketPath: n.path, retryMs: 20, listDisk: true, update: { name: PKG, hash: running.hash, store: dir } })
+  t.after(() => host.stop())
+  host.start()
+  await until('the replacement package answered', () => n.packageCalls.length === 1)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  assert.equal(readlinkSync(join(dir, 'current')), running.hash, 'C is not cached or installed for the B offer')
+  assert.equal(n.packageCalls.length, 1, 'the mismatched response does not start a retry loop')
 })
 
 test('a package whose files do not match its hash is not installed', async (t) => {

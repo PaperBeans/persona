@@ -394,14 +394,23 @@ func (r *reading) pendingReviewWaiting() bool {
 
 // ---- row 3: the owner decides ----
 
-// ownerDecides: open, and its review waits for the owner (needs_user) or its ask is a decision or says it cannot be
-// done, unless the owner chose Don't handle on it. A decision that can wait is row 4's. verify, steps_proposed,
-// signin and a possible duplicate have no input yet (spec/fixtures/todo-view/README.md "Not produced yet").
+// ownerDecides: open, and its review requires personal verification or waits for the owner's decision. A decision
+// may also say the work cannot be done. A dismissed decision is out, and a decision that can wait is row 4's.
 func (r *reading) ownerDecides() (placement, bool) {
+	state := reviewState(r.f)
+	if state == reviewUserCheck {
+		p := r.at(assistantwire.TodoPhaseNeedsYou, assistantwire.TodoListSectionNeedsYou, assistantwire.TodoReasonVerify)
+		p.Since = utc(r.f.Supervision.UpdatedAt)
+		if a := openAsk(r.f); a != nil && a.Outcome == "" {
+			// Clients answer the verification round from the listed to-do's ask through the existing Pass action.
+			p.Line, p.Since = line(assistantwire.TodoLineKeyDecision, "text", a.Verdict), utc(a.AskedAt)
+		}
+		return p, true
+	}
 	a := r.decisionAsk()
 	p := r.at(assistantwire.TodoPhaseNeedsYou, assistantwire.TodoListSectionNeedsYou, assistantwire.TodoReasonOwnerDecides)
 	switch {
-	case a == nil && (r.dismissed() || reviewState(r.f) != reviewNeedsUser):
+	case a == nil && (r.dismissed() || state != reviewNeedsUser):
 		if d := r.f.Delivery; d != nil && d.Owner {
 			p.Line, p.Since = line(assistantwire.TodoLineKeyDecision, "text", d.Gate), utc(d.At)
 			return p, true

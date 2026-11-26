@@ -131,6 +131,8 @@ type Service struct {
 	reportedLinks reportedLinkBook
 	// build is Options.Build.
 	build string
+	// supRoles supplements direction role baselines for working legacy supervisors (supervision_roles.go).
+	supRoles supervisionRoleBook
 	// northStarOn: the north star's recording start is saved (north_star.go).
 	northStarOn atomic.Bool
 	// nodeAnswering: the computers' requests being answered now, but the ones that wait on a person (idle.go).
@@ -354,19 +356,20 @@ type Service struct {
 	tevents          todoEvents        // todo_events.go: what the extensions are told of the todos
 	tpush            todosPush         // todos.go: the {"type":"todos"} waiting for the rest of its write
 	directions       directionBook     // directions.go: the leaders' records and what the extensions were told of them
-	lreports         leaderReportBook  // leader_reports.go: what the leaders' tasks were reported as
-	outbound         outboundOnce      // outbound_once.go: one card per hand-off the owner is asked about, none again once allowed
-	dtree            directionTreeBook // direction_tree.go: the direction tree the apps were last told of
-	tview            todoViewBook      // todo_view_push.go: what the apps were told each to-do is filed under
-	trevision        todoRevisionBook  // todo_revision.go: the pushed read's cheap validator
-	offers           routeBook         // route.go: the directions offered for New chats
-	fleetUp          atomic.Bool       // the fleet has been brought up since this process started (FleetUp): the pending cards are the real ones (lark_board.go)
-	kb               kbState           // kb.go
-	inbox            inboxBook         // inbox_book.go
-	board            boardBook         // workspace_board.go: the workspace board
-	viewEvents       viewNotifications // views.go: only coalesced notifications; contents are stored first
-	pages            pagesRuntime      // pages_actions.go, pages_events.go: the pages' events, taps and turns (Dashboards)
-	viewMemo         viewMemo          // views.go: encoded cards for the feed snapshot, checked against the database
+
+	lreports   leaderReportBook  // leader_reports.go: what the leaders' tasks were reported as
+	outbound   outboundOnce      // outbound_once.go: one card per hand-off the owner is asked about, none again once allowed
+	dtree      directionTreeBook // direction_tree.go: the direction tree the apps were last told of
+	tview      todoViewBook      // todo_view_push.go: what the apps were told each to-do is filed under
+	trevision  todoRevisionBook  // todo_revision.go: the pushed read's cheap validator
+	offers     routeBook         // route.go: the directions offered for New chats
+	fleetUp    atomic.Bool       // the fleet has been brought up since this process started (FleetUp): the pending cards are the real ones (lark_board.go)
+	kb         kbState           // kb.go
+	inbox      inboxBook         // inbox_book.go
+	board      boardBook         // workspace_board.go: the workspace board
+	viewEvents viewNotifications // views.go: only coalesced notifications; contents are stored first
+	pages      pagesRuntime      // pages_actions.go, pages_events.go: the pages' events, taps and turns (Dashboards)
+	viewMemo   viewMemo          // views.go: encoded cards for the feed snapshot, checked against the database
 
 	devs                 Devices // the computers (devices.go); nil: no fleet
 	mcpWaitMu            sync.Mutex
@@ -419,7 +422,8 @@ type Service struct {
 	sockets   sync.Once
 	socketMux *http.ServeMux
 	// navMu: one change of the user's navigation choices at a time, each read and written whole (navigation.go)
-	navMu sync.Mutex
+	navMu            sync.Mutex
+	idleArchiveAudit idleArchiveAuditBook // agent_archive_idle.go: audited guarded idle archive-and-close records
 }
 
 var _ Handler = (*Service)(nil)
@@ -448,6 +452,7 @@ func New(o Options) *Service {
 	s.conversationSwitchRoutes()
 	s.modelPickRoutes()
 	s.agentArchiveRoutes()
+	s.idleArchiveRoutes()
 	s.agentNamingRoutes()  // agent_naming_request.go
 	s.questionReadRoutes() // question_reads.go
 	s.alwaysRoutes()

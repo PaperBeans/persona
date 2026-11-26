@@ -57,9 +57,11 @@ nonisolated struct KBEntry: Codable, Identifiable, Hashable, Sendable {
     var meetingID: String?
     /// In the meetings list, a recording that stands for an imported meeting too: that meeting (`KBList.meetings`).
     var imported: KBImportedMeeting? = nil
+    /// A recording whose in-flight state the hub holds back, and why (#15214); nil when nothing is paused.
+    var paused: RecordingPause? = nil
 
     enum CodingKeys: String, CodingKey {
-        case kind, id, name, importance, relevance, tags, updated, extra, source
+        case kind, id, name, importance, relevance, tags, updated, extra, source, paused
         case oneLine = "one_line"
         case recordingKind = "recording_kind"
         case meetingID = "meeting_id"
@@ -74,6 +76,13 @@ nonisolated struct KBEntry: Codable, Identifiable, Hashable, Sendable {
         case "day": return String(localized: "All-Day")
         default: return nil
         }
+    }
+
+    /// The pill a recording's row carries while the hub's recording module is off and its minutes or upload wait for it
+    /// (#15214); none for a reason this app doesn't know.
+    var pausedTag: String? {
+        guard kind == KBKind.recordings.rawValue, paused?.isModuleOff == true else { return nil }
+        return String(localized: "Paused")
     }
 
     /// The phone's own recording this entry is, when it has it: its page opens instead of the hub's copy.
@@ -141,6 +150,8 @@ nonisolated struct KBDetail: Decodable, Sendable {
     var moments: [KBMomentRef]?
     /// A topic's knowledge points (docs/assistant/knowledge.md "Topics").
     var points: [KBTopicPoint]?
+    /// A recording whose in-flight state the hub holds back, and why (#15214); nil when nothing is paused.
+    var paused: RecordingPause?
 
     /// A recording's imported meeting (#8872): `meta.imported_meeting` and the link the hub resolves for it; nil without
     /// one, or with nothing to open.

@@ -865,8 +865,7 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 			return &pushOutcome{held: interceptReasonDedup}, nil
 		}
 		policy := pushPolicy{kind: assistantwire.NotifyPush, level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey, todoID: relatedTodoID(n.RelatedKey, !n.Asked),
-			depth: n.Depth, track: n.Track, cardID: n.CardID}
-		policy.level = h.pushGradingNotifyLevel(from, n, policy.level)
+			depth: n.Depth, track: n.Track, cardID: n.CardID, derivedLevel: n.Level == "", mainConv: h.isMainForManager(from, n.DeviceID, n.SessionID)}
 		o := h.notifyDoneUnder(from, "assistant", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, pushWants{}, managerPushCollapseID(from, n.ID),
 			pushRecordingID(n.RecordingID), policy)
 		out = &o
@@ -889,22 +888,4 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 		return nil, fmt.Errorf("unknown notification kind %q", n.Kind)
 	}
 	return out, nil
-}
-
-// pushGradingNotifyLevel is a notify_user push's effective level while push grading is on. A level the caller named explicitly
-// (P0/P1/P2) always stands. A notice that named none and came from the main conversation still interrupts (P0): the
-// owner talking to Persona directly keeps its alerts. Every other conversation's ordinary notice is P1 — held for the
-// "Needs you" list and the briefing instead of alerting. With the switch off the level the caller named stands, so
-// delivery is exactly as before.
-func (h *Hub) pushGradingNotifyLevel(manager string, n assistantwire.Notification, derived string) string {
-	if h.push == nil || !h.push.filteringFor(manager) { // hub.ln_mode on, attention mode in force, or active extension layer
-		return derived
-	}
-	if n.Level != "" {
-		return derived
-	}
-	if h.isMainOn(n.DeviceID, n.SessionID) {
-		return assistantwire.LevelP0
-	}
-	return assistantwire.LevelP1
 }

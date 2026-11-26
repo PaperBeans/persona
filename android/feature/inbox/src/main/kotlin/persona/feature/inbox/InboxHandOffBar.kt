@@ -37,6 +37,7 @@ import persona.core.designsystem.JMenu
 import persona.core.designsystem.JSwitchRow
 import persona.core.designsystem.JTextButton
 import persona.core.designsystem.JToastHost
+import persona.core.designsystem.MailAccess
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.SendButton
 import persona.core.designsystem.Tokens
@@ -62,8 +63,14 @@ internal fun rememberInboxHandOffBarModel(repository: InboxRepository, itemId: S
 }
 
 /** The existing reply sheet supports Lark, mail, and connectors that explicitly accept replies. */
-internal fun inboxSupportsDraftReply(record: InboxRecord): Boolean =
-    record.isLark || record.isMail || record.connector?.canReply == true
+internal fun inboxSupportsDraftReply(record: InboxRecord, mail: MailAccess = MailAccess.Live): Boolean =
+    mail.offersReply(record) && (record.isLark || record.isMail || record.connector?.canReply == true)
+
+/**
+ * Whether a reply to [record] can be sent on this hub: always, except to a mail while the hub's mail module is off
+ * (#15995), when nothing that would send one is offered (the reply sheet, the AI's draft with its Send, a suggested reply).
+ */
+internal fun MailAccess.offersReply(record: InboxRecord): Boolean = this == MailAccess.Live || !record.isMail
 
 /**
  * The event page's persistent hand-off bar. Its toast is local to this bar, never a second global feedback host.

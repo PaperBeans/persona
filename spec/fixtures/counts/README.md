@@ -139,6 +139,9 @@ in `docs/protocol/counts.md`; step 6 of the plan, #15512): `{"version": 1, "case
   `fleetcount` decides for that case on the Agents list: the counted rows in `keys`, the muted and held ones in `held`,
   each reason as the adapter spells it, and a quiet task's agent in neither. `TestViewSamplesAreFleetcountsRows`
   (`server/internal/assistant/fleetcount/fleetcountadapt`) checks it, and that `totals` repeats `n`.
+- A case whose `input.todo_counts` also names a case of `spec/fixtures/todo-counts` holds, as `counts.todos_needs_you`,
+  that list's `needs_you` with no row listed (all of `n` is `more`), and the same test checks it; a case that names none
+  is a view from a manager that has not counted its to-dos yet, without `todos_needs_you`.
 - A case without `input` shows a shape no fixture case gives: rows past the listed `keys` (`more`), and a manager
   build that does not work a count out (absent, never 0).
 
@@ -148,11 +151,53 @@ in Go (`server/internal/assistantwire/counts_gen_test.go`), Swift
 (`android/core/contracts/src/test/kotlin/persona/core/contracts/CountsWireTest.kt`) and the web
 (`web/src/lib/counts-wire.test.ts`). A new count id adds samples here with its schema field.
 
+## Kept views
+
+`views.json` holds what a device keeps of the managers' counts views (D13 of the plan; `docs/protocol/counts.md`, "The
+hub's relay"; #15893): `{"version": 1, "cases": [...]}`, each case with a `name`, a `description`, the views the device
+keeps (`given.kept`), one transport event (`when`), and the views it keeps after it with their totals (`then`).
+
+- `kept` lists `{hub, manager, view}`: one view per hub and manager, listed by hub, then manager. `hub` and `manager`
+  are made-up ids (the same manager id on two paired hubs is two sources); `view` is a `CountsView`, which
+  `scripts/test/test_wire_schema.py` holds to the schema like the samples above.
+- `when.event` is one of the transport events a device sees:
+
+| `event` | Fields | What the device saw |
+| --- | --- | --- |
+| `arrived` | `hub`, `manager`, `view` | A `counts` message with a view (`docs/protocol/protocol.md`, "Counts view"), live or as it connected |
+| `arrivedEmpty` | `hub`, `manager` | A `counts` message with `view: null`: the manager's connection to the hub ended |
+| `wentOffline` | `hub`, `manager` | The roster (`GET /api/v1/managers`) lists the manager offline |
+| `restarted` | `hub` | The hub restarted, was redeployed or switched versions: the socket ended and a new `hello` came |
+| `leftRoster` | `hub`, `manager` | The roster no longer lists the manager |
+| `signedOut` | `hub` | The device signed out of the hub |
+
+- `then.totals` is each count id's `n` added up over every view the device keeps after the event. A count no kept view
+  carries is absent: unknown, never 0. Which managers a surface adds up, and whether it draws views at all while a
+  manager in its scope is absent (D10), are the surface's (`surfaces.json`, `docs/protocol/counts.md`), not this file's.
+
+The rules the cases hold: a view stays through `view: null`, going offline and a hub restart; a view with a new epoch
+replaces the kept one whatever its rev; within an epoch a lower rev loses and a higher one replaces; the view goes when
+the roster no longer lists its manager, and every view of a hub goes when the device signs out of it; a null view from
+a manager the device never kept a view of keeps nothing, and a device with no view after a hub restart keeps none until
+the managers connect again. D10's explicit absence (a hello without `counts_view`, a connected manager's entry
+without the flag) sends a surface to its fallback; it is not a transport event here, and a client step whose reducer
+also drops kept views on it adds the event and its cases.
+
+Who replays it:
+
+- each client's reducer from steps 8 to 10 of the plan, through its adapter (keep, replace, lose, drop as above), and
+  none of them writes this file;
+- the hub, for the restart cases (`TestTheHubReplaysTheRestartCases` in `server/internal/hub/counts_view_test.go`): a
+  hub that just restarted sends a device that connects no `counts` message and still lists every kept manager in its
+  roster, so each `restarted` case's `then` keeps its `given`; and when a manager connects again and tells its view,
+  the device gets it as `the_managers_reconnect_after_a_hub_restart` says.
+
 ## CI and check-fast
 
 CI's lanes already select these files: `spec/**` runs the Android and Apple lanes, whose replays carry the switch,
 and the scripts lane (`**`) runs both suites. check-fast runs the guard and the differ's tests for this directory and
-`spec/fixtures/needs-you`, and the guard for the plan and every file the table names (`scripts/ci/check_fast_map.py`).
+`spec/fixtures/needs-you`, and the guard for the plan and every file the table names (`scripts/ci/check_fast_map.py`);
+for `views.json` it also runs the server packages that read the shared fixtures, the hub's among them.
 Running the report in the scheduled main verification (the plan's section 3.5) is not part of step 4.
 
 ## Changing the table

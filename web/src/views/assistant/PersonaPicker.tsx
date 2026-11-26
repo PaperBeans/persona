@@ -11,6 +11,7 @@ import { deleteUploadedLook, LOOK_UPLOADS_FEATURE, LOOK_UPLOADS_STATES_FEATURE, 
 import { Button, cx, Dialog, IconButton } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { lazyDialog } from "../LazyOverlay";
+import { DASHED_OUTLINE, fileDropGuard, useFileDrop } from "./lookDrop";
 import { MochiFace } from "./MochiFace";
 import { currentLanguage, t } from "../../i18n";
 import { tRich } from "../../i18n/rich";
@@ -113,6 +114,78 @@ export function NoOtherLooks({ onExtensions }: { onExtensions?: () => void }) {
   );
 }
 
+interface PickerCardItem {
+  id: string;
+  title: string;
+  label: string;
+  sub: React.ReactNode;
+  face: React.ReactNode;
+  uploaded?: boolean;
+  info?: PersonaInfo;
+}
+
+/** A picker card's face, title (with a check when chosen) and line under it. */
+function CardContent({ card, selected }: { card: PickerCardItem; selected: boolean }) {
+  return (
+    <>
+      <span className="flex h-14 items-center justify-center">{card.face}</span>
+      <span className="flex max-w-full items-center gap-1 text-[12.5px] font-medium whitespace-nowrap text-ink">
+        {selected && <Icon name="check" size={12} stroke={2.6} className="shrink-0 text-accent-ink" />}
+        <span className="truncate">{card.title}</span>
+      </span>
+      {card.sub}
+    </>
+  );
+}
+
+/** An uploaded avatar card with Edit/Delete corner buttons; accepts a dropped image to open Edit when `onDropFile` is given. */
+function UploadedLookCard({
+  card,
+  selected,
+  onChoose,
+  onEdit,
+  onDelete,
+  onDropFile,
+}: {
+  card: PickerCardItem;
+  selected: boolean;
+  onChoose: () => void;
+  onEdit?: () => void;
+  onDelete: () => void;
+  onDropFile?: (file: File) => void;
+}) {
+  const drop = useFileDrop({ disabled: !onDropFile, onFile: (file) => onDropFile?.(file) });
+  return (
+    <div className="group/look relative flex min-w-0" {...(onDropFile ? drop.props : undefined)}>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={selected}
+        aria-label={card.label}
+        data-drop-over={drop.over ? "true" : undefined}
+        style={drop.over ? DASHED_OUTLINE : undefined}
+        onClick={onChoose}
+        className={cx(
+          "flex min-w-0 flex-1 flex-col items-center gap-2 rounded-card px-2 pt-3.5 pb-2.5 transition-[background-color,box-shadow] duration-150",
+          drop.over
+            ? "bg-accent-tint outline-1 outline-accent -outline-offset-1"
+            : selected
+              ? "bg-accent-tint shadow-[inset_0_0_0_1.5px_var(--accent)]"
+              : "bg-inset shadow-hairline hover:bg-hover",
+        )}
+      >
+        <CardContent card={card} selected={selected} />
+      </button>
+      <span className="absolute top-1 right-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/look:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+        {onEdit && (
+          <IconButton icon="pencil" label={t("assistant-persona.edit_label", { name: card.title })} onClick={onEdit} />
+        )}
+        <IconButton icon="trash" label={t("assistant-persona.delete_label", { name: card.title })} onClick={onDelete} />
+      </span>
+    </div>
+  );
+}
+
 /**
  * Avatar (Settings › Avatar and the profile page; the app's Settings › Appearance › Avatar): the one setting for Persona's face, name, the
  * page's mark and icon (#3200): the default dumpling, then the hub's packages (including the bundled frog) and the
@@ -128,11 +201,15 @@ export function PersonaPicker({ onExtensions }: { onExtensions?: () => void } = 
   const uploadStates = useStore((st) => hubHas(st.features, LOOK_UPLOADS_STATES_FEATURE));
   const [refreshing, setRefreshing] = useState(false);
   // the upload / edit dialog, a new one each time it opens (`key`)
-  const [upload, setUpload] = useState<{ open: boolean; key: number; edit?: PersonaInfo }>({ open: false, key: 0 });
+  const [upload, setUpload] = useState<{ open: boolean; key: number; edit?: PersonaInfo; file?: File }>({ open: false, key: 0 });
   const [deleting, setDeleting] = useState<{ id: string; name: string; current: boolean } | null>(null);
   // where the choices stood as the upload left (takePersonaChoice)
   const uploadSent = useRef(0);
   const grid = useRef<HTMLDivElement>(null);
+  const uploadDrop = useFileDrop({
+    disabled: !uploads,
+    onFile: (file) => setUpload((u) => ({ open: true, key: u.key + 1, file })),
+  });
   const load = () => {
     setRefreshing(true);
     void refreshPersonas().finally(() => setRefreshing(false));
@@ -140,7 +217,7 @@ export function PersonaPicker({ onExtensions }: { onExtensions?: () => void } = 
   useEffect(load, []);
   const sub = (text: string) => <span className="max-w-full truncate text-[11px] whitespace-nowrap text-ink-3">{text}</span>;
   const lookOf = (id: string) => s.looks?.find((l) => l.id === id);
-  const cards: { id: string; title: string; label: string; sub: React.ReactNode; face: React.ReactNode; uploaded?: boolean; info?: PersonaInfo }[] = [
+  const cards: PickerCardItem[] = [
     { id: BUILTIN_PERSONA, title: t("assistant-persona.mochi"), label: t("assistant-persona.mochi_default"), sub: sub(t("assistant-persona.default_avatar")), face: <MochiFace size={56} /> },
     ...s.list.map((p) => {
       const title = localized(p.manifest.name, p.manifest.names, lang);
@@ -164,10 +241,24 @@ export function PersonaPicker({ onExtensions }: { onExtensions?: () => void } = 
   const shownId = current.info?.id ?? BUILTIN_PERSONA;
   return (
     <div className="flex flex-col gap-3 p-3">
-      <div ref={grid} role="radiogroup" aria-label={t("assistant-persona.avatar")} className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+      <div ref={grid} role="radiogroup" aria-label={t("assistant-persona.avatar")} className="grid grid-cols-2 gap-2.5 sm:grid-cols-3" {...(uploads ? fileDropGuard : undefined)}>
         {cards.map((c) => {
           const selected = c.id === shownId;
-          const card = (
+          if (c.uploaded && uploads) {
+            const canEdit = uploadStates && !!c.info;
+            return (
+              <UploadedLookCard
+                key={c.id}
+                card={c}
+                selected={selected}
+                onChoose={() => choosePersona(c.id)}
+                onEdit={canEdit ? () => setUpload((u) => ({ open: true, key: u.key + 1, edit: c.info })) : undefined}
+                onDelete={() => setDeleting({ id: c.id, name: c.title, current: selected })}
+                onDropFile={canEdit ? (file) => setUpload((u) => ({ open: true, key: u.key + 1, edit: c.info, file })) : undefined}
+              />
+            );
+          }
+          return (
             <button
               key={c.id}
               type="button"
@@ -177,41 +268,30 @@ export function PersonaPicker({ onExtensions }: { onExtensions?: () => void } = 
               onClick={() => choosePersona(c.id)}
               className={cx(
                 "flex min-w-0 flex-col items-center gap-2 rounded-card px-2 pt-3.5 pb-2.5 transition-[background-color,box-shadow] duration-150",
-                c.uploaded && uploads && "flex-1",
                 selected ? "bg-accent-tint shadow-[inset_0_0_0_1.5px_var(--accent)]" : "bg-inset shadow-hairline hover:bg-hover",
               )}
             >
-              <span className="flex h-14 items-center justify-center">{c.face}</span>
-              <span className="flex max-w-full items-center gap-1 text-[12.5px] font-medium whitespace-nowrap text-ink">
-                {selected && <Icon name="check" size={12} stroke={2.6} className="shrink-0 text-accent-ink" />}
-                <span className="truncate">{c.title}</span>
-              </span>
-              {c.sub}
+              <CardContent card={c} selected={selected} />
             </button>
-          );
-          if (!c.uploaded || !uploads) return card;
-          // Edit (with look_uploads_states) and Delete sit in the card's corner at default IconButton size (28/15): hover / keyboard focus, always on touch.
-          return (
-            <div key={c.id} className="group/look relative flex min-w-0">
-              {card}
-              <span className="absolute top-1 right-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/look:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-                {uploadStates && c.info && (
-                  <IconButton icon="pencil" label={t("assistant-persona.edit_label", { name: c.title })} onClick={() => setUpload((u) => ({ open: true, key: u.key + 1, edit: c.info }))} />
-                )}
-                <IconButton icon="trash" label={t("assistant-persona.delete_label", { name: c.title })} onClick={() => setDeleting({ id: c.id, name: c.title, current: selected })} />
-              </span>
-            </div>
           );
         })}
         {uploads && (
           <button
             type="button"
             aria-label={t("assistant-persona.upload_label")}
+            data-drop-over={uploadDrop.over ? "true" : undefined}
+            style={uploadDrop.over ? DASHED_OUTLINE : undefined}
             onClick={() => setUpload((u) => ({ open: true, key: u.key + 1 }))}
-            className="flex min-w-0 flex-col items-center gap-2 rounded-card bg-inset px-2 pt-3.5 pb-2.5 shadow-hairline transition-[background-color,box-shadow] duration-150 hover:bg-hover"
+            {...uploadDrop.props}
+            className={cx(
+              "flex min-w-0 flex-col items-center gap-2 rounded-card px-2 pt-3.5 pb-2.5 transition-[background-color,box-shadow] duration-150",
+              uploadDrop.over
+                ? "bg-accent-tint outline-1 outline-accent -outline-offset-1"
+                : "bg-inset shadow-hairline hover:bg-hover",
+            )}
           >
             <span className="flex h-14 items-center justify-center">
-              <span className="flex size-14 items-center justify-center rounded-full border border-dashed border-line-strong text-ink-3">
+              <span className={cx("flex size-14 items-center justify-center rounded-full border border-dashed transition-colors duration-150", uploadDrop.over ? "border-accent text-accent-ink" : "border-line-strong text-ink-3")}>
                 <Icon name="plus" size={22} />
               </span>
             </span>
@@ -240,7 +320,8 @@ export function PersonaPicker({ onExtensions }: { onExtensions?: () => void } = 
           open={upload.open}
           supportsStates={uploadStates}
           edit={upload.edit}
-          onClose={() => setUpload((u) => ({ ...u, open: false }))}
+          initialFile={upload.file}
+          onClose={() => setUpload((u) => ({ ...u, open: false, file: undefined }))}
           onSend={() => (uploadSent.current = personaChoiceMark())}
           onUploaded={(answer) => lookUploaded(answer, uploadSent.current)}
           onEdited={lookEdited}

@@ -917,3 +917,16 @@ func TestCodexVersionCache(t *testing.T) {
 		}
 	})
 }
+
+// When a terminal-backed Codex session already runs with the requested model and effort, session.modes reports
+// changed=false so a subsequent refused step (such as ultracode) is not misreported as a partial change.
+func TestCodexTerminalNoopReportsChangedFalse(t *testing.T) {
+	n, f, _ := cxTerminalNode(t, proto.StatusIdle, "0.169.1", "gpt-a", "medium")
+	res, err := request(t, n, "session.modes", map[string]any{"session_id": cxID, "model": "gpt-a", "effort": "medium"})
+	if err != nil {
+		t.Fatalf("no-op codex session.modes: %v", err)
+	}
+	if res["changed"] != false || len(cxTyped(f)) != 0 {
+		t.Fatalf("no-op codex reply=%v typed=%v, want changed=false and nothing typed", res, cxTyped(f))
+	}
+}

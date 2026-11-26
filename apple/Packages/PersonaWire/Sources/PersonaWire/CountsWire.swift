@@ -76,18 +76,23 @@ public nonisolated struct CountsEpoch: RawRepresentable, Codable, Hashable, Send
 public nonisolated struct CountsViewCounts: Codable, Hashable, Sendable {
     /// The Agents that need the owner (docs/protocol/counts.md, "agents_needs_you").
     public var agentsNeedsYou: CountsViewCount?
+    /// The to-dos that need the owner, N of the To-dos list (docs/protocol/counts.md, "todos_needs_you").
+    public var todosNeedsYou: CountsViewCount?
 
-    public init(agentsNeedsYou: CountsViewCount? = nil) {
+    public init(agentsNeedsYou: CountsViewCount? = nil, todosNeedsYou: CountsViewCount? = nil) {
         self.agentsNeedsYou = agentsNeedsYou
+        self.todosNeedsYou = todosNeedsYou
     }
 
     enum CodingKeys: String, CodingKey {
         case agentsNeedsYou = "agents_needs_you"
+        case todosNeedsYou = "todos_needs_you"
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.agentsNeedsYou = try? c.decodeIfPresent(CountsViewCount.self, forKey: .agentsNeedsYou)
+        self.todosNeedsYou = try? c.decodeIfPresent(CountsViewCount.self, forKey: .todosNeedsYou)
     }
 }
 
@@ -96,18 +101,23 @@ public nonisolated struct CountsViewCounts: Codable, Hashable, Sendable {
 public nonisolated struct CountsViewTotals: Codable, Hashable, Sendable {
     /// counts.agents_needs_you.n.
     public var agentsNeedsYou: Int?
+    /// counts.todos_needs_you.n.
+    public var todosNeedsYou: Int?
 
-    public init(agentsNeedsYou: Int? = nil) {
+    public init(agentsNeedsYou: Int? = nil, todosNeedsYou: Int? = nil) {
         self.agentsNeedsYou = agentsNeedsYou
+        self.todosNeedsYou = todosNeedsYou
     }
 
     enum CodingKeys: String, CodingKey {
         case agentsNeedsYou = "agents_needs_you"
+        case todosNeedsYou = "todos_needs_you"
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.agentsNeedsYou = try? c.decodeIfPresent(Int.self, forKey: .agentsNeedsYou)
+        self.todosNeedsYou = try? c.decodeIfPresent(Int.self, forKey: .todosNeedsYou)
     }
 }
 

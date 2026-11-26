@@ -214,6 +214,12 @@ to `recordingRolling`), which the watch stores beside `WatchSync.phoneRollingKey
 The phone sets them from what its app supports, the consent and its hub's last `hello.features`; neither goes through
 the hub.
 
+One more key rides beside them since #15214: `recordingModule`, the word `allowed` or `off`, the phone's answer to
+whether its hub's recording module is on (docs/apple/recording.md, "With the hub's recording module off (#15214)"). Absent
+(a phone from before it) or any other value means allowed. While it is `off` the watch starts nothing, a start the
+phone asks for included, and the All-Day Recording face shows the mode's name alone; a day that already records goes on
+until the user stops it.
+
 ## Phone to hub
 
 Only on a hub that lists `recording_day` (WS `hello.features` and trusted `/health`), which it does only while the

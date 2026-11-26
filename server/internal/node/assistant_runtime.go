@@ -176,9 +176,7 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 	if supportsPolicy && id != "" && known && st.SupervisionInstructions != policy && n.runtimeStatus(h, id) == proto.StatusWorking {
 		return "", refusal(assistantwire.CodeConversationBusy, i18n.T(i18n.From(ctx), "rpc-errors.assistant_supervision_busy"), nil)
 	}
-	if n.assistantDirectoryPrepared(cwd) {
-		n.assistantRuntimeSkills(cwd)
-	}
+	n.assistantRuntimeSkillsForSend(cwd)
 	memDir := n.memoryForUse(cwd)
 	environment, releaseEnv, bindEnv := n.assistantEnvForRuntimeLease(h, cwd, id)
 	turn := map[string]any{"assistant": true, "memory_dir": memDir}
@@ -446,10 +444,49 @@ func (n *Node) runtimeInstructionsWithTools(cwd, memDir string, memoryTools bool
 	return prompts.RenderRuntimeInstructions(r)
 }
 
+// assistantRuntimeSkillsForSend refreshes skills only while this process still has the prepare's connector state.
+// After a restart, disk state can prove only the instruction fallback; running a full sync then would treat forgotten
+// connectors as signed out and remove their skills before the manager's next prepare.
+func (n *Node) assistantRuntimeSkillsForSend(cwd string) {
+	if n.assistantDirectoryPrepared(cwd) {
+		n.assistantRuntimeSkills(cwd)
+		return
+	}
+	if n.assistantInstructionDirectoryPrepared(cwd) {
+		n.restoreAssistantInstructionFallback(cwd)
+	}
+}
+
 // assistantRuntimeSkills puts the assistant's skills where agent runtimes look for a project's (<cwd>/.agents/skills),
 // beside Claude's (.claude/skills, assistantLarkEnv).
 func (n *Node) assistantRuntimeSkills(cwd string) {
 	n.syncRuntimeSkillDir(cwd, filepath.Join(cwd, ".agents", "skills"))
+	n.restoreAssistantInstructionFallback(cwd)
+}
+
+func (n *Node) restoreAssistantInstructionFallback(cwd string) {
+	n.assistantSkillsMu.Lock()
+	defer n.assistantSkillsMu.Unlock()
+	if assistantskills.ViewsGuideReady(cwd) {
+		return
+	}
+	mode, err := os.ReadFile(filepath.Join(cwd, assistantInstructionMode))
+	if err != nil || string(mode) != assistantInstructionModeViews {
+		return // compact view instructions were never selected for this directory
+	}
+	full, err := os.ReadFile(filepath.Join(cwd, assistantInstructionFallback))
+	if err != nil {
+		n.logger.Printf("assistant: restore complete instructions: %v", err)
+		return
+	}
+	if err := writeAssistantInstructionFiles(cwd, string(full)); err != nil {
+		n.logger.Printf("assistant: restore complete instructions: %v", err)
+		return
+	}
+	// Stay on the complete form until a later prepare verifies the managed skill again.
+	if err := writeIfChanged(filepath.Join(cwd, assistantInstructionMode), []byte(assistantInstructionModeFull)); err != nil {
+		n.logger.Printf("assistant: record complete-instruction fallback: %v", err)
+	}
 }
 
 // gateScript is a command gate's script in the assistant's directory, "" when its skill is not there.

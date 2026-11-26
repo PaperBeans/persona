@@ -210,7 +210,7 @@ func liveFleet(tb testing.TB, machines, rows int) *Service {
 func liveRoundOnce(s *Service, kept map[string][]proto.Session, r *fleetRound) (assistantwire.FleetState, link.Attention) {
 	agents, ixs, told := s.fleetInputsInto(kept)
 	st := r.buildFleet("en", agents, ixs)
-	attention, _ := r.linkAndCounts("en", agents, ixs, told)
+	attention, _ := r.linkAndCounts("en", agents, ixs, told, s.fleet.live.counts.todos.kept())
 	return st, attention
 }
 

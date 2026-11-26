@@ -6,11 +6,11 @@ managers in a surface's scope (`docs/plans/plan-derived-counts.md`, #11679). **W
 users see one number for each name on every screen and device; Agents users can trust that the badge, the list and the
 Lock Screen agree. This doc is the contract: what the view holds, what each count id means, and how a count may change.
 
-**Status (#15512, #15650):** the schema, its generated types and the wire samples exist, and each manager tells the
-hub its view (step 7a of the plan, "The manager's view" below). Nothing relays or draws a view yet: the hub relays it
-at step 7b (with its rows in `docs/protocol/protocol.md`: the `counts` message, the `counts_view` feature and the
-roster's `counts_view` flag), and the clients draw it from steps 8 to 10. Until a client draws the view, every number it
-shows is still its own.
+**Status (#15512, #15650, #15893, #15896):** the schema, its generated types and the wire samples exist, each manager
+tells the hub its view (step 7a of the plan, "The manager's view" below; the To-dos list's count since step 12's server
+part), and the hub relays it to the clients that ask (step 7b, "The hub's relay" below; its rows in
+`docs/protocol/protocol.md` "Counts view"). No client draws a view yet: they do from steps 8 to 10, keeping views as
+`spec/fixtures/counts/views.json` says. Until a client draws the view, every number it shows is still its own.
 
 ## The view
 
@@ -32,9 +32,10 @@ core draw no badges; the schema guards both languages against a hand-written cop
       "n": 2,                                              // the number drawn
       "keys": [{"id": "agent:studio/s3"}, {"id": "card:ix-a", "cards": ["ix-a"]}],
       "held": [{"id": "agent:studio/s1", "why": "muted"}]  // listed, not counted
-    }
+    },
+    "todos_needs_you": {"n": 3, "more": 3}                 // a count that lists none of its rows
   },
-  "totals": {"agents_needs_you": 2}                        // optional: each count's n again
+  "totals": {"agents_needs_you": 2, "todos_needs_you": 3}  // optional: each count's n again
 }
 ```
 
@@ -59,15 +60,56 @@ core draw no badges; the schema guards both languages against a hand-written cop
   not change tells nothing; a change goes up one `rev`, with a new `as_of`. After each handshake the last view is told
   again as it was, so a hub that restarted has it. Each run of the manager draws a new `epoch`, and `build` is the
   manager's version.
+- **The to-dos' counts (#15896).** The manager keeps the counts of the last read of its whole to-do list, the ones
+  `GET /api/v1/todos` answers with (every read of the list, of one to-do or of the places works the whole list out), in
+  `server/internal/assistant/counts_view.go`, and the next round hands them to `Fleet.View` (below), which writes
+  `todos_needs_you` from them; `surfaces.json` names it as that count's `producer` too. Every `{"type":"todos"}` makes
+  each app read the list again, which keeps the new counts; when none did a second after one, the manager reads the
+  list itself, so the number follows the list while no app is open. It reads one list at a time: a round or a
+  `{"type":"todos"}` that asks while a read waits or runs (on a slow store, up to its 30 s) starts no second one, and a
+  `{"type":"todos"}` that went out meanwhile has the manager read the list once more after it. Until a run has counted
+  its to-dos, each round asks for a count, and the view leaves `todos_needs_you` out.
 - **Who writes what.** `fleetcount.AgentsNeedsYou` decides the rows on the Agents list's surface; package assistant
   calls it, then the adapter's `Fleet.View` (`server/internal/assistant/fleetcount/fleetcountadapt/view.go`), which
   writes `counts` and `totals` in one pass over the decided rows, so a total never disagrees with its rows. Package
-  assistant adds `epoch`, `rev`, `as_of` and `build`. `spec/fixtures/counts/surfaces.json` names `Fleet.View` as the
+  assistant adds `epoch`, `rev`, `as_of` and `build`. `spec/fixtures/counts/surfaces.json` names `Fleet.View` as each
   count's `producer`, and the adapter's tests hold it to the table.
-- **The bound.** A view takes at most 16 KB as JSON (`CountsViewMaxBytes`), the most the hub keeps from step 7b on.
+- **The bound.** A view takes at most 16 KB as JSON (`CountsViewMaxBytes`), the most the hub keeps.
   `keys` and `held` list at most 200 rows each: the counted rows first, since they are the number, then the held ones,
   each list stopping at the first row that would pass the bound (1 KB is kept for the rest of the view). The counted
   rows `keys` leaves out are `more`; a held row the bound leaves out is not listed, and counts nowhere either way.
+
+## The hub's relay
+
+The hub is transport: it passes each manager's view on as the manager wrote it and works out no count
+(`server/internal/hub/counts_view.go`). It imports no counting core, domain kit or adapter, which
+`server/internal/hub/architecture_guard_test.go` and the archguard's `path-no-core` rule hold.
+
+- **What it keeps.** The last view of each manager's current bus connection, compacted, when the view is a JSON object
+  of at most `CountsViewMaxBytes` with a non-empty string `epoch` and a whole `rev` of 0 or more. It reads nothing else
+  of it, and drops a view that is not one, or that comes from a manager whose hello did not name `counts_view`. The view
+  goes with the connection: a hub that restarted has none until each manager connects again and tells its last one.
+- **What it sends.** `{"type":"counts","manager":"<id>","view":{…}}` when a manager tells a view that differs from its
+  last one, and for every kept view, by manager id, as a client connects (after `machines`, before the session lists)
+  or names the feature in a `client_hello`; `"view": null` when the connection of a manager that told one ends.
+  `manager` is always there, the built-in assistant's id included, as a client keeps one view per hub and manager. An
+  app never gets a manager's view after a newer one: relays and the views sent at connect are queued under one lock.
+- **To whom.** Only full-role clients that ask for the feature `counts_view` (`?features=` or `client_hello`): a view
+  lists every waiting session and card of a manager, so it reaches only what may read them all. Scoped and answer-only
+  devices get no `counts` message whatever they ask. `counts` is one of the hub's own message types
+  (`hubMessageTypes`), so no manager can broadcast one.
+- **Feature and flag (D10).** The hub lists the feature `counts_view` always, from the proto feature list
+  (`server/internal/proto/features_counts.go`): hub features reach a client only in the hello, so a feature that
+  followed the managers would switch the client's rule on every redeploy. Each roster entry says `counts_view: true`
+  while that manager is online and its hello named the capability. A client takes a manager as absent, and draws the
+  surfaces whose scope holds it from its fallback, when the hello lacks the feature, the manager's entry is online
+  without the flag, or it never kept a view of that manager; offline and `view: null` are not absence.
+- **What a client keeps (D13).** The last view per hub and manager, persisted, through `view: null`, going offline and a
+  hub restart; a new epoch replaces it whatever its rev, and a lower rev within an epoch loses. It is dropped when the
+  roster no longer lists the manager, at sign-out and on D10's explicit absence. `spec/fixtures/counts/views.json`
+  writes each case as given, one transport event and then (`spec/fixtures/counts/README.md`, "Kept views"); each
+  client's reducer replays it from steps 8 to 10, and `TestTheHubReplaysTheRestartCases` replays its restart cases
+  through the hub.
 
 ## A count
 
@@ -130,14 +172,24 @@ out; a card its task's supervisor holds is in no row. Pinned by `spec/fixtures/n
 `fleetcount.AgentsNeedsYou` on its badge surface, written by `fleetcountadapt`'s `Fleet.View`. In the view since step 7a
 (#15650).
 
+### `todos_needs_you`
+
+N of the To-dos list (D8 of the plan): the to-dos in its Needs you section, each once; Can wait and quiet tasks' to-dos
+are left out, and a step its parent carries counts with its parent. It is the `needs_you` of the counts
+`GET /api/v1/todos` answers for this manager's whole list, the to-do projection's `Counts()`
+(`server/internal/assistant/todo/projection/list.go`), pinned by `spec/fixtures/todo-counts`. Those counts are numbers
+without their rows, so the count lists no `keys` and no `held`: all of `n` is `more`. A client that has the list files
+the rows itself; listing them in the view would be a schema addition (a row key for a to-do). Absent until the
+manager has counted its to-dos ("The to-dos' counts" above). Written by `Fleet.View`, which is handed the counts as
+they are, so no record is made for them. In the view since #15896.
+
 ### Later ids
 
-`inbox_unread`, `inbox_action`, `todos_needs_you` and `persona_cards` come one at a time, each after its decision in
-the plan's section 6 (D7, D8, D9), each with its fixture and its line here. `surfaces.json` lists their rules until
-then. Until the Inbox and the to-dos have cores of their own, such a count comes into the view as one more input of
-`Fleet.View`: the number package assistant works out today (the Inbox items' `status()` fold, the to-do projection's
-`Counts()`), never a record made for it. Once the view's schema carries an id, its row in `surfaces.json` names its
-`producer`, and the guard fails until it does. The composer's Needs you is not a count id: it stays the `assistant_needs` payload of
+`inbox_unread`, `inbox_action` and `persona_cards` come one at a time, each after its decision in the plan's section 6
+(D7, D9), each with its fixture and its line here. `surfaces.json` lists their rules until then. Until the Inbox has a
+core of its own, its count comes into the view as one more input of `Fleet.View`: the number package assistant works
+out today (the Inbox items' `status()` fold), never a record made for it, as the to-dos' did (`todos_needs_you`). Once
+the view's schema carries an id, its row in `surfaces.json` names its `producer`, and the guard fails until it does. The composer's Needs you is not a count id: it stays the `assistant_needs` payload of
 `docs/design/proposals/todos-redesign.md`.
 
 ## Changing a count
@@ -187,6 +239,7 @@ python3 scripts/test/test_wire_schema.py
 python3 -B scripts/test/test_counts_surfaces.py
 (cd server && go test -count=1 ./internal/assistantwire/ ./internal/assistant/fleetcount/...)
 (cd server && go test -count=1 -run 'CountsView|TheHelloNamesTheCountsView' ./internal/assistant/)
+(cd server && go test -count=1 -run 'CountsView|KeptViews|RestartCases|EpochAndRev|TestBroadcastTypes' ./internal/hub/)
 (cd apple/Packages/PersonaWire && swift test --filter CountsWireTests)
 (cd android && ./gradlew :core:contracts:test --tests '*CountsWireTest*' --max-workers=4)
 (cd web && npx vitest run src/lib/counts-wire.test.ts)

@@ -18,13 +18,10 @@
  ],
  "manager": [
   "a2a_tasks.body",
-  "a2a_tasks.state",
   "agent_placements.decision",
   "agent_share_objects.kind",
   "assistant_captures.filed_to",
-  "assistant_captures.kind",
   "assistant_captures.sort",
-  "assistant_captures.status",
   "assistant_external_inbox_events.external_ref",
   "assistant_external_inbox_events.input",
   "assistant_external_inbox_events.plan",
@@ -88,7 +85,6 @@
   "task_briefs.state",
   "task_estimate_rounds.kind",
   "task_estimate_rounds.role",
-  "task_plans.state",
   "task_plans.tasks",
   "task_workspace_operations.record",
   "todo_context_handoffs.diff_ref",
@@ -103,9 +99,7 @@
   "todo_supervision.state",
   "todo_supervision.waits",
   "todo_workspace_rules.rules",
-  "todos.kind",
   "urgent_calls.outcome",
-  "urgent_calls.state",
   "workspace_naming_plans.plan",
   "workspace_snapshots.data"
  ]

@@ -287,13 +287,16 @@ private struct RecordingDayRecapSections: View {
         }
     }
 
-    private var retry: some View {
-        Button { Task { await model.regenerate(summary) } } label: {
-            Label("Retry", systemImage: Theme.Icon.retry).lineLimit(1)
+    /// Not with the hub's recording module off (#15214): the route that writes a recap again is gone with it.
+    @ViewBuilder private var retry: some View {
+        if RecordingModule.allowance.offersWrites {
+            Button { Task { await model.regenerate(summary) } } label: {
+                Label("Retry", systemImage: Theme.Icon.retry).lineLimit(1)
+            }
+            .themedButton()
+            .disabled(model.asking)
+            .accessibilityIdentifier("dayrecap-retry")
         }
-        .themedButton()
-        .disabled(model.asking)
-        .accessibilityIdentifier("dayrecap-retry")
     }
 
     @ViewBuilder private func ready(_ content: RecordingDayRecapContent, note: RecordingDayRecapState.Note?) -> some View {
@@ -790,6 +793,9 @@ struct RecordingDayTodaySection: View {
     var dayID: UUID?
     /// The hub lists `recording_day`.
     var offered: Bool
+    /// The hub's recording module (#15214), handed down by the page: off, the switch and the consent row go, and
+    /// today's day stays to read.
+    var recording = RecordingAllowance.on
     @State private var summaries = RecordingDaySummaries.shared
     @State private var board = RecordingDayBoard.shared
     @State private var control = RecordingDaySwitch.shared
@@ -807,7 +813,11 @@ struct RecordingDayTodaySection: View {
         let on = RecordingDayStatus.isOn(watch: watch, pending: pending, now: now)
         // Today's cell, read by the rows that draw it: a chunk redraws them, not the switch and its sheet (P5).
         let cell = dayID.map { board.cell($0) }
+        // With the recording module off nothing new starts: the switch stays only while it is on, to turn it off.
+        let showsSwitch = Self.showsSwitch(recording, on: on)
+        if showsSwitch || cell != nil {
         Section {
+            if showsSwitch {
             // The "since" in the zone of the day the watch records, as that day's own times are written.
             SettingsSwitchRow(title: String(localized: "All-Day Recording"), detail: line.text(in: board.zone(of: watch?.recording)),
                               symbol: Theme.Icon.allDay,
@@ -819,7 +829,8 @@ struct RecordingDayTodaySection: View {
                 .sheet(item: Binding(get: { control.asking }, set: { if $0 == nil { control.consentAnswered(agreed: false) } })) { _ in
                     RecordingDayConsentView(transcriptDays: sync.store.days) { control.consentAnswered(agreed: $0) }
                 }
-            if !consent.agreed {
+            }
+            if !consent.agreed, recording.offersWrites {
                 Button { control.askConsent() } label: {
                     // One line at every size: the whole label where it fits, else its short form (DESIGN_SYSTEM 1.2,
                     // rule 3: shorten the copy).
@@ -835,12 +846,19 @@ struct RecordingDayTodaySection: View {
                 NavigationLink { RecordingDayView(id: cell.id) } label: { RecordingDayTodayRow(cell: cell) }
                     .accessibilityIdentifier("allday-today")
             }
-            RecordingDayHubNotice(cell: cell, offered: offered, agreed: consent.agreed, on: on)
+            if recording.offersWrites { RecordingDayHubNotice(cell: cell, offered: offered, agreed: consent.agreed, on: on) }
         }
         // Also on appearing: the watch may have answered while the section was away.
         .onChange(of: watch, initial: true) { _, next in control.watchChanged(next) }
         // The line moves by itself at each of a command's deadlines; a new command or the watch's answer starts over.
         .task(id: pending) { await control.follow { summaries.watch } }
+        }
+    }
+
+    /// Whether the All-Day Recording switch shows: always with the hub's recording module on; off, only while all-day
+    /// recording is on (or on its way), so it can still be turned off and never on (#15214).
+    nonisolated static func showsSwitch(_ recording: RecordingAllowance, on: Bool) -> Bool {
+        recording.offersWrites || on
     }
 }
 

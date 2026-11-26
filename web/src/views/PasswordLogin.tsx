@@ -1,71 +1,104 @@
 import { t } from "../i18n";
-import { useEffect, useState } from "react";
-import { errorText } from "../lib/api";
-import { pair } from "../lib/auth";
-import { setToken } from "../lib/api";
-import { loginWithPassword, passwordApi, readNativeLogin, type NativeLogin, type PasswordState } from "../lib/password";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { api, ApiError, errorText, setPairedToken, setToken } from "../lib/api";
+import { deviceName, forgetUnrevoked, pairToken, unrevokedTokenId } from "../lib/auth";
+import { storedCredentials } from "../lib/compatibility";
+import {
+  loginWithPassword,
+  passwordApi,
+  readNativeLogin,
+  type NativeLogin,
+  type PasswordCredential,
+  type PasswordState,
+} from "../lib/password";
 import { Button, Spinner } from "../ui/atoms";
 import { Icon } from "../ui/icons";
 
-// Sign in with a connection password or pair with a hub or device token. `linkError` reports an invalid token from a link.
-export function PasswordLogin({ onDone, error: linkError = "", native = null }: { onDone: () => void; error?: string; native?: NativeLogin | null }) {
-  const [token, setTok] = useState("");
-  const [passwordEnabled, setPasswordEnabled] = useState(false);
-  const [mode, setMode] = useState<"password" | "token">("password");
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    let live = true;
-    passwordApi<PasswordState>("/state").then((state) => {
-      if (!live) return;
-      setPasswordEnabled(state.enabled);
-      if (!state.enabled) {
-        setMode("token");
-        if (native) setError(t("password.disabled"));
-      }
-    }, (error) => { if (live) { setMode("token"); if (native) setError(errorText(error)); } })
-      .finally(() => { if (live) setLoading(false); });
-    return () => { live = false; };
-  }, [native]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(linkError);
-  const [appCallback, setAppCallback] = useState("");
+export type PasswordLoginMode = "password" | "token";
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (busy || loading || appCallback) return;
-    const credential = mode === "password" ? token : token.trim();
-    if (!credential) return;
-    setBusy(true);
-    setError("");
+export interface PasswordLoginDeps {
+  passwordApi?: (path: string, json?: unknown) => Promise<PasswordState>;
+  loginWithPassword?: (password: string, native: NativeLogin | null) => Promise<PasswordCredential | { code: string }>;
+  pair?: (input: string, signal?: AbortSignal) => Promise<void>;
+  setToken?: (token: string, id?: string) => void;
+  formatError?: (error: unknown) => string;
+  assignLocation?: (url: string) => void;
+}
+
+export interface PasswordLoginProps {
+  onDone: () => void;
+  error?: string;
+  native?: NativeLogin | null;
+  scopeKey?: string;
+  deps?: PasswordLoginDeps;
+}
+
+export interface PasswordLoginViewProps {
+  native: NativeLogin | null;
+  mode: PasswordLoginMode;
+  passwordEnabled: boolean;
+  loading: boolean;
+  busy: boolean;
+  token: string;
+  error: string;
+  appCallback: string;
+  onTokenChange: (value: string) => void;
+  onSubmit: (e: React.FormEvent) => void;
+  onToggleMode: () => void;
+}
+
+export interface NativePasswordLoginDeps extends PasswordLoginDeps {
+  readNativeLogin?: (href: string) => NativeLogin | null;
+  getHref?: () => string;
+}
+
+export interface NativePasswordLoginProps {
+  href?: string;
+  onDone?: () => void;
+  scopeKey?: string;
+  deps?: NativePasswordLoginDeps;
+}
+
+const noop = () => {};
+const defaultAssignLocation = (url: string) => window.location.assign(url);
+
+// Mirrors lib/auth.ts pair(), but verifies `isCurrent()` and `signal` before committing global credentials so an
+// unmounted or superseded login view cannot silently persist auth while dropping `onDone()`.
+async function defaultPair(input: string, signal: AbortSignal, isCurrent: () => boolean): Promise<boolean> {
+  const tok = pairToken(input);
+  await api("/machines", { token: tok, signal });
+  if (signal.aborted || !isCurrent()) return false;
+  let use = tok;
+  let tokenId: string | undefined;
+  let exchanged = false;
+  if (!tok.startsWith("jd_")) {
     try {
-      if (mode === "password") {
-        const pending = loginWithPassword(credential, native);
-        setTok("");
-        const result = await pending;
-        if (native) {
-          if (!("code" in result)) throw new Error(t("password.invalid_native_result"));
-          const callback = `persona://password-login?${new URLSearchParams({ code: result.code, state: native.state })}`;
-          setAppCallback(callback);
-          window.location.assign(callback);
-        } else {
-          if (!("token" in result)) throw new Error(t("password.invalid_result"));
-          setToken(result.token, result.id);
-          onDone();
-        }
-      } else {
-        await pair(credential);
-        onDone();
-      }
+      const replaces = storedCredentials().tokenId || unrevokedTokenId();
+      const json = { name: deviceName(), kind: "web", ...(replaces ? { replaces } : {}) };
+      const r = await api<{ token: string; id: string }>("/auth/tokens", { method: "POST", json, token: tok, signal });
+      if (signal.aborted || !isCurrent()) return false;
+      use = r.token;
+      tokenId = r.id;
+      exchanged = true;
     } catch (err) {
-      setError(errorText(err) === "invalid token" ? t("password.invalid_token") : errorText(err));
-    } finally {
-      setBusy(false);
+      if (signal.aborted || !isCurrent()) return false;
+      if (!(err instanceof ApiError) || err.status !== 404) throw err;
     }
-  };
+  }
+  if (signal.aborted || !isCurrent()) return false;
+  if (exchanged) forgetUnrevoked(); // the hub has had its one chance at it
+  if (tokenId === undefined) setPairedToken(use);
+  else setPairedToken(use, tokenId);
+  return true;
+}
 
+/** Pure presentational view for connection-password and token sign-in. */
+export function PasswordLoginView({
+  native, mode, passwordEnabled, loading, busy, token, error, appCallback, onTokenChange, onSubmit, onToggleMode,
+}: PasswordLoginViewProps) {
   return (
     <div className="flex min-h-full items-center justify-center bg-page px-5 py-16">
-      <form onSubmit={submit} className="w-full max-w-[360px]" style={{ animation: "fade-up 450ms cubic-bezier(0.23,1,0.32,1) both" }}>
+      <form onSubmit={onSubmit} className="w-full max-w-[360px]" style={{ animation: "fade-up 450ms cubic-bezier(0.23,1,0.32,1) both" }}>
         <div className="mb-7 flex flex-col items-center gap-3 text-center">
           <span className="flex size-11 items-center justify-center rounded-[12px] bg-ink text-surface shadow-raised">
             <Icon name="spark" size={20} />
@@ -85,7 +118,7 @@ export function PasswordLogin({ onDone, error: linkError = "", native = null }: 
               autoFocus
               type="password"
               value={token}
-              onChange={(e) => setTok(e.target.value)}
+              onChange={(e) => onTokenChange(e.target.value)}
               placeholder={mode === "password" ? t("password.connection_password") : "hub token"}
               aria-label={mode === "password" ? t("password.connection_password") : "hub token"}
               autoComplete={mode === "password" ? "current-password" : "off"}
@@ -100,7 +133,7 @@ export function PasswordLogin({ onDone, error: linkError = "", native = null }: 
         <p className="mt-3 h-5 text-center text-[12.5px] text-red" role="alert">
           {error}
         </p>
-        {!native && passwordEnabled && <button type="button" className="mb-4 w-full text-center text-[12.5px] text-ink-2" disabled={busy} onClick={() => { setMode(mode === "password" ? "token" : "password"); setTok(""); setError(""); }}>
+        {!native && passwordEnabled && <button type="button" className="mb-4 w-full text-center text-[12.5px] text-ink-2" disabled={busy} onClick={onToggleMode}>
           {mode === "password" ? t("password.use_token") : t("password.use_password")}
         </button>}
         <p className="text-center text-[11.5px] leading-relaxed text-ink-3">{native ? t("password.native_credential") : t("password.browser_credential")}</p>
@@ -109,12 +142,171 @@ export function PasswordLogin({ onDone, error: linkError = "", native = null }: 
   );
 }
 
+// Sign in with a connection password or pair with a hub or device token. `linkError` reports an invalid token from a link.
+export function PasswordLogin({ onDone, error: linkError = "", native = null, scopeKey, deps }: PasswordLoginProps) {
+  const scopeId = JSON.stringify([
+    scopeKey ?? null,
+    native ? [native.state, native.challenge, native.kind, native.name] : null,
+  ]);
+  const [scope, setScope] = useState<{ id: string; epoch: number }>(() => ({ id: scopeId, epoch: 1 }));
+  const [prevLinkError, setPrevLinkError] = useState(linkError);
+  const [token, setTok] = useState("");
+  const [passwordEnabled, setPasswordEnabled] = useState(false);
+  const [mode, setMode] = useState<PasswordLoginMode>("password");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(linkError);
+  const [appCallback, setAppCallback] = useState("");
 
-export function NativePasswordLogin() {
-  const [request] = useState(() => {
-    try { return { native: readNativeLogin(window.location.href), error: "" }; }
-    catch { return { native: null, error: t("password.invalid_request_full") }; }
+  if (scope.id !== scopeId) {
+    setScope({ id: scopeId, epoch: scope.epoch + 1 });
+    setPrevLinkError(linkError);
+    setTok("");
+    setPasswordEnabled(false);
+    setMode("password");
+    setLoading(true);
+    setBusy(false);
+    setError(linkError);
+    setAppCallback("");
+  } else if (prevLinkError !== linkError) {
+    setPrevLinkError(linkError);
+    setError(linkError);
+  }
+
+  const onDoneRef = useRef(onDone);
+  const depsRef = useRef(deps);
+  const nativeRef = useRef(native);
+  useLayoutEffect(() => {
+    onDoneRef.current = onDone;
+    depsRef.current = deps;
+    nativeRef.current = native;
   });
+
+  const activeEpochRef = useRef(0);
+  const submitSeqRef = useRef(0);
+  const pendingSubmitRef = useRef<{ epoch: number; seq: number; controller: AbortController } | null>(null);
+
+  useLayoutEffect(() => {
+    activeEpochRef.current = scope.epoch;
+    return () => {
+      activeEpochRef.current = 0;
+      pendingSubmitRef.current?.controller.abort();
+      pendingSubmitRef.current = null;
+      submitSeqRef.current += 1;
+    };
+  }, [scope.epoch]);
+
+  useEffect(() => {
+    let live = true;
+    const runEpoch = scope.epoch;
+    const runNative = nativeRef.current;
+    const readState = depsRef.current?.passwordApi ?? passwordApi<PasswordState>;
+    const isCurrent = () => live && activeEpochRef.current === runEpoch;
+    let request: Promise<PasswordState>;
+    try {
+      request = Promise.resolve(readState("/state"));
+    } catch (err) {
+      request = Promise.reject(err);
+    }
+    request.then((state) => {
+      if (!isCurrent()) return;
+      setPasswordEnabled(state.enabled);
+      if (!state.enabled) {
+        setMode("token");
+        if (runNative) setError(t("password.disabled"));
+      }
+    }, (err) => {
+      if (!isCurrent()) return;
+      setMode("token");
+      if (runNative) setError((depsRef.current?.formatError ?? errorText)(err));
+    }).finally(() => {
+      if (isCurrent()) setLoading(false);
+    });
+    return () => { live = false; };
+  }, [scope.epoch]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const runEpoch = scope.epoch;
+    if (busy || loading || appCallback || pendingSubmitRef.current !== null || activeEpochRef.current !== runEpoch) return;
+    const runMode = mode;
+    const runNative = nativeRef.current;
+    const credential = runMode === "password" ? token : token.trim();
+    if (!credential) return;
+    const controller = new AbortController();
+    const runSeq = ++submitSeqRef.current;
+    pendingSubmitRef.current = { epoch: runEpoch, seq: runSeq, controller };
+    const isCurrent = () =>
+      !controller.signal.aborted && activeEpochRef.current === runEpoch && pendingSubmitRef.current?.seq === runSeq;
+    setBusy(true);
+    setError("");
+    try {
+      if (runMode === "password") {
+        const runLogin = depsRef.current?.loginWithPassword ?? loginWithPassword;
+        setTok("");
+        const result = await runLogin(credential, runNative);
+        if (!isCurrent()) return;
+        if (runNative) {
+          if (!("code" in result)) throw new Error(t("password.invalid_native_result"));
+          const callback = `persona://password-login?${new URLSearchParams({ code: result.code, state: runNative.state })}`;
+          setAppCallback(callback);
+          (depsRef.current?.assignLocation ?? defaultAssignLocation)(callback);
+        } else {
+          if (!("token" in result)) throw new Error(t("password.invalid_result"));
+          (depsRef.current?.setToken ?? setToken)(result.token, result.id);
+          onDoneRef.current();
+        }
+      } else {
+        if (depsRef.current?.pair) {
+          await depsRef.current.pair(credential, controller.signal);
+          if (!isCurrent()) return;
+        } else if (!(await defaultPair(credential, controller.signal, isCurrent))) {
+          return;
+        }
+        onDoneRef.current();
+      }
+    } catch (err) {
+      if (!isCurrent()) return;
+      const msg = (depsRef.current?.formatError ?? errorText)(err);
+      setError(msg === "invalid token" ? t("password.invalid_token") : msg);
+    } finally {
+      if (pendingSubmitRef.current?.seq === runSeq) pendingSubmitRef.current = null;
+      if (activeEpochRef.current === runEpoch && submitSeqRef.current === runSeq) setBusy(false);
+    }
+  };
+
+  const toggleMode = () => {
+    if (busy || pendingSubmitRef.current !== null) return;
+    setMode((m) => (m === "password" ? "token" : "password"));
+    setTok("");
+    setError("");
+  };
+
+  return (
+    <PasswordLoginView
+      native={native}
+      mode={mode}
+      passwordEnabled={passwordEnabled}
+      loading={loading}
+      busy={busy}
+      token={token}
+      error={error}
+      appCallback={appCallback}
+      onTokenChange={setTok}
+      onSubmit={submit}
+      onToggleMode={toggleMode}
+    />
+  );
+}
+
+export function NativePasswordLogin({ href, onDone = noop, scopeKey, deps }: NativePasswordLoginProps = {}) {
+  const read = deps?.readNativeLogin ?? readNativeLogin;
+  const [initialHref] = useState(() => (href !== undefined ? href : deps?.getHref ? deps.getHref() : window.location.href));
+  const currentHref = href !== undefined ? href : initialHref;
+  const request = useMemo(() => {
+    try { return { native: read(currentHref), error: "" }; }
+    catch { return { native: null, error: t("password.invalid_request_full") }; }
+  }, [read, currentHref]);
   if (!request.native) return <p role="alert" className="p-8 text-ink">{request.error || t("password.start_from_app")}</p>;
-  return <PasswordLogin native={request.native} onDone={() => {}} />;
+  return <PasswordLogin native={request.native} onDone={onDone} scopeKey={scopeKey} deps={deps} />;
 }

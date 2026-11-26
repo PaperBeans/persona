@@ -869,14 +869,16 @@ use it only on the intranet / VPN, and put an HTTPS reverse proxy in front befor
   - **Avatar** (#433, `lib/persona.ts`, `views/assistant/Persona.tsx`, `docs/apple/persona.md`): the hub's `/personas` avatar packs; which one is chosen is stored in the current browser. It is used for the large icon on the new-chat page, the state-dependent dot left of the chat top-bar title
     (states as in iOS `personaState`; the browser plays the APNG itself, and with reduced motion the first frame is drawn on a canvas), the header of Settings › Assistant, and the "Ask xxx…" placeholder. With the default avatar (or an old hub, or no pack), everything looks as before;
     the avatar's colors do not change the web app's tokens. It is chosen in Settings › Avatar and on the profile page.
-  - **Avatar from an image** (#2404, #15449, `views/assistant/PersonaPicker.tsx`, `views/assistant/LookUpload.tsx`, `views/assistant/LookUploadExtras.tsx`, `lib/look-upload.ts`, `lib/look-upload-states.ts`, `lib/look-colors.ts`, `docs/apple/persona.md` "Uploading an image"): on a hub with the `look_uploads` feature the picker ends with an **Upload** card (none on an older hub).
+  - **Avatar from an image** (#2404, #15449, #15612, `views/assistant/PersonaPicker.tsx`, `views/assistant/LookUpload.tsx`, `views/assistant/LookUploadExtras.tsx`, `views/assistant/lookDrop.ts`, `lib/look-upload.ts`, `lib/look-upload-states.ts`, `lib/look-colors.ts`, `docs/apple/persona.md` "Uploading an image"): on a hub with the `look_uploads` feature the picker ends with an **Upload** card (none on an older hub).
     Its dialog takes a PNG, JPEG, WebP or GIF (picked or dropped), decoded upright (`createImageBitmap` with `imageOrientation: "from-image"`; a GIF's first frame), and a square crop with the avatar's circle over it: drag to move, the slider,
     the wheel (about the pointer) or a pinch to zoom, the arrow keys and + / − from the keyboard; the crop never leaves the image nor gets under 64 px. The crop box draws the crop itself into a canvas at its own resolution, so what it shows is what is sent.
     A name (1–40 characters, counted as the hub counts) and an optional description (up to 80). **Upload** draws the crop at its own size, at most 1024 px, as a PNG (a JPEG on white past 6 MB) and sends it with `choose: true` over XHR so the footer shows the bytes sent,
     then "Making the avatar…" while the hub works; a second click sends nothing, and a refusal is shown as the hub words it. Cancel, or leaving the page under the dialog, stops a request still going out. The answer's look is listed (before the extensions' looks) and chosen at once; the `personas` and `look` pushes that follow change nothing, and a list read that left before the upload or a delete is dropped for a new one.
     The choice in an upload's or a delete's answer is taken only when no other came since the request left (the hub pushes its own `look` before it answers): when another device chose meanwhile, the look on screen stays and a fresh read of `/looks` settles it.
     Uploaded looks (`"uploaded": true`) say the user's description, or "Your image", where others show their colors, and have **Delete** in the card's corner (on hover and keyboard focus, always on touch screens). It asks first, says when the look is the current one that Persona goes back to the default, and takes the hub's `current` from `DELETE /looks/uploads/{id}`.
-    When the hub also lists `look_uploads_states` (#15449), the dialog keeps the default upload path unchanged and adds two collapsed entries below the fields — **Theme color** (Automatic, previewing the dominant swatch extracted from the crop with the shared integer method in `spec/fixtures/look-colors/README.md`, replayed by `lib/look-colors.test.ts`, or a picked color) and **Pictures for each state** (five rows: Idle, Thinking, Working, Needs you, Offline, Automatic by default; each can pick a picture with its own square crop, show a playing preview when animated while respecting `prefers-reduced-motion` with frame 0 only, toggle the status mark for non-Idle own pictures, and return to Automatic). Animated files detected by bytes (multi-frame GIF, PNG with `acTL`, WebP with `ANIM`) send the original file base64 with an integer `crop` (`{x, y, side}`); still pictures export as cropped PNGs (main ≤ 1024 px, states ≤ 512 px). Uploaded cards also gain **Edit** beside Delete (same hover / keyboard focus / touch rules), which opens the same dialog filled from the package (playing dots from the hub, own vs automatic and marks from `manifest.source`, and color), sends only changed fields via `PATCH /looks/uploads/{id}`, updates Match Avatar when chosen, and refreshes the list. Without `look_uploads_states`, the single-image sheet and cards stay unchanged (no color, no state rows, no Edit; Delete keeps its default 28 / 15 `IconButton` size). The picker (`views/assistant/PersonaPicker.tsx`, its `assistant-persona` copy beyond `hub_unsupported` / `load_failed`), `lib/look-upload.ts`, and all new upload/edit code stay lazy off the cold first screen. When an uploaded avatar carries `colors` and is chosen, Settings › Advanced › Appearance offers and applies **Match avatar** as for any other package.
+    When the hub also lists `look_uploads_states` (#15449), the dialog keeps the default upload path unchanged and adds two collapsed entries below the fields — **Theme color** (Automatic, previewing the dominant swatch extracted from the crop with the shared integer method in `spec/fixtures/look-colors/README.md`, replayed by `lib/look-colors.test.ts`, or a picked color) and **Pictures for each state** (five rows: Idle, Thinking, Working, Needs you, Offline, Automatic by default; each can pick a picture with its own square crop, show a playing preview when animated while respecting `prefers-reduced-motion` with frame 0 only, toggle the status mark for non-Idle own pictures, and return to Automatic). Animated files detected by bytes (multi-frame GIF, PNG with `acTL`, WebP with `ANIM`) send the original file base64 with an integer `crop` (`{x, y, side}`); still pictures export as cropped PNGs (main ≤ 1024 px, states ≤ 512 px). Uploaded cards also gain **Edit** beside Delete (same hover / keyboard focus / touch rules), which opens the same dialog filled from the package (playing dots from the hub, own vs automatic and marks from `manifest.source`, and color), sends only changed fields via `PATCH /looks/uploads/{id}`, updates Match Avatar when chosen, and refreshes the list. Without `look_uploads_states`, the single-image sheet and cards stay unchanged (no color, no state rows, no Edit; Delete keeps its default 28 / 15 `IconButton` size).
+    Every picture slot accepts a dropped image as well as a keyboard-reachable file picker button (#15612, `views/assistant/lookDrop.ts`): the main picture (empty drop zone, crop box, edit preview), each of the five state rows (whose Choose / Change button carries a state-specific accessible label), and an open state's crop sub-view (replacing that state's picture). Each targeted slot highlights with the accent dashed border and accent tint (or the crop box's accent ring) with no layout shift, stops propagation so only the innermost slot reacts, and routes dropped files through the same validation and animated-image decoder as chosen files; while the dialog is open a window-level guard (`useWindowFileDropGuard`), and on the picker a guard on the grid, keep a file dropped outside a slot (the dialog's title, footer or backdrop included) from opening in the tab. In the picker, dragging onto the **Upload** card highlights it and opens the upload dialog with that file as the main picture; dragging onto an uploaded card that offers Edit (`look_uploads_states`) highlights it and opens that look's Edit dialog with the file as its new main picture (nothing is saved until Save, and **Keep current** reverts); built-in cards and uploaded cards without Edit ignore drops.
+    The picker (`views/assistant/PersonaPicker.tsx`, its `assistant-persona` copy beyond `hub_unsupported` / `load_failed`), `views/assistant/lookDrop.ts`, `lib/look-upload.ts`, and all new upload/edit code stay lazy off the cold first screen. When an uploaded avatar carries `colors` and is chosen, Settings › Advanced › Appearance offers and applies **Match avatar** as for any other package.
     End-to-end check: `python3 scripts/test/web_avatar_upload_e2e.py <web URL> [--basic <basic web URL>] [--shots <directory>]`.
   - **Profile page** (`/assistant`, `views/assistant/Profile.tsx`, following `AssistantProfileView`): avatar, name, where it runs, online / next item, up next (scheduled tasks), avatar, proactive work / knowing you / runs on, access.
     Entries: **Data** at the top right of the new-chat page, and **Details** in the chat's ⋯ menu (the ⋯ menu also has knowledge base, back to main chat, copy info).
@@ -2496,12 +2498,19 @@ change, removed when a hello lacks `modules` or on sign-out, #14431): on a reloa
 uses that remembered answer, so a module the hub switched off is never drawn and its chunk is never fetched while
 waiting for the hello. A hub never seen before, and an older hub whose hello has no `modules`, keep every module on so
 defaults never change and nothing waits on the hello to draw; a later hello that adds or drops a flag turns it on or off
-at once. Otherwise it is *off*, and an off module is absent:
+at once. Otherwise it is *off*. Most off modules are absent:
 
 - no sidebar entry, and no switch it could have left behind (the start page falls back as for a removed page);
-- its addresses route as unknown ones (`not-found`), aliases included;
-- neither its code chunk nor its catalog is requested. `loadModule` refuses an off module, and its page is a
+- their addresses route as unknown ones (`not-found`), aliases included;
+- neither their code chunk nor their catalog is requested. `loadModule` refuses an off module, and its page is a
   `lazyPage(…, { listed: false })`, which `loadPages` never preloads.
+
+The built-in Health space is the default-panel exception required by #13430: with its module off, and in a core-only
+build, `/health…` and `/tracks/health…` route to a read-only Health archive (`lib/health-archive.ts`,
+`views/spaces/HealthReadOnlyData.tsx`). Existing conversations keep transcript reads and in-chat search; reports and
+memory can be opened; no composer, new-chat, upload, edit, approval, archive or delete control is offered, and the
+Health module chunk and catalog are still not requested. The enabled module keeps the full Health home and write
+flows unchanged.
 
 An on module's page is warmed as the built-in pages are (`core/ModulePage.tsx`, `lib/lazy-page.ts` `preloadOnIntent`):
 when the pointer, the focus or a finger reaches a link to it (its sidebar entry); not with Data Saver on, and never for
@@ -2628,13 +2637,33 @@ unavailable (including a 404 from a hub before the list read moved into Core) hi
 flag is `module.recording`: off on a hub that publishes module flags without it, or where a browser switches it off.
 The recording settings (how long recordings and minutes are kept, Settings › Persona) stay in core for now.
 
+**Mail with the hub's mail module off** (#15995; mail has no web module of its own, the Inbox reads the hub flag
+`module.mail`). `lib/mail.ts` decides it once (`mailReading`: `full`, or `stored` when the hello names modules and
+leaves mail out) and everything else is handed that: Settings and compose already hide (`loadMailAccounts` asks
+nothing), and an opened mail item is `views/inbox/StoredMailBody.tsx` instead of the live reader. It asks no
+`/api/v1/mail/…` route, which the hub no longer has; it reads the item's own page (`GET /api/v1/inbox/{id}`, Core)
+and shows the mail's words out of the stored `context` (`lib/mail-stored.ts` takes off the heading and header lines
+the hub wrote for the model; at most 3,000 characters of the newest mail, or the list's preview), who it is from and
+when, and after the text one line: mail is off on the hub machine, so the full message and its attachments can't be
+loaded. The line ends by what the hub says about the stored text (`mail_body_truncated` on the item's page, read once
+as the closed `StoredMailClipping` by `storedMailClipping` in `lib/mail.ts`): `clipped`, the text is cut short;
+`whole`, nothing more; `unknown` (a hub from before it sent the flag, an item stored before the hub recorded it, a
+mail whose text it never read, or the list's copy when the page cannot be read), a long message may be cut short. A translation is shown only when the item
+lists one the hub kept (`POST /api/v1/translate/mail` answers from it without the mail server); a failure there is
+silent. Left out, because each needs the mail module: Reply and Reply all, marking the mail read, attachments and the
+HTML view, and sending a reply from the Inbox (AI draft reply, Send on a draft or a reply suggestion:
+`views/inbox/item-write-gate.ts`, beside Lark's gate; a draft already written stays readable). Hand to AI (without
+the line about `mail_read`), Done, mute, folders, rules and to-dos are the Inbox's and stay. With the module on, or a
+hub that names no modules, the reader and its requests are as before.
+
 **The pilot: health.** The Health page (`web/src/modules/health/`, docs/assistant/health.md) is the first module. Its
 route (`/health`, `/health/new`, `/health/<id>`, and `/tracks/health…`), its water and protein pages (the reserved
 extension-page id `-health-intake`, which routes as unknown while the module is off), its sidebar entry (right after Inbox, pink with
 Colored icons) and its `health` namespace come from its descriptor instead of the `Route` union, `App.tsx` and
 `SidebarParts.tsx`. Its flag is `module.health`: every hub before #13844 publishes no module flags and keeps it on, as
-the page always was, and a browser can still switch it off. Core code that needs one of its addresses writes the path (`/health/<id>`), which routes as
-unknown while the module is off.
+the page always was, and a browser can still switch it off. Core code that needs one of its addresses writes the path (`/health/<id>`).
+With the module off, that path does not become a dead link: the default-panel Health archive below reopens the stored data
+read-only, including in a core-only build.
 
 ### Adding a module
 

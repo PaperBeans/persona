@@ -236,6 +236,18 @@ func (s *Service) toolTodoGet(ctx context.Context, machine, self string, args js
 			fmt.Fprintf(&b, "- %s/%s %q %s\n", ag.MachineID, ag.SessionID, clip(oneLine(ag.Title), 80), state)
 		}
 	}
+	if a, ok := s.askCopy(t.ID); ok && decisionOpen(&a, t) && !acceptAskEnded(&a, t) &&
+		a.RecheckAt.IsZero() && !ownerDecisionReturned(t.Supervision) {
+		if dismissed, err := s.decisionDismissed(ctx, t); err == nil && !dismissed {
+			fmt.Fprintf(&b, "pending user decision (needs_user, asked_at: %s): %s\n", a.AskedAt.UTC().Format(time.RFC3339Nano), a.Reason)
+			if a.Recommend != "" {
+				fmt.Fprintf(&b, "  recommended: %s\n", a.Recommend)
+			}
+			for _, o := range a.Options {
+				fmt.Fprintf(&b, "  - %s: %s\n", o.Label, o.LeadsTo)
+			}
+		}
+	}
 	if st := s.todoDB(); st != nil {
 		if ds, err := st.ListTodoDecisions(ctx, t.ID, false); err == nil && len(ds) > 0 {
 			b.WriteString("decisions in force:\n")

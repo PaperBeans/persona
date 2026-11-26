@@ -85,8 +85,8 @@ func TestLarkCheckTagsConnectorOutwardWrites(t *testing.T) {
 			cfg.CLI = &proto.LarkCLI{Bin: "/nonexistent/lark-cli"}
 			n, fh := readCardBypassNode(t, cfg)
 			n.larkRisks = map[string]string{
-				"\x00docs +fetch":        "read",
-				"\x00im +messages-send":  "write",
+				"\x00docs +fetch":            "read",
+				"\x00im +messages-send":      "write",
 				"\x00im +chat-messages-list": "read",
 			}
 			n.persistModes(testThread, tc.mode, "")

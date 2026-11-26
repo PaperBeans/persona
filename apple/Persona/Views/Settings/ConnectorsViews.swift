@@ -443,10 +443,13 @@ struct ConnectorsSection: View {
                         hubRow(c)
                     }
                 }
-                NavigationLink(value: SettingsPage.feishuBot) {
-                    ConnectorRowLabel(title: String(localized: "Lark Bot"), symbol: Theme.Icon.chatBot, value: FeishuBotModel.summary(bot))
+                // The bot is the hub's Lark module's: no row while that module is off (#15995).
+                if LarkModule.botEntry.isOffered {
+                    NavigationLink(value: SettingsPage.feishuBot) {
+                        ConnectorRowLabel(title: String(localized: "Lark Bot"), symbol: Theme.Icon.chatBot, value: FeishuBotModel.summary(bot))
+                    }
+                    .settingsListRow(SettingsPage.feishuBot)
                 }
-                .settingsListRow(SettingsPage.feishuBot)
             }
             .bareListRow()
         } header: {
@@ -454,7 +457,7 @@ struct ConnectorsSection: View {
         } footer: {
             footer
         }
-        .task(id: "\(model.assistantManagerID ?? "")|\(model.settingsPath.count)|\(model.config?.url.absoluteString ?? "")") { await load() }
+        .task(id: "\(model.assistantManagerID ?? "")|\(model.settingsPath.count)|\(model.config?.url.absoluteString ?? "")|\(LarkModule.botEntry.isOffered)") { await load() }
     }
 
     /// A hub connector's row, opening its manager's copy.
@@ -481,7 +484,8 @@ struct ConnectorsSection: View {
         async let a = try? api.mailAccounts()
         // An assistant without the chat connector says not set up (`LarkStatus.absent`), not a blank row.
         async let l = chats ? api.chatConnectorStatus().status : nil
-        async let b = try? api.feishuBot()
+        let offersBot = LarkModule.botEntry.isOffered
+        async let b = offersBot ? try? api.feishuBot() : nil
         await hub.load(listed: listed)
         let (accs, st, bs) = await (a, l, b)
         guard !Task.isCancelled, api.sameSettingsScope(as: model.api) else { return }

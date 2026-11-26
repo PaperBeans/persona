@@ -30,7 +30,7 @@ import { useFoldScroll } from "../chat/fold-scroll";
 import { useInboxView } from "../../lib/inbox-view-memory";
 import { InboxLine } from "./InboxLine";
 import { Glyph, Spark, Tag } from "./InboxParts";
-import { useLarkItemReadOnly } from "./lark-write-gate";
+import { useItemReadOnly } from "./item-write-gate";
 
 /** Where a tapped `source` entry (or "Original") opens the item's own page: at a Feishu position, a mail's uid, or a URL. */
 export type SourceAt = { position?: string; uid?: number; url?: string };
@@ -415,8 +415,8 @@ function TextSuggestion({ item, suggestion: s }: { item: InboxItem; suggestion: 
   const busy = useInbox((st) => st.sending.includes(itemKey(item)));
   const uncertain = useInbox((st) => st.uncertainReplies[uncertainReplyKey(item, s.version)]);
   const attempt = s.kind === "reply" ? uncertain ?? item.suggestion_attempts?.find((a) => a.version === s.version) : undefined;
-  const larkReadOnly = useLarkItemReadOnly(item);
-  const replyReadOnly = s.kind === "reply" && larkReadOnly;
+  const readOnly = useItemReadOnly(item);
+  const replyReadOnly = s.kind === "reply" && readOnly;
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(s.text);
   const [say, setSay] = useState("");

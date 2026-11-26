@@ -918,6 +918,7 @@ final class AppModel {
             // All-day recording: the erases and deletes the watch hasn't confirmed go now that a send reaches it
             // (docs/assistant/day-recap.md「Erasing」「Deleting」), paired with a hub or not.
             RecordingDayReceiver.shared.sessionActivated()
+            RecordingModule.tellWatch() // what the hub says of recording, as last remembered (#15214)
             guard let self, self.isPaired, !self.isDemo else { return }
             WatchSync.shared.push(persona: self.personas.chosenID)
             self.pushWatchConfigs()
@@ -3290,6 +3291,7 @@ final class AppModel {
             if let link = link(group), !link.isDemo { Task { await link.agentsDisplay.refresh() } }
             // The hub may turn modules off, or on again (#13849, docs/apple/ios.md "Modules"); kept per hub.
             ModuleState.shared.heard(Set(hello.features), from: group, isHub: isHub)
+            if isHub { RecordingModule.tellSurfaces() } // the watch, the widgets and the control follow the recording module too (#15214)
             #if os(iOS)
             if isHub { Task { await HealthIntakeSync.shared.refresh(model: self) } }
             #endif
@@ -5113,6 +5115,7 @@ final class AppModel {
     /// Another group was picked for the hub-level pages: their data starts over from that group's.
     func hubChanged() {
         ModuleState.shared.follow(hub?.group ?? "", features: hub?.features ?? []) // the modules this hub allows (#13849)
+        RecordingModule.tellSurfaces()
         if let g = hub?.group {
             assistantConfig = heldAssistant(g)
         }

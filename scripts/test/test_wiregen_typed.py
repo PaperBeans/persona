@@ -158,6 +158,13 @@ class Model(unittest.TestCase):
 class Languages(unittest.TestCase):
     """What each keyword turns into, language by language (2.1, 2.3, 2.4, 2.5 of the typed core plan)."""
 
+    def test_outputs_have_no_extra_terminal_blank_line(self):
+        for language in ("go", "ts", "arkts", "swift", "kotlin", "rust"):
+            with self.subTest(language):
+                generated = generate(language)
+                self.assertTrue(generated.endswith("\n"))
+                self.assertFalse(generated.endswith("\n\n"))
+
     def test_go(self):
         go = generate("go")
         # x-enum closed + x-unknown count

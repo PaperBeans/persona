@@ -253,6 +253,45 @@
       }
     },
     {
+      "name": "the_to_do_lists_needs_you",
+      "description": "Once the manager has counted its to-dos, todos_needs_you is the to-do list's needs_you (the todo-counts case's counts, as GET /api/v1/todos answers them), beside the agents' count. The list's counts carry no rows, so keys lists none and all of n is more.",
+      "input": {
+        "needs_you": "cards_of_one_session_are_one_row",
+        "todo_counts": "ranked_list"
+      },
+      "expected": {
+        "view": {
+          "epoch": "b7e1c2a9",
+          "rev": 9,
+          "as_of": 1795593609000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 1,
+              "keys": [
+                {
+                  "id": "agent:studio/s1",
+                  "cards": [
+                    "ix-plan",
+                    "ix-question",
+                    "ix-permission"
+                  ]
+                }
+              ]
+            },
+            "todos_needs_you": {
+              "n": 4,
+              "more": 4
+            }
+          },
+          "totals": {
+            "agents_needs_you": 1,
+            "todos_needs_you": 4
+          }
+        }
+      }
+    },
+    {
       "name": "rows_past_the_keys_are_more",
       "description": "keys lists fewer rows than n counts (at most 200, fewer to keep the view small); more is the rest, so n is the rows keys lists plus more.",
       "expected": {

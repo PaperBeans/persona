@@ -2,8 +2,9 @@ package assistant
 
 import (
 	"context"
-	"slices"
+	"fmt"
 
+	"github.com/nwverse/persona/server/internal/assistant/supervisionrole"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -56,7 +57,9 @@ func (s *Service) supervisionInstructions(ctx context.Context, machine, id strin
 	if known && runtimeSessionLacksSupervisionPolicy(c) {
 		return "", nil
 	}
-	if !main && !(id == cfg.BackgroundSupervisor && cfg.BackgroundSupervisorMachineID == machine) && !s.isBackgroundCallerOn(ctx, machine, id) && !slices.Contains(cfg.Leaders, id) {
+	background := (id == cfg.BackgroundSupervisor && cfg.BackgroundSupervisorMachineID == machine) || s.isBackgroundCallerOn(ctx, machine, id)
+	leader := s.isLeader(ctx, id)
+	if !main && !background && !leader {
 		// Side chats genuinely supervise their own open tasks (#4669). Sharing the
 		// directory, a scheduled purpose, or the ability to plan is not a role.
 		if known && (!c.Assistant || c.Space != "") {
@@ -85,9 +88,39 @@ func (s *Service) supervisionInstructions(ctx context.Context, machine, id strin
 	} else if guest {
 		return "", nil
 	}
-	// A leader's own direction notes follow its policy (direction_notes.go): changing them restarts only this one, on
-	// a send that finds it idle.
-	return s.leaderPolicy(ctx, id, prompts.RenderSupervisionInstructions(), leadIdle(c, known)), nil
+	role := supervisionrole.RoleSide()
+	switch {
+	case main:
+		role = supervisionrole.RoleMain()
+	case background:
+		role = supervisionrole.RoleBackground()
+	case leader:
+		role = supervisionrole.RoleLeader()
+	}
+	idle := leadIdle(c, known)
+	if idle {
+		if err := s.recordSupervisionRole(ctx, machine, id, role); err != nil {
+			// Role persistence must not add a new owner-send failure mode. Without a durable baseline, retain the legacy
+			// complete policy for this send and retry the compact selection on a later idle send.
+			policy := prompts.RenderSupervisionInstructions()
+			return s.leaderPolicy(ctx, id, policy, false, role)
+		}
+	}
+	policyRole := role
+	if known && !idle {
+		if held, ok := s.workingSupervisionRole(ctx, machine, id); ok {
+			policyRole = held
+		} else {
+			// A pre-role-filtering process has no baseline. Keep its complete legacy policy until an idle send instead of
+			// presenting a new fingerprint that the node must refuse as busy.
+			policy := prompts.RenderSupervisionInstructions()
+			return s.leaderPolicy(ctx, id, policy, false, role)
+		}
+	}
+	policy := supervisionPolicy(policyRole)
+	// A leader's own direction notes and leader/side role changes follow its role policy (direction_notes.go): both wait
+	// for an idle send and roll back together if that send is refused. Former leaders keep remaining tasks as side supervisors.
+	return s.leaderPolicy(ctx, id, policy, idle, role)
 }
 
 func (s *Service) putSupervisionInstructions(ctx context.Context, machine, id string, p map[string]any) error {
@@ -97,8 +130,14 @@ func (s *Service) putSupervisionInstructions(ctx context.Context, machine, id st
 	if err != nil {
 		return err
 	}
-	if id == "" && ctx.Value(supervisionStartup{}) == true && p["guest"] == nil {
-		text = prompts.RenderSupervisionInstructions()
+	if id == "" && p["guest"] == nil {
+		if startup := ctx.Value(supervisionStartup{}); startup != nil {
+			role, ok := startup.(supervisionrole.Role)
+			if !ok {
+				return fmt.Errorf("invalid supervision startup role %T", startup)
+			}
+			text = supervisionPolicy(role)
+		}
 	}
 	p["supervision_instructions"] = text
 	return nil

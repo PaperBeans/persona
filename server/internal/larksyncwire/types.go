@@ -104,6 +104,11 @@ const (
 	// PendingLinksCursor is the per-binding cursor key in lark_sync_cursors holding the persistent queue of unfetched
 	// or retryable linked cloud documents discovered in synced messages.
 	PendingLinksCursor = "links_queue"
+
+	// SenderNamesCursor is the per-binding cursor key holding the name book: display names the sync learned for
+	// senders and mentioned users (open_id or app_id -> name), so a member who left a group or a bot another message
+	// mentioned is still named.
+	SenderNamesCursor = "sender_names"
 )
 
 // Canonical-key prefixes: one piece of content has one key whichever bot, account or entry point read it.
@@ -405,6 +410,48 @@ type Syncer interface {
 // errors are omitted; a missing contact scope or auth/context error is returned alongside any names resolved so far.
 type NameResolver interface {
 	ResolveUserNames(ctx context.Context, b Binding, token func(ctx context.Context) (string, error), openIDs []string) (map[string]string, error)
+}
+
+// OpenID is a Feishu/Lark user open_id in the sync contract.
+type OpenID string
+
+// ChatID is a Feishu/Lark chat_id (oc_…) in the sync contract.
+type ChatID string
+
+// NameResolveRequest describes the unnamed senders and chats a binding's sender-name backfill wants to resolve.
+type NameResolveRequest struct {
+	// OpenIDs are unique human sender open_ids to look up.
+	OpenIDs []OpenID
+	// ChatSenders maps chat_id -> unique unnamed sender_ids seen in that chat (group, topic, or p2p), used to
+	// fetch GET /open-apis/im/v1/chats/:chat_id/members per chat when contact/v3 misses external users.
+	ChatSenders map[string][]string
+	// P2PChatIDs are unnamed p2p chat_ids whose display name should be resolved via chat info and chat members.
+	P2PChatIDs []ChatID
+	// SampleMessages maps sender_id -> a sample message_id from that sender for message-carried fallback when
+	// both contact/v3 and chat members miss.
+	SampleMessages map[string]string
+	// SampleTimes maps sender_id -> the time of its sample message, around which the chat is read for an @mention of
+	// a sender no member list names (one who left the group).
+	SampleTimes map[string]time.Time
+	// SampleChats maps sender_id -> the chat of its sample message.
+	SampleChats map[string]string
+	// NameBook is the binding's stored SenderNamesCursor value: names learned before, for senders nothing else names.
+	NameBook string
+}
+
+// NameResolveResult holds display names resolved for senders and unnamed p2p chats.
+type NameResolveResult struct {
+	// UserNames maps sender_id -> display name.
+	UserNames map[string]string
+	// P2PChatNames maps p2p chat_id -> peer display name.
+	P2PChatNames map[string]string
+}
+
+// ChatNameResolver is optionally implemented by a Syncer (alongside NameResolver) to resolve sender display names
+// and unnamed p2p chat names with chat-scoped fallbacks (GET im/v1/chats/:chat_id/members, GET im/v1/chats/:chat_id,
+// and message-carried sender/mention info) when contact/v3 cannot see external users.
+type ChatNameResolver interface {
+	ResolveNamesWithFallback(ctx context.Context, b Binding, token func(ctx context.Context) (string, error), req NameResolveRequest) (NameResolveResult, error)
 }
 
 // LinkObjType is the canonical cloud object type of a Feishu / Lark document or wiki link.

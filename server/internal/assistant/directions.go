@@ -70,8 +70,10 @@ type direction struct {
 	NotesLastAt *time.Time `json:"notes_last_at,omitempty"`
 	// NotesInEffect: the notes block the conversation was last given (notesInEffect, #11392): set by a send that found
 	// it idle (its leader's block, or "" once it is no leader) and, before any did, by the first notes save while it
-	// leads (the block of the notes before that save); nil while unknown.
+	// leads (the block of the notes before that save); nil while unknown. RoleInEffect is the role policy sent with it.
+	// A direction ended or made again keeps both until an idle send, so a working process never gets a new fingerprint.
 	NotesInEffect *string `json:"notes_in_effect,omitempty"`
+	RoleInEffect  string  `json:"role_in_effect,omitempty"`
 }
 
 type leaderTold struct {

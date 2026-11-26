@@ -1566,6 +1566,9 @@ internal fun closeSwipe(row: AgentSession, busy: Boolean, close: () -> Unit): ((
  * "Subtasks (N)", offers no Pin: Pinned lists rows of their own only, so it would not move (#4494); a pin it has can go.
  */
 @Suppress("DEPRECATION")
+internal fun forkBlockedByTurn(session: Session): Boolean =
+    session.isLive && (session.agentState == AgentState.Working || session.agentState == AgentState.NeedsYou)
+
 @Composable
 internal fun AgentSessionMenuItems(
     row: AgentSession, pinned: Boolean, muted: Boolean, busy: Boolean,
@@ -1599,7 +1602,7 @@ internal fun AgentSessionMenuItems(
         }
         onAttach?.let { add(JAction(stringResource(R.string.agents_action_attach), PhIcons.PlugsConnected, enabled = !busy, onClick = it)) }
         if (onFork != null) {
-            val turnRunning = row.state == AgentState.Working || row.state == AgentState.NeedsYou
+            val turnRunning = forkBlockedByTurn(session)
             add(JAction(
                 stringResource(persona.feature.chat.R.string.chat_menu_fork),
                 PersonaIcons.forkChat,

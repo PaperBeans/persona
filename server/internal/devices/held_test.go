@@ -1225,6 +1225,31 @@ func TestHeldLinesInEveryLanguage(t *testing.T) {
 				t.Errorf("%s %+v: state %s", l, r.HeldOperation, m.State)
 			}
 		}
+		for _, key := range []string{"rpc-errors.not_delivered", "rpc-errors.not_delivered_finished"} {
+			r := heldRow{HeldOperation: db.HeldOperation{State: db.HeldFailed, Failure: db.HeldRefused, Error: i18n.T(i18n.Default, key)}}
+			m := r.wire(l, "NAME", false)
+			want := i18n.T(l, key)
+			if !strings.Contains(m.Error, want) {
+				t.Errorf("%s %s: %q does not contain %q", l, key, m.Error, want)
+			}
+		}
+		bareDialog := heldRow{HeldOperation: db.HeldOperation{State: db.HeldFailed, Failure: db.HeldRefused,
+			Error: "电脑上的终端正开着一个对话框（确认、选择列表等），这条消息没有发出去：先回答或关掉它再发。"}}
+		if got := bareDialog.wire(l, "NAME", false).Error; l != i18n.ZhHans && !strings.Contains(got, i18n.T(l, "rpc-errors.dialog_open")) {
+			t.Errorf("%s bare dialog: %q", l, got)
+		}
+		titledDialog := heldRow{HeldOperation: db.HeldOperation{State: db.HeldFailed, Failure: db.HeldRefused,
+			Error: "电脑上的终端正开着一个对话框（「Allow command?」），这条消息没有发出去：先回答或关掉它再发。"}}
+		if got := titledDialog.wire(l, "NAME", false).Error; !strings.Contains(got, "Allow command?") ||
+			(l != i18n.ZhHans && !strings.Contains(got, i18n.T(l, "rpc-errors.dialog_open"))) {
+			t.Errorf("%s titled dialog: %q", l, got)
+		}
+		noticeDialog := heldRow{HeldOperation: db.HeldOperation{State: db.HeldFailed, Failure: db.HeldRefused,
+			Error: "电脑上的终端正开着一个对话框（「Session updated」），这条消息没有发出去：它只是一条通知，按回车就关掉，可以让发送先关掉它再发。"}}
+		if got := noticeDialog.wire(l, "NAME", false).Error; !strings.Contains(got, "Session updated") ||
+			(l != i18n.ZhHans && (!strings.Contains(got, i18n.T(l, "rpc-errors.dialog_open_notice")) || strings.Contains(got, i18n.T(l, "rpc-errors.dialog_open")))) {
+			t.Errorf("%s notice dialog: %q", l, got)
+		}
 	}
 }
 

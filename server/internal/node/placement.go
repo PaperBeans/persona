@@ -82,7 +82,7 @@ func (n *Node) refreshHostInventoryWithFailures(ctx context.Context, strict bool
 		wg.Add(1)
 		go func(i int, h host.Host) {
 			defer wg.Done()
-			agents, full, err := n.lookAt(ctx, h, epoch)
+			agents, full, err := n.lookAtSnapshot(ctx, h, epoch, strict, "")
 			outs[i] = outcome{kind: h.Kind(), agents: agents, full: full, err: err}
 		}(i, h)
 	}
@@ -160,17 +160,97 @@ func (n *Node) refreshHostInventoryWithFailures(ctx context.Context, strict bool
 	return nil
 }
 
+type paneStrictSnapshotter interface {
+	snapshotForPaneStrict(context.Context, string) (*host.Layout, error)
+}
+
+type allStrictSnapshotter interface {
+	snapshotStrictAll(context.Context) (*host.Layout, error)
+}
+
+// refreshHostForPaneStrict refreshes host h with a guaranteed fresh (non-cached) snapshot for the server or
+// named session owning paneID, refusing partial/list fallbacks and cached lastLayout fallbacks.
+func (n *Node) refreshHostForPaneStrict(ctx context.Context, h host.Host, paneID string) error {
+	if n.sessionScope != nil {
+		return errors.New("scoped node cannot verify live host state")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	n.mu.Lock()
+	epoch := n.engEpoch
+	n.mu.Unlock()
+	agents, full, err := n.lookAtSnapshot(ctx, h, epoch, true, paneID)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err != nil {
+		if !errors.Is(err, host.ErrNotRunning) {
+			return fmt.Errorf("incomplete host inventory %s: %w", h.Kind(), err)
+		}
+		agents, full, err = nil, true, nil
+	}
+	if !full {
+		return fmt.Errorf("incomplete host inventory %s: full snapshot unavailable", h.Kind())
+	}
+	n.mu.Lock()
+	if n.engEpoch != epoch {
+		n.mu.Unlock()
+		return errEngineChanged
+	}
+	if n.hostAgents == nil {
+		n.hostAgents = map[string][]host.Agent{}
+	}
+	n.hostAgents[h.Kind()] = agents
+	union := make([]host.Agent, 0)
+	for _, list := range n.hostAgents {
+		union = append(union, list...)
+	}
+	n.mu.Unlock()
+	if !n.setAgentsAt(union, epoch, map[string]bool{h.Kind(): true}) {
+		return errEngineChanged
+	}
+	n.backfillResume(union)
+	n.panesChanged()
+	return nil
+}
+
 // lookAt is one host's agents: from a snapshot (full), which also gives the space / slot names; a host that cannot
 // snapshot (older herdr without `api snapshot`) gives its agent list instead.
 func (n *Node) lookAt(ctx context.Context, h host.Host, epoch uint64) (agents []host.Agent, full bool, err error) {
-	snap, err := h.Snapshot(ctx)
-	if err != nil {
-		agents, aerr := h.Agents(ctx)
-		if aerr != nil {
-			return nil, false, err
+	return n.lookAtSnapshot(ctx, h, epoch, false, "")
+}
+
+func (n *Node) lookAtSnapshot(ctx context.Context, h host.Host, epoch uint64, strict bool, targetPane string) (agents []host.Agent, full bool, err error) {
+	var (
+		snap *host.Layout
+		serr error
+	)
+	if strict {
+		if targetPane != "" {
+			if ps, ok := h.(paneStrictSnapshotter); ok {
+				snap, serr = ps.snapshotForPaneStrict(ctx, targetPane)
+			} else {
+				snap, serr = h.Snapshot(ctx)
+			}
+		} else if as, ok := h.(allStrictSnapshotter); ok {
+			snap, serr = as.snapshotStrictAll(ctx)
+		} else {
+			snap, serr = h.Snapshot(ctx)
 		}
-		n.enrichHerdrAgyPresence(ctx, h, agents)
-		return agents, false, nil
+		if serr != nil {
+			return nil, false, serr
+		}
+	} else {
+		snap, serr = h.Snapshot(ctx)
+		if serr != nil {
+			agents, aerr := h.Agents(ctx)
+			if aerr != nil {
+				return nil, false, serr
+			}
+			n.enrichHerdrAgyPresence(ctx, h, agents)
+			return agents, false, nil
+		}
 	}
 	l := layout{spaces: map[string]host.Space{}, slots: map[string]host.Slot{}, panes: snap.Panes, paneIndex: snap.PaneIndex, at: time.Now()}
 	for _, w := range snap.Spaces {
@@ -507,7 +587,7 @@ func (n *Node) setAgentsAt(agents []host.Agent, epoch uint64, heard map[string]b
 	if n.codices != nil {
 		n.codices.paneReads.retain(codex)
 	}
-	paneDeadline := time.Now().Add(codexHomeListWait)
+	paneDeadline := time.Now().Add(n.codexHomeListBudget())
 	for _, a := range codex {
 		w := n.codexWaitOf(a.PaneID)
 		n.mu.Lock()

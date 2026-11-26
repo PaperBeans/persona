@@ -23,8 +23,8 @@
     "todos_needs_you": {
       "rule": "N: the to-dos in Needs you, each once, quiet ones and Can wait left out, a step with its parent (TodoCounts.needs_you).",
       "pinned_by": "spec/fixtures/todo-counts",
-      "producer": null,
-      "waits_on": ["D8"]
+      "producer": {"file": "server/internal/assistant/fleetcount/fleetcountadapt/view.go", "symbol": "Fleet.View"},
+      "waits_on": []
     },
     "persona_cards": {
       "rule": null,

@@ -166,6 +166,23 @@ WEB = {
         "entries": [
             {"name": "Settings › Connectors Mail group", "hubs": ["test"], "page": "/settings?tab=connectors",
              "ready": {"text": r"^Connectors$"}, "selector": "[data-settings-group='mail']"},
+            # A mail the hub already delivered (the mock hub's inbox). On, it opens the whole message with its replies.
+            # Off, it stays (#13430, #15995): the Inbox's own route still answers with the text the hub stored, so the
+            # page shows that and one line saying mail is off, and none of the controls that need the mail routes
+            # (StoredMailBody.tsx; the mock answers 404 on /api/v1/mail/ then, as the hub does).
+            {"name": "Inbox mail item", "hubs": ["mock"], "page": "/inbox", "ready": {"selector": "[data-item]"},
+             "selector": "[data-item='mail:acc1:t1:501']", "opens": {"selector": "button:has-text('Reply all')"},
+             "off": {
+                 "kept": [
+                     {"name": "a mail the hub already delivered", "selector": "[data-item='mail:acc1:t1:501']",
+                      "shows": [{"name": "its stored text", "selector": "[data-mail-stored-text]:has-text('Lucy')"},
+                                {"name": "the line saying mail is off", "selector": "[data-mail-off-notice]"}]},
+                 ],
+                 "hides": [{"name": "reply", "selector": "button:has-text('Reply')"},
+                           {"name": "AI draft reply", "selector": "button:has-text('AI draft reply')"},
+                           {"name": "attachment", "selector": "a[download]"},
+                           {"name": "error where the mail should be", "text": r"HTTP 404|not set up"}],
+             }},
         ],
         "chunks": [],
     },

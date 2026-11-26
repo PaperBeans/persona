@@ -42,6 +42,7 @@ type pushGradingSnapshot struct {
 type pushGradingStoreAPI interface {
 	Settings(ctx context.Context, keys ...string) (map[string]json.RawMessage, error)
 	PutPushGradingBase(ctx context.Context, baseKey, layerKey, mirrorKey string, value any) error
+	SetPushGradingSwitch(ctx context.Context, baseKey, mirrorKey string, enabled bool) error
 	PutPushGradingLayer(ctx context.Context, baseKey, layerKey, mirrorKey, manager, source string, value any, out any) (bool, error)
 	DeletePushGradingLayer(ctx context.Context, baseKey, layerKey, mirrorKey, manager, source string, revision int64) (bool, error)
 	ClearPushGradingLayer(ctx context.Context, layerKey, manager, source string) (bool, error)

@@ -32,8 +32,30 @@ type codexHomeScan struct {
 }
 
 type codexHomeIndex struct {
-	mu    sync.Mutex
-	homes map[string]*codexHomeScan
+	mu       sync.Mutex
+	homes    map[string]*codexHomeScan
+	scanWait time.Duration // 0 uses codexHomeScanWait
+	listWait time.Duration // 0 uses codexHomeListWait
+}
+
+func (i *codexHomeIndex) listBudget() time.Duration {
+	if i == nil {
+		return codexHomeListWait
+	}
+	i.mu.Lock()
+	d := i.listWait
+	i.mu.Unlock()
+	if d > 0 {
+		return d
+	}
+	return codexHomeListWait
+}
+
+func (n *Node) codexHomeListBudget() time.Duration {
+	if n == nil || n.codices == nil {
+		return codexHomeListWait
+	}
+	return n.codices.index.listBudget()
 }
 
 // indexCodexHome registers both the rollouts and the App's sidebar threads (including
@@ -185,16 +207,24 @@ func (i *codexHomeIndex) available(home string, deadline time.Time, scan func() 
 		}()
 	}
 	run := s.run
+	scanWait := i.scanWait
 	i.mu.Unlock()
-	if !waitCodexScan(run.done, run.started, deadline) {
+	if scanWait <= 0 {
+		scanWait = codexHomeScanWait
+	}
+	if !waitCodexScanWithin(run.done, run.started, deadline, scanWait) {
 		return false
 	}
 	return run.ok
 }
 
 func waitCodexScan(done <-chan struct{}, started, deadline time.Time) bool {
+	return waitCodexScanWithin(done, started, deadline, codexHomeScanWait)
+}
+
+func waitCodexScanWithin(done <-chan struct{}, started, deadline time.Time, scanWait time.Duration) bool {
 	now := time.Now()
-	wait := min(codexHomeScanWait-now.Sub(started), deadline.Sub(now))
+	wait := min(scanWait-now.Sub(started), deadline.Sub(now))
 	if wait <= 0 {
 		select {
 		case <-done:

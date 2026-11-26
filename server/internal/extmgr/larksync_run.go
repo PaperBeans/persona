@@ -343,7 +343,11 @@ func (h *Manager) larkSyncRunHeld(ctx context.Context, key, mode string, rt *lar
 		if commitErr == nil {
 			committedLinksBackfillVer = linksBackfillVer
 			if tier == larksyncwire.TierFull && b.BackfillVersion < larkSyncBackfillVersion {
-				repaired, done, repairErr := h.larkSyncBackfillSenderNames(ctx, store, binding, &st, reader, token, handed)
+				book := cursors[larksyncwire.SenderNamesCursor]
+				if v, ok := moved[larksyncwire.SenderNamesCursor]; ok {
+					book = v
+				}
+				repaired, done, repairErr := h.larkSyncBackfillSenderNames(ctx, store, binding, &st, reader, token, handed, book)
 				chats += repaired
 				if repairErr != nil {
 					res.Errors = append(res.Errors, larksyncwire.ResourceError{
@@ -387,12 +391,14 @@ func larkSyncMadeProgress(prev map[string]string, res larksyncwire.Result, moved
 	return false
 }
 
-// larkSyncBackfillSenderNames performs a one-time, idempotent sender-name backfill for chat messages synced before
-// #15486 (which landed in the outbox and knowledge base with empty SenderName). It scans chat outbox rows in sequence
-// order, skips messages that already have a newer named outbox entry, restricts lookups to messages belonging to
-// binding.Key (verified through lark_sync_index for multi-tenant isolation), resolves unique user open_ids via
-// larksyncwire.NameResolver, and emits repair chat batches so kb.Engine.Ingest can fill in sender names (and re-run
-// gateway alignment) in place. done is true when the binding can be marked at larkSyncBackfillVersion.
+// larkSyncBackfillSenderNames performs a one-time, idempotent sender-name and unnamed-DM backfill for chat messages
+// that landed in the outbox and knowledge base with empty SenderName or empty DM Chat.Name (e.g. pre-#15486 rows, or
+// personal/external tenants where contact/v3 cannot see external users). It scans chat outbox rows in sequence order,
+// skips messages/DMs already repaired by a newer row, restricts lookups to rows owned by binding.Key (verified through
+// lark_sync_index for multi-tenant isolation), resolves sender and p2p chat names via ChatNameResolver (with chat
+// members, chat info, and message-carried fallbacks) or legacy NameResolver, updates im:p2p_chats cursors when DM
+// names are learned, and emits repair chat batches so kb.Engine.Ingest updates lines, Person.Name, and DM Chat.Name
+// in place. done is true when the binding can be marked at larkSyncBackfillVersion.
 func (h *Manager) larkSyncBackfillSenderNames(
 	ctx context.Context,
 	store larkSyncStore,
@@ -401,17 +407,25 @@ func (h *Manager) larkSyncBackfillSenderNames(
 	reader larksyncwire.Syncer,
 	token func(ctx context.Context) (string, error),
 	handed func() string,
+	nameBook string,
 ) (repairedChats int, done bool, repairErr error) {
-	resolver, ok := reader.(larksyncwire.NameResolver)
-	if !ok {
+	chatResolver, hasChatResolver := reader.(larksyncwire.ChatNameResolver)
+	legacyResolver, hasLegacyResolver := reader.(larksyncwire.NameResolver)
+	if !hasChatResolver && !hasLegacyResolver {
 		return 0, false, nil
 	}
 	type candidate struct {
 		chat kbwire.SourceChat
 		msg  kbwire.SourceMessage
 	}
+	type dmCandidate struct {
+		chat        kbwire.SourceChat
+		sampleMsgID string
+	}
 	candidates := map[string]candidate{}
 	var order []string
+	unnamedDMs := map[string]dmCandidate{}
+	var dmOrder []string
 	var after int64
 	for {
 		rows, err := store.LarkSyncOutboxAfter(ctx, db.LarkSyncChat, after, 100)
@@ -425,6 +439,26 @@ func (h *Manager) larkSyncBackfillSenderNames(
 			if err := json.Unmarshal(row.Payload, &cb); err != nil {
 				continue
 			}
+			if cb.Chat.Kind == "dm" && cb.Chat.ID != "" {
+				if strings.TrimSpace(cb.Chat.Name) != "" {
+					delete(unnamedDMs, cb.Chat.ID)
+				} else {
+					dc, exists := unnamedDMs[cb.Chat.ID]
+					if !exists {
+						dmOrder = append(dmOrder, cb.Chat.ID)
+						dc.chat = cb.Chat
+					}
+					if dc.sampleMsgID == "" {
+						for _, m := range cb.Messages {
+							if m.ID != "" {
+								dc.sampleMsgID = m.ID
+								break
+							}
+						}
+					}
+					unnamedDMs[cb.Chat.ID] = dc
+				}
+			}
 			for _, m := range cb.Messages {
 				if m.ID == "" || m.Mine {
 					continue
@@ -433,7 +467,12 @@ func (h *Manager) larkSyncBackfillSenderNames(
 					delete(candidates, m.ID)
 					continue
 				}
-				if m.SenderID == "" || strings.HasPrefix(m.SenderID, "cli_") {
+				if m.SenderID == "" {
+					continue
+				}
+				// Skip bot/app senders in group/topic chats (contact/v3 and chat/members omit bots); keep bot
+				// senders in 1-on-1 DMs when ChatNameResolver is available because GET /chats/:chat_id can name them.
+				if strings.HasPrefix(m.SenderID, "cli_") && (cb.Chat.Kind != "dm" || !hasChatResolver) {
 					continue
 				}
 				if _, exists := candidates[m.ID]; !exists {
@@ -446,7 +485,7 @@ func (h *Manager) larkSyncBackfillSenderNames(
 			break
 		}
 	}
-	if len(candidates) == 0 {
+	if len(candidates) == 0 && len(unnamedDMs) == 0 {
 		return 0, true, nil
 	}
 
@@ -465,14 +504,30 @@ func (h *Manager) larkSyncBackfillSenderNames(
 			fullBindings++
 		}
 	}
-	owned := map[string]candidate{}
-	var ownedOrder []string
-	keys := make([]string, 0, len(candidates))
-	ids := make([]string, 0, len(candidates))
+	keySet := map[string]bool{}
+	var keys []string
+	var ids []string
 	for _, id := range order {
 		if _, ok := candidates[id]; ok {
 			ids = append(ids, id)
-			keys = append(keys, larksyncwire.KeyMessage+id)
+			k := larksyncwire.KeyMessage + id
+			if !keySet[k] {
+				keySet[k] = true
+				keys = append(keys, k)
+			}
+		}
+	}
+	var dmIDs []string
+	for _, cid := range dmOrder {
+		if dc, ok := unnamedDMs[cid]; ok {
+			dmIDs = append(dmIDs, cid)
+			if dc.sampleMsgID != "" {
+				k := larksyncwire.KeyMessage + dc.sampleMsgID
+				if !keySet[k] {
+					keySet[k] = true
+					keys = append(keys, k)
+				}
+			}
 		}
 	}
 	indexMap := map[string]larksyncwire.IndexRecord{}
@@ -487,58 +542,126 @@ func (h *Manager) larkSyncBackfillSenderNames(
 			indexMap[k] = v
 		}
 	}
-	for _, id := range ids {
-		c := candidates[id]
-		rec, exists := indexMap[larksyncwire.KeyMessage+id]
-		mine := false
-		if exists {
-			mine = slices.ContainsFunc(rec.Sources, func(s larksyncwire.SourceRef) bool { return s.Binding == binding.Key })
-		} else if fullBindings <= 1 {
-			mine = true
+	isOwned := func(msgID string) bool {
+		if msgID != "" {
+			if rec, exists := indexMap[larksyncwire.KeyMessage+msgID]; exists {
+				return slices.ContainsFunc(rec.Sources, func(s larksyncwire.SourceRef) bool { return s.Binding == binding.Key })
+			}
 		}
-		if mine {
-			owned[id] = c
+		return fullBindings <= 1
+	}
+
+	owned := map[string]candidate{}
+	var ownedOrder []string
+	for _, id := range ids {
+		if isOwned(id) {
+			owned[id] = candidates[id]
 			ownedOrder = append(ownedOrder, id)
 		}
 	}
-	if len(owned) == 0 {
+	ownedDMs := map[string]kbwire.SourceChat{}
+	var ownedDMOrder []string
+	for _, cid := range dmIDs {
+		dc := unnamedDMs[cid]
+		if isOwned(dc.sampleMsgID) {
+			ownedDMs[cid] = dc.chat
+			ownedDMOrder = append(ownedDMOrder, cid)
+		}
+	}
+	if len(owned) == 0 && len(ownedDMs) == 0 {
 		return 0, true, nil
 	}
 
 	uniqueSenders := map[string]bool{}
 	var openIDs []string
+	chatSenderSets := map[string]map[string]bool{}
+	sampleMessages := map[string]string{}
+	sampleTimes := map[string]time.Time{}
+	sampleChats := map[string]string{}
 	for _, id := range ownedOrder {
-		sid := owned[id].msg.SenderID
-		if !uniqueSenders[sid] {
+		c := owned[id]
+		sid := c.msg.SenderID
+		if !strings.HasPrefix(sid, "cli_") && !uniqueSenders[sid] {
 			uniqueSenders[sid] = true
 			openIDs = append(openIDs, sid)
 		}
+		if c.chat.ID != "" {
+			if chatSenderSets[c.chat.ID] == nil {
+				chatSenderSets[c.chat.ID] = map[string]bool{}
+			}
+			chatSenderSets[c.chat.ID][sid] = true
+		}
+		if sampleMessages[sid] == "" {
+			sampleMessages[sid] = id
+			sampleTimes[sid] = c.msg.At
+			sampleChats[sid] = c.chat.ID
+		}
 	}
 	slices.Sort(openIDs)
+	chatSenders := make(map[string][]string, len(chatSenderSets))
+	for cid, set := range chatSenderSets {
+		list := make([]string, 0, len(set))
+		for sid := range set {
+			list = append(list, sid)
+		}
+		slices.Sort(list)
+		chatSenders[cid] = list
+	}
+	p2pChatIDs := slices.Clone(ownedDMOrder)
+	slices.Sort(p2pChatIDs)
+
+	typedOpenIDs := make([]larksyncwire.OpenID, len(openIDs))
+	for i, id := range openIDs {
+		typedOpenIDs[i] = larksyncwire.OpenID(id)
+	}
+	typedP2P := make([]larksyncwire.ChatID, len(p2pChatIDs))
+	for i, cid := range p2pChatIDs {
+		typedP2P[i] = larksyncwire.ChatID(cid)
+	}
 
 	resolveBinding := binding
 	resolveBinding.Budget = 2 * time.Minute
-	names, err := resolver.ResolveUserNames(ctx, resolveBinding, token, openIDs)
+	req := larksyncwire.NameResolveRequest{
+		OpenIDs:        typedOpenIDs,
+		ChatSenders:    chatSenders,
+		P2PChatIDs:     typedP2P,
+		SampleMessages: sampleMessages,
+		SampleTimes:    sampleTimes,
+		SampleChats:    sampleChats,
+		NameBook:       nameBook,
+	}
+	runResolve := func() (larksyncwire.NameResolveResult, error) {
+		if hasChatResolver {
+			return chatResolver.ResolveNamesWithFallback(ctx, resolveBinding, token, req)
+		}
+		names, rerr := legacyResolver.ResolveUserNames(ctx, resolveBinding, token, openIDs)
+		return larksyncwire.NameResolveResult{UserNames: names}, rerr
+	}
+	res, err := runResolve()
 	if larkSyncKindOf(err) == larksyncwire.ErrKindAuth && ctx.Err() == nil {
 		if refused := handed(); refused != "" {
 			if _, rerr := h.larkSyncAccessToken(ctx, binding.Key, refused); rerr == nil {
-				names, err = resolver.ResolveUserNames(ctx, resolveBinding, token, openIDs)
+				res, err = runResolve()
 			}
 		}
 	}
 	if err != nil {
 		h.logf("lark sync: %s: sender-name backfill resolve: %v", binding.Key, err)
 	}
-	if len(names) == 0 {
-		// Complete when every lookup finished without a fatal/scope/deadline error (e.g. only deleted/external users).
+	if len(res.UserNames) == 0 && len(res.P2PChatNames) == 0 {
+		// Complete when every lookup finished without a fatal/scope/deadline error (e.g. only deleted/unresolvable users).
 		return 0, err == nil, err
 	}
 
 	byChat := map[string]*connector.ChatBatch{}
 	var chatOrder []string
+	resolvedDMNames := map[string]string{}
 	for _, id := range ownedOrder {
 		c := owned[id]
-		name := strings.TrimSpace(names[c.msg.SenderID])
+		name := strings.TrimSpace(res.UserNames[c.msg.SenderID])
+		if name == "" && c.chat.Kind == "dm" {
+			name = strings.TrimSpace(res.P2PChatNames[c.chat.ID])
+		}
 		if name == "" {
 			continue
 		}
@@ -552,9 +675,31 @@ func (h *Manager) larkSyncBackfillSenderNames(
 		msgCopy := c.msg
 		msgCopy.SenderName = name
 		if cb.Chat.Kind == "dm" && cb.Chat.Name == "" && !msgCopy.Mine {
-			cb.Chat.Name = name
+			peer := strings.TrimSpace(res.P2PChatNames[c.chat.ID])
+			if peer == "" {
+				peer = name
+			}
+			cb.Chat.Name = peer
+			resolvedDMNames[c.chat.ID] = peer
 		}
 		cb.Messages = append(cb.Messages, msgCopy)
+	}
+	for _, cid := range ownedDMOrder {
+		peer := strings.TrimSpace(res.P2PChatNames[cid])
+		if peer == "" {
+			continue
+		}
+		resolvedDMNames[cid] = peer
+		if cb := byChat[cid]; cb != nil {
+			if cb.Chat.Name == "" {
+				cb.Chat.Name = peer
+			}
+			continue
+		}
+		chatCopy := ownedDMs[cid]
+		chatCopy.Name = peer
+		byChat[cid] = &connector.ChatBatch{Chat: chatCopy}
+		chatOrder = append(chatOrder, cid)
 	}
 	var repairRows []db.LarkSyncOutbox
 	for _, cid := range chatOrder {
@@ -566,8 +711,30 @@ func (h *Manager) larkSyncBackfillSenderNames(
 		}
 		repairRows = append(repairRows, db.LarkSyncOutbox{Kind: db.LarkSyncChat, CanonicalKey: "chat:" + cid, Payload: raw})
 	}
-	if len(repairRows) > 0 {
-		if cerr := store.CommitLarkSyncRun(ctx, binding.Key, nil, nil, repairRows); cerr != nil {
+	var cursorUpdates map[string]string
+	if len(resolvedDMNames) > 0 {
+		if existingCursors, cerr := store.LarkSyncCursors(ctx, binding.Key); cerr == nil {
+			const p2pKey = larksyncwire.ResIM + ":p2p_chats"
+			saved := map[string]string{}
+			if raw := strings.TrimSpace(existingCursors[p2pKey]); raw != "" {
+				_ = json.Unmarshal([]byte(raw), &saved)
+			}
+			changed := false
+			for cid, peer := range resolvedDMNames {
+				if peer != "" && saved[cid] == "" {
+					saved[cid] = peer
+					changed = true
+				}
+			}
+			if changed {
+				if raw, merr := json.Marshal(saved); merr == nil {
+					cursorUpdates = map[string]string{p2pKey: string(raw)}
+				}
+			}
+		}
+	}
+	if len(repairRows) > 0 || len(cursorUpdates) > 0 {
+		if cerr := store.CommitLarkSyncRun(ctx, binding.Key, cursorUpdates, nil, repairRows); cerr != nil {
 			h.logf("lark sync: %s: sender-name backfill commit: %v", binding.Key, cerr)
 			return 0, false, cerr
 		}

@@ -66,6 +66,10 @@ func (h *Hub) assistantRoutesRelayed(api *http.ServeMux) {
 			api.HandleFunc(pattern, h.forwardAgentArchives)
 			continue
 		}
+		if pattern == assistantwire.RouteAgentIdleArchive || pattern == assistantwire.RouteAgentIdleArchiveAudit {
+			api.HandleFunc(pattern, h.forwardAgentIdleArchive)
+			continue
+		}
 		if pattern == "POST /api/v1/sessions/{mid}/{sid}/autoname" { // a full device, a capable owner (agent_autoname.go)
 			api.HandleFunc(pattern, h.forwardAgentAutoname)
 			continue

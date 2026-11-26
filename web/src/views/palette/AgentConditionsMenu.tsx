@@ -5,9 +5,10 @@
 import { useMemo, useState } from "react";
 import { t } from "../../i18n";
 import { stateOf } from "../../lib/format";
+import type { AgentPins } from "../../lib/pins";
 import { STATE_LABEL } from "../../lib/state-labels";
 import { useStore } from "../../lib/store";
-import type { AgentState, Session } from "../../lib/types";
+import type { AgentState, Machine, Session } from "../../lib/types";
 import { Menu, type MenuItem } from "../../ui/atoms";
 
 type Page = "root" | "machine" | "project" | "state" | "harness" | "model" | "since";
@@ -25,18 +26,33 @@ const FACETS: { page: Facet; labelKey: string }[] = [
   { page: "model", labelKey: "lib-agent-filter.filter_model" },
 ];
 
-/** The menu over `anchor`, the query's conditions checked; a choice gives the new query to `onQuery`. */
-export function AgentConditionsMenu({ anchor, query, onQuery, search, sessions, onClose }: {
+export interface AgentConditionsMenuProps {
   anchor: HTMLElement;
   query: string;
   onQuery: (next: string) => void;
   search: typeof import("../../lib/agent-search");
   sessions: Session[];
+  machines?: Machine[];
+  pins?: AgentPins;
   onClose: () => void;
-}) {
+}
+
+/** The menu over `anchor`, the query's conditions checked; a choice gives the new query to `onQuery`. */
+export function AgentConditionsMenu(props: AgentConditionsMenuProps) {
+  if (props.machines !== undefined && props.pins !== undefined) {
+    return <AgentConditionsMenuView {...props} machines={props.machines} pins={props.pins} />;
+  }
+  return <DefaultAgentConditionsMenu {...props} />;
+}
+
+function DefaultAgentConditionsMenu(props: AgentConditionsMenuProps) {
+  const storedMachines = useStore((s) => s.machines);
+  const storedPins = useStore((s) => s.pins);
+  return <AgentConditionsMenuView {...props} machines={props.machines ?? storedMachines} pins={props.pins ?? storedPins} />;
+}
+
+function AgentConditionsMenuView({ anchor, query, onQuery, search, sessions, machines, pins, onClose }: AgentConditionsMenuProps & { machines: Machine[]; pins: AgentPins }) {
   const [page, setPage] = useState<Page>("root");
-  const machines = useStore((s) => s.machines);
-  const pins = useStore((s) => s.pins);
   const facets = useMemo(() => search.buildAgentFacets(sessions, machines, pins), [search, sessions, machines, pins]);
   const options = useMemo((): Record<Facet, Option[]> => {
     const spelled = (list: Option[]) => list.filter((o) => search.conditionValue(o.id));

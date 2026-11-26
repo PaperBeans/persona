@@ -137,8 +137,7 @@ struct AvatarStatesPage: View {
         .navigationTitle(String(localized: "Pictures for Each State"))
         .navigationBarTitleDisplayMode(.inline)
         .modifier(AvatarPicturePicking(choosingPhoto: $choosingPhoto, choosingFile: $choosingFile, picked: { data in
-            guard let s = choosingFor, let picture = await model.load(data) else { return }
-            model.give(s, picture)
+            guard let s = choosingFor, await model.receiveState(s, data) else { return }
             path.append(.crop(s))
         }, failed: model.failedToRead))
     }
@@ -146,8 +145,7 @@ struct AvatarStatesPage: View {
     private func row(_ s: PersonaState) -> some View {
         let source = model.states[s]?.source ?? .automatic
         return Menu {
-            Button { choose(s, file: false) } label: { Label(String(localized: "Choose from Photos"), systemImage: Theme.Icon.photos) }
-            Button { choose(s, file: true) } label: { Label(String(localized: "Choose Image File"), systemImage: Theme.Icon.file) }
+            AvatarPictureSourceButtons(slot: .state(s, editing: model.editing != nil)) { choose(s, file: $0 == .files) }
             if source == .picked {
                 Button { path.append(.crop(s)) } label: { Label(String(localized: "Adjust Crop"), systemImage: Theme.Icon.crop) }
             }
@@ -173,6 +171,12 @@ struct AvatarStatesPage: View {
         .accessibilityValue(source == .automatic ? String(localized: "Automatic") : String(localized: "Your Picture"))
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("avatar-state-\(s.rawValue)")
+        .modifier(AvatarPictureDrop(enabled: model.made == nil && !model.uploading, radius: Theme.Radius.control,
+                                    inset: -Theme.Space.xs, targetID: s.rawValue,
+                                    dropped: { data in
+                                        if await model.receiveState(s, data) { path.append(.crop(s)) }
+                                    },
+                                    failed: model.failedToRead))
     }
 
     /// The switch for an own picture's mark, saying what the mark is.
@@ -204,7 +208,7 @@ struct AvatarStatesPage: View {
 }
 
 /// A state's picture, its square: the crop area as the sheet's. The square is kept as it is moved; ‹ goes back to the
-/// states.
+/// states. Dropping a picture on the square replaces this state's picture (#15612).
 struct AvatarStateCropPage: View {
     var model: AvatarUploadModel
     var state: PersonaState
@@ -216,12 +220,23 @@ struct AvatarStateCropPage: View {
                     AvatarCropArea(framing: framing) {
                         Task { await framing.makePreview(side: AvatarUploadModel.previewSide) }
                     }
+                    .modifier(AvatarPictureDrop(enabled: model.made == nil && !model.uploading, radius: Theme.Radius.card,
+                                                targetID: "state-crop",
+                                                dropped: { data in
+                                                    if await model.receiveState(state, data) {
+                                                        await model.states[state]?.picked?.makePreview(side: AvatarUploadModel.previewSide)
+                                                    }
+                                                },
+                                                failed: model.failedToRead))
                     .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
                 } footer: {
                     Text("Drag to move the photo. Pinch to zoom.")
                 }
+            }
+            if let error = model.error {
+                Section { LoadProblem(text: error) }
             }
         }
         .themedPage()
@@ -331,6 +346,208 @@ struct AvatarPicturePicking: ViewModifier {
             return
         } catch {
             failed(error)
+        }
+    }
+}
+
+/// How an avatar picture can be chosen from the device (#15612): Photos or an image file, always both.
+enum AvatarPictureSource: String, CaseIterable, Identifiable {
+    case photos
+    case files
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .photos: String(localized: "Choose from Photos")
+        case .files: String(localized: "Choose Image File")
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .photos: Theme.Icon.photos
+        case .files: Theme.Icon.file
+        }
+    }
+}
+
+/// Every picture slot in the avatar upload and edit flows (#15612).
+enum AvatarPictureSlot: Hashable {
+    case mainNew
+    case mainEdit
+    case state(PersonaState, editing: Bool)
+
+    static var all: [AvatarPictureSlot] {
+        [.mainNew, .mainEdit]
+            + PersonaState.allCases.map { .state($0, editing: false) }
+            + PersonaState.allCases.map { .state($0, editing: true) }
+    }
+
+    /// Every slot offers choosing from Photos and from Files.
+    var pickSources: [AvatarPictureSource] { AvatarPictureSource.allCases }
+}
+
+/// The two pick buttons every picture slot's menu starts with: Photos and Files.
+struct AvatarPictureSourceButtons: View {
+    var slot: AvatarPictureSlot
+    var choose: (AvatarPictureSource) -> Void
+
+    var body: some View {
+        ForEach(slot.pickSources) { source in
+            Button { choose(source) } label: { Label(source.title, systemImage: source.icon) }
+        }
+    }
+}
+
+/// An image dragged onto an avatar picture slot or picker card (#15612), imported in its original format (`.image`) so
+/// GIF, APNG and animated WebP keep all their frames. Files are copied out of the system's temporary drop scope and
+/// read off the main actor (`read()`).
+nonisolated struct DroppedAvatarImage: Transferable, Sendable {
+    enum Payload: Sendable {
+        case file(URL)
+        case data(Data)
+        case tooLarge
+    }
+
+    let payload: Payload
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .image) { received in
+            try importFile(received.file)
+        }
+        DataRepresentation(importedContentType: .image) { data in
+            importData(data)
+        }
+    }
+
+    static func importFile(_ file: URL, limit: Int = AvatarImage.fileLimit) throws -> DroppedAvatarImage {
+        if let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > limit {
+            return DroppedAvatarImage(payload: .tooLarge)
+        }
+        let dir = FileManager.default.temporaryDirectory.appending(path: "avatar-drops/" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appending(path: file.lastPathComponent.isEmpty ? "image" : file.lastPathComponent)
+        try FileManager.default.copyItem(at: file, to: dest)
+        return DroppedAvatarImage(payload: .file(dest))
+    }
+
+    static func importData(_ data: Data, limit: Int = AvatarImage.fileLimit) -> DroppedAvatarImage {
+        if data.count > limit {
+            return DroppedAvatarImage(payload: .tooLarge)
+        }
+        return DroppedAvatarImage(payload: .data(data))
+    }
+
+    /// Reads the imported bytes off the main actor and removes any temporary copy.
+    func read() async throws -> Data {
+        let payload = self.payload
+        return try await Task.detached(priority: .userInitiated) {
+            switch payload {
+            case .tooLarge:
+                throw AvatarImage.Problem(errorDescription: String(localized: "This file is too large to be an avatar. Choose a smaller image."))
+            case .data(let data):
+                return data
+            case .file(let url):
+                defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+                return try AvatarImage.readPickedFile(url)
+            }
+        }.value
+    }
+
+    /// Removes any temporary copy held by an unused dropped image.
+    func discard() {
+        if case .file(let url) = payload {
+            try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+        }
+    }
+}
+
+/// Accepts an image dragged onto an avatar picture slot or picker card (#15612), highlights the target while dragged
+/// over with the design system's accent border and tint, and routes the imported bytes through the same path as picking.
+struct AvatarPictureDrop: ViewModifier {
+    /// Whether this view accepts drops at all (false on built-in cards and older hubs: registers no `dropDestination`).
+    var accepts: Bool = true
+    /// Whether a drop is allowed right now (false while uploading, loading or deleting).
+    var enabled: Bool = true
+    var radius: CGFloat = Theme.Radius.card
+    /// Padding applied to the highlight overlay (negative outsets around tight Form rows so the stroke has room).
+    var inset: CGFloat = 0
+    /// VoiceOver hint added when this target accepts drops (nil preserves a view's own hint).
+    var accessibilityHint: String? = String(localized: "Drop an image here")
+    /// Identifies this drop target for DEBUG screenshot switches (`-showAvatarDropTarget <id>`).
+    var targetID: String? = nil
+    #if DEBUG
+    private static let forcedTarget = UserDefaults.standard.string(forKey: "showAvatarDropTarget")
+    #endif
+    var dropped: (Data) async -> Void
+    var failed: ((any Error)?) -> Void = { _ in }
+    @State private var targeted = false
+
+    private var highlighted: Bool {
+        guard accepts, enabled else { return false }
+        #if DEBUG
+        if let targetID, Self.forcedTarget == targetID { return true }
+        #endif
+        return targeted
+    }
+
+    func body(content: Content) -> some View {
+        if accepts {
+            dropView(content)
+        } else {
+            content
+        }
+    }
+
+    @ViewBuilder private func dropView(_ content: Content) -> some View {
+        let base = content
+            .dropDestination(for: DroppedAvatarImage.self) { items, _ in
+                guard enabled else {
+                    discard(items)
+                    return false
+                }
+                guard let first = items.first else {
+                    failed(nil)
+                    return false
+                }
+                discard(Array(items.dropFirst()))
+                Task { await open(first) }
+                return true
+            } isTargeted: { on in
+                targeted = enabled && on
+            }
+            .overlay {
+                if highlighted {
+                    let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    shape
+                        .fill(Theme.AvatarSheet.dropTint)
+                        .overlay(shape.strokeBorder(Theme.AvatarSheet.dropStroke, lineWidth: Theme.AvatarSheet.dropStrokeWidth))
+                        .padding(inset)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+        if let accessibilityHint {
+            base.accessibilityHint(accessibilityHint)
+        } else {
+            base
+        }
+    }
+
+    private func open(_ item: DroppedAvatarImage) async {
+        do {
+            let data = try await item.read()
+            await dropped(data)
+        } catch {
+            failed(error)
+        }
+    }
+
+    private func discard(_ items: [DroppedAvatarImage]) {
+        guard !items.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            for item in items { item.discard() }
         }
     }
 }

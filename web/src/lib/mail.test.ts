@@ -10,12 +10,21 @@ vi.mock("./api", () => ({
   enc: encodeURIComponent,
 }));
 
-import { badAddresses, loadMailAccounts, markMailSeen, newDraft, parseAddresses, replyDraft, resetMailForTests, sendBody, sendMail } from "./mail";
+import { badAddresses, loadMailAccounts, markMailSeen, newDraft, parseAddresses, replyDraft, resetMailForTests, sendBody, sendMail, storedMailClipping } from "./mail";
 
 beforeEach(() => {
   calls.list = [];
   calls.fail = false;
   resetMailForTests();
+});
+
+describe("storedMailClipping", () => {
+  it("reads the item page's flag as a closed state; anything but a boolean is unknown, never whole", () => {
+    expect(storedMailClipping({ mail_body_truncated: true })).toBe("clipped");
+    expect(storedMailClipping({ mail_body_truncated: false })).toBe("whole");
+    for (const item of [undefined, {}, { mail_body_truncated: undefined }, { mail_body_truncated: null }, { mail_body_truncated: "false" }, { mail_body_truncated: 0 }])
+      expect(storedMailClipping(item), JSON.stringify(item)).toBe("unknown");
+  });
 });
 
 describe("addresses", () => {

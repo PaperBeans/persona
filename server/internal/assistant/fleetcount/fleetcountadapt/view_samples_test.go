@@ -8,6 +8,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistant/fleetcount"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/domainkit/opt"
 )
 
 // viewSamples are the counts views of schema/wire/counts.schema.json the clients' round trips read
@@ -17,7 +18,8 @@ const viewSamples = "../../../../../spec/fixtures/counts/view_samples.json"
 // Each view sample that names a needs-you case holds, as its counts and totals, what View writes of fleetcount's
 // Agents list tally of that case's sessions and cards: the rows and the number, each held row's reason a word the wire
 // knows, and the totals repeating the number. The case hands in its quiet agents, which the view lists in neither
-// list, as the live round never hands them in.
+// list, as the live round never hands them in. A sample that also names a todo-counts case holds todos_needs_you as
+// View writes it of that list's counts; one that names none has no to-dos counted.
 func TestViewSamplesAreFleetcountsRows(t *testing.T) {
 	byName := map[string]needsYouCase{}
 	for _, c := range needsYouCases(t) {
@@ -31,7 +33,8 @@ func TestViewSamplesAreFleetcountsRows(t *testing.T) {
 		Cases []struct {
 			Name  string `json:"name"`
 			Input struct {
-				NeedsYou string `json:"needs_you"`
+				NeedsYou   string `json:"needs_you"`
+				TodoCounts string `json:"todo_counts"`
 			} `json:"input"`
 			Expected struct {
 				View assistantwire.CountsView `json:"view"`
@@ -41,6 +44,7 @@ func TestViewSamplesAreFleetcountsRows(t *testing.T) {
 	if err := json.Unmarshal(b, &file); err != nil {
 		t.Fatalf("%s: %v", viewSamples, err)
 	}
+	lists := todoCountsCases(t)
 	checked := 0
 	for _, s := range file.Cases {
 		if s.Input.NeedsYou == "" {
@@ -55,8 +59,16 @@ func TestViewSamplesAreFleetcountsRows(t *testing.T) {
 			if want == nil {
 				t.Fatal("no agents_needs_you")
 			}
+			todos := opt.None[assistantwire.TodoCounts]()
+			if s.Input.TodoCounts != "" {
+				counts, ok := lists[s.Input.TodoCounts]
+				if !ok {
+					t.Fatalf("no todo-counts case %q", s.Input.TodoCounts)
+				}
+				todos = opt.Some(counts)
+			}
 			f := c.fleet(t)
-			got := f.View(f.decide(fleetcount.SurfaceBadge()))
+			got := f.View(f.decide(fleetcount.SurfaceBadge()), todos)
 			// A sample may leave its totals out (they are optional); the manager always writes them.
 			if tot := s.Expected.View.Totals; !reflect.DeepEqual(got.Counts, s.Expected.View.Counts) ||
 				tot != nil && !reflect.DeepEqual(got.Totals, tot) {

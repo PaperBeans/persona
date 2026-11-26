@@ -61,6 +61,32 @@ describe("api in-flight GET deduplication", () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([0, READ_TIMEOUT_MS])("uses the global fetch receiver while coalescing and cancelling a waiter (timeout %s)", async (timeout) => {
+    const response = deferred<Response>();
+    let signal: AbortSignal | null | undefined;
+    const nativeFetch = vi.fn(function (this: unknown, _url: RequestInfo | URL, init?: RequestInit) {
+      if (this !== globalThis) throw new TypeError("Illegal invocation");
+      signal = init?.signal;
+      return response.promise;
+    });
+    // The old entry.fetcher(...) call must fail with this stub, as it does with native fetch in Chrome.
+    expect(() => ({ fetcher: nativeFetch }).fetcher("/api/v1/managers")).toThrow("Illegal invocation");
+    nativeFetch.mockClear();
+    vi.stubGlobal("fetch", nativeFetch);
+
+    const controller = new AbortController();
+    const cancelled = api("/managers", { timeout, signal: controller.signal }).catch((e: unknown) => e);
+    const remaining = api("/managers", { timeout });
+    expect(nativeFetch).toHaveBeenCalledTimes(1);
+    expect(nativeFetch.mock.contexts).toEqual([globalThis]);
+    controller.abort();
+    expect(isAbort(await cancelled)).toBe(true);
+    expect(signal?.aborted).toBe(false);
+
+    response.resolve(new Response(JSON.stringify({ managers: [{ id: "assistant", name: "Example assistant" }] })));
+    await expect(remaining).resolves.toEqual({ managers: [{ id: "assistant", name: "Example assistant" }] });
+  });
+
   it("coalesces concurrent identical GET requests into a single fetch and isolates response copies", async () => {
     const { fn, calls } = abortableFetch();
     const seenStatuses: number[] = [];

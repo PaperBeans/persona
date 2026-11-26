@@ -6550,7 +6550,9 @@ struct Composer: View, Equatable {
                                                 scan: DocumentScanner.isAvailable ? { showScan = true } : nil,
                                                 modules: Modules.registry.composerActions, open: { moduleSheet = $0 },
                                                 // As the sidebar's (#3723): records the meeting with Recordings open, or opens the one running.
-                                                meeting: isMain ? { Task { await MeetingRecorder.shared.startMeeting(inForeground: true) } } : nil,
+                                                // Not with the hub's recording module off (#15214).
+                                                meeting: isMain && RecordingModule.allowance.offersWrites
+                                                    ? { Task { await MeetingRecorder.shared.startMeeting(inForeground: true) } } : nil,
                                                 mention: { typeMention() }, context: { contextPick = $0 })
         if !shellChat || offersMainClear {
             var rows = SlashCommand.commands(loop: canLoop).map { cmd in

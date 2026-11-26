@@ -155,7 +155,9 @@ rule below. Native clients keep their existing two-entry presentation until they
   for Start (one row per plan); a message card waiting for Send; the conversation's own cards. A finished task is never
   here, whatever `ask` it still carries (a supervisor's accepting review can leave its "please verify" behind): the
   To-dos page files it with the finished ones and the tray has nothing to answer, so until #12974 such rows kept the
-  badge up for good while the list the owner opened showed none of them.
+  badge up for good while the list the owner opened showed none of them. On the web, a task review's current owner
+  decision is answerable in the supervising conversation's tray and in the main tray, where a direction's decision is
+  grouped under its supervisor. A quiet task's decision can appear there while the global To-dos badge still skips it.
 - **A supervisor's review is not the owner's.** A supervised task judged finished waits in `pending_review` for its
   supervisor (the background supervisor, a leader, or the conversation that handed it out; "Supervision" and
   "Background supervisor" below), who closes it with `task_review`. That review is Persona's to do, so the Needs you

@@ -387,6 +387,7 @@ class AgentsFoldAllTest {
     }
 
     @Test fun forkRefreshesRepositoryAndOpensBranchedSession() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         var refreshes = 0
         val forkedCalls = mutableListOf<SessionKey>()
         val opened = mutableListOf<SessionKey>()
@@ -430,5 +431,22 @@ class AgentsFoldAllTest {
         assertEquals(1, refreshes)
         assertEquals(listOf(SessionKey("shown", "branched-99")), opened)
         assertEquals(persona.feature.chat.R.string.chat_menu_forked, model.notice.value?.id)
+    }
+
+    @Test fun forkBlockedByTurnChecksOwnLiveStateNotFoldedOrStopped() {
+        val idleParent = Session("m", "p", state = "idle", status = "idle", canFork = true,
+            children = persona.core.contracts.SessionChildren(total = 1, working = 1))
+        val foldedParent = persona.core.domain.sort.AgentSession(idleParent)
+        assertEquals(persona.core.contracts.AgentState.Working, foldedParent.state)
+        assertFalse(forkBlockedByTurn(foldedParent.session))
+
+        val workingLive = Session("m", "w", state = "working", status = "working", canFork = true)
+        val needsYouLive = Session("m", "n", state = "needs_you", status = "blocked", canFork = true)
+        assertTrue(forkBlockedByTurn(workingLive))
+        assertTrue(forkBlockedByTurn(needsYouLive))
+
+        val stoppedWithStaleWorking = Session("m", "s", state = "working", status = "offline", canFork = true)
+        assertFalse(stoppedWithStaleWorking.isLive)
+        assertFalse(forkBlockedByTurn(stoppedWithStaleWorking))
     }
 }

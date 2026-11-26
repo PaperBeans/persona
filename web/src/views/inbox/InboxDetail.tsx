@@ -35,7 +35,7 @@ import { InboxLine } from "./InboxLine";
 import { InboxTaskLinks } from "./InboxTaskLinks";
 import { EventBody, type SourceAt } from "./InboxEvent";
 import { chatOfItem, LarkThread } from "./LarkThread";
-import { useLarkItemReadOnly } from "./lark-write-gate";
+import { useItemReadOnly } from "./item-write-gate";
 import { lazyDialog } from "../LazyOverlay";
 import type { ExternalSourceBindingEditorProps } from "../../features/external-sources/ExternalSourceBindingEditor";
 
@@ -91,7 +91,7 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
   // A chat item's event sits above its chat (#3262), and a mail event above its message (#5471), whether an extension
   // offers a page for the source or not. A chain entry focuses the chat or mail in place instead of switching the page.
   const embed = event && Boolean(item?.lark || item?.mail);
-  const larkReadOnly = useLarkItemReadOnly(item);
+  const readOnly = useItemReadOnly(item);
   const unsentDraft = useUnsentReply(originalKey);
   // Other events replace their body with the original. Give that page its own same-address entry so Back returns to
   // the event; "Handling" closes it and takes the entry back off. Item navigation takes the entry with it instead.
@@ -220,7 +220,7 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
             {!showEvent && <InboxLine item={item} />}
             {!done && !item.handling && agentWorking(item) && <div className="mt-2"><AgentWorking it={item} /></div>}
             <div className="mt-3 flex flex-wrap gap-2">
-              {canDraft(item) && (!larkReadOnly || hasDraft) ? (
+              {canDraft(item) && (!readOnly || hasDraft) ? (
                 <Button tone="accent" icon="write" onClick={() => setDialog("draft")}>{draft && !done ? t("inbox-inboxdetail.view_draft") : t("inbox-inboxdetail.ai_draft")}</Button>
               ) : (
                 // Answered in the source's own app (a CI run has nothing to answer: only "Hand to AI").

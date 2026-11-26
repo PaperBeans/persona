@@ -116,13 +116,13 @@ func (n *Node) codexTerminalRow(id string, s *proto.Session, m quickMeta) {
 
 // setCodexTerminalSettings switches the Codex in t to model and / or effort ("" leaves one as it is) by typing Codex's
 // own /model into its box.
-func (n *Node) setCodexTerminalSettings(ctx context.Context, id string, t codexTerminal, model, effort string) error {
+func (n *Node) setCodexTerminalSettings(ctx context.Context, id string, t codexTerminal, model, effort string) (bool, error) {
 	model, effort = strings.TrimSpace(model), strings.TrimSpace(effort)
 	if model == "" && effort == "" {
-		return nil
+		return false, nil
 	}
 	if model != "" && !proto.ValidModelID(model) {
-		return fmt.Errorf("invalid model %q", model)
+		return false, fmt.Errorf("invalid model %q", model)
 	}
 	n.forgetMeta(n.transcriptPath(id)) // a change made at the computer a moment ago counts
 	now := n.metaOf(id)                // what the rollout says the thread runs with
@@ -134,7 +134,7 @@ func (n *Node) setCodexTerminalSettings(ctx context.Context, id string, t codexT
 			levels = target.levels
 		}
 		if err := codexEffortRefusal(levels, effort); err != nil {
-			return err
+			return false, err
 		}
 	case listed && slices.Contains(target.levels, now.effort):
 		// A model alone: Codex would put the new model on that model's default level. The app-server route keeps the
@@ -142,11 +142,11 @@ func (n *Node) setCodexTerminalSettings(ctx context.Context, id string, t codexT
 		effort = now.effort
 	}
 	if (model == "" || model == now.model) && (effort == "" || effort == now.effort) {
-		return nil // what it runs with already
+		return false, nil // what it runs with already
 	}
 	cmd, err := codexModelArgsCommand(model, effort)
 	if err != nil {
-		return err
+		return false, err
 	}
 	for try := 0; ; try++ {
 		err := n.typeCodexSettings(ctx, id, t, cmd, model, effort)
@@ -155,15 +155,16 @@ func (n *Node) setCodexTerminalSettings(ctx context.Context, id string, t codexT
 			if err == nil {
 				n.forgetMeta(n.transcriptPath(id)) // the row shows what Codex just recorded, not a read from before it
 				n.notifySessions()
+				return true, nil
 			}
-			return err
+			return false, err
 		}
 		if try > 0 {
-			return refusal(proto.CodeModesCodexRefused, starting.words, nil)
+			return false, refusal(proto.CodeModesCodexRefused, starting.words, nil)
 		}
 		select { // nothing was applied: typed once more after a moment
 		case <-ctx.Done():
-			return refusal(proto.CodeModesCodexRefused, starting.words, nil)
+			return false, refusal(proto.CodeModesCodexRefused, starting.words, nil)
 		case <-time.After(codexStartingRetry):
 		}
 	}

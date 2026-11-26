@@ -98,7 +98,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 	livePanes := map[string]bool{} // the resting Claudes' panes, whose screens are read for a dialog
 	liveBusyAgy := map[string]bool{}
 	now := time.Now()
-	paneDeadline := now.Add(codexHomeListWait)
+	paneDeadline := now.Add(n.codexHomeListBudget())
 	// In id order, not the map's: the list is sorted by UpdatedAt with a stable sort, and rows that tie on it (live panes
 	// with no transcript yet all have none) came out in a new order on every pass, each one a whole new list for the hub.
 	for _, id := range slices.Sorted(maps.Keys(agents)) {

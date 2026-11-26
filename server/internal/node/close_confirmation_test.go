@@ -114,6 +114,9 @@ func TestForceCloseDialogAfterUnacceptedAllowOrLostPrompt(t *testing.T) {
 		"lost first prompt": func(n *Node) {
 			n.lostFirst.set(sidA, lostDialog, time.Now())
 		},
+		"lost work-agent first prompt": func(n *Node) {
+			n.lostFirst.set(sidA, lostWorkDialog(), time.Now())
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			n, f, _ := herdrNode(t)

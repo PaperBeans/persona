@@ -71,7 +71,13 @@ func testScheduledUsageLimitRetryRestoredAfterRestart(t *testing.T, st Store) {
 	}
 	t.Cleanup(func() {
 		close(releaseOld)
-		<-oldExited
+		// Only a watcher parked at its deadline is waited for. A test that failed before one got there must stay a
+		// failure, not hang its partition; one that arrives later passes the closed releaseOld and exits (#16028).
+		select {
+		case <-oldAtDeadline:
+			<-oldExited
+		default:
+		}
 	})
 
 	limitRun(t, n, first, nil)

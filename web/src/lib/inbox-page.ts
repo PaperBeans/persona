@@ -7,6 +7,7 @@ import { t } from "../i18n";
 import { api, enc, getToken } from "./api";
 import type { ContextRef } from "./links";
 import { larkPath } from "./lark-accounts";
+import { mailReading } from "./mail";
 import { baseName, uuid } from "./format";
 import type { Route } from "./router";
 import type { Interaction, Session } from "./types";
@@ -120,7 +121,8 @@ export function handOffContext(it: InboxItem): ContextRef {
   }
   if (it.connector?.url) text += `\n\n${t("lib-inbox-page.handoff_connector", { name: it.account_name || it.source, url: it.connector.url })}`;
   const uid = it.mail?.uids[it.mail.uids.length - 1];
-  if (it.mail && uid !== undefined) text += `\n\n${t("lib-inbox-page.handoff_mail", { account: it.mail.account_id, mailbox: it.mail.mailbox || "INBOX", uid })}`;
+  // a hub with mail off has no mail_read / mail_send to point the agent at (lib/mail.ts mailReading)
+  if (it.mail && uid !== undefined && mailReading().kind === "full") text += `\n\n${t("lib-inbox-page.handoff_mail", { account: it.mail.account_id, mailbox: it.mail.mailbox || "INBOX", uid })}`;
   return { id: `inbox:${it.id}`, kind: "context", title, url: "", text };
 }
 

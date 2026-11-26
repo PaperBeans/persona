@@ -29,6 +29,9 @@ var todoFeedKinds = []string{feedTask, feedReceipt, feedRouted, feedReport, feed
 // extensionViewConversations are those of list (GET /api/v1/assistant) an extension's token is shown:
 // none of a space, by its space or its directory (without the registry here, any space is left out),
 // and never a LogicalPlaceholder whose space is not affirmatively known to be the default empty space.
+// The one route that lists a space's conversations to an extension is GET
+// /api/v1/assistant/tracks/{slug}/conversations, behind the spaces scope and row by row
+// (trackConversations, track_conversations.go).
 func (s *Service) extensionViewConversations(ctx context.Context, list []proto.Session) []proto.Session {
 	return slices.DeleteFunc(list, func(c proto.Session) bool {
 		if runSpace(c) != "" {

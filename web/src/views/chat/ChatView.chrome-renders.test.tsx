@@ -56,7 +56,7 @@ vi.mock("./chat-actions", async (load) => {
 vi.mock("../../lib/panel", async (load) => ({ ...(await load<typeof import("../../lib/panel")>()), usePanel: () => null }));
 vi.mock("../assistant/Persona", () => ({ usePersona: () => ({ name: "Persona" }) }));
 
-import { applyCompleteSessions, applyMachine, getState, reset, type ItemsEvent } from "../../lib/store";
+import { applyCompleteSessions, applyMachine, getState, refreshTodos, reset, type ItemsEvent } from "../../lib/store";
 import { whenComposer } from "../../lib/links";
 import { closePanel, getPanel, openPanel } from "../../lib/panel";
 import { currentPlatform } from "../../lib/shortcuts";
@@ -68,6 +68,7 @@ import { skillContext } from "../../lib/skill-mentions";
 import { currentRoster, resetRoster, setRoster } from "../../lib/managers";
 import { resetManagerChoice } from "../../lib/manager-choice";
 import type { Item, Machine, Session } from "../../lib/types";
+import type { Todo } from "../../lib/todos";
 import { t } from "../../i18n";
 import { ChatView } from "./ChatView";
 
@@ -143,6 +144,49 @@ async function open(view: React.ReactElement<{ assistant?: boolean }>, session =
   zero();
 }
 const posted = (path: string) => fetcher.mock.calls.filter(([url, init]) => String(url).endsWith(path) && (init as RequestInit | undefined)?.method === "POST");
+
+it("shows and answers the linked task's current decision above the Agent composer", async () => {
+  const round = "2026-11-24T09:00:00Z";
+  const task: Todo = {
+    id: "task1", title: "Release checks", created_at: round, updated_at: round,
+    agents: [{ machine_id: "mac", session_id: "s1", linked_at: round }],
+    ask: { outcome: "decide", asked_at: round, verdict: "Needs your decision", question: "How should the release proceed?",
+      recommend: "Try a staged rollout", options: [{ label: "Try a staged rollout" }, { label: "Wait for verification" }] },
+  };
+  let todos: Todo[] = [{ ...task, id: "task2", ask: { ...task.ask!, question: "A different task's decision" } }];
+  const fallback = fetcher.getMockImplementation() as typeof fetch;
+  fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+    const path = String(url);
+    if (path.endsWith("/todos/task1/accept") && init?.method === "POST") {
+      todos = [{ ...task, ask: undefined }];
+      return Response.json({});
+    }
+    return path.endsWith("/todos") ? Response.json({ todos }) : fallback(url, init);
+  });
+  const card = () => host.querySelector("[data-chat-dock-above] [data-decision-row]");
+  const reload = () => act(async () => { await refreshTodos(); });
+
+  await open(<ChatView mid="mac" sid="s1" inPage />, row({ manager: "remote-manager", todo: { id: task.id, title: task.title } }));
+  await reload();
+  expect(card()).toBeNull(); // a stale association on the to-do list cannot show another task's decision
+  todos = [{ ...task, agents: task.agents?.map((a) => ({ ...a, released_at: round })) }];
+  await reload();
+  expect(card()).toBeNull();
+
+  todos = [task];
+  await reload();
+  await act(async () => { await import("../assistant/TaskDecision"); });
+  await vi.waitFor(() => expect(card()?.querySelector("[data-decision-question]")?.textContent).toBe(task.ask?.question));
+  expect(card()?.textContent).toContain("Try a staged rollout");
+  expect(card()?.textContent).toContain(t("chat-interactions.recommended"));
+  const alternate = [...card()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Wait for verification");
+  expect(alternate).toBeDefined();
+  await act(async () => { alternate!.click(); });
+  const sends = posted("/todos/task1/accept");
+  expect(sends).toHaveLength(1);
+  expect(JSON.parse((sends[0][1] as RequestInit).body as string)).toEqual({ asked_at: round, option: "Wait for verification" });
+  await vi.waitFor(() => expect(card()).toBeNull());
+});
 
 it("a completed task remains a labelled, clickable owner, not a prompt to link it again", async () => {
   const router = await import("../../lib/router");

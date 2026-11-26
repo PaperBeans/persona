@@ -89,7 +89,8 @@ fun EntryProviderScope<NavKey>.settingsDetailEntries(navigator: Navigator, servi
     }
     // One of the current assistant's channels and model providers (its Settings, docs/assistant/managers.md "Clients").
     entry<ChannelRoute> { route ->
-        ChannelPage(services.forCurrentAssistant().channels.takeUnless { demo }, route.channelId, onBack = navigator::back, onOpen = navigator::navigate)
+        ChannelPage(services.forCurrentAssistant().channels.takeUnless { demo }, route.channelId, onBack = navigator::back, onOpen = navigator::navigate,
+            larkBot = rememberLarkBotEntry())
     }
     entry<persona.core.navigation.ModelProviderRoute> { route ->
         val machines by services.sessions.machines.collectAsState()

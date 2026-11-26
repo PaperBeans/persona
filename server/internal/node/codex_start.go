@@ -479,7 +479,7 @@ func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, be
 			return "", ctx.Err()
 		case <-time.After(min(time.Until(deadline), poll)):
 		}
-		scanBy := time.Now().Add(codexHomeListWait)
+		scanBy := time.Now().Add(n.codexHomeListBudget())
 		for _, home := range n.codexRolloutHomes(pane) {
 			for _, r := range n.firstMessageRollouts(home, scanBy) {
 				if (r.cwd != cwd && r.cwd != resolved) || r.mtime.Before(began.Add(-time.Second)) {

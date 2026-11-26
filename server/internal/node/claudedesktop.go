@@ -527,8 +527,11 @@ func localID(id string) string {
 func (x claudeDesktopIndex) listed(id string) bool { return x.visible[id] }
 
 // maxDesktopOffline bounds the desktop app's sessions the offline list shows (the newest, whatever their age); they are
-// counted on their own, not toward the 80 of the others.
-const maxDesktopOffline = 100
+// counted on their own, not toward the 80 of the others. It only guards against a runaway index: the list follows the
+// sidebar, which keeps every unarchived session. It was 100, and a sidebar outgrows that (one Mac had 208 top-level
+// sessions): the ones quiet for a week or more were cut, newest transcript first, while the sidebar still showed them
+// (#15522).
+const maxDesktopOffline = 1000
 
 // hidden: the offline list leaves transcript id out as the desktop app's sidebar does. shown are the transcripts the
 // list has shown so far (newest first, so a session's current one comes before its earlier ones).

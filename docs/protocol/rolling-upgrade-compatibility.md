@@ -59,6 +59,20 @@
 | New hub, older manager | `agents.start_params` keeps the older synchronous model naming behavior. The older manager does not understand the completion event, so the new guarded late rename requires a manager upgrade too. |
 | Older hub, new manager | Start parameters carry the local placeholder without a model wait. An older hub does not emit the completion event for a synchronous start and retains its legacy asynchronous post-start behavior; upgrade the hub for the guarded completion path. |
 
+### On-demand assistant skills
+
+| Pair | What happens |
+| --- | --- |
+| New manager, older node | `assistant.prepare.claude_md` retains the complete work and rich-view procedures. The older node ignores `work_guide_md` and `views_guide_md`, so it never refers to a built-in skill its binary does not carry. |
+| Older manager, new node | An absent `views_guide_md` keeps the manager's complete rich-view procedure. Existing `work_guide_md` behavior is unchanged. |
+| New manager and node | The node syncs both native skill roots before writing instructions. It selects compact rich-view guidance only when both managed `persona-views` copies are ready; if work guidance was requested, its readiness is checked independently. |
+| Local same-name skill | A newly introduced built-in does not adopt or replace an existing `persona-views` directory. The node retains the complete instructions because that local directory is not a verified managed copy. The managed directory's marker and a separate ownership file must be hard links to the same inode, so copying and editing the directory revokes ownership. If a later per-send sync finds a user replacement, the node restores its saved complete instructions and stays on them until a new prepare verifies the managed guide. |
+| Node downgrade before the next prepare | The shared legacy inventory does not list `persona-views`. An older node therefore does not remove it as an unknown managed built-in, and a process resumed with compact instructions can still read the on-demand skill. A cached same-name extension disables compact selection because an older node may copy it over the managed guide; if that happens, the next runtime sync restores the saved complete instructions. The next prepare from an older manager also restores the complete inline procedure. |
+
+A working supervisor started with the legacy complete policy keeps that exact policy across a manager upgrade until an idle send. Main, background and side conversations without a direction record persist their selected role in `assistant.supervision_roles`; existing `direction.RoleInEffect` records remain authoritative. A new main or background conversation records its compact role only after the node accepts the start and returns the conversation id. Other role changes share the send's outcome settlement: a refused idle send restores the previous baseline, and a policy-only lookup cannot create one. Leader membership transitions inherit only a previously recorded role, before the new membership becomes visible; a pre-upgrade process without that evidence keeps the complete policy. A missing or unreadable baseline always fails closed rather than changing a working process's fingerprint.
+
+A manager downgrade while a role-filtered supervisor is working is a deliberate compatibility limit, not a seamless policy switch. The older manager presents the legacy complete fingerprint, so the node keeps the running process and its policy unchanged and refuses that send as busy; existing supervision delivery retry waits for idle, while a direct follow-up can receive the busy response. Once idle, the older manager's complete policy can be accepted normally. The node's supervision-policy fingerprint and busy guard are not relaxed for this downgrade case.
+
 ### MCP namespace / tools
 
 The hub sends its feature list in `devices.connected`, matching the capabilities advertised in `hello.features`.
@@ -365,6 +379,25 @@ channel and exact final offset; duplicate, stale and unknown-channel confirmatio
 
 RFB keeps its existing completion rule in every combination: the local close finishes the channel and session at the
 next watchdog tick without waiting for `close_ack`.
+
+## Counts view (`counts_view`, #15893)
+
+A manager that names the capability `counts_view` tells the hub its counts view (`counts.view`); the hub relays it to
+clients that ask for the feature as `counts` messages, lists the feature always, and says `counts_view: true` on the
+roster entry of each online manager that tells one ([counts.md](counts.md) "The hub's relay"). A client draws a
+surface from views only while no manager in its scope is absent, and keeps a manager's last view across `view: null`,
+going offline and a hub restart (D10 and D13 of `docs/plans/plan-derived-counts.md`).
+
+| Pair | What it sees |
+| --- | --- |
+| Old app, new hub | It never asks for the feature, so it gets no `counts` message, and it ignores the roster's unknown `counts_view`. Its numbers are its own, as before |
+| New app, old hub | The hello lists no `counts_view`: every surface draws the app's fallback, today's rule |
+| New app and hub, a manager without the capability | Its roster entry is online without `counts_view`: the surfaces whose scope holds it draw the fallback |
+| New manager, old hub | The hub drops `counts.view`, an event it does not know |
+| Manager restarts or is redeployed | `view: null`, then a view with a new epoch; meanwhile the app draws its last view as it was, and no rule changes |
+| Hub restarts or switches versions | The new hub has no view until each manager connects again and tells its last one; an app keeps the views it has, and one with none draws the fallback until then |
+| Manager or hub rolled back | The hello lists no `counts_view`, or the reconnected manager's entry has no `counts_view: true`: the fallback from that message on |
+| Several paired hubs | Each hub on its own; the app adds them up |
 
 ## Apple 端交接
 

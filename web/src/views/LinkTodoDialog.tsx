@@ -1,11 +1,11 @@
 // Dialog to link an agent session or project space to an uncompleted todo
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { errorText } from "../lib/api";
 import { ago } from "../lib/format";
 import { composing } from "../lib/send-history";
 import { useAgentSessions } from "../lib/sessions";
 import { refresh, refreshTodos, setSpacesSupported, useStore } from "../lib/store";
-import { projectNames, useTodoProjects } from "../lib/todo-projects";
+import { projectNames, useTodoProjects, type TodoProject } from "../lib/todo-projects";
 import {
   createTodo,
   isLegacySpacesRouteError,
@@ -43,26 +43,81 @@ export interface LinkTargetSpace {
   space: string;
 }
 
+export type LinkTodoNotifyTone = "ok" | "error";
+export type LinkTodoRefreshScope = "todos" | "all";
+
+export interface LinkTodoDialogProps {
+  open: boolean;
+  session?: Session;
+  space?: LinkTargetSpace;
+  onClose: () => void;
+  /** Explicit todos skip the default hub store subscription. */
+  todos?: readonly Todo[];
+  /** Explicit current todo ID (`null` when unlinked) overrides deriving it from `session` and `todos`. */
+  currentTodoId?: string | null;
+  /** Explicit sessions for status derivation skip `useAgentSessions()`. */
+  sessions?: readonly Session[];
+  /** Explicit projects for labels and search skip `useTodoProjects()` and its `/kb/projects` fetch. */
+  projects?: readonly TodoProject[];
+  /** Controlled link callback for a session target, replacing `linkAgentToTodo`. */
+  onLinkSession?: (todo: Todo, session: Session) => Promise<void> | void;
+  /** Controlled link callback for a project space target, replacing `linkSpaceToTodo`. */
+  onLinkSpace?: (todo: Todo, space: LinkTargetSpace) => Promise<void> | void;
+  /** Controlled unlink callback for a session target, replacing `unlinkAgentFromTodo`. */
+  onUnlinkSession?: (todoId: string, session: Session) => Promise<void> | void;
+  /** Controlled unlink callback for a project space target, replacing `unlinkSpaceFromTodo`. */
+  onUnlinkSpace?: (todoId: string, space: LinkTargetSpace) => Promise<void> | void;
+  /** Controlled create callback for "New to-do…", replacing `createTodo`. */
+  onCreateTodo?: (title: string) => Promise<Todo>;
+  /** Controlled refresh callback replacing `refreshTodos` / `refresh`. Omitted with controlled mutations skips global store refreshes. */
+  onRefresh?: (scope: LinkTodoRefreshScope) => Promise<void> | void;
+  /** Controlled legacy-spaces callback replacing `setSpacesSupported(false)`. */
+  onSpacesUnsupported?: () => void;
+  /** Controlled notification callback replacing `toast(message, tone)`. */
+  onNotify?: (message: string, tone: LinkTodoNotifyTone) => void;
+}
+
 export function getLinkDialogTargetKey(space?: LinkTargetSpace, session?: Session): string {
   if (space) return `sp:${space.machineId}/${space.space}`;
   if (session) return `s:${session.machine_id}/${session.session_id}`;
   return "";
 }
 
-export function LinkTodoDialog({
+export function LinkTodoDialog(props: LinkTodoDialogProps) {
+  if (props.todos !== undefined) {
+    return <LinkTodoDialogView {...props} todos={props.todos} />;
+  }
+  return <DefaultLinkTodoDialog {...props} />;
+}
+
+function DefaultLinkTodoDialog(props: LinkTodoDialogProps) {
+  const todos = useStore((s) => s.todos);
+  return <LinkTodoDialogView {...props} todos={todos} />;
+}
+
+interface LinkTodoDialogViewProps extends Omit<LinkTodoDialogProps, "todos"> {
+  todos: readonly Todo[];
+}
+
+function LinkTodoDialogView({
   open,
   session,
   space,
   onClose,
-}: {
-  open: boolean;
-  session?: Session;
-  space?: LinkTargetSpace;
-  onClose: () => void;
-}) {
-  const todos = useStore((s) => s.todos);
+  todos,
+  currentTodoId: controlledCurrentTodoId,
+  sessions,
+  projects,
+  onLinkSession,
+  onLinkSpace,
+  onUnlinkSession,
+  onUnlinkSpace,
+  onCreateTodo,
+  onRefresh,
+  onSpacesUnsupported,
+  onNotify,
+}: LinkTodoDialogViewProps) {
   const uncompleted = useMemo(() => todos.filter((todo) => !todo.done_at), [todos]);
-  const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   // Cancelling a new to-do puts the keyboard back on "New to-do…", not on the page under the dialog.
@@ -72,105 +127,185 @@ export function LinkTodoDialog({
     setCreating(false);
   };
 
-  // Reset dialog state when opened or when target changes (#874 item 3)
+  // Reset dialog state and invalidate stale in-flight requests when opened or when target changes (#874 item 3).
   const targetKey = getLinkDialogTargetKey(space, session);
+  const scopeKey = open ? targetKey : "";
+  const mountedRef = useRef(true);
+  const requestSeqRef = useRef(0);
+  const activeRequestRef = useRef(0);
+  const latestRef = useRef({ onClose, onNotify, onRefresh, onSpacesUnsupported });
+  latestRef.current = { onClose, onNotify, onRefresh, onSpacesUnsupported };
+  const [busyState, setBusyState] = useState<{ scope: string; token: number } | null>(null);
+  const busy = busyState !== null && busyState.scope === scopeKey;
+
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestSeqRef.current += 1;
+      activeRequestRef.current = 0;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    requestSeqRef.current += 1;
+    activeRequestRef.current = 0;
+    setBusyState(null);
     if (open) {
       setCreating(false);
       setNewTitle("");
-      setBusy(false);
     }
   }, [open, targetKey]);
 
   if (!session && !space) return null;
 
+  const startRequest = (): number | null => {
+    if (activeRequestRef.current !== 0) return null;
+    const token = ++requestSeqRef.current;
+    activeRequestRef.current = token;
+    setBusyState({ scope: scopeKey, token });
+    return token;
+  };
+  const isCurrent = (token: number) => mountedRef.current && activeRequestRef.current === token;
+  const finishRequest = (token: number) => {
+    if (activeRequestRef.current === token) {
+      activeRequestRef.current = 0;
+      if (mountedRef.current) setBusyState((prev) => (prev?.token === token ? null : prev));
+    }
+  };
+  const notify = (message: string, tone: LinkTodoNotifyTone) => {
+    if (latestRef.current.onNotify) latestRef.current.onNotify(message, tone);
+    else toast(message, tone);
+  };
+  const markSpacesUnsupported = (controlledAction: boolean) => {
+    if (latestRef.current.onSpacesUnsupported) latestRef.current.onSpacesUnsupported();
+    else if (!controlledAction) setSpacesSupported(false);
+  };
+  const runRefresh = async (scope: LinkTodoRefreshScope, controlledAction: boolean) => {
+    if (latestRef.current.onRefresh) {
+      await latestRef.current.onRefresh(scope);
+      return;
+    }
+    if (controlledAction) return;
+    await refreshTodos();
+    if (scope === "all") await refresh();
+  };
+  const closeDialog = () => latestRef.current.onClose();
+
   // Keep session.todo?.id as source for sessions so controls don't disappear if /todos hasn't loaded (#874 item 4)
-  const currentTodoId = resolveLinkCurrentTodoId(space, session, todos);
+  const currentTodoId =
+    controlledCurrentTodoId !== undefined
+      ? (controlledCurrentTodoId ?? undefined)
+      : resolveLinkCurrentTodoId(space, session, todos as Todo[]);
 
   const handleSelect = async (todo: Todo) => {
-    setBusy(true);
+    const token = startRequest();
+    if (token === null) return;
+    const controlledAction = Boolean(space ? onLinkSpace : onLinkSession);
     try {
       if (space) {
-        await linkSpaceToTodo(todo.id, space.machineId, space.space);
-        await refreshTodos();
-        await refresh();
-        toast(t("linktododialog.space_linked", { title: todo.title }), "ok");
+        if (onLinkSpace) await onLinkSpace(todo, space);
+        else await linkSpaceToTodo(todo.id, space.machineId, space.space);
+        if (!isCurrent(token)) return;
+        await runRefresh("all", controlledAction);
+        if (!isCurrent(token)) return;
+        notify(t("linktododialog.space_linked", { title: todo.title }), "ok");
       } else if (session) {
-        await linkAgentToTodo(todo.id, session.machine_id, session.session_id);
-        await refreshTodos();
-        await refresh();
-        toast(t("linktododialog.session_linked", { title: todo.title }), "ok");
+        if (onLinkSession) await onLinkSession(todo, session);
+        else await linkAgentToTodo(todo.id, session.machine_id, session.session_id);
+        if (!isCurrent(token)) return;
+        await runRefresh("all", controlledAction);
+        if (!isCurrent(token)) return;
+        notify(t("linktododialog.session_linked", { title: todo.title }), "ok");
       }
-      onClose();
+      closeDialog();
     } catch (e) {
+      if (!isCurrent(token)) return;
       if (space && isLegacySpacesRouteError(e)) {
-        setSpacesSupported(false);
-        toast(t("linktododialog.space_unsupported"), "error");
+        markSpacesUnsupported(controlledAction);
+        notify(t("linktododialog.space_unsupported"), "error");
       } else {
-        toast(space ? t("linktododialog.space_link_failed", { error: errorText(e) }) : t("linktododialog.session_link_failed", { error: errorText(e) }), "error");
+        notify(space ? t("linktododialog.space_link_failed", { error: errorText(e) }) : t("linktododialog.session_link_failed", { error: errorText(e) }), "error");
       }
-      void refreshTodos();
+      void Promise.resolve(runRefresh("todos", controlledAction)).catch(() => {});
     } finally {
-      setBusy(false);
+      finishRequest(token);
     }
   };
 
   const handleUnlink = async () => {
     if (!currentTodoId) return;
-    setBusy(true);
+    const token = startRequest();
+    if (token === null) return;
+    const controlledAction = Boolean(space ? onUnlinkSpace : onUnlinkSession);
     try {
       if (space) {
-        await unlinkSpaceFromTodo(currentTodoId, space.machineId, space.space);
-        await refreshTodos();
-        await refresh();
-        toast(t("linktododialog.space_unlinked"), "ok");
+        if (onUnlinkSpace) await onUnlinkSpace(currentTodoId, space);
+        else await unlinkSpaceFromTodo(currentTodoId, space.machineId, space.space);
+        if (!isCurrent(token)) return;
+        await runRefresh("all", controlledAction);
+        if (!isCurrent(token)) return;
+        notify(t("linktododialog.space_unlinked"), "ok");
       } else if (session) {
-        await unlinkAgentFromTodo(currentTodoId, session.machine_id, session.session_id);
-        await refreshTodos();
-        await refresh();
-        toast(t("linktododialog.session_unlinked"), "ok");
+        if (onUnlinkSession) await onUnlinkSession(currentTodoId, session);
+        else await unlinkAgentFromTodo(currentTodoId, session.machine_id, session.session_id);
+        if (!isCurrent(token)) return;
+        await runRefresh("all", controlledAction);
+        if (!isCurrent(token)) return;
+        notify(t("linktododialog.session_unlinked"), "ok");
       }
-      onClose();
+      closeDialog();
     } catch (e) {
+      if (!isCurrent(token)) return;
       if (space && isLegacySpacesRouteError(e)) {
-        setSpacesSupported(false);
+        markSpacesUnsupported(controlledAction);
       }
-      toast(space ? t("linktododialog.space_unlink_failed", { error: errorText(e) }) : t("linktododialog.session_unlink_failed", { error: errorText(e) }), "error");
-      void refreshTodos();
+      notify(space ? t("linktododialog.space_unlink_failed", { error: errorText(e) }) : t("linktododialog.session_unlink_failed", { error: errorText(e) }), "error");
+      void Promise.resolve(runRefresh("todos", controlledAction)).catch(() => {});
     } finally {
-      setBusy(false);
+      finishRequest(token);
     }
   };
 
   const handleCreateAndLink = async () => {
     const trimmed = newTitle.trim();
     if (!trimmed) return;
-    setBusy(true);
+    const token = startRequest();
+    if (token === null) return;
+    const linkControlled = Boolean(space ? onLinkSpace : onLinkSession);
+    const anyControlled = Boolean(onCreateTodo) || linkControlled;
     try {
-      const created = await createTodo(trimmed);
+      const created = onCreateTodo ? await onCreateTodo(trimmed) : await createTodo(trimmed);
+      if (!isCurrent(token)) return;
       try {
         if (space) {
-          await linkSpaceToTodo(created.id, space.machineId, space.space);
-          toast(t("linktododialog.space_created_linked", { title: created.title }), "ok");
+          if (onLinkSpace) await onLinkSpace(created, space);
+          else await linkSpaceToTodo(created.id, space.machineId, space.space);
+          if (!isCurrent(token)) return;
+          notify(t("linktododialog.space_created_linked", { title: created.title }), "ok");
         } else if (session) {
-          await linkAgentToTodo(created.id, session.machine_id, session.session_id);
-          toast(t("linktododialog.session_created_linked", { title: created.title }), "ok");
+          if (onLinkSession) await onLinkSession(created, session);
+          else await linkAgentToTodo(created.id, session.machine_id, session.session_id);
+          if (!isCurrent(token)) return;
+          notify(t("linktododialog.session_created_linked", { title: created.title }), "ok");
         }
       } catch (linkErr) {
+        if (!isCurrent(token)) return;
         if (space && isLegacySpacesRouteError(linkErr)) {
-          setSpacesSupported(false);
-          toast(t("linktododialog.created_space_unsupported", { error: errorText(linkErr) }), "error");
+          markSpacesUnsupported(linkControlled);
+          notify(t("linktododialog.created_space_unsupported", { error: errorText(linkErr) }), "error");
         } else {
-          toast(space ? t("linktododialog.created_space_link_failed", { error: errorText(linkErr) }) : t("linktododialog.created_session_link_failed", { error: errorText(linkErr) }), "error");
+          notify(space ? t("linktododialog.created_space_link_failed", { error: errorText(linkErr) }) : t("linktododialog.created_session_link_failed", { error: errorText(linkErr) }), "error");
         }
       }
-      await refreshTodos();
-      await refresh();
-      onClose();
+      await runRefresh("all", anyControlled);
+      if (!isCurrent(token)) return;
+      closeDialog();
     } catch (e) {
-      toast(t("linktododialog.create_failed", { error: errorText(e) }), "error");
+      if (!isCurrent(token)) return;
+      notify(t("linktododialog.create_failed", { error: errorText(e) }), "error");
     } finally {
-      setBusy(false);
+      finishRequest(token);
     }
   };
 
@@ -194,7 +329,15 @@ export function LinkTodoDialog({
         {uncompleted.length === 0 ? (
           <div className="py-4 text-center text-meta text-ink-3">{t("linktododialog.empty")}</div>
         ) : (
-          <TodoChoices todos={uncompleted} currentTodoId={currentTodoId} busy={busy} onPick={(todo) => void handleSelect(todo)} />
+          <TodoChoices
+            todos={uncompleted}
+            currentTodoId={currentTodoId}
+            busy={busy}
+            resetKey={scopeKey}
+            sessions={sessions}
+            projects={projects}
+            onPick={(todo) => void handleSelect(todo)}
+          />
         )}
 
         {creating ? (
@@ -266,14 +409,58 @@ export function LinkTodoDialog({
   );
 }
 
+interface TodoChoicesProps {
+  todos: Todo[];
+  currentTodoId?: string;
+  busy: boolean;
+  resetKey: string;
+  sessions?: readonly Session[];
+  projects?: readonly TodoProject[];
+  onPick: (todo: Todo) => void;
+}
+
+interface TodoChoicesWithSessionsProps extends Omit<TodoChoicesProps, "sessions"> {
+  sessions: readonly Session[];
+}
+
+interface TodoChoicesViewProps extends Omit<TodoChoicesWithSessionsProps, "projects"> {
+  projects: readonly TodoProject[];
+}
+
 /** The open to-dos to pick from. Each row says, under its title, where the to-do stands (the To-dos page's word), its
  *  project and when it last changed, so two with one title can be told apart; a long list gets a search field. */
-function TodoChoices({ todos, currentTodoId, busy, onPick }: { todos: Todo[]; currentTodoId?: string; busy: boolean; onPick: (todo: Todo) => void }) {
+function TodoChoices(props: TodoChoicesProps) {
+  if (props.sessions !== undefined) {
+    return <TodoChoicesProjects {...props} sessions={props.sessions} />;
+  }
+  return <DefaultTodoChoicesSessions {...props} />;
+}
+
+function DefaultTodoChoicesSessions(props: TodoChoicesProps) {
   const sessions = useAgentSessions();
-  const lookup = useMemo(() => makeSessionLookup(sessions), [sessions]);
-  const project = projectNames(useTodoProjects());
+  return <TodoChoicesProjects {...props} sessions={sessions} />;
+}
+
+function TodoChoicesProjects(props: TodoChoicesWithSessionsProps) {
+  if (props.projects !== undefined) {
+    return <TodoChoicesView {...props} projects={props.projects} />;
+  }
+  return <DefaultTodoChoicesProjects {...props} />;
+}
+
+function DefaultTodoChoicesProjects(props: TodoChoicesWithSessionsProps) {
+  const projects = useTodoProjects();
+  return <TodoChoicesView {...props} projects={projects} />;
+}
+
+function TodoChoicesView({ todos, currentTodoId, busy, resetKey, sessions, projects, onPick }: TodoChoicesViewProps) {
+  const lookup = useMemo(() => makeSessionLookup(sessions as Session[]), [sessions]);
+  const project = useMemo(() => projectNames(projects as TodoProject[]), [projects]);
   const now = useNow(60_000);
   const [query, setQuery] = useState("");
+  useLayoutEffect(() => {
+    setQuery("");
+  }, [resetKey]);
   const searchable = todos.length >= LINK_SEARCH_FROM;
   const shown = searchable ? matchTodos(todos, query, project) : todos;
   return (

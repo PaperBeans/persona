@@ -530,3 +530,219 @@ func TestClarifyFailureKeepsOriginalToolWaiting(t *testing.T) {
 		t.Fatalf("denied original tool result = %+v, %v", got.out, got.err)
 	}
 }
+
+func TestPreparedApprovalZeroExpiresAtClarifyPreservesDefaultDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ft := newFleetTestNoStore(t)
+		preparedTestConversation(ft)
+		var applies atomic.Int32
+		ix := proto.Interaction{ID: "ix_zero_ttl_clarify", MachineID: "mac", SessionID: "s1", Kind: proto.IxPermission,
+			ToolName: "persona_settings", Summary: "Change the example setting"}
+		done := make(chan preparedTestResult, 1)
+		go func() {
+			out, err := ft.s.waitPreparedCard(context.Background(), ix, approvalops.Operation{Apply: func(context.Context, proto.Resolution) (string, error) {
+				applies.Add(1)
+				return "applied after clarification", nil
+			}})
+			done <- preparedTestResult{out: out, err: err}
+		}()
+		ft.waitPending(1)
+
+		if err := ft.s.clarify(context.Background(), ix.ID, "Please explain", "owner-q-zero-ttl", nil); err != nil {
+			t.Fatalf("clarify: %v", err)
+		}
+		first := awaitPreparedTest(t, done)
+		if first.err != nil || !first.out.Clarifying {
+			t.Fatalf("initial result = %+v, %v", first.out, first.err)
+		}
+
+		ref := SessionRef{MachineID: "mac", SessionID: "s1"}
+		ft.s.approvalAnswerTurnStarted(ref)
+		ft.s.approvalAnswerTurnEnded(ref)
+
+		elapse(time.Minute)
+		if pending := ft.s.pendingInteractions(); len(pending) != 1 || pending[0].ID != ix.ID {
+			t.Fatalf("default-TTL prepared card expired right after answer: pending=%+v", pending)
+		}
+
+		allow := true
+		if err := ft.s.resolve(ix.ID, proto.Resolution{Allow: &allow}); err != nil {
+			t.Fatalf("Allow after clarification answer failed: %v", err)
+		}
+		if applies.Load() != 1 {
+			t.Fatalf("apply count = %d, want 1", applies.Load())
+		}
+		if result := waitApprovalResult(t, ft, ix.ID); !strings.Contains(result, "applied after clarification") {
+			t.Fatalf("terminal result = %q", result)
+		}
+	})
+}
+
+func TestStartPreparedTimerDoesNotClobberPausedOrClarifiedCard(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ft := newFleetTestNoStore(t)
+		preparedTestConversation(ft)
+		done := startPreparedTest(t, ft, "ix_timer_race", "", nil)
+
+		if err := ft.s.clarify(context.Background(), "ix_timer_race", "Question", "owner-q-timer-race", nil); err != nil {
+			t.Fatalf("clarify: %v", err)
+		}
+		awaitPreparedTest(t, done)
+
+		// Simulate startPreparedTimer running after an early clarify already paused the card.
+		ft.s.fleet.mu.Lock()
+		p := ft.s.fleet.interactions["ix_timer_race"]
+		beforePaused := p.prepared.decisionTimer
+		ft.s.fleet.mu.Unlock()
+		ft.s.startPreparedTimer(p)
+		ft.s.fleet.mu.Lock()
+		afterPaused := p.prepared.decisionTimer
+		ft.s.fleet.mu.Unlock()
+		if afterPaused != beforePaused {
+			t.Fatal("startPreparedTimer replaced decisionTimer on an already-paused card")
+		}
+
+		// After the answer resumes the card with ~1h remaining, a late startPreparedTimer
+		// must also NOT overwrite the resumed timer with the short 75s initial wait.
+		ref := SessionRef{MachineID: "mac", SessionID: "s1"}
+		ft.s.approvalAnswerTurnStarted(ref)
+		ft.s.approvalAnswerTurnEnded(ref)
+		ft.s.startPreparedTimer(p)
+
+		elapse(2 * time.Minute)
+		if pending := ft.s.pendingInteractions(); len(pending) != 1 || pending[0].ID != "ix_timer_race" {
+			t.Fatalf("late startPreparedTimer expired a clarified card after initial wait: pending=%+v", pending)
+		}
+	})
+}
+
+func TestClarifyReturnsUnavailableWhenCardRemovedInFlight(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ft := newFleetTestNoStore(t)
+		preparedTestConversation(ft)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ix := proto.Interaction{ID: "ix_removed_in_flight", MachineID: "mac", SessionID: "s1", Kind: proto.IxPermission,
+			ToolName: "persona_settings", Summary: "Change the example setting", ExpiresAt: time.Now().Add(time.Hour)}
+		done := make(chan preparedTestResult, 1)
+		go func() {
+			out, err := ft.s.waitPreparedCard(ctx, ix, approvalops.Operation{Apply: func(context.Context, proto.Resolution) (string, error) {
+				return "applied", nil
+			}})
+			done <- preparedTestResult{out: out, err: err}
+		}()
+		ft.waitPending(1)
+
+		ft.f.mu.Lock()
+		ft.f.onSendOnce = func(_ *fakeHub, _ map[string]any) {
+			ft.s.fleet.mu.Lock()
+			if p := ft.s.fleet.interactions["ix_removed_in_flight"]; p != nil && p.prepared != nil {
+				if p.prepared.decisionTimer != nil {
+					p.prepared.decisionTimer.Stop()
+				}
+				if p.prepared.pauseTimer != nil {
+					p.prepared.pauseTimer.Stop()
+				}
+			}
+			delete(ft.s.fleet.interactions, "ix_removed_in_flight")
+			ft.s.fleet.mu.Unlock()
+		}
+		ft.f.mu.Unlock()
+
+		err := ft.s.clarify(context.Background(), "ix_removed_in_flight", "Question during removal", "owner-q-removed", nil)
+		if !errors.Is(err, errClarifyUnavailable) {
+			t.Fatalf("clarify error = %v, want errClarifyUnavailable", err)
+		}
+		cancel()
+		awaitPreparedTest(t, done)
+	})
+}
+
+func TestStaleDecisionTimerDoesNotExpireClarifiedResumedCard(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ft := newFleetTestNoStore(t)
+		preparedTestConversation(ft)
+		var applies atomic.Int32
+		done := startPreparedTest(t, ft, "ix_stale_timer", "", func(context.Context, proto.Resolution) (string, error) {
+			applies.Add(1)
+			return "applied after stale timer ignored", nil
+		})
+
+		ft.s.fleet.mu.Lock()
+		p := ft.s.fleet.interactions["ix_stale_timer"]
+		staleGen := p.prepared.decisionGen
+		ft.s.fleet.mu.Unlock()
+
+		if err := ft.s.clarify(context.Background(), "ix_stale_timer", "Explain first", "owner-q-stale", nil); err != nil {
+			t.Fatalf("clarify: %v", err)
+		}
+		awaitPreparedTest(t, done)
+
+		ref := SessionRef{MachineID: "mac", SessionID: "s1"}
+		ft.s.approvalAnswerTurnStarted(ref)
+		ft.s.approvalAnswerTurnEnded(ref)
+
+		// A stopped-but-already-fired initial decision timer arriving after resume must be ignored.
+		ft.s.expirePreparedGen(p, staleGen)
+		if pending := ft.s.pendingInteractions(); len(pending) != 1 || pending[0].ID != "ix_stale_timer" {
+			t.Fatalf("stale decision timer expired resumed card: pending=%+v", pending)
+		}
+
+		allow := true
+		if err := ft.s.resolve("ix_stale_timer", proto.Resolution{Allow: &allow}); err != nil {
+			t.Fatalf("Allow after ignored stale timer failed: %v", err)
+		}
+		if applies.Load() != 1 {
+			t.Fatalf("apply count = %d, want 1", applies.Load())
+		}
+		if result := waitApprovalResult(t, ft, "ix_stale_timer"); !strings.Contains(result, "applied after stale timer ignored") {
+			t.Fatalf("terminal result = %q", result)
+		}
+	})
+}
+
+func TestClarifyRemovedInFlightWhilePausedDoesNotResumeOrShowCard(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ft := newFleetTestNoStore(t)
+		preparedTestConversation(ft)
+		done := startPreparedTest(t, ft, "ix_paused_removed", "", nil)
+
+		if err := ft.s.clarify(context.Background(), "ix_paused_removed", "First question", "owner-q-paused-1", nil); err != nil {
+			t.Fatalf("first clarify: %v", err)
+		}
+		awaitPreparedTest(t, done)
+
+		ref := SessionRef{MachineID: "mac", SessionID: "s1"}
+		ft.s.approvalAnswerTurnStarted(ref)
+
+		ft.s.fleet.mu.Lock()
+		p := ft.s.fleet.interactions["ix_paused_removed"]
+		ft.s.fleet.mu.Unlock()
+
+		ft.f.mu.Lock()
+		ft.f.onSendOnce = func(_ *fakeHub, _ map[string]any) {
+			ft.s.fleet.mu.Lock()
+			// Answer turn finishes while second clarify attempt is in flight, and the card is removed.
+			p.prepared.turnActive = false
+			p.prepared.answeredSeq = max(p.prepared.answeredSeq, p.prepared.turnSeq)
+			if p.prepared.pauseTimer != nil {
+				p.prepared.pauseTimer.Stop()
+				p.prepared.pauseTimer = nil
+			}
+			delete(ft.s.fleet.interactions, "ix_paused_removed")
+			ft.s.fleet.mu.Unlock()
+		}
+		ft.f.mu.Unlock()
+
+		err := ft.s.clarify(context.Background(), "ix_paused_removed", "Second question", "owner-q-paused-2", nil)
+		if !errors.Is(err, errClarifyUnavailable) {
+			t.Fatalf("second clarify error = %v, want errClarifyUnavailable", err)
+		}
+		ft.s.fleet.mu.Lock()
+		resumedTimer := p.prepared.decisionTimer
+		ft.s.fleet.mu.Unlock()
+		if resumedTimer != nil {
+			t.Fatal("finishClarifyAttempt resumed a decisionTimer on a removed card")
+		}
+	})
+}

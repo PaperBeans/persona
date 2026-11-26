@@ -420,15 +420,11 @@ func (n *Node) syncRuntimeSkillDir(cwd, dir string) {
 	}
 }
 
-// syncAssistantSkills provisions native skills and connector commands during prepare.
-// Before switching to the compact instructions, both runtimes must have the guide.
+// syncAssistantSkills provisions native skills and connector commands during prepare. Both runtimes need the
+// always-available views guide before the node selects compact instructions; the optional work guide follows selection.
 func (n *Node) syncAssistantSkills(cwd string) error {
 	selection := n.skillSelection(cwd)
-	dirs := []string{filepath.Join(cwd, ".claude", "skills")}
-	agentDir := filepath.Join(cwd, ".agents", "skills")
-	if st, err := os.Stat(agentDir); selection.WorkGuide || (err == nil && st.IsDir()) {
-		dirs = append(dirs, agentDir)
-	}
+	dirs := []string{filepath.Join(cwd, ".claude", "skills"), filepath.Join(cwd, ".agents", "skills")}
 	var syncErr error
 	for _, d := range dirs {
 		if err := assistantskills.Sync(d, assistantskills.UserDir(), selection, n.logger.Printf); err != nil {

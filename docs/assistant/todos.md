@@ -813,8 +813,10 @@ Something the owner raises in the main conversation and wants an answer to is a 
 **Personal verification** (#10047): `task_review` with `verdict: "accepted"` and `user_check: true` records the
 supervisor's review but leaves `done_at` unset, with `supervision.state: "user_check"` (**Awaiting your
 verification**). The task remains open and counted as Waiting on you, even if its delivery is already live or its
-reply has been read. Its existing "Please verify" ask is reused; without a Lark card the same ask stays available in
-the apps. Completed-task retirement does not select this Agent, and personal verification also protects it from the
+reply has been read. In Web **Needs you**, personal verification appears in the main conversation's own group
+and in the supervising conversation's tray. While the ask is unavailable, the row opens the task. Pass appears
+once the hub supplies the answerable round. Lark also shows the card when task reports and notification settings allow it.
+Completed-task retirement does not select this Agent, and personal verification also protects it from the
 ordinary stalled-task idle limit. This does not change the closure policy for tasks that really have completed.
 
 The owner's **Pass** (app, card or approval reply) marks the task verified, closes it by review, and permits normal
@@ -1342,7 +1344,7 @@ An approved start is remembered across manager restarts and rechecked by the tas
 | Tool | What it does | Confirmed on the phone |
 | --- | --- | --- |
 | `todo_list` | Open to-dos and failed starts by default, earliest due first (none last), filtered by state, due before / after, overdue, with or without agents, project, words | — |
-| `todo_get` | One in full: notes, agents, the task it is, decisions in force | — |
+| `todo_get` | One in full: notes, agents, the task it is, its pending user decision and decisions in force | — |
 | `todo_create` | `title`, `notes`, `due` (a day, a moment in the user's time zone or RFC 3339, `2h` / `3d`), `remind` (a moment, not past), `priority`, `project`, `part_of`, `after` ("Requests in pieces"); an open to-do with the same title and due date is returned instead of made twice | No |
 | `todo_update` | Title, notes, due, remind, priority, project, `part_of`, `after`; `""` / `[]` clears | No |
 | `todo_complete` / `todo_reopen` | Mark done / open again | Only for a task, or a to-do agents work on (completing closes its agents) |

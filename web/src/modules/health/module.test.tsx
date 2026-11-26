@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // The health module (#13434, the web pilot of #13430; docs/web/web.md "Modules"): its page, its sidebar entry and its
 // strings come from the module host. Switched off, or registered behind a hub flag the hub does not name, it is absent:
-// no entry, its addresses are unknown ones, and neither its chunk (./Health) nor its catalog is ever requested. On, the
-// page opens at /health as before, and its chunk and strings load when it is first drawn, the strings first.
+// no entry, neither its chunk (./Health) nor its catalog is ever requested, and old addresses open the read-only
+// default-panel archive. On, the page opens at /health as before, and its chunk and strings load when it is first
+// drawn, the strings first.
 import { act, Suspense } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -98,13 +99,15 @@ describe("the health module", () => {
     expect(chunk).toHaveBeenCalledTimes(1);
   });
 
-  it("switched off in this browser: no entry, /health is an unknown address, nothing of it requested", async () => {
+  it("switched off in this browser: no entry or chunk, while old Health addresses open the read-only default-panel archive", async () => {
     setModuleSwitchedOff("health", true);
     registerModule(counted());
     await sidebar();
     expect(links()).not.toContain(t("sidebar.nav_health"));
-    expect(parse("/health")).toEqual({ name: "not-found", path: "/health" });
-    expect(parse("/tracks/health")).toEqual({ name: "not-found", path: "/tracks/health" });
+    expect(parse("/health")).toEqual({ name: "track", slug: "health", fresh: true });
+    expect(parse("/health/new")).toEqual({ name: "track", slug: "health", fresh: true });
+    expect(parse("/health/h1")).toEqual({ name: "track", slug: "health", sid: "h1" });
+    expect(parse("/tracks/health/h1")).toEqual({ name: "track", slug: "health", sid: "h1" });
     act(() => root.render(<ModulePage route={{ name: "module", module: "health", base: "health", path: [] }} />));
     await flush();
     expect(host.querySelector('[data-testid="health-page"]')).toBeNull();
@@ -112,12 +115,13 @@ describe("the health module", () => {
     expect(catalog).not.toHaveBeenCalled();
   });
 
-  it("on a hub that publishes module flags without module.health: absent, nothing requested; there once the hello names it", async () => {
+  it("on a hub that publishes module flags without module.health: the default-panel archive remains reachable, with nothing requested; there once the hello names it", async () => {
     registerModule(counted());
     Object.assign(getState(), { loaded: true, features: [MODULES_FEATURE, "other"] });
     await sidebar();
     expect(links()).not.toContain(t("sidebar.nav_health"));
-    expect(parse("/health")).toEqual({ name: "not-found", path: "/health" });
+    expect(parse("/health")).toEqual({ name: "track", slug: "health", fresh: true });
+    expect(parse("/tracks/health")).toEqual({ name: "track", slug: "health", fresh: true });
     act(() => root.render(<ModulePage route={{ name: "module", module: "health", base: "health", path: [] }} />));
     await flush();
     expect(chunk).not.toHaveBeenCalled();
@@ -185,6 +189,13 @@ describe("the health module", () => {
     await flush();
     expect(chunk).not.toHaveBeenCalled();
     expect(catalog).not.toHaveBeenCalled();
+  });
+
+  it("without a registered Health descriptor, as in a core-only build, old addresses still open the archive", () => {
+    expect(parse("/health")).toEqual({ name: "track", slug: "health", fresh: true });
+    expect(parse("/health/kept")).toEqual({ name: "track", slug: "health", sid: "kept" });
+    expect(parse("/tracks/health/kept")).toEqual({ name: "track", slug: "health", sid: "kept" });
+    expect(parse("/health", "?at=message")).toEqual({ name: "track", slug: "health", fresh: true });
   });
 
   it("declares what it contributes, and its hub flag module.health", () => {

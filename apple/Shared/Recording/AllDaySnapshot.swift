@@ -20,6 +20,10 @@ nonisolated struct AllDaySnapshot: Codable, Equatable, Sendable {
         case needsConsent
         /// One tap starts or continues it.
         case ready
+        /// Nothing can start: the phone says its hub's recording module is off (#15214,
+        /// `PhoneRecordingAllowance`). The face shows the mode's name alone, as before the app wrote anything, and a tap
+        /// opens the page, which says so.
+        case moduleOff
     }
 
     var state: State
@@ -79,7 +83,10 @@ nonisolated struct AllDaySnapshot: Codable, Equatable, Sendable {
         case .recording:
             if let staleDate, date >= staleDate { .stale(lastHeard: updatedAt) } else { .recording(since: since ?? updatedAt) }
         case .paused, .interrupted: .paused
-        case .stopped: .stopped(startable: (access ?? .ready) == .ready)
+        case .stopped:
+            // Nothing can continue it while the hub's recording module is off: the neutral face, whose tap opens the
+            // page (it says why, and Stop for Today ends the wish).
+            access == .moduleOff ? .off(.moduleOff) : .stopped(startable: (access ?? .ready) == .ready)
         }
     }
 

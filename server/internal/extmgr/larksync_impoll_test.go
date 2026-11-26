@@ -716,6 +716,157 @@ func TestLarkSyncBackfillDroppedLinksIdempotentAndScoped(t *testing.T) {
 	}
 }
 
+// Upgrading a binding from BackfillVersion=1 (where contact/v3 could not resolve external personal-tenant users)
+// triggers v2 backfill once using ChatNameResolver, repairs external group senders, human DMs, bot DMs, and
+// owner-only unnamed DMs, updates im:p2p_chats, advances BackfillVersion to 2, and is idempotent on reruns.
+func TestLarkSyncBackfillV2ResolvesExternalSendersAndUnnamedDMsIdempotently(t *testing.T) {
+	w := newLarkWorld(t)
+	ctx := context.Background()
+
+	w.addSyncBot(t, "bsync", "cli_sync", larksyncwire.TierFull)
+	key, acc := w.adopt(t, "bsync", "ou_owner", "acc-1", "ref-1", 24*time.Hour)
+	if _, err := w.h.larkSyncChange(ctx, func(st *larkSyncState) error {
+		b := st.binding(key)
+		b.Tier = larksyncwire.TierFull
+		b.BackfillVersion = 2 // already ran v2; v3 (on-demand member lists, the name book, mention scans) runs again
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	seedBatch := func(cb connector.ChatBatch) db.LarkSyncOutbox {
+		raw, err := json.Marshal(cb)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return db.LarkSyncOutbox{Kind: db.LarkSyncChat, CanonicalKey: "chat:" + cb.Chat.ID, Payload: raw}
+	}
+	at := w.now().Add(-time.Hour)
+	if err := w.store.CommitLarkSyncRun(ctx, key, map[string]string{
+		"im:p2p_chats":                 `{"oc_dm_human":"","oc_dm_owner_only":"","oc_dm_bot":""}`,
+		larksyncwire.SenderNamesCursor: `{"ou_left":{"n":"Former Member","t":1}}`,
+	}, []larksyncwire.IndexRecord{
+		{Key: larksyncwire.KeyMessage + "om_ext", Kind: "message", Sources: []larksyncwire.SourceRef{{Binding: key, Entry: larksyncwire.EntryChat}}},
+		{Key: larksyncwire.KeyMessage + "om_dm_h", Kind: "message", Sources: []larksyncwire.SourceRef{{Binding: key, Entry: larksyncwire.EntryChat}}},
+		{Key: larksyncwire.KeyMessage + "om_dm_o", Kind: "message", Sources: []larksyncwire.SourceRef{{Binding: key, Entry: larksyncwire.EntryChat}}},
+		{Key: larksyncwire.KeyMessage + "om_dm_b", Kind: "message", Sources: []larksyncwire.SourceRef{{Binding: key, Entry: larksyncwire.EntryChat}}},
+	}, []db.LarkSyncOutbox{
+		seedBatch(connector.ChatBatch{
+			Chat:     kbwire.SourceChat{ID: "oc_ext_grp", Name: "External Group", Kind: "group"},
+			Messages: []kbwire.SourceMessage{{ID: "om_ext", SenderID: "ou_ext", SenderName: "", Text: "hello", At: at}},
+		}),
+		seedBatch(connector.ChatBatch{
+			Chat:     kbwire.SourceChat{ID: "oc_dm_human", Name: "", Kind: "dm"},
+			Messages: []kbwire.SourceMessage{{ID: "om_dm_h", SenderID: "ou_friend", SenderName: "", Text: "hi", At: at.Add(time.Second)}},
+		}),
+		seedBatch(connector.ChatBatch{
+			Chat:     kbwire.SourceChat{ID: "oc_dm_owner_only", Name: "", Kind: "dm"},
+			Messages: []kbwire.SourceMessage{{ID: "om_dm_o", SenderID: "ou_owner", Mine: true, Text: "ping", At: at.Add(2 * time.Second)}},
+		}),
+		seedBatch(connector.ChatBatch{
+			Chat:     kbwire.SourceChat{ID: "oc_dm_bot", Name: "", Kind: "dm"},
+			Messages: []kbwire.SourceMessage{{ID: "om_dm_b", SenderID: "cli_helper", SenderName: "", Text: "alert", At: at.Add(3 * time.Second)}},
+		}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls atomic.Int32
+	var gotReq larksyncwire.NameResolveRequest
+	w.mu.Lock()
+	w.resolveNamesWithFallback = func(_ context.Context, _ larksyncwire.Binding, _ func(context.Context) (string, error), req larksyncwire.NameResolveRequest) (larksyncwire.NameResolveResult, error) {
+		calls.Add(1)
+		gotReq = req
+		return larksyncwire.NameResolveResult{
+			UserNames: map[string]string{
+				"ou_ext":     "External Member",
+				"ou_friend":  "External Friend",
+				"cli_helper": "Helper Bot",
+			},
+			P2PChatNames: map[string]string{
+				"oc_dm_human":      "External Friend",
+				"oc_dm_owner_only": "Quiet Peer",
+				"oc_dm_bot":        "Helper Bot",
+			},
+		}, nil
+	}
+	w.mu.Unlock()
+	w.script("bsync", acc, func(_ context.Context, _ larksyncwire.Binding, _ func(context.Context) (string, error), _ map[string]string, _ larksyncwire.Index) (larksyncwire.Result, error) {
+		return larksyncwire.Result{}, nil
+	})
+
+	if err := w.h.larkSyncRunMode(ctx, key, larksyncwire.ModeIM); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("calls = %d, want 1", calls.Load())
+	}
+	if !slices.Equal(gotReq.P2PChatIDs, []larksyncwire.ChatID{"oc_dm_bot", "oc_dm_human", "oc_dm_owner_only"}) {
+		t.Fatalf("P2PChatIDs = %v", gotReq.P2PChatIDs)
+	}
+	if !slices.Equal(gotReq.ChatSenders["oc_ext_grp"], []string{"ou_ext"}) || !slices.Equal(gotReq.ChatSenders["oc_dm_bot"], []string{"cli_helper"}) {
+		t.Fatalf("ChatSenders = %v", gotReq.ChatSenders)
+	}
+	if gotReq.NameBook != `{"ou_left":{"n":"Former Member","t":1}}` {
+		t.Fatalf("NameBook = %q, want the binding's stored book", gotReq.NameBook)
+	}
+	if !gotReq.SampleTimes["ou_ext"].Equal(at) || gotReq.SampleChats["ou_ext"] != "oc_ext_grp" || gotReq.SampleMessages["ou_ext"] != "om_ext" {
+		t.Fatalf("sample of ou_ext = %v %v %v", gotReq.SampleMessages["ou_ext"], gotReq.SampleTimes["ou_ext"], gotReq.SampleChats["ou_ext"])
+	}
+	if larkSyncBackfillVersion != 3 {
+		t.Fatalf("larkSyncBackfillVersion = %d, want 3", larkSyncBackfillVersion)
+	}
+	if got := w.binding(t, key).BackfillVersion; got != larkSyncBackfillVersion {
+		t.Fatalf("BackfillVersion = %d, want %d", got, larkSyncBackfillVersion)
+	}
+
+	rows, err := w.store.LarkSyncOutboxAfter(ctx, db.LarkSyncChat, 4, 20)
+	if err != nil || len(rows) != 4 {
+		t.Fatalf("repair rows = %d, err = %v", len(rows), err)
+	}
+	repaired := map[string]connector.ChatBatch{}
+	for _, r := range rows {
+		var cb connector.ChatBatch
+		if err := json.Unmarshal(r.Payload, &cb); err != nil {
+			t.Fatal(err)
+		}
+		repaired[cb.Chat.ID] = cb
+	}
+	if g := repaired["oc_ext_grp"]; len(g.Messages) != 1 || g.Messages[0].SenderName != "External Member" {
+		t.Fatalf("repaired oc_ext_grp = %+v", g)
+	}
+	if d := repaired["oc_dm_human"]; d.Chat.Name != "External Friend" || len(d.Messages) != 1 || d.Messages[0].SenderName != "External Friend" {
+		t.Fatalf("repaired oc_dm_human = %+v", d)
+	}
+	if d := repaired["oc_dm_owner_only"]; d.Chat.Name != "Quiet Peer" || len(d.Messages) != 0 {
+		t.Fatalf("repaired oc_dm_owner_only = %+v", d)
+	}
+	if d := repaired["oc_dm_bot"]; d.Chat.Name != "Helper Bot" || len(d.Messages) != 1 || d.Messages[0].SenderName != "Helper Bot" {
+		t.Fatalf("repaired oc_dm_bot = %+v", d)
+	}
+	var savedP2P map[string]string
+	if err := json.Unmarshal([]byte(w.store.cursorsOf(key)["im:p2p_chats"]), &savedP2P); err != nil {
+		t.Fatalf("im:p2p_chats cursor: %v", err)
+	}
+	if savedP2P["oc_dm_human"] != "External Friend" || savedP2P["oc_dm_owner_only"] != "Quiet Peer" || savedP2P["oc_dm_bot"] != "Helper Bot" {
+		t.Fatalf("updated im:p2p_chats = %v", savedP2P)
+	}
+
+	// Idempotent even if BackfillVersion is manually reset to 1: newer named outbox rows leave 0 candidates.
+	if _, err := w.h.larkSyncChange(ctx, func(st *larkSyncState) error {
+		st.binding(key).BackfillVersion = 1
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.h.larkSyncRunMode(ctx, key, larksyncwire.ModeIM); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("reset BackfillVersion re-resolved already-repaired data (%d calls)", calls.Load())
+	}
+}
+
 func splitSpaces(s string) []string {
 	var out []string
 	cur := ""

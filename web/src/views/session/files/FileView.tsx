@@ -238,6 +238,7 @@ export function FileView({
   cwd,
   line,
   lineTo,
+  readOnly,
   onBack,
   onClose,
   onOpenPath,
@@ -251,6 +252,8 @@ export function FileView({
   line?: number;
   /** The last line of the range marked, when it is one. */
   lineTo?: number;
+  /** Suppresses edit, Show in Files, and line comments while keeping reads and downloads available. */
+  readOnly?: boolean;
   onBack?: () => void;
   onClose: () => void;
   onOpenPath: (path: string) => void;
@@ -263,7 +266,7 @@ export function FileView({
   const [mode, setMode] = useState<Mode>(line ? "source" : "rendered");
   const [saving, setSaving] = useState(false);
   // Edit (#5829): text files up to 1 MB read whole, where the hub writes files
-  const canWrite = hubHas(useStore((s) => s.features), FILE_WRITE_FEATURE);
+  const canWrite = !readOnly && hubHas(useStore((s) => s.features), FILE_WRITE_FEATURE);
   const [editing, setEditing] = useState(false);
 
   // JSON is indented from the whole text: read the rest first (as the app does), up to a cap.
@@ -350,7 +353,7 @@ export function FileView({
           disabled={editProblem(f, doc.next === 0) !== null || doc.changed}
         />
       )}
-      {onShowInFolder && kind !== "directory" && <IconButton icon="folder" label={t("files-nav.show_in_files")} onClick={() => onShowInFolder(f?.path || path)} />}
+      {!readOnly && onShowInFolder && kind !== "directory" && <IconButton icon="folder" label={t("files-nav.show_in_files")} onClick={() => onShowInFolder(f?.path || path)} />}
       <IconButton icon="copy" label={t("session-files-fileview.copy_path")} onClick={() => copyText(f?.path || path)} />
       {kind !== "directory" && <IconButton icon="arrowDown" label={saving ? t("session-files-fileview.downloading") : t("session-files-fileview.download")} onClick={download} disabled={!f || saving || doc.changed} />}
     </>
@@ -441,10 +444,10 @@ export function FileView({
             : json?.error
               ? t("session-files-fileview.invalid_json", { error: json.error })
               : "";
-    body = <CodeView doc={doc} file={f} text={shown} line={line} lineTo={lineTo} note={note} where={{ mid, sid, cwd }} />;
+    body = <CodeView doc={doc} file={f} text={shown} line={line} lineTo={lineTo} note={note} where={{ mid, sid, cwd, readOnly }} />;
   }
 
-  if (editing && f) {
+  if (editing && canWrite && f) {
     return (
       <FileEdit
         mid={mid}
@@ -479,7 +482,7 @@ export function FileView({
 
 // ── code ──────────────────────────────────────────────────
 
-function CodeView({ doc, file, text, line, lineTo, note, where }: { doc: FileDoc; file: FileContent; text: string; line?: number; lineTo?: number; note: string; where: { mid: string; sid?: string; cwd?: string } }) {
+function CodeView({ doc, file, text, line, lineTo, note, where }: { doc: FileDoc; file: FileContent; text: string; line?: number; lineTo?: number; note: string; where: { mid: string; sid?: string; cwd?: string; readOnly?: boolean } }) {
   const name = file.name;
   const lines = useMemo(() => splitLines(text), [text]);
   const lang = useMemo<Lang | null>(() => (text.length <= COLOR_BYTES && lines.length <= COLOR_LINES ? languageOf(name, lines[0]) : null), [name, text.length, lines]);
@@ -507,7 +510,7 @@ function CodeView({ doc, file, text, line, lineTo, note, where }: { doc: FileDoc
   }, [line, lines.length]);
 
   // comments on lines (LineComment.tsx): the + in the gutter, the box under the code, the cards' numbers beside their lines
-  const key = commentKey(where.mid, where.sid);
+  const key = where.readOnly ? null : commentKey(where.mid, where.sid);
   const pick = useLinePick(Boolean(key));
   const quotes = useQuotes(key ?? "").list;
   const marked = useMemo(() => markedLines(quotes, (s) => !s.diff && s.path === file.path), [quotes, file.path]);

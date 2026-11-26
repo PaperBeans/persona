@@ -7,7 +7,12 @@ import persona.core.contracts.Session
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Transient
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonObject
 
 /** The kinds of the knowledge base, in the order the list offers them (docs/assistant/knowledge.md). */
@@ -43,6 +48,8 @@ data class KnowledgeEntry(
     val source: String? = null,
     /** A recording's imported meeting, as the meetings list has its id; null before a match and from an older hub. */
     @SerialName("meeting_id") val meetingId: String? = null,
+    /** A recording whose in-flight state nothing can settle, and why ([RecordingPaused]); null when it is not paused. */
+    val paused: RecordingPaused? = null,
     /** Client-only: the imported meeting this recording stands for in the merged Meetings list. */
     @Transient val imported: KnowledgeEntry? = null,
 ) {
@@ -68,7 +75,32 @@ data class KnowledgeDetail(
     val minutes: RecordingMinutes? = null,
     /** A topic's knowledge points (topics only, docs/assistant/knowledge.md "Topics"). */
     val points: List<TopicPoint>? = null,
+    /** A recording whose in-flight state nothing can settle, and why ([RecordingPaused]); null when it is not paused. */
+    val paused: RecordingPaused? = null,
 )
+
+/**
+ * Why a recording's in-flight state (an upload not complete, minutes or a day recap pending, a transcription on the
+ * hub) is not moving: the hub's `paused` on a recording's list entry and detail, derived when read and never stored
+ * (#13407). A closed set: a reason this app does not know reads as [Unknown], never as one it does.
+ */
+@Serializable(with = RecordingPausedSerializer::class)
+enum class RecordingPaused(val wire: String) {
+    /** `module_off`: the recording module is off on this hub, so nothing takes the recording up until it is back. */
+    ModuleOff("module_off"),
+    /** A reason a newer hub names; the page says nothing it cannot stand behind and behaves as before. */
+    Unknown("unknown");
+
+    companion object {
+        fun fromWire(value: String): RecordingPaused = entries.firstOrNull { it != Unknown && it.wire == value } ?: Unknown
+    }
+}
+
+object RecordingPausedSerializer : KSerializer<RecordingPaused> {
+    override val descriptor = PrimitiveSerialDescriptor("persona.core.contracts.api.RecordingPaused", PrimitiveKind.STRING)
+    override fun deserialize(decoder: Decoder): RecordingPaused = RecordingPaused.fromWire(decoder.decodeString())
+    override fun serialize(encoder: Encoder, value: RecordingPaused) = encoder.encodeString(value.wire)
+}
 
 /** A source a knowledge point was said in; [day] is YYYY-MM-DD. */
 @Serializable

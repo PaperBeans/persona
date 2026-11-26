@@ -80,7 +80,8 @@ fun InboxEventScreen(repository: InboxRepository, route: InboxEventRoute, naviga
     val handOff = rememberInboxHandOffBarModel(repository, route.itemId)
     val composers = rememberReplyComposers(repository)
     var drafting by rememberSaveable(route.itemId) { mutableStateOf(false) }
-    val draftComposer = if (record != null && !record.item.isDone && inboxSupportsDraftReply(record) && record.event.suggestion?.kind != "reply") {
+    val mailAccess = LocalMailAccess.current
+    val draftComposer = if (record != null && !record.item.isDone && inboxSupportsDraftReply(record, mailAccess) && record.event.suggestion?.kind != "reply") {
         composers.get(ReplyTarget.Inbox(record.item.id), record.agent?.draft.orEmpty())
     } else null
     fun openHandOff(destination: HandOffDestination) {
@@ -187,7 +188,8 @@ fun InboxEventScreen(repository: InboxRepository, route: InboxEventRoute, naviga
                 }
             }
         }
-        val suggestion = record.event.suggestion
+        // A suggested reply to a mail cannot be sent while the hub's mail module is off (#15995): it is not offered.
+        val suggestion = record.event.suggestion?.takeUnless { it.kind == "reply" && !mailAccess.offersReply(record) }
         if (nowText != null) item("event-state") {
             EventStateLine(EventMark.Now(nowText, inboxNowStatus(record.event.now), problem = record.event.now == "failed",
                 key = record.event.now), Modifier.padding(bottom = Tokens.Space.s), stateActions)

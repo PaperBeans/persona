@@ -42,7 +42,8 @@ vi.mock("./api", async (original) => ({
   enc: encodeURIComponent,
 }));
 
-const { useAttentionSignals } = await import("./attention-signals");
+const { preloadAttentionSignals, useAttentionSignals } = await import("./attention-signals");
+await preloadAttentionSignals();
 const { BATCH_MAX_MS, BATCH_QUIET_MS, SETTLE_MS } = await import("./attention");
 const { _setTabId, markFront } = await import("./notify");
 

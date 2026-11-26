@@ -203,6 +203,7 @@ fun InboxScreen(repository: InboxRepository, navigator: Navigator, onOpenCard: (
     var handingOff by remember { mutableStateOf<String?>(null) }
     var composeDraft by remember { mutableStateOf<MailDraft?>(null) }
     val mailTransport by repository.mailTransport.collectAsStateWithLifecycle()
+    val mailAccess = LocalMailAccess.current
 
     val haptics = rememberHaptics()
     // Tap-driven row motion only (#9600). A hub refresh changes the rows with the flag clear.
@@ -559,7 +560,7 @@ fun InboxScreen(repository: InboxRepository, navigator: Navigator, onOpenCard: (
                     size = JButtonSize.Small, enabled = pickedTargets.isNotEmpty())
                 if (picked.size == 1) JIconButton(PhIcons.DotsThree, stringResource(R.string.inbox_more), { pickedMenu = true })
             }) else ({
-                if (mailTransport != null) {
+                if (mailTransport != null && mailAccess == MailAccess.Live) {
                     JIconButton(PhIcons.PencilSimple, stringResource(R.string.inbox_compose_mail), {
                         composeDraft = MailDraft(accountId = "")
                     })

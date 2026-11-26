@@ -99,7 +99,7 @@ func TestColdHerdrUUIDWaitsForItsRolloutHome(t *testing.T) {
 }
 
 func TestHerdrRefreshIsolatesBlockedRolloutFromOtherAgents(t *testing.T) {
-	n := remoteTestNode(t)
+	n := boundedTestNode(t)
 	const healthyID = "eeee0000-0000-4000-8000-000000000002"
 	slowRoot, fastRoot := t.TempDir(), t.TempDir()
 	writeThread(t, slowRoot, remoteRaw, n.home, "slow")

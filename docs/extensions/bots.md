@@ -271,6 +271,16 @@ some names were resolved. Reauthorization preserves cursors and the pending repa
 due now; the next scheduler tick runs the sync and retries repair automatically. Disabled bindings remain disabled.
 The repair marks its version complete only after it finishes, so later ticks are idempotent.
 
+Senders that `contact/v3` cannot see (external members) are looked up in the chat's member list, read on demand: only
+while a sender of that chat is still unnamed, resuming where it stopped, up to 500 pages of 100. A member who left the
+group is in no list; the binding's name book (`sender_names` cursor, at most 5,000 names, the oldest learned dropped
+first) keeps the names the sync learned from contacts, member lists and @mentions, and the sender-name backfill
+(version 3) also reads the chat around such a sender's message for an @mention of them. Another app's bot is named only
+when a message mentions it: the API that names an app by its id
+([application/v6](https://open.feishu.cn/document/server-docs/application-v6/application/get)) takes a tenant token,
+an admin scope and a custom app of the same enterprise, none of which a user's sync has. A system message without a
+`sender_id` stays unnamed.
+
 Regression coverage: `server/internal/larksyncwire/scopes_test.go` checks the audited permission alternatives;
 `scripts/test/test_lark_sync_scope_guides.py` checks every locale of the three setup guides against both packs;
 `server/internal/extmgr/larksync_impoll_test.go` covers scope refusal followed by authorization and scheduler recovery;

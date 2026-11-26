@@ -87,7 +87,7 @@ func localizeSession(l i18n.Lang, s *proto.Session) {
 	localizeWorkflows(l, s)
 	localizeSubagents(l, s)
 	s.ReadOnlyReason = localizeReadOnlyReason(l, s.ReadOnlyReason)
-	s.AttentionReason = claudeLiveText(l, s.AttentionReason)
+	s.AttentionReason = localizeAttentionReason(l, s.AttentionReason)
 	copied := false
 	for i, b := range s.Background {
 		if b.Description == "超时转到后台的命令" {
@@ -200,6 +200,16 @@ var claudeLiveTexts = map[string]string{
 func claudeLiveText(l i18n.Lang, s string) string {
 	if key, ok := claudeLiveTexts[s]; ok {
 		return tt(l, key)
+	}
+	return s
+}
+
+func localizeAttentionReason(l i18n.Lang, s string) string {
+	if got := claudeLiveText(l, s); got != s {
+		return got
+	}
+	if s == tt(i18n.Default, "work_agent_first_dialog") {
+		return tt(l, "work_agent_first_dialog")
 	}
 	return s
 }

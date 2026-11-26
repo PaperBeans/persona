@@ -1876,6 +1876,19 @@ every platform are described from #13430; this section is the Apple side.
   `apple/Persona/CarPlay`) and the call intents. `-openVoice silent`'s audio (`SilentVoiceAudio`) is core, since a call to
   Persona takes it too. The ratchet counts `apple/Modules/Voice` (and `apple/PersonaCallIntents`); the voice directories
   still in `apple/Persona` count as the core until they move (`guarded_dirs` in `scripts/test/test_apple_module_refs.py`).
+- **`recording`, a flag without a packaged module** (#15214): the recording code is still core app code
+  (`apple/Persona/Recording`), so nothing is registered and `Modules.builtIn` does not list it. The app still follows
+  the hub's `module.recording` flag: `RecordingModule.allowance` asks the registry's hub answer with the descriptor id
+  `recording` (the same `HubModules.allows`). What goes and what stays when it is off: `docs/apple/recording.md`,
+  "With the hub's recording module off (#15214)".
+- **`lark`, the same kind of flag** (#15995): the hub's Lark module is what connects the Lark bot, so the bot's entry
+  points follow `module.lark`. `LarkModule.botEntry` (`apple/Persona/App/LarkModule.swift`) answers the closed
+  `LarkBotEntry` (`offered`, `moduleOff`) from the registry's hub answer with the descriptor id `lark`. With the module
+  off the Lark Bot row leaves Settings › Connectors (and its status is not read), the bot's channel (`feishu`) is not
+  listed or counted in Settings › Channels, and a link or saved place that lands on the bot's page or its channel's page
+  shows the page's title and one line (`ModuleOffPage`) without asking the hub anything. This is not `LarkFeatures`:
+  those are the installed Lark extension's (`lark`, `lark_moments`, …) and keep deciding Settings › Connectors › Lark,
+  Messages, the Inbox's Lark chats and the readers, which use `/api/v1/lark/…` and stay as they are with the module off.
 - **Adding a module.** Give its sources a directory of their own, classify that directory with the module id in
   `schema/module-classification.txt` (`docs/architecture/core-and-modules.md`, "Classification") and add the id to
   `GUARDED` in the ratchet; write a type

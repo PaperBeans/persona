@@ -27,6 +27,42 @@ export interface MailMessage {
   attachments?: { id?: string; filename?: string; mime?: string; size?: number }[];
 }
 
+// ── where a mail's words come from ───────────────────────
+
+/** How an opened mail is read, decided in one place (mailReading) from the hub's module flag and handed down
+ *  (components follow the hub's hello through views/inbox/item-write-gate.ts):
+ *  - `full`: the hub has the mail module (or says nothing about modules): the whole message is asked of the mail
+ *    server as it opens, and replies, flags and attachments work.
+ *  - `stored`: the hub turned mail off (#15995). Its mail routes are gone, so only the text the hub kept with the
+ *    Inbox item can be shown, and nothing can be written to the mailbox. */
+export type MailReading = { kind: "full" } | { kind: "stored"; reason: "mail-off" };
+
+const FULL: MailReading = { kind: "full" };
+const STORED: MailReading = { kind: "stored", reason: "mail-off" };
+
+/** The hub flag rule for `module.mail` (hubServes): no hello yet or a hub without module flags reads in full. */
+export function mailReading(s?: Parameters<typeof hubServes>[1]): MailReading {
+  return hubServes(moduleFeature("mail"), s) ? FULL : STORED;
+}
+
+/** Whether the text the hub stored for a mail is all of the newest mail (#15995), from the item's own page:
+ *  - `clipped`: the hub cut it at the 3,000 characters it stores;
+ *  - `whole`: the stored text is the whole text;
+ *  - `unknown`: the hub did not say: a hub from before it sent `mail_body_truncated`, an item stored before the hub
+ *    recorded it, a mail whose text the hub never read, or the list's own copy of the item (which never carries it). */
+export type StoredMailClipping = "clipped" | "whole" | "unknown";
+
+/** `mail_body_truncated` of GET /inbox/{id} as the closed type; anything but a boolean is `unknown`, never `whole`. */
+export function storedMailClipping(item?: { mail_body_truncated?: unknown }): StoredMailClipping {
+  const v = item?.mail_body_truncated;
+  return v === true ? "clipped" : v === false ? "whole" : "unknown";
+}
+
+/** Whether `item`'s replies would be mail the hub can no longer send (`reading` is `stored`). */
+export function mailItemReadOnly(reading: MailReading, item?: { source: string; mail?: unknown }): boolean {
+  return reading.kind === "stored" && Boolean(item && (item.mail || item.source === "mail"));
+}
+
 export function addressText(a?: MailAddress): string {
   return a ? (a.name && a.email ? `${a.name} <${a.email}>` : a.email || a.name || "") : "";
 }
@@ -199,7 +235,7 @@ const accountsKey = (manager?: string) => (itemHeaders(manager) ? manager! : "")
  *  the last answer is kept. */
 export function loadMailAccounts(manager?: string): Promise<MailAccount[]> {
   // A hub without the mail module (built out or switched off: no module.mail flag) has no mail routes: ask nothing.
-  if (!hubServes(moduleFeature("mail"))) return Promise.resolve([]);
+  if (mailReading().kind === "stored") return Promise.resolve([]);
   const key = accountsKey(manager);
   let p = inFlight.get(key);
   if (!p) {

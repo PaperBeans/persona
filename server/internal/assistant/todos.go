@@ -524,6 +524,7 @@ func (s *Service) todosPushSoon() {
 		p.armed = false
 		p.mu.Unlock()
 		s.todoViewPushed() // every app reads the list again from here (todo_view_push.go)
+		s.todosCountSoon() // and the counts view's to-dos follow, read by the manager if no app does (counts_view.go)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		s.event(ctx, map[string]any{"type": "todos"})
@@ -637,7 +638,18 @@ func (s *Service) insertTodo(ctx context.Context, row db.TodoRow, bindings ...*r
 	var out Todo
 	var err error
 	if row.PartOf != "" || len(row.After) > 0 {
+		if row.Responsible != nil && row.Responsible.Kind == db.ResponsibleSession && row.Responsible.SessionID != "" {
+			if err := s.waitIdleCloseFence(ctx, row.Responsible.MachineID, row.Responsible.SessionID); err != nil {
+				return Todo{}, err
+			}
+		}
 		out, err = s.insertPiece(ctx, row, bindings...)
+	} else if row.Responsible != nil && row.Responsible.Kind == db.ResponsibleSession && row.Responsible.SessionID != "" {
+		if err := s.lockTodoWritingWithIdleFence(ctx, row.Responsible.MachineID, row.Responsible.SessionID); err != nil {
+			return Todo{}, err
+		}
+		out, err = s.putNewTodo(ctx, row, bindings...)
+		s.todos.writing.Unlock()
 	} else {
 		out, err = s.putNewTodo(ctx, row, bindings...)
 	}
@@ -654,7 +666,13 @@ func (s *Service) insertPiece(ctx context.Context, row db.TodoRow, bindings ...*
 	if f := s.pieceWriteHook; f != nil {
 		f(row.ID)
 	}
-	s.todos.writing.Lock()
+	if row.Responsible != nil && row.Responsible.Kind == db.ResponsibleSession && row.Responsible.SessionID != "" {
+		if err := s.lockTodoWritingWithIdleFence(ctx, row.Responsible.MachineID, row.Responsible.SessionID); err != nil {
+			return Todo{}, err
+		}
+	} else {
+		s.todos.writing.Lock()
+	}
 	defer s.todos.writing.Unlock()
 	e, err := s.recheckPieces("", db.TodoEdit{PartOf: &row.PartOf, After: &row.After})
 	if err != nil {
@@ -1882,7 +1900,13 @@ func (s *Service) linkTodoAgentWithSourceAllowingDone(ctx context.Context, todoI
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		return err
 	}
-	s.todos.writing.Lock()
+	if !allowDone {
+		if err := s.lockTodoWritingWithIdleFence(ctx, mid, sid); err != nil {
+			return err
+		}
+	} else {
+		s.todos.writing.Lock()
+	}
 	err := s.writeTodoAgentLink(ctx, todoID, mid, sid, title, cwd, agent, startError, source, via, allowDone)
 	s.todos.writing.Unlock()
 	if err != nil {
@@ -1896,7 +1920,9 @@ func (s *Service) linkTodoAgentWithSourceAllowingDone(ctx context.Context, todoI
 // linkTodoSpaceAgent retires fanout when a newer move/unlink published while the
 // session lookup was in flight. Check and write share the ownership write boundary.
 func (s *Service) linkTodoSpaceAgent(ctx context.Context, todoID, mid, key string, linkedAt time.Time, c proto.Session) (bool, error) {
-	s.todos.writing.Lock()
+	if err := s.lockTodoWritingWithIdleFence(ctx, mid, c.SessionID); err != nil {
+		return false, err
+	}
 	s.todos.mu.RLock()
 	current := false
 	if target := s.todos.todos[todoID]; target != nil && s.todos.spacesByKey[key] == todoID {
@@ -2177,7 +2203,9 @@ func (s *Service) reopenFailedTodo(ctx context.Context, id string) (Todo, bool, 
 	if !ok {
 		return Todo{}, false, db.ErrTodoNotFound
 	}
-	s.todos.writing.Lock()
+	if err := s.lockTodoWritingForSessions(ctx, todoProtectedSessions(cur, nil)); err != nil {
+		return Todo{}, false, err
+	}
 	now := time.Now().UTC()
 	row := db.TodoRow{ID: cur.ID, Title: cur.Title, Notes: cur.Notes, CreatedAt: cur.CreatedAt, UpdatedAt: now,
 		Origin: cur.Origin, PlanID: cur.PlanID, ReopenedAt: &now}

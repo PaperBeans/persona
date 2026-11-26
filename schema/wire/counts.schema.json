@@ -10,7 +10,7 @@
     "kotlin": "android/core/contracts/src/main/kotlin/persona/core/contracts/generated/CountsWire.kt"
   },
   "x-guard": ["arkts", "rust"],
-  "x-guard-keys": ["agents_needs_you"],
+  "x-guard-keys": ["agents_needs_you", "todos_needs_you"],
   "$defs": {
     "CountsView": {
       "description": "One manager's counts. A view with a new epoch replaces the one kept; within an epoch a lower rev loses to a higher one.",
@@ -56,6 +56,10 @@
         "agents_needs_you": {
           "$ref": "#/$defs/CountsViewCount",
           "description": "The Agents that need the owner (docs/protocol/counts.md, \"agents_needs_you\")."
+        },
+        "todos_needs_you": {
+          "$ref": "#/$defs/CountsViewCount",
+          "description": "The to-dos that need the owner, N of the To-dos list (docs/protocol/counts.md, \"todos_needs_you\")."
         }
       }
     },
@@ -68,6 +72,12 @@
           "minimum": 0,
           "x-go-pointer": true,
           "description": "counts.agents_needs_you.n."
+        },
+        "todos_needs_you": {
+          "type": "integer",
+          "minimum": 0,
+          "x-go-pointer": true,
+          "description": "counts.todos_needs_you.n."
         }
       }
     },

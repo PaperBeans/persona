@@ -54,8 +54,12 @@ const (
 	larkSyncBodyMost    = int64(1 << 20)       // request bodies of the sync's routes
 	larkSyncChangesMost = 100                  // chat batches one Changes call hands over by default
 	larkSyncStaleAuth   = larkSyncAuthFor + time.Minute
-	// larkSyncBackfillVersion triggers the one-time idempotent sender-name backfill for pre-#15486 outbox messages.
-	larkSyncBackfillVersion = 1
+	// larkSyncBackfillVersion triggers the one-time idempotent sender-name backfill for outbox messages:
+	// v1 resolved contact/v3 names for pre-#15486 rows; v2 adds chat-member, p2p chat-info, and message-carried
+	// fallbacks (plus unnamed DM chat name repair) for personal/external tenants where contact/v3 misses; v3 reads a
+	// large group's member list on demand past the old 20-page cap, and names members who left the group from the
+	// binding's name book and from @mentions around their messages.
+	larkSyncBackfillVersion = 3
 	// larkSyncLinksBackfillVersion triggers the one-time idempotent remediation that scans already-synced chat
 	// outbox messages and enqueues cloud document / wiki links missing body content in lark_sync_index.
 	larkSyncLinksBackfillVersion = 1
