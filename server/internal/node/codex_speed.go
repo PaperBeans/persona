@@ -37,9 +37,14 @@ func (n *Node) codexSpeedRow(s *proto.Session) {
 	if thread.serviceTier != "" {
 		s.ServiceTier = thread.serviceTier
 	}
-	if len(tiers) > 0 {
-		s.ServiceTiers = append([]proto.ServiceTier{{ID: "default", Name: "Standard"}}, tiers...)
+	s.ServiceTiers = codexSpeedChoices(tiers)
+}
+
+func codexSpeedChoices(tiers []proto.ServiceTier) []proto.ServiceTier {
+	if len(tiers) == 0 || slices.ContainsFunc(tiers, func(t proto.ServiceTier) bool { return t.ID == "default" }) {
+		return tiers
 	}
+	return append([]proto.ServiceTier{{ID: "default", Name: "Standard"}}, tiers...)
 }
 
 // Speed is a separate RPC so an older node cannot silently ignore it in modes.
@@ -53,7 +58,7 @@ func (n *Node) setCodexSpeed(ctx context.Context, id, tier string) error {
 	}
 	c, thread, ok := n.codexEffortThread(id)
 	if !ok {
-		return fmt.Errorf("this session does not support Codex speed changes")
+		return n.setCodexTerminalSpeed(ctx, id, tier)
 	}
 	model := n.codexModelNow(id, c, thread, n.metaOf(id).model)
 	c.mu.Lock()
@@ -80,4 +85,30 @@ func (n *Node) setCodexSpeed(ctx context.Context, id, tier string) error {
 	c.mu.Unlock()
 	n.notifyCodex()
 	return nil
+}
+
+// setCodexTerminalSpeed uses the same checked input and rollout acknowledgment as terminal model changes.
+func (n *Node) setCodexTerminalSpeed(ctx context.Context, id, tier string) error {
+	t, why, live := n.codexOnTerminalCtx(ctx, id, true)
+	if !live {
+		return fmt.Errorf("this session does not support Codex speed changes")
+	}
+	if why != nil {
+		return why
+	}
+	n.forgetMeta(t.rollout)
+	now := n.codexTerminalSettingsOf(id, t, n.metaOf(id))
+	model, _ := codexModelEffortsIn(t.home, now.model)
+	if !proto.ValidModelID(tier) || len(model.tiers) == 0 || tier != "default" && !slices.ContainsFunc(model.tiers, func(t proto.ServiceTier) bool { return t.ID == tier }) {
+		return fmt.Errorf("this model does not advertise the requested Codex speed")
+	}
+	native := tier
+	switch tier {
+	case "default":
+		native = "standard"
+	case "priority":
+		native = "fast"
+	}
+	_, err := n.applyCodexTerminalSettings(ctx, id, t, "/model --speed="+native, codexTerminalSettings{tier: tier})
+	return err
 }

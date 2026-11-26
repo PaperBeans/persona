@@ -134,9 +134,7 @@ func init() {
 		delete(f.interactions, p.ID)
 		f.mu.Unlock()
 		h.push.withdraw(p.ID) // a suspended app hears it by push (#4349)
-		if todo := assistantwire.TodoOfAskCard(p.ID); todo != "" {
-			h.push.todoPushOver(todo) // the to-do no longer waits on the owner: its next push rings (push_todo_dedup.go)
-		}
+		h.push.resolvedPushOver(p.ID)
 		event := map[string]any{"type": "interaction_resolved", "id": p.ID}
 		if p.AnsweredBy != "" {
 			event["answered_by"] = p.AnsweredBy // the app marks a question the assistant answered (docs/assistant/assistant.md)
@@ -836,10 +834,11 @@ func relatedTodoID(key string, allowAsk bool) string {
 // own, or none. What the extensions are told of it (agent.finished, agent.needs_you) goes to from's only, and the
 // devices that muted from (NotifyPrefs.MutedManagers) get none of it.
 //
-// It returns where an assistant's push or a finished turn went (nil for a card, a reply reminder or a decision, whose
-// delivery is not reported): the devices it was handed to, the offline ones that keep it, and the ln-mode reason it was
-// held. The assistant's notify_user tool tells the model from it whether the notice reached a device, the briefing or
-// nothing, and counts it as an interruption only when a device took it.
+// It returns where an assistant's push or a finished turn went (nil for a card, a reply reminder or a decision when it
+// was not held; when held, held carries the intercept reason so notify.request reports held/reason consistently without
+// breaking existing checks for nil devices): the devices it was handed to, the offline ones that keep it, and the
+// ln-mode reason it was held. The assistant's notify_user tool tells the model from it whether the notice reached a
+// device, the briefing or nothing, and counts it as an interruption only when a device took it.
 func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *pushOutcome, err error) {
 	switch n.Kind {
 	case assistantwire.NotifyInput:
@@ -850,7 +849,9 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 		if !ok || cmp.Or(ix.Manager, assistantwire.AssistantID) != from {
 			return nil, &rpc.Error{Code: devicewire.CodeNoDevice, Message: "an input push is for a pending card the manager reported"}
 		}
-		h.notifyInteractionHinted(from, ix, n.Subtitle, n.LinkCovered, n.Level, n.RelatedKey, n.Depth, n.Track)
+		if held := h.notifyInteractionHinted(from, ix, n.Subtitle, n.LinkCovered, n.Level, n.RelatedKey, n.Depth, n.Track); held != "" {
+			return &pushOutcome{held: held}, nil
+		}
 		return nil, nil
 	case assistantwire.NotifyPush, assistantwire.NotifyDone, assistantwire.NotifyReply, assistantwire.NotifyDecide:
 		if !h.ownsRef(from, n.DeviceID, n.SessionID) {
@@ -860,12 +861,12 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 	}
 	switch n.Kind {
 	case assistantwire.NotifyPush: // one with an id shows once, sent again however late (a day recap's push)
-		if !h.push.claimTodoPush(n.RelatedKey) {
-			// The same to-do's push about the same reason rang and the to-do still waits on the owner for it.
+		if !h.push.claimTodoPushCard(n.RelatedKey, n.CardID) {
+			// The same to-do's or concern's push about the same reason/state rang and still waits on the owner.
 			return &pushOutcome{held: interceptReasonDedup}, nil
 		}
 		policy := pushPolicy{kind: assistantwire.NotifyPush, level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey, todoID: relatedTodoID(n.RelatedKey, !n.Asked),
-			depth: n.Depth, track: n.Track, cardID: n.CardID, derivedLevel: n.Level == "", mainConv: h.isMainForManager(from, n.DeviceID, n.SessionID)}
+			depth: n.Depth, track: n.Track, cardID: n.CardID, derivedLevel: n.Level == "", asked: n.Asked, mainConv: h.isMainForManager(from, n.DeviceID, n.SessionID)}
 		o := h.notifyDoneUnder(from, "assistant", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, pushWants{}, managerPushCollapseID(from, n.ID),
 			pushRecordingID(n.RecordingID), policy)
 		out = &o
@@ -876,12 +877,16 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 				done: true, track: n.Track})
 		out = &o
 	case assistantwire.NotifyReply:
-		h.notifyReplyKeyed(from, n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, n.RelatedKey)
+		if held := h.notifyReplyKeyed(from, n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, n.RelatedKey); held != "" {
+			out = &pushOutcome{held: held}
+		}
 	case assistantwire.NotifyDecide:
 		if n.Todo == nil || n.Todo.ID == "" || n.Todo.AskedAt.IsZero() || n.Todo.Recommend == "" {
 			return nil, errors.New("a decision's push needs its to-do, when it was asked and the option its OK takes")
 		}
-		h.notifyDecideKeyed(from, n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, *n.Todo, n.RelatedKey)
+		if held := h.notifyDecideKeyed(from, n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, *n.Todo, n.RelatedKey); held != "" {
+			out = &pushOutcome{held: held}
+		}
 	case assistantwire.NotifyHealthWater:
 		return h.notifyHealthWater(from, n)
 	default:

@@ -206,14 +206,15 @@ on an app-server yet gets its messages typed into its box, and since Codex 0.169
 choice as arguments, `/model <model> --reasoning=<level>` (either part may be left out), and applies it to this session only, from the next turn,
 mid-turn too; `config.toml` stays as it is (`node/codex_terminal_modes.go`).
 
-- **Row**: `capabilities.model: true`, and `efforts` the levels of the model the rollout last ran: `supported_reasoning_levels` in the
-  `models_cache.json` of the Codex home the rollout is in, Codex's whole list for a model the cache does not name, none for a model that takes none.
-  Only when the session has a rollout and the running Codex is 0.169 or later (#13290): the node reads the pane process's executable version first
-  (`<exe> --version`, cached by executable path and modification time) and falls back to the rollout's first `session_meta.cli_version` when the
-  pane process cannot be read (another user, a remote pane, or a failing version check). If neither reports 0.169 or later, the row omits the
-  controls and `session.modes` refuses with `modes_codex_version`, with nothing typed. So a pre-0.169 session resumed by 0.169 or later offers
-  model and effort and switches them, and a newer session resumed by a pre-0.169 binary is refused safely without opening its picker. Never on
-  sub-Agents, botmux panes, TRAE CLI, or a session whose owner is in doubt.
+- **Row**: `capabilities.model: true`, plus the current model, effort and speed. Before the rollout records its settings, the node uses the launch
+  selections, launcher arguments and Codex configuration from the home that owns the rollout. The model catalog supplies defaults when available.
+  That home's `models_cache.json` gives the model's effort levels and speed choices. The row uses Codex's whole effort list for an unlisted model
+  and an empty list for a model with no effort choices. Speed choices require tiers in the catalog.
+- **Version check** uses the running Codex (#13290). The node requires a rollout and reads the pane process's executable version
+  (`<exe> --version`, cached by executable path and modification time). If that version is unavailable, it uses the rollout's first
+  `session_meta.cli_version`. The effective version must be 0.169 or later for the row to offer controls and for settings requests to type
+  anything. An older session resumed by a supported binary gains the controls. A supported session resumed by an older binary loses them.
+  Sub-Agents, botmux panes, TRAE CLI and sessions with uncertain ownership are excluded.
 - The phone reads the named launcher's catalog when the session reports one. A manually opened Codex pane with no known launcher
   gets the machine's Codex catalog. A pick changes the running session's model within its current provider. The gateway determines which
   model IDs it will serve.
@@ -223,9 +224,11 @@ mid-turn too; `config.toml` stays as it is (`node/codex_terminal_modes.go`).
   as made only when the rollout records it: Codex writes `thread_settings_applied` with the thread's `model` and `reasoning_effort` as soon as it
   applies them, between turns and mid-turn, and again at each turn's start. The transcript reader takes that event as it takes a `turn_context`,
   so the row shows the new values at once.
+- **Speed** uses its own request. The node types `/model --speed=<tier>` with `standard` for Standard and `fast` for Fast. It reports success after
+  a new rollout settings event confirms the requested tier. The request carries no model or effort change.
 - **Refusals** (`session.modes` codes, worded in en / zh-Hans / ja): a permission mode, as on the app-server route; a level the model does not take;
-  `modes_codex_version` (the running Codex — or the rollout's `cli_version` when the process cannot be read — is older than 0.169 or unknown); `modes_codex_no_rollout` (no rollout yet: a new Codex has none until its first
-  message); `modes_codex_refused` with Codex's own words (a model or level it does not have, Reserve, an unknown argument, `/model` disabled
+  `modes_codex_version` (the effective version is older than 0.169 or unknown); `modes_codex_no_rollout` (no rollout yet);
+  `modes_codex_refused` with Codex's own words (a model or level it does not have, Reserve, an unknown argument, `/model` disabled
   while a task runs; "still starting" is typed once more after 2 seconds, and a second "still starting" is passed on);
   `modes_codex_unconfirmed` (`delivered: "unknown"`) when the rollout does not show the change within 15 seconds. Nothing is typed again after
   it. Codex's words count only at the start of a screen line that is new since the typing (one more copy than before counts, as Codex prints a
@@ -486,6 +489,7 @@ and answers with a **waiting row** for the pane (`node/codex_waiting.go`).
 - **The waiting row**: its id is the node's own: a UUID whose first group is `c0de0000`, which no Codex thread id (a UUIDv7) or Claude session id takes. It carries `awaiting_first_message: true`,
   `agent: codex`, the pane and tab, `status: idle` whatever herdr says (Codex starting its MCP servers reads as working, then done), or `blocked` while a dialog holds the pane.
   Its capabilities are read, send and terminal. Its conversation is empty. Modes, the queue and forking are refused until the thread exists, and it has no history, archive or resume.
+  Web follows the replacement Codex row on the same computer and pane from either the compact session list or the full session list, then reads its complete settings.
   The node binds the pane to the row's id. The hub stores and returns that binding, so a restarted node knows the row again from the id's shape and its record.
   A Codex started by hand in a herdr or Herdr App tab uses the same row. Its title is the tab's label, with the directory name as a fallback. The row's time is when Persona first saw that pane.
 - **Attaching the thread, never by directory**: the node looks every second while a row waits. It scans the Codex processes only when a new thread appeared in the row's directory or herdr or the title named one, and every 15 seconds otherwise.

@@ -44,7 +44,7 @@ data class PlanTask(
     val brief: TaskBrief? = null,
 ) {
     /** The directory's last part: how the user names a project. */
-    val project get() = cwd.trimEnd('/').substringAfterLast('/')
+    val project get() = compactFolderName(cwd)
 }
 
 @KeepGeneratedSerializer

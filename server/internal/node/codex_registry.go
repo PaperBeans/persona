@@ -48,6 +48,7 @@ type codexRegistry struct {
 	byPane            map[string]string
 	byPanePID         map[string]int
 	threads           map[string]codexSource
+	desktopAsks       map[string]codexSource
 	remotes           map[string]*codexRemote
 	retries           map[string]codexRetry // server id -> attempts that did not connect (codex_backoff.go)
 	report            func(proto.CodexConfig)
@@ -871,6 +872,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 		parent, root string
 	}
 	var adopted []adoption
+	desktopAsks := map[string]codexSource{}
 	emitUnavailable := func(id string, src codexSource) {
 		if last, ok := previous[id]; ok && !seen[id] && !pass.runtimeOf(src.thread).live &&
 			(!n.agentFiltered("codex", src.path) || n.keptSessions()[id]) {
@@ -1036,6 +1038,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 				s.Capabilities.Interrupt = false
 			}
 			if s.Capabilities.Send {
+				s.Capabilities.AnswerQuestions = true
 				s.ReadOnlyReason = ""
 				if busUp {
 					n.codexDesktopEffortRow(&s, src, m) // codex_desktop_effort.go
@@ -1046,6 +1049,9 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 							s.Effort = app.Effort
 						}
 					}
+				}
+				if time.Since(s.UpdatedAt) < codexAskMaxAge {
+					desktopAsks[id] = src
 				}
 			}
 		} else if o := codexThreadOrigin(src); o.desktop { // a subagent whose rollout is gone too: its database row (#8191)
@@ -1093,6 +1099,9 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			} else {
 				s.Title = "Codex"
 			}
+		}
+		if !s.Capabilities.Send || s.IsSubagent {
+			delete(desktopAsks, id)
 		}
 		seen[id] = true
 		out = append(out, s)
@@ -1151,7 +1160,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 	}
 	n.codices.mu.Lock()
 	if seq > n.codices.savedSeq {
-		n.codices.lastRows, n.codices.savedSeq = saved, seq
+		n.codices.lastRows, n.codices.desktopAsks, n.codices.savedSeq = saved, desktopAsks, seq
 	}
 	n.codices.mu.Unlock()
 	return out

@@ -303,7 +303,7 @@ func (s *Service) FleetUp(ctx context.Context) {
 	if !s.fleetOn() {
 		return
 	}
-	s.fleetStart(context.WithoutCancel(ctx))
+	s.fleetStart(ctx)
 	defer s.boardFleetUp() // the pending cards are read: the board may have changed while the assistant was away
 	s.fleet.sentMu.Lock()
 	s.fleet.sent, s.fleet.archived = nil, nil

@@ -384,7 +384,7 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 	}
 	n.bindPane(pane, id)
 	n.namePersonaTab(ctx, pane, id) // the tab was marked before the thread was known (personatab.go)
-	st := sessionState{ModelSource: execution.Source, Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: began.UTC(), Model: execution.Model, ModelEffort: execution.Effort, TaskInstructions: execution.TaskInstructions}
+	st := sessionState{ModelSource: execution.Source, Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: began.UTC(), Model: execution.Model, ModelEffort: execution.Effort, CodexStartTier: execution.ServiceTier, TaskInstructions: execution.TaskInstructions}
 	if dedicatedInstructions {
 		st.TaskInstructionChannel = "codex"
 	}

@@ -488,6 +488,7 @@
     <string name="chat_web_download_started">%1$s をダウンロードしています</string>
     <string name="chat_web_download_opened_browser">ブラウザでダウンロードを開きました</string>
     <string name="chat_web_download_loopback_unsupported">ポート転送されたローカルファイルはここではダウンロードできません</string>
+    <string name="chat_web_download_too_large">ファイルが %1$d MB のダウンロード上限を超えています</string>
     <string name="chat_web_download_failed">ダウンロードを開始できませんでした</string>
     <string name="chat_file_video">動画</string>
     <string name="chat_file_audio">録音</string>

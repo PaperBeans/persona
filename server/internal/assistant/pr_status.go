@@ -454,10 +454,11 @@ func (s *Service) sweepPRStatuses(ctx context.Context, now time.Time) {
 	if s.ensureTodosLoaded(ctx) != nil {
 		return
 	}
+	s.followLinkedDeliveryPRs(ctx, now) // delivery PRs only in repository links (#14049)
 	s.todos.mu.RLock()
 	var tasks []Todo
 	for _, t := range s.todos.todos {
-		if t.DoneAt == nil && (t.PRURL != "" || externalParkPRURL(t.Supervision.parking()) != "") && !isAskTodo(t.ID) {
+		if t.DoneAt == nil && (t.PRURL != "" || len(t.PRs) > 0 || externalParkPRURL(t.Supervision.parking()) != "") && !isAskTodo(t.ID) {
 			tasks = append(tasks, copyTodoLocked(t))
 		}
 	}
@@ -692,6 +693,11 @@ func (s *Service) applyPRStatus(ctx context.Context, t Todo, status TodoPRStatus
 			if changed {
 				parkWoke = true
 				detail := "PR " + status.State + ": " + status.URL
+				if status.State == "closed" {
+					if hint := s.closedPRSuccessors(ctx, t, status.URL); hint != "" { // continued or abandoned (#14049)
+						detail += ". " + hint
+					}
+				}
 				if reviewChange {
 					detail = "PR changes requested: " + status.URL
 				}
@@ -710,6 +716,14 @@ func (s *Service) applyPRStatus(ctx context.Context, t Todo, status TodoPRStatus
 		}
 		s.drainWorkspaceQueuesForPrereq(ctx, t.ID)
 		s.evaluateTodoAfterDependents(ctx, t.ID)
+	} else if status.State == "closed" && !parkWoke && !needsUserMergeHandled {
+		// The last open delivery PR closed unmerged after another merged: the delivery is as complete as it gets, which
+		// its supervisor hears through the merged one (#14049). This closing is that completion, whether or not the closed
+		// PR was ever read open (its earlier reads may have failed); a closing already recorded is not news again.
+		if u := s.mergedDeliveryPR(ctx, t.ID); u != "" {
+			newlyClosed := old == nil || !strings.EqualFold(old.State, "closed")
+			s.maybeEmitUnparkedPRMerged(ctx, t.ID, u, held, parkWoke, newlyClosed, preStage)
+		}
 	}
 	if terminalState && s.settings(ctx).todosV2On() {
 		if _, err := s.reconcileTodoBlockersForPR(ctx, status); err != nil {

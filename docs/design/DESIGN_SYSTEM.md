@@ -190,7 +190,7 @@ Needs you is blue on every client (`docs/design/DECISIONS.md`, 11-11). Android r
 | `ModeTone` (permission modes, #3719) | asks first: secondary ink; plans: teal `#0E7C86`/`#4FD1C5`; acts within limits (Auto-Edit, Auto): `Hue.purple`; allows everything: `danger`. None is an agent state's color | `apple/Shared/Design/Theme.swift` (`Theme.ModeTone`) |
 | `Shell` (same in every style) | composer `#FFFFFF`/`#1F1F21`, stroke `#E3E3E3`/`#3A3A3C`, ink `#0D0D0D`/`#F2F2F2`, segment `#E6E6E6`/`#3A3A3C`, drawer `#F9F9F9`/`#171717` | `apple/Shared/Design/Theme.swift:840-873` |
 | `ChatBox` | user `#E3EDFD`/`#1C2F47`, persona `#F0F0F3`/`#2A2A2E` | `apple/Shared/Design/ChatLayoutTokens.swift:18-23` |
-| `UsageColor` | input, output, cache write, cache read; color-blind checked; same on web | `apple/Shared/Design/UsageColor.swift:8-15` |
+| `UsageColor` | input, output, cache write, cache read; color-blind checked; same on web. Web also has `--project-other`, By project's non-development projects (#16530, development takes the accent) | `apple/Shared/Design/UsageColor.swift:8-15`, `web/src/styles.css` |
 | `Syntax` | eight colors, each 4.5:1 on `codeBackground` | `apple/Shared/Design/Theme.swift:888` |
 
 Android mirrors `Shell`, `ChatBox` and the roles hex for hex (`android/core/designsystem/src/main/kotlin/persona/core/designsystem/HomeTokens.kt`).
@@ -3058,6 +3058,7 @@ Current gaps against this contract are listed in `docs/design/HIG_AUDIT.md`. No 
 | Sidebar session preview | Long-press menu | Fine-pointer hover card (#15342) | Preview in the action sheet | platform-specific disclosure |
 | Composer references | Picker results use each client's existing composer | Inline references at the caret (#15409) | Picker results use each client's existing composer | platform-specific editing |
 | Chat question rail | Outside scope of #15813 | Dense scroll track and on-demand preview and jump | Outside scope of #15813 | Web interaction |
+| Extension page setup | Outside scope of #16553 | Missing settings and a link to that installation's settings on a direct page visit | Outside scope of #16553 | Web deep-link recovery |
 | Assistant update status | Outside scope of #15687 | Live update and idle-restart notice in Assistant | Outside scope of #15687 | web change |
 | Tokens source | hand-written | hand-written | generated from `spec/tokens` | Apple and Android drift fails a test; the web is unchecked |
 

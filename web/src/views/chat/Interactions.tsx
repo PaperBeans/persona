@@ -7,7 +7,6 @@ import { mergeRefs } from "../../lib/tap-guard";
 import { delegateLines, isDelegating, recommendedLabels, type DelegatedAnswer } from "../../lib/delegate";
 import { supervisorHeld } from "../../lib/supervisor-held";
 import { Choice, DigitHint } from "./Choice";
-import { DelegatedCard } from "./Delegated";
 import { BUSY_MOTION, spinStyle } from "../../lib/busy-motion";
 import { appArchiveDeps, archiveAgent, archiveSession } from "../../lib/agent-archives";
 import { isSessionReview } from "../../lib/types";
@@ -578,6 +577,9 @@ function PlanCard({ ix }: { ix: Interaction }) {
 // The complete tool-approval card loads with the first permission interaction, keeping its optional clarification UI
 // and permission editor out of the first screen. Its slot stays identifiable while the chunk loads or cannot load.
 const PermissionCard = lazyPage(() => import("./PermissionCard").then((m) => m.PermissionCard));
+// A card the assistant answered for the user (its "Change answer"): drawn only after such an answer, so its chunk is off
+// the first screen and loads with the first one (the idle tier has no room for it).
+const DelegatedCard = lazyPage(() => import("./Delegated").then((m) => m.DelegatedCard));
 
 export function PermissionCardLoading({ ix }: { ix: Interaction }) {
   return (
@@ -589,8 +591,7 @@ export function PermissionCardLoading({ ix }: { ix: Interaction }) {
 
 /** A repeated cached import failure gets one full reload per card and tab session. The marker survives that reload;
  *  if the chunk is still unavailable, the card keeps its local Retry instead of entering a reload loop. */
-function reloadPermissionChunk(id: string) {
-  const key = `permission-chunk-reload:${id}`;
+function reloadCardChunk(key: string) {
   try {
     if (sessionStorage.getItem(key)) return;
     sessionStorage.setItem(key, "1");
@@ -613,7 +614,7 @@ export class PermissionCardFrame extends Component<{ ix: Interaction; children?:
   componentDidCatch(error: unknown, info: ErrorInfo) {
     const chunk = isChunkError(error);
     reportBoundary(error, "permission_card", chunk, info.componentStack);
-    if (chunk && this.failures++) reloadPermissionChunk(this.props.ix.id);
+    if (chunk && this.failures++) reloadCardChunk(`permission-chunk-reload:${this.props.ix.id}`);
   }
 
   render() {
@@ -628,6 +629,34 @@ export class PermissionCardFrame extends Component<{ ix: Interaction; children?:
       );
     }
     return <Suspense fallback={<PermissionCardLoading ix={ix} />}>{children ?? <PermissionCard ix={ix} />}</Suspense>;
+  }
+}
+
+/** The same for a card the assistant answered for the user: its chunk loads with the first such answer, and a failed
+ *  load keeps a Retry in its slot instead of taking the chat (and the cards beside it) down to the page boundary. */
+export class DelegatedCardFrame extends Component<{ d: DelegatedAnswer; children?: ReactNode }, { error: unknown }> {
+  state = { error: null as unknown };
+  failures = 0;
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    const chunk = isChunkError(error);
+    reportBoundary(error, "delegated_card", chunk, info.componentStack);
+    if (chunk && this.failures++) reloadCardChunk(`delegated-chunk-reload:${this.props.d.ix.id}`);
+  }
+
+  render() {
+    const { d, children } = this.props;
+    if (this.state.error) {
+      return (
+        <ErrorNotice role="alert" message={t("chat-fulltext.failed")}
+          actions={<Button size="sm" onClick={() => this.setState({ error: null })}>{t("app.retry")}</Button>} />
+      );
+    }
+    return <Suspense fallback={null}>{children ?? <DelegatedCard d={d} />}</Suspense>;
   }
 }
 
@@ -1556,7 +1585,7 @@ export function PendingCards({ interactions, answered, delegated = [], offerNext
   if (!count && !answered.length && !delegated.length) return null;
   const shown = showsAnswered({ narrow, keyboard, open, short });
   const done = shown
-    ? [...delegated.map((d) => <DelegatedCard key={d.ix.id} d={d} />), ...(answered.length ? [<AnsweredSummary key="answered" answered={answered} />] : [])]
+    ? [...delegated.map((d) => <DelegatedCardFrame key={d.ix.id} d={d} />), ...(answered.length ? [<AnsweredSummary key="answered" answered={answered} />] : [])]
     : [];
   // the cut-off count only while all the cards are opened: a stack folded to its first says where it stands instead (the
   // position chip). Each card has its own keyed provider, so a card moving up to first as the one above it goes keeps

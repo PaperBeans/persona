@@ -20,7 +20,7 @@ vi.mock("../../lib/api", async (importOriginal) => ({
   fileThumbURL: mocks.fileThumbURL,
   fileDownloadURL: mocks.fileDownloadURL,
 }));
-vi.mock("../../lib/panel", () => ({ openPanel: mocks.openPanel }));
+vi.mock("../../lib/panel", () => ({ openPanel: mocks.openPanel, useReadOnlyFile: () => false }));
 vi.mock("../../lib/path-presence", () => ({ usePathLinks: mocks.usePathLinks }));
 vi.mock("../../ui/icons", () => ({ Icon: ({ name }: { name: string }) => <span data-icon={name} /> }));
 

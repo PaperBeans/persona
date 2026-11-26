@@ -158,7 +158,7 @@ internal fun Todo.place(host: AssistantTaskHost, lead: Session?): String = build
     val a = activeAgents.firstOrNull() ?: agents.firstOrNull()
     if (a != null) {
         add(host.machineName(a.machineId))
-        a.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf(String::isNotBlank)?.let(::add)
+        persona.core.contracts.compactFolderName(a.cwd).takeIf(String::isNotBlank)?.let(::add)
     }
     lead?.agentLabel?.let(::add)
 }.joinToString(" · ")
@@ -640,8 +640,8 @@ private fun ReceiptCard(item: FeedItem, host: AssistantTaskHost, todos: List<Tod
     }
     val busy by host.tasks.busy.collectAsStateWithLifecycle()
     // A done receipt ends a stretch of work, not the task: while its todo is open (the agent stopped unfinished, waits on
-    // the user…) it says so, not "done"; done once the todo is (#6153). One gone from the list stands on its receipt.
-    val stopped = !failed && todo != null && todo.doneAt == null
+    // the user…) it says so, not "done"; done once the todo is done or its agent has an unread completion (#6153).
+    val stopped = !failed && todo != null && todo.doneAt == null && state != TaskState.Unread
     val tone = if (failed) PersonaTheme.palette.danger else if (stopped) PersonaTheme.palette.idle else PersonaTheme.palette.done
     val summary = todo?.startError?.takeIf { failed && it.isNotBlank() }?.let { stringResource(R.string.chat_tasks_now_failed, it.trim()) } ?: item.field("summary")
     Row(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.cardShape).background(PersonaTheme.palette.statusSurface).padding(Tokens.Space.l),
@@ -669,7 +669,7 @@ private fun ReceiptCard(item: FeedItem, host: AssistantTaskHost, todos: List<Tod
 /** What the task's agent said last, its Markdown styled and its web links linked, in four lines (#1508). */
 @Composable
 private fun ReceiptSummary(md: String) {
-    Text(agentWords(md), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2, maxLines = 4, overflow = TextOverflow.Ellipsis)
+    Text(summaryWords(md), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2, maxLines = 4, overflow = TextOverflow.Ellipsis)
 }
 
 /** A task the model service cut off (#1516): red, why in words, "Continue" while it is still cut off; once its agent went on,

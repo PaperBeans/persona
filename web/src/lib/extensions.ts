@@ -322,7 +322,8 @@ export const listExtensionsInfo = (isAuthContextCurrent?: () => boolean) =>
   }));
 /** A detail as either kind of hub sends it, its pages' places read with the new keys. */
 export const detailOf = (d: HubExtensionDetail): HubExtensionDetail => (d.ui ? { ...d, ui: d.ui.map(placeOf) } : d);
-export const extensionDetail = (id: string) => api<HubExtensionDetail>(withEntryLists(`${base(id)}/`)).then(detailOf);
+export const extensionDetail = (id: string, options?: Pick<Parameters<typeof api>[1] & object, "headers" | "signal" | "isAuthContextCurrent">) =>
+  api<HubExtensionDetail>(withEntryLists(`${base(id)}/`), options).then(detailOf);
 /** After a change that can start, stop or reconfigure an extension: its entries, cards and sections are asked for again. */
 export const changed = <T>(r: T): T => {
   refreshExtensionPlaces();

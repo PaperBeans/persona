@@ -43,6 +43,9 @@ import persona.core.inbox.LarkNativeLink
 import persona.feature.inbox.LarkTextPick
 import persona.feature.inbox.ManagerUriHandler
 import persona.core.inbox.larkNativeLink
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -259,19 +262,39 @@ fun ChatLinkHost(
                         }
                     }, onWebpage = { nativeWebpage = it }) { title, whole -> nativeTitle = title; nativeWhole = whole }
                 }
+                val currentDownloader by rememberUpdatedState(webDownloader)
+                val currentFeedback by rememberUpdatedState(feedback)
                 if (view != null) {
                     // Only a committed composition activates the view; acquires from abandoned compositions stay evictable.
                     SideEffect { view.picks = picks; pool.activate(view) }
                     // Only the view going away releases it: a change of picks must not destroy the page being shown.
                     DisposableEffect(view) {
+                        val downloadJob = SupervisorJob(scope.coroutineContext[Job])
+                        val downloadScope = CoroutineScope(scope.coroutineContext + downloadJob)
                         view.onPick = picked
                         view.onExternal = { external = it }
                         view.onDownload = { request ->
-                            val _ = handleWebDownload(context, resources, webDownloader, request, forwarded != null) { notice, style ->
-                                val _ = feedback?.notice(notice, style)
+                            val key = view.downloadGuard.tryStart(request.url)
+                            if (key != null) {
+                                val isForwardedPage = forwarded != null
+                                downloadScope.launch {
+                                    var completed = false
+                                    try {
+                                        val _ = handleWebDownload(context, resources, currentDownloader, request, isForwardedPage) { notice, style ->
+                                            val _ = currentFeedback?.notice(notice, style)
+                                        }
+                                        completed = true
+                                    } finally {
+                                        view.downloadGuard.finish(key, applyCooldown = completed)
+                                    }
+                                }
                             }
                         }
-                        onDispose { pool.release(view) }
+                        onDispose {
+                            downloadJob.cancel()
+                            view.downloadGuard.clear()
+                            pool.release(view)
+                        }
                     }
                 }
                 fun close() {

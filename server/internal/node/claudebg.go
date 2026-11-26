@@ -182,6 +182,13 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 				status = proto.StatusDone
 			}
 		}
+		// Its turn ended on the app's end-of-turn question to the owner, marked blocked: it waits on them (#16406).
+		endAsk := ""
+		if source == proto.SourceClaudeDesktop && (status == proto.StatusIdle || status == proto.StatusDone) {
+			if endAsk = endOfTurnAsk(p); endAsk != "" {
+				status = proto.StatusBlocked
+			}
+		}
 		s := proto.Session{
 			SessionID: id, Cwd: c.Cwd, Status: status, Agent: "claude", Title: m.title, SourceKind: source,
 			Model: n.shownModel(id, m.model), LastText: snippet(m.lastText), UpdatedAt: lastUsed(m, st), Rev: st.Size(), AgentSurface: m.surface,
@@ -229,6 +236,9 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 				// The phone answers the dialog on the pane's screen: the row names it once it is read (#5965).
 				s.AttentionReason = n.dialogOn(id, pane)
 			}
+		}
+		if endAsk != "" && s.AttentionReason == "" {
+			s.AttentionReason = endAsk // the owner answers it with a message, which reaches it through its inbox
 		}
 		hasActiveCard := n.activeAsks.active(id) || n.ccPlugins.hasActivePermission(id)
 		hasPublishedAsk := s.Capabilities != nil && s.Capabilities.Send && s.PaneID == "" && n.cx.hasOutsideAsk(id)

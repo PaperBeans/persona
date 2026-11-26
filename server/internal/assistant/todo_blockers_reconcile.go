@@ -71,7 +71,6 @@ type todoBlockerHooks struct {
 	registry    *blockerRegistry
 	onUnblocked func(ctx context.Context, todoID string)
 	fetchPR     func(ctx context.Context, targetRef string) (todoBlockerPRFact, bool)
-	planUnlocks map[string][]todoStageUnlockSpec
 }
 
 // todoBlockerHookRegistry isolates optional per-Service blocker hooks without modifying Service fields
@@ -274,56 +273,6 @@ func normalizeBlockerConditionJSON(raw string) string {
 		return "{}"
 	}
 	return s
-}
-
-// rememberPlanUnlockRules stores per-task structured unlock rules for a saved plan until startPlan consumes them.
-func (s *Service) rememberPlanUnlockRules(planID string, specs []todoStageUnlockSpec) {
-	planID = strings.TrimSpace(planID)
-	if s == nil || planID == "" || len(specs) == 0 {
-		return
-	}
-	hasAny := false
-	for _, sp := range specs {
-		if sp.stage != "" || len(sp.contracts) > 0 {
-			hasAny = true
-			break
-		}
-	}
-	if !hasAny {
-		return
-	}
-	if h := s.todoBlockerHooks(true); h != nil {
-		cp := make([]todoStageUnlockSpec, len(specs))
-		for i, sp := range specs {
-			cp[i] = todoStageUnlockSpec{
-				stage:     sp.stage,
-				contracts: append([]string(nil), sp.contracts...),
-			}
-		}
-		h.mu.Lock()
-		if h.planUnlocks == nil {
-			h.planUnlocks = make(map[string][]todoStageUnlockSpec)
-		}
-		h.planUnlocks[planID] = cp
-		h.mu.Unlock()
-	}
-}
-
-// takePlanUnlockRules retrieves and clears any remembered unlock rules for planID.
-func (s *Service) takePlanUnlockRules(planID string) []todoStageUnlockSpec {
-	planID = strings.TrimSpace(planID)
-	if s == nil || planID == "" {
-		return nil
-	}
-	h := s.todoBlockerHooks(false)
-	if h == nil {
-		return nil
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	specs := h.planUnlocks[planID]
-	delete(h.planUnlocks, planID)
-	return specs
 }
 
 // todoStageUnlockRuleFromBlockers extracts a structured stage/contract unlock rule from persisted todo_stage blockers

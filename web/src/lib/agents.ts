@@ -215,9 +215,9 @@ export function providerLabel(p: string): string {
   return PROVIDER_LABEL[p] ?? (p || t("lib-agents.other"));
 }
 
-// The agent mark (ui/AgentMark.tsx) a provider's product is drawn with, for the providers whose product has one bundled:
-// Dots drives ChatGPT, whose mark is the OpenAI Blossom the Codex mark already is. The others draw their label's letter.
-const PROVIDER_MARK: Record<string, MarkedAgent> = { grok_bot: "grok", dots: "codex", claude_duet: "claude", gemini_tasks: "gemini" };
+// The agent mark (ui/AgentMark.tsx) a provider's product is drawn with, only where the provider is that product's own
+// agent. Dots and Grok Bot are different products: they draw their labels' letters, never ChatGPT's or Grok's marks.
+const PROVIDER_MARK: Record<string, MarkedAgent> = { claude_duet: "claude", gemini_tasks: "gemini" };
 
 /** The `agent` to hand AgentMark for a provider: its product's mark, else its label, whose first letter is drawn ("" would
  *  be Claude Code's). */

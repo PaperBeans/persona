@@ -677,11 +677,14 @@ class OutboxMessageSender(
         if (!store.transition(id, from, to)) return@withLock false
         if (!composerActive(id)) return@withLock true
         // The manual claim is already visible but its durable start is queued behind this lock. An automatic
-        // Unknown settlement and the same attempt's immediate Unknown→Sending retry both belong to the old
-        // operation. Restore only an unsettled Sending row with its current operation, never a Sent/Shown result.
+        // Unknown settlement, the same attempt's immediate Unknown→Sending retry, and a review deadline moving
+        // Unknown/Verifying to NeedsConfirmation all belong to the old operation. Restore only an unsettled row
+        // written by that automatic transition with its current operation, never a Sent/Shown result.
         // In particular, a manual claim during the second write must not let the old operation replace its opId.
         val current = store.entries.first().firstOrNull { it.clientMessageId == id }
-        if (current?.state == OutboxState.Sending || current?.state == OutboxState.Unknown) {
+        if (current?.state == OutboxState.Sending || current?.state == OutboxState.Unknown ||
+            (to == OutboxState.NeedsConfirmation && current?.state == OutboxState.NeedsConfirmation)
+        ) {
             store.transition(id, setOf(current.state), OutboxState.Sending, current.error, current.operationId)
         }
         false

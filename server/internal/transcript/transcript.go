@@ -504,7 +504,7 @@ const (
 	CompactSummaryNotice = "已从压缩的上下文继续"
 )
 
-// CompactNotice is the notice a /compact without instructions becomes (no user line): a /compact sent from the phone
+// CompactNotice is the notice a /compact command becomes (no user line): a /compact sent from the phone
 // is tied to it (node/echo.go).
 const CompactNotice = "压缩上下文"
 

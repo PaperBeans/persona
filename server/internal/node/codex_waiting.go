@@ -173,7 +173,7 @@ func codexSkipUpdateKeys(text string) []string {
 // openCodexWait makes the waiting row of a Codex the start opened with no message and answers with it.
 func (n *Node) openCodexWait(ctx context.Context, pane, cwd, launcher, mode string, execution modelExecution, began time.Time) *proto.Session {
 	w := &codexWait{id: codexWaitID(), pane: pane, cwd: cwd, began: began}
-	st := sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: began.UTC(), Model: execution.Model, ModelEffort: execution.Effort}
+	st := sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: began.UTC(), Model: execution.Model, ModelEffort: execution.Effort, CodexStartTier: execution.ServiceTier}
 	if mode == "plan" { // as a start with a message keeps it (codex_start.go), for the thread to take
 		st.AppMode = mode
 	}
@@ -693,7 +693,7 @@ func (n *Node) attachCodexWait(ctx context.Context, w *codexWait, thread, how st
 	// would find the pane still bound to the row's id and make the row again (codexWaitOf).
 	if !w.manual {
 		st, _ := n.state.get(w.id)
-		n.state.put(thread, sessionState{Pane: w.pane, Launcher: st.Launcher, Cwd: st.Cwd, Model: st.Model, ModelEffort: st.ModelEffort,
+		n.state.put(thread, sessionState{Pane: w.pane, Launcher: st.Launcher, Cwd: st.Cwd, Model: st.Model, ModelEffort: st.ModelEffort, CodexStartTier: st.CodexStartTier,
 			StartedAt: st.StartedAt, AppMode: st.AppMode, AppModeExplicit: st.AppModeExplicit, CreationID: st.CreationID, Incarnation: st.Incarnation})
 	}
 	n.mu.Lock()

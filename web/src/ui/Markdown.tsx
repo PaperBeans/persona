@@ -13,7 +13,7 @@ import { copyText, toast } from "./atoms";
 import { tableHtml, tableToTsv, writeTableClipboard } from "./tableCopy";
 import { t } from "../i18n";
 import { Icon } from "./icons";
-import { MermaidBlock } from "./Mermaid";
+import { lazyPage } from "../lib/lazy-page";
 import { ExternalImage } from "./ExternalImage";
 import { ReplyPicturesContext } from "./reply-pictures-context";
 import { LocalImageRun, ReplyImagesRun, useReplyImages } from "./reply-images-lazy";
@@ -370,6 +370,22 @@ function Link({ href, children, mid, cwd, line, title: hover, readOnly }: { href
   );
 }
 
+// A ```mermaid block's component (Mermaid.tsx, with lib/mermaid.ts and the words only they read) loads with the first
+// block drawn, not with every first screen that can draw a reply. Until it is in, the block shows its source dimmed, as
+// the component itself does until the diagram is drawn; once in, every block after draws at once.
+export const MermaidDiagram = lazyPage(() => import("./Mermaid").then((m) => m.MermaidBlock));
+
+/** A diagram's source while its component loads: MermaidBlock's own look before its drawing. */
+function MermaidPending({ code }: { code: string }) {
+  return (
+    <div className="group/code relative my-3" data-mermaid="">
+      <pre className="opacity-60">
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
 // A formula KaTeX has not drawn yet (it loads when a reply first has one, ui/stream/math.ts): remark-math leaves it as a
 // <code class="math-inline"> / <pre><code class="math-display">, shown as the TeX it was written in. Once KaTeX is in,
 // rehype-katex turns those into formulas before they get here.
@@ -379,7 +395,14 @@ function renderPre(children: React.ReactNode) {
   const code = () => textOf(children).replace(/\n$/, "");
   if (hasClass(codeClass(children), "math-display")) return <div className="whitespace-pre-wrap" data-math-pending="display">{`$$\n${code()}\n$$`}</div>;
   const lang = codeLanguage(children);
-  if (lang === "mermaid") return <MermaidBlock code={code()} />;
+  if (lang === "mermaid") {
+    const source = code();
+    return (
+      <Suspense fallback={<MermaidPending code={source} />}>
+        <MermaidDiagram code={source} />
+      </Suspense>
+    );
+  }
   // the assistant's cards (#1850): drawn with the extensions' components; a block that does not read stays code
   if (CARD_LANGUAGES.includes(lang)) return <AssistantCard lang={lang} code={textOf(children)} fallback={<CodeBlock lang={lang}>{children}</CodeBlock>} />;
   return <CodeBlock lang={lang}>{children}</CodeBlock>;

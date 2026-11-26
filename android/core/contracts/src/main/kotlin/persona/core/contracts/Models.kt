@@ -914,7 +914,7 @@ data class Session(
             else -> UsageLimitWhen.Resets(at)
         }
     }
-    val folderName: String get() = cwd.trimEnd('/').substringAfterLast('/')
+    val folderName: String get() = compactFolderName(cwd)
     val displayTitle: String get() = if (title.isEmpty() || title == "Claude Code") folderName.ifEmpty { sessionId.take(8) } else title
     /** Codex in a terminal, or a thread from a Codex app-server / Codex history. */
     val isCodex: Boolean get() = agent == "codex" || sourceKind == "codex_app_server" || sourceKind == "codex_history"

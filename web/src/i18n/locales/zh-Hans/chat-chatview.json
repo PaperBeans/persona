@@ -117,7 +117,6 @@
   "loop_mark": "循环",
   "agent_device": "Agent 在 {device} 上运行",
   "agent_device_offline": "Agent 在 {device} 上运行，那台电脑现在离线，连上后才能继续",
-  "branch_title": "分支：{branch}",
   "background_running": "后台任务，{count} 个在运行",
   "rename_title": "重命名",
   "agent_device_label": "{agent}。{where}",

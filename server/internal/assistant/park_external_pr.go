@@ -67,6 +67,10 @@ func (s *Service) applyExternalParkPRStatus(ctx context.Context, t Todo, status 
 	}
 	observation := externalPRObservation{URL: source, State: status.State, CheckedAt: status.CheckedAt,
 		HeadOID: status.HeadOID, Review: status.submittedReview}
+	hint := ""
+	if status.State == "closed" { // closed unmerged: name the linked PRs that may continue it (#14049)
+		hint = s.closedPRSuccessors(ctx, t, status.URL)
+	}
 	s.todos.writing.Lock()
 	defer s.todos.writing.Unlock()
 	v, changed, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
@@ -90,7 +94,7 @@ func (s *Service) applyExternalParkPRStatus(ctx context.Context, t Todo, status 
 		return err
 	}
 	if changed && v.State == reviewPending {
-		s.signal(superviseSignal{Todo: t.ID, Kind: sigReview, Key: reviewKey(&v)})
+		s.signal(superviseSignal{Todo: t.ID, Kind: sigReview, Key: reviewKey(&v), Detail: hint})
 	}
 	return nil
 }

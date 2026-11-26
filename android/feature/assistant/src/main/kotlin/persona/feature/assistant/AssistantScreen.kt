@@ -1071,7 +1071,7 @@ fun AssistantScreen(
             }
         }
             // The page's own toast (no app feedback), at the top, where the root draws the app's.
-            persona.core.designsystem.JToastHost(toast, Modifier.align(Alignment.TopCenter).statusBarsPadding())
+            persona.core.designsystem.JToastHost(toast, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = persona.core.designsystem.ToastTopBarClearance))
         }
         }
     }

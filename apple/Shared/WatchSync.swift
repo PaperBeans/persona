@@ -147,14 +147,14 @@ nonisolated enum WatchPhoneCapabilities {
     @discardableResult static func storeDay(_ ctx: [String: Any], full: Bool, in defaults: UserDefaults = .standard) -> Int {
         var writes = keep(ctx[RecordingDayContract.phoneKey] as? Int, as: dayKey, full: full, in: defaults)
         writes += keep(ctx[RecordingDayContract.phoneHubKey] as? Bool, as: dayHubKey, full: full, in: defaults)
-        let keepDays = (ctx[RecordingDayContract.phoneKeepDaysKey] as? Int).map { RecordingDayContract.keepDays(recordingDays: $0) }
+        let keepDays = (ctx[RecordingDayContract.phoneKeepDaysKey] as? Int).map { RecordingDayContract.keepDays(audioDays: $0) }
         writes += keep(keepDays, as: keepDaysKey, full: full, in: defaults)
         return writes
     }
 
     /// How long the watch keeps a chunk the phone hasn't acknowledged, in days after its `day`.
     static func keepDays(_ defaults: UserDefaults = .standard) -> Int {
-        (defaults.object(forKey: keepDaysKey) as? Int).map { RecordingDayContract.keepDays(recordingDays: $0) }
+        (defaults.object(forKey: keepDaysKey) as? Int).map { RecordingDayContract.keepDays(audioDays: $0) }
             ?? RecordingDayContract.maxKeepDays
     }
 

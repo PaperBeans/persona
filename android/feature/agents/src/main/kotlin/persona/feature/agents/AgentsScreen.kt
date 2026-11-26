@@ -1035,7 +1035,7 @@ internal fun AgentsScreen(
             if (takeoverClient != null) CodexTakeoverBusyPill(takeoverCoordinator, page.sessions)
             if (sidebar == null) AgentsFeedNote(feed, latestPage)
         }
-        persona.core.designsystem.JToastHost(toast, Modifier.align(Alignment.TopCenter).statusBarsPadding())
+        persona.core.designsystem.JToastHost(toast, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = persona.core.designsystem.ToastTopBarClearance))
     }
     }
     val glassRows = PersonaTheme.style == AppStyle.Glass
@@ -1178,7 +1178,7 @@ internal fun AgentsScreen(
                             }
                         })
                     if (takeoverClient != null) CodexTakeoverDialogs(historyTakeoverCoordinator)
-                    persona.core.designsystem.JToastHost(historyToast, Modifier.align(Alignment.TopCenter).statusBarsPadding())
+                    persona.core.designsystem.JToastHost(historyToast, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = persona.core.designsystem.ToastTopBarClearance))
                 }
             }
         }

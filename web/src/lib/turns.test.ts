@@ -252,6 +252,29 @@ describe("chatLines", () => {
     }
   });
 
+  it("omits the empty-response fallback for /compact and notice-answered local slash commands", () => {
+    const empty = (items: Item[]) => {
+      const [line] = chatLines(items);
+      return line.kind === "segment" && line.seg.emptyResponse === true;
+    };
+    const compactWithArgs = u(1, "/compact Write every compaction summary in English.");
+    const compactedStdout = notice(2, "Compacted PreCompact completed successfully");
+    expect(empty([compactWithArgs, compactedStdout])).toBe(false);
+    expect(empty([compactWithArgs])).toBe(false);
+    expect(empty([u(1, "/compact")])).toBe(false);
+    expect(empty([u(1, "/model opus"), notice(2, "Set model to Opus")])).toBe(false);
+    expect(empty([u(1, "/cost"), notice(2, "Total cost: $0.04")])).toBe(false);
+
+    // Model-invoking slash commands, file paths, and ordinary messages still report an empty response.
+    const thinking: Item = { id: "t2#0", seq: 2, role: "assistant", kind: "thinking", text: "Reviewing" };
+    expect(empty([u(1, "/review")])).toBe(true);
+    expect(empty([u(1, "/review"), thinking, a(3, " ")])).toBe(true);
+    expect(empty([u(1, "/review"), notice(2, "API Error: 503 Unavailable")])).toBe(true);
+    expect(empty([u(1, "/compact/notes.md")])).toBe(true);
+    expect(empty([u(1, "/etc/hosts"), notice(2, "Checked")])).toBe(true);
+    expect(empty([u(1, "Please run /compact")])).toBe(true);
+  });
+
   // #3428: the node's notices for switching ultracode (transcript/ultracode.go) are ordinary notices
   it("keeps the ultracode on / off notices as notices", () => {
     for (const text of ["已开启 ultracode（只对本会话）", "已关闭 ultracode"]) {

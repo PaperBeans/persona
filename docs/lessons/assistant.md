@@ -1067,3 +1067,13 @@ reject final symlinks, non-regular files, files over 1 MiB, and lexical or resol
 Output-filter whitelists also need argument checks: `sort -o` / `--output` / `--compress-program`, `date -s` / `--set` /
 positional timestamp operands, and `uniq IN OUT` write files, execute programs, or mutate system state rather than only
 formatting output.
+
+## A loop started with the run's cancellation taken off outlives the run (#16215)
+
+`FleetUp` handed `fleetStart` `context.WithoutCancel(ctx)` so its one-time reads would finish, and `fleetStart` started
+`liveLoop` and `expireLoop` on the same context. When a manager's run ended without the process (its token revoked, a
+restart in place for a new binary), `run()` closed the store, but both loops went on against the old Service: every
+15 s `liveLoop` read the settings through the devices' time zone hook and logged `assistant: settings: closed pool`,
+for days, and each restart left another pair. Take the cancellation off only the one-time reads; a loop gets the
+run's context. Test it by finding the loop's goroutine in the stacks, ending the run, and waiting until it is gone
+(`server/internal/assistant/fleet_loops_run_test.go`).

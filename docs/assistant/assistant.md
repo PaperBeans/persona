@@ -2403,9 +2403,11 @@ Assistant MCP tools (`assistant/conversations.go`, descriptions `prompts/mcp/ass
     three checks, each with a 15-second timeout, and waits 10 seconds between checks. A match removes the relay
     from the queue. If the last check fails or still finds no match, the manager retries with the same `once_id`.
     Direct and queued supervision sends apply the same transcript-confirmation boundary even when `assistant.send`
-    returns success: if the rendered supervision user item is not visible or the transcript cannot be read, the
-    relay (including tried PR, decision-reply, and unhandled-inbox digests) is persisted with its exact rendered
-    payload and attempt state under the same `once_id` for bounded reconciliation and retry. Untried special digests
+    returns success: confirmation reads bypass the database history cache on the active conversation source (leaving
+    retired frozen segments on durable history) and allow a brief bounded settle window on successful RPC returns for
+    asynchronous transcript flushes. If the rendered supervision user item is still not visible or the transcript
+    cannot be read, the relay (including tried PR, decision-reply, and unhandled-inbox digests) is persisted with its
+    exact rendered payload and attempt state under the same `once_id` for bounded reconciliation and retry. Untried special digests
     continue to restore for revalidation, and an unresolved supervision relay (tried, durable-doubt, or withdrawn)
     keeps decision-reply interjections pending until that relay is reconciled.
     An uncertain supervision digest stays queued if rechecking its tasks would change the text or destination.

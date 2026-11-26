@@ -71,6 +71,7 @@ type codexCard struct {
 	pane     string
 	ask      *transcript.CodexAsk
 	approval *screen.CodexApprovalDialog
+	desktop  *codexSource
 }
 
 type codexCards struct {
@@ -206,9 +207,7 @@ func (n *Node) codexCardsNow(ctx context.Context, only string) []codexCard {
 		a.joined = n.codexJoined(id)
 		agents[id] = a
 	}
-	if only == "" {
-		n.cx.forget(agents)
-	}
+	desktop := n.desktopCodexAskSources(only)
 	var out []codexCard
 	for id, a := range agents {
 		path, title := n.codexPath(id), n.codexTitle(id)
@@ -250,8 +249,42 @@ func (n *Node) codexCardsNow(ctx context.Context, only string) []codexCard {
 			n.cx.approvalGone(id)
 		}
 	}
+	for id, src := range desktop {
+		if _, terminal := agents[id]; terminal {
+			continue
+		}
+		a := codexAgent{kind: "codex"}
+		agents[id] = a // Keep the incremental tail while this desktop chat is listed.
+		path := src.path
+		if path == "" {
+			path = n.codexAppHistoryFile(src)
+		}
+		for _, ask := range n.cx.asks(id, path) {
+			if !ask.Async || !ask.At.IsZero() && time.Since(ask.At) > codexAskMaxAge {
+				continue
+			}
+			out = append(out, codexCard{ix: askCard(id, a, threadTitle(src.home, src.thread), ask), ask: &ask, desktop: &src})
+		}
+	}
+	if only == "" {
+		n.cx.forget(agents)
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ix.CreatedAt.Before(out[j].ix.CreatedAt) })
 	return out
+}
+
+func (n *Node) desktopCodexAskSources(only string) map[string]codexSource {
+	sources := map[string]codexSource{}
+	if n.codices != nil {
+		n.codices.mu.Lock()
+		defer n.codices.mu.Unlock()
+		for id, src := range n.codices.desktopAsks {
+			if only == "" || id == only {
+				sources[id] = src
+			}
+		}
+	}
+	return sources
 }
 
 type codexAgent struct {
@@ -637,6 +670,14 @@ func (n *Node) codexAnswer(ctx context.Context, session, id string, r proto.Reso
 	switch {
 	case card.approval != nil:
 		err = n.codexApprove(ctx, card, r)
+	case card.desktop != nil:
+		n.cx.mu.Lock()
+		held := time.Now().Before(n.cx.held[id])
+		n.cx.mu.Unlock()
+		if held {
+			return refusal("codex_busy", "Codex is already processing this answer.", nil)
+		}
+		err = n.codexReplyDesktop(ctx, session, card, r)
 	case card.ask.Async && n.codexJoined(session):
 		err = n.codexReplyRemote(ctx, session, card, r)
 	case card.ask.Async:
@@ -744,22 +785,41 @@ func (n *Node) codexSubmitted(ctx context.Context, pane string) error {
 // pastedRE is how Codex shows a long paste in its box.
 var pastedRE = lazyre.New(`^\[Pasted Content \d+ chars\]$`)
 
-// codexReply answers an async question: the reply envelope Codex's own clients send, as a message.
-func (n *Node) codexReply(ctx context.Context, session string, card *codexCard, r proto.Resolution) error {
-	var replies []transcript.CodexReply
-	for _, q := range card.ask.Questions {
-		if a := strings.TrimSpace(r.Answers[q.Question]); a != "" {
-			replies = append(replies, transcript.CodexReply{QuestionItemID: transcript.QuestionItemID(card.ask.CallID, q.Index), Question: q.Question, Answer: a})
+// Desktop answers need their own turn. Do not queue them behind a running turn: the question may be answered in the App in the meantime.
+func (n *Node) codexReplyDesktop(ctx context.Context, session string, card *codexCard, r proto.Resolution) error {
+	msg, err := codexReplyText(card, r)
+	if err != nil {
+		return err
+	}
+	src := *card.desktop
+	if !codexDesktopAvailable(src.home) || !codexDesktopChat(src) {
+		return codexDesktopUnavailable(ctx)
+	}
+	t := codexDesktopQueue.thread(src)
+	t.send.Lock()
+	defer t.send.Unlock()
+	working, mark := n.codexDesktopTurnState(src)
+	if len(t.held) != 0 || working || t.recentlyStarted(mark) {
+		return refusal("codex_busy", "Codex is still working. Wait for this turn to finish, then answer again.", nil)
+	}
+	for _, current := range n.codexCardsNow(ctx, session) {
+		if current.ix.ID == card.ix.ID {
+			return t.start(ctx, n, []codexDesktopMessage{{text: msg}}, mark)
 		}
 	}
-	if len(replies) == 0 {
-		return fmt.Errorf("没有回答任何一道题")
+	return refusal(screen.PromptChanged, "Codex is no longer waiting for this answer.", nil)
+}
+
+// codexReply answers an async question: the reply envelope Codex's own clients send, as a message.
+func (n *Node) codexReply(ctx context.Context, session string, card *codexCard, r proto.Resolution) error {
+	msg, err := codexReplyText(card, r)
+	if err != nil {
+		return err
 	}
 	if err := n.codexReady(ctx, card.pane, true); err != nil {
 		return err
 	}
-	msg := transcript.CodexReplyMessage(replies)
-	err := n.codexType(ctx, card.pane, msg, func(draft string) bool {
+	err = n.codexType(ctx, card.pane, msg, func(draft string) bool {
 		d := strings.Join(strings.Fields(draft), "")
 		return strings.HasSuffix(d, "</send_user_message_question_reply>") || pastedRE.MatchString(draft)
 	})
@@ -768,6 +828,19 @@ func (n *Node) codexReply(ctx context.Context, session string, card *codexCard, 
 	}
 	// Taken: the rollout has the reply (the question closes), or the turn queued it to send after the current step.
 	return n.codexTaken(ctx, session, card, queuedReply)
+}
+
+func codexReplyText(card *codexCard, r proto.Resolution) (string, error) {
+	var replies []transcript.CodexReply
+	for _, q := range card.ask.Questions {
+		if a := strings.TrimSpace(r.Answers[q.Question]); a != "" {
+			replies = append(replies, transcript.CodexReply{QuestionItemID: transcript.QuestionItemID(card.ask.CallID, q.Index), Question: q.Question, Answer: a})
+		}
+	}
+	if len(replies) == 0 {
+		return "", fmt.Errorf("没有回答任何一道题")
+	}
+	return transcript.CodexReplyMessage(replies), nil
 }
 
 // codexTaken waits for Codex to take an answer: the card's question no longer open in the rollout (or, when shown

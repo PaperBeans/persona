@@ -167,6 +167,8 @@ type TaskReview struct {
 	WaitingOn string    `json:"waiting_on,omitempty"`
 	Parks     int       `json:"parks,omitempty"`
 	DueAt     time.Time `json:"due_at,omitzero"`
+	// DueResends: how many times its parked_due was told again because no task_review followed the reminder.
+	DueResends int `json:"due_resends,omitempty"`
 	// ParkEndedAt is recorded when this wait is replaced or resolved, so its time is excluded from stalled checks.
 	ParkEndedAt time.Time `json:"park_ended_at,omitzero"`
 	// Evidence is absent on legacy parks. A new park records its external wait, inspected source receipt and
@@ -178,6 +180,8 @@ type TaskReview struct {
 	Reply *connectorwire.LarkReplyObservation `json:"reply,omitempty"`
 	// ExternalPR is this external-event park's observed object, independent of the task's PR associations.
 	ExternalPR *externalPRObservation `json:"external_pr,omitempty"`
+	// ExternalIssue is the last read of the GitHub issue this park's evidence names (park_issue_wake.go, #14050).
+	ExternalIssue *externalIssueObservation `json:"external_issue,omitempty"`
 	// Decided: the owner's decision (its id) that ended this park before its time (parkDecided, parked.go), and
 	// DecidedTold: when a supervision message carried that to the supervisor.
 	Decided     string    `json:"decided,omitempty"`

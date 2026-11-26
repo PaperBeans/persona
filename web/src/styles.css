@@ -381,6 +381,11 @@ body {
    teal is under 3:1 on a light card, so the legend always writes the numbers. Same values as the apps' UsageColor. */
 :root { --usage-input: #2a78d6; --usage-output: #eb6834; --usage-cache-write: #6250d6; --usage-cache-read: #1baf7a; }
 .dark { --usage-input: #3987e5; --usage-output: #d95926; --usage-cache-write: #9085e9; --usage-cache-read: #199e70; }
+/* Token usage by project (#16530): development projects take the accent, non-development ones (folders, the home
+   folder, the assistant) this cyan, apart from the kinds' teal; at least 3:1 on a card in both schemes. Same values as
+   the apps' UsageColor.projectOther. */
+:root { --project-other: #0f7f8f; }
+.dark { --project-other: #4bbfcc; }
 /* The user's own messages: iOS Agents' pale blue (apple/Shared/Design/Styles/Glass.swift, ColorSpec.blue, #2672);
    a message relayed from another conversation and a tool's inline detail keep the neutral gray. */
 @theme inline { --color-user-bubble: var(--user-bubble); --color-neutral-bubble: var(--neutral-bubble); --color-status-waiting: var(--status-waiting); }

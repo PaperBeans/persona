@@ -66,6 +66,21 @@ func (s *Service) inboxReady(ctx context.Context) error {
 	return nil
 }
 
+// inboxItemIsGroup reports whether the referenced item is from a group chat, including older Lark items.
+func (s *Service) inboxItemIsGroup(ctx context.Context, id string) (bool, error) {
+	if id == "" {
+		return false, nil
+	}
+	if err := s.inboxReady(ctx); err != nil {
+		return false, err
+	}
+	b := &s.inbox
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	it := b.items[id]
+	return it != nil && (it.Kind == KindGroup || it.Kind == KindMention || it.Lark != nil && it.Lark.IsGroup), nil
+}
+
 // inboxUp is inboxReady for a route: false when it answered 503 inbox_unavailable.
 func (s *Service) inboxUp(w http.ResponseWriter, r *http.Request) bool {
 	if err := s.inboxReady(r.Context()); err != nil {
@@ -359,8 +374,10 @@ func (s *Service) tellInboxNeedsYou() {
 		for {
 			n := 0
 			b.mu.Lock()
+			cutoff := time.Now().Add(-inboxKeepDone)
+			duplicates := b.larkDuplicates(cutoff, b.listedDoneCut(cutoff, true), true)
 			for _, it := range b.items {
-				if it.status() == StatusAction {
+				if !duplicates.hidden[it.ID] && it.status() == StatusAction {
 					n++
 				}
 			}

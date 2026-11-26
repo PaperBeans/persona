@@ -262,8 +262,12 @@ func (s *Service) logicalHistoryPage(ctx context.Context, st logicalConversation
 		if p.Turns > 0 && !forward {
 			params["turns"] = min(p.Turns, 10)
 		}
+		segCtx := ctx
+		if seg.FrozenEnd != nil {
+			segCtx = withoutLiveHistoryRead(ctx) // retired frozen segments cannot receive new sends; durable history stays authoritative
+		}
 		var source historyPage
-		if err := s.physicalHistoryCall(ctx, seg.MachineID, DeviceSessionItems, params, &source); err != nil {
+		if err := s.physicalHistoryCall(segCtx, seg.MachineID, DeviceSessionItems, params, &source); err != nil {
 			if isMissingTranscriptErr(err) && s.isZeroTurnPreparedSegment(ctx, c, seg) {
 				var spanErr error
 				coverage, end, spanErr = mergeLogicalSpan(coverage, end, seg, 0, 0)
@@ -281,7 +285,7 @@ func (s *Service) logicalHistoryPage(ctx context.Context, st logicalConversation
 			through := from + min(*seg.FrozenEnd-from, 2*proto.MaxWindowRadius)
 			scoped := proto.ItemsWindowRequest{SessionID: proto.NavigationSessionID(seg.SessionID), FromSeq: from, ThroughSeq: through, BeforeSeq: *seg.FrozenEnd + 1}
 			var window proto.ItemsWindow
-			if err := s.physicalHistoryCall(ctx, seg.MachineID, proto.MethodSessionItemsWindow, scoped, &window); err == nil && window.Matches(scoped) {
+			if err := s.physicalHistoryCall(segCtx, seg.MachineID, proto.MethodSessionItemsWindow, scoped, &window); err == nil && window.Matches(scoped) {
 				source = historyPage{Items: window.Items, History: window.History, FromSeq: &window.FromSeq, ToSeq: &window.ToSeq, MoreAfter: window.MoreAfter}
 			}
 		}

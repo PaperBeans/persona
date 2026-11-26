@@ -1029,7 +1029,7 @@ func (s *Service) digestEntryRecheck(ctx context.Context, g superviseSignal, web
 			return prompts.SuperviseEntry{}, false // parked meanwhile: it waits on purpose (parked.go)
 		}
 	case sigParkedDue:
-		if r := v.parking(); st != reviewParked || r == nil || parkKey(r) != g.Key {
+		if r := v.parking(); st != reviewParked || r == nil || parkDueKey(r) != g.Key {
 			return prompts.SuperviseEntry{}, false // its agent works again, or it was reviewed again, meanwhile
 		}
 	case sigParkDecided:
@@ -1202,6 +1202,9 @@ func (s *Service) digestEntryRecheck(ctx context.Context, g superviseSignal, web
 	}
 	if g.Kind == sigParkedDue || g.Kind == sigParkedSummary {
 		e.Detail, e.Parked = "", s.parkedEntry(ctx, v.parking())
+	}
+	if g.Kind == sigParkedDue && e.Parked != nil {
+		e.Parked.Resent = parkedDueResend(v.parking())
 	}
 	if g.Kind == sigParkDecided && st == reviewParked { // parked again before this went: what it waits for now
 		e.Parked = s.parkedEntry(ctx, v.parking())

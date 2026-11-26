@@ -18,7 +18,7 @@ vi.mock("../../lib/ops", () => ({
   }),
 }));
 import { ApiError } from "../../lib/api";
-import { InteractionCard } from "./Interactions";
+import { InteractionCard, PendingCards } from "./Interactions";
 import { DelegatedCard, DelegatedHistory } from "./Delegated";
 import { getState, noteReanswer } from "../../lib/store";
 import { t } from "../../i18n";
@@ -257,5 +257,17 @@ describe("会话里看助手代答过的问题", () => {
     await render();
     await flush();
     expect(host.textContent).toBe("");
+  });
+});
+
+describe("the main chat's card stack", () => {
+  it("draws an answer the assistant gave from Delegated's own chunk, with the answered ones", async () => {
+    act(() => root.render(<PendingCards interactions={[]} answered={[]} delegated={[answered]} narrow={false} keyboard={false} onDismissKeyboard={() => {}} />));
+    await vi.waitFor(async () => {
+      await flush();
+      expect(host.textContent).toContain("助手代答");
+    });
+    expect(host.textContent).toContain("理由：仓库里都用 pgx");
+    expect(button("改答")).toBeTruthy();
   });
 });

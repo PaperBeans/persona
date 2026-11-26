@@ -174,7 +174,11 @@ type PlanTask struct {
 	PartOf      string   `json:"part_of,omitempty"`
 	After       []string `json:"after,omitempty"`
 	BlockedByPR []string `json:"blocked_by_pr,omitempty"`
-	RequestGate string   `json:"request_gate,omitempty"`
+	// UnlockStage and UnlockContracts are the validated stage gate for After, kept with the plan so a saved plan
+	// retains it across a manager restart. Empty means the dependency is mirrored as todo_done.
+	UnlockStage     string   `json:"unlock_stage,omitempty"`
+	UnlockContracts []string `json:"unlock_contracts,omitempty"`
+	RequestGate     string   `json:"request_gate,omitempty"`
 	// Project: the knowledge-base project the task's todo goes in (#2581, todo_project.go), checked and kept as its slug
 	// when the plan is made; "" for none.
 	Project string `json:"project,omitempty"`
@@ -236,6 +240,9 @@ type PlanTask struct {
 	rememberKind bool
 	// task_spawn preserves the caller's mode instead of applying a fresh task's Claude-family permission default.
 	preservePermission bool
+	// handoffLauncherSwitch marks a continuation whose launcher or agent kind changed (not only machine);
+	// cross-launcher / cross-provider switches always require explicit owner confirmation on the plan card.
+	handoffLauncherSwitch bool
 	// LauncherDefaultModel selects the launcher's own model instead of a matching Agents binding. It is hub-owned:
 	// task_spawn sets it for an explicitly empty parent model, and a launcher-only retry override sets it too. Its
 	// absence on a legacy plan keeps that row's opaque launch unchanged.

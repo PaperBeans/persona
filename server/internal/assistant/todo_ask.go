@@ -297,11 +297,12 @@ func (s *Service) pushDecisionAbout(ctx context.Context, id, reason string) (boo
 		n.Title, n.Body = s.redactedNotice(ctx, l, space)
 		n.Todo.Options, n.Todo.Lockscreen = nil, assistantwire.OwnerAskLockscreenOpenOnly
 	}
-	s.noteCard(ctx, cardDecision, n)
-	if _, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
+	res, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n})
+	if err != nil {
 		s.logf("task %s: decision push: %v", id, err)
 		return false, err
 	}
+	s.noteCardResult(ctx, decisionCardSource(a.WhyOwner), n, res)
 	return true, nil
 }
 

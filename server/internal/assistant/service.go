@@ -1019,10 +1019,11 @@ func (s *Service) pushResult(ctx context.Context, n Notification) (NotifyResult,
 	if n.Asked { // the conversation pushed what matters itself: its own finished push is left out (fleet_push.go)
 		s.noteAsked(n.SessionID)
 	}
-	s.noteCard(ctx, "", n) // its source is on ctx (withCard; card_layers.go)
 	res, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n})
 	if err != nil {
 		s.logf("assistant: push: %v", err)
+	} else {
+		s.noteCardResult(ctx, "", n, res) // its source is on ctx (withCard; card_layers.go)
 	}
 	return res, err
 }

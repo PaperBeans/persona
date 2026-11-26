@@ -181,11 +181,14 @@ func (h recordingHost) PutSetting(ctx context.Context, key string, v any) error 
 }
 
 func (h recordingHost) Notify(ctx context.Context, n Notification) error {
-	_, err := h.s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n})
+	res, err := h.s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n})
+	if err == nil && n.ID != "" {
+		h.s.rememberNotifyHeld(n.ID, res)
+	}
 	return err
 }
 func (h recordingHost) NoteCard(ctx context.Context, source string, n Notification) {
-	h.s.noteCard(ctx, source, n)
+	h.s.noteCardResult(ctx, source, n, h.s.consumeNotifyHeld(n.ID))
 }
 func (h recordingHost) Answered(err error) bool { return answered(err) }
 
